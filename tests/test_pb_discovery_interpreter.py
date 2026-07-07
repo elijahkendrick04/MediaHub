@@ -93,3 +93,30 @@ def test_graceful_fallback_when_interpreter_unavailable(monkeypatch):
     # The public entry point swallows the ImportError and uses the heuristic.
     rows, conf = parse_pbs_from_page(_page(), use_interpreter=True)
     assert all(r.raw.get("source") in ("table_heuristic", "text_heuristic") for r in rows)
+
+
+def test_interpreter_crash_is_logged_with_page_url(monkeypatch, caplog):
+    """A crashing interpreter must not be swallowed silently: the fallback to
+    the heuristic still happens, but a warning naming the page URL is logged
+    so the degradation is diagnosable in production."""
+    import logging
+
+    import mediahub.interpreter as interp_mod
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("interpreter exploded")
+
+    monkeypatch.setattr(interp_mod, "interpret_document", _boom)
+
+    page = _page()
+    with caplog.at_level(logging.WARNING, logger="mediahub.pb_discovery.parse_pbs"):
+        rows, conf = parse_pbs_from_page(page, use_interpreter=True)
+
+    warnings = [r for r in caplog.records if r.levelno >= logging.WARNING]
+    assert warnings, "interpreter failure must emit a warning, not vanish"
+    assert any(page.url in r.getMessage() for r in warnings), (
+        "the warning must name the failing page URL"
+    )
+    # Heuristic fallback still returns (possibly empty) rows with low confidence.
+    assert isinstance(rows, list)
+    assert conf <= 0.6

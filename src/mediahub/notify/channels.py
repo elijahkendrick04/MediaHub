@@ -136,7 +136,8 @@ class WebhookChannel(Channel):
             "priority": n.priority,
             "tags": list(n.tags),
             "url": n.click_url,
-            "text": text,  # Slack/Discord-friendly
+            "text": text,  # Slack renders this key
+            "content": text[:2000],  # Discord requires this key (2000-char cap)
         }
         try:
             import requests  # noqa: PLC0415

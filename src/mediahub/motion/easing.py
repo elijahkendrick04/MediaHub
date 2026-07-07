@@ -23,6 +23,7 @@ RNG — so a preset renders byte-identically every time.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Dict, Tuple
 
@@ -47,8 +48,12 @@ class Easing:
 
     # -- FFmpeg -------------------------------------------------------------
     def ffmpeg_expr(self, progress: str) -> str:
-        """Eased value for an FFmpeg expression whose progress 0..1 is ``progress``."""
-        return self.ffmpeg.replace("P", f"({progress})")
+        """Eased value for an FFmpeg expression whose progress 0..1 is ``progress``.
+
+        Substitutes only the standalone ``P`` token so constants like ``PI``
+        (in ``ease_in_out_sine``) survive intact.
+        """
+        return re.sub(r"(?<![A-Za-z])P(?![A-Za-z])", lambda m: f"({progress})", self.ffmpeg)
 
     # -- Python (tests + compilers) ----------------------------------------
     def sample(self, t: float) -> float:

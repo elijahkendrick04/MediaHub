@@ -271,6 +271,94 @@ class TestWriteFile:
         out = export_svg_alongside(png, _BOX_HTML, (300, 260))
         assert out == tmp_path / "feed_portrait.svg"
         assert out.exists() and "<svg" in out.read_text()
+        # The re-export of the identical inputs is a cheap freshness hit — the
+        # sidecar bytes stay identical (same stamped content key).
+        first = out.read_text()
+        assert export_svg_alongside(png, _BOX_HTML, (300, 260)) == out
+        assert out.read_text() == first
+
+
+class TestSidecarFreshness:
+    """A fresh <stem>.svg (same html+size+options key) skips the whole
+    Chromium + PDFium pass; any input change re-exports. No browser needed —
+    the conversion is stubbed and counted."""
+
+    def _counting_stub(self, monkeypatch):
+        calls = {"n": 0}
+
+        def fake_html_to_svg(html, size, **kw):
+            calls["n"] += 1
+            return (
+                '<?xml version="1.0" encoding="UTF-8"?>\n'
+                f'<svg xmlns="http://www.w3.org/2000/svg" width="{size[0]}" '
+                f'height="{size[1]}"><path d="M0 0"/></svg>\n'
+            )
+
+        monkeypatch.setattr(svg_export, "html_to_svg", fake_html_to_svg)
+        return calls
+
+    def test_fresh_sidecar_is_not_re_exported(self, tmp_path, monkeypatch):
+        calls = self._counting_stub(monkeypatch)
+        png = tmp_path / "story.png"
+        png.write_bytes(b"\x89PNG\r\n\x1a\n")
+        out1 = export_svg_alongside(png, "<p>card</p>", (1080, 1920))
+        assert calls["n"] == 1
+        assert f"{svg_export._SIDECAR_KEY_MARK}" in out1.read_text()[:512]
+        out2 = export_svg_alongside(png, "<p>card</p>", (1080, 1920))
+        assert out2 == out1
+        assert calls["n"] == 1  # skipped: sidecar was fresh
+
+    def test_changed_html_or_size_re_exports(self, tmp_path, monkeypatch):
+        calls = self._counting_stub(monkeypatch)
+        png = tmp_path / "story.png"
+        png.write_bytes(b"\x89PNG\r\n\x1a\n")
+        export_svg_alongside(png, "<p>card</p>", (1080, 1920))
+        export_svg_alongside(png, "<p>CHANGED</p>", (1080, 1920))
+        assert calls["n"] == 2
+        export_svg_alongside(png, "<p>CHANGED</p>", (1080, 1080))
+        assert calls["n"] == 3
+
+    def test_changed_options_re_export(self, tmp_path, monkeypatch):
+        calls = self._counting_stub(monkeypatch)
+        png = tmp_path / "story.png"
+        png.write_bytes(b"\x89PNG\r\n\x1a\n")
+        export_svg_alongside(png, "<p>card</p>", (1080, 1920))
+        export_svg_alongside(png, "<p>card</p>", (1080, 1920), embed_images=False)
+        assert calls["n"] == 2
+
+
+class TestNeedsShaping:
+    def test_latin_never_flagged(self):
+        for ch in "PB Eira Hughes 2:08.41 — ÉÀÖ":
+            assert not svg_export._needs_shaping(ord(ch)), ch
+
+    def test_shaped_scripts_flagged(self):
+        for ch in "سلאकส":  # Arabic, Hebrew, Devanagari, Thai
+            assert svg_export._needs_shaping(ord(ch)), hex(ord(ch))
+
+
+@_LIVE
+class TestShapedScriptFallback:
+    _AR_HTML = (
+        "<!doctype html><meta charset=utf-8>"
+        "<style>@page{margin:0}html,body{margin:0;padding:0}"
+        ".t{position:absolute;left:20px;top:60px;font:700 44px sans-serif;color:#0a2540}"
+        "</style><div class=t>سباحة رائعة</div>"
+    )
+
+    def test_arabic_text_is_not_silently_dropped(self):
+        """A shaped-script run must ship as a raster embed of its rendered
+        footprint — never as silently-dropped / isolated-form outlines."""
+        svg = html_to_svg(self._AR_HTML, (400, 200))
+        assert "mh-text-raster" in svg
+
+    def test_strict_mode_logs_fidelity_warning(self, caplog):
+        import logging as _logging
+
+        with caplog.at_level(_logging.WARNING, logger="mediahub.graphic_renderer.svg_export"):
+            svg = html_to_svg(self._AR_HTML, (400, 200), embed_images=False)
+        assert "mh-text-raster" not in svg  # strict export stays raster-free
+        assert any("not faithfully outlineable" in r.message for r in caplog.records)
 
 
 # ---------------------------------------------------------------------------

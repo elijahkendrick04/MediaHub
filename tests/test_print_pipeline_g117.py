@@ -598,3 +598,58 @@ class TestPrintModeCertificateRoute:
         c = web_env["client"]
         _pin(c, "org-beta")
         assert c.get(f"/pack/{web_env['run_id']}/certificates.zip?print=1").status_code == 404
+
+    def test_mid_run_cmyk_failure_ships_rgb_zip_with_note(self, web_env, monkeypatch):
+        """If Ghostscript errors mid-run, the intact RGB print PDFs still ship
+        as a 200 zip with a CMYK-NOTE.txt naming the fallback — never a 500."""
+        import io
+        import os
+        import zipfile
+
+        c = web_env["client"]
+        _pin(c, "org-alpha")
+        run_id = web_env["run_id"]
+        runs_dir = Path(os.environ["RUNS_DIR"])
+        payload = json.loads((runs_dir / f"{run_id}.json").read_text())
+        payload["recognition_report"]["ranked_achievements"] = [
+            {
+                "rank": 1,
+                "quality_band": "elite",
+                "priority": 0.9,
+                "safe_to_post": {"level": "safe", "reason": "ok"},
+                "achievement": {
+                    "swim_id": "swim-1",
+                    "swimmer_name": "Maya Patel",
+                    "event": "100m Freestyle",
+                    "headline": "New PB",
+                    "raw_facts": {"time": "59.99"},
+                },
+            }
+        ]
+        (runs_dir / f"{run_id}.json").write_text(json.dumps(payload))
+        from mediahub.workflow.status import CardStatus
+        from mediahub.workflow.store import WorkflowStore
+
+        WorkflowStore(runs_dir).set_status(run_id, "swim-1", CardStatus.APPROVED)
+
+        import mediahub.graphic_renderer.print_export as pe
+
+        def fake_export(output_path, *, cmyk=False, **kw):
+            # The real function renders the RGB PDF first, then converts —
+            # so on a CMYK failure the RGB file is already on disk.
+            Path(output_path).write_bytes(b"%PDF-1.4 fake rgb")
+            if cmyk:
+                raise pe.CmykUnavailable("Ghostscript CMYK conversion failed: boom")
+            return Path(output_path)
+
+        monkeypatch.setattr(pe, "ghostscript_available", lambda: True)
+        monkeypatch.setattr(pe, "export_certificate_print_pdf", fake_export)
+
+        r = c.get(f"/pack/{run_id}/certificates.zip?print=1&cmyk=1")
+        assert r.status_code == 200
+        zf = zipfile.ZipFile(io.BytesIO(r.data))
+        names = zf.namelist()
+        assert any(n.endswith(".pdf") for n in names)
+        assert "certificates/CMYK-NOTE.txt" in names
+        note = zf.read("certificates/CMYK-NOTE.txt").decode()
+        assert "failed at run time" in note and "Maya-Patel" in note

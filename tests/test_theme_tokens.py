@@ -385,3 +385,24 @@ class TestNoNewHardcodes:
             f"Run `python scripts/inventory_colors.py` and migrate offenders "
             f"to var(--mh-*) references."
         )
+
+
+class TestUltrawideChromeAlignment:
+    def test_footer_and_hud_widen_with_main_wrap(self):
+        """On ultrawide/TV tiers the footer and HUD inner rails must share
+        main.wrap's max-width so the page chrome edges stay aligned."""
+        import re as _re
+
+        from mediahub.web.responsive_guardrails import RESPONSIVE_GUARDRAILS_CSS
+
+        for min_w in ("1920px", "2400px"):
+            m = _re.search(
+                r"@media \(min-width: " + min_w + r"\) \{(.*?)\n\}",
+                RESPONSIVE_GUARDRAILS_CSS,
+                _re.S,
+            )
+            assert m, f"missing ultrawide block for {min_w}"
+            block = m.group(1)
+            assert "main.wrap" in block
+            assert ".mh-footer-inner" in block
+            assert ".mh-hud-inner" in block

@@ -20,8 +20,12 @@ def _page_url(base_url: str, slug: str) -> str:
 
 
 def indexable_pages(spec: SiteSpec) -> list:
-    """The pages that should appear in search: shown in nav-or-not, but not noindex."""
-    return [p for p in spec.pages if not p.seo.noindex]
+    """The pages that should appear in search: shown in nav-or-not, but not noindex.
+
+    Password-protected (members-only) pages are excluded by default — a public
+    sitemap must not advertise a gated page's slug, whether or not the operator
+    also ticked noindex."""
+    return [p for p in spec.pages if not p.seo.noindex and not p.protected]
 
 
 def sitemap_xml(spec: SiteSpec, base_url: str) -> str:

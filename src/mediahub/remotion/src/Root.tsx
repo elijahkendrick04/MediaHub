@@ -51,6 +51,7 @@ const defaultCard = {
   roleOnGround: "",
   captionsJson: "",
   inReel: false,
+  meshBg: "",
 };
 
 export const RemotionRoot: React.FC = () => {

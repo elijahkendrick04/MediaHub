@@ -511,6 +511,35 @@ def test_reel_caption_json_builds_from_card_line():
     assert "Swimmer 1" in " ".join(c["text"] for c in track["cues"])
 
 
+def test_reel_captions_are_sized_to_each_cards_carved_beat(tmp_path, monkeypatch):
+    """Beats are rank-weighted (the top card breathes 1.25× by default), so each
+    card's caption track must be sized to ITS OWN beat frames — the exact
+    MeetReel.tsx carve — not a flat REEL_PER_CARD_SEC grid, or trailing cues get
+    clipped on short beats and end early on the emphasised one."""
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("MEDIAHUB_SUBTITLES", "1")
+    _voice_on(monkeypatch)
+    _stub_finishing(monkeypatch)
+    monkeypatch.setattr("mediahub.visual.voiceover._synthesize_raw", _fake_synth_echo)
+
+    seen: list[int] = []
+    real = motion._reel_caption_json
+
+    def _spy(card_dict, brand_dict, *, beat_frames):
+        seen.append(beat_frames)
+        return real(card_dict, brand_dict, beat_frames=beat_frames)
+
+    with (
+        mock.patch.object(motion, "_reel_caption_json", side_effect=_spy),
+        mock.patch.object(motion, "_run_remotion", side_effect=_fake_run),
+    ):
+        motion.render_meet_reel([_card(1), _card(2)], BRAND, tmp_path / "out" / "reel.mp4")
+
+    duration = motion.reel_duration_for(2)
+    assert seen == motion.reel_card_beat_frames(2, duration, None)
+    assert seen[0] > seen[1], "the top-ranked beat carries the 1.25x emphasis"
+
+
 # ---------------------------------------------------------------------------
 # FFmpeg story burn (engine parity)
 # ---------------------------------------------------------------------------

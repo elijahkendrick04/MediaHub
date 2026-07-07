@@ -163,6 +163,39 @@ class TestForeignReadDenied:
         assert "ALPHA SECRET DRAFT" not in body
         assert "Alpha-only" not in body
 
+    def test_drafts_index_hides_foreign_packs_shows_own_and_unstamped(self, two_orgs):
+        """/drafts lists only the active org's packs plus unstamped legacy
+        ones — a pack title is the first line of another org's free-text
+        brief, so the index must be per-tenant filtered like the per-pack
+        routes."""
+        from mediahub.club_platform.stub_pack_store import save_pack
+
+        beta_pack = save_pack(
+            "free_text",
+            {"free_text": "BETA OWN DRAFT"},
+            [{"platform": "instagram", "caption": "Beta caption", "confidence": 0.9}],
+            profile_id="org-beta",
+        )
+        legacy_pack = save_pack(
+            "free_text",
+            {"free_text": "LEGACY UNSTAMPED DRAFT"},
+            [{"platform": "instagram", "caption": "Legacy caption", "confidence": 0.9}],
+        )
+        c = two_orgs["client"]
+        _pin(c, "org-beta")
+        body = c.get("/drafts").get_data(as_text=True)
+        # Own + unstamped legacy visible; Alpha's title must not leak.
+        assert "BETA OWN DRAFT" in body
+        assert "LEGACY UNSTAMPED DRAFT" in body
+        assert "ALPHA SECRET DRAFT" not in body
+        # Alpha still sees her own.
+        _pin(c, "org-alpha")
+        body = c.get("/drafts").get_data(as_text=True)
+        assert "ALPHA SECRET DRAFT" in body
+        assert "BETA OWN DRAFT" not in body
+        assert beta_pack["pack_id"] not in body
+        assert legacy_pack["pack_id"]  # created OK (sanity)
+
     def test_api_cards_returns_404_not_alpha_cards(self, two_orgs):
         c = two_orgs["client"]
         _pin(c, "org-beta")
@@ -182,6 +215,34 @@ class TestForeignReadDenied:
         _pin(c, "org-beta")
         r = c.get(f"/api/runs/{two_orgs['run_id']}/export")
         assert r.status_code == 404
+
+    def test_api_cards_export_in_progress_run_is_404_for_foreign_org(self, two_orgs, tmp_path):
+        """An IN-PROGRESS run (DB row, no JSON yet) must 404 for a foreign org
+        on /cards and /export — the 202 in_progress short-circuit must not leak
+        that another org's run exists / when it finishes. Owner still gets 202."""
+        import mediahub.web.web as wm
+
+        prog_id = "run-alpha-inprog-" + uuid.uuid4().hex[:8]
+        conn = wm._db()
+        conn.execute(
+            "INSERT OR REPLACE INTO runs (id, created_at, status, profile_id, "
+            "meet_name, file_name) VALUES (?, datetime('now'), 'running', ?, ?, ?)",
+            (prog_id, "org-alpha", "SECRET ALPHA INPROGRESS", "alpha2.hy3"),
+        )
+        conn.commit()
+        conn.close()
+        # No JSON file on disk → _run_state is in_progress.
+        assert not (tmp_path / "runs_v4" / f"{prog_id}.json").exists()
+
+        c = two_orgs["client"]
+        _pin(c, "org-beta")
+        assert c.get(f"/api/runs/{prog_id}/cards").status_code == 404
+        assert c.get(f"/api/runs/{prog_id}/export").status_code == 404
+
+        # The owner still sees the honest 202 in_progress signal.
+        _pin(c, "org-alpha")
+        assert c.get(f"/api/runs/{prog_id}/cards").status_code == 202
+        assert c.get(f"/api/runs/{prog_id}/export").status_code == 202
 
     def test_create_graphic_returns_404(self, two_orgs):
         c = two_orgs["client"]

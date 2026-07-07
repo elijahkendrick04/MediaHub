@@ -23,11 +23,12 @@
    The sprocket strips are pure CSS (a repeating-linear-gradient in the
    outline role), so the motif is deterministic and uses only role tokens.
 
-   Honest repetition: {{ATHLETE_IMG_BLOCK}} is the ONE real cutout the
-   renderer inlines; it is substituted into each frame and re-cropped via
-   CSS object-position. No new or invented imagery. With no photo each
-   frame is a clean brand-surface cell with its frame number, so the sheet
-   still reads as deliberate.
+   Honest repetition: the ONE real cutout is inlined ONCE as the
+   --mh-athlete-img custom property (ATHLETE_IMG_VAR) and each frame's
+   <img> references it via content: var(...), re-cropped with CSS
+   object-position — six frames, one copy of the photo bytes. No new or
+   invented imagery. With no photo each frame is a clean brand-surface
+   cell with its frame number, so the sheet still reads as deliberate.
 
    Overflow safety: the caption surname is scaled via calc(var * 0.6) AND
    wraps; the keeper-frame result via calc(var * 0.42) AND wraps. Holds at
@@ -48,6 +49,8 @@
   -webkit-font-smoothing: antialiased;
   padding: 72px 64px 68px;
   gap: 18px;
+  /* the ONE real shot, carried once and re-used by every frame */
+  {{ATHLETE_IMG_VAR}}
 }
 .cs *, .cs *::before, .cs *::after { box-sizing: border-box; }
 
@@ -89,6 +92,7 @@
   position: absolute; inset: 0;
   width: 100%; height: 100%;
   object-fit: cover; display: block;
+  content: var(--mh-athlete-img);
 }
 .cs__frame .athlete-cutout { width: 100%; height: 100%; object-fit: cover; }
 /* per-frame crops of the one real shot */
@@ -189,19 +193,19 @@
   <div class="cs__sprockets"></div>
 
   <div class="cs__grid">
-    <div class="cs__frame cs__f1"><span class="cs__num">01</span>{{ATHLETE_IMG_BLOCK}}</div>
-    <div class="cs__frame cs__f2"><span class="cs__num">02</span>{{ATHLETE_IMG_BLOCK}}</div>
-    <div class="cs__frame cs__f3"><span class="cs__num">03</span>{{ATHLETE_IMG_BLOCK}}</div>
-    <div class="cs__frame cs__f4"><span class="cs__num">04</span>{{ATHLETE_IMG_BLOCK}}</div>
+    <div class="cs__frame cs__f1"><span class="cs__num">01</span>{{PHOTO_ONLY_OPEN}}<img class="athlete-cutout" alt="{{ATHLETE_FULL_NAME}}" />{{PHOTO_ONLY_CLOSE}}</div>
+    <div class="cs__frame cs__f2"><span class="cs__num">02</span>{{PHOTO_ONLY_OPEN}}<img class="athlete-cutout" alt="" />{{PHOTO_ONLY_CLOSE}}</div>
+    <div class="cs__frame cs__f3"><span class="cs__num">03</span>{{PHOTO_ONLY_OPEN}}<img class="athlete-cutout" alt="" />{{PHOTO_ONLY_CLOSE}}</div>
+    <div class="cs__frame cs__f4"><span class="cs__num">04</span>{{PHOTO_ONLY_OPEN}}<img class="athlete-cutout" alt="" />{{PHOTO_ONLY_CLOSE}}</div>
     <div class="cs__frame cs__f5 cs__frame--sel">
-      <span class="cs__num">05</span>{{ATHLETE_IMG_BLOCK}}
+      <span class="cs__num">05</span>{{PHOTO_ONLY_OPEN}}<img class="athlete-cutout" alt="" />{{PHOTO_ONLY_CLOSE}}
       <div class="cs__sel-scrim"></div>
       <div class="cs__sel-body">
         <div class="cs__sel-lab">Result</div>
         <div class="cs__sel-result">{{RESULT_VALUE}}</div>
       </div>
     </div>
-    <div class="cs__frame cs__f6"><span class="cs__num">06</span>{{ATHLETE_IMG_BLOCK}}</div>
+    <div class="cs__frame cs__f6"><span class="cs__num">06</span>{{PHOTO_ONLY_OPEN}}<img class="athlete-cutout" alt="" />{{PHOTO_ONLY_CLOSE}}</div>
   </div>
 
   <div class="cs__sprockets"></div>

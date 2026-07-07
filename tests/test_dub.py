@@ -79,7 +79,11 @@ class TestDubPlan:
 
 
 class TestReelDubWiring:
-    """_reel_audio_plan(dub_language=…) routes the reel narration through the dub."""
+    """_reel_audio_plan(dub_language=…) routes the reel narration through the dub.
+
+    The helper returns ``(plan, dub_error)`` — the honest drop reason rides
+    alongside the plan (for the manifest), never inside it (cache keys).
+    """
 
     def _run(self, dub_language, translate_ret=None, translate_exc=None):
         import mediahub.visual.audio_mux as ax
@@ -107,21 +111,79 @@ class TestReelDubWiring:
             )
 
     def test_dub_language_translates_and_revoices(self):
-        plan = self._run("cy", translate_ret="Gosododd Hannah PB newydd.")
+        plan, dub_error = self._run("cy", translate_ret="Gosododd Hannah PB newydd.")
         assert plan["voice"] == "cy-GB-NiaNeural"
         assert plan["script"] == "Gosododd Hannah PB newydd."
         assert plan["dubbed"] is True
         assert plan["music"] == "bed.mp3"  # bed preserved
+        assert dub_error == ""
 
     def test_unavailable_dub_drops_narration_keeps_music(self):
         # No provider → don't ship English pretending to be Welsh: drop the
-        # narration, keep the music bed.
-        plan = self._run("cy", translate_exc=ClaudeUnavailableError("no provider"))
+        # narration, keep the music bed — and say why for the manifest.
+        plan, dub_error = self._run("cy", translate_exc=ClaudeUnavailableError("no provider"))
         assert plan is not None
         assert "script" not in plan and "voice" not in plan
         assert plan.get("music") == "bed.mp3"
+        assert "dub" in dub_error and "no provider" in dub_error
 
     def test_no_dub_language_is_the_plain_plan(self):
-        plan = self._run("")
+        plan, dub_error = self._run("")
         assert plan["voice"] == "en-GB-SoniaNeural"
         assert "dubbed" not in plan
+        assert dub_error == ""
+
+
+def test_dub_failure_reason_reaches_the_render_manifest(tmp_path, monkeypatch):
+    """Honest-error rule: a reel that silently lost its dub must say why in the
+    explainability manifest (the reason rides beside the plan, never in the
+    cache-keyed plan itself)."""
+    import json
+    from pathlib import Path
+
+    import mediahub.visual.audio_mux as ax
+    import mediahub.visual.motion as M
+
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    base = {"voice": "en-GB-SoniaNeural", "script": "Hannah set a new PB.", "music": "bed.mp3"}
+    monkeypatch.setattr(ax, "audio_active", lambda: True)
+    monkeypatch.setattr(ax, "voice_active", lambda: True)
+    monkeypatch.setattr(M, "_library_bed_for", lambda key: None)
+    monkeypatch.setattr(ax, "build_audio_plan", lambda **k: dict(base))
+    monkeypatch.setattr(
+        ax, "apply_audio", lambda video, plan, *, duration_sec, cut_times=None: {"status": "mixed"}
+    )
+    monkeypatch.setattr(
+        ax, "write_poster", lambda video, poster, *, at_sec: Path(poster).write_bytes(b"P") or True
+    )
+
+    def _boom(*a, **k):
+        raise ClaudeUnavailableError("no provider")
+
+    def _fake_run(*, composition_id, props, out_path, duration_sec=None, size=None, timeout=600):
+        out = Path(out_path)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_bytes(b"0" * 2048)
+        return out
+
+    card = {
+        "id": "dub-1",
+        "achievement": {"swimmer_name": "Hannah Cox", "event_name": "100m Free"},
+        "meet_name": "Champs",
+    }
+    with (
+        mock.patch.object(dub, "translate_text", side_effect=_boom),
+        mock.patch.object(M, "_run_remotion", side_effect=_fake_run),
+    ):
+        M.render_meet_reel([card], {"display_name": "Dub SC"}, tmp_path / "o" / "r.mp4",
+                           dub_language="cy")
+
+    manifest = json.loads(
+        next(
+            p
+            for p in M._cache_dir().glob("*.json")
+            if not p.name.endswith(".audio.json")
+        ).read_text(encoding="utf-8")
+    )
+    assert "no provider" in manifest["audio"]["dub_error"]
+    assert "cy" in manifest["audio"]["dub_error"]

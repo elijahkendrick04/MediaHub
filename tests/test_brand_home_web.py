@@ -266,6 +266,19 @@ def test_card_brand_check_no_brief_is_404(app_client):
     assert r.status_code == 404
 
 
+def test_card_brand_check_cross_tenant_is_404_not_403(app_client):
+    """Anti-IDOR house norm: a foreign org's run must answer exactly like a
+    missing one (404 run_not_found), never 403 — a 403 confirms the run id
+    exists (enumeration signal)."""
+    client, cp, tmp_path = app_client
+    _seed_profile(cp)
+    _signin(client)
+    run_id, card_id = _seed_run_with_brief(cp, tmp_path, pid="some-other-org")
+    r = client.get(f"/api/runs/{run_id}/card/{card_id}/brand-check")
+    assert r.status_code == 404, r.status_code
+    assert r.get_json()["error"] == "run_not_found"
+
+
 def test_card_brand_advise_honest_error_without_provider(app_client):
     client, cp, tmp_path = app_client
     _seed_profile(cp)

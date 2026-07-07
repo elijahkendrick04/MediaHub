@@ -38,6 +38,7 @@ import mimetypes
 import os
 import re
 import tempfile
+import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -388,6 +389,11 @@ def resolve_logo_path(profile_id: str, logo_id: str) -> Optional[Path]:
 _MIRROR_MAX_BYTES = 8 * 1024 * 1024  # 8 MB — a web logo is far smaller
 _MIRROR_TIMEOUT = 10  # seconds
 _MIRROR_MAX_HOPS = 4
+# Negative-cache TTL: a failed mirror (dead URL, hot-link block, SSRF refusal)
+# writes a <key>.miss marker so every subsequent page view returns fast instead
+# of re-hitting the external host synchronously in the request thread. Short,
+# so a transiently-down logo host recovers within the hour.
+_MIRROR_MISS_TTL = 3600  # seconds
 _MIRROR_UA = "MediaHubLogoMirror/1.0 (+https://mediahub.example/about)"
 
 # Browser-renderable raster content-types we accept, mapped to the stored
@@ -438,8 +444,29 @@ def mirror_external_logo(profile_id: str, url: str) -> Optional[Path]:
         p = cache_dir / f"{key}.{ext}"
         if p.exists():
             return p
-    # Cache miss: fetch SSRF-safely, re-validating every redirect hop so a
-    # public URL can never 302 the mirror onto a private/loopback address.
+    # Negative-cache hit: a recent failed fetch wrote a miss marker — return
+    # fast with no network until the TTL expires.
+    miss = cache_dir / f"{key}.miss"
+    if miss.exists():
+        try:
+            if (time.time() - miss.stat().st_mtime) < _MIRROR_MISS_TTL:
+                return None
+            miss.unlink()
+        except OSError:
+            return None
+    result = _mirror_fetch(url, cache_dir, key)
+    if result is None:
+        try:
+            miss.write_text(str(int(time.time())), encoding="utf-8")
+        except OSError:  # pragma: no cover - marker is best-effort
+            pass
+    return result
+
+
+def _mirror_fetch(url: str, cache_dir: Path, key: str) -> Optional[Path]:
+    """Fetch ``url`` SSRF-safely and write it into ``cache_dir``; ``None`` on
+    any failure. Re-validates every redirect hop so a public URL can never
+    302 the mirror onto a private/loopback address."""
     try:
         import requests  # already a project dep
     except Exception:

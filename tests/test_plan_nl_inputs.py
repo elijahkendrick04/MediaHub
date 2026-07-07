@@ -333,6 +333,35 @@ def test_plan_page_lives_under_create_with_nl_and_goals(app_with_org):
         assert "function mhPlanAddGoal" in html
 
 
+def test_interpret_route_rejects_traversal_sport_slug(app_with_org, monkeypatch):
+    """A client-supplied sport slug can never escape the profiles dir: a
+    traversal value is rejected before ``load_sport_profile`` touches the fs."""
+    import mediahub.content_engine.nl_inputs as nl
+
+    called = {"n": 0}
+
+    def fake_interpret(text, *, goal_choices, **kw):
+        called["n"] += 1
+        return {"summary": "ok", "research": [], "provider": "gemini"}
+
+    monkeypatch.setattr(nl, "interpret_planner_inputs", fake_interpret, raising=True)
+    with app_with_org.test_client() as client:
+        _with_org(client)
+        # The default org ("org-test") has no org_type, so the body sport is used.
+        r = client.post(
+            "/api/plan/interpret",
+            json={"text": "note", "sport": "../../etc/passwd"},
+        )
+        assert r.status_code == 404
+
+
+def test_generate_route_rejects_traversal_sport_slug(app_with_org):
+    with app_with_org.test_client() as client:
+        _with_org(client)
+        r = client.post("/api/plan/generate", json={"sport": "../../etc/passwd"})
+        assert r.status_code == 404
+
+
 def test_inputs_route_round_trips_goals(app_with_org):
     """Regression: the save path keeps goals (the form used to drop them)."""
     with app_with_org.test_client() as client:

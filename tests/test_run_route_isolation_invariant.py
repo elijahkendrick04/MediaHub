@@ -221,8 +221,14 @@ class TestRunRouteIsolationInvariant:
                 uncoverable.append(f"{rule.rule}  (unknown arg <{missing}>)")
                 continue
             methods = rule.methods or set()
-            method = "GET" if "GET" in methods else ("POST" if "POST" in methods else None)
+            method = next(
+                (m for m in ("GET", "POST", "PATCH", "PUT", "DELETE") if m in methods),
+                None,
+            )
             if method is None:
+                # A run route with no sweepable method must extend the sweep,
+                # not vanish from it — report it like an unknown arg.
+                uncoverable.append(f"{rule.rule}  (no sweepable method — {sorted(methods)})")
                 continue
             resp = c.open(path, method=method, data={}, follow_redirects=True)
             body = resp.get_data(as_text=True)

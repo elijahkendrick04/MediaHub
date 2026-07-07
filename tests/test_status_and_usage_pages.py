@@ -51,6 +51,12 @@ def fresh_app(tmp_path, monkeypatch):
         yield c, app
 
 
+def _as_operator(c):
+    """The LLM-usage dashboard is operator-only (like /healthz/governance)."""
+    with c.session_transaction() as s:
+        s["dev_operator"] = True
+
+
 class TestStatusPageReachableWithoutOrg:
     def test_status_page_returns_200_without_org(self, fresh_app):
         c, _ = fresh_app
@@ -243,8 +249,17 @@ class TestStatusPageWithSeededHeartbeats:
 
 
 class TestHealthzUsageReachableWithoutOrg:
+    def test_usage_page_redirects_anonymous(self, fresh_app):
+        # The usage dashboard exposes call counts, token totals, cost and the
+        # last raw provider error — operator-only. An anonymous caller is
+        # bounced to settings (org-gate exemption is not an authentication).
+        c, _ = fresh_app
+        resp = c.get("/healthz/usage")
+        assert resp.status_code in (302, 303)
+
     def test_usage_page_returns_200(self, fresh_app):
         c, _ = fresh_app
+        _as_operator(c)
         resp = c.get("/healthz/usage")
         assert resp.status_code == 200
         body = resp.get_data(as_text=True)
@@ -252,6 +267,7 @@ class TestHealthzUsageReachableWithoutOrg:
 
     def test_usage_page_shows_empty_state_when_no_calls(self, fresh_app):
         c, _ = fresh_app
+        _as_operator(c)
         resp = c.get("/healthz/usage")
         body = resp.get_data(as_text=True)
         assert "No LLM calls in the last 24 hours" in body
@@ -260,6 +276,7 @@ class TestHealthzUsageReachableWithoutOrg:
 class TestHealthzUsageWithSeededCalls:
     def test_usage_page_surfaces_today_calls_and_cost(self, fresh_app):
         c, _ = fresh_app
+        _as_operator(c)
         import mediahub.observability.llm_usage as llmu
         # Seed a recent gemini call + an anthropic call with tokens.
         llmu.record_call(provider="gemini", ok=True,
@@ -278,6 +295,7 @@ class TestHealthzUsageWithSeededCalls:
 
     def test_usage_page_surfaces_last_llm_error(self, fresh_app):
         c, _ = fresh_app
+        _as_operator(c)
         import mediahub.observability.llm_usage as llmu
         llmu.record_call(
             provider="gemini", ok=False,
@@ -292,6 +310,7 @@ class TestHealthzUsageWithSeededCalls:
 
     def test_usage_page_surfaces_gemini_headroom_bar(self, fresh_app):
         c, _ = fresh_app
+        _as_operator(c)
         import mediahub.observability.llm_usage as llmu
         for _ in range(50):
             llmu.record_call(provider="gemini", ok=True)

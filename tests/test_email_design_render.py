@@ -123,6 +123,70 @@ def test_user_text_is_escaped_no_xss():
     assert "&lt;img src=x onerror=alert(2)&gt;" in html
 
 
+def test_href_scheme_whitelist_blocks_script_urls():
+    bad = [
+        "javascript:alert(1)",
+        "JaVaScRiPt:alert(1)",
+        "java\tscript:alert(1)",
+        "data:text/html,<script>alert(1)</script>",
+        "vbscript:msgbox(1)",
+    ]
+    blocks = []
+    for u in bad:
+        blocks += [
+            m.button("Click", u),
+            m.image("https://x/p.png", alt="a", href=u),
+            m.card(title="C", body="b", cta="go", href=u),
+            m.sponsor("AquaCo", href=u),
+        ]
+    spec = m.NewsletterSpec(title="x", sections=[m.Section(blocks=blocks)])
+    html = render_email_html(spec, profile=_profile())
+    lower = html.lower().replace("\t", "")
+    assert "javascript:" not in lower
+    assert "vbscript:" not in lower
+    assert "data:text/html" not in lower
+
+
+def test_href_scheme_whitelist_allows_legit_urls():
+    blocks = [
+        m.button("Web", "https://club.test/news"),
+        m.button("Plain", "http://club.test/news"),
+        m.button("Mail", "mailto:coach@club.test"),
+        m.button("Rel", "/newsletter/tok/card/1.png"),
+    ]
+    spec = m.NewsletterSpec(title="x", sections=[m.Section(blocks=blocks)])
+    html = render_email_html(spec, profile=_profile())
+    assert 'href="https://club.test/news"' in html
+    assert 'href="http://club.test/news"' in html
+    assert 'href="mailto:coach@club.test"' in html
+    assert 'href="/newsletter/tok/card/1.png"' in html
+
+
+def test_script_scheme_image_src_is_dropped():
+    spec = m.NewsletterSpec(
+        title="x",
+        sections=[m.Section(blocks=[m.image("javascript:alert(1)", alt="a", caption="cap")])],
+    )
+    html = render_email_html(spec, profile=_profile())
+    assert "javascript:" not in html.lower()
+    assert "cap" in html  # degrades to the caption text
+
+
+def test_malformed_props_render_without_raising():
+    blocks = [
+        m.EmailBlock("heading", {"text": "H", "level": "x"}),
+        m.EmailBlock("image", {"src": "https://x/p.png", "alt": "a", "width": "x"}),
+        m.EmailBlock("stat_row", {"stats": [1, "s", {"value": "12", "label": "PBs"}]}),
+        m.EmailBlock("fixtures", {"items": [None, "s", {"date": "1 Jan", "name": "Meet"}]}),
+    ]
+    spec = m.NewsletterSpec(title="x", sections=[m.Section(blocks=blocks)])
+    html = render_email_html(spec, profile=_profile())
+    text = render_plaintext(spec, profile=_profile())
+    assert "<h2" in html  # bad level degrades to the default
+    assert "12" in html and "Meet" in html
+    assert "12" in text and "Meet" in text
+
+
 def test_render_is_deterministic():
     spec = _spec()
     a = render_email_html(spec, profile=_profile())

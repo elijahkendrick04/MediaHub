@@ -325,7 +325,7 @@ def _resolve_music_path(plan: dict) -> Optional[Path]:
     return p if p.is_file() else None
 
 
-def card_cut_times(duration_sec: float, n_cards: int) -> list[float]:
+def card_cut_times(duration_sec: float, n_cards: int, rhythm: Optional[dict] = None) -> list[float]:
     """Timestamps where a reel cuts to a new card scene — the beat grid the
     music accents align to.
 
@@ -334,6 +334,12 @@ def card_cut_times(duration_sec: float, n_cards: int) -> list[float]:
     overrides the total duration, so the maths stay the single source of truth.
     Story (single-scene) renders have no internal cuts and pass ``n_cards=0`` →
     ``[]``.
+
+    R1.12 — ``rhythm`` (a canonical dict from ``motion.normalise_reel_rhythm``)
+    moves the cuts the same way the MeetReel carve and
+    ``reel_segment_durations`` move the scenes: cumulative weighted seconds
+    (cover + running per-card·weight), so the accents land on the reel's real
+    cuts. ``None`` keeps the historic flat grid byte-identical.
     """
     n = int(n_cards or 0)
     if n <= 0:
@@ -341,11 +347,33 @@ def card_cut_times(duration_sec: float, n_cards: int) -> list[float]:
     from mediahub.visual.motion import (
         REEL_COVER_SEC,
         REEL_PER_CARD_SEC,
+        _fit_beat_weights,
         reel_duration_for,
     )
 
     n = min(n, 5)
     total = float(duration_sec or 0.0)
+    if rhythm:
+        cover = float(rhythm.get("coverSec", REEL_COVER_SEC))
+        per_card = float(rhythm.get("perCardSec", REEL_PER_CARD_SEC))
+        weights_raw = list(rhythm.get("beatWeights") or [])
+        weights = _fit_beat_weights(weights_raw, n) if weights_raw else [1.0] * n
+        from mediahub.visual.motion import REEL_OUTRO_SEC
+
+        ref_total = reel_duration_for(
+            n,
+            cover_sec=cover,
+            outro_sec=float(rhythm.get("outroSec", REEL_OUTRO_SEC)),
+            per_card_sec=per_card,
+            beat_weights=(weights_raw or None),
+        )
+        factor = (total / ref_total) if total > 0 and ref_total else 1.0
+        cuts: list[float] = []
+        acc = cover
+        for k in range(n):
+            cuts.append(round(acc * factor, 3))
+            acc += per_card * weights[k]
+        return cuts
     factor = (total / reel_duration_for(n)) if total > 0 else 1.0
     return [round((REEL_COVER_SEC + k * REEL_PER_CARD_SEC) * factor, 3) for k in range(n)]
 
@@ -605,6 +633,11 @@ def apply_audio(
         aligned = [c for c in (cut_times or []) if c > 0]
         if aligned:
             record["beat_aligned_cuts"] = aligned
+        # Explainability: the operator pool the deterministic pick chose from
+        # (empty for a bundled-library bed, which has no operator pool).
+        pool = music_pool_summary()
+        if pool.get("count"):
+            record["music_pool"] = pool
     if voice_error:
         record["reason"] = voice_error
     return record

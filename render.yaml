@@ -67,11 +67,12 @@ services:
         generateValue: true
       - key: FLASK_ENV
         value: production
-      # Operator developer sign-in needs no configuration: the home-page
-      # "Developer access" link and the /developer route are public and
-      # passwordless (one click grants an unrestricted operator session). See
-      # docs/adr/0018-public-passwordless-operator-signin.md for the rationale
-      # and the accepted risk.
+      # Operator developer sign-in: the home-page "Developer access" link and
+      # the /developer route ask for a username + password (credentialed per
+      # docs/adr/0019-password-protect-operator-signin.md, which superseded
+      # ADR-0018's passwordless one-click). Defaults are baked into
+      # web/auth.py; rotate by setting MEDIAHUB_DEV_USER and
+      # MEDIAHUB_DEV_PASSWORD_HASH in the dashboard.
       # --- In-container SearXNG metasearch (Capability 3, OPTIONAL) ---
       # Runs stock SearXNG as a localhost-only process INSIDE this container —
       # no new service, no extra cost. It uses ~150-250 MB RAM; Playwright /

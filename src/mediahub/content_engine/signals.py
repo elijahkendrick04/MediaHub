@@ -36,6 +36,12 @@ log = logging.getLogger(__name__)
 ANNIVERSARY_WINDOW_DAYS = 7
 MAX_RUN_SIGNALS = 12
 MAX_PACK_SIGNALS = 12
+MAX_DISCOVERED_MEET_SIGNALS = 24
+
+
+def _norm_meet_name(name: str) -> str:
+    """Casefold + collapse whitespace, for meet-name attribution matching."""
+    return " ".join(name.split()).casefold()
 
 
 @dataclass
@@ -295,11 +301,23 @@ def gather_external_signals(
         return []
     today = _today(now)
     signals: list[Signal] = []
+    org_runs = _iter_org_runs(profile_id, data_dir)
 
     # --- Discovered meet identities (context_engine cache) --------------
+    # The discovery cache is a shared, unattributed store (keyed by a hash of
+    # meet/venue/year — no org field), so tenant isolation is enforced here:
+    # an identity only signals for an org whose own runs carry a matching meet
+    # name. Anything unmatched is another tenant's context and never leaks.
+    own_meet_names = {
+        _norm_meet_name(str((rec.get("meet") or {}).get("name") or "")) for rec in org_runs
+    }
+    own_meet_names.discard("")
     discovered_dir = _data_dir(data_dir) / "discovered" / "meets"
-    if discovered_dir.is_dir():
-        for p in sorted(discovered_dir.glob("*.json"))[:24]:
+    if discovered_dir.is_dir() and own_meet_names:
+        n_discovered = 0
+        for p in sorted(discovered_dir.glob("*.json")):
+            if n_discovered >= MAX_DISCOVERED_MEET_SIGNALS:
+                break
             try:
                 rec = json.loads(p.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError):
@@ -309,7 +327,13 @@ def gather_external_signals(
             name = str(ident.get("canonical_name") or "").strip()
             body = str(ident.get("governing_body") or "").strip()
             level = str(ident.get("meet_level") or "").strip()
-            if not (name or body or level):
+            # canonical_name is "<meet name> <year>" (context_engine.identity),
+            # so match an org meet name exactly or as a year-suffixed prefix.
+            # A record with no name cannot be attributed to this org → skip.
+            norm = _norm_meet_name(name)
+            if not norm or not any(
+                norm == own or norm.startswith(own + " ") for own in own_meet_names
+            ):
                 continue
             bits = [b for b in (name, level, body) if b]
             signals.append(
@@ -321,9 +345,10 @@ def gather_external_signals(
                     payload={"canonical_name": name, "governing_body": body, "meet_level": level},
                 )
             )
+            n_discovered += 1
 
     # --- Calendar anniversaries of the club's own meets -----------------
-    for rec in _iter_org_runs(profile_id, data_dir):
+    for rec in org_runs:
         meet = rec.get("meet") or {}
         meet_name = str(meet.get("name") or "").strip()
         finished = _parse_when(rec.get("finished_at"))

@@ -74,6 +74,11 @@ jobs:
           app.config["TESTING"] = True
           fails = []
           with app.test_client() as c:
+              # /healthz/usage is operator-only; sign the probe in as the
+              # operator (mirrors tests/test_responsive_meta.py) so both
+              # routes render their full template rather than a redirect.
+              with c.session_transaction() as s:
+                  s["dev_operator"] = True
               for route in ("/status", "/healthz/usage"):
                   body = c.get(route).get_data(as_text=True)
                   for needle in (

@@ -550,6 +550,22 @@ class TestCreateGraphicOverrides:
         fams = captured["calls"]["kwargs"].get("allowed_families")
         assert fams and "text_led_recap" in fams
 
+    def test_variants_receive_persisted_overrides(self, captured):
+        """Regenerate-variants renders honour saved inspector tweaks too —
+        a pinned accent/crop must not silently vanish on 'Show alternatives'."""
+        if not captured["wm"]._v8_ok:
+            pytest.skip("v8 engine unavailable")
+        run_id = self._seed(captured)
+        ws = captured["wm"]._get_wf_store()
+        ws.set_edits(run_id, "s1", {"insp.accent": "#C9A227", "insp.focus": "left top"})
+        r = captured["client"].post(
+            f"/api/runs/{run_id}/cards/s1/regenerate-variants?sync=1", json={},
+        )
+        assert r.status_code == 200, r.get_json()
+        ov = captured["calls"]["kwargs"]["user_overrides"]
+        assert ov["accent"] == "#C9A227"
+        assert ov["photo_pos"] == "left top"
+
 
 # ===========================================================================
 # 6. Persistence via existing set_edits route + pack-builder safety

@@ -42,7 +42,9 @@ _ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_ROOT))
 
 _SKIP_BROWSER = os.environ.get("MEDIAHUB_SKIP_BROWSER_TESTS", "").lower() in ("1", "true", "yes")
-_PINNED_CHROMIUM = Path("/opt/pw-browsers/chromium-1194/chrome-linux/chrome")
+from tests._pw_chromium import resolve_prebaked_chromium
+
+_PINNED_CHROMIUM = resolve_prebaked_chromium()
 
 _WEB_STATIC = _ROOT / "src" / "mediahub" / "web" / "static"
 _THEME_COMPONENTS = _WEB_STATIC / "theme" / "theme-components.css"
@@ -194,10 +196,13 @@ class TestVanishSearchMarkup:
         assert re.search(r'<span class="mh-vanish__ph" aria-hidden="true">', html)
 
     def test_native_placeholder_removed(self, app_mod):
-        """UI2.6: the native placeholder is emptied (the overlay carries it)."""
+        """UI2.6: the native placeholder shows no visible text (the overlay
+        carries the real hint). A single space is used rather than "" so
+        WebKit's :placeholder-shown still matches and hides the overlay on
+        Safari — so accept whitespace-only, not strictly empty."""
         app, _ = app_mod
         html = _get(app, "/activity")
-        assert _input_attr(html, "placeholder") == "", "native placeholder not removed"
+        assert _input_attr(html, "placeholder").strip() == "", "native placeholder not removed"
 
     def test_input_keeps_accessible_name(self, app_mod):
         """With the placeholder gone, an aria-label preserves the input's name."""
@@ -306,7 +311,7 @@ def _activity_page_assets(app):
 
 @pytest.mark.skipif(_SKIP_BROWSER, reason="MEDIAHUB_SKIP_BROWSER_TESTS set")
 @pytest.mark.skipif(not _playwright_available(), reason="playwright not installed")
-@pytest.mark.skipif(not _chromium_available(), reason="chromium-1194 not at pinned path")
+@pytest.mark.skipif(not _chromium_available(), reason="prebaked chromium not found")
 class TestVanishSearchBrowser:
     def test_overlay_rotates_through_phrases(self, app_mod):
         app, _ = app_mod

@@ -52,6 +52,16 @@ class TestProfileIdValidation:
         assert d.is_dir()
         assert d == isolated_data_dir / "themes"
 
+    def test_dev_fallback_matches_web_src_root(self, monkeypatch):
+        """With DATA_DIR unset, the fallback is src/mediahub/ — the same
+        dev default web.py uses (_SRC_ROOT) — not src/."""
+        monkeypatch.delenv("DATA_DIR", raising=False)
+        from mediahub.theming import theme_store
+        fallback = theme_store._data_dir()
+        pkg_root = Path(theme_store.__file__).resolve().parents[1]
+        assert fallback == pkg_root
+        assert fallback.name == "mediahub"
+
     @pytest.mark.parametrize("bad", [
         "../etc/passwd",
         "a/b",

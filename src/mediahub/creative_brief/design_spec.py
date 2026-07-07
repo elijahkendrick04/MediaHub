@@ -86,6 +86,34 @@ ACCENT_TREATMENTS: tuple[str, ...] = (
     "arrow",
     "underline",
     "diagonal_underline",
+    # R1.5 accent expansion pack — sizing/style variants of the base accents.
+    # Each token is executed by BOTH surfaces: the still engine
+    # (graphic_renderer.render._accent_decoration_html) and its motion twin
+    # under remotion/.../sprint/accents/<token>.tsx (registry contract:
+    # the file's exported name IS this brief token).
+    "thick_stripe",
+    "thin_stripe",
+    "double_stripe",
+    "side_rail",
+    "large_brackets",
+    "small_brackets",
+    "bracket_frame",
+    "corner_tabs",
+    "offset_badge",
+)
+
+# R1.10 — the photo grades the director may request. Executed in lock-step on
+# both surfaces: the still applies ``render._photo_treatment_css`` and the
+# motion render the matching backdrop-filter grade
+# (remotion/.../sprint/layers/photo_filters.tsx). "cutout" is the clean
+# default (no grade). Structural values ("no-photo", "frame") are deliberately
+# NOT offered here: whether a card carries a photo is a pipeline/caller
+# decision, never an art-direction whim.
+PHOTO_TREATMENTS: tuple[str, ...] = (
+    "cutout",
+    "duotone",
+    "halftone",
+    "vignette",
 )
 
 LOGO_LOCKUPS: tuple[str, ...] = (
@@ -170,6 +198,7 @@ DEFAULT_FOCAL_ELEMENT = "big_number"
 DEFAULT_CROP_INTENT = "centered"
 DEFAULT_HERO_STAT = "final_time"
 DEFAULT_ACCENT_TREATMENT = "minimal"
+DEFAULT_PHOTO_TREATMENT = "cutout"
 DEFAULT_LOGO_LOCKUP = "icon"
 DEFAULT_MOOD = "neutral"
 DEFAULT_MOTION_INTENT = "fade_in"
@@ -225,6 +254,10 @@ class DesignSpec:
     mood: str
     motion_intent: str
     rationale: str
+    # R1.10 — the requested photo grade (PHOTO_TREATMENTS). "cutout" (the
+    # default) asks for no grade, so an older spec dict without the field
+    # normalises to a byte-identical card.
+    photo_treatment: str = DEFAULT_PHOTO_TREATMENT
     # 1.9 — per-slot text effects as a hashable, sorted (slot, effect) tuple.
     # Only non-"none" effects on known slots survive ``normalise``; an empty
     # tuple (the default) means the card carries no effects and renders
@@ -250,6 +283,7 @@ class DesignSpec:
             "mood": self.mood,
             "motion_intent": self.motion_intent,
             "rationale": self.rationale,
+            "photo_treatment": self.photo_treatment,
             "text_effects": self.text_effects_map(),
         }
 
@@ -392,6 +426,9 @@ def normalise(raw: dict, *, archetypes: list[str], token_roles: list[str]) -> De
             data.get("motion_intent"), MOTION_INTENTS, DEFAULT_MOTION_INTENT
         ),
         rationale=_clean_text(data.get("rationale"), max_len=MAX_RATIONALE_LEN, oneline=False),
+        photo_treatment=_coerce_enum(
+            data.get("photo_treatment"), PHOTO_TREATMENTS, DEFAULT_PHOTO_TREATMENT
+        ),
         text_effects=_coerce_text_effects(data.get("text_effects")),
     )
 
@@ -442,6 +479,7 @@ def design_spec_json_schema(*, archetypes: list[str], token_roles: list[str]) ->
             "mood": {"type": "string", "enum": list(MOODS)},
             "motion_intent": {"type": "string", "enum": list(MOTION_INTENTS)},
             "rationale": {"type": "string", "maxLength": MAX_RATIONALE_LEN},
+            "photo_treatment": {"type": "string", "enum": list(PHOTO_TREATMENTS)},
             "text_effects": {
                 "type": "object",
                 "additionalProperties": False,
@@ -464,6 +502,7 @@ def design_spec_json_schema(*, archetypes: list[str], token_roles: list[str]) ->
             "mood",
             "motion_intent",
             "rationale",
+            "photo_treatment",
             "text_effects",
         ],
     }
@@ -479,6 +518,7 @@ __all__ = [
     "CROP_INTENTS",
     "STAT_KEYS",
     "ACCENT_TREATMENTS",
+    "PHOTO_TREATMENTS",
     "LOGO_LOCKUPS",
     "MOODS",
     "MOTION_INTENTS",
@@ -489,6 +529,7 @@ __all__ = [
     "DEFAULT_CROP_INTENT",
     "DEFAULT_HERO_STAT",
     "DEFAULT_ACCENT_TREATMENT",
+    "DEFAULT_PHOTO_TREATMENT",
     "DEFAULT_LOGO_LOCKUP",
     "DEFAULT_MOOD",
     "DEFAULT_MOTION_INTENT",

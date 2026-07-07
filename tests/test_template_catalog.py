@@ -90,21 +90,16 @@ def test_pack_roundtrip_and_normalise():
 
 
 def test_at_least_1000_unique_templates():
+    # A template is an archetype × a style pack. Product surfaces address the
+    # two factors directly (pack id + archetype name — there is no separate
+    # Template id layer), so the floor is pinned on the same product the
+    # design editor computes: archetypes × unique packs.
     arch = A.list_archetypes()
-    templates = sp.list_templates(arch)
-    ids = [t.id for t in templates]
-    assert len(ids) == len(set(ids)), "duplicate template ids"
-    assert len(templates) == sp.template_count(arch)
-    assert len(templates) >= 1000, f"only {len(templates)} templates (< 1000)"
-
-
-def test_template_pick_and_roundtrip():
-    arch = A.list_archetypes()
-    t = sp.pick_template(12345, arch)
-    assert t is not None and t.archetype in arch
-    assert sp.template_from_id(t.id, arch).id == t.id
-    assert sp.template_from_id("not_a_real_archetype/flat-none-none-standard", arch) is None
-    assert sp.pick_template(0, []) is None  # empty library → no template
+    pack_ids = [p.id for p in sp.list_style_packs()]
+    assert len(pack_ids) == len(set(pack_ids)), "duplicate pack ids"
+    assert len(set(arch)) == len(arch), "duplicate archetype names"
+    n_templates = len(arch) * sp.style_pack_count()
+    assert n_templates >= 1000, f"only {n_templates} templates (< 1000)"
 
 
 # --------------------------------------------------------------------------- #

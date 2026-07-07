@@ -45,6 +45,9 @@ class ChatSession:
     created_at: str
     updated_at: str
     title: str = ""
+    # Owning organisation/profile id — tenant isolation. "" on legacy chats
+    # created before scoping existed (tolerated like ownerless runs).
+    profile_id: str = ""
     # messages = [{role: "user"|"assistant"|"system_note", content: str, ts: iso}]
     messages: list[dict] = field(default_factory=list)
     # Latest brief the assistant has proposed, awaiting user accept/decline.
@@ -60,6 +63,7 @@ class ChatSession:
             "created_at": self.created_at,
             "updated_at": self.updated_at,
             "title": self.title,
+            "profile_id": self.profile_id,
             "messages": list(self.messages),
             "pending_brief": self.pending_brief,
             "accepted_brief": self.accepted_brief,
@@ -73,6 +77,7 @@ class ChatSession:
             created_at=d.get("created_at", _now_iso()),
             updated_at=d.get("updated_at", _now_iso()),
             title=d.get("title", "") or "",
+            profile_id=d.get("profile_id", "") or "",
             messages=list(d.get("messages") or []),
             pending_brief=d.get("pending_brief"),
             accepted_brief=d.get("accepted_brief"),
@@ -103,14 +108,40 @@ class ChatSession:
         self.updated_at = _now_iso()
 
 
-def create_session() -> ChatSession:
+def create_session(profile_id: str = "") -> ChatSession:
+    """Create and persist a new chat, stamped with its owning profile.
+
+    Callers with an active organisation (the web routes) pass its
+    profile id so the chat is tenant-scoped from birth; "" keeps the
+    legacy ownerless behaviour for pre-org sandboxes.
+    """
     s = ChatSession(
         chat_id=uuid.uuid4().hex[:12],
         created_at=_now_iso(),
         updated_at=_now_iso(),
+        profile_id=(profile_id or "").strip(),
     )
     save_session(s)
     return s
+
+
+def can_access_session(s: Optional[ChatSession], active_pid: Optional[str]) -> bool:
+    """Tenant isolation guard — mirrors web.py's ``_can_access_run`` rules.
+
+    A chat that records an owning ``profile_id`` is only accessible to
+    that organisation's session. Legacy ownerless chats (created before
+    scoping existed) stay readable so historical conversations aren't
+    orphaned. ``active_pid`` of ``None`` means no organisations are
+    configured at all — a single-tenant sandbox with nothing to isolate.
+    """
+    if s is None:
+        return False
+    if active_pid is None:
+        return True
+    owner = (s.profile_id or "").strip()
+    if not owner:
+        return True
+    return owner == active_pid
 
 
 def save_session(s: ChatSession) -> None:
@@ -130,17 +161,29 @@ def load_session(chat_id: str) -> Optional[ChatSession]:
         return None
 
 
-def list_sessions(limit: int = 50) -> list[dict]:
+def list_sessions(limit: int = 50, profile_id: Optional[str] = None) -> list[dict]:
+    """List chats, newest first.
+
+    ``profile_id=None`` keeps the historical unscoped listing (pre-org
+    sandboxes / direct unit calls). When a profile id is given, only that
+    organisation's chats — plus legacy ownerless ones, mirroring
+    :func:`can_access_session` — are returned; transcripts can carry
+    athlete names and briefs, so they must not list across workspaces.
+    """
     rows: list[dict] = []
     for p in _sessions_dir().glob("*.json"):
         try:
             d = json.loads(p.read_text(encoding="utf-8"))
+            owner = (d.get("profile_id") or "").strip()
+            if profile_id is not None and owner and owner != profile_id:
+                continue
             rows.append(
                 {
                     "chat_id": d.get("chat_id", p.stem),
                     "title": d.get("title", "") or "Untitled",
                     "created_at": d.get("created_at", ""),
                     "updated_at": d.get("updated_at", ""),
+                    "profile_id": owner,
                     "n_messages": len(d.get("messages") or []),
                     "accepted": bool(d.get("accepted_brief")),
                 }

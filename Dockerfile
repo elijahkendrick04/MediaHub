@@ -124,7 +124,11 @@ RUN python /app/scripts/fetch_piper_voice.py /opt/piper_voices \
  && test -f /opt/piper_voices/en_GB-alba-medium.onnx
 
 # Install Remotion node modules so /api/.../motion + /reel render MP4s.
-RUN cd /app/src/mediahub/remotion && retry npm install --no-audit --no-fund
+# `npm ci` installs the committed package-lock.json verbatim, so every deploy
+# of auto-deploying main renders with the same pinned Remotion 4.x rather than
+# whatever the registry shipped that day. Refresh deliberately: `make remotion`
+# (npm install) then commit the updated lockfile.
+RUN cd /app/src/mediahub/remotion && retry npm ci --no-audit --no-fund
 
 # --- Optional in-container SearXNG metasearch (Capability 3) -----------------
 # Stock, UNMODIFIED SearXNG installed into an ISOLATED virtualenv so its pinned

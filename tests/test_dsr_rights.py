@@ -156,6 +156,47 @@ def test_sar_export_collects_every_store(data_dir, media_store):
     assert any("independent controllers" in n for n in export["notes"])
 
 
+def test_export_and_erase_never_cross_match_name_prefixes(data_dir):
+    """'Sam Lee' must never match 'Sam Leeson' in the global PB caches.
+
+    A substring scan crossed data subjects (and tenants): export embedded
+    another swimmer's cache file; erasure deleted it. Whole-name matching
+    plus row redaction keeps each subject's SAR to their own data.
+    """
+    discovered = data_dir / "discovered"
+    (discovered / "swimmers").mkdir(parents=True)
+    (discovered / "swimmers" / "leeson.json").write_text(
+        json.dumps({"name": "Sam Leeson", "pbs": [{"event": "50 Free", "time": "29.10"}]})
+    )
+    mixed = discovered / "swimmers" / "mixed.json"
+    mixed.write_text(
+        json.dumps(
+            {
+                "meet": "Spring Open",
+                "rows": [
+                    {"name": "Sam Lee", "time": "57.10"},
+                    {"name": "Rival Kid", "time": "58.00"},
+                ],
+            }
+        )
+    )
+    from mediahub.compliance.dsr import erase_athlete, export_athlete
+
+    export = export_athlete("clubx", "Sam Lee")
+    cache_paths = " ".join(c["path"] for c in export["pb_caches"])
+    assert "leeson" not in cache_paths  # prefix collision never exported
+    assert "mixed" in cache_paths
+    mixed_entry = next(c for c in export["pb_caches"] if "mixed" in c["path"])
+    blob = json.dumps(mixed_entry["content"])
+    assert "Sam Lee" in blob
+    assert "Rival Kid" not in blob  # other subjects' rows redacted
+    assert mixed_entry["rows_redacted"] == 1
+
+    report = erase_athlete("clubx", "Sam Lee")
+    assert (discovered / "swimmers" / "leeson.json").exists(), report
+    assert not mixed.exists()
+
+
 # ----------------------------------------------------------------- erasure
 
 

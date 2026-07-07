@@ -123,6 +123,62 @@ class TestTextExtraction:
         # Must not raise; must return SOMETHING but bounded.
         assert out["status"] == "ok"
 
+    def test_single_member_zip_bomb_never_inflates_past_budget(self, monkeypatch):
+        """A single high-compression-ratio member (few KB compressed, huge
+        inflated) must be refused DURING inflation, not after a full read."""
+        # Shrink the budget so the test stays fast and small.
+        monkeypatch.setattr(guidelines, "_MAX_ZIP_DECOMPRESSED", 64 * 1024)
+        monkeypatch.setattr(guidelines, "_ZIP_CHUNK", 8 * 1024)
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            # 4 MB of zeros compresses to a few KB but inflates 64x past budget.
+            zf.writestr("bomb.txt", "\x00" * (4 * 1024 * 1024))
+        out = guidelines.extract_text("bomb.zip", buf.getvalue())
+        # The bomb member is refused whole — nothing extracted, no blow-up.
+        assert out["status"] in ("unsupported", "empty")
+
+    def test_zip_member_lying_about_file_size_still_capped(self, monkeypatch):
+        """The declared file_size is only an early filter — the streamed
+        read itself enforces the budget even when the header lies."""
+        monkeypatch.setattr(guidelines, "_MAX_ZIP_DECOMPRESSED", 16 * 1024)
+        monkeypatch.setattr(guidelines, "_ZIP_CHUNK", 4 * 1024)
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr("big.txt", "A" * (256 * 1024))
+        # Forging the central-directory size field directly is fiddly;
+        # instead make every ZipInfo the walk sees claim a tiny size.
+        real_infolist = zipfile.ZipFile.infolist
+
+        def lying_infolist(self):
+            infos = real_infolist(self)
+            for info in infos:
+                info.file_size = 10  # claim tiny; actual inflate is 256 KB
+            return infos
+
+        monkeypatch.setattr(zipfile.ZipFile, "infolist", lying_infolist)
+        out = guidelines.extract_text("liar.zip", buf.getvalue())
+        # Member refused by the streamed budget despite the lying header.
+        assert out["status"] in ("unsupported", "empty")
+
+    def test_nested_zip_depth_capped(self):
+        """zip-in-zip is walked once; deeper nesting is refused."""
+        inner2 = io.BytesIO()
+        with zipfile.ZipFile(inner2, "w") as zf:
+            zf.writestr("deepest.txt", "DEEPEST-LEVEL-RULE")
+        inner1 = io.BytesIO()
+        with zipfile.ZipFile(inner1, "w") as zf:
+            zf.writestr("level2.zip", inner2.getvalue())
+            zf.writestr("mid.txt", "MID-LEVEL-RULE")
+        outer = io.BytesIO()
+        with zipfile.ZipFile(outer, "w") as zf:
+            zf.writestr("level1.zip", inner1.getvalue())
+            zf.writestr("top.txt", "TOP-LEVEL-RULE")
+        out = guidelines.extract_text("nested.zip", outer.getvalue())
+        assert out["status"] == "ok"
+        assert "TOP-LEVEL-RULE" in out["text"]
+        assert "MID-LEVEL-RULE" in out["text"]  # depth 1 — allowed
+        assert "DEEPEST-LEVEL-RULE" not in out["text"]  # depth 2 — refused
+
 
 # ---------------------------------------------------------------------------
 # 2. LLM-driven interpretation
@@ -271,3 +327,51 @@ class TestIngestEndToEnd:
         # Status will be unsupported/empty/ok — but the call MUST NOT
         # raise. That's the invariant.
         assert "brand_guidelines_status" in payload
+
+    def test_interpret_ok_but_rules_pass_fails_is_not_silent(self, monkeypatch):
+        """Interpretation succeeding while the dedicated mandatory-rules
+        call fails must NOT read as 'document has no hard rules' — the
+        payload carries a distinct error status the UI can act on."""
+        monkeypatch.setattr("mediahub.media_ai.llm.is_available", lambda: True)
+        calls = {"n": 0}
+
+        def two_faced(*a, **kw):
+            calls["n"] += 1
+            if calls["n"] == 1:  # interpret_guidelines succeeds
+                return {"summary": "A warm club.", "voice_attributes": ["warm"]}
+            raise RuntimeError("provider blew up on the rules pass")
+
+        monkeypatch.setattr("mediahub.media_ai.llm.generate_json", two_faced)
+        payload = guidelines.ingest_guidelines_file(
+            "rules.txt", b"The strapline MUST always appear."
+        )
+        assert payload["brand_guidelines_status"] == "ok"
+        assert payload["brand_guidelines_mandatory_rules"] == []
+        assert payload["brand_guidelines_mandatory_rules_status"] == "error"
+
+    def test_rules_status_ok_none_and_no_provider(self, monkeypatch):
+        # no_provider
+        monkeypatch.setattr("mediahub.media_ai.llm.is_available", lambda: False)
+        rules, status = guidelines.extract_mandatory_rules_with_status("MUST rule.")
+        assert (rules, status) == ([], "no_provider")
+        # ok — rules found
+        monkeypatch.setattr("mediahub.media_ai.llm.is_available", lambda: True)
+        monkeypatch.setattr(
+            "mediahub.media_ai.llm.generate_json",
+            lambda *a, **kw: {"mandatory_rules": ["The strapline MUST appear."]},
+        )
+        rules, status = guidelines.extract_mandatory_rules_with_status("doc")
+        assert status == "ok" and rules
+        # none — provider answered, document has no hard rules
+        monkeypatch.setattr(
+            "mediahub.media_ai.llm.generate_json",
+            lambda *a, **kw: {"mandatory_rules": []},
+        )
+        rules, status = guidelines.extract_mandatory_rules_with_status("doc")
+        assert (rules, status) == ([], "none")
+        # error — provider answered but output was unparseable (fallback {})
+        monkeypatch.setattr(
+            "mediahub.media_ai.llm.generate_json", lambda *a, **kw: {}
+        )
+        rules, status = guidelines.extract_mandatory_rules_with_status("doc")
+        assert (rules, status) == ([], "error")

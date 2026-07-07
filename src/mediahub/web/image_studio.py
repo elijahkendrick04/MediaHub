@@ -197,6 +197,7 @@ def render_studio_body(
     gen_history_url: str,
     width: int = 0,
     height: int = 0,
+    dev_operator: bool = False,
 ) -> str:
     """Build the Image-studio page body.
 
@@ -281,10 +282,18 @@ def render_studio_body(
         "</div>"
         # Honest note shown when no image provider is configured. The
         # deterministic / vision ops can still light up independently.
+        # Env-var instructions are operator-only: hosted-SaaS customers cannot
+        # set env vars, so they get plain "not enabled here" copy instead.
         '<p class="mh-st-providernote dim" id="mh-st-providernote" hidden>'
-        "No image generator is configured, so the AI edit tools are off. The default is the "
-        "in-house local model (set <code>MEDIAHUB_IMAGINE_LOCAL_ENDPOINT</code>); a Gemini key "
-        "also enables them.</p>"
+        + (
+            "No image generator is configured, so the AI edit tools are off. The default is the "
+            "in-house on-server model (set <code>MEDIAHUB_IMAGINE_LOCAL_ENDPOINT</code>); a "
+            "Gemini key also enables them."
+            if dev_operator
+            else "AI edit tools aren&rsquo;t enabled on this deployment &mdash; ask your "
+            "operator about turning them on."
+        )
+        + "</p>"
         f"{panels}"
         '<p class="dim mh-st-noops" id="mh-st-noops" hidden>No studio tools are available on '
         "this deployment yet.</p>"

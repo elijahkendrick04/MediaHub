@@ -13,6 +13,10 @@ import secrets
 import uuid
 from dataclasses import dataclass, field
 from typing import Optional
+from urllib.parse import urlparse
+
+# Reuse the project's single SSRF blocklist (same door deep research uses).
+from ..web_research.safe_fetch import _ip_is_blocked, _resolved_ips
 
 from . import _db
 from .events import validate_events
@@ -24,6 +28,27 @@ _SECRET_BYTES = 24
 
 def _new_secret() -> str:
     return _SECRET_PREFIX + secrets.token_hex(_SECRET_BYTES)
+
+
+def _url_ssrf_error(url: str) -> Optional[str]:
+    """Registration-time SSRF guard: refuse endpoint URLs whose host is (or
+    resolves to) an internal/reserved address — loopback, RFC-1918, link-local
+    (incl. cloud metadata), multicast, unspecified.
+
+    A host that does not resolve right now is allowed through: delivery
+    re-validates the resolved IP on every attempt, which is the enforcement
+    that actually matters (and defeats later DNS changes).
+    """
+    try:
+        host = urlparse(url).hostname or ""
+    except ValueError:
+        return "url could not be parsed"
+    if not host:
+        return "url must include a host"
+    for ip_text in _resolved_ips(host):
+        if _ip_is_blocked(ip_text):
+            return "url host is a private or internal address, which is not allowed"
+    return None
 
 
 @dataclass
@@ -85,6 +110,9 @@ class EndpointStore:
             raise ValueError("profile_id is required")
         if not (url.startswith("https://") or url.startswith("http://")):
             raise ValueError("url must be an absolute http(s) URL")
+        ssrf_error = _url_ssrf_error(url)
+        if ssrf_error:
+            raise ValueError(ssrf_error)
         ep = WebhookEndpoint(
             id=_ID_PREFIX + uuid.uuid4().hex[:16],
             profile_id=profile_id,

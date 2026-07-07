@@ -190,19 +190,72 @@ def asset_data_uri(path: str | Path, loader: Callable[[Path], str]) -> str:
 # HTML→PNG stage — on-disk, content-addressed PNG cache.
 # ---------------------------------------------------------------------------
 
+_salt_lock = threading.Lock()
+_salt_cache: Optional[str] = None
+
+
+def _compute_renderer_generation(fonts_dir: Path) -> str:
+    """Digest of the renderer environment: font files + browser build.
+
+    Pure function of its inputs so tests can exercise it directly; production
+    goes through the once-per-process :func:`_renderer_generation` wrapper.
+    """
+    h = hashlib.sha256()
+    # Renderer fonts by (name, mtime_ns, size) — the same unchanged-file signal
+    # the asset cache trusts. The card HTML references these by file:// *path*,
+    # not by content, so a refresh changes output without changing the HTML.
+    try:
+        for p in sorted(fonts_dir.glob("*.woff2")):
+            try:
+                st = p.stat()
+                h.update(f"{p.name}|{st.st_mtime_ns}|{st.st_size}\n".encode("utf-8"))
+            except OSError:
+                continue
+    except OSError:
+        pass
+    # The installed Playwright version pins the bundled Chromium build, whose
+    # rasteriser decides the exact output bytes.
+    try:
+        from importlib.metadata import version
+
+        h.update(("playwright=" + version("playwright")).encode("utf-8"))
+    except Exception:
+        h.update(b"playwright=unknown")
+    return h.hexdigest()[:16]
+
+
+def _renderer_generation() -> str:
+    """Once-per-process salt identifying the rendering environment.
+
+    ``DATA_DIR/render_cache`` persists across deploys with no TTL, but a cached
+    PNG is only reusable while the *renderer environment* holds still: a
+    renderer-font refresh (``scripts/fetch_renderer_fonts.py``) or a
+    Playwright/Chromium bump changes the output for unchanged HTML. Folding
+    this salt into every PNG key makes such a deploy naturally invalidate
+    pre-upgrade entries (they age out of the LRU) instead of serving stale
+    renders as hits. Computed once per process — cheap ``stat`` calls only.
+    """
+    global _salt_cache
+    with _salt_lock:
+        if _salt_cache is None:
+            fonts_dir = Path(__file__).resolve().parent / "layouts" / "fonts"
+            _salt_cache = _compute_renderer_generation(fonts_dir)
+        return _salt_cache
+
 
 def png_cache_key(html: str, width: int, height: int, dpr: int) -> str:
     """Stable SHA-256 hex key for a finished card render.
 
     The screenshot is a pure function of (final HTML, canvas size, device-scale
     factor) — the card HTML is fully self-contained (data: URIs + file:// fonts,
-    no network at screenshot time) — so these three fully determine the output
-    bytes.
+    no network at screenshot time) — *within one renderer environment*, so the
+    key also folds in the renderer-generation salt (fonts + browser build).
     """
     h = hashlib.sha256()
     h.update(html.encode("utf-8"))
     # Domain-separate the dimensions so they can't collide with HTML bytes.
     h.update(f"|{int(width)}x{int(height)}@{int(dpr)}".encode("ascii"))
+    h.update(f"|env:{_renderer_generation()}".encode("ascii"))
     return h.hexdigest()
 
 

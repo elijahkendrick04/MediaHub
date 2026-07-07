@@ -181,6 +181,117 @@ class TestLastError:
         assert err["error_kind"] == "auth"
 
 
+class TestVisionCallsAreLogged:
+    """The vision helpers must land one usage row per attempt, like every
+    text-path branch — success and failure both count."""
+
+    def _rows(self, monkeypatch, fresh_usage):
+        rows: list[dict] = []
+
+        def rec(**kw):
+            rows.append(kw)
+            return 1
+
+        monkeypatch.setattr(fresh_usage, "record_call", rec)
+        return rows
+
+    def _reset_breaker(self):
+        from mediahub.media_ai import llm as m
+
+        with m._gemini_breaker_lock:
+            m._gemini_breaker_state["consecutive_failures"] = 0
+            m._gemini_breaker_state["tripped_until"] = 0.0
+
+    def test_gemini_vision_success_logs_row(self, fresh_usage, monkeypatch):
+        import requests
+
+        from mediahub.media_ai import llm as m
+
+        rows = self._rows(monkeypatch, fresh_usage)
+        monkeypatch.setattr(m, "_resolve_gemini_key", lambda: "k")
+        self._reset_breaker()
+
+        class _Resp:
+            status_code = 200
+            ok = True
+
+            @staticmethod
+            def json():
+                return {"candidates": [{"content": {"parts": [{"text": "seen"}]}}]}
+
+        monkeypatch.setattr(requests, "post", lambda *a, **k: _Resp())
+        assert m._call_gemini_vision([], "describe", None, 10) == "seen"
+        assert len(rows) == 1
+        assert rows[0]["provider"] == "gemini-vision"
+        assert rows[0]["ok"] is True
+
+    def test_gemini_vision_transport_failure_logs_row(self, fresh_usage, monkeypatch):
+        import requests
+
+        from mediahub.media_ai import llm as m
+
+        rows = self._rows(monkeypatch, fresh_usage)
+        monkeypatch.setattr(m, "_resolve_gemini_key", lambda: "k")
+        self._reset_breaker()
+
+        def boom(*a, **k):
+            raise requests.exceptions.Timeout("timed out")
+
+        monkeypatch.setattr(requests, "post", boom)
+        assert m._call_gemini_vision([], "describe", None, 10) is None
+        self._reset_breaker()
+        assert len(rows) == 1
+        assert rows[0]["provider"] == "gemini-vision"
+        assert rows[0]["ok"] is False
+        assert rows[0]["error_kind"] == "transport"
+
+    def test_anthropic_vision_success_logs_row(self, fresh_usage, monkeypatch):
+        from mediahub.media_ai import llm as m
+
+        rows = self._rows(monkeypatch, fresh_usage)
+
+        class _Block:
+            text = "described"
+
+        class _Resp:
+            content = [_Block()]
+            usage = None
+
+        class _Msgs:
+            @staticmethod
+            def create(**kw):
+                return _Resp()
+
+        class _Client:
+            messages = _Msgs()
+
+        monkeypatch.setattr(m, "_get_anthropic", lambda: _Client())
+        assert m._call_anthropic_vision([], "describe", None, 10) == "described"
+        assert len(rows) == 1
+        assert rows[0]["provider"] == "anthropic-vision"
+        assert rows[0]["ok"] is True
+
+    def test_anthropic_vision_failure_logs_row(self, fresh_usage, monkeypatch):
+        from mediahub.media_ai import llm as m
+
+        rows = self._rows(monkeypatch, fresh_usage)
+
+        class _Msgs:
+            @staticmethod
+            def create(**kw):
+                raise RuntimeError("api down")
+
+        class _Client:
+            messages = _Msgs()
+
+        monkeypatch.setattr(m, "_get_anthropic", lambda: _Client())
+        assert m._call_anthropic_vision([], "describe", None, 10) is None
+        assert len(rows) == 1
+        assert rows[0]["provider"] == "anthropic-vision"
+        assert rows[0]["ok"] is False
+        assert rows[0]["error_kind"] == "RuntimeError"
+
+
 class TestSafetyAndDegradation:
     def test_record_call_swallows_bad_input(self, fresh_usage):
         # None ok should fall back to False without raising.

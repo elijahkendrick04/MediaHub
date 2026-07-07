@@ -48,7 +48,9 @@ MOTION_CSS = _MOTION_CSS_PATH.read_text(encoding="utf-8")
 UIKIT_JS = _UIKIT_JS_PATH.read_text(encoding="utf-8")
 
 _SKIP_BROWSER = os.environ.get("MEDIAHUB_SKIP_BROWSER_TESTS", "").lower() in ("1", "true", "yes")
-_PINNED_CHROMIUM = Path("/opt/pw-browsers/chromium-1194/chrome-linux/chrome")
+from tests._pw_chromium import resolve_prebaked_chromium
+
+_PINNED_CHROMIUM = resolve_prebaked_chromium()
 
 
 def _playwright_available() -> bool:
@@ -70,6 +72,61 @@ def caption_js() -> str:
     from mediahub.web import web as wm
 
     return wm._card_creative_js()
+
+
+class TestCopilotEscaperIsGlobal:
+    """Copilot replies, model-derived rejection reasons, comments and preview
+    errors reach innerHTML — they MUST be escaped. Previously `safeText` was only
+    a local var in the caption closure and never global, so the
+    `window.safeText?safeText():raw` guards silently took the raw branch → a
+    prompt-injection-to-XSS sink on the review surface."""
+
+    def test_global_escaper_is_defined(self, caption_js):
+        assert "window.safeText = window.safeText ||" in caption_js
+
+    def test_no_falsy_fallback_guards_remain(self, caption_js):
+        # The broken guard that fell through to the raw string is gone.
+        assert "window.safeText?safeText" not in caption_js
+        assert "window.safeText ? safeText" not in caption_js
+
+    def test_copilot_sinks_escape_unconditionally(self, caption_js):
+        # Reply body, rejection reasons, preview error and comment text all route
+        # through the global escaper before innerHTML.
+        assert ":</span> ' + window.safeText(text)" in caption_js
+        assert "Skipped: ' + window.safeText(reasons)" in caption_js
+        assert "window.safeText(res.err)" in caption_js
+        assert "function _cmTxt(s){ return window.safeText(s); }" in caption_js
+
+    def test_motion_and_reel_error_paths_escape_server_detail(self, caption_js):
+        # generateMotion / generateReel / generateReelBatch fall back to a raw
+        # str(e) `detail` (meet names, node stderr) — escape before innerHTML.
+        assert "Reel render error: ' + window.safeText(msg)" in caption_js
+        # The motion error path escapes its msg too.
+        assert "font-size:13px\">' + window.safeText(msg) + '</div>';" in caption_js
+
+    def test_visual_panel_escapes_why_layout_and_errors(self, caption_js):
+        # _renderVisualPanel: why_this_design is LLM output; layout + errors are
+        # server-derived. All must be escaped before innerHTML.
+        assert "window.safeText(why)" in caption_js
+        assert "window.safeText(layout" in caption_js
+        assert "window.safeText(data.errors.join" in caption_js
+
+    def test_reel_batch_shows_honest_reasons_not_stale_engine_advice(self, caption_js):
+        # The batch reel panel must surface the API's per-cut formats_failed
+        # reason (escaped), not the misleading hardcoded "switch engine" line
+        # (the ffmpeg engine renders all four cuts since R1.16).
+        assert "Switch to the Remotion engine" not in caption_js
+        assert "Not produced by the active render engine" not in caption_js
+        assert "These cuts failed to render" in caption_js
+        assert "window.safeText(reason)" in caption_js
+
+    def test_variant_picker_escapes_hook_label_and_errors(self, caption_js):
+        # _vFail msg + the variant picker's LLM hook, layout label and per-seed
+        # error join are all server/LLM-echoed and go to innerHTML.
+        assert "font-size:13px\">' + window.safeText(msg)" in caption_js
+        assert "window.safeText((vt.errors||[]).join" in caption_js
+        assert "&middot; ' + window.safeText(label)" in caption_js
+        assert "margin-top:2px\">' + window.safeText(hook)" in caption_js
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -336,7 +393,7 @@ def _typeon_page(caption: str) -> str:
 
 @pytest.mark.skipif(_SKIP_BROWSER, reason="MEDIAHUB_SKIP_BROWSER_TESTS set")
 @pytest.mark.skipif(not _playwright_available(), reason="playwright not installed")
-@pytest.mark.skipif(not _chromium_available(), reason="chromium-1194 not at pinned path")
+@pytest.mark.skipif(not _chromium_available(), reason="prebaked chromium not found")
 class TestTypeOnBrowser:
     def test_splits_into_staggered_words_preserving_newlines(self):
         pw, browser = _launch_browser()
@@ -451,7 +508,7 @@ def _e2e_page(caption_js: str, caption: str, cap_url: str, card: str) -> str:
 
 @pytest.mark.skipif(_SKIP_BROWSER, reason="MEDIAHUB_SKIP_BROWSER_TESTS set")
 @pytest.mark.skipif(not _playwright_available(), reason="playwright not installed")
-@pytest.mark.skipif(not _chromium_available(), reason="chromium-1194 not at pinned path")
+@pytest.mark.skipif(not _chromium_available(), reason="prebaked chromium not found")
 class TestRealCaptionFlowBrowser:
     """Drive the *actual* shipped caption JS: a fresh generation must type on the
     read-only preview while the editable textarea keeps a plain value."""

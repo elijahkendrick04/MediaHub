@@ -628,9 +628,95 @@ def _bg_duotone_data_uri() -> str:
     return f'url("data:image/svg+xml;base64,{base64.b64encode(svg.encode()).decode()}")'
 
 
+# --- R1.4 sprint-pattern parity tiles -------------------------------------
+# Still-engine builders for the motion sprint patterns
+# (remotion/src/compositions/sprint/patterns/*.ts). Each mirrors its motion
+# tile's geometry 1:1 (same tile size, shapes and opacities, monochrome) so a
+# card carrying the token reads the same on both surfaces.
+
+
+def _bg_checkerboard_data_uri() -> str:
+    svg = """<svg xmlns='http://www.w3.org/2000/svg' width='80' height='80'>
+  <rect width='40' height='40' fill='white' fill-opacity='0.10'/>
+  <rect x='40' y='40' width='40' height='40' fill='white' fill-opacity='0.10'/>
+</svg>"""
+    return f'url("data:image/svg+xml;base64,{base64.b64encode(svg.encode()).decode()}")'
+
+
+def _bg_diamonds_data_uri() -> str:
+    svg = """<svg xmlns='http://www.w3.org/2000/svg' width='56' height='56'>
+  <path d='M28,0 L56,28 L28,56 L0,28 Z' fill='none' stroke='white' stroke-opacity='0.16' stroke-width='1.5'/>
+  <path d='M28,0 L28,56 M0,28 L56,28' stroke='white' stroke-opacity='0.07' stroke-width='1'/>
+</svg>"""
+    return f'url("data:image/svg+xml;base64,{base64.b64encode(svg.encode()).decode()}")'
+
+
+def _bg_circuit_data_uri() -> str:
+    svg = """<svg xmlns='http://www.w3.org/2000/svg' width='100' height='100'>
+  <g fill='none' stroke='white' stroke-opacity='0.16' stroke-width='2'>
+    <path d='M0,30 H32 V68 H72 V30 H100'/>
+    <path d='M50,0 V22 H82 V52'/>
+    <path d='M18,100 V74 H46'/>
+  </g>
+  <g fill='white' fill-opacity='0.24'>
+    <circle cx='32' cy='30' r='3.5'/><circle cx='72' cy='68' r='3.5'/>
+    <circle cx='82' cy='52' r='3.5'/><circle cx='46' cy='74' r='3.5'/>
+  </g>
+</svg>"""
+    return f'url("data:image/svg+xml;base64,{base64.b64encode(svg.encode()).decode()}")'
+
+
+def _bg_organic_waves_data_uri() -> str:
+    svg = """<svg xmlns='http://www.w3.org/2000/svg' width='120' height='72'>
+  <g fill='none' stroke='white' stroke-opacity='0.16' stroke-width='2'>
+    <path d='M0,12 Q30,4 60,12 T120,12'/>
+    <path d='M0,36 Q30,28 60,36 T120,36'/>
+    <path d='M0,60 Q30,52 60,60 T120,60'/>
+  </g>
+</svg>"""
+    return f'url("data:image/svg+xml;base64,{base64.b64encode(svg.encode()).decode()}")'
+
+
+def _hex_cell_path(cx: float, cy: float) -> str:
+    """Flat-top hexagon outline (side 20, half-height 17.32 ≈ 10√3)."""
+    return (
+        f"M{cx + 20},{cy} L{cx + 10},{cy + 17.32} L{cx - 10},{cy + 17.32} "
+        f"L{cx - 20},{cy} L{cx - 10},{cy - 17.32} L{cx + 10},{cy - 17.32} Z"
+    )
+
+
+def _bg_hexmesh_data_uri() -> str:
+    cells = " ".join(
+        _hex_cell_path(cx, cy) for cx, cy in ((30, 17.32), (0, 0), (60, 0), (0, 34.64), (60, 34.64))
+    )
+    svg = (
+        "<svg xmlns='http://www.w3.org/2000/svg' width='60' height='34.64'>"
+        f"<path d='{cells}' fill='none' stroke='white' stroke-opacity='0.16' stroke-width='1.5'/>"
+        "</svg>"
+    )
+    return f'url("data:image/svg+xml;base64,{base64.b64encode(svg.encode()).decode()}")'
+
+
+def _bg_concentric_data_uri() -> str:
+    svg = """<svg xmlns='http://www.w3.org/2000/svg' width='80' height='80'>
+  <g fill='none' stroke='white' stroke-opacity='0.15' stroke-width='1.5'>
+    <circle cx='40' cy='40' r='12'/>
+    <circle cx='40' cy='40' r='24'/>
+    <circle cx='40' cy='40' r='36'/>
+  </g>
+  <circle cx='40' cy='40' r='2.5' fill='white' fill-opacity='0.22'/>
+</svg>"""
+    return f'url("data:image/svg+xml;base64,{base64.b64encode(svg.encode()).decode()}")'
+
+
 # Lookup table: brief.background_style → CSS url() value
 def _background_pattern_for(style: str) -> str:
     style = (style or "water").lower()
+    # G1.8: a gradient-mesh ground (any accepted trigger spelling, with or
+    # without a ``:mode`` suffix) is painted by the sprint render hook
+    # (sprint_hooks/gradient_mesh_bg.py) — no pattern tile on top of it.
+    if style.partition(":")[0] in ("gradient_mesh", "gradient-mesh", "mesh"):
+        return _bg_clean_data_uri()
     builders = {
         "water": _water_pattern_data_uri,
         "halftone": _bg_halftone_data_uri,
@@ -642,6 +728,16 @@ def _background_pattern_for(style: str) -> str:
         "dots": _bg_dots_data_uri,
         "duotone": _bg_duotone_data_uri,
         "grain": _bg_clean_data_uri,  # rely on the noise overlay only
+        # R1.4 sprint-pattern tokens — still tiles mirroring the motion
+        # registry (sprint/patterns/*.ts) 1:1 so both surfaces stay in parity.
+        # The motion token spells "organic-waves"; accept both separators.
+        "checkerboard": _bg_checkerboard_data_uri,
+        "diamonds": _bg_diamonds_data_uri,
+        "circuit": _bg_circuit_data_uri,
+        "organic-waves": _bg_organic_waves_data_uri,
+        "organic_waves": _bg_organic_waves_data_uri,
+        "hexmesh": _bg_hexmesh_data_uri,
+        "concentric": _bg_concentric_data_uri,
     }
     builder = builders.get(style, _water_pattern_data_uri)
     return builder()
@@ -771,6 +867,111 @@ def _accent_decoration_html(
             f"width:{size}px;height:{size}px;border-radius:50%;background:{color};"
             f"opacity:0.85;z-index:11;pointer-events:none;"
             f'box-shadow:0 6px 18px rgba(0,0,0,0.35);"></div>'
+        )
+    if style == "diagonal_underline":
+        m = min(width, height)
+        bar_h = max(4, int(m * 0.004))
+        return (
+            f'<div style="position:absolute;left:80px;top:{int(height * 0.82)}px;'
+            f"width:{int(m * 0.22)}px;height:{bar_h}px;background:{color};"
+            f"transform:rotate(-6deg);transform-origin:left center;"
+            f'z-index:11;pointer-events:none;"></div>'
+        )
+    # ---- R1.5 accent expansion pack -------------------------------------
+    # Sizing/style variants of the base accents. The geometry below mirrors
+    # the motion twins under remotion/.../sprint/accents/<style>.tsx (held
+    # frame) 1:1, so a card's video and its approved still carry the SAME
+    # decoration — the registry contract ("name == still-engine token").
+    m = min(width, height)
+    if style == "thick_stripe":
+        return (
+            f'<div style="position:absolute;left:80px;top:{int(height * 0.42)}px;'
+            f"width:{int(m * 0.18)}px;height:{max(12, int(m * 0.016))}px;"
+            f'background:{color};z-index:11;pointer-events:none;"></div>'
+        )
+    if style == "thin_stripe":
+        return (
+            f'<div style="position:absolute;left:80px;top:{int(height * 0.43)}px;'
+            f"width:{int(m * 0.26)}px;height:{max(2, int(m * 0.0035))}px;"
+            f'background:{color};z-index:11;pointer-events:none;"></div>'
+        )
+    if style == "double_stripe":
+        bar_w = int(m * 0.16)
+        bar_h = max(5, int(m * 0.007))
+        gap = max(10, int(m * 0.024))
+        top = int(height * 0.42)
+
+        def _bar(y: int) -> str:
+            return (
+                f'<div style="position:absolute;left:80px;top:{y}px;'
+                f"width:{bar_w}px;height:{bar_h}px;background:{color};"
+                f'z-index:11;pointer-events:none;"></div>'
+            )
+
+        return _bar(top) + _bar(top + gap)
+    if style == "side_rail":
+        return (
+            f'<div style="position:absolute;left:48px;top:{int(height * 0.30)}px;'
+            f"width:{max(5, int(m * 0.007))}px;height:{int(height * 0.34)}px;"
+            f'background:{color};z-index:11;pointer-events:none;"></div>'
+        )
+    if style == "large_brackets":
+        size = int(m * 0.09)
+        w = max(4, int(m * 0.006))
+        return (
+            f'<div style="position:absolute;left:56px;top:{int(height * 0.40)}px;'
+            f"width:{size}px;height:{size}px;border-left:{w}px solid {color};"
+            f'border-top:{w}px solid {color};z-index:11;pointer-events:none;"></div>'
+            f'<div style="position:absolute;right:90px;bottom:{int(height * 0.18)}px;'
+            f"width:{size}px;height:{size}px;border-right:{w}px solid {color};"
+            f'border-bottom:{w}px solid {color};z-index:11;pointer-events:none;"></div>'
+        )
+    if style == "small_brackets":
+        size = int(m * 0.035)
+        w = max(2, int(m * 0.0035))
+        return (
+            f'<div style="position:absolute;left:64px;top:{int(height * 0.44)}px;'
+            f"width:{size}px;height:{size}px;border-left:{w}px solid {color};"
+            f'border-top:{w}px solid {color};z-index:11;pointer-events:none;"></div>'
+            f'<div style="position:absolute;right:96px;bottom:{int(height * 0.22)}px;'
+            f"width:{size}px;height:{size}px;border-right:{w}px solid {color};"
+            f'border-bottom:{w}px solid {color};z-index:11;pointer-events:none;"></div>'
+        )
+    if style == "bracket_frame":
+        size = int(m * 0.05)
+        w = max(3, int(m * 0.0045))
+        inset = 56
+        corners = (
+            ("left", "top"),
+            ("right", "top"),
+            ("left", "bottom"),
+            ("right", "bottom"),
+        )
+        return "".join(
+            f'<div style="position:absolute;{x}:{inset}px;{y}:{inset}px;'
+            f"width:{size}px;height:{size}px;border-{x}:{w}px solid {color};"
+            f'border-{y}:{w}px solid {color};z-index:11;pointer-events:none;"></div>'
+            for x, y in corners
+        )
+    if style == "corner_tabs":
+        size = int(m * 0.045)
+        return (
+            f'<div style="position:absolute;left:56px;top:{int(height * 0.41)}px;'
+            f'width:{size}px;height:{size}px;background:{color};z-index:11;pointer-events:none;"></div>'
+            f'<div style="position:absolute;right:92px;bottom:{int(height * 0.19)}px;'
+            f'width:{size}px;height:{size}px;background:{color};z-index:11;pointer-events:none;"></div>'
+        )
+    if style == "offset_badge":
+        size = int(m * 0.085)
+        w = max(3, int(m * 0.005))
+        off = int(m * 0.022)
+        return (
+            f'<div style="position:absolute;right:{72 - off}px;bottom:{int(height * 0.20) - off}px;'
+            f"width:{size}px;height:{size}px;border-radius:50%;border:{w}px solid {color};"
+            f'opacity:0.5;z-index:11;pointer-events:none;"></div>'
+            f'<div style="position:absolute;right:72px;bottom:{int(height * 0.20)}px;'
+            f"width:{size}px;height:{size}px;border-radius:50%;border:{w}px solid {color};"
+            f'z-index:11;pointer-events:none;"></div>'
         )
     return ""
 
@@ -1251,11 +1452,6 @@ def html_escape(s: Any) -> str:
 # ---------------------------------------------------------------------------
 # Layout-specific filler functions
 # ---------------------------------------------------------------------------
-
-
-def _surname_for_display(surname: str, max_chars: int = 8) -> str:
-    s = (surname or "").upper()
-    return s[:max_chars] if len(s) > max_chars else s
 
 
 _COURSE_SUFFIX_RE = re.compile(r"\s*\((?:SC|LC)\)\s*$", re.IGNORECASE)
@@ -1825,6 +2021,14 @@ def _common_replacements(
         "MEET_NAME_SHORT": html_escape((layers.get("meet_name") or "")[:40]),
         "CLUB_FULL": html_escape(layers.get("club_full") or ""),
         "ATHLETE_IMG_BLOCK": _build_athlete_block(athlete_data_uri, full_name),
+        # One-copy photo carry: archetypes that repeat the SAME shot across
+        # several frames (contact_sheet) declare this custom property once and
+        # reference it per frame via ``content: var(--mh-athlete-img)`` — so an
+        # MB-scale cutout is inlined once, not once per frame. Empty (and the
+        # frames' <img> tags comment-wrapped via PHOTO_ONLY_*) when no photo.
+        "ATHLETE_IMG_VAR": (
+            f"--mh-athlete-img:url('{athlete_data_uri}');" if athlete_data_uri else ""
+        ),
         "TEXT_LED_FILL_BLOCK": text_led_fill_html,
         "HAS_PHOTO": "1" if has_photo else "0",
         # Conditional wrappers — templates use {{PHOTO_ONLY_OPEN}} / {{PHOTO_ONLY_CLOSE}}
@@ -2026,9 +2230,9 @@ def _fill_weekend_numbers(brief, width: int, height: int, repl: dict[str, str]) 
             label = k[5:].replace("_", " ").upper()
             stat_pairs.append((sval, label))
     if not stat_pairs:
-        # Sensible synthesised stats so the layout reads as a polished recap
-        # even when the caller didn't pass numbers. Inferred from any swim/
-        # meet metadata available on the brief.
+        # Derive stats from real swim/meet metadata on the brief only — we
+        # don't invent results, so no placeholder tiles ("24 HOURS",
+        # "★ HIGHLIGHT") pad the grid. The grid sizes to the actual count.
         meet = (layers.get("meet_name") or "").strip()
         result = (layers.get("result_value") or "").strip()
         event = (layers.get("event_name") or "").strip()
@@ -2040,12 +2244,9 @@ def _fill_weekend_numbers(brief, width: int, height: int, repl: dict[str, str]) 
             stat_pairs.append((place, "BEST FINISH"))
         if event:
             stat_pairs.append((_ellipsize(_clean_event_name(event), 14), "FEATURE EVENT"))
-        # Pad to 4 with placeholder counts that read as professional copy
-        defaults = [("1", "MEET"), ("✓", "COMPLETE"), ("24", "HOURS"), ("★", "HIGHLIGHT")]
-        i = 0
-        while len(stat_pairs) < 4 and i < len(defaults):
-            stat_pairs.append(defaults[i])
-            i += 1
+        if meet:
+            # Honest derived count: this recap covers exactly one meet.
+            stat_pairs.append(("1", "MEET"))
     num_base = int(min(width, height) * 0.13)
     # Two-column grid: fit each tile's value font so a long value (e.g. an
     # event name) doesn't overflow the tile. Numeric values like "58.34" stay
@@ -2677,7 +2878,14 @@ def _render_on_context(ctx, html: str, output_path: Path, size: tuple[int, int],
     # silently failed and text fell back to generic sans. Writing the HTML next
     # to the output and goto()-ing it puts the document on the file scheme,
     # which is allowed to load file fonts.
-    page_path = output_path.with_suffix(output_path.suffix + ".render.html")
+    # Unique per-render name: two workers cold-rendering the same output path
+    # (e.g. a queued pool task racing the one-shot fallback) must not share a
+    # temp file — one worker's finally-unlink could land before the other's
+    # goto(), failing that render with ERR_FILE_NOT_FOUND. Same directory, so
+    # the file:// origin (and font loading) is unchanged.
+    page_path = output_path.with_suffix(
+        output_path.suffix + f".{os.getpid()}-{uuid.uuid4().hex[:8]}.render.html"
+    )
     page_path.write_text(html, encoding="utf-8")
     page = ctx.new_page()
     try:
@@ -2958,8 +3166,14 @@ class _RenderPool:
                 return fut.result(timeout=0.5)
             except _FutureTimeout:
                 if self._broken.is_set():
+                    # Cancel the queued task before abandoning it: workers gate
+                    # on set_running_or_notify_cancel(), so a recovering worker
+                    # skips it instead of racing the one-shot fallback on the
+                    # same output path. (No-op if the task already started.)
+                    fut.cancel()
                     raise _PoolUnavailable("render pool lost its browser") from None
                 if time.monotonic() >= deadline:
+                    fut.cancel()
                     raise _PoolUnavailable(
                         f"render pool timed out after {_POOL_SUBMIT_TIMEOUT_S}s"
                     ) from None
@@ -3829,17 +4043,27 @@ def render_brief(
     except Exception:
         _photo_recipe = None
 
+    _recipe_applied = False  # did any photo actually get the recipe baked in?
+
     def _inline_photo(path) -> str:
         """Inline a real photo, applying the resolved adjustment recipe if any.
 
         Falls back to the plain (un-adjusted) inline on any error, so an
         optional adjustment can never break a render.
         """
+        nonlocal _recipe_applied
         if _photo_recipe is not None:
             try:
-                return _photo_adjust.adjust_to_data_uri(path, _photo_recipe)
-            except Exception:
-                pass
+                uri = _photo_adjust.adjust_to_data_uri(path, _photo_recipe)
+                _recipe_applied = True
+                return uri
+            except Exception as exc:
+                log.debug(
+                    "photo adjust recipe %r failed for %s; using un-adjusted photo: %s",
+                    getattr(_photo_recipe, "name", "") or "?",
+                    path,
+                    exc,
+                )
         return _img_to_data_uri(path)
 
     # Athlete cutout
@@ -4120,6 +4344,41 @@ def render_brief(
         encode_kwargs["quality"] = quality
     bytes_written = render_html_to_png(html, out_path, (width, height), **encode_kwargs)
 
+    # G1.16: stamp the exported card with its own credit chain — photographer,
+    # copyright, credit, caption — so attribution survives the re-share that
+    # strips a visible caption. The splice is lossless (ancillary PNG chunks /
+    # JPEG APP1 segments; pixels untouched) and lands AFTER the G1.24 cache
+    # store, so cache keys are unchanged and a cache hit and a cold render
+    # yield identical stamped files. metadata_from_brief is deterministic (no
+    # now()); a failure never sinks the render.
+    if pil_format in ("PNG", "JPEG"):
+        try:
+            from mediahub.graphic_renderer.metadata_embed import (
+                embed_metadata,
+                metadata_from_brief,
+            )
+
+            _photo_asset = None
+            for _asset_id in list(getattr(brief, "sourced_asset_ids", []) or []):
+                try:
+                    from mediahub.media_library.store import get_store as _ml_get_store
+
+                    _photo_asset = _ml_get_store().get(str(_asset_id))
+                except Exception:
+                    _photo_asset = None
+                if _photo_asset is not None:
+                    break
+            embed_metadata(
+                out_path,
+                metadata_from_brief(
+                    brief,
+                    club_name=str(getattr(brand_kit, "display_name", "") or ""),
+                    photo_asset=_photo_asset,
+                ),
+            )
+        except Exception as e:
+            log.warning("card metadata embed skipped: %s", e)
+
     # G1.13: optionally drop an editable, outlined-font SVG beside the PNG. Off
     # by default (the SVG needs a second Chromium pass), so default renders stay
     # byte-identical and fast; opt in with MEDIAHUB_SVG_SIDECAR=1. A failure here
@@ -4131,6 +4390,67 @@ def render_brief(
             export_svg_alongside(out_path, html, (width, height), title=family)
         except Exception as e:  # pragma: no cover - opt-in, environment-dependent
             log.warning("SVG sidecar export skipped: %s", e)
+
+    # G1.29: optionally export a seamlessly-looping animated still (APNG, with
+    # its .json manifest) beside the static output. Two opt-in triggers, both
+    # off by default so ordinary renders stay byte-identical: the operator env
+    # flag MEDIAHUB_ANIMATED_STILL=1 (mirrors the SVG sidecar), or the brief's
+    # own opt-in (animate_still / background_style="animated_loop" /
+    # animated_loop — the same gate the CSS preview hook honours). A failure
+    # never sinks the render; the still is the deliverable.
+    try:
+        from mediahub.graphic_renderer.sprint_hooks.animated_still import (
+            _wants_animation as _wants_animated_still,
+        )
+
+        if _flag("MEDIAHUB_ANIMATED_STILL", "0") or _wants_animated_still(brief):
+            from mediahub.graphic_renderer.animated_still import export_animated_still
+
+            export_animated_still(out_path, out_path.with_suffix(".apng"), brief=brief)
+    except Exception as e:
+        log.warning("animated-still export skipped: %s", e)
+
+    # G1.30: when inspection is enabled, persist the design-explainability
+    # sidecar on disk beside the output file (``<stem>.json``, mirroring the
+    # motion engine's ``<hash>.json`` manifest). The render hook only sees
+    # HTML, so this is the one place the output path AND the card's source
+    # photo are both known — passing the photo lets the sidecar record the
+    # deterministic saliency crop box. Strictly opt-in and best-effort: off
+    # (the default) nothing is written and a failure never sinks the render.
+    try:
+        from mediahub.graphic_renderer import inspect as _inspect
+
+        _inspect_ctx = _RenderHookCtx(
+            brief=brief,
+            width=width,
+            height=height,
+            family=family,
+            format_name=format_name,
+            is_v2=bool(_v2_archetype),
+        )
+        if _inspect.inspect_enabled(_inspect_ctx):
+            _inspect.write_sidecar(
+                out_path.with_suffix(".json"),
+                _inspect.design_explainability(
+                    html,
+                    _inspect_ctx,
+                    image_path=athlete_path or bg_photo_path or venue_path,
+                ),
+            )
+    except Exception as e:
+        log.warning("inspect sidecar skipped: %s", e)
+
+    # G1.25 explainability: when an adjustment recipe was actually baked into
+    # this card's pixels, say so on the visual — the recipe changed the
+    # deliverable, so the "why this design" trail must record it.
+    _safety_notes = list(brief.safety_notes or [])
+    if _recipe_applied and _photo_recipe is not None and not _photo_recipe.is_noop():
+        _safety_notes.append(
+            "photo adjusted ({}): {}".format(
+                _photo_recipe.name or _photo_recipe.signature(),
+                "; ".join(_photo_recipe.describe()),
+            )
+        )
 
     visual = GeneratedVisual(
         id=visual_id,
@@ -4145,7 +4465,7 @@ def render_brief(
         text_layers=dict(brief.text_layers or {}),
         palette=dict(brief.palette or {}),
         sourced_asset_ids=list(brief.sourced_asset_ids or []),
-        safety_notes=list(brief.safety_notes or []),
+        safety_notes=_safety_notes,
         why_this_design=brief.why_this_design or "",
         confidence_label=brief.confidence_label or "",
     )

@@ -185,6 +185,28 @@ def test_import_rejects_bad_extension(app_env):
         assert "err=" in r.headers["Location"]
 
 
+def test_import_rejects_row_flood_with_honest_error(app_env):
+    """Rows persist one-by-one, so an uncapped 10^5-row CSV would turn the
+    import into a multi-minute synchronous request. Past the cap (20k, far
+    beyond any club spreadsheet) the import is refused with an honest message
+    and nothing is partially imported."""
+    app, wm, _ = app_env
+    with app.test_client() as c:
+        _login(c)
+        csv = b"a,b\n" + b"1,2\n" * 20_001
+        r = c.post(
+            "/api/data-hub/import",
+            data={"file": (io.BytesIO(csv), "flood.csv")},
+            content_type="multipart/form-data",
+        )
+        assert r.status_code == 302
+        loc = r.headers["Location"]
+        assert "err=" in loc and "limit" in loc
+        from mediahub.data_hub import store as dh_store
+
+        assert dh_store.list_org_tables("club-a") == []
+
+
 def test_export_csv_and_xlsx(app_env):
     app, wm, _ = app_env
     with app.test_client() as c:
@@ -275,6 +297,49 @@ def test_derive_via_json(app_env):
         )
         assert r.status_code == 200
         assert r.get_json()["ok"] is True
+
+
+def test_derive_key_collision_with_source_column_is_rejected(app_env):
+    """A derived output slug that collides with an existing source column must
+    400 (never silently overwrite data); recomputing a derived column in place
+    still works."""
+    app, wm, _ = app_env
+    with app.test_client() as c:
+        _login(c)
+        tid = (
+            c.post(
+                "/api/data-hub/import",
+                data={"file": (io.BytesIO(b"Name,PB Time\nMaya,59.10\n"), "r.csv")},
+                content_type="multipart/form-data",
+            )
+            .headers["Location"]
+            .rsplit("/", 1)[-1]
+        )
+        # "PB Time" slugs to pb_time — the imported source column's key
+        r = c.post(
+            f"/api/data-hub/table/{tid}/derive",
+            json={
+                "output_title": "PB Time",
+                "derivation_id": "initials",
+                "params": {"name": "name"},
+            },
+        )
+        assert r.status_code == 400
+        assert "already exists" in r.get_json()["error"]
+        # source data intact
+        page = c.get(f"/data-hub/table/{tid}")
+        assert b"59.10" in page.data
+        # a derived column can still be recomputed in place (same title twice)
+        for _ in range(2):
+            ok = c.post(
+                f"/api/data-hub/table/{tid}/derive",
+                json={
+                    "output_title": "Initials",
+                    "derivation_id": "initials",
+                    "params": {"name": "name"},
+                },
+            )
+            assert ok.status_code == 200 and ok.get_json()["ok"] is True
 
 
 # --------------------------------------------------------------------------- #

@@ -38,7 +38,9 @@ _CSS = _ROOT / "src" / "mediahub" / "web" / "static" / "theme" / "theme-componen
 import os  # noqa: E402
 
 _SKIP_BROWSER = os.environ.get("MEDIAHUB_SKIP_BROWSER_TESTS", "").lower() in ("1", "true", "yes")
-_PINNED_CHROMIUM = Path("/opt/pw-browsers/chromium-1194/chrome-linux/chrome")
+from tests._pw_chromium import resolve_prebaked_chromium
+
+_PINNED_CHROMIUM = resolve_prebaked_chromium()
 
 
 def _playwright_available() -> bool:
@@ -64,6 +66,36 @@ def _launch_browser():
         args=["--no-sandbox", "--disable-dev-shm-usage"],
     )
     return pw, browser
+
+
+def _serve_dock(page, body):
+    """Serve ``body`` from a routable http origin and stub the card-workflow POST.
+
+    sub_18-1 makes the optimistic status flip *revert* when its POST fails. A
+    ``set_content`` page has an ``about:blank`` origin, so the card's relative
+    ``fetch`` resolves to an unfetchable ``about:blank/…`` URL and always
+    rejects — which now rolls the approve straight back to ``queue``. Serving the
+    page over a fake http origin (via ``page.route`` + ``goto``) gives those
+    relative POSTs a routable URL we can fulfil with a 200 ``{"status":
+    "approved"}``, simulating the save landing — the dock's real happy path."""
+
+    def _handler(route):
+        req = route.request
+        if req.resource_type == "document":
+            route.fulfill(status=200, content_type="text/html", body=body)
+        elif req.method == "POST":
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps({"status": "approved"}),
+            )
+        else:
+            # Inlined CSS means no real subresources; anything else (a self-hosted
+            # font probe) can harmlessly fail.
+            route.abort()
+
+    page.route("**/*", _handler)
+    page.goto("http://dock.test/review")
 
 
 # ---------------------------------------------------------------------------
@@ -408,7 +440,7 @@ class TestDockCss:
 
 @pytest.mark.skipif(_SKIP_BROWSER, reason="MEDIAHUB_SKIP_BROWSER_TESTS set")
 @pytest.mark.skipif(not _playwright_available(), reason="playwright not installed")
-@pytest.mark.skipif(not _chromium_available(), reason="chromium-1194 not at pinned path")
+@pytest.mark.skipif(not _chromium_available(), reason="prebaked chromium not found")
 class TestDockBrowserBehaviour:
     def _review_body(self, env, n=4):
         achs = [
@@ -481,7 +513,7 @@ class TestDockBrowserBehaviour:
         pw, browser = _launch_browser()
         try:
             page = browser.new_page(viewport={"width": 390, "height": 844})
-            page.set_content(body)
+            _serve_dock(page, body)
             page.wait_for_timeout(200)
             before = page.evaluate(self._PROBE, None)
             # Drive the real click handler (the per-card workflow button it
@@ -507,7 +539,7 @@ class TestDockBrowserBehaviour:
         pw, browser = _launch_browser()
         try:
             page = browser.new_page(viewport={"width": 390, "height": 844})
-            page.set_content(body)
+            _serve_dock(page, body)
             page.wait_for_timeout(200)
             for _ in range(3):  # approve all three
                 page.evaluate("document.querySelector('[data-mh-dock-approve]').click()")

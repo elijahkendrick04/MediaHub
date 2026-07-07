@@ -79,8 +79,10 @@ class ProfileIdError(ValueError):
 
 def _data_dir() -> Path:
     """Resolve DATA_DIR at call time so tests can monkeypatch the env."""
-    src_root = Path(__file__).resolve().parents[2]
-    return Path(os.environ.get("DATA_DIR", str(src_root)))
+    # parents[1] == src/mediahub/ — the same dev fallback as web.py's _SRC_ROOT,
+    # so theme JSONs land beside data.db/runs instead of a stray src/themes/.
+    pkg_root = Path(__file__).resolve().parents[1]
+    return Path(os.environ.get("DATA_DIR", str(pkg_root)))
 
 
 def themes_dir() -> Path:

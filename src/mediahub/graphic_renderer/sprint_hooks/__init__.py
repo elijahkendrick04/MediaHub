@@ -23,9 +23,12 @@ no-op and renders are byte-identical to before the seam landed.
 from __future__ import annotations
 
 import importlib
+import logging
 import pkgutil
 from dataclasses import dataclass
 from typing import Any, Callable
+
+log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -46,7 +49,11 @@ def _discover() -> list[tuple[int, str, Callable[[str, RenderHookCtx], str]]]:
     for info in pkgutil.iter_modules(__path__):
         if info.name.startswith("_"):
             continue
-        mod = importlib.import_module(f"{__name__}.{info.name}")
+        try:
+            mod = importlib.import_module(f"{__name__}.{info.name}")
+        except Exception as exc:  # noqa: BLE001 — isolation: a bad hook module is skipped, not fatal
+            log.warning("render hook module %s failed to import, skipped: %s", info.name, exc)
+            continue
         fn = getattr(mod, "apply", None)
         if callable(fn):
             order = int(getattr(mod, "ORDER", 50))

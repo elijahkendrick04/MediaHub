@@ -18,8 +18,9 @@ The new contract:
     theme store fills in (so a brand kit derived only from a logo
     still produces output).
   * ``themeSource`` reports which source actually contributed the
-    primary colour — "brand-kit" when the BrandKit's flat fields
-    were present, "theme-store" otherwise.
+    roles used — "brand-kit" when the BrandKit's flat fields supplied
+    every sourced role, "theme-store" when the store supplied them
+    all, and "mixed" when a partial kit was filled from the store.
 """
 from __future__ import annotations
 
@@ -90,14 +91,26 @@ class TestThemeStoreSource:
     def test_brand_kit_dataclass_input(self, isolated_data_dir):
         """A BrandKit dataclass carries flat colour fields, so when
         passed in directly its colours win even if a theme was
-        seeded on disk."""
+        seeded on disk. Its accent field defaults to None, so the
+        seeded theme contributes the accent — an honest "mixed"."""
         from mediahub.brand.kit import BrandKit
         kit = BrandKit(profile_id="dc-test", display_name="DC",
                        primary_colour="#06D6A0")
         kit.ensure_derived_palette()
         result = _brand_to_dict(kit)
-        assert result["themeSource"] == "brand-kit"
+        assert result["themeSource"] == "mixed"
         assert result["primary"].upper() == "#06D6A0"
+
+    def test_partial_kit_filled_from_store_is_mixed(self, isolated_data_dir):
+        """An accent-only kit gets primary/secondary from the theme
+        store; themeSource must say so instead of claiming brand-kit."""
+        _seed_theme("mixed-test", "#A30D2D")
+        result = _brand_to_dict({
+            "profile_id": "mixed-test",
+            "accent_colour": "#FFD86E",
+        })
+        assert result["themeSource"] == "mixed"
+        assert result["accent"].upper() == "#FFD86E"
 
 
 class TestSecondaryAccent:

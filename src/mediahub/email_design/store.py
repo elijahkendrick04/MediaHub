@@ -92,22 +92,27 @@ def _save_tokens(tokens: dict) -> None:
 
 
 def save_newsletter(profile_id: str, spec: NewsletterSpec) -> NewsletterSpec:
-    """Persist a newsletter's editable draft (atomic). Preserves publish state."""
+    """Persist a newsletter's editable draft (atomic). Preserves publish state.
+
+    The read-modify-write runs under ``_LOCK`` like publish/unpublish/delete —
+    otherwise a save racing a publish can clobber the record's publish fields
+    while ``_tokens.json`` keeps the token, stranding a 404ing public URL."""
     p = _path(profile_id, spec.newsletter_id)
-    existing = _read(p) or {}
-    payload = {
-        "updated_at": time.time(),
-        "title": spec.title,
-        "newsletter_format": spec.newsletter_format,
-        "spec": spec.to_dict(),
-        # carry forward publish state untouched
-        "published": bool(existing.get("published")),
-        "public_token": existing.get("public_token", ""),
-        "published_at": existing.get("published_at", 0.0),
-        "published_spec": existing.get("published_spec"),
-        "created_at": existing.get("created_at", time.time()),
-    }
-    _atomic_write(p, payload)
+    with _LOCK:
+        existing = _read(p) or {}
+        payload = {
+            "updated_at": time.time(),
+            "title": spec.title,
+            "newsletter_format": spec.newsletter_format,
+            "spec": spec.to_dict(),
+            # carry forward publish state untouched
+            "published": bool(existing.get("published")),
+            "public_token": existing.get("public_token", ""),
+            "published_at": existing.get("published_at", 0.0),
+            "published_spec": existing.get("published_spec"),
+            "created_at": existing.get("created_at", time.time()),
+        }
+        _atomic_write(p, payload)
     return spec
 
 

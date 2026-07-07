@@ -8,12 +8,12 @@
     "preview": "remotion studio src/index.ts"
   },
   "dependencies": {
-    "@remotion/bundler": "^4.0.0",
-    "@remotion/cli": "^4.0.0",
-    "@remotion/renderer": "^4.0.0",
-    "react": "^19.2.7",
-    "react-dom": "^19.2.7",
-    "remotion": "^4.0.0"
+    "@remotion/bundler": "4.0.485",
+    "@remotion/cli": "4.0.485",
+    "@remotion/renderer": "4.0.485",
+    "react": "19.2.7",
+    "react-dom": "19.2.7",
+    "remotion": "4.0.485"
   },
   "devDependencies": {
     "@types/react": "^19.2.17",

@@ -63,6 +63,11 @@ _ALLOWED_PLACEHOLDERS = {
     "HERO_STAT",
     "LOGO_BLOCK",
     "ATHLETE_IMG_BLOCK",
+    # One-copy photo carry (contact_sheet): the cutout inlined once as a CSS
+    # custom property, frames comment-wrapped when the card has no photo.
+    "ATHLETE_IMG_VAR",
+    "PHOTO_ONLY_OPEN",
+    "PHOTO_ONLY_CLOSE",
     "ACCENT_DECORATION",
     "SPONSOR_BLOCK",
     "WIDTH",

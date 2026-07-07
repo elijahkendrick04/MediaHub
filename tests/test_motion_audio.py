@@ -274,10 +274,11 @@ def test_story_audio_plan_is_none_by_default(monkeypatch):
 def test_reel_audio_plan_budgets_to_the_reel_duration(monkeypatch):
     _voice_on(monkeypatch)
     cards = [motion._card_to_props(_card(i), variation_seed=0) for i in (1, 2, 3)]
-    plan = motion._reel_audio_plan(
+    plan, dub_error = motion._reel_audio_plan(
         cards, {"displayName": "Audio Wire SC"}, "Audio Invitational", duration_sec=15.0
     )
     assert plan is not None
+    assert dub_error == ""  # no dub requested → no drop reason
     from mediahub.visual.narration import estimate_seconds
 
     assert "Audio Invitational" in plan["script"]

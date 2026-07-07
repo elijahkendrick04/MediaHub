@@ -46,7 +46,19 @@ def test_same_club_matches(target: str, candidate: str) -> None:
         ("City of Cardiff", "City of Bristol"),
         ("City of Cardiff", "Co Manch Aq"),
         ("City of Cardiff", "Millfield"),
+        # All-generic candidates ("Co" → {city}, "Co Aq" → {city, aquatics},
+        # "University SC" → {university, club}) are subsets of nearly every
+        # club name — the subset branch must not let them match anything.
+        ("City of Cardiff Aquatics", "Co Aq"),
+        ("City of Cardiff Aquatics", "Co"),
+        ("Loughborough University SC", "University SC"),
     ],
 )
 def test_different_club_does_not_match(target: str, candidate: str) -> None:
     assert _m(target, candidate) is False
+
+
+def test_subset_with_identity_token_still_matches() -> None:
+    # A genuine abbreviation whose tokens include a real place name keeps
+    # matching via the subset branch.
+    assert _m("City of Manchester Aquatics", "Manch Aq") is True

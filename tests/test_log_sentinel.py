@@ -540,3 +540,47 @@ def test_notification_delivery_via_webhook(tmp_path, monkeypatch):
     d = str(tmp_path)
     notify_entries = [e for e in st.read_audit_tail(20, d) if e["kind"] == "notify"]
     assert notify_entries[0]["sent"] is True
+
+# --- /healthz/sentinel route: audit tail is operator-only -----------------------
+
+
+def _sentinel_app(tmp_path, monkeypatch):
+    """A fresh app whose DATA_DIR carries a seeded sentinel audit tail."""
+    import importlib
+    import mediahub.web.web as wm
+
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    d = str(tmp_path)
+    st.append_audit(
+        {"kind": "finding", "issue_id": "worker_timeout",
+         "evidence": ["[CRITICAL] WORKER TIMEOUT (pid:90) 1.2.3.4 /make"]},
+        d,
+    )
+    st.write_status({"configured": True, "last_poll_ok": True, "findings": []}, d)
+    importlib.reload(wm)
+    app = wm.create_app()
+    app.config["TESTING"] = True
+    return app
+
+
+def test_healthz_sentinel_hides_audit_tail_from_anonymous(tmp_path, monkeypatch):
+    app = _sentinel_app(tmp_path, monkeypatch)
+    c = app.test_client()
+    body = c.get("/healthz/sentinel").get_json()
+    assert body["ok"] is True
+    # Booleans/status stay public…
+    assert body["status"]["configured"] is True
+    # …but the raw log excerpts (evidence) never reach an anonymous caller.
+    assert "audit_tail" not in body
+    assert "WORKER TIMEOUT" not in json.dumps(body)
+
+
+def test_healthz_sentinel_shows_audit_tail_to_operator(tmp_path, monkeypatch):
+    app = _sentinel_app(tmp_path, monkeypatch)
+    c = app.test_client()
+    with c.session_transaction() as s:
+        s["dev_operator"] = True
+    body = c.get("/healthz/sentinel").get_json()
+    assert body["ok"] is True
+    assert "audit_tail" in body
+    assert "WORKER TIMEOUT" in json.dumps(body["audit_tail"])

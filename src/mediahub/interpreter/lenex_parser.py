@@ -86,6 +86,28 @@ _NON_FINISH_STATUS = frozenset({"DSQ", "DNS", "DNF", "WDR", "SICK"})
 _LENEX_TAG_RE = re.compile(rb"<\s*lenex[\s>/]", re.IGNORECASE)
 _SWIMTIME_RE = re.compile(r"^(\d{1,2}):(\d{2}):(\d{2})\.(\d{2})$")
 
+# XML entity-expansion guard: stdlib ElementTree expands internal DTD entities,
+# so a sub-kilobyte upload with nested <!ENTITY …> definitions (billion-laughs
+# class) could exhaust the worker's memory/CPU — the byte-size cap does not
+# stop expansion. LENEX never needs a DTD, so ANY DOCTYPE declaration is
+# rejected outright with an honest needs_review flag before parsing.
+_DOCTYPE_RE = re.compile(rb"<!DOCTYPE", re.IGNORECASE)
+_DOCTYPE_TEXT_RE = re.compile(r"<!DOCTYPE", re.IGNORECASE)
+
+
+def _has_doctype(data: bytes) -> bool:
+    """True if *data* carries a DOCTYPE declaration (encoding-tolerant).
+
+    Checks the raw bytes (covers UTF-8 / Latin-1 / ASCII) and both UTF-16
+    byte orders, so the guard cannot be dodged by re-encoding the payload.
+    """
+    if _DOCTYPE_RE.search(data):
+        return True
+    for enc in ("utf-16-le", "utf-16-be"):
+        if _DOCTYPE_TEXT_RE.search(data.decode(enc, errors="ignore")):
+            return True
+    return False
+
 
 # ---------------------------------------------------------------------------
 # Detection
@@ -388,6 +410,17 @@ def _load_meet_element(
             {
                 "reason": "lenex-too-large",
                 "detail": f"{len(data)} bytes exceeds the {_MAX_LENEX_BYTES}-byte limit",
+            }
+        ]
+    if _has_doctype(data):
+        # Reject before ET.fromstring — never parse a DTD-bearing document.
+        return None, [
+            {
+                "reason": "lenex-xml-unsafe",
+                "detail": (
+                    "document carries a DOCTYPE/DTD declaration, which LENEX never "
+                    "uses; rejected to prevent XML entity expansion"
+                ),
             }
         ]
     try:

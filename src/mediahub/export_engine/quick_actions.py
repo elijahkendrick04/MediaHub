@@ -151,7 +151,9 @@ def gif_to_video(src: Path, out: Path, *, fmt: str = "mp4", quality: int = 80) -
 
 
 # A catalogue of the toolbox actions, grouped for the UI. Each entry names the
-# action key the web layer dispatches on and a short human label.
+# action key the web layer dispatches on and a short human label. Only actions
+# the single-asset quick-action route can actually serve belong here — "merge"
+# (video_merge above) stays out until a multi-asset selection surface exists.
 ACTIONS: dict[str, list[tuple[str, str]]] = {
     "image": [
         ("convert", "Convert format"),
@@ -166,7 +168,6 @@ ACTIONS: dict[str, list[tuple[str, str]]] = {
         ("speed", "Change speed"),
         ("mute", "Mute"),
         ("reverse", "Reverse"),
-        ("merge", "Merge clips"),
         ("to_gif", "Video → GIF"),
     ],
     "gif": [

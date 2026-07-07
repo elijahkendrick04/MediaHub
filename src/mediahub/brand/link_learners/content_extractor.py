@@ -83,53 +83,6 @@ _URL_RE = re.compile(r"https?://\S+")
 _MD_HEADING_RE = re.compile(r"^\s*#{1,6}\s+", re.MULTILINE)
 _WHITESPACE_RE = re.compile(r"\s+")
 _BLOB_RE = re.compile(r"blob:[a-z]+://\S+", re.IGNORECASE)
-_HEX_INLINE_RE = re.compile(r"#[0-9a-fA-F]{6}\b")
-
-
-def _scan_hex_candidates(raw_text: str, limit: int = 16) -> list[str]:
-    """Pull every distinct #rrggbb colour mentioned in the raw text.
-
-    PURE EVIDENCE-GATHERER, NOT A COLOUR DECISION. This no longer feeds
-    the brand-palette resolver — that path now uses frequency-weighted
-    colour-USAGE evidence (``dna_capture.build_colour_usage_map``) and
-    lets the cloud LLM choose. This first-appearance scanner survives
-    only as a draft-onboarding helper (``brand/bootstrap_extract``),
-    where every value is human-confirmed and never auto-applied.
-
-    Drops pure white, pure black, and near-grey (saturation ≈ 0) as data
-    hygiene — they are UI chrome, not brand identity.
-    """
-    if not raw_text:
-        return []
-    seen: set[str] = set()
-    out: list[str] = []
-    for m in _HEX_INLINE_RE.findall(raw_text):
-        v = m.lower()
-        if v in seen:
-            continue
-        seen.add(v)
-        try:
-            r = int(v[1:3], 16)
-            g = int(v[3:5], 16)
-            b = int(v[5:7], 16)
-        except ValueError:
-            continue
-        # Skip pure white / pure black — both are universal UI tokens,
-        # not brand identifiers. Skip near-grey too (all three channels
-        # within 8 of each other AND no channel >= 240 / <= 15) because
-        # the page chrome dumps hundreds of grey CSS vars that crowd out
-        # the actual brand picks.
-        if v in ("#ffffff", "#000000"):
-            continue
-        if max(r, g, b) - min(r, g, b) < 8:
-            # Allow if extreme (very near black/white can still be
-            # decorative, but mid-greys are noise).
-            if max(r, g, b) < 240 and min(r, g, b) > 15:
-                continue
-        out.append(v)
-        if len(out) >= limit:
-            break
-    return out
 
 
 def _clean_excerpt(raw_text: str, *, cap: int = 280) -> str:

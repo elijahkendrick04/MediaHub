@@ -99,6 +99,9 @@ class PackFormat:
     height: int
     bytes: int
     sha256: str
+    # Optional vector sidecar (<format>.svg written by the opt-in
+    # MEDIAHUB_SVG_SIDECAR export) — bundled beside the PNG when present.
+    svg_path: Optional[Path] = None
 
 
 @dataclass
@@ -222,6 +225,7 @@ def collect_pack_cards(visuals_dir: str | Path) -> list[PackCard]:
             if not data:
                 continue
             w, h = _png_dimensions(data)
+            svg = png.with_suffix(".svg")
             formats.append(
                 PackFormat(
                     format_name=png.stem,
@@ -230,6 +234,7 @@ def collect_pack_cards(visuals_dir: str | Path) -> list[PackCard]:
                     height=h,
                     bytes=len(data),
                     sha256=hashlib.sha256(data).hexdigest(),
+                    svg_path=svg if svg.is_file() else None,
                 )
             )
         if not formats:
@@ -321,17 +326,18 @@ def build_manifest(
             image_count += 1
             total_bytes += f.bytes
             present_union.add(f.format_name)
-            fmt_entries.append(
-                {
-                    "format": f.format_name,
-                    "label": FORMAT_LABELS.get(f.format_name, f.format_name),
-                    "file": f"{folder}/{f.format_name}.png",
-                    "width": f.width,
-                    "height": f.height,
-                    "bytes": f.bytes,
-                    "sha256": f.sha256,
-                }
-            )
+            entry = {
+                "format": f.format_name,
+                "label": FORMAT_LABELS.get(f.format_name, f.format_name),
+                "file": f"{folder}/{f.format_name}.png",
+                "width": f.width,
+                "height": f.height,
+                "bytes": f.bytes,
+                "sha256": f.sha256,
+            }
+            if f.svg_path is not None:
+                entry["svg_file"] = f"{folder}/{f.format_name}.svg"
+            fmt_entries.append(entry)
         card_entries.append(
             {
                 "index": idx,
@@ -391,9 +397,10 @@ def _readme_text(manifest: dict) -> str:
         f"Images: {summary.get('image_count', 0)}\n\n"
         "What's inside\n"
         "-------------\n"
-        "Every approved card, rendered at every available size, in its own\n"
-        "folder under cards/. Grab the size that fits the channel you're\n"
-        "posting to:\n\n"
+        "Every approved and pending card (rejected cards are excluded),\n"
+        "rendered at every available size, in its own folder under cards/.\n"
+        "Each card's approval status is in metadata.json. Grab the size that\n"
+        "fits the channel you're posting to:\n\n"
         f"{fmt_lines}\n\n"
         "Where a card has a caption.txt, that's the ready-to-post caption.\n\n"
         "metadata.json\n"
@@ -450,6 +457,14 @@ def build_pack_export(
         dict, and ``card_count`` / ``image_count``.
     """
     cards = _order_cards(collect_pack_cards(visuals_dir), order)
+    # A human rejected these cards — they must not ship in the download.
+    # Approved and pending cards stay in, with their status in metadata.json.
+    if statuses:
+        cards = [
+            c
+            for c in cards
+            if str(statuses.get(c.content_item_id, "") or "").strip().lower() != "rejected"
+        ]
     manifest = build_manifest(
         run_id,
         cards,
@@ -477,6 +492,11 @@ def build_pack_export(
                     image_count += 1
                 except OSError:
                     continue
+                if f.svg_path is not None:
+                    try:
+                        z.writestr(f"{folder}/{f.format_name}.svg", f.svg_path.read_bytes())
+                    except OSError:
+                        pass
             cap = str(captions.get(card.content_item_id, "") or "").strip()
             alt = str((alt_texts or {}).get(card.content_item_id, "") or "").strip()
             if cap or alt:

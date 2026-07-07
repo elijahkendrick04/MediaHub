@@ -210,9 +210,12 @@ class LocalImagineProvider(ImagineProvider):
             )
         images = _images_from_response(r)
         if not images:
+            # Endpoint URL goes to the server log only — ImagineError text can
+            # reach customers via the studio UI and must not disclose infra.
+            log.warning("local imagine (%s) returned no image; endpoint: %s", op, endpoint)
             raise ImagineError(
                 f"The local image backend ({op}) returned no image. Check the "
-                f"server logs at {endpoint}."
+                f"diffusion server's logs."
             )
         return images
 

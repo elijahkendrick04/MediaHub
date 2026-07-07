@@ -116,6 +116,17 @@ def test_restore_blocks_path_traversal(data_world, tmp_path):
     assert not (tmp_path / "outside.txt").exists()
 
 
+def test_restore_blocks_sibling_dir_sharing_the_prefix(data_world, tmp_path):
+    # "../victim-evil/x" resolves to a sibling of the target whose path merely
+    # starts with the target's — a bare startswith guard let it through.
+    evil = tmp_path / "evil.zip"
+    with zipfile.ZipFile(evil, "w") as zf:
+        zf.writestr("../victim-evil/x.txt", "escape")
+    with pytest.raises(RuntimeError):
+        bk.restore_backup(evil, tmp_path / "victim")
+    assert not (tmp_path / "victim-evil").exists()
+
+
 def test_prune_keeps_newest(data_world, monkeypatch):
     monkeypatch.setenv("MEDIAHUB_BACKUP_KEEP", "2")
     out = bk.backup_dir()

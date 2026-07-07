@@ -423,6 +423,43 @@ class TestReviewRenderIntegration:
         assert "How to read these cards" in body
         assert '<div class="mh-nearmiss-hint"' not in body
 
+    def test_not_generated_table_shows_truncation_notice_over_40(self, client):
+        # A big meet can have far more than 40 no-achievement swims. The table
+        # leads with the 40 closest, but the copy promises nothing was silently
+        # dropped — so an honest "showing the 40 leading close calls of N" notice
+        # must render when the list is truncated.
+        traces = [
+            {
+                "swimmer_name": f"Swimmer {i}",
+                "event": "50 Free",
+                "time_str": "30.00",
+                "achievement_count": 0,
+                "near_miss_category": "lower_priority",
+                "summary": "outranked by stronger swims",
+            }
+            for i in range(55)
+        ]
+        _write_run("r7", _run_payload("r7", ranked=[], traces=traces))
+        body = _review_body(client, "r7")
+        assert "Showing the 40 leading close calls of 55" in body
+        assert "every swim is in the run trace JSON" in body
+
+    def test_not_generated_table_no_notice_at_or_below_40(self, client):
+        traces = [
+            {
+                "swimmer_name": f"Swimmer {i}",
+                "event": "50 Free",
+                "time_str": "30.00",
+                "achievement_count": 0,
+                "near_miss_category": "lower_priority",
+                "summary": "outranked",
+            }
+            for i in range(40)
+        ]
+        _write_run("r8", _run_payload("r8", ranked=[], traces=traces))
+        body = _review_body(client, "r8")
+        assert "leading close calls of" not in body
+
     def test_only_outranked_traces_hint_and_panel(self, client):
         # Traces present but no close calls: the hint says so honestly and the
         # "Not generated" panel does NOT auto-open (close calls are the signal).

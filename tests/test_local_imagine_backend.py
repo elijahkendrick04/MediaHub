@@ -391,6 +391,18 @@ def test_empty_images_is_honest_error(monkeypatch, post):
         im.generate("x")
 
 
+def test_no_image_error_does_not_leak_endpoint(monkeypatch, post):
+    """The ImagineError text can reach customers via the studio UI, so the
+    internal endpoint URL must never appear in it (server log only)."""
+    _set_endpoint(monkeypatch, url="http://imagine-internal:8800")
+    post["resp"] = _Resp(jbody={"images": []})
+    im = _im()
+    with pytest.raises(im.ImagineError) as ei:
+        im.generate("x")
+    assert "imagine-internal" not in str(ei.value)
+    assert "8800" not in str(ei.value)
+
+
 def test_network_exception_is_honest_error(monkeypatch):
     _set_endpoint(monkeypatch)
     import requests

@@ -147,7 +147,8 @@ def test_comparison_table_marks_recommended_column(monkeypatch, tmp_path):
 
 
 def test_billing_toggle_present_and_accessible(monkeypatch, tmp_path):
-    html = _get(_make_app(monkeypatch, tmp_path, with_stripe=False))
+    # The toggle only exists once a committed list price is live (PC.4).
+    html = _render(monkeypatch, tmp_path, seed_prices=(58800, 58800, 82800, 118800, 70800, 99000))
     assert 'aria-label="Billing period"' in html
     assert ">Annually<" in html and ">Monthly<" in html
     # Annual is the default-selected, real billing model.
@@ -157,12 +158,17 @@ def test_billing_toggle_present_and_accessible(monkeypatch, tmp_path):
     assert "mh-segmented" in html
 
 
-def test_toggle_present_even_when_price_is_tbc(monkeypatch, tmp_path):
-    """The control ships regardless; before the gate it just has no figure to
-    reformat, and must not leak a '/year' or '/mo' suffix."""
+def test_toggle_absent_when_price_is_tbc(monkeypatch, tmp_path):
+    """Before the PC.4 gate no tier emits annual/monthly panes (every paid
+    tier reads 'Pricing TBC'), so the segmented control must not render —
+    a toggle that visibly does nothing is worse than none. No '/year' or
+    '/mo' suffix may leak either."""
     html = _get(_make_app(monkeypatch, tmp_path, with_stripe=True))  # no quotes
-    assert 'aria-label="Billing period"' in html
     assert "Pricing TBC" in html
+    assert 'aria-label="Billing period"' not in html
+    assert ">Annually<" not in html and ">Monthly<" not in html
+    # The container keeps its harmless data-period attribute.
+    assert 'data-period="annual"' in html
     assert "/year" not in html
     assert "/mo" not in html
 
@@ -198,7 +204,8 @@ def test_monthly_two_decimal_path(monkeypatch, tmp_path):
 
 
 def test_toggle_js_is_inline_vanilla(monkeypatch, tmp_path):
-    html = _get(_make_app(monkeypatch, tmp_path, with_stripe=False))
+    # JS ships with the toggle, i.e. only once the price gate is met.
+    html = _render(monkeypatch, tmp_path, seed_prices=(58800, 58800, 82800, 118800, 70800, 99000))
     # Progressive enhancement: a tiny inline script wires the root data-period.
     assert "getElementById('mh-pricing')" in html
     assert "data-period" in html

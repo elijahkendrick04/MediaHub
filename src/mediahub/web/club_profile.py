@@ -427,11 +427,54 @@ def _profiles_dir() -> Path:
     return d
 
 
+# Third-party tokens for the withdrawn Buffer/scheduler integration.
+# ``from_dict`` already ignores these keys and ``to_dict`` never writes
+# them, but profiles saved before the withdrawal still carry the secrets
+# at rest until re-saved — so loads proactively scrub them from disk.
+_WITHDRAWN_TOKEN_KEYS = ("scheduler_access_token", "buffer_access_token")
+
+
+def _scrub_withdrawn_tokens(path: Path, data: dict) -> dict:
+    """Strip withdrawn third-party tokens from a persisted JSON dict.
+
+    Rewrites ``path`` atomically (temp file + ``os.replace``) without the
+    token keys. Best-effort: on a read-only filesystem the rewrite is
+    skipped and the cleaned in-memory dict is still returned, so profile
+    loads never break.
+    """
+    if not any(k in data for k in _WITHDRAWN_TOKEN_KEYS):
+        return data
+    cleaned = {k: v for k, v in data.items() if k not in _WITHDRAWN_TOKEN_KEYS}
+    try:
+        tmp = path.with_name(path.name + ".tmp")
+        tmp.write_text(json.dumps(cleaned, indent=2))
+        os.replace(tmp, path)
+    except Exception:
+        pass
+    return cleaned
+
+
+def _scrub_legacy_secrets_file() -> None:
+    """Strip withdrawn tokens from the legacy ``secrets.json``, if present."""
+    try:
+        from mediahub.web.secrets_store import _SECRETS_PATH
+
+        if not _SECRETS_PATH.exists():
+            return
+        data = json.loads(_SECRETS_PATH.read_text())
+        if isinstance(data, dict):
+            _scrub_withdrawn_tokens(_SECRETS_PATH, data)
+    except Exception:
+        pass
+
+
 def list_profiles() -> list[ClubProfile]:
+    _scrub_legacy_secrets_file()
     out = []
     for f in sorted(_profiles_dir().glob("*.json")):
         try:
-            out.append(ClubProfile.from_dict(json.loads(f.read_text())))
+            data = _scrub_withdrawn_tokens(f, json.loads(f.read_text()))
+            out.append(ClubProfile.from_dict(data))
         except Exception:
             continue
     return out
@@ -441,8 +484,9 @@ def load_profile(profile_id: str) -> Optional[ClubProfile]:
     p = _profiles_dir() / f"{profile_id}.json"
     if not p.exists():
         return None
+    _scrub_legacy_secrets_file()
     try:
-        return ClubProfile.from_dict(json.loads(p.read_text()))
+        return ClubProfile.from_dict(_scrub_withdrawn_tokens(p, json.loads(p.read_text())))
     except Exception:
         return None
 

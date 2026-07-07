@@ -321,6 +321,23 @@ def test_footer_links_to_api_docs(client):
     assert 'href="/developer/api"' in body
 
 
+def test_api_docs_quickstart_shows_session_cookie_and_handles_unknown(client):
+    """The legacy /api routes need the session cookie; the quickstart samples
+    must say so, and their poll loops must treat 'unknown' (a 404 run) as
+    terminal so a copy-pasted script can't spin forever."""
+    raw = client.get("/developer/api").get_data(as_text=True).split("</head>", 1)[-1]
+    # Strip the highlighter's token spans so we can assert on the real sample text.
+    body = _plain(raw)
+    # The quickstart mentions the session cookie the legacy routes need.
+    assert "session cookie" in body.lower()
+    # The cURL sample sends the cookie (-b) and the Python sample passes cookies=.
+    assert "curl -s -b" in body
+    assert "cookies=cookies" in body
+    # 'unknown' is a terminal state in the copy-paste poll loops (Python + JS).
+    assert '("done", "error", "unknown")' in body
+    assert 'status.status !== "unknown"' in body
+
+
 def test_api_docs_examples_use_request_host(client):
     # Base URL in the samples is the live deployment host, not a hardcoded one.
     body = client.get("/developer/api").get_data(as_text=True)

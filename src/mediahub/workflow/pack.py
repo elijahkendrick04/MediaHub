@@ -14,11 +14,36 @@ Each returned card is the RankedAchievement dict extended with:
 from __future__ import annotations
 
 import json
+import threading
 from pathlib import Path
 from typing import Optional
 
 from .status import CardStatus
 from .store import WorkflowStore
+
+
+def _capture_memories_async(jobs: list[tuple]) -> None:
+    """Run the semantic caption-memory captures out-of-band.
+
+    Each capture makes a blocking HTTP embed call when an embedding backend
+    is configured; doing that per card inside pack building (a page render /
+    export path) stalls the response — up to the embed timeout per card when
+    the endpoint is down. A daemon thread keeps the best-effort, never-raises
+    contract; a capture lost on process exit is acceptable for a cache."""
+
+    def _run() -> None:
+        try:
+            from mediahub.memory import learning as _mem
+
+            for profile_id, ach, cap, card_id, run_id in jobs:
+                try:
+                    _mem.capture(profile_id, ach, cap, card_id=card_id, run_id=run_id)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+    threading.Thread(target=_run, name="pack-memory-capture", daemon=True).start()
 
 
 def build_content_pack(
@@ -73,6 +98,7 @@ def build_content_pack(
 
     # Filter to approved only, sorted by priority desc
     approved: list[dict] = []
+    capture_jobs: list[tuple] = []
     for ra in ranked_achs:
         ach = ra.get("achievement") or {}
         card_id = ach.get("swim_id") or ach.get("swimmer_id") or str(ra.get("rank", ""))
@@ -112,7 +138,9 @@ def build_content_pack(
             # context -> caption) so future caption generation can recall what
             # worked for similar moments. Off-by-default + best-effort: a no-op
             # unless an embedding backend is configured, and it never raises
-            # into pack building.
+            # into pack building. The embed call itself is HTTP-blocking, so
+            # captures are queued here and run on a daemon thread after the
+            # pack is assembled — never on the render path.
             try:
                 from mediahub.memory import learning as _mem
 
@@ -123,12 +151,13 @@ def build_content_pack(
                         str(v).strip() for v in _active.values() if isinstance(v, str) and v.strip()
                     )
                     if _cap:
-                        _mem.capture(profile_id, ach, _cap, card_id=card_id, run_id=run_id)
+                        if _mem.is_enabled():
+                            capture_jobs.append((profile_id, ach, _cap, card_id, run_id))
                         # PAR-1 approval loop: the plain few-shot voice store
                         # works for EVERY club (no embedding backend, no corpus
                         # floor) — the approved caption becomes a voice example
                         # injected into future generation. Idempotent per
-                        # caption, best-effort like the semantic capture.
+                        # caption, a cheap local write, best-effort.
                         if profile_id:
                             from mediahub.web.ai_caption import record_approved_caption
 
@@ -137,6 +166,9 @@ def build_content_pack(
                 pass
 
             approved.append((ra.get("priority", 0.0), card))
+
+    if capture_jobs:
+        _capture_memories_async(capture_jobs)
 
     approved.sort(key=lambda x: -x[0])
     return [card for _, card in approved]

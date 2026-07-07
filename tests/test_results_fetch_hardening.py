@@ -165,6 +165,32 @@ def test_configure_preselects_fuzzy_club(app_mod):
     assert '<option value="City of Leeds" selected>' not in body
 
 
+def test_configure_warns_when_no_club_matches(app_mod):
+    """The pre-select and its no-match warning now both flow from the single
+    shared _best_club_match matcher (the inline SequenceMatcher duplicate was
+    removed): an org that matches nothing in the file gets no auto-pick and the
+    honest 'none of the clubs … match' heads-up."""
+    app, wm = app_mod
+    import mediahub.web.club_profile as cp
+    from mediahub.web.club_profile import ClubProfile
+
+    cp.save_profile(ClubProfile(profile_id="p9", display_name="Edinburgh Penguins"))
+    rid = "stagedrun009"
+    rdir = wm.RUNS_DIR / rid
+    rdir.mkdir(parents=True, exist_ok=True)
+    (rdir / "input.bin").write_bytes(b"PK\x03\x04dummy")
+    (rdir / "upload_meta.json").write_text(
+        json.dumps({"clubs": ["City of Leeds", "Otter SC"], "meet_name": "Spring Open"})
+    )
+    c = app.test_client()
+    with c.session_transaction() as s:
+        s["active_profile_id"] = "p9"
+    body = c.get(f"/upload/configure?run_id={rid}").get_data(as_text=True)
+    assert " selected>" not in body  # nothing cleared the floor → no auto-pick
+    assert "none of the clubs in this" in body
+    assert "Edinburgh Penguins" in body
+
+
 def test_configure_offers_free_text_when_no_clubs_detected(app_mod):
     """A distance-event page can yield zero club names; the club field must
     fall back to a free-text input so the run is never blocked on an empty
@@ -288,6 +314,22 @@ def test_upload_page_injects_real_csrf_into_link_fetch(app_mod):
     assert "__CSRF__" not in body  # placeholder was substituted
     assert "X-CSRF-Token" in body
     assert _CSRF_TOK in body
+
+
+def test_upload_poller_treats_unknown_as_terminal(app_mod):
+    """The url-fetch progress poller must not spin forever on status 'unknown'
+    (job gone after a restart/prune): it treats a short streak of 'unknown' as a
+    terminal failure and caps consecutive network errors, rather than re-polling
+    'Reading the site…' indefinitely."""
+    app, wm = app_mod
+    html = app.test_client().get("/upload").get_data(as_text=True)
+    # The poller branches on the 'unknown' status and fails after a short streak.
+    assert "j.status === 'unknown'" in html
+    assert "unknownStreak" in html
+    # Consecutive network failures are capped (no infinite catch-retry loop).
+    assert "errStreak" in html
+    # A human-readable terminal message for the lost fetch.
+    assert "find this fetch any more" in html
 
 
 def test_from_url_blocked_without_csrf_but_works_with_header(app_mod, monkeypatch):

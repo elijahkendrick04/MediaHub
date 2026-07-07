@@ -95,6 +95,54 @@ def test_list_org_tables_summary(db):
     assert s["editable"] is True
 
 
+def test_bulk_insert_rows_positions_and_parity(db):
+    tid = store.create_table("club-a", "Roster", _cols(), db_path=db)
+    # A pre-existing row so bulk positions must continue from MAX(position).
+    store.upsert_row("club-a", tid, {"name": text_cell("Zero")}, db_path=db)
+    rows = [
+        {"name": text_cell("Aaa"), "pbs": DataCell(1, "1", provenance=Provenance.HAND_ENTERED)},
+        {"name": text_cell("Bbb")},
+        {"name": text_cell("Ccc")},
+    ]
+    rids = store.bulk_insert_rows("club-a", tid, rows, db_path=db)
+    assert len(rids) == 3
+    t = store.get_org_table("club-a", tid, db_path=db)
+    # Appended after the existing row, in supplied order.
+    assert [t.cell(i, "name").display for i in range(4)] == ["Zero", "Aaa", "Bbb", "Ccc"]
+    assert store.row_ids_for(t)[1:] == rids
+    # Cell normalisation matches upsert_row (DataCell round-trip preserved).
+    assert t.cell(1, "pbs").value == 1
+    # Empty input is a no-op.
+    assert store.bulk_insert_rows("club-a", tid, [], db_path=db) == []
+
+
+def test_set_cells_batches_edits(db):
+    tid = store.create_table("club-a", "Roster", _cols(), db_path=db)
+    rids = store.bulk_insert_rows(
+        "club-a",
+        tid,
+        [{"name": text_cell("Aaa")}, {"name": text_cell("Bbb")}],
+        db_path=db,
+    )
+    n = store.set_cells(
+        "club-a",
+        tid,
+        [
+            (rids[0], "pbs", DataCell(5, "5")),
+            (rids[1], "pbs", DataCell(6, "6")),
+            ("missing-row", "pbs", DataCell(9, "9")),  # skipped
+        ],
+        db_path=db,
+    )
+    assert n == 2  # the missing row was skipped
+    t = store.get_org_table("club-a", tid, db_path=db)
+    assert t.cell(0, "pbs").value == 5
+    assert t.cell(1, "pbs").value == 6
+    # Untouched cells survive, exactly like set_cell.
+    assert t.cell(0, "name").display == "Aaa"
+    assert store.set_cells("club-a", tid, [], db_path=db) == 0
+
+
 def test_set_columns_replaces_definition(db):
     tid = store.create_table("club-a", "Roster", _cols(), db_path=db)
     new_cols = _cols() + [DataColumn("medals", "Medals", "int", editable=True)]

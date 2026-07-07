@@ -160,6 +160,36 @@ def test_ai_read_candidates_respects_budget():
     assert len(out) == 2
 
 
+def test_ai_read_candidates_progress_cb_fires_per_read():
+    rec: dict = {}
+    seen: list[tuple[int, int]] = []
+    pages = [_rendered_rr(f"page {i}") for i in range(5)]
+    out = ai_read_candidates(
+        pages,
+        max_reads=3,
+        generate=_gen(_GOOD_CSV, rec),
+        progress_cb=lambda i, n: seen.append((i, n)),
+    )
+    assert len(out) == 3
+    # One beat per actual read, numbered 1..budget, total = min(pages, budget).
+    assert seen == [(1, 3), (2, 3), (3, 3)]
+
+
+def test_ai_read_candidates_progress_cb_is_best_effort():
+    rec: dict = {}
+    pages = [_rendered_rr(f"page {i}") for i in range(2)]
+
+    def boom(i, n):
+        raise RuntimeError("heartbeat failed")
+
+    # A throwing callback must not abort the reads.
+    out = ai_read_candidates(
+        pages, max_reads=2, generate=_gen(_GOOD_CSV, rec), progress_cb=boom
+    )
+    assert rec["calls"] == 2
+    assert len(out) == 2
+
+
 def test_ai_read_empty_page_skips_call():
     rec: dict = {}
     # rendered page with no text and no screenshot → nothing to look at

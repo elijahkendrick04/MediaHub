@@ -159,6 +159,12 @@ class RenderedBackend:
 
     tier = "rendered"
 
+    # A host's SSRF verdict is cached only briefly: a host that resolved to a
+    # public IP at first check must not stay trusted forever if its DNS is later
+    # repointed at a private/loopback/metadata address (DNS rebinding). Entries
+    # expire after this many seconds and are re-validated on next use.
+    _safe_cache_ttl_s = 60.0
+
     def __init__(
         self,
         limits: Optional[FetchLimits] = None,
@@ -174,7 +180,9 @@ class RenderedBackend:
         self.renders_done = 0
         self.budget_hit = False
         self._deadline: Optional[float] = None
-        self._safe_cache: dict[str, bool] = {}
+        # host -> (verdict, monotonic_expiry). Entries older than the TTL are
+        # discarded and re-validated so a DNS-rebound host can't stay trusted.
+        self._safe_cache: dict[str, tuple[bool, float]] = {}
         # Recycle the headless browser every N renders. A Chromium that has
         # rendered many heavy JS pages on a memory-tight host can wedge so a
         # later new_context/new_page blocks forever (the crawl appears stuck at
@@ -232,11 +240,13 @@ class RenderedBackend:
 
     def _host_ok(self, url: str) -> bool:
         host = (urlparse(url).hostname or "").lower()
-        cached = self._safe_cache.get(host)
-        if cached is None:
-            cached = bool(self._host_safe(url))
-            self._safe_cache[host] = cached
-        return cached
+        now = time.monotonic()
+        entry = self._safe_cache.get(host)
+        if entry is not None and now < entry[1]:
+            return entry[0]
+        verdict = bool(self._host_safe(url))
+        self._safe_cache[host] = (verdict, now + self._safe_cache_ttl_s)
+        return verdict
 
     def route_decision(self, url: str, resource_type: str, scope: Scope) -> str:
         """``"continue"`` or ``"abort"`` for one request the page makes.

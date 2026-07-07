@@ -36,6 +36,10 @@ def test_gallery_renders_every_preset(monkeypatch, tmp_path):
     html = resp.get_data(as_text=True)
     # links the compiled stylesheet…
     assert "motion-vocabulary.css" in html
+    # …and the self-hosted brand fonts (never the system fallback / a CDN):
+    # the gallery styles with 'Hanken Grotesk', so it must load fonts.css.
+    assert "theme/fonts.css" in html
+    assert "'Inter'" not in html
     # …and shows a tile (with its anim class) for every preset.
     for name in v.names():
         assert f"mh-anim-{name.replace('_', '-')}" in html, name

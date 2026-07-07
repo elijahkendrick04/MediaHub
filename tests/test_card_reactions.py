@@ -322,6 +322,60 @@ class TestValidation:
         _toggle(env["client"], run_id, "s1", "💩", "r-1")
         assert env["wm"]._reaction_counts_for_run(run_id) == {}
 
+    def test_unknown_card_id_rejected(self, env):
+        """A card id that isn't part of the run must 400 — an arbitrary
+        made-up id can never accrete reaction rows against the run."""
+        run_id = _seed(env, ["s1"])
+        r = _toggle(env["client"], run_id, "not-a-card", THUMB, "r-1")
+        assert r.status_code == 400
+        assert r.get_json()["error"] == "invalid card_id"
+        assert env["wm"]._reaction_counts_for_run(run_id) == {}
+
+    def test_spotlight_and_in_numbers_ids_allowed(self, env):
+        """The synthetic ids the pack surfaces emit (sp:* aggregate rows and
+        the weekend-in-numbers card) must stay reactable."""
+        payload = _make_run_payload("org-test", ["s1"])
+        # An aggregate ranked row with no swim_id → the sp:type:event id.
+        payload["recognition_report"]["ranked_achievements"].append(
+            {
+                "rank": 2,
+                "achievement": {
+                    "swimmer_name": "Relay Team",
+                    "event": "4x100 Free",
+                    "headline": "Relay gold",
+                    "type": "relay",
+                },
+                "quality_band": "strong",
+                "priority": 0.5,
+                "factors": [],
+            }
+        )
+        payload["recognition_report"]["meet_name"] = "REACTIONS TEST INVITATIONAL"
+        run_id = _seed_run(env["tmp_path"], env["wm"], "org-test", payload)
+        c = env["client"]
+        r1 = _toggle(c, run_id, "sp:relay:4x100 Free", THUMB, "r-1")
+        assert r1.status_code == 200, r1.get_json()
+        r2 = _toggle(c, run_id, "weekend_in_numbers:REACTIONS TEST INVITATIONAL", THUMB, "r-1")
+        assert r2.status_code == 200, r2.get_json()
+
+    def test_distinct_reactor_cap_enforced(self, env, monkeypatch):
+        """Beyond the per-(run,card) distinct-reactor cap, NEW reactors get
+        429 — but a reactor already on the card keeps toggling freely."""
+        monkeypatch.setattr(env["wm"], "REACTION_MAX_REACTORS_PER_CARD", 3)
+        run_id = _seed(env, ["s1"])
+        c = env["client"]
+        for i in range(3):
+            assert _toggle(c, run_id, "s1", THUMB, f"r-{i}").status_code == 200
+        r = _toggle(c, run_id, "s1", THUMB, "r-new")
+        assert r.status_code == 429
+        assert r.get_json()["error"] == "too_many_reactors"
+        # An existing reactor can still add a different emoji…
+        assert _toggle(c, run_id, "s1", HEART, "r-0").status_code == 200
+        # …and toggle one off.
+        off = _toggle(c, run_id, "s1", THUMB, "r-1")
+        assert off.status_code == 200
+        assert off.get_json()["counts"][THUMB] == 2
+
 
 # ---------------------------------------------------------------------------
 # Tenant isolation / IDOR

@@ -263,14 +263,20 @@ img, video { block-size: auto; }
 
 /* Ultrawide & 4K (≥ 1920px). Caps line length for readability but lets
    the wrap stretch a bit beyond its 1200px desktop max so the layout
-   doesn't look stranded in the middle of a 34" monitor. */
+   doesn't look stranded in the middle of a 34" monitor. The footer and
+   HUD inner rails widen in lock-step so the page chrome keeps a single
+   aligned edge with the content. */
 @media (min-width: 1920px) {
-  main.wrap { max-width: min(1400px, 88vw); }
+  main.wrap,
+  .mh-footer-inner,
+  .mh-hud-inner { max-width: min(1400px, 88vw); }
 }
 
 /* TV / very large displays (≥ 2400px). Centred reading column. */
 @media (min-width: 2400px) {
-  main.wrap { max-width: 1600px; }
+  main.wrap,
+  .mh-footer-inner,
+  .mh-hud-inner { max-width: 1600px; }
 }
 
 /* ---------------------------------------------------------------------

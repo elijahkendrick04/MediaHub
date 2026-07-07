@@ -128,7 +128,10 @@ def imagen_predict(
         return []
 
     mdl = model or _default_model()
-    url = f"{_GEMINI_API_BASE}/models/{mdl}:predict?key={key}"
+    # Key travels in the x-goog-api-key header, NOT the URL — a URL-borne key
+    # rides into every exception repr / access log that mentions the request
+    # URL. _redact_key stays as defence-in-depth on the log lines below.
+    url = f"{_GEMINI_API_BASE}/models/{mdl}:predict"
     payload = {
         "instances": [{"prompt": prompt}],
         "parameters": {
@@ -141,18 +144,24 @@ def imagen_predict(
             "safetySetting": safety,
         },
     }
+    from mediahub.media_ai.llm import _redact_key
+
     try:
         r = requests.post(
             url,
-            headers={"Content-Type": "application/json"},
+            headers={"Content-Type": "application/json", "x-goog-api-key": key},
             data=json.dumps(payload),
             timeout=timeout or _default_timeout(),
         )
-    except Exception as e:  # pragma: no cover - network error path
-        log.debug("imagine.gemini: predict POST failed: %s", e)
+    except Exception as e:
+        log.debug("imagine.gemini: predict POST failed: %s", _redact_key(str(e), key))
         return []
     if r.status_code != 200:
-        log.debug("imagine.gemini: non-200 %s %s", r.status_code, (r.text or "")[:300])
+        log.debug(
+            "imagine.gemini: non-200 %s %s",
+            r.status_code,
+            _redact_key((r.text or "")[:300], key),
+        )
         return []
     try:
         body = r.json()

@@ -53,9 +53,45 @@ def test_chat_posts_expected_request(monkeypatch):
     assert res.tokens_in == 7 and res.tokens_out == 11
     assert captured["url"] == "https://host/v1/chat/completions"
     assert captured["json"]["model"] == "m1"
-    # max_completion_tokens is clamped to a floor of 16.
+    # max_completion_tokens is clamped to a floor of 16, and the cap is sent
+    # under BOTH names by default so legacy servers (OpenRouter / Together /
+    # llama.cpp document only max_tokens) still honour it.
     assert captured["json"]["max_completion_tokens"] == 16
+    assert captured["json"]["max_tokens"] == 16
     assert captured["headers"]["Authorization"] == "Bearer secret-key"
+
+
+@pytest.mark.parametrize(
+    "mode,expect_completion,expect_legacy",
+    [
+        ("both", True, True),
+        ("completion", True, False),
+        ("legacy", False, True),
+        ("", True, True),  # unset/empty => default 'both'
+    ],
+)
+def test_chat_token_param_knob(monkeypatch, mode, expect_completion, expect_legacy):
+    """MEDIAHUB_LLM_TOKEN_PARAM picks which output-cap field(s) ride the
+    payload — strict endpoints (OpenAI reasoning models) reject the
+    deprecated max_tokens, so 'completion' must suppress it."""
+    if mode:
+        monkeypatch.setenv("MEDIAHUB_LLM_TOKEN_PARAM", mode)
+    else:
+        monkeypatch.delenv("MEDIAHUB_LLM_TOKEN_PARAM", raising=False)
+    captured = {}
+
+    def fake_post(url, json=None, headers=None, timeout=None, **kw):
+        captured["json"] = json
+        return _FakeResp(200, _chat_payload("x"))
+
+    monkeypatch.setattr(requests, "post", fake_post)
+    client = lc.OpenAICompatClient(["https://host/v1"], None, default_model="m")
+    client.chat([{"role": "user", "content": "hi"}], max_completion_tokens=64)
+    assert ("max_completion_tokens" in captured["json"]) is expect_completion
+    assert ("max_tokens" in captured["json"]) is expect_legacy
+    for field in ("max_completion_tokens", "max_tokens"):
+        if field in captured["json"]:
+            assert captured["json"][field] == 64
 
 
 def test_chat_omits_auth_header_when_keyless(monkeypatch):

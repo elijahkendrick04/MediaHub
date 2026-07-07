@@ -253,6 +253,38 @@ def test_password_gate(app_env):
     assert b"secret members content" in seen.data
 
 
+def test_password_unlock_is_rate_limited(app_env):
+    """Brute-forcing the member-page password gets throttled per IP, like the
+    sibling public form/vote routes."""
+    app, _wm, _ = app_env
+    from mediahub.sites.models import SitePage, SiteSection, SiteSpec
+    from mediahub.documents.models import text
+
+    c = app.test_client()
+    _login(c)
+    spec = SiteSpec(
+        title="Members",
+        pages=[SitePage(title="Home", slug="", protected=True,
+                        sections=[SiteSection(blocks=[text("secret")])])],
+    )
+    from mediahub.sites.store import save_site, site_record
+
+    save_site("club-a", spec)
+    c.post(f"/api/sites/{spec.site_id}/password", data={"password": "letmein"})
+    c.post(f"/api/sites/{spec.site_id}/publish", data={})
+    token = site_record("club-a", spec.site_id)["public_token"]
+
+    pub = app.test_client()
+    statuses = [
+        pub.post(f"/site/{token}/unlock", data={"site_password": f"wrong-{i}", "next": ""}).status_code
+        for i in range(12)
+    ]
+    assert statuses[0] == 200  # wrong password re-prompts
+    assert 429 in statuses  # …but repeated guessing gets throttled
+    limited = pub.post(f"/site/{token}/unlock", data={"site_password": "letmein", "next": ""})
+    assert limited.status_code == 429  # over the budget, even the right password waits
+
+
 def test_delete_site(app_env):
     app, _wm, _ = app_env
     c = app.test_client()

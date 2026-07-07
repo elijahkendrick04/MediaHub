@@ -204,6 +204,20 @@ def test_home_fresh_visitor_shows_demo_in_its_own_section(app):
     assert body.index('id="mh-see-it-work"') < body.index(el), "demo is in the See-it-work section"
 
 
+def test_demo_omnibox_uses_request_host_not_hardcoded_render(app):
+    """The decorative Chrome omnibox shows the LIVE host, so a custom domain no
+    longer advertises the internal Render hostname. A local/empty host falls
+    back to the canonical Render host so dev screenshots stay clean."""
+    with app.test_client() as c:
+        # A custom domain shows through into the omnibox…
+        body = c.get("/", headers={"Host": "clubs.example.com"}).get_data(as_text=True)
+        assert '<span class="mh-demo-url">clubs.example.com</span>' in body
+        assert "mediahub-gzwc.onrender.com" not in body
+        # …but the default local test host falls back to the canonical host.
+        body_local = c.get("/").get_data(as_text=True)
+        assert '<span class="mh-demo-url">mediahub-gzwc.onrender.com</span>' in body_local
+
+
 def test_home_still_renders_the_rest_of_the_landing(app):
     """Regression: inserting the demo didn't break the existing sections."""
     with app.test_client() as c:
@@ -444,3 +458,53 @@ def test_reduced_motion_rests_every_new_beat_composed():
     assert ".mh-demo-chip { opacity: 1; transform: none; }" in rm
     # the new beats are also in the hard `animation: none !important` reset
     assert ".mh-demo-chip { animation: none !important; }" in rm
+
+
+def test_demo_review_confidence_score_has_label():
+    """The confidence number in the Review demo panel must carry an explanatory
+    tooltip so a volunteer does not see a bare decimal with no context.
+
+    Regression guard for: 'Two unexplained decimal numbers appear on the
+    review card with no label, tooltip, or legend indicating what they
+    represent or what an acceptable value looks like.'
+    """
+    import re
+
+    html = _demo_html()
+    m = re.search(r'<span[^>]*class="mh-demo-conf"[^>]*>', html)
+    assert m, "mh-demo-conf span not found in demo HTML"
+    tag = m.group()
+    assert "title=" in tag, (
+        "mh-demo-conf span must include a title= tooltip explaining what the "
+        "confidence score means; currently the bare value '0.94' appears with "
+        "no label or tooltip (regression: unexplained decimal on review card)"
+    )
+
+
+# =========================================================================== #
+# Group F — queue context (regression guard for autotest finding f51fbb0c9424)
+# =========================================================================== #
+def test_review_scene_shows_queue_position():
+    """The review scene must surface a queue position indicator so a visitor
+    understands there are 3 ranked moments to triage — not just the one
+    visible Tom Davies card.
+
+    Without this the demo advertises '3 moments ranked' in Scene 1, then
+    dead-ends after a single card with no indication that the relay and Aoife
+    Nolan's sub-1:00 are also waiting for approval.
+    """
+    html = _demo_html()
+    # Scene 1 must still advertise 3 moments (precondition for the bug).
+    assert "3 moments ranked" in html
+    # The review scene must carry a queue position indicator so the visitor
+    # knows which moment they are looking at and how many remain.
+    assert "mh-demo-qcount" in html, (
+        "review scene must carry a queue position element (mh-demo-qcount); "
+        "without it '3 moments ranked' advertises a queue that appears to have "
+        "only 1 card — the other 2 ranked moments have no visible path to review"
+    )
+    # The indicator text must show position-in-queue context (e.g. '1 of 3').
+    assert "of 3" in html, (
+        "queue indicator must show position context e.g. '1 of 3' so the visitor "
+        "understands two more moments follow Tom Davies in the queue"
+    )

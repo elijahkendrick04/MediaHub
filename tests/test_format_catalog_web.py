@@ -260,3 +260,35 @@ def test_reformat_caches_deterministic_render(app_env):
             assert r2.status_code == 200
     # Second identical request is served from the on-disk cache (no re-render).
     assert captured["calls"] == 1
+
+
+def test_reformat_cache_invalidates_on_brief_edit(app_env):
+    """The cache key folds the SOURCE brief's content: an edit that keeps the
+    layout template (copilot/headline change persisting a new brief) must
+    re-render, never serve the stale pre-edit PNG."""
+    app, wm, tmp_path = app_env
+    run_id = _seed_run(tmp_path)
+    _seed_brief(tmp_path, run_id, "c1")
+
+    fake, captured = _fake_render_brief_factory()
+    with mock.patch("mediahub.graphic_renderer.render.render_brief", fake):
+        with app.test_client() as c:
+            assert c.post(f"/api/runs/{run_id}/card/c1/reformat?format=ig_square", json={}).status_code == 200
+            assert captured["calls"] == 1
+            # A later brief version for the same card, same layout, new copy —
+            # exactly what a copilot edit persists.
+            import os as _os
+            import time as _time
+
+            bdir = tmp_path / "runs_v4" / run_id / "briefs"
+            bdict = json.loads((bdir / "cb_seed1.json").read_text())
+            bdict["id"] = "cb_seed2"
+            bdict["primary_hook"] = "CLUB RECORD"
+            p2 = bdir / "cb_seed2.json"
+            p2.write_text(json.dumps(bdict, default=str))
+            # make the new brief unambiguously the most recent
+            now = _time.time()
+            _os.utime(p2, (now + 5, now + 5))
+            assert c.post(f"/api/runs/{run_id}/card/c1/reformat?format=ig_square", json={}).status_code == 200
+    # The edited design re-rendered instead of serving the pre-edit cache.
+    assert captured["calls"] == 2

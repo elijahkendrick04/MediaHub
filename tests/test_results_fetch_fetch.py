@@ -11,6 +11,8 @@ each asserted directly.
 
 from __future__ import annotations
 
+import time
+
 import pytest
 
 from mediahub.results_fetch import (
@@ -424,6 +426,33 @@ def test_route_allows_data_uri_blocks_file_scheme():
     assert rb.route_decision("data:image/png;base64,iVBORw0K", "image", scope) == "continue"
     assert rb.route_decision("file:///etc/passwd", "document", scope) == "abort"
     assert rb.route_decision("ftp://x/y", "xhr", scope) == "abort"
+
+
+def test_safe_cache_expires_and_revalidates_after_ttl():
+    """The SSRF host-safety cache must not trust a host forever: after the TTL
+    it re-validates, so a host that flips to unsafe (DNS rebinding) is caught."""
+    calls: list[str] = []
+
+    def _host_safe(u):
+        calls.append(u)
+        # First check safe; every later re-validation reports unsafe.
+        return len(calls) == 1
+
+    rb = RenderedBackend(host_safe=_host_safe)
+    rb._safe_cache_ttl_s = 30.0
+
+    url = "https://site.test/results/"
+    # First call validates and caches "safe".
+    assert rb._host_ok(url) is True
+    # Within TTL: served from cache, validator not re-run.
+    assert rb._host_ok(url) is True
+    assert len(calls) == 1
+
+    # Force the cached entry past its TTL and confirm re-validation flips it.
+    host, (_verdict, _expiry) = next(iter(rb._safe_cache.items()))
+    rb._safe_cache[host] = (True, time.monotonic() - 1.0)
+    assert rb._host_ok(url) is False
+    assert len(calls) == 2
 
 
 # ---------------------------------------------------------------------------

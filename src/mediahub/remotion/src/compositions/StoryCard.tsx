@@ -16,6 +16,7 @@ import {
   EXTRA_SCENES,
   EXTRA_SPRINGS,
 } from "./sprint/registry";
+import { photoGradeFilterFor } from "./sprint/layers/photo_filters";
 
 // Exported for MeetReel: ONE schema for a card's props on both compositions,
 // so a field added here can never be silently zod-stripped on the reel path.
@@ -89,6 +90,14 @@ export const cardSchema = z.object({
   // frame-timed caption cues built by visual/subtitle_burn.py and painted by
   // sprint/layers/captions.tsx. Empty = no captions (byte-identical render).
   captionsJson: z.string().default(""),
+  // G1.8 mesh-ground parity: the still's deterministic brand-role gradient
+  // mesh as a CSS background-image value (url("data:image/svg+xml;base64,…")),
+  // built by the SAME Python engine the still hook runs
+  // (graphic_renderer.gradient_mesh via motion._mesh_bg_for_brief) — so the
+  // video ground is the mesh the approved still painted, not a re-derivation.
+  // Painted on the composition root beneath every content layer, exactly the
+  // still's ground override. Empty = the flat roles.ground (byte-identical).
+  meshBg: z.string().default(""),
 });
 
 const brandSchema = z.object({
@@ -932,10 +941,14 @@ const PhotoLayer: React.FC<{ ctx: SceneCtx; scrim?: "bottom" | "full" }> = ({
   ctx,
   scrim = "full",
 }) => {
-  const { card, roles, anim } = ctx;
+  const { card, roles, anim, frame, fps } = ctx;
   if (!card.photoSrc) {
     return null;
   }
+  // R1.10 photo grade (duotone/halftone/vignette) — photo-element-only, the
+  // still's `_photo_treatment_css` scope. "" (no grade) leaves the style
+  // byte-identical.
+  const grade = photoGradeFilterFor(card, frame, fps);
   return (
     <>
       <img
@@ -952,6 +965,7 @@ const PhotoLayer: React.FC<{ ctx: SceneCtx; scrim?: "bottom" | "full" }> = ({
           // variants) a lateral travel in % of the photo's own box, small
           // enough that the saliency framing always holds.
           transform: `translate(${anim.photoDriftX}%, ${anim.photoDriftY}%) scale(${anim.photoScale})`,
+          ...(grade ? { filter: grade } : {}),
         }}
       />
       <div
@@ -1398,6 +1412,32 @@ function packSpiralPoints(steps = 72, turns = 2.4, maxR = 44): string {
   return pts.join(" ");
 }
 
+// The pack's ground atmosphere alone — rendered BENEATH the scene content
+// (before <Scene>), matching the still's z-order exactly: the still injects
+// the ground at z-index 1 while archetype copy sits at z-index 2–3, so a
+// top_fade / vignette / mesh ground never dims the card's text there. Texture
+// (still z6) and accent geometry (still z8) stay in StylePackLayer above the
+// scene. Same parse, same darken-only alphas, same ease-in.
+const StylePackGroundLayer: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
+  const pack = parseStylePack(ctx.card.stylePack || "");
+  if (!pack) {
+    return null;
+  }
+  const ground = packGroundGradient(pack.ground, pack.bold ? 0.34 : 0.24);
+  if (!ground) {
+    return null;
+  }
+  const enter = interpolate(ctx.frame, [2, 16], [0, 1], {
+    extrapolateLeft: "clamp",
+    extrapolateRight: "clamp",
+  });
+  return (
+    <div style={{ position: "absolute", inset: 0, overflow: "hidden", pointerEvents: "none", opacity: enter }}>
+      <div style={{ position: "absolute", inset: 0, background: ground }} />
+    </div>
+  );
+};
+
 const StylePackLayer: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
   const pack = parseStylePack(ctx.card.stylePack || "");
   if (!pack) {
@@ -1412,12 +1452,6 @@ const StylePackLayer: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
   });
   const children: React.ReactNode[] = [];
 
-  const ground = packGroundGradient(pack.ground, pack.bold ? 0.34 : 0.24);
-  if (ground) {
-    children.push(
-      <div key="ground" style={{ position: "absolute", inset: 0, background: ground }} />,
-    );
-  }
   const stack = PACK_TEXTURE_STACKS[pack.texture];
   if (stack) {
     // Layered surface (G1.6): fuse two tiles with a background-blend-mode, then
@@ -2754,10 +2788,23 @@ export const StoryCard: React.FC<Props> = ({ card, brand }) => {
     <AbsoluteFill
       style={{
         backgroundColor: roles.ground,
+        // G1.8 mesh ground — the still's exact SVG, under every content layer
+        // (the still hook overrides the ground element's background-image the
+        // same way). Absent = the flat brand ground, byte-identical.
+        ...(card.meshBg
+          ? {
+              backgroundImage: card.meshBg,
+              backgroundSize: "cover",
+              backgroundPosition: "center",
+              backgroundRepeat: "no-repeat",
+            }
+          : {}),
         fontFamily: fontStack,
         opacity: outroFade,
       }}
     >
+      {/* Pack ground BENEATH the scene (the still's z1-under-copy order). */}
+      <StylePackGroundLayer ctx={ctx} />
       <Scene ctx={ctx} />
       <ResolveAccentLayer ctx={ctx} />
       <StylePackLayer ctx={ctx} />

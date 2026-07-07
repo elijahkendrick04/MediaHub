@@ -24,6 +24,7 @@
  */
 import React from "react";
 import type { SceneCtx } from "./registry";
+import { photoGradeFilterFor } from "./layers/photo_filters";
 
 // Append an 8-bit alpha to a #rrggbb role hex (the StoryCard scrim precedent,
 // e.g. `${roles.ground}B0`) — a named helper for scenes that build their own
@@ -189,10 +190,12 @@ export const PhotoFill: React.FC<{
   scrim?: ScrimMode;
   strength?: number; // 0..1 extra darkening for busy compositions
 }> = ({ ctx, scrim = "full", strength = 0 }) => {
-  const { card, roles, anim } = ctx;
+  const { card, roles, anim, frame, fps } = ctx;
   if (!card.photoSrc) {
     return null;
   }
+  // R1.10 photo grade — photo-element-only, exactly the PhotoLayer precedent.
+  const grade = photoGradeFilterFor(card, frame, fps);
   const g = roles.ground;
   const boost = Math.round(Math.max(0, Math.min(1, strength)) * 40)
     .toString(16)
@@ -221,6 +224,7 @@ export const PhotoFill: React.FC<{
           objectPosition: card.photoPos || "center 28%",
           // M15 — the shared seed-chosen camera move (push + lateral drift).
           transform: `translate(${anim.photoDriftX}%, ${anim.photoDriftY}%) scale(${anim.photoScale})`,
+          ...(grade ? { filter: grade } : {}),
         }}
       />
       <div style={{ position: "absolute", inset: 0, background: gradient }} />

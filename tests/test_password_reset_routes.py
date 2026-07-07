@@ -11,6 +11,7 @@ from __future__ import annotations
 import importlib
 import json
 import re
+import time
 
 import pytest
 
@@ -64,6 +65,15 @@ def _reset_link_from(text: str) -> str:
     return "/password/reset/" + m.group(1)
 
 
+def _wait_outbox(outbox, n: int, timeout: float = 3.0):
+    """The reset mail is sent from a fire-and-forget thread (timing-oracle
+    guard), so tests wait briefly for it to land."""
+    deadline = time.time() + timeout
+    while len(outbox) < n and time.time() < deadline:
+        time.sleep(0.01)
+    return outbox
+
+
 # ---- honest-unavailable state ----------------------------------------------
 
 
@@ -88,7 +98,7 @@ def test_password_reset_end_to_end(app_world, outbox):
     # Request the link.
     r = c.post("/password/forgot", data={"email": "coach@club.org"})
     assert r.status_code == 200
-    assert len(outbox) == 1
+    assert len(_wait_outbox(outbox, 1)) == 1
     link = _reset_link_from(outbox[0]["text"])
 
     # The form renders.
@@ -117,12 +127,39 @@ def test_forgot_password_does_not_enumerate_accounts(app_world, outbox):
     # Same outward response either way; only the real account got mail.
     assert real.status_code == fake.status_code == 200
     assert real.get_data(as_text=True) == fake.get_data(as_text=True)
-    assert len(outbox) == 1
+    assert len(_wait_outbox(outbox, 1)) == 1
+
+
+def test_forgot_password_send_is_async_no_timing_oracle(app_world, monkeypatch):
+    """A slow provider must not make the known-account branch measurably
+    slower than the unknown one: the POST returns before the provider call
+    completes (fire-and-forget), and the mail is still sent."""
+    monkeypatch.setenv("RESEND_API_KEY", "re_test")
+    monkeypatch.setenv("MEDIAHUB_EMAIL_FROM", "MediaHub <no-reply@example.org>")
+    sent = []
+    delay = 0.6
+
+    def slow_post(url, json=None, headers=None, timeout=None):
+        time.sleep(delay)
+        sent.append(json)
+        return _Resp(200)
+
+    monkeypatch.setattr("requests.post", slow_post)
+    c = app_world["app"].test_client()
+    t0 = time.time()
+    r = c.post("/password/forgot", data={"email": "coach@club.org"})
+    elapsed = time.time() - t0
+    assert r.status_code == 200
+    assert elapsed < delay, f"POST blocked on the provider send ({elapsed:.2f}s)"
+    # The mail still goes out (best-effort, from the background thread).
+    assert len(_wait_outbox(sent, 1)) == 1
+    assert "password/reset/" in sent[0]["text"]
 
 
 def test_short_password_rejected_at_reset(app_world, outbox):
     c = app_world["app"].test_client()
     c.post("/password/forgot", data={"email": "coach@club.org"})
+    _wait_outbox(outbox, 1)
     link = _reset_link_from(outbox[0]["text"])
     r = c.post(link, data={"password": "short"})
     assert r.status_code == 400
@@ -226,7 +263,6 @@ def test_notify_users_requires_operator(app_world):
 
 
 def test_notify_users_sends_to_all_and_records(app_world, outbox, monkeypatch):
-    monkeypatch.setenv("MEDIAHUB_DEV_KEY", "op-key-123")
     c = app_world["app"].test_client()
     with c.session_transaction() as s:
         s["dev_operator"] = True

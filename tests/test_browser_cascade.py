@@ -1,8 +1,8 @@
 """Phase 1.6 Stage I2 — Playwright end-to-end cascade test.
 
 Boots the Flask app via test_client, renders a real HTML
-response, loads it in chromium-1194 (the version pinned to the
-session-start hook), and asserts that the live CSS cascade
+response, loads it in the prebaked Chromium (resolved via
+tests/_pw_chromium.py), and asserts that the live CSS cascade
 resolves ``--mh-brand-seed`` and ``--mh-surface`` to the
 expected values.
 
@@ -25,7 +25,7 @@ Gating
 ------
 Follows the ``tests/test_motion.py`` pattern:
   - opt-out via ``MEDIAHUB_SKIP_BROWSER_TESTS=1``
-  - auto-skip if Playwright OR chromium-1194 is missing
+  - auto-skip if Playwright OR the prebaked Chromium is missing
 """
 from __future__ import annotations
 
@@ -46,7 +46,9 @@ _SKIP_BROWSER = (
     in ("1", "true", "yes")
 )
 
-_PINNED_CHROMIUM = Path("/opt/pw-browsers/chromium-1194/chrome-linux/chrome")
+from tests._pw_chromium import resolve_prebaked_chromium
+
+_PINNED_CHROMIUM = resolve_prebaked_chromium()
 
 
 def _playwright_available() -> bool:
@@ -73,7 +75,7 @@ pytestmark = [
     ),
     pytest.mark.skipif(
         not _chromium_available(),
-        reason="chromium-1194 not installed at pinned path",
+        reason="prebaked chromium not found",
     ),
 ]
 

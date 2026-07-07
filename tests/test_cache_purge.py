@@ -15,16 +15,11 @@ from pathlib import Path
 
 import pytest
 
-DEV_KEY = "operator-key-for-cache-tests"
 PASSWORD = "twelve-chars-long"
 
 
-def _make_app(monkeypatch, tmp_path, *, dev_key=DEV_KEY):
+def _make_app(monkeypatch, tmp_path):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    if dev_key is None:
-        monkeypatch.delenv("MEDIAHUB_DEV_KEY", raising=False)
-    else:
-        monkeypatch.setenv("MEDIAHUB_DEV_KEY", dev_key)
     from mediahub.web.web import create_app
 
     app = create_app()
@@ -77,7 +72,7 @@ def test_purge_all_caches_tolerates_empty_deployment(monkeypatch, tmp_path):
 
 
 def test_route_requires_operator(monkeypatch, tmp_path):
-    app = _make_app(monkeypatch, tmp_path, dev_key=None)
+    app = _make_app(monkeypatch, tmp_path)
     c = app.test_client()
 
     # Anonymous → bounced to developer sign-in, nothing purged.
@@ -132,6 +127,33 @@ def test_purge_clears_graphic_render_cache_on_disk(monkeypatch, tmp_path):
     assert not (render_cache / "deadbeef.png").exists()
 
 
+def test_purge_covers_newer_cache_roots(monkeypatch, tmp_path):
+    """document_cache, site_cache, asr_cache and stock_thumb_cache are all
+    re-derivable and must be enrolled in the site-wide purge.
+
+    Regression: these roots were added after the purge shipped and were
+    silently skipped (and under-counted on the settings card).
+    """
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    from mediahub.privacy.cache_purge import cache_roots, purge_all_caches
+
+    labels = {label for label, _ in cache_roots()}
+    expected = {"document_cache", "site_cache", "asr_cache", "stock_thumb_cache"}
+    assert expected <= labels
+
+    for name in ("document_cache", "site_cache", "asr_cache", "stock_thumb_cache"):
+        d = tmp_path / name
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "entry.bin").write_bytes(b"cached")
+
+    report = purge_all_caches()
+
+    for name in expected:
+        assert name in report["sections"], name
+        assert report["sections"][name]["files_deleted"] >= 1, name
+        assert not (tmp_path / name / "entry.bin").exists()
+
+
 def test_purge_clears_in_process_module_caches(monkeypatch, tmp_path):
     """A disk purge must also drop the matching in-process caches from memory,
     or the worker keeps serving them (and its RSS never falls)."""
@@ -153,6 +175,43 @@ def test_purge_clears_in_process_module_caches(monkeypatch, tmp_path):
     assert len(R._LOGO_PREP_CACHE) == 0
     assert "graphic_render_asset_cache" in report["inprocess_cleared"]
     assert "logo_prep_cache" in report["inprocess_cleared"]
+
+
+def test_cache_tally_cached_within_ttl_and_cleared_on_purge(monkeypatch, tmp_path):
+    """The developer settings cache-purge card must not walk every cache root on
+    every render: the (files, MB) tally is snapshotted for ~60s and cleared on
+    purge. Two renders within the TTL walk the roots once."""
+    app = _make_app(monkeypatch, tmp_path)
+    from mediahub.web import web as wm
+
+    wm._cache_tally_cache.clear()
+
+    calls = {"n": 0}
+    import mediahub.privacy.cache_purge as cp
+
+    orig = cp.cache_roots
+
+    def counting_roots():
+        calls["n"] += 1
+        return orig()
+
+    monkeypatch.setattr(cp, "cache_roots", counting_roots, raising=True)
+
+    c = app.test_client()
+    with c.session_transaction() as s:
+        s["dev_operator"] = True
+
+    r1 = c.get("/settings/developer")
+    assert r1.status_code == 200
+    r2 = c.get("/settings/developer")
+    assert r2.status_code == 200
+    assert calls["n"] == 1, "second render within TTL must reuse the snapshot"
+
+    # Purge clears the snapshot, so the next render walks the roots again.
+    c.post("/operator/cache/purge")
+    n_after_purge = calls["n"]
+    c.get("/settings/developer")
+    assert calls["n"] > n_after_purge, "purge must invalidate the tally snapshot"
 
 
 def test_operator_route_clears_studio_render_cache(monkeypatch, tmp_path):

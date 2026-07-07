@@ -498,6 +498,18 @@ class TestStorage:
     def test_load_missing(self):
         assert fi.load_record("club", "nope-400-normal") is None
 
+    def test_remove_and_load_sanitise_traversal_slugs(self, tmp_path):
+        """A caller-supplied slug is slugged before the path join, so a
+        traversal attempt can never reach outside the tenant dir."""
+        outside = Path(fi.font_dir_for("club")).parent.parent / "victim.woff2"
+        outside.write_bytes(b"do-not-delete")
+        try:
+            assert fi.remove_font("club", "../../victim") is False
+            assert outside.is_file()
+            assert fi.load_record("club", "../../victim") is None
+        finally:
+            outside.unlink(missing_ok=True)
+
 
 # --------------------------------------------------------------------------- #
 # CSS emission + injection safety

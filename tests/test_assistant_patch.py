@@ -65,6 +65,16 @@ def test_all_advertised_op_kinds_round_trip():
         assert parse_patch({"ops": [{"kind": kind}]}).ops[0].kind == kind
 
 
+def test_parse_caps_runaway_ops_list():
+    # The 'small, bounded list' contract: a runaway/adversarial model
+    # returning hundreds of ops is truncated at parse time so apply_patch
+    # can't be made to burn CPU (set_colour_role re-runs the APCA gate per op).
+    from mediahub.assistant.patch import _MAX_OPS
+
+    raw = {"ops": [{"kind": "set_mood", "mood": "bold"} for _ in range(100)]}
+    assert len(parse_patch(raw).ops) == _MAX_OPS
+
+
 # ---------------------------------------------------------------------------
 # apply_patch — validation + no mutation
 # ---------------------------------------------------------------------------

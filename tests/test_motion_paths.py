@@ -75,5 +75,20 @@ def test_remotion_tokens_sample_with_angles():
 
 def test_ffmpeg_overlay_expressions_reference_frame_counter():
     xe, ye = paths.from_svg("M0,0 L100,0").to_ffmpeg_overlay(frames=120, samples=4)
-    assert "on/120" in xe
+    # overlay defines `n` (not zoompan's `on`) as its frame counter.
+    assert "n/120" in xe
+    assert "on/120" not in xe
     assert isinstance(ye, str)
+
+
+def test_ffmpeg_overlay_frame_var_is_parameterisable():
+    xe, _ = paths.from_svg("M0,0 L100,0").to_ffmpeg_overlay(
+        frames=60, samples=4, frame_var="on"
+    )
+    assert "on/60" in xe
+
+
+def test_from_svg_rejects_unsupported_commands():
+    # Arc (and S/T) params must not be silently consumed as line coords.
+    with pytest.raises(ValueError, match="unsupported SVG path command"):
+        paths.from_svg("M0 0 A 5 5 0 0 1 10 10")

@@ -26,7 +26,7 @@ grouped by style. Neither can be dropped in 1:1. So:
 | File | Role |
 |---|---|
 | `src/mediahub/web/static/theme/theme-motion.css` | Effect layer — loads after `theme-components`, before the responsive guardrails (which stay last). |
-| `src/mediahub/web/static/js/ui-kit.js` | Behaviour layer — pointer-follow, tilt, marquee, IntersectionObserver reveal/count-up/flap, flip-words, tab indicator, compare, lens, scroll progress, `MH.steps` / `MH.renderLogSteps` / `MH.btnState`. Deferred, re-entrant (`MH.ui.init`), fails safe. |
+| `src/mediahub/web/static/js/ui-kit.js` | Behaviour layer — pointer-follow, tilt, IntersectionObserver reveal/count-up, tab indicator, compare, lens, scroll progress, `MH.renderLogSteps` / `MH.btnState` / `MH.cursorReadout`. Deferred, re-entrant (`MH.ui.init`), fails safe. |
 
 Loader wiring: `theme_tokens.py` exports `THEME_MOTION_CSS`; `web.py` appends it to
 `BASE_CSS` and adds `<script defer src=".../js/ui-kit.js">` to the shared shell.
@@ -35,7 +35,7 @@ Loader wiring: `theme_tokens.py` exports `THEME_MOTION_CSS`; `web.py` appends it
 
 | Screen | Effects integrated |
 |---|---|
-| **Home / landing** | Spotlight (hero ambient), Infinite-Moving-Cards (sport marquee), Card-Spotlight (sample cards + the 4 step cards), split-flap Flapboard (PB time), gradient-text (marquee label), reveal (final CTA via `.mh-reveal`) |
+| **Home / landing** | Spotlight (hero ambient), count-up/odometer hero stats (`data-mh-count` + `data-mh-odometer`), reveal + reveal-lines (sections and final CTA via `.mh-reveal`). *(The sport marquee, home Card-Spotlight samples and split-flap Flapboard were later removed in the "Tidy home page" pass — see the REMOVED rows below.)* |
 | **Upload** | Aurora ambient (entry hero) |
 | **Processing** | Multi-Step Loader (real pipeline log → live step checklist via `MH.renderLogSteps`) |
 | **Review** | Count-up (recognition stats, via the existing `data-mh-count`), bar-fill (priority bars), Animated-Tooltip (athlete avatar on every card → name · club · meet haul, via `.mh-tooltip`), client-side workflow Tabs (`.mh-tabs` — Queue/Approved filter switches in place, no reload, UI2.4), inline machine-readable **Codeblock** (the run's recognition data, syntax-highlighted + copyable on the Recognition-summary card, UI2.8) |
@@ -50,9 +50,10 @@ Loader wiring: `theme_tokens.py` exports `THEME_MOTION_CSS`; `web.py` appends it
 Moving-Border + Stateful-Button are wired together on the primary-CTA host
 (`.btn.mh-cta-motion`, UI2.5 — Upload / Make). The kit also ships ready-to-use effects not yet
 wired to a specific screen (Aurora, Grid/Dot/Scales/Grain backgrounds, gradient-border,
-3D tilt, Glare, hover-group, Hover-Border-Gradient, Text-Generate, Flip-Words,
-Hero-Highlight, Compare slider, Tracing-Beam, Timeline, Vanish-input) for follow-on
-surfaces.
+3D tilt, hover-group, Hover-Border-Gradient, Text-Generate, Hero-Highlight,
+Compare slider, Tracing-Beam, Timeline, Vanish-input) for follow-on surfaces.
+(Glare, Flip-Words and the Flapboard shipped in the kit but were never wired,
+and were deleted in the dead-code sweep — see the REMOVED verdicts below.)
 
 ---
 
@@ -105,11 +106,11 @@ MediaHub's UI guide: *avoid generic AI-SaaS patterns; no over-animation*).
 | Card Hover Effect | ADOPT | `.mh-hover-group` |
 | Wobble Card | PARTIAL | |
 | Expandable Card | PARTIAL | pending review-card detail |
-| Card Spotlight | ADOPT | `.mh-spotlight-card` (home samples) |
+| Card Spotlight | ADOPT | `.mh-spotlight-card` (sign-in org profile cards) |
 | Focus Cards | PARTIAL | needs a grid gallery (media lib is a table) |
-| Infinite Moving Cards | ADOPT | `.mh-marquee` (sport band) |
+| Infinite Moving Cards | REMOVED | shipped as `.mh-marquee` (home sport band), removed with the "Tidy home page" pass; no producer at HEAD |
 | Draggable Card | SKIP | no use |
-| Glare Card | ADOPT | `.mh-glare` (featured card) |
+| Glare Card | REMOVED | shipped as `.mh-glare` but no surface ever used it; deleted in the dead-code sweep |
 | Direction Aware Hover | PARTIAL | needs image grid |
 
 ### Scroll / parallax
@@ -130,10 +131,10 @@ MediaHub's UI guide: *avoid generic AI-SaaS patterns; no over-animation*).
 | Colourful Text | SKIP | reads AI-generic |
 | Text Generate Effect | ADOPT | `.mh-text-generate` (kit; skipped on editable caption by design) |
 | Typewriter Effect | PARTIAL | |
-| Flip Words | ADOPT | `.mh-flip-words` |
+| Flip Words | REMOVED | shipped as `.mh-flip-words` but no surface ever used it; deleted in the dead-code sweep |
 | Text Hover Effect | PARTIAL | |
 | Hero Highlight | ADOPT | `.mh-highlight` |
-| Text Flipping Board | ADOPT | `.mh-flapboard` (PB time; scoreboard feel) |
+| Text Flipping Board | REMOVED | shipped as `.mh-flapboard` but no surface ever used it; deleted in the dead-code sweep |
 
 ### Buttons / loaders / nav / inputs
 | Component | Verdict | Note |
@@ -177,8 +178,9 @@ MediaHub's UI guide: *avoid generic AI-SaaS patterns; no over-animation*).
 | Lens | ADOPT | `.mh-lens` (media library) |
 | 3D Pin / 3D Marquee | PARTIAL | |
 
-**Tally:** ~41 ADOPT, ~24 PARTIAL (idea taken; restrained or awaiting a host surface),
-~25 SKIP. Every one of the 108 has a verdict.
+**Tally:** ~37 ADOPT, ~24 PARTIAL (idea taken; restrained or awaiting a host surface),
+~25 SKIP, 4 REMOVED (shipped, then deleted once unwired — Glare, Flip Words,
+Flapboard, Infinite Moving Cards). Every one of the 108 has a verdict.
 
 ---
 

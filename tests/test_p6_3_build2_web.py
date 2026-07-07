@@ -150,6 +150,42 @@ def test_mockup_templates_list(app_env):
     assert "poster_wall" in ids and "phone_post" in ids
 
 
+def test_mockup_uses_profile_brand_accent(app_env, monkeypatch):
+    """_profile_accent_hex must read the RESOLVED brand kit (manual palette
+    included) — the raw brand_kit dict uses ``*_colour`` keys, so the old
+    direct ``accent``/``primary`` read missed every profile and mockups were
+    never brand-tinted."""
+    app, wm, tmp_path, iu, st = app_env
+    from mediahub.web.club_profile import ClubProfile, save_profile
+
+    save_profile(
+        ClubProfile(
+            profile_id="club-x",
+            display_name="Club X",
+            brand_palette_manual={
+                "primary": "#0A2540",
+                "secondary": "#111111",
+                "accent": "#C9A227",
+            },
+        )
+    )
+    a = _seed(st, tmp_path)
+    seen = {}
+    import mediahub.mockups as mk
+
+    real = mk.compose_mockup
+
+    def spy(art, template, accent=None, **kw):
+        seen["accent"] = accent
+        return real(art, template, accent=accent, **kw)
+
+    monkeypatch.setattr(mk, "compose_mockup", spy)
+    r = _client(app).post(f"/api/media-library/{a.id}/mockup/poster_wall")
+    assert r.status_code == 200
+    # Palette normalisation lowercases hexes — compare case-insensitively.
+    assert (seen["accent"] or "").lower() == "#c9a227"
+
+
 # --- generated-images history ----------------------------------------------
 
 

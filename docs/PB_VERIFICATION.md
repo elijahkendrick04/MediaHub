@@ -42,8 +42,9 @@ The caption layer uses `pb_status` to choose phrasing:
 - `NOT_PB` → no PB callout (other angles take over)
 - `UNKNOWN` → "Strong swim — couldn't verify history"
 
-This is enforced in `mediahub.web.humanise.humanise` and in the AI prompt
-template in `mediahub.web.ai_caption._SYSTEM_PROMPT`.
+This is enforced in `mediahub.web.humanise.humanise` and in the achievement
+prose the AI prompt is built from (`mediahub.ai_core.narrate.narrate_achievement`,
+whose `_PB_PHRASES` mapping distinguishes confirmed / likely / unverified PBs).
 
 ## Trust ledger
 

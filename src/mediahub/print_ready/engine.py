@@ -334,20 +334,29 @@ def prepare_print(
     out = (Path(out_dir) if out_dir else _cache_dir()) / f"{key}.pdf"
 
     if out.exists():
-        used = request.colour_mode  # the baked-in mode is part of the key
-        manifest = _manifest(product, placement, report, request, out, used, "")
-        return PrintResult(
-            product_slug=product.slug,
-            placement_slug=placement.slug,
-            preflight=report,
-            rendered=True,
-            pdf_path=out,
-            colour_mode_requested=request.colour_mode,
-            colour_mode_used=used,
-            from_cache=True,
-            mockup_path=_existing_mockup(out) if mockup else None,
-            manifest=manifest,
-        )
+        # The key holds the REQUESTED mode; the sidecar records what the cold
+        # render actually achieved. Only a hit whose recorded outcome matches
+        # the request may be served — a recorded downgrade (or a missing /
+        # corrupt sidecar) falls through to a fresh render, so a later-installed
+        # CMYK/PDF-X toolchain re-converts instead of the hit claiming a mode
+        # the file doesn't have.
+        cached = _cached_colour_outcome(out, request.colour_mode)
+        if cached is not None:
+            used, note = cached
+            manifest = _manifest(product, placement, report, request, out, used, note)
+            return PrintResult(
+                product_slug=product.slug,
+                placement_slug=placement.slug,
+                preflight=report,
+                rendered=True,
+                pdf_path=out,
+                colour_mode_requested=request.colour_mode,
+                colour_mode_used=used,
+                note=note,
+                from_cache=True,
+                mockup_path=_existing_mockup(out) if mockup else None,
+                manifest=manifest,
+            )
 
     info = f"{product.title.upper()} · {placement.label} · MediaHub"
     html = build_raster_print_html(
@@ -384,6 +393,19 @@ def prepare_print(
         mockup_path=mockup_path,
         manifest=manifest,
     )
+
+
+def _cached_colour_outcome(out: Path, requested: str) -> Optional[tuple[str, str]]:
+    """The ``(used, note)`` a cache hit may honestly report, or ``None`` to re-render."""
+    try:
+        m = json.loads(out.with_suffix(".json").read_text(encoding="utf-8"))
+        used = str(m.get("colour_mode_used") or "")
+        note = str(m.get("note") or "")
+    except Exception:
+        return None
+    if used != requested:
+        return None
+    return used, note
 
 
 def _compose_mockup(art_bytes: bytes, product: PrintProduct, pdf_out: Path) -> Optional[Path]:

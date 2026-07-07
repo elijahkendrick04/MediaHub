@@ -41,11 +41,6 @@ try:  # stdlib on 3.9+; tasks default to UTC if a zone is unavailable
 except Exception:  # pragma: no cover
     ZoneInfo = None  # type: ignore
 
-# Same derivation web.py uses, so we hit the SAME data.db without importing the
-# (heavy, cycle-prone) web module. In production DATA_DIR is set in the env.
-DATA_DIR = Path(os.environ.get("DATA_DIR", str(Path(__file__).resolve().parents[1])))
-DB_PATH = DATA_DIR / "data.db"
-
 SCHEDULE_KINDS = ("once", "daily", "weekly", "monthly", "cron")
 RUN_RUNNING = "running"
 RUN_DONE = "done"
@@ -91,17 +86,29 @@ def _iso(dt: datetime) -> str:
     return dt.astimezone(timezone.utc).replace(microsecond=0).isoformat()
 
 
+def _db_path() -> Path:
+    """The shared ``data.db`` path, resolved from ``DATA_DIR`` at call time.
+
+    Same derivation web.py uses, so we hit the SAME data.db without importing
+    the (heavy, cycle-prone) web module — and never frozen at import, so a
+    ``DATA_DIR`` set after this module loads is still honoured (the sibling
+    autonomy ledger was fixed the same way)."""
+    data_dir = Path(os.environ.get("DATA_DIR", str(Path(__file__).resolve().parents[1])))
+    return data_dir / "data.db"
+
+
 def _connect(db_path: Optional[Path] = None) -> sqlite3.Connection:
     """Open a short-lived connection to the shared db with the same busy_timeout
     web.py uses, so two workers racing a claim wait briefly rather than erroring."""
-    conn = sqlite3.connect(str(db_path or DB_PATH), timeout=5.0)
+    target = db_path or _db_path()
+    conn = sqlite3.connect(str(target), timeout=5.0)
     conn.row_factory = sqlite3.Row
     try:
         conn.execute("PRAGMA busy_timeout=5000")
     except Exception as e:
         # Without the pragma the default (much shorter) timeout applies and
         # racing claims are likelier to error — keep going, but say so.
-        log.warning("scheduler: could not set busy_timeout on %s: %s", db_path or DB_PATH, e)
+        log.warning("scheduler: could not set busy_timeout on %s: %s", target, e)
     return conn
 
 
@@ -271,46 +278,6 @@ def due_slot_utc(task: ScheduledTask, now_utc: datetime, catchup_secs: int) -> O
     if (now_utc - prev_utc).total_seconds() <= catchup_secs:
         return prev_utc.isoformat()
     return None
-
-
-def next_fire_utc(task: ScheduledTask, after_utc: Optional[datetime] = None) -> Optional[str]:
-    """The next scheduled UTC instant strictly after ``after_utc`` (for display
-    / a future 'week ahead' view). None for a ``once`` task already in the past."""
-    after = after_utc or _now_utc()
-    if task.schedule_kind == "once":
-        try:
-            dt = datetime.fromisoformat(task.schedule_expr.strip())
-        except ValueError:
-            return None
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=_tz(task.timezone))
-        slot = dt.astimezone(timezone.utc).replace(microsecond=0)
-        return slot.isoformat() if slot > after else None
-    tz = _tz(task.timezone)
-    try:
-        if task.schedule_kind == "daily":
-            prev = _prev_daily_slot(task.schedule_expr, tz, after)
-            nxt = prev + timedelta(days=1)
-        elif task.schedule_kind == "weekly":
-            prev = _prev_weekly_slot(task.schedule_expr, tz, after)
-            nxt = prev + timedelta(weeks=1)
-        elif task.schedule_kind == "monthly":
-            # Advance by ~31 days then compute the prev slot from there.
-            candidate = after + timedelta(days=32)
-            nxt = _prev_monthly_slot(task.schedule_expr, tz, candidate)
-            if nxt <= after:
-                nxt = _prev_monthly_slot(task.schedule_expr, tz, candidate + timedelta(days=32))
-        else:  # "cron" — requires croniter
-            try:
-                from croniter import croniter  # noqa: PLC0415
-            except Exception:
-                return None
-            cron = _to_cron(task.schedule_kind, task.schedule_expr)
-            nxt_local = croniter(cron, after.astimezone(tz)).get_next(datetime)
-            nxt = nxt_local.astimezone(timezone.utc).replace(microsecond=0)
-    except Exception:
-        return None
-    return nxt.astimezone(timezone.utc).replace(microsecond=0).isoformat()
 
 
 # ── task CRUD ──────────────────────────────────────────────────────────────
@@ -532,7 +499,6 @@ __all__ = [
     "RUN_DONE",
     "RUN_FAILED",
     "RUN_INTERRUPTED",
-    "DB_PATH",
     "init_schema",
     "create_task",
     "list_tasks",
@@ -540,7 +506,6 @@ __all__ = [
     "set_enabled",
     "delete_task",
     "due_slot_utc",
-    "next_fire_utc",
     "claim_run",
     "mark_done",
     "mark_failed",

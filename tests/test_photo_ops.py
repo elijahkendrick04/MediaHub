@@ -411,6 +411,34 @@ def test_recipe_clamps_out_of_range_params():
     assert r.steps[1].params["amount"] <= 100.0
 
 
+def test_recipe_step_count_is_capped():
+    # Posted recipes are untrusted: thousands of steps must not each run a
+    # full-image pass. (Legit recipes are single-instance per op, far below the cap.)
+    spec = {"steps": [{"op": "brightness", "params": {"factor": 1.01}}] * 5000}
+    r = po.EditRecipe.from_dict(spec)
+    assert len(r.steps) <= po._MAX_STEPS
+
+
+def test_brush_stamps_are_capped():
+    stamps = [{"cx": 0.5, "cy": 0.5, "r": 0.01, "strength": 1.0}] * 10000
+    op = po.EditOp("blur_brush", {"stamps": stamps})
+    assert len(op.params["stamps"]) <= po._MAX_STAMPS
+    assert len(po._stamp_regions({"stamps": stamps})) <= po._MAX_STAMPS
+
+
+def test_stamp_mask_overlap_takes_stronger_value():
+    # The shared-mask draw must keep max-wins semantics on overlapping discs,
+    # whichever order the stamps arrive in.
+    stamps = [
+        (0.5, 0.5, 0.3, 1.0),  # strong disc
+        (0.6, 0.5, 0.3, 0.2),  # weaker disc, overlapping, listed after
+    ]
+    mask = po._stamp_mask((100, 100), stamps)
+    assert mask.getpixel((55, 50)) == 255  # overlap keeps the stronger value
+    mask_rev = po._stamp_mask((100, 100), list(reversed(stamps)))
+    assert list(mask.getdata()) == list(mask_rev.getdata())
+
+
 def test_recipe_apply_is_deterministic():
     img = _gradient_rgb()
     r = po.EditRecipe.build(

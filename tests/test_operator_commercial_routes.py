@@ -12,16 +12,11 @@ from unittest import mock
 
 import pytest
 
-DEV_KEY = "operator-key-for-commercial-tests"
 PASSWORD = "twelve-chars-long"
 
 
-def _make_app(monkeypatch, tmp_path, *, dev_key: str | None = DEV_KEY, stripe: bool = False):
+def _make_app(monkeypatch, tmp_path, *, stripe: bool = False):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    if dev_key is None:
-        monkeypatch.delenv("MEDIAHUB_DEV_KEY", raising=False)
-    else:
-        monkeypatch.setenv("MEDIAHUB_DEV_KEY", dev_key)
     if stripe:
         monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test_placeholder_not_a_real_key")
         monkeypatch.setenv("STRIPE_WEBHOOK_SECRET", "whsec_test_placeholder")
@@ -45,7 +40,7 @@ def _login_operator(client):
 
 
 def test_console_redirects_anonymous_to_developer_signin(monkeypatch, tmp_path):
-    app = _make_app(monkeypatch, tmp_path, dev_key=None)
+    app = _make_app(monkeypatch, tmp_path)
     c = app.test_client()
     r = c.get("/operator/commercial")
     assert r.status_code in (302, 303)

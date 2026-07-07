@@ -71,6 +71,14 @@ class TestCatalogue:
         for f in all_formats():
             assert f.accepts <= set(OPTION_KEYS), f"{f.key} accepts unknown option"
 
+    def test_every_alias_targets_a_real_format(self):
+        # An alias to a format that doesn't exist implies support while still
+        # raising UnknownFormatError (e.g. the old tif→tiff, htm→html).
+        from mediahub.export_engine.formats import _ALIASES
+
+        for alias, target in _ALIASES.items():
+            assert has_format(target), f"alias {alias!r} points at missing format {target!r}"
+
     def test_suffix_starts_with_dot_and_mime_present(self):
         for f in all_formats():
             assert f.suffix.startswith("."), f"{f.key} suffix not dotted"

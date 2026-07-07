@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>{{ATHLETE_FULL_NAME}} — {{RESULT_VALUE}}</title>
+<style>{{BASE_CSS}}
+
+/* ===================================================================
+   radial_rings  (v2 archetype, PAR-7 — G1.1)
+
+   A radial competition target built as a RIPPLE: several concentric accent
+   rings emanate outward from a centre bullseye that holds the verified
+   RESULT — the number itself, dead centre — with the athlete name seated
+   below the rings and the club lockup anchoring the foot. The rings thin
+   and fade as they travel out, so the eye reads a pulse leaving the centre.
+
+   Structural signature: a MULTI-ring concentric ripple with the result
+   value at the bullseye and the name below. This is deliberately distinct
+   from radial_competition_ring (a SINGLE thick ring badge with a punched
+   core and clock ticks, accent-coloured numeral) — here there is no punched
+   disc, the numeral rides the brand ground in the on-primary role, and it
+   is a stack of many emanating rings rather than one dial. Mirrors the R1.2
+   `radial_rings` motion scene (rings ripple outward, staggered per ring).
+
+   Fully typographic — no photo. Overflow safety: the bullseye is a narrow
+   centred column far inside the inner ring, so the result is scaled to
+   ~0.5 of the full-canvas result var and allowed to WRAP; the surname
+   below (full width) uses ~0.62 of the surname var and breaks too. Holds
+   centred at 1080x1350 and 1080x1920 with the foot bottom-anchored.
+   =================================================================== */
+
+.rl {
+  position: relative;
+  width: {{WIDTH}}px;
+  height: {{HEIGHT}}px;
+  overflow: hidden;
+  display: flex; flex-direction: column; align-items: center;
+  background: var(--mh-primary);
+  color: var(--mh-on-primary);
+  font-family: 'Inter', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  padding: 96px 70px 80px;
+  text-align: center;
+}
+.rl *, .rl *::before, .rl *::after { box-sizing: border-box; }
+
+.rl__label {
+  font-family: 'Space Grotesk', 'Inter', sans-serif; font-weight: 800;
+  font-size: 26px; letter-spacing: 0.22em; text-transform: uppercase;
+  color: var(--mh-accent); margin-bottom: 44px;
+  max-width: 100%; overflow-wrap: anywhere;
+}
+
+/* the emanating ring target — concentric rings centred on the bullseye */
+.rl__rings {
+  position: relative; flex: 0 0 auto;
+  width: 600px; height: 600px; max-width: 100%;
+}
+.rl__ring {
+  position: absolute; inset: 0; margin: auto;
+  border-radius: 50%; border-style: solid; border-color: var(--mh-accent);
+}
+.rl__ring--1 { width: 600px; height: 600px; border-width: 2px; opacity: 0.24; }
+.rl__ring--2 { width: 486px; height: 486px; border-width: 3px; opacity: 0.40; }
+.rl__ring--3 { width: 372px; height: 372px; border-width: 5px; opacity: 0.62; }
+.rl__ring--4 { width: 262px; height: 262px; border-width: 8px; opacity: 0.9; }
+/* a soft accent bloom seating the number at the centre */
+.rl__bloom {
+  position: absolute; inset: 0; margin: auto;
+  width: 340px; height: 340px; border-radius: 50%;
+  background: radial-gradient(circle, rgba(0,0,0,0) 46%, rgba(0,0,0,0.18) 100%);
+}
+
+/* bullseye — event + verified result, dead centre of the rings */
+.rl__eye {
+  position: absolute; inset: 0; margin: auto;
+  width: 300px; height: 300px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 10px;
+}
+.rl__eye-event {
+  font-family: 'Space Grotesk', 'Inter', sans-serif; font-weight: 700;
+  font-size: 22px; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--mh-on-primary); opacity: 0.82; overflow-wrap: anywhere;
+}
+.rl__result {
+  font-family: 'JetBrains Mono', 'Space Grotesk', monospace; font-feature-settings: "tnum";
+  font-weight: 700; font-size: calc(var(--mh-fit-result-px, 118px) * 0.5);
+  font-variation-settings: var(--mh-axes-result, normal);
+  line-height: 0.9; letter-spacing: -0.02em; color: var(--mh-on-primary);
+  white-space: normal; overflow-wrap: anywhere; word-break: break-word; max-width: 100%;
+}
+
+/* name seated below the target */
+.rl__below { margin-top: 52px; width: 100%; }
+.rl__first {
+  font-family: 'Space Grotesk', 'Inter', sans-serif; font-weight: 700;
+  font-size: 38px; letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--mh-accent); margin-bottom: 2px; overflow-wrap: anywhere;
+}
+.rl__surname {
+  font-family: 'Anton', 'Bebas Neue', Impact, sans-serif; font-weight: 400;
+  font-size: calc(var(--mh-fit-surname-px, 132px) * 0.62);
+  line-height: 0.94; letter-spacing: -0.01em; text-transform: uppercase;
+  color: var(--mh-on-primary);
+  white-space: normal; overflow-wrap: anywhere; word-break: break-word; max-width: 100%;
+}
+.rl__stat {
+  margin-top: 16px;
+  font-family: 'Space Grotesk', 'Inter', sans-serif; font-weight: 800;
+  font-size: 24px; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--mh-accent); overflow-wrap: anywhere;
+}
+.rl__stat:empty { display: none; }
+
+.rl__foot {
+  margin-top: auto; padding-top: 30px; width: 100%;
+  border-top: 2px solid var(--mh-outline);
+  display: flex; align-items: center; justify-content: space-between; gap: 24px;
+  text-align: left;
+}
+.rl__logo { height: 54px; width: auto; flex: 0 0 auto; }
+.rl__logo img, .rl__logo svg { height: 100%; width: auto; object-fit: contain; display: block; }
+.rl__meta { display: flex; flex-direction: column; min-width: 0; }
+.rl__meet {
+  font-family: 'Inter', sans-serif; font-weight: 600; font-size: 20px;
+  color: var(--mh-on-primary); opacity: 0.85; overflow-wrap: anywhere;
+}
+.rl__club {
+  font-family: 'Inter', sans-serif; font-weight: 800; font-size: 19px;
+  text-transform: uppercase; color: var(--mh-on-primary); overflow-wrap: anywhere;
+}
+.rl__sponsor { flex: 0 0 auto; }
+</style>
+</head>
+<body>
+<div class="rl">
+  <div class="rl__label">{{ACHIEVEMENT_LABEL}}</div>
+
+  <div class="rl__rings">
+    <div class="rl__ring rl__ring--1"></div>
+    <div class="rl__ring rl__ring--2"></div>
+    <div class="rl__ring rl__ring--3"></div>
+    <div class="rl__ring rl__ring--4"></div>
+    <div class="rl__bloom"></div>
+    <div class="rl__eye">
+      <div class="rl__eye-event">{{EVENT_NAME}}</div>
+      <div class="rl__result">{{RESULT_VALUE}}</div>
+    </div>
+  </div>
+
+  <div class="rl__below">
+    <div class="rl__first">{{ATHLETE_FIRST_NAME}}</div>
+    <div class="rl__surname">{{ATHLETE_SURNAME_DISPLAY}}</div>
+    <div class="rl__stat">{{HERO_STAT}}</div>
+  </div>
+
+  <div class="rl__foot">
+    <div class="rl__logo">{{LOGO_BLOCK}}</div>
+    <div class="rl__meta">
+      <div class="rl__meet">{{MEET_NAME}}</div>
+      <div class="rl__club">{{CLUB_FULL}}</div>
+    </div>
+    <div class="rl__sponsor">{{SPONSOR_BLOCK}}</div>
+  </div>
+
+  {{ACCENT_DECORATION}}
+</div>
+</body>
+</html>

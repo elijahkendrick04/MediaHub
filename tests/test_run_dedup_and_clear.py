@@ -85,6 +85,18 @@ def test_duplicate_map_ignores_empty_signals():
     assert wm._duplicate_map(rows) == {}
 
 
+def test_placeholder_unknown_meet_is_not_a_usable_fingerprint():
+    """The '(unknown)' DISPLAY placeholder normalises to 'unknown' (non-empty),
+    so fingerprinting it would make every unnamed run share one id. _persist_run
+    must fingerprint the raw canonical name ('' when there is none) instead."""
+    wm = _wm()
+    # The pitfall the fix avoids: the placeholder normalises to a real token.
+    assert wm._normalize_meet_name("(unknown)") == "unknown"
+    assert wm._meet_fingerprint("org1", "(unknown)", "2026-05-10") != ""
+    # What _persist_run now passes for an un-named run → no fingerprint.
+    assert wm._meet_fingerprint("org1", "", "2026-05-10") == ""
+
+
 # ---------------------------------------------------------------------------
 # App-backed tests
 # ---------------------------------------------------------------------------
@@ -174,6 +186,37 @@ def test_runs_table_has_dedup_columns(client):
     conn.close()
     assert "content_hash" in cols
     assert "meet_fingerprint" in cols
+
+
+def test_two_unnamed_runs_share_no_fingerprint(client):
+    """Two runs with no canonical meet (e.g. error runs) must NOT be fingerprinted
+    to the same id — otherwise _duplicate_map falsely badges the newer as a
+    'Re-run' of the first on Activity / My Season."""
+    _c, wm, _ = client
+    from mediahub.pipeline.pipeline_v4 import PipelineRunV4
+
+    for rid, ts in (("unnamed1", "2026-05-10T10:00:00"), ("unnamed2", "2026-05-11T10:00:00")):
+        run = PipelineRunV4(run_id=rid, started_at=ts, finished_at=ts, profile_id="club-a")
+        run.canonical_meet = None  # nothing to name → nothing to fingerprint
+        wm._persist_run(run, "meet.hy3")
+
+    conn = wm._db()
+    rows = {
+        r["id"]: r["meet_fingerprint"]
+        for r in conn.execute(
+            "SELECT id, meet_fingerprint FROM runs WHERE profile_id = 'club-a'"
+        ).fetchall()
+    }
+    conn.close()
+    assert rows["unnamed1"] == "" and rows["unnamed2"] == ""
+    # …so the duplicate map groups nothing (no false Re-run badge).
+    dmap = wm._duplicate_map(
+        [
+            {"id": "unnamed2", "created_at": "2026-05-11", "content_hash": "", "meet_fingerprint": rows["unnamed2"]},
+            {"id": "unnamed1", "created_at": "2026-05-10", "content_hash": "", "meet_fingerprint": rows["unnamed1"]},
+        ]
+    )
+    assert dmap == {}
 
 
 def test_find_duplicate_run_by_hash_and_fingerprint(client):

@@ -20,7 +20,7 @@ import re
 from dataclasses import dataclass
 from typing import Any, Dict, List, Tuple
 
-_TOKEN = re.compile(r"([MmLlHhVvCcQqZz])|(-?\d*\.?\d+(?:[eE][-+]?\d+)?)")
+_TOKEN = re.compile(r"([A-Za-z])|(-?\d*\.?\d+(?:[eE][-+]?\d+)?)")
 
 Point = Tuple[float, float]
 
@@ -121,12 +121,19 @@ class MotionPath:
             "@keyframes mh-path-move{from{offset-distance:0%}to{offset-distance:100%}}"
         )
 
-    def to_ffmpeg_overlay(self, frames: int, samples: int = 12) -> Tuple[str, str]:
-        """Piecewise-linear overlay ``x``/``y`` expressions over ``on``/frames."""
+    def to_ffmpeg_overlay(
+        self, frames: int, samples: int = 12, *, frame_var: str = "n"
+    ) -> Tuple[str, str]:
+        """Piecewise-linear overlay ``x``/``y`` expressions over ``frame_var``/frames.
+
+        ``frame_var`` defaults to ``n`` — the frame counter the ``overlay``
+        filter actually defines (``on`` is zoompan-only); pass the right
+        variable when targeting a different filter.
+        """
         pts = [(s / samples, self.point_at(s / samples)) for s in range(samples + 1)]
         return (
-            _piecewise([(t, p[0]) for t, p in pts], frames),
-            _piecewise([(t, p[1]) for t, p in pts], frames),
+            _piecewise([(t, p[0]) for t, p in pts], frames, frame_var),
+            _piecewise([(t, p[1]) for t, p in pts], frames, frame_var),
         )
 
 
@@ -196,7 +203,9 @@ def from_svg(d: str, *, substeps: int = 16) -> MotionPath:
             poly.extend(_line(cur, start, substeps))
             cur = start
         else:
-            i += 1  # unknown command token — skip defensively
+            # Unsupported command (A/S/T/…): consuming its params as
+            # continuation coords would silently draw the wrong path.
+            raise ValueError(f"unsupported SVG path command {cmd!r} in {d!r}")
 
     if not poly:
         poly = [(0.0, 0.0)]
@@ -206,17 +215,17 @@ def from_svg(d: str, *, substeps: int = 16) -> MotionPath:
     return MotionPath(d=d, polyline=tuple(poly), cum_len=tuple(cum))
 
 
-def _piecewise(samples: List[Tuple[float, float]], frames: int) -> str:
-    """Nested ``if(lt(t,..),lerp,..)`` over ``t = on/frames`` for FFmpeg."""
+def _piecewise(samples: List[Tuple[float, float]], frames: int, frame_var: str = "n") -> str:
+    """Nested ``if(lt(t,..),lerp,..)`` over ``t = frame_var/frames`` for FFmpeg."""
     expr = _num(samples[-1][1])
     for k in range(len(samples) - 2, -1, -1):
         t0, v0 = samples[k]
         t1, v1 = samples[k + 1]
         span = t1 - t0 or 1.0
         # linear interpolation of v across [t0,t1] in terms of t
-        frac = f"((on/{frames})-{_num(t0)})/{_num(span)}"
+        frac = f"(({frame_var}/{frames})-{_num(t0)})/{_num(span)}"
         seg = f"({_num(v0)}+({_num(v1 - v0)})*({frac}))"
-        expr = f"if(lt(on/{frames},{_num(t1)}),{seg},{expr})"
+        expr = f"if(lt({frame_var}/{frames},{_num(t1)}),{seg},{expr})"
     return expr
 
 

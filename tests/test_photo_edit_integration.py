@@ -188,6 +188,59 @@ def test_export_profile_picture_creates_square_draft(tmp_path):
     assert store.get(new.id) is not None
 
 
+def test_export_profile_picture_non_square_is_not_distorted(tmp_path):
+    """A 4:3 source must be centre-cropped square, never squashed to 512x512."""
+    store = _store(tmp_path)
+    # 400x300: centre 300x300 square red, the outer flanks blue. A distorting
+    # resize would drag blue into the avatar; a centred crop keeps it all red.
+    img = Image.new("RGB", (400, 300), (0, 0, 255))
+    img.paste(Image.new("RGB", (300, 300), (255, 0, 0)), (50, 0))
+    p = tmp_path / "wide.jpg"
+    img.save(p)
+    a = store.save(MediaAsset(id="", filename="wide.jpg", path=str(p), type="athlete_action", profile_id="club_a"))
+    new = pe.export_profile_picture(a, store, preset="avatar_circle")
+    with Image.open(new.path) as im:
+        assert im.size == (512, 512)
+        r, g, b, alpha = im.convert("RGBA").getpixel((10, 256))
+        assert alpha > 0
+        assert r > 200 and b < 60  # red centre-crop content, no squashed blue
+
+
+def test_avatar_ring_preset_draws_a_ring(tmp_path):
+    store = _store(tmp_path)
+    a = _save_asset(store, tmp_path, size=(300, 300), rgb=(10, 120, 10))
+    ring = pe.export_profile_picture(a, store, preset="avatar_ring")
+    circle = pe.export_profile_picture(a, store, preset="avatar_circle")
+    with Image.open(ring.path) as im_ring, Image.open(circle.path) as im_circle:
+        assert im_ring.tobytes() != im_circle.tobytes()
+        # a ring pixel near the left edge of the centre row carries the ring
+        # colour (neutral white here — no club profile resolves in this store),
+        # while the plain circle shows the photo's green there
+        rr, rg, rb, ra = im_ring.convert("RGBA").getpixel((20, 256))
+        cr, cg, cb, _ = im_circle.convert("RGBA").getpixel((20, 256))
+        assert ra == 255
+        assert (rr, rg, rb) != (cr, cg, cb)
+        assert rr > 200 and rb > 200  # white fallback ring, not the green photo
+
+
+def test_apply_scaled_enhance_suggestion_teaches_memory(tmp_path):
+    store = _store(tmp_path)
+    a = _save_asset(store, tmp_path, rgb=(30, 40, 60))  # dim, casted
+    scaled = pe.enhance_auto(a.path, strength=0.5)
+    assert not scaled.is_noop()
+    got = pe.maybe_record_enhance_accepted(a, scaled, store)
+    assert got == 0.5
+    assert pe.remembered_enhance_strength("club_a", store) < 1.0  # nudged
+
+
+def test_unrelated_manual_edit_never_teaches_memory(tmp_path):
+    store = _store(tmp_path)
+    a = _save_asset(store, tmp_path, rgb=(30, 40, 60))
+    manual = EditRecipe.build([("warmth", {"amount": 25}), ("crop", {"x": 0.1, "y": 0.1, "w": 0.8, "h": 0.8})])
+    assert pe.maybe_record_enhance_accepted(a, manual, store) is None
+    assert pe.remembered_enhance_strength("club_a", store) == 1.0
+
+
 def test_create_collage_from_two_assets(tmp_path):
     store = _store(tmp_path)
     a1 = _save_asset(store, tmp_path, name="a1.jpg", rgb=(200, 0, 0))
@@ -226,3 +279,23 @@ def test_collage_inherits_per_photo_edits(tmp_path):
     arr = np.asarray(Image.open(collage.path).convert("RGB"), np.float64)
     left = arr[:, :100]  # a1's cell — now near-grey, so R≈G≈B
     assert abs(left[..., 0].mean() - left[..., 1].mean()) < 30
+
+
+def test_asset_dicts_for_render_applies_edits(tmp_path):
+    """The render-path dicts must carry the materialised edit, not the raw
+    original — a safeguarding blur that only exists in the editor preview is a
+    broken promise on the rendered card."""
+    store = _store(tmp_path)
+    edited = _save_asset(store, tmp_path, name="edited.jpg")
+    plain = _save_asset(store, tmp_path, name="plain.jpg")
+    pe.save_recipe(edited, EditRecipe.build([("warmth", {"amount": 25})]), store)
+    edited = store.get(edited.id)
+
+    dicts = pe.asset_dicts_for_render([edited, plain], store)
+
+    assert len(dicts) == 2
+    edited_dict = next(d for d in dicts if d["path"] != plain.path and d["id"] == edited.id)
+    assert edited_dict["path"] == pe.effective_image_path(edited, store)
+    assert edited_dict["path"] != edited.path
+    plain_dict = next(d for d in dicts if d["id"] == plain.id)
+    assert plain_dict["path"] == plain.path

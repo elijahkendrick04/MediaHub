@@ -67,6 +67,13 @@ ImageLike = Union[str, bytes, Image.Image]
 # A hard ceiling so a resize/expand can never allocate an absurd buffer.
 _MAX_DIM = 8000
 
+# Posted recipes are untrusted JSON (up to the request-body cap), so bound the
+# work a single recipe can demand: at most this many steps per recipe and this
+# many brush stamps per op. Legit UI recipes are single-instance per op (~15
+# op kinds) and a dense manual brush pass is a few hundred stamps.
+_MAX_STEPS = 40
+_MAX_STAMPS = 2000
+
 
 # --------------------------------------------------------------------------- #
 # Clamps
@@ -619,6 +626,8 @@ def _stamp_regions(params: Dict[str, Any]) -> List[Tuple[float, float, float, fl
     """
     out: List[Tuple[float, float, float, float]] = []
     for s in params.get("stamps", []) or []:
+        if len(out) >= _MAX_STAMPS:
+            break
         if not isinstance(s, dict):
             continue
         cx = _clamp(s.get("cx", 0.5), *_BOUNDS["frac"])
@@ -634,19 +643,21 @@ def _stamp_regions(params: Dict[str, Any]) -> List[Tuple[float, float, float, fl
 def _stamp_mask(
     size: Tuple[int, int], stamps: Sequence[Tuple[float, float, float, float]]
 ) -> Image.Image:
-    """An 'L' mask painted from circular stamps (max strength wins on overlap)."""
+    """An 'L' mask painted from circular stamps (max strength wins on overlap).
+
+    All discs are drawn into ONE shared mask, weakest first, so a stronger disc
+    overwrites any overlap — max-wins for uniform-value discs — without
+    allocating a full-size image per stamp (recipes are untrusted input).
+    """
     w, h = size
     mask = Image.new("L", size, 0)
     short = min(w, h)
-    for cx, cy, r, st in stamps:
+    dd = ImageDraw.Draw(mask)
+    for cx, cy, r, st in sorted(stamps, key=lambda s: s[3]):
         px, py = cx * w, cy * h
         rad = r * short
         val = int(round(st * 255))
-        # Paint the strongest value into the disc (overlap = max, not additive).
-        disc = Image.new("L", size, 0)
-        dd = ImageDraw.Draw(disc)
         dd.ellipse((px - rad, py - rad, px + rad, py + rad), fill=val)
-        mask = ImageChops.lighter(mask, disc)  # overlap takes the stronger value
     return mask
 
 
@@ -964,6 +975,8 @@ def _hex_str(value: Any) -> str:
 def _canon_stamps(stamps: Any) -> List[Dict[str, float]]:
     out: List[Dict[str, float]] = []
     for s in stamps or []:
+        if len(out) >= _MAX_STAMPS:
+            break
         if not isinstance(s, dict):
             continue
         out.append(
@@ -1023,7 +1036,8 @@ class EditRecipe:
     steps: Tuple[EditOp, ...] = ()
 
     def __post_init__(self) -> None:
-        self.steps = tuple(s for s in self.steps if isinstance(s, EditOp) and s.valid)
+        # Cap the step count too — recipes arrive as untrusted posted JSON.
+        self.steps = tuple(s for s in self.steps if isinstance(s, EditOp) and s.valid)[:_MAX_STEPS]
 
     # --- construction --------------------------------------------------- #
 

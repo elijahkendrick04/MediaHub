@@ -18,6 +18,7 @@ from a template guess. Outputs are content-addressed (:mod:`documents.cache`).
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
 from pathlib import Path
@@ -45,24 +46,43 @@ def _inline(raw: str) -> str:
     return safe
 
 
+def _data_root() -> Path:
+    return Path(os.environ.get("DATA_DIR", ".")).resolve()
+
+
 def _img_src(src: str) -> str:
     """Resolve an image source to something Chromium can fetch under file://.
 
-    Local filesystem paths become ``file://`` URIs (the renderer is network-locked
-    to file:// by default); ``data:``/``file:``/``http(s):`` pass through."""
+    Spec srcs are tenant-editable (the advanced JSON editor), so only ``data:``
+    URIs and files under the app's own ``DATA_DIR`` resolve. A remote
+    ``http(s)://`` URL would be fetched server-side by Chromium (SSRF) and a
+    path outside ``DATA_DIR`` would include arbitrary local files — both are
+    dropped, matching the network-locked PNG preview path. A blocked image
+    renders as nothing, never a fabricated placeholder."""
     s = str(src or "").strip()
     if not s:
         return ""
     low = s.lower()
-    if low.startswith(("data:", "file:", "http://", "https://")):
+    if low.startswith("data:"):
         return s
-    try:
+    if low.startswith(("http://", "https://")):
+        return ""
+    if low.startswith("file:"):
+        from urllib.parse import unquote, urlparse
+
+        try:
+            p = Path(unquote(urlparse(s).path))
+        except (OSError, ValueError):
+            return ""
+    else:
         p = Path(s)
-        if p.exists():
-            return p.resolve().as_uri()
+    try:
+        rp = p.resolve()
+        if rp.is_file() and rp.is_relative_to(_data_root()):
+            return rp.as_uri()
     except (OSError, ValueError):
         pass
-    return s
+    return ""
 
 
 # ---------------------------------------------------------------------------
@@ -118,8 +138,25 @@ def _b_chart(p: dict, ctx: dict) -> str:
         return ""
 
 
-def _b_card(p: dict) -> str:
-    src = _img_src(p.get("src", ""))
+def _resolve_src(p: dict, ctx: dict) -> str:
+    """Resolve a block's image src via the context's asset resolver.
+
+    The site engine reuses these block renderers for public HTML, where a src
+    is a served URL fetched by the *visitor's* browser — its ``asset_url``
+    callable keeps those semantics. Document renders (server-side Chromium)
+    have no ``asset_url`` and fall through to the locked-down :func:`_img_src`."""
+    raw = p.get("src", "")
+    fn = ctx.get("asset_url")
+    if callable(fn):
+        try:
+            return str(fn(raw) or "")
+        except Exception:
+            return _img_src(raw)
+    return _img_src(raw)
+
+
+def _b_card(p: dict, ctx: dict) -> str:
+    src = _resolve_src(p, ctx)
     if not src:
         return ""
     alt = _h(p.get("alt", ""))
@@ -128,8 +165,8 @@ def _b_card(p: dict) -> str:
     return f'<figure class="doc-figure"><img src="{_h(src)}" alt="{alt}"/>{figcap}</figure>'
 
 
-def _b_media(p: dict) -> str:
-    src = _img_src(p.get("src", ""))
+def _b_media(p: dict, ctx: dict) -> str:
+    src = _resolve_src(p, ctx)
     if not src:
         return ""
     alt = _h(p.get("alt", ""))
@@ -193,9 +230,9 @@ def _render_block(block: Block, ctx: dict) -> str:
     if kind == "chart":
         return _b_chart(p, ctx)
     if kind == "card":
-        return _b_card(p)
+        return _b_card(p, ctx)
     if kind == "media":
-        return _b_media(p)
+        return _b_media(p, ctx)
     if kind == "stat":
         return _b_stat(p)
     if kind == "kpi_row":

@@ -430,3 +430,86 @@ class TestCacheHygiene:
         # Cache file must live under the tmp DATA_DIR, not the repo
         expected = isolated_data_dir / "brand_dna_cache" / "hygiene.example.json"
         assert expected.exists()
+
+
+# ---------------------------------------------------------------------------
+# 8. Streaming size cap on the fetchers
+# ---------------------------------------------------------------------------
+
+class _StreamResp:
+    """Streamed-response stand-in with an endless body."""
+
+    def __init__(self, *, encoding="utf-8", headers=None):
+        self.status_code = 200
+        self.headers = headers or {"Content-Type": "text/html; charset=utf-8"}
+        self.encoding = encoding
+        self.yielded = 0
+        self.closed = False
+
+    def iter_content(self, size):
+        while True:  # endless — must be cut off by the cap
+            self.yielded += 1
+            yield b"x" * size
+
+    def close(self):
+        self.closed = True
+
+
+class TestStreamingCap:
+    def test_page_fetch_stops_reading_at_cap(self, monkeypatch):
+        """The 2MB HTML cap applies WHILE streaming — a huge body is never
+        fully buffered before truncation."""
+        import requests
+
+        from mediahub.brand import dna_capture
+
+        resp = _StreamResp()
+        monkeypatch.setattr(dna_capture, "_url_is_safe", lambda _u: True)
+        monkeypatch.setattr(dna_capture, "_MAX_HTML_BYTES", 256 * 1024)
+        monkeypatch.setattr(requests, "get", lambda *a, **k: resp)
+
+        text = dna_capture._fetch("https://club.example/")
+        assert text is not None
+        assert len(text.encode("utf-8")) <= 256 * 1024
+        # 64KB chunks against a 256KB cap: the generator stopped early.
+        assert resp.yielded <= 5
+        assert resp.closed
+
+    def test_css_fetch_stops_reading_at_cap(self, monkeypatch):
+        import requests
+
+        from mediahub.brand import dna_capture
+
+        resp = _StreamResp(headers={"Content-Type": "text/css"})
+        monkeypatch.setattr(dna_capture, "_url_is_safe", lambda _u: True)
+        monkeypatch.setattr(dna_capture, "_CSS_FETCH_BYTES", 128 * 1024)
+        monkeypatch.setattr(requests, "get", lambda *a, **k: resp)
+
+        text = dna_capture._default_css_fetcher("https://club.example/site.css")
+        assert text is not None
+        assert len(text.encode("utf-8")) <= 128 * 1024
+        assert resp.yielded <= 3
+        assert resp.closed
+
+    def test_fetch_decodes_declared_charset(self, monkeypatch):
+        """Header-declared charset is respected — no drift on non-UTF-8
+        club sites."""
+        import requests
+
+        from mediahub.brand import dna_capture
+
+        class _Latin1Resp:
+            status_code = 200
+            headers = {"Content-Type": "text/html; charset=iso-8859-1"}
+            encoding = "iso-8859-1"
+
+            def iter_content(self, size):
+                yield "café".encode("iso-8859-1")
+
+            def close(self):
+                pass
+
+        monkeypatch.setattr(dna_capture, "_url_is_safe", lambda _u: True)
+        monkeypatch.setattr(requests, "get", lambda *a, **k: _Latin1Resp())
+        text = dna_capture._fetch("https://club.example/")
+        assert text == "café"

@@ -1,11 +1,10 @@
 """UI 1.17 — Content-cadence heatmap (Activity page).
 
 A GitHub-contribution-graph-style calendar grid that shows how consistently an
-organisation has been *making and posting content* over the past year. Each
-square is one day; its intensity reflects that day's content activity —
-pipeline runs generated plus pieces successfully posted. It renders as a single
-inline SVG, server-side, from the org's own run history (the ``runs`` table)
-augmented with the posting log; no JS library, no client charting dependency.
+organisation has been *making content* over the past year. Each square is one
+day; its intensity reflects that day's content activity — pipeline runs
+generated. It renders as a single inline SVG, server-side, from the org's own
+run history (the ``runs`` table); no JS library, no client charting dependency.
 
 Design rules honoured (see CLAUDE.md):
   * Dark-first, on the existing CSS variables. The heat ramp is lane-yellow
@@ -37,8 +36,8 @@ from typing import Mapping, Optional, Union
 # --------------------------------------------------------------------------- #
 
 # Minimum day-count to reach heat level 1..4. Tuned for club cadence (a busy
-# club generates / posts a handful of pieces a day, not hundreds): a single
-# piece already lights the cell; seven or more saturates it.
+# club generates a handful of pieces a day, not hundreds): a single piece
+# already lights the cell; seven or more saturates it.
 DEFAULT_LEVEL_THRESHOLDS: tuple[int, int, int, int] = (1, 2, 4, 7)
 
 # Monday-start weeks (UK product). ``date.weekday()``: Mon=0 … Sun=6.
@@ -79,8 +78,6 @@ class DayCell:
     """One day square in the grid."""
 
     day: date
-    generated: int
-    posted: int
     count: int
     level: int
     future: bool
@@ -96,18 +93,13 @@ class CadenceGrid:
     end: date
     week_start: int
     month_labels: list[tuple[int, str]]
-    total_generated: int
-    total_posted: int
+    total: int
     active_days: int
     longest_streak: int
     current_streak: int
     busiest_day: Optional[date]
     busiest_count: int
     max_count: int
-
-    @property
-    def total(self) -> int:
-        return self.total_generated + self.total_posted
 
 
 # --------------------------------------------------------------------------- #
@@ -161,21 +153,19 @@ def _normalise_counts(counts: Optional[Mapping[Union[str, date], int]]) -> dict[
 
 def build_grid(
     generated: Optional[Mapping[Union[str, date], int]],
-    posted: Optional[Mapping[Union[str, date], int]] = None,
     *,
     end: date,
     weeks: int = DEFAULT_WEEKS,
     week_start: int = DEFAULT_WEEK_START,
     thresholds: tuple[int, int, int, int] = DEFAULT_LEVEL_THRESHOLDS,
 ) -> CadenceGrid:
-    """Shape per-day ``generated`` / ``posted`` counts into a calendar grid.
+    """Shape per-day ``generated`` counts into a calendar grid.
 
     Days after ``end`` (the trailing part of the current week) are marked
     ``future`` and carry no counts. Statistics are computed over the in-range
     days only, in chronological order.
     """
     gen = _normalise_counts(generated)
-    pst = _normalise_counts(posted)
     start = window_start(end, weeks=weeks, week_start=week_start)
 
     columns: list[list[DayCell]] = []
@@ -186,13 +176,9 @@ def build_grid(
             day = start + timedelta(days=w * 7 + d)
             future = day > end
             iso = day.isoformat()
-            g = 0 if future else gen.get(iso, 0)
-            p = 0 if future else pst.get(iso, 0)
-            c = g + p
+            c = 0 if future else gen.get(iso, 0)
             cell = DayCell(
                 day=day,
-                generated=g,
-                posted=p,
                 count=c,
                 level=0 if future else level_for(c, thresholds),
                 future=future,
@@ -215,8 +201,7 @@ def build_grid(
             last_month = month
 
     # Summary stats + streaks over the chronological in-range days.
-    total_generated = sum(cell.generated for cell in in_range)
-    total_posted = sum(cell.posted for cell in in_range)
+    total = sum(cell.count for cell in in_range)
     active_days = sum(1 for cell in in_range if cell.count > 0)
     max_count = max((cell.count for cell in in_range), default=0)
 
@@ -249,8 +234,7 @@ def build_grid(
         end=end,
         week_start=week_start,
         month_labels=month_labels,
-        total_generated=total_generated,
-        total_posted=total_posted,
+        total=total,
         active_days=active_days,
         longest_streak=longest_streak,
         current_streak=current_streak,
@@ -274,19 +258,15 @@ def _cell_title(cell: DayCell) -> str:
     head = _format_day(cell.day)
     if cell.count == 0:
         return f"{head} — no activity"
-    bits = []
-    if cell.generated:
-        bits.append(f"{cell.generated} generated")
-    if cell.posted:
-        bits.append(f"{cell.posted} posted")
-    return f"{head} — " + " · ".join(bits)
+    return f"{head} — {cell.count} generated"
 
 
 def aria_summary(grid: CadenceGrid) -> str:
     """A plain-text description of the grid for screen readers."""
     return (
-        f"Content-cadence heatmap. {grid.total_generated} pieces generated and "
-        f"{grid.total_posted} posted across {grid.active_days} active "
+        f"Content-cadence heatmap. {grid.total} "
+        f"{'piece' if grid.total == 1 else 'pieces'} generated across "
+        f"{grid.active_days} active "
         f"{'day' if grid.active_days == 1 else 'days'} in the year ending "
         f"{_format_day(grid.end)}. Longest streak "
         f"{grid.longest_streak} {'day' if grid.longest_streak == 1 else 'days'}."
@@ -381,10 +361,19 @@ def cadence_panel_html(
     week_start: int = DEFAULT_WEEK_START,
     thresholds: tuple[int, int, int, int] = DEFAULT_LEVEL_THRESHOLDS,
 ) -> str:
-    """The full Activity-page panel markup for the content-cadence heatmap."""
+    """The full Activity-page panel markup for the content-cadence heatmap.
+
+    ``posted`` is a transitional argument: MediaHub does not post to social
+    channels, so the grid has a single "generated" lane. Any counts passed
+    here are merged into that lane. It exists only because the web.py caller
+    still passes its (always-empty) second dict positionally — drop it once
+    that caller passes a single mapping.
+    """
+    counts = _normalise_counts(generated)
+    for iso, n in _normalise_counts(posted).items():
+        counts[iso] = counts.get(iso, 0) + n
     grid = build_grid(
-        generated,
-        posted,
+        counts,
         end=end,
         weeks=weeks,
         week_start=week_start,
@@ -407,13 +396,13 @@ def cadence_panel_html(
 
     if total == 0:
         foot_note = (
-            "Each square is a day. As you generate and post content, this grid "
+            "Each square is a day. As you generate content, this grid "
             "fills in — brighter days are busier ones."
         )
     else:
         foot_note = (
             "Each square is a day over the last year. Brighter means more pieces "
-            "generated or posted that day."
+            "generated that day."
         )
 
     return (
@@ -445,8 +434,8 @@ CADENCE_HEATMAP_CSS = """
 /* ===================================================================== */
 /* UI 1.17 — Content-cadence heatmap (Activity page)                     */
 /* GitHub-contribution-graph-style year grid, server-rendered inline SVG */
-/* from run history + posting log. Heat ramp is lane-yellow stepped by   */
-/* opacity over a faint empty cell; medal-gold is never used (reserved   */
+/* from run history. Heat ramp is lane-yellow stepped by opacity over a  */
+/* faint empty cell; medal-gold is never used (reserved                  */
 /* for athlete achievements). No animation — nothing to freeze under     */
 /* prefers-reduced-motion.                                               */
 /* ===================================================================== */

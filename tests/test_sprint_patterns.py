@@ -245,3 +245,42 @@ def test_patterns_typecheck_against_registry():
         cwd=str(motion.REMOTION_DIR), capture_output=True, text=True, timeout=300,
     )
     assert r.returncode == 0, f"tsc failed:\n{r.stdout}\n{r.stderr}"
+
+
+# ---------------------------------------------------------------------------
+# Still-engine parity — every motion pattern token has a matching still tile
+# ---------------------------------------------------------------------------
+
+
+def test_every_motion_pattern_token_has_a_still_builder():
+    """Still↔motion parity: a brief token must paint on BOTH surfaces.
+
+    The still engine's ``_background_pattern_for`` must return a real,
+    token-specific tile (not the water default, not the clean 1×1 pixel) for
+    every registered motion pattern token, so a card carrying the token reads
+    the same on the approved still and its motion render.
+    """
+    from mediahub.graphic_renderer.render import (
+        _background_pattern_for,
+        _bg_clean_data_uri,
+        _water_pattern_data_uri,
+    )
+
+    water = _water_pattern_data_uri()
+    clean = _bg_clean_data_uri()
+    tiles: dict[str, str] = {}
+    for p in _pattern_files():
+        token = _name_literal(p.read_text())
+        assert token, p.name
+        tile = _background_pattern_for(token)
+        assert tile != water, f"{token}: still engine falls back to water"
+        assert tile != clean, f"{token}: still engine renders nothing"
+        tiles[token] = tile
+    # Distinct tokens paint distinct tiles (no copy-paste alias).
+    assert len(set(tiles.values())) == len(tiles), "still tiles are not distinct"
+
+
+def test_organic_waves_accepts_both_separators():
+    from mediahub.graphic_renderer.render import _background_pattern_for
+
+    assert _background_pattern_for("organic-waves") == _background_pattern_for("organic_waves")

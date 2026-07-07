@@ -231,6 +231,37 @@ def test_card_cut_times_scale_with_an_overridden_duration():
     )
 
 
+def test_card_cut_times_follow_a_custom_rhythm():
+    """R1.12 — with a customised rhythm the video's real cuts move (MeetReel
+    carve / reel_segment_durations); the accent grid must move with them."""
+    from mediahub.visual.motion import normalise_reel_rhythm, reel_duration_for
+    from mediahub.visual.reel_ffmpeg import reel_segment_durations
+
+    rhythm = normalise_reel_rhythm(
+        {"cover": 3.0, "outro": 2.0, "per_card_sec": 5.0, "weights": [2.0, 1.0, 1.0]}, 3
+    )
+    total = reel_duration_for(
+        3, cover_sec=3.0, outro_sec=2.0, per_card_sec=5.0, beat_weights=[2.0, 1.0, 1.0]
+    )
+    cuts = audio_mux.card_cut_times(total, 3, rhythm)
+    # Cumulative weighted seconds: cover, cover+5*2, cover+5*2+5*1.
+    assert cuts == [3.0, 13.0, 18.0]
+    # Same boundaries the free engine's segment maths produce (last segment
+    # absorbs the outro; strip the xfade padding each non-final segment gains).
+    from mediahub.visual.reel_ffmpeg import CROSSFADE_SEC
+
+    segs = reel_segment_durations(3, total, rhythm=rhythm)
+    visible = [s - (CROSSFADE_SEC if i < len(segs) - 1 else 0.0) for i, s in enumerate(segs)]
+    boundaries = []
+    acc = 0.0
+    for v in visible[:-1]:
+        acc += v
+        boundaries.append(round(acc, 3))
+    assert cuts == boundaries
+    # No rhythm (or a default one) keeps the historic flat grid byte-identical.
+    assert audio_mux.card_cut_times(15.0, 3, None) == audio_mux.card_cut_times(15.0, 3)
+
+
 def test_track_bpm_from_filename_and_sidecar(tmp_path):
     assert audio_mux.track_bpm(tmp_path / "anthem.128bpm.mp3") == 128.0
     assert audio_mux.track_bpm(tmp_path / "warm up - 90 bpm.wav") == 90.0
@@ -554,6 +585,10 @@ def test_real_mux_music_bed_and_poster(tmp_path, monkeypatch):
     assert rec["status"] == "mixed"
     assert rec["music"] == "bed.wav"
     assert audio_mux.has_audio_stream(video) is True
+    # Explainability: a bed-backed record carries the operator-pool snapshot
+    # the deterministic pick chose from.
+    assert rec["music_pool"]["count"] == 1
+    assert rec["music_pool"]["tracks"] == ["bed.wav"]
 
     poster = audio_mux.poster_path_for(video)
     assert audio_mux.write_poster(video, poster, at_sec=audio_mux.poster_time_for("story", 1.0))

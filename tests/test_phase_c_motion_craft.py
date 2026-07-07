@@ -23,6 +23,7 @@ Covers the quality-overhaul items shipped in this phase:
 TSX is checked as source contracts (the shape every parity suite here uses);
 Python behaviour is exercised with the render subprocesses stubbed.
 """
+
 from __future__ import annotations
 
 import base64
@@ -118,8 +119,7 @@ class TestM15PhotoCamera:
     def test_photo_layer_applies_translate_and_scale(self):
         src = _story_src()
         assert (
-            "translate(${anim.photoDriftX}%, ${anim.photoDriftY}%) scale(${anim.photoScale})"
-            in src
+            "translate(${anim.photoDriftX}%, ${anim.photoDriftY}%) scale(${anim.photoScale})" in src
         )
 
     def test_camera_is_frame_pure(self):
@@ -240,8 +240,11 @@ class TestM18BrandTrueCover:
     def test_cover_props_carry_roles_typography_and_photo(self):
         cards = [
             {"typographyPair": "", "photoSrc": "", "photoPos": ""},
-            {"typographyPair": "bebas-grotesk", "photoSrc": "data:image/jpeg;base64,xx",
-             "photoPos": "center 30%"},
+            {
+                "typographyPair": "bebas-grotesk",
+                "photoSrc": "data:image/jpeg;base64,xx",
+                "photoPos": "center 30%",
+            },
         ]
         props = motion._reel_cover_props(cards, motion._brand_to_dict(BRAND), BRAND)
         assert props["coverRoleGround"].startswith("#")
@@ -256,8 +259,11 @@ class TestM18BrandTrueCover:
         def _capture(*, composition_id, props, out_path, duration_sec=None, size=None, timeout=600):
             captured["props"] = props
             return _fake_run(
-                composition_id=composition_id, props=props, out_path=out_path,
-                duration_sec=duration_sec, size=size,
+                composition_id=composition_id,
+                props=props,
+                out_path=out_path,
+                duration_sec=duration_sec,
+                size=size,
             )
 
         with mock.patch.object(motion, "_run_remotion", side_effect=_capture):
@@ -344,9 +350,7 @@ class TestM19ProportionalChoreography:
 # M20 — reel chrome + relay photos
 # =========================================================================== #
 def _reel_layer_src(name: str) -> str:
-    return (
-        motion.REMOTION_DIR / "src" / "compositions" / "sprint" / "reel" / name
-    ).read_text()
+    return (motion.REMOTION_DIR / "src" / "compositions" / "sprint" / "reel" / name).read_text()
 
 
 class TestM20ReelChrome:
@@ -371,8 +375,15 @@ class TestM20ReelChrome:
         reg = (
             motion.REMOTION_DIR / "src" / "compositions" / "sprint" / "reelRegistry.ts"
         ).read_text()
-        for field in ("accent", "ground", "onGround", "clubLabel", "logoDataUri",
-                      "beatStarts", "outroStart"):
+        for field in (
+            "accent",
+            "ground",
+            "onGround",
+            "clubLabel",
+            "logoDataUri",
+            "beatStarts",
+            "outroStart",
+        ):
             assert field in reg, field
         # MeetReel provides them.
         src = _reel_src()
@@ -383,8 +394,7 @@ class TestM20ReelChrome:
 
     def test_relay_collage_fills_panels_from_photo_srcs(self):
         src = (
-            motion.REMOTION_DIR
-            / "src" / "compositions" / "sprint" / "scenes" / "relay_collage.tsx"
+            motion.REMOTION_DIR / "src" / "compositions" / "sprint" / "scenes" / "relay_collage.tsx"
         ).read_text()
         assert "card.photoSrcs" in src
         assert "panelSrc" in src
@@ -403,9 +413,7 @@ class TestM20ReelChrome:
         from mediahub.media_library.models import MediaAsset
         from mediahub.media_library.store import MediaLibraryStore
 
-        store = MediaLibraryStore(
-            db_path=tmp_path / "data.db", uploads_dir=tmp_path / "uploads"
-        )
+        store = MediaLibraryStore(db_path=tmp_path / "data.db", uploads_dir=tmp_path / "uploads")
         for i, name in enumerate(["Ada Lovelace", "Grace Hopper"]):
             p = tmp_path / f"athlete{i}.jpg"
             Image.new("RGB", (900, 1200), (10 + i, 60, 140)).save(p, "JPEG")
@@ -434,7 +442,10 @@ class TestM20ReelChrome:
         assert len(srcs) == 2
         assert all(s.startswith("data:image/jpeg;base64,") for s in srcs)
         # A single-hero archetype never pays the lookup.
-        assert motion._photo_srcs_for_card(card, {"layout_template": "big_number_dominant"}, BRAND) == []
+        assert (
+            motion._photo_srcs_for_card(card, {"layout_template": "big_number_dominant"}, BRAND)
+            == []
+        )
         # No individual names → honest empty (never guess a lineup).
         anon = {"achievement": {"swimmer_name": "Phase C relay"}}
         assert motion._photo_srcs_for_card(anon, brief, BRAND) == []
@@ -507,7 +518,9 @@ class TestM21EditedPhotoParity:
         with mock.patch.object(motion, "_run_remotion", side_effect=_fake_run):
             motion.render_story_card(_card(1), BRAND, tmp_path / "a.mp4", brief=brief)
             n_before = len(list(motion._cache_dir().glob("*.mp4")))
-            photo_edit.save_recipe(store.get("edit-1"), EditRecipe.build([("blur", {"radius": 9})]), store)
+            photo_edit.save_recipe(
+                store.get("edit-1"), EditRecipe.build([("blur", {"radius": 9})]), store
+            )
             motion.render_story_card(_card(1), BRAND, tmp_path / "b.mp4", brief=brief)
         assert len(list(motion._cache_dir().glob("*.mp4"))) == n_before + 1, (
             "an edited photo must re-render, never serve the pre-edit MP4"
@@ -586,9 +599,7 @@ class TestM22FfmpegManifests:
     def test_ffmpeg_reel_writes_manifest_with_honest_notes(self, tmp_path, monkeypatch):
         _stub_ffmpeg(monkeypatch, tmp_path)
         with mock.patch.object(motion, "_run_remotion") as remotion_run:
-            motion.render_meet_reel(
-                [_card(1), _card(2)], BRAND, tmp_path / "reel.mp4"
-            )
+            motion.render_meet_reel([_card(1), _card(2)], BRAND, tmp_path / "reel.mp4")
             assert not remotion_run.called
         reel = next(m for m in _cache_manifests() if m.get("kind") == "reel")
         assert reel["engine"] == "ffmpeg"

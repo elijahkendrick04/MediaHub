@@ -72,3 +72,38 @@ def test_public_dict_hides_secret_by_default(store):
     ep = store.create("org-a", "https://a.com/h", events=["run.finished"])
     assert "secret" not in ep.to_public_dict()
     assert ep.to_public_dict(include_secret=True)["secret"] == ep.secret
+
+
+def test_create_rejects_internal_ip_literal_hosts(store):
+    # SSRF guard: cloud metadata / loopback / private hosts are refused at registration.
+    for bad in (
+        "http://169.254.169.254/latest/meta-data/",
+        "http://127.0.0.1:8080/hook",
+        "http://localhost/hook",
+        "https://10.0.0.5/hook",
+    ):
+        with pytest.raises(ValueError):
+            store.create("org-a", bad, events=["card.approved"])
+
+
+def test_create_rejects_host_resolving_to_private_ip(store, monkeypatch):
+    import socket
+
+    def fake_getaddrinfo(host, *a, **k):
+        return [(socket.AF_INET, socket.SOCK_STREAM, 0, "", ("192.168.1.7", 0))]
+
+    monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
+    with pytest.raises(ValueError):
+        store.create("org-a", "https://internal.example/hook", events=["card.approved"])
+
+
+def test_create_allows_currently_unresolvable_host(store, monkeypatch):
+    # DNS failure at registration is tolerated — delivery re-validates each attempt.
+    import socket
+
+    def fake_getaddrinfo(host, *a, **k):
+        raise socket.gaierror("no such host")
+
+    monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
+    ep = store.create("org-a", "https://not-yet-live.example/hook", events=["card.approved"])
+    assert ep.url == "https://not-yet-live.example/hook"

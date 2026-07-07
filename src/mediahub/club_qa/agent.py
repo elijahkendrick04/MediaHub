@@ -160,8 +160,8 @@ def _run_line(run_id: str, data: dict) -> str:
     return " · ".join(bits)
 
 
-def _tool_list_recent_runs(env: QAEnv) -> str:
-    runs = _owned_runs(env)
+def _tool_list_recent_runs(env: QAEnv, runs: Optional[list[tuple[str, dict]]] = None) -> str:
+    runs = _owned_runs(env) if runs is None else runs
     if not runs:
         return "No processed runs found for this organisation."
     shown = runs[:_MAX_RUNS_LISTED]
@@ -172,11 +172,13 @@ def _tool_list_recent_runs(env: QAEnv) -> str:
     return "\n".join(lines)
 
 
-def _tool_get_run_details(env: QAEnv, run_id: str) -> str:
+def _tool_get_run_details(
+    env: QAEnv, run_id: str, runs: Optional[list[tuple[str, dict]]] = None
+) -> str:
     run_id = (run_id or "").strip()
     if not run_id:
         return "No run_id given."
-    data = dict(_owned_runs(env)).get(run_id)
+    data = dict(_owned_runs(env) if runs is None else runs).get(run_id)
     if data is None:
         return f"No run with id {run_id} for this organisation."
     meet = data.get("meet") or {}
@@ -207,7 +209,9 @@ def _tool_get_run_details(env: QAEnv, run_id: str) -> str:
     return "\n".join(lines)
 
 
-def _tool_get_athlete_history(env: QAEnv, name: str) -> str:
+def _tool_get_athlete_history(
+    env: QAEnv, name: str, runs: Optional[list[tuple[str, dict]]] = None
+) -> str:
     name = (name or "").strip()
     if not name:
         return "No athlete name given."
@@ -221,7 +225,10 @@ def _tool_get_athlete_history(env: QAEnv, name: str) -> str:
     swims = athlete_swims(env.profile_id, rec.athlete_id, db_path=env.athletes_db_path)
     if not swims:
         return f"{rec.canonical_name} is in the registry but has no logged swims yet."
-    meet_names = {rid: (d.get("meet") or {}).get("name") or rid for rid, d in _owned_runs(env)}
+    meet_names = {
+        rid: (d.get("meet") or {}).get("name") or rid
+        for rid, d in (_owned_runs(env) if runs is None else runs)
+    }
     lines = [f"{rec.canonical_name} — {len(swims)} logged swim(s), newest first:"]
     for s in swims[:_MAX_SWIMS_SHOWN]:
         t = _fmt_cs(s.get("time_cs"))
@@ -258,24 +265,33 @@ def answer_club_question(
         return QAAnswer(answer="No question was asked.")
 
     consulted: dict[str, str] = {}  # run_id -> meet name
+    runs_cache: Optional[list[tuple[str, dict]]] = None
+
+    def _runs() -> list[tuple[str, dict]]:
+        # One runs-dir scan per answer: every tool call re-parsing each run
+        # JSON made a 6-round Q&A re-read the whole dir several times over.
+        nonlocal runs_cache
+        if runs_cache is None:
+            runs_cache = _owned_runs(env)
+        return runs_cache
 
     def _note_run(run_id: str) -> None:
-        data = dict(_owned_runs(env)).get(run_id)
+        data = dict(_runs()).get(run_id)
         if data is not None:
             consulted[run_id] = (data.get("meet") or {}).get("name") or run_id
 
     def _tool(name: str, inp: dict) -> str:
         inp = inp or {}
         if name == "list_recent_runs":
-            return _tool_list_recent_runs(env)
+            return _tool_list_recent_runs(env, _runs())
         if name == "get_run_details":
             run_id = str(inp.get("run_id") or "")
-            out = _tool_get_run_details(env, run_id)
+            out = _tool_get_run_details(env, run_id, _runs())
             if not out.startswith("No run"):
                 _note_run(run_id.strip())
             return out
         if name == "get_athlete_history":
-            return _tool_get_athlete_history(env, str(inp.get("name") or ""))
+            return _tool_get_athlete_history(env, str(inp.get("name") or ""), _runs())
         return json.dumps({"error": f"unknown tool: {name}"})
 
     convo = ask_with_tools(

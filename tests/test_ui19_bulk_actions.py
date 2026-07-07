@@ -410,6 +410,41 @@ class TestReviewBulkStatus:
         assert states["s_ok"].status == CardStatus.APPROVED
         assert "s_blocked" not in states or states["s_blocked"].status != CardStatus.APPROVED
 
+    def test_blocked_flash_names_the_right_gates(self, env, monkeypatch):
+        """The no-JS flash must not blame the consent gate for every block —
+        per-reason counts name consent AND open-task blocks correctly."""
+        c, tp, wm = env["client"], env["tmp_path"], env["wm"]
+        run_id = _seed_run(tp, wm, "org-test", ["s_consent", "s_task", "s_ok"])
+
+        import mediahub.compliance.gate as gate
+
+        def fake_consent(profile_id, card):
+            ach = (card or {}).get("achievement") or {}
+            return "minor: consent missing" if ach.get("swim_id") == "s_consent" else None
+
+        monkeypatch.setattr(gate, "consent_block_reason_for_card", fake_consent)
+
+        import mediahub.collab.threads as threads
+
+        monkeypatch.setattr(
+            threads,
+            "open_task_count",
+            lambda rid, cid: 1 if cid == "s_task" else 0,
+        )
+
+        r = c.post(
+            f"/api/runs/{run_id}/cards/bulk-status",
+            data={"card_ids": ["s_consent", "s_task", "s_ok"], "status": "approved"},
+        )
+        assert r.status_code == 302
+        with c.session_transaction() as sess:
+            toast = sess.get("mh_toast") or {}
+        msg = toast.get("msg", "")
+        assert "2 blocked" in msg, msg
+        assert "1 consent" in msg, msg
+        assert "1 open task" in msg, msg
+        assert "consent gate" not in msg, msg
+
 
 # ===========================================================================
 # Review queue — bulk export (selected cards as JSON)
@@ -499,3 +534,15 @@ class TestReviewHtml:
         assert f"/api/runs/{run_id}/cards/bulk-export" in body
         # The shared progressive-enhancement JS is wired in.
         assert "data-mh-bulkbar" in body and "mhRecountReview" in body
+
+    def test_bulk_js_respects_per_card_status_for_held_cards(self, env):
+        """A group-approval-held card returns {ok:true,status:'queue'}; the bulk
+        JS must paint it by its actual server status (In queue), not flip it to
+        Approved, and must not count it in the 'Approved N' toast."""
+        import mediahub.web.web as webmod
+        js = webmod._BULK_ACTIONS_JS
+        # Cards are painted by their real per-card status, not the action's.
+        assert "r.status || status" in js
+        assert "held for another approver" in js
+        # The naive "every ok is approved" filter is gone.
+        assert "filter(function(r){ return r.ok; })" not in js

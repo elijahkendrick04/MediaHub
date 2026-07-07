@@ -16,8 +16,8 @@ silent drop, or a fabricated file.
 
 from __future__ import annotations
 
-import io
 import json
+import os
 import re
 import zipfile
 from dataclasses import dataclass, field
@@ -146,14 +146,48 @@ def run_bulk_export(
             from_cache=True,
         )
 
+    _cache.maybe_gc()  # bound old bulk ZIPs / export-cache growth (best-effort)
+
+    # Stream the archive to a temp sibling and os.replace into place: peak RAM
+    # is one member (not the whole archive twice), and a crash mid-build can
+    # never leave a truncated ZIP at the path the share route existence-checks.
+    zip_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = zip_path.with_name(zip_path.name + ".tmp")
+    try:
+        manifest, file_count, error_count = _write_zip(
+            tmp_path, items, formats, label, opts, progress
+        )
+        os.replace(tmp_path, zip_path)
+    except BaseException:
+        tmp_path.unlink(missing_ok=True)
+        raise
+
+    return BulkExportResult(
+        zip_path=zip_path,
+        manifest=manifest,
+        item_count=len(items),
+        file_count=file_count,
+        error_count=error_count,
+        from_cache=False,
+    )
+
+
+def _write_zip(
+    tmp_path: Path,
+    items: Sequence[BulkItem],
+    formats: Sequence[str],
+    label: str,
+    opts: ExportOptions,
+    progress: Optional[ProgressFn],
+) -> tuple[dict, int, int]:
+    """Build the archive at ``tmp_path``; returns (manifest, files, errors)."""
     total = len(items)
     manifest_items: list[dict] = []
     file_count = 0
     error_count = 0
     total_bytes = 0
-    buf = io.BytesIO()
 
-    with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+    with zipfile.ZipFile(tmp_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
         used_names: set[str] = set()
         for idx, item in enumerate(items):
             name = _slug(item.name, f"item-{idx + 1:02d}")
@@ -219,17 +253,7 @@ def run_bulk_export(
         zf.writestr(f"{label}/manifest.json", json.dumps(manifest, indent=2))
         zf.writestr(f"{label}/README.txt", _readme(label, manifest))
 
-    zip_path.parent.mkdir(parents=True, exist_ok=True)
-    zip_path.write_bytes(buf.getvalue())
-
-    return BulkExportResult(
-        zip_path=zip_path,
-        manifest=manifest,
-        item_count=total,
-        file_count=file_count,
-        error_count=error_count,
-        from_cache=False,
-    )
+    return manifest, file_count, error_count
 
 
 def _read_manifest_from_zip(zip_path: Path) -> dict:

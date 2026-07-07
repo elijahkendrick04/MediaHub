@@ -147,20 +147,25 @@ class TestVenueImportRoute:
     def test_import_saves_asset_with_licence_and_attribution(self, app, env, monkeypatch):
         run_id = _seed_run(env)
 
-        class FakeRaw:
+        # Fake the pinned transport seam (urllib3-shaped response + pool) that
+        # _ssrf_safe_stream_get now fetches through.
+        class FakeResp:
+            status = 200
+            headers = {"Content-Type": "image/png"}
+
             def read(self, n, decode_content=True):
                 return b"\x89PNG fake-bytes"
 
-        class FakeResp:
-            headers = {"Content-Type": "image/png"}
-            raw = FakeRaw()
-
-            def raise_for_status(self):
+            def close(self):
                 return None
 
-        import requests as real_requests
+        class FakePool:
+            def close(self):
+                return None
 
-        monkeypatch.setattr(real_requests, "get", lambda *a, **k: FakeResp())
+        import mediahub.web_research.safe_fetch as _sf
+
+        monkeypatch.setattr(_sf, "pinned_stream_get", lambda url, **kw: (FakeResp(), FakePool()))
         with app.test_client() as client:
             _with_org(client)
             resp = client.post(
@@ -184,6 +189,55 @@ class TestVenueImportRoute:
         assert a.source_licence == "CC BY-SA 4.0"
         assert a.source_attribution == "Photo: A. Photographer"
         assert a.linked_venue == "Ponds Forge"
+
+    def test_rejects_ssrf_metadata_url_without_fetching(self, app, env, monkeypatch):
+        """A direct_url pointed at a private / metadata address is refused with
+        400 and no file written — is_url_safe gates it before any fetch."""
+        run_id = _seed_run(env)
+        import mediahub.web_research.safe_fetch as _sf
+        import requests as real_requests
+
+        monkeypatch.setattr(_sf, "is_url_safe", lambda u: False)
+        monkeypatch.setattr(
+            real_requests, "get", lambda *a, **k: pytest.fail("must not fetch unsafe host")
+        )
+        with app.test_client() as client:
+            _with_org(client)
+            resp = client.post(
+                f"/api/runs/{run_id}/venue-import",
+                json={"direct_url": "http://169.254.169.254/latest/meta-data/"},
+            )
+        assert resp.status_code == 400
+        assert resp.get_json()["error"] == "bad_image_url"
+
+    def test_rejects_redirect_to_private_host(self, app, env, monkeypatch):
+        """A public URL that 302-redirects to a private host is refused: each
+        redirect hop is re-validated before it is followed."""
+        run_id = _seed_run(env)
+        import mediahub.web_research.safe_fetch as _sf
+        import requests as real_requests
+
+        # First hop safe, the redirect target private.
+        monkeypatch.setattr(
+            _sf, "is_url_safe", lambda u: "169.254" not in u and "internal" not in u
+        )
+
+        class RedirectResp:
+            status_code = 302
+            headers = {"Location": "http://169.254.169.254/"}
+
+            def close(self):
+                return None
+
+        monkeypatch.setattr(real_requests, "get", lambda *a, **k: RedirectResp())
+        with app.test_client() as client:
+            _with_org(client)
+            resp = client.post(
+                f"/api/runs/{run_id}/venue-import",
+                json={"direct_url": "https://cdn.example.org/pic.jpg"},
+            )
+        assert resp.status_code == 400
+        assert resp.get_json()["error"] == "bad_image_url"
 
 
 class TestMotionManifestRoute:

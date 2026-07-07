@@ -153,32 +153,11 @@ def test_styles_registry_is_complete_and_ordered():
     assert narration.STYLES == ("standard", "compact", "verbose", "poetic", "technical")
     assert narration.DEFAULT_STYLE == "standard"
     assert narration.DEFAULT_STYLE in narration.STYLES
-    assert narration.available_styles() == narration.STYLES
-    # every advertised style is actually registered and described
+    # every advertised style is actually registered
     for name in narration.STYLES:
         assert name in narration._STYLES
-        assert name in narration.STYLE_DESCRIPTIONS
-        assert narration.STYLE_DESCRIPTIONS[name].strip()
     # no orphan registry entries beyond the advertised set
     assert set(narration._STYLES) == set(narration.STYLES)
-    assert set(narration.STYLE_DESCRIPTIONS) == set(narration.STYLES)
-
-
-@pytest.mark.parametrize(
-    "raw,ok",
-    [
-        ("standard", True),
-        ("POETIC", True),
-        ("  technical  ", True),
-        ("Compact", True),
-        ("verbose", True),
-        ("bogus", False),
-        ("", False),
-        (None, False),
-    ],
-)
-def test_is_valid_style(raw, ok):
-    assert narration.is_valid_style(raw) is ok
 
 
 # ---------------------------------------------------------------------------

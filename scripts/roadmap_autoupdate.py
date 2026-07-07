@@ -89,9 +89,14 @@ STATUS = {
 # Commits the bot itself makes — excluded from the activity feed.
 _BOT_SUBJECT = "docs: auto-update roadmap"
 
-# A trailing status badge on an item line: " · <emoji> **LABEL**".
+# A status badge on an item line: " · <emoji> **LABEL**". Usually trailing,
+# but hand-authored rows may carry a suffix after it (a " · <region tag>"
+# segment or a "*(completed …)*" annotation), so the badge is anchored to what
+# follows it — end of line, another "·"-separated segment, or a completion
+# annotation — not to $ alone. A $-only anchor left stale "❌ **NOT STARTED**"
+# badges mid-line on rows moved into the DONE block.
 _BADGE_RE = re.compile(
-    r"\s*·\s*(?:✅|\U0001F535|⚠️|❌)\s*\*\*[^*]+\*\*\s*$"
+    r"\s*·\s*(?:✅|\U0001F535|⚠️|❌)\s*\*\*[^*\n]+\*\*(?:\s*$|(?=\s*(?:·|\*\()))"
 )
 
 # The completion annotation a Completed item carries.
@@ -490,7 +495,13 @@ def _fetch_sentinel_issues():
 
 
 def _md_escape(s: str) -> str:
-    return (s or "").replace("|", "\\|").strip()[:100]
+    """Neutralise table pipes and HTML-comment sequences. A commit subject
+    containing ``<!--``/``-->`` would otherwise land verbatim inside the
+    bot-maintained blocks and act as an early block-end marker for
+    ``replace_block``'s non-greedy regex, corrupting later runs."""
+    s = (s or "").replace("|", "\\|")
+    s = s.replace("<!--", "&lt;!--").replace("-->", "--&gt;")
+    return s.strip()[:100]
 
 
 # ---------------------------------------------------------------------------

@@ -171,6 +171,15 @@ def test_normalise_accepts_snake_camel_and_aliases():
     }
 
 
+def test_normalise_accepts_bare_beat_alias():
+    """The reel route's ?beat= query param arrives as a bare 'beat' key — it
+    must set the per-card seconds, not silently no-op."""
+    bare = motion.normalise_reel_rhythm({"beat": 6}, 3)
+    assert bare is not None
+    assert bare["perCardSec"] == 6.0
+    assert bare == motion.normalise_reel_rhythm({"per_card_sec": 6}, 3)
+
+
 def test_normalise_explicit_weights_are_never_treated_as_default():
     """Even uniform explicit weights differ from the default top-card emphasis,
     so the rhythm must be carried (a different carve = a different render)."""
@@ -195,6 +204,60 @@ def test_reel_duration_kwargs_round_trip():
     r2 = motion.normalise_reel_rhythm({"weights": [2, 1, 1]}, 3)
     assert motion.reel_duration_for(3, **motion._reel_duration_kwargs(r2)) == 20.5
     assert motion._reel_duration_kwargs(None) == {}
+
+
+# ===========================================================================
+# reel_card_beat_frames — the Python mirror of MeetReel.tsx's beat carve
+# ===========================================================================
+
+
+def test_beat_frames_default_carve_matches_the_tsx_maths():
+    """3 cards @ the 16.5s default: durationInFrames=495, cover 60, outro 75
+    (M17), transition round(30*0.35)=11, remaining 360, weights [1.25,1,1] →
+    [floor(360*1.25/3.25)+11, floor(360/3.25)+11, …] = [149, 121, 121]."""
+    assert motion.reel_card_beat_frames(3, motion.reel_duration_for(3), None) == [149, 121, 121]
+    # A single card gets no top-card emphasis (safeCards.length > 1 in the tsx).
+    # 8.5s → 255 frames, remaining 120 → floor(120)+11 = 131.
+    assert motion.reel_card_beat_frames(1, motion.reel_duration_for(1), None) == [131]
+    assert motion.reel_card_beat_frames(0, 16.5, None) == []
+
+
+def test_beat_frames_honour_weights_and_bookends():
+    rhythm = motion.normalise_reel_rhythm(
+        {"cover": 3.0, "outro": 2.0, "per_card_sec": 5.0, "weights": [2.0, 1.0, 1.0]}, 3
+    )
+    total = motion.reel_duration_for(3, **motion._reel_duration_kwargs(rhythm))  # 25s
+    beats = motion.reel_card_beat_frames(3, total, rhythm)
+    # 750 frames, cover 90, outro 60, remaining 600, weights sum 4 →
+    # [floor(600*2/4)+11, floor(600/4)+11, …] = [311, 161, 161].
+    assert beats == [311, 161, 161]
+    # Explicit weights are authoritative — no hidden 1.25 emphasis on top.
+    flat = motion.normalise_reel_rhythm({"weights": [1.0, 1.0, 1.0]}, 3)
+    total_flat = motion.reel_duration_for(3, **motion._reel_duration_kwargs(flat))
+    b = motion.reel_card_beat_frames(3, total_flat, flat)
+    assert b[0] == b[1] == b[2]
+
+
+def test_beat_frames_respect_the_min_beat_floor():
+    """A tiny weight can never starve a beat below the tsx minBeat
+    (2*transition + round(fps*0.5) = 37 frames at 30fps)."""
+    rhythm = motion.normalise_reel_rhythm({"per_card_sec": 1.5, "weights": [10.0, 0.1, 0.1]}, 3)
+    total = motion.reel_duration_for(3, **motion._reel_duration_kwargs(rhythm))  # 9.75s
+    beats = motion.reel_card_beat_frames(3, total, rhythm)
+    # Weights clamp to [4.0, 0.25, 0.25]; 293 frames, remaining 203 →
+    # [floor(203*4/4.5)+11, max(37, floor(203*0.25/4.5)+11), …].
+    assert beats == [191, 37, 37]
+    assert all(bf >= 37 for bf in beats)
+
+
+def test_tsx_carve_constants_match_the_python_mirror():
+    """Source contract: the tsx constants reel_card_beat_frames mirrors must
+    stay verbatim — if this fails, update BOTH sides in lock-step."""
+    src = _reel_src()
+    carve = src.split("export const MeetReel", 1)[1].split("let cursor = 0", 1)[0]
+    assert "Math.round(fps * 0.35)" in carve  # transitionFrames
+    assert "transitionFrames * 2 + Math.round(fps * 0.5)" in carve  # minBeat
+    assert "Math.floor((remaining * w) / weightSum) + transitionFrames" in carve
 
 
 # ===========================================================================

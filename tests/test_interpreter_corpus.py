@@ -318,6 +318,23 @@ def test_hytek_banner_only_header_strips_boilerplate_to_recover_name():
     assert "Page" not in (res.meet_name or "")
 
 
+def test_dotted_date_title_line_is_still_the_meet_name():
+    """A title line carrying a dotted date tail ("… - 14.02.2026") must not be
+    rejected as a result row: the dd.mm token is race-time-shaped, but the date
+    tail is stripped before the race-time check, so the real title wins instead
+    of the venue line below it."""
+    txt = (
+        "Winter Open Meet - 14.02.2026\n"
+        "Ponds Forge, Sheffield\n"
+        "\n"
+        "Event 1 Female 50 LC Meter Freestyle\n"
+        "1 Jones, Amy 14 Cardiff 28.40\n"
+    )
+    res = interpret_document(txt.encode(), hint="txt")
+    assert res.meet_name == "Winter Open Meet"
+    assert res.venue == "Ponds Forge, Sheffield"
+
+
 def test_no_time_seed_does_not_create_phantom_clubs():
     """"NT" is the No-Time SEED value, not club text. The team-name parser must
     not absorb it into the club, or the picker fills with phantom "<Club> NT"

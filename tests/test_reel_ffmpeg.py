@@ -746,3 +746,74 @@ def test_story_assembly_with_a_parallax_variant_renders(tmp_path, monkeypatch):
     )
     assert Path(result).exists() and Path(result).stat().st_size > 1024
     assert reel_ffmpeg.media_duration_seconds(Path(result)) == pytest.approx(4.0, abs=0.25)
+
+
+def test_media_duration_returns_none_on_probe_timeout(monkeypatch, tmp_path):
+    """A wedged `ffmpeg -i` probe must not hang the worker: the 30s timeout
+    fires and the function keeps its None-on-unknown contract."""
+    import subprocess as _subprocess
+
+    monkeypatch.setattr(reel_ffmpeg, "ffmpeg_exe", lambda: "/usr/bin/ffmpeg")
+
+    def _hang(*args, **kwargs):
+        assert kwargs.get("timeout") == 30
+        raise _subprocess.TimeoutExpired(cmd=args[0], timeout=30)
+
+    monkeypatch.setattr(reel_ffmpeg.subprocess, "run", _hang)
+    assert reel_ffmpeg.media_duration_seconds(tmp_path / "bad.mp4") is None
+
+
+# ---------------------------------------------------------------------------
+# The beats compile the shared motion vocabulary (mediahub.motion)
+# ---------------------------------------------------------------------------
+
+
+def test_beat_motion_compiles_the_vocabulary_byte_identically():
+    """The tokenised photo presets are the authoritative source for the beat
+    motion — and the compiled fragment is byte-identical to the direct recipe,
+    so no cache key moves."""
+    for variant, preset in reel_ffmpeg._PRESET_FOR_KB_VARIANT.items():
+        via_vocab = reel_ffmpeg._beat_motion_filter(4.0, variant=variant, tag="7")
+        direct = reel_ffmpeg._ken_burns_filter(4.0, variant=variant, tag="7")
+        assert via_vocab == direct, f"{variant} (preset {preset}) drifted from the recipe"
+
+
+def test_engine_only_variants_bypass_the_vocabulary():
+    for variant in ("zoom_tl", "zoom_br", "parallax", "hold"):
+        assert variant not in reel_ffmpeg._PRESET_FOR_KB_VARIANT
+        assert reel_ffmpeg._beat_motion_filter(4.0, variant=variant, tag="0") == (
+            reel_ffmpeg._ken_burns_filter(4.0, variant=variant, tag="0")
+        )
+
+
+def test_kb_variant_preset_map_mirrors_the_vocabulary_aliases():
+    """One source of truth: the reverse map here must be exactly the
+    vocabulary's KEN_BURNS_ALIASES inverted."""
+    from mediahub.motion.vocabulary import KEN_BURNS_ALIASES
+
+    assert {v: k for k, v in KEN_BURNS_ALIASES.items()} == dict(
+        reel_ffmpeg._PRESET_FOR_KB_VARIANT
+    )
+
+
+def test_reel_graph_actually_routes_through_the_compiler(monkeypatch):
+    """Product wiring (not just a helper): reel_ffmpeg_args' beat chains call
+    the vocabulary compiler for tokenised variants."""
+    calls: list[str] = []
+    import mediahub.motion.compile_ffmpeg as mcf
+
+    real = mcf.compile_ffmpeg
+
+    def _spy(preset, **kwargs):
+        calls.append(preset.name)
+        return real(preset, **kwargs)
+
+    monkeypatch.setattr(mcf, "compile_ffmpeg", _spy)
+    stills = [Path("c.png"), Path("a.png"), Path("b.png")]
+    reel_ffmpeg.reel_ffmpeg_args(
+        stills,
+        Path("out.mp4"),
+        reel_ffmpeg.reel_segment_durations(2, 11.0),
+        kb_variants=["zoom_in", "pan_left", "zoom_tl"],
+    )
+    assert calls == ["ken_burns_in", "pan_left"]  # zoom_tl is engine-only

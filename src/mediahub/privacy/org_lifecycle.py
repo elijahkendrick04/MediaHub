@@ -6,17 +6,17 @@ module is both halves:
 
 - :func:`delete_org` — cascade an organisation out of every store under
   ``DATA_DIR``: its runs (through the web layer's run-deletion cascade, so
-  PB caches / caption memory / posting-log excerpts / motion cache are
-  reached per run), media-library assets, uploaded logos, sponsor exposure
-  ledger, consent + athletes registries, club records, corrections,
-  posting-log rows, approval telemetry, live watches, magic-link versions,
-  caption memory, the autonomy audit ledger, memberships, and finally the
-  profile JSON itself (which structurally revokes the public wall token).
+  PB caches / caption memory / motion cache are reached per run),
+  media-library assets, uploaded logos, sponsor exposure ledger, consent +
+  athletes registries, club records, corrections, approval telemetry, live
+  watches, magic-link versions, caption memory, the autonomy audit ledger,
+  memberships, and finally the profile JSON itself (which structurally
+  revokes the public wall token).
 - :func:`org_export_zip` — one ZIP with everything the workspace holds:
   the profile, runs JSON + workflow states, media assets, captions-bearing
   packs, the consent registry CSV, athletes, sponsors + exposure ledger,
-  posting log, club records, corrections and the autonomy audit log. One
-  mechanism serves both SARs and portability.
+  club records, corrections and the autonomy audit log. One mechanism
+  serves both SARs and portability.
 
 Deliberately NOT deleted, recorded in the report so the UI can say so:
 
@@ -334,7 +334,6 @@ def org_export_zip(profile_id: str, out_path: Path, *, media_store=None) -> dict
         "media_assets": 0,
         "athletes": 0,
         "consent_rows": 0,
-        "posting_rows": 0,
         "club_records": 0,
         "corrections": 0,
         "audit_lines": 0,

@@ -103,6 +103,29 @@
       .catch(function () { setBusy("Pre-flight failed — try again."); });
   });
 
+  // Grey out colour modes this deployment can't actually produce (no
+  // Ghostscript → no CMYK; no ICC profile → no PDF/X), so the picker never
+  // promises a conversion the export will silently downgrade.
+  (function () {
+    var sel = $("pr-colour");
+    if (!sel || !window.fetch) return;
+    fetch((window._API_BASE || "") + "/api/print/products", { headers: { Accept: "application/json" } })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        var caps = (data && data.capabilities) || {};
+        for (var i = 0; i < sel.options.length; i++) {
+          var opt = sel.options[i];
+          if ((opt.value === "cmyk" && caps.cmyk === false) ||
+              (opt.value === "pdfx" && caps.pdfx === false)) {
+            opt.disabled = true;
+            opt.textContent = opt.textContent + " — unavailable here";
+            if (opt.selected) sel.value = "rgb";
+          }
+        }
+      })
+      .catch(function () { /* capability probe is best-effort */ });
+  })();
+
   $("pr-download").addEventListener("click", function () {
     if (!guard()) return;
     setBusy("Building the print-ready PDF… (a cold render can take a minute)");
@@ -112,15 +135,21 @@
     jsonPost(buildUrl(printTmpl, extra)).then(function (r) {
       var ctype = r.headers.get("Content-Type") || "";
       if (ctype.indexOf("application/pdf") !== -1) {
+        // The server names the file for the colour mode actually ACHIEVED
+        // (X-Print-Colour-Used) — e.g. a Ghostscript-less box downgrades
+        // "cmyk" to RGB — and explains any downgrade in X-Print-Note.
+        var used = r.headers.get("X-Print-Colour-Used") || colour;
+        var printNote = r.headers.get("X-Print-Note") || "";
         return r.blob().then(function (b) {
           var a = document.createElement("a");
           a.href = URL.createObjectURL(b);
-          a.download = selectedProduct().product + "-" + selectedCard() + "-" + colour + ".pdf";
+          a.download = selectedProduct().product + "-" + selectedCard() + "-" + used + ".pdf";
           document.body.appendChild(a);
           a.click();
           a.remove();
           report.innerHTML = "";
-          report.appendChild(note("Downloaded the print-ready PDF.", "muted"));
+          report.appendChild(note("Downloaded the print-ready PDF (" + used.toUpperCase() + ").", "muted"));
+          if (printNote) report.appendChild(note(printNote, "muted"));
         });
       }
       return r.json().then(function (data) {

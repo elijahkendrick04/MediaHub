@@ -33,6 +33,10 @@ Every archetype slot, whatever its geometry, wants three layers:
 2. **Midground facts** — name, event, time, place, photo. The message.
 3. **Foreground accents** — the brief's `accent_style` (brackets, stripe,
    badge, frame, ribbon, arrow, underline, diagonal_underline, minimal),
+   plus the R1.5 sizing/style variants (thick/thin/double stripe, side_rail,
+   large/small brackets, bracket_frame, corner_tabs, offset_badge — the
+   full closed list is `design_spec.ACCENT_TREATMENTS`, executed identically
+   by the still engine and the motion accents registry),
    plus structural rules/dividers and the logo. These are what make a card
    feel *produced*: registration-mark details, a hairline scale, a label in
    mono.

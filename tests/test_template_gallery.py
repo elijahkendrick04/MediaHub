@@ -188,7 +188,7 @@ def test_gallery_entries_shape():
 
 def test_render_body_structure():
     html = G.render_gallery_body(gallery_url="/templates", make_url="/make")
-    assert _cards(html) == len(A.list_archetypes()) == 29
+    assert _cards(html) == len(A.list_archetypes()) == 32
     assert _hidden_cards(html) == 0  # the default "all" view hides nothing
     # Chips for All + every category, with counts.
     assert 'aria-label="Filter templates by category"' in html
@@ -226,6 +226,19 @@ def test_render_body_escapes_inputs():
     )
     assert '/t"x' not in html  # raw quote must have been escaped
     assert "&#34;" in html or "&quot;" in html
+
+
+def test_gallery_js_mirrors_server_junk_category_fallback():
+    """apply() must collapse an unknown ?category= to 'all' client-side.
+
+    The server's valid_category() guarantees junk never empties the gallery;
+    the popstate/on-load JS path uses the raw URL param, so it needs the same
+    fallback or ?category=bogus hides every card.
+    """
+    js = G._GALLERY_JS
+    assert "if(!known) cat = 'all';" in js
+    # The fallback runs before any card is toggled.
+    assert js.find("if(!known)") < js.find("classList.toggle('is-hidden'")
 
 
 def test_heading_order_valid():

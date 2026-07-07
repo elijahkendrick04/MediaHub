@@ -61,7 +61,6 @@ def world(tmp_path, monkeypatch):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
     monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    monkeypatch.delenv("MEDIAHUB_DEV_KEY", raising=False)
     for d in ("runs_v4", "club_profiles"):
         (tmp_path / d).mkdir(parents=True, exist_ok=True)
 
@@ -208,6 +207,44 @@ def test_card_scoped_link_only_serves_its_card(world):
     anon = world["app"].test_client()
     # a different card id on a card-scoped link is refused
     assert anon.get(f"/share/{share['token']}/card/other-card.png").status_code == 404
+
+
+def test_internal_comments_and_tasks_never_render_on_share_page(world):
+    """The public share page shows only external-safe entries: comments posted
+    via the share link itself (no account email). Internal committee comments
+    and tasks — always author_email-attributed — must not leak to an
+    unauthenticated link holder."""
+    run_id = world["run_id"]
+    from mediahub.collab import threads as th
+
+    th.add_comment(
+        run_id,
+        "card-1",
+        "check surname, parent complained",
+        author_email=OWNER,
+        author_name=OWNER,
+        kind="comment",
+    )
+    th.add_comment(
+        run_id,
+        "card-1",
+        "task: confirm the lane-4 name",
+        author_email=OWNER,
+        author_name=OWNER,
+        kind="task",
+    )
+    share = _create_share(world["app"], run_id, perm="comment")
+    anon = world["app"].test_client()
+    # An external reviewer's own share-posted comment IS visible.
+    anon.post(
+        f"/share/{share['token']}/comment",
+        data={"card_id": "card-1", "name": "A Parent", "body": "Looks great to me"},
+    )
+    body = anon.get(f"/share/{share['token']}").get_data(as_text=True)
+    assert "parent complained" not in body
+    assert "lane-4" not in body
+    assert OWNER not in body
+    assert "Looks great to me" in body
 
 
 def test_erasure_cascade_drops_shares(world):

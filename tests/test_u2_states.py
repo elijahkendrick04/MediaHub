@@ -300,6 +300,28 @@ def test_flash_toast_outside_request_context_is_noop():
     webmod._flash_toast("nothing here")  # no exception == pass
 
 
+def test_toast_message_set_via_textcontent_not_innerhtml(client):
+    """MH.toast must inject its (server-echoed) message via textContent, never
+    concatenate it into innerHTML — otherwise a filename/caption/error string
+    is a DOM XSS sink."""
+    body = client.get("/").get_data(as_text=True)
+    assert "MH.toast = function" in body
+    # The message slot is filled by textContent.
+    assert ".mh-toast-msg').textContent" in body
+    # The old raw-concat sink is gone.
+    assert "min-width:0\">' + message + '</div>'" not in body
+
+
+def test_run_delete_js_shows_failure_toast():
+    """A failed delete (run already gone in another tab, 404/400 → HTML → {})
+    must surface an honest error toast, not look like a dead click on Activity /
+    My Season / Settings."""
+    js = webmod._RUN_DELETE_JS
+    # Both the !j.ok branch and the network .catch of each handler toast.
+    assert js.count("Could not delete — reload and try again.") >= 4
+    assert "'error'" in js
+
+
 def test_delete_run_flash_confirms_once(client, monkeypatch):
     # Resolve ownership as a legacy untagged run and stub the real deletion so
     # the test exercises only the redirect + flash bridge.

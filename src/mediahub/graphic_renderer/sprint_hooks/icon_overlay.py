@@ -210,6 +210,27 @@ def _haystack(brief) -> str:
     return " ".join(p for p in parts if p).lower()
 
 
+def _factual_haystack(brief) -> str:
+    """Achievement-fact fields ONLY — a medal / record badge is a factual claim,
+    so free-form hook copy (``primary_hook`` / ``post_angle``) is excluded: "a
+    golden night for the squad" must never mint a gold-medal badge. The
+    deterministic ``inspiration_pattern_id`` counts as factual; its underscores
+    read as word separators so ``medal_and_pb_combo`` matches ``\\bmedal\\b``.
+    """
+    layers = getattr(brief, "text_layers", None) or {}
+    parts = [
+        _norm(getattr(brief, "confidence_label", "")),
+        _norm(layers.get("achievement_label")),
+        _norm(getattr(brief, "inspiration_pattern_id", "")).replace("_", " "),
+    ]
+    return " ".join(p for p in parts if p).lower()
+
+
+def _word(term: str, hay: str) -> bool:
+    """Whole-word match, so "golden" never reads as "gold"."""
+    return re.search(rf"\b{term}\b", hay) is not None
+
+
 def _place_int(value: object) -> int | None:
     """Leading integer of a place string (``"1st"`` → 1, ``"=2nd"`` → 2)."""
     m = re.match(r"\D*(\d+)", _norm(value))
@@ -217,28 +238,28 @@ def _place_int(value: object) -> int | None:
 
 
 def _medal_tier(brief) -> str | None:
-    hay = _haystack(brief)
+    hay = _factual_haystack(brief)
     layers = getattr(brief, "text_layers", None) or {}
     place = _place_int(layers.get("place"))
-    medal_ctx = "medal" in hay  # only let a 1/2/3 placing imply a medal in a medal context
-    if "gold" in hay or (medal_ctx and place == 1):
+    medal_ctx = _word("medal", hay)  # only let a 1/2/3 placing imply a medal in a medal context
+    if _word("gold", hay) or (medal_ctx and place == 1):
         return "gold"
-    if "silver" in hay or (medal_ctx and place == 2):
+    if _word("silver", hay) or (medal_ctx and place == 2):
         return "silver"
-    if "bronze" in hay or (medal_ctx and place == 3):
+    if _word("bronze", hay) or (medal_ctx and place == 3):
         return "bronze"
     return None
 
 
 def _record_kind(brief) -> str | None:
-    hay = _haystack(brief)
-    if "record" not in hay:
+    hay = _factual_haystack(brief)
+    if not _word("record", hay):
         return None
-    if "national" in hay:
+    if _word("national", hay):
         return "NATIONAL"
-    if "county" in hay or "regional" in hay:
+    if _word("county", hay) or _word("regional", hay):
         return "COUNTY"
-    if "club" in hay:
+    if _word("club", hay):
         return "CLUB"
     return "RECORD"
 

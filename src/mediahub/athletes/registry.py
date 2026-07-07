@@ -531,6 +531,78 @@ def athlete_swims(
         conn.close()
 
 
+def resolve_and_swims_bulk(
+    profile_id: str,
+    names: list[str],
+    db_path: Optional[Path] = None,
+) -> dict[str, list[dict]]:
+    """Resolve many names and fetch each one's swim history in one connection.
+
+    Parity helper for hot page views (e.g. the results table) that would
+    otherwise call :func:`resolve` + :func:`athlete_swims` per swimmer — two
+    connection opens and two ``ensure_schema`` calls each. This does ONE
+    ``ensure_schema`` and ONE connection: it resolves every distinct
+    ``normalise_name`` alias with a single ``alias IN (...)`` query, then fetches
+    the swims for the resolved athletes with a single ``athlete_id IN (...)``
+    query, and hands each requested name its history newest-first.
+
+    Returns ``{name: [swim, ...]}`` keyed by the *original* names passed in;
+    unknown names (and any on an empty/failed lookup) map to ``[]`` — the same
+    fail-soft empty-history contract as the per-name path. Semantics match
+    :func:`resolve` (alias) + :func:`athlete_swims` (ordering) exactly.
+    """
+    result: dict[str, list[dict]] = {name: [] for name in names}
+    if not profile_id or not names:
+        return result
+    # Distinct normalised keys → the original names that produced them.
+    key_to_names: dict[str, list[str]] = {}
+    for name in names:
+        key = normalise_name(name)
+        if not key:
+            continue
+        key_to_names.setdefault(key, []).append(name)
+    if not key_to_names:
+        return result
+    ensure_schema(db_path)
+    conn = _connect(db_path)
+    try:
+        keys = list(key_to_names)
+        placeholders = ",".join("?" for _ in keys)
+        alias_rows = conn.execute(
+            f"SELECT alias, athlete_id FROM athlete_aliases"
+            f" WHERE profile_id = ? AND alias IN ({placeholders})",
+            (profile_id, *keys),
+        ).fetchall()
+        key_to_athlete: dict[str, str] = {r["alias"]: r["athlete_id"] for r in alias_rows}
+        athlete_ids = sorted(set(key_to_athlete.values()))
+        swims_by_athlete: dict[str, list[dict]] = {}
+        if athlete_ids:
+            aid_placeholders = ",".join("?" for _ in athlete_ids)
+            swim_rows = conn.execute(
+                f"SELECT athlete_id, event, swim_date, time_cs, run_id FROM athlete_swims"
+                f" WHERE profile_id = ? AND athlete_id IN ({aid_placeholders})"
+                f" ORDER BY swim_date DESC, event",
+                (profile_id, *athlete_ids),
+            ).fetchall()
+            for r in swim_rows:
+                swims_by_athlete.setdefault(r["athlete_id"], []).append(
+                    {
+                        "event": r["event"],
+                        "swim_date": r["swim_date"],
+                        "time_cs": r["time_cs"],
+                        "run_id": r["run_id"],
+                    }
+                )
+    finally:
+        conn.close()
+    for key, orig_names in key_to_names.items():
+        aid = key_to_athlete.get(key)
+        swims = swims_by_athlete.get(aid, []) if aid else []
+        for name in orig_names:
+            result[name] = swims
+    return result
+
+
 def merge_athletes(
     profile_id: str,
     keep_id: str,

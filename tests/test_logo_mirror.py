@@ -149,6 +149,45 @@ class TestMirrorExternalLogo:
         assert path is not None
         assert path.suffix == ".webp"
 
+    def test_failed_fetch_is_negative_cached(self, logos_mod, monkeypatch):
+        logos, tmp_path = logos_mod
+        calls = {"n": 0}
+
+        def fake_get(url, **kw):
+            calls["n"] += 1
+            return _FakeResp(status_code=404)
+
+        import requests
+        monkeypatch.setattr(requests, "get", fake_get)
+
+        assert logos.mirror_external_logo("acme", "https://club.example/dead.png") is None
+        assert calls["n"] == 1
+        # A miss marker was written next to where the logo would live.
+        misses = list((tmp_path / "club_logo_cache" / "acme").glob("*.miss"))
+        assert len(misses) == 1
+        # Second call inside the TTL: no network attempt.
+        assert logos.mirror_external_logo("acme", "https://club.example/dead.png") is None
+        assert calls["n"] == 1
+
+    def test_miss_marker_expires_and_refetches(self, logos_mod, monkeypatch):
+        logos, tmp_path = logos_mod
+        import os
+        import requests
+        monkeypatch.setattr(requests, "get",
+                            lambda url, **kw: _FakeResp(status_code=503))
+        assert logos.mirror_external_logo("acme", "https://club.example/flaky.png") is None
+        (miss,) = (tmp_path / "club_logo_cache" / "acme").glob("*.miss")
+        # Age the marker past the TTL — the next call retries the fetch.
+        old = miss.stat().st_mtime - logos._MIRROR_MISS_TTL - 10
+        os.utime(miss, (old, old))
+        monkeypatch.setattr(
+            requests, "get",
+            lambda url, **kw: _FakeResp(headers={"Content-Type": "image/png"}),
+        )
+        path = logos.mirror_external_logo("acme", "https://club.example/flaky.png")
+        assert path is not None and path.exists()
+        assert not miss.exists()
+
     def test_mirror_content_type_maps_extension(self, logos_mod):
         logos, _ = logos_mod
         assert logos.mirror_content_type(Path("a/b.png")) == "image/png"

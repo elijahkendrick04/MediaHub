@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-26 · `23152a688` · Merge pull request #1053 from elijahkendrick04/claude/github-repo-private-plan-gk7lok
+**Last updated:** 2026-07-07 · `0d61c7d73` · Merge pull request #1068 from elijahkendrick04/claude/audit-last-350-prs-u9r9lc
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -117,7 +117,9 @@ section; **closing the issue clears it from here**. How the bot works:
 [`LOG_SENTINEL.md`](LOG_SENTINEL.md).
 
 <!-- ROADMAP:SENTINEL -->
-_No open production findings — the log sentinel has nothing filed._
+- [#1067](https://github.com/elijahkendrick04/MediaHub/issues/1067) · HTTP 5xx responses *(opened 2026-07-06)*
+- [#1066](https://github.com/elijahkendrick04/MediaHub/issues/1066) · Unhandled Python traceback *(opened 2026-07-03)*
+- [#1065](https://github.com/elijahkendrick04/MediaHub/issues/1065) · AI provider unavailable *(opened 2026-07-03)*
 <!-- /ROADMAP:SENTINEL -->
 
 ## To do — things to build (priority order)
@@ -1226,16 +1228,16 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
-| 2026-06-26 | `5269ea922` | build(deps): bump actions/cache from 5 to 6 |
-| 2026-06-26 | `6e332f7e8` | docs(roadmap): fast-track repo-private plan to top of both to-do lists |
-| 2026-06-24 | `b8eedb581` | Fix CI: use SHA-256 for meet fingerprint (bandit B324) + ruff-format |
-| 2026-06-24 | `6c12bac0d` | Add run deletion + bulk clear (My Season, Activity) and duplicate-meet detection |
-| 2026-06-24 | `b1184fc43` | 1.24: persist-visible translations, honest error shape, metered translate |
-| 2026-06-24 | `a9543cd73` | 1.24: normalise bulk language fan-out and fix the cap break |
-| 2026-06-24 | `4982f9dff` | 1.24: isolate bidi on RTL renders so embedded LTR runs don't scramble |
-| 2026-06-24 | `e3c884299` | 1.24: harden localise engine (glossary casing, empty-target no-op) |
-| 2026-06-24 | `c76085dc8` | docs(1.24): mark localisation shipped in the creative-suite parity map |
-| 2026-06-24 | `859010b1d` | localize(1.24): AI-dub pipeline for reels (Build 5/5) |
-| 2026-06-24 | `405167e0c` | localize(1.24): UI i18n (Welsh-first) + bulk per-language variants (Build 4/5) |
-| 2026-06-24 | `ec278326b` | localize(1.24): renderer RTL + non-Latin script fonts + re-render (Build 3/5) |
+| 2026-07-07 | `1e52b5ccc` | audit sub_16-3: represent the 3 new archetypes in the template gallery |
+| 2026-07-07 | `1a434e27d` | fix: give the three motion-trio archetypes their template-gallery entries |
+| 2026-07-07 | `f5a441cd2` | audit sub_16-3: author the 3 v2 still archetypes that make the R1.2 motion trio reachable |
+| 2026-07-07 | `ceac8c505` | security: pin the media-import stream fetch to its validated IP (+ review minors) |
+| 2026-07-07 | `d02432fcc` | audit phase D: make logo-inventory director tests immune to module-identity pollution |
+| 2026-07-07 | `0d1439461` | ci: fix the two red checks on the phase-D head |
+| 2026-07-07 | `7e5223735` | audit phase D: refresh inventories after merge |
+| 2026-07-07 | `86e34ea85` | audit phase C: complete 2 remaining-half handoffs |
+| 2026-07-07 | `e6489f251` | audit phase D: fix 8 Phase-C test regressions |
+| 2026-07-07 | `7a6b01624` | audit phase D: pre-commit hygiene (ruff-format, end-of-file) |
+| 2026-07-07 | `f5349cf56` | audit phase D: regenerate ENV/dependency/feature inventories after phase C |
+| 2026-07-07 | `a8dffae6f` | audit phase C: wire 3 onward web.py caller-swaps to batched helpers |
 <!-- /ROADMAP:ACTIVITY -->

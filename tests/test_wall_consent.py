@@ -207,6 +207,34 @@ def test_compliance_ledger_optout_blocks_the_wall_too(consent_wall):
     assert c.get("/wall/token-org-a-secret/card/run-a-1/swim-1.png").status_code == 404
 
 
+def test_consent_lookup_failure_fails_closed(consent_wall, monkeypatch):
+    """A broken consent registry drops every card (fail closed) while the
+    public page itself still renders 200 — consent may only ever tighten
+    this children's-data surface, never widen it."""
+    import mediahub.compliance.gate as gate
+    from mediahub.web.club_profile import load_profile
+    from mediahub.web.public_wall import wall_cards, wall_image_path
+
+    def _boom(*a, **k):
+        raise RuntimeError("registry corrupt")
+
+    monkeypatch.setattr(gate, "consent_block_reason", _boom)
+
+    hidden: list = []
+    cards = wall_cards(load_profile("org-a"), consent_hidden=hidden)
+    assert cards == []  # every card excluded, none leaked
+    assert len(hidden) == 2
+    assert all("consent lookup failed" in h["reason"] for h in hidden)
+    assert wall_image_path(load_profile("org-a"), "run-a-1", "swim-1") is None
+
+    c = consent_wall["app"].test_client()
+    assert c.get("/wall/token-org-a-secret/card/run-a-1/swim-1.png").status_code == 404
+    r = c.get("/wall/token-org-a-secret")
+    assert r.status_code == 200  # page renders; the cards are simply absent
+    html = r.get_data(as_text=True)
+    assert "Alice" not in html and "A.S." not in html
+
+
 def test_settings_page_explains_consent_hidden_cards(consent_wall):
     _set_consent("org-a", "Alice Smith", "do_not_feature")
     _set_consent("org-a", "Bob Jones", "full")

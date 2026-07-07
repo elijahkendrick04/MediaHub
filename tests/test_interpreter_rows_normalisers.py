@@ -19,6 +19,7 @@ from mediahub.interpreter.rows import (
     _normalise_reaction,
     _normalise_time,
     _normalise_yob,
+    _parse_records_from_line,
 )
 
 
@@ -276,6 +277,22 @@ class TestNormaliseClub:
         assert v == expected
 
     @pytest.mark.parametrize(
+        "raw",
+        [
+            # Para classes only run 1-15, so the class strip is bounded to that
+            # range — a club legitimately named with a trailing number outside
+            # it must survive intact (was being folded into a different club).
+            "Otter 79",
+            "SV Neptun 08",
+            "TSV 1860 München 79",
+            "Barracudas 16",
+        ],
+    )
+    def test_trailing_number_outside_para_range_is_preserved(self, raw: str) -> None:
+        v, _ = _normalise_club(raw)
+        assert v == raw
+
+    @pytest.mark.parametrize(
         "raw,expected",
         [
             # A whole "Name AaD Club" row collapsed into the club cell — recover
@@ -320,3 +337,29 @@ class TestNormaliseClub:
         # not surface as a club.
         v, _ = _normalise_club("NT")
         assert v is None
+
+
+# ---------------------------------------------------------------------------
+# _record_to_swim — age vs year-of-birth disambiguation (parens are the signal)
+# ---------------------------------------------------------------------------
+
+
+class TestRecordAgeVsYob:
+    def test_bare_two_digit_token_is_age_not_yob(self) -> None:
+        # Hy-Tek AaD layouts print the swimmer's AGE bare ("… Andrew 23 UoAPS
+        # 28.73"). A bare 2-digit token must be stored as age-at-meet, never
+        # coerced to a 20xx year of birth (23 was becoming yob=2023).
+        (swim,) = _parse_records_from_line("1 Arthur, Andrew 23 UoAPS 28.73")
+        assert swim.age == 23
+        assert swim.yob is None
+
+    def test_parenthesised_two_digit_token_is_yob(self) -> None:
+        # British results print YOB parenthesised: "(04)" → 2004.
+        (swim,) = _parse_records_from_line("1 Davies, Tom (04) City of Sheffield 28.73")
+        assert swim.yob == 2004
+        assert swim.age is None
+
+    def test_four_digit_token_is_yob(self) -> None:
+        (swim,) = _parse_records_from_line("1 Smith Jane 2006 SPAC 27.31")
+        assert swim.yob == 2006
+        assert swim.age is None

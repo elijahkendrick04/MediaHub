@@ -219,6 +219,33 @@ def test_route_starts_background_job(app_mod, monkeypatch):
     assert re.fullmatch(r"[0-9a-f]{12}", job_id)
 
 
+def test_rate_limit_not_dodgeable_by_fresh_sessions_same_ip(app_mod, monkeypatch):
+    """The crawl rate limit must key on identity/IP, NOT a client-resettable
+    session value — otherwise a fresh session per request dodges the cap. With a
+    constant client IP, a new test client (fresh session) each call still 429s
+    once the 6/5-min budget is spent."""
+    app, wm = app_mod
+    monkeypatch.setattr(
+        "mediahub.results_fetch.crawl.crawl_results_site", _fake_crawl_factory(wm)
+    )
+    monkeypatch.setattr("mediahub.web_research.safe_fetch.is_url_safe", lambda u: True)
+    wm._url_fetch_rate.clear()
+
+    codes = []
+    for _ in range(8):
+        # A brand-new client each iteration = a fresh (empty) session cookie.
+        c = app.test_client()
+        r = c.post(
+            "/upload/from-url",
+            data={"url": "https://results.swim.test/agb/"},
+            environ_overrides={"REMOTE_ADDR": "203.0.113.7"},
+        )
+        codes.append(r.status_code)
+    # First 6 succeed (the anonymous IP bucket), the rest are throttled.
+    assert codes[:6] == [200] * 6
+    assert codes[6] == 429 and codes[7] == 429
+
+
 # ---------------------------------------------------------------------------
 # Honest failures — job error, never a 500
 # ---------------------------------------------------------------------------
@@ -330,6 +357,38 @@ def test_job_state_survives_a_second_worker(app_mod):
     assert entry["status"] == "reading"
     assert entry["progress"] == "Reading the site"
     assert entry["run_id"] == "run-xyz"
+
+
+def test_prune_reaps_stale_running_job_files(app_mod):
+    """A worker crash mid-crawl leaves a 'running' status file that the
+    finished-only sweep never deletes; once the dir exceeds the cap it would
+    grow unbounded. Prune must also drop files whose heartbeat is quiet well
+    past the stall guard, while keeping a freshly-heartbeating running job."""
+    app, wm = app_mod
+    d = wm._url_jobs_dir()
+    d.mkdir(parents=True, exist_ok=True)
+    now = wm.time.time()
+    stale = now - (wm._URL_JOB_STALL_S * 2 + 60)
+
+    # Push the dir over the cap with old 'done' files so prune actually runs.
+    for i in range(wm._URL_JOBS_MAX + 5):
+        (d / f"done{i:03d}00ab.json").write_text(
+            json.dumps({"status": "done", "heartbeat": now - 1000}), encoding="utf-8"
+        )
+    # A wedged 'running' job whose heartbeat went cold long ago.
+    (d / "stalerun0001.json").write_text(
+        json.dumps({"status": "running", "heartbeat": stale}), encoding="utf-8"
+    )
+    # A genuinely alive 'running' job heartbeating right now.
+    (d / "liverun00002.json").write_text(
+        json.dumps({"status": "running", "heartbeat": now}), encoding="utf-8"
+    )
+
+    wm._url_jobs_files_prune()
+
+    names = {p.name for p in d.glob("*.json")}
+    assert "stalerun0001.json" not in names, "wedged running file must be reaped"
+    assert "liverun00002.json" in names, "a live heartbeating job must be kept"
 
 
 # ---------------------------------------------------------------------------

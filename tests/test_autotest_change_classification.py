@@ -56,6 +56,18 @@ def test_tripwire_and_classifier_tests_are_self_governance():
         ["tests/test_autotest_change_classification.py"]) == "self_governance"
 
 
+# --- protected oracle + comparators (abort, never auto-merge) ---------------
+def test_golden_oracle_and_its_comparators_are_protected():
+    """The golden baseline is PROTECTED, but the cheat works one level up too:
+    weaken the comparator (ground_truth.py / baseline.py tolerances) and a real
+    regression 'passes' without touching the oracle. All three must trip
+    _touches_protected so a diff touching any of them aborts the cycle."""
+    for f in ("autotest/baseline/golden-baseline.json",
+              "autotest/ground_truth.py", "autotest/baseline.py"):
+        assert gitops._touches_protected([f]), (
+            f"{f} is unprotected — the coder could grade its own homework")
+
+
 # --- precedence + fail-safe -------------------------------------------------
 def test_self_governance_wins_over_product_and_harness():
     # Stricter wins: any self-governance file makes the whole diff self_governance.

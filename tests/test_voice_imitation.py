@@ -14,14 +14,13 @@ import pytest
 import json
 
 from mediahub.brand.voice_imitation import (
-    _redact_pii,
     _compute_stats,
     analyse_examples,
     redact_pii,
     ADDRESS_OPTIONS,
 )
 from mediahub.web.club_profile import ClubProfile
-from mediahub.web.ai_caption import _voice_profile_instructions
+from mediahub.web.ai_caption import _voice_profile_prose
 
 
 # ---------------------------------------------------------------------------
@@ -30,28 +29,28 @@ from mediahub.web.ai_caption import _voice_profile_instructions
 
 class TestRedactPii:
     def test_strips_full_name(self):
-        result = _redact_pii(["Great swim by Sarah Johnson today!"])
-        assert "Sarah Johnson" not in result[0]
-        assert "[NAME]" in result[0]
+        result = redact_pii("Great swim by Sarah Johnson today!")
+        assert "Sarah Johnson" not in result
+        assert "[NAME]" in result
 
     def test_strips_multiple_names(self):
         text = "Congrats to Emily Davis and Tom Wilson!"
-        result = _redact_pii([text])
-        assert "Emily Davis" not in result[0]
-        assert "Tom Wilson" not in result[0]
+        result = redact_pii(text)
+        assert "Emily Davis" not in result
+        assert "Tom Wilson" not in result
 
     def test_preserves_club_names_single_word(self):
         text = "Great race from COMA today #swimming"
-        result = _redact_pii([text])
-        assert result[0] == text  # no change — not a 'First Last' pattern
+        result = redact_pii(text)
+        assert result == text  # no change — not a 'First Last' pattern
 
-    def test_empty_list(self):
-        assert _redact_pii([]) == []
+    def test_empty_string(self):
+        assert redact_pii("") == ""
 
     def test_no_names(self):
         text = "Huge PBs for the squad! #swimming"
-        result = _redact_pii([text])
-        assert result[0] == text
+        result = redact_pii(text)
+        assert result == text
 
 
 # ---------------------------------------------------------------------------
@@ -420,51 +419,51 @@ class TestClubProfileBackwardCompat:
 
 
 # ---------------------------------------------------------------------------
-# _voice_profile_instructions — system prompt injection
+# _voice_profile_prose — system prompt injection
 # ---------------------------------------------------------------------------
 
 class TestVoiceProfileInstructions:
     def test_empty_profile_returns_empty(self):
-        assert _voice_profile_instructions({}) == ""
-        assert _voice_profile_instructions(None) == ""  # type: ignore[arg-type]
+        assert _voice_profile_prose({}) == ""
+        assert _voice_profile_prose(None) == ""  # type: ignore[arg-type]
 
     def test_no_emoji_instruction_for_low_rate(self):
         vp = {"emoji_rate_per_caption": 0.0}
-        instr = _voice_profile_instructions(vp)
+        instr = _voice_profile_prose(vp)
         assert "no emoji" in instr.lower()
 
     def test_emoji_instruction_for_high_rate(self):
         vp = {"emoji_rate_per_caption": 3.0}
-        instr = _voice_profile_instructions(vp)
+        instr = _voice_profile_prose(vp)
         assert "emoji" in instr.lower()
         # Should not say "no emoji"
         assert "no emoji" not in instr.lower()
 
     def test_no_hashtag_instruction(self):
         vp = {"hashtag_count_avg": 0.0}
-        instr = _voice_profile_instructions(vp)
+        instr = _voice_profile_prose(vp)
         assert "hashtag" in instr.lower()
         assert "do not" in instr.lower() or "no" in instr.lower()
 
     def test_sentence_length_instruction(self):
         vp = {"sentence_length_avg": 8.0}
-        instr = _voice_profile_instructions(vp)
+        instr = _voice_profile_prose(vp)
         assert "8" in instr
 
     def test_forbidden_phrases_in_instructions(self):
         vp = {"forbidden_phrases": ["going forward", "unprecedented times"]}
-        instr = _voice_profile_instructions(vp)
+        instr = _voice_profile_prose(vp)
         assert "going forward" in instr
         assert "unprecedented times" in instr
 
     def test_opener_style_in_instructions(self):
         vp = {"characteristic_openers": ["Huge PB for", "What a race"]}
-        instr = _voice_profile_instructions(vp)
+        instr = _voice_profile_prose(vp)
         assert "Huge PB for" in instr
 
     def test_last_name_address(self):
         vp = {"preferred_swimmer_address": "last_name"}
-        instr = _voice_profile_instructions(vp)
+        instr = _voice_profile_prose(vp)
         assert "last name" in instr.lower() or "surname" in instr.lower()
 
     def test_default_address_is_first_name(self):
@@ -522,6 +521,32 @@ class TestQualitativeLLMPath:
         assert out["characteristic_openers"] == []
         # Numeric stats still computed.
         assert out["sentence_length_avg"] > 0
+        # ...but the AI half honestly reports it failed.
+        assert out["qualitative_status"] == "error"
+
+    def test_provider_down_reports_no_provider_status(self):
+        from mediahub.media_ai.llm import ClaudeUnavailableError
+
+        with mock.patch(
+            "mediahub.media_ai.llm.generate_json",
+            side_effect=ClaudeUnavailableError("no key configured"),
+        ):
+            out = analyse_examples(["Hello world."], use_llm=True)
+        assert out["qualitative_status"] == "no_provider"
+        # Numeric stats survive the AI outage.
+        assert out["sentence_length_avg"] > 0
+
+    def test_success_reports_ok_status(self):
+        with mock.patch(
+            "mediahub.media_ai.llm.generate_json",
+            return_value={"preferred_swimmer_address": "first_name"},
+        ):
+            out = analyse_examples(["Hello world."], use_llm=True)
+        assert out["qualitative_status"] == "ok"
+
+    def test_deterministic_only_reports_ok_status(self):
+        out = analyse_examples(["Hello world."], use_llm=False)
+        assert out["qualitative_status"] == "ok"
 
 
 # ---------------------------------------------------------------------------
