@@ -183,11 +183,11 @@ def _pinned_get(url: str, *, timeout: float, max_bytes: int) -> Optional[tuple[i
                 retries=False,
             )
         else:
-            # nosemgrep: python.lang.security.audit.network.http-not-https-connection.http-not-https-connection
             # Cleartext pool is reached ONLY when the caller's validated URL is
             # http:// (the https branch above uses HTTPSConnectionPool with SNI +
             # cert checks). We never downgrade an https target — the scheme is
             # preserved from the SSRF-validated URL; we only pin the resolved IP.
+            # nosemgrep: python.lang.security.audit.network.http-not-https-connection.http-not-https-connection
             pool = urllib3.HTTPConnectionPool(
                 ip_text, port=port, timeout=pool_timeout, retries=False
             )
