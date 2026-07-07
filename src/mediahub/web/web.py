@@ -2861,6 +2861,13 @@ def _init_db():
             created_at TEXT,
             PRIMARY KEY (run_id, card_id, emoji, reactor_id)
         );
+        -- One-time purge of the orphaned legacy posting-log table. Pre-PR-779
+        -- data.db files still hold `posting_attempts` rows with caption excerpts
+        -- and athlete names, but every erasure path (org-delete, athlete-erase,
+        -- run-erasure) stopped touching it once the table left the scrub set.
+        -- Nothing reads it at HEAD, so dropping it on init purges that
+        -- unreachable personal data for good.
+        DROP TABLE IF EXISTS posting_attempts;
     """)
     # Additive migration for DBs created before progress_log / heartbeat_at /
     # n_achievements. Old rows keep NULL n_achievements until they are listed
@@ -5838,6 +5845,33 @@ def _render_stored_translations(card: dict) -> str:
     )
 
 
+# Fixed slug order for the review-screen assist buttons. `fuller`/`calmer`
+# remain opt-in presets with no button; labels come from
+# caption_assist.PRESET_LABELS so a label change propagates to every row.
+_ASSIST_BUTTON_ORDER = ("shorter", "punchier", "add_time", "tidy", "summarise", "expand", "rewrite")
+_ASSIST_BUTTON_TITLES = {
+    "summarise": "One tight sentence",
+    "expand": "Add one on-brand detail",
+    "rewrite": "Fresh angle, same facts",
+}
+
+
+def _caption_assist_buttons(card_uuid: str) -> str:
+    """Build the review-screen Assist button row from caption_assist.PRESET_LABELS."""
+    from mediahub.web.caption_assist import PRESET_LABELS
+
+    out = []
+    for slug in _ASSIST_BUTTON_ORDER:
+        label = _h(PRESET_LABELS.get(slug, slug))
+        title = _ASSIST_BUTTON_TITLES.get(slug)
+        title_attr = f' title="{_h(title)}"' if title else ""
+        out.append(
+            f'<button class="btn secondary" style="font-size:11px;padding:3px 9px" '
+            f"onclick=\"captionAssistRun(this, '{card_uuid}', '{slug}')\"{title_attr}>{label}</button>"
+        )
+    return "".join(out)
+
+
 def _render_card_creative_toolbar(run_id: str, card_id_raw: str) -> str:
     """Per-card creative toolbar for the Content builder (post-approval):
     live AI caption tone tabs (AI / Warm / Hype / Precise), Copy, Regenerate,
@@ -5977,13 +6011,7 @@ def _render_card_creative_toolbar(run_id: str, card_id_raw: str) -> str:
         f'<div class="assist-row" data-card="{card_uuid}" style="display:none;margin-top:8px;padding:8px 10px;background:rgba(255,255,255,0.02);border:1px dashed var(--border);border-radius:6px">'
         f'<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);margin-bottom:6px;letter-spacing:0.5px">Assist &mdash; revise the current caption (AI suggests; you approve)</div>'
         f'<div style="display:flex;gap:5px;flex-wrap:wrap;align-items:center">'
-        f'<button class="btn secondary" style="font-size:11px;padding:3px 9px" onclick="captionAssistRun(this, \'{card_uuid}\', \'shorter\')">Shorter</button>'
-        f'<button class="btn secondary" style="font-size:11px;padding:3px 9px" onclick="captionAssistRun(this, \'{card_uuid}\', \'punchier\')">Punchier</button>'
-        f'<button class="btn secondary" style="font-size:11px;padding:3px 9px" onclick="captionAssistRun(this, \'{card_uuid}\', \'add_time\')">Add time</button>'
-        f'<button class="btn secondary" style="font-size:11px;padding:3px 9px" onclick="captionAssistRun(this, \'{card_uuid}\', \'tidy\')">Tidy up</button>'
-        f'<button class="btn secondary" style="font-size:11px;padding:3px 9px" onclick="captionAssistRun(this, \'{card_uuid}\', \'summarise\')" title="One tight sentence">Summarise</button>'
-        f'<button class="btn secondary" style="font-size:11px;padding:3px 9px" onclick="captionAssistRun(this, \'{card_uuid}\', \'expand\')" title="Add one on-brand detail">Expand</button>'
-        f'<button class="btn secondary" style="font-size:11px;padding:3px 9px" onclick="captionAssistRun(this, \'{card_uuid}\', \'rewrite\')" title="Fresh angle, same facts">Rewrite</button>'
+        f"{_caption_assist_buttons(card_uuid)}"
         f'<input class="assist-custom" type="text" maxlength="140" placeholder="or type a change&hellip;" aria-label="Custom caption change instruction" style="flex:1;min-width:140px;font-size:12px;padding:4px 8px;border:1px solid var(--border);border-radius:6px;background:rgba(255,255,255,0.04);color:inherit;font-family:inherit" />'
         f'<button class="btn" style="font-size:11px;padding:3px 10px;background:var(--lane);color:var(--lane-ink);border:none" onclick="captionAssistRun(this, \'{card_uuid}\', \'custom\')">Apply</button>'
         f"</div>"
@@ -10969,6 +10997,56 @@ def _theme_audit_panel_html(theme_json: Optional[dict]) -> str:
     )
 
 
+def _colour_accessibility_panel_html(role_vars: Optional[dict]) -> str:
+    """G1.18 — a collapsed "Colour accessibility" report beside the theme audit.
+
+    Renders the deterministic ``quality.colour_audit`` verdict for the brand's
+    resolved ``--mh-*`` role set: the APCA/WCAG summary from ``audit_roles`` plus
+    the colourblind-preview swatch strip (``swatches_svg``). Read-only and
+    engine-free — it explains, it never changes what renders. Returns "" when no
+    usable role set is available.
+    """
+    if not isinstance(role_vars, dict) or not role_vars:
+        return ""
+    try:
+        from mediahub.quality import colour_audit as _ca
+
+        audit = _ca.audit_roles(role_vars)
+        summary = audit.to_summary()
+        explain = audit.explain()
+        swatch_svg = _ca.swatches_svg(role_vars)
+    except Exception:
+        return ""
+
+    verdict_ok = bool(summary.get("passes")) and bool(summary.get("cvd_safe"))
+    verdict_label = "Passes" if verdict_ok else "Needs attention"
+    verdict_var = "--mh-success" if verdict_ok else "--mh-error"
+    warnings = summary.get("warnings") or []
+    warn_html = ""
+    if warnings:
+        items = "".join(f"<li>{_h(w)}</li>" for w in warnings[:12])
+        warn_html = (
+            '<ul style="margin:8px 0 0;padding-left:18px;font-size:12px;'
+            f'color:var(--mh-on-surface-variant)">{items}</ul>'
+        )
+    # swatches_svg is safe-by-construction (validated hex + fixed labels, every
+    # text node XML-escaped) so it embeds inline without re-escaping.
+    return (
+        '<details style="margin-top:14px;border:1px solid var(--mh-outline-variant);'
+        'border-radius:8px;padding:0 12px">'
+        '<summary style="cursor:pointer;padding:10px 0;font-size:13px;font-weight:600;'
+        'color:var(--mh-on-surface)">Colour accessibility '
+        f'<span style="color:var({verdict_var});font-weight:600">&middot; {verdict_label}</span>'
+        "</summary>"
+        '<div style="padding:0 0 12px">'
+        f'<p style="font-size:12px;color:var(--mh-on-surface-variant);'
+        f'margin:0 0 10px;line-height:1.5">{_h(explain)}</p>'
+        f"{warn_html}"
+        f'<div style="overflow-x:auto;margin-top:12px">{swatch_svg}</div>'
+        "</div></details>"
+    )
+
+
 def _theme_repair_callout_html(theme_json: Optional[dict]) -> str:
     """Phase 1.6 Stage H3 — render the non-blocking warning callout
     when the repair loop fired.
@@ -12688,18 +12766,12 @@ def _render_content_builder(pack_id: str, rec: dict, mode: str = "spotlight") ->
     # Inline Assist row — the meet-recap revise buttons (shorter / punchier /
     # add the time / tidy / summarise / expand / rewrite + a custom box), hidden
     # until "Assist…" is clicked. AI suggests; the user keeps or copies.
+    from mediahub.web.caption_assist import PRESET_LABELS as _preset_labels
+
     _assist_btns = "".join(
         f'<button type="button" class="btn secondary" style="font-size:11px;padding:3px 9px" '
-        f"onclick=\"cbAssistRun(this, '{_t}')\">{_lbl}</button>"
-        for _t, _lbl in [
-            ("shorter", "Shorter"),
-            ("punchier", "Punchier"),
-            ("add_time", "Add time"),
-            ("tidy", "Tidy up"),
-            ("summarise", "Summarise"),
-            ("expand", "Expand"),
-            ("rewrite", "Rewrite"),
-        ]
+        f"onclick=\"cbAssistRun(this, '{_t}')\">{_h(_preset_labels.get(_t, _t))}</button>"
+        for _t in _ASSIST_BUTTON_ORDER
     )
     assist_row = (
         '<div id="cb-assist-row" style="display:none;margin-top:8px;padding:8px 10px;'
@@ -23215,15 +23287,17 @@ function copyWhyCard(btn, taId) {{
                         variants.extend(pool.map(lambda _: _gen_one(), range(extra_needed)))
                 # Drop None placeholders from failed variants.
                 variants = [v for v in variants if v]
-                # Deduplicate identical outputs (Gemini occasionally returns the
-                # same caption twice on short prompts) while preserving order.
-                seen = set()
-                unique = []
-                for v in variants:
-                    if v and v not in seen:
-                        seen.add(v)
-                        unique.append(v)
-                variants = unique or variants
+                # Collapse exact + trigram near-duplicates (Gemini occasionally
+                # returns the same or near-same caption twice on short prompts)
+                # and drop AI-tell candidates, against the club's recent captions
+                # and the kept variants — the shared quality gate from
+                # generate_caption_candidates. Fail-open: never empties a
+                # non-empty list (a slightly stale caption beats none).
+                from mediahub.web.ai_caption import (
+                    filter_caption_variants as _filter_variants,
+                )
+
+                variants = _filter_variants(variants, recent_captions=_recent_captions)
 
                 caption_text = variants[0] if variants else ""
                 # If every variant failed (e.g. provider rate-limited),
@@ -27335,9 +27409,31 @@ self.addEventListener('fetch', function(e){
         pid = prof.profile_id
         plan = _auth.current_plan()
 
+        # Features whose routes don't yet record usage: their per-request
+        # governance context is bound but nothing meters them, so their limits
+        # would never enforce. Label them honestly rather than imply a live
+        # count (caption / imagine / translate DO record and are metered).
+        _unmetered_features = {
+            _gf.FEATURE_BRAND,
+            _gf.FEATURE_PALETTE,
+            _gf.FEATURE_DESCRIBE,
+            _gf.FEATURE_DNA,
+            _gf.FEATURE_RESEARCH,
+        }
+
         # --- Usage + quota per feature ---
         usage_rows = ""
         for spec in _gf.all_features():
+            if spec.key in _unmetered_features:
+                usage_rows += (
+                    '<tr><td style="padding:8px 10px">'
+                    f"<strong>{_h(spec.label)}</strong>"
+                    f'<div style="font-size:12px;color:var(--ink-muted)">{_h(spec.description)}</div>'
+                    "</td>"
+                    '<td style="padding:8px 10px;text-align:right;color:var(--ink-muted)">&mdash;</td>'
+                    '<td style="padding:8px 10px;color:var(--ink-muted)">Not yet metered</td></tr>'
+                )
+                continue
             if spec.key == _gf.FEATURE_IMAGINE:
                 try:
                     q = _imagine.check_quota(pid)
@@ -27376,8 +27472,10 @@ self.addEventListener('fetch', function(e){
             )
         usage_card = (
             '<div class="card"><h2 style="margin-top:0;font-size:18px">AI usage this month</h2>'
-            '<p style="color:var(--ink-muted);font-size:13px">A rolling 30-day window. Usage is '
-            "always counted; a feature only blocks if a specific limit has been set for it.</p>"
+            '<p style="color:var(--ink-muted);font-size:13px">A rolling 30-day window. Metered '
+            "features (captions, imagery, translation) count every use and block only once a "
+            "specific limit is set; features marked <em>not yet metered</em> run but aren&rsquo;t "
+            "counted yet.</p>"
             '<table style="width:100%;border-collapse:collapse">'
             '<thead><tr style="text-align:left;color:var(--ink-muted);font-size:12px">'
             '<th style="padding:8px 10px">Feature</th>'
@@ -40017,6 +40115,17 @@ what you're doing, what they should do.</p>
                 _theme_json_for_audit = None
             _repair_callout_html = _theme_repair_callout_html(_theme_json_for_audit)
             _audit_panel_html = _theme_audit_panel_html(_theme_json_for_audit)
+            # G1.18 colour-accessibility report for the brand's resolved --mh-*
+            # role set (deterministic; read-only) beside the theme audit.
+            _colour_a11y_html = ""
+            try:
+                from mediahub.graphic_renderer.render import _mh_role_vars
+
+                _colour_a11y_html = _colour_accessibility_panel_html(
+                    _mh_role_vars({}, _kit_for_audit)
+                )
+            except Exception:
+                _colour_a11y_html = ""
 
             preview_html = f"""
 <div class="card" style="margin-bottom:24px;border:1px solid var(--accent);
@@ -40037,6 +40146,7 @@ what you're doing, what they should do.</p>
   {confirm_form_html}
   {_repair_callout_html}
   {_audit_panel_html}
+  {_colour_a11y_html}
   <div style="margin-top:14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
     <a class="btn" href="{url_for("make_page")}" data-mh-cascade="finalise">Looks right &mdash; start creating &rarr;</a>
     {_sample_pack_cta(compact=True, button_label="See it on a sample meet")}
@@ -43321,6 +43431,21 @@ function mhSetupMode(mode) {{
                     f'border-radius:8px;font-weight:600;color:var(--warn)">{_h(draft)}</div>'
                 )
 
+            # Fallback badge — honest marker that this artefact shipped the
+            # deterministic template copy (a provider error prevented an
+            # AI-written version). Rendered only when the pack carries the
+            # per-artefact `source` field (old packs omit it → no badge).
+            fallback_html = ""
+            if art.get("source") == "fallback":
+                fallback_html = (
+                    '<div style="margin-bottom:12px;padding:10px 14px;'
+                    "background:rgba(245,158,11,0.12);border:1px solid var(--warn);"
+                    'border-radius:8px;font-weight:600;color:var(--warn)">'
+                    "&#9888; Template copy &mdash; the AI writer was unavailable, so this "
+                    "artefact fell back to a deterministic draft. Review before posting."
+                    "</div>"
+                )
+
             # Caption editor blocks &mdash; one per key
             caption_blocks = ""
             for cap_key, cap_val in captions.items():
@@ -43423,6 +43548,7 @@ function mhSetupMode(mode) {{
     <span class="tag info">{_h(atype_label)}</span>
   </div>
   {draft_html}
+  {fallback_html}
   {sub_cards_html}
   {caption_blocks}
   <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
@@ -45819,6 +45945,10 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
 
         _pe.save_recipe(a, recipe, store)
         a = store.get(asset_id)  # reload with the saved recipe
+        # Learn the club's preferred Enhance strength when this save embeds a
+        # (possibly scaled) Enhance suggestion — conservative and deterministic,
+        # a no-op for unrelated manual edits (closes the Enhance-memory loop).
+        _pe.maybe_record_enhance_accepted(a, recipe, store)
         _pe.materialize_edit(a, store)
         return jsonify(
             {
@@ -49157,6 +49287,22 @@ voice, and queues them for one-click approval.</p>
         if target is None:
             return jsonify({"error": "card_not_found"}), 404
 
+        # R1.19 — optional per-card audio-mix profile (?mix=voice_lead|balanced|
+        # music_forward), a deterministic operator knob folded into the card
+        # payload so _card_mix_profile reads it; absent keeps the env/default
+        # mix (byte-identical). Junk is an honest 400.
+        from mediahub.visual import audio_mux as _audio_mux
+
+        mix_profile = (request.args.get("mix") or "").strip().lower()
+        if mix_profile and mix_profile not in _audio_mux.AUDIO_MIX_PROFILES:
+            return jsonify(
+                {
+                    "error": "bad_mix",
+                    "detail": f"unknown audio mix profile {mix_profile!r}",
+                    "valid_mix": sorted(_audio_mux.AUDIO_MIX_PROFILES),
+                }
+            ), 400
+
         ach = target.get("achievement") or {}
         meet_name = (run_data.get("meet") or {}).get("name") or run_data.get("meet_name", "")
         card_payload = {
@@ -49165,6 +49311,8 @@ voice, and queues them for one-click approval.</p>
             "achievement": ach,
             "meet_name": meet_name,
         }
+        if mix_profile:
+            card_payload["audio_mix_profile"] = mix_profile
 
         profile_id = run_data.get("profile_id") or run_data.get("club_filter") or "_run_" + run_id
         profile_id = re.sub(r"[^a-z0-9_-]", "-", profile_id.lower()).strip("-") or (
@@ -50178,6 +50326,39 @@ voice, and queues them for one-click approval.</p>
                 400,
             )
 
+        # R1.19 — optional per-reel audio-mix profile (?mix=voice_lead|balanced|
+        # music_forward), a deterministic operator knob like ?format/?n. Folded
+        # into every card payload below so _card_mix_profile reads it; absent
+        # keeps the env/default mix (byte-identical). Junk is an honest 400.
+        from mediahub.visual import audio_mux as _audio_mux
+
+        mix_profile = (request.args.get("mix") or "").strip().lower()
+        if mix_profile and mix_profile not in _audio_mux.AUDIO_MIX_PROFILES:
+            return None, (
+                jsonify(
+                    {
+                        "error": "bad_mix",
+                        "detail": f"unknown audio mix profile {mix_profile!r}",
+                        "valid_mix": sorted(_audio_mux.AUDIO_MIX_PROFILES),
+                    }
+                ),
+                400,
+            )
+
+        # R1.13 — optional cover stat-chip config from the POST body. Validated
+        # via normalise_reel_stat_config (ValueError on junk ids → honest 400);
+        # absent leaves the reel byte-identical.
+        _reel_body = request.get_json(silent=True) or {}
+        reel_stat_config = _reel_body.get("reel_stat_config")
+        if reel_stat_config is not None:
+            try:
+                _motion.normalise_reel_stat_config(reel_stat_config)
+            except (ValueError, TypeError) as e:
+                return None, (
+                    jsonify({"error": "bad_stat_config", "detail": str(e)}),
+                    400,
+                )
+
         # R1.12 — optional beat-rhythm & duration customisation. Bad numbers are
         # an honest 400 rather than a silently-ignored param; absent params keep
         # the default skeleton (normalise_reel_rhythm returns None).
@@ -50231,14 +50412,17 @@ voice, and queues them for one-click approval.</p>
         cards: list[dict] = []
         for ra in top:
             ach = ra.get("achievement") or {}
-            cards.append(
-                {
-                    "id": ach.get("swim_id") or ra.get("id") or "",
-                    "swim_id": ach.get("swim_id") or "",
-                    "achievement": ach,
-                    "meet_name": meet_name,
-                }
-            )
+            card = {
+                "id": ach.get("swim_id") or ra.get("id") or "",
+                "swim_id": ach.get("swim_id") or "",
+                "achievement": ach,
+                "meet_name": meet_name,
+            }
+            # R1.19 — thread the operator's chosen mix into the card payload so
+            # _card_mix_profile picks it up; absent leaves the env/default mix.
+            if mix_profile:
+                card["audio_mix_profile"] = mix_profile
+            cards.append(card)
 
         profile_id = run_data.get("profile_id") or run_data.get("club_filter") or "_run_" + run_id
         profile_id = re.sub(r"[^a-z0-9_-]", "-", profile_id.lower()).strip("-") or (
@@ -50298,9 +50482,27 @@ voice, and queues them for one-click approval.</p>
         from mediahub.visual import dub as _dub
 
         _lang = (request.args.get("lang") or "").strip()
-        dub_language = (
-            _lang if (_lang and _dub.is_dubbable(_lang) and _lang.split("-", 1)[0] != "en") else ""
-        )
+        dub_language = ""
+        if _lang:
+            _lang_base = _lang.split("-", 1)[0].lower()
+            if _lang_base == "en":
+                # English IS the reel's original narration language — a no-op,
+                # not a dub, so it is honoured as the plain English cut.
+                dub_language = ""
+            elif _dub.is_dubbable(_lang):
+                dub_language = _lang
+            else:
+                # Honest-error rule: an undubbable ?lang= must not silently ship
+                # the English cut (mirrors api_card_translate's bad_language).
+                return None, (
+                    jsonify(
+                        {
+                            "error": "bad_language",
+                            "message": "That language can't be dubbed on this deployment.",
+                        }
+                    ),
+                    400,
+                )
         _lang_suffix = f"_{dub_language.split('-', 1)[0]}" if dub_language else ""
         # One canonical naming shared by the single, job and batch routes (and
         # matched by the reel-file route): the language suffix rides on the
@@ -50332,6 +50534,7 @@ voice, and queues them for one-click approval.</p>
                 "sponsor": sponsor_name,
                 "next_meet": next_meet_label,
                 "dub_language": dub_language,
+                "reel_stat_config": reel_stat_config,
             },
             None,
         )
@@ -50375,6 +50578,7 @@ voice, and queues them for one-click approval.</p>
                     sponsor=inputs.get("sponsor", ""),
                     next_meet=inputs.get("next_meet", ""),
                     dub_language=inputs.get("dub_language", ""),
+                    reel_stat_config=inputs.get("reel_stat_config"),
                 )
         except _RenderBusy:
             return _render_busy_response("reel")
@@ -50771,6 +50975,7 @@ voice, and queues them for one-click approval.</p>
                             sponsor=inputs.get("sponsor", ""),
                             next_meet=inputs.get("next_meet", ""),
                             dub_language=inputs.get("dub_language", ""),
+                            reel_stat_config=inputs.get("reel_stat_config"),
                         )
                 if not Path(mp4).exists():
                     raise RuntimeError("mp4 missing after render")
@@ -50903,6 +51108,7 @@ voice, and queues them for one-click approval.</p>
                         sponsor=inputs.get("sponsor", ""),
                         next_meet=inputs.get("next_meet", ""),
                         dub_language=inputs.get("dub_language", ""),
+                        reel_stat_config=inputs.get("reel_stat_config"),
                     )
                 rendered = result.get("rendered") or {}
                 errors = result.get("errors") or {}
@@ -51187,6 +51393,28 @@ voice, and queues them for one-click approval.</p>
                     y=float(body.get("y", 0) or 0),
                     w=float(body.get("w", 1) or 1),
                     h=float(body.get("h", 1) or 1),
+                )
+            elif action == "to_pdf" and cat == "image":
+                out = _out(".pdf")
+                qa.images_to_pdf([src], out)
+            elif action == "crop" and cat == "video":
+                out = _out(".mp4")
+                qa.video_crop(
+                    src,
+                    out,
+                    x=int(body.get("x", 0) or 0),
+                    y=int(body.get("y", 0) or 0),
+                    width=int(body.get("width", 0) or 0),
+                    height=int(body.get("height", 0) or 0),
+                )
+            elif action == "resize" and cat == "video":
+                out = _out(".mp4")
+                qa.video_resize(
+                    src,
+                    out,
+                    width=int(body.get("width", 0) or 0),
+                    height=int(body.get("height", 0) or 0),
+                    keep_aspect=bool(body.get("keep_aspect", True)),
                 )
             elif action == "to_gif" and cat == "video":
                 out = _out(".gif")
@@ -54665,7 +54893,12 @@ voice, and queues them for one-click approval.</p>
             'style="width:100%;padding:10px;margin:8px 0">'
             '<button class="btn" type="submit">Unlock</button></form></div>'
         )
-        return _layout("Protected", body, active="")
+        # Protected pages must never be indexed: the slug is excluded from the
+        # sitemap and the prompt itself carries an explicit noindex directive so
+        # a members-only page can't be advertised in search.
+        resp = make_response(_layout("Protected", body, active=""))
+        resp.headers["X-Robots-Tag"] = "noindex"
+        return resp
 
     def _serve_public_site(token, slug):
         from mediahub.sites import insights as _ins
