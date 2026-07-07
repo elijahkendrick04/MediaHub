@@ -7555,7 +7555,17 @@ def _run_url_fetch_job(job_id: str, url: str, profile_id: Optional[str]) -> None
                 percent=82,
             )
             try:
-                ai_extractions = ai_read_candidates(crawl.ai_candidates)
+                def _ai_read_progress(i: int, total: int) -> None:
+                    _url_job_set(
+                        job_id,
+                        phase="reading",
+                        progress=summary + f" · AI-reading page {i} of {total}",
+                        percent=82,
+                    )
+
+                ai_extractions = ai_read_candidates(
+                    crawl.ai_candidates, progress_cb=_ai_read_progress
+                )
             except ClaudeUnavailableError:
                 if no_results:
                     _url_job_set(
@@ -22606,21 +22616,28 @@ function copyWhyCard(btn, taId) {{
         history: dict[str, list[dict]] = {}
         if pid:
             try:
-                from mediahub.athletes import athlete_swims as _ath_swims
-                from mediahub.athletes import resolve as _ath_resolve
+                from mediahub.athletes import resolve_and_swims_bulk as _ath_bulk
 
                 swimmers = meet.get("swimmers") or {}
+                # Distinct swimmer_key → display name, then ONE bulk lookup
+                # (single connection, IN-queries) instead of resolve + swims per
+                # swimmer (two connection opens each).
+                sk_name: dict[str, str] = {}
                 for res in meet.get("results") or []:
                     sk = res.get("swimmer_key") or ""
-                    if not sk or sk in history:
+                    if not sk or sk in sk_name:
                         continue
                     sw = swimmers.get(sk) or {}
-                    name = (
+                    sk_name[sk] = (
                         f"{(sw.get('first_name') or '').strip()} "
                         f"{(sw.get('last_name') or '').strip()}"
                     ).strip()
-                    rec = _ath_resolve(pid, name) if name else None
-                    history[sk] = _ath_swims(pid, rec.athlete_id) if rec else []
+                names = [n for n in sk_name.values() if n]
+                swims_by_name = _ath_bulk(pid, names) if names else {}
+                history = {
+                    sk: (swims_by_name.get(name, []) if name else [])
+                    for sk, name in sk_name.items()
+                }
             except Exception:
                 history = {}
 
@@ -54114,8 +54131,10 @@ voice, and queues them for one-click approval.</p>
                 )
             )
         tid = _dh_store.create_table(pid, result.table.title, result.table.columns)
-        for row in result.table.rows:
-            _dh_store.upsert_row(pid, tid, row)
+        # Batched insert: one connection + transaction (one fsync) for the whole
+        # import instead of a connect/commit per row. Row count is already capped
+        # to _DH_MAX_IMPORT_ROWS above.
+        _dh_store.bulk_insert_rows(pid, tid, list(result.table.rows))
         return redirect(url_for("data_hub_table", table_id=tid))
 
     @app.route("/data-hub/export/<table_id>")
