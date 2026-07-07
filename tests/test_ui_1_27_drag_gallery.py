@@ -312,8 +312,9 @@ class TestMediaLibraryGallery:
         assert 'class="mh-drag-scroll"' in body
         assert 'aria-label="Media library photos' in body
         assert body.count('<figure class="mh-ds-card">') == 3, "one filmstrip card per asset"
-        # caption surfaces the (prettified) type + the subject
-        assert "athlete photo" in body
+        # caption surfaces the (prettified) type + the subject. Legacy
+        # "athlete_photo" canonicalises to athlete_action on read.
+        assert "athlete action" in body
         assert "Eira Hughes" in body and "Tom Davies" in body
         assert "Welsh National Open" in body  # falls back to venue when no athlete
 
@@ -338,7 +339,7 @@ class TestMediaLibraryGallery:
         body = _media_client(app).get("/media-library").get_data(as_text=True)
         assert 'class="mh-drag-scroll"' not in body, "no gallery when there are no assets"
         # ...but the upload form + (empty) table still render.
-        assert "Upload a photo" in body and "<table" in body
+        assert "Upload photos" in body and "<table" in body
 
 
 # ── 5. Browser-side (Playwright) ─────────────────────────────────────────────
