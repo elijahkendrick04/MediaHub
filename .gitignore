@@ -77,6 +77,7 @@ src/mediahub/export_cache/
 src/mediahub/runs_v4/
 src/mediahub/turn_into_packs/
 src/mediahub/stock_thumb_cache/
+src/mediahub/themes/
 # Legacy stock-thumb fallback location (pre-audit builds wrote to src/) —
 # guards dirty dev trees from ever re-committing cache binaries.
 src/stock_thumb_cache/

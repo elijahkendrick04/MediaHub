@@ -313,11 +313,13 @@ def export_pack_text(record: dict) -> str:
         platform = card.get("platform", "Post")
         caption = (card.get("caption") or "").strip()
         hashtags = card.get("hashtags") or []
-        try:
-            conf = int(round(float(card.get("confidence", 0.6)) * 100))
-        except (TypeError, ValueError):
-            conf = 60
-        lines.append(f"--- Card {i} · {platform} · {conf}% confidence ---")
+        conf_seg = ""
+        if card.get("confidence") is not None:
+            try:
+                conf_seg = f" · {int(round(float(card['confidence']) * 100))}% confidence"
+            except (TypeError, ValueError):
+                conf_seg = ""
+        lines.append(f"--- Card {i} · {platform}{conf_seg} ---")
         lines.append(caption)
         if hashtags:
             lines.append("")

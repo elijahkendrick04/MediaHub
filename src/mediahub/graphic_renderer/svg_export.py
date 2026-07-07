@@ -1094,8 +1094,17 @@ def _sidecar_key(
     background: Optional[str],
     title: Optional[str],
 ) -> str:
-    """Content key for a sidecar: the exact final HTML + every output-shaping input."""
+    """Content key for a sidecar: the exact final HTML + every output-shaping input.
+
+    Folds in the same renderer-generation salt as the PNG cache key: the SVG
+    is shaped by the same font files and Chromium build (print-to-PDF + PDFium
+    glyph outlining), so a font refresh or Playwright bump must re-export the
+    sidecar too, not just the PNG.
+    """
+    from .render_cache import _renderer_generation
+
     h = hashlib.sha256()
+    h.update(_renderer_generation().encode("utf-8"))
     h.update(
         repr(
             (int(size[0]), int(size[1]), bool(embed_images), bool(clip), background, title)
