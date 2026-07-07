@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-07-07 · `a10c36267` · Merge pull request #1071 from elijahkendrick04/claude/graphic-reel-engine-quality-gb7q90
+**Last updated:** 2026-07-07 · `6755bf0e1` · Merge pull request #1070 from elijahkendrick04/dependabot/pip/python-deps-c815298516
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1237,7 +1237,7 @@ list and the auto table below, not here.
 | 2026-07-07 | `22422946a` | feat(quality): register the M12 layered archetypes in the template gallery |
 | 2026-07-07 | `bec48507a` | feat(quality): phase B — still-graphic craft (M7-M14) |
 | 2026-07-07 | `268bbef78` | feat(quality): phase C — motion/reel craft (M15-M22) |
+| 2026-07-07 | `383ef20bb` | build(deps): bump the python-deps group across 1 directory with 13 updates |
 | 2026-07-07 | `e8037a24a` | feat(quality): phase A — photo foundations (M1-M6) |
 | 2026-07-07 | `1e52b5ccc` | audit sub_16-3: represent the 3 new archetypes in the template gallery |
-| 2026-07-07 | `1a434e27d` | fix: give the three motion-trio archetypes their template-gallery entries |
 <!-- /ROADMAP:ACTIVITY -->
