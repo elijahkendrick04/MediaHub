@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-07-07 · `89c44753d` · Merge pull request #1062 from elijahkendrick04/autotest/fix-f6d7111d0a5f
+**Last updated:** 2026-07-07 · `a67b04125` · Merge pull request #1058 from elijahkendrick04/claude/hyperframes-image-generation-xtlpz4
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1228,6 +1228,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-07-07 | `646b089aa` | feat(motion): per-card connective reel transitions + firmer on-video text/scrim + Video Maker rebran |
 | 2026-07-07 | `bf7f5f59d` | fix(ci): bandit B324 on selection markers + re-baseline reel frame for the paired-transition upgrade |
 | 2026-07-07 | `732138867` | chore(quality): final sweep — docs, moments memo, theme-token budget, formatting |
 | 2026-07-07 | `b547d4977` | feat(quality): phase D — club footage into the graphic + reel engines (M23-M28) |
@@ -1239,5 +1240,4 @@ list and the auto table below, not here.
 | 2026-07-07 | `268bbef78` | feat(quality): phase C — motion/reel craft (M15-M22) |
 | 2026-07-07 | `383ef20bb` | build(deps): bump the python-deps group across 1 directory with 13 updates |
 | 2026-07-07 | `e8037a24a` | feat(quality): phase A — photo foundations (M1-M6) |
-| 2026-07-07 | `1e52b5ccc` | audit sub_16-3: represent the 3 new archetypes in the template gallery |
 <!-- /ROADMAP:ACTIVITY -->
