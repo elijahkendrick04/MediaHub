@@ -147,27 +147,25 @@ class TestVenueImportRoute:
     def test_import_saves_asset_with_licence_and_attribution(self, app, env, monkeypatch):
         run_id = _seed_run(env)
 
-        class FakeRaw:
+        # Fake the pinned transport seam (urllib3-shaped response + pool) that
+        # _ssrf_safe_stream_get now fetches through.
+        class FakeResp:
+            status = 200
+            headers = {"Content-Type": "image/png"}
+
             def read(self, n, decode_content=True):
                 return b"\x89PNG fake-bytes"
-
-        class FakeResp:
-            status_code = 200
-            headers = {"Content-Type": "image/png"}
-            raw = FakeRaw()
-
-            def raise_for_status(self):
-                return None
 
             def close(self):
                 return None
 
-        import requests as real_requests
+        class FakePool:
+            def close(self):
+                return None
 
         import mediahub.web_research.safe_fetch as _sf
 
-        monkeypatch.setattr(_sf, "is_url_safe", lambda u: True)
-        monkeypatch.setattr(real_requests, "get", lambda *a, **k: FakeResp())
+        monkeypatch.setattr(_sf, "pinned_stream_get", lambda url, **kw: (FakeResp(), FakePool()))
         with app.test_client() as client:
             _with_org(client)
             resp = client.post(

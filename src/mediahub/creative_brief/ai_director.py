@@ -48,11 +48,14 @@ def _logo_inventory(brand_kit) -> str:
     """The uploaded-logo inventory for the brand kit's profile, if any.
 
     The art director picks a ``logo_lockup`` but was previously blind to which
-    logo variants actually exist. Surface the same ``include_logos=True``
-    inventory the brand-context builder produces (names + availability), loaded
-    from the kit's owning ClubProfile, so the model chooses a lockup that maps
-    to a real asset. Best-effort: any load/import failure yields ""; the
-    director never crashes on brand context.
+    logo variants actually exist. Surface the brand-context builder's
+    ``include_logos=True`` inventory (names + availability), loaded from the
+    kit's owning ClubProfile, so the model chooses a lockup that maps to a
+    real asset. The director is deliberately the only consumer: caption/text
+    generators keep the default logo-free context so logo filenames can never
+    leak into copy (guarded by test_caption_no_logo_leak). Best-effort: any
+    load/import failure yields ""; the director never crashes on brand
+    context.
     """
     profile_id = _safe_get(brand_kit, "profile_id", default="") or ""
     if not profile_id:
@@ -60,9 +63,8 @@ def _logo_inventory(brand_kit) -> str:
     try:
         from mediahub.web.club_profile import load_profile
 
-        # The single source of the include_logos=True inventory prose; reusing it
-        # keeps the humanised-name / dark-vs-mono guidance identical to what
-        # caption/imagery generators already surface.
+        # The single source of the include_logos=True inventory prose
+        # (humanised names + dark-vs-mono guidance).
         from mediahub.brand.context import _logos_prose
 
         profile = load_profile(profile_id)
