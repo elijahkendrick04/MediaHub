@@ -1501,20 +1501,26 @@ export const MeetReel: React.FC<Props> = ({
     Math.max(minBeat, Math.floor((remaining * w) / weightSum) + transitionFrames),
   );
 
-  // One consistent connective cut for every same-rank handoff, derived from
-  // the reel (the top card's seed) so the lower beats feel like one piece.
+  // The reel-level connective FALLBACK — the quiet kind derived from the top
+  // card's seed. Used only for a lower beat that carries no seed of its own.
   const connective = transitionFor(safeCards[0]?.variationSeed || 0);
 
   // M16 — paired, velocity-matched transitions: every beat's INCOMING spec is
   // precomputed so the preceding scene (cover or beat) can play the matched
   // exit transform through the SAME window with the SAME kind. The first beat
   // is the #1 (top-ranked) moment — its entry off the brand cover is the
-  // reel's peak, so it earns the bold, mood-chosen cut.
+  // reel's peak, so it earns the bold, mood-chosen cut. Every LOWER beat picks
+  // its OWN quiet connective kind from ITS card's seed (#1058), so consecutive
+  // same-rank handoffs vary within the quiet trio (crossfade/push/wipe) rather
+  // than all cutting identically — the peak stays the reel's only bold cut
+  // (transitionFor keeps bold kinds peak-only), and a seedless beat falls back
+  // to the reel-level `connective`.
   const specs = safeCards.map((card, i) => {
     const isPeak = i === 0 && safeCards.length > 1;
-    return isPeak
-      ? transitionFor(card.variationSeed || 0, { peak: true, mood: card.mood })
-      : connective;
+    if (isPeak) {
+      return transitionFor(card.variationSeed || 0, { peak: true, mood: card.mood });
+    }
+    return card.variationSeed ? transitionFor(card.variationSeed) : connective;
   });
   // Per-card timing: the chosen cut's own duration, capped at the handoff
   // budget so it stays inside the beat overlap (never eats the next build).

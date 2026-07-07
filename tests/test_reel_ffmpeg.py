@@ -227,9 +227,11 @@ def test_xfade_mapping_covers_every_kind_with_real_transition_names():
     assert reel_ffmpeg._xfade_for("unknown_kind") == "fade"  # safe fallback
 
 
-def test_reel_transition_names_earn_one_peak_cut_then_stay_connective():
-    # >1 card: cover→peak earns the mood cut (celebratory → iris/circleopen),
-    # every later handoff shares the one connective kind from the top seed.
+def test_reel_transition_names_earn_one_peak_then_per_card_connective():
+    # >1 card: cover→peak earns the mood cut (celebratory → iris/circleopen);
+    # every LATER handoff picks its OWN quiet connective kind from THAT card's
+    # seed (#1058), so consecutive same-rank beats vary within the quiet trio
+    # instead of all cutting identically.
     cards = [
         {"variationSeed": 0, "mood": "celebratory"},
         {"variationSeed": 9, "mood": "fierce"},
@@ -237,9 +239,30 @@ def test_reel_transition_names_earn_one_peak_cut_then_stay_connective():
     ]
     names = reel_ffmpeg._reel_transition_names(cards)
     assert len(names) == 3  # one join per card beat (cover→c0, c0→c1, c1→c2)
-    assert names[0] == "circleopen"  # earned peak cut from card 0's mood
-    assert names[1] == names[2] == "fade"  # connective from seed 0 → crossfade
-    # A single-card reel has no peak — the lone handoff is connective.
+    # Peak cut earned from card 0's mood + seed (computed via the real pickers,
+    # not a hardcoded guess — this pins the value that map actually produces).
+    assert names[0] == reel_ffmpeg._xfade_for(
+        reel_ffmpeg._transition_kind_for(0, peak=True, mood="celebratory")
+    )
+    assert names[0] == "circleopen"
+    # Lower beats: each drawn from its OWN seed via _transition_kind_for/_xfade_for.
+    assert names[1] == reel_ffmpeg._xfade_for(reel_ffmpeg._transition_kind_for(9))
+    assert names[2] == reel_ffmpeg._xfade_for(reel_ffmpeg._transition_kind_for(4))
+    assert names[1] == "fade"  # seed 9 → crossfade
+    assert names[2] == "slideup"  # seed 4 → push
+    # Per-card variation: the two connective joins differ, both from the quiet
+    # trio (crossfade / push / wipe → fade / slideup / wiperight).
+    assert names[1] != names[2]
+    quiet = {"fade", "slideup", "wiperight"}
+    assert names[1] in quiet and names[2] in quiet
+    # A seedless (0) lower beat falls back to the reel-level connective — the
+    # top card's seed. Here card 0 (seed 5, bold) is the peak; card 1 has no
+    # seed, so its join is the connective from seed 5 (→ wipe/wiperight).
+    seedless = reel_ffmpeg._reel_transition_names(
+        [{"variationSeed": 5, "mood": "bold"}, {"variationSeed": 0}]
+    )
+    assert seedless[1] == reel_ffmpeg._xfade_for(reel_ffmpeg._transition_kind_for(5))
+    # A single-card reel has no peak — the lone handoff is its own connective.
     assert reel_ffmpeg._reel_transition_names([{"variationSeed": 1}]) == ["slideup"]
     assert reel_ffmpeg._reel_transition_names([]) == []
 
