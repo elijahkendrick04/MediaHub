@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-07-07 · `0d61c7d73` · Merge pull request #1068 from elijahkendrick04/claude/audit-last-350-prs-u9r9lc
+**Last updated:** 2026-07-07 · `a10c36267` · Merge pull request #1071 from elijahkendrick04/claude/graphic-reel-engine-quality-gb7q90
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1228,16 +1228,16 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-07-07 | `bf7f5f59d` | fix(ci): bandit B324 on selection markers + re-baseline reel frame for the paired-transition upgrade |
+| 2026-07-07 | `732138867` | chore(quality): final sweep — docs, moments memo, theme-token budget, formatting |
+| 2026-07-07 | `b547d4977` | feat(quality): phase D — club footage into the graphic + reel engines (M23-M28) |
+| 2026-07-07 | `868b4488e` | test: align fixtures with phase A/B/E contracts (matte gate, canonical types, multi-upload copy) |
+| 2026-07-07 | `4559f56f7` | feat(motion): still↔motion parity pass — photo modes, exact filters, data weight, layered scenes |
+| 2026-07-07 | `d6909ee3f` | feat(quality): phase E — review-to-export UX overhaul (M29-M36) |
+| 2026-07-07 | `22422946a` | feat(quality): register the M12 layered archetypes in the template gallery |
+| 2026-07-07 | `bec48507a` | feat(quality): phase B — still-graphic craft (M7-M14) |
+| 2026-07-07 | `268bbef78` | feat(quality): phase C — motion/reel craft (M15-M22) |
+| 2026-07-07 | `e8037a24a` | feat(quality): phase A — photo foundations (M1-M6) |
 | 2026-07-07 | `1e52b5ccc` | audit sub_16-3: represent the 3 new archetypes in the template gallery |
 | 2026-07-07 | `1a434e27d` | fix: give the three motion-trio archetypes their template-gallery entries |
-| 2026-07-07 | `f5a441cd2` | audit sub_16-3: author the 3 v2 still archetypes that make the R1.2 motion trio reachable |
-| 2026-07-07 | `ceac8c505` | security: pin the media-import stream fetch to its validated IP (+ review minors) |
-| 2026-07-07 | `d02432fcc` | audit phase D: make logo-inventory director tests immune to module-identity pollution |
-| 2026-07-07 | `0d1439461` | ci: fix the two red checks on the phase-D head |
-| 2026-07-07 | `7e5223735` | audit phase D: refresh inventories after merge |
-| 2026-07-07 | `86e34ea85` | audit phase C: complete 2 remaining-half handoffs |
-| 2026-07-07 | `e6489f251` | audit phase D: fix 8 Phase-C test regressions |
-| 2026-07-07 | `7a6b01624` | audit phase D: pre-commit hygiene (ruff-format, end-of-file) |
-| 2026-07-07 | `f5349cf56` | audit phase D: regenerate ENV/dependency/feature inventories after phase C |
-| 2026-07-07 | `a8dffae6f` | audit phase C: wire 3 onward web.py caller-swaps to batched helpers |
 <!-- /ROADMAP:ACTIVITY -->
