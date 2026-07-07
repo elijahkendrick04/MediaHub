@@ -25,6 +25,27 @@ ASSET_TYPES = (
     "other",
 )
 
+# Values older upload forms / the share-target wrote before the vocabulary was
+# aligned with ASSET_TYPES. Normalised on every deserialise (from_dict) so
+# legacy rows keep scoring correctly in the selector's ROLE_TYPE_MAP.
+LEGACY_TYPE_ALIASES = {
+    "athlete_photo": "athlete_action",
+    "venue": "venue_photo",
+    "podium": "athlete_action",
+    "team": "team_photo",
+    "action": "athlete_action",
+}
+
+
+def canonical_asset_type(value) -> str:
+    """Map a legacy asset-type string onto its canonical ASSET_TYPES value.
+
+    Unknown values pass through unchanged (from_dict has always tolerated
+    arbitrary type strings; only the known legacy aliases are rewritten).
+    """
+    s = str(value or "").strip()
+    return LEGACY_TYPE_ALIASES.get(s, s)
+
 PERMISSION_STATUSES = (
     "user_owned",
     "approved_public",
@@ -124,6 +145,8 @@ class MediaAsset:
                 except Exception:
                     v = [s.strip() for s in v.split(",") if s.strip()]
             clean[k] = v
+        if clean.get("type"):
+            clean["type"] = canonical_asset_type(clean["type"])
         # ensure required
         if "id" not in clean:
             clean["id"] = ""
@@ -148,6 +171,8 @@ class MediaAsset:
 __all__ = [
     "MediaAsset",
     "ASSET_TYPES",
+    "LEGACY_TYPE_ALIASES",
+    "canonical_asset_type",
     "PERMISSION_STATUSES",
     "APPROVAL_STATUSES",
     "ORIENTATIONS",

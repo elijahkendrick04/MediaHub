@@ -169,6 +169,43 @@ class MediaLibraryStore:
                 setattr(existing, k, v)
         return self.save(existing)
 
+    def backfill_measurements(
+        self,
+        *,
+        profile_id: Optional[str] = None,
+        force: bool = False,
+        limit: int = 500,
+    ) -> int:
+        """One-shot re-measure of existing image assets (PHOTOS-1 backfill).
+
+        Assets saved before the ingest metadata spine landed carry width=0 /
+        orientation="unknown" and no ``media_meta["quality"]`` metrics, which
+        pins the selector's quality and orientation axes. This walks stored
+        assets (profile-scoped when ``profile_id`` is given) and re-measures
+        any image whose measurements are missing — or every image when
+        ``force=True``. Measurement is EXIF-aware in memory; the stored file
+        bytes are never rewritten here (only fresh uploads get orientation
+        baked in). Returns the number of assets updated. Call on demand (an
+        operator/maintenance action), it is not run automatically.
+        """
+        from .tagger import measure_asset
+
+        updated = 0
+        for asset in self.list(profile_id=profile_id, limit=limit):
+            if asset.type == "footage":
+                continue
+            has_quality = isinstance(asset.media_meta, dict) and isinstance(
+                asset.media_meta.get("quality"), dict
+            )
+            if not force and asset.width > 0 and asset.height > 0 and has_quality:
+                continue
+            if not asset.path or not os.path.exists(asset.path):
+                continue
+            if measure_asset(asset):
+                self.save(asset)
+                updated += 1
+        return updated
+
     # ------------------------------------------------------------------
     # Read
     # ------------------------------------------------------------------

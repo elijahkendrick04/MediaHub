@@ -23,6 +23,15 @@ bounds and always tracks the subject.
 Public API:
     crops_for(image_path, ratios) -> dict[ratio_spec, (x, y, w, h)]
     best_crop(image_path, ratio)  -> (x, y, w, h)
+    focus_position(image_path, ratio) -> "x% y%" object-position
+    focus_position_with_mask(image_path, mask_path, ratio) -> "x% y%"
+        (an external cutout's alpha steers the ORIGINAL photo's crop)
+
+Alpha-mask energy additionally gets a deterministic head bias for
+portrait-ish target ratios (< 1): the whole-mass centroid of a person
+cutout sits on the torso, so it is blended with the centroid of the top
+~30% of the subject's bounding box — fixed weights, no randomness.
+Non-alpha images are byte-identical to the pre-head-bias behaviour.
 
 No LLM, no network.
 """
@@ -60,9 +69,12 @@ def crops_for(image_path: Union[str, Path], ratios: Iterable[RatioSpec]) -> Dict
     # Validate every ratio up front so a bad spec fails before any file I/O.
     parsed = [(spec, _parse_ratio(spec)) for spec in specs]
 
-    width, height, energy = _energy_map(image_path)
-    cx, cy = _centroids(energy)
-    return {spec: _place_crop(width, height, ratio, cx, cy) for spec, ratio in parsed}
+    width, height, energy, is_alpha = _energy_map(image_path)
+    out: Dict[RatioSpec, Crop] = {}
+    for spec, ratio in parsed:
+        cx, cy = _focus_centroids(energy, is_alpha, ratio)
+        out[spec] = _place_crop(width, height, ratio, cx, cy)
+    return out
 
 
 def best_crop(image_path: Union[str, Path], ratio: RatioSpec) -> Crop:
@@ -73,8 +85,8 @@ def best_crop(image_path: Union[str, Path], ratio: RatioSpec) -> Crop:
     guaranteed within bounds.
     """
     r = _parse_ratio(ratio)
-    width, height, energy = _energy_map(image_path)
-    cx, cy = _centroids(energy)
+    width, height, energy, is_alpha = _energy_map(image_path)
+    cx, cy = _focus_centroids(energy, is_alpha, r)
     return _place_crop(width, height, r, cx, cy)
 
 
@@ -147,6 +159,53 @@ def focus_position_for_format(image_path: Union[str, Path], format_name: str = "
     return focus_position(image_path, ratio_for_format(format_name))
 
 
+def focus_position_with_mask(
+    image_path: Union[str, Path],
+    mask_path: Union[str, Path],
+    ratio: RatioSpec = "4:5",
+) -> str:
+    """CSS ``object-position`` for the ORIGINAL photo, steered by a cutout's alpha.
+
+    Most originals carry no transparency, so :func:`focus_position` falls back
+    to gradient energy — which tracks edges, not the subject. When a rembg /
+    PhotoRoom cutout of the same photo exists, its alpha channel IS the
+    subject mask: this helper reads the mask's alpha as the energy map (head
+    bias included for portrait-ish ratios) and places the crop in the
+    original photo's pixel grid, so face-accurate focus works for non-alpha
+    originals too.
+
+    Deterministic; on any failure (missing/opaque/unreadable mask) it falls
+    back to ``focus_position(image_path, ratio)`` — exactly what the caller
+    would have used without a mask.
+    """
+    if not image_path or not mask_path:
+        return focus_position(image_path, ratio)
+    try:
+        r = _parse_ratio(ratio)
+        with Image.open(image_path) as im:
+            im.load()
+            width, height = im.size
+        if width <= 0 or height <= 0:
+            return focus_position(image_path, ratio)
+        with Image.open(mask_path) as mim:
+            mim.load()
+            alpha = _alpha_mask(mim)
+            if alpha is None:
+                return focus_position(image_path, ratio)
+            # Resample the mask onto the ORIGINAL's working grid so the
+            # centroid lands in the original's coordinate space even when the
+            # cutout was produced at a different resolution.
+            sw, sh = _work_size(width, height)
+            energy = np.asarray(alpha.resize((sw, sh), Image.BILINEAR), dtype=np.float32)
+        cx, cy = _focus_centroids(energy, True, r)
+        x, y, w, h = _place_crop(width, height, r, cx, cy)
+        px = max(0.0, min(1.0, (x + w / 2.0) / width)) * 100.0
+        py = max(0.0, min(1.0, (y + h / 2.0) / height)) * 100.0
+        return f"{px:.0f}% {py:.0f}%"
+    except Exception:
+        return focus_position(image_path, ratio)
+
+
 # --------------------------------------------------------------------------- #
 # Ratio parsing
 # --------------------------------------------------------------------------- #
@@ -200,12 +259,14 @@ def _parse_ratio(spec: RatioSpec) -> float:
 # --------------------------------------------------------------------------- #
 
 
-def _energy_map(image_path: Union[str, Path]) -> Tuple[int, int, np.ndarray]:
-    """Load the image and return ``(width, height, energy)``.
+def _energy_map(image_path: Union[str, Path]) -> Tuple[int, int, np.ndarray, bool]:
+    """Load the image and return ``(width, height, energy, is_alpha)``.
 
     ``energy`` is a non-negative 2-D float array on a downscaled working
-    grid: the cutout alpha mask if the image carries usable transparency,
-    otherwise a gradient-magnitude edge map.
+    grid: the cutout alpha mask if the image carries usable transparency
+    (``is_alpha=True``), otherwise a gradient-magnitude edge map
+    (``is_alpha=False``). Only the alpha path carries a subject silhouette,
+    so only it is eligible for the head-bias blend.
     """
     with Image.open(image_path) as im:
         im.load()
@@ -216,11 +277,13 @@ def _energy_map(image_path: Union[str, Path]) -> Tuple[int, int, np.ndarray]:
         if mask is not None:
             small = mask.resize((sw, sh), Image.BILINEAR)
             energy = np.asarray(small, dtype=np.float32)
+            is_alpha = True
         else:
             small = im.convert("L").resize((sw, sh), Image.BILINEAR)
             energy = _gradient_energy(np.asarray(small, dtype=np.float32))
+            is_alpha = False
 
-    return width, height, energy
+    return width, height, energy, is_alpha
 
 
 def _work_size(width: int, height: int) -> Tuple[int, int]:
@@ -256,6 +319,64 @@ def _gradient_energy(lum: np.ndarray) -> np.ndarray:
     if lum.shape[0] > 1:
         gy[1:, :] = np.abs(np.diff(lum, axis=0))
     return np.hypot(gx, gy)
+
+
+# --------------------------------------------------------------------------- #
+# Head bias (PHOTOS-8) — alpha-mask energy only, portrait-ish targets only
+# --------------------------------------------------------------------------- #
+
+# A person cutout's whole-mass centroid sits on the torso; for portrait-ish
+# crops (ratio < 1) the head is what must stay in frame. The head lives in the
+# top band of the subject's bounding box, so we blend the centroid of that
+# band with the full centroid using fixed weights. Alpha values below the
+# threshold (0..255 grid) are matting noise, not subject.
+_HEAD_BAND_FRACTION = 0.30
+_HEAD_BLEND = 0.6  # weight on the head-band centroid; 1-this on the full one
+_ALPHA_SUBJECT_THRESHOLD = 25.0
+
+
+def _focus_centroids(energy: np.ndarray, is_alpha: bool, ratio: float) -> Tuple[float, float]:
+    """The centroid the crop should centre on, head-biased where it applies.
+
+    Gradient-energy images (no mask) keep the plain centroid — byte-identical
+    behaviour for every non-alpha photo. Alpha-mask energy gets the head-bias
+    blend for portrait-ish target ratios (ratio < 1); wider targets keep the
+    whole-mass centroid, which frames torso-level action correctly.
+    """
+    cx, cy = _centroids(energy)
+    if not is_alpha or ratio >= 1.0:
+        return cx, cy
+    head = _head_centroid(energy)
+    if head is None:
+        return cx, cy
+    hx, hy = head
+    return (
+        _HEAD_BLEND * hx + (1.0 - _HEAD_BLEND) * cx,
+        _HEAD_BLEND * hy + (1.0 - _HEAD_BLEND) * cy,
+    )
+
+
+def _head_centroid(energy: np.ndarray) -> Union[Tuple[float, float], None]:
+    """Centroid of the top ``_HEAD_BAND_FRACTION`` of the subject's bbox.
+
+    Returns fractions in ``[0, 1]`` like :func:`_centroids`, or None when the
+    mask carries no subject above the threshold (fall back to the full
+    centroid — never guess).
+    """
+    subject = energy > _ALPHA_SUBJECT_THRESHOLD
+    rows = np.flatnonzero(subject.any(axis=1))
+    if rows.size == 0:
+        return None
+    top, bottom = int(rows[0]), int(rows[-1])
+    band_h = max(1, int(round((bottom - top + 1) * _HEAD_BAND_FRACTION)))
+    band = np.zeros_like(energy)
+    band[top : top + band_h, :] = energy[top : top + band_h, :]
+    # Only subject pixels contribute — matting haze outside the silhouette
+    # must not drag the head point sideways.
+    band[~subject] = 0.0
+    if float(band.sum()) <= 1e-9:
+        return None
+    return _centroids(band)
 
 
 def _centroids(energy: np.ndarray) -> Tuple[float, float]:
@@ -320,6 +441,7 @@ __all__ = [
     "best_crop",
     "focus_position",
     "focus_position_for_format",
+    "focus_position_with_mask",
     "ratio_for_format",
     "FORMAT_RATIOS",
     "Crop",

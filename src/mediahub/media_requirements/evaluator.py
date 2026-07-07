@@ -11,7 +11,7 @@ and a recommended_action string.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Iterable, Optional
 
 from mediahub.media_library import MediaAsset, select_assets
@@ -38,6 +38,10 @@ class EvaluationResult:
     confidence_tier: str = "high"  # high | medium | low
     confidence_label: str = "NEW PB"  # readable label for graphic ("NEW PB" / "LIKELY PB" / ...)
     explain: str = ""
+    # PHOTOS-6: when hero matching fails but this meet's uploads exist,
+    # the top-k of those photos — surfaced for a HUMAN to pick from, never
+    # auto-placed on a named card (they carry no verified athlete link).
+    candidates: list[dict] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return {
@@ -52,6 +56,7 @@ class EvaluationResult:
             "confidence_tier": self.confidence_tier,
             "confidence_label": self.confidence_label,
             "explain": self.explain,
+            "candidates": self.candidates,
         }
 
 
@@ -137,8 +142,18 @@ def evaluate(
     profile_logo_present: bool = False,
     content_type_override: Optional[str] = None,
     exclude_athlete_photos: bool = False,
+    run_id: Optional[str] = None,
+    meet_window: Optional[tuple[str, str]] = None,
+    exclude_asset_families: Optional[list[str]] = None,
 ) -> EvaluationResult:
-    """Compute readiness + best-fit assets per role."""
+    """Compute readiness + best-fit assets per role.
+
+    ``run_id`` / ``meet_window`` scope the PHOTOS-6 candidate surface: when
+    hero matching fails, photos stamped with this run's id (or uploaded inside
+    the meet's ISO-timestamp window) are ranked and surfaced as ``candidates``
+    for a human to pick from. ``exclude_asset_families`` threads recently-used
+    dHashes through to the selector so one pack never repeats a near-frame.
+    """
     item_id = (
         content_item.get("id")
         or content_item.get("content_item_id")
@@ -227,13 +242,20 @@ def evaluate(
             preferred_orientation="portrait" if req.role.startswith("hero") else None,
             min_score=0.35,
             k=5,
+            exclude_families=exclude_asset_families,
         )
         if scored:
             matched[req.role] = scored
         else:
             # Try fallback role if specified
             if req.fallback_role:
-                fb = select_assets(library_list, role=req.fallback_role, min_score=0.35, k=3)
+                fb = select_assets(
+                    library_list,
+                    role=req.fallback_role,
+                    min_score=0.35,
+                    k=3,
+                    exclude_families=exclude_asset_families,
+                )
                 if fb:
                     matched[req.role] = fb
                     continue
@@ -243,6 +265,7 @@ def evaluate(
                 missing_optional.append(req.role)
 
     # Status decision
+    candidates: list[dict] = []
     if tier == "low":
         status = SKIP_LOW_CONFIDENCE
         action = "Verify the underlying result before generating a graphic."
@@ -254,7 +277,28 @@ def evaluate(
         else:
             status = NEEDS_MEDIA
             roles_text = ", ".join(missing_required)
-            if "hero_athlete" in missing_required and athlete_name:
+            _hero_missing = any(r.startswith("hero") for r in missing_required)
+            _meet_total = 0
+            if _hero_missing and _photo_ok and not exclude_athlete_photos:
+                # PHOTOS-6: the volunteer may have already uploaded this
+                # meet's photos — surface them to pick from instead of the
+                # upload nag. Never auto-matched: an unconfirmed face on a
+                # named card needs a human click.
+                candidates, _meet_total = _meet_scoped_candidates(
+                    library_list,
+                    run_id=run_id,
+                    meet_window=meet_window,
+                    athlete_name=athlete_name,
+                    athlete_id=athlete_id,
+                    exclude_asset_families=exclude_asset_families,
+                )
+            if candidates:
+                _n = _meet_total or len(candidates)
+                action = (
+                    f"Pick from {_n} photo{'s' if _n != 1 else ''} "
+                    "uploaded for this meet."
+                )
+            elif "hero_athlete" in missing_required and athlete_name:
                 action = f"Upload a real photo of {athlete_name} to render this post."
             elif "venue" in missing_required:
                 action = "Search for a venue image, or upload one."
@@ -278,7 +322,74 @@ def evaluate(
         confidence_tier=tier,
         confidence_label=label,
         explain=explain,
+        candidates=candidates,
     )
+
+
+# Person-photo types eligible for the meet-scoped candidate surface (quick
+# uploads land as "other", so it stays in the pickable set).
+_CANDIDATE_TYPES = ("athlete_action", "athlete_headshot", "team_photo", "other")
+
+
+def _meet_scoped_candidates(
+    library_list: list[MediaAsset],
+    *,
+    run_id: Optional[str],
+    meet_window: Optional[tuple[str, str]],
+    athlete_name: Optional[str],
+    athlete_id: Optional[str],
+    exclude_asset_families: Optional[list[str]],
+    k: int = 5,
+) -> tuple[list[dict], int]:
+    """Rank this meet's uploaded photos as pick-from candidates.
+
+    A photo belongs to the meet when its ``linked_meet_ids`` carries the run
+    id (stamped at upload time — recorded, never guessed) or, when a
+    ``meet_window`` of ISO timestamps is given, when it was uploaded inside
+    that window. Returns ``(top_k_scored, total_in_scope)``; deterministic —
+    same library in, same ranking out.
+    """
+    if not run_id and not meet_window:
+        return [], 0
+    scoped: list[MediaAsset] = []
+    for a in library_list:
+        if a.type not in _CANDIDATE_TYPES or not a.is_usable_for_post():
+            continue
+        in_scope = bool(run_id and run_id in (a.linked_meet_ids or []))
+        if not in_scope and meet_window:
+            in_scope = _uploaded_within(a.uploaded_at, meet_window)
+        if in_scope:
+            scoped.append(a)
+    if not scoped:
+        return [], 0
+    ranked = select_assets(
+        scoped,
+        role="hero_athlete",
+        athlete_name=athlete_name,
+        athlete_id=athlete_id,
+        preferred_orientation="portrait",
+        min_score=0.0,
+        k=k,
+        exclude_families=exclude_asset_families,
+    )
+    # min_score=0.0 admits hard-zero (unusable) scores; scoped is already
+    # usable-only, but keep the guard explicit for safety.
+    ranked = [r for r in ranked if r["score"] > 0.0]
+    return ranked, len(scoped)
+
+
+def _uploaded_within(uploaded_at: str, window: tuple[str, str]) -> bool:
+    """True iff ``uploaded_at`` parses and falls inside the ISO window."""
+    try:
+        from datetime import datetime, timezone
+
+        def _parse(s: str) -> datetime:
+            dt = datetime.fromisoformat(str(s).replace("Z", "+00:00"))
+            return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+        return _parse(window[0]) <= _parse(uploaded_at) <= _parse(window[1])
+    except Exception:
+        return False
 
 
 def _build_explanation(

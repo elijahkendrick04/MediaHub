@@ -221,6 +221,129 @@ def _resolve_asset_paths(
     return athlete_path, venue_path, logo_path, bg_photo_path
 
 
+def _item_athlete_name(item: dict) -> str:
+    ach = item.get("achievement") or {}
+    return str(
+        item.get("swimmer_name")
+        or ach.get("swimmer_name")
+        or item.get("athlete_name")
+        or ach.get("athlete_name")
+        or ""
+    ).strip()
+
+
+def _asset_as_dict(a) -> dict:
+    if isinstance(a, dict):
+        return a
+    return a.to_dict() if hasattr(a, "to_dict") else {}
+
+
+def _photo_identity_note(
+    item: dict,
+    evaluation,
+    media_assets,
+    forced_hero_asset_id=None,
+) -> Optional[str]:
+    """STILLS-9: flag an unverified face landing on a named card.
+
+    When the card names an athlete and the hero photo about to render carries
+    no verified link to that athlete (no matching ``linked_athlete_ids`` /
+    ``linked_athlete_names``), return a reviewer-facing note for the visual's
+    safety_notes. A description mention is NOT verification — only an explicit
+    athlete link is. Returns None when there's no named subject, no hero
+    photo, or the link checks out.
+    """
+    name = _item_athlete_name(item)
+    if not name:
+        return None
+    ach = item.get("achievement") or {}
+    subject_id = str(
+        item.get("swimmer_id") or ach.get("swimmer_id") or item.get("athlete_id") or ""
+    ).strip()
+
+    hero: Optional[dict] = None
+    if forced_hero_asset_id:
+        for a in media_assets or []:
+            ad = _asset_as_dict(a)
+            if str(ad.get("id")) == str(forced_hero_asset_id):
+                hero = ad
+                break
+    elif hasattr(evaluation, "matched") and evaluation.matched:
+        for role, scored in evaluation.matched.items():
+            if role.startswith("hero") and scored:
+                top = scored[0]
+                hero = (top.get("asset") if isinstance(top, dict) else None) or None
+                break
+    if not hero:
+        return None
+
+    ids = [str(x) for x in (hero.get("linked_athlete_ids") or [])]
+    names = [str(n).lower() for n in (hero.get("linked_athlete_names") or [])]
+    needle = name.lower()
+    verified = bool(subject_id and subject_id in ids) or (
+        needle in names or any(needle in n or n in needle for n in names)
+    )
+    if verified:
+        return None
+    return f"photo identity unverified — check it's really {name}"
+
+
+def _record_asset_usage(visuals: list[dict], *, profile_id: str, store=None) -> int:
+    """PHOTOS-5: persist which visuals each source asset ended up in.
+
+    Appends every rendered visual id onto its source assets' ``used_in`` so
+    the selector's reuse-penalty axis finally has data — the same photo stops
+    landing on every card of a multi-PB weekend. Profile-scoped: an asset
+    belonging to a different organisation is never touched, even if its id
+    leaked into a brief. Returns the number of assets updated.
+    """
+    usage: dict[str, list[str]] = {}
+    for v in visuals or []:
+        vid = str(v.get("id") or "")
+        if not vid:
+            continue
+        for aid in v.get("sourced_asset_ids") or []:
+            if aid and aid != "_brand_logo_":
+                usage.setdefault(str(aid), []).append(vid)
+    if not usage:
+        return 0
+    if store is None:
+        from mediahub.media_library.store import get_store
+
+        store = get_store()
+    updated = 0
+    for aid, vids in usage.items():
+        try:
+            asset = store.get(aid)
+            if asset is None:
+                continue
+            if profile_id and asset.profile_id and asset.profile_id != profile_id:
+                continue
+            merged = list(asset.used_in or [])
+            fresh = [v for v in vids if v not in merged]
+            if not fresh:
+                continue
+            store.update_fields(aid, {"used_in": merged + fresh})
+            updated += 1
+        except Exception:
+            continue
+    return updated
+
+
+def _dhash_by_asset_id(media_assets) -> dict[str, str]:
+    """Index asset id → ingest dHash (burst-family key) for pack threading."""
+    out: dict[str, str] = {}
+    for a in media_assets or []:
+        ad = _asset_as_dict(a)
+        aid = str(ad.get("id") or "")
+        meta = ad.get("media_meta")
+        q = meta.get("quality") if isinstance(meta, dict) else None
+        dh = str(q.get("dhash") or "") if isinstance(q, dict) else ""
+        if aid and dh:
+            out[aid] = dh
+    return out
+
+
 def create_visual_for_item(
     item: dict,
     brand_kit,
@@ -243,11 +366,17 @@ def create_visual_for_item(
     forced_bg_asset_id: Optional[str] = None,
     design_spec=None,
     user_overrides: Optional[dict] = None,
+    recent_asset_families: Optional[list[str]] = None,
 ) -> dict:
     """Full pipeline for one content item. Returns a dict of:
         { brief, evaluation, visuals (list of dicts with file_path), errors }
 
     The caller normally writes the returned ``visuals`` list back onto the item.
+
+    ``recent_asset_families``: dHash hex strings of photos already used earlier
+    in this pack (threaded by ``attach_visuals_to_pack`` the same way
+    ``recent_signatures`` is) — the selector drops near-frames of them so one
+    pack never features two shots from the same burst.
 
     ``design_spec``: a validated ``DesignSpec`` to apply onto the brief (the
     regenerate-variants worker pre-computes distinct specs in one batch call
@@ -296,6 +425,8 @@ def create_visual_for_item(
             library_assets=library,
             profile_logo_present=bool(getattr(brand_kit, "logo_svg", None)),
             exclude_athlete_photos=_exclude_photos,
+            run_id=run_id,
+            exclude_asset_families=recent_asset_families,
         )
         out["evaluation"] = (
             evaluation.to_dict() if hasattr(evaluation, "to_dict") else dict(evaluation.__dict__)
@@ -397,6 +528,19 @@ def create_visual_for_item(
             skip_cutout_for_render = False
         athlete_for_render = None if skip_cutout_for_render else athlete_path
 
+        # STILLS-9: an unverified face about to render beside the subject's
+        # name gets a reviewer-facing safety note (rides brief.safety_notes →
+        # GeneratedVisual.safety_notes → the review panel's trace).
+        if athlete_for_render:
+            _identity_note = _photo_identity_note(
+                item, evaluation, media_assets, forced_hero_asset_id
+            )
+            if _identity_note:
+                try:
+                    brief.safety_notes = list(brief.safety_notes or []) + [_identity_note]
+                except Exception:
+                    pass
+
         # UI 1.18 — element toggle: drop the sponsor strip for this render.
         _hide_sponsor = bool(overrides.get("hide_sponsor"))
         _render_sponsor_name = "" if _hide_sponsor else sponsor_name
@@ -444,6 +588,14 @@ def create_visual_for_item(
                 "sourced_asset_ids": r.visual.sourced_asset_ids,
             }
         )
+
+    # PHOTOS-5: remember where each source photo landed so the reuse-penalty
+    # axis works across the pack and across weeks. Best-effort — a bookkeeping
+    # hiccup never sinks a successful render.
+    try:
+        _record_asset_usage(visuals_summary, profile_id=profile_id)
+    except Exception:
+        pass
 
     out["visuals"] = visuals_summary
     return out
@@ -582,6 +734,7 @@ def create_candidate_pool_for_item(
             library_assets=library,
             profile_logo_present=bool(getattr(brand_kit, "logo_svg", None)),
             exclude_athlete_photos=_exclude_photos,
+            run_id=run_id,
         )
         out["evaluation"] = (
             evaluation.to_dict() if hasattr(evaluation, "to_dict") else dict(evaluation.__dict__)
@@ -799,10 +952,15 @@ def attach_visuals_to_pack(
     Each rendered brief's variation signature is threaded into the next item's
     ``recent_signatures``, so the deterministic archetype floor rotates past a
     seed collision instead of repeating a composition within the same pack —
-    the same dedupe the per-card route keeps in its variation history.
+    the same dedupe the per-card route keeps in its variation history. The
+    burst families (ingest dHashes) of each item's sourced photos thread the
+    same way into ``recent_asset_families``, so two cards in one pack never
+    carry near-identical frames from the same poolside burst.
     """
     only = set(only_buckets)
     recent_sigs: list[str] = []
+    recent_fams: list[str] = []
+    fam_by_asset = _dhash_by_asset_id(media_assets)
     for bucket_name, bucket in list(pack.items()):
         if bucket_name not in only:
             continue
@@ -825,6 +983,7 @@ def attach_visuals_to_pack(
                 sponsor_name=sponsor_name,
                 formats=formats,
                 recent_signatures=recent_sigs[-6:],
+                recent_asset_families=recent_fams[-12:],
             )
             item["visuals"] = res.get("visuals", [])
             item["visual_brief"] = res.get("brief")
@@ -833,6 +992,11 @@ def attach_visuals_to_pack(
             sig = (res.get("brief") or {}).get("variation_signature")
             if sig:
                 recent_sigs.append(sig)
+            for v in res.get("visuals") or []:
+                for aid in v.get("sourced_asset_ids") or []:
+                    fam = fam_by_asset.get(str(aid))
+                    if fam and fam not in recent_fams:
+                        recent_fams.append(fam)
             if res.get("visuals"):
                 rendered += 1
     return pack

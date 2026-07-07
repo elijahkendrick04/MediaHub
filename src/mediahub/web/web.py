@@ -32815,9 +32815,10 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         Delegates to ``_save_library_photo`` so quick-build uploads get the
         same ingest gate as every other path — extension allowlist, HEIC
         normalisation to a web-safe JPEG (iPhones save HEIC by default,
-        which the browser/renderer can't show), and the decode check. A
-        rejected photo is skipped (None) rather than stored unreadable —
-        an honest gap beats a broken graphic background.
+        which the browser/renderer can't show), EXIF baking, measurement,
+        and the decode check. A rejected photo is skipped (None) rather
+        than stored unreadable — an honest gap beats a broken graphic
+        background.
         """
         if not (_v8_ok and _v8_get_media_store is not None and profile_id):
             return None
@@ -44488,12 +44489,12 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
     <input id="ml-desc" type="text" name="description" placeholder="e.g. Eira Hughes at Welsh National Open">
     <label for="ml-type">Type</label>
     <select id="ml-type" name="asset_type">
-      <option value="athlete_photo">Athlete photo</option>
-      <option value="venue">Venue</option>
-      <option value="team">Team</option>
-      <option value="action">Action</option>
-      <option value="podium">Podium</option>
+      <option value="athlete_action">Athlete / action photo</option>
+      <option value="athlete_headshot">Headshot</option>
+      <option value="team_photo">Team</option>
+      <option value="venue_photo">Venue</option>
       <option value="logo">Logo</option>
+      <option value="other">Other</option>
     </select>
     <input type="hidden" name="profile_id" value="{profile_id}">
     <div style="margin-top:var(--sp-4);display:flex;gap:var(--sp-3);flex-wrap:wrap">
@@ -44667,37 +44668,71 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         return dest
 
     def _save_library_photo(
-        file_storage, profile_id, *, description="", asset_type="athlete_photo"
+        file_storage, profile_id, *, description="", asset_type="athlete_action", run_id=None
     ):
         """Persist one uploaded image into a profile's media library.
 
-        Shared by the media-library upload form and the PWA share-target
-        receiver (roadmap 1.22) so both paths handle on-disk storage,
-        validation, HEIC normalisation, and metadata parsing identically.
-        Raises ``_PhotoRejectedError`` when the upload isn't an acceptable
-        image — the caller decides whether to 415 or skip it.
+        Shared by the media-library upload form, the PWA share-target
+        receiver (roadmap 1.22) and the free-text quick-build so every path
+        handles on-disk storage, validation, HEIC normalisation, EXIF
+        orientation baking, metadata parsing and measurement identically.
+        ``run_id`` (already validated by the caller) stamps
+        ``linked_meet_ids`` so the evaluator can surface "photos uploaded
+        for this meet". Raises ``_PhotoRejectedError`` when the upload isn't
+        an acceptable image — the caller decides whether to 415 or skip it.
         """
         dest = _store_photo_upload(file_storage, profile_id)
 
+        # PHOTOS-1: bake the EXIF orientation into the pixels once, so Pillow
+        # (saliency, edits) and Chromium (the still render) see the same
+        # upright grid, then measure dimensions / orientation / dominant
+        # colours / technical quality so the selector's axes have real data.
+        from mediahub.media_library import tagger as _ml_tagger
+        from mediahub.media_library.models import MediaAsset, canonical_asset_type
+
+        _ml_tagger.bake_exif_orientation(dest)
+
         meta = _v8_parse_description(description) if description else {}
         store = _v8_get_media_store()
-        from mediahub.media_library.models import MediaAsset
 
         athlete_names = list(meta.get("athletes") or [])
         asset = MediaAsset(
             id="",
             filename=Path(file_storage.filename or dest.name).name,
             path=str(dest),
-            type=asset_type,
+            type=canonical_asset_type(asset_type) or "other",
             description_raw=description,
             description_parsed=meta,
             profile_id=profile_id,
             linked_athlete_names=athlete_names,
+            linked_meet_ids=[run_id] if run_id else [],
             linked_venue=meta.get("venue"),
             linked_event=meta.get("event"),
             tags=meta.get("tags") or [],
         )
+        _ml_tagger.measure_asset(asset)
         return store.save(asset)
+
+    def _run_id_for_upload_stamp(raw_run_id) -> Optional[str]:
+        """Validate an upload's optional run-context id.
+
+        Only a run the *current session* can access may be stamped onto an
+        asset's ``linked_meet_ids`` — otherwise a crafted form post could
+        associate photos with another organisation's meet. Invalid or foreign
+        ids are dropped (the upload itself still succeeds, just unstamped).
+        """
+        rid = str(raw_run_id or "").strip()
+        if not rid or not re.fullmatch(r"[A-Za-z0-9_.-]+", rid):
+            return None
+        try:
+            run_data = _load_run(rid)
+            if run_data is None:
+                return None
+            if not _can_access_run(rid, run_data, _active_profile_id()):
+                return None
+        except Exception:
+            return None
+        return rid
 
     @app.route("/api/media-library", methods=["POST"])
     def api_media_library_upload():
@@ -44718,11 +44753,14 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         if profile_id != active_pid and not profile_id.startswith("_run_"):
             return jsonify({"error": "forbidden"}), 403
         description = _req.form.get("description", "").strip()
-        asset_type = _req.form.get("asset_type", "athlete_photo").strip()
+        asset_type = _req.form.get("asset_type", "athlete_action").strip()
+        # PHOTOS-6: uploads made from a run context stamp the run onto the
+        # asset so the evaluator can offer "photos uploaded for this meet".
+        run_id = _run_id_for_upload_stamp(_req.form.get("run_id"))
 
         try:
             asset = _save_library_photo(
-                f, profile_id, description=description, asset_type=asset_type
+                f, profile_id, description=description, asset_type=asset_type, run_id=run_id
             )
         except _PhotoRejectedError as e:
             return jsonify({"error": e.code, "message": e.message}), 415
@@ -44763,6 +44801,9 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         # Browsers post shared files under the manifest-declared "photos" field;
         # accept "file" too for resilience across share-sheet implementations.
         files = _req.files.getlist("photos") + _req.files.getlist("file")
+        # OS share sheets can't carry a run id, but a future share URL might —
+        # accept and validate it the same way the library upload does.
+        run_id = _run_id_for_upload_stamp(_req.form.get("run_id"))
         saved = 0
         skipped = 0
         for f in files:
@@ -44773,7 +44814,9 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                 skipped += 1  # the OS bundled a non-image attachment — ignore it
                 continue
             try:
-                _save_library_photo(f, profile_id, description="", asset_type="athlete_photo")
+                _save_library_photo(
+                    f, profile_id, description="", asset_type="athlete_action", run_id=run_id
+                )
                 saved += 1
             except _PhotoRejectedError:
                 skipped += 1
@@ -46180,7 +46223,12 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             return jsonify({"error": e.code, "message": e.message}), 415
 
         store = _v8_get_media_store()
+        from mediahub.media_library import tagger as _ml_tagger
         from mediahub.media_library.models import MediaAsset
+
+        # Same ingest spine as the library upload: upright pixels + measured
+        # dimensions/orientation/quality so the selector can rank this photo.
+        _ml_tagger.bake_exif_orientation(dest)
 
         meet_name = (run_data.get("meet") or {}).get("name") or run_data.get("meet_name", "")
         asset = MediaAsset(
@@ -46197,6 +46245,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             permission_status="user_owned",
             approval_status="approved",
         )
+        _ml_tagger.measure_asset(asset)
         asset = store.save(asset)
         return jsonify(
             {
@@ -47192,14 +47241,14 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         # library remembers as being OF this card's athlete (linked when
         # they were uploaded on an earlier card/meet) are flagged and
         # sorted first, so next meet the right face is one click away.
+        # Canonical types only — legacy values ("athlete_photo", "action",
+        # "podium", …) are alias-mapped at deserialise (MediaAsset.from_dict),
+        # so store-read assets never carry them.
         _photo_types = {
             "athlete_action",
             "athlete_headshot",
-            "athlete_photo",
             "team_photo",
             "venue_photo",
-            "action",
-            "podium",
             "other",
         }
         _card_athlete = str(ach.get("swimmer_name") or "").strip()
