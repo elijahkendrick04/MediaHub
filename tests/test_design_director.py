@@ -206,3 +206,35 @@ def test_director_hero_stat_choice_is_honoured_when_measured(monkeypatch):
         use_ai_director=True,
     )
     assert brief2.text_layers.get("hero_stat", "") == ""
+
+
+def test_brand_context_surfaces_logo_inventory(monkeypatch):
+    """The director picks a logo_lockup, so its brand context must actually name
+    which logo variants exist (the include_logos=True inventory), loaded from the
+    kit's owning profile — otherwise the model chooses a lockup blindly."""
+    import mediahub.web.club_profile as club_profile
+
+    fake_profile = {
+        "brand_logos": [
+            {"label": "Primary crest", "mime": "image/svg+xml"},
+            {"label": "White mono mark", "mime": "image/png"},
+        ]
+    }
+    monkeypatch.setattr(club_profile, "load_profile", lambda pid: fake_profile)
+
+    ctx = ai_director._brand_context(_brand())
+    assert "Primary crest" in ctx
+    assert "White mono mark" in ctx
+    assert "logo variant" in ctx  # the inventory intro line
+    # Palette context is still present alongside the new inventory.
+    assert "Test SC" in ctx
+
+
+def test_brand_context_omits_logos_when_none_uploaded(monkeypatch):
+    """No uploaded logos → no fabricated inventory line; brand context is unchanged."""
+    import mediahub.web.club_profile as club_profile
+
+    monkeypatch.setattr(club_profile, "load_profile", lambda pid: {"brand_logos": []})
+    ctx = ai_director._brand_context(_brand())
+    assert "logo variant" not in ctx
+    assert "Test SC" in ctx
