@@ -204,25 +204,46 @@ _PHOTO_MAX_EDGE = 1280
 _PHOTO_MAX_BYTES = 12_000_000  # refuse to embed originals beyond this raw size
 
 
-def _photo_asset_path_for_brief(brief: Optional[dict]) -> Optional[Path]:
-    """Resolve the on-disk path of the photo a brief sourced, or ``None``.
+def _effective_asset_path(asset: Any, store: Any) -> Path:
+    """The path the MP4 should read for ``asset`` — the materialised edit
+    (enhance / crop / safeguarding blur) when a recipe is stored, else the
+    original (M21 / PHOTOS-3). This is the same
+    ``photo_edit.effective_image_path`` the still pipeline reads, so a face a
+    volunteer blurred on the approved still can never ship unblurred in the
+    video. Never raises; falls back to the raw path on any miss.
+    """
+    raw = Path(getattr(asset, "path", "") or "")
+    try:
+        from mediahub.media_library import photo_edit
+
+        eff = Path(photo_edit.effective_image_path(asset, store))
+        if str(eff) and eff.exists():
+            return eff
+    except Exception:
+        pass
+    return raw
+
+
+def _photo_asset_for_brief(brief: Optional[dict]):
+    """Resolve the photo a brief sourced to ``(asset, effective_path)``.
 
     Mirrors the sourcing rules of the still renderer: skips "no-photo"
     treatments, the synthetic ``_brand_logo_`` id, missing files, and
-    oversized originals. Never raises.
+    oversized originals. The path is the EDIT-EFFECTIVE one (M21). Never
+    raises; ``(None, None)`` on any miss.
     """
     b = brief if isinstance(brief, dict) else {}
     if not b or str(b.get("photo_treatment") or "") == "no-photo":
-        return None
+        return None, None
     asset_ids = [str(a) for a in (b.get("sourced_asset_ids") or []) if a and a != "_brand_logo_"]
     if not asset_ids:
-        return None
+        return None, None
     try:
         from mediahub.media_library.store import get_store
 
         store = get_store()
     except Exception:
-        return None
+        return None, None
     for aid in asset_ids:
         try:
             asset = store.get(aid)
@@ -230,13 +251,63 @@ def _photo_asset_path_for_brief(brief: Optional[dict]) -> Optional[Path]:
             continue
         if asset is None:
             continue
-        p = Path(getattr(asset, "path", "") or "")
+        p = _effective_asset_path(asset, store)
         try:
             if p.exists() and p.stat().st_size <= _PHOTO_MAX_BYTES:
-                return p
+                return asset, p
         except OSError:
             continue
-    return None
+    return None, None
+
+
+def _photo_asset_path_for_brief(brief: Optional[dict]) -> Optional[Path]:
+    """The on-disk path of the photo a brief sourced (edit-effective), or
+    ``None``. Thin wrapper over :func:`_photo_asset_for_brief`."""
+    return _photo_asset_for_brief(brief)[1]
+
+
+def _photo_edit_signature_for_brief(brief: Optional[dict]) -> str:
+    """The sourced asset's edit-recipe signature, or ``""`` when the asset
+    carries no edit (M21). Folded into the motion cache key ONLY when a
+    recipe exists, so unedited assets keep byte-identical keys while an
+    edited photo re-renders instead of serving the stale pre-edit MP4.
+    """
+    asset, _ = _photo_asset_for_brief(brief)
+    if asset is None:
+        return ""
+    try:
+        from mediahub.media_library import photo_edit
+
+        recipe = photo_edit.recipe_for_asset(asset)
+        return "" if recipe.is_noop() else recipe.signature()
+    except Exception:
+        return ""
+
+
+def _photo_data_uri_for_path(p: Optional[Path]) -> str:
+    """Downscale + inline one photo file as a JPEG data URI, or ``""``.
+
+    Applies ``ImageOps.exif_transpose`` first (M21) so a phone-portrait
+    photo that displays upright on the still doesn't play sideways in the
+    video. Never raises — a missing photo must never fail a motion render.
+    """
+    if p is None:
+        return ""
+    try:
+        import base64
+        import io
+
+        from PIL import Image, ImageOps
+
+        with Image.open(p) as im:
+            im = ImageOps.exif_transpose(im)
+            im = im.convert("RGB")
+            im.thumbnail((_PHOTO_MAX_EDGE, _PHOTO_MAX_EDGE))
+            buf = io.BytesIO()
+            im.save(buf, format="JPEG", quality=82)
+        return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
+    except Exception:
+        return ""
 
 
 def _photo_data_uri_for_brief(brief: Optional[dict]) -> str:
@@ -247,23 +318,7 @@ def _photo_data_uri_for_brief(brief: Optional[dict]) -> str:
     miss (no brief, "no-photo" treatment, asset gone, decode failure) —
     a missing photo must never fail a motion render.
     """
-    p = _photo_asset_path_for_brief(brief)
-    if p is None:
-        return ""
-    try:
-        import base64
-        import io
-
-        from PIL import Image
-
-        with Image.open(p) as im:
-            im = im.convert("RGB")
-            im.thumbnail((_PHOTO_MAX_EDGE, _PHOTO_MAX_EDGE))
-            buf = io.BytesIO()
-            im.save(buf, format="JPEG", quality=82)
-        return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
-    except Exception:
-        return ""
+    return _photo_data_uri_for_path(_photo_asset_path_for_brief(brief))
 
 
 def _photo_focus_for_brief(brief: Optional[dict], format_name: str = DEFAULT_MOTION_FORMAT) -> str:
@@ -326,10 +381,12 @@ def _cutout_data_uri_for_brief(brief: Optional[dict]) -> str:
     try:
         import io
 
-        from PIL import Image
+        from PIL import Image, ImageOps
 
         # Cache the alpha cut keyed by the source's identity (path/mtime/size)
         # so repeat renders of the same photo skip the remover entirely.
+        # (M21: `src` is already the edit-effective, content-addressed path,
+        # so an edited photo re-cuts instead of reusing the pre-edit alpha.)
         st = src.stat()
         key = hashlib.sha256(
             f"{src.resolve()}|{st.st_mtime_ns}|{st.st_size}".encode("utf-8")
@@ -347,6 +404,10 @@ def _cutout_data_uri_for_brief(brief: Optional[dict]) -> str:
         if not (cut_path.exists() and cut_path.stat().st_size > 1000):
             return ""
         with Image.open(cut_path) as im:
+            # Belt-and-braces EXIF normalisation (M21): remover output should
+            # already be upright, but a passthrough of legacy EXIF must never
+            # rotate the cutout against its own background photo.
+            im = ImageOps.exif_transpose(im)
             im = im.convert("RGBA")
             im.thumbnail((_CUTOUT_MAX_EDGE, _CUTOUT_MAX_EDGE))
             buf = io.BytesIO()
@@ -384,6 +445,119 @@ def _resolved_motion_roles(brief: Optional[dict], brand_kit: Any) -> dict[str, s
         }
     except Exception:
         return {}
+
+
+# The archetypes whose motion scenes lay out MULTIPLE athlete panels (the
+# relay quartet, the duo split, the triptych progression). Only these earn the
+# extra photoSrcs lookup — everything else keeps the single-photo path.
+_MULTI_PHOTO_ARCHETYPES = frozenset(
+    {"relay_collage", "duo_athlete_split", "triptych_progression"}
+)
+
+
+def _profile_id_of(brand_kit: Any) -> str:
+    """The brand kit's profile id, tolerant of dataclass / dict / None."""
+    if brand_kit is None:
+        return ""
+    if isinstance(brand_kit, dict):
+        return str(brand_kit.get("profile_id") or brand_kit.get("profileId") or "")
+    return str(getattr(brand_kit, "profile_id", "") or "")
+
+
+def _relay_athlete_names(card: Any, ach: Any) -> list[str]:
+    """The individual athlete names a relay/multi-athlete card carries.
+
+    Reads an explicit list field when the payload has one, else splits a
+    combined ``swimmer_name`` ("A, B & C") into its parts. Only ever returns
+    names the card itself supplied — never guesses a lineup. Empty when the
+    card names no individuals (e.g. "{club} relay").
+    """
+    import re as _re
+
+    for src in (ach, card):
+        if not isinstance(src, dict):
+            continue
+        for key in ("relay_swimmers", "relay_members", "swimmer_names", "athlete_names", "members"):
+            v = src.get(key)
+            if isinstance(v, (list, tuple)):
+                names = [str(x).strip() for x in v if str(x).strip()]
+                if names:
+                    return names
+    combined = ""
+    for src in (ach, card):
+        if isinstance(src, dict):
+            combined = str(src.get("swimmer_name") or src.get("athlete_name") or "")
+            if combined:
+                break
+    parts = [p.strip() for p in _re.split(r",|&|/|\band\b", combined) if p.strip()]
+    return parts if len(parts) >= 2 else []
+
+
+def _photo_srcs_for_card(card: Any, brief: Optional[dict], brand_kit: Any) -> list[str]:
+    """Extra athlete photos for a multi-panel archetype, as data URIs (M20).
+
+    Only for the relay/duo/triptych archetypes, and only when the card names
+    individual athletes: each linked athlete's best photo is resolved by the
+    deterministic media-library selector (``select_assets`` — fixed weights,
+    no LLM), materialised through the edit-effective path, downscaled and
+    inlined exactly like ``photoSrc``. Capped at 4 (a relay quartet), skips
+    the card's primary photo, and returns ``[]`` on any miss — an empty list
+    keeps the card's props (and cache key) byte-identical.
+    """
+    b = brief if isinstance(brief, dict) else {}
+    if str(b.get("layout_template") or "") not in _MULTI_PHOTO_ARCHETYPES:
+        return []
+    ach = card.get("achievement") if isinstance(card, dict) else None
+    names = _relay_athlete_names(card, ach if isinstance(ach, dict) else {})
+    if not names:
+        return []
+    try:
+        from mediahub.media_library.selector import select_assets
+        from mediahub.media_library.store import get_store
+
+        store = get_store()
+        assets = store.list(profile_id=_profile_id_of(brand_kit) or None, limit=500)
+    except Exception:
+        return []
+    if not assets:
+        return []
+    out: list[str] = []
+    # Never duplicate the card's primary photo in a panel.
+    primary_asset, _ = _photo_asset_for_brief(b)
+    used: set[str] = {str(getattr(primary_asset, "id", "") or "")}
+    for name in names[:4]:
+        try:
+            picks = select_assets(
+                assets,
+                role="hero_athlete",
+                athlete_name=name,
+                preferred_orientation="portrait",
+                k=3,
+            )
+        except Exception:
+            continue
+        for pick in picks:
+            aid = str(pick.get("asset_id") or "")
+            if not aid or aid in used:
+                continue
+            try:
+                asset = store.get(aid)
+            except Exception:
+                continue
+            if asset is None:
+                continue
+            p = _effective_asset_path(asset, store)
+            try:
+                if not (p.exists() and p.stat().st_size <= _PHOTO_MAX_BYTES):
+                    continue
+            except OSError:
+                continue
+            uri = _photo_data_uri_for_path(p)
+            if uri:
+                out.append(uri)
+                used.add(aid)
+                break
+    return out
 
 
 def _card_to_props(
@@ -479,7 +653,8 @@ def _card_to_props(
     # treats unknown names as "no archetype treatment").
     brief_layers = b.get("text_layers") if isinstance(b.get("text_layers"), dict) else {}
     roles = _resolved_motion_roles(b, brand_kit)
-    return {
+    photo_srcs = _photo_srcs_for_card(card, b, brand_kit)
+    props = {
         "athleteFullName": str(athlete),
         "athleteFirstName": str(first),
         "athleteSurname": str(surname),
@@ -518,6 +693,12 @@ def _card_to_props(
         "roleAccent": roles.get("roleAccent", ""),
         "roleOnGround": roles.get("roleOnGround", ""),
     }
+    # M20: extra linked-athlete photos for the multi-panel archetypes, only
+    # attached when at least one resolved — an empty list never touches the
+    # prop dict, so single-photo cards keep byte-identical cache keys.
+    if photo_srcs:
+        props["photoSrcs"] = photo_srcs
+    return props
 
 
 def _content_hash(payload: dict, *, kind: str) -> str:
@@ -1111,9 +1292,16 @@ def render_story_card(
         "brand": brand_dict,
         "duration": duration_sec,
         "size": list(size),
+        "rev": STORY_COMPOSITION_REVISION,
     }
     if audio_plan:
         cache_payload["audio"] = audio_plan
+    # M21: an edited photo (safeguarding blur, crop, enhance) re-renders; the
+    # signature is attached ONLY when a recipe exists so unedited assets keep
+    # byte-identical keys.
+    edit_sig = _photo_edit_signature_for_brief(brief)
+    if edit_sig:
+        cache_payload["photo_edit"] = edit_sig
     cache_key = _content_hash(cache_payload, kind="story")
     cached = _cache_dir() / f"{cache_key}.mp4"
     if cached.exists() and cached.stat().st_size > 1024:
@@ -1160,12 +1348,18 @@ def render_story_card(
 
 
 # Data-driven reel allocation (SEQ-4): the reel's length follows the number
-# of ranked moments instead of a fixed 15s — a one-medal weekend is a tight
-# 7s, a five-PB weekend a 23s recap. Mirrors MeetReel.tsx's scene layout
-# (cover + N card scenes + outro beat).
+# of ranked moments instead of a fixed duration — a one-medal weekend is a
+# tight 8.5s, a five-PB weekend a 25s recap. Mirrors MeetReel.tsx's scene
+# layout (cover + N card scenes + outro beat).
 REEL_COVER_SEC = 2.0
 REEL_PER_CARD_SEC = 4.0
-REEL_OUTRO_SEC = 1.0
+# M17 (MOTION-4): 2.5s default outro — the old 1.0s meant the CTA close
+# (sponsor thank-you / next-up / follow) mathematically never reached full
+# opacity before its own fade began. 2.5s gives the retimed OutroScreen a
+# CTA fully readable by ~0.9s and a hold of ≥1.2s before the closing fade.
+# Mirrored into MeetReel.tsx's rhythm default and reel_ffmpeg's carve;
+# explicit rhythm.outro callers keep full control via REEL_OUTRO_RANGE.
+REEL_OUTRO_SEC = 2.5
 
 # Reel beat-rhythm & duration customisation (R1.12). The default skeleton above
 # stays the contract; these bounds keep a *customised* reel readable and the
@@ -1184,7 +1378,23 @@ REEL_TOTAL_RANGE = (3.0, 60.0)
 # separately and stay byte-identical, so this is reel-only.
 #   "2" — R1.14: expanded transition library (glitch / slide-stack /
 #         light-sweep) + per-card transition timing.
-REEL_COMPOSITION_REVISION = "2"
+#   "3" — Phase C (M15–M20): default photo camera moves, paired
+#         velocity-matched transitions (no mid-reel self-fades), legible
+#         2.5s outro retime, brand-true cover/outro roles + photo cover,
+#         beat-proportional choreography + resolve accents, reel chrome
+#         (progress rail + club mark).
+REEL_COMPOSITION_REVISION = "3"
+
+# Story composition revision — folded into the STORY cache key (M15). The
+# story payload historically had no revision field; introducing one both
+# retires every pre-Phase-C cached story (buying the photo-camera +
+# proportional-choreography upgrade on re-request) and gives future visual
+# upgrades a clean lever. Bump whenever StoryCard.tsx's deterministic output
+# changes for an unchanged payload.
+#   "1" — Phase C (M15/M19): seed-chosen photo camera moves on every intent,
+#         beat-proportional keyframes, resolve-phase micro-accent, ambient
+#         PEAK_ALPHA 0.14.
+STORY_COMPOSITION_REVISION = "1"
 
 
 def _clamp(value: float, lo: float, hi: float) -> float:
@@ -1470,6 +1680,76 @@ def _assemble_reel_props(
     return cards_props, brand_dict, meet_name, duration_sec, audio_plan, briefs_list, rhythm_norm
 
 
+def _cover_brand_roles(brand_dict: dict, brand_kit: Any) -> dict[str, str]:
+    """APCA-gated bookend roles for the reel cover/outro (M18 / MOTION-5).
+
+    Runs the SAME graphic_renderer role resolver the card beats use
+    (``resolved_role_vars_for_brief``) against the bare brand palette — Tier A
+    brand baseline, contrast-picked on-colours, no invented hex — so a club
+    whose accent fails contrast against its primary no longer gets an
+    illegible cover. Empty dict on any miss (the TSX then keeps the legacy
+    accent-on-primary pairing).
+    """
+    try:
+        from types import SimpleNamespace
+
+        from mediahub.graphic_renderer.render import resolved_role_vars_for_brief
+
+        shim = SimpleNamespace(
+            palette={
+                "primary": str(brand_dict.get("primary") or ""),
+                "secondary": str(brand_dict.get("secondary") or ""),
+                "accent": str(brand_dict.get("accent") or ""),
+            },
+            colour_role_assignment=None,
+            text_layers={},
+            inspiration_pattern_id="",
+        )
+        root_vars = resolved_role_vars_for_brief(shim, brand_kit)
+        roles = {
+            "ground": str(root_vars.get("--mh-primary") or ""),
+            "surface": str(root_vars.get("--mh-surface") or ""),
+            "accent": str(root_vars.get("--mh-accent") or ""),
+            "onGround": str(root_vars.get("--mh-on-primary") or ""),
+        }
+        return roles if roles["ground"] and roles["onGround"] else {}
+    except Exception:
+        return {}
+
+
+def _reel_cover_props(cards_props: list[dict], brand_dict: dict, brand_kit: Any) -> dict[str, str]:
+    """The reel's brand-true cover/outro props (M18), assembled Python-side:
+
+    * ``coverRole*`` — the APCA-gated bookend roles (see ``_cover_brand_roles``);
+    * ``coverTypography`` — the top card's typography pair, so the cover's
+      masthead face matches the club's approved cards;
+    * ``coverPhotoSrc``/``coverPhotoPos`` — the top photo-bearing card's photo,
+      feeding the pool-gated fifth "photo" cover variant.
+
+    Every key is attached ONLY when it resolved, and the dict is folded into
+    the render props + cache key only when non-empty — a reel with none of
+    them stays byte-identical.
+    """
+    out: dict[str, str] = {}
+    roles = _cover_brand_roles(brand_dict, brand_kit)
+    if roles:
+        out["coverRoleGround"] = roles["ground"]
+        out["coverRoleSurface"] = roles["surface"]
+        out["coverRoleAccent"] = roles["accent"]
+        out["coverRoleOnGround"] = roles["onGround"]
+    for cp in cards_props:
+        if cp.get("typographyPair"):
+            out["coverTypography"] = str(cp["typographyPair"])
+            break
+    for cp in cards_props:
+        if cp.get("photoSrc"):
+            out["coverPhotoSrc"] = str(cp["photoSrc"])
+            if cp.get("photoPos"):
+                out["coverPhotoPos"] = str(cp["photoPos"])
+            break
+    return out
+
+
 def _reel_cta_props(sponsor: str, next_meet: str) -> dict[str, str]:
     """R1.30 outro-CTA props (sponsor thanks / next meet), folded into the
     Remotion props AND the cache key ONLY when present, so a reel with neither
@@ -1544,6 +1824,11 @@ def _render_reel_one_format(
     # focus and the story cut stays byte-identical.
     cards_props = _apply_format_photo_focus(cards_props, briefs_list, format_name)
 
+    # M18 — brand-true cover/outro props (APCA-gated roles, top card's
+    # typography, top photo for the pool-gated photo cover). Assembled per cut
+    # so the cover photo's saliency focus follows the format.
+    cover_props = _reel_cover_props(cards_props, brand_dict, brand_kit)
+
     if engine == "ffmpeg":
         from mediahub.visual import reel_ffmpeg
 
@@ -1572,8 +1857,15 @@ def _render_reel_one_format(
         cache_payload["rhythm"] = rhythm
     if cta_props:
         cache_payload["cta"] = cta_props
+    if cover_props:
+        cache_payload["cover"] = cover_props
     if audio_plan:
         cache_payload["audio"] = audio_plan
+    # M21: per-card edit-recipe signatures, folded only when any card's photo
+    # actually carries an edit (unedited reels keep byte-identical keys).
+    edit_sigs = [_photo_edit_signature_for_brief(b) for b in briefs_list]
+    if any(edit_sigs):
+        cache_payload["photo_edits"] = edit_sigs
     cache_key = _content_hash(cache_payload, kind="reel")
     cached = _cache_dir() / f"{cache_key}.mp4"
     if cached.exists() and cached.stat().st_size > 1024:
@@ -1597,6 +1889,7 @@ def _render_reel_one_format(
         "brand": brand_dict,
         "meetName": meet_name,
         **cta_props,
+        **cover_props,
     }
     if rhythm:
         reel_props["rhythm"] = rhythm
@@ -1643,6 +1936,15 @@ def _render_reel_one_format(
             "meet_name": meet_name,
             "rhythm": rhythm or "default",
             "cta": cta_props,
+            # M18 — the bookend treatment, without the photo bytes.
+            "cover": {
+                "roles_source": "brand-resolved" if cover_props.get("coverRoleGround") else "legacy-pairing",
+                "role_ground": cover_props.get("coverRoleGround", ""),
+                "role_accent": cover_props.get("coverRoleAccent", ""),
+                "role_on_ground": cover_props.get("coverRoleOnGround", ""),
+                "typography": cover_props.get("coverTypography", ""),
+                "has_photo": bool(cover_props.get("coverPhotoSrc")),
+            },
             "cards": [_card_manifest_axes(cp) for cp in cards_props],
             "audio": audio_rec,
             "captions": _reel_caption_manifest(cards_props),

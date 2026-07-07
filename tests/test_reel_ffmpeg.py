@@ -98,10 +98,10 @@ def test_reel_segments_scale_to_caller_override():
 
 def test_reel_segments_last_carries_the_outro_beat():
     segs = reel_ffmpeg.reel_segment_durations(2, reel_duration_for(2))
-    # cover (2s) + crossfade, card (4s) + crossfade, last card (4s + 1s outro)
+    # cover (2s) + crossfade, card (4s) + crossfade, last card (4s + 2.5s outro)
     assert segs[0] == pytest.approx(2.0 + reel_ffmpeg.CROSSFADE_SEC)
     assert segs[1] == pytest.approx(4.0 + reel_ffmpeg.CROSSFADE_SEC)
-    assert segs[2] == pytest.approx(5.0)
+    assert segs[2] == pytest.approx(6.5)
 
 
 # ---------------------------------------------------------------------------

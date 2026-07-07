@@ -56,7 +56,8 @@ def _fake_run(*, composition_id, props, out_path, duration_sec=None, size=None, 
 
 
 def _silent_story_key(card: dict, *, duration: float = 6.0) -> str:
-    """The pre-audio cache key, computed exactly as the silent path does."""
+    """The audio-off cache key, computed exactly as the silent path does
+    (including the story composition revision — see M15)."""
     brand_dict = motion._brand_to_dict(BRAND)
     card_dict = motion._card_to_props(card, variation_seed=0, brief=None, brand_kit=BRAND)
     return motion._content_hash(
@@ -65,6 +66,7 @@ def _silent_story_key(card: dict, *, duration: float = 6.0) -> str:
             "brand": brand_dict,
             "duration": duration,
             "size": [1080, 1920],
+            "rev": motion.STORY_COMPOSITION_REVISION,
         },
         kind="story",
     )

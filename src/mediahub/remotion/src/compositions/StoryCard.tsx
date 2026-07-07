@@ -47,6 +47,11 @@ export const cardSchema = z.object({
   // the still renderer's --mh-photo-pos) so faces stay in frame. Empty =
   // the safe "center 28%" default.
   photoPos: z.string().default(""),
+  // M20: additional photos for multi-athlete archetypes (relay_collage /
+  // duo_athlete_split / triptych_progression), one JPEG data URI per linked
+  // relay athlete resolved by the deterministic media-library selector.
+  // Empty = the single-photo behaviour, byte-identical to before.
+  photoSrcs: z.array(z.string()).default([]),
   // R1.9: the athlete cut out from their photo (background removed to alpha),
   // inlined by motion.py as a PNG data URI. The cutout sprint layer
   // (sprint/layers/cutout.tsx) composites this as a parallax FOREGROUND plane
@@ -54,6 +59,11 @@ export const cardSchema = z.object({
   // Empty = no prepared cutout (no sourced photo, or no background remover
   // available), and the layer no-ops — byte-identical to the pre-R1.9 render.
   cutoutSrc: z.string().default(""),
+  // M16: true when this card renders as a beat INSIDE a meet reel. The reel
+  // sets it in the TSX itself (never from Python, so cache keys are
+  // untouched); it suppresses the story's closing self-fade because in a reel
+  // the outgoing transition IS the exit — no more dips through black mid-reel.
+  inReel: z.boolean().default(false),
   // Gen v2 (SEQ-4): the still graphic's archetype + measured emphasis line,
   // so the motion render of a card visually matches its still. Empty keeps
   // the pre-v2 behaviour for cards rendered by older callers.
@@ -197,7 +207,8 @@ function bgPatternFor(style: string, roles: Roles): string {
 // SAME self-hosted brand woff2 as the still graphic (see src/fonts.ts; Council
 // 2026-05-31), so each stack LEADS with the real brand face and matches the
 // posted card. The system fonts are kept only as a safety net behind it.
-function fontStackFor(pair: string): string {
+// Exported for MeetReel (M18): the reel cover follows the top card's pair.
+export function fontStackFor(pair: string): string {
   switch (pair) {
     case "anton-inter":
     case "druk-inter":
@@ -257,7 +268,16 @@ export type AnimChannels = {
   resultScale: number;
   chipOpacity: number; // chips, logo, bottom strip, decorations
   bgDrift: number; // background pattern translateY (parallax)
-  photoScale: number; // slow photo push (parallax)
+  // M15 — the photo camera. Every intent gives the photo layer a slow,
+  // seed-chosen camera move (push-in / push-out / lateral drift); `static`
+  // stays genuinely still and `parallax` keeps its stronger dual-rate zoom.
+  photoScale: number; // slow photo push (≤1.06 so saliency framing holds)
+  photoDriftX: number; // lateral drift in % of the photo's own box (≤2%)
+  photoDriftY: number; // vertical drift in % of the photo's own box (≤2%)
+  // M19 — shared resolve-phase micro-accent: a 0→1→0 pulse at ~70% of the
+  // beat, seed/mood-keyed to one of three expressions so sibling cards differ.
+  resolveAccent: number;
+  resolveAccentKind: "stat" | "underline" | "label" | "none";
   // Numeric count-up progress for the result value (count_up intent).
   // 1 everywhere else, so every other programme renders the verbatim text.
   resultProgress: number;
@@ -279,12 +299,52 @@ export const MOTION_INTENTS = [
   "static",
 ] as const;
 
+// M15 — the default cinematic photo camera. Every intent gives the full-bleed
+// photo a slow, seed-chosen camera move so club photos never sit frozen:
+// push-in, push-out, or a lateral drift left/right (variationSeed % 4). Scale
+// stays ≤1.06 and lateral travel ≤2% of the photo's own box so the saliency
+// framing (photoPos) always holds. Frame-pure interpolate over the whole clip
+// with a sine in-out (motion-language.md's Ken Burns ease). `static` is
+// genuinely still; `parallax` keeps its stronger dual-rate treatment (applied
+// in its own branch below).
+function photoCameraFor(
+  intent: string,
+  seed: number,
+  frame: number,
+  durationInFrames: number,
+): { photoScale: number; photoDriftX: number; photoDriftY: number } {
+  if (intent === "static") {
+    return { photoScale: 1, photoDriftX: 0, photoDriftY: 0 };
+  }
+  const t = interpolate(frame, [0, durationInFrames], [0, 1], {
+    extrapolateLeft: "clamp",
+    extrapolateRight: "clamp",
+    easing: Easing.inOut(Easing.sin),
+  });
+  const mode = (((seed | 0) % 4) + 4) % 4;
+  if (mode === 1) {
+    // Push-out: opens tight, settles into the composed frame.
+    return { photoScale: 1.06 - 0.06 * t, photoDriftX: 0, photoDriftY: 0 };
+  }
+  if (mode === 2) {
+    // Lateral drift left, with a whisper of push so the move never reads flat.
+    return { photoScale: 1.035 + 0.015 * t, photoDriftX: 1.5 - 3.0 * t, photoDriftY: 0 };
+  }
+  if (mode === 3) {
+    // Lateral drift right.
+    return { photoScale: 1.035 + 0.015 * t, photoDriftX: -1.5 + 3.0 * t, photoDriftY: 0 };
+  }
+  // Push-in — the classic slow Ken Burns toward the saliency focus.
+  return { photoScale: 1 + 0.06 * t, photoDriftX: 0, photoDriftY: 0 };
+}
+
 function animProgram(
   intent: string,
   mood: string,
   frame: number,
   fps: number,
   durationInFrames: number,
+  seed: number,
 ): AnimChannels {
   const moodSpring = springConfigFor(mood);
   const clampRight = { extrapolateRight: "clamp" as const };
@@ -292,33 +352,77 @@ function animProgram(
   // contributes nothing extra (no double-applied fades).
   const identityWord = () => ({ y: 0, opacity: 1 });
 
-  // Shared default ramps (the original programme).
+  // M19 — beat-proportional choreography. Keyframes are FRACTIONS of the
+  // clip so a 4s reel beat and a 6s story distribute the same build →
+  // breathe → resolve rhythm proportionally (build lands by ~30%) instead of
+  // front-loading everything into an absolute 1.5s. The +3 keeps the first
+  // animation off frame 0 (a t=0 entrance reads as a jump cut) while staying
+  // strictly monotonic for any clip length.
+  const at = (f: number) => 3 + (durationInFrames - 3) * f;
+
+  // M19 — the shared resolve-phase micro-accent: a 0→1→0 pulse at ~70% of
+  // the beat, seed-picked among three expressions (hero-stat/result pulse,
+  // accent underline draw, label chip re-pulse) so sibling cards differ, and
+  // mood-scaled so a calm club gets a quieter accent than a celebration.
+  const m = (mood || "").toLowerCase();
+  const accentAmp = /(calm|stoic|precise|minimal|composed|weighty)/.test(m)
+    ? 0.6
+    : /(electric|explosive|fierce|celebratory|triumph)/.test(m)
+      ? 1.0
+      : 0.8;
+  const resolvePulse =
+    interpolate(
+      frame,
+      [durationInFrames * 0.68, durationInFrames * 0.74, durationInFrames * 0.84],
+      [0, 1, 0],
+      { extrapolateLeft: "clamp", extrapolateRight: "clamp", easing: Easing.inOut(Easing.sin) },
+    ) * accentAmp;
+  const accentKinds = ["stat", "underline", "label"] as const;
+  const resolveAccentKind: AnimChannels["resolveAccentKind"] =
+    intent === "static" ? "none" : accentKinds[(((seed | 0) % 3) + 3) % 3];
+
+  const camera = photoCameraFor(intent, seed, frame, durationInFrames);
+
+  // Shared default ramps (the original programme, proportionally timed).
   const defaultSpring = spring({ frame, fps, config: moodSpring });
   const base: AnimChannels = {
     heroY: interpolate(defaultSpring, [0, 1], [120, 0]),
-    heroOpacity: interpolate(frame, [0, fps * 0.4], [0, 1], clampRight),
+    heroOpacity: interpolate(frame, [at(0.0), at(0.07)], [0, 1], clampRight),
     heroScale: 1,
-    secondaryOpacity: interpolate(frame, [0, fps * 0.4], [0, 1], clampRight),
-    resultOpacity: interpolate(frame, [fps * 0.6, fps * 1.1], [0, 1], clampRight),
-    resultScale: interpolate(frame, [fps * 0.6, fps * 1.4], [0.92, 1.0], clampRight),
-    chipOpacity: interpolate(frame, [fps * 1.0, fps * 1.5], [0, 1], clampRight),
+    secondaryOpacity: interpolate(frame, [at(0.0), at(0.07)], [0, 1], clampRight),
+    resultOpacity: interpolate(frame, [at(0.1), at(0.185)], [0, 1], clampRight),
+    resultScale: interpolate(frame, [at(0.1), at(0.235)], [0.92, 1.0], clampRight),
+    chipOpacity: interpolate(frame, [at(0.17), at(0.26)], [0, 1], clampRight),
     bgDrift: 0,
-    photoScale: 1,
+    photoScale: camera.photoScale,
+    photoDriftX: camera.photoDriftX,
+    photoDriftY: camera.photoDriftY,
+    resolveAccent: resolvePulse,
+    resolveAccentKind,
     resultProgress: 1,
     wordAt: identityWord,
   };
 
+  // Kind-specific execution of the resolve accent that lives in the shared
+  // channels: the "stat" expression re-pulses the result/hero-stat scale with
+  // the same confirmation curve count_up uses. Applied on the way out so
+  // every intent (including sprint ones that spread ...base) shares it.
+  const withResolveAccent = (ch: AnimChannels): AnimChannels =>
+    ch.resolveAccentKind === "stat"
+      ? { ...ch, resultScale: ch.resultScale * (1 + 0.04 * ch.resolveAccent) }
+      : ch;
+
   switch (intent) {
     case "fade_in": {
-      return {
+      return withResolveAccent({
         ...base,
         heroY: 0,
-        heroOpacity: interpolate(frame, [0, fps * 0.7], [0, 1], clampRight),
-        secondaryOpacity: interpolate(frame, [fps * 0.3, fps * 1.0], [0, 1], clampRight),
-        resultOpacity: interpolate(frame, [fps * 0.6, fps * 1.3], [0, 1], clampRight),
+        heroOpacity: interpolate(frame, [at(0.0), at(0.115)], [0, 1], clampRight),
+        secondaryOpacity: interpolate(frame, [at(0.05), at(0.165)], [0, 1], clampRight),
+        resultOpacity: interpolate(frame, [at(0.1), at(0.215)], [0, 1], clampRight),
         resultScale: 1,
-        chipOpacity: interpolate(frame, [fps * 0.9, fps * 1.6], [0, 1], clampRight),
-      };
+        chipOpacity: interpolate(frame, [at(0.15), at(0.265)], [0, 1], clampRight),
+      });
     }
     case "snap_in_then_settle": {
       // Deliberately overshooting spring — the snap IS the language; the
@@ -328,64 +432,66 @@ function animProgram(
         fps,
         config: { damping: 9, stiffness: 220, mass: 0.5 },
       });
-      return {
+      return withResolveAccent({
         ...base,
         heroY: interpolate(snap, [0, 1], [90, 0]),
-        heroOpacity: interpolate(frame, [0, fps * 0.2], [0, 1], clampRight),
-        resultOpacity: interpolate(frame, [fps * 0.35, fps * 0.7], [0, 1], clampRight),
+        heroOpacity: interpolate(frame, [at(0.0), at(0.035)], [0, 1], clampRight),
+        resultOpacity: interpolate(frame, [at(0.06), at(0.115)], [0, 1], clampRight),
         resultScale: interpolate(snap, [0, 1], [1.06, 1.0]),
-        chipOpacity: interpolate(frame, [fps * 0.6, fps * 1.0], [0, 1], clampRight),
-      };
+        chipOpacity: interpolate(frame, [at(0.1), at(0.165)], [0, 1], clampRight),
+      });
     }
     case "slide_up": {
-      const eased = interpolate(frame, [0, fps * 0.8], [1, 0], {
+      const eased = interpolate(frame, [at(0.0), at(0.135)], [1, 0], {
         ...clampRight,
         easing: Easing.out(Easing.cubic),
       });
-      return {
+      return withResolveAccent({
         ...base,
         heroY: eased * 240,
-        heroOpacity: interpolate(frame, [0, fps * 0.5], [0, 1], clampRight),
-        secondaryOpacity: interpolate(frame, [fps * 0.4, fps * 0.9], [0, 1], clampRight),
-        resultOpacity: interpolate(frame, [fps * 0.7, fps * 1.2], [0, 1], clampRight),
-        chipOpacity: interpolate(frame, [fps * 1.0, fps * 1.5], [0, 1], clampRight),
-      };
+        heroOpacity: interpolate(frame, [at(0.0), at(0.085)], [0, 1], clampRight),
+        secondaryOpacity: interpolate(frame, [at(0.065), at(0.15)], [0, 1], clampRight),
+        resultOpacity: interpolate(frame, [at(0.115), at(0.2)], [0, 1], clampRight),
+        chipOpacity: interpolate(frame, [at(0.17), at(0.25)], [0, 1], clampRight),
+      });
     }
     case "scale_in": {
       const grow = spring({ frame, fps, config: moodSpring });
-      return {
+      return withResolveAccent({
         ...base,
         heroY: 0,
-        heroOpacity: interpolate(frame, [0, fps * 0.4], [0, 1], clampRight),
+        heroOpacity: interpolate(frame, [at(0.0), at(0.07)], [0, 1], clampRight),
         heroScale: interpolate(grow, [0, 1], [0.82, 1.0]),
-        resultOpacity: interpolate(frame, [fps * 0.5, fps * 1.0], [0, 1], clampRight),
+        resultOpacity: interpolate(frame, [at(0.085), at(0.165)], [0, 1], clampRight),
         resultScale: interpolate(grow, [0, 1], [0.82, 1.0]),
-        chipOpacity: interpolate(frame, [fps * 0.9, fps * 1.4], [0, 1], clampRight),
-      };
+        chipOpacity: interpolate(frame, [at(0.15), at(0.235)], [0, 1], clampRight),
+      });
     }
     case "crossfade": {
       // Layered opacity beats, no movement: hero → secondary → result → chrome.
-      return {
+      return withResolveAccent({
         ...base,
         heroY: 0,
-        heroOpacity: interpolate(frame, [0, fps * 0.5], [0, 1], clampRight),
-        secondaryOpacity: interpolate(frame, [fps * 0.45, fps * 0.95], [0, 1], clampRight),
-        resultOpacity: interpolate(frame, [fps * 0.9, fps * 1.4], [0, 1], clampRight),
+        heroOpacity: interpolate(frame, [at(0.0), at(0.085)], [0, 1], clampRight),
+        secondaryOpacity: interpolate(frame, [at(0.075), at(0.16)], [0, 1], clampRight),
+        resultOpacity: interpolate(frame, [at(0.15), at(0.235)], [0, 1], clampRight),
         resultScale: 1,
-        chipOpacity: interpolate(frame, [fps * 1.35, fps * 1.85], [0, 1], clampRight),
-      };
+        chipOpacity: interpolate(frame, [at(0.225), at(0.31)], [0, 1], clampRight),
+      });
     }
     case "kinetic_type": {
       // Per-word staggered reveal — the type itself carries the energy.
       // The hero line's block opacity is 1; each word owns its reveal.
-      return {
+      return withResolveAccent({
         ...base,
         heroY: 0,
         heroOpacity: 1,
-        secondaryOpacity: interpolate(frame, [fps * 0.6, fps * 1.0], [0, 1], clampRight),
-        resultOpacity: interpolate(frame, [fps * 0.8, fps * 1.2], [0, 1], clampRight),
-        chipOpacity: interpolate(frame, [fps * 1.1, fps * 1.6], [0, 1], clampRight),
+        secondaryOpacity: interpolate(frame, [at(0.1), at(0.165)], [0, 1], clampRight),
+        resultOpacity: interpolate(frame, [at(0.135), at(0.2)], [0, 1], clampRight),
+        chipOpacity: interpolate(frame, [at(0.185), at(0.265)], [0, 1], clampRight),
         wordAt: (i: number) => {
+          // Word stagger stays tempo-based (it is rhythm, not build phase);
+          // the whole sequence remains under ~15 frames for short lines.
           const start = fps * 0.12 * i;
           const s = spring({
             frame: Math.max(0, frame - start),
@@ -402,43 +508,49 @@ function animProgram(
             ),
           };
         },
-      };
+      });
     }
     case "parallax": {
-      // The surfaces drift at different rates across the WHOLE clip.
+      // The surfaces drift at different rates across the WHOLE clip — the
+      // photo keeps its stronger dual-rate push (no extra lateral drift on
+      // top; the depth split IS this intent's camera language).
       const drift = interpolate(frame, [0, durationInFrames], [0, 60]);
-      return {
+      return withResolveAccent({
         ...base,
         bgDrift: drift,
         photoScale: interpolate(frame, [0, durationInFrames], [1.0, 1.07]),
-      };
+        photoDriftX: 0,
+        photoDriftY: 0,
+      });
     }
     case "count_up": {
       // The number IS the animation: the result ticks up from zero and
       // settles — with a small confirmation pulse — on the exact verified
       // value, which then holds for the rest of the clip. A calm fade
       // programme carries the layers around it.
-      return {
+      return withResolveAccent({
         ...base,
         heroY: 0,
-        heroOpacity: interpolate(frame, [0, fps * 0.5], [0, 1], clampRight),
-        secondaryOpacity: interpolate(frame, [fps * 0.25, fps * 0.8], [0, 1], clampRight),
-        resultOpacity: interpolate(frame, [fps * 0.15, fps * 0.45], [0, 1], clampRight),
+        heroOpacity: interpolate(frame, [at(0.0), at(0.085)], [0, 1], clampRight),
+        secondaryOpacity: interpolate(frame, [at(0.04), at(0.135)], [0, 1], clampRight),
+        resultOpacity: interpolate(frame, [at(0.025), at(0.075)], [0, 1], clampRight),
         resultScale: interpolate(
           frame,
-          [fps * 1.55, fps * 1.75, fps * 1.95],
+          [at(0.26), at(0.295), at(0.33)],
           [1.0, 1.05, 1.0],
           { extrapolateLeft: "clamp", extrapolateRight: "clamp" },
         ),
-        chipOpacity: interpolate(frame, [fps * 0.9, fps * 1.4], [0, 1], clampRight),
-        resultProgress: interpolate(frame, [fps * 0.3, fps * 1.6], [0, 1], {
+        chipOpacity: interpolate(frame, [at(0.15), at(0.235)], [0, 1], clampRight),
+        resultProgress: interpolate(frame, [at(0.05), at(0.27)], [0, 1], {
           ...clampRight,
           easing: Easing.out(Easing.cubic),
         }),
-      };
+      });
     }
     case "static": {
-      // Everything present from frame 0 — the card IS the statement.
+      // Everything present from frame 0 — the card IS the statement. The
+      // photo is genuinely still too (stillness as a choice), and no resolve
+      // accent fires.
       return {
         heroY: 0,
         heroOpacity: 1,
@@ -449,14 +561,22 @@ function animProgram(
         chipOpacity: 1,
         bgDrift: 0,
         photoScale: 1,
+        photoDriftX: 0,
+        photoDriftY: 0,
+        resolveAccent: 0,
+        resolveAccentKind: "none",
         resultProgress: 1,
         wordAt: identityWord,
       };
     }
     default: {
       // Sprint intents (R1.1) register their own file under sprint/intents/.
+      // They spread ...base, so the M15 photo camera and M19 resolve accent
+      // ride along unless a sprint intent deliberately overrides them.
       const extra = EXTRA_INTENTS[intent];
-      return extra ? extra(frame, fps, durationInFrames, mood, base) : base;
+      return withResolveAccent(
+        extra ? extra(frame, fps, durationInFrames, mood, base) : base,
+      );
     }
   }
 }
@@ -828,7 +948,10 @@ const PhotoLayer: React.FC<{ ctx: SceneCtx; scrim?: "bottom" | "full" }> = ({
           height: "100%",
           objectFit: "cover",
           objectPosition: card.photoPos || "center 28%",
-          transform: `scale(${anim.photoScale})`,
+          // M15 — the seed-chosen camera move: slow push plus (for the drift
+          // variants) a lateral travel in % of the photo's own box, small
+          // enough that the saliency framing always holds.
+          transform: `translate(${anim.photoDriftX}%, ${anim.photoDriftY}%) scale(${anim.photoScale})`,
         }}
       />
       <div
@@ -1410,14 +1533,16 @@ const LabelChip: React.FC<{ ctx: SceneCtx; left?: number; top?: number; center?:
   center = false,
 }) => {
   const { roles, anim, ts, label } = ctx;
+  // M19 — the "label" resolve accent: the chip re-pulses at ~70% of the beat.
+  const pulse = anim.resolveAccentKind === "label" ? 1 + 0.05 * anim.resolveAccent : 1;
   return (
     <div
       style={{
         position: "absolute",
         top: top ?? Math.round(140 * ts),
         ...(center
-          ? { left: "50%", transform: "translateX(-50%)" }
-          : { left }),
+          ? { left: "50%", transform: `translateX(-50%) scale(${pulse})` }
+          : { left, transform: `scale(${pulse})`, transformOrigin: "left center" }),
         padding: `${Math.round(14 * ts)}px ${Math.round(28 * ts)}px`,
         background: roles.accent,
         color: roles.ground,
@@ -2207,6 +2332,14 @@ const SplitScene: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
   const { card, roles, anim, width, height, ts } = ctx;
   // Wedge sweeps in from the right as the hero channel settles.
   const sweep = (1 - anim.heroOpacity) * width * 0.4;
+  // M20 — multi-athlete panels: when motion.py resolved extra linked-athlete
+  // photos (photoSrcs), the duo split fills its wedge with the second
+  // athlete's photo and the triptych stacks up to two framed panels on the
+  // wedge. Empty photoSrcs renders byte-identically to the single-photo card.
+  const extras = (card.photoSrcs || []).filter(Boolean);
+  const duoSrc = card.archetype === "duo_athlete_split" ? extras[0] || "" : "";
+  const triptychSrcs =
+    card.archetype === "triptych_progression" ? extras.slice(0, 2) : [];
   return (
     <>
       <PhotoLayer ctx={ctx} />
@@ -2223,6 +2356,71 @@ const SplitScene: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
           transform: `translateX(${sweep}px)`,
         }}
       />
+      {duoSrc ? (
+        // The second athlete rides the wedge itself — a true duo split.
+        <div
+          style={{
+            position: "absolute",
+            inset: 0,
+            clipPath: `polygon(${width * 0.62}px 0, 100% 0, 100% 100%, ${width * 0.34}px 100%)`,
+            transform: `translateX(${sweep}px)`,
+            opacity: anim.heroOpacity,
+          }}
+        >
+          <img
+            src={duoSrc}
+            alt=""
+            style={{
+              position: "absolute",
+              inset: 0,
+              width: "100%",
+              height: "100%",
+              objectFit: "cover",
+              objectPosition: "center 28%",
+              transform: `translate(${-anim.photoDriftX}%, ${anim.photoDriftY}%) scale(${anim.photoScale})`,
+            }}
+          />
+          {/* Role scrim so the result stays legible on the wedge. */}
+          <div
+            style={{
+              position: "absolute",
+              inset: 0,
+              background: `linear-gradient(180deg, ${roles.surface}66 0%, ${roles.surface}D8 78%)`,
+            }}
+          />
+        </div>
+      ) : null}
+      {triptychSrcs.map((src, i) => (
+        // Progression panels stacked on the wedge — framed, entering on the
+        // chip channel so they settle after the facts.
+        <div
+          key={`tri-${i}`}
+          style={{
+            position: "absolute",
+            right: Math.round(70 * ts),
+            top: height * (0.14 + 0.22 * i),
+            width: Math.round(width * 0.24),
+            height: Math.round(width * 0.24),
+            overflow: "hidden",
+            borderRadius: 10,
+            border: `3px solid ${roles.accent}`,
+            opacity: anim.chipOpacity,
+            transform: `translateY(${(1 - anim.chipOpacity) * 30}px)`,
+          }}
+        >
+          <img
+            src={src}
+            alt=""
+            style={{
+              width: "100%",
+              height: "100%",
+              objectFit: "cover",
+              objectPosition: "center 28%",
+              transform: `scale(${anim.photoScale})`,
+            }}
+          />
+        </div>
+      ))}
       {/* Accent keyline along the diagonal. */}
       <div
         style={{
@@ -2446,6 +2644,38 @@ const MagazineScene: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
   );
 };
 
+// M19 — the "underline" resolve accent: a short accent rule that draws in at
+// ~70% of the beat (left→right) near the lower text region, then recedes with
+// the pulse. Scene-agnostic (it lives in the frame's margin), painted in the
+// resolved accent role only, and skipped entirely for the other accent kinds.
+const ResolveAccentLayer: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
+  const { anim, roles, ts, frame, height } = ctx;
+  const { durationInFrames } = useVideoConfig();
+  if (anim.resolveAccentKind !== "underline" || anim.resolveAccent <= 0) {
+    return null;
+  }
+  const draw = interpolate(
+    frame,
+    [durationInFrames * 0.68, durationInFrames * 0.76],
+    [0, 1],
+    { extrapolateLeft: "clamp", extrapolateRight: "clamp", easing: Easing.out(Easing.cubic) },
+  );
+  return (
+    <div
+      style={{
+        position: "absolute",
+        left: 80,
+        bottom: Math.round(150 * ts),
+        width: Math.round(220 * ts * draw),
+        height: Math.max(4, Math.round(5 * ts)),
+        background: roles.accent,
+        opacity: anim.resolveAccent,
+        pointerEvents: "none",
+      }}
+    />
+  );
+};
+
 const SCENES: Record<SceneMode, React.FC<{ ctx: SceneCtx }>> = {
   hero: HeroScene,
   poster: PosterScene,
@@ -2469,6 +2699,7 @@ export const StoryCard: React.FC<Props> = ({ card, brand }) => {
     frame,
     fps,
     durationInFrames,
+    card.variationSeed || 0,
   );
   const mode = sceneForArchetype(card.archetype || "");
   const layout = compositionLayoutFor(card.composition || "left", width);
@@ -2477,13 +2708,19 @@ export const StoryCard: React.FC<Props> = ({ card, brand }) => {
   // cuts shrink type proportionally so the stack still breathes.
   const ts = Math.min(width / 1080, height / 1440, 1);
 
-  // Outro: fade to black on last 0.4s
-  const outroFade = interpolate(
-    frame,
-    [durationInFrames - fps * 0.4, durationInFrames],
-    [1, 0],
-    { extrapolateLeft: "clamp", extrapolateRight: "clamp" },
-  );
+  // Outro: fade to black on last 0.4s — but ONLY for the standalone story.
+  // Inside a reel (card.inReel, set by MeetReel.tsx) the beat's exit belongs
+  // to the paired transition (M16): the outgoing content stays fully visible
+  // until the incoming beat's transition takes over, so handoffs never dip
+  // through black.
+  const outroFade = card.inReel
+    ? 1
+    : interpolate(
+        frame,
+        [durationInFrames - fps * 0.4, durationInFrames],
+        [1, 0],
+        { extrapolateLeft: "clamp", extrapolateRight: "clamp" },
+      );
 
   const ctx: SceneCtx = {
     card,
@@ -2522,6 +2759,7 @@ export const StoryCard: React.FC<Props> = ({ card, brand }) => {
       }}
     >
       <Scene ctx={ctx} />
+      <ResolveAccentLayer ctx={ctx} />
       <StylePackLayer ctx={ctx} />
       {/* Sprint overlay layers (R1.6/8/9/10/11/22/23/24/25) — additive, in order. */}
       {EXTRA_LAYERS.map(({ Layer }, i) => (

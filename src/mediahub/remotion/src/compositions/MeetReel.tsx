@@ -9,7 +9,7 @@ import {
   useVideoConfig,
 } from "remotion";
 import { z } from "zod";
-import { StoryCard, cardSchema } from "./StoryCard";
+import { StoryCard, cardSchema, fontStackFor } from "./StoryCard";
 import { REEL_LAYERS } from "./sprint/reelRegistry";
 
 // The reel reuses StoryCard's card schema verbatim (single source of truth):
@@ -37,7 +37,10 @@ const brandSchema = z.object({
 //     to 1.0 for any card past the supplied list.
 const reelRhythmSchema = z.object({
   coverSec: z.number().default(2.0),
-  outroSec: z.number().default(1.0),
+  // M17 — 2.5s default outro so the CTA (sponsor thank-you / next-up /
+  // follow) is legibly on screen. Mirrored in motion.py's REEL_OUTRO_SEC and
+  // the ffmpeg carve; explicit rhythm.outro callers keep full control.
+  outroSec: z.number().default(2.5),
   perCardSec: z.number().default(4.0),
   beatWeights: z.array(z.number()).default([]),
 });
@@ -91,7 +94,30 @@ export const meetReelSchema = z.object({
   // the close only names a sponsor / next meet the caller actually supplied.
   sponsor: z.string().default(""),
   nextMeet: z.string().default(""),
+  // M18 — brand-true cover/outro props, resolved Python-side. coverRole* is
+  // the APCA-gated role set from the same graphic_renderer resolver the card
+  // beats use; coverTypography follows the top card's typography pair; the
+  // photo pair feeds the fifth "photo" cover variant (only eligible when a
+  // photo exists). ALL optional with "" defaults so a prop-less reel renders
+  // byte-identically to before.
+  coverRoleGround: z.string().default(""),
+  coverRoleSurface: z.string().default(""),
+  coverRoleAccent: z.string().default(""),
+  coverRoleOnGround: z.string().default(""),
+  coverTypography: z.string().default(""),
+  coverPhotoSrc: z.string().default(""),
+  coverPhotoPos: z.string().default(""),
 });
+
+// The resolved bookend colour roles a cover/outro paints with. Every field
+// falls back to the legacy safe pairing (accent text on the primary ground,
+// secondary for bars) when Python sent no resolved roles — the pre-M18 look.
+export type CoverRoles = {
+  ground: string;
+  surface: string;
+  accent: string;
+  onGround: string;
+};
 
 type Props = z.infer<typeof meetReelSchema>;
 type CardItem = Props["cards"][number];
@@ -387,21 +413,28 @@ function reelSeed(s: string): number {
   return h >>> 0;
 }
 
-export type CoverVariant = "stack" | "masthead" | "spotlight" | "banner";
+export type CoverVariant = "stack" | "masthead" | "spotlight" | "banner" | "photo";
 
 // Honest, data-driven cover selection. A medal/PB-heavy weekend EARNS the
 // stat-forward "spotlight" cover (it leads with a big honest number); a quiet
 // weekend never fabricates a hero stat it doesn't have, so spotlight is left
 // out of its pool entirely. The per-meet seed then picks within the eligible
 // pool, so covers vary across meets without ever lying about the data.
+// M18 — the full-bleed "photo" cover joins the pool ONLY when a real club
+// photo reached the reel (hasPhoto); without one the pools (and therefore the
+// modulo pick) are byte-identical to before.
 export function coverVariantFor(
   seed: number,
   counts: { swims: number; pbs: number; medals: number },
+  hasPhoto = false,
 ): CoverVariant {
   const statForward = counts.medals > 0 || counts.pbs >= 2;
   const pool: CoverVariant[] = statForward
     ? ["spotlight", "masthead", "stack", "banner"]
     : ["masthead", "stack", "banner"];
+  if (hasPhoto) {
+    pool.push("photo");
+  }
   return pool[seed % pool.length];
 }
 
@@ -436,14 +469,19 @@ type CoverVariantProps = {
   chips: ReelStat[];
   counts: { swims: number; pbs: number; medals: number };
   env: CoverEnv;
+  // M18 — resolved bookend roles (APCA-gated Python-side); each variant falls
+  // back to the legacy brand pairing when the strings are empty.
+  roles: CoverRoles;
+  photoSrc: string;
+  photoPos: string;
 };
 
 // Variant 1 — STACK: the classic centred emblem lockup. Logo scales in, the
 // meet name springs up under a "Meet Recap" eyebrow, a brand-secondary rule
 // grows out, club name and honest chips settle beneath.
-const StackCover: React.FC<CoverVariantProps> = ({ brand, meetName, chips, env }) => {
+const StackCover: React.FC<CoverVariantProps> = ({ brand, meetName, chips, env, roles }) => {
   const { frame, fps, width, ts, chipsOpacity, chipsProgress } = env;
-  const accent = brand.accent || "#FFFFFF";
+  const accent = roles.onGround || brand.accent || "#FFFFFF";
   const intro = spring({ frame, fps, config: { damping: 16, stiffness: 100, mass: 0.6 } });
   const logoScale = spring({
     frame: frame - 2,
@@ -533,7 +571,7 @@ const StackCover: React.FC<CoverVariantProps> = ({ brand, meetName, chips, env }
           marginTop: Math.round(36 * ts),
           width: ruleW,
           height: 4,
-          background: brand.secondary || accent,
+          background: roles.surface || brand.secondary || accent,
           opacity: 0.9,
         }}
       />
@@ -555,7 +593,7 @@ const StackCover: React.FC<CoverVariantProps> = ({ brand, meetName, chips, env }
       <StatChips
         chips={chips}
         accent={accent}
-        ground={brand.primary || "#0A2540"}
+        ground={roles.ground || brand.primary || "#0A2540"}
         ts={ts}
         opacity={chipsOpacity}
         progress={chipsProgress}
@@ -568,9 +606,9 @@ const StackCover: React.FC<CoverVariantProps> = ({ brand, meetName, chips, env }
 // down the left of a huge left-set headline that slides in from the left out
 // of a defocus; the club + honest chips settle as a centred footer. The mix
 // of a left hero and a centred footer is a deliberate editorial contrast.
-const MastheadCover: React.FC<CoverVariantProps> = ({ brand, meetName, chips, env }) => {
+const MastheadCover: React.FC<CoverVariantProps> = ({ brand, meetName, chips, env, roles }) => {
   const { frame, fps, width, height, ts, chipsOpacity, chipsProgress } = env;
-  const accent = brand.accent || "#FFFFFF";
+  const accent = roles.onGround || brand.accent || "#FFFFFF";
   const barH = interpolate(frame, [3, fps * 0.65], [0, Math.round(height * 0.46)], {
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
@@ -614,7 +652,7 @@ const MastheadCover: React.FC<CoverVariantProps> = ({ brand, meetName, chips, en
           top: `calc(50% - ${Math.round(height * 0.3)}px)`,
           width: 12,
           height: barH,
-          background: brand.secondary || accent,
+          background: roles.surface || brand.secondary || accent,
           opacity: 0.95,
         }}
       />
@@ -702,7 +740,7 @@ const MastheadCover: React.FC<CoverVariantProps> = ({ brand, meetName, chips, en
         <StatChips
           chips={chips}
           accent={accent}
-          ground={brand.primary || "#0A2540"}
+          ground={roles.ground || brand.primary || "#0A2540"}
           ts={ts}
           opacity={chipsOpacity}
           progress={chipsProgress}
@@ -716,9 +754,9 @@ const MastheadCover: React.FC<CoverVariantProps> = ({ brand, meetName, chips, en
 // number the weekend produced (medals → PBs → swims), which counts up and
 // lands on EXACTLY that verified total; the meet name plays the supporting
 // headline. Only ever selected when the data has a number worth leading with.
-const SpotlightCover: React.FC<CoverVariantProps> = ({ brand, meetName, counts, env }) => {
+const SpotlightCover: React.FC<CoverVariantProps> = ({ brand, meetName, counts, env, roles }) => {
   const { frame, fps, width, ts } = env;
-  const accent = brand.accent || "#FFFFFF";
+  const accent = roles.onGround || brand.accent || "#FFFFFF";
   const hero =
     counts.medals > 0
       ? { n: counts.medals, label: counts.medals === 1 ? "MEDAL" : "MEDALS" }
@@ -799,7 +837,7 @@ const SpotlightCover: React.FC<CoverVariantProps> = ({ brand, meetName, counts, 
           marginTop: Math.round(40 * ts),
           width: ruleW,
           height: 4,
-          background: brand.secondary || accent,
+          background: roles.surface || brand.secondary || accent,
           opacity: 0.9,
         }}
       />
@@ -842,9 +880,9 @@ const SpotlightCover: React.FC<CoverVariantProps> = ({ brand, meetName, counts, 
 // up top, a full-width brand-secondary band wipes across the middle carrying
 // the club logo, and the club name + honest chips rise in beneath it. Text
 // stays accent-on-primary; only the logo (an image) ever sits on the band.
-const BannerCover: React.FC<CoverVariantProps> = ({ brand, meetName, chips, env }) => {
+const BannerCover: React.FC<CoverVariantProps> = ({ brand, meetName, chips, env, roles }) => {
   const { frame, fps, height, ts, chipsOpacity, chipsProgress } = env;
-  const accent = brand.accent || "#FFFFFF";
+  const accent = roles.onGround || brand.accent || "#FFFFFF";
   const titleY = interpolate(
     spring({ frame, fps, config: { damping: 18, stiffness: 100, mass: 0.6 } }),
     [0, 1],
@@ -921,7 +959,7 @@ const BannerCover: React.FC<CoverVariantProps> = ({ brand, meetName, chips, env 
           left: 0,
           right: 0,
           height: bandH,
-          background: brand.secondary || accent,
+          background: roles.surface || brand.secondary || accent,
           clipPath: `inset(0 ${bandClip}% 0 0)`,
           display: "flex",
           alignItems: "center",
@@ -967,11 +1005,156 @@ const BannerCover: React.FC<CoverVariantProps> = ({ brand, meetName, chips, env 
         <StatChips
           chips={chips}
           accent={accent}
-          ground={brand.primary || "#0A2540"}
+          ground={roles.ground || brand.primary || "#0A2540"}
           ts={ts}
           opacity={chipsOpacity}
           progress={chipsProgress}
         />
+      </div>
+    </div>
+  );
+};
+
+// Variant 5 — PHOTO (M18): the weekend's own hero photo, full-bleed, under a
+// role-colour scrim with masthead type. Earned only when a real club photo
+// reached the reel (coverVariantFor pool-gates it on hasPhoto), so this cover
+// never fabricates imagery. The photo gets the same slow frame-pure push the
+// card beats give theirs; text paints only resolved roles / brand fallbacks.
+const PhotoCover: React.FC<CoverVariantProps> = ({
+  brand,
+  meetName,
+  chips,
+  env,
+  roles,
+  photoSrc,
+  photoPos,
+}) => {
+  const { frame, fps, width, height, ts, chipsOpacity, chipsProgress } = env;
+  const accent = roles.onGround || brand.accent || "#FFFFFF";
+  const ground = roles.ground || brand.primary || "#0A2540";
+  // Slow frame-pure push across the cover's ~2s so the photo never sits flat.
+  const push = interpolate(frame, [0, Math.round(fps * 2.35)], [1.0, 1.05], {
+    extrapolateRight: "clamp",
+    easing: Easing.inOut(Easing.sin),
+  });
+  const eyebrowOpacity = interpolate(frame, [fps * 0.15, fps * 0.5], [0, 1], {
+    extrapolateRight: "clamp",
+  });
+  const titleY = interpolate(
+    spring({ frame: frame - 3, fps, config: { damping: 18, stiffness: 95, mass: 0.7 } }),
+    [0, 1],
+    [56, 0],
+  );
+  const titleOpacity = interpolate(frame, [3, fps * 0.5], [0, 1], {
+    extrapolateLeft: "clamp",
+    extrapolateRight: "clamp",
+  });
+  const footerOpacity = interpolate(frame, [fps * 0.55, fps * 0.95], [0, 1], {
+    extrapolateRight: "clamp",
+  });
+  const display = (brand.displayName || brand.shortName || "").toUpperCase();
+  return (
+    <div style={{ position: "absolute", inset: 0, overflow: "hidden" }}>
+      <img
+        src={photoSrc}
+        alt=""
+        style={{
+          position: "absolute",
+          inset: 0,
+          width: "100%",
+          height: "100%",
+          objectFit: "cover",
+          objectPosition: photoPos || "center 28%",
+          transform: `scale(${push})`,
+        }}
+      />
+      {/* Role scrim — the ground colour carries legibility, top and bottom. */}
+      <div
+        style={{
+          position: "absolute",
+          inset: 0,
+          background: `linear-gradient(180deg, ${ground}88 0%, ${ground}30 38%, ${ground}55 62%, ${ground}E6 100%)`,
+        }}
+      />
+      {brand.logoDataUri ? (
+        <img
+          src={brand.logoDataUri}
+          alt={brand.displayName || "club logo"}
+          style={{
+            position: "absolute",
+            top: 84,
+            right: 84,
+            width: Math.round(120 * ts),
+            height: Math.round(120 * ts),
+            objectFit: "contain",
+            opacity: eyebrowOpacity,
+          }}
+        />
+      ) : null}
+      {/* Masthead block over the lower scrim. */}
+      <div
+        style={{
+          position: "absolute",
+          left: 0,
+          right: 0,
+          bottom: Math.round(height * 0.1),
+          padding: "0 96px",
+          textAlign: "center",
+        }}
+      >
+        <div
+          style={{
+            fontSize: Math.round(36 * ts),
+            letterSpacing: "0.22em",
+            color: accent,
+            opacity: 0.85 * eyebrowOpacity,
+            marginBottom: Math.round(22 * ts),
+            textTransform: "uppercase",
+            fontFamily: BODY_FONT,
+            fontWeight: 700,
+          }}
+        >
+          Meet Recap
+        </div>
+        <div
+          style={{
+            fontSize: Math.round(120 * ts),
+            fontWeight: 900,
+            color: accent,
+            lineHeight: 0.96,
+            letterSpacing: "-0.02em",
+            textTransform: "uppercase",
+            maxWidth: width - 160,
+            margin: "0 auto",
+            transform: `translateY(${titleY}px)`,
+            opacity: titleOpacity,
+          }}
+        >
+          {meetName || "WEEKEND HIGHLIGHTS"}
+        </div>
+        <div style={{ opacity: footerOpacity }}>
+          <div
+            style={{
+              marginTop: Math.round(24 * ts),
+              fontSize: Math.round(36 * ts),
+              color: accent,
+              letterSpacing: "0.16em",
+              fontWeight: 700,
+              textTransform: "uppercase",
+              fontFamily: BODY_FONT,
+            }}
+          >
+            {display}
+          </div>
+          <StatChips
+            chips={chips}
+            accent={accent}
+            ground={roles.ground || brand.primary || "#0A2540"}
+            ts={ts}
+            opacity={chipsOpacity}
+            progress={chipsProgress}
+          />
+        </div>
       </div>
     </div>
   );
@@ -983,31 +1166,63 @@ const CoverScreen: React.FC<{
   durationInFrames: number;
   chips: ReelStat[];
   counts: { swims: number; pbs: number; medals: number };
-}> = ({ brand, meetName, durationInFrames, chips, counts }) => {
+  roles: CoverRoles;
+  fontStack: string;
+  photoSrc: string;
+  photoPos: string;
+  // M16: only a cover that is the WHOLE reel (no card beats) may fade itself
+  // out; inside a real reel the paired exit owns the handoff, so the cover
+  // stays fully visible until the first beat's transition takes over.
+  selfExit?: boolean;
+}> = ({
+  brand,
+  meetName,
+  durationInFrames,
+  chips,
+  counts,
+  roles,
+  fontStack,
+  photoSrc,
+  photoPos,
+  selfExit = false,
+}) => {
   const env = useCoverEnv(durationInFrames);
   // Data-driven: the variant is a pure function of the meet's identity and its
-  // honest stats, so it is stable per meet and varied across meets.
+  // honest stats, so it is stable per meet and varied across meets. The
+  // full-bleed photo cover is pool-gated on a photo actually existing (M18).
   const variant = coverVariantFor(
     reelSeed(`${meetName}|${counts.swims}|${counts.pbs}|${counts.medals}`),
     counts,
+    Boolean(photoSrc),
   );
   const Body =
-    variant === "spotlight"
-      ? SpotlightCover
-      : variant === "masthead"
-        ? MastheadCover
-        : variant === "banner"
-          ? BannerCover
-          : StackCover;
+    variant === "photo"
+      ? PhotoCover
+      : variant === "spotlight"
+        ? SpotlightCover
+        : variant === "masthead"
+          ? MastheadCover
+          : variant === "banner"
+            ? BannerCover
+            : StackCover;
   return (
     <AbsoluteFill
       style={{
-        backgroundColor: brand.primary || "#0A2540",
-        fontFamily: COVER_FONT,
-        opacity: env.outroFade,
+        backgroundColor: roles.ground || brand.primary || "#0A2540",
+        fontFamily: fontStack || COVER_FONT,
+        opacity: selfExit ? env.outroFade : 1,
       }}
     >
-      <Body brand={brand} meetName={meetName} chips={chips} counts={counts} env={env} />
+      <Body
+        brand={brand}
+        meetName={meetName}
+        chips={chips}
+        counts={counts}
+        env={env}
+        roles={roles}
+        photoSrc={photoSrc}
+        photoPos={photoPos}
+      />
     </AbsoluteFill>
   );
 };
@@ -1050,27 +1265,33 @@ const OutroScreen: React.FC<{
   durationInFrames: number;
   sponsor: string;
   nextMeet: string;
-}> = ({ brand, meetName, durationInFrames, sponsor, nextMeet }) => {
+  // M18 — the same resolved bookend roles the cover paints with.
+  roles: CoverRoles;
+}> = ({ brand, meetName, durationInFrames, sponsor, nextMeet, roles }) => {
   const frame = useCurrentFrame();
   const { fps, width, height } = useVideoConfig();
   const ts = Math.min(width / 1080, height / 1440, 1);
-  const accent = brand.accent || "#FFFFFF";
+  const accent = roles.onGround || brand.accent || "#FFFFFF";
+  // M17 — legible-outro retiming inside the (now 2.5s-default) outro: logo +
+  // club settled by ~0.5s, rule drawn right behind them, CTA fully readable
+  // by ~0.9s, then a hold of ≥1.2s before the closing fade begins. The outro
+  // remains the only scene allowed to animate itself out.
   const grow = spring({
     frame,
     fps,
-    config: { damping: 14, stiffness: 120, mass: 0.6 },
+    config: { damping: 16, stiffness: 150, mass: 0.55 },
   });
-  const fadeIn = interpolate(frame, [0, fps * 0.3], [0, 1], {
+  const fadeIn = interpolate(frame, [0, fps * 0.25], [0, 1], {
     extrapolateRight: "clamp",
   });
-  const ruleW = interpolate(frame, [fps * 0.25, fps * 0.6], [0, 180], {
+  const ruleW = interpolate(frame, [fps * 0.25, fps * 0.55], [0, 180], {
     extrapolateRight: "clamp",
     easing: Easing.out(Easing.cubic),
   });
-  const ctaOpacity = interpolate(frame, [fps * 0.4, fps * 0.8], [0, 1], {
+  const ctaOpacity = interpolate(frame, [fps * 0.5, fps * 0.9], [0, 1], {
     extrapolateRight: "clamp",
   });
-  const ctaY = interpolate(frame, [fps * 0.4, fps * 0.8], [18, 0], {
+  const ctaY = interpolate(frame, [fps * 0.5, fps * 0.9], [18, 0], {
     extrapolateRight: "clamp",
     easing: Easing.out(Easing.cubic),
   });
@@ -1091,7 +1312,7 @@ const OutroScreen: React.FC<{
   return (
     <AbsoluteFill
       style={{
-        backgroundColor: brand.primary || "#0A2540",
+        backgroundColor: roles.ground || brand.primary || "#0A2540",
         fontFamily: COVER_FONT,
         opacity: outroFade,
       }}
@@ -1139,7 +1360,7 @@ const OutroScreen: React.FC<{
             marginTop: Math.round(26 * ts),
             width: ruleW,
             height: 4,
-            background: brand.secondary || accent,
+            background: roles.surface || brand.secondary || accent,
             opacity: 0.9,
           }}
         />
@@ -1205,6 +1426,13 @@ export const MeetReel: React.FC<Props> = ({
   reelStatConfig,
   sponsor,
   nextMeet,
+  coverRoleGround,
+  coverRoleSurface,
+  coverRoleAccent,
+  coverRoleOnGround,
+  coverTypography,
+  coverPhotoSrc,
+  coverPhotoPos,
 }) => {
   const { fps, durationInFrames, width, height } = useVideoConfig();
   const rootFrame = useCurrentFrame();
@@ -1215,6 +1443,15 @@ export const MeetReel: React.FC<Props> = ({
   // honest totals the variant SELECTION + spotlight numeral read from).
   const chips = reelStats(safeCards, reelStatConfig);
   const counts = coverStatCounts(safeCards);
+  // M18 — the resolved bookend roles (empty strings = legacy brand pairing)
+  // and the top card's typography, shared by the cover AND the outro.
+  const coverRoles: CoverRoles = {
+    ground: coverRoleGround || "",
+    surface: coverRoleSurface || "",
+    accent: coverRoleAccent || "",
+    onGround: coverRoleOnGround || "",
+  };
+  const coverFontStack = coverTypography ? fontStackFor(coverTypography) : "";
   if (safeCards.length === 0) {
     return (
       <CoverScreen
@@ -1223,16 +1460,21 @@ export const MeetReel: React.FC<Props> = ({
         durationInFrames={durationInFrames}
         chips={chips}
         counts={counts}
+        roles={coverRoles}
+        fontStack={coverFontStack}
+        photoSrc={coverPhotoSrc || ""}
+        photoPos={coverPhotoPos || ""}
+        selfExit
       />
     );
   }
 
   // R1.12 — beat-rhythm & duration customisation. The bookend seconds and the
   // per-card beat weights are caller-customisable via the `rhythm` prop; the
-  // defaults below reproduce the original 2s cover / 1s outro / top-card-1.25
-  // emphasis exactly, so a brief-less (rhythm-less) reel is byte-identical.
+  // defaults below reproduce the default 2s cover / 2.5s outro (M17) /
+  // top-card-1.25 emphasis exactly, so a rhythm-less reel is byte-identical.
   const coverSec = rhythm && rhythm.coverSec > 0 ? rhythm.coverSec : 2.0;
-  const outroSec = rhythm && rhythm.outroSec > 0 ? rhythm.outroSec : 1.0;
+  const outroSec = rhythm && rhythm.outroSec > 0 ? rhythm.outroSec : 2.5;
   const coverFrames = Math.round(fps * coverSec);
   const outroFrames = Math.round(fps * outroSec);
   const transitionFrames = Math.round(fps * 0.35);
@@ -1259,59 +1501,92 @@ export const MeetReel: React.FC<Props> = ({
     Math.max(minBeat, Math.floor((remaining * w) / weightSum) + transitionFrames),
   );
 
+  // One consistent connective cut for every same-rank handoff, derived from
+  // the reel (the top card's seed) so the lower beats feel like one piece.
+  const connective = transitionFor(safeCards[0]?.variationSeed || 0);
+
+  // M16 — paired, velocity-matched transitions: every beat's INCOMING spec is
+  // precomputed so the preceding scene (cover or beat) can play the matched
+  // exit transform through the SAME window with the SAME kind. The first beat
+  // is the #1 (top-ranked) moment — its entry off the brand cover is the
+  // reel's peak, so it earns the bold, mood-chosen cut.
+  const specs = safeCards.map((card, i) => {
+    const isPeak = i === 0 && safeCards.length > 1;
+    return isPeak
+      ? transitionFor(card.variationSeed || 0, { peak: true, mood: card.mood })
+      : connective;
+  });
+  // Per-card timing: the chosen cut's own duration, capped at the handoff
+  // budget so it stays inside the beat overlap (never eats the next build).
+  const beatFades = specs.map((spec) =>
+    transitionFramesFor(spec.durationSeconds, transitionFrames, fps),
+  );
+
   let cursor = 0;
   const sequences: React.ReactNode[] = [];
+  const beatStarts: number[] = [];
+
+  // The cover holds fully visible until the first beat's transition takes
+  // over (no self-fade dip through black) and plays that spec's exit.
   sequences.push(
     <Sequence
       key="cover"
       from={cursor}
       durationInFrames={coverFrames + transitionFrames}
     >
-      <CoverScreen
-        brand={brand}
-        meetName={meetName}
-        durationInFrames={coverFrames + transitionFrames}
-        chips={chips}
-        counts={counts}
-      />
+      <ExitWrap
+        kind={specs[0].kind}
+        startLocal={coverFrames}
+        exitFrames={beatFades[0]}
+      >
+        <CoverScreen
+          brand={brand}
+          meetName={meetName}
+          durationInFrames={coverFrames + transitionFrames}
+          chips={chips}
+          counts={counts}
+          roles={coverRoles}
+          fontStack={coverFontStack}
+          photoSrc={coverPhotoSrc || ""}
+          photoPos={coverPhotoPos || ""}
+        />
+      </ExitWrap>
     </Sequence>,
   );
   cursor += coverFrames;
 
-  // One consistent connective cut for every same-rank handoff, derived from
-  // the reel (the top card's seed) so the lower beats feel like one piece.
-  const connective = transitionFor(safeCards[0]?.variationSeed || 0);
-
   safeCards.forEach((card, i) => {
     const dur = beatFrames[i];
-    // The first beat is the #1 (top-ranked) moment — its entry off the brand
-    // cover is the reel's peak, so it earns the bold, mood-chosen cut.
-    const isPeak = i === 0 && safeCards.length > 1;
-    const spec = isPeak
-      ? transitionFor(card.variationSeed || 0, { peak: true, mood: card.mood })
-      : connective;
-    // Per-card timing: the chosen cut's own duration, capped at the handoff
-    // budget so it stays inside the beat overlap (never eats the next build).
-    const fadeFrames = transitionFramesFor(spec.durationSeconds, transitionFrames, fps);
+    const spec = specs[i];
+    const fadeFrames = beatFades[i];
     // The light-sweep glints the club accent across the frame; pass the
     // card's resolved accent (the exact still-parity hex) so it stays
     // brand-true rather than inventing a highlight colour.
     const accent = card.roleAccent || brand.accent || "";
+    // The outgoing side of this beat's handoff: the NEXT beat's spec (or the
+    // outro's quiet crossfade — no exit transform, the outgoing beat simply
+    // holds beneath the dissolve).
+    const nextKind = i + 1 < safeCards.length ? specs[i + 1].kind : "crossfade";
+    const nextFrames = i + 1 < safeCards.length ? beatFades[i + 1] : transitionFrames;
+    beatStarts.push(cursor);
     sequences.push(
       <Sequence
         key={`card-${i}`}
         from={cursor}
         durationInFrames={dur + transitionFrames}
       >
-        <TransitionWrap fadeInFrames={fadeFrames} kind={spec.kind} accent={accent}>
-          <StoryCard card={card} brand={brand} />
-        </TransitionWrap>
+        <ExitWrap kind={nextKind} startLocal={dur - transitionFrames} exitFrames={nextFrames}>
+          <TransitionWrap fadeInFrames={fadeFrames} kind={spec.kind} accent={accent}>
+            <StoryCard card={{ ...card, inReel: true }} brand={brand} />
+          </TransitionWrap>
+        </ExitWrap>
       </Sequence>,
     );
     cursor += dur - transitionFrames;
   });
 
   // Outro — runs to the end of the reel, whatever rounding left over.
+  const outroStart = cursor;
   sequences.push(
     <Sequence
       key="outro"
@@ -1325,10 +1600,21 @@ export const MeetReel: React.FC<Props> = ({
           durationInFrames={Math.max(outroFrames, durationInFrames - cursor)}
           sponsor={sponsor}
           nextMeet={nextMeet}
+          roles={coverRoles}
         />
       </TransitionWrap>
     </Sequence>,
   );
+
+  // M20 — whole-piece chrome data for the reel-overlay layers (progress rail,
+  // club mark): the resolved role colours (top card first, then the cover
+  // roles, then the raw brand) plus the beat grid the ticks mark.
+  const chromeAccent =
+    safeCards[0]?.roleAccent || coverRoles.accent || brand.accent || "#FFFFFF";
+  const chromeGround =
+    safeCards[0]?.roleGround || coverRoles.ground || brand.primary || "#0A2540";
+  const chromeOnGround =
+    safeCards[0]?.roleOnGround || coverRoles.onGround || brand.accent || "#FFFFFF";
 
   return (
     <AbsoluteFill>
@@ -1345,6 +1631,13 @@ export const MeetReel: React.FC<Props> = ({
             height,
             cardCount: safeCards.length,
             meetName,
+            accent: chromeAccent,
+            ground: chromeGround,
+            onGround: chromeOnGround,
+            clubLabel: brand.shortName || brand.displayName || "",
+            logoDataUri: brand.logoDataUri || "",
+            beatStarts,
+            outroStart,
           }}
         />
       ))}
@@ -1506,4 +1799,82 @@ const TransitionWrap: React.FC<{
     );
   }
   return <AbsoluteFill style={{ opacity: ease((n) => n) }}>{children}</AbsoluteFill>;
+};
+
+// M16 — the paired exit wrapper. While the NEXT scene's TransitionWrap plays
+// its entrance, the outgoing scene wrapped here plays the velocity-matched
+// exit of the SAME TransitionSpec through the SAME frame window: the outgoing
+// side accelerates (Easing.in) as the incoming side decelerates (Easing.out),
+// so a push reads as one continuous camera move and a whip mirrors laterally.
+// Non-directional kinds (crossfade / wipe / blur / iris / glitch /
+// slide-stack / light-sweep entrances that cover or reveal) apply NO exit
+// transform — the outgoing beat holds at full opacity beneath the incoming
+// treatment, which is exactly what keeps handoffs from dipping through black.
+const ExitWrap: React.FC<{
+  kind: TransitionKind;
+  startLocal: number; // local frame at which the incoming scene starts
+  exitFrames: number; // the incoming transition's frame window
+  children: React.ReactNode;
+}> = ({ kind, startLocal, exitFrames, children }) => {
+  const frame = useCurrentFrame();
+  const { width, height } = useVideoConfig();
+  const t = interpolate(
+    frame,
+    [startLocal, startLocal + Math.max(1, exitFrames)],
+    [0, 1],
+    {
+      extrapolateLeft: "clamp",
+      extrapolateRight: "clamp",
+      easing: Easing.in(Easing.cubic),
+    },
+  );
+  if (t <= 0) {
+    return <AbsoluteFill>{children}</AbsoluteFill>;
+  }
+  if (kind === "push") {
+    // Mirrors the incoming push (translateY +12% → 0): the outgoing beat
+    // travels up and out at matched velocity.
+    return (
+      <AbsoluteFill style={{ transform: `translateY(${-t * height * 0.12}px)` }}>
+        {children}
+      </AbsoluteFill>
+    );
+  }
+  if (kind === "whip") {
+    // Mirrors the incoming whip laterally, with the same directional blur.
+    return (
+      <AbsoluteFill
+        style={{
+          transform: `translateX(${-t * width * 0.5}px)`,
+          filter: `blur(${t * 14}px)`,
+        }}
+      >
+        {children}
+      </AbsoluteFill>
+    );
+  }
+  if (kind === "zoom") {
+    // Zoom-through: the outgoing beat scales past the camera and softens as
+    // the incoming one arrives beneath its own scale-up.
+    return (
+      <AbsoluteFill
+        style={{ transform: `scale(${1 + 0.15 * t})`, opacity: 1 - 0.5 * t }}
+      >
+        {children}
+      </AbsoluteFill>
+    );
+  }
+  if (kind === "slide-stack") {
+    // The outgoing card recedes slightly as the next one lands on the stack.
+    return (
+      <AbsoluteFill
+        style={{ transform: `translateY(${-t * height * 0.08}px) scale(${1 - 0.03 * t})` }}
+      >
+        {children}
+      </AbsoluteFill>
+    );
+  }
+  // Crossfade / wipe / blur / iris / glitch / light-sweep: hold fully visible
+  // beneath the incoming treatment — the transition IS the exit.
+  return <AbsoluteFill>{children}</AbsoluteFill>;
 };

@@ -219,7 +219,8 @@ export const PhotoFill: React.FC<{
           height: "100%",
           objectFit: "cover",
           objectPosition: card.photoPos || "center 28%",
-          transform: `scale(${anim.photoScale})`,
+          // M15 — the shared seed-chosen camera move (push + lateral drift).
+          transform: `translate(${anim.photoDriftX}%, ${anim.photoDriftY}%) scale(${anim.photoScale})`,
         }}
       />
       <div style={{ position: "absolute", inset: 0, background: gradient }} />

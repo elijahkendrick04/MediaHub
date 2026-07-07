@@ -60,23 +60,23 @@ def _card(i: int) -> dict:
 # ===========================================================================
 
 
-@pytest.mark.parametrize("n,expected", [(1, 7.0), (2, 11.0), (3, 15.0), (4, 19.0), (5, 23.0)])
-def test_default_duration_unchanged(n, expected):
-    """The original 2 + 4·n + 1 formula must survive verbatim — every keyword
-    defaulted, the result is exactly what it was before R1.12."""
+@pytest.mark.parametrize("n,expected", [(1, 8.5), (2, 12.5), (3, 16.5), (4, 20.5), (5, 24.5)])
+def test_default_duration_follows_the_skeleton(n, expected):
+    """The 2 + 4·n + REEL_OUTRO_SEC formula, with the M17 2.5s legible
+    outro — every keyword defaulted."""
     assert motion.reel_duration_for(n) == expected
 
 
 def test_default_duration_clamps_card_count_as_before():
-    assert motion.reel_duration_for(0) == 7.0  # never a zero-card reel
-    assert motion.reel_duration_for(99) == 23.0  # capped at the 5-card max
-    assert motion.reel_duration_for(3) == 15.0  # the historic default
+    assert motion.reel_duration_for(0) == 8.5  # never a zero-card reel
+    assert motion.reel_duration_for(99) == 24.5  # capped at the 5-card max
+    assert motion.reel_duration_for(3) == 16.5  # the three-card default
 
 
 def test_passing_default_values_explicitly_is_a_no_op():
-    """cover=2/outro=1/per_card=4/uniform weights must reproduce the default."""
-    assert motion.reel_duration_for(3, cover_sec=2.0, outro_sec=1.0, per_card_sec=4.0) == 15.0
-    assert motion.reel_duration_for(3, beat_weights=[1, 1, 1]) == 15.0
+    """cover=2/outro=2.5/per_card=4/uniform weights must reproduce the default."""
+    assert motion.reel_duration_for(3, cover_sec=2.0, outro_sec=2.5, per_card_sec=4.0) == 16.5
+    assert motion.reel_duration_for(3, beat_weights=[1, 1, 1]) == 16.5
 
 
 # ===========================================================================
@@ -90,17 +90,17 @@ def test_custom_cover_and_outro_shift_the_total():
 
 
 def test_custom_per_card_rescales_the_card_budget():
-    # 2 cards at 6s each: 2 + 6·2 + 1 = 15
-    assert motion.reel_duration_for(2, per_card_sec=6.0) == 15.0
+    # 2 cards at 6s each: 2 + 6·2 + 2.5 = 16.5
+    assert motion.reel_duration_for(2, per_card_sec=6.0) == 16.5
 
 
 def test_beat_weights_grow_the_total_honestly():
     """A weighted card earns proportionally more seconds — the reel lengthens
     rather than silently squeezing the connective beats."""
-    # weights [2,1,1] → per-card budget 4·(2+1+1) = 16 → 2 + 16 + 1 = 19
-    assert motion.reel_duration_for(3, beat_weights=[2, 1, 1]) == 19.0
+    # weights [2,1,1] → per-card budget 4·(2+1+1) = 16 → 2 + 16 + 2.5 = 20.5
+    assert motion.reel_duration_for(3, beat_weights=[2, 1, 1]) == 20.5
     # single dominant card
-    assert motion.reel_duration_for(1, beat_weights=[3]) == 2 + 4 * 3 + 1  # 15
+    assert motion.reel_duration_for(1, beat_weights=[3]) == 2 + 4 * 3 + 2.5  # 16.5
 
 
 def test_duration_grows_monotonically_with_emphasis():
@@ -154,8 +154,8 @@ def test_normalise_returns_none_for_nothing_or_defaults():
     assert motion.normalise_reel_rhythm({}, 3) is None
     assert motion.normalise_reel_rhythm("not-a-dict", 3) is None
     # Values equal to the defaults are still "default" — no cache-busting key.
-    assert motion.normalise_reel_rhythm({"cover_sec": 2.0, "outro_sec": 1.0}, 3) is None
-    assert motion.normalise_reel_rhythm({"cover": 2, "outro": 1, "per_card": 4}, 3) is None
+    assert motion.normalise_reel_rhythm({"cover_sec": 2.0, "outro_sec": 2.5}, 3) is None
+    assert motion.normalise_reel_rhythm({"cover": 2, "outro": 2.5, "per_card": 4}, 3) is None
 
 
 def test_normalise_accepts_snake_camel_and_aliases():
@@ -193,7 +193,7 @@ def test_reel_duration_kwargs_round_trip():
     r = motion.normalise_reel_rhythm({"cover": 3, "outro": 1.5}, 3)
     assert motion.reel_duration_for(3, **motion._reel_duration_kwargs(r)) == 3 + 4 * 3 + 1.5
     r2 = motion.normalise_reel_rhythm({"weights": [2, 1, 1]}, 3)
-    assert motion.reel_duration_for(3, **motion._reel_duration_kwargs(r2)) == 19.0
+    assert motion.reel_duration_for(3, **motion._reel_duration_kwargs(r2)) == 20.5
     assert motion._reel_duration_kwargs(None) == {}
 
 
@@ -219,9 +219,9 @@ def _render_capture(tmp_path, monkeypatch, cards, **kwargs):
     return captured, result
 
 
-def test_default_reel_omits_the_rhythm_prop_and_keeps_15s(tmp_path, monkeypatch):
+def test_default_reel_omits_the_rhythm_prop_and_keeps_the_default_total(tmp_path, monkeypatch):
     cap, _ = _render_capture(tmp_path, monkeypatch, [_card(i) for i in range(3)])
-    assert cap["duration_sec"] == 15.0
+    assert cap["duration_sec"] == 16.5
     assert "rhythm" not in cap["props"], "a default reel must not carry a rhythm prop"
 
 
@@ -232,8 +232,8 @@ def test_custom_rhythm_flows_into_duration_and_props(tmp_path, monkeypatch):
         [_card(i) for i in range(3)],
         rhythm={"cover": 3, "weights": [2, 1, 1]},
     )
-    # cover 3 + 4·(2+1+1) + 1 = 20
-    assert cap["duration_sec"] == 20.0
+    # cover 3 + 4·(2+1+1) + 2.5 = 21.5
+    assert cap["duration_sec"] == 21.5
     assert cap["props"]["rhythm"]["coverSec"] == 3.0
     assert cap["props"]["rhythm"]["beatWeights"] == [2.0, 1.0, 1.0]
 
@@ -317,7 +317,7 @@ def test_ffmpeg_segments_honour_beat_weights():
     total = motion.reel_duration_for(2, beat_weights=[2, 1])
     segs = reel_ffmpeg.reel_segment_durations(2, total, rhythm=rhythm)
     assert segs[1] == pytest.approx(8.0 + X)  # card0 weighted 2× → 8s
-    assert segs[2] == pytest.approx(5.0)  # card1 4s + 1s outro
+    assert segs[2] == pytest.approx(6.5)  # card1 4s + 2.5s outro
     assert sum(segs) - X * (len(segs) - 1) == pytest.approx(total, abs=1e-9)
 
 
@@ -343,8 +343,8 @@ def test_motion_dispatch_forwards_rhythm_to_the_ffmpeg_engine(tmp_path, monkeypa
         )
     assert not remotion_run.called
     assert calls["rhythm"]["beatWeights"] == [2.0, 1.0]
-    # cover 2 + 4·(2+1) + 1 = 15 flows through as the total too
-    assert calls["duration_sec"] == 15.0
+    # cover 2 + 4·(2+1) + 2.5 = 16.5 flows through as the total too
+    assert calls["duration_sec"] == 16.5
 
 
 def test_ffmpeg_render_folds_rhythm_into_the_cache_key(tmp_path, monkeypatch):

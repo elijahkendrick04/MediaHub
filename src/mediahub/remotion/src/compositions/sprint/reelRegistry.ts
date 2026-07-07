@@ -28,6 +28,17 @@ export type ReelCtx = {
   height: number;
   cardCount: number;
   meetName: string;
+  // M20 — whole-piece chrome data so overlays can be brand-exact and
+  // beat-aware: the resolved role colours (top card → cover roles → raw
+  // brand fallback), the club identity, the global start frame of each card
+  // beat, and the global frame the outro scene begins.
+  accent: string;
+  ground: string;
+  onGround: string;
+  clubLabel: string;
+  logoDataUri: string;
+  beatStarts: number[];
+  outroStart: number;
 };
 
 export type ReelLayer = ComponentType<{ ctx: ReelCtx }>;

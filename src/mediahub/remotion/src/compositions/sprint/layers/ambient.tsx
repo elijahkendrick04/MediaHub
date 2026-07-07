@@ -30,10 +30,11 @@ import type { SceneComponent } from "../registry";
  * beat-local frame — the breathe window lands per beat, not across the reel.
  */
 
-// Peak overlay alpha — deliberately low. The still engine paints decorative
-// grounds at 0.24–0.34 and stays APCA-gated; an ambient atmosphere lives well
-// under that, so even where a glow overlaps text the contrast shift is tiny.
-const PEAK_ALPHA = 0.08;
+// Peak overlay alpha — deliberately low, but high enough to survive H.264
+// (M19: 0.08 vanished after encoding; 0.14 reads as living atmosphere while
+// staying far under the still engine's 0.24–0.34 decorative grounds, so even
+// where a glow overlaps text the contrast shift stays tiny).
+const PEAK_ALPHA = 0.14;
 
 const AMBIENT_PROGRAMMES = ["drift", "pan", "temperature", "breathe", "still"] as const;
 type Programme = (typeof AMBIENT_PROGRAMMES)[number];
@@ -90,7 +91,7 @@ const Layer: SceneComponent = ({ ctx }) => {
   // (no frame-0 jump, no fighting entrances), full through the breathe window,
   // gone again before resolve so the transition/outro stays clean.
   const d = durationInFrames;
-  const env = interpolate(frame, [d * 0.16, d * 0.32, d * 0.7, d * 0.86], [0, 1, 1, 0], {
+  const env = interpolate(frame, [d * 0.1, d * 0.26, d * 0.74, d * 0.9], [0, 1, 1, 0], {
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
     easing: Easing.inOut(Easing.sin),
