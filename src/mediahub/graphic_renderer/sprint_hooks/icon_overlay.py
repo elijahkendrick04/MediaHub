@@ -57,6 +57,40 @@ _MEDAL_LABEL = {"gold": "Gold medal", "silver": "Silver medal", "bronze": "Bronz
 # still apply).
 _MEDAL_BAKED_FAMILIES = {"medal_card", "centered_medal_spotlight"}
 
+# M13 (STILLS-8) — per-archetype badge anchor. The default top-right corner
+# collides with brand furniture on several archetypes (a gold disc stamped
+# over the club lockup is the clearest "stickers on a template" tell), so
+# each colliding family names the corner its layout actually leaves clear:
+#   (h_side, v_side, extra_x_px, extra_y_px)
+# extra_*_px are fixed offsets past the standard margin, sized from where the
+# template's own fixed-px furniture sits (audited per template). Families not
+# listed keep the historic top-right anchor byte-identically.
+_DEFAULT_ANCHOR = ("right", "top", 0, 0)
+_ANCHORS: dict[str, tuple[str, str, int, int]] = {
+    # brand block top-right (top:60;right:60); kicker top-left → badges sit
+    # left, below the kicker pill (~60px tall at top:60).
+    "full_bleed_photo_lower_third": ("left", "top", 0, 86),
+    # the masthead rail (title + dateline) spans the full top edge and the
+    # right info rail sits under it → drop below the masthead (which can wrap
+    # to two title lines, ~210px), LEFT side over the photo well (the headline
+    # is lower-left, so the well's top-left stays clear).
+    "magazine_cover": ("left", "top", 0, 170),
+    # the data bay's logo/club stack owns the top-right; the left photo bay's
+    # kicker owns top-left → badges sit left, under the kicker.
+    "duo_athlete_split": ("left", "top", 0, 84),
+    # header row: kicker top-left, club lockup top-RIGHT → badges sit left,
+    # below the kicker, over the matted window's top-left.
+    "photo_passepartout": ("left", "top", 0, 86),
+    # right info column opens with the kicker at its top → badges live on the
+    # photo panel's top-left, clear of the seam.
+    "full_height_portrait_split": ("left", "top", 0, 0),
+    # masthead (brand left, meet right) spans the top → below it, right side,
+    # clear of the left-aligned name block.
+    "editorial_numbers_grid": ("right", "top", 0, 120),
+    # (The M12 layered archetypes keep their top-right corner clear by design —
+    # kicker top-left, brand in the band — so the default anchor is correct.)
+}
+
 # Nation → three colour bands (top→bottom) for the flag chip. Real flags vary in
 # geometry, so we evoke the nation's colours and ALWAYS show the code chip rather
 # than claim exact vexillology. Keyed by upper-case ISO alpha-2 / alpha-3 / NOC.
@@ -373,16 +407,21 @@ def apply(html: str, ctx: RenderHookCtx) -> str:
     margin = max(12, round(short * 0.05))
     gap = max(6, round(short * 0.022))
 
+    # M13: anchor to the corner this archetype's furniture leaves clear.
+    # Unmapped families keep the historic top-right stamp byte-identically.
+    h_side, v_side, extra_x, extra_y = _ANCHORS.get(ctx.family or "", _DEFAULT_ANCHOR)
+    x = margin + extra_x
+    offset = margin + extra_y
+
     kinds = ",".join(k for k, _ in badges)
     cells: list[str] = []
-    top = margin
     for _kind, svg in badges:
         cells.append(
-            f'<div style="position:absolute;top:{top}px;right:{margin}px;'
+            f'<div style="position:absolute;{v_side}:{offset}px;{h_side}:{x}px;'
             f"width:{box}px;height:{box}px;"
             f'filter:drop-shadow(0 2px 6px rgba(0,0,0,0.45))">{svg}</div>'
         )
-        top += box + gap
+        offset += box + gap
 
     overlay = (
         f'<div class="mh-icon-overlay" data-badges="{kinds}" '

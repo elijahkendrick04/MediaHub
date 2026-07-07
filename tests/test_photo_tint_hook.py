@@ -1,14 +1,15 @@
 """Tests for the G1.7 photo-derived ground-tint render hook.
 
-Covers the two hard rules and the opt-in contract:
+Covers the two hard rules and the default-on contract (M9/STILLS-3):
 
   * **Never overrides a confirmed brand hex** — a club's ``--mh-primary`` is left
     byte-identical; only the *derived* ``--mh-surface`` is tinted. The no-brand
     fallback ground is the sole exception (then the photo may seed it).
   * **APCA-gated** — a tint that would erode on-ground legibility is rejected and
     the card renders unchanged.
-  * **Opt-in / byte-identical** — no ``MEDIAHUB_PHOTO_TINT`` ⇒ pure no-op; v1
-    cards and photo-less cards pass through untouched.
+  * **Default ON / explicit off byte-identical** — unset ``MEDIAHUB_PHOTO_TINT``
+    runs the hook; an explicit falsy value (``0``/``false``/``no``/``off``) is a
+    pure no-op; v1 cards and photo-less cards pass through untouched either way.
   * Wired into the real ``render_brief`` pipeline (Playwright stubbed).
 """
 from __future__ import annotations
@@ -172,12 +173,20 @@ def test_illegible_surface_is_left_untouched():
 
 
 def test_flag_off_is_byte_identical(monkeypatch):
-    monkeypatch.delenv("MEDIAHUB_PHOTO_TINT", raising=False)
+    monkeypatch.setenv("MEDIAHUB_PHOTO_TINT", "0")
     html = _html(_CONFIRMED)
     assert PT.apply(html, _ctx({"primary": "#0E5BFF"})) == html
 
 
-@pytest.mark.parametrize("val", ["0", "false", "no", "off", ""])
+def test_unset_flag_defaults_on(monkeypatch):
+    # M9: the tint is default-ON — an unset flag runs the hook.
+    monkeypatch.delenv("MEDIAHUB_PHOTO_TINT", raising=False)
+    html = _html(_CONFIRMED)
+    out = PT.apply(html, _ctx({"primary": "#0E5BFF"}))
+    assert out != html and "--mh-photo-accent:" in out
+
+
+@pytest.mark.parametrize("val", ["0", "false", "no", "off"])
 def test_falsey_flag_values_are_no_ops(monkeypatch, val):
     monkeypatch.setenv("MEDIAHUB_PHOTO_TINT", val)
     html = _html(_CONFIRMED)
@@ -243,10 +252,8 @@ def test_a_raising_hook_is_skipped_not_fatal(monkeypatch):
 
 def _render_capture(monkeypatch, tmp_path, photo_path, *, tint: bool):
     monkeypatch.setenv("MEDIAHUB_GEN_V2", "1")
-    if tint:
-        monkeypatch.setenv("MEDIAHUB_PHOTO_TINT", "1")
-    else:
-        monkeypatch.delenv("MEDIAHUB_PHOTO_TINT", raising=False)
+    # M9: the hook is default-ON, so "off" is now the explicit kill value.
+    monkeypatch.setenv("MEDIAHUB_PHOTO_TINT", "1" if tint else "0")
 
     import mediahub.graphic_renderer.render as R
     from mediahub.brand.kit import BrandKit

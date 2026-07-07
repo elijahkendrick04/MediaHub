@@ -269,10 +269,48 @@ def _design_spec_system_prompt(archetypes: list[str], token_roles: list[str]) ->
     )
 
 
+def _photo_context(photo_facts: Optional[dict]) -> str:
+    """One prompt line stating what photography this card really has (M7).
+
+    The director's archetype guidance ("a great photo → full-bleed") is only
+    honest when it knows whether a photo exists. Facts are resolved by the
+    caller from the media library BEFORE direction — never guessed here.
+    Returns "" when the caller resolved nothing (legacy paths).
+    """
+    if not isinstance(photo_facts, dict):
+        return ""
+    if not photo_facts.get("has_photo"):
+        return (
+            "PHOTO: none available — pick a type-led composition; "
+            "never a photo-led stage."
+        )
+    bits = []
+    asset_type = str(photo_facts.get("asset_type") or "").strip()
+    orientation = str(photo_facts.get("orientation") or "").strip()
+    if orientation and orientation != "unknown":
+        bits.append(orientation)
+    bits.append(asset_type.replace("_", " ") if asset_type else "athlete photo")
+    line = f"PHOTO: a real {' '.join(bits)} of the subject is available"
+    try:
+        count = int(photo_facts.get("person_photo_count") or 0)
+    except (TypeError, ValueError):
+        count = 0
+    if count > 1:
+        line += f" ({count} person photos in the library)"
+    return line + " — lead with it where the composition earns it."
+
+
 def _design_spec_user_prompt(
-    summary: str, brand_ctx: str, angle: str, recent_archetypes: list[str]
+    summary: str,
+    brand_ctx: str,
+    angle: str,
+    recent_archetypes: list[str],
+    photo_facts: Optional[dict] = None,
 ) -> str:
     parts = [f"ACHIEVEMENT:\n{summary}", f"BRAND:\n{brand_ctx}"]
+    photo_line = _photo_context(photo_facts)
+    if photo_line:
+        parts.append(photo_line)
     if angle:
         parts.append(f"ANGLE: {angle}")
     if recent_archetypes:
@@ -291,6 +329,7 @@ def ai_design_spec(
     token_roles: list[str],
     angle: str = "",
     recent_archetypes: Optional[list[str]] = None,
+    photo_facts: Optional[dict] = None,
 ):
     """Ask the AI for a v2 ``DesignSpec`` — which archetype + emphasis + hook best
     fit THIS achievement (Tier B §5.4).
@@ -317,6 +356,7 @@ def ai_design_spec(
         _brand_context(brand_kit),
         angle,
         recent_archetypes or [],
+        photo_facts,
     )
     try:
         out = ask(sys, user, max_tokens=500)
@@ -359,6 +399,7 @@ def ai_design_specs(
     angle: str = "",
     recent_archetypes: Optional[list[str]] = None,
     count: int = 5,
+    photo_facts: Optional[dict] = None,
 ):
     """One call → ``count`` mutually-distinct validated DesignSpecs (Tier B §5.5).
 
@@ -400,6 +441,7 @@ def ai_design_specs(
         _brand_context(brand_kit),
         angle,
         recent_archetypes or [],
+        photo_facts,
     )
     try:
         out = ask(sys, user, max_tokens=350 * count)

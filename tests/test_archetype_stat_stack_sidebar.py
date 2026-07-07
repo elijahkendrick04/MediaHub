@@ -38,6 +38,8 @@ _ALLOWED = {
     "WIDTH",
     "HEIGHT",
     "BASE_CSS",
+    # M11 — secondary-stat chip row (collapses to "" when undirected).
+    "STAT_CHIPS",
 }
 
 

@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>{{ATHLETE_FULL_NAME}} — {{ACHIEVEMENT_LABEL}}</title>
+<style>{{BASE_CSS}}
+
+/* ===================================================================
+   band_break  (v2 archetype, M12 — layered depth)
+
+   A broadcast band, broken by the athlete: a solid brand band carries
+   the first name, an oversized surname, the event and the result chip
+   across the frame — and the athlete CUTOUT's head and shoulders
+   visibly OVERLAP the band's top edge while the torso and legs continue
+   BELOW it. Pure z-index layering over one shared cutout (one-copy data
+   URI via the --mh-athlete-img custom property): the full-figure plane
+   sits UNDER the band; a second, pixel-aligned copy soft-masked to the
+   head/shoulder region paints OVER it (a short fade, so the overlap
+   dissolves into the band instead of cutting). The band's top edge
+   (--mh-band-top) and the overlap fade stops (--mh-break-solid /
+   --mh-break-fade, stage-relative) are placed from the cutout's alpha
+   bounding box at fill time so the break always lands at the shoulders,
+   never through a face.
+
+   Structural signature: a straight horizontal band visibly CROSSED by
+   the subject — distinct from full_bleed_photo_lower_third (band over an
+   uninterrupted photo stage, pinned to the bottom) and from
+   poster_name_behind (type plane behind the athlete).
+
+   No-photo grace: with no cutout the band + surname watermark read as a
+   clean broadcast strip. Matte-gate grace (.mh-photo-flat): a rejected
+   matte renders the ORIGINAL photograph as the classic full-bleed stage
+   under the band — honest, never a shredded silhouette.
+   =================================================================== */
+
+.bb {
+  position: relative;
+  width: {{WIDTH}}px;
+  height: {{HEIGHT}}px;
+  overflow: hidden;
+  isolation: isolate;
+  background: radial-gradient(120% 80% at 50% 6%, var(--mh-surface) 0%, var(--mh-primary) 78%);
+  color: var(--mh-on-primary);
+  font-family: 'Inter', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  /* the ONE real cutout, carried once and painted by both planes */
+  {{ATHLETE_IMG_VAR}}
+}
+.bb *, .bb *::before, .bb *::after { box-sizing: border-box; }
+
+/* faint surname watermark on the ground, behind everything */
+.bb__watermark {
+  position: absolute; left: 0; right: 0; top: 9%;
+  z-index: 0; text-align: center;
+  font-family: 'Anton','Bebas Neue',Impact,sans-serif; font-weight: 400;
+  font-size: calc(var(--mh-fit-mega-name-px, 240px) * 0.62);
+  line-height: 0.84; letter-spacing: 0.02em; text-transform: uppercase;
+  color: var(--mh-on-primary); opacity: 0.10; white-space: nowrap;
+}
+
+/* the cutout stage: both copies live here, bottom-anchored, contain-fit */
+.bb__stage { position: absolute; left: 0; right: 0; bottom: 0; top: 14%; }
+.bb__body, .bb__head {
+  position: absolute; inset: 0;
+  background-image: var(--mh-athlete-img);
+  background-repeat: no-repeat;
+  background-position: bottom center;
+  background-size: contain;
+}
+/* full-figure plane — under the band (torso + legs continue below it) */
+.bb__body { z-index: 1; filter: var(--mh-cutout-depth, drop-shadow(0 14px 34px rgba(0,0,0,0.45))); }
+/* head/shoulders plane — soft-masked copy that paints OVER the band's top
+   edge and dissolves just below it (stage-relative fade stops) */
+.bb__head {
+  z-index: 3;
+  -webkit-mask-image: linear-gradient(180deg, black 0%, black var(--mh-break-solid, 58%), transparent var(--mh-break-fade, 66%));
+  mask-image: linear-gradient(180deg, black 0%, black var(--mh-break-solid, 58%), transparent var(--mh-break-fade, 66%));
+}
+
+/* the band — a straight strip pinned by --mh-band-top, content-height */
+.bb__band {
+  position: absolute; left: 0; right: 0; z-index: 2;
+  top: var(--mh-band-top, 62%);
+  background: var(--mh-primary);
+  border-top: 6px solid var(--mh-accent);
+  border-bottom: 2px solid var(--mh-outline);
+  padding: 34px 60px 38px;
+  display: flex; flex-direction: column;
+  box-shadow: 0 18px 44px rgba(0,0,0,0.35);
+}
+.bb__first {
+  font-family: 'Space Grotesk','Inter',sans-serif;
+  font-weight: 700; font-size: 28px; letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--mh-accent);
+}
+.bb__surname {
+  font-family: 'Anton','Bebas Neue',Impact,sans-serif;
+  font-weight: 400; font-size: var(--mh-fit-surname-px, 110px);
+  line-height: 0.86; letter-spacing: -0.01em; text-transform: uppercase;
+  color: var(--mh-on-primary); white-space: nowrap;
+}
+.bb__row {
+  margin-top: 18px;
+  display: flex; align-items: flex-end; justify-content: space-between; gap: 32px;
+}
+.bb__meta { min-width: 0; }
+.bb__event {
+  font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 600;
+  font-size: 27px; letter-spacing: 0.05em; text-transform: uppercase;
+  color: var(--mh-on-primary); overflow-wrap: anywhere;
+}
+.bb__stat { margin-top: 8px; font-family: 'Inter',sans-serif; font-weight: 600; font-size: 22px; color: var(--mh-accent); }
+.bb__result {
+  flex: 0 0 auto;
+  display: inline-block; padding: 15px 26px;
+  background: var(--mh-accent); color: var(--mh-primary);
+  font-family: 'JetBrains Mono','Space Grotesk',monospace; font-feature-settings: "tnum";
+  font-weight: 700; font-size: var(--mh-fit-result-px, 76px);
+  font-variation-settings: var(--mh-axes-result, normal); line-height: 0.9;
+}
+
+/* slim footer over the ground — the figure's legs pass centre, so the
+   lockup keeps to the left edge and the meet line to the right */
+.bb__foot {
+  position: absolute; left: 60px; right: 60px; bottom: 44px; z-index: 4;
+  display: flex; align-items: flex-end; justify-content: space-between; gap: 24px;
+}
+.bb__lockup { display: flex; align-items: center; gap: 12px; }
+.bb__logo { height: 46px; width: auto; }
+.bb__logo img, .bb__logo svg { height: 100%; width: auto; object-fit: contain; display: block; }
+.bb__club { font-family: 'Inter',sans-serif; font-weight: 800; font-size: 19px; text-transform: uppercase; color: var(--mh-on-primary); text-shadow: 0 2px 10px rgba(0,0,0,0.5); }
+.bb__meet { font-family: 'Inter',sans-serif; font-weight: 500; font-size: 19px; color: var(--mh-on-primary); opacity: 0.8; text-align: right; overflow-wrap: anywhere; text-shadow: 0 2px 10px rgba(0,0,0,0.5); }
+.bb__sponsor { flex: 0 0 auto; }
+
+/* kicker — top-left over the ground */
+.bb__kicker {
+  position: absolute; top: 60px; left: 60px; z-index: 4;
+  display: inline-flex; align-items: center;
+  padding: 14px 22px;
+  background: var(--mh-accent); color: var(--mh-primary);
+  font-family: 'Space Grotesk','Inter',sans-serif;
+  font-weight: 800; font-size: 25px; letter-spacing: 0.16em; text-transform: uppercase;
+}
+.bb__kicker:empty { display: none; }
+
+/* matte-gate fallback: the original photograph as an uninterrupted
+   full-bleed stage under the band (no head plane, no break). */
+.bb.mh-photo-flat .bb__stage { top: 0; }
+.bb.mh-photo-flat .bb__body {
+  background-size: cover;
+  background-position: var(--mh-photo-pos, center 26%);
+  filter: none;
+}
+.bb.mh-photo-flat .bb__head { display: none; }
+.bb.mh-photo-flat .bb__watermark { display: none; }
+.bb.mh-photo-flat .bb__grad {
+  position: absolute; inset: 0; z-index: 1; pointer-events: none;
+  background: linear-gradient(180deg, rgba(0,0,0,0) 44%, rgba(0,0,0,0.14) 62%, rgba(0,0,0,0.42) 100%);
+}
+.bb__grad { display: none; }
+.bb.mh-photo-flat .bb__grad { display: block; }
+</style>
+</head>
+<body>
+<div class="bb{{PHOTO_FLAT_CLASS}}">
+
+  <div class="bb__watermark">{{ATHLETE_SURNAME_DISPLAY}}</div>
+
+  <div class="bb__stage">
+    {{PHOTO_ONLY_OPEN}}<div class="bb__body"></div>{{PHOTO_ONLY_CLOSE}}
+    <div class="bb__grad"></div>
+  </div>
+
+  <div class="bb__kicker">{{ACHIEVEMENT_LABEL}}</div>
+
+  <div class="bb__band">
+    <div class="bb__first">{{ATHLETE_FIRST_NAME}}</div>
+    <div class="bb__surname">{{ATHLETE_SURNAME_DISPLAY}}</div>
+    <div class="bb__row">
+      <div class="bb__meta">
+        <div class="bb__event">{{EVENT_NAME}}</div>
+        <div class="bb__stat">{{HERO_STAT}}</div>
+      </div>
+      <span class="bb__result">{{RESULT_VALUE}}</span>
+    </div>
+  </div>
+
+  <div class="bb__stage bb__stage--front">
+    {{PHOTO_ONLY_OPEN}}<div class="bb__head"></div>{{PHOTO_ONLY_CLOSE}}
+  </div>
+
+  <div class="bb__foot">
+    <div class="bb__lockup">
+      <div class="bb__logo">{{LOGO_BLOCK}}</div>
+      <div class="bb__club">{{CLUB_FULL}}</div>
+    </div>
+    <div class="bb__meet">{{MEET_NAME}}</div>
+    <div class="bb__sponsor">{{SPONSOR_BLOCK}}</div>
+  </div>
+
+  {{ACCENT_DECORATION}}
+
+</div>
+</body>
+</html>
