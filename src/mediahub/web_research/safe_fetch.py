@@ -134,28 +134,28 @@ def _decode_body(body: bytes, content_type: str) -> str:
     return body.decode("utf-8", errors="replace")
 
 
-def _pinned_get(url: str, *, timeout: float, max_bytes: int) -> Optional[tuple[int, dict, bytes]]:
-    """GET ``url`` connecting directly to a pre-validated IP (DNS pinning).
+def _pinned_open(url: str, *, timeout: float):
+    """Open a pinned GET for ``url`` without reading the body.
 
-    The TCP connection goes to the IP that passed the SSRF check; the original
-    hostname rides along as the ``Host`` header and TLS SNI/verification name,
-    so virtual hosts and certificates still work. Redirects are NOT followed
-    (the caller re-validates each hop). The body is streamed and capped at
-    ``max_bytes``. Returns ``(status, headers, body)`` or ``None``.
+    Resolves + validates the host (``resolve_safe_ip``), connects to the
+    validated IP (Host header + TLS SNI carry the original hostname), and
+    returns ``(response, pool)`` with the body unread
+    (``preload_content=False``). Redirects are NOT followed — the caller
+    re-validates each hop. Raises ``ValueError("unsafe_url")`` when the
+    scheme is not http(s) or the host is unresolvable / resolves to an
+    internal IP; transport errors propagate. The caller owns closing both
+    the response and the pool.
     """
-    try:
-        import urllib3  # noqa: PLC0415
-    except Exception:  # pragma: no cover - urllib3 ships with requests
-        return None
+    import urllib3  # noqa: PLC0415
 
     parsed = urlparse(url)
     if parsed.scheme not in ("http", "https"):
-        return None
+        raise ValueError("unsafe_url")
     host = parsed.hostname or ""
     ip_text = resolve_safe_ip(host)
     if ip_text is None:
         log.warning("safe_fetch refused a URL (SSRF guard): host=%s", host)
-        return None
+        raise ValueError("unsafe_url")
     default_port = 443 if parsed.scheme == "https" else 80
     port = parsed.port or default_port
     path = parsed.path or "/"
@@ -170,27 +170,24 @@ def _pinned_get(url: str, *, timeout: float, max_bytes: int) -> Optional[tuple[i
         "Accept": "text/html,application/xhtml+xml,text/plain;q=0.9",
         "Accept-Language": "en-GB,en;q=0.9",
     }
-    pool = None
+    pool_timeout = urllib3.Timeout(connect=timeout, read=timeout)
+    if parsed.scheme == "https":
+        pool = urllib3.HTTPSConnectionPool(
+            ip_text,
+            port=port,
+            timeout=pool_timeout,
+            server_hostname=host,  # SNI + certificate name for the real host
+            assert_hostname=host,
+            retries=False,
+        )
+    else:
+        # Cleartext pool is reached ONLY when the caller's validated URL is
+        # http:// (the https branch above uses HTTPSConnectionPool with SNI +
+        # cert checks). We never downgrade an https target — the scheme is
+        # preserved from the SSRF-validated URL; we only pin the resolved IP.
+        # nosemgrep: python.lang.security.audit.network.http-not-https-connection.http-not-https-connection
+        pool = urllib3.HTTPConnectionPool(ip_text, port=port, timeout=pool_timeout, retries=False)
     try:
-        pool_timeout = urllib3.Timeout(connect=timeout, read=timeout)
-        if parsed.scheme == "https":
-            pool = urllib3.HTTPSConnectionPool(
-                ip_text,
-                port=port,
-                timeout=pool_timeout,
-                server_hostname=host,  # SNI + certificate name for the real host
-                assert_hostname=host,
-                retries=False,
-            )
-        else:
-            # Cleartext pool is reached ONLY when the caller's validated URL is
-            # http:// (the https branch above uses HTTPSConnectionPool with SNI +
-            # cert checks). We never downgrade an https target — the scheme is
-            # preserved from the SSRF-validated URL; we only pin the resolved IP.
-            # nosemgrep: python.lang.security.audit.network.http-not-https-connection.http-not-https-connection
-            pool = urllib3.HTTPConnectionPool(
-                ip_text, port=port, timeout=pool_timeout, retries=False
-            )
         r = pool.urlopen(
             "GET",
             path,
@@ -199,6 +196,62 @@ def _pinned_get(url: str, *, timeout: float, max_bytes: int) -> Optional[tuple[i
             retries=False,
             preload_content=False,
         )
+    except Exception:
+        try:
+            pool.close()
+        except Exception:
+            pass
+        raise
+    return r, pool
+
+
+def pinned_stream_get(url: str, *, timeout: float, max_hops: int = DEFAULT_MAX_HOPS):
+    """Streaming GET with DNS pinning on every redirect hop.
+
+    Each hop's host is resolved + validated and the connection is made to the
+    validated IP (defeating DNS-rebinding TOCTOU), redirects are followed
+    manually with re-validation, and the final response is returned with its
+    body UNREAD so callers can check status/headers before a bounded read.
+    Returns ``(response, pool)`` — a urllib3 response
+    (``.status`` / ``.headers`` / ``.read(amt, decode_content=...)``) and the
+    pool that owns its connection; the caller closes both. Raises
+    ``ValueError("unsafe_url")`` for a refused hop or a redirect with no
+    Location, ``ValueError("too_many_redirects")`` past ``max_hops``;
+    transport errors propagate.
+    """
+    current = (url or "").strip()
+    for _ in range(max(1, max_hops) + 1):
+        r, pool = _pinned_open(current, timeout=timeout)
+        if int(r.status) in (301, 302, 303, 307, 308):
+            loc = r.headers.get("Location") or r.headers.get("location")
+            try:
+                r.close()
+            except Exception:
+                pass
+            try:
+                pool.close()
+            except Exception:
+                pass
+            if not loc:
+                raise ValueError("unsafe_url")
+            current = urljoin(current, loc)  # resolve relative redirects
+            continue
+        return r, pool
+    raise ValueError("too_many_redirects")
+
+
+def _pinned_get(url: str, *, timeout: float, max_bytes: int) -> Optional[tuple[int, dict, bytes]]:
+    """GET ``url`` connecting directly to a pre-validated IP (DNS pinning).
+
+    The TCP connection goes to the IP that passed the SSRF check; the original
+    hostname rides along as the ``Host`` header and TLS SNI/verification name,
+    so virtual hosts and certificates still work. Redirects are NOT followed
+    (the caller re-validates each hop). The body is streamed and capped at
+    ``max_bytes``. Returns ``(status, headers, body)`` or ``None``.
+    """
+    pool = None
+    try:
+        r, pool = _pinned_open(url, timeout=timeout)
         try:
             deadline = time.monotonic() + max(timeout * 3.0, timeout + 5.0)
             chunks: list[bytes] = []
@@ -260,4 +313,4 @@ def safe_fetch(
     return None  # too many redirects
 
 
-__all__ = ["safe_fetch", "is_url_safe", "resolve_safe_ip"]
+__all__ = ["safe_fetch", "is_url_safe", "resolve_safe_ip", "pinned_stream_get"]

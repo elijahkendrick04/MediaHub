@@ -1783,8 +1783,9 @@ def _get_wf_store() -> Optional["WorkflowStore"]:
 # Memoised backdrop-logo aspect fits, keyed on (profile_id, logo_id, mtime_ns).
 # The backdrop pick opens every uploaded logo with PIL on each signed-in page
 # render; this caches each logo's aspect so repeat renders do zero PIL opens.
-# Keying on the file's mtime self-invalidates when a logo is replaced in place.
-_bg_fit_cache: dict[tuple[str, str, int], float] = {}
+# Keying on the file's mtime self-invalidates when a logo is replaced in place;
+# the LRU bound stops replaced-file keys accumulating on long-lived workers.
+_bg_fit_cache: BoundedCache = BoundedCache(max_size=512)
 
 
 _approval_ledger = None  # 1.12 group-approver votes (lazy, like _wf_store)
@@ -2125,36 +2126,55 @@ def _render_slot(kind: str, label: str = "", *, timeout: float):
             log.info("render gate: %s finished (%.0fms) label=%s", kind, dur_ms, label)
 
 
+class _PinnedStreamResponse:
+    """requests.Response-shaped adapter over a pinned urllib3 response.
+
+    Exposes exactly what the media-import callers use — ``raise_for_status``,
+    ``headers``, ``raw.read(amt, decode_content=...)`` and ``close`` — while
+    the underlying connection is pinned to the SSRF-validated IP. Holding the
+    pool ties its lifetime to the response so the connection isn't reclaimed
+    mid-stream.
+    """
+
+    __slots__ = ("raw", "headers", "status_code", "_pool")
+
+    def __init__(self, r, pool) -> None:
+        self.raw = r  # urllib3 response: .read(amt, decode_content=...)
+        self.headers = r.headers
+        self.status_code = int(r.status)
+        self._pool = pool
+
+    def raise_for_status(self) -> None:
+        if self.status_code >= 400:
+            # Deliberately NOT ValueError: callers map ValueError to a 400
+            # "bad url" and everything else to a 502 "download_failed",
+            # matching the previous requests.HTTPError behaviour.
+            raise RuntimeError(f"HTTP {self.status_code}")
+
+    def close(self) -> None:
+        for closer in (self.raw.close, self._pool.close):
+            try:
+                closer()
+            except Exception:
+                pass
+
+
 def _ssrf_safe_stream_get(url: str, *, timeout: int, max_hops: int = 5):
     """Streaming GET that refuses SSRF on a user-supplied URL.
 
-    The initial URL and every redirect hop must pass
-    ``web_research.safe_fetch.is_url_safe`` (http(s) hosts that resolve to
-    public IPs only), so an authenticated tenant can't aim a media import at an
-    internal / cloud-metadata address. Follows redirects manually
-    (``allow_redirects=False``) so each ``Location`` is re-validated before it
-    is fetched. Returns the final ``requests.Response`` (``stream=True``);
-    raises ``ValueError`` when any hop is unsafe or the chain is too long.
+    The initial URL and every redirect hop are resolved + validated and the
+    connection is made to the validated IP itself
+    (``web_research.safe_fetch.pinned_stream_get``), so an authenticated
+    tenant can't aim a media import at an internal / cloud-metadata address —
+    including via DNS rebinding between the check and the fetch. Returns a
+    response with the body unread so callers can gate on status/content-type
+    before a bounded read; raises ``ValueError`` when any hop is unsafe or the
+    chain is too long.
     """
-    import requests as _requests  # noqa: PLC0415
-    from urllib.parse import urljoin as _urljoin  # noqa: PLC0415
+    from mediahub.web_research.safe_fetch import pinned_stream_get  # noqa: PLC0415
 
-    from mediahub.web_research.safe_fetch import is_url_safe as _is_url_safe  # noqa: PLC0415
-
-    current = url
-    for _ in range(max_hops + 1):
-        if not _is_url_safe(current):
-            raise ValueError("unsafe_url")
-        resp = _requests.get(current, timeout=timeout, stream=True, allow_redirects=False)
-        if resp.status_code in (301, 302, 303, 307, 308):
-            loc = resp.headers.get("Location") or ""
-            resp.close()
-            if not loc:
-                raise ValueError("unsafe_url")
-            current = _urljoin(current, loc)  # resolve relative redirects
-            continue
-        return resp
-    raise ValueError("too_many_redirects")
+    r, pool = pinned_stream_get(url, timeout=float(timeout), max_hops=max_hops)
+    return _PinnedStreamResponse(r, pool)
 
 
 def _render_busy_response(kind: str):
@@ -26319,7 +26339,7 @@ self.addEventListener('fetch', function(e){
             '<!doctype html><html lang="en"><head><meta charset="utf-8">'
             '<meta name="viewport" content="width=device-width, initial-scale=1">'
             "<title>Motion vocabulary — MediaHub</title>"
-            f'<link rel="stylesheet" href="{url_for("static", filename="theme/fonts.css")}">'
+            f'<link rel="stylesheet" href="{url_for("static", filename="theme/fonts.css", v=_static_ver("theme/fonts.css"))}">'
             f'<link rel="stylesheet" href="{css_url}">'
             "<style>"
             ":root{--bg:#0A0B11;--panel:#14161F;--ink:#EaEcF2;--muted:#8A90A2;--accent:#C9A227;}"
