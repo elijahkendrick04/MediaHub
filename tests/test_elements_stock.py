@@ -567,27 +567,25 @@ def test_stock_thumb_route_404_on_miss(app_env, monkeypatch):
 def test_import_stock_creates_asset_and_rights(app_env, monkeypatch):
     app, _wm, tmp_path = app_env
 
+    # Fake the pinned transport seam (urllib3-shaped response + pool) that
+    # _ssrf_safe_stream_get now fetches through.
     class _Resp:
-        status_code = 200
+        status = 200
         headers = {"Content-Type": "image/jpeg"}
-
-        def raise_for_status(self):
-            pass
-
-        def close(self):
-            pass
-
-        @property
-        def raw(self):
-            return self
 
         def read(self, n, decode_content=True):
             return b"\xff\xd8\xff" + b"0" * 100  # tiny fake jpeg
 
+        def close(self):
+            pass
+
+    class _Pool:
+        def close(self):
+            pass
+
     import mediahub.web_research.safe_fetch as _sf
 
-    monkeypatch.setattr(_sf, "is_url_safe", lambda u: True)
-    monkeypatch.setattr("requests.get", lambda *a, **k: _Resp())
+    monkeypatch.setattr(_sf, "pinned_stream_get", lambda url, **kw: (_Resp(), _Pool()))
 
     with app.test_client() as c:
         _signin(c)

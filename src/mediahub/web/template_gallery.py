@@ -70,6 +70,7 @@ CATEGORY_BY_ARCHETYPE: dict[str, str] = {
     "spotlight_disc": "photo",
     "full_height_portrait_split": "photo",  # G1.1
     "contact_sheet": "photo",  # G1.1
+    "vertical_split": "photo",  # R1.2 — identity over a photo field, result below
     # Data-led — the figures are the structural hero; no photo needed.
     "big_number_dominant": "data",
     "editorial_numbers_grid": "data",
@@ -81,6 +82,7 @@ CATEGORY_BY_ARCHETYPE: dict[str, str] = {
     "timeline_progression": "data",  # G1.1
     "radial_competition_ring": "data",  # G1.1
     "vertical_stat_tower": "data",  # G1.1
+    "radial_rings": "data",  # R1.2 — result numeral at the bullseye of a ripple
     # Editorial — type / quote / narrative leads; no photo needed.
     "magazine_cover": "editorial",
     "quote_led_recap": "editorial",
@@ -91,6 +93,7 @@ CATEGORY_BY_ARCHETYPE: dict[str, str] = {
     "three_card_editorial_grid": "editorial",  # G1.1
     "staggered_diagonal_offset": "editorial",  # G1.1
     "ribbon_banner": "editorial",  # G1.1
+    "marquee_crawl": "editorial",  # R1.2 — a repeating-fact ribbon wall + plate
 }
 
 # Default for any future archetype with no explicit mapping yet (a test guards
@@ -131,6 +134,10 @@ _DISPLAY_ORDER: tuple[str, ...] = (
     "contact_sheet",
     "vertical_stat_tower",
     "ribbon_banner",
+    # R1.2 — three families completing the motion scene trio.
+    "vertical_split",
+    "radial_rings",
+    "marquee_crawl",
 )
 
 # Friendly card titles (the snake_case slug is shown separately for
@@ -165,6 +172,9 @@ _TITLE: dict[str, str] = {
     "full_height_portrait_split": "Portrait Split",
     "ribbon_banner": "Ribbon Banner",
     "contact_sheet": "Contact Sheet",
+    "vertical_split": "Vertical Split",
+    "radial_rings": "Radial Rings",
+    "marquee_crawl": "Marquee Crawl",
 }
 
 # Short fallback "what it is" blurb, used only if an archetype's notes file is
@@ -200,6 +210,9 @@ _FALLBACK_SUMMARY: dict[str, str] = {
     "full_height_portrait_split": "A full-height portrait beside a full-height info column.",
     "ribbon_banner": "An award ribbon with chevron ends and tails carries the achievement.",
     "contact_sheet": "A film contact sheet of one shot; one keeper frame carries the result.",
+    "vertical_split": "Two solid colour fields split by an accent seam: identity above, result below.",
+    "radial_rings": "Concentric accent rings ripple out from a bullseye that holds the result.",
+    "marquee_crawl": "A wall of repeating-fact ribbons behind one pinned plate carrying name and result.",
 }
 
 _CARD_SUMMARY_MAX = 180
@@ -625,6 +638,54 @@ _SVG: dict[str, str] = {
         '<rect class="ik" x="16" y="120" width="18" height="4" rx="1"/>'
         '<rect class="ik2" x="16" y="127" width="42" height="9" rx="1"/>'
         '<rect class="ac" x="90" y="120" width="14" height="6" rx="1"/>'
+    ),
+    # ----- R1.2 — three new families completing the motion scene trio -----
+    # Photo-led — two solid stacked fields split by a full-width accent seam:
+    # identity (over photo) above, the result field below.
+    "vertical_split": (
+        '<rect class="gd" x="0" y="0" width="120" height="150" rx="3"/>'
+        '<rect class="ph" x="0" y="0" width="120" height="80"/>'
+        '<rect class="ac" x="10" y="12" width="22" height="7" rx="1"/>'
+        '<rect class="ik2" x="10" y="50" width="30" height="7" rx="1"/>'
+        '<rect class="ik2" x="10" y="60" width="84" height="14" rx="1"/>'
+        '<rect class="ac" x="0" y="80" width="120" height="6"/>'
+        '<rect class="sf" x="0" y="86" width="120" height="64"/>'
+        '<rect class="ik" x="10" y="96" width="40" height="5" rx="1"/>'
+        '<rect class="ik2" x="10" y="106" width="70" height="16" rx="1"/>'
+        '<rect class="ac" x="10" y="127" width="30" height="5" rx="1"/>'
+        '<rect class="ik" x="10" y="138" width="14" height="9" rx="1"/>'
+        '<rect class="ik" x="30" y="140" width="34" height="5" rx="1"/>'
+    ),
+    # Data-led — concentric emanating rings (a ripple) with the result numeral
+    # at the bullseye and the name below. More rings than the single-core dial.
+    "radial_rings": (
+        '<rect class="gd" x="0" y="0" width="120" height="150" rx="3"/>'
+        '<rect class="ac" x="46" y="12" width="28" height="5" rx="1"/>'
+        '<circle class="acln" cx="60" cy="60" r="44"/>'
+        '<circle class="acln" cx="60" cy="60" r="35"/>'
+        '<circle class="acln" cx="60" cy="60" r="26"/>'
+        '<circle class="acln" cx="60" cy="60" r="17"/>'
+        '<rect class="ik2" x="47" y="54" width="26" height="12" rx="1"/>'
+        '<rect class="ik2" x="34" y="112" width="52" height="9" rx="1"/>'
+        '<rect class="ac" x="48" y="126" width="24" height="4" rx="1"/>'
+        '<rect class="ik" x="12" y="140" width="30" height="4" rx="1"/>'
+    ),
+    # Editorial — a wall of full-width repeating-fact ribbons top and bottom,
+    # with one solid centre plate carrying the name + result.
+    "marquee_crawl": (
+        '<rect class="gd" x="0" y="0" width="120" height="150" rx="3"/>'
+        '<rect class="ik" x="-4" y="14" width="128" height="6"/>'
+        '<rect class="ac" x="-4" y="28" width="128" height="6"/>'
+        '<rect class="ik" x="-4" y="42" width="128" height="6"/>'
+        '<rect class="ik" x="-4" y="108" width="128" height="6"/>'
+        '<rect class="ac" x="-4" y="122" width="128" height="6"/>'
+        '<rect class="ik" x="-4" y="136" width="128" height="6"/>'
+        '<rect class="sf" x="0" y="56" width="120" height="42"/>'
+        '<rect class="ac" x="0" y="56" width="120" height="3"/>'
+        '<rect class="ac" x="0" y="95" width="120" height="3"/>'
+        '<rect class="ik" x="10" y="63" width="20" height="4" rx="1"/>'
+        '<rect class="ik2" x="10" y="70" width="62" height="10" rx="1"/>'
+        '<rect class="ac" x="10" y="84" width="40" height="8" rx="1"/>'
     ),
 }
 
