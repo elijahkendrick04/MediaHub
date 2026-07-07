@@ -243,6 +243,9 @@ def evaluate(
             min_score=0.35,
             k=5,
             exclude_families=exclude_asset_families,
+            # LEFTOVER-2: the card's angle steers the deterministic scene-tag
+            # boost (podium shots on medal cards, celebrations on PB cards).
+            card_context=angle,
         )
         if scored:
             matched[req.role] = scored
@@ -291,6 +294,7 @@ def evaluate(
                     athlete_name=athlete_name,
                     athlete_id=athlete_id,
                     exclude_asset_families=exclude_asset_families,
+                    card_context=angle,
                 )
             if candidates:
                 _n = _meet_total or len(candidates)
@@ -339,6 +343,7 @@ def _meet_scoped_candidates(
     athlete_name: Optional[str],
     athlete_id: Optional[str],
     exclude_asset_families: Optional[list[str]],
+    card_context: Optional[str] = None,
     k: int = 5,
 ) -> tuple[list[dict], int]:
     """Rank this meet's uploaded photos as pick-from candidates.
@@ -371,6 +376,7 @@ def _meet_scoped_candidates(
         min_score=0.0,
         k=k,
         exclude_families=exclude_asset_families,
+        card_context=card_context,
     )
     # min_score=0.0 admits hard-zero (unusable) scores; scoped is already
     # usable-only, but keep the guard explicit for safety.

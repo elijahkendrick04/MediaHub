@@ -63,8 +63,14 @@ const Layer: SceneComponent = ({ ctx }) => {
   // STILLS-2 / M8 parity: a "photo"-mode archetype shows the ORIGINAL
   // photograph on the still — never a composited cutout plane (belt-and-braces
   // beside motion.py sending an empty cutoutSrc). The M12 layered archetypes
-  // own their cutout choreography in their scenes.
-  if (card.photoMode === "photo" || SCENE_OWNED_ARCHETYPES.has(card.archetype || "")) {
+  // own their cutout choreography in their scenes. M23: a footage beat plays
+  // real video — a frozen cutout plane over moving footage would read as a
+  // sticker, so footage implies no cutout, ever.
+  if (
+    card.photoMode === "photo" ||
+    card.videoSrc ||
+    SCENE_OWNED_ARCHETYPES.has(card.archetype || "")
+  ) {
     return null;
   }
 

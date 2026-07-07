@@ -37,6 +37,11 @@ const defaultCard = {
   photoTreatment: "",
   photoSrc: "",
   photoPos: "",
+  // M23 footage beat (blank = photo path; production attaches a
+  // footage_cache trim via visual/footage.py).
+  videoSrc: "",
+  videoStartSec: 0,
+  videoDurationSec: 0,
   photoSrcs: [] as string[],
   cutoutSrc: "",
   photoMode: "",

@@ -4565,10 +4565,10 @@ function _attrEsc(jsExpr) {
 // Upload a photo for ONE card: file dialog → POST to the card's /photo
 // endpoint (which links it to the athlete in the media library) → attach
 // the new asset to this graphic by re-rendering with it selected.
-function mhCardPhotoUpload(btn, photoUrl, createUrl, cardId, fmt) {
+function mhCardPhotoUpload(btn, photoUrl, createUrl, cardId, fmt, accept) {
   var inp = document.createElement('input');
   inp.type = 'file';
-  inp.accept = 'image/*';
+  inp.accept = accept || 'image/*';
   inp.style.display = 'none';
   inp.onchange = function() {
     if (!inp.files || !inp.files.length) return;
@@ -4582,7 +4582,17 @@ function mhCardPhotoUpload(btn, photoUrl, createUrl, cardId, fmt) {
       .then(function(j) {
         btn.disabled = false; btn.textContent = orig;
         if (!j.ok || !j.asset) {
-          if (window.MH && MH.toast) MH.toast('Photo upload failed: ' + (j.error || 'unknown'), 'error', 4000);
+          if (window.MH && MH.toast) MH.toast('Upload failed: ' + (j.message || j.error || 'unknown'), 'error', 4000);
+          return;
+        }
+        if (j.asset.kind === 'clip') {
+          // M24 — a race clip: linked to this card's athlete + meet, so the
+          // motion render can back the card with real footage. The auto-
+          // extracted best frame (M25, when available) becomes the still's
+          // photo in the same breath.
+          var hasFrame = j.asset.frame_asset && j.asset.frame_asset.id;
+          if (window.MH && MH.toast) MH.toast('Race clip saved &amp; linked to this card' + (hasFrame ? ' — using its best frame as the photo' : ''), 'success', 3200);
+          createGraphic(btn, createUrl, cardId, fmt, hasFrame ? j.asset.frame_asset.id : '', false);
           return;
         }
         if (window.MH && MH.toast) MH.toast('Photo saved to your library — rendering with it now', 'success', 2500);
@@ -4590,7 +4600,7 @@ function mhCardPhotoUpload(btn, photoUrl, createUrl, cardId, fmt) {
       })
       .catch(function(e) {
         btn.disabled = false; btn.textContent = orig;
-        if (window.MH && MH.toast) MH.toast('Photo upload failed: ' + e, 'error', 4000);
+        if (window.MH && MH.toast) MH.toast('Upload failed: ' + e, 'error', 4000);
       });
   };
   document.body.appendChild(inp);
@@ -4613,6 +4623,20 @@ function mhConfirmCandidate(btn, confirmUrl, createUrl, cardId, fmt, assetId) {
       }
       createGraphic(btn, createUrl, cardId, fmt, assetId, false);
     });
+}
+
+// M24 — detach a race clip from this card (the clip stays in the library;
+// only the card link is removed). Re-renders so the chip row refreshes.
+function mhClipUnlink(btn, unlinkUrl, assetId, createUrl, cardId, fmt) {
+  btn.disabled = true;
+  fetch(unlinkUrl, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({asset_id: assetId})})
+    .then(function(r) { return r.json(); })
+    .then(function(j) {
+      if (window.MH && MH.toast) MH.toast(j.ok ? 'Race clip detached from this card' : ('Could not detach the clip: ' + (j.error || 'unknown')), j.ok ? 'success' : 'error', 2500);
+      if (j.ok) { createGraphic(btn, createUrl, cardId, fmt, '', false); }
+      else { btn.disabled = false; }
+    })
+    .catch(function() { btn.disabled = false; });
 }
 
 // Venue backdrops: CC-licensed public photos of the meet's pool/venue,
@@ -4765,6 +4789,26 @@ function _renderVisualPanel(panel, data, cardId, createUrl) {
   var firstName = athlete ? athlete.split(' ')[0] : '';
   var upOc = 'mhCardPhotoUpload(this, ' + JSON.stringify(photoUrl) + ', ' + JSON.stringify(createUrl) + ', ' + JSON.stringify(cardId) + ', ' + JSON.stringify(cur) + ')';
   var uploadBtn = '<button type="button" onclick=' + _attrEsc(upOc) + ' style="font-size:11px;padding:3px 9px;border-radius:6px;cursor:pointer;border:1px dashed var(--lane);background:transparent;color:var(--lane);font-family:inherit;margin:0 4px 4px 0">+ Add photo' + (firstName ? ' of ' + firstName : '') + '</button>';
+  // M24 — the card's race clips: the footage that can back this card's
+  // motion render (M23). Chip per linked clip (filename + duration +
+  // permission state) with a detach affordance, plus an add/replace upload.
+  var clips = data.race_clips || [];
+  var clipUnlinkUrl = createUrl.replace(/\/create-graphic$/, '/clip-unlink');
+  var clipChips = clips.map(function(c) {
+    var dur = c.duration_ms ? (' · ' + Math.round(c.duration_ms / 1000) + 's') : '';
+    var perm = c.usable ? '' : ' <span title="Blocked: ' + window.safeText((c.permission_status || '').replace(/_/g, ' ')) + '">&#9888;</span>';
+    var rmOc = 'mhClipUnlink(this, ' + JSON.stringify(clipUnlinkUrl) + ', ' + JSON.stringify(c.id) + ', ' + JSON.stringify(createUrl) + ', ' + JSON.stringify(cardId) + ', ' + JSON.stringify(cur) + ')';
+    return '<span style="display:inline-flex;align-items:center;gap:5px;font-size:11px;padding:3px 9px;border-radius:6px;border:1px solid ' + (c.usable ? 'var(--border)' : 'var(--bad)') + ';color:var(--ink-dim);margin:0 4px 4px 0">&#x1F3AC; ' +
+      window.safeText(c.filename) + dur + perm +
+      '<button type="button" title="Detach this clip from the card" onclick=' + _attrEsc(rmOc) + ' style="border:0;background:transparent;color:var(--ink-muted);cursor:pointer;padding:0;font-size:12px;line-height:1">&#10005;</button></span>';
+  }).join('');
+  var clipUpOc = 'mhCardPhotoUpload(this, ' + JSON.stringify(photoUrl) + ', ' + JSON.stringify(createUrl) + ', ' + JSON.stringify(cardId) + ', ' + JSON.stringify(cur) + ', "video/*")';
+  var clipBtn = '<button type="button" onclick=' + _attrEsc(clipUpOc) + ' style="font-size:11px;padding:3px 9px;border-radius:6px;cursor:pointer;border:1px dashed var(--border);background:transparent;color:var(--ink-dim);font-family:inherit;margin:0 4px 4px 0">' + (clips.length ? '&#x21BA; Replace race clip' : '+ Add race clip' + (firstName ? ' of ' + firstName : '')) + '</button>';
+  var clipRow =
+    '<div style="margin:2px 0 4px">' +
+      '<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:4px">Race clip &middot; backs the motion video</div>' +
+      clipChips + clipBtn +
+    '</div>';
   var venueOc = 'mhVenueSearchOpen(this, ' + JSON.stringify(createUrl) + ', ' + JSON.stringify(cardId) + ', ' + JSON.stringify(cur) + ')';
   var venueBtn = '<button type="button" onclick=' + _attrEsc(venueOc) + ' style="font-size:11px;padding:3px 9px;border-radius:6px;cursor:pointer;border:1px dashed var(--border);background:transparent;color:var(--ink-dim);font-family:inherit;margin:0 4px 4px 0">Venue backdrop&hellip;</button>';
   // Roadmap 1.2 — when a real library photo is on this graphic, deep-link it
@@ -4778,6 +4822,7 @@ function _renderVisualPanel(panel, data, cardId, createUrl) {
       pickNote +
       _pchip('Auto', (!chosen && !noP), autoOc) + _pchip('No photo', noP, noneOc) + thumbs + uploadBtn + studioBtn + venueBtn +
       '<div class="mh-venue-results" data-card="' + cardId.replace(/"/g, '&quot;') + '" style="display:none;margin-top:6px"></div>' +
+      clipRow +
     '</div>';
   panel.innerHTML =
     '<div style="display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap">' +
@@ -11770,7 +11815,7 @@ _VIDEO_STUDIO_HTML = """
     <div id="vs-drop" class="vstudio-drop" tabindex="0" role="button"
          aria-label="Upload footage">
       <strong>Drop a clip here</strong>
-      <span class="muted">or click to choose &middot; MP4, MOV, WebM &middot; under 50&nbsp;MB</span>
+      <span class="muted">or click to choose &middot; MP4, MOV, WebM &middot; under __VIDEO_MAX_MB__&nbsp;MB</span>
       <input id="vs-file" type="file" accept="video/*" hidden>
     </div>
     <div class="vstudio-rec">
@@ -11872,7 +11917,16 @@ _VIDEO_STUDIO_HTML = """
   .vstudio-tile{border:1px solid var(--border,#26262c);border-radius:8px;overflow:hidden;cursor:pointer;background:#000;position:relative}
   .vstudio-tile.sel{outline:2px solid var(--accent,#22d3ee);outline-offset:-2px}
   .vstudio-tile video{display:block;width:100%;height:90px;object-fit:cover;background:#000}
+  .vstudio-thumb{position:relative;display:block;height:90px;background:#000}
+  .vstudio-thumb img{display:block;width:100%;height:90px;object-fit:cover}
+  .vstudio-play{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#fff;font-size:20px;text-shadow:0 1px 6px rgba(0,0,0,.7);pointer-events:none}
   .vstudio-tile .cap{padding:5px 7px;font-size:11px;color:var(--ink-dim,#b8b8c0);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .vs-tile-meta{display:flex;flex-direction:column;gap:4px;padding:0 7px 7px;font-size:10px}
+  .vs-perm-badge{font-size:10px;padding:1px 6px;align-self:flex-start}
+  .vstudio-badge.blocked{color:var(--bad,crimson);border-color:color-mix(in oklab, var(--bad,crimson) 35%, transparent)}
+  .vs-perm{background:#0a0a0c;border:1px solid var(--border,#33333a);border-radius:5px;color:var(--ink,#f0f0f2);padding:2px 4px;font-size:10px;max-width:100%}
+  .vs-frame{font-size:10px;padding:2px 6px;align-self:flex-start}
+  .vs-frame-status{font-size:10px}
   .vstudio-controls{display:flex;flex-direction:column;gap:12px}
   .vstudio-controls label{display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--ink-dim,#b8b8c0)}
   .vstudio-controls input[type=text],.vstudio-controls select{background:#0a0a0c;border:1px solid var(--border,#33333a);border-radius:6px;color:var(--ink,#f0f0f2);padding:7px 9px;font-size:14px}
@@ -11922,6 +11976,8 @@ _VIDEO_STUDIO_HTML = """
   var CSRF = "__CSRF__";
   var FOOTAGE_URL = "__FOOTAGE_URL__";
   var FOOTAGE_LIST_URL = "__FOOTAGE_LIST_URL__";
+  var FOOTAGE_PERM_TMPL = "__FOOTAGE_PERM_TMPL__";
+  var FOOTAGE_FRAME_TMPL = "__FOOTAGE_FRAME_TMPL__";
   var CLIPMAKER_URL = "__CLIPMAKER_URL__";
   var PROJECTS_URL = "__PROJECTS_URL__";
   var RENDER_TMPL = "__PROJECT_RENDER_TMPL__";
@@ -11946,6 +12002,22 @@ _VIDEO_STUDIO_HTML = """
   function $(id){ return document.getElementById(id); }
   function esc(s){ var d=document.createElement('div'); d.textContent=(s==null?'':String(s)); return d.innerHTML; }
   function url(tmpl, id){ return tmpl.replace('__PID__', encodeURIComponent(id)); }
+  function aurl(tmpl, id){ return tmpl.replace('__AID__', encodeURIComponent(id)); }
+  // M26 — the media-library permission vocabulary, one-tap editable per tile.
+  var PERM_OPTIONS = [
+    ['needs_approval','Needs approval'],
+    ['approved_by_club','Approved by club'],
+    ['user_owned','User owned'],
+    ['approved_public','Approved (public)'],
+    ['approved_by_photographer','Approved by photographer'],
+    ['internal_only','Internal only'],
+    ['needs_parental_consent','Needs parental consent'],
+    ['do_not_use','Do not use']
+  ];
+  function permLabel(p){
+    for(var i=0;i<PERM_OPTIONS.length;i++){ if(PERM_OPTIONS[i][0]===p) return PERM_OPTIONS[i][1]; }
+    return p || 'unknown';
+  }
   function waveUrl(pid, idx){ return WAVEFORM_TMPL.replace('__PID__', encodeURIComponent(pid)).replace('__CIDX__', idx); }
   function fmtDur(ms){ if(!ms) return ''; var s=Math.round(ms/1000); return s+'s'; }
 
@@ -12006,28 +12078,74 @@ _VIDEO_STUDIO_HTML = """
       var wrap = $('vs-footage'); var items = (j && j.footage) || [];
       if(!items.length){ wrap.innerHTML = '<p class="muted">No footage yet. Upload or record a clip.</p>'; return; }
       wrap.innerHTML = items.map(function(a){
+        // M27 — poster thumbnails: an <img> + play glyph per tile (a real
+        // <video> element only appears once the clip is selected). Clips
+        // ingested before posters existed keep the <video> tile honestly.
+        var media = a.poster_url
+          ? '<span class="vstudio-thumb" data-file="'+esc(a.file_url)+'"><img src="'+esc(a.poster_url)+'" alt="" loading="lazy"><span class="vstudio-play" aria-hidden="true">&#9654;</span></span>'
+          : '<video src="'+esc(a.file_url)+'#t=0.1" preload="metadata" muted playsinline></video>';
+        // M26 — permission badge + one-tap editor on every tile.
+        var permOpts = PERM_OPTIONS.map(function(p){
+          return '<option value="'+p[0]+'"'+(p[0]===a.permission_status?' selected':'')+'>'+esc(p[1])+'</option>';
+        }).join('');
+        var badge = '<span class="vstudio-badge vs-perm-badge '+(a.usable?'approved':'blocked')+'" title="'+esc(permLabel(a.permission_status))+'">'
+          + (a.usable ? '&#10003; ' : '&#9888; ') + esc(permLabel(a.permission_status)) + '</span>';
         return '<figure class="vstudio-tile'+(a.id===selectedId?' sel':'')+'" data-id="'+esc(a.id)+'">'
-          + '<video src="'+esc(a.file_url)+'#t=0.1" preload="metadata" muted playsinline></video>'
+          + media
           + '<label class="vstudio-pick" title="Include in AI reel"><input type="checkbox" class="vs-reel-pick" data-id="'+esc(a.id)+'"'+(reelSet[a.id]?' checked':'')+'> reel</label>'
-          + '<figcaption class="cap">'+esc(a.filename)+(a.duration_ms?(' &middot; '+fmtDur(a.duration_ms)):'')+'</figcaption></figure>';
+          + '<figcaption class="cap">'+esc(a.filename)+(a.duration_ms?(' &middot; '+fmtDur(a.duration_ms)):'')+'</figcaption>'
+          + '<div class="vs-tile-meta">'+badge
+          + '<select class="vs-perm" data-id="'+esc(a.id)+'" aria-label="Clip permission">'+permOpts+'</select>'
+          + '<button type="button" class="btn ghost vs-frame" data-id="'+esc(a.id)+'" title="Save the clip\\u2019s best moment as a photo in your library">Best frame &rarr; photo</button>'
+          + '<span class="muted vs-frame-status" data-id="'+esc(a.id)+'"></span></div>'
+          + '</figure>';
       }).join('');
       Array.prototype.forEach.call(wrap.querySelectorAll('.vstudio-tile'), function(el){
-        el.addEventListener('click', function(ev){ if(ev.target.closest('.vstudio-pick')) return; selectFootage(el.getAttribute('data-id'), items); });
+        el.addEventListener('click', function(ev){ if(ev.target.closest('.vstudio-pick')||ev.target.closest('.vs-tile-meta')) return; selectFootage(el.getAttribute('data-id'), items); });
       });
       Array.prototype.forEach.call(wrap.querySelectorAll('.vs-reel-pick'), function(cb){
         cb.addEventListener('click', function(ev){ ev.stopPropagation(); });
         cb.addEventListener('change', function(){ toggleReel(cb.getAttribute('data-id'), cb.checked); });
+      });
+      Array.prototype.forEach.call(wrap.querySelectorAll('.vs-perm'), function(sel){
+        sel.addEventListener('click', function(ev){ ev.stopPropagation(); });
+        sel.addEventListener('change', function(){
+          jpost(aurl(FOOTAGE_PERM_TMPL, sel.getAttribute('data-id')), {permission_status: sel.value})
+            .then(function(j){ if(j.ok){ loadFootage(); } else { alert(j.message || j.error || 'Could not change the permission.'); } });
+        });
+      });
+      Array.prototype.forEach.call(wrap.querySelectorAll('.vs-frame'), function(b){
+        b.addEventListener('click', function(ev){
+          ev.stopPropagation();
+          var st = wrap.querySelector('.vs-frame-status[data-id="'+b.getAttribute('data-id')+'"]');
+          b.disabled = true; if(st){ st.textContent = 'Extracting…'; }
+          jpost(aurl(FOOTAGE_FRAME_TMPL, b.getAttribute('data-id')), {}).then(function(j){
+            b.disabled = false;
+            if(st){ st.textContent = j.ok ? 'Saved to your photo library.' : ('Failed: '+(j.message||j.error||'error')); }
+          });
+        });
       });
     });
   }
   function selectFootage(id, items){
     selectedId = id;
     Array.prototype.forEach.call(document.querySelectorAll('.vstudio-tile'), function(el){
-      el.classList.toggle('sel', el.getAttribute('data-id')===id);
+      var sel = el.getAttribute('data-id')===id;
+      el.classList.toggle('sel', sel);
+      // M27 — the real <video> element is created only on selection; the
+      // grid itself stays <img> posters.
+      var thumb = el.querySelector('.vstudio-thumb');
+      if(sel && thumb){
+        var v = document.createElement('video');
+        v.src = thumb.getAttribute('data-file')+'#t=0.1';
+        v.muted = true; v.playsInline = true; v.preload = 'metadata'; v.controls = true;
+        thumb.replaceWith(v);
+      }
     });
     var a = (items||[]).filter(function(x){return x.id===id;})[0];
     $('vs-selected').innerHTML = 'Selected: <strong>'+esc(a?a.filename:id)+'</strong>'
-      + (a && !a.has_audio ? ' <span class="muted">(no audio &rarr; captions need sound)</span>' : '');
+      + (a && !a.has_audio ? ' <span class="muted">(no audio &rarr; captions need sound)</span>' : '')
+      + (a && !a.usable ? ' <span class="muted">&#9888; blocked: '+esc(permLabel(a.permission_status))+'</span>' : '');
     $('vs-controls').hidden = false;
   }
 
@@ -12132,7 +12250,25 @@ _VIDEO_STUDIO_HTML = """
     });
   }
   function approveProject(id){
-    jpost(url(APPROVE_TMPL, id), {status:'approved'}).then(function(){ loadProjects(); });
+    // M26 — the approve dialog lists each source clip's permission state so
+    // the human gate is informed, not blind.
+    fetch(url(PROJECT_TMPL, id), {headers:{'Accept':'application/json'}})
+      .then(function(r){ return r.json(); })
+      .then(function(j){
+        var srcs = (j && j.source_permissions) || [];
+        var lines = srcs.map(function(s){
+          return '\\u2022 ' + s.filename + ' \\u2014 ' + permLabel(s.permission_status) + (s.usable ? '' : '  (BLOCKED)');
+        });
+        var msg = 'Approve this clip for export?';
+        if(lines.length){ msg += '\\n\\nSource clip permissions:\\n' + lines.join('\\n'); }
+        if(!window.confirm(msg)) return;
+        jpost(url(APPROVE_TMPL, id), {status:'approved'}).then(function(){ loadProjects(); });
+      })
+      .catch(function(){
+        if(window.confirm('Approve this clip for export?')){
+          jpost(url(APPROVE_TMPL, id), {status:'approved'}).then(function(){ loadProjects(); });
+        }
+      });
   }
 
   // ---- timeline editor (manual trim / speed / look / transition / grade / captions) ----
@@ -17709,7 +17845,10 @@ def create_app() -> Flask:
         # below (reading it is what enforces MAX_CONTENT_LENGTH). This is the first
         # before_request, so the larger limit is in place before anything touches
         # the body. endpoint is resolved by routing, which runs before this hook.
-        if request.endpoint == "api_video_footage_upload":
+        # M24: the per-card upload now accepts race clips (video/*) too, so it
+        # shares the raised cap — its image branch stays protected by the
+        # decode-validating _store_photo_upload gate regardless of body size.
+        if request.endpoint in ("api_video_footage_upload", "api_card_photo_upload"):
             request.max_content_length = _video_upload_max
         if not _csrf_enforced() or request.path in _CSRF_EXEMPT_PATHS:
             return None
@@ -46203,6 +46342,22 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             return "", 403
         from flask import send_file
 
+        # M27 — ?poster=1 serves the deterministic poster frame extracted at
+        # footage ingest (mirrors the project-file route's pattern). Honest
+        # 404 when no poster was recorded (no FFmpeg at upload time) — the
+        # caller keeps its current <video>-tile behaviour.
+        if (request.args.get("poster") or "").strip().lower() in {"1", "true", "yes"}:
+            meta = a.media_meta if isinstance(a.media_meta, dict) else {}
+            # basename only — the sidecar always sits beside the blob, and a
+            # tampered meta value must never traverse out of the blob dir.
+            poster_name = Path(str(meta.get("poster") or "")).name
+            poster = Path(a.path).parent / poster_name if poster_name else None
+            if not poster_name or poster is None or not poster.exists():
+                return "", 404
+            resp = send_file(str(poster), mimetype="image/png")
+            resp.headers["X-Content-Type-Options"] = "nosniff"
+            return resp
+
         suffix = re.sub(r"[^a-z0-9.]", "", Path(a.path).suffix.lower())
         mime = _IMAGE_SERVE_MIMES.get(suffix)
         try:
@@ -47537,7 +47692,14 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         f = _req.files.get("photo")
         if not f or not f.filename:
             return jsonify({"error": "no_file"}), 400
-        if not (f.mimetype or "").startswith("image/"):
+        # M24 — the per-card upload accepts race clips (video/*) too: a coach
+        # on the card-review page can finally say "here's the video of this
+        # race". Clips route through the footage ingest spine (probe + M27
+        # poster + the review-first needs_approval permission default).
+        from mediahub.video.ingest import is_video_filename as _is_video_name
+
+        _is_clip = (f.mimetype or "").startswith("video/") or _is_video_name(f.filename or "")
+        if not _is_clip and not (f.mimetype or "").startswith("image/"):
             return jsonify({"error": "not_an_image"}), 400
 
         # Photos live under the ORGANISATION's library (not a per-run
@@ -47548,6 +47710,84 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         )
         if not _session_can_access_profile(profile_id):
             return jsonify({"error": "forbidden"}), 403
+
+        if _is_clip:
+            from mediahub.video.ingest import ingest_footage_stream
+
+            meet_name = (run_data.get("meet") or {}).get("name") or run_data.get("meet_name", "")
+            try:
+                clip_asset = ingest_footage_stream(
+                    f.stream,
+                    f.filename or "clip.mp4",
+                    profile_id=profile_id,
+                    description=(
+                        f"Race clip of {athlete} — uploaded on the card for {meet_name}".strip(
+                            " —"
+                        )
+                    ),
+                    uploaded_by=_active_profile_id(),
+                    # permission default needs_approval preserved (review-first).
+                )
+            except ValueError as e:
+                return jsonify({"error": "bad_footage", "message": str(e)}), 400
+            except OSError:
+                log.exception("card race-clip upload could not be stored")
+                return jsonify(
+                    {
+                        "error": "storage_failed",
+                        "message": "The clip couldn't be saved on the server — its "
+                        "storage is full or unavailable. Please try again.",
+                    }
+                ), 500
+            store = _v8_get_media_store()
+            # Link the clip to THIS card's athlete + meet so M23's footage
+            # sourcing (and the picker's memory) can find it.
+            store.merge_links(
+                clip_asset.id,
+                athlete_names=[athlete] if athlete else [],
+                meet_ids=[run_id],
+            )
+            clip_asset = store.get(clip_asset.id) or clip_asset
+            # M25 — auto best-frame: the clip's top moment becomes a linked
+            # photo asset (permission INHERITED, never wider) so the still
+            # card lights up too. Best-effort: a frame miss never fails the
+            # clip upload.
+            frame_info = None
+            try:
+                from mediahub.video.best_frame import extract_best_frame
+
+                frame = extract_best_frame(clip_asset, store=store)
+                frame_info = {
+                    "id": frame.id,
+                    "url": url_for("api_media_library_file", asset_id=frame.id),
+                    "label": athlete or "best frame",
+                    "permission_status": frame.permission_status,
+                }
+            except Exception as e:
+                log.info("card clip best-frame extraction skipped: %s", e)
+            meta = clip_asset.media_meta if isinstance(clip_asset.media_meta, dict) else {}
+            return jsonify(
+                {
+                    "ok": True,
+                    "asset": {
+                        "kind": "clip",
+                        "id": clip_asset.id,
+                        "url": url_for("api_media_library_file", asset_id=clip_asset.id),
+                        "poster_url": (
+                            url_for(
+                                "api_media_library_file", asset_id=clip_asset.id, poster=1
+                            )
+                            if meta.get("poster")
+                            else ""
+                        ),
+                        "label": athlete or "race clip",
+                        "filename": clip_asset.filename,
+                        "duration_ms": meta.get("duration_ms", 0),
+                        "permission_status": clip_asset.permission_status,
+                        "frame_asset": frame_info,
+                    },
+                }
+            )
 
         # Same ingest gate as the library form: extension allowlist, HEIC
         # normalisation, and a real decode check — a renamed .svg/.html must
@@ -47632,6 +47872,46 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             meet_ids=[run_id],
         )
         return jsonify({"ok": True, "asset_id": asset_id, "athlete": athlete})
+
+    @app.route("/api/runs/<run_id>/cards/<card_id>/clip-unlink", methods=["POST"])
+    def api_card_clip_unlink(run_id: str, card_id: str):
+        """Detach a race clip from this card (M24's remove affordance).
+
+        Removes THIS run's meet link (and this card's athlete link) from the
+        footage asset so it no longer backs the card — the clip itself stays
+        in the club's library. Never deletes footage.
+        """
+        if not _v8_ok:
+            return jsonify({"error": "v8_unavailable"}), 503
+        run_data, target = _load_run_for_card(run_id, card_id)
+        if not _can_access_run(run_id, run_data, _active_profile_id()):
+            return jsonify({"error": "run_not_found"}), 404
+        if target is None:
+            return jsonify({"error": "card_not_found"}), 404
+        athlete = str((target.get("achievement") or {}).get("swimmer_name") or "").strip()
+        body = request.get_json(silent=True) or {}
+        asset_id = str(body.get("asset_id") or "").strip()
+        if not asset_id:
+            return jsonify({"error": "asset_id_required"}), 400
+        store = _v8_get_media_store()
+        asset = store.get(asset_id)
+        if asset is None or asset.type != "footage":
+            return jsonify({"error": "footage_not_found"}), 404
+        if not _session_can_access_profile(asset.profile_id):
+            return jsonify({"error": "forbidden"}), 403
+        athlete_lc = athlete.lower()
+        store.update_fields(
+            asset_id,
+            {
+                "linked_meet_ids": [m for m in (asset.linked_meet_ids or []) if m != run_id],
+                "linked_athlete_names": [
+                    n
+                    for n in (asset.linked_athlete_names or [])
+                    if str(n).strip().lower() != athlete_lc
+                ],
+            },
+        )
+        return jsonify({"ok": True, "asset_id": asset_id})
 
     @app.route("/api/runs/<run_id>/venue-import", methods=["POST"])
     def api_venue_import(run_id: str):
@@ -48655,6 +48935,40 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                 )
         available_photos.sort(key=lambda p: (not p["suggested"], p["label"]))
 
+        # M24 — race clips linked to THIS card (this run + this athlete),
+        # surfaced as a 'race clip' chip beside the photo picker. Read fresh
+        # from the store so duration / permission / poster reflect ingest's
+        # media_meta rather than the render-shaped asset dicts.
+        race_clips = []
+        try:
+            _store_rc = _v8_get_media_store()
+            for _fa in _store_rc.list(profile_id=profile_id, asset_type="footage", limit=100):
+                if run_id not in (_fa.linked_meet_ids or []):
+                    continue
+                _fnames = [str(n).strip().lower() for n in (_fa.linked_athlete_names or [])]
+                if _card_athlete_lc and not any(
+                    _card_athlete_lc == n or _card_athlete_lc in n or n in _card_athlete_lc
+                    for n in _fnames
+                ):
+                    continue
+                _fmeta = _fa.media_meta if isinstance(_fa.media_meta, dict) else {}
+                race_clips.append(
+                    {
+                        "id": _fa.id,
+                        "filename": _fa.filename,
+                        "duration_ms": _fmeta.get("duration_ms", 0),
+                        "permission_status": _fa.permission_status,
+                        "usable": _fa.is_usable_for_post(),
+                        "poster_url": (
+                            url_for("api_media_library_file", asset_id=_fa.id, poster=1)
+                            if _fmeta.get("poster")
+                            else ""
+                        ),
+                    }
+                )
+        except Exception:
+            race_clips = []
+
         # Gen v2 Tier B: ``?candidates=N`` (or JSON ``{"candidates": N}``)
         # renders a ranked candidate POOL — N design-spec-directed
         # alternatives, each carrying a deterministic brand-compliance
@@ -48716,6 +49030,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                     "variation_signature": new_sig,
                     "explanation": _build_card_explanation(target),
                     "available_photos": available_photos,
+                    "race_clips": race_clips,
                     "chosen_asset_id": chosen_asset_id,
                     "no_photo": force_no_photo,
                     "card_athlete": _card_athlete,
@@ -48828,6 +49143,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                 "explanation": explanation,
                 # Per-graphic photo picker state.
                 "available_photos": available_photos,
+                "race_clips": race_clips,
                 "chosen_asset_id": chosen_asset_id,
                 "no_photo": force_no_photo,
                 "card_athlete": _card_athlete,
@@ -54824,13 +55140,49 @@ voice, and queues them for one-click approval.</p>
     def _video_render_dir(project_id: str) -> Path:
         return DATA_DIR / "video_projects" / project_id
 
+    def _video_brand_kit():
+        """The active profile's BrandKit for the footage path, or None."""
+        pid = _active_profile_id()
+        if not pid or not _v8_ok:
+            return None
+        try:
+            return _v8_brand_kit_for(pid)
+        except Exception:
+            return None
+
     def _video_brand_colours():
-        """Best-effort brand colours for caption styling (defaults are legible)."""
+        """Brand colours for caption/pad styling — the SAME resolved role set
+        the motion path paints (M28).
+
+        Runs the motion engine's APCA-gated bookend resolver
+        (``motion._cover_brand_roles`` — the graphic_renderer's single role
+        resolver over the brand palette: Tier A baseline, contrast-picked
+        on-colours, no invented hex) so the Video Studio's captions and pad
+        colour can never disagree with the club's approved cards. Falls back
+        to the legacy accent-only pairing when no brand resolves — defaults
+        stay legible either way.
+        """
         from mediahub.video.clip_maker import BrandColours
 
+        background = "#0A0A0A"
+        brand_kit = _video_brand_kit()
+        if brand_kit is not None:
+            try:
+                from mediahub.visual.motion import _brand_to_dict, _cover_brand_roles
+
+                brand_dict = _brand_to_dict(brand_kit)
+                roles = _cover_brand_roles(brand_dict, brand_kit)
+                if roles.get("ground") and roles.get("onGround"):
+                    return BrandColours(
+                        ground=roles["ground"],
+                        onground=roles["onGround"],
+                        accent=roles.get("accent") or "",
+                        background=roles["ground"],
+                    )
+            except Exception:
+                pass
         prof = _active_profile()
         accent = ""
-        background = "#0A0A0A"
         for attr in ("accent_colour", "accent", "primary_colour", "primary"):
             val = getattr(prof, attr, "") if prof else ""
             if isinstance(val, str) and val.startswith("#"):
@@ -54844,6 +55196,112 @@ voice, and queues them for one-click approval.</p>
 
         name = str(raw or "none").strip().lower()
         return name if name in LOOKS else "none"
+
+    def _footage_permission_error(asset) -> Optional[dict]:
+        """Plain-language block reason when a clip may not be used (M26), or None.
+
+        The MediaAsset.is_usable_for_post() consent gate, surfaced with an
+        actionable message per status — footage of minors under a consent hold
+        must be blocked everywhere content is made, not just in the photo
+        selector.
+        """
+        name = str(getattr(asset, "filename", "") or "this clip")
+        status = str(getattr(asset, "permission_status", "") or "")
+        if status == "do_not_use":
+            return {
+                "error": "footage_blocked",
+                "permission_status": status,
+                "message": (
+                    f"“{name}” is marked “do not use”, so it can't "
+                    "appear in content. Pick another clip — or, if that marking is "
+                    "wrong, change its permission on the footage tile first."
+                ),
+            }
+        if status == "needs_parental_consent":
+            return {
+                "error": "footage_blocked",
+                "permission_status": status,
+                "message": (
+                    f"“{name}” needs parental consent before it can appear "
+                    "in content. Record the consent and set its permission to "
+                    "“approved by club” on the footage tile, or pick "
+                    "another clip."
+                ),
+            }
+        if str(getattr(asset, "approval_status", "") or "") == "rejected":
+            return {
+                "error": "footage_blocked",
+                "permission_status": status,
+                "message": (
+                    f"“{name}” was rejected in review, so it can't appear "
+                    "in content. Re-approve it in the media library, or pick "
+                    "another clip."
+                ),
+            }
+        if not asset.is_usable_for_post():
+            return {
+                "error": "footage_blocked",
+                "permission_status": status,
+                "message": (
+                    f"“{name}” isn't cleared for public use yet — check its "
+                    "permission on the footage tile."
+                ),
+            }
+        return None
+
+    def _project_source_states(proj) -> list[dict]:
+        """Each EDL clip source's library permission state, for the approve
+        dialog and the export gate (M26). Re-resolved from the store at call
+        time, so a permission regression AFTER project creation still shows/
+        blocks. Sources that aren't library assets (e.g. stabilised copies
+        under the project's render dir) can't be resolved and are skipped."""
+        try:
+            store = _v8_get_media_store()
+            assets = store.list(
+                profile_id=getattr(proj, "profile_id", None), asset_type="footage", limit=500
+            )
+        except Exception:
+            return []
+        by_path = {str(Path(a.path)): a for a in assets if a.path}
+        out: list[dict] = []
+        seen: set[str] = set()
+        for clip in getattr(proj.edl, "clips", None) or []:
+            src = str(Path(clip.source)) if clip.source else ""
+            if not src or src in seen:
+                continue
+            seen.add(src)
+            asset = by_path.get(src)
+            if asset is None:
+                continue
+            out.append(
+                {
+                    "asset_id": asset.id,
+                    "filename": asset.filename,
+                    "permission_status": asset.permission_status,
+                    "approval_status": asset.approval_status,
+                    "usable": asset.is_usable_for_post(),
+                }
+            )
+        return out
+
+    def _project_blocked_source(proj) -> Optional[dict]:
+        """The first EDL source whose library asset fails the consent gate."""
+        try:
+            store = _v8_get_media_store()
+            assets = store.list(
+                profile_id=getattr(proj, "profile_id", None), asset_type="footage", limit=500
+            )
+        except Exception:
+            return None
+        by_path = {str(Path(a.path)): a for a in assets if a.path}
+        for clip in getattr(proj.edl, "clips", None) or []:
+            asset = by_path.get(str(Path(clip.source)) if clip.source else "")
+            if asset is None:
+                continue
+            blocked = _footage_permission_error(asset)
+            if blocked:
+                return blocked
+        return None
 
     @app.route("/video")
     def video_studio_page():
@@ -54894,6 +55352,14 @@ voice, and queues them for one-click approval.</p>
             _VIDEO_STUDIO_HTML.replace("__CSRF__", _h(_csrf_token()))
             .replace("__FOOTAGE_URL__", url_for("api_video_footage_upload"))
             .replace("__FOOTAGE_LIST_URL__", url_for("api_video_footage_list"))
+            .replace(
+                "__FOOTAGE_PERM_TMPL__",
+                url_for("api_video_footage_permission", asset_id="__AID__"),
+            )
+            .replace(
+                "__FOOTAGE_FRAME_TMPL__",
+                url_for("api_video_footage_best_frame", asset_id="__AID__"),
+            )
             .replace("__CLIPMAKER_URL__", url_for("api_video_clip_maker"))
             .replace("__REEL_URL__", url_for("api_video_reel"))
             .replace("__PROJECTS_URL__", url_for("api_video_projects_list"))
@@ -54997,16 +55463,100 @@ voice, and queues them for one-click approval.</p>
     def _video_footage_summary(asset) -> dict:
         ad = asset.to_dict() if hasattr(asset, "to_dict") else dict(asset)
         meta = ad.get("media_meta") or {}
+        usable = (
+            asset.is_usable_for_post()
+            if hasattr(asset, "is_usable_for_post")
+            else ad.get("permission_status") not in ("do_not_use", "needs_parental_consent")
+        )
         return {
             "id": ad.get("id", ""),
             "filename": ad.get("filename", ""),
             "file_url": url_for("api_media_library_file", asset_id=ad.get("id", "")),
+            # M27 — poster thumbnail recorded at ingest; "" when extraction
+            # wasn't possible (the tile then keeps its <video> behaviour).
+            "poster_url": (
+                url_for("api_media_library_file", asset_id=ad.get("id", ""), poster=1)
+                if meta.get("poster")
+                else ""
+            ),
             "duration_ms": meta.get("duration_ms", 0),
             "has_audio": meta.get("has_audio", False),
             "orientation": ad.get("orientation", "unknown"),
             "permission_status": ad.get("permission_status", ""),
+            # M26 — badge + gate signal for the tiles.
+            "usable": bool(usable),
             "uploaded_at": ad.get("uploaded_at", ""),
         }
+
+    @app.route("/api/video/footage/<asset_id>/permission", methods=["POST"])
+    def api_video_footage_permission(asset_id: str):
+        """One-tap permission editor for a footage tile (M26).
+
+        Sets the clip's ``permission_status`` using the existing media-library
+        permission vocabulary — the same statuses the consent gate enforces —
+        so a volunteer can record consent (or a do-not-use hold) without
+        leaving the studio.
+        """
+        if not _v8_ok:
+            return jsonify({"error": "v8_unavailable"}), 503
+        store = _v8_get_media_store()
+        asset = store.get(asset_id)
+        if not asset or asset.type != "footage":
+            return jsonify({"error": "footage_not_found"}), 404
+        if not _session_can_access_profile(asset.profile_id):
+            return jsonify({"error": "forbidden"}), 403
+        from mediahub.media_library.models import PERMISSION_STATUSES
+
+        payload = request.get_json(silent=True) or {}
+        status = str(payload.get("permission_status") or "").strip()
+        if status not in PERMISSION_STATUSES:
+            return jsonify(
+                {
+                    "error": "bad_permission",
+                    "message": f"permission_status must be one of: "
+                    f"{', '.join(PERMISSION_STATUSES)}",
+                }
+            ), 400
+        asset = store.update_fields(asset_id, {"permission_status": status})
+        return jsonify({"ok": True, "asset": _video_footage_summary(asset)})
+
+    @app.route("/api/video/footage/<asset_id>/best-frame", methods=["POST"])
+    def api_video_footage_best_frame(asset_id: str):
+        """Extract the clip's best frame as a linked photo asset (M25).
+
+        Deterministic: the top detected moment's centre frame, saved as an
+        ``athlete_action`` MediaAsset with the clip's links AND permission
+        inherited (never wider). One click on a Video Studio footage tile;
+        the same extraction runs automatically on card-linked clip uploads.
+        """
+        if not _v8_ok:
+            return jsonify({"error": "v8_unavailable"}), 503
+        store = _v8_get_media_store()
+        asset = store.get(asset_id)
+        if not asset or asset.type != "footage":
+            return jsonify({"error": "footage_not_found"}), 404
+        if not _session_can_access_profile(asset.profile_id):
+            return jsonify({"error": "forbidden"}), 403
+        from mediahub.video.best_frame import BestFrameUnavailable, extract_best_frame
+
+        try:
+            frame = extract_best_frame(asset, store=store)
+        except BestFrameUnavailable as e:
+            return jsonify({"error": "best_frame_unavailable", "message": str(e)}), 503
+        except Exception as e:
+            log.warning("best-frame extraction failed for %s: %s", asset_id, e)
+            return jsonify({"error": "best_frame_failed", "message": str(e)[:200]}), 500
+        return jsonify(
+            {
+                "ok": True,
+                "asset": {
+                    "id": frame.id,
+                    "url": url_for("api_media_library_file", asset_id=frame.id),
+                    "label": frame.description_raw,
+                    "permission_status": frame.permission_status,
+                },
+            }
+        )
 
     @app.route("/api/video/footage")
     def api_video_footage_list():
@@ -55041,6 +55591,11 @@ voice, and queues them for one-click approval.</p>
             return jsonify({"error": "forbidden"}), 403
         if not Path(asset.path).exists():
             return jsonify({"error": "footage_missing_on_disk"}), 410
+        # M26 — consent gate: a do_not_use / needs-parental-consent clip can't
+        # even be clip-made, with a plain-language, actionable reason.
+        _blocked = _footage_permission_error(asset)
+        if _blocked:
+            return jsonify(_blocked), 403
 
         fmt = (payload.get("format") or "story").strip().lower()
         from mediahub.visual.motion import MOTION_FORMATS
@@ -55139,6 +55694,10 @@ voice, and queues them for one-click approval.</p>
                 return jsonify({"error": "forbidden"}), 403
             if not Path(asset.path).exists():
                 return jsonify({"error": "footage_missing_on_disk", "asset_id": aid}), 410
+            # M26 — consent gate on every clip the reel would consume.
+            _blocked = _footage_permission_error(asset)
+            if _blocked:
+                return jsonify({**_blocked, "asset_id": aid}), 403
             paths.append(asset.path)
             profile_id = asset.profile_id
 
@@ -55373,7 +55932,15 @@ voice, and queues them for one-click approval.</p>
         if not _video_can_access_project(proj):
             return jsonify({"error": "not_found"}), 404
         if request.method == "GET":
-            return jsonify({"ok": True, "project": proj.to_dict()})
+            # M26 — the approve dialog lists each source clip's permission
+            # state so the human gate is informed, not blind.
+            return jsonify(
+                {
+                    "ok": True,
+                    "project": proj.to_dict(),
+                    "source_permissions": _project_source_states(proj),
+                }
+            )
         payload = request.get_json(silent=True) or {}
         if "name" in payload:
             proj.name = str(payload["name"])[:120]
@@ -55447,6 +56014,12 @@ voice, and queues them for one-click approval.</p>
         from mediahub.video.render import available as _render_available
         from mediahub.video.render import render_edl
 
+        # M26 — consent gate at render time, re-resolving each EDL clip's
+        # source: a permission regression AFTER project creation still blocks
+        # (checked before the engine so the block is honest on any deployment).
+        _blocked = _project_blocked_source(proj)
+        if _blocked:
+            return jsonify(_blocked), 403
         if not _render_available():
             return jsonify(
                 {
@@ -55455,16 +56028,30 @@ voice, and queues them for one-click approval.</p>
                     "available on this deployment.",
                 }
             ), 503
+        # M28 — close the render on the branded club end-card (a dissolve into
+        # the club outro rendered by the existing still renderer). Appended at
+        # render time on a COPY of the timeline (the saved project is never
+        # mutated); the end-card MP4 is an ordinary clip source, so the render
+        # cache key folds its fingerprint exactly like music beds. Honest
+        # fallback: no brand/renderer/FFmpeg → the timeline renders unchanged.
+        from mediahub.video.end_card import append_end_card
+
+        render_edl_input, end_card_note = append_end_card(proj.edl, _video_brand_kit())
         out_path = _video_render_dir(project_id) / f"{proj.format_name}.mp4"
         try:
-            render_edl(proj.edl, out_path)
+            render_edl(render_edl_input, out_path)
         except VideoEngineUnavailable as e:
             return jsonify({"error": "engine_unavailable", "message": str(e)}), 503
         except Exception as e:
             log.warning("video render failed for %s: %s", project_id, e)
             return jsonify({"error": "render_failed", "message": str(e)[:200]}), 500
         return jsonify(
-            {"ok": True, "file_url": url_for("api_video_project_file", project_id=project_id)}
+            {
+                "ok": True,
+                "file_url": url_for("api_video_project_file", project_id=project_id),
+                "end_card": "appended" if not end_card_note else "skipped",
+                **({"end_card_note": end_card_note} if end_card_note else {}),
+            }
         )
 
     @app.route("/api/video/projects/<project_id>/approve", methods=["POST"])
@@ -55509,6 +56096,12 @@ voice, and queues them for one-click approval.</p>
                     "message": "Approve this clip before exporting it.",
                 }
             ), 403
+        # M26 — consent gate at export, re-resolving each EDL clip's source:
+        # a permission regression after approval still blocks the download.
+        if download:
+            _blocked = _project_blocked_source(proj)
+            if _blocked:
+                return jsonify(_blocked), 403
         return send_file(
             str(path),
             mimetype="video/mp4",

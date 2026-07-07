@@ -35,6 +35,19 @@ sidecar — a single picked frame to use as the thumbnail.
 engine is active (the health page shows its answer). Asking for an engine that
 isn't recognised produces a clear, honest error — never a fake video.
 
+`footage.py` puts a club's **real race clip** behind a story card or reel beat
+(the M23 "footage-backed beats"). It picks the clip with the same fixed-weight
+media selector photos use (athlete-linked, permission-gated — a clip whose
+consent is on hold is never used), finds the best few seconds with the video
+suite's deterministic moment detector, and trims that window into a small,
+muted, normalised MP4 that the Remotion render plays under the exact same brand
+scrim the photograph would get. The choice is a simple honest rule — the clip
+plays only when it *scores at least as well as* the card's photo — and the
+render's `.json` manifest records exactly which clip, which seconds, and why.
+Any miss (no FFmpeg, clip too short, permission hold) falls back to the photo
+with the reason in the manifest; the free FFmpeg engine can't play footage and
+says so honestly.
+
 `reel_parallel.py` is an **opt-in speed-up** for the Remotion reel (turn it on
 with `MEDIAHUB_REEL_PARALLEL=1`). A reel is one long video, so making it
 normally means rendering its frames one after another. This helper instead cuts

@@ -902,6 +902,30 @@ def _photo_srcs_for_card(card: Any, brief: Optional[dict], brand_kit: Any) -> li
     return out
 
 
+def _footage_for_card(
+    card: Any, brief: Optional[dict], brand_kit: Any, *, beat_seconds: float
+) -> tuple[Optional[Any], str]:
+    """Resolve this card's footage beat (M23) — ``(resolution, reason)``.
+
+    Thin motion-side wrapper over :func:`mediahub.visual.footage.
+    resolve_card_footage`: it supplies the card's already-resolved still photo
+    (the brief's sourced asset) so the deterministic priority rule can score
+    photo vs footage without re-resolving. Never raises; ``(None, "")`` on a
+    quiet miss, ``(None, reason)`` when a candidate lost or failed — the
+    caller records the reason in the render manifest and the photo path
+    renders untouched.
+    """
+    try:
+        from mediahub.visual import footage as _footage
+
+        photo_asset, _ = _photo_asset_for_brief(brief)
+        return _footage.resolve_card_footage(
+            card, brief, brand_kit, beat_seconds=beat_seconds, photo_asset=photo_asset
+        )
+    except Exception:
+        return None, ""
+
+
 def _card_to_props(
     card: dict,
     *,
@@ -909,6 +933,7 @@ def _card_to_props(
     brief: Optional[dict] = None,
     brand_kit: Any = None,
     format_name: str = DEFAULT_MOTION_FORMAT,
+    footage: Optional[Any] = None,
 ) -> dict[str, Any]:
     """Coerce one content-pack card payload into the StoryCard props shape.
 
@@ -935,6 +960,15 @@ def _card_to_props(
     it steers the saliency ``photoPos`` so the photo's focal point is resolved
     for that frame's aspect ratio. The ``story`` default keeps ``photoPos``
     byte-identical to the pre-format behaviour.
+
+    ``footage`` (M23) is a pre-resolved
+    :class:`mediahub.visual.footage.FootageResolution` for this card's beat —
+    resolved by the caller via :func:`_footage_for_card` so the render path
+    owns the cache/manifest folds. When present, ``videoSrc`` /
+    ``videoStartSec`` / ``videoDurationSec`` attach and the crop-intent
+    ``photoScale`` is withheld (the video has real motion; the photo-derived
+    zoom must not double-apply). ``None`` — the default and every miss — keeps
+    the prop dict byte-identical to the photo-only behaviour.
     """
     ach = card.get("achievement") if isinstance(card, dict) else None
     if not isinstance(ach, dict):
@@ -1059,6 +1093,33 @@ def _card_to_props(
         props["photoSrcs"] = photo_srcs
     if mesh_bg:
         props["meshBg"] = mesh_bg
+    # LEFTOVER-1 (UI 1.18 → motion): a manual crop persisted in the card's
+    # inspector overrides wins over the saliency focus — the same
+    # ``photo_pos`` value the still honours, validated by the still's own
+    # sanitiser so no unvetted CSS ever reaches the composition. The
+    # ``photoPosManual`` marker keeps the per-cut saliency re-resolve
+    # (``_apply_format_photo_focus``) from clobbering a human's crop. Only
+    # overridden cards attach it, so untouched cards stay byte-identical.
+    insp = card.get("inspector_overrides") if isinstance(card, dict) else None
+    manual_pos = ""
+    if isinstance(insp, dict) and insp.get("photo_pos"):
+        try:
+            from mediahub.graphic_renderer.render import _sanitise_photo_pos
+
+            manual_pos = _sanitise_photo_pos(str(insp.get("photo_pos") or ""))
+        except Exception:
+            manual_pos = ""
+    if manual_pos and photo_uri:
+        props["photoPos"] = manual_pos
+        props["photoPosManual"] = True
+    # M23: the card's resolved footage beat — the club's real race clip under
+    # the same scrim/treatment stack the photo path paints. Attached ONLY when
+    # the caller resolved a clip, so photo-only cards keep byte-identical
+    # props (and cache keys).
+    if footage is not None:
+        props["videoSrc"] = str(footage.video_src)
+        props["videoStartSec"] = float(footage.video_start_sec)
+        props["videoDurationSec"] = float(footage.video_duration_sec)
     # Parity pass — every prop below is attached ONLY when it resolved, so a
     # card it doesn't apply to keeps a byte-identical prop dict (and cache key).
     if photo_mode == "photo" and photo_uri:
@@ -1067,7 +1128,9 @@ def _card_to_props(
         props["photoMode"] = "photo"
     # M10 crop-intent mirror: the still's --mh-photo-scale zoom, multiplied
     # into the photo layer's cinematic push-in (transform-origin = photoPos).
-    crop_scale = _photo_crop_scale_for_brief(b, format_name)
+    # Withheld for a footage beat: the crop zoom is derived from the
+    # photograph's saliency and must not double-apply to real video motion.
+    crop_scale = 0.0 if footage is not None else _photo_crop_scale_for_brief(b, format_name)
     if crop_scale > 1.0:
         props["photoScale"] = crop_scale
     # M10 true-brand duotone / real halftone parameters (exact still mirror).
@@ -1173,6 +1236,7 @@ def _card_manifest_axes(card_props: dict) -> dict:
         else "seed-permutation",
         "has_photo": bool(card_props.get("photoSrc")),
         "has_cutout": bool(card_props.get("cutoutSrc")),
+        "has_footage": bool(card_props.get("videoSrc")),
         "photo_mode": card_props.get("photoMode") or "",
         "photo_focus": card_props.get("photoPos") or "",
         "hero_stat": card_props.get("heroStat") or "",
@@ -1706,12 +1770,22 @@ def render_story_card(
     size = motion_format_size(format_name)
     out_path = Path(out_path)
     brand_dict = _brand_to_dict(brand_kit)
+    # M23 — footage-backed story: resolve the card's race clip for this 6s
+    # beat. Remotion-only (the ffmpeg fallback renders pre-baked stills and
+    # cannot play a video plane — its manifest says so honestly); a miss of
+    # any kind keeps the photo path byte-identical, reason in the manifest.
+    foot, foot_reason = (None, "")
+    if engine != "ffmpeg":
+        foot, foot_reason = _footage_for_card(
+            card_payload, brief, brand_kit, beat_seconds=duration_sec
+        )
     card_dict = _card_to_props(
         card_payload,
         variation_seed=variation_seed,
         brief=brief,
         brand_kit=brand_kit,
         format_name=format_name,
+        footage=foot,
     )
     audio_plan = _story_audio_plan(
         card_dict, brand_dict, mix_profile=_card_mix_profile(card_payload, brief)
@@ -1752,6 +1826,11 @@ def render_story_card(
     edit_sig = _photo_edit_signature_for_brief(brief)
     if edit_sig:
         cache_payload["photo_edit"] = edit_sig
+    # M23: the footage beat's source fingerprint + trim window, folded ONLY
+    # when a clip resolved — replacing the source clip re-renders while every
+    # no-footage card keeps its byte-identical key.
+    if foot is not None:
+        cache_payload["footage"] = foot.cache_sig
     cache_key = _content_hash(cache_payload, kind="story")
     cached = _cache_dir() / f"{cache_key}.mp4"
     if cached.exists() and cached.stat().st_size > 1024:
@@ -1781,21 +1860,25 @@ def render_story_card(
     poster_source = audio_rec.pop("poster_source", "")
     from mediahub.visual.audio_mux import poster_path_for
 
-    _write_render_manifest(
-        cached,
-        {
-            "kind": "story",
-            "engine": engine,
-            "format": format_name,
-            "size": list(size),
-            "duration_sec": duration_sec,
-            "card": _card_manifest_axes(card_dict),
-            "audio": audio_rec,
-            "captions": _caption_manifest(card_dict.get("captionsJson") or ""),
-            "poster": poster_path_for(cached).name if poster_path_for(cached).exists() else "",
-            "poster_source": poster_source,
-        },
-    )
+    story_manifest = {
+        "kind": "story",
+        "engine": engine,
+        "format": format_name,
+        "size": list(size),
+        "duration_sec": duration_sec,
+        "card": _card_manifest_axes(card_dict),
+        "audio": audio_rec,
+        "captions": _caption_manifest(card_dict.get("captionsJson") or ""),
+        "poster": poster_path_for(cached).name if poster_path_for(cached).exists() else "",
+        "poster_source": poster_source,
+    }
+    # M23 explainability: full provenance when a clip plays; the honest
+    # fall-back reason when a candidate existed but the photo path won.
+    if foot is not None:
+        story_manifest["footage"] = foot.provenance
+    elif foot_reason:
+        story_manifest["footage"] = {"used": False, "reason": foot_reason}
+    _write_render_manifest(cached, story_manifest)
     published = _publish(cached, out_path)
     return published if published.exists() else cached
 
@@ -1840,6 +1923,11 @@ REEL_TOTAL_RANGE = (3.0, 60.0)
 #         plane, exact M10 duotone/halftone mirrors replace the CSS
 #         approximation on beats, M11 stat chips + PB bars, and the M12
 #         layered-archetype scenes (poster_name_behind / band_break).
+#   (Phase D / M23 footage beats deliberately did NOT bump this: the video
+#   plane only activates on the new attach-only videoSrc props, so a reel
+#   with an unchanged payload renders byte-identically — the exact condition
+#   this revision lever exists to police. Footage reels re-key through the
+#   new props + the cache_payload["footage"] fold instead.)
 REEL_COMPOSITION_REVISION = "4"
 
 # Story composition revision — folded into the STORY cache key (M15). The
@@ -1855,6 +1943,11 @@ REEL_COMPOSITION_REVISION = "4"
 #         photograph (no cutout plane), exact M10 duotone/halftone mirrors
 #         replace the CSS approximation, M11 stat chips + PB bars, and the
 #         M12 layered-archetype scenes (poster_name_behind / band_break).
+#   (Phase D / M23 footage beats deliberately did NOT bump this: the video
+#   plane only activates on the new attach-only videoSrc props, so a story
+#   with an unchanged payload renders byte-identically — the exact condition
+#   this revision lever exists to police. Footage stories re-key through the
+#   new props + the cache_payload["footage"] fold instead.)
 STORY_COMPOSITION_REVISION = "2"
 
 
@@ -2163,7 +2256,8 @@ def _assemble_reel_props(
     briefs: Optional[list[Optional[dict]]],
     rhythm: Optional[dict] = None,
     dub_language: str = "",
-) -> tuple[list[dict], dict, str, float, Any, list, Optional[dict]]:
+    resolve_footage: bool = False,
+) -> tuple[list[dict], dict, str, float, Any, list, Optional[dict], Optional[dict], list]:
     """Format-independent prop assembly shared by the single and batch reel
     renders.
 
@@ -2181,14 +2275,35 @@ def _assemble_reel_props(
     its props + cache key. ``None`` or an effectively-default request keeps the
     historic skeleton and byte-identical cache key.
 
+    ``resolve_footage`` (M23) turns on per-beat race-clip resolution: each
+    card's clip is trimmed to ITS carved beat seconds (the exact MeetReel.tsx
+    allocation — rank-weighted / rhythm-custom), so an emphasised beat earns a
+    longer window. Off (the default, and always off for the ffmpeg engine),
+    every prop dict is byte-identical to the photo-only behaviour.
+
     Returns ``(cards_props, brand_dict, meet_name, duration_sec, audio_plan,
-    briefs_list, rhythm_norm, audio_notes)`` — ``audio_notes`` carries honest
-    manifest-only facts about the plan (e.g. a dropped dub's reason) and never
-    folds into any cache key.
+    briefs_list, rhythm_norm, audio_notes, footage_list)`` — ``audio_notes``
+    carries honest manifest-only facts about the plan (e.g. a dropped dub's
+    reason) and never folds into any cache key; ``footage_list`` is the
+    per-card ``(FootageResolution | None, reason)`` pairs for the cache fold
+    and the manifest.
     """
     brand_dict = _brand_to_dict(brand_kit)
 
+    # R1.12 — resolve the (optional) beat-rhythm customisation and the
+    # data-driven duration UP FRONT (they depend only on the card count), so
+    # the per-card beat carve is known before props are shaped and each
+    # footage window (M23) can be sized to its own beat. ``None`` for a
+    # default request, so the duration maths, cache key, and render props
+    # below all stay byte-identical to a reel rendered before this feature.
+    n_cards = len(top_cards or [])
+    rhythm_norm = normalise_reel_rhythm(rhythm, n_cards)
+    if duration_sec is None:
+        duration_sec = reel_duration_for(n_cards, **_reel_duration_kwargs(rhythm_norm))
+    beat_frames = reel_card_beat_frames(n_cards, duration_sec, rhythm_norm)
+
     cards_props: list[dict] = []
+    footage_list: list[tuple[Optional[Any], str]] = []
     briefs_list = list(briefs or [])
     for idx, c in enumerate(top_cards or []):
         # variation seed per card — caller may pass via {"variation_seed": N}
@@ -2215,10 +2330,21 @@ def _assemble_reel_props(
                     except Exception:
                         seed = 1
         brief = briefs_list[idx] if idx < len(briefs_list) else None
+        # M23 — this card's footage beat, trimmed to its OWN carved beat
+        # seconds. Only attempted when the engine can play it; any miss keeps
+        # the card's props byte-identical with the reason kept for the manifest.
+        foot, foot_reason = (None, "")
+        if resolve_footage and idx < len(beat_frames):
+            foot, foot_reason = _footage_for_card(
+                c, brief, brand_kit, beat_seconds=beat_frames[idx] / MOTION_FPS
+            )
+        footage_list.append((foot, foot_reason))
         # Format-independent base focus (story 9:16); the per-cut saliency
         # photoPos is re-resolved downstream in _render_reel_one_format (R1.7).
         cards_props.append(
-            _card_to_props(c, variation_seed=seed, brief=brief, brand_kit=brand_kit),
+            _card_to_props(
+                c, variation_seed=seed, brief=brief, brand_kit=brand_kit, footage=foot
+            ),
         )
 
     if not meet_name:
@@ -2226,14 +2352,6 @@ def _assemble_reel_props(
             if cp.get("meetName"):
                 meet_name = cp["meetName"]
                 break
-
-    # R1.12 — resolve the (optional) beat-rhythm customisation. ``None`` for a
-    # default request, so the duration maths, cache key, and render props below
-    # all stay byte-identical to a reel rendered before this feature landed.
-    rhythm_norm = normalise_reel_rhythm(rhythm, len(cards_props))
-
-    if duration_sec is None:
-        duration_sec = reel_duration_for(len(cards_props), **_reel_duration_kwargs(rhythm_norm))
 
     # One reel, one mix (R1.19): the headline (first card to name one) drives
     # the voice/music balance; absent that, the operator env default decides.
@@ -2280,6 +2398,7 @@ def _assemble_reel_props(
         briefs_list,
         rhythm_norm,
         audio_notes,
+        footage_list,
     )
 
 
@@ -2385,6 +2504,11 @@ def _apply_format_photo_focus(
         return cards_props
     out: list[dict] = []
     for idx, cp in enumerate(cards_props):
+        # LEFTOVER-1: a human's manual crop is format-agnostic and always
+        # wins — never clobber it with the recomputed saliency focus.
+        if cp.get("photoPosManual"):
+            out.append(cp)
+            continue
         brief = briefs_list[idx] if idx < len(briefs_list) else None
         pos = _photo_focus_for_brief(brief, format_name)
         if pos == cp.get("photoPos", ""):
@@ -2412,6 +2536,7 @@ def _render_reel_one_format(
     rhythm: Optional[dict] = None,
     audio_notes: Optional[dict] = None,
     stat_config: Optional[dict] = None,
+    footage_list: Optional[list] = None,
 ) -> Path:
     """Render (or serve cached) ONE reel cut from already-assembled props.
 
@@ -2480,6 +2605,13 @@ def _render_reel_one_format(
     edit_sigs = [_photo_edit_signature_for_brief(b) for b in briefs_list]
     if any(edit_sigs):
         cache_payload["photo_edits"] = edit_sigs
+    # M23: per-beat footage fingerprints + trim windows, folded ONLY when at
+    # least one beat resolved a clip (footage-free reels keep byte-identical keys).
+    footage_list = list(footage_list or [])
+    if any(f is not None for f, _ in footage_list):
+        cache_payload["footage"] = [
+            (f.cache_sig if f is not None else None) for f, _ in footage_list
+        ]
     cache_key = _content_hash(cache_payload, kind="reel")
     cached = _cache_dir() / f"{cache_key}.mp4"
     if cached.exists() and cached.stat().st_size > 1024:
@@ -2545,6 +2677,12 @@ def _render_reel_one_format(
     poster_source = audio_rec.pop("poster_source", "")
     from mediahub.visual.audio_mux import poster_path_for
 
+    # M23 explainability: per-beat footage provenance / honest fall-back
+    # reasons, recorded only when there is something to say.
+    reel_footage_manifest = [
+        (f.provenance if f is not None else {"used": False, "reason": r or ""})
+        for f, r in footage_list
+    ]
     _write_render_manifest(
         cached,
         {
@@ -2575,6 +2713,11 @@ def _render_reel_one_format(
             "captions": _reel_caption_manifest(cards_props),
             "poster": poster_path_for(cached).name if poster_path_for(cached).exists() else "",
             "poster_source": poster_source,
+            **(
+                {"footage": reel_footage_manifest}
+                if any(entry.get("used") or entry.get("reason") for entry in reel_footage_manifest)
+                else {}
+            ),
         },
     )
     published = _publish(cached, out_path)
@@ -2653,6 +2796,7 @@ def render_meet_reel(
         briefs_list,
         rhythm_norm,
         audio_notes,
+        footage_list,
     ) = _assemble_reel_props(
         top_cards,
         brand_kit,
@@ -2661,6 +2805,7 @@ def render_meet_reel(
         briefs=briefs,
         rhythm=rhythm,
         dub_language=dub_language,
+        resolve_footage=engine != "ffmpeg",
     )
     cta_props = _reel_cta_props(sponsor, next_meet)
     return _render_reel_one_format(
@@ -2678,6 +2823,7 @@ def render_meet_reel(
         rhythm=rhythm_norm,
         audio_notes=audio_notes,
         stat_config=stat_config,
+        footage_list=footage_list,
     )
 
 
@@ -2771,6 +2917,7 @@ def render_meet_reel_all_formats(
         briefs_list,
         rhythm_norm,
         audio_notes,
+        footage_list,
     ) = _assemble_reel_props(
         top_cards,
         brand_kit,
@@ -2779,6 +2926,7 @@ def render_meet_reel_all_formats(
         briefs=briefs,
         rhythm=rhythm,
         dub_language=dub_language,
+        resolve_footage=engine != "ffmpeg",
     )
     cta_props = _reel_cta_props(sponsor, next_meet)
 
@@ -2805,6 +2953,7 @@ def render_meet_reel_all_formats(
                     rhythm=rhythm_norm,
                     audio_notes=audio_notes,
                     stat_config=stat_config,
+                    footage_list=footage_list,
                 )
         except ReelEngineUnavailable as e:
             # Expected capability gap (e.g. ffmpeg can't do non-story) —

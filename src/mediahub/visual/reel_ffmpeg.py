@@ -1016,6 +1016,10 @@ def render_story_card_from_props(
             "kb_variant": variant,
             "captions": _caption_manifest(str(card_props.get("captionsJson") or "")),
             "notes": {
+                # M23: footage-backed beats need the Remotion engine (this
+                # path animates the card's pre-baked still and cannot play a
+                # video plane) — an honest capability note, never a fake beat.
+                "footage": "unsupported-on-engine",
                 "engine_note": (
                     "Rendered by the reduced-motion FFmpeg engine: the card's own "
                     "approved still with a deterministic camera move — no text "
@@ -1196,6 +1200,10 @@ def render_meet_reel_from_props(
             "notes": {
                 "captions": "unsupported-on-engine",
                 "stat_chips": "static-cover",
+                # M23: footage-backed beats need the Remotion engine (this
+                # path animates pre-baked stills and cannot play a video
+                # plane) — an honest capability note, never a fake beat.
+                "footage": "unsupported-on-engine",
                 "engine_note": (
                     "Rendered by the reduced-motion FFmpeg engine: each beat is "
                     "the card's own approved still with a deterministic camera "

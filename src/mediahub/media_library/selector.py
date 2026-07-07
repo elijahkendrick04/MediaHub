@@ -39,7 +39,35 @@ ROLE_TYPE_MAP = {
     "brand_pattern": ["brand_pattern"],
     "exemplar": ["exemplar_post"],
     "any_athlete": ["athlete_action", "athlete_headshot", "team_photo"],
+    # M23: a race clip backing a story-card / reel beat. Same fixed-weight
+    # scoring, same athlete linkage, same is_usable_for_post gate — footage of
+    # minors under a consent hold can never score above 0.
+    "race_footage": ["footage"],
 }
+
+# LEFTOVER-2 (M34 follow-through): deterministic scene-tag boost. When the
+# caller names the card's achievement context, an asset whose recorded scene
+# tags (human tags or the roster-anchored vision pass — the closed
+# describe.VISION_SCENE_TAGS vocabulary) match that context earns a small
+# fixed-weight boost: a podium shot belongs on a medal card, a celebration
+# frame on a PB card. Tokens are matched case-insensitively against the
+# context string; boosts are additive but capped by _SCENE_BOOST_CAP. No
+# context (the default) applies nothing — legacy scores are byte-identical.
+_SCENE_CONTEXT_BOOSTS: tuple[tuple[tuple[str, ...], dict[str, float]], ...] = (
+    (
+        ("medal", "gold", "silver", "bronze", "podium"),
+        {"podium": 0.05, "celebration": 0.03},
+    ),
+    (
+        ("pb", "record", "barrier", "drop", "qualif", "milestone", "best"),
+        {"celebration": 0.05, "podium": 0.02},
+    ),
+    (
+        ("relay", "team"),
+        {"team-huddle": 0.04, "celebration": 0.02},
+    ),
+)
+_SCENE_BOOST_CAP = 0.08
 
 # Roles whose subject is a person — the only roles where has_face is a signal.
 _FACE_ROLES = ("headshot", "hero_athlete", "any_athlete")
@@ -91,6 +119,39 @@ def _quality_meta(asset: MediaAsset) -> Optional[dict]:
     return None
 
 
+def _asset_scene_tags(asset: MediaAsset) -> set[str]:
+    """The asset's recorded scene tags (human tags + the vision record)."""
+    tags = {str(t).strip().lower() for t in (asset.tags or []) if str(t).strip()}
+    parsed = asset.description_parsed if isinstance(asset.description_parsed, dict) else {}
+    vision = parsed.get("vision") if isinstance(parsed.get("vision"), dict) else {}
+    for t in vision.get("scene_tags") or []:
+        if str(t).strip():
+            tags.add(str(t).strip().lower())
+    return tags
+
+
+def _scene_boost(asset: MediaAsset, card_context: Optional[str]) -> float:
+    """Fixed-weight scene-tag boost for a card context, 0.0 when absent.
+
+    Deterministic: the context string's tokens select the boost table, the
+    asset's recorded scene tags earn the fixed weights, capped at
+    ``_SCENE_BOOST_CAP``. No context → exactly 0.0 (legacy byte-identical).
+    """
+    ctx = str(card_context or "").strip().lower()
+    if not ctx:
+        return 0.0
+    tags = _asset_scene_tags(asset)
+    if not tags:
+        return 0.0
+    boost = 0.0
+    for tokens, table in _SCENE_CONTEXT_BOOSTS:
+        if any(tok in ctx for tok in tokens):
+            for tag, weight in table.items():
+                if tag in tags:
+                    boost += weight
+    return min(_SCENE_BOOST_CAP, boost)
+
+
 def score_asset(
     asset: MediaAsset,
     *,
@@ -98,8 +159,15 @@ def score_asset(
     athlete_name: Optional[str] = None,
     athlete_id: Optional[str] = None,
     preferred_orientation: Optional[str] = None,
+    card_context: Optional[str] = None,
 ) -> float:
-    """Compute a 0..1 fitness score for using `asset` in the given role."""
+    """Compute a 0..1 fitness score for using `asset` in the given role.
+
+    ``card_context`` (optional) is the card's achievement context string
+    (e.g. its post angle, ``"medal_gold"``); when given, assets whose recorded
+    scene tags fit that context earn the small fixed scene boost. Absent (the
+    default) the score is byte-identical to the pre-context behaviour.
+    """
     if not asset.is_usable_for_post():
         return 0.0
 
@@ -207,6 +275,11 @@ def score_asset(
     if asset.has_face is True and role in _FACE_ROLES:
         score += 0.05 if role == "headshot" else 0.03
 
+    # 9b) Scene-tag fit (LEFTOVER-2): a podium shot on a medal card, a
+    # celebration frame on a PB card. Fixed weights, capped; exactly 0.0
+    # when the caller supplied no context, so legacy scores are unchanged.
+    score += _scene_boost(asset, card_context)
+
     # 10) Wrong-athlete guard (STILLS-9): linked to someone else entirely →
     # hard demotion. Unlinked assets keep their score (ranking handles them).
     if _identity_basis(asset, athlete_name, athlete_id) == "other_athlete":
@@ -225,6 +298,7 @@ def select_assets(
     min_score: float = 0.35,
     k: int = 5,
     exclude_families: Optional[Iterable[str]] = None,
+    card_context: Optional[str] = None,
 ) -> list[dict]:
     """Return up to k scored asset dicts sorted high → low.
 
@@ -241,6 +315,10 @@ def select_assets(
     Ranking: when a subject athlete is requested, subject-matched assets
     always rank above unlinked ones, which rank above wrong-athlete ones —
     score orders within each band.
+
+    ``card_context`` threads the card's achievement context through to
+    :func:`score_asset`'s scene-tag boost; ``None`` (the default) keeps every
+    score byte-identical to the pre-context behaviour.
     """
     excluded = [h for h in (exclude_families or []) if h]
     scored: list[dict] = []
@@ -251,6 +329,7 @@ def select_assets(
             athlete_name=athlete_name,
             athlete_id=athlete_id,
             preferred_orientation=preferred_orientation,
+            card_context=card_context,
         )
         if s < min_score:
             continue

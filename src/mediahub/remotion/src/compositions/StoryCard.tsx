@@ -3,7 +3,9 @@ import {
   AbsoluteFill,
   Easing,
   interpolate,
+  OffthreadVideo,
   spring,
+  staticFile,
   useCurrentFrame,
   useVideoConfig,
 } from "remotion";
@@ -53,6 +55,16 @@ export const cardSchema = z.object({
   // the still renderer's --mh-photo-pos) so faces stay in frame. Empty =
   // the safe "center 28%" default.
   photoPos: z.string().default(""),
+  // M23 footage beat: a normalised, MUTED, keyframe-clean trim of the club's
+  // real race clip, staticFile-served from remotion/public/footage_cache/
+  // (deterministically chosen + trimmed by visual/footage.py — selector
+  // scoring + moment detection, never AI). When set, the photo layer plays
+  // it under the EXACT same scrim/filter/treatment stack the photograph
+  // uses; empty keeps the photo path byte-identical. The clip has real
+  // motion, so the seed-chosen camera channels do not apply to it.
+  videoSrc: z.string().default(""),
+  videoStartSec: z.number().default(0),
+  videoDurationSec: z.number().default(0),
   // M20: additional photos for multi-athlete archetypes (relay_collage /
   // duo_athlete_split / triptych_progression), one JPEG data URI per linked
   // relay athlete resolved by the deterministic media-library selector.
@@ -1001,7 +1013,7 @@ const PhotoLayer: React.FC<{ ctx: SceneCtx; scrim?: "bottom" | "full" }> = ({
   scrim = "full",
 }) => {
   const { card, roles, anim, frame, fps } = ctx;
-  if (!card.photoSrc) {
+  if (!card.photoSrc && !card.videoSrc) {
     return null;
   }
   // R1.10 photo grade (duotone/halftone/vignette) — photo-element-only, the
@@ -1014,7 +1026,35 @@ const PhotoLayer: React.FC<{ ctx: SceneCtx; scrim?: "bottom" | "full" }> = ({
   // static wrapper (transform-origin = the saliency focus) so it multiplies
   // into the cinematic push-in without fighting the img's camera transform.
   const cropScale = card.photoScale && card.photoScale > 1 ? card.photoScale : 1;
-  const img = (
+  // M23 — footage beat: the club's real race clip plays as the moving
+  // background under the EXACT scrim/filter/treatment stack the photograph
+  // uses (duotone/halftone/grade apply identically). MUTED by construction
+  // (the trim is audio-stripped server-side; muted here is belt-and-braces),
+  // frame-pure (OffthreadVideo frames are a pure function of the frame), and
+  // deliberately camera-stable: real motion needs no synthetic push/drift.
+  const startFromFrame = Math.max(0, Math.round((card.videoStartSec || 0) * fps));
+  const endAtFrame =
+    card.videoDurationSec && card.videoDurationSec > 0
+      ? Math.max(startFromFrame + 1, Math.round(((card.videoStartSec || 0) + card.videoDurationSec) * fps))
+      : undefined;
+  const img = card.videoSrc ? (
+    <OffthreadVideo
+      muted
+      src={staticFile(card.videoSrc)}
+      startFrom={startFromFrame}
+      endAt={endAtFrame}
+      style={{
+        position: "absolute",
+        inset: 0,
+        width: "100%",
+        height: "100%",
+        objectFit: "cover",
+        objectPosition: card.photoPos || "center 28%",
+        ...(grade ? { filter: grade } : {}),
+        ...(mask ?? {}),
+      }}
+    />
+  ) : (
     <img
       src={card.photoSrc}
       alt=""
@@ -1037,7 +1077,7 @@ const PhotoLayer: React.FC<{ ctx: SceneCtx; scrim?: "bottom" | "full" }> = ({
   return (
     <>
       <PhotoFilterDefs card={card} />
-      {cropScale > 1 ? (
+      {cropScale > 1 && !card.videoSrc ? (
         <div
           style={{
             position: "absolute",

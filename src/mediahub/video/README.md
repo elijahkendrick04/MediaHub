@@ -90,7 +90,21 @@ spoken words on screen → brand it → a human says yes → download.**
   "AI-generated". There is no way to make an undisclosed fake person.
 - **`ingest.py`** — files an uploaded clip into the shared **media library**, so
   footage gets the same privacy, permission and approval rules as photos (which
-  matters a lot when the footage is of children).
+  matters a lot when the footage is of children). It also grabs one small
+  **poster frame** (a picture at 10% of the clip) so the footage grid can show
+  lightweight thumbnails instead of loading every full video.
+- **`best_frame.py`** — pulls the clip's **best single picture** out (the centre
+  of the loudest/most eventful moment) and saves it as a real photo in the
+  library — with the clip's permission and athlete links **inherited, never
+  wider** — so a club with lots of video and few photos still gets photo cards.
+- **`end_card.py`** — the **branded club close** for Video Studio renders: the
+  club outro frame (drawn by the same still renderer as the cards) looped into a
+  short muted clip and dissolved onto the end of the timeline.
+- **`caption_fonts.py`** — makes the six self-hosted brand typefaces **real for
+  the caption burner** (libass can't read the repo's woff2 files, so this
+  converts them to ttf once under `DATA_DIR` and points fontconfig at exactly
+  that folder). If it can't, the render says so honestly instead of silently
+  burning captions in the wrong font.
 - **`projects.py`** — **saves** the timelines you're working on, one list per
   club, with their approval state.
 

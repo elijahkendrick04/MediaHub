@@ -154,7 +154,7 @@ def build_ffmpeg_args(
     return args
 
 
-def _run_ffmpeg(args: list[str], *, timeout: int = 600) -> None:
+def _run_ffmpeg(args: list[str], *, timeout: int = 600, extra_env: Optional[dict] = None) -> None:
     exe = ffmpeg_exe()
     if not exe:
         raise VideoEngineUnavailable(
@@ -162,8 +162,11 @@ def _run_ffmpeg(args: list[str], *, timeout: int = 600) -> None:
             "imageio-ffmpeg, put ffmpeg on PATH, or set MEDIAHUB_FFMPEG)."
         )
     cmd = [exe, "-hide_banner", "-loglevel", "error", *args]
+    env = None
+    if extra_env:
+        env = {**os.environ, **extra_env}
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, env=env)
     except subprocess.TimeoutExpired as e:
         raise VideoEngineUnavailable(f"video render timed out after {timeout}s") from e
     if proc.returncode != 0:
@@ -346,7 +349,17 @@ def render_edl(edl: EDL, out_path: Path | str, *, timeout: int = 600) -> Path:
         args = build_ffmpeg_args(
             compiled, fps=edl.fps, out_path=tmp_out, ass_paths=ass_paths, duration_ms=duration_ms
         )
-        _run_ffmpeg(args, timeout=timeout)
+        # M28 — any burned ASS text must render in the six self-hosted brand
+        # families: provision the ttf conversions + the scoped fonts.conf and
+        # point libass at them via FONTCONFIG_FILE. Provisioning failure is an
+        # honest caption render error (CaptionFontsUnavailable names the
+        # missing piece) — never a silent burn in a substituted system face.
+        extra_env: Optional[dict] = None
+        if ass_paths:
+            from mediahub.video.caption_fonts import ensure_caption_fonts
+
+            extra_env = ensure_caption_fonts()
+        _run_ffmpeg(args, timeout=timeout, extra_env=extra_env)
         if not tmp_out.exists() or tmp_out.stat().st_size < 1024:
             raise RuntimeError("FFmpeg reported success but the MP4 is missing or empty")
 
