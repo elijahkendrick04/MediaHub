@@ -169,6 +169,70 @@ class MediaLibraryStore:
                 setattr(existing, k, v)
         return self.save(existing)
 
+    def merge_links(
+        self,
+        asset_id: str,
+        *,
+        athlete_names: Optional[list[str]] = None,
+        meet_ids: Optional[list[str]] = None,
+        tags: Optional[list[str]] = None,
+    ) -> Optional[MediaAsset]:
+        """Additively merge link metadata onto an asset (never removes).
+
+        The M4 write-back seam: a per-card picker confirm (or the M34 vision
+        pass) remembers "this photo is OF this athlete / FROM this meet" by
+        merging into ``linked_athlete_names`` / ``linked_meet_ids`` / ``tags``
+        without duplicates (athlete names case-insensitively). Existing values
+        always survive — human-entered links are never overwritten. Returns
+        the saved asset, or ``None`` when the id is unknown.
+        """
+        asset = self.get(asset_id)
+        if asset is None:
+            return None
+
+        def _merge(existing: list[str], extra: list[str], *, ci: bool) -> list[str]:
+            out = list(existing or [])
+            seen = {(v.lower() if ci else v) for v in out}
+            for raw in extra or []:
+                v = str(raw).strip()
+                key = v.lower() if ci else v
+                if v and key not in seen:
+                    seen.add(key)
+                    out.append(v)
+            return out
+
+        if athlete_names:
+            asset.linked_athlete_names = _merge(
+                asset.linked_athlete_names, athlete_names, ci=True
+            )
+        if meet_ids:
+            asset.linked_meet_ids = _merge(asset.linked_meet_ids, meet_ids, ci=False)
+        if tags:
+            asset.tags = _merge(asset.tags, [str(t).lower() for t in tags], ci=False)
+        return self.save(asset)
+
+    def list_untagged(self, *, profile_id: Optional[str] = None, limit: int = 500) -> list[MediaAsset]:
+        """Photo assets with no athlete link, no tags, and no vision record.
+
+        The M34 bulk "Describe N untagged photos" pass targets exactly these:
+        image assets (footage and logos excluded) that neither a human
+        description nor a previous vision pass has tagged yet.
+        """
+        skip_types = {"footage", "logo", "sponsor_logo", "brand_pattern"}
+        out: list[MediaAsset] = []
+        for a in self.list(profile_id=profile_id, limit=limit):
+            if a.type in skip_types:
+                continue
+            vision = (
+                a.description_parsed.get("vision")
+                if isinstance(a.description_parsed, dict)
+                else None
+            )
+            if a.linked_athlete_names or a.tags or vision:
+                continue
+            out.append(a)
+        return out
+
     def backfill_measurements(
         self,
         *,

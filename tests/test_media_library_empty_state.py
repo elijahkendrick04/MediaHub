@@ -33,7 +33,9 @@ sys.path.insert(0, str(_ROOT))
 # Distinctive fragments of each rendered state (HTML entities stripped to the
 # ASCII-safe core so the match doesn't depend on &rsquo;/&mdash; encoding).
 _ERROR_SENTINEL = "load library assets"  # the "store wasn't readable" message
-_EMPTY_SENTINEL = "No assets uploaded yet"  # the clean empty state
+# The clean empty state — since M33 (Phase E) it is the three-step
+# get-photos-onto-cards onboarding checklist, not a bare "no assets" line.
+_EMPTY_SENTINEL = "photos onto cards in three steps"
 
 
 @pytest.fixture
