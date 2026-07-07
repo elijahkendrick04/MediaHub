@@ -43,10 +43,10 @@ const VARIANTS: ScrimVariant[] = ["gradient", "edge", "radial", "corner"];
 // the scene's own under-text scrim, so it only reinforces the edges and never
 // approaches the heavy bottom-band darkening a scene applies beneath its copy.
 const PEAK_ALPHA: Record<ScrimVariant, number> = {
-  gradient: 0.34,
-  edge: 0.3,
-  radial: 0.34,
-  corner: 0.32,
+  gradient: 0.4,
+  edge: 0.38,
+  radial: 0.4,
+  corner: 0.4,
 };
 
 /**

@@ -44839,7 +44839,7 @@ function tiRegenerate() {{
                         f'<a class="btn secondary" style="font-size:12px;padding:4px 10px" '
                         f'href="{_h(_motion_url)}" target="_blank" rel="noopener" '
                         f'title="Render a 6-second branded story-format MP4 for this card. '
-                        f'First time can take 30-90s while Remotion runs.">'
+                        f'First time can take 30-90s while Video Maker renders.">'
                         f"&#x25B6; Motion video</a>"
                     )
                 # Per-card sponsor variant — Phase 1.2 deliverable.
@@ -50952,10 +50952,10 @@ voice, and queues them for one-click approval.</p>
                 "kind": "infra_missing",
                 "detail": detail,
                 "user_message": (
-                    "Motion video rendering isn't available on this "
+                    "Video Maker isn't available on this "
                     "deployment. The operator needs to install Node and "
-                    "run npm install inside src/mediahub/remotion/ for "
-                    "Remotion to work. Static graphics and downloads "
+                    "run npm install inside src/mediahub/remotion/ "
+                    "to enable video rendering. Static graphics and downloads "
                     "still work in the meantime."
                 ),
             }

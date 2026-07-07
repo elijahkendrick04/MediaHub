@@ -623,9 +623,11 @@ def _reel_kb_variants(cards_props: list[dict]) -> list[str]:
 def _reel_transition_names(cards_props: list[dict]) -> list[str]:
     """Per-join xfade names mirroring ``MeetReel``: the cover→first-card
     handoff earns the bold, mood-chosen cut (only when there is more than one
-    card), and every later handoff shares the one connective kind derived
-    from the top card's seed. Length is one per beat join (= number of
-    cards)."""
+    card), and every LATER handoff picks its OWN quiet connective kind from
+    that card's seed (#1058) — so consecutive same-rank beats vary within the
+    quiet trio instead of all cutting identically. A seedless lower beat falls
+    back to the reel-level connective (the top card's seed). Length is one per
+    beat join (= number of cards)."""
     if not cards_props:
         return []
     top = cards_props[0]
@@ -633,7 +635,13 @@ def _reel_transition_names(cards_props: list[dict]) -> list[str]:
     connective = _transition_kind_for(seed)
     peak = _transition_kind_for(seed, peak=True, mood=str(top.get("mood") or ""))
     n = len(cards_props)
-    kinds = [peak if (j == 0 and n > 1) else connective for j in range(n)]
+    kinds: list[str] = []
+    for j, props in enumerate(cards_props):
+        if j == 0 and n > 1:
+            kinds.append(peak)
+            continue
+        cseed = int(props.get("variationSeed") or 0)
+        kinds.append(_transition_kind_for(cseed) if cseed else connective)
     return [_xfade_for(k) for k in kinds]
 
 

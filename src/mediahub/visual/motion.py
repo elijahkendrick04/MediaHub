@@ -1928,7 +1928,12 @@ REEL_TOTAL_RANGE = (3.0, 60.0)
 #   with an unchanged payload renders byte-identically — the exact condition
 #   this revision lever exists to police. Footage reels re-key through the
 #   new props + the cache_payload["footage"] fold instead.)
-REEL_COMPOSITION_REVISION = "4"
+#   "5" — #1058: per-card connective reel transitions (each lower beat now
+#         picks its own quiet cut from ITS seed instead of one shared kind)
+#         + firmer on-video text (outline / shadow3d / stroke_animate) and
+#         firmer photo scrim for muted-feed legibility. All change MeetReel's
+#         deterministic output for an unchanged payload, so cached reels retire.
+REEL_COMPOSITION_REVISION = "5"
 
 # Story composition revision — folded into the STORY cache key (M15). The
 # story payload historically had no revision field; introducing one both
@@ -1948,7 +1953,12 @@ REEL_COMPOSITION_REVISION = "4"
 #   with an unchanged payload renders byte-identically — the exact condition
 #   this revision lever exists to police. Footage stories re-key through the
 #   new props + the cache_payload["footage"] fold instead.)
-STORY_COMPOSITION_REVISION = "2"
+#   "3" — #1058: firmer on-video text (outline / shadow3d / stroke_animate)
+#         and firmer photo scrim. The reel's per-card connective transition
+#         change is reel-only, but StoryCard shares the text_fx + photo_scrim
+#         sprint layers, so these firmer values change a story's deterministic
+#         output for an unchanged payload too — hence the story bump.
+STORY_COMPOSITION_REVISION = "3"
 
 
 def _clamp(value: float, lo: float, hi: float) -> float:
