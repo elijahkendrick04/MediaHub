@@ -147,6 +147,48 @@ def _dir_stats(path: Path) -> tuple[int, int]:
     return files, total
 
 
+def _writable(path: Path) -> bool:
+    """True iff we can create + remove a file inside ``path`` (dir made if absent)."""
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+        probe = path / ".wipe_write_test"
+        probe.write_text("x", encoding="utf-8")
+        probe.unlink()
+        return True
+    except OSError:
+        return False
+
+
+def _preflight_issues(data_dir: Path, runs_dir: Path, run_ids: dict) -> list[str]:
+    """Blocking problems that mean the wipe would silently under-delete.
+
+    The classic footgun is a wrong ``DATA_DIR`` (e.g. a placeholder path): the
+    run files under ``RUNS_DIR`` get deleted, but the DB rows, caches and memory
+    under ``DATA_DIR`` are unreachable — a half-wipe. Catch that up front.
+    """
+    issues: list[str] = []
+    if not _writable(data_dir):
+        issues.append(
+            f"DATA_DIR ({data_dir}) is not writable — the DB rows, semantic "
+            f"memory and caches under it could not be cleared."
+        )
+    if not (data_dir / "data.db").exists():
+        issues.append(
+            f"No data.db at {data_dir / 'data.db'} — DATA_DIR is probably wrong. "
+            f"Use the value the app runs with (see render.yaml's DATA_DIR)."
+            + (
+                f" (Meanwhile {len(run_ids)} run(s) were found via RUNS_DIR "
+                f"{runs_dir} — deleting their files without clearing the DB "
+                f"would leave the app listing dead runs.)"
+                if run_ids
+                else ""
+            )
+        )
+    if not _writable(runs_dir):
+        issues.append(f"RUNS_DIR ({runs_dir}) is not writable — run files can't be removed.")
+    return issues
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Delete ALL run data across every org.")
     ap.add_argument(
@@ -174,6 +216,11 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Also delete free-text / stub content packs (drafts).",
     )
+    ap.add_argument(
+        "--force",
+        action="store_true",
+        help="Proceed even if the pre-flight finds problems (wrong/unwritable DATA_DIR).",
+    )
     args = ap.parse_args(argv)
 
     data_dir, runs_dir, uploads_dir, db_path = _resolve_paths()
@@ -197,27 +244,53 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  caches      : {'kept' if args.keep_caches else 'purged (site-wide)'}")
     print()
 
+    # Pre-flight: refuse a mis-pointed / unwritable DATA_DIR before deleting a
+    # single file, so we never leave the app with dead run rows and orphaned
+    # files (the exact half-wipe a placeholder DATA_DIR would cause).
+    issues = _preflight_issues(data_dir, runs_dir, run_ids)
+    if issues:
+        print("Pre-flight found problem(s):")
+        for msg in issues:
+            print(f"  ! {msg}")
+        print()
+        if args.yes and not args.force:
+            print(
+                "Refusing to run: fix DATA_DIR / permissions and retry, or pass "
+                "--force to override (you'll get a half-wipe if these aren't real)."
+            )
+            return 2
+        if not args.yes:
+            print("(These would block a real --yes run unless --force is given.)")
+
     if not args.yes:
         print("Dry run complete — re-run with --yes to permanently delete the above.")
-        return 0
+        return 0 if not issues else 2
 
     # --- destructive from here ------------------------------------------------
+    errors = 0
     try:
         from mediahub.privacy import run_deletion_cascade
     except Exception as exc:  # noqa: BLE001
         print(f"  ! could not import erasure cascade ({exc}); skipping per-run cascade")
         run_deletion_cascade = None  # type: ignore[assignment]
+        errors += 1
 
     deleted = 0
+    cascade_errors = 0
     for rid, pid in run_ids.items():
         owner = _owner_profile_id(rid, runs_dir, pid)
         if run_deletion_cascade is not None:
             try:
                 run_deletion_cascade(rid, owner)
             except Exception as exc:  # noqa: BLE001
-                print(f"  ! cascade failed for {rid}: {exc}", file=sys.stderr)
+                cascade_errors += 1
+                if cascade_errors <= 3:  # don't flood; the count is reported below
+                    print(f"  ! cascade failed for {rid}: {exc}", file=sys.stderr)
         _delete_run_files(rid, runs_dir, data_dir)
         deleted += 1
+    if cascade_errors:
+        print(f"  ! erasure cascade failed for {cascade_errors}/{deleted} run(s)")
+        errors += 1
     print(f"  removed {deleted} run(s) + sidecars")
 
     # DB rows: clear the run tables wholesale (catches any straggler rows).
@@ -234,6 +307,10 @@ def main(argv: list[str] | None = None) -> int:
             print("  cleared runs / card_reactions tables")
         except sqlite3.Error as exc:
             print(f"  ! DB clear failed: {exc}", file=sys.stderr)
+            errors += 1
+    else:
+        print(f"  ! no data.db at {db_path} — DB rows NOT cleared")
+        errors += 1
 
     if not args.keep_uploads and uploads_dir.is_dir():
         for child in uploads_dir.iterdir():
@@ -258,6 +335,7 @@ def main(argv: list[str] | None = None) -> int:
             print("  cleared semantic caption memory (all tenants)")
         except Exception as exc:  # noqa: BLE001
             print(f"  ! memory clear skipped: {exc}", file=sys.stderr)
+            errors += 1
 
     if not args.keep_caches:
         try:
@@ -270,6 +348,14 @@ def main(argv: list[str] | None = None) -> int:
             )
         except Exception as exc:  # noqa: BLE001
             print(f"  ! cache purge skipped: {exc}", file=sys.stderr)
+            errors += 1
+
+    if errors:
+        print(
+            f"\nFinished with {errors} problem area(s) — some run data may REMAIN. "
+            f"Check DATA_DIR ({data_dir}) and write permissions, then re-run."
+        )
+        return 1
 
     print("\nDone. All run data has been permanently deleted for every organisation.")
     return 0
