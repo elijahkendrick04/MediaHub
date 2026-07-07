@@ -8,7 +8,7 @@
  */
 import React from "react";
 import { Easing, interpolate, useCurrentFrame, useVideoConfig } from "remotion";
-import { MetaFooter, KineticWords, ClubLogo, fitLine } from "../sceneKit";
+import { MetaFooter, KineticWords, ClubLogo, StatChipsBlock, fitLine } from "../sceneKit";
 import type { SceneComponent } from "../registry";
 
 const Scene: SceneComponent = ({ ctx }) => {
@@ -185,6 +185,9 @@ const Scene: SceneComponent = ({ ctx }) => {
             {ctx.card.heroStat}
           </div>
         ) : null}
+        {/* M11 parity — the still's stat chips + honest PB bars ride the
+            context node's column; both collapse when the props are absent. */}
+        <StatChipsBlock ctx={ctx} />
       </div>
 
       <ClubLogo ctx={ctx} size={104} />

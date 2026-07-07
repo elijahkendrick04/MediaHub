@@ -376,28 +376,40 @@ def _cutout_cache_dir() -> Path:
     return d
 
 
-def _cutout_data_uri_for_brief(brief: Optional[dict]) -> str:
-    """Resolve the brief's sourced photo into an alpha-cutout PNG data URI (R1.9).
+def _cutout_for_brief(brief: Optional[dict]) -> tuple[str, Optional[Path]]:
+    """Resolve the brief's sourced photo into ``(alpha-cutout data URI, cut
+    path)`` — the R1.9 foreground plane, now matte-gated (parity pass).
 
     The motion render's foreground cutout layer (``sprint/layers/cutout.tsx``)
-    composites the athlete with their background removed as a parallax
-    foreground plane. The cut is produced by the same configured background
-    remover the still renderer uses (``media_ai.providers.get_bg_remover``), so
-    motion and still isolate the subject identically. The result is cached as a
-    PNG under ``motion_cache/cutouts/`` keyed by the source photo's identity, so
-    the (~300 ms+) remover runs at most once per photo, then is downscaled and
-    inlined — Remotion's headless Chromium only sees what the props carry.
+    and the layered-depth archetype scenes composite the athlete with their
+    background removed. The cut is produced by the same configured background
+    remover the still renderer uses (``media_ai.providers.get_bg_remover``) and
+    measured by the same M14 matte gate (``graphic_renderer.matte.assess_matte``)
+    — so when the still rejected the matte and fell back to the original
+    photograph, the motion render falls back identically instead of shipping a
+    shredded silhouette the customer never approved. A rejection is persisted
+    as a ``.rejected.json`` marker beside the would-be cut, so a bad matte is
+    measured once, not re-matted every render.
+
+    The accepted cut is cached as a PNG under ``motion_cache/cutouts/`` keyed
+    by the source photo's identity, so the (~300 ms+) remover runs at most once
+    per photo, then is downscaled and inlined — Remotion's headless Chromium
+    only sees what the props carry.
 
     Honest by construction: only a *real* remover is used (``is_available()``),
-    never rembg's passthrough alpha, so the foreground plane is never a flat
-    rectangular photo masquerading as a cutout. Empty string on any miss (no
-    brief, ``no-photo`` treatment, asset gone, no usable remover, decode or
-    synthesis failure) — a missing or failed cutout must never fail a motion
-    render; the TSX layer simply no-ops.
+    never rembg's passthrough alpha — and the matte gate would reject a
+    passthrough rectangle anyway. ``("", None)`` on any miss (no brief,
+    ``no-photo`` treatment, asset gone, no usable remover, gate rejection,
+    decode or synthesis failure) — a missing or failed cutout must never fail
+    a motion render; the TSX layer simply no-ops.
+
+    The returned ``cut_path`` (the full-resolution alpha PNG) feeds the
+    band_break placement maths (``render._band_top_fraction``) so both surfaces
+    break the band at identical pixels.
     """
     src = _photo_asset_path_for_brief(brief)
     if src is None:
-        return ""
+        return "", None
     try:
         import io
 
@@ -412,6 +424,11 @@ def _cutout_data_uri_for_brief(brief: Optional[dict]) -> str:
             f"{src.resolve()}|{st.st_mtime_ns}|{st.st_size}".encode("utf-8")
         ).hexdigest()[:24]
         cut_path = _cutout_cache_dir() / f"{key}.png"
+        reject_marker = cut_path.with_name(cut_path.name + ".rejected.json")
+        if reject_marker.exists():
+            # A previous render measured this photo's matte and rejected it —
+            # the still shipped the original photograph, so motion does too.
+            return "", None
         if not (cut_path.exists() and cut_path.stat().st_size > 1000):
             from mediahub.media_ai.providers import get_bg_remover
 
@@ -419,10 +436,32 @@ def _cutout_data_uri_for_brief(brief: Optional[dict]) -> str:
             # Only composite a genuine cut — a provider that can't actually
             # remove the background would passthrough the whole rectangle.
             if remover is None or not remover.is_available():
-                return ""
+                return "", None
             remover.remove(str(src), str(cut_path))
+            if not (cut_path.exists() and cut_path.stat().st_size > 1000):
+                return "", None
+            # M14 matte-gate parity: measure the produced matte with the SAME
+            # pure image-maths gate the still runs before accepting it. Same
+            # file → same verdict, so still and motion can never disagree on
+            # whether a cutout was shippable.
+            verdict = None
+            try:
+                from mediahub.graphic_renderer.matte import assess_matte
+
+                verdict = assess_matte(cut_path)
+            except Exception:
+                verdict = None  # the gate itself must never sink a render
+            if verdict is not None and not verdict.ok:
+                with contextlib.suppress(OSError):
+                    cut_path.unlink()
+                with contextlib.suppress(OSError):
+                    reject_marker.write_text(
+                        json.dumps({"reason": verdict.reason, "metrics": verdict.metrics}),
+                        encoding="utf-8",
+                    )
+                return "", None
         if not (cut_path.exists() and cut_path.stat().st_size > 1000):
-            return ""
+            return "", None
         with Image.open(cut_path) as im:
             # Belt-and-braces EXIF normalisation (M21): remover output should
             # already be upright, but a passthrough of legacy EXIF must never
@@ -432,9 +471,16 @@ def _cutout_data_uri_for_brief(brief: Optional[dict]) -> str:
             im.thumbnail((_CUTOUT_MAX_EDGE, _CUTOUT_MAX_EDGE))
             buf = io.BytesIO()
             im.save(buf, format="PNG")
-        return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
+        uri = "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
+        return uri, cut_path
     except Exception:
-        return ""
+        return "", None
+
+
+def _cutout_data_uri_for_brief(brief: Optional[dict]) -> str:
+    """The brief's matte-gated alpha-cutout data URI, or ``""`` (see
+    :func:`_cutout_for_brief`)."""
+    return _cutout_for_brief(brief)[0]
 
 
 # The still hook's opt-in tokens for the G1.8 gradient-mesh ground (mirrors
@@ -490,15 +536,15 @@ def _mesh_bg_for_brief(brief: Optional[dict], brand_kit: Any, format_name: str) 
         return ""
 
 
-def _resolved_motion_roles(brief: Optional[dict], brand_kit: Any) -> dict[str, str]:
-    """The exact colour roles the card's STILL graphic paints, for motion.
+def _resolved_root_vars(brief: Optional[dict], brand_kit: Any) -> dict[str, str]:
+    """The raw ``--mh-*`` vars the card's STILL graphic paints, for motion.
 
-    Rehydrates the persisted brief and runs the still renderer's single
-    role resolver (Tier A brand baseline → the director's APCA-gated
-    colour-role assignment → medal tint), then maps the ``--mh-*`` vars
-    onto the motion prop names. Empty dict on any miss — the TSX then
-    falls back to its seed-permutation roles, exactly the pre-parity
-    behaviour.
+    Rehydrates the persisted brief and runs the still renderer's single role
+    resolver (Tier A brand baseline → the director's APCA-gated colour-role
+    assignment → medal tint). Empty dict on any miss. This is the one shared
+    resolution pass; :func:`_motion_roles_from_vars` maps it onto the motion
+    prop names, and the M10/M11 parity props (duotone shadow, stat-chip ink)
+    read their exact hexes from it.
     """
     if not isinstance(brief, dict) or not brief:
         return {}
@@ -509,15 +555,240 @@ def _resolved_motion_roles(brief: Optional[dict], brand_kit: Any) -> dict[str, s
         b = CreativeBrief.from_dict(brief)
         if b is None:
             return {}
-        root_vars = resolved_role_vars_for_brief(b, brand_kit)
-        return {
-            "roleGround": str(root_vars.get("--mh-primary") or ""),
-            "roleSurface": str(root_vars.get("--mh-surface") or ""),
-            "roleAccent": str(root_vars.get("--mh-accent") or ""),
-            "roleOnGround": str(root_vars.get("--mh-on-primary") or ""),
-        }
+        return {str(k): str(v) for k, v in resolved_role_vars_for_brief(b, brand_kit).items()}
     except Exception:
         return {}
+
+
+def _motion_roles_from_vars(root_vars: dict[str, str]) -> dict[str, str]:
+    """The resolved ``--mh-*`` vars mapped onto the motion prop names. Empty
+    dict on any miss — the TSX then falls back to its seed-permutation roles,
+    exactly the pre-parity behaviour."""
+    if not root_vars:
+        return {}
+    return {
+        "roleGround": str(root_vars.get("--mh-primary") or ""),
+        "roleSurface": str(root_vars.get("--mh-surface") or ""),
+        "roleAccent": str(root_vars.get("--mh-accent") or ""),
+        "roleOnGround": str(root_vars.get("--mh-on-primary") or ""),
+    }
+
+
+def _archetype_photo_mode(brief: Optional[dict]) -> str:
+    """``"photo"`` / ``"cutout"`` / ``""`` — how this card's archetype consumes
+    the athlete photo (STILLS-2 / M8), resolved exactly as the still does.
+
+    ``archetypes.photo_mode(layout_template)`` is the source of truth — it is
+    what decides which scene actually renders, and the still's render path
+    derives its mode from the template the same way, so a stale persisted
+    stamp (e.g. a brief whose archetype was later regenerated) can never make
+    motion composite a cutout the still doesn't show. The persisted
+    ``brief.photo_mode`` stamp is the fallback for briefs whose template can't
+    be resolved here. ``""`` for v1 families / brief-less callers — the legacy
+    cutout-compositing behaviour, byte-identical props.
+    """
+    b = brief if isinstance(brief, dict) else {}
+    arch = str(b.get("layout_template") or "")
+    if arch:
+        try:
+            from mediahub.graphic_renderer import archetypes as _archetypes
+
+            if arch in _archetypes.list_archetypes():
+                return _archetypes.photo_mode(arch)
+        except Exception:
+            pass
+    mode = str(b.get("photo_mode") or "").strip().lower()
+    return mode if mode in ("photo", "cutout") else ""
+
+
+def _is_v2_archetype(name: str) -> bool:
+    """True when ``name`` is a Gen-v2 archetype (the M10/M11/M12 parity props
+    only apply to v2 renders, mirroring the still's fill path)."""
+    if not name:
+        return False
+    try:
+        from mediahub.graphic_renderer import archetypes as _archetypes
+
+        return name in _archetypes.list_archetypes()
+    except Exception:
+        return False
+
+
+# The v2 archetypes whose motion scenes paint the cutout as layered depth
+# planes themselves (M12 twins). They take the decoration-scaled depth
+# treatment and (band_break) the alpha-derived band placement props.
+_LAYERED_CUTOUT_ARCHETYPES = frozenset({"poster_name_behind", "band_break"})
+
+
+def _decoration_strength_of(brief: Optional[dict]) -> float:
+    """The brief's decoration strength with the still's exact fallback
+    semantics (``float(... or 0.5)`` — see render.py's M10/M12 call sites)."""
+    b = brief if isinstance(brief, dict) else {}
+    try:
+        return float(b.get("decoration_strength") or 0.5)
+    except (TypeError, ValueError):
+        return 0.5
+
+
+def _photo_treatment_mirror_props(
+    brief: Optional[dict], root_vars: dict[str, str], has_photo: bool
+) -> dict[str, Any]:
+    """The exact-mirror photo-grade props for a v2 card (M10 parity).
+
+    duotone → ``duotoneShadow``/``duotoneHighlight``: the two ink hexes the
+    still's SVG filter ramps between, computed by the SAME maths
+    (``render.darken(--mh-primary, 0.30)`` shadow, resolved ``--mh-accent``
+    highlight — medal tints included) so the TSX filter's tableValues are
+    byte-identical to the still's ``_duotone_defs_svg``.
+
+    halftone → ``halftoneTile``: the mask tile px from ``decoration_strength``
+    (``round(14 + 18·clamp(s, 0, 1))`` — ``render._v2_photo_treatment_assets``).
+
+    Attached ONLY for a v2 archetype with a sourced photo and one of these two
+    treatments — every other card's props (and cache key) stay byte-identical.
+    """
+    b = brief if isinstance(brief, dict) else {}
+    if not has_photo or not root_vars:
+        return {}
+    if not _is_v2_archetype(str(b.get("layout_template") or "")):
+        return {}
+    treatment = str(b.get("photo_treatment") or "").strip().lower()
+    if treatment == "duotone":
+        try:
+            from mediahub.graphic_renderer.render import darken
+
+            shadow = darken(root_vars.get("--mh-primary", "#0A2540"), 0.30)
+        except Exception:
+            return {}
+        return {
+            "duotoneShadow": shadow,
+            "duotoneHighlight": root_vars.get("--mh-accent", "#FFFFFF"),
+        }
+    if treatment == "halftone":
+        strength = _decoration_strength_of(b)
+        return {"halftoneTile": int(round(14 + 18 * max(0.0, min(1.0, strength))))}
+    return {}
+
+
+def _stat_chips_for_brief(brief: Optional[dict]) -> list[dict[str, str]]:
+    """The card's secondary-stat chips for motion (M11 parity), as
+    ``[{"label": ..., "value": ...}, ...]``.
+
+    Exactly the still's selection (``render._stat_chips_html``): only the
+    data-led archetypes, only keys verified present in ``hero_stat_options``,
+    the hero line's own fact skipped, values label-trimmed, capped at 4.
+    ``[]`` for everything else — the prop is then never attached.
+    """
+    b = brief if isinstance(brief, dict) else {}
+    try:
+        from mediahub.graphic_renderer.render import (
+            _STAT_CHIP_ARCHETYPES,
+            _STAT_CHIP_LABELS,
+            _chip_value,
+        )
+    except Exception:
+        return []
+    if str(b.get("layout_template") or "") not in _STAT_CHIP_ARCHETYPES:
+        return []
+    keys = [k for k in (b.get("secondary_stats") or []) if k]
+    opts = b.get("hero_stat_options") if isinstance(b.get("hero_stat_options"), dict) else {}
+    layers = b.get("text_layers") if isinstance(b.get("text_layers"), dict) else {}
+    hero_line = layers.get("hero_stat") or ""
+    hero_key = next((k for k, v in opts.items() if v == hero_line), None)
+    chips: list[dict[str, str]] = []
+    for key in keys:
+        if key == hero_key or key not in opts:
+            continue
+        label = _STAT_CHIP_LABELS.get(key)
+        if not label:
+            continue
+        chips.append({"label": label, "value": _chip_value(key, str(opts[key]))})
+        if len(chips) >= 4:
+            break
+    return chips
+
+
+def _pb_bars_for_brief(brief: Optional[dict]) -> Optional[dict]:
+    """The honest proportional PB-bar payload for motion (M11 parity), or None.
+
+    Exactly the still's gate (``render._pb_bars_html``): only the bar-bearing
+    archetypes, only when both the previous PB and the new time parse as race
+    times with the new one faster. ``nowPct`` is the mathematically
+    proportional width on the honest zero-based axis; the caption prepends the
+    delta only when it isn't already the hero line.
+    """
+    b = brief if isinstance(brief, dict) else {}
+    try:
+        from mediahub.graphic_renderer.render import (
+            _PB_BARS_ARCHETYPES,
+            _parse_time_seconds,
+        )
+    except Exception:
+        return None
+    if str(b.get("layout_template") or "") not in _PB_BARS_ARCHETYPES:
+        return None
+    layers = b.get("text_layers") if isinstance(b.get("text_layers"), dict) else {}
+    prev_str = str(layers.get("prev_pb_time") or "").strip()
+    new_str = str(layers.get("result_value") or "").strip()
+    prev_s = _parse_time_seconds(prev_str)
+    new_s = _parse_time_seconds(new_str)
+    if prev_s is None or new_s is None or prev_s <= 0 or new_s >= prev_s:
+        return None
+    new_pct = max(1.0, min(100.0, new_s / prev_s * 100.0))
+    opts = b.get("hero_stat_options") if isinstance(b.get("hero_stat_options"), dict) else {}
+    drop = opts.get("pb_delta") or f"−{prev_s - new_s:.2f}s"
+    caption = (
+        "bars proportional to real times"
+        if str(drop) == str(layers.get("hero_stat") or "")
+        else f"{drop} · bars proportional to real times"
+    )
+    return {"prev": prev_str, "now": new_str, "nowPct": round(new_pct, 1), "caption": caption}
+
+
+def _stat_ink_for_brief(brief: Optional[dict], root_vars: dict[str, str]) -> str:
+    """The resolved hex of the ink var the still's chip row / PB bars use for
+    this archetype (``--mh-on-surface`` or ``--mh-on-primary``), or ``""``."""
+    b = brief if isinstance(brief, dict) else {}
+    try:
+        from mediahub.graphic_renderer.render import (
+            _PB_BARS_ARCHETYPES,
+            _STAT_CHIP_ARCHETYPES,
+        )
+    except Exception:
+        return ""
+    arch = str(b.get("layout_template") or "")
+    ink_var = _STAT_CHIP_ARCHETYPES.get(arch) or _PB_BARS_ARCHETYPES.get(arch) or ""
+    return str(root_vars.get(ink_var) or "") if ink_var else ""
+
+
+def _photo_crop_scale_for_brief(brief: Optional[dict], format_name: str) -> float:
+    """The still's ``--mh-photo-scale`` crop-intent zoom for this card (M10),
+    or ``0.0`` when the intent emits none.
+
+    Runs the still's own deterministic translation of the director's crop
+    intent (``render._crop_intent_vars`` — saliency/alpha-bbox maths, never
+    taste) against the sourced photo, using a previously-gated cutout as the
+    subject mask exactly like the still's photo-mode path. Only
+    ``tight_portrait`` currently emits a scale; every other card returns 0.0
+    so the prop is never attached and cache keys stay byte-identical.
+    """
+    b = brief if isinstance(brief, dict) else {}
+    intent = str(b.get("crop_intent") or "").strip()
+    if not intent or not _is_v2_archetype(str(b.get("layout_template") or "")):
+        return 0.0
+    p = _photo_asset_path_for_brief(b)
+    if p is None:
+        return 0.0
+    try:
+        from mediahub.graphic_renderer.render import _crop_intent_vars, _existing_cutout_for
+
+        width, height = motion_format_size(format_name)
+        mask = _existing_cutout_for(p, profile_id=str(b.get("profile_id") or "default"))
+        intent_vars = _crop_intent_vars(intent, p, mask, width, height)
+        scale = intent_vars.get("--mh-photo-scale", "")
+        return float(scale) if scale else 0.0
+    except Exception:
+        return 0.0
 
 
 # The archetypes whose motion scenes lay out MULTIPLE athlete panels (the
@@ -723,11 +994,24 @@ def _card_to_props(
     # engine produced the brief (a v1 family name otherwise — the TSX
     # treats unknown names as "no archetype treatment").
     brief_layers = b.get("text_layers") if isinstance(b.get("text_layers"), dict) else {}
-    roles = _resolved_motion_roles(b, brand_kit)
+    root_vars = _resolved_root_vars(b, brand_kit)
+    roles = _motion_roles_from_vars(root_vars)
     photo_srcs = _photo_srcs_for_card(card, b, brand_kit)
     # G1.8 mesh-ground parity: attached ONLY when the brief opted in, so every
     # other card's props (and cache key) stay byte-identical.
     mesh_bg = _mesh_bg_for_brief(b, brand_kit, format_name)
+    # STILLS-2 / M8 photo-mode parity: a "photo"-mode archetype shows the
+    # ORIGINAL photograph on the still (the template's scrims handle
+    # legibility) — its motion render must not composite a cutout plane the
+    # approved still never had. Cutout resolution (and the remover cost) is
+    # skipped entirely; "cutout"/legacy keeps the R1.9 behaviour untouched.
+    arch_name = str(b.get("layout_template") or "")
+    photo_mode = _archetype_photo_mode(b)
+    photo_uri = _photo_data_uri_for_brief(b)
+    if photo_mode == "photo":
+        cutout_uri, cutout_path = "", None
+    else:
+        cutout_uri, cutout_path = _cutout_for_brief(b)
     props = {
         "athleteFullName": str(athlete),
         "athleteFirstName": str(first),
@@ -744,12 +1028,13 @@ def _card_to_props(
         "accentStyle": str(b.get("accent_style") or ""),
         "mood": str(b.get("mood") or ""),
         "photoTreatment": str(b.get("photo_treatment") or ""),
-        "photoSrc": _photo_data_uri_for_brief(b),
+        "photoSrc": photo_uri,
         "photoPos": _photo_focus_for_brief(b, format_name),
         # R1.9: the athlete cut out to alpha, composited by the cutout sprint
-        # layer as a parallax foreground plane. "" = no prepared cut (no photo
-        # or no usable remover) and the layer no-ops.
-        "cutoutSrc": _cutout_data_uri_for_brief(b),
+        # layer (or a layered-depth archetype scene) as a foreground plane.
+        # "" = no prepared cut (no photo, no usable remover, matte-gate
+        # rejection, or a "photo"-mode archetype) and the consumers no-op.
+        "cutoutSrc": cutout_uri,
         "archetype": str(b.get("layout_template") or ""),
         # The still's style pack id (graphic_renderer.style_packs): the motion
         # render layers the same ground/texture/accent-geometry overlay so a
@@ -774,6 +1059,64 @@ def _card_to_props(
         props["photoSrcs"] = photo_srcs
     if mesh_bg:
         props["meshBg"] = mesh_bg
+    # Parity pass — every prop below is attached ONLY when it resolved, so a
+    # card it doesn't apply to keeps a byte-identical prop dict (and cache key).
+    if photo_mode == "photo" and photo_uri:
+        # Tells the TSX photo/cutout layers this archetype shows the ORIGINAL
+        # photograph (belt-and-braces beside the empty cutoutSrc).
+        props["photoMode"] = "photo"
+    # M10 crop-intent mirror: the still's --mh-photo-scale zoom, multiplied
+    # into the photo layer's cinematic push-in (transform-origin = photoPos).
+    crop_scale = _photo_crop_scale_for_brief(b, format_name)
+    if crop_scale > 1.0:
+        props["photoScale"] = crop_scale
+    # M10 true-brand duotone / real halftone parameters (exact still mirror).
+    props.update(_photo_treatment_mirror_props(b, root_vars, bool(photo_uri)))
+    # M11 data weight: secondary-stat chips + honest proportional PB bars for
+    # the data-led archetypes, with the exact ink hex the still's bay uses.
+    stat_chips = _stat_chips_for_brief(b)
+    if stat_chips:
+        props["statChips"] = stat_chips
+    pb_bars = _pb_bars_for_brief(b)
+    if pb_bars:
+        props["pbBars"] = pb_bars
+    if stat_chips or pb_bars:
+        stat_ink = _stat_ink_for_brief(b, root_vars)
+        if stat_ink:
+            props["statInk"] = stat_ink
+        if root_vars.get("--mh-outline"):
+            # The still's hairline outline (a translucent on-colour) for the
+            # chip boxes — passed, never re-derived, so no literal colour
+            # lives in the TSX (brand-locked rule).
+            props["roleOutline"] = str(root_vars["--mh-outline"])
+    # M12 layered-depth twins: decoration strength for the role-coloured depth
+    # filter (0.5 is the TSX default, so only a non-default value attaches),
+    # poster_name_behind's surface-band ink, and band_break's alpha-derived
+    # band placement — the SAME maths the still ran, so both surfaces break
+    # at identical pixels.
+    if arch_name in _LAYERED_CUTOUT_ARCHETYPES and cutout_uri:
+        strength = _decoration_strength_of(b)
+        if abs(strength - 0.5) > 1e-9:
+            props["decorationStrength"] = round(strength, 4)
+        if arch_name == "poster_name_behind" and root_vars.get("--mh-on-surface"):
+            props["roleOnSurface"] = str(root_vars["--mh-on-surface"])
+        if arch_name == "band_break" and root_vars.get("--mh-outline"):
+            # The band's 2px border-bottom paints the still's outline var.
+            props["roleOutline"] = str(root_vars["--mh-outline"])
+        if arch_name == "band_break" and cutout_path is not None:
+            try:
+                from mediahub.graphic_renderer.render import _band_top_fraction
+
+                width, height = motion_format_size(format_name)
+                band_top = _band_top_fraction(cutout_path, width, height)
+            except Exception:
+                band_top = None
+            if band_top is not None:
+                props["bandTopPct"] = round(band_top * 100, 1)
+                solid = max(0.0, min(0.97, (band_top + 0.015 - 0.14) / 0.86))
+                fade = min(0.99, solid + 0.055)
+                props["breakSolidPct"] = round(solid * 100, 1)
+                props["breakFadePct"] = round(fade * 100, 1)
     return props
 
 
@@ -830,8 +1173,11 @@ def _card_manifest_axes(card_props: dict) -> dict:
         else "seed-permutation",
         "has_photo": bool(card_props.get("photoSrc")),
         "has_cutout": bool(card_props.get("cutoutSrc")),
+        "photo_mode": card_props.get("photoMode") or "",
         "photo_focus": card_props.get("photoPos") or "",
         "hero_stat": card_props.get("heroStat") or "",
+        "stat_chips": len(card_props.get("statChips") or []),
+        "has_pb_bars": bool(card_props.get("pbBars")),
     }
 
 
@@ -1490,7 +1836,11 @@ REEL_TOTAL_RANGE = (3.0, 60.0)
 #         2.5s outro retime, brand-true cover/outro roles + photo cover,
 #         beat-proportional choreography + resolve accents, reel chrome
 #         (progress rail + club mark).
-REEL_COMPOSITION_REVISION = "3"
+#   "4" — Still↔motion parity pass: photo-mode archetypes drop the cutout
+#         plane, exact M10 duotone/halftone mirrors replace the CSS
+#         approximation on beats, M11 stat chips + PB bars, and the M12
+#         layered-archetype scenes (poster_name_behind / band_break).
+REEL_COMPOSITION_REVISION = "4"
 
 # Story composition revision — folded into the STORY cache key (M15). The
 # story payload historically had no revision field; introducing one both
@@ -1501,7 +1851,11 @@ REEL_COMPOSITION_REVISION = "3"
 #   "1" — Phase C (M15/M19): seed-chosen photo camera moves on every intent,
 #         beat-proportional keyframes, resolve-phase micro-accent, ambient
 #         PEAK_ALPHA 0.14.
-STORY_COMPOSITION_REVISION = "1"
+#   "2" — Still↔motion parity pass: photo-mode archetypes show the original
+#         photograph (no cutout plane), exact M10 duotone/halftone mirrors
+#         replace the CSS approximation, M11 stat chips + PB bars, and the
+#         M12 layered-archetype scenes (poster_name_behind / band_break).
+STORY_COMPOSITION_REVISION = "2"
 
 
 def _clamp(value: float, lo: float, hi: float) -> float:

@@ -146,7 +146,10 @@ class TestM15PhotoCamera:
         assert len(list(motion._cache_dir().glob("*.mp4"))) == 2
 
     def test_reel_revision_bumped_for_phase_c(self):
-        assert motion.REEL_COMPOSITION_REVISION == "3"
+        # Phase C bumped the reel revision to "3"; later visual passes (the
+        # still↔motion parity pass → "4") keep moving it forward — the
+        # contract is that Phase C's bump is never rolled back.
+        assert int(motion.REEL_COMPOSITION_REVISION) >= 3
 
 
 # =========================================================================== #
