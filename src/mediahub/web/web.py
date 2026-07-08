@@ -21918,11 +21918,12 @@ def create_app() -> Flask:
   {_dev_steploader}
   {_dev_techlog}
 
-  <div style="margin-top:var(--sp-5);display:flex;gap:var(--sp-3);flex-wrap:wrap">
+  <p class="dim" style="margin-top:var(--sp-3);font-size:12.5px">You can leave this page &mdash; the run keeps going on our server and the finished content pack appears on your Home.</p>
+  <div style="margin-top:var(--sp-4);display:flex;gap:var(--sp-3);flex-wrap:wrap">
     <a id="review-link" class="btn" style="display:none" href="{_review_url}">Open review queue &rarr;</a>
     {_rerun_form}
     <a id="retry-link"  class="btn secondary" style="display:none" href="{url_for("upload")}">Try another file</a>
-    <a id="home-link"   class="btn secondary" href="{url_for("home")}">View on home</a>
+    <a id="home-link"   class="btn secondary" href="{url_for("home")}">Leave &mdash; it finishes on Home</a>
   </div>
 </div>
 
@@ -37641,7 +37642,17 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             log.warning("invite activation failed for a new account", exc_info=True)
         # PC.14: verification mail (best-effort; only when the email seam
         # is configured — signup never blocks on it).
-        _send_verification_email(user.email)
+        _verify_sent = _send_verification_email(user.email)
+        # D-35 — tell the user their account was created (and, honestly, whether
+        # a verification link is on its way) instead of a silent redirect.
+        if _verify_sent:
+            _flash_toast(
+                f"Account created — we've sent a verification link to {user.email}. "
+                "Verify it so password resets and notices reach you.",
+                "success",
+            )
+        else:
+            _flash_toast("Account created — you're signed in.", "success")
         # PC.9: a referral code records the new club as a code-tracked lead
         # in the PC.6 funnel — zero operator typing. Best-effort: a bad
         # code must never break a signup.
@@ -38045,6 +38056,8 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             _auth.login_user(user)
             if not _legal.AcceptanceStore().needs_terms_reacceptance(user.email):
                 session["terms_ok_version"] = _legal.TERMS_VERSION
+            # D-35 — confirm the change instead of a silent login + redirect.
+            _flash_toast("Password updated — you're signed in.", "success")
             return redirect(url_for("make_page"))
         body = _account_email_card(
             f'<form method="post" action="{url_for("password_reset", token=token)}">'
@@ -38087,13 +38100,17 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             active="signin",
         )
 
-    def _send_verification_email(email: str) -> None:
-        """Best-effort post-signup verification mail (configured-only)."""
+    def _send_verification_email(email: str) -> bool:
+        """Best-effort post-signup verification mail (configured-only).
+
+        Returns True only if a verification email was actually dispatched, so the
+        signup flow can give an honest "we've sent a link" notice (D-35) rather
+        than claiming a mail that the unconfigured email seam never sent."""
         from mediahub.notify.email import email_configured, send_email
         from mediahub.web import account_tokens as _tokens
 
         if not email_configured():
-            return
+            return False
         try:
             token = _tokens.mint_verify_token(app.secret_key, email)
             send_email(
@@ -38103,8 +38120,10 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 "and service notices reach you:\n\n"
                 f"{url_for('verify_email', token=token, _external=True)}\n",
             )
+            return True
         except Exception:
             log.warning("verification email failed", exc_info=True)
+            return False
 
     # ---- /legal/accept (versioned ToS re-acceptance) -------------------
 
