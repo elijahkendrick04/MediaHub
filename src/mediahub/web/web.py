@@ -16570,6 +16570,26 @@ _PB_TRUST_KEY_HTML = (
     "</ul></details>"
 )
 
+# F-10 — plain-language labels for the brand-kit editor, so the form stops
+# reading like an internal config file. Lock tokens, the font-pairing catalogue
+# (ids mirror graphic_renderer's self-hosted @font-face stacks) and the tone
+# options all get human names; a typo can no longer be silently dropped because
+# the palette uses colour pickers and font/tone use dropdowns.
+_BRAND_LOCK_LABELS: dict[str, str] = {
+    "palette": "Lock colours",
+    "fonts": "Lock fonts",
+    "logo": "Lock logo",
+}
+_BRAND_FONT_PAIRINGS: tuple[tuple[str, str], ...] = (
+    ("", "Club default (inherit)"),
+    ("anton-inter", "Anton + Inter — bold, modern"),
+    ("bebas-grotesk", "Bebas Neue + Space Grotesk — tall, sporty"),
+    ("druk-inter", "Druk + Inter — heavy, editorial"),
+    ("bowlby-inter", "Bowlby One + Inter — rounded, playful"),
+    ("archivo-inter", "Archivo + Inter — clean, technical"),
+    ("oswald-inter", "Oswald + Inter — condensed, classic"),
+)
+
 
 def _humanise_parse_code(code: str) -> str:
     """Plain-English label for a parse-warning code, falling back to a
@@ -40764,9 +40784,10 @@ what you're doing, what they should do.</p>
         lock_checks = ""
         for tok in LOCKABLE_TOKENS:
             checked = "checked" if tok in (kit.locks or []) else ""
+            tok_label = _BRAND_LOCK_LABELS.get(tok, tok.replace("_", " ").capitalize())
             lock_checks += (
                 f'<label style="margin-right:14px;font-size:12px;color:var(--ink-muted)">'
-                f'<input type="checkbox" name="lock" value="{tok}" {checked}/> {tok}</label>'
+                f'<input type="checkbox" name="lock" value="{tok}" {checked}/> {_h(tok_label)}</label>'
             )
         # 1.18 per-content-type approver overrides: a stricter rule for the
         # sensitive types the roadmap names. Empty inputs → no override (the
@@ -40798,24 +40819,64 @@ what you're doing, what they should do.</p>
             + _per_type_row("sponsor_activation", "Sponsor activation")
         )
         pal = kit.palette or {}
+        # F-10 — colour pickers (validated by construction, so "red" or a typo
+        # can't be silently dropped) instead of bare "#hex" text inputs. Empty
+        # slots fall back to the kit's primary, then a neutral, so the picker
+        # always shows something on-brand.
+        _pal_default = (
+            pal.get("primary") if str(pal.get("primary", "")).startswith("#") else "#5b6b7a"
+        )
+
+        def _kit_colour_slot(slot: str, label: str) -> str:
+            cur = pal.get(slot, "")
+            val = cur if str(cur).startswith("#") else _pal_default
+            return (
+                '<label style="display:flex;flex-direction:column;gap:3px;'
+                'font-size:11px;color:var(--ink-muted)">'
+                f"{label}"
+                f'<input type="color" name="{slot}" value="{_h(val)}" '
+                'style="width:64px;height:40px;padding:0;border:1px solid var(--border);'
+                'border-radius:4px;background:var(--panel);cursor:pointer"/>'
+                "</label>"
+            )
+
+        palette_pickers = "".join(
+            _kit_colour_slot(slot, label)
+            for slot, label in (
+                ("primary", "Primary"),
+                ("secondary", "Secondary"),
+                ("accent", "Accent"),
+                ("fourth", "Fourth"),
+            )
+        )
+        font_options = "".join(
+            f'<option value="{_h(fid)}"'
+            f"{' selected' if kit.font_pairing == fid else ''}>{_h(flabel)}</option>"
+            for fid, flabel in _BRAND_FONT_PAIRINGS
+        )
+        from mediahub.brand.tone import TONE_META as _TONE_META  # noqa: PLC0415
+
+        tone_options = '<option value="">Club default (inherit)</option>' + "".join(
+            f'<option value="{_h(t.value)}"'
+            f"{' selected' if kit.tone == t.value else ''}>{_h(meta.get('label', t.value))}</option>"
+            for t, meta in _TONE_META.items()
+        )
         edit_form = (
             f'<details style="margin-top:10px"><summary style="cursor:pointer;'
             'color:var(--accent);font-size:13px">Edit kit</summary>'
             f'<form method="post" action="{url_for("api_brand_kit_update", kit_id=kit.kit_id)}" '
             'style="display:flex;flex-direction:column;gap:8px;margin-top:10px">'
             f'<input class="mh-input" name="name" value="{_h(kit.name)}" placeholder="Kit name" required />'
-            '<div style="display:flex;gap:8px;flex-wrap:wrap">'
-            + "".join(
-                f'<input class="mh-input" name="{slot}" value="{_h(pal.get(slot, ""))}" '
-                f'placeholder="{slot} #hex" style="max-width:160px" />'
-                for slot in ("primary", "secondary", "accent", "fourth")
-            )
+            '<div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">'
+            + palette_pickers
             + "</div>"
-            f'<input class="mh-input" name="font_pairing" value="{_h(kit.font_pairing)}" '
-            'placeholder="font pairing id (optional)" style="max-width:260px" />'
-            f'<input class="mh-input" name="tone" value="{_h(kit.tone)}" '
-            'placeholder="tone override (optional)" style="max-width:260px" />'
-            '<div style="font-size:12px;color:var(--ink-muted)">Lock tokens (block off-brand approval):</div>'
+            '<label style="font-size:12px;color:var(--ink-muted)">Fonts'
+            f'<select class="mh-input" name="font_pairing" style="max-width:320px;display:block">{font_options}</select>'
+            "</label>"
+            '<label style="font-size:12px;color:var(--ink-muted)">Caption tone'
+            f'<select class="mh-input" name="tone" style="max-width:320px;display:block">{tone_options}</select>'
+            "</label>"
+            '<div style="font-size:12px;color:var(--ink-muted)">Block approval when content strays from these (off-brand guard):</div>'
             f"<div>{lock_checks}</div>"
             '<div style="font-size:12px;color:var(--ink-muted)">Group approval (members-only workspaces):</div>'
             '<div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap">'
@@ -40943,10 +41004,19 @@ what you're doing, what they should do.</p>
             '<option value="section">Team / section</option>'
             '<option value="personal">Personal</option>'
             "</select>"
-            '<div style="display:flex;gap:8px;flex-wrap:wrap">'
+            '<div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">'
             + "".join(
-                f'<input class="mh-input" name="{slot}" placeholder="{slot} #hex" style="max-width:160px" />'
-                for slot in ("primary", "secondary", "accent")
+                '<label style="display:flex;flex-direction:column;gap:3px;'
+                'font-size:11px;color:var(--ink-muted)">'
+                f"{label}"
+                f'<input type="color" name="{slot}" value="{default}" '
+                'style="width:64px;height:40px;padding:0;border:1px solid var(--border);'
+                'border-radius:4px;background:var(--panel);cursor:pointer"/></label>'
+                for slot, label, default in (
+                    ("primary", "Primary", "#0a2540"),
+                    ("secondary", "Secondary", "#5b6b7a"),
+                    ("accent", "Accent", "#22d3ee"),
+                )
             )
             + "</div>"
             '<div><button class="btn" type="submit">Create kit</button></div>'
@@ -41089,8 +41159,21 @@ what you're doing, what they should do.</p>
         kit = normalise_kit(raw)
         if kit is None:
             return _brand_redirect(err="A kit needs a name.")
+        # F-10 — be honest about anything the normaliser dropped instead of a
+        # blanket "Saved kit". With colour pickers + dropdowns this is normally
+        # empty, but a palette-file import or a hand-crafted POST can still carry
+        # an unreadable value, and the user deserves to know it didn't stick.
+        submitted_pal = _form_palette()
+        dropped = [
+            slot for slot, val in submitted_pal.items() if val and slot not in (kit.palette or {})
+        ]
         upsert_kit(prof, kit)
         save_profile(prof)
+        if dropped:
+            return _brand_redirect(
+                msg=f"Saved kit “{kit.name}” — but could not read the "
+                f"{', '.join(dropped)} colour(s); please give a valid #hex."
+            )
         return _brand_redirect(msg=f"Saved kit “{kit.name}”.")
 
     @app.route("/api/brand/kits/<kit_id>/delete", methods=["POST"])
