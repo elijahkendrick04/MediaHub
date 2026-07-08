@@ -17857,6 +17857,7 @@ _DOC_PRESENT_CONSOLE = r"""
       <button class="btn secondary" onclick="act('autoplay')">Autoplay</button>
       <button class="btn secondary" onclick="act('timer_reset')">Reset timer</button>
       <span id="pos" class="dim"></span>
+      <span id="cstat" class="dim" role="status" aria-live="polite" style="color:var(--warn)"></span>
       <span id="timer" class="dim" style="margin-left:auto;font-variant-numeric:tabular-nums"></span>
     </div>
     <p class="dim" style="font-size:12px;margin-top:6px">Keys: ← / → move, B blackout.</p>
@@ -17877,7 +17878,16 @@ _DOC_PRESENT_CONSOLE = r"""
 <script>
 const TOTAL=__TOTAL__, BASE='__SLIDE_URL__', NOTES=__NOTES__, TITLES=__TITLES__;
 let cur=-1;
-async function act(a){ await fetch('__ACTION_URL__',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:a})}); poll(); }
+function cstat(m){ var el=document.getElementById('cstat'); if(el) el.textContent=m||''; }
+async function act(a){
+  // D-31: surface fetch failures and non-ok responses instead of a dead tap.
+  try{
+    const r=await fetch('__ACTION_URL__',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:a})});
+    if(!r.ok){ cstat(r.status===429?'Too many attempts — wait a moment':'Not connected'); return; }
+    cstat('');
+  }catch(e){ cstat('Reconnecting…'); return; }
+  poll();
+}
 function fmtT(s){ const m=Math.floor(s/60), ss=s%60; return m+':'+String(ss).padStart(2,'0'); }
 async function poll(){
   try{
@@ -17944,14 +17954,25 @@ button:active{background:#2b3a66}
 </style></head><body>
 <div id="g">
   <div class="hd">Remote · code <b>__CODE__</b> · <span id="pos">–</span></div>
+  <div id="rstat" class="hd" role="status" aria-live="polite" style="color:#ffb454;min-height:18px"></div>
   <button onclick="act('prev')">◀ Previous</button>
   <button onclick="act('next')">Next ▶</button>
   <div class="row"><button onclick="act('blackout')">Blackout</button><button onclick="act('end')">End</button></div>
 </div>
 <script>
-async function act(a){ const r=await fetch('__ACTION_URL__',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:a})}); const j=await r.json(); if(j.state) setPos(j.state); }
+function rstat(m){ var el=document.getElementById('rstat'); if(el) el.textContent=m||''; }
+async function act(a){
+  // D-31: a dead tap (offline wifi, a 429 rate-limit, a 4xx with no state) used
+  // to do nothing with zero feedback — now it says what happened.
+  try{
+    const r=await fetch('__ACTION_URL__',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:a})});
+    const j=await r.json().catch(function(){ return {}; });
+    if(!r.ok || j.ok===false){ rstat((r.status===429||j.error==='rate_limited')?'Too many taps — wait a moment':'Not connected'); return; }
+    if(j.state){ setPos(j.state); rstat(''); }
+  }catch(e){ rstat('Reconnecting…'); }
+}
 function setPos(s){ document.getElementById('pos').textContent=(s.current+1)+' / '+s.total+(s.blackout?' · black':''); }
-async function poll(){ try{ const r=await fetch('__STATE_URL__'); const s=await r.json(); if(!s.ended) setPos(s); }catch(e){} }
+async function poll(){ try{ const r=await fetch('__STATE_URL__'); const s=await r.json(); if(!s.ended){ setPos(s); rstat(''); } }catch(e){ rstat('Reconnecting…'); } }
 setInterval(poll,1500); poll();
 </script></body></html>"""
 
