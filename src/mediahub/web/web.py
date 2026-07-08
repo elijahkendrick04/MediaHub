@@ -36656,8 +36656,16 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 record_referred_signup(ref_code, user.email)
             except Exception:
                 log.warning("referral signup recording failed", exc_info=True)
-        # Land new users on the create surface (Step 7: redirect to /add-input).
-        return redirect(url_for("make_page"))
+        # First-run routing (A-4): a brand-new account has no workspace yet,
+        # so sending it to /make just trips the org-ready gate, which bounces
+        # to /sign-in and — on a shared deployment — falsely reads "no
+        # organisations exist". Route straight to setup instead. An account
+        # that signed up via an invite already has an accessible workspace, so
+        # send it to the picker to choose/enter it.
+        accessible = [p for p in list_profiles() if _session_can_use_profile(p.profile_id)]
+        if accessible:
+            return redirect(url_for("sign_in_page"))
+        return redirect(url_for("organisation_setup"))
 
     @app.route("/login", methods=["GET"])
     def login_page():
@@ -38664,7 +38672,7 @@ what you're doing, what they should do.</p>
             empty_body = (
                 "<h1>Sign in</h1>"
                 '<p class="lede" style="margin-bottom:var(--sp-6)">'
-                "No organisation profiles exist on this deployment yet. "
+                "You don't have access to any organisation yet. "
                 "Create one and it will appear here for sign-in next time."
                 "</p>"
                 '<div class="card" style="padding:24px 28px;margin-bottom:18px">'

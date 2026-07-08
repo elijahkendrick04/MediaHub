@@ -129,9 +129,11 @@ def test_signup_creates_user_hashes_and_logs_in(client, tmp_path):
         "/signup",
         data={"email": "coach@club.org", "password": "twelvechars1", "accept_terms": "1"},
     )
-    # Redirects into the app and sets a session cookie.
+    # Redirects into the app and sets a session cookie. A brand-new,
+    # org-less account lands on organisation setup (A-4) rather than /make,
+    # which would only bounce off the org-ready gate.
     assert r.status_code == 302
-    assert "/make" in r.headers["Location"]
+    assert "/organisation/setup" in r.headers["Location"]
     set_cookie = "\n".join(v for k, v in r.headers if k == "Set-Cookie")
     assert "session=" in set_cookie
     # HttpOnly is set on the session cookie.
