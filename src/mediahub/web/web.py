@@ -30225,10 +30225,26 @@ function mhPlanInterpret(btn) {{
 }}
 function mhPlanGenerate(btn) {{
   var status = document.getElementById('mh-plan-status');
-  btn.disabled = true; status.textContent = 'Fusing own + external + direct signals…';
-  fetch({json.dumps(url_for("api_plan_generate"))}, {{
+  btn.disabled = true; status.textContent = 'Saving your inputs…';
+  // H-7: persist whatever is on the page BEFORE generating. Generate builds
+  // the plan from the PERSISTED inputs and the page reloads on success, so an
+  // event/goal/blackout the volunteer just typed (or added via "Interpret &
+  // fill in", which only creates DOM rows) would otherwise be silently wiped
+  // and never reach the plan. Auto-saving first makes the big primary action
+  // do what the user expects.
+  fetch({json.dumps(url_for("api_plan_inputs"))}, {{
     method: 'POST', headers: {{'Content-Type': 'application/json'}},
-    body: JSON.stringify({{ sport: document.getElementById('mh-plan-sport').value }})
+    body: JSON.stringify({{
+      upcoming_events: mhPlanCollectEvents(),
+      blackout_dates: document.getElementById('mh-plan-blackouts').value.split(',').map(function(s){{return s.trim();}}).filter(Boolean),
+      goals: mhPlanCollectGoals()
+    }})
+  }}).then(function(r){{ return r.json(); }}).catch(function(){{ return {{ok:false}}; }}).then(function(){{
+    status.textContent = 'Fusing own + external + direct signals…';
+    return fetch({json.dumps(url_for("api_plan_generate"))}, {{
+      method: 'POST', headers: {{'Content-Type': 'application/json'}},
+      body: JSON.stringify({{ sport: document.getElementById('mh-plan-sport').value }})
+    }});
   }}).then(function(r){{ return r.json(); }}).then(function(j){{
     if (j.ok) {{ window.location.reload(); }}
     else {{ btn.disabled = false; status.textContent = j.error || 'Plan generation failed'; }}
