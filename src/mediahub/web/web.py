@@ -41781,24 +41781,50 @@ what you're doing, what they should do.</p>
                     "</div>"
                     "</div>"
                 )
-            _gl_status_html = (
-                '<div style="margin-top:12px;padding:10px 12px;border:1px solid var(--border);'
-                'border-radius:8px;background:rgba(44,201,127,0.05);font-size:12px;line-height:1.5">'
-                f'<div style="font-weight:600;color:var(--ink)">Loaded: {_h(prof.brand_guidelines_filename)}</div>'
-                f'<div class="muted" style="margin-top:2px">{_h(prof.brand_guidelines_uploaded_at[:19] if prof.brand_guidelines_uploaded_at else "")}'
-                f" &middot; {_h(prof.brand_guidelines_status or '')} via {_h(prof.brand_guidelines_extractor or '')}</div>"
-                + (
-                    f'<div style="margin-top:6px;color:var(--ink-dim)">{_h(summary)}</div>'
-                    if summary
-                    else ""
+            _gl_status = prof.brand_guidelines_status or ""
+            _gl_failed = _gl_status.startswith(("unsupported_binary", "error:"))
+            if _gl_failed:
+                # D-30: a rejected guidelines upload is a FAILURE — warning
+                # styling, no green "Loaded", and no raw internal status /
+                # extractor codes; a plain-English reason instead.
+                if _gl_status.startswith("unsupported_binary"):
+                    _gl_reason = (
+                        "It looks like an image or binary file. Brand guidelines must be a "
+                        "text document — PDF, DOCX, TXT, RTF or MD."
+                    )
+                else:
+                    _gl_reason = (
+                        "We couldn't read this file. Try a PDF, DOCX, TXT, RTF or MD export "
+                        "of your guidelines."
+                    )
+                _gl_status_html = (
+                    '<div style="margin-top:12px;padding:10px 12px;border:1px solid var(--warn);'
+                    "border-radius:8px;background:color-mix(in oklab, var(--warn) 7%, transparent);"
+                    'font-size:12px;line-height:1.5">'
+                    '<div style="font-weight:600;color:var(--warn)">Couldn&rsquo;t read: '
+                    f"{_h(prof.brand_guidelines_filename)}</div>"
+                    f'<div class="muted" style="margin-top:4px;color:var(--ink-dim)">{_h(_gl_reason)}</div>'
+                    "</div>"
                 )
-                + f'<div style="margin-top:6px;color:var(--ink-dim)">Voice attributes: {_h(attrs)} &middot; '
-                f"{n_dos} do{'s' if n_dos != 1 else ''}, {n_donts} don't{'s' if n_donts != 1 else ''}, "
-                f"{n_prohib} prohibited word{'s' if n_prohib != 1 else ''}.</div>"
-                + rules_html
-                + '<div class="muted" style="font-size:11px;margin-top:6px">Upload a new file to replace, or leave blank to keep this one.</div>'
-                "</div>"
-            )
+            else:
+                _gl_status_html = (
+                    '<div style="margin-top:12px;padding:10px 12px;border:1px solid var(--border);'
+                    'border-radius:8px;background:rgba(44,201,127,0.05);font-size:12px;line-height:1.5">'
+                    f'<div style="font-weight:600;color:var(--ink)">Loaded: {_h(prof.brand_guidelines_filename)}</div>'
+                    f'<div class="muted" style="margin-top:2px">{_h(prof.brand_guidelines_uploaded_at[:19] if prof.brand_guidelines_uploaded_at else "")}'
+                    f" &middot; {_h(prof.brand_guidelines_status or '')} via {_h(prof.brand_guidelines_extractor or '')}</div>"
+                    + (
+                        f'<div style="margin-top:6px;color:var(--ink-dim)">{_h(summary)}</div>'
+                        if summary
+                        else ""
+                    )
+                    + f'<div style="margin-top:6px;color:var(--ink-dim)">Voice attributes: {_h(attrs)} &middot; '
+                    f"{n_dos} do{'s' if n_dos != 1 else ''}, {n_donts} don't{'s' if n_donts != 1 else ''}, "
+                    f"{n_prohib} prohibited word{'s' if n_prohib != 1 else ''}.</div>"
+                    + rules_html
+                    + '<div class="muted" style="font-size:11px;margin-top:6px">Upload a new file to replace, or leave blank to keep this one.</div>'
+                    "</div>"
+                )
 
         # Per-link status chips (M5): map each captured status to a
         # chip styled by severity. The mapping is kept here next to the
