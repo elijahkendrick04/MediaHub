@@ -4232,8 +4232,15 @@ function _fetchCaption(captionUrl, tone, panel, cacheKey, isAi, cardId) {
   if (captionDiv) {
     captionDiv.innerHTML = '<span style="color:var(--ink-muted);font-style:italic">Generating&hellip;<span class="spin" style="display:inline-block;margin-left:6px;animation:spin 0.8s linear infinite">&#x27F3;</span></span>';
   }
-  fetch(captionUrl + '?tone=' + encodeURIComponent(tone), {method: 'POST'})
-    .then(function(r) { return r.json(); })
+  // The tone rides in the query string; the JSON content-type is what keeps
+  // this same-origin write CSRF-exempt (mirrors every other fetch on the
+  // page). Without it the server 403s with {"error":"csrf"} and the caption
+  // silently renders blank. r.ok / r.status are threaded onto the parsed
+  // body so the catch-all error branch below can never fall through to an
+  // empty caption.
+  fetch(captionUrl + '?tone=' + encodeURIComponent(tone),
+        {method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}'})
+    .then(function(r) { return r.json().then(function(j) { j.__ok = r.ok; j.__status = r.status; return j; }); })
     .then(function(j) {
       var text = j.caption || '';
       var ts = j.generated_at ? new Date(j.generated_at).toLocaleTimeString() : '';
@@ -4270,6 +4277,19 @@ function _fetchCaption(captionUrl, tone, panel, cacheKey, isAi, cardId) {
       // Render the caption + a variant picker if we got multiple back.
       var variants = (j.variants && j.variants.length) ? j.variants : [text];
       var safeText = function(t){ return (t||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); };
+      // Catch-all: anything the transient/terminal branches above did not
+      // classify — a CSRF 403 ({"error":"csrf"}), an unexpected 4xx/5xx, or
+      // an empty body with no variants — must surface a retry, never a blank
+      // caption. This is the last line of defence before the render.
+      if (j.__ok === false || j.error || (!text && !(j.variants && j.variants.length))) {
+        if (captionDiv) {
+          captionDiv.innerHTML = '<div style="padding:10px;border:1px solid var(--border);border-radius:6px;background:rgba(255,93,108,0.06)">'
+            + '<div style="font-weight:600;color:var(--ink);margin-bottom:4px">&#x21BB; Couldn&rsquo;t generate a caption</div>'
+            + '<div style="font-size:11px;line-height:1.5;color:var(--ink-dim)">' + safeText(j.message || 'Something went wrong. Pick a tone again to retry.') + '</div>'
+            + '</div>';
+        }
+        return;
+      }
       function _renderActive(idx, reveal) {
         var active = variants[idx] || text;
         if (captionDiv) {
@@ -17162,7 +17182,7 @@ _CHARTS_PAGE_JS = """
     var tile = btn.closest('.mh-chartpack-tile'); if(!tile) return;
     var out = tile.querySelector('.mh-cap-out'); if(!out) return;
     busy(btn, true, 'Writing…');
-    fetch(btn.getAttribute('data-cap-url'), {method:'POST'}).then(function(r){return r.json();}).then(function(j){
+    fetch(btn.getAttribute('data-cap-url'), {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'}).then(function(r){return r.json();}).then(function(j){
       busy(btn, false);
       out.style.display='block'; out.textContent='';
       if(j.available===false || !j.caption){ out.textContent = j.message || 'AI captions are not configured on this deployment.'; return; }
