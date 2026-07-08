@@ -14513,6 +14513,12 @@ def _layout(
       panel.hidden = false;
       position();
       poll();
+      // I-6: move focus INTO the panel so a keyboard / screen-reader user
+      // actually enters the notifications (Escape closes it and restores focus
+      // to the bell — handler below). Previously focus stayed on the bell and
+      // Tab walked backwards into the page nav.
+      var _first = panel.querySelector('button, [href], [tabindex]:not([tabindex="-1"])');
+      if (_first) { try { _first.focus(); } catch(e){} }
       window.addEventListener('resize', position, {passive:true});
       window.addEventListener('scroll', position, {passive:true, capture:true});
     } else {
@@ -17006,9 +17012,21 @@ _BULK_ACTIONS_JS = r"""
 _ML_QUICK_ACTION_JS = r"""
 (function(){
   var formatsCache = null;
+  var activeTrigger = null;  // I-8: the trigger to restore focus to on close
   function closeMenus(){
     Array.prototype.slice.call(document.querySelectorAll('.mh-ml-qa-menu')).forEach(function(m){ m.remove(); });
+    Array.prototype.slice.call(document.querySelectorAll('.mh-ml-qa[aria-expanded="true"]'))
+      .forEach(function(t){ t.setAttribute('aria-expanded', 'false'); });
+    activeTrigger = null;
   }
+  // I-8: Escape closes the menu and returns focus to the trigger.
+  document.addEventListener('keydown', function(ev){
+    if (ev.key === 'Escape' && activeTrigger){
+      var t = activeTrigger;
+      closeMenus();
+      try { t.focus(); } catch(e){}
+    }
+  });
   document.addEventListener('click', function(ev){
     var btn = ev.target.closest ? ev.target.closest('.mh-ml-qa') : null;
     if (!btn) {
@@ -17021,12 +17039,16 @@ _ML_QUICK_ACTION_JS = r"""
     if (existing) return; // second click on the same button = toggle closed
     var menu = document.createElement('div');
     menu.className = 'mh-ml-qa-menu';
+    menu.setAttribute('role', 'menu');
+    menu.setAttribute('aria-label', 'Convert format');
     menu.style.cssText = 'position:absolute;z-index:40;margin-top:4px;padding:8px;' +
       'background:var(--panel);border:1px solid var(--border);border-radius:8px;' +
       'display:flex;flex-direction:column;gap:4px;min-width:180px;box-shadow:0 8px 24px rgba(0,0,0,0.35)';
     menu.innerHTML = '<div style="font-size:10px;text-transform:uppercase;letter-spacing:0.5px;color:var(--ink-muted)">Convert to&hellip;</div>';
     if (getComputedStyle(host).position === 'static') host.style.position = 'relative';
     host.appendChild(menu);
+    btn.setAttribute('aria-expanded', 'true');
+    activeTrigger = btn;
     var fill = function(data){
       var fmts = ((data && data.categories && data.categories.image) || []).filter(function(f){
         return (f.accepts || []).indexOf('image') !== -1;
@@ -17042,6 +17064,7 @@ _ML_QUICK_ACTION_JS = r"""
         var b = document.createElement('button');
         b.type = 'button';
         b.className = 'btn ghost';
+        b.setAttribute('role', 'menuitem');
         b.style.cssText = 'font-size:11px;padding:3px 9px;text-align:left';
         b.textContent = f.label;
         b.addEventListener('click', function(){
@@ -17063,13 +17086,23 @@ _ML_QUICK_ACTION_JS = r"""
               });
             }
             return r.json().then(function(j){
-              b.disabled = false;
-              b.textContent = (j && (j.message || j.error)) || 'Conversion failed';
+              // I-8: surface the honest error via a toast too, not only by
+              // rewriting a tiny button label a SR user won't hear.
+              var msg = (j && (j.message || j.error)) || 'Conversion failed';
+              b.disabled = false; b.textContent = f.label;
+              if (window.MH && MH.toast) MH.toast(msg, 'error', 4000); else b.textContent = msg;
             });
-          }).catch(function(){ b.disabled = false; b.textContent = 'Network error'; });
+          }).catch(function(){
+            b.disabled = false; b.textContent = f.label;
+            if (window.MH && MH.toast) MH.toast('Network error — check your connection.', 'error', 4000);
+            else b.textContent = 'Network error';
+          });
         });
         menu.appendChild(b);
       });
+      // I-8: move focus to the first format so a keyboard/SR user enters the menu.
+      var _first = menu.querySelector('button');
+      if (_first) { try { _first.focus(); } catch(e){} }
     };
     if (formatsCache) { fill(formatsCache); return; }
     var fmtHost = document.querySelector('[data-formats-url]');
@@ -46493,6 +46526,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
     <a class="btn ghost" href="{_studio_url}" style="font-size:11px;padding:3px 9px;margin-right:6px" title="Edit this photo with AI — fill, erase, expand, upscale, restyle">&#x2726; Studio</a>
     <a class="btn ghost" href="{_cutout_url}" style="font-size:11px;padding:3px 9px;margin-right:6px" title="See exactly what background removal knocks out">Cut-out</a>
     <button class="btn ghost mh-ml-qa" type="button" data-qa-url="{_qa_url}"
+            aria-haspopup="menu" aria-expanded="false"
             style="font-size:11px;padding:3px 9px;margin-right:6px"
             title="One-click convert — pick a format from the export engine and download the result">&#x21C4; Convert</button>
     <button class="btn danger" type="submit" formaction="{_delete_url}" formnovalidate
