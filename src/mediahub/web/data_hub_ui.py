@@ -203,8 +203,17 @@ def render_index(
 
     jobs_html = ""
     if jobs:
+        # D-20: each job row links to the run's review queue where its cards
+        # landed, so "I just made 24 cards" has a path into reviewing them.
+        def _job_title(j: dict) -> str:
+            rid = (j.get("run_id") or "").strip()
+            title = _h(j["title"])
+            if rid:
+                return f'<a href="{url_for("review", run_id=rid)}">{title}</a>'
+            return title
+
         rows = "".join(
-            f"<tr><td>{_h(j['title'])}</td><td>{_h(j['status'])}</td>"
+            f"<tr><td>{_job_title(j)}</td><td>{_h(j['status'])}</td>"
             f"<td>{j['n_queued']}/{j['n_total']}</td><td>{j['pct']}%</td></tr>"
             for j in jobs[:10]
         )

@@ -57855,7 +57855,18 @@ voice, and queues them for one-click approval.</p>
         jobs = _bulk_store.list_jobs(pid)
         msg = ""
         if request.args.get("msg"):
-            msg = f'<div class="card" style="border-color:var(--mh-success)"><p>{_h(request.args.get("msg"))}</p></div>'
+            # D-20: link straight to the run's review queue where the cards landed.
+            _review_run = (request.args.get("review_run") or "").strip()
+            _review_link = (
+                f'<p style="margin:6px 0 0"><a class="btn" href="{url_for("review", run_id=_review_run)}">'
+                "Review these cards &rarr;</a></p>"
+                if _review_run
+                else ""
+            )
+            msg = (
+                '<div class="card" style="border-color:var(--mh-success)">'
+                f'<p>{_h(request.args.get("msg"))}</p>{_review_link}</div>'
+            )
         if request.args.get("err"):
             msg = f'<div class="card" style="border-color:var(--mh-error)"><p>{_h(request.args.get("err"))}</p></div>'
         body = msg + _ui.render_index(
@@ -58203,10 +58214,15 @@ voice, and queues them for one-click approval.</p>
             return redirect(url_for("data_hub_page", err=str(exc)))
         if is_json:
             return jsonify({"ok": True, "job": job.to_dict()})
+        # D-20: name the human format (not the internal slug) and carry the run
+        # id so the page can offer a direct link to the queued cards — otherwise
+        # "Queued 24 cards" is a dead end with no path into reviewing them.
+        human_format = format_slug.replace("_", " ").replace("-", " ").strip().title()
         return redirect(
             url_for(
                 "data_hub_page",
-                msg=f"Queued {job.n_queued} card(s) for review from {format_slug}.",
+                msg=f"Queued {job.n_queued} card(s) for review from {human_format}.",
+                review_run=job.run_id,
             )
         )
 
