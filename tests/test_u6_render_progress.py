@@ -62,6 +62,9 @@ _RENDER_FUNCS = {
     "regenerateGraphic": "function regenerateGraphic(",
     "mhGen (draft panel)": "function mhGen(panel)",
     "generateReelGrouped": "function generateReelGrouped(",
+    # J-1: the Video Studio's shared background-job helper (render / make-clip /
+    # direct-reel / stabilise all drive the same branded controller through it).
+    "runVideoJob (video studio)": "function runVideoJob(",
 }
 
 
@@ -149,7 +152,8 @@ def test_generic_panel_spinner_removed_from_render_panels():
     # The 24px in-panel spinner markup is gone everywhere (all render panels).
     assert src.count("width:24px;height:24px;border:2px solid") == 0
     # Each upgraded panel now drives the shared controller and gates its result.
-    # 7 = the original six U.6 panels + R1.15's generateReelBatch panel.
+    # Original six U.6 panels + R1.15's generateReelBatch + J-1's runVideoJob
+    # (the Video Studio's shared render/analysis/stabilise progress helper).
     assert src.count("MH.renderProgress(panel") == len(_RENDER_FUNCS)
 
 
