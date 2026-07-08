@@ -701,6 +701,25 @@ input[type=color]:hover { border-color: var(--lane); }
   border-radius: 2px;
 }
 
+/* J-10: "Coming soon" Settings tiles (Auto scheduling, Autonomy) get a visible
+   badge and a muted CTA so the placeholder state reads before the click, rather
+   than looking like a working feature behind "Open →". */
+.mh-template-soon { opacity: 0.72; }
+.mh-template-soon:hover { transform: none; }
+.mh-template-soon .mh-template-cta { color: var(--ink-faint); }
+.mh-template-soon-badge {
+  font-family: var(--font-mono);
+  font-size: var(--fs-9, 11px);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  border-radius: 20px;
+  background: rgba(245, 242, 232, 0.06);
+  color: var(--ink-muted);
+  border: 1px solid var(--hairline);
+}
+
 /* ---------------------------------------------------------------------
    RELATIVE-TIME utility — pairs with the JS in _layout that
    converts ISO timestamps to "5 min ago" / "Tuesday 15:24"
@@ -5209,9 +5228,12 @@ kbd {
   border-radius: 20px;
   padding: 1px 8px;
 }
-.mh-bd-add { margin-bottom: 10px; }
+/* H-21: an input + a visible Add button (Enter alone was the only way to add
+   an idea, invisible on mobile soft keyboards), with a small "press Enter" hint. */
+.mh-bd-add { margin-bottom: 10px; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .mh-bd-add-title {
-  width: 100%;
+  flex: 1 1 120px;
+  min-width: 0;
   font-size: 12.5px;
   padding: 7px 9px;
   border: 1px dashed var(--border);
@@ -5220,6 +5242,18 @@ kbd {
   color: var(--ink);
 }
 .mh-bd-add-title:focus { border-color: var(--accent); outline: none; }
+.mh-bd-add-btn {
+  flex: 0 0 auto;
+  font-size: 12.5px;
+  padding: 7px 12px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--panel);
+  color: var(--ink);
+  cursor: pointer;
+}
+.mh-bd-add-btn:hover { border-color: var(--accent); }
+.mh-bd-add-hint { flex: 1 1 100%; font-size: 11px; color: var(--ink-muted); }
 .mh-bd-cards { display: flex; flex-direction: column; gap: 8px; }
 .mh-bd-card {
   background: var(--bg);

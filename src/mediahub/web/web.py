@@ -18292,22 +18292,54 @@ def _home_signed_in_quick_actions_html() -> str:
 # stay literal and interpolated values are escaped at the call site.
 # ---------------------------------------------------------------------------
 
-_DOCUMENTS_HOME_JS = r"""
-<script>
-async function genDoc(fmt, scope, runId){
-  if(fmt==='meet_programme' && !runId){ alert('Pick a meet first.'); return; }
-  const withAi = confirm('Write the wording with AI?\n\nOK = AI draft · Cancel = build from data only');
-  const j = await _gen(fmt, scope, runId, withAi);
-  if(j.ok){ location.href=j.url; return; }
-  if(j.error==='no_ai'){
-    if(confirm('No AI provider is configured. Build it from your data (no AI wording)?')){
-      const j2 = await _gen(fmt, scope, runId, false);
-      if(j2.ok){ location.href=j2.url; return; }
-      alert(j2.message||j2.error||'Could not generate.');
-    }
-    return;
-  }
-  alert(j.message||j.error||'Could not generate.');
+# D-10: shared editorial-generate helpers — a per-button "Write with AI" toggle
+# (no more OK/Cancel confirm chooser), a busy state on the button, and styled
+# MH.toast errors with plain-English text instead of raw alert() codes.
+_EDITORIAL_GEN_HELPERS = r"""
+function _genMsg(j){
+  var e=(j&&j.error)||'';
+  if(e==='no_ai') return 'No AI provider is configured. Untick "Write with AI" to build from your data.';
+  if(j&&j.message) return j.message;
+  if(e==='generate_failed') return 'Could not generate — please try again.';
+  if(e==='need_two_pdfs') return 'Choose at least two PDFs.';
+  if(e==='bad_format') return 'That type is not available.';
+  if(e==='not_signed_in') return 'Sign in to generate this.';
+  if(e==='unavailable') return 'This feature is not enabled here.';
+  return 'Could not generate.';
+}
+function _genToast(m, kind){ if(window.MH && MH.toast){ MH.toast(m, kind||'error', 4500); } else { alert(m); } }
+function _aiChecked(btn){
+  var card = btn && btn.closest ? btn.closest('.card') : null;
+  var cb = card ? card.querySelector('.mh-ai-toggle') : null;
+  return cb ? !!cb.checked : true;
+}
+function _genBusy(btn, on){
+  if(!btn) return;
+  if(on){ if(!btn.dataset.label) btn.dataset.label = btn.textContent; btn.disabled = true; btn.textContent = 'Generating…'; }
+  else { btn.disabled = false; if(btn.dataset.label) btn.textContent = btn.dataset.label; }
+}
+"""
+
+# D-10: the per-card AI toggle that replaces the ambiguous OK/Cancel confirm.
+_EDITORIAL_AI_CHECKBOX = (
+    '<label class="mh-ai-opt" style="display:flex;align-items:center;gap:6px;'
+    'font-size:12px;margin-top:8px;color:var(--ink-muted)">'
+    '<input type="checkbox" class="mh-ai-toggle" checked> Write the wording with AI</label>'
+)
+
+_DOCUMENTS_HOME_JS = (
+    "<script>\n"
+    + _EDITORIAL_GEN_HELPERS
+    + r"""
+async function genDoc(btn, fmt, scope, runId){
+  if(fmt==='meet_programme' && !runId){ _genToast('Pick a meet first.'); return; }
+  _genBusy(btn, true);
+  try{
+    const j = await _gen(fmt, scope, runId, _aiChecked(btn));
+    if(j.ok){ location.href=j.url; return; }
+    _genToast(_genMsg(j));
+  }catch(e){ _genToast('Network error — nothing was created.'); }
+  finally{ _genBusy(btn, false); }
 }
 async function _gen(fmt, scope, runId, withAi){
   const r = await fetch('__GEN_URL__', {method:'POST', headers:{'Content-Type':'application/json'},
@@ -18316,31 +18348,32 @@ async function _gen(fmt, scope, runId, withAi){
 }
 async function importDoc(){
   const f=document.getElementById('imp-file').files[0];
-  if(!f){ alert('Choose a file.'); return; }
+  if(!f){ _genToast('Choose a file.'); return; }
   const fd=new FormData(); fd.append('file', f);
   const r=await fetch('__IMPORT_URL__', {method:'POST', body:fd}); const j=await r.json();
-  if(j.ok){ location.href=j.url; } else { alert(j.detail||j.error||'Import failed.'); }
+  if(j.ok){ location.href=j.url; } else { _genToast(j.detail||j.message||j.error||'Import failed.'); }
 }
 async function mergePdfs(){
   const fs=document.getElementById('merge-files').files;
-  if(fs.length<2){ alert('Choose at least two PDFs.'); return; }
+  if(fs.length<2){ _genToast('Choose at least two PDFs.'); return; }
   const fd=new FormData(); for(const f of fs) fd.append('files', f);
   await _download('__MERGE_URL__', fd, 'merged.pdf');
 }
 async function imagesToPdf(){
   const fs=document.getElementById('img-files').files;
-  if(!fs.length){ alert('Choose images.'); return; }
+  if(!fs.length){ _genToast('Choose images.'); return; }
   const fd=new FormData(); for(const f of fs) fd.append('files', f);
   await _download('__IMG_URL__', fd, 'images.pdf');
 }
 async function _download(url, fd, name){
   const r=await fetch(url,{method:'POST',body:fd});
-  if(!r.ok){ const j=await r.json().catch(()=>({})); alert(j.detail||j.error||'Failed.'); return; }
+  if(!r.ok){ const j=await r.json().catch(()=>({})); _genToast(j.detail||j.message||j.error||'Failed.'); return; }
   const blob=await r.blob(); const a=document.createElement('a');
   a.href=URL.createObjectURL(blob); a.download=name; a.click();
 }
 </script>
 """
+)
 
 _DOCUMENT_VIEW_JS = r"""
 <script>
@@ -18360,22 +18393,20 @@ async function delDoc(){
 </script>
 """
 
-_NEWSLETTERS_HOME_JS = r"""
-<script>
-async function genNl(fmt){
-  const range=document.getElementById('nl-range').value;
-  const withAi = confirm('Write the intro with AI in your club voice?\n\nOK = AI draft · Cancel = build from data only');
-  const j = await _genNl(fmt, range, withAi);
-  if(j.ok){ location.href=j.url; return; }
-  if(j.error==='no_ai'){
-    if(confirm('No AI provider is configured. Build it from your approved content (plain intro)?')){
-      const j2 = await _genNl(fmt, range, false);
-      if(j2.ok){ location.href=j2.url; return; }
-      alert(j2.message||j2.error||'Could not generate.');
-    }
-    return;
-  }
-  alert(j.message||j.error||'Could not generate.');
+_NEWSLETTERS_HOME_JS = (
+    "<script>\n"
+    + _EDITORIAL_GEN_HELPERS
+    + r"""
+async function genNl(btn, fmt){
+  var rangeEl=document.getElementById('nl-range');
+  var range=rangeEl?rangeEl.value:'';
+  _genBusy(btn, true);
+  try{
+    const j = await _genNl(fmt, range, _aiChecked(btn));
+    if(j.ok){ location.href=j.url; return; }
+    _genToast(_genMsg(j));
+  }catch(e){ _genToast('Network error — nothing was created.'); }
+  finally{ _genBusy(btn, false); }
 }
 async function _genNl(fmt, range, withAi){
   const r = await fetch('__GEN_URL__', {method:'POST', headers:{'Content-Type':'application/json'},
@@ -18384,6 +18415,7 @@ async function _genNl(fmt, range, withAi){
 }
 </script>
 """
+)
 
 _NEWSLETTER_VIEW_JS = r"""
 <script>
@@ -18431,6 +18463,9 @@ _DOC_PRESENT_CONSOLE = r"""
       <span id="pos" class="dim"></span>
       <span id="cstat" class="dim" role="status" aria-live="polite" style="color:var(--warn)"></span>
       <span id="timer" class="dim" style="margin-left:auto;font-variant-numeric:tabular-nums"></span>
+      <!-- J-13: a clean "that's a wrap" so closing the laptop tab doesn't strand
+           the projector on the last slide for the full 6-hour session TTL. -->
+      <button id="end-pres" class="btn secondary" onclick="endPres()" style="border-color:var(--danger,#c0392b);color:var(--danger,#c0392b)">End presentation</button>
     </div>
     <p class="dim" style="font-size:12px;margin-top:6px">Keys: ← / → move, B blackout.</p>
   </div>
@@ -18461,6 +18496,15 @@ async function act(a){
   poll();
 }
 function fmtT(s){ const m=Math.floor(s/60), ss=s%60; return m+':'+String(ss).padStart(2,'0'); }
+// J-13: end the talk cleanly from the console (the remote had this; the driving
+// laptop did not), then return the presenter to the document.
+async function endPres(){
+  if(!confirm('End the presentation for everyone? The audience view will show that the talk has ended.')) return;
+  var btn=document.getElementById('end-pres'); if(btn){ btn.disabled=true; btn.textContent='Ending…'; }
+  try{ await fetch('__ACTION_URL__',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'end'})}); }
+  catch(e){}
+  location.href='__DOC_URL__';
+}
 async function poll(){
   try{
     const r=await fetch('__STATE_URL__'); const s=await r.json();
@@ -18496,9 +18540,9 @@ _DOC_PRESENT_AUDIENCE = r"""<!doctype html><html lang="en"><head><meta charset="
 <div id="black"></div><div id="ended">Presentation ended</div>
 <script>
 const TOTAL=__TOTAL__, BASE='__SLIDE_URL__';
-let cur=-1, ver='', autoplay=false, apTimer=null, apIdx=0;
+let cur=-1, ver='', autoplay=false, apTimer=null, apIdx=0, apMs=8000;
 function show(i,v){ document.getElementById('slide').src=BASE+'/'+i+'.png?v='+(v||''); }
-function startAuto(){ if(apTimer) return; apTimer=setInterval(function(){ apIdx=(apIdx+1)%TOTAL; show(apIdx,ver); }, 6000); }
+function startAuto(){ if(apTimer) return; apTimer=setInterval(function(){ apIdx=(apIdx+1)%TOTAL; show(apIdx,ver); }, apMs); }
 function stopAuto(){ if(apTimer){ clearInterval(apTimer); apTimer=null; } }
 async function poll(){
   try{
@@ -18506,6 +18550,10 @@ async function poll(){
     if(s.ended){ document.getElementById('ended').style.display='flex'; document.getElementById('wrap').style.display='none'; return; }
     document.getElementById('black').style.display=s.blackout?'block':'none';
     const newVer=s.spec_version||ver;
+    // G-13: advance on the session's configured cadence, not a hardcoded 6s;
+    // if the operator retimes the deck live, restart the running timer.
+    var newMs=Math.max(1, Number(s.autoplay_seconds)||8)*1000;
+    if(newMs!==apMs){ apMs=newMs; if(autoplay){ stopAuto(); startAuto(); } }
     if(autoplay!==!!s.autoplay){ autoplay=!!s.autoplay; if(autoplay){ apIdx=s.current||0; startAuto(); } else { stopAuto(); } }
     if(!autoplay && (s.current!==cur || newVer!==ver)){ cur=s.current; show(cur,newVer); }
     ver=newVer;
@@ -18560,6 +18608,28 @@ function setPos(s){ document.getElementById('pos').textContent=(s.current+1)+' /
 async function poll(){ try{ const r=await fetch('__STATE_URL__'); const s=await r.json(); if(s.ended){ showEnded(); return; } setPos(s); rstat(''); }catch(e){ rstat('Reconnecting…'); } }
 setInterval(poll,1500); poll();
 </script></body></html>"""
+
+
+# E-6 / E-7: client-side confirms for the two irreversible /athletes actions.
+# Merge reads the selected option text (which carries each swimmer's race count)
+# so the confirm names both swimmers and their histories; enforcement only
+# confirms in the destructive (turn-ON) direction, using a server-computed
+# impact string stashed in the form's data-msg.
+_ATHLETES_CONFIRM_JS = r"""
+<script>
+function athMergeConfirm(f){
+  var keep=f.keep_id, mrg=f.merge_id;
+  if(!keep||!mrg||keep.value===mrg.value){ return true; }
+  var kText=keep.options[keep.selectedIndex].text;
+  var mText=mrg.options[mrg.selectedIndex].text;
+  return confirm('Merge '+mText+' into '+kText+'?\n\nTheir entire race histories fuse into one swimmer. This sticks for every future upload and cannot be undone.');
+}
+function athEnforceConfirm(f){
+  if(f.getAttribute('data-enforcing')!=='1'){ return true; }
+  return confirm(f.getAttribute('data-msg')||'Turn consent enforcement on?');
+}
+</script>
+"""
 
 
 def create_app() -> Flask:
@@ -29224,17 +29294,28 @@ self.addEventListener('fetch', function(e){
         """Render the Settings landing — a grid of heading cards."""
         is_dev = _auth.is_dev_operator()
         signed_in = bool(_active_profile_id())
+        # J-10: these two tiles lead only to a "Coming soon" placeholder — badge
+        # them and mute the CTA so the state reads before the click, instead of
+        # the same "Open →" weight as a working feature.
+        soon_sections = {
+            url_for("settings_section", section="scheduling"),
+            url_for("settings_section", section="autonomy"),
+        }
         tiles = ""
         for title, desc, icon_key, href in _settings_card_specs(is_dev, signed_in):
             icon = _SETTINGS_ICONS.get(icon_key, "")
+            soon = href in soon_sections
+            badge = '<span class="mh-template-soon-badge">Coming soon</span>' if soon else ""
+            cta = "Coming soon" if soon else "Open"
             tiles += (
-                f'<a href="{href}" class="mh-template mh-glow-border">'
+                f'<a href="{href}" class="mh-template mh-glow-border{" mh-template-soon" if soon else ""}">'
                 f'<div class="mh-template-icon">{icon}</div>'
                 '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:var(--sp-1)">'
                 f'<h2 style="margin:0">{_h(title)}</h2>'
+                f"{badge}"
                 "</div>"
                 f"<p>{_h(desc)}</p>"
-                '<span class="mh-template-cta">Open</span>'
+                f'<span class="mh-template-cta">{cta}</span>'
                 "</a>"
             )
         body = (
@@ -32043,7 +32124,13 @@ document.addEventListener('click', function (e) {{
             if pv is not None:
                 frames += _channel_frame_html(card, pv)
         if not frames:
-            frames = '<p class="dim">This draft has no cards to preview yet.</p>'
+            # J-7: don't strand the user on a dead empty state — mirror the
+            # ad-variants page and link back to the draft to add/regenerate cards.
+            frames = (
+                '<p class="dim">This draft has no cards to preview yet. '
+                f'<a href="{url_for("stub_pack_view", pack_id=pack_id)}" style="text-decoration:underline">'
+                "Add or regenerate cards</a> first.</p>"
+            )
 
         title = _h(rec.get("title") or "Draft")
         body = f"""
@@ -32293,6 +32380,8 @@ document.addEventListener('click', function (e) {{
                 '<div class="mh-bd-add">'
                 f'<input type="text" class="mh-bd-add-title" placeholder="New idea…" '
                 f"onkeydown=\"if(event.key==='Enter')mhBoardAdd(this)\"/>"
+                '<button type="button" class="mh-bd-add-btn" onclick="mhBoardAdd(this)">Add</button>'
+                '<span class="mh-bd-add-hint">or press Enter to add</span>'
                 "</div>"
                 if col == "idea"
                 else ""
@@ -32337,8 +32426,13 @@ function mhBoardPost(url, payload, ok) {{
       ok ? ok(j) : window.location.reload();
     }}).catch(function(){{ mhBoardStatus('Could not update.', true); }});
 }}
-function mhBoardAdd(inp) {{
-  var t = inp.value.trim(); if (!t) return;
+function mhBoardAdd(el) {{
+  // H-21: called from the input (Enter) or the Add button — resolve the input
+  // either way, and tell the user why nothing happened on an empty title.
+  var box = el.closest ? el.closest('.mh-bd-add') : null;
+  var inp = box ? box.querySelector('.mh-bd-add-title') : el;
+  var t = (inp && inp.value ? inp.value : '').trim();
+  if (!t) {{ mhBoardStatus('Type an idea first, then press Add.', true); if (inp) inp.focus(); return; }}
   mhBoardPost(MH_BD.add, {{title: t}});
 }}
 function mhBoardDelete(btn) {{ mhBoardPost(MH_BD.del, {{card_id: btn.dataset.card}}); }}
@@ -34392,6 +34486,18 @@ function mhAnDigest(btn) {{
             for t, m in _SP_TONE_META.items()
         )
 
+        # H-23: with nothing approved, "Build spotlight post" 400s on a full page
+        # and loses the tone selection. Disable the button and surface the
+        # already-present helper line as the reason; the server check stays as a
+        # fallback for the (rare) approve-elsewhere race.
+        _sp_has_approved = bool(_approved_ras)
+        _sp_build_attr = "" if _sp_has_approved else " disabled"
+        _sp_build_title = (
+            "Build the post from the approved achievements"
+            if _sp_has_approved
+            else "Approve at least one achievement below to build the post"
+        )
+
         # UI2.2: the hero athlete avatar + tooltip. Standalone, so it's
         # keyboard-reachable (focusable) and exposes the same grounded summary
         # to assistive tech via aria-label. Club + haul come from the run and
@@ -34436,7 +34542,7 @@ function mhAnDigest(btn) {{
     <form method="post" action="{url_for("spotlight_build", run_id=run_id, swimmer_key=swimmer_key)}" style="display:inline-flex;gap:8px;align-items:center;flex-wrap:wrap"
           data-loader-text="Composing the spotlight post">
       <select name="tone" style="font-size:12px;max-width:220px" title="Caption tone for the spotlight post">{_sp_tone_opts}</select>
-      <button type="submit" class="btn" style="font-size:13px">Build spotlight post from approved cards &rarr;</button>
+      <button type="submit" class="btn"{_sp_build_attr} title="{_h(_sp_build_title)}" style="font-size:13px">Build spotlight post from approved cards &rarr;</button>
     </form>
     <a class="btn secondary" href="{_pack_url}" style="font-size:13px">Open content builder &rarr;</a>
     <span class="muted" style="font-size:12px">Approve the achievements below to choose which go into the post.</span>
@@ -52687,12 +52793,16 @@ ever appear; queued, edited and rejected cards never do.</p>
   </div>
 </div>"""
 
-        claim_html = ""
+        # G-15: a signed-in visitor already has an account, so show one CTA —
+        # claim this preview into their workspace — not the signup button plus a
+        # near-identical claim button. Anonymous visitors see only the signup CTA.
         if _active_profile() is not None:
-            claim_html = f"""
+            cta_html = f"""
   <form method="post" action="{url_for("try_demo_claim", run_id=run_id)}" style="margin:0">
-    <button type="submit" class="btn secondary">Keep this preview in my workspace</button>
+    <button type="submit" class="btn">Keep this preview in my workspace &rarr;</button>
   </form>"""
+        else:
+            cta_html = f'<a class="btn" href="{url_for("signup_page")}">Sign up — keep your preview &rarr;</a>'
         inner = f"""
 <h1 style="margin-bottom:4px">Your top {len(cards)} card{"s" if len(cards) != 1 else ""}</h1>
 <p class="dim" style="margin-bottom:20px;max-width:640px">Watermarked preview — the real
@@ -52700,8 +52810,7 @@ product renders these in your club's colours with your logo, generates captions 
 voice, and queues them for one-click approval.</p>
 {sections}
 <div class="card" style="display:flex;gap:14px;align-items:center;flex-wrap:wrap">
-  <a class="btn" href="{url_for("signup_page")}">Sign up — keep your preview &rarr;</a>
-  {claim_html}
+  {cta_html}
   <span class="dim" style="font-size:12px">Demo runs are deleted within 24 hours.</span>
 </div>"""
         return _try_page(inner, title="Your preview")
@@ -56569,14 +56678,54 @@ voice, and queues them for one-click approval.</p>
             f"WebP: <strong>{'yes' if st['webp_encode'] else 'no'}</strong> · "
             f"AVIF: <strong>{'yes' if st['avif_encode'] else 'no'}</strong></p>"
         )
+        # J-5: this hub used to send users to a "meet's review page" to bulk-export
+        # — but the bulk-export tool lives at /export/<run_id>. List the profile's
+        # recent results linking straight there, and fix the misdirecting copy.
+        prof = _active_profile()
+        recent_html = ""
+        if prof is not None:
+            rrows = []
+            try:
+                conn = _db()
+                try:
+                    rrows = conn.execute(
+                        "SELECT id, meet_name FROM runs "
+                        "WHERE profile_id = ? AND status = 'done' "
+                        "ORDER BY created_at DESC LIMIT 8",
+                        (prof.profile_id,),
+                    ).fetchall()
+                finally:
+                    conn.close()
+            except Exception:
+                rrows = []
+            if rrows:
+                items = "".join(
+                    f'<li style="margin:6px 0"><a href="{url_for("export_run_tool_page", run_id=r["id"])}">'
+                    f"{_h(r['meet_name'] or 'Untitled results')} &rarr;</a></li>"
+                    for r in rrows
+                )
+                recent_html = (
+                    '<section class="panel" style="margin-bottom:var(--sp-4)">'
+                    "<h2>Bulk-export your recent results</h2>"
+                    '<p class="muted">Open the export tool for a set of results — pick formats, '
+                    "run it, and download or share the whole pack.</p>"
+                    f'<ul style="list-style:none;padding:0;margin:0">{items}</ul></section>'
+                )
+        if not recent_html:
+            recent_html = (
+                '<section class="panel" style="margin-bottom:var(--sp-4)">'
+                "<h2>Bulk-export a content pack</h2>"
+                '<p class="muted">Once you\'ve processed a set of results, its Content builder '
+                'has an "Export ZIP" that bulk-exports the whole pack in these formats. '
+                f'<a href="{url_for("home")}">Start with your results &rarr;</a></p></section>'
+            )
         body = (
             '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-8);padding-bottom:var(--sp-6)">'
             '<span class="mh-hero-eyebrow">Export &amp; convert</span>'
             '<h1>Export <em class="editorial">anything</em>, your way.</h1>'
             '<p class="lede">Every card, reel, document and photo can leave MediaHub in the '
-            "format you need — with quality, size and transparency options. Open a meet's "
-            "review page to bulk-export its content pack.</p>"
-            f"{engines}</section>" + "".join(sections)
+            "format you need — with quality, size and transparency options.</p>"
+            f"{engines}</section>" + recent_html + "".join(sections)
         )
         return _layout("Export & convert", body)
 
@@ -60563,6 +60712,24 @@ voice, and queues them for one-click approval.</p>
             "behave as before. Import your consent register (or switch enforcement "
             "on) and unknown athletes become most-restricted automatically.</p>"
         )
+        # E-7: turning enforcement ON blocks every athlete with no consent on file
+        # club-wide. Show the impact ("N of M would be blocked") and confirm before
+        # enabling; switching it off needs no confirm (it only unblocks).
+        _no_consent = sum(
+            1
+            for rec in roster
+            if ((consent.get(rec.athlete_id) or {}).get("level") or "unknown") == "unknown"
+        )
+        _enf_msg = (
+            f"Turn consent enforcement on? {_no_consent} of {len(roster)} athletes have no "
+            "consent on file and would be blocked from all content until you record their "
+            "permission. You can switch it back off, but content built while it is on is blocked."
+        )
+        _enf_attrs = (
+            ' onsubmit="return athEnforceConfirm(this)" data-enforcing="0"'
+            if regime
+            else f' onsubmit="return athEnforceConfirm(this)" data-enforcing="1" data-msg="{_h(_enf_msg)}"'
+        )
         body = f"""
 <section class="mh-hero" style="padding-top:var(--sp-7);padding-bottom:var(--sp-4)">
   <span class="mh-hero-eyebrow">Club data &middot; Athletes</span>
@@ -60574,7 +60741,7 @@ voice, and queues them for one-click approval.</p>
 {msg_html}
 <div class="card" style="margin-bottom:16px">{regime_note}
   <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px">
-    <form method="POST" action="{url_for("athletes_action")}">
+    <form method="POST" action="{url_for("athletes_action")}"{_enf_attrs}>
       <input type="hidden" name="action" value="toggle_enforce"/>
       <button type="submit" class="btn secondary">{"Switch enforcement off" if regime else "Switch enforcement on"}</button>
     </form>
@@ -60597,13 +60764,13 @@ voice, and queues them for one-click approval.</p>
   <p class="dim" style="font-size:13px">Results files spell names differently
   ("Maya Patel" / "Patel, Maya"). Merge them and the decision sticks for every
   future upload. Merges are recorded in the audit log.</p>
-  <form method="POST" action="{url_for("athletes_action")}" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+  <form method="POST" action="{url_for("athletes_action")}" onsubmit="return athMergeConfirm(this)" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
     <input type="hidden" name="action" value="merge"/>
     <label>Keep</label><select name="keep_id">{merge_opts}</select>
     <label>absorbs</label><select name="merge_id">{merge_opts}</select>
     <button type="submit" class="btn">Merge</button>
   </form>
-</div>
+</div>{_ATHLETES_CONFIRM_JS}
 <div class="card">
   <h2 style="margin-top:0">Import the consent register (.csv)</h2>
   <p class="dim" style="font-size:13px">One row per athlete:
@@ -61675,7 +61842,10 @@ voice, and queues them for one-click approval.</p>
             return (
                 '<div class="card"><h3 style="margin-top:0">' + name + "</h3>"
                 '<p class="dim" style="font-size:13px">' + desc + "</p>"
-                '<button class="btn" style="margin-top:8px" onclick="genNl(\'' + fmt + "')\">"
+                '<label class="mh-ai-opt" style="display:flex;align-items:center;gap:6px;'
+                'font-size:12px;margin-top:8px;color:var(--ink-muted)">'
+                '<input type="checkbox" class="mh-ai-toggle" checked> Write the intro with AI</label>'
+                '<button class="btn" style="margin-top:8px" onclick="genNl(this,\'' + fmt + "')\">"
                 "Generate</button></div>"
             )
 
@@ -62171,21 +62341,25 @@ voice, and queues them for one-click approval.</p>
             '<div class="card"><h3 style="margin-top:0">Meet programme</h3>'
             '<p class="dim" style="font-size:13px">A gala-night programme/recap from one meet.</p>'
             f'<select id="prog-run" class="input">{run_opts}</select>'
-            '<button class="btn" style="margin-top:8px" '
-            "onclick=\"genDoc('meet_programme','meet',document.getElementById('prog-run').value)\">"
+            + _EDITORIAL_AI_CHECKBOX
+            + '<button class="btn" style="margin-top:8px" '
+            "onclick=\"genDoc(this,'meet_programme','meet',document.getElementById('prog-run').value)\">"
             "Generate</button></div>"
             # season report (season scope)
             '<div class="card"><h3 style="margin-top:0">Season report</h3>'
             '<p class="dim" style="font-size:13px">The committee report from your whole season.</p>'
-            "<button class=\"btn\" onclick=\"genDoc('season_report','season')\">Generate</button></div>"
+            + _EDITORIAL_AI_CHECKBOX
+            + "<button class=\"btn\" onclick=\"genDoc(this,'season_report','season')\">Generate</button></div>"
             # sponsor proposal
             '<div class="card"><h3 style="margin-top:0">Sponsor proposal</h3>'
             '<p class="dim" style="font-size:13px">A sponsorship pitch with your reach and packages.</p>'
-            "<button class=\"btn\" onclick=\"genDoc('sponsor_proposal','season')\">Generate</button></div>"
+            + _EDITORIAL_AI_CHECKBOX
+            + "<button class=\"btn\" onclick=\"genDoc(this,'sponsor_proposal','season')\">Generate</button></div>"
             # AGM deck
             '<div class="card"><h3 style="margin-top:0">AGM deck</h3>'
             '<p class="dim" style="font-size:13px">The year in review, ready to present.</p>'
-            "<button class=\"btn\" onclick=\"genDoc('agm_deck','season')\">Generate</button></div>"
+            + _EDITORIAL_AI_CHECKBOX
+            + "<button class=\"btn\" onclick=\"genDoc(this,'agm_deck','season')\">Generate</button></div>"
             "</div>"
             # tools row
             '<h2 style="margin-top:28px">PDF tools</h2>'
@@ -62621,6 +62795,7 @@ voice, and queues them for one-click approval.</p>
             .replace("__STATE_URL__", url_for("api_present_state", session_id=session.session_id))
             .replace("__ACTION_URL__", url_for("api_present_action", session_id=session.session_id))
             .replace("__AUDIENCE_URL__", url_for("present_audience", session_id=session.session_id))
+            .replace("__DOC_URL__", url_for("document_view", doc_id=doc_id))
             .replace("__REMOTE_URL__", _h(remote_url))
             .replace("__NOTES__", notes)
             .replace("__TITLES__", titles)
@@ -62735,13 +62910,33 @@ voice, and queues them for one-click approval.</p>
         code = (request.args.get("code") or "").strip().upper()
         if code:
             return redirect(url_for("remote_control", code=code))
+        # H-22: validate the code client-side (exactly 6 chars from the
+        # unambiguous alphabet) so a typo never navigates to /remote/<code>,
+        # fails the lookup, and burns a shared-NAT failure attempt for the venue.
         body = (
             '<div class="card" style="max-width:380px;margin:40px auto;text-align:center">'
             '<h2>Slide remote</h2><p class="dim">Enter the 6-character code shown on the presenter screen.</p>'
             '<input id="code" class="input" maxlength="6" autocapitalize="characters" '
+            'oninput="rgClean()" onkeydown="if(event.key===\'Enter\')rgGo()" '
             'style="text-transform:uppercase;font-size:24px;text-align:center;letter-spacing:4px" placeholder="ABC123">'
-            '<button class="btn" style="margin-top:12px;width:100%" '
-            "onclick=\"location.href='/remote/'+document.getElementById('code').value.toUpperCase()\">Connect</button></div>"
+            '<button id="rgo" class="btn" style="margin-top:12px;width:100%" disabled '
+            'onclick="rgGo()">Connect</button>'
+            '<p id="rghint" class="dim" style="font-size:12px;margin-top:8px;min-height:16px"></p>'
+            "<script>"
+            "var RG=/^[A-HJKMNP-Z2-9]{6}$/;"
+            "function rgClean(){"
+            "var i=document.getElementById('code');"
+            "var v=i.value.toUpperCase().replace(/[^A-HJKMNP-Z2-9]/g,'');"
+            "if(v!==i.value){i.value=v;}"
+            "document.getElementById('rgo').disabled=!RG.test(v);"
+            "document.getElementById('rghint').textContent=(v.length>0&&v.length<6)?(v.length+' of 6 characters'):'';"
+            "}"
+            "function rgGo(){"
+            "var v=(document.getElementById('code').value||'').toUpperCase();"
+            "if(!RG.test(v)){document.getElementById('rghint').textContent='Enter all 6 characters from the presenter screen.';return;}"
+            "location.href='/remote/'+v;"
+            "}"
+            "</script></div>"
         )
         return _layout("Slide remote", body, active="create")
 
