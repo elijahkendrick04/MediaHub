@@ -18465,7 +18465,7 @@ _DOC_PRESENT_CONSOLE = r"""
       <span id="timer" class="dim" style="margin-left:auto;font-variant-numeric:tabular-nums"></span>
       <!-- J-13: a clean "that's a wrap" so closing the laptop tab doesn't strand
            the projector on the last slide for the full 6-hour session TTL. -->
-      <button id="end-pres" class="btn secondary" onclick="endPres()" style="border-color:var(--danger,#c0392b);color:var(--danger,#c0392b)">End presentation</button>
+      <button id="end-pres" class="btn secondary" onclick="endPres()" style="border-color:var(--bad);color:var(--bad)">End presentation</button>
     </div>
     <p class="dim" style="font-size:12px;margin-top:6px">Keys: ← / → move, B blackout.</p>
   </div>
