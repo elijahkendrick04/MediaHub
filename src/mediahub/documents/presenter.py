@@ -128,9 +128,7 @@ def get_session(session_id: str) -> Optional[PresenterSession]:
     return s
 
 
-def get_by_pairing_code(
-    code: str, *, include_ended: bool = False
-) -> Optional[PresenterSession]:
+def get_by_pairing_code(code: str, *, include_ended: bool = False) -> Optional[PresenterSession]:
     """Resolve a live session by its pairing code.
 
     ``include_ended=True`` also returns a session whose talk has ended (but not

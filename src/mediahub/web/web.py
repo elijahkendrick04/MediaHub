@@ -57341,7 +57341,9 @@ voice, and queues them for one-click approval.</p>
             "else if(window.MH&&MH.toast)MH.toast(j.reason||j.detail||'Could not create','error',3000);})"
             ".catch(function(){});}\n"
             "function mhDeleteCollection(id){"
-            "var go=function(){fetch('" + url_for("api_collections") + "/'+encodeURIComponent(id),{method:'POST',"
+            "var go=function(){fetch('"
+            + url_for("api_collections")
+            + "/'+encodeURIComponent(id),{method:'POST',"
             "headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'delete'})})"
             ".then(function(r){return r.json();}).then(function(){location.reload();}).catch(function(){});};"
             "if(window.MH&&MH.confirm){MH.confirm({title:'Delete this collection?',"
@@ -62301,9 +62303,7 @@ voice, and queues them for one-click approval.</p>
         _ver = spec_version(spec)
         session = _pres.get_live_for(doc_id, pid)
         if session is None:
-            session = _pres.create_session(
-                doc_id, len(spec.sections), owner=pid, spec_version=_ver
-            )
+            session = _pres.create_session(doc_id, len(spec.sections), owner=pid, spec_version=_ver)
         else:
             # Reflect any edit to the deck since the session started (bumps the
             # version only when the content actually changed, so an unchanged
