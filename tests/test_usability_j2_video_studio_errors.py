@@ -34,8 +34,12 @@ def test_shared_error_toast_helper_exists():
 
 def test_render_and_clip_and_reel_have_catch_handlers():
     js = _studio_js()
-    # renderProject re-enables the button and toasts rather than sticking on "Rendering...".
-    assert "the render may still be running; reload to check" in js
+    # renderProject now runs as a background job (J-1) via the shared runVideoJob
+    # helper; its failure path re-enables the button (restore) and surfaces the
+    # error via vsToast + an inline panel instead of sticking on "Rendering...".
+    assert "function runVideoJob(" in js
+    assert "Network error: " in js  # the outer job-POST .catch
+    assert "btn.disabled=false" in js  # restore() re-enables the render button
     # make-clip and reel-direct clear their stuck status lines on failure.
     assert "the analysis may still be running" in js
     assert "the director may still be watching" in js
@@ -92,4 +96,5 @@ def test_studio_page_renders_error_handling(client):
         pytest.skip("V8 media engine not enabled in this environment")
     html = c.get("/video").get_data(as_text=True)
     assert "function vsToast(m)" in html
-    assert "the render may still be running; reload to check" in html
+    # J-1: the render error handling now lives in the background-job helper.
+    assert "function runVideoJob(" in html

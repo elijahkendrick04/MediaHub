@@ -12233,6 +12233,10 @@ _VIDEO_STUDIO_HTML = """
           + '<span class="muted" style="font-size:12px">'+esc(p.format)+' &middot; '+p.clips+' clip(s) &middot; '+fmtDur(p.duration_ms)+'</span>'
           + enhanceRow
           + '<div class="row"><button class="btn ghost vs-edit" data-id="'+esc(p.id)+'">Edit timeline</button>'+renderBtn+approveBtn+exportBtn+'</div>'
+          // J-1: a dedicated mount for the branded render/stabilise progress panel
+          // (MH.renderProgress replaces its innerHTML, so it must be its own child,
+          // never the whole tile which holds the edit/render/approve/export buttons).
+          + '<div class="vs-render-panel" data-id="'+esc(p.id)+'" hidden></div>'
           + '<span class="muted vs-enh-status" data-id="'+esc(p.id)+'" style="font-size:12px"></span></div>';
       }).join('');
       Array.prototype.forEach.call(wrap.querySelectorAll('.vs-edit'), function(b){ b.addEventListener('click', function(){ openEditor(b.getAttribute('data-id')); }); });
@@ -12253,12 +12257,51 @@ _VIDEO_STUDIO_HTML = """
       else { if(st){ st.textContent = 'Failed: '+(j.message||j.error||'error'); } }
     }).catch(function(){ if(btn){ btn.disabled = false; } if(st){ st.textContent = 'Network error — try again.'; } });
   }
+  // J-1: render on a background job the client polls, showing the branded
+  // MH.renderProgress panel — a 30-90s synchronous render held one connection
+  // open, which proxies kill, so the button "did nothing". POST returns 202
+  // {job_id, poll_url}; on completion the tile rebuilds and flips to the preview.
+  function runVideoJob(id, btn, jobUrl, opts){
+    var panel = document.querySelector('.'+opts.panelClass+'[data-id="'+id+'"]');
+    if(!panel){ if(btn){ btn.disabled=true; } jpost(jobUrl, {}); return; }
+    panel.hidden = false;
+    var origLabel = btn ? btn.textContent : '';
+    if(btn){ btn.disabled = true; btn.textContent = opts.busyLabel; }
+    var prog = MH.renderProgress(panel, {label: opts.label, sub: opts.sub, expectedMs: opts.expectedMs, accent: 'medal'});
+    var restore = function(){ if(btn){ btn.disabled=false; btn.textContent=origLabel||opts.idleLabel; } };
+    var fail = function(msg){
+      prog.stop(); restore();
+      panel.hidden = false;
+      panel.innerHTML = '<div style="padding:10px;color:var(--bad);font-size:13px">'+esc(opts.errLabel)+': '+esc(msg)+'</div>';
+      vsToast(msg);
+    };
+    var done = function(){ prog.complete(function(){ restore(); loadProjects(); }); };
+    fetch(jobUrl, {method:'POST', headers:{'Content-Type':'application/json','X-CSRF-Token':CSRF,'Accept':'application/json'}, body:'{}'})
+      .then(function(r){ return r.json().then(function(j){ return {status:r.status, body:j}; }); })
+      .then(function(res){
+        if(res.status !== 202 || !res.body || !res.body.poll_url){
+          fail((res.body && (res.body.user_message || res.body.message || res.body.error)) || 'could not start'); return;
+        }
+        var tries = 0;
+        var poll = function(){
+          tries++;
+          if(tries > 100){ fail('timed out waiting — reload to check'); return; }
+          fetch(res.body.poll_url).then(function(r){ return r.json(); }).then(function(j){
+            if(j.status === 'done'){ done(); return; }
+            if(j.status === 'error' || (j.error && j.status !== 'running')){ fail(j.user_message || j.error || 'failed'); return; }
+            setTimeout(poll, 3000);
+          }).catch(function(){ setTimeout(poll, 3000); });
+        };
+        setTimeout(poll, 3000);
+      })
+      .catch(function(err){ fail('Network error: ' + err); });
+  }
   function renderProject(id, btn){
-    if(btn){ btn.disabled = true; btn.textContent = 'Rendering...'; }
-    jpost(url(RENDER_TMPL, id), {}).then(function(j){
-      if(!j.ok && j.message){ vsToast(j.message); }
-      loadProjects();
-    }).catch(function(){ if(btn){ btn.disabled = false; btn.textContent = 'Render'; } vsToast('Network error — the render may still be running; reload to check.'); });
+    runVideoJob(id, btn, url(RENDER_TMPL, id) + '-job', {
+      panelClass: 'vs-render-panel', busyLabel: 'Rendering…', idleLabel: 'Render',
+      label: 'Rendering your clip', sub: 'First render can take up to 90 seconds; repeats are instant',
+      expectedMs: 60000, errLabel: 'Render error'
+    });
   }
   function approveProject(id){
     // M26 — the approve dialog lists each source clip's permission state so
@@ -55827,6 +55870,11 @@ voice, and queues them for one-click approval.</p>
             "motion",
             "render-all",
             "describe",
+            # J-1: the Video Studio's async operations poll this same route.
+            "video-render",
+            "video-clip",
+            "video-reel",
+            "video-stabilize",
         ):
             return jsonify({"error": "job_not_found"}), 404
         if (job.get("owner_pid") or "") != (_active_profile_id() or ""):
@@ -55855,6 +55903,14 @@ voice, and queues them for one-click approval.</p>
             payload["done"] = int(job.get("done") or 0)
             payload["current"] = str(job.get("current") or "")
             payload["errors"] = job.get("errors") or {}
+        # J-1: the Video Studio analysis/stabilise jobs hand back a project id
+        # (and the stabilise job the updated project) instead of a video_url,
+        # since no MP4 exists until a separate render-job runs. Single-format
+        # pollers ignore these keys, so nothing else changes.
+        if job.get("project_id"):
+            payload["project_id"] = job.get("project_id")
+        if job.get("project") is not None:
+            payload["project"] = job.get("project")
         return jsonify(payload)
 
     @app.route("/api/runs/<run_id>/reel-file", methods=["GET"])
@@ -58733,6 +58789,98 @@ voice, and queues them for one-click approval.</p>
                 "end_card": "appended" if not end_card_note else "skipped",
                 **({"end_card_note": end_card_note} if end_card_note else {}),
             }
+        )
+
+    @app.route("/api/video/projects/<project_id>/render-job", methods=["POST"])
+    def api_video_project_render_job(project_id: str):
+        """J-1: the async twin of api_video_project_render.
+
+        A 30-90s render held one HTTP connection open, which reverse proxies
+        kill — the button then "did nothing". This returns 202 {job_id,
+        poll_url} immediately and renders on a background thread the client
+        polls via api_reel_job_status (the same disk-backed job store the reel/
+        motion routes use). The three fail-fast gates (tenant / consent /
+        engine) and the end-card fold stay in the request thread so a blocked
+        source never spawns a doomed job; the rendered MP4 lands at the same
+        address the unchanged api_video_project_file already serves, so a cache
+        hit for an unchanged EDL is still sub-second.
+        """
+        store = _video_project_store()
+        proj = store.get(project_id)
+        if not _video_can_access_project(proj):
+            return jsonify({"error": "not_found"}), 404
+        from mediahub.video.render import VideoEngineUnavailable
+        from mediahub.video.render import available as _render_available
+        from mediahub.video.render import render_edl
+
+        _blocked = _project_blocked_source(proj)
+        if _blocked:
+            return jsonify(_blocked), 403
+        if not _render_available():
+            return jsonify(
+                {
+                    "error": "engine_unavailable",
+                    "message": "The video render engine (FFmpeg + renderer) isn't "
+                    "available on this deployment.",
+                }
+            ), 503
+        # Fold the club end-card in the request thread (a COPY of the timeline),
+        # exactly like the sync route, so the worker renders byte-identical input
+        # and the content-cache key matches — never proj.edl raw.
+        from mediahub.video.end_card import append_end_card
+
+        render_edl_input, _end_card_note = append_end_card(proj.edl, _video_brand_kit())
+        out_path = _video_render_dir(project_id) / f"{proj.format_name}.mp4"
+        file_url = url_for("api_video_project_file", project_id=project_id)
+
+        job_id = uuid.uuid4().hex
+        job: dict = {
+            "id": job_id,
+            "kind": "video-render",
+            "status": "running",
+            "error": "",
+            "user_message": "",
+            "video_url": "",
+            "created_at": time.time(),
+            "owner_pid": _active_profile_id() or "",
+        }
+        _variant_jobs_gc()
+        _variant_job_save(job)
+
+        def _worker() -> None:
+            try:
+                with _job_heartbeat(job):
+                    with _render_slot("video", project_id, timeout=_RENDER_TRY_TIMEOUT):
+                        render_edl(render_edl_input, out_path)
+                if not Path(out_path).exists():
+                    raise RuntimeError("mp4 missing after render")
+                job["status"] = "done"
+                job["video_url"] = file_url
+            except _RenderBusy:
+                job["status"] = "error"
+                job["error"] = "renderer_busy"
+                job["user_message"] = (
+                    "Another video is rendering right now — try again in a minute."
+                )
+            except VideoEngineUnavailable as e:
+                job["status"] = "error"
+                job["error"] = "engine_unavailable"
+                job["user_message"] = str(e)
+            except Exception as e:
+                job["status"] = "error"
+                job["error"] = str(e)[:200]
+            _variant_job_save(job)
+
+        threading.Thread(target=_worker, name=f"vidrender-{job_id[:8]}", daemon=True).start()
+        return (
+            jsonify(
+                {
+                    "ok": True,
+                    "job_id": job_id,
+                    "poll_url": url_for("api_reel_job_status", job_id=job_id),
+                }
+            ),
+            202,
         )
 
     @app.route("/api/video/projects/<project_id>/approve", methods=["POST"])
