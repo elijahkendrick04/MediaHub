@@ -711,6 +711,21 @@ class Tester:
         links = self._extract_links(html) if status and status < 400 else []
         return status, html, links
 
+    def _onerror_image_srcs(self) -> set[str]:
+        """Resolved ``src`` URLs of ``<img>`` elements that declare an ``onerror``
+        fallback on the current page. A 404 on such an image is an intentional,
+        client-handled degradation (the logo chip that swaps to org initials on
+        load failure), not a broken asset — so it must not be flagged as a
+        ``network_error`` (#884). Best-effort: any DOM/query failure yields an
+        empty set, so genuinely broken images are still caught."""
+        try:
+            srcs = self.page.eval_on_selector_all(
+                "img[onerror]", "els => els.map(e => e.src).filter(Boolean)"
+            )
+            return set(srcs or [])
+        except Exception:
+            return set()
+
     def _evaluate(self, route: str, url: str, label: str, status: int | None,
                   html: str, new_log: str, from_link: bool) -> None:
         is_500_page = 'data-lane="500"' in html
@@ -778,7 +793,16 @@ class Tester:
                 evidence=msg, repro=[f"Open {url}", "Open devtools console"]), shoot=False)
 
         # 6) failed same-origin network requests (assets / xhr)
+        # An <img> that 404s but declares an onerror fallback is a deliberately
+        # handled degradation, not a broken asset — MediaHub's logo chip serves a
+        # keyed-silhouette 404 on purpose so the img's onerror swaps in the org's
+        # initials. Flagging that as a network_error is a false positive (#884), so
+        # skip image failures whose element wired an onerror handler. A truly broken
+        # image (no onerror) is still flagged.
+        _handled_img_srcs = self._onerror_image_srcs()
         for fr in self.col.failed:
+            if fr.get("type") == "image" and fr.get("url") in _handled_img_srcs:
+                continue
             st = fr.get("status")
             sev = "high" if (isinstance(st, int) and st >= 500) else "medium"
             self._add(Finding(

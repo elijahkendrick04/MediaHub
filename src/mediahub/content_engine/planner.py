@@ -452,10 +452,16 @@ def _sanitise_org(org_id: str) -> str:
     return s[:120]
 
 
-def _plans_dir(org_id: str, data_dir: Optional[Path] = None) -> Path:
+def _plans_dir(org_id: str, data_dir: Optional[Path] = None, *, create: bool = True) -> Path:
     base = Path(data_dir) if data_dir is not None else Path(os.environ.get("DATA_DIR", "."))
     d = base / "content_plans" / _sanitise_org(org_id)
-    d.mkdir(parents=True, exist_ok=True)
+    # Only the WRITE path creates the directory. The read path must never mkdir:
+    # a mkdir OSError (disk full, a permissions fault, a path component that is a
+    # file) would escape load_latest_plan *before* its try/except and 500 the
+    # /plan and /api/plan/latest routes (#1066/#1067). A missing directory simply
+    # means "never planned", which loads honestly as None.
+    if create:
+        d.mkdir(parents=True, exist_ok=True)
     return d
 
 
@@ -472,10 +478,13 @@ def save_plan(plan: ContentPlan, *, data_dir: Optional[Path] = None) -> Path:
 
 def load_latest_plan(org_id: str, *, data_dir: Optional[Path] = None) -> Optional[dict]:
     """The org's most recent plan as a dict, or None when never planned."""
-    path = _plans_dir(org_id, data_dir) / "latest.json"
-    if not path.exists():
-        return None
+    path = _plans_dir(org_id, data_dir, create=False) / "latest.json"
     try:
+        # ``exists()`` is inside the guard on purpose: on an existing-but-locked
+        # path it can itself raise OSError (EACCES/EROFS) on some Python versions,
+        # which would otherwise escape and 500 the route.
+        if not path.exists():
+            return None
         raw = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         # Any unreadable/undecodable file degrades to "never planned". ValueError

@@ -39028,14 +39028,25 @@ what you're doing, what they should do.</p>
                 None,
             )
             if _first:
-                _chip_src = url_for(
-                    "organisation_logo_serve",
-                    profile_id=p.profile_id,
-                    logo_id=_first.get("logo_id"),
-                    bg=1,
-                    chip=1,
-                )
-                _chip_tone = logos_mod.logo_chip_tone(p.profile_id, _first.get("logo_id"))
+                _lid = _first.get("logo_id")
+                # Only emit the logo <img> when its keyed silhouette actually
+                # renders. logo_bg_silhouette_path() returns None for a missing or
+                # un-keyable upload — the SAME None that makes the ?bg=1&chip=1 serve
+                # route 404. Previously the picker always emitted the <img> and leaned
+                # on that 404 + the img's onerror to swap in the initials; the 404
+                # still tripped the autotest crawler's "image sub-request failed"
+                # check (#884). Emitting no <img> for an un-keyable logo shows the
+                # initials with zero failed sub-requests. The silhouette is cached and
+                # logo_chip_tone computes it too, so this adds no real cost.
+                if logos_mod.logo_bg_silhouette_path(p.profile_id, _lid):
+                    _chip_src = url_for(
+                        "organisation_logo_serve",
+                        profile_id=p.profile_id,
+                        logo_id=_lid,
+                        bg=1,
+                        chip=1,
+                    )
+                    _chip_tone = logos_mod.logo_chip_tone(p.profile_id, _lid)
             else:
                 _cap = (getattr(p, "brand_logo_url", "") or "").strip()
                 if _cap.startswith("http://") or _cap.startswith("https://"):
