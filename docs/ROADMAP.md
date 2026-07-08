@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-07-08 · `56e31a34a` · Usability audit — Theme F complete, Theme I complete, D feedback/error states (#1085)
+**Last updated:** 2026-07-08 · `4c552809e` · chore(gitignore): ignore src/mediahub/dsr_exports runtime SAR snapshots (#1087)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1228,6 +1228,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-07-08 | `423b8ce54` | chore(gitignore): ignore src/mediahub/dsr_exports runtime SAR snapshots |
 | 2026-07-08 | `3b64973b8` | fix: address pre-merge adversarial review (F-9 undercount, D-17 dead banner, F-4 dead code) |
 | 2026-07-08 | `588251f24` | docs(audit): mark shipped findings + add implementation-status matrix |
 | 2026-07-08 | `b31f5b86c` | fix(charts): intent-labelled exports + JS blob download with SVG fallback (D-33) |
@@ -1239,5 +1240,4 @@ list and the auto table below, not here.
 | 2026-07-08 | `7ebbf1867` | test: update export-loader guard for F-5's broadened native-submit branch |
 | 2026-07-08 | `df939de03` | fix(brand): colour pickers + font/tone dropdowns for the kit editor (F-10) |
 | 2026-07-08 | `202631d7a` | fix(export): live quality readout + plain-English format hints (F-11) |
-| 2026-07-08 | `967c0c579` | fix(consent): lead consent & rights UI with plain English, demote GDPR articles (F-8) |
 <!-- /ROADMAP:ACTIVITY -->
