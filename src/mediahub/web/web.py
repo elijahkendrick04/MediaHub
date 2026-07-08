@@ -28873,7 +28873,7 @@ self.addEventListener('fetch', function(e){
     }
     _AUDIO_UPLOAD_MAX_BYTES = 25 * 1024 * 1024  # 25 MB — clips/beds, not albums
 
-    def _audio_back_or_json(payload: dict, status: int = 200):
+    def _audio_back_or_json(payload: dict, status: int = 200, *, flash_status: str = ""):
         from flask import request as _req
 
         wants_json = (
@@ -28882,6 +28882,11 @@ self.addEventListener('fetch', function(e){
         )
         if wants_json:
             return jsonify(payload), status
+        # D-7: a form POST navigates back to the audio settings; carry a status
+        # so the section can confirm the action ("Track added" / "Track removed")
+        # instead of a silent redirect the volunteer can't tell worked.
+        if flash_status:
+            return redirect(url_for("settings_section", section="audio", status=flash_status))
         return redirect(url_for("settings_section", section="audio"))
 
     @app.route("/api/audio/library")
@@ -29050,8 +29055,50 @@ self.addEventListener('fetch', function(e){
                 "asset": rec.to_dict(),
                 "duplicate": check.is_duplicate,
                 "fingerprint_method": check.fingerprint.method,
-            }
+            },
+            flash_status="audio_added",
         )
+
+    @app.route("/api/audio/upload/<asset_id>")
+    def api_audio_upload_file(asset_id):
+        """D-7: serve one of the active org's own uploaded audio files for
+        in-browser preview. Tenant-scoped by the rights ledger's profile_id —
+        an id owned by another org 404s (no IDOR), and the filename resolves to
+        a basename inside the org's own directory (no path traversal)."""
+        from flask import send_file
+
+        from mediahub.audio import rights as _rights
+
+        pid = _active_profile_id()
+        if not pid:
+            abort(404)
+        rec = _rights.RightsLedger().get(asset_id)
+        if rec is None or rec.profile_id != pid:
+            abort(404)
+        path = DATA_DIR / "audio_uploads" / pid / Path(rec.filename).name
+        if not path.is_file():
+            abort(404)
+        return send_file(str(path))
+
+    @app.route("/api/audio/upload/<asset_id>/delete", methods=["POST"])
+    def api_audio_upload_delete(asset_id):
+        """D-7: remove one of the active org's own uploaded audio files and its
+        rights-ledger row. Tenant-scoped exactly like the preview route."""
+        from mediahub.audio import rights as _rights
+
+        pid = _active_profile_id()
+        if not pid:
+            return _audio_back_or_json({"error": "no_org"}, 403)
+        led = _rights.RightsLedger()
+        rec = led.get(asset_id)
+        if rec is None or rec.profile_id != pid:
+            return _audio_back_or_json({"error": "not_found"}, 404)
+        try:
+            (DATA_DIR / "audio_uploads" / pid / Path(rec.filename).name).unlink(missing_ok=True)
+        except OSError:
+            pass
+        led.delete(asset_id)
+        return _audio_back_or_json({"ok": True}, flash_status="audio_removed")
 
     @app.route("/api/audio/voice-consent", methods=["GET", "POST"])
     def api_audio_voice_consent():
@@ -29237,6 +29284,62 @@ self.addEventListener('fetch', function(e){
         else:
             upload_html = ""
 
+        # --- Your uploaded audio (D-7: list + preview + remove) ---
+        uploads_html = ""
+        if pid:
+            from mediahub.audio import rights as _rights
+
+            up_rows = ""
+            for rec in _rights.RightsLedger().list_for_profile(pid):
+                fpath = DATA_DIR / "audio_uploads" / pid / Path(rec.filename).name
+                if not fpath.is_file():
+                    continue  # a ledger row whose file is gone (cleaned/removed) — skip
+                src = url_for("api_audio_upload_file", asset_id=rec.asset_id)
+                lic = _h(rec.licence.name or "operator-supplied")
+                when = _h((rec.attested_at or "")[:10])
+                del_url = url_for("api_audio_upload_delete", asset_id=rec.asset_id)
+                up_rows += (
+                    '<div class="card" style="padding:12px 14px;display:flex;align-items:center;'
+                    'gap:12px;flex-wrap:wrap">'
+                    f'<div style="flex:1;min-width:180px"><strong>{_h(rec.filename)}</strong>'
+                    f'<div class="dim" style="font-size:12px">{lic}'
+                    f'{(" · " + when) if when else ""}</div></div>'
+                    f'<audio controls preload="none" src="{src}" style="height:34px"></audio>'
+                    f'<form method="post" action="{del_url}" style="margin:0" '
+                    "onsubmit=\"return confirm('Remove this uploaded track?')\">"
+                    '<button class="btn btn-ghost" style="padding:4px 10px">Remove</button>'
+                    "</form></div>"
+                )
+            if up_rows:
+                uploads_html = (
+                    '<h2 style="font-size:18px;margin:28px 0 6px">Your uploaded audio</h2>'
+                    '<p class="dim" style="margin:0 0 12px">Tracks you\'ve added for this '
+                    "organisation — preview or remove them here.</p>"
+                    f'<div style="display:grid;gap:8px">{up_rows}</div>'
+                )
+            else:
+                uploads_html = (
+                    '<h2 style="font-size:18px;margin:28px 0 6px">Your uploaded audio</h2>'
+                    '<p class="dim" style="margin:0 0 12px">No uploads yet — add a track above '
+                    "and it'll appear here to preview or remove.</p>"
+                )
+
+        # D-7: confirm the upload/remove that a form POST just performed, so the
+        # volunteer sees it worked instead of a silent redirect.
+        _audio_flash = (request.args.get("status") or "").strip()
+        banner_html = ""
+        if _audio_flash == "audio_added":
+            banner_html = (
+                '<div class="card" style="border-left:2px solid var(--good);margin-bottom:14px">'
+                '<strong style="color:var(--good)">Track added.</strong> '
+                'It\'s listed under "Your uploaded audio" below.</div>'
+            )
+        elif _audio_flash == "audio_removed":
+            banner_html = (
+                '<div class="card" style="border-left:2px solid var(--warn);margin-bottom:14px">'
+                "Track removed.</div>"
+            )
+
         # --- Voice consent (cloning / changer; off by default) ---
         if pid:
             store = ConsentStore()
@@ -29303,12 +29406,14 @@ self.addEventListener('fetch', function(e){
 
         return (
             '<div style="max-width:760px">'
-            '<p class="lede" style="margin-top:0">Sound for your videos — music, effects and '
+            + banner_html
+            + '<p class="lede" style="margin-top:0">Sound for your videos — music, effects and '
             "voiceover — all rights-clean and explainable.</p>"
             + library_html
             + voices_html
             + lexicon_html
             + upload_html
+            + uploads_html
             + consent_html
             + (recorder_js if pid else "")
             + "</div>"
