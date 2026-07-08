@@ -49017,9 +49017,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             + _ML_MOCKUP_MODAL
             + "<script>"
             + (
-                _ML_MOCKUP_PICKER_JS.replace(
-                    "__TEMPLATES_URL__", url_for("api_mockup_templates")
-                )
+                _ML_MOCKUP_PICKER_JS.replace("__TEMPLATES_URL__", url_for("api_mockup_templates"))
                 .replace(
                     "__MOCKUP_TMPL__",
                     url_for("api_media_library_mockup", asset_id="__AID__", template="__T__"),
@@ -49535,9 +49533,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             + _ML_MOCKUP_MODAL
             + "<script>"
             + (
-                _ML_MOCKUP_PICKER_JS.replace(
-                    "__TEMPLATES_URL__", url_for("api_mockup_templates")
-                )
+                _ML_MOCKUP_PICKER_JS.replace("__TEMPLATES_URL__", url_for("api_mockup_templates"))
                 .replace(
                     "__MOCKUP_TMPL__",
                     url_for("api_media_library_mockup", asset_id="__AID__", template="__T__"),
@@ -57601,7 +57597,9 @@ voice, and queues them for one-click approval.</p>
                 for r in runs:
                     if r["id"] in present:
                         continue
-                    opts += f'<option value="{_h(r["id"])}">{_h(r["meet_name"] or r["id"])}</option>'
+                    opts += (
+                        f'<option value="{_h(r["id"])}">{_h(r["meet_name"] or r["id"])}</option>'
+                    )
             except Exception:
                 opts = ""
             opts = opts or '<option value="">No processed meets to add</option>'
@@ -57610,7 +57608,7 @@ voice, and queues them for one-click approval.</p>
                 'gap:8px;flex-wrap:wrap;align-items:center">'
                 '<label for="mh-col-add" style="margin:0">Add a meet</label>'
                 '<select id="mh-col-add" style="flex:1;min-width:200px;padding:8px 10px;'
-                'border:1px solid var(--border);border-radius:6px;background:rgba(255,255,255,0.04);'
+                "border:1px solid var(--border);border-radius:6px;background:rgba(255,255,255,0.04);"
                 f'color:inherit">{opts}</select>'
                 '<button class="btn" onclick="mhColAdd()">Add</button></div>'
             )
@@ -57619,10 +57617,7 @@ voice, and queues them for one-click approval.</p>
             f'<div class="strap" style="margin-bottom:var(--sp-2)">'
             f'<a href="{url_for("collections_page")}" style="color:var(--ink-muted);'
             'text-decoration:none">&larr; All collections</a></div>'
-            f"<h1>{_h(name)}</h1>"
-            + picker
-            + f'<div id="mh-col-items">{rows}</div>'
-            + "<script>\n"
+            f"<h1>{_h(name)}</h1>" + picker + f'<div id="mh-col-items">{rows}</div>' + "<script>\n"
             f"var COL_URL='{detail_url}';\n"
             "function mhColAdd(){var s=document.getElementById('mh-col-add');"
             "if(!s||!s.value)return;"
