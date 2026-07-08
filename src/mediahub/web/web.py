@@ -49907,9 +49907,17 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                 "</form></td></tr>"
             )
         if not rows:
+            # D-34: a designed empty state (art + headline + guidance), not a
+            # bare grey table line, on the first-run moment.
             rows = (
-                '<tr><td colspan="5" class="dim" style="padding:16px">No sponsors yet. '
-                "Add one below &mdash; its slot then rotates across your cards automatically.</td></tr>"
+                '<tr><td colspan="5" style="padding:0">'
+                + _empty_state(
+                    art="inbox",
+                    headline="No sponsors yet",
+                    sub="Add your first sponsor below &mdash; its slot then rotates across your "
+                    "cards automatically.",
+                )
+                + "</td></tr>"
             )
 
         tier_opts = "".join(
@@ -55554,7 +55562,13 @@ voice, and queues them for one-click approval.</p>
                 )
                 + "</div>"
             )
-        rows = rows or '<p class="lede">No collections yet — create one to group your meets.</p>'
+        # D-34: a designed empty state instead of a bare grey line.
+        rows = rows or _empty_state(
+            art="inbox",
+            headline="No collections yet",
+            sub="Group related meets and packs &mdash; a season, a championship, a sponsor "
+            "campaign &mdash; into one place.",
+        )
         create_html = ""
         if can_edit:
             create_html = (
