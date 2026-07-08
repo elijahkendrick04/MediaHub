@@ -26445,7 +26445,9 @@ Relay team broke club record"></textarea>
             if r.under_18 is True:
                 extra.append("under 18")
             if r.restricted:
-                extra.append("<strong>RESTRICTED (Art 18)</strong>")
+                extra.append(
+                    '<strong title="UK GDPR Art 18 — processing restricted">' "Paused</strong>"
+                )
             rows.append(
                 f"<tr><td>{_h(r.athlete_name)}</td><td>{status_tag}</td>"
                 f"<td>{', '.join(extra) or '—'}</td><td class='muted'>{_h(r.note[:160])}</td>"
@@ -26476,20 +26478,21 @@ Relay team broke club record"></textarea>
 <div class="card">
   <h2>Lawful basis &amp; gating mode</h2>
   <form method="post" action="{url_for("org_consent_settings")}">
-    <label>Lawful basis for publication<br>
+    <label>Why you're allowed to post about your athletes<br>
       <select name="lawful_basis_publication">
         <option value=""{_sel("", profile.lawful_basis_publication)}>— not recorded —</option>
-        <option value="consent"{_sel("consent", profile.lawful_basis_publication)}>Consent (Art 6(1)(a))</option>
-        <option value="legitimate_interests"{_sel("legitimate_interests", profile.lawful_basis_publication)}>Legitimate interests (Art 6(1)(f))</option>
-        <option value="other"{_sel("other", profile.lawful_basis_publication)}>Other (see notes)</option>
+        <option value="consent"{_sel("consent", profile.lawful_basis_publication)}>They (or a parent) said yes</option>
+        <option value="legitimate_interests"{_sel("legitimate_interests", profile.lawful_basis_publication)}>We have a good reason to (reporting club results)</option>
+        <option value="other"{_sel("other", profile.lawful_basis_publication)}>Other — explain in notes below</option>
       </select>
-    </label><br>
-    <label>Lawful basis for PB-history enrichment<br>
+    </label>
+    <small class="muted" style="display:block;margin:-4px 0 10px">In legal terms: "said yes" = consent (UK GDPR Art&nbsp;6(1)(a)); "good reason" = legitimate interests (Art&nbsp;6(1)(f)).</small>
+    <label>Why you're allowed to look up their PB history<br>
       <select name="lawful_basis_enrichment">
         <option value=""{_sel("", profile.lawful_basis_enrichment)}>— not recorded —</option>
-        <option value="consent"{_sel("consent", profile.lawful_basis_enrichment)}>Consent (Art 6(1)(a))</option>
-        <option value="legitimate_interests"{_sel("legitimate_interests", profile.lawful_basis_enrichment)}>Legitimate interests (Art 6(1)(f))</option>
-        <option value="other"{_sel("other", profile.lawful_basis_enrichment)}>Other (see notes)</option>
+        <option value="consent"{_sel("consent", profile.lawful_basis_enrichment)}>They (or a parent) said yes</option>
+        <option value="legitimate_interests"{_sel("legitimate_interests", profile.lawful_basis_enrichment)}>We have a good reason to (reporting club results)</option>
+        <option value="other"{_sel("other", profile.lawful_basis_enrichment)}>Other — explain in notes below</option>
       </select>
     </label><br>
     <label><input type="checkbox" name="pb_enrichment_enabled" value="1"{" checked" if profile.pb_enrichment_enabled else ""}> Fetch PB history from public rankings (requires telling athletes/parents — Art 14 notice template in docs/compliance/templates/)</label><br>
@@ -26542,7 +26545,7 @@ Relay team broke club record"></textarea>
     </label><br>
     <label><input type="checkbox" name="parental" value="1"> Given by a parent/guardian</label>
     <label><input type="checkbox" name="under_18" value="1"> Athlete is under 18</label>
-    <label><input type="checkbox" name="restricted" value="1"> Restrict processing (Art 18)</label><br>
+    <label title="UK GDPR Art 18 — restriction of processing"><input type="checkbox" name="restricted" value="1"> Pause all use of their data <span class="muted">(Art&nbsp;18)</span></label><br>
     <label>Note (how/when consent was collected)<br><input type="text" name="note" maxlength="1000"></label><br>
     <button class="btn" type="submit">Save record</button>
   </form>
@@ -26762,20 +26765,21 @@ Relay team broke club record"></textarea>
 <section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">
   <span class="mh-hero-eyebrow">Privacy &amp; data</span>
   <h1>Athlete <em class="editorial">rights.</em></h1>
-  <p class="lede">When an athlete or parent asks to see, fix, restrict or erase their data, log it here — the due date and the stop-the-clock rules (Article 12A) are tracked for you, and the actions reach every store on this deployment.</p>
+  <p class="lede">When an athlete or parent asks to see, fix, restrict or erase their data, log it here — the deadline (and any time you spend waiting on them for ID) is tracked for you, and the actions reach every store on this deployment.</p>
 </section>
 <div class="card">
   <h2>Log a request</h2>
   <form method="post" action="{url_for("org_dsr_open")}">
     <label>Athlete name<br><input type="text" name="athlete_name" maxlength="200" required></label><br>
-    <label>Request type<br>
+    <label>What did they ask for?<br>
       <select name="request_type">
-        <option value="access">Access — export everything we hold (SAR)</option>
-        <option value="rectification">Rectification — correct their name</option>
-        <option value="erasure">Erasure — delete them everywhere</option>
-        <option value="restriction">Restriction — pause processing (Art 18)</option>
+        <option value="access" title="Subject access request (SAR) — UK GDPR Art 15">See everything we hold about them</option>
+        <option value="rectification" title="UK GDPR Art 16 — rectification">Correct their name</option>
+        <option value="erasure" title="UK GDPR Art 17 — erasure / right to be forgotten">Delete them everywhere</option>
+        <option value="restriction" title="UK GDPR Art 18 — restriction">Pause all use of their data</option>
       </select>
-    </label><br>
+    </label>
+    <small class="muted" style="display:block;margin:-4px 0 10px">These are the UK GDPR rights (access, rectification, erasure, restriction) — you don't need to know the article numbers.</small>
     <label>Note<br><input type="text" name="note" maxlength="1000"></label><br>
     <button class="btn" type="submit">Log request</button>
   </form>
