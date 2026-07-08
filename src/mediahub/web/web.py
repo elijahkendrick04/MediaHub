@@ -20944,6 +20944,10 @@ def create_app() -> Flask:
             f"<span>{n_meets:,} {'meet' if n_meets == 1 else 'meets'}</span>"
             '<span class="sep">&middot;</span>'
             f'<span><a href="{url_for("activity_page")}">View as activity log &rarr;</a></span>'
+            '<span class="sep">&middot;</span>'
+            # C-9 — a discoverable entry into Collections (folders grouping meets),
+            # previously reachable only by typing the URL.
+            f'<span><a href="{url_for("collections_page")}">Collections &rarr;</a></span>'
             f"{clear_all_html}"
             "</div></section>"
         )
@@ -57447,19 +57451,24 @@ voice, and queues them for one-click approval.</p>
         can_edit = _perms.can_edit(_active_role(pid))
         rows = ""
         for c in cols:
+            # C-9 — the name links into the collection so it's no longer a
+            # look-don't-touch row; the detail page lists contents and fills it.
+            _detail = url_for("collection_detail_page", collection_id=c["id"])
             rows += (
                 '<div class="card" style="padding:12px 16px;margin-bottom:10px;display:flex;'
                 'justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">'
-                f"<div><strong>{_h(c['name'])}</strong>"
+                f'<div><a href="{_detail}" style="text-decoration:none"><strong>{_h(c["name"])}</strong></a>'
                 f'<span style="color:var(--ink-muted);font-size:12px;margin-left:8px">'
                 f"{c['count']} item{'s' if c['count'] != 1 else ''}</span></div>"
+                '<div style="display:flex;gap:8px">'
+                f'<a class="btn secondary" style="font-size:12px;padding:4px 10px" href="{_detail}">Open</a>'
                 + (
                     f'<button class="btn secondary" style="font-size:12px;padding:4px 10px" '
                     f"onclick=\"mhDeleteCollection('{c['id']}')\">Delete</button>"
                     if can_edit
                     else ""
                 )
-                + "</div>"
+                + "</div></div>"
             )
         # D-34: a designed empty state instead of a bare grey line.
         rows = rows or _empty_state(
@@ -57505,6 +57514,131 @@ voice, and queues them for one-click approval.</p>
             "</script>"
         )
         return _layout("Collections", body, active="settings")
+
+    @app.route("/collections/<collection_id>")
+    def collection_detail_page(collection_id: str):
+        """C-9 — a collection's contents, with a picker to actually fill it.
+
+        Previously collections could be created but never filled (no
+        'add to collection' action anywhere), so every one stayed at 0 items.
+        This lists the collection's meets (resolved to names, linking into
+        review) and offers a meet picker to add/remove — the fillable path the
+        feature was missing."""
+        pid = _active_profile_id()
+        if not pid:
+            return redirect(url_for("sign_in_page"))
+        from mediahub.collab import collections as _col
+
+        items = _col.list_items(pid, collection_id)
+        if items is None:  # not this org's collection (or gone)
+            return _recovery_page(
+                "Collection not found",
+                "It may have been deleted, or it belongs to another organisation.",
+                primary_cta=("All collections", url_for("collections_page")),
+            )
+        name = next(
+            (c["name"] for c in _col.list_collections(pid) if c["id"] == collection_id),
+            "Collection",
+        )
+        can_edit = _perms.can_edit(_active_role(pid))
+        # Resolve run items to a meet name + review link via the org-scoped runs
+        # table (WHERE profile_id = pid is the tenant boundary, so a run id from
+        # another org — or a deleted run — resolves to nothing and shows as its
+        # raw id, still removable, never linked/leaked).
+        run_names: dict = {}
+        run_ids = [it["item_id"] for it in items if it["item_type"] == "run"]
+        if run_ids:
+            try:
+                conn = _db()
+                qmarks = ",".join("?" for _ in run_ids)
+                for r in conn.execute(
+                    f"SELECT id, meet_name FROM runs WHERE profile_id = ? AND id IN ({qmarks})",
+                    (pid, *run_ids),
+                ).fetchall():
+                    run_names[r["id"]] = r["meet_name"] or r["id"]
+                conn.close()
+            except Exception:
+                run_names = {}
+        rows = ""
+        for it in items:
+            iid = it["item_id"]
+            label, link = iid, None
+            if it["item_type"] == "run" and iid in run_names:
+                label = run_names[iid]
+                link = url_for("review", run_id=iid)
+            label_html = (
+                f'<a href="{link}">{_h(label)}</a>' if link else f"<span>{_h(label)}</span>"
+            )
+            remove_btn = (
+                f'<button class="btn secondary" style="font-size:12px;padding:4px 10px" '
+                f"onclick=\"mhColRemove('{_h(it['item_type'])}','{_h(iid)}')\">Remove</button>"
+                if can_edit
+                else ""
+            )
+            rows += (
+                '<div class="card" style="padding:10px 14px;margin-bottom:8px;display:flex;'
+                'justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">'
+                f'<div><span class="tag" style="font-size:10px;margin-right:8px">'
+                f'{_h(it["item_type"])}</span>{label_html}</div>{remove_btn}</div>'
+            )
+        rows = rows or (
+            '<p class="dim" style="margin:var(--sp-4) 0">Nothing in this collection yet — '
+            "add a meet below.</p>"
+        )
+        # Meet picker: this org's processed meets, minus ones already in.
+        present = {it["item_id"] for it in items if it["item_type"] == "run"}
+        picker = ""
+        if can_edit:
+            opts = ""
+            try:
+                conn = _db()
+                runs = conn.execute(
+                    "SELECT id, meet_name FROM runs WHERE profile_id = ? AND status = 'done' "
+                    "ORDER BY created_at DESC LIMIT 100",
+                    (pid,),
+                ).fetchall()
+                conn.close()
+                for r in runs:
+                    if r["id"] in present:
+                        continue
+                    opts += f'<option value="{_h(r["id"])}">{_h(r["meet_name"] or r["id"])}</option>'
+            except Exception:
+                opts = ""
+            opts = opts or '<option value="">No processed meets to add</option>'
+            picker = (
+                '<div class="card" style="padding:12px 16px;margin:var(--sp-4) 0;display:flex;'
+                'gap:8px;flex-wrap:wrap;align-items:center">'
+                '<label for="mh-col-add" style="margin:0">Add a meet</label>'
+                '<select id="mh-col-add" style="flex:1;min-width:200px;padding:8px 10px;'
+                'border:1px solid var(--border);border-radius:6px;background:rgba(255,255,255,0.04);'
+                f'color:inherit">{opts}</select>'
+                '<button class="btn" onclick="mhColAdd()">Add</button></div>'
+            )
+        detail_url = url_for("api_collection_detail", collection_id=collection_id)
+        body = (
+            f'<div class="strap" style="margin-bottom:var(--sp-2)">'
+            f'<a href="{url_for("collections_page")}" style="color:var(--ink-muted);'
+            'text-decoration:none">&larr; All collections</a></div>'
+            f"<h1>{_h(name)}</h1>"
+            + picker
+            + f'<div id="mh-col-items">{rows}</div>'
+            + "<script>\n"
+            f"var COL_URL='{detail_url}';\n"
+            "function mhColAdd(){var s=document.getElementById('mh-col-add');"
+            "if(!s||!s.value)return;"
+            "fetch(COL_URL,{method:'POST',headers:{'Content-Type':'application/json'},"
+            "body:JSON.stringify({action:'add_item',item_type:'run',item_id:s.value})})"
+            ".then(function(r){return r.json();}).then(function(j){if(j.ok)location.reload();"
+            "else if(window.MH&&MH.toast)MH.toast(j.detail||j.error||'Could not add','error',3000);})"
+            ".catch(function(){if(window.MH&&MH.toast)MH.toast('Network error','error',3000);});}\n"
+            "function mhColRemove(t,id){"
+            "fetch(COL_URL,{method:'POST',headers:{'Content-Type':'application/json'},"
+            "body:JSON.stringify({action:'remove_item',item_type:t,item_id:id})})"
+            ".then(function(r){return r.json();}).then(function(){location.reload();})"
+            ".catch(function(){if(window.MH&&MH.toast)MH.toast('Network error','error',3000);});}\n"
+            "</script>"
+        )
+        return _layout(name + " — collection", body, active="settings")
 
     # =====================================================================
     # Video suite (roadmap 1.6) — the footage path
