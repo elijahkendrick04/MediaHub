@@ -31378,11 +31378,55 @@ function mhAnDigest(btn) {{
         event = (ach.get("event") or "").strip()
         slug = re.sub(r"[^A-Za-z0-9]+", "-", f"{swimmer} {event}").strip("-").lower() or "card"
 
-        # Caption text from the caller (preferred — preserves edits)
-        # or fall back to the achievement headline.
-        caption = (
-            request.args.get("caption") or ach.get("headline") or f"{swimmer} — {event}"
-        ).strip()
+        # Caption text. Priority (E-3):
+        #   1. an explicit ?caption= override (rare — a caller passing its own),
+        #   2. the card's APPROVED / active-tone caption — the SAME source the
+        #      run-level export.zip and the public API export write, so the two
+        #      never contradict each other,
+        #   3. the internal headline, only as a last resort.
+        # Previously this fell straight through to ach.get("headline"), so the
+        # volunteer posted the internal headline while their edited caption was
+        # silently dropped (and the ZIP README claimed it was the real caption).
+        caption = (request.args.get("caption") or "").strip()
+        # 2. The approved active-tone caption — byte-for-byte the source the
+        #    run-level export.zip and public API export use (only approved
+        #    cards appear here).
+        if not caption:
+            try:
+                from mediahub.workflow.pack import build_content_pack as _bcp
+
+                for _card in _bcp(run_id, _active_profile_id() or "default", RUNS_DIR):
+                    if str(_card.get("_card_id") or "") == str(card_id):
+                        _active = _card.get("active_caption") or {}
+                        if isinstance(_active, dict):
+                            caption = " ".join(
+                                str(v).strip()
+                                for v in _active.values()
+                                if isinstance(v, str) and v.strip()
+                            ).strip()
+                        break
+            except Exception:
+                caption = ""
+        # 3. Any human edit persisted on the card even if not formally approved
+        #    (build_content_pack returns approved cards only). Excludes the
+        #    inspector overrides (insp.*) and alt-text slots — those aren't the
+        #    post caption.
+        if not caption:
+            try:
+                _ws = _get_wf_store()
+                _st = _ws.load(run_id).get(card_id) if _ws else None
+                _edits = (getattr(_st, "edited_captions", None) or {}) if _st else {}
+                _parts = [
+                    _edits[k]
+                    for k in sorted(_edits)
+                    if k and not str(k).startswith("insp.") and k != "alt_text" and _edits.get(k)
+                ]
+                caption = "\n".join(p for p in _parts if p).strip()
+            except Exception:
+                caption = ""
+        # 4. Last resort: the internal headline.
+        if not caption:
+            caption = (ach.get("headline") or f"{swimmer} — {event}").strip()
 
         # Try to locate the rendered PNG for this card. Best-effort:
         # not every card has a generated visual yet.
