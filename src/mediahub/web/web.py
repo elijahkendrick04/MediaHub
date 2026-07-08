@@ -26237,12 +26237,49 @@ Relay team broke club record"></textarea>
                 '<div class="card"><p class="tag bad">Set up your organisation first.</p></div>',
                 active="settings",
             ), 404
+        from datetime import datetime, timezone
+
         from mediahub.compliance.dsr import DsrRequestLog
+
+        _now = datetime.now(timezone.utc)
+
+        def _due_cell(r) -> tuple:
+            """D-9: render the statutory due date with an OVERDUE badge / a
+            'due in N days' countdown so a busy officer can't silently blow the
+            one-month deadline. Only OPEN requests count down (clock_stopped is
+            paused; completed is done). Returns (is_overdue, cell_html)."""
+            base = _h(r.due_at[:10])
+            if r.status != "open":
+                return False, base
+            try:
+                due = datetime.fromisoformat(r.due_at)
+                if due.tzinfo is None:
+                    due = due.replace(tzinfo=timezone.utc)
+            except Exception:
+                return False, base
+            if due < _now:
+                days_late = (_now - due).days
+                return True, (
+                    f'{base} <span class="tag bad">OVERDUE</span>'
+                    f'<span class="muted" style="font-size:11px"> {days_late}d late</span>'
+                )
+            days_left = (due - _now).days
+            hint = "due today" if days_left == 0 else f"due in {days_left}d"
+            _warn = ' style="color:var(--warn)"' if days_left <= 5 else ""
+            return (
+                False,
+                f'{base} <span class="muted" style="font-size:11px"{_warn}>({hint})</span>',
+            )
 
         rows = []
         for r in DsrRequestLog().all(profile_id=pid):
+            _is_overdue, _due_html = _due_cell(r)
             status_tag = {
-                "open": '<span class="tag">open</span>',
+                "open": (
+                    '<span class="tag bad">OVERDUE</span>'
+                    if _is_overdue
+                    else '<span class="tag">open</span>'
+                ),
                 "clock_stopped": '<span class="tag bad">clock stopped</span>',
                 "completed": '<span class="tag ok">completed</span>',
             }.get(r.status, _h(r.status))
@@ -26283,14 +26320,22 @@ Relay team broke club record"></textarea>
                         '<button class="btn secondary" type="submit">Resume clock</button></form>'
                     )
             rows.append(
-                f"<tr><td><code>{_h(r.id)}</code></td><td>{_h(r.request_type)}</td>"
-                f"<td>{_h(r.athlete_name)}</td><td>{_h(r.received_at[:10])}</td>"
-                f"<td>{_h(r.due_at[:10])}</td><td>{status_tag}</td><td>{''.join(actions) or '—'}</td></tr>"
+                (
+                    _is_overdue,
+                    f"<tr><td><code>{_h(r.id)}</code></td><td>{_h(r.request_type)}</td>"
+                    f"<td>{_h(r.athlete_name)}</td><td>{_h(r.received_at[:10])}</td>"
+                    f"<td>{_due_html}</td><td>{status_tag}</td>"
+                    f"<td>{''.join(actions) or '—'}</td></tr>",
+                )
             )
+        # D-9: float overdue requests to the top so a late one can't hide at the
+        # bottom of a long list; preserve original order within each group.
+        rows.sort(key=lambda t: not t[0])
+        _rows_html = "".join(h for _, h in rows)
         table = (
             "<table><thead><tr><th>Ref</th><th>Type</th><th>Athlete</th><th>Received</th>"
             "<th>Due</th><th>Status</th><th>Actions</th></tr></thead><tbody>"
-            + ("".join(rows) or '<tr><td colspan="7" class="muted">No requests logged.</td></tr>')
+            + (_rows_html or '<tr><td colspan="7" class="muted">No requests logged.</td></tr>')
             + "</tbody></table>"
         )
         body = f"""
