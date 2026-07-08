@@ -60766,8 +60766,9 @@ voice, and queues them for one-click approval.</p>
                 '<div class="card" style="margin-bottom:14px">'
                 "<strong>Publish a hosted web version</strong>"
                 '<p class="dim" style="font-size:13px;margin:4px 0 8px">A shareable '
-                "browser-readable page &mdash; and the link the card images need to show in "
-                "the downloaded email.</p>"
+                "browser-readable page. The downloaded email embeds its card images inline, "
+                "but publishing also gives hosted image links that every email client renders "
+                "reliably.</p>"
                 '<button class="btn" onclick="nlPublish(true)">Publish</button></div>'
             )
 
@@ -60807,9 +60808,30 @@ voice, and queues them for one-click approval.</p>
         )
         return _layout(spec.title, body, active="create")
 
-    def _nl_render_html(pid, newsletter_id, spec, *, preview=False, published_token=""):
+    def _nl_embed_card_src(pid: str, run_id: str, card_id: str) -> str:
+        """D-18 — a self-contained ``data:`` URI for a card image so a downloaded
+        (unpublished) email actually carries its images instead of silently
+        dropping them. Falls back to the honest "unavailable" placeholder when
+        the card isn't approved/rendered, never a blank."""
+        path = _nl_card_image_path(pid, run_id, card_id)
+        if not path:
+            return _nl_unavailable_src("publish the hosted version to include this image")
+        try:
+            import base64 as _b64  # noqa: PLC0415
+            import mimetypes  # noqa: PLC0415
+
+            raw = Path(path).read_bytes()
+            mime = mimetypes.guess_type(path)[0] or "image/png"
+            return f"data:{mime};base64," + _b64.b64encode(raw).decode("ascii")
+        except Exception:
+            return _nl_unavailable_src("image could not be read")
+
+    def _nl_render_html(
+        pid, newsletter_id, spec, *, preview=False, published_token="", embed=False
+    ):
         """Render a newsletter to email-safe HTML, resolving card images for the
-        right context (authenticated preview route / public token route)."""
+        right context: authenticated preview route, public token route, or (for a
+        downloaded unpublished draft) inline ``data:`` URIs (D-18)."""
         from mediahub.email_design.render import render_email_html
 
         prof = load_profile(pid)
@@ -60839,6 +60861,8 @@ voice, and queues them for one-click approval.</p>
                     _external=True,
                 ),
             )
+        elif embed:
+            spec = _nl_resolve_images(spec, lambda r, c: _nl_embed_card_src(pid, r, c))
         return render_email_html(spec, profile=prof)
 
     @app.route("/api/newsletters/<newsletter_id>/html")
@@ -60851,12 +60875,21 @@ voice, and queues them for one-click approval.</p>
         from mediahub.email_design import store as _ns
 
         preview = request.args.get("preview") == "1"
+        is_dl = request.args.get("dl") == "1"
         token = ""
+        embed = False
         if not preview:
             rec = _ns.newsletter_record(pid, newsletter_id) or {}
             if rec.get("published"):
                 token = rec.get("public_token", "")
-        html = _nl_render_html(pid, newsletter_id, spec, preview=preview, published_token=token)
+            elif is_dl:
+                # D-18 — a downloaded draft used to omit every card image. Embed
+                # them inline so the file is self-contained; publishing still
+                # gives hosted URLs that every email client renders.
+                embed = True
+        html = _nl_render_html(
+            pid, newsletter_id, spec, preview=preview, published_token=token, embed=embed
+        )
         resp = make_response(html)
         resp.headers["Content-Type"] = "text/html; charset=utf-8"
         if request.args.get("dl") == "1":
