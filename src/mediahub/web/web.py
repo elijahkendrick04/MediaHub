@@ -28643,7 +28643,9 @@ self.addEventListener('fetch', function(e){
 
         pid = _active_profile_id()
         if not pid:
-            return jsonify({"error": "no_org", "message": "Choose an organisation to manage a lexicon."}), 403
+            return jsonify(
+                {"error": "no_org", "message": "Choose an organisation to manage a lexicon."}
+            ), 403
         try:
             from mediahub.audio.voice import OrgLexicon
         except Exception as e:
@@ -28676,7 +28678,9 @@ self.addEventListener('fetch', function(e){
 
         pid = _active_profile_id()
         if not pid:
-            return jsonify({"error": "no_org", "message": "Choose an organisation to upload audio."}), 403
+            return jsonify(
+                {"error": "no_org", "message": "Choose an organisation to upload audio."}
+            ), 403
         f = _req.files.get("file")
         if not f:
             return jsonify({"error": "no_file"}), 400
@@ -36062,6 +36066,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         # any AI-extracted / setup-confirmed palette. Showing the legacy value
         # made the picker display one colour while the cards used another.
         from mediahub.brand.palette import effective_palette as _eff_pal
+
         _org_eff = _eff_pal(
             manual=getattr(profile, "brand_palette_manual", {}) or {},
             extracted=getattr(profile, "brand_palette_extracted", {}) or {},
@@ -38876,7 +38881,11 @@ what you're doing, what they should do.</p>
                 '<div class="actions">'
                 f'<form method="post" action="{sign_in_url}" style="flex:1;display:flex" data-loader-text="Switching organisation">'
                 f'<input type="hidden" name="profile_id" value="{_h(p.profile_id)}">'
-                + (f'<input type="hidden" name="next" value="{_h(_next_val)}">' if _next_val else "")
+                + (
+                    f'<input type="hidden" name="next" value="{_h(_next_val)}">'
+                    if _next_val
+                    else ""
+                )
                 + '<button type="submit" class="btn-sign-in">'
                 f"{'Continue' if is_current else 'Enter'} &rarr;</button>"
                 "</form>"
@@ -41403,9 +41412,7 @@ what you're doing, what they should do.</p>
                     "brand signal before it can create content for you."
                 )
             else:
-                _lead = (
-                    "We couldn't read enough from your links to unlock content yet."
-                )
+                _lead = "We couldn't read enough from your links to unlock content yet."
             not_ready_html = (
                 '<div class="card" id="mh-setup-not-ready" role="status" '
                 'style="margin-bottom:20px;border:1px solid rgba(255,180,84,0.5);'
