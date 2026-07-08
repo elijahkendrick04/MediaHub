@@ -306,8 +306,10 @@ def test_toast_message_set_via_textcontent_not_innerhtml(client):
     is a DOM XSS sink."""
     body = client.get("/").get_data(as_text=True)
     assert "MH.toast = function" in body
-    # The message slot is filled by textContent.
-    assert ".mh-toast-msg').textContent" in body
+    # The message slot is captured and filled by textContent (D-1 refactored the
+    # inline querySelector into a `msgSlot` local; the XSS-safe contract holds).
+    assert "t.querySelector('.mh-toast-msg')" in body
+    assert "msgSlot.textContent" in body
     # The old raw-concat sink is gone.
     assert "min-width:0\">' + message + '</div>'" not in body
 
