@@ -20879,10 +20879,24 @@ def create_app() -> Flask:
         if not clubs and (byte_size < 2048 or n_events == 0):
             upload_url = url_for("upload")
 
-            if byte_size < 2048:
+            _fname = _h(meta.get("filename") or "(unknown)")
+            if parse_err:
+                # D-22: the parser actually CRASHED — don't tell the volunteer
+                # the file "parsed OK" and to wait for the meet to finish. Say we
+                # couldn't read it, with plain-language causes.
+                headline = "We couldn't read that file"
+                explain = (
+                    f"<p>The file <code>{_fname}</code> couldn't be read as a meet "
+                    "results file. It may be corrupted, an unusual export, or "
+                    "password-protected.</p>"
+                    '<p class="dim" style="font-size:13px;margin-top:8px">'
+                    "Try re-exporting or re-downloading it from the source, then "
+                    "upload again.</p>"
+                )
+            elif byte_size < 2048:
                 headline = "That file doesn't look like a meet results file"
                 explain = (
-                    f"<p>The file <code>{_h(meta.get('filename') or '(unknown)')}</code> "
+                    f"<p>The file <code>{_fname}</code> "
                     f"is only {byte_size} bytes &mdash; far too small to be a real "
                     "meet results file. The most common cause is a broken download "
                     '(an HTML "404 Not Found" page saved as a PDF, or a partial save).</p>'
@@ -20893,17 +20907,19 @@ def create_app() -> Flask:
             else:
                 headline = "That file looks like a meet preview, not results"
                 explain = (
-                    f"<p>The file <code>{_h(meta.get('filename') or '(unknown)')}</code> "
+                    f"<p>The file <code>{_fname}</code> "
                     "parsed OK but doesn't contain any events with results.</p>"
                     '<p class="dim" style="font-size:13px;margin-top:8px">'
                     "This usually means you uploaded an entry list, a heat sheet, or "
                     "meet conditions document. Wait until the meet finishes and the "
                     "organisers publish the actual results file.</p>"
                 )
+            # D-22: the raw parser exception is operator-only — never shown to a
+            # customer alongside friendly copy (it read as a contradiction).
             err_explain = (
                 f'<p class="dim" style="margin-bottom:12px;font-size:13px">'
                 f"Parser error: <code>{_h(parse_err)}</code></p>"
-                if parse_err
+                if parse_err and _auth.is_dev_operator()
                 else ""
             )
             body = f"""
@@ -20911,7 +20927,7 @@ def create_app() -> Flask:
 <div class="card">
   {explain}
   {err_explain}
-  <p class="dim" style="font-size:13px;margin-top:14px">Supported formats: Hytek Meet Manager <code>.hy3</code>, a <code>.zip</code> containing one, or a Sportsystems PDF results file.</p>
+  <p class="dim" style="font-size:13px;margin-top:14px">Supported formats: Hytek (<code>.hy3</code>, <code>.hyv</code>), SDIF (<code>.sd3</code>, <code>.sdif</code>, <code>.cl2</code>), a <code>.zip</code> of results, a results PDF, HTML, CSV, TXT or Excel (<code>.xlsx</code>).</p>
   <div style="margin-top:18px;display:flex;gap:10px;flex-wrap:wrap">
     <a class="btn" href="{upload_url}">\u2190 Try another file</a>
     <a class="btn secondary" href="{url_for("make_page")}">Pick a different input type</a>
