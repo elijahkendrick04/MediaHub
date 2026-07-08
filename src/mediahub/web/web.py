@@ -16610,6 +16610,42 @@ def _parse_notes_card(warnings: list) -> str:
     )
 
 
+def _import_skipped_html(rows) -> str:
+    """D-19: render the rows an import couldn't read — line number, name (if any)
+    and reason — so the user can fix and re-import, instead of only being told a
+    count. Empty string when there's nothing to show."""
+    if not isinstance(rows, list) or not rows:
+        return ""
+    items = []
+    for r in rows[:50]:
+        if not isinstance(r, dict):
+            continue
+        rownum = r.get("row")
+        name = str(r.get("name") or "").strip()
+        reason = str(r.get("reason") or "couldn’t be read").strip()
+        loc = f"Row {rownum}" if rownum is not None else "Row"
+        who = f" · {_h(name)}" if name else ""
+        items.append(f"<li><strong>{_h(loc)}</strong>{who} — {_h(reason)}</li>")
+    more = ""
+    if len(rows) > 50:
+        more = (
+            f'<div class="muted" style="font-size:11px;margin-top:4px">'
+            f"…and {len(rows) - 50} more.</div>"
+        )
+    return (
+        '<div class="card" style="border-left:2px solid var(--warn);margin-bottom:14px">'
+        f'<strong style="color:var(--warn)">{len(rows)} row{"s" if len(rows) != 1 else ""} '
+        "couldn&rsquo;t be imported</strong>"
+        '<ul style="margin:6px 0 0;padding-left:18px;font-size:13px;color:var(--ink-dim)">'
+        + "".join(items)
+        + "</ul>"
+        + more
+        + '<div class="muted" style="font-size:11px;margin-top:6px">'
+        "Fix these rows in your sheet and import again.</div>"
+        "</div>"
+    )
+
+
 def _flash_toast(message: str, kind: str = "success") -> None:
     """Queue a one-shot toast to show on the next rendered page.
 
@@ -58951,6 +58987,8 @@ voice, and queues them for one-click approval.</p>
         regime = regime_active(pid)
         msg = (request.args.get("msg") or "").strip()
         msg_html = f'<p class="tag good" style="margin-bottom:14px">{_h(msg)}</p>' if msg else ""
+        # D-19: list exactly which rows the last consent import couldn't read.
+        msg_html += _import_skipped_html(session.pop("consent_import_skipped", None))
 
         level_options = list(LEVEL_LABELS.items())
         rows = []
@@ -59100,6 +59138,9 @@ voice, and queues them for one-click approval.</p>
             msg = f"Imported {result['imported']} rows."
             if result["skipped"]:
                 msg += f" Skipped {len(result['skipped'])} (unreadable level/name)."
+                # D-19: stash the failed rows so the page can list exactly which
+                # ones need fixing, not just a count.
+                session["consent_import_skipped"] = result["skipped"]
         elif action == "backfill":
             prof = load_profile(pid)
 
@@ -59137,6 +59178,8 @@ voice, and queues them for one-click approval.</p>
 
         msg = (request.args.get("msg") or "").strip()
         msg_html = f'<p class="tag good" style="margin-bottom:14px">{_h(msg)}</p>' if msg else ""
+        # D-19: list exactly which rows the last records import couldn't read.
+        msg_html += _import_skipped_html(session.pop("records_import_skipped", None))
         records = list_records(pid)
         rows = "".join(
             "<tr>"
@@ -59206,6 +59249,8 @@ voice, and queues them for one-click approval.</p>
             msg = f"Imported {result['imported']} records."
             if result["skipped"]:
                 msg += f" Skipped {len(result['skipped'])} unreadable rows."
+                # D-19: stash the failed rows so the page lists which to fix.
+                session["records_import_skipped"] = result["skipped"]
         elif action == "delete":
             try:
                 ok = delete_record(
