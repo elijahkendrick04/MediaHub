@@ -1758,11 +1758,9 @@ DATA_DIR = Path(os.environ.get("DATA_DIR", str(_SRC_ROOT)))
 RUNS_DIR = Path(os.environ.get("RUNS_DIR", str(DATA_DIR / "runs_v4")))
 UPLOADS_DIR = Path(os.environ.get("UPLOADS_DIR", str(DATA_DIR / "uploads_v4")))
 DB_PATH = DATA_DIR / "data.db"  # MUST be data.db for publish snapshot
-RESEARCH_DIR = DATA_DIR / "research"
 
 RUNS_DIR.mkdir(parents=True, exist_ok=True)
 UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
-RESEARCH_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def _dsr_export_path(profile_id: str, request_id: str) -> Path:
@@ -5736,11 +5734,6 @@ function addGraphicToPack(btn, visualId) {
             d.style.background = color;
             var btn = d.closest('button');
             if (btn) btn.title = title;
-          });
-          // D-17 — reveal a visible inline banner when AI is off (a tooltip on a
-          // tiny dot is invisible on a phone). Hidden again the moment AI is live.
-          document.querySelectorAll('.ai-disabled-banner').forEach(function(b){
-            b.hidden = !!j.live;
           });
         })
         .catch(function(){});
@@ -11073,92 +11066,6 @@ def _hero_word_cycle_html() -> str:
         hidden = "" if k == 0 else ' aria-hidden="true"'
         spans.append(f'<span class="{cls}"{hidden}>{word}</span>')
     return '<span class="mh-word-cycle" data-mh-word-cycle>' + "".join(spans) + "</span>"
-
-
-def _render_markdown(text: str) -> str:
-    """Tiny, dependency-free markdown subset for the research page."""
-    import html as _html
-    import re as _re
-
-    def _inline(s: str) -> str:
-        s = _html.escape(s)
-        s = _re.sub(
-            r"\[([^\]]+)\]\(([^)]+)\)",
-            lambda m: f'<a href="{m.group(2)}" target="_blank" rel="noopener">{m.group(1)}</a>',
-            s,
-        )
-        s = _re.sub(r"\*\*([^*]+)\*\*", r"<strong>\1</strong>", s)
-        s = _re.sub(r"`([^`]+)`", r"<code>\1</code>", s)
-        return s
-
-    lines = text.splitlines()
-    out: list[str] = []
-    in_code = False
-    table_rows: list[list[str]] = []
-
-    def flush_table():
-        if not table_rows:
-            return
-        head, *rest = table_rows
-        rest = [r for r in rest if not all(_re.fullmatch(r":?-+:?", c.strip() or "-") for c in r)]
-        out.append('<div style="overflow-x:auto"><table>')
-        out.append(
-            "<thead><tr>" + "".join(f"<th>{_inline(c)}</th>" for c in head) + "</tr></thead>"
-        )
-        out.append("<tbody>")
-        for r in rest:
-            out.append("<tr>" + "".join(f"<td>{_inline(c)}</td>" for c in r) + "</tr>")
-        out.append("</tbody></table></div>")
-        table_rows.clear()
-
-    in_list = False
-    for raw in lines:
-        ln = raw.rstrip()
-        if ln.startswith("```"):
-            if in_code:
-                out.append("</code></pre>")
-            else:
-                out.append("<pre><code>")
-            in_code = not in_code
-            continue
-        if in_code:
-            out.append(_html.escape(ln))
-            continue
-        if ln.startswith("|") and ln.endswith("|"):
-            cells = [c.strip() for c in ln.strip("|").split("|")]
-            table_rows.append(cells)
-            continue
-        if table_rows:
-            flush_table()
-        m = _re.match(r"^(#{1,4})\s+(.*)$", ln)
-        if m:
-            if in_list:
-                out.append("</ul>")
-                in_list = False
-            level = len(m.group(1))
-            out.append(f"<h{level}>{_inline(m.group(2))}</h{level}>")
-            continue
-        if ln.startswith("- ") or ln.startswith("* "):
-            if not in_list:
-                out.append('<ul style="margin-top:6px">')
-                in_list = True
-            out.append(f"<li>{_inline(ln[2:])}</li>")
-            continue
-        if in_list and not ln.strip():
-            out.append("</ul>")
-            in_list = False
-            continue
-        if not ln.strip():
-            continue
-        out.append(f"<p>{_inline(ln)}</p>")
-
-    if table_rows:
-        flush_table()
-    if in_code:
-        out.append("</code></pre>")
-    if in_list:
-        out.append("</ul>")
-    return "\n".join(out)
 
 
 def _logo_chip_html(
@@ -23332,13 +23239,6 @@ details.why-card[open] > summary .why-peek {{ display: none; }}
 
 {weekend_glance_html}
 
-<div class="ai-disabled-banner card" role="status" hidden style="border-color:var(--mh-prim-warning-500);margin-bottom:var(--sp-4)">
-  <strong>AI captions are turned off on this deployment.</strong>
-  You can still review, edit and approve every card by hand — the AI tone options and
-  imagery will show an honest error until your operator enables a provider.
-  <a href="{url_for("settings_section", section="governance")}">See AI status &rarr;</a>
-</div>
-
 <div class="card">
   <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:8px">
     <h2 style="margin:0">Top achievements</h2>
@@ -26966,7 +26866,10 @@ Relay team broke club record"></textarea>
             body = (
                 '<div class="card"><h2>What was removed</h2>'
                 f"<p class='muted'>Erasure completed for <strong>{_h(req.athlete_name)}</strong>.</p>"
-                + _erasure_removed_html(report)
+                # Pass the cascade so the compliant Art-17 summary counts the
+                # cascade-only figures (research-cache, result rows, …) instead of
+                # showing 0 — same numbers as the /privacy quick-erase sibling.
+                + _erasure_removed_html(report, report.get("cascade"))
                 + "<p class='muted'>Remaining mentions inside multi-athlete captions were "
                 "redacted. Content already published to social platforms must be deleted "
                 "there too.</p>"

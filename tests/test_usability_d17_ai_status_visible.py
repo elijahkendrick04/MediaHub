@@ -83,19 +83,12 @@ def test_llm_status_endpoint_reports_not_live(client):
     assert j["live"] is False
 
 
-def test_review_page_carries_ai_disabled_banner(client):
+def test_review_page_shows_ai_off_banner(client):
     c, tmp = client
     run_id = _seed_run(tmp)
     html = c.get(f"/review/{run_id}").get_data(as_text=True)
-    # The banner element is present (hidden by default; the poller reveals it),
-    # visibly worded, and links to the AI-status page.
-    assert "ai-disabled-banner" in html
-    assert "AI captions are turned off on this deployment" in html
-    assert "/settings/governance" in html
-
-
-def test_poller_toggles_the_banner():
-    src = pathlib.Path("src/mediahub/web/web.py").read_text(encoding="utf-8")
-    # The status poller reveals/hides the banner from the live flag.
-    assert "querySelectorAll('.ai-disabled-banner')" in src
-    assert "b.hidden = !!j.live" in src
+    # With no provider configured, the review page renders the server-side
+    # AI-unavailable banner (no client poller needed), so AI-off is visible
+    # inline where the volunteer works.
+    assert "mh-ai-unavailable" in html
+    assert "AI provider not configured" in html

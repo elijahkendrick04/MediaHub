@@ -131,3 +131,49 @@ def test_both_erasure_paths_share_the_same_summary(client, data_dir):
     ):
         assert marker in quick, marker
         assert marker in formal, marker
+
+
+def test_formal_erasure_summary_counts_the_cascade(client, data_dir, monkeypatch):
+    """The compliant Art-17 page must count the cascade-only figures (result
+    rows, research-cache, posting excerpts), not show 0. erase_athlete nests
+    those under report['cascade']; the formal path must pass it to the helper
+    exactly as the /privacy sibling does."""
+    _seed(data_dir)
+    with client.session_transaction() as sess:
+        sess["active_profile_id"] = "clubx"
+    client.post(
+        "/organisation/athlete-rights/open",
+        data={"athlete_name": ATHLETE, "request_type": "erasure"},
+    )
+    from mediahub.compliance.dsr import DsrRequestLog
+
+    req = DsrRequestLog().all(profile_id="clubx")[0]
+
+    import mediahub.compliance.dsr as _dsr_mod
+
+    fake_report = {
+        "cards_removed": 0,
+        "runs_touched": [],
+        "memory_rows_deleted": 0,
+        "visual_files_deleted": [],
+        "pb_cache_files_deleted": [],
+        "media_assets_deleted": [],
+        "media_assets_unlinked": [],
+        "residuals": [],
+        "cascade": {
+            "cards_removed": 2,
+            "swims_removed": 12,
+            "runs_touched": ["r1", "r2"],
+            "assets_removed": 4,
+            "pb_cache_files": 2,
+            "research_cache_files": 3,
+            "memory_rows": 5,
+            "posting_excerpts": 7,
+        },
+    }
+    monkeypatch.setattr(_dsr_mod, "erase_athlete", lambda *a, **k: fake_report)
+    html = client.post(f"/organisation/athlete-rights/{req.id}/run").get_data(as_text=True)
+    # Cascade-only figures now surface instead of the pre-fix 0s.
+    assert "12 result row(s)" in html
+    assert "3 research-cache" in html
+    assert "7 posting-log excerpt(s) blanked" in html
