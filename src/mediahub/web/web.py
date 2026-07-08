@@ -23109,7 +23109,9 @@ details.why-card[open] > summary .why-peek {{ display: none; }}
    work the queue from the pool deck without pinch-zooming. The inline
    button sizing on _render_wf_actions is overridden with !important here. */
 @media (max-width: 700px) {{
-  .filters-bar {{ top: 0; padding: 10px 12px; gap: 8px; }}
+  /* I-5: non-sticky on small screens — the 9-control bar otherwise pins over a
+     third of the viewport above the queue while scrolling. */
+  .filters-bar {{ position: static; top: auto; padding: 10px 12px; gap: 8px; }}
   .filters-bar select {{ flex: 1 1 calc(50% - 8px); min-width: 0; }}
   .ach-row > div {{ gap: 10px !important; }}
   .wf-actions {{ width: 100%; }}
@@ -26358,12 +26360,14 @@ Relay team broke club record"></textarea>
                 f"<td class='muted'>{_h(r.recorded_at[:10])}</td></tr>"
             )
         table = (
-            "<table><thead><tr><th>Athlete</th><th>Status</th><th>Flags</th><th>Note</th><th>Recorded</th></tr></thead><tbody>"
+            # I-3: scroll wrapper so the multi-column registry doesn't overflow
+            # a phone (volunteers act on consent from poolside).
+            '<div class="mh-table-scroll"><table><thead><tr><th>Athlete</th><th>Status</th><th>Flags</th><th>Note</th><th>Recorded</th></tr></thead><tbody>'
             + (
                 "".join(rows)
                 or '<tr><td colspan="5" class="muted">No consent records yet.</td></tr>'
             )
-            + "</tbody></table>"
+            + "</tbody></table></div>"
         )
         mode = (profile.consent_mode or "").strip()
 
@@ -26655,10 +26659,12 @@ Relay team broke club record"></textarea>
         rows.sort(key=lambda t: not t[0])
         _rows_html = "".join(h for _, h in rows)
         table = (
-            "<table><thead><tr><th>Ref</th><th>Type</th><th>Athlete</th><th>Received</th>"
+            # I-3: scroll wrapper so the 7-column rights table (with inline action
+            # forms) doesn't overflow a phone.
+            '<div class="mh-table-scroll"><table><thead><tr><th>Ref</th><th>Type</th><th>Athlete</th><th>Received</th>'
             "<th>Due</th><th>Status</th><th>Actions</th></tr></thead><tbody>"
             + (_rows_html or '<tr><td colspan="7" class="muted">No requests logged.</td></tr>')
-            + "</tbody></table>"
+            + "</tbody></table></div>"
         )
         body = f"""
 <section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">
