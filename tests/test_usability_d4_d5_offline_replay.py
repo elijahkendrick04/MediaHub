@@ -62,6 +62,20 @@ def test_client_surfaces_replay_problems_not_false_synced(client):
     assert 'data-state="problem"' in client.get("/").get_data(as_text=True)
 
 
+def test_problems_persist_and_take_precedence(client):
+    # review-workflow fix: problems are a persisted module var (not a per-render
+    # arg), accumulated across drains, so a follow-up status ping can't erase the
+    # notice; and they render ahead of the sync-pending count so a still-queued
+    # transient item can't hide them.
+    js = client.get("/static/js/offline-queue.js").get_data(as_text=True)
+    assert "var problems = [];" in js
+    assert "problems = problems.concat(d.problems)" in js
+    # The problems branch is evaluated before the count>0 branch.
+    assert js.index("if (problems.length) {") < js.index("} else if (lastCount > 0) {")
+    # It's persistent until explicitly dismissed.
+    assert "Dismiss" in js
+
+
 # --- D-5: drain on load + manual Sync now ------------------------------------
 
 

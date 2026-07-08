@@ -15589,27 +15589,31 @@ def _layout(
     }).then(function(o){
       if (!o.ok || !o.body || o.body.ok === false) {
         var body = o.body || {};
-        // D-1: the consent / brand-lock / open-task gates answer with
-        // {error:<code>, reason:<plain English>}. Show the reason — never the
-        // raw "consent_blocked" code — and mark a 4xx-with-code as a deliberate
-        // safeguarding block (err.gate) so the caller suppresses the
-        // contradictory "try again" retry advice a permanent block can't act on.
-        var human = body.reason || body.message || 'We couldn\\u2019t save that change.';
+        // D-1: the consent / brand-lock / open-task gates answer with a 4xx
+        // {error:<code>, reason:<plain English>}. Only THAT is a deliberate,
+        // non-retryable block: show its reason (never the raw code) and mark it
+        // handled so the caller suppresses the contradictory "try again" advice.
+        // A 5xx / transient / bodyless failure is NOT a gate — leave it
+        // unhandled so the caller still shows the retryable "reverted — try
+        // again" toast (server hiccup, cold start).
         var isGate = (o.status >= 400 && o.status < 500) && !!body.error;
-        if (window.MH && MH.toast) {
-          if (isGate && body.error === 'tasks_open') {
-            // The tasks that hold this card live on the content builder, not
-            // the review page — deep-link straight there to resolve them.
-            MH.toast(human, 'error', 6500,
-              {text: 'Open in builder', href: base + '/pack/' + encodeURIComponent(runId)});
-          } else {
-            MH.toast(human, 'error', 4500);
-          }
-        }
-        var err = new Error(human);
-        err.handled = true;   // already toasted — the caller must not double-toast
-        err.gate = isGate;    // a deliberate block, not a transient failure
+        var err = new Error(body.reason || body.message || 'workflow error');
+        err.gate = isGate;
         err.code = body.error || '';
+        if (isGate) {
+          var human = body.reason || body.message || 'We couldn\\u2019t save that change.';
+          if (window.MH && MH.toast) {
+            if (body.error === 'tasks_open') {
+              // The tasks that hold this card live on the content builder, not
+              // the review page — deep-link straight there to resolve them.
+              MH.toast(human, 'error', 6500,
+                {text: 'Open in builder', href: base + '/pack/' + encodeURIComponent(runId)});
+            } else {
+              MH.toast(human, 'error', 4500);
+            }
+          }
+          err.handled = true;  // already toasted — the caller must not double-toast
+        }
         throw err;
       }
       return o.body;

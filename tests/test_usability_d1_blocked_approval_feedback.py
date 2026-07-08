@@ -61,6 +61,19 @@ def test_tasks_open_offers_builder_deeplink(page_html):
     assert "/pack/' + encodeURIComponent(runId)" in page_html
 
 
+def test_transient_server_error_stays_retryable(page_html):
+    # A 5xx / transient failure is NOT a gate: mhWorkflowSet only marks
+    # err.handled inside the isGate branch, so the caller still shows the
+    # retryable "reverted — try again" toast (review-workflow fix).
+    assert "if (isGate) {" in page_html
+    assert "err.handled = true;  // already toasted" in page_html
+    # err.handled is no longer set unconditionally for every error response.
+    assert (
+        "err.handled = true;   // already toasted — the caller must not double-toast"
+        not in page_html
+    )
+
+
 def test_toast_supports_optional_action_link(page_html):
     # MH.toast gained a backward-compatible 4th action param that renders a
     # trusted same-origin anchor.
