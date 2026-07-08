@@ -205,6 +205,27 @@ def test_detects_worker_timeout_and_oom_and_disk():
             "unhandled_traceback"} <= ids
 
 
+def test_llm_provider_down_ignores_boot_env_check():
+    # #1065: MediaHub's own boot/build env-check warning names
+    # ClaudeUnavailableError in prose to DOCUMENT the intended honest-error
+    # behaviour — it must NOT be filed as a "provider down" incident.
+    benign = _line(
+        "env check: No LLM provider configured — AI surfaces will honest-error "
+        "(ClaudeUnavailableError) until a key is set."
+    )
+    assert not any(
+        f.issue_id == "llm_provider_down" for f in detectors.detect([benign])
+    )
+    # A genuine runtime raise while serving a request still fires.
+    for msg in (
+        "mediahub.web.ai_caption.ClaudeUnavailableError: provider down",
+        "ai_core.llm.ProviderNotConfigured: no key configured",
+    ):
+        assert any(
+            f.issue_id == "llm_provider_down" for f in detectors.detect([_line(msg)])
+        ), msg
+
+
 # --- playbook gates ---------------------------------------------------------------
 
 def test_notify_only_issue_never_acts(monkeypatch):

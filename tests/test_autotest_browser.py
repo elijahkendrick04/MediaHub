@@ -109,6 +109,54 @@ def _finding(**kw):
     return Finding(**base)
 
 
+def test_onerror_image_404_is_not_flagged_as_network_error():
+    """#884 — an <img> that 404s but declares an onerror fallback (MediaHub's
+    logo chip → org-initials pattern) is a deliberately-handled degradation, not
+    a broken asset. The crawler must skip it while still flagging a genuinely
+    broken image that has no onerror."""
+    from autotest.run import Collector, Tester
+
+    handled = "http://x/organisation/swansea/logo/abc?bg=1&chip=1"
+    broken = "http://x/static/missing.png"
+
+    class _FakePage:
+        def eval_on_selector_all(self, selector, script):
+            # Only the logo-chip <img> wired an onerror fallback.
+            return [handled]
+
+    col = Collector("http://x")
+    col.failed = [
+        {"url": handled, "status": 404, "type": "image"},
+        {"url": broken, "status": 404, "type": "image"},
+    ]
+    t = Tester(None, "http://x", _FakePage(), col, 10)
+    t._shoot = lambda f: None  # no real browser to screenshot with
+    t._evaluate("/x", "http://x/x", "x", 200, "", "", from_link=False)
+
+    net = [f for f in t.findings if f.category == "network_error"]
+    assert len(net) == 1, "exactly the genuinely-broken image should be flagged"
+    assert broken in net[0].actual
+    assert not any("logo/abc" in f.actual for f in net)
+
+
+def test_broken_image_without_onerror_still_flagged():
+    """The exemption is narrow: an image 404 whose element has NO onerror is
+    still a real broken asset and must be flagged."""
+    from autotest.run import Collector, Tester
+
+    class _FakePage:
+        def eval_on_selector_all(self, selector, script):
+            return []  # no onerror-guarded images on the page
+
+    col = Collector("http://x")
+    col.failed = [{"url": "http://x/static/logo.png", "status": 404, "type": "image"}]
+    t = Tester(None, "http://x", _FakePage(), col, 10)
+    t._shoot = lambda f: None
+    t._evaluate("/x", "http://x/x", "x", 200, "", "", from_link=False)
+
+    assert any(f.category == "network_error" for f in t.findings)
+
+
 def test_engine_tag_changes_fingerprint_even_with_suspect():
     """The tag must reach the fingerprint basis: a finding WITH a suspect (or
     long evidence) previously collapsed with the chromium run's because the

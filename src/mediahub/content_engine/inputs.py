@@ -45,15 +45,30 @@ def _sanitise_org(org_id: str) -> str:
     return s[:120]
 
 
-def _inputs_dir(data_dir: Optional[Path] = None) -> Path:
+def _inputs_dir(data_dir: Optional[Path] = None, *, create: bool = True) -> Path:
     base = Path(data_dir) if data_dir is not None else Path(os.environ.get("DATA_DIR", "."))
     d = base / "planner_inputs"
-    d.mkdir(parents=True, exist_ok=True)
+    # Only the WRITE path creates the directory. The read path must never mkdir:
+    # a mkdir OSError (disk full, a permissions fault, a path component that is a
+    # file) would escape the read helpers *before* their protective try/except and
+    # 500 the /plan and /api/plan/latest routes (#1066/#1067). A missing directory
+    # simply means "nothing saved yet", which loads honestly as empty inputs.
+    if create:
+        d.mkdir(parents=True, exist_ok=True)
     return d
 
 
-def _inputs_path(org_id: str, data_dir: Optional[Path] = None) -> Path:
-    return _inputs_dir(data_dir) / f"{_sanitise_org(org_id)}.json"
+def _inputs_path(org_id: str, data_dir: Optional[Path] = None, *, create: bool = True) -> Path:
+    return _inputs_dir(data_dir, create=create) / f"{_sanitise_org(org_id)}.json"
+
+
+def _as_list(value: object) -> list:
+    """Only a real list is iterated as items. A persisted/submitted field that is
+    a truthy scalar (a JSON number/bool from a legacy or hand-edited file) would
+    otherwise reach ``map()`` via ``value or []`` and raise ``TypeError`` — which
+    the loader's ``(OSError, ValueError)`` guard does not catch, 500-ing /plan
+    (#1067). Coercing here keeps a mis-shaped field honestly empty."""
+    return value if isinstance(value, list) else []
 
 
 def _clean_date(value: object) -> Optional[str]:
@@ -92,10 +107,13 @@ def empty_inputs() -> dict:
 
 def load_planner_inputs(org_id: str, *, data_dir: Optional[Path] = None) -> dict:
     """Load the org's direct inputs; missing/corrupt files load as empty."""
-    path = _inputs_path(org_id, data_dir)
-    if not path.exists():
-        return empty_inputs()
+    path = _inputs_path(org_id, data_dir, create=False)
     try:
+        # ``exists()`` is inside the guard on purpose: on an existing-but-locked
+        # path it can itself raise OSError (EACCES/EROFS) on some Python versions,
+        # which would otherwise escape and 500 the route.
+        if not path.exists():
+            return empty_inputs()
         raw = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         # "missing/corrupt files load as empty" (per the module docstring): any
@@ -107,9 +125,9 @@ def load_planner_inputs(org_id: str, *, data_dir: Optional[Path] = None) -> dict
         return empty_inputs()
     if not isinstance(raw, dict):
         return empty_inputs()
-    events = [e for e in map(_clean_event, raw.get("upcoming_events") or []) if e]
-    goals = [g for g in map(_clean_goal, raw.get("goals") or []) if g]
-    blackouts = [d for d in map(_clean_date, raw.get("blackout_dates") or []) if d]
+    events = [e for e in map(_clean_event, _as_list(raw.get("upcoming_events"))) if e]
+    goals = [g for g in map(_clean_goal, _as_list(raw.get("goals"))) if g]
+    blackouts = [d for d in map(_clean_date, _as_list(raw.get("blackout_dates"))) if d]
     return {
         "upcoming_events": sorted(events, key=lambda e: e["date"])[:MAX_EVENTS],
         "goals": goals[:MAX_GOALS],
@@ -122,12 +140,12 @@ def save_planner_inputs(org_id: str, inputs: dict, *, data_dir: Optional[Path] =
     raw = inputs if isinstance(inputs, dict) else {}
     clean = {
         "upcoming_events": sorted(
-            (e for e in map(_clean_event, raw.get("upcoming_events") or []) if e),
+            (e for e in map(_clean_event, _as_list(raw.get("upcoming_events"))) if e),
             key=lambda e: e["date"],
         )[:MAX_EVENTS],
-        "goals": [g for g in map(_clean_goal, raw.get("goals") or []) if g][:MAX_GOALS],
+        "goals": [g for g in map(_clean_goal, _as_list(raw.get("goals"))) if g][:MAX_GOALS],
         "blackout_dates": sorted(
-            {d for d in map(_clean_date, raw.get("blackout_dates") or []) if d}
+            {d for d in map(_clean_date, _as_list(raw.get("blackout_dates"))) if d}
         )[:MAX_BLACKOUTS],
     }
     path = _inputs_path(org_id, data_dir)

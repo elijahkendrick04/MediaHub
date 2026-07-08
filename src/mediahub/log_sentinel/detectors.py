@@ -44,6 +44,11 @@ class Detector:
     pattern: re.Pattern
     suggestion: str
     threshold: int = 1  # min matches in one batch before it becomes a Finding
+    # A line that matches ``pattern`` but ALSO matches ``exclude`` is not a
+    # finding — used to skip MediaHub's own benign diagnostics that merely name
+    # an error class in prose (e.g. the boot env-check warning that documents the
+    # honest-error behaviour, #1065) without dropping the genuine runtime event.
+    exclude: re.Pattern | None = None
 
 
 DETECTORS: tuple[Detector, ...] = (
@@ -137,6 +142,14 @@ DETECTORS: tuple[Detector, ...] = (
         severity="warning",
         title="AI provider unavailable",
         pattern=re.compile(r"ClaudeUnavailableError|ProviderNotConfigured"),
+        # The env-check warning at boot/build ("env check: No LLM provider
+        # configured — AI surfaces will honest-error (ClaudeUnavailableError) …")
+        # names the exception class in prose to DOCUMENT the intended honest-error
+        # behaviour; it is not a runtime provider failure. Excluding it stops the
+        # sentinel from filing a spurious "provider down" incident every keyless
+        # build/boot (#1065) while a genuine raised ClaudeUnavailableError /
+        # ProviderNotConfigured during request handling still fires.
+        exclude=re.compile(r"env check:|will honest-error"),
         suggestion=(
             "AI surfaces are raising honest 'unavailable' errors (MediaHub never "
             "substitutes fake output). Check GEMINI_API_KEY / ANTHROPIC_API_KEY validity "
@@ -160,7 +173,12 @@ def detect(lines: list[LogLine]) -> list[Finding]:
     """Run every detector over one batch; return findings that met threshold."""
     findings: list[Finding] = []
     for det in DETECTORS:
-        matched = [ln for ln in lines if det.pattern.search(ln.message)]
+        matched = [
+            ln
+            for ln in lines
+            if det.pattern.search(ln.message)
+            and not (det.exclude and det.exclude.search(ln.message))
+        ]
         if len(matched) < det.threshold:
             continue
         evidence = tuple(

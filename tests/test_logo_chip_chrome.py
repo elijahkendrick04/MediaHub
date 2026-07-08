@@ -186,6 +186,31 @@ def test_picker_serve_route_supports_keyed_chip(client):
         assert r.headers["Content-Type"] in ("image/png", "image/svg+xml")
 
 
+def test_picker_omits_img_for_unrenderable_upload(client):
+    """#884 — the /sign-in picker must not emit a logo <img> whose keyed
+    silhouette can't render. It used to always emit the ?bg=1&chip=1 <img> and
+    lean on the serve route's 404 + the img's onerror to swap in initials — but
+    that 404 on an image sub-request is exactly what the autotest crawler flags.
+    An un-keyable upload (an image/* entry whose bytes won't rasterise) must now
+    render the chip's initials with NO logo request; a renderable upload still
+    gets its keyed picker <img>."""
+    # An image/* entry (so the picker selects it) whose bytes are not a real image.
+    bad = _store_bytes("org-noimg", "l", "png", b"not a real png", "image/png")
+    good = _store_img(
+        "org-img", "l", "png", _img(_solid((40, 120, 200, 255))), "image/png", "PNG"
+    )
+    _make_org("org-noimg", name="No Image Org", logos=[bad])
+    _make_org("org-img", name="Image Org", logos=[good])
+
+    body = client.get("/sign-in").get_data(as_text=True)
+    # Un-keyable upload: a chip renders, but with NO logo sub-request for it.
+    assert "/organisation/org-noimg/logo/" not in body
+    # Renderable upload: its keyed picker <img> is emitted.
+    assert "/organisation/org-img/logo/l" in body
+    # The initials frame is always present as the fallback.
+    assert "mh-logo-chip__initials" in body
+
+
 # --------------------------------------------------------------------------- #
 # 3. _logo_chip_html — elevated markup + legacy back-compat
 # --------------------------------------------------------------------------- #

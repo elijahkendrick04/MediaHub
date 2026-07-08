@@ -778,3 +778,49 @@ def test_plan_routes_survive_non_utf8_persisted_files(app_with_org):
         assert page.status_code == 200
         html = page.get_data(as_text=True)
         assert "What should we" in html and "post next?" in html
+
+
+def test_load_planner_inputs_tolerates_legacy_scalar_fields(tmp_path, monkeypatch):
+    """#1067 — a legacy / hand-edited ``planner_inputs/<org>.json`` can store a
+    field as a truthy scalar (a JSON number/bool) where the loader expects a
+    list. ``raw.get("upcoming_events") or []`` then yields the scalar, and
+    ``map(_clean_event, 3)`` raises ``TypeError`` — which is neither ``OSError``
+    nor ``ValueError``, so it escaped the loader's guard and 500'd /plan. The
+    loader must coerce a non-list field to empty, not raise.
+
+    Fails before the fix (TypeError escapes), passes after.
+    """
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    from mediahub.content_engine.inputs import (
+        _inputs_path,
+        empty_inputs,
+        load_planner_inputs,
+    )
+
+    p = _inputs_path("org-x", data_dir=tmp_path)
+    p.write_text(
+        '{"upcoming_events": 3, "goals": true, "blackout_dates": 7}',
+        encoding="utf-8",
+    )
+    assert load_planner_inputs("org-x", data_dir=tmp_path) == empty_inputs()
+
+
+def test_plan_loaders_tolerate_nondir_data_path(tmp_path):
+    """#1066/#1067 — the read path must not ``mkdir``. If ``content_plans`` /
+    ``planner_inputs`` on the durable disk get clobbered into a FILE (or the disk
+    is full / read-only), the old ``_*_dir`` mkdir raised OSError *before* the
+    loaders' try/except and 500'd both plan routes. With the read path no longer
+    creating directories, a missing/blocked dir simply loads as None / empty.
+
+    Fails before the fix (OSError from mkdir escapes), passes after.
+    """
+    from mediahub.content_engine.inputs import empty_inputs, load_planner_inputs
+    from mediahub.content_engine.planner import load_latest_plan
+
+    # A file where the loaders expect a directory: mkdir(exist_ok=True) on a path
+    # whose component is a file raises (FileExistsError / NotADirectoryError).
+    (tmp_path / "content_plans").write_text("not a dir", encoding="utf-8")
+    (tmp_path / "planner_inputs").write_text("not a dir", encoding="utf-8")
+
+    assert load_latest_plan("org-x", data_dir=tmp_path) is None
+    assert load_planner_inputs("org-x", data_dir=tmp_path) == empty_inputs()
