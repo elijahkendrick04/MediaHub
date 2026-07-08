@@ -20410,8 +20410,10 @@ def create_app() -> Flask:
             if prof_for_recent is not None:
                 conn = _db()
                 rows = conn.execute(
-                    "SELECT id, meet_name, file_name, created_at, our_swims "
-                    "FROM runs WHERE profile_id = ? AND status = 'done' "
+                    # D-6: include failed runs too — their file is still on disk,
+                    # so the volunteer can re-run from it instead of re-uploading.
+                    "SELECT id, meet_name, file_name, created_at, our_swims, status "
+                    "FROM runs WHERE profile_id = ? AND status IN ('done', 'error') "
                     "ORDER BY created_at DESC LIMIT 5",
                     (prof_for_recent.profile_id,),
                 ).fetchall()
@@ -20429,16 +20431,25 @@ def create_app() -> Flask:
                         when_iso = when.replace(" ", "T") + "Z" if when else ""
                         configure_href = url_for("upload_configure", run_id=r["id"])
                         n_swims = r["our_swims"] or 0
+                        failed = r["status"] == "error"
+                        # A failed run has no swim count worth showing — flag that
+                        # it didn't finish and invite a retry from the saved file.
+                        meta_line = (
+                            '<span class="tag bad" style="font-size:10px">Didn\'t finish</span>'
+                            if failed
+                            else f'{n_swims} swim{"" if n_swims == 1 else "s"}'
+                        )
                         items_html += (
                             "<li>"
                             '<span class="ico">'
                             '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>'
                             "</span>"
                             f'<div class="body"><span class="name">{_h(name)}</span>'
-                            f'<span class="meta">{n_swims} swim{"" if n_swims == 1 else "s"} · '
+                            f'<span class="meta">{meta_line} · '
                             f'<time class="mh-rel" datetime="{_h(when_iso)}">{_h(when)}</time></span>'
                             "</div>"
-                            f'<a class="go" href="{configure_href}">Re-configure &rarr;</a>'
+                            f'<a class="go" href="{configure_href}">'
+                            f'{"Try again" if failed else "Re-configure"} &rarr;</a>'
                             "</li>"
                         )
                     recent_html = (
@@ -21529,6 +21540,42 @@ def create_app() -> Flask:
             duplicate = None
         return _render_configure(run_id, meta, selected_club=_preselect, duplicate=duplicate)
 
+    # ---- RE-RUN A FAILED RUN FROM ITS SAVED FILE -----------------------
+    @app.route("/runs/<run_id>/rerun", methods=["POST"])
+    def rerun_run(run_id):
+        """D-6: re-launch a run from its server-persisted input file instead of
+        forcing a full re-upload. The launch bytes are kept beside every run
+        (``input.bin`` + ``resume.json``), so a poolside volunteer who no longer
+        has the original file can retry in one click. Starts a fresh run so the
+        failed run's record is preserved for diagnosis."""
+        run_data = _load_run(run_id)
+        if not _can_access_run(run_id, run_data, _active_profile_id()):
+            return jsonify({"error": "run_not_found"}), 404
+        loaded = _load_run_input(run_id)
+        if not loaded:
+            # The saved file isn't on disk (an old run, or a best-effort write
+            # that failed) — be honest and send them to re-upload.
+            if _req_wants_json(request):
+                return jsonify({"error": "no_saved_input"}), 409
+            _flash_toast(
+                "We couldn't find the saved file for that run — please upload it again.",
+                "error",
+            )
+            return redirect(url_for("upload"))
+        data, meta = loaded
+        new_run_id = _start_run(
+            file_bytes=data,
+            file_name=meta.get("file_name") or "upload.bin",
+            profile_id=meta.get("profile_id") or _active_profile_id(),
+            use_pb_cache=bool(meta.get("use_pb_cache", True)),
+            fetch_pbs=bool(meta.get("fetch_pbs", True)),
+            club_filter=meta.get("club_filter"),
+        )
+        target = url_for("run_status", run_id=new_run_id)
+        if _req_wants_json(request):
+            return jsonify({"ok": True, "run_id": new_run_id, "redirect": target})
+        return redirect(target)
+
     # ---- PROGRESS ------------------------------------------------------
     @app.route("/runs/<run_id>")
     def run_status(run_id):
@@ -21565,25 +21612,47 @@ def create_app() -> Flask:
                 return redirect(_review_url)
             if _row_status == "error":
                 # Server-side render a real error page rather than waiting for
-                # the JS poller — gives the user immediate context, a clear
-                # path back to the upload step, and the raw error text.
+                # the JS poller — gives the user immediate context and a clear
+                # recovery path. D-6: the uploaded file is persisted server-side,
+                # so lead with a one-click "Run this file again" instead of
+                # forcing a re-upload; the raw exception is operator-only.
                 _err_msg = _row_error or "Pipeline failed without leaving an error message."
+                _is_dev_err = _auth.is_dev_operator()
+                _can_rerun = _resume_input_exists(run_id)
+                _rerun_action = (
+                    f'<form method="post" action="{url_for("rerun_run", run_id=run_id)}" style="display:inline">'
+                    '<button type="submit" class="mh-cta-primary">Run this file again &rarr;</button>'
+                    "</form>"
+                    if _can_rerun
+                    else f'<a class="mh-cta-primary" href="{url_for("upload")}">Try another file &rarr;</a>'
+                )
+                _upload_cta = (
+                    f'<a class="mh-cta-secondary" href="{url_for("upload")}">Upload a different file</a>'
+                    if _can_rerun
+                    else ""
+                )
+                _err_detail = (
+                    '<div class="card" style="border-left:2px solid var(--bad)">'
+                    '<div class="strap" style="color:var(--bad);margin-bottom:var(--sp-3)">Error detail</div>'
+                    f'<pre style="font-family:var(--font-mono);font-size:12px;white-space:pre-wrap;margin:0;color:var(--ink)">{_h(_err_msg)}</pre>'
+                    "</div>"
+                    if _is_dev_err
+                    else ""
+                )
                 _err_body = (
                     '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-8);padding-bottom:var(--sp-7);margin-bottom:var(--sp-5)">'
                     '<span class="mh-hero-eyebrow">Pipeline failed</span>'
                     "<h1>Run didn't finish.</h1>"
                     '<p class="lede">'
-                    "The pipeline raised an error before producing any cards. The most common cause is a results file the active adapter couldn't parse &mdash; try a different format or check the file isn't corrupted."
+                    "The pipeline hit a snag before producing any cards &mdash; often a results file the parser couldn't read. Your file is saved, so you can run it again, or try a different one."
                     "</p>"
                     '<div class="mh-hero-actions">'
-                    f'<a class="mh-cta-primary" href="{url_for("upload")}">Try another file &rarr;</a>'
+                    f"{_rerun_action}"
+                    f"{_upload_cta}"
                     f'<a class="mh-cta-secondary" href="{url_for("activity_page")}">All recent runs</a>'
                     "</div>"
                     "</section>"
-                    '<div class="card" style="border-left:2px solid var(--bad)">'
-                    '<div class="strap" style="color:var(--bad);margin-bottom:var(--sp-3)">Error detail</div>'
-                    f'<pre style="font-family:var(--font-mono);font-size:12px;white-space:pre-wrap;margin:0;color:var(--ink)">{_h(_err_msg)}</pre>'
-                    "</div>"
+                    f"{_err_detail}"
                 )
                 return _layout("Run failed", _err_body, active="create")
             # Round-6 fix: when neither the in-memory cache nor the DB has
@@ -21606,6 +21675,16 @@ def create_app() -> Flask:
         # a plain-English phase describing what the engine is doing — never the
         # raw steps or internal error text.
         _is_dev = _auth.is_dev_operator()
+        # D-6: the launch file is persisted, so on failure we can offer a
+        # one-click re-run from it rather than a forced re-upload.
+        _can_rerun = _resume_input_exists(run_id)
+        _rerun_form = (
+            f'<form id="rerun-form" method="post" action="{url_for("rerun_run", run_id=run_id)}" style="display:none">'
+            '<button type="submit" class="btn">Run this file again &rarr;</button>'
+            "</form>"
+            if _can_rerun
+            else ""
+        )
         _dev_stepcount = (
             '<span class="sep">·</span><span id="mh-step-count">0 steps</span>' if _is_dev else ""
         )
@@ -21638,6 +21717,7 @@ def create_app() -> Flask:
 
   <div style="margin-top:var(--sp-5);display:flex;gap:var(--sp-3);flex-wrap:wrap">
     <a id="review-link" class="btn" style="display:none" href="{_review_url}">Open review queue &rarr;</a>
+    {_rerun_form}
     <a id="retry-link"  class="btn secondary" style="display:none" href="{url_for("upload")}">Try another file</a>
     <a id="home-link"   class="btn secondary" href="{url_for("home")}">View on home</a>
   </div>
@@ -21671,6 +21751,10 @@ def create_app() -> Flask:
   var lede = document.querySelector('.lede');
   var reviewLink = document.getElementById('review-link');
   var retryLink = document.getElementById('retry-link');
+  // D-6: a one-click re-run from the saved file (present only when the launch
+  // input is still on disk) — the primary recovery, shown ahead of re-upload.
+  var rerunForm = document.getElementById('rerun-form');
+  function showRerun() {{ if (rerunForm) rerunForm.style.display = 'inline-block'; }}
 
   function setStage(txt) {{ if (stage) stage.textContent = txt; }}
   // Drive the determinate progress bar + numeric readout from a 0–100 percent.
@@ -21688,6 +21772,7 @@ def create_app() -> Flask:
     setBar(100, 'var(--bad)');
     if (reviewLink) reviewLink.style.display = 'inline-flex';
     if (retryLink) retryLink.style.display = 'inline-flex';
+    showRerun();
     if (lede) lede.textContent = msg;
     if (window.MH) MH.toast(msg, 'error', 9000);
   }}
@@ -21747,6 +21832,7 @@ def create_app() -> Flask:
       stopped = true;
       setBar(100, 'var(--bad)');
       if (retryLink) retryLink.style.display = 'inline-flex';
+      showRerun();
       if (IS_DEV) {{
         setStage('Run failed');
         var emsg = (j && j.error) || 'unknown';
@@ -21755,7 +21841,9 @@ def create_app() -> Flask:
         if (window.MH) MH.toast('Run failed: ' + emsg, 'error', 9000);
       }} else {{
         setStage('Something went wrong');
-        if (lede) lede.textContent = "We hit a snag finishing your recap. Please try uploading your file again — nothing you did was lost.";
+        if (lede) lede.textContent = rerunForm
+          ? "We hit a snag finishing your recap. Your file is saved — run it again below; nothing you did was lost."
+          : "We hit a snag finishing your recap. Please try uploading your file again — nothing you did was lost.";
         if (window.MH) MH.toast('Your recap could not be completed', 'error', 7000);
       }}
       return;
