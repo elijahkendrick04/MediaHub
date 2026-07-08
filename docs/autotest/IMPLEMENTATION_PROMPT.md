@@ -94,7 +94,7 @@ The core defect today: subjective AI findings open on a single sighting and **ne
 Add these as **deterministic** finding sources (they bypass the A1 confirm gate). Keep each behind an `AUTOTEST_*` flag, default on, honest-skip if a dep is missing.
 
 ### B1. Cross-browser + mobile (`autotest/run.py` Playwright launch; CI matrix)
-- Today the launcher is Chromium-only (`pw.chromium.launch`). Introduce a browser/device selection driven by `AUTOTEST_BROWSER` (`chromium`|`firefox`|`webkit`) and `AUTOTEST_DEVICE` (a Playwright device name like `iPhone 13`/`Pixel 7`, optional). Run the **primary flow + a smoke pass** across the configured target; in CI, run Chromium on the 6-hour schedule and a **fuller matrix nightly** (add a scheduled matrix job in `autotest.yml` or a sibling workflow). Tag any browser-specific finding with the engine/device in its route/evidence so fingerprints don't collapse across engines.
+- Today the launcher is Chromium-only (`pw.chromium.launch`). Introduce a browser/device selection driven by `AUTOTEST_BROWSER` (`chromium`|`firefox`|`webkit`) and `AUTOTEST_DEVICE` (a Playwright device name like `iPhone 13`/`Pixel 7`, optional). Run the **primary flow + a smoke pass** across the configured target; in CI, run Chromium on the 6-hour schedule and a **fuller matrix nightly** (add a scheduled matrix job in `autotest.yml` or a sibling workflow). Tag any browser-specific finding with the engine/device in its route/evidence so fingerprints don't collapse across engines. **[The nightly CI matrix was removed 2026-07-08 — see docs/adr/0021; the local `AUTOTEST_BROWSER`/`AUTOTEST_DEVICE` browser-select capability in `run.py` is retained.]**
 
 ### B2. Accessibility (`@axe-core/playwright`; new `a11y` finding class in `run.py`)
 - After each rendered page in `probe`/`_capture_surface`, run **axe-core** against the DOM and emit violations as a new **deterministic** finding category `a11y`, severity mapped from axe impact (critical/serious→high, moderate→medium, minor→low). Install `@axe-core/playwright` (Node) — or inject `axe.min.js` and call it via `page.evaluate` to avoid a new npm dep if you prefer. Toggle `AUTOTEST_A11Y` (default 1); honest-skip if axe isn't available. Consider `pa11y-ci` as a separate CI job if you want sitemap-wide coverage.
@@ -102,7 +102,7 @@ Add these as **deterministic** finding sources (they bypass the A1 confirm gate)
 ### B3. Visual-regression baselines (Playwright snapshots; optionally Argos/Lost Pixel)
 - Add **deterministic** visual baselines for the key surfaces the VLM already screenshots (home, review). Use Playwright's built-in `expect(page).toHaveScreenshot()` with `animations:'disabled'`, masking dynamic regions (captions, timestamps, run ids) via `mask:`/`stylePath`, and per-browser/platform baselines committed under `autotest/` (a human-blessed baseline, analogous to `baseline.py`'s golden baseline — never auto-updated by the loop). Emit diffs as category `visual_regression`. Keep `vision.py` as the **novel-defect** judge; the snapshots are the **regression backbone**. `AUTOTEST_VISUAL` (default 1).
 
-### B4. Performance / Core Web Vitals budgets (Lighthouse CI; new CI job)
+### B4. Performance / Core Web Vitals budgets (Lighthouse CI; new CI job) **[Removed 2026-07-08 — see docs/adr/0021.]**
 - Add a **Lighthouse CI** job (`treosh/lighthouse-ci-action` or `@lhci/cli autorun`) against the live Render URL with a `budget.json`. Assert **accessibility / best-practices / SEO scores and resource budgets as errors**, and treat raw timing metrics (LCP/TBT ms) as **warnings** (documented CI noise); use `numberOfRuns: 3` (median). This can live in its own workflow file (`.github/workflows/lighthouse.yml`) rather than inside the autotest sweep.
 
 ### B5. API contract/schema testing for `/api` (Schemathesis — Python/pytest-native)
@@ -118,7 +118,7 @@ Add these as **deterministic** finding sources (they bypass the A1 confirm gate)
 ### C1. External synthetic monitor (separate from the bug-finding/fixing pipeline)
 - Stand up an **external monitor** of the primary login + a lightweight health check, running every 1–5 min, **completely separate** from the autotest finder/fixer so monitoring noise can never reach the fixer. Two acceptable implementations — pick one and scaffold it:
   - **Checkly "monitoring as code"** (`checkly` CLI): reuse a trimmed Playwright `*.check.ts`/`*.spec` of the login + health flow; config + a `checkly.config` committed under `monitoring/`. Alerts to Slack/PagerDuty (leave the destination as a documented TODO/secret).
-  - **Upptime** (GitHub-Actions-native, zero-server): add an `.upptimerc.yml` and the Upptime workflow targeting the Render URL + `/healthz`; it opens/closes GitHub Issues on down/up and publishes a status page. (Self-hosted **Uptime Kuma** is the alternative if the operator prefers a server.)
+  - **Upptime** (GitHub-Actions-native, zero-server): add an `.upptimerc.yml` and the Upptime workflow targeting the Render URL + `/healthz`; it opens/closes GitHub Issues on down/up and publishes a status page. (Self-hosted **Uptime Kuma** is the alternative if the operator prefers a server.) **[The Upptime monitor built from this was removed 2026-07-08 — see docs/adr/0021.]**
 - Document the choice and setup in `monitoring/README.md`.
 
 ### C2. Incident hygiene
@@ -142,10 +142,10 @@ Add these as **deterministic** finding sources (they bypass the A1 confirm gate)
 ## 6. New / changed CI workflows (`.github/workflows/`)
 
 - **`autotest.yml`** — wire in the new deterministic finders (a11y/visual/contract toggles), keep the read-only live sweep + fixer, and ensure the new `pending`/decay logic is reflected in the committed `BUGS.md`/`ledger.json`. Do **not** change the prod auto-merge arming yourself (§1).
-- **`lighthouse.yml`** (new) — B4.
+- **`lighthouse.yml`** (new) — B4. **[Removed 2026-07-08 — see docs/adr/0021.]**
 - **`contract.yml`** (new) or a step in the existing test workflow — B5 (Schemathesis).
-- **Nightly cross-browser matrix** (new job or workflow) — B1.
-- **Monitoring** — Upptime workflow **or** Checkly deploy step (C1), clearly separate from autotest.
+- **Nightly cross-browser matrix** (new job or workflow) — B1. **[Removed 2026-07-08 — see docs/adr/0021.]**
+- **Monitoring** — Upptime workflow **or** Checkly deploy step (C1), clearly separate from autotest. **[The Upptime workflow was removed 2026-07-08 — see docs/adr/0021.]**
 - Keep every new workflow self-contained and using only official actions where possible (matches the repo's `responsive-design.yml` philosophy). Pin action versions.
 
 ---
