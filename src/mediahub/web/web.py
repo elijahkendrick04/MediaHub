@@ -2371,6 +2371,43 @@ def _render_busy_response(kind: str):
     return resp
 
 
+def _friendly_failure_message(exc: Exception, *, kind: str = "ai", context: str = "") -> str:
+    """Map a provider/render exception to plain-English customer copy, logging
+    the raw exception server-side only (D-23).
+
+    Customers on the chat, draft-graphic and public-demo surfaces must never
+    read a raw Python exception or ``render_failed: <traceback>`` — it looks
+    like the product broke and leaks internals. Operators still get the full
+    detail in the server log via ``exc_info``.
+
+    ``kind`` picks the copy register: ``"ai"`` for LLM / caption / chat turns,
+    ``"render"`` for graphic / video renders. When the underlying cause is an
+    unconfigured or unavailable AI provider we say so honestly — the fix is an
+    operator action, not a customer retry — otherwise we describe a transient
+    hiccup and invite a retry.
+    """
+    log.warning(
+        "%s failure%s: %s",
+        kind,
+        f" [{context}]" if context else "",
+        exc,
+        exc_info=True,
+    )
+    name = type(exc).__name__
+    text = str(exc).lower()
+    provider_gap = name in {"ProviderNotConfigured", "ClaudeUnavailableError"} or any(
+        hint in text for hint in ("not configured", "no provider", "unavailable", "no api key")
+    )
+    if provider_gap:
+        return (
+            "AI isn't switched on for this workspace yet, so this step can't run. "
+            "Ask your administrator to connect an AI provider, then try again."
+        )
+    if kind == "render":
+        return "We couldn't finish rendering this just now. Give it a moment and try again."
+    return "Something went wrong on our side and this step didn't finish. Please try again in a moment."
+
+
 # ---------------------------------------------------------------------------
 # V10: background job store for the 3-variant regenerate fan-out.
 #
@@ -12713,6 +12750,17 @@ _VISUAL_PANEL_JS = """<script>
         '</div>' +
       '</div>';
   }
+  // D-23: render a friendly failure with a Retry button. panel._mh survives
+  // the innerHTML swap (it's a JS property, not markup), so the Retry button —
+  // class mh-vbtn, picked up by the delegated listener — re-runs mhGen with the
+  // last-used format/photo state.
+  function mhVFail(panel, msg){
+    panel.innerHTML =
+      '<div style="padding:14px;font-size:13px">' +
+        '<div style="color:var(--bad);margin-bottom:8px">' + esc(msg) + '</div>' +
+        '<button type="button" class="btn secondary mh-vbtn" data-act="regen" style="font-size:11px;padding:4px 10px">\\u21BA Try again</button>' +
+      '</div>';
+  }
   function mhGen(panel){
     var st = panel._mh; if (!st || !st.url) return;
     panel.style.display = '';
@@ -12725,14 +12773,14 @@ _VISUAL_PANEL_JS = """<script>
       .then(function(res){
         if (!res.ok || res.body.error){
           prog.stop();
-          panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">Error: ' + esc(res.body.error || 'render failed') + '</div>';
+          mhVFail(panel, res.body.user_message || 'We couldn\\u2019t create this graphic just now.');
           return;
         }
         prog.complete(function(){ render(panel, res.body); });
       })
-      .catch(function(err){
+      .catch(function(){
         prog.stop();
-        panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">Network error: ' + esc(String(err)) + '</div>';
+        mhVFail(panel, 'Couldn\\u2019t reach the server \\u2014 check your connection and try again.');
       });
   }
   // One delegated listener handles every in-panel control (format tabs, photo
@@ -34097,7 +34145,10 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             try:
                 next_assistant_turn(s, club_brand=_active_club_brand_for_llm())
             except Exception as e:
-                s.add_assistant_message(f"Error: {e}", meta={"error": True})
+                s.add_assistant_message(
+                    _friendly_failure_message(e, kind="ai", context="free-text chat"),
+                    meta={"error": True},
+                )
                 save_session(s)
         return redirect(url_for("free_text_chat_view", chat_id=chat_id))
 
@@ -34139,7 +34190,10 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             try:
                 next_assistant_turn(s, club_brand=_active_club_brand_for_llm())
             except Exception as e:
-                s.add_assistant_message(f"Error: {e}", meta={"error": True})
+                s.add_assistant_message(
+                    _friendly_failure_message(e, kind="ai", context="free-text chat"),
+                    meta={"error": True},
+                )
                 save_session(s)
         return redirect(url_for("free_text_chat_view", chat_id=chat_id))
 
@@ -34711,7 +34765,14 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 forced_bg_asset_id=chosen_asset_id,
             )
         except Exception as e:
-            return jsonify({"error": f"render_failed: {e}"}), 500
+            return jsonify(
+                {
+                    "error": "render_failed",
+                    "user_message": _friendly_failure_message(
+                        e, kind="render", context="draft graphic"
+                    ),
+                }
+            ), 500
         return jsonify(
             {
                 "ok": True,
@@ -50545,7 +50606,6 @@ ever appear; queued, edited and rejected cards never do.</p>
         # ---- light parse for the club picker (same as the real upload) ----
         clubs: list[str] = []
         meet_name = ""
-        parse_error = ""
         try:
             from mediahub.interpreter import interpret_document
 
@@ -50560,19 +50620,18 @@ ever appear; queued, edited and rejected cards never do.</p>
             clubs.sort(key=str.lower)
             meet_name = interpreted.meet_name or ""
         except Exception as exc:
-            parse_error = str(exc)
+            # D-23: keep the raw parser exception operator-only. The anonymous
+            # demo is the top of the acquisition funnel — a first-time visitor
+            # must never see a Python traceback or "Parser said: <exception>".
+            log.warning("try-demo parse failed: %s", exc, exc_info=True)
         if not clubs:
-            detail = (
-                f'<p class="dim" style="font-size:13px">Parser said: <code>{_h(parse_error)}</code></p>'
-                if parse_error
-                else ""
-            )
             inner = f"""
 <h1>We couldn't read that file</h1>
 <div class="card" style="max-width:560px">
   <p>It doesn't look like a meet results file we can parse (Hy-Tek PDF, HY3, or a ZIP of
   one). Entry lists and heat sheets won't work — it needs finished results.</p>
-  {detail}
+  <p class="dim" style="font-size:13px">Double-check it's a finished-results export and
+  try again — or use the sample meet to see how it works.</p>
   <a class="btn" href="{url_for("try_demo")}">&larr; Try another file</a>
 </div>"""
             return _try_page(inner)
@@ -50693,21 +50752,32 @@ ever appear; queued, edited and rejected cards never do.</p>
     def try_demo_run(run_id: str):
         state = _demo_run_or_404(run_id)
         if state["status"] in ("queued", "running"):
+            # D-23: an animated indeterminate bar instead of a blank wait, so a
+            # first-time visitor sees the demo is working rather than a stalled
+            # page that silently reloads.
             inner = """
 <h1>Reading your results&hellip;</h1>
 <div class="card" style="max-width:560px">
   <p>MediaHub is parsing the file, detecting achievements, and ranking what's worth
   posting. This usually takes under a minute.</p>
-  <p class="dim" style="font-size:13px">This page refreshes itself.</p>
+  <div style="height:6px;border-radius:999px;background:var(--hairline);overflow:hidden;margin:14px 0 4px">
+    <div style="height:100%;width:40%;border-radius:999px;background:var(--lane);
+                animation:mhTryBar 1.4s ease-in-out infinite"></div>
+  </div>
+  <p class="dim" style="font-size:13px">This page updates itself &mdash; no need to refresh.</p>
 </div>
+<style>@keyframes mhTryBar{0%{margin-left:-40%}100%{margin-left:100%}}</style>
 <script>setTimeout(function () { location.reload(); }, 3000);</script>"""
             return _try_page(inner, title="Working…")
         if state["status"] != "done":
+            # D-23: log the raw pipeline error operator-only; the anonymous
+            # visitor sees plain-language copy, never a traceback.
+            log.warning("try-demo run %s failed: %s", run_id, (state.get("error") or "")[:500])
             inner = f"""
 <h1>That run didn't finish</h1>
 <div class="card" style="max-width:560px">
-  <p>Something went wrong processing the file.</p>
-  <p class="dim" style="font-size:13px"><code>{_h(state["error"][:300])}</code></p>
+  <p>Something went wrong while we were processing that file. It might be a partial or
+  unusual export &mdash; try another results file, or use the sample meet.</p>
   <a class="btn" href="{url_for("try_demo")}">&larr; Try another file</a>
 </div>"""
             return _try_page(inner, title="Demo run failed")
