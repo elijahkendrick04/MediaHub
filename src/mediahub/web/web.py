@@ -26567,6 +26567,9 @@ Relay team broke club record"></textarea>
         # Deleting an account is irreversible — re-verify the password so a
         # hijacked session can't silently destroy the account.
         password = request.form.get("password") or ""
+        # E-9: return the user to the page they deleted from (Settings account
+        # or /privacy), not a hardcoded /privacy.
+        _back = _safe_next(request.form.get("return_to")) or url_for("privacy_page")
         try:
             _user_store().authenticate(email, password)
         except _auth.AuthError:
@@ -26575,9 +26578,9 @@ Relay team broke club record"></textarea>
                     "Account not deleted",
                     '<div class="card"><p class="tag bad">Password check failed '
                     "&mdash; account NOT deleted.</p>"
-                    f'<p><a class="btn secondary" href="{url_for("privacy_page")}">'
+                    f'<p><a class="btn secondary" href="{_h(_back)}">'
                     "&larr; Back</a></p></div>",
-                    active="privacy",
+                    active="settings",
                 ),
                 403,
             )
@@ -26586,7 +26589,19 @@ Relay team broke club record"></textarea>
         erase_account(email)
         _auth.logout_user()
         session.clear()
-        return redirect(url_for("home"))
+        # E-9: land on an explicit confirmation, not a silent bounce to home
+        # that leaves the user unsure whether it worked.
+        return _layout(
+            "Account deleted",
+            '<section class="mh-hero" style="padding-top:var(--sp-7);'
+            'padding-bottom:var(--sp-5);margin-bottom:var(--sp-5)">'
+            '<span class="mh-hero-eyebrow">Account</span>'
+            '<h1>Your account has been <em class="editorial">deleted.</em></h1></section>'
+            '<div class="card"><p>Your MediaHub account and its personal data have been '
+            "erased. You have been signed out.</p>"
+            f'<p><a class="btn" href="{url_for("home")}">Back to home</a></p></div>',
+            active="home",
+        )
 
     # ---- HEALTH --------------------------------------------------------
     APP_VERSION = "v4.0.0"
@@ -29347,7 +29362,11 @@ self.addEventListener('fetch', function(e){
             '<form method="post" action="'
             + url_for("account_delete")
             + '" onsubmit="return confirm(\'Permanently delete your account? This cannot be undone.\')">'
-            '<input type="password" name="password" placeholder="Confirm password" '
+            # E-9: `required` stops an empty submit that used to sail past the
+            # confirm and dead-end on a full-page "Password check failed"; the
+            # return_to lands a failed check back on THIS page, not /privacy.
+            f'<input type="hidden" name="return_to" value="{_h(url_for("settings_section", section="account"))}"/>'
+            '<input type="password" name="password" required placeholder="Confirm password" '
             'style="font-size:13px;padding:8px 10px;border:1px solid var(--panel);border-radius:6px;'
             'background:var(--bg);color:var(--ink);margin-right:8px"/>'
             '<button class="btn danger" type="submit" style="font-size:13px">Delete my account</button>'
