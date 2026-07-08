@@ -23364,6 +23364,26 @@ function copyWhyCard(btn, taId) {{
         msg += '  (' + unseen + " not yet opened — you haven't read their reasoning; approving accepts them as-is.)";
       }}
       if (!window.confirm(msg)) return;
+      // D-2: route every queued card through the shared bulk bar so they
+      // approve in ONE request — per-card gate results, held-vote handling and
+      // a single summary toast ("Approved 148, 2 blocked (consent)") — instead
+      // of firing 150+ fetches and stacking 150 success toasts. Tick every
+      // queued row's checkbox, then trigger the bulk "Approve".
+      var bulkForm = document.getElementById('mh-review-bulk');
+      var approveBtn = bulkForm && bulkForm.querySelector('[data-mh-bulk="approve"]');
+      if (bulkForm && approveBtn) {{
+        Array.prototype.slice.call(bulkForm.querySelectorAll('.mh-row-check'))
+          .forEach(function(c){{ c.checked = false; }});
+        queued.forEach(function(row){{
+          var c = row.querySelector('.mh-row-check');
+          if (c) c.checked = true;
+        }});
+        // The bulk handler reads the checked set fresh on click, then clears
+        // the boxes and refreshes counts once the request returns.
+        approveBtn.click();
+        return;
+      }}
+      // Defensive fallback (bulk bar absent): the legacy per-card path.
       var n = 0;
       queued.forEach(function(row){{
         var btn = row.querySelector('[data-mh-wf="approved"]');
