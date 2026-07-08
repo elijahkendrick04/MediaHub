@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-07-08 · `4c552809e` · chore(gitignore): ignore src/mediahub/dsr_exports runtime SAR snapshots (#1087)
+**Last updated:** 2026-07-08 · `014c8481b` · Fix production sentinel/autotest findings (#1067 #1066 #1065 #884) (#1089)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -117,9 +117,7 @@ section; **closing the issue clears it from here**. How the bot works:
 [`LOG_SENTINEL.md`](LOG_SENTINEL.md).
 
 <!-- ROADMAP:SENTINEL -->
-- [#1067](https://github.com/elijahkendrick04/MediaHub/issues/1067) · HTTP 5xx responses *(opened 2026-07-06)*
-- [#1066](https://github.com/elijahkendrick04/MediaHub/issues/1066) · Unhandled Python traceback *(opened 2026-07-03)*
-- [#1065](https://github.com/elijahkendrick04/MediaHub/issues/1065) · AI provider unavailable *(opened 2026-07-03)*
+_No open production findings — the log sentinel has nothing filed._
 <!-- /ROADMAP:SENTINEL -->
 
 ## To do — things to build (priority order)
@@ -1228,6 +1226,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-07-08 | `ac47d1c93` | Fix production sentinel/autotest findings (#1067 #1066 #1065 #884) |
 | 2026-07-08 | `423b8ce54` | chore(gitignore): ignore src/mediahub/dsr_exports runtime SAR snapshots |
 | 2026-07-08 | `3b64973b8` | fix: address pre-merge adversarial review (F-9 undercount, D-17 dead banner, F-4 dead code) |
 | 2026-07-08 | `588251f24` | docs(audit): mark shipped findings + add implementation-status matrix |
@@ -1239,5 +1238,4 @@ list and the auto table below, not here.
 | 2026-07-08 | `7f0c5fd62` | fix(newsletter): embed card images in the downloaded draft email (D-18) |
 | 2026-07-08 | `7ebbf1867` | test: update export-loader guard for F-5's broadened native-submit branch |
 | 2026-07-08 | `df939de03` | fix(brand): colour pickers + font/tone dropdowns for the kit editor (F-10) |
-| 2026-07-08 | `202631d7a` | fix(export): live quality readout + plain-English format hints (F-11) |
 <!-- /ROADMAP:ACTIVITY -->
