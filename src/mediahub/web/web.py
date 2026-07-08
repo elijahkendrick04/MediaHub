@@ -30460,10 +30460,12 @@ self.addEventListener('fetch', function(e){
                 "pin a sport, so pick one here</span>"
             )
 
+        # F-6: plain-language signal-source chips (the engine's OWN/EXTERNAL/DIRECT
+        # taxonomy meant nothing to a volunteer and had no legend on the page).
         src_chip = {
-            "own": '<span class="tag" style="background:rgba(34,211,238,.12);color:var(--accent)">OWN</span>',
-            "external": '<span class="tag" style="background:rgba(167,139,250,.12);color:var(--medal)">EXTERNAL</span>',
-            "direct": '<span class="tag" style="background:rgba(250,204,21,.12);color:var(--lane)">DIRECT</span>',
+            "own": '<span class="tag" style="background:rgba(34,211,238,.12);color:var(--accent)">From your results</span>',
+            "external": '<span class="tag" style="background:rgba(167,139,250,.12);color:var(--medal)">From the calendar</span>',
+            "direct": '<span class="tag" style="background:rgba(250,204,21,.12);color:var(--lane)">You told us</span>',
         }
 
         # Persisted plans are durable state — DATA_DIR is a mounted disk that
@@ -30504,13 +30506,11 @@ self.addEventListener('fetch', function(e){
                             create_link = ""
                 chips = "".join(src_chip.get(s, "") for s in _as_list(item.get("sources_used")))
                 if not chips:
-                    chips = '<span class="tag">baseline</span>'
+                    # F-6: a bare "baseline" tag meant nothing — say what it is.
+                    chips = '<span class="tag">General suggestion</span>'
                 reasons = "".join(
                     f'<li style="margin:2px 0;color:var(--ink-muted);font-size:12.5px">{_h(r)}</li>'
                     for r in _as_list(item.get("reasons"))
-                )
-                autonomy = _h(
-                    (item.get("default_autonomy") or "approval_required").replace("_", " ")
                 )
                 badge = (
                     '<span class="tag live">Ready to create</span>'
@@ -30524,7 +30524,6 @@ self.addEventListener('fetch', function(e){
     <strong style="flex:1">{_h(item.get("title") or slug)}</strong>
     {chips}
     {badge}
-    <span class="tag" title="Default autonomy for this type">{autonomy}</span>
     <span style="font-variant-numeric:tabular-nums;font-weight:700;font-size:15px" title="Priority score">{_as_int(item.get("score"))}</span>
     {create_link}
   </summary>
@@ -30543,8 +30542,8 @@ self.addEventListener('fetch', function(e){
 <div class="card" style="margin-bottom:14px">
   <div style="display:flex;gap:18px;flex-wrap:wrap;align-items:center">
     <strong>{_h(plan.get("sport_display") or plan.get("sport", ""))} plan</strong>
-    <span class="dim" style="font-size:12.5px">generated {_h(str(plan.get("generated_at", ""))[:16].replace("T", " "))} · horizon {_as_int(plan.get("horizon_days"), 14)}d</span>
-    <span style="font-size:12.5px">{src_chip["own"]} {_as_int(counts.get("own"))} · {src_chip["external"]} {_as_int(counts.get("external"))} · {src_chip["direct"]} {_as_int(counts.get("direct"))} signals</span>
+    <span class="dim" style="font-size:12.5px">generated {_h(str(plan.get("generated_at", ""))[:16].replace("T", " "))} · next {_as_int(plan.get("horizon_days"), 14)} days</span>
+    <span style="font-size:12.5px">{_as_int(counts.get("own"))} from your results · {_as_int(counts.get("external"))} from the calendar · {_as_int(counts.get("direct"))} you told us</span>
   </div>
   {f'<ul style="margin:8px 0 0 0;padding-left:18px">{notes_html}</ul>' if notes_html else ""}
 </div>"""
