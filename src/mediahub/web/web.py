@@ -31348,7 +31348,8 @@ document.addEventListener('click', function (e) {{
         pack = save_pack(
             "free_text",
             {"free_text": seed},
-            [{"platform": "Draft", "caption": seed, "hashtags": [], "confidence": 0.5}],
+            # D-25: prompt-led draft — no fabricated confidence badge.
+            [{"platform": "Draft", "caption": seed, "hashtags": [], "confidence": None}],
             profile_id=pid,
         )
         updated = link_pack(pid, card_id, pack["pack_id"], column="drafted")
@@ -33052,7 +33053,9 @@ function mhAnDigest(btn) {{
             "platform": "Instagram",
             "caption": result["caption"],
             "hashtags": ["#spotlight", "#swimming"],
-            "confidence": 0.9,
+            # D-25: prompt-led drafts carry no real model confidence — leave it
+            # unset so the honest "% conf" badge doesn't render a fabricated one.
+            "confidence": None,
             "notes": (
                 f"Composed from {result['n_approved']} approved achievement(s) "
                 f"for {result['swimmer_name']}."
@@ -34215,7 +34218,8 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             "platform": brief.get("platform") or "Instagram",
             "caption": caption,
             "hashtags": brief.get("hashtags") or [],
-            "confidence": 0.9,
+            # D-25: prompt-led draft — no fabricated confidence badge.
+            "confidence": None,
             "notes": brief.get("visual_concept", "") or "",
             "status": "queue",
         }
@@ -34541,7 +34545,8 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 [p for p in [brief.get("headline", ""), brief.get("body", "")] if p]
             ).strip(),
             "hashtags": brief.get("hashtags") or [],
-            "confidence": 0.85,
+            # D-25: prompt-led chat draft — no fabricated confidence badge.
+            "confidence": None,
             "notes": brief.get("visual_concept", "") or "",
             "status": "queue",
         }
