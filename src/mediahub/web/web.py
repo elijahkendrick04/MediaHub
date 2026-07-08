@@ -41261,6 +41261,58 @@ what you're doing, what they should do.</p>
             )
 
         capture_url = url_for("organisation_setup_capture")
+
+        # A-2: an org can be created but still "not ready" — a name-only AI
+        # submit, or an AI capture that read the links but found no usable
+        # brand signal. Previously that left the user on an unchanged form
+        # while every nav click bounced silently back here (the org-ready
+        # gate), with no explanation — a hard lockout. is_ready() is
+        # deliberately strict (no anonymous/generic content), so the fix is
+        # to explain exactly what unlocks content and give a one-click path
+        # to finish. The manual colours are the fastest route, and the
+        # manual form already carries over the name/type/country the user
+        # typed, so switching tabs loses nothing.
+        not_ready_html = ""
+        if prof and not prof.is_ready():
+            _cap = (prof.brand_capture_status or "").strip().lower()
+            if _cap in ("ok", "ok_heuristic"):
+                _lead = (
+                    "We read your links but couldn't find a usable brand signal "
+                    "(colours, voice or keywords)."
+                )
+            elif _cap in ("", "no_sources"):
+                _lead = (
+                    "You've given us your name — now MediaHub needs one real "
+                    "brand signal before it can create content for you."
+                )
+            else:
+                _lead = (
+                    "We couldn't read enough from your links to unlock content yet."
+                )
+            not_ready_html = (
+                '<div class="card" id="mh-setup-not-ready" role="status" '
+                'style="margin-bottom:20px;border:1px solid rgba(255,180,84,0.5);'
+                'background:rgba(255,180,84,0.07)">'
+                '<h2 style="margin-top:0;font-size:18px;color:var(--ink)">'
+                f'Almost there &mdash; {_h(prof.display_name or "your organisation")} '
+                "isn&rsquo;t unlocked yet</h2>"
+                '<p style="font-size:14px;line-height:1.55;color:var(--ink);margin:0 0 12px">'
+                f"{_h(_lead)} Add <strong>any one</strong> of these and you&rsquo;re in:</p>"
+                '<ul style="font-size:13px;line-height:1.7;color:var(--ink-dim);'
+                'margin:0 0 14px 18px">'
+                "<li>your brand colours (fastest &mdash; a few taps)</li>"
+                "<li>a website or social link the AI can read</li>"
+                "<li>a brand-guidelines document (PDF, DOCX, TXT)</li>"
+                "<li>a couple of sentences on how your club sounds</li>"
+                "</ul>"
+                '<button type="button" class="btn" '
+                "onclick=\"mhSetupMode('manual');var m="
+                "document.getElementById('mh-setup-manual-panel');"
+                "if(m){m.scrollIntoView({behavior:'smooth',block:'start'});}\">"
+                "Pick your colours now &rarr;</button>"
+                "</div>"
+            )
+
         # UK legal baseline: DPA acceptance + lawful-basis attestation block,
         # rendered in BOTH setup forms until this workspace has a record.
         _attestation_html = _org_attestation_form_html(prof)
@@ -41280,6 +41332,7 @@ what you're doing, what they should do.</p>
 </section>
 
 {llm_banner_html}
+{not_ready_html}
 {preview_html}
 
 <div style="display:flex;gap:8px;margin-bottom:20px;flex-wrap:wrap" role="tablist" aria-label="How do you want to set up?">
@@ -41345,11 +41398,12 @@ what you're doing, what they should do.</p>
     </span>
   </summary>
   <p class="dim" style="font-size:13px;line-height:1.5;margin:14px 0 14px 0">
-    Skip this section entirely if you want &mdash; the AI works fine
-    without it. If you DO paste a link, the AI reads it, picks up your
-    palette, tone of voice, characteristic phrases and the things you
-    actually talk about, and uses that on every caption it writes &mdash;
-    so you never have to explain "this is how we sound".
+    Skip the links if you&rsquo;d rather &mdash; but MediaHub still needs
+    <b>one</b> brand signal to unlock content, so add your colours or a
+    guidelines document below instead. If you DO paste a link, the AI reads
+    it, picks up your palette, tone of voice, characteristic phrases and the
+    things you actually talk about, and uses that on every caption it writes
+    &mdash; so you never have to explain &ldquo;this is how we sound&rdquo;.
   </p>
   <div style="margin-bottom:14px">
     <label>
