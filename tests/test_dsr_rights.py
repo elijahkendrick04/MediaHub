@@ -413,14 +413,20 @@ def test_rights_workflow_via_routes(client, data_dir, media_store):
     page = client.get("/organisation/athlete-rights")
     assert req.id.encode() in page.data
 
+    # D-21: "Run export" now redirects back with a confirmation and marks the
+    # request complete (was a bare JSON attachment that left the table stale).
     r = client.post(f"/organisation/athlete-rights/{req.id}/run")
-    assert r.status_code == 200
-    assert r.mimetype == "application/json"
-    export = json.loads(r.data)
-    assert export["athlete_name"] == ATHLETE
+    assert r.status_code == 302
     assert DsrRequestLog().get(req.id).status == "completed"
+    # …and the refreshed page offers a working download of the SAR export.
+    page = client.get("/organisation/athlete-rights").get_data(as_text=True)
+    assert f"/organisation/athlete-rights/{req.id}/export.json" in page
+    dl = client.get(f"/organisation/athlete-rights/{req.id}/export.json")
+    assert dl.status_code == 200 and dl.mimetype == "application/json"
+    export = json.loads(dl.data)
+    assert export["athlete_name"] == ATHLETE
 
-    # cross-tenant: another org cannot run this tenant's requests
+    # cross-tenant: another org cannot run this tenant's requests OR grab its export
     with client.session_transaction() as sess:
         sess["active_profile_id"] = "other-org"
     from mediahub.web.club_profile import ClubProfile, save_profile
@@ -428,6 +434,7 @@ def test_rights_workflow_via_routes(client, data_dir, media_store):
     save_profile(ClubProfile(profile_id="other-org", display_name="Other"))
     r = client.post(f"/organisation/athlete-rights/{req.id}/run")
     assert r.status_code == 404
+    assert client.get(f"/organisation/athlete-rights/{req.id}/export.json").status_code == 404
 
 
 def test_erasure_route_records_security_event(client, data_dir, media_store):

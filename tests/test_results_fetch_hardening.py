@@ -443,7 +443,11 @@ def test_status_reports_stall_when_heartbeat_goes_quiet(app_mod):
     c = app.test_client()
     body = c.get(f"/api/upload/from-url/{job_id}/status").get_json()
     assert body["status"] == "error"
-    assert "stall" in body["error"].lower()
+    # F-3: the stalled-crawl message is now customer-facing copy (no operator
+    # env-var jargon) that still terminates the poll and points at the fallback.
+    err = body["error"].lower()
+    assert "didn't finish" in err or "did not finish" in err
+    assert "upload" in err  # steers the volunteer to upload the file directly
 
 
 def test_status_stays_running_when_heartbeat_fresh(app_mod):

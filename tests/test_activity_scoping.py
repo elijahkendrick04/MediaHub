@@ -127,7 +127,7 @@ class TestActivityScoping:
         resp = c.get("/activity")
         assert resp.status_code == 200
         body = resp.get_data(as_text=True)
-        assert "No runs yet for this organisation" in body
+        assert "No results yet for this organisation" in body
         # And critically — no other club's data appears
         assert "Club A meet" not in body
         assert "Club B meet" not in body

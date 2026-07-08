@@ -4439,6 +4439,21 @@ kbd {
   tab-size: 2;
   -webkit-overflow-scrolling: touch;
 }
+/* I-2: long tokenised parse-note / diagnostics strings wrap instead of forcing
+   the review page body to scroll sideways on a phone. */
+.mh-tok-string,
+.mh-tok-property,
+.mh-tok-comment,
+.mh-tok-variable {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+/* I-2: wide diagnostics tables scroll inside their own box, never the page. */
+.mh-table-scroll {
+  overflow-x: auto;
+  max-width: 100%;
+  -webkit-overflow-scrolling: touch;
+}
 .mh-cs-panel code {
   font: inherit;
   color: inherit;
@@ -5366,7 +5381,6 @@ span.mh-an-down { background: var(--warn); }
   font-family: var(--font-mono);
   font-size: 11px;
   letter-spacing: 0.06em;
-  white-space: nowrap;
   animation: mh-oq-in var(--dur-slow) var(--ease-spring) both;
 }
 #mh-offline-queue::before {
@@ -5381,6 +5395,27 @@ span.mh-an-down { background: var(--warn); }
 }
 #mh-offline-queue[data-state="synced"] { color: var(--good); }
 #mh-offline-queue[data-state="synced"]::before { background: var(--good); }
+/* D-4: some queued approvals were refused or held on replay — never a green
+   "synced" over a lost approval intent. */
+#mh-offline-queue[data-state="problem"] {
+  color: var(--bad);
+  white-space: normal;
+  max-width: min(360px, calc(100vw - 24px));
+  line-height: 1.4;
+}
+#mh-offline-queue[data-state="problem"]::before { background: var(--bad); }
+/* D-5: a tappable manual drain — iOS Safari has no Background Sync. */
+.mh-oq-sync {
+  margin-left: 10px;
+  padding: 2px 10px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--chrome);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.mh-oq-sync:hover { border-color: var(--lane); color: var(--ink); }
 @keyframes mh-oq-in {
   from { opacity: 0; transform: translate(-50%, 8px); }
   to   { opacity: 1; transform: translate(-50%, 0); }
@@ -5417,13 +5452,29 @@ span.mh-an-down { background: var(--warn); }
   box-shadow: var(--shadow-3);
   animation: mh-chip-in var(--dur-slow) var(--ease-spring) both;
 }
+/* I-7: the chip is now a container of two real buttons — reset their chrome so
+   the visual is unchanged, but each is keyboard-focusable. */
+#mh-install-chip .mh-install-action {
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  padding: 0;
+  cursor: pointer;
+}
 #mh-install-chip .mh-install-x {
+  border: none;
+  background: none;
+  color: inherit;
   font-size: 16px;
   line-height: 1;
   opacity: 0.65;
-  padding: 0 2px;
+  padding: 0 4px;
+  cursor: pointer;
 }
-#mh-install-chip:hover .mh-install-x { opacity: 1; }
+#mh-install-chip:hover .mh-install-x,
+#mh-install-chip .mh-install-x:focus-visible { opacity: 1; }
 #mh-install-chip:active { transform: translateY(1px); }
 @keyframes mh-chip-in {
   from { opacity: 0; transform: translateY(8px); }

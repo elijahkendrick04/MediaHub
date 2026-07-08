@@ -92,10 +92,11 @@ def test_sw_returns_queued_202_when_offline(sw_body):
 
 
 def test_sw_drain_is_idempotent_safe(sw_body):
-    """A final server decision (status < 500) drops the entry; a 5xx/network
-    error keeps it for the next sync — so replay never loops or double-errors."""
+    """A 5xx/network error keeps the entry for the next sync (transient); a final
+    server decision drops it — so replay never loops or double-errors."""
     assert "drainQueue" in sw_body
-    assert "res.status < 500" in sw_body
+    # Transient failures are kept and retried; only final decisions are dropped.
+    assert "res.status >= 500" in sw_body
     assert "idbDelete(it.id)" in sw_body
 
 

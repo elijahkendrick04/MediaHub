@@ -1758,11 +1758,21 @@ DATA_DIR = Path(os.environ.get("DATA_DIR", str(_SRC_ROOT)))
 RUNS_DIR = Path(os.environ.get("RUNS_DIR", str(DATA_DIR / "runs_v4")))
 UPLOADS_DIR = Path(os.environ.get("UPLOADS_DIR", str(DATA_DIR / "uploads_v4")))
 DB_PATH = DATA_DIR / "data.db"  # MUST be data.db for publish snapshot
-RESEARCH_DIR = DATA_DIR / "research"
 
 RUNS_DIR.mkdir(parents=True, exist_ok=True)
 UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
-RESEARCH_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _dsr_export_path(profile_id: str, request_id: str) -> Path:
+    """D-21 — where a generated SAR (access-request) export snapshot is kept so
+    the officer downloads it from a refreshed page instead of a dead-end
+    attachment. Both ids are sanitised so neither can escape the export dir."""
+    import re as _re
+
+    safe_pid = _re.sub(r"[^A-Za-z0-9_-]+", "_", profile_id or "")[:80] or "org"
+    safe_rid = _re.sub(r"[^A-Za-z0-9_-]+", "_", request_id or "")[:80] or "req"
+    return DATA_DIR / "dsr_exports" / safe_pid / f"{safe_rid}.json"
+
 
 # V7: workflow store (sidecar JSON per run)
 _wf_store = None  # initialised after imports complete
@@ -2369,6 +2379,43 @@ def _render_busy_response(kind: str):
     resp.status_code = 429
     resp.headers["Retry-After"] = "5"
     return resp
+
+
+def _friendly_failure_message(exc: Exception, *, kind: str = "ai", context: str = "") -> str:
+    """Map a provider/render exception to plain-English customer copy, logging
+    the raw exception server-side only (D-23).
+
+    Customers on the chat, draft-graphic and public-demo surfaces must never
+    read a raw Python exception or ``render_failed: <traceback>`` — it looks
+    like the product broke and leaks internals. Operators still get the full
+    detail in the server log via ``exc_info``.
+
+    ``kind`` picks the copy register: ``"ai"`` for LLM / caption / chat turns,
+    ``"render"`` for graphic / video renders. When the underlying cause is an
+    unconfigured or unavailable AI provider we say so honestly — the fix is an
+    operator action, not a customer retry — otherwise we describe a transient
+    hiccup and invite a retry.
+    """
+    log.warning(
+        "%s failure%s: %s",
+        kind,
+        f" [{context}]" if context else "",
+        exc,
+        exc_info=True,
+    )
+    name = type(exc).__name__
+    text = str(exc).lower()
+    provider_gap = name in {"ProviderNotConfigured", "ClaudeUnavailableError"} or any(
+        hint in text for hint in ("not configured", "no provider", "unavailable", "no api key")
+    )
+    if provider_gap:
+        return (
+            "AI isn't switched on for this workspace yet, so this step can't run. "
+            "Ask your administrator to connect an AI provider, then try again."
+        )
+    if kind == "render":
+        return "We couldn't finish rendering this just now. Give it a moment and try again."
+    return "Something went wrong on our side and this step didn't finish. Please try again in a moment."
 
 
 # ---------------------------------------------------------------------------
@@ -4073,7 +4120,7 @@ _RUN_DELETE_JS = """
     if (!form || !form.classList) return;
     if (form.classList.contains('mh-run-delete')) {
       e.preventDefault();
-      if (!window.confirm('Delete this run? This cannot be undone.')) return;
+      if (!window.confirm('Delete these results? This cannot be undone.')) return;
       var rid = form.getAttribute('data-run-id');
       var btn = form.querySelector('button');
       if (btn) btn.disabled = true;
@@ -7438,6 +7485,10 @@ def _execute_run(
     _hb_thread = threading.Thread(target=_heartbeat_ticker, name=f"hb-{run_id[:8]}", daemon=True)
     _hb_thread.start()
 
+    # D-6: only a SUCCESSFUL run reclaims its stored launch input. A failed run
+    # keeps input.bin + resume.json so the volunteer can re-run it from the saved
+    # file (a killed worker never reaches the finally, so it stays resumable too).
+    _ended_ok = False
     try:
         run = run_pipeline_v4(
             file_bytes=file_bytes,
@@ -7455,6 +7506,7 @@ def _execute_run(
             run.error if run.error else None,
         )
         if not run.error:
+            _ended_ok = True
             # "Pack ready for review" ping. Inert (no-op) unless an operator
             # configured a notification channel; runs in its own thread so it
             # never delays the run, and never raises.
@@ -7525,10 +7577,11 @@ def _execute_run(
         # or error) so a finished run's heartbeat freezes and the entry can
         # settle into its terminal status.
         _hb_stop.set()
-        # Reaching here means a clean terminal — the run will not be resumed,
-        # so reclaim its stored launch input. A killed worker never gets here,
-        # so an interrupted run keeps its input and stays resumable.
-        _cleanup_run_input(run_id)
+        # D-6: reclaim the stored launch input only on SUCCESS. A failed run
+        # keeps it so it can be re-run from the saved file; a killed worker never
+        # gets here, so an interrupted run keeps its input and stays resumable.
+        if _ended_ok:
+            _cleanup_run_input(run_id)
 
 
 def _spawn_run_thread(
@@ -7560,9 +7613,9 @@ def _spawn_run_thread(
 def _mark_run_errored(run_id: str, message: str) -> None:
     """Stamp a still-non-terminal run as errored (DB + any in-memory entry).
 
-    Errored is terminal — the run will never be resumed — so reclaim its stored
-    launch input here too (covers the resume-budget-exhausted / unrecoverable
-    paths, which never reach the worker's own cleanup)."""
+    D-6: the stored launch input is deliberately KEPT (not reclaimed) so a
+    failed run — including a resume-budget-exhausted / stale one — can still be
+    re-run from the saved file. Input is only reclaimed on a successful run."""
     try:
         conn = _db()
         conn.execute(
@@ -7579,7 +7632,6 @@ def _mark_run_errored(run_id: str, message: str) -> None:
         if isinstance(entry, dict) and entry.get("status") in ("queued", "running", None):
             entry["status"] = "error"
             entry["error"] = entry.get("error") or message
-    _cleanup_run_input(run_id)
 
 
 def _claim_stale_run_for_resume(run_id: str, max_resumes: int) -> str:
@@ -8647,26 +8699,6 @@ main.wrap { max-width: 1200px; margin: 0 auto; padding: 36px 28px 96px; }
   font-size: 15px;
   color: var(--ink-dim);
   text-align: center;
-}
-.mh-footer-devlink {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-family: var(--font-mono);
-  font-size: 11px;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--ink);
-  border: 1px solid var(--lane);
-  border-radius: 999px;
-  padding: 6px 14px;
-  text-decoration: none;
-  transition: color var(--transition), background var(--transition);
-}
-.mh-footer-devlink:hover {
-  background: var(--lane);
-  color: var(--bg-deep);
-  text-decoration: none;
 }
 .mh-footer-meta {
   display: inline-flex; align-items: center; gap: var(--sp-3);
@@ -11036,92 +11068,6 @@ def _hero_word_cycle_html() -> str:
     return '<span class="mh-word-cycle" data-mh-word-cycle>' + "".join(spans) + "</span>"
 
 
-def _render_markdown(text: str) -> str:
-    """Tiny, dependency-free markdown subset for the research page."""
-    import html as _html
-    import re as _re
-
-    def _inline(s: str) -> str:
-        s = _html.escape(s)
-        s = _re.sub(
-            r"\[([^\]]+)\]\(([^)]+)\)",
-            lambda m: f'<a href="{m.group(2)}" target="_blank" rel="noopener">{m.group(1)}</a>',
-            s,
-        )
-        s = _re.sub(r"\*\*([^*]+)\*\*", r"<strong>\1</strong>", s)
-        s = _re.sub(r"`([^`]+)`", r"<code>\1</code>", s)
-        return s
-
-    lines = text.splitlines()
-    out: list[str] = []
-    in_code = False
-    table_rows: list[list[str]] = []
-
-    def flush_table():
-        if not table_rows:
-            return
-        head, *rest = table_rows
-        rest = [r for r in rest if not all(_re.fullmatch(r":?-+:?", c.strip() or "-") for c in r)]
-        out.append('<div style="overflow-x:auto"><table>')
-        out.append(
-            "<thead><tr>" + "".join(f"<th>{_inline(c)}</th>" for c in head) + "</tr></thead>"
-        )
-        out.append("<tbody>")
-        for r in rest:
-            out.append("<tr>" + "".join(f"<td>{_inline(c)}</td>" for c in r) + "</tr>")
-        out.append("</tbody></table></div>")
-        table_rows.clear()
-
-    in_list = False
-    for raw in lines:
-        ln = raw.rstrip()
-        if ln.startswith("```"):
-            if in_code:
-                out.append("</code></pre>")
-            else:
-                out.append("<pre><code>")
-            in_code = not in_code
-            continue
-        if in_code:
-            out.append(_html.escape(ln))
-            continue
-        if ln.startswith("|") and ln.endswith("|"):
-            cells = [c.strip() for c in ln.strip("|").split("|")]
-            table_rows.append(cells)
-            continue
-        if table_rows:
-            flush_table()
-        m = _re.match(r"^(#{1,4})\s+(.*)$", ln)
-        if m:
-            if in_list:
-                out.append("</ul>")
-                in_list = False
-            level = len(m.group(1))
-            out.append(f"<h{level}>{_inline(m.group(2))}</h{level}>")
-            continue
-        if ln.startswith("- ") or ln.startswith("* "):
-            if not in_list:
-                out.append('<ul style="margin-top:6px">')
-                in_list = True
-            out.append(f"<li>{_inline(ln[2:])}</li>")
-            continue
-        if in_list and not ln.strip():
-            out.append("</ul>")
-            in_list = False
-            continue
-        if not ln.strip():
-            continue
-        out.append(f"<p>{_inline(ln)}</p>")
-
-    if table_rows:
-        flush_table()
-    if in_code:
-        out.append("</code></pre>")
-    if in_list:
-        out.append("</ul>")
-    return "\n".join(out)
-
-
 def _logo_chip_html(
     src_url: str,
     alt: str = "",
@@ -12713,6 +12659,17 @@ _VISUAL_PANEL_JS = """<script>
         '</div>' +
       '</div>';
   }
+  // D-23: render a friendly failure with a Retry button. panel._mh survives
+  // the innerHTML swap (it's a JS property, not markup), so the Retry button —
+  // class mh-vbtn, picked up by the delegated listener — re-runs mhGen with the
+  // last-used format/photo state.
+  function mhVFail(panel, msg){
+    panel.innerHTML =
+      '<div style="padding:14px;font-size:13px">' +
+        '<div style="color:var(--bad);margin-bottom:8px">' + esc(msg) + '</div>' +
+        '<button type="button" class="btn secondary mh-vbtn" data-act="regen" style="font-size:11px;padding:4px 10px">\\u21BA Try again</button>' +
+      '</div>';
+  }
   function mhGen(panel){
     var st = panel._mh; if (!st || !st.url) return;
     panel.style.display = '';
@@ -12725,14 +12682,14 @@ _VISUAL_PANEL_JS = """<script>
       .then(function(res){
         if (!res.ok || res.body.error){
           prog.stop();
-          panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">Error: ' + esc(res.body.error || 'render failed') + '</div>';
+          mhVFail(panel, res.body.user_message || 'We couldn\\u2019t create this graphic just now.');
           return;
         }
         prog.complete(function(){ render(panel, res.body); });
       })
-      .catch(function(err){
+      .catch(function(){
         prog.stop();
-        panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">Network error: ' + esc(String(err)) + '</div>';
+        mhVFail(panel, 'Couldn\\u2019t reach the server \\u2014 check your connection and try again.');
       });
   }
   // One delegated listener handles every in-panel control (format tabs, photo
@@ -14160,9 +14117,8 @@ def _layout(
     </div>
     <div class="mh-footer-center">
       <div class="mh-footer-tag">Structured input. Meaningful moments. Ready-to-post content.</div>
-      {% if active == 'home' %}
-      <a class="mh-footer-devlink" href="{{ url_for('developer_login') }}" title="Operator sign-in (unrestricted)">Developer access &rarr;</a>
-      {% endif %}
+      {# F-13: the operator "Developer access" link no longer sits in the
+         customer landing footer — it lives only on the sign-in page. #}
     </div>
     <div class="mh-footer-meta">
       <a href="{{ url_for('status_page') }}">System status</a>
@@ -14175,7 +14131,7 @@ def _layout(
       <span class="mh-footer-sep">/</span>
       <a href="{{ url_for('dpa_page') }}">DPA</a>
       <span class="mh-footer-sep">/</span>
-      <a href="{{ url_for('research_page') }}">Roadmap</a>
+      <a href="{{ url_for('research_page') }}">Supported files</a>
       <span class="mh-footer-sep">/</span>
       <a href="{{ url_for('api_docs_page') }}">API</a>
     </div>
@@ -14460,6 +14416,12 @@ def _layout(
       panel.hidden = false;
       position();
       poll();
+      // I-6: move focus INTO the panel so a keyboard / screen-reader user
+      // actually enters the notifications (Escape closes it and restores focus
+      // to the bell — handler below). Previously focus stayed on the bell and
+      // Tab walked backwards into the page nav.
+      var _first = panel.querySelector('button, [href], [tabindex]:not([tabindex="-1"])');
+      if (_first) { try { _first.focus(); } catch(e){} }
       window.addEventListener('resize', position, {passive:true});
       window.addEventListener('scroll', position, {passive:true, capture:true});
     } else {
@@ -14595,7 +14557,7 @@ def _layout(
     error:   '<svg class="mh-toast-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>',
     info:    '<svg class="mh-toast-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>'
   };
-  MH.toast = function(message, type, ms) {
+  MH.toast = function(message, type, ms, action) {
     if (!toastContainer) return;
     type = type || 'info';
     var t = document.createElement('div');
@@ -14607,7 +14569,19 @@ def _layout(
     t.innerHTML = (ICONS[type] || ICONS.info) +
       '<div class="mh-toast-msg" style="flex:1;min-width:0"></div>' +
       '<button class="mh-toast-close" aria-label="Dismiss">&times;</button>';
-    t.querySelector('.mh-toast-msg').textContent = (message == null ? '' : String(message));
+    var msgSlot = t.querySelector('.mh-toast-msg');
+    msgSlot.textContent = (message == null ? '' : String(message));
+    // Optional inline action — a same-origin deep link (e.g. "Open in builder"
+    // for an open-task gate, D-1). The href is a trusted app path the caller
+    // builds with encodeURIComponent; the visible label is set via textContent.
+    if (action && action.href) {
+      var a = document.createElement('a');
+      a.href = action.href;
+      a.textContent = action.text || 'Open';
+      a.className = 'mh-toast-action';
+      a.style.cssText = 'margin-left:10px;color:inherit;font-weight:600;text-decoration:underline;white-space:nowrap';
+      msgSlot.appendChild(a);
+    }
     toastContainer.appendChild(t);
     var close = function(){
       t.style.transition = 'opacity 0.2s ease, transform 0.2s ease';
@@ -15522,17 +15496,41 @@ def _layout(
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({action: 'set_status', status: status})
     }).then(function(r){
-      return r.json().then(function(j){ return {ok: r.ok, body: j}; });
+      return r.json().then(
+        function(j){ return {ok: r.ok, status: r.status, body: j}; },
+        function(){ return {ok: r.ok, status: r.status, body: null}; }
+      );
     }).then(function(o){
       if (!o.ok || !o.body || o.body.ok === false) {
-        var msg = (o.body && (o.body.error || o.body.message)) || ('HTTP ' + (o.ok ? 200 : 'err'));
-        if (window.MH && MH.toast) MH.toast('Workflow update failed: ' + msg, 'error', 4000);
-        throw new Error(msg);
+        var body = o.body || {};
+        // D-1: the consent / brand-lock / open-task gates answer with a 4xx
+        // {error:<code>, reason:<plain English>}. Only THAT is a deliberate,
+        // non-retryable block: show its reason (never the raw code) and mark it
+        // handled so the caller suppresses the contradictory "try again" advice.
+        // A 5xx / transient / bodyless failure is NOT a gate — leave it
+        // unhandled so the caller still shows the retryable "reverted — try
+        // again" toast (server hiccup, cold start).
+        var isGate = (o.status >= 400 && o.status < 500) && !!body.error;
+        var err = new Error(body.reason || body.message || 'workflow error');
+        err.gate = isGate;
+        err.code = body.error || '';
+        if (isGate) {
+          var human = body.reason || body.message || 'We couldn\\u2019t save that change.';
+          if (window.MH && MH.toast) {
+            if (body.error === 'tasks_open') {
+              // The tasks that hold this card live on the content builder, not
+              // the review page — deep-link straight there to resolve them.
+              MH.toast(human, 'error', 6500,
+                {text: 'Open in builder', href: base + '/pack/' + encodeURIComponent(runId)});
+            } else {
+              MH.toast(human, 'error', 4500);
+            }
+          }
+          err.handled = true;  // already toasted — the caller must not double-toast
+        }
+        throw err;
       }
       return o.body;
-    }).catch(function(e){
-      if (window.MH && MH.toast) MH.toast('Workflow update failed: ' + (e && e.message || e), 'error', 4000);
-      throw e;
     });
   };
 
@@ -15596,16 +15594,35 @@ def _layout(
         // (idempotently) the moment the connection returns. The optimistic UI
         // above stands — the volunteer can keep triaging on the bus.
         if (window.MH && MH.toast) MH.toast('Saved offline — will sync when you reconnect', 'info', 2400);
+        return;
+      }
+      // D-3: the group-approver rule can HOLD an approve as a recorded vote,
+      // answering status:'queue' instead of the requested 'approved'. The
+      // optimistic paint flipped the button to "Approved ✓"; repaint to what
+      // the server actually stored so the button/pile/counts don't lie, and
+      // tell the volunteer their vote counted but the card is still held.
+      var applied = (result && result.status) || status;
+      if (applied !== status) {
+        paintState(applied);
+        if (window.MH && MH.toast) {
+          MH.toast(result.reason || 'Vote recorded — still held for another approver', 'info', 3800);
+        }
       } else if (window.MH && MH.toast) {
         MH.toast('Marked as ' + status, 'success', 1500);
       }
-    }).catch(function(){
+    }).catch(function(err){
       btn.disabled = false; btn.style.opacity = '';
       btn.textContent = origLabel;
       // Server rejected the change: revert the optimistic flip on the straps,
       // buttons and row, and resync tab counts so the card returns to its pile.
       paintState(prevStatus);
-      if (window.MH && MH.toast) MH.toast('Could not save — reverted. Try again.', 'error', 2600);
+      // D-1: a gate block (consent / brand-lock / open task) already surfaced
+      // its plain-English reason via mhWorkflowSet and is NOT retryable — don't
+      // pile the contradictory "Could not save — reverted. Try again." on top.
+      // Only genuinely transient failures (network / server error) get the retry.
+      if (!(err && (err.handled || err.gate))) {
+        if (window.MH && MH.toast) MH.toast('Could not save — reverted. Try again.', 'error', 2600);
+      }
     });
   });
 
@@ -16432,6 +16449,71 @@ _PARSE_NOTE_LABELS: dict[str, str] = {
     "no_club_filter": "No club selected",
 }
 
+# F-7 — one source of truth for the PB identity-match status shown on the audit
+# table AND the per-swimmer Verify screen, so the two never disagree (the Verify
+# screen used to render the raw `needs_verification` / `asa_id_verified` enum
+# while the table one screen earlier showed a friendly label). Maps the internal
+# `identity.method` enum to (human label, semantic tag class).
+_PB_MATCH_STATUS_META: dict[str, tuple[str, str]] = {
+    "asa_id_verified": ("Verified", "good"),
+    "needs_verification": ("Needs check", "warn"),
+    "asa_id_unverified": ("Unverified", ""),
+    "no_id": ("Not linked", ""),
+    "manual_override": ("Override", "info"),
+}
+
+
+def _pb_match_status_meta(method: str) -> tuple[str, str]:
+    """(human label, tag class) for a PB identity-match ``method``.
+
+    Unknown codes humanise the raw code rather than leak snake_case, so a newly
+    added status is never shown as ``needs_verification`` to a volunteer.
+    """
+    m = (method or "").strip()
+    if m in _PB_MATCH_STATUS_META:
+        return _PB_MATCH_STATUS_META[m]
+    return (m.replace("_", " ").capitalize() or "—", "")
+
+
+# Plain-language trust key for the PB-audit surfaces (F-7): what "confirmed"
+# means and what each match status is telling the volunteer. Rendered as a
+# collapsible so it explains without crowding the numbers.
+_PB_TRUST_KEY_HTML = (
+    '<details class="mh-trust-key" style="margin-top:var(--sp-3)">'
+    '<summary style="cursor:pointer;font-size:12.5px;color:var(--ink-dim)">'
+    "What do these mean?</summary>"
+    '<ul style="margin:8px 0 0 18px;font-size:12.5px;color:var(--ink-dim);line-height:1.6">'
+    "<li><strong>Confirmed PB</strong> &mdash; the time matched an official record "
+    "for that swimmer, so we're confident it's a genuine personal best.</li>"
+    "<li><strong>Verified</strong> &mdash; we matched the swimmer to their official "
+    "member ID.</li>"
+    "<li><strong>Needs check</strong> &mdash; we couldn't confirm the swimmer's ID, "
+    "so their PBs aren't confirmed yet. Use the Verify action to set the right ID.</li>"
+    "<li><strong>Not linked / Unverified</strong> &mdash; no official member ID on "
+    "file to check against; the swim still appears, just not as a confirmed PB.</li>"
+    "</ul></details>"
+)
+
+# F-10 — plain-language labels for the brand-kit editor, so the form stops
+# reading like an internal config file. Lock tokens, the font-pairing catalogue
+# (ids mirror graphic_renderer's self-hosted @font-face stacks) and the tone
+# options all get human names; a typo can no longer be silently dropped because
+# the palette uses colour pickers and font/tone use dropdowns.
+_BRAND_LOCK_LABELS: dict[str, str] = {
+    "palette": "Lock colours",
+    "fonts": "Lock fonts",
+    "logo": "Lock logo",
+}
+_BRAND_FONT_PAIRINGS: tuple[tuple[str, str], ...] = (
+    ("", "Club default (inherit)"),
+    ("anton-inter", "Anton + Inter — bold, modern"),
+    ("bebas-grotesk", "Bebas Neue + Space Grotesk — tall, sporty"),
+    ("druk-inter", "Druk + Inter — heavy, editorial"),
+    ("bowlby-inter", "Bowlby One + Inter — rounded, playful"),
+    ("archivo-inter", "Archivo + Inter — clean, technical"),
+    ("oswald-inter", "Oswald + Inter — condensed, classic"),
+)
+
 
 def _humanise_parse_code(code: str) -> str:
     """Plain-English label for a parse-warning code, falling back to a
@@ -16508,6 +16590,66 @@ def _parse_notes_card(warnings: list) -> str:
         "file, or couldn&rsquo;t fully resolve, is listed here so you can check it "
         "before approving.</p>"
         f"{sections}{more_html}</div>"
+    )
+
+
+def _import_skipped_html(rows) -> str:
+    """D-19: render the rows an import couldn't read — line number, name (if any)
+    and reason — so the user can fix and re-import, instead of only being told a
+    count. Empty string when there's nothing to show."""
+    if not isinstance(rows, list) or not rows:
+        return ""
+    items = []
+    for r in rows[:50]:
+        if not isinstance(r, dict):
+            continue
+        rownum = r.get("row")
+        name = str(r.get("name") or "").strip()
+        reason = str(r.get("reason") or "couldn’t be read").strip()
+        loc = f"Row {rownum}" if rownum is not None else "Row"
+        who = f" · {_h(name)}" if name else ""
+        items.append(f"<li><strong>{_h(loc)}</strong>{who} — {_h(reason)}</li>")
+    more = ""
+    if len(rows) > 50:
+        more = (
+            f'<div class="muted" style="font-size:11px;margin-top:4px">'
+            f"…and {len(rows) - 50} more.</div>"
+        )
+    return (
+        '<div class="card" style="border-left:2px solid var(--warn);margin-bottom:14px">'
+        f'<strong style="color:var(--warn)">{len(rows)} row{"s" if len(rows) != 1 else ""} '
+        "couldn&rsquo;t be imported</strong>"
+        '<ul style="margin:6px 0 0;padding-left:18px;font-size:13px;color:var(--ink-dim)">'
+        + "".join(items)
+        + "</ul>"
+        + more
+        + '<div class="muted" style="font-size:11px;margin-top:6px">'
+        "Fix these rows in your sheet and import again.</div>"
+        "</div>"
+    )
+
+
+def _erasure_removed_html(report: dict, cascade: Optional[dict] = None) -> str:
+    """F-9: the shared "What was removed" summary for a DSR erasure. Both the
+    formal Article-12A workflow and the /privacy quick-erase render this, so the
+    compliant path no longer gives the worse (raw-JSON) experience."""
+    c = cascade or {}
+    r = report or {}
+    runs_n = len(set(list(c.get("runs_touched", [])) + list(r.get("runs_touched", []))))
+    return (
+        "<ul>"
+        f"<li>{c.get('cards_removed', 0) + r.get('cards_removed', 0)} card(s) and "
+        f"{c.get('swims_removed', 0)} result row(s) across {runs_n} run(s)</li>"
+        f"<li>{c.get('assets_removed', 0) + len(r.get('visual_files_deleted', []))} rendered file(s)</li>"
+        f"<li>{c.get('pb_cache_files', 0) + len(r.get('pb_cache_files_deleted', []))} PB-cache and "
+        f"{c.get('research_cache_files', 0)} research-cache file(s)</li>"
+        f"<li>{c.get('memory_rows', 0) + r.get('memory_rows_deleted', 0)} caption-memory row(s)</li>"
+        f"<li>{c.get('posting_excerpts', 0)} posting-log excerpt(s) blanked</li>"
+        f"<li>{len(r.get('media_assets_deleted', []))} media-library photo(s) deleted, "
+        f"{len(r.get('media_assets_unlinked', []))} unlinked</li>"
+        "<li>Suppression recorded in both consent registries &mdash; the athlete "
+        "cannot reappear in new content</li>"
+        "</ul>"
     )
 
 
@@ -16731,10 +16873,27 @@ _BULK_ACTIONS_JS = r"""
         var n = (body && typeof body.n_ok === 'number') ? body.n_ok : gone.length;
         toast('Deleted ' + n + ' photo' + (n === 1 ? '' : 's') + '.', 'success', 2500);
         refresh();
-      } else if (action === 'approve'){
-        var n2 = (body && typeof body.n_ok === 'number') ? body.n_ok : ids.length;
+      } else if (action === 'approve' || action === 'unapprove'){
+        // D-29 — repaint each affected photo's Draft/Ready badge in place, so
+        // the approval state is visible after the toast fades (and undoable).
+        var ready = action === 'approve';
+        var okIds = (body && (body.approved || body.unapproved)) || ids;
+        okIds.forEach(function(id){
+          var esc = (window.CSS && CSS.escape) ? CSS.escape(id) : id;
+          var row = form.querySelector('.mh-asset-row[data-asset-id="' + esc + '"]');
+          var badge = row ? row.querySelector('[data-mh-approval]') : null;
+          if (badge){
+            badge.textContent = ready ? 'Ready' : 'Draft';
+            badge.classList.toggle('good', ready);
+            badge.title = ready ? 'Ready to use on cards (the photo picker prefers these)'
+                                : 'Not yet marked ready for cards';
+          }
+        });
+        var n2 = (body && typeof body.n_ok === 'number') ? body.n_ok : okIds.length;
         var sk = (body && body.n_skipped) || 0;
-        var msg = 'Approved ' + n2 + ' photo' + (n2 === 1 ? '' : 's') + '.';
+        var msg = ready
+          ? ('Marked ' + n2 + ' photo' + (n2 === 1 ? '' : 's') + ' ready for cards.')
+          : ('Moved ' + n2 + ' photo' + (n2 === 1 ? '' : 's') + ' back to Draft.');
         if (sk) msg += ' ' + sk + ' skipped (safeguarding).';
         toast(msg, n2 ? 'success' : 'info', 3000);
         selected().forEach(function(c){ c.checked = false; });
@@ -16791,11 +16950,12 @@ _BULK_ACTIONS_JS = r"""
     }
     Array.prototype.slice.call(form.querySelectorAll('[data-mh-bulk]')).forEach(function(btn){
       var action = btn.getAttribute('data-mh-bulk');
-      if (action === 'export') {
+      if (action === 'export' || action === 'download') {
         // Native submit → file download (Content-Disposition: attachment),
         // which never navigates the page — so the global form loader would
         // hang on "Working on it" forever and the volunteer thinks it crashed.
         // The download starts on submit, so hide the loader a beat later.
+        // 'export' = the JSON data dump; 'download' = the F-5 content ZIP.
         btn.addEventListener('click', function(){
           setTimeout(function(){ if (window.MH && MH.hideLoader) MH.hideLoader(); }, 1200);
         });
@@ -16862,9 +17022,21 @@ _BULK_ACTIONS_JS = r"""
 _ML_QUICK_ACTION_JS = r"""
 (function(){
   var formatsCache = null;
+  var activeTrigger = null;  // I-8: the trigger to restore focus to on close
   function closeMenus(){
     Array.prototype.slice.call(document.querySelectorAll('.mh-ml-qa-menu')).forEach(function(m){ m.remove(); });
+    Array.prototype.slice.call(document.querySelectorAll('.mh-ml-qa[aria-expanded="true"]'))
+      .forEach(function(t){ t.setAttribute('aria-expanded', 'false'); });
+    activeTrigger = null;
   }
+  // I-8: Escape closes the menu and returns focus to the trigger.
+  document.addEventListener('keydown', function(ev){
+    if (ev.key === 'Escape' && activeTrigger){
+      var t = activeTrigger;
+      closeMenus();
+      try { t.focus(); } catch(e){}
+    }
+  });
   document.addEventListener('click', function(ev){
     var btn = ev.target.closest ? ev.target.closest('.mh-ml-qa') : null;
     if (!btn) {
@@ -16877,12 +17049,16 @@ _ML_QUICK_ACTION_JS = r"""
     if (existing) return; // second click on the same button = toggle closed
     var menu = document.createElement('div');
     menu.className = 'mh-ml-qa-menu';
+    menu.setAttribute('role', 'menu');
+    menu.setAttribute('aria-label', 'Convert format');
     menu.style.cssText = 'position:absolute;z-index:40;margin-top:4px;padding:8px;' +
       'background:var(--panel);border:1px solid var(--border);border-radius:8px;' +
       'display:flex;flex-direction:column;gap:4px;min-width:180px;box-shadow:0 8px 24px rgba(0,0,0,0.35)';
     menu.innerHTML = '<div style="font-size:10px;text-transform:uppercase;letter-spacing:0.5px;color:var(--ink-muted)">Convert to&hellip;</div>';
     if (getComputedStyle(host).position === 'static') host.style.position = 'relative';
     host.appendChild(menu);
+    btn.setAttribute('aria-expanded', 'true');
+    activeTrigger = btn;
     var fill = function(data){
       var fmts = ((data && data.categories && data.categories.image) || []).filter(function(f){
         return (f.accepts || []).indexOf('image') !== -1;
@@ -16898,6 +17074,7 @@ _ML_QUICK_ACTION_JS = r"""
         var b = document.createElement('button');
         b.type = 'button';
         b.className = 'btn ghost';
+        b.setAttribute('role', 'menuitem');
         b.style.cssText = 'font-size:11px;padding:3px 9px;text-align:left';
         b.textContent = f.label;
         b.addEventListener('click', function(){
@@ -16919,13 +17096,23 @@ _ML_QUICK_ACTION_JS = r"""
               });
             }
             return r.json().then(function(j){
-              b.disabled = false;
-              b.textContent = (j && (j.message || j.error)) || 'Conversion failed';
+              // I-8: surface the honest error via a toast too, not only by
+              // rewriting a tiny button label a SR user won't hear.
+              var msg = (j && (j.message || j.error)) || 'Conversion failed';
+              b.disabled = false; b.textContent = f.label;
+              if (window.MH && MH.toast) MH.toast(msg, 'error', 4000); else b.textContent = msg;
             });
-          }).catch(function(){ b.disabled = false; b.textContent = 'Network error'; });
+          }).catch(function(){
+            b.disabled = false; b.textContent = f.label;
+            if (window.MH && MH.toast) MH.toast('Network error — check your connection.', 'error', 4000);
+            else b.textContent = 'Network error';
+          });
         });
         menu.appendChild(b);
       });
+      // I-8: move focus to the first format so a keyboard/SR user enters the menu.
+      var _first = menu.querySelector('button');
+      if (_first) { try { _first.focus(); } catch(e){} }
     };
     if (formatsCache) { fill(formatsCache); return; }
     var fmtHost = document.querySelector('[data-formats-url]');
@@ -17223,6 +17410,43 @@ _CHARTS_PAGE_JS = """
       copy.addEventListener('click', function(){ navigator.clipboard && navigator.clipboard.writeText(j.caption); copy.textContent='Copied'; });
       out.appendChild(copy);
     }).catch(function(){ busy(btn,false); out.style.display='block'; out.textContent='Could not reach the caption writer. Try again.'; });
+  });
+
+  // D-33 — download a chart PNG via fetch+blob so a raster failure (e.g. no
+  // Chromium on the worker) renders inline with an SVG fallback, instead of the
+  // anchor navigating the whole page onto a raw JSON error. Shows a busy state.
+  document.addEventListener('click', function(ev){
+    var btn = ev.target.closest ? ev.target.closest('.mh-chart-dl') : null;
+    if(!btn) return;
+    ev.preventDefault();
+    var tile = btn.closest('.mh-chartpack-tile');
+    var msg = tile ? tile.querySelector('.mh-chart-export-msg') : null;
+    var url = btn.getAttribute('data-dl-url');
+    var svg = btn.getAttribute('data-svg-fallback');
+    var name = btn.getAttribute('data-dl-name') || 'chart.png';
+    if(msg){ msg.style.display='none'; msg.textContent=''; }
+    busy(btn, true, '…');
+    fetch(url).then(function(r){
+      if(!r.ok) throw new Error('unavailable');
+      return r.blob();
+    }).then(function(blob){
+      busy(btn, false);
+      var obj = URL.createObjectURL(blob);
+      var a = document.createElement('a');
+      a.href = obj; a.download = name;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(function(){ URL.revokeObjectURL(obj); }, 4000);
+    }).catch(function(){
+      busy(btn, false);
+      if(msg){
+        msg.style.display = 'block';
+        msg.textContent = 'PNG export is not available on this deployment right now. ';
+        var link = document.createElement('a');
+        link.href = svg; link.setAttribute('download', '');
+        link.textContent = 'Download the vector (SVG) instead';
+        msg.appendChild(link);
+      }
+    });
   });
 })();
 </script>
@@ -17722,6 +17946,7 @@ _DOC_PRESENT_CONSOLE = r"""
       <button class="btn secondary" onclick="act('autoplay')">Autoplay</button>
       <button class="btn secondary" onclick="act('timer_reset')">Reset timer</button>
       <span id="pos" class="dim"></span>
+      <span id="cstat" class="dim" role="status" aria-live="polite" style="color:var(--warn)"></span>
       <span id="timer" class="dim" style="margin-left:auto;font-variant-numeric:tabular-nums"></span>
     </div>
     <p class="dim" style="font-size:12px;margin-top:6px">Keys: ← / → move, B blackout.</p>
@@ -17742,7 +17967,16 @@ _DOC_PRESENT_CONSOLE = r"""
 <script>
 const TOTAL=__TOTAL__, BASE='__SLIDE_URL__', NOTES=__NOTES__, TITLES=__TITLES__;
 let cur=-1;
-async function act(a){ await fetch('__ACTION_URL__',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:a})}); poll(); }
+function cstat(m){ var el=document.getElementById('cstat'); if(el) el.textContent=m||''; }
+async function act(a){
+  // D-31: surface fetch failures and non-ok responses instead of a dead tap.
+  try{
+    const r=await fetch('__ACTION_URL__',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:a})});
+    if(!r.ok){ cstat(r.status===429?'Too many attempts — wait a moment':'Not connected'); return; }
+    cstat('');
+  }catch(e){ cstat('Reconnecting…'); return; }
+  poll();
+}
 function fmtT(s){ const m=Math.floor(s/60), ss=s%60; return m+':'+String(ss).padStart(2,'0'); }
 async function poll(){
   try{
@@ -17801,7 +18035,7 @@ document.body.addEventListener('click', function(){ if(document.documentElement.
 _DOC_REMOTE = r"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1"><title>Slide remote</title>
 <style>html,body{margin:0;height:100%;font-family:system-ui,sans-serif;background:#0b1020;color:#fff}
-#g{position:fixed;inset:0;display:grid;grid-template-rows:auto 1fr 1fr auto;gap:10px;padding:14px}
+#g{position:fixed;inset:0;display:grid;grid-template-rows:auto auto 1fr 1fr auto;gap:10px;padding:14px}
 button{font-size:22px;border:0;border-radius:14px;background:#1b2440;color:#fff}
 button:active{background:#2b3a66}
 .row{display:flex;gap:10px}.row button{flex:1}
@@ -17809,14 +18043,25 @@ button:active{background:#2b3a66}
 </style></head><body>
 <div id="g">
   <div class="hd">Remote · code <b>__CODE__</b> · <span id="pos">–</span></div>
+  <div id="rstat" class="hd" role="status" aria-live="polite" style="color:#ffb454;min-height:18px"></div>
   <button onclick="act('prev')">◀ Previous</button>
   <button onclick="act('next')">Next ▶</button>
   <div class="row"><button onclick="act('blackout')">Blackout</button><button onclick="act('end')">End</button></div>
 </div>
 <script>
-async function act(a){ const r=await fetch('__ACTION_URL__',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:a})}); const j=await r.json(); if(j.state) setPos(j.state); }
+function rstat(m){ var el=document.getElementById('rstat'); if(el) el.textContent=m||''; }
+async function act(a){
+  // D-31: a dead tap (offline wifi, a 429 rate-limit, a 4xx with no state) used
+  // to do nothing with zero feedback — now it says what happened.
+  try{
+    const r=await fetch('__ACTION_URL__',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:a})});
+    const j=await r.json().catch(function(){ return {}; });
+    if(!r.ok || j.ok===false){ rstat((r.status===429||j.error==='rate_limited')?'Too many taps — wait a moment':'Not connected'); return; }
+    if(j.state){ setPos(j.state); rstat(''); }
+  }catch(e){ rstat('Reconnecting…'); }
+}
 function setPos(s){ document.getElementById('pos').textContent=(s.current+1)+' / '+s.total+(s.blackout?' · black':''); }
-async function poll(){ try{ const r=await fetch('__STATE_URL__'); const s=await r.json(); if(!s.ended) setPos(s); }catch(e){} }
+async function poll(){ try{ const r=await fetch('__STATE_URL__'); const s=await r.json(); if(!s.ended){ setPos(s); rstat(''); } }catch(e){ rstat('Reconnecting…'); } }
 setInterval(poll,1500); poll();
 </script></body></html>"""
 
@@ -18760,7 +19005,7 @@ def create_app() -> Flask:
             )
         if n_runs:
             meta_parts.append(
-                f"<span>{_odometer(n_runs, 3)} total {'run' if n_runs == 1 else 'runs'}</span>"
+                f"<span>{_odometer(n_runs, 3)} {'result' if n_runs == 1 else 'results'} processed</span>"
             )
         if n_moments:
             meta_parts.append(
@@ -18780,7 +19025,7 @@ def create_app() -> Flask:
         if not (prof and prof.is_ready()):
             demo_line_html = (
                 '<p class="mh-demo-line">Just looking? '
-                f'<a href="{url_for("research_page")}">See what the engine does</a> '
+                '<a href="#mh-see-it-work">See it in action</a> '
                 'or <a href="' + url_for("sign_in_page") + '">browse pinned organisations</a>.'
                 "</p>"
             )
@@ -18963,13 +19208,13 @@ def create_app() -> Flask:
             + _reveal_lines(["Can't find the", '<em class="editorial">answer</em>?'])
             + '<p class="mh-reveal" style="color:var(--ink-dim);max-width:62ch">'
             "Check the live system status, audit exactly what's stored about your "
-            "club on the privacy page, or see what's shipping next on the roadmap."
+            "club on the privacy page, or see which result files you can upload."
             "</p>"
             '<div class="mh-hero-actions" style="margin-top:var(--sp-4)">'
             f'<a class="btn" href="{url_for("status_page")}">System status</a>'
             f'<a class="btn secondary" href="{url_for("privacy_page")}">'
             "Privacy &amp; data</a>"
-            f'<a class="btn secondary" href="{url_for("research_page")}">Roadmap</a>'
+            f'<a class="btn secondary" href="{url_for("research_page")}">Supported files</a>'
             f'<a class="btn secondary" href="{url_for("export_center_page")}">'
             "Export &amp; convert</a>"
             f'<a class="btn secondary" href="{url_for("print_center_page")}">'
@@ -19211,7 +19456,7 @@ def create_app() -> Flask:
                 '<span class="mh-hero-eyebrow">Activity</span>'
                 f'<h1>Quiet weekend, <em class="editorial">{_h(prof.display_name)}</em>.</h1>'
                 '<p class="lede">'
-                "No runs yet for this organisation. Upload a results file, paste "
+                "No results yet for this organisation. Upload a results file, paste "
                 "a sponsor brief, or describe a moment in your own words &mdash; "
                 "every run lands here with the meet name, status, queue, and a "
                 "one-click link back into the review."
@@ -19502,7 +19747,7 @@ def create_app() -> Flask:
             'style="margin-bottom:var(--sp-4)">'
             f'<a class="{table_cls.strip()}" '
             f'aria-current="{"page" if active_view == "table" else "false"}" '
-            f'href="{url_for("activity_page")}">Runs table</a>'
+            f'href="{url_for("activity_page")}">Results table</a>'
             f'<a class="{feed_cls.strip()}" '
             f'aria-current="{"page" if active_view == "feed" else "false"}" '
             f'href="{url_for("activity_feed_page")}">Feed</a>'
@@ -19735,7 +19980,7 @@ def create_app() -> Flask:
                     "operator to check the data volume.</p>"
                     '<div class="mh-hero-actions">'
                     f'<a class="mh-cta-primary" href="{url_for("activity_feed_page")}">Refresh &rarr;</a>'
-                    f'<a class="mh-cta-secondary" href="{url_for("activity_page")}">Runs table</a>'
+                    f'<a class="mh-cta-secondary" href="{url_for("activity_page")}">Results table</a>'
                     "</div></section>"
                 )
                 return _layout("Activity feed", empty_body, active="activity")
@@ -19748,7 +19993,7 @@ def create_app() -> Flask:
                 "detail behind it. Create your first piece to get started.</p>"
                 '<div class="mh-hero-actions">'
                 f'<a class="mh-cta-primary" href="{url_for("make_page")}">Create your first piece &rarr;</a>'
-                f'<a class="mh-cta-secondary" href="{url_for("activity_page")}">Runs table</a>'
+                f'<a class="mh-cta-secondary" href="{url_for("activity_page")}">Results table</a>'
                 "</div></section>"
             )
             return _layout("Activity feed", empty_body, active="activity")
@@ -20311,8 +20556,10 @@ def create_app() -> Flask:
             if prof_for_recent is not None:
                 conn = _db()
                 rows = conn.execute(
-                    "SELECT id, meet_name, file_name, created_at, our_swims "
-                    "FROM runs WHERE profile_id = ? AND status = 'done' "
+                    # D-6: include failed runs too — their file is still on disk,
+                    # so the volunteer can re-run from it instead of re-uploading.
+                    "SELECT id, meet_name, file_name, created_at, our_swims, status "
+                    "FROM runs WHERE profile_id = ? AND status IN ('done', 'error') "
                     "ORDER BY created_at DESC LIMIT 5",
                     (prof_for_recent.profile_id,),
                 ).fetchall()
@@ -20330,16 +20577,25 @@ def create_app() -> Flask:
                         when_iso = when.replace(" ", "T") + "Z" if when else ""
                         configure_href = url_for("upload_configure", run_id=r["id"])
                         n_swims = r["our_swims"] or 0
+                        failed = r["status"] == "error"
+                        # A failed run has no swim count worth showing — flag that
+                        # it didn't finish and invite a retry from the saved file.
+                        meta_line = (
+                            '<span class="tag bad" style="font-size:10px">Didn\'t finish</span>'
+                            if failed
+                            else f'{n_swims} swim{"" if n_swims == 1 else "s"}'
+                        )
                         items_html += (
                             "<li>"
                             '<span class="ico">'
                             '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>'
                             "</span>"
                             f'<div class="body"><span class="name">{_h(name)}</span>'
-                            f'<span class="meta">{n_swims} swim{"" if n_swims == 1 else "s"} · '
+                            f'<span class="meta">{meta_line} · '
                             f'<time class="mh-rel" datetime="{_h(when_iso)}">{_h(when)}</time></span>'
                             "</div>"
-                            f'<a class="go" href="{configure_href}">Re-configure &rarr;</a>'
+                            f'<a class="go" href="{configure_href}">'
+                            f'{"Try again" if failed else "Re-configure"} &rarr;</a>'
                             "</li>"
                         )
                     recent_html = (
@@ -20733,10 +20989,24 @@ def create_app() -> Flask:
         if not clubs and (byte_size < 2048 or n_events == 0):
             upload_url = url_for("upload")
 
-            if byte_size < 2048:
+            _fname = _h(meta.get("filename") or "(unknown)")
+            if parse_err:
+                # D-22: the parser actually CRASHED — don't tell the volunteer
+                # the file "parsed OK" and to wait for the meet to finish. Say we
+                # couldn't read it, with plain-language causes.
+                headline = "We couldn't read that file"
+                explain = (
+                    f"<p>The file <code>{_fname}</code> couldn't be read as a meet "
+                    "results file. It may be corrupted, an unusual export, or "
+                    "password-protected.</p>"
+                    '<p class="dim" style="font-size:13px;margin-top:8px">'
+                    "Try re-exporting or re-downloading it from the source, then "
+                    "upload again.</p>"
+                )
+            elif byte_size < 2048:
                 headline = "That file doesn't look like a meet results file"
                 explain = (
-                    f"<p>The file <code>{_h(meta.get('filename') or '(unknown)')}</code> "
+                    f"<p>The file <code>{_fname}</code> "
                     f"is only {byte_size} bytes &mdash; far too small to be a real "
                     "meet results file. The most common cause is a broken download "
                     '(an HTML "404 Not Found" page saved as a PDF, or a partial save).</p>'
@@ -20747,17 +21017,19 @@ def create_app() -> Flask:
             else:
                 headline = "That file looks like a meet preview, not results"
                 explain = (
-                    f"<p>The file <code>{_h(meta.get('filename') or '(unknown)')}</code> "
+                    f"<p>The file <code>{_fname}</code> "
                     "parsed OK but doesn't contain any events with results.</p>"
                     '<p class="dim" style="font-size:13px;margin-top:8px">'
                     "This usually means you uploaded an entry list, a heat sheet, or "
                     "meet conditions document. Wait until the meet finishes and the "
                     "organisers publish the actual results file.</p>"
                 )
+            # D-22: the raw parser exception is operator-only — never shown to a
+            # customer alongside friendly copy (it read as a contradiction).
             err_explain = (
                 f'<p class="dim" style="margin-bottom:12px;font-size:13px">'
                 f"Parser error: <code>{_h(parse_err)}</code></p>"
-                if parse_err
+                if parse_err and _auth.is_dev_operator()
                 else ""
             )
             body = f"""
@@ -20765,7 +21037,7 @@ def create_app() -> Flask:
 <div class="card">
   {explain}
   {err_explain}
-  <p class="dim" style="font-size:13px;margin-top:14px">Supported formats: Hytek Meet Manager <code>.hy3</code>, a <code>.zip</code> containing one, or a Sportsystems PDF results file.</p>
+  <p class="dim" style="font-size:13px;margin-top:14px">Supported formats: Hytek (<code>.hy3</code>, <code>.hyv</code>), SDIF (<code>.sd3</code>, <code>.sdif</code>, <code>.cl2</code>), a <code>.zip</code> of results, a results PDF, HTML, CSV, TXT or Excel (<code>.xlsx</code>).</p>
   <div style="margin-top:18px;display:flex;gap:10px;flex-wrap:wrap">
     <a class="btn" href="{upload_url}">\u2190 Try another file</a>
     <a class="btn secondary" href="{url_for("make_page")}">Pick a different input type</a>
@@ -21165,10 +21437,12 @@ def create_app() -> Flask:
                     **entry,
                     "status": "error",
                     "error": (
-                        "The fetch stalled while reading the site and didn't finish. "
-                        "This site is unusually heavy to crawl; try again, or ask your "
-                        "administrator to raise MEDIAHUB_RESULTS_FETCH_TIMEOUT_S / "
-                        "RENDER_BUDGET_S (or set MEDIAHUB_SEARCH_ENDPOINT)."
+                        # F-3: no env-var names in customer copy (hosted SaaS —
+                        # the customer has no shell). The operator sees the
+                        # tunables in the server log.
+                        "This site is unusually heavy to read and the fetch didn't "
+                        "finish. Try again, or download the results file from the site "
+                        "and upload it directly instead."
                     ),
                 }
         payload = {
@@ -21430,6 +21704,42 @@ def create_app() -> Flask:
             duplicate = None
         return _render_configure(run_id, meta, selected_club=_preselect, duplicate=duplicate)
 
+    # ---- RE-RUN A FAILED RUN FROM ITS SAVED FILE -----------------------
+    @app.route("/runs/<run_id>/rerun", methods=["POST"])
+    def rerun_run(run_id):
+        """D-6: re-launch a run from its server-persisted input file instead of
+        forcing a full re-upload. The launch bytes are kept beside every run
+        (``input.bin`` + ``resume.json``), so a poolside volunteer who no longer
+        has the original file can retry in one click. Starts a fresh run so the
+        failed run's record is preserved for diagnosis."""
+        run_data = _load_run(run_id)
+        if not _can_access_run(run_id, run_data, _active_profile_id()):
+            return jsonify({"error": "run_not_found"}), 404
+        loaded = _load_run_input(run_id)
+        if not loaded:
+            # The saved file isn't on disk (an old run, or a best-effort write
+            # that failed) — be honest and send them to re-upload.
+            if _req_wants_json(request):
+                return jsonify({"error": "no_saved_input"}), 409
+            _flash_toast(
+                "We couldn't find the saved file for that run — please upload it again.",
+                "error",
+            )
+            return redirect(url_for("upload"))
+        data, meta = loaded
+        new_run_id = _start_run(
+            file_bytes=data,
+            file_name=meta.get("file_name") or "upload.bin",
+            profile_id=meta.get("profile_id") or _active_profile_id(),
+            use_pb_cache=bool(meta.get("use_pb_cache", True)),
+            fetch_pbs=bool(meta.get("fetch_pbs", True)),
+            club_filter=meta.get("club_filter"),
+        )
+        target = url_for("run_status", run_id=new_run_id)
+        if _req_wants_json(request):
+            return jsonify({"ok": True, "run_id": new_run_id, "redirect": target})
+        return redirect(target)
+
     # ---- PROGRESS ------------------------------------------------------
     @app.route("/runs/<run_id>")
     def run_status(run_id):
@@ -21466,25 +21776,47 @@ def create_app() -> Flask:
                 return redirect(_review_url)
             if _row_status == "error":
                 # Server-side render a real error page rather than waiting for
-                # the JS poller — gives the user immediate context, a clear
-                # path back to the upload step, and the raw error text.
+                # the JS poller — gives the user immediate context and a clear
+                # recovery path. D-6: the uploaded file is persisted server-side,
+                # so lead with a one-click "Run this file again" instead of
+                # forcing a re-upload; the raw exception is operator-only.
                 _err_msg = _row_error or "Pipeline failed without leaving an error message."
+                _is_dev_err = _auth.is_dev_operator()
+                _can_rerun = _resume_input_exists(run_id)
+                _rerun_action = (
+                    f'<form method="post" action="{url_for("rerun_run", run_id=run_id)}" style="display:inline">'
+                    '<button type="submit" class="mh-cta-primary">Run this file again &rarr;</button>'
+                    "</form>"
+                    if _can_rerun
+                    else f'<a class="mh-cta-primary" href="{url_for("upload")}">Try another file &rarr;</a>'
+                )
+                _upload_cta = (
+                    f'<a class="mh-cta-secondary" href="{url_for("upload")}">Upload a different file</a>'
+                    if _can_rerun
+                    else ""
+                )
+                _err_detail = (
+                    '<div class="card" style="border-left:2px solid var(--bad)">'
+                    '<div class="strap" style="color:var(--bad);margin-bottom:var(--sp-3)">Error detail</div>'
+                    f'<pre style="font-family:var(--font-mono);font-size:12px;white-space:pre-wrap;margin:0;color:var(--ink)">{_h(_err_msg)}</pre>'
+                    "</div>"
+                    if _is_dev_err
+                    else ""
+                )
                 _err_body = (
                     '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-8);padding-bottom:var(--sp-7);margin-bottom:var(--sp-5)">'
                     '<span class="mh-hero-eyebrow">Pipeline failed</span>'
                     "<h1>Run didn't finish.</h1>"
                     '<p class="lede">'
-                    "The pipeline raised an error before producing any cards. The most common cause is a results file the active adapter couldn't parse &mdash; try a different format or check the file isn't corrupted."
+                    "The pipeline hit a snag before producing any cards &mdash; often a results file the parser couldn't read. Your file is saved, so you can run it again, or try a different one."
                     "</p>"
                     '<div class="mh-hero-actions">'
-                    f'<a class="mh-cta-primary" href="{url_for("upload")}">Try another file &rarr;</a>'
+                    f"{_rerun_action}"
+                    f"{_upload_cta}"
                     f'<a class="mh-cta-secondary" href="{url_for("activity_page")}">All recent runs</a>'
                     "</div>"
                     "</section>"
-                    '<div class="card" style="border-left:2px solid var(--bad)">'
-                    '<div class="strap" style="color:var(--bad);margin-bottom:var(--sp-3)">Error detail</div>'
-                    f'<pre style="font-family:var(--font-mono);font-size:12px;white-space:pre-wrap;margin:0;color:var(--ink)">{_h(_err_msg)}</pre>'
-                    "</div>"
+                    f"{_err_detail}"
                 )
                 return _layout("Run failed", _err_body, active="create")
             # Round-6 fix: when neither the in-memory cache nor the DB has
@@ -21507,6 +21839,16 @@ def create_app() -> Flask:
         # a plain-English phase describing what the engine is doing — never the
         # raw steps or internal error text.
         _is_dev = _auth.is_dev_operator()
+        # D-6: the launch file is persisted, so on failure we can offer a
+        # one-click re-run from it rather than a forced re-upload.
+        _can_rerun = _resume_input_exists(run_id)
+        _rerun_form = (
+            f'<form id="rerun-form" method="post" action="{url_for("rerun_run", run_id=run_id)}" style="display:none">'
+            '<button type="submit" class="btn">Run this file again &rarr;</button>'
+            "</form>"
+            if _can_rerun
+            else ""
+        )
         _dev_stepcount = (
             '<span class="sep">·</span><span id="mh-step-count">0 steps</span>' if _is_dev else ""
         )
@@ -21531,16 +21873,18 @@ def create_app() -> Flask:
 </section>
 
 <div class="card">
-  <div class="strap live" style="margin-bottom:var(--sp-3)"><span id="mh-current-stage">Starting&hellip;</span>{_dev_stepcount}</div>
+  <div class="strap live" role="status" aria-live="polite" style="margin-bottom:var(--sp-3)"><span id="mh-current-stage">Starting&hellip;</span>{_dev_stepcount}</div>
   <div class="mh-progress-bar indeterminate"><span></span></div>
   <div id="mh-percent" aria-live="polite" style="margin-top:var(--sp-2);font-size:13px;color:var(--ink-dim);font-variant-numeric:tabular-nums">0%</div>
   {_dev_steploader}
   {_dev_techlog}
 
-  <div style="margin-top:var(--sp-5);display:flex;gap:var(--sp-3);flex-wrap:wrap">
+  <p class="dim" style="margin-top:var(--sp-3);font-size:12.5px">You can leave this page &mdash; the run keeps going on our server and the finished content pack appears on your Home.</p>
+  <div style="margin-top:var(--sp-4);display:flex;gap:var(--sp-3);flex-wrap:wrap">
     <a id="review-link" class="btn" style="display:none" href="{_review_url}">Open review queue &rarr;</a>
+    {_rerun_form}
     <a id="retry-link"  class="btn secondary" style="display:none" href="{url_for("upload")}">Try another file</a>
-    <a id="home-link"   class="btn secondary" href="{url_for("home")}">View on home</a>
+    <a id="home-link"   class="btn secondary" href="{url_for("home")}">Leave &mdash; it finishes on Home</a>
   </div>
 </div>
 
@@ -21572,6 +21916,10 @@ def create_app() -> Flask:
   var lede = document.querySelector('.lede');
   var reviewLink = document.getElementById('review-link');
   var retryLink = document.getElementById('retry-link');
+  // D-6: a one-click re-run from the saved file (present only when the launch
+  // input is still on disk) — the primary recovery, shown ahead of re-upload.
+  var rerunForm = document.getElementById('rerun-form');
+  function showRerun() {{ if (rerunForm) rerunForm.style.display = 'inline-block'; }}
 
   function setStage(txt) {{ if (stage) stage.textContent = txt; }}
   // Drive the determinate progress bar + numeric readout from a 0–100 percent.
@@ -21589,6 +21937,7 @@ def create_app() -> Flask:
     setBar(100, 'var(--bad)');
     if (reviewLink) reviewLink.style.display = 'inline-flex';
     if (retryLink) retryLink.style.display = 'inline-flex';
+    showRerun();
     if (lede) lede.textContent = msg;
     if (window.MH) MH.toast(msg, 'error', 9000);
   }}
@@ -21648,6 +21997,7 @@ def create_app() -> Flask:
       stopped = true;
       setBar(100, 'var(--bad)');
       if (retryLink) retryLink.style.display = 'inline-flex';
+      showRerun();
       if (IS_DEV) {{
         setStage('Run failed');
         var emsg = (j && j.error) || 'unknown';
@@ -21656,7 +22006,9 @@ def create_app() -> Flask:
         if (window.MH) MH.toast('Run failed: ' + emsg, 'error', 9000);
       }} else {{
         setStage('Something went wrong');
-        if (lede) lede.textContent = "We hit a snag finishing your recap. Please try uploading your file again — nothing you did was lost.";
+        if (lede) lede.textContent = rerunForm
+          ? "We hit a snag finishing your recap. Your file is saved — run it again below; nothing you did was lost."
+          : "We hit a snag finishing your recap. Please try uploading your file again — nothing you did was lost.";
         if (window.MH) MH.toast('Your recap could not be completed', 'error', 7000);
       }}
       return;
@@ -21864,12 +22216,12 @@ def create_app() -> Flask:
 <div class="card" style="border-color:rgba(255,107,107,0.25);margin-top:var(--sp-6)">
   <div style="display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap">
     <div>
-      <h2 style="margin:0 0 2px 0;font-size:15px">Delete this run</h2>
+      <h2 style="margin:0 0 2px 0;font-size:15px">Delete these results</h2>
       <p class="muted" style="margin:0;font-size:12px">Removes the failed run. Source files stay
         on disk and can be re-processed.</p>
     </div>
     <form method="post" action="{url_for("privacy_delete_run", run_id=run_id)}"
-          onsubmit="return confirm('Delete this run permanently?')">
+          onsubmit="return confirm('Delete these results permanently?')">
       <button class="btn danger" type="submit">Delete run</button>
     </form>
   </div>
@@ -22404,10 +22756,46 @@ def create_app() -> Flask:
                 s += f" · best {best}"
             return s
 
-        def opts(items, label):
+        # F-2: map the engine's raw enums to display labels in the filters —
+        # every other part of the page is humanised, so "not_worthy" /
+        # "medal_gold" / "main_feed" with underscores read as a leak. The
+        # <option value> keeps the raw enum (the JS filter matches on it); only
+        # the visible label is humanised.
+        _BAND_SHORT = {
+            "elite": "Elite",
+            "strong": "Strong",
+            "story": "Story",
+            "nice": "Nice",
+            "not_worthy": "Below the bar",
+        }
+        _ACH_TYPE_LABELS = {
+            "medal_gold": "Gold medal",
+            "medal_silver": "Silver medal",
+            "medal_bronze": "Bronze medal",
+            "top_of_field_top_3": "Top-3 finish",
+            "pb_confirmed": "Personal best",
+            "pb_probable": "Likely personal best",
+            "first_time": "First-time swim",
+            "season_best": "Season best",
+        }
+        _POST_TYPE_LABELS = {
+            "main_feed": "Feed post",
+            "feed": "Feed post",
+            "story": "Story",
+            "stories": "Story",
+            "reel": "Reel",
+            "spotlight": "Athlete spotlight",
+            "meet_recap": "Meet recap",
+        }
+
+        def _humanise_enum(v: str) -> str:
+            return (v or "").replace("_", " ").replace("-", " ").strip().title() or (v or "")
+
+        def opts(items, label, labels=None):
             o = f'<option value="">All {label}</option>'
             for item in items:
-                o += f'<option value="{_h(item)}">{_h(item)}</option>'
+                disp = (labels or {}).get(item) or _humanise_enum(item)
+                o += f'<option value="{_h(item)}">{_h(disp)}</option>'
             return o
 
         # --- V7: build workflow summary card (triage counts)
@@ -22807,7 +23195,9 @@ details.why-card[open] > summary .why-peek {{ display: none; }}
    work the queue from the pool deck without pinch-zooming. The inline
    button sizing on _render_wf_actions is overridden with !important here. */
 @media (max-width: 700px) {{
-  .filters-bar {{ top: 0; padding: 10px 12px; gap: 8px; }}
+  /* I-5: non-sticky on small screens — the 9-control bar otherwise pins over a
+     third of the viewport above the queue while scrolling. */
+  .filters-bar {{ position: static; top: auto; padding: 10px 12px; gap: 8px; }}
   .filters-bar select {{ flex: 1 1 calc(50% - 8px); min-width: 0; }}
   .ach-row > div {{ gap: 10px !important; }}
   .wf-actions {{ width: 100%; }}
@@ -22855,12 +23245,12 @@ details.why-card[open] > summary .why-peek {{ display: none; }}
     <span class="muted" style="font-size:12px">Approve cards here &mdash; build graphics, video &amp; the reel in the content builder.</span>
   </div>
   <div class="filters-bar">
-    <select id="f-type" onchange="applyFilters()">{opts(types_set, "types")}</select>
+    <select id="f-type" onchange="applyFilters()">{opts(types_set, "types", _ACH_TYPE_LABELS)}</select>
     <select id="f-conf" onchange="applyFilters()"><option value="">All confidence</option><option>high</option><option>medium</option><option>low</option></select>
     <select id="f-swimmer" onchange="applyFilters()">{opts(swimmers_set, "swimmers")}</select>
     <select id="f-event" onchange="applyFilters()">{opts(events_set, "events")}</select>
-    <select id="f-band" onchange="applyFilters()">{opts(bands_set, "bands")}</select>
-    <select id="f-post" onchange="applyFilters()">{opts(post_types_set, "post types")}</select>
+    <select id="f-band" onchange="applyFilters()">{opts(bands_set, "bands", _BAND_SHORT)}</select>
+    <select id="f-post" onchange="applyFilters()">{opts(post_types_set, "post types", _POST_TYPE_LABELS)}</select>
     <button class="btn secondary" style="font-size:13px;padding:6px 12px" onclick="clearFilters()">Clear</button>
     <span id="f-count" class="muted" style="font-size:12px;align-self:center"></span>
     <button type="button" class="btn secondary" id="mh-expand-all-why" aria-pressed="false"
@@ -22879,8 +23269,13 @@ details.why-card[open] > summary .why-peek {{ display: none; }}
         <button type="submit" class="btn secondary" data-mh-bulk="reject" name="op" value="rejected"
                 formaction="{url_for("api_cards_bulk_status", run_id=run_id)}"
                 data-confirm="Reject {{n}} selected card(s)? They move out of the queue; you can re-queue them later.">Reject</button>
-        <button type="submit" class="btn secondary" data-mh-bulk="export"
-                formaction="{url_for("api_cards_bulk_export", run_id=run_id)}">Export</button>
+        <button type="submit" class="btn secondary" data-mh-bulk="download"
+                formaction="{url_for("api_cards_bulk_download", run_id=run_id)}"
+                title="Download the selected cards' captions + visuals as a ZIP, ready to post">Download content (.zip)</button>
+        <button type="submit" class="btn ghost" data-mh-bulk="export"
+                style="font-size:12px;padding:6px 12px"
+                formaction="{url_for("api_cards_bulk_export", run_id=run_id)}"
+                title="Developer export: the selected cards' data (rank, scores, status) as JSON">Export data (JSON)</button>
       </div>
     </div>
     <div id="ach-list" data-wf-filter="{_h(_wf_filter)}">{ach_rows_html_wf}</div>
@@ -22941,10 +23336,10 @@ details.why-card[open] > summary .why-peek {{ display: none; }}
   <details>
     <summary style="cursor:pointer;font-size:15px;font-weight:700;color:var(--ink)">Legacy content cards <span class="muted" style="font-weight:400;font-size:13px">&mdash; {len(cards)} cards</span></summary>
     <div style="margin-top:14px">
-      <table>
+      <div class="mh-table-scroll"><table>
         <thead><tr><th>Card</th><th>Confidence</th><th>Safe to post</th><th>Bucket</th><th>Why</th></tr></thead>
         <tbody>{"".join(v4_rows) or '<tr><td colspan="5" class="muted">No cards generated.</td></tr>'}</tbody>
-      </table>
+      </table></div>
       <div style="margin-top:14px">{captions_html or '<p class="muted">No captions.</p>'}</div>
     </div>
   </details>
@@ -22955,10 +23350,10 @@ details.why-card[open] > summary .why-peek {{ display: none; }}
     <summary style="cursor:pointer;font-size:15px;font-weight:700;color:var(--ink)">Not generated <span class="muted" style="font-weight:400;font-size:13px">&mdash; {len(no_ach_traces)} swims with no achievements{f", {_n_close_calls} close {'call' if _n_close_calls == 1 else 'calls'}" if _n_close_calls else ""}</span></summary>
     <div style="margin-top:8px">
       <p class="muted" style="font-size:12px;margin:0 0 12px">Every swim was traced by the recognition engine. These produced no card &mdash; the close calls are led out first, each with the reason in plain English so you can override if you disagree. Nothing here was silently dropped.</p>
-      <table>
+      <div class="mh-table-scroll"><table>
         <thead><tr><th>Swimmer</th><th>Event</th><th>Time</th><th>Why not</th></tr></thead>
         <tbody>{not_gen_rows or '<tr><td colspan="4" class="muted">All swims produced achievements, or no trace data available.</td></tr>'}</tbody>
-      </table>
+      </table></div>
     </div>
   </details>
 </div>
@@ -22967,10 +23362,10 @@ details.why-card[open] > summary .why-peek {{ display: none; }}
   <details>
     <summary style="cursor:pointer;font-size:15px;font-weight:700;color:var(--ink)">Sources used <span class="muted" style="font-weight:400;font-size:13px">&mdash; {len(all_sources)} source(s)</span></summary>
     <div style="margin-top:14px">
-      <table>
+      <div class="mh-table-scroll"><table>
         <thead><tr><th>Source</th><th>Used for</th><th>Fetched</th></tr></thead>
         <tbody>{sources_rows}</tbody>
-      </table>
+      </table></div>
     </div>
   </details>
 </div>
@@ -22978,10 +23373,10 @@ details.why-card[open] > summary .why-peek {{ display: none; }}
 <div class="card" style="border-color:rgba(255,107,107,0.25);margin-top:var(--sp-6)">
   <div style="display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap">
     <div>
-      <h2 style="margin:0 0 2px 0;font-size:15px">Delete this run</h2>
+      <h2 style="margin:0 0 2px 0;font-size:15px">Delete these results</h2>
       <p class="muted" style="margin:0;font-size:12px">Removes the generated cards and review state for this run. Source files stay on disk and can be re-processed.</p>
     </div>
-    <form method="post" action="{_delete_url}" onsubmit="return confirm('Delete this run permanently? Source files stay on disk; generated cards and the review state are removed.')">
+    <form method="post" action="{_delete_url}" onsubmit="return confirm('Delete these results permanently? Source files stay on disk; generated cards and the review state are removed.')">
       <button class="btn danger" type="submit">Delete run</button>
     </form>
   </div>
@@ -23265,6 +23660,26 @@ function copyWhyCard(btn, taId) {{
         msg += '  (' + unseen + " not yet opened — you haven't read their reasoning; approving accepts them as-is.)";
       }}
       if (!window.confirm(msg)) return;
+      // D-2: route every queued card through the shared bulk bar so they
+      // approve in ONE request — per-card gate results, held-vote handling and
+      // a single summary toast ("Approved 148, 2 blocked (consent)") — instead
+      // of firing 150+ fetches and stacking 150 success toasts. Tick every
+      // queued row's checkbox, then trigger the bulk "Approve".
+      var bulkForm = document.getElementById('mh-review-bulk');
+      var approveBtn = bulkForm && bulkForm.querySelector('[data-mh-bulk="approve"]');
+      if (bulkForm && approveBtn) {{
+        Array.prototype.slice.call(bulkForm.querySelectorAll('.mh-row-check'))
+          .forEach(function(c){{ c.checked = false; }});
+        queued.forEach(function(row){{
+          var c = row.querySelector('.mh-row-check');
+          if (c) c.checked = true;
+        }});
+        // The bulk handler reads the checked set fresh on click, then clears
+        // the boxes and refreshes counts once the request returns.
+        approveBtn.click();
+        return;
+      }}
+      // Defensive fallback (bulk bar absent): the legacy per-card path.
       var n = 0;
       queued.forEach(function(row){{
         var btn = row.querySelector('[data-mh-wf="approved"]');
@@ -23341,7 +23756,11 @@ function copyWhyCard(btn, taId) {{
             if (_wf_summary or ranked_achs)
             else None
         )
-        return _layout("Recognition", body, active="home", dock=_review_dock)
+        # F-2: the browser tab read the engine's "Recognition"; title it by the
+        # meet the volunteer is reviewing instead.
+        _meet_name = (meet.get("name") or "").strip() if isinstance(meet, dict) else ""
+        _review_title = f"Review — {_meet_name}" if _meet_name else "Review"
+        return _layout(_review_title, body, active="home", dock=_review_dock)
 
     @app.route("/runs/<run_id>/results")
     def run_results_table(run_id):
@@ -24599,15 +25018,9 @@ function copyWhyCard(btn, taId) {{
             for sa in per_swimmer:
                 identity = sa.get("identity") or {}
                 method = identity.get("method", "")
-                # Map internal `method` enum to a human label + semantic tag class.
-                method_meta = {
-                    "asa_id_verified": ("Verified", "good"),
-                    "needs_verification": ("Needs check", "warn"),
-                    "asa_id_unverified": ("Unverified", ""),
-                    "no_id": ("Not linked", ""),
-                    "manual_override": ("Override", "info"),
-                }.get(method, (method.replace("_", " ").capitalize() or "—", ""))
-                method_label, method_cls = method_meta
+                # F-7: one shared label map (see _pb_match_status_meta) so this
+                # table and the Verify screen never show different words.
+                method_label, method_cls = _pb_match_status_meta(method)
                 _sw_key = sa.get("asa_id") or f"name:{sa.get('hy3_name', '')}"
                 _verify_url = url_for("pb_verify_form", run_id=run_id, swimmer_key=_sw_key)
                 _ignore_url = url_for("pb_ignore", run_id=run_id, swimmer_key=_sw_key)
@@ -24693,6 +25106,7 @@ function copyWhyCard(btn, taId) {{
     <div class="stat"><div class="l">Total decisions</div><div class="v">{pb_audit.get("pb_decisions_count", 0)}</div></div>
     <div class="stat"><div class="l">Fetch time</div><div class="v">{pb_audit.get("fetch_total_seconds", 0):.1f}s</div></div>
   </div>
+  {_PB_TRUST_KEY_HTML}
 </div>
 <div class="card">
   <h2>Per-swimmer</h2>
@@ -24753,14 +25167,10 @@ function copyWhyCard(btn, taId) {{
             ident = target.get("identity") or {}
             hy3_name = _h(target.get("hy3_name") or "—")
             sr_name = _h(target.get("sr_name") or "— (no record returned)")
-            method = _h(ident.get("method") or "—")
-            method_pill = {
-                "asa_id_verified": "good",
-                "needs_verification": "warn",
-                "asa_id_unverified": "warn",
-                "no_id": "bad",
-                "manual_override": "info",
-            }.get(ident.get("method", ""), "")
+            # F-7: show the SAME friendly label the audit table shows, never the
+            # raw `needs_verification` / `asa_id_verified` enum.
+            _method_label, method_pill = _pb_match_status_meta(ident.get("method", ""))
+            method = _h(_method_label)
             cur_asa = _h(target.get("asa_id") or "—")
             notes_list = ident.get("notes") or []
             notes_html = (
@@ -24784,6 +25194,7 @@ function copyWhyCard(btn, taId) {{
     <strong>Why this matters:</strong>
     <ul style="margin:4px 0 0 20px">{notes_html}</ul>
   </div>
+  {_PB_TRUST_KEY_HTML}
 </div>"""
         else:
             context_html = f"""
@@ -25035,39 +25446,43 @@ Relay team broke club record"></textarea>
     # ---- RESEARCH ------------------------------------------------------
     @app.route("/research")
     def research_page():
-        # Try to render a research markdown if present
-        md_path = RESEARCH_DIR / "parser_roadmap.md"
-        if md_path.exists():
-            content = md_path.read_text()
-            html = _render_markdown(content)
-        else:
-            html = """
-<h2>Adapter roadmap (interim)</h2>
-<p>The research substream is collecting source-format coverage across UK and US meets.
-   This page will populate when the roadmap document is written.</p>
-<h3>Currently supported</h3>
+        # F-4 — a customer-facing "what can I upload?" page, not the old
+        # parser/adapter research notes. Plain language for a club volunteer
+        # deciding whether their meet file will work; the engine-internal
+        # can_parse()/adapter detail lives on /developer/api instead.
+        html = """
+<h2>Files you can upload today</h2>
 <ul>
-  <li><strong>HY3</strong> &mdash; Hytek Meet Manager (UK + US) &mdash; full parser with splits.</li>
+  <li><strong>Hytek results (.hy3)</strong> &mdash; the file Meet Manager exports after
+      a gala. This is the richest input: individual swims, splits and heats all come
+      through.</li>
+  <li><strong>PDF result sheets</strong> &mdash; the printed-style results many meets
+      publish. We read the tables and flag anything that looks unclear for your review.</li>
+  <li><strong>Spreadsheets (.csv / .xls / .xlsx)</strong> &mdash; results exported from
+      Meet Mobile, SwimTopia or a hand-kept sheet.</li>
+  <li><strong>A results link</strong> &mdash; paste the web address of a public results
+      page and we'll read it for you.</li>
 </ul>
-<h3>Planned next</h3>
+<h3>Coming soon</h3>
 <ul>
-  <li>SDIF / CL2 &mdash; sibling format produced by Hytek and used by USA Swimming.</li>
-  <li>Meet Mobile / SwimTopia exports (CSV).</li>
-  <li>Public meet-result pages from external swim-results sites (HTML adapter).</li>
-  <li>USA Swimming Times Search exports.</li>
+  <li>SDIF / CL2 timing exports (the sibling of the Hytek file, used by USA Swimming).</li>
+  <li>Direct import from more meet-management and timing platforms.</li>
 </ul>
-<p class="muted">Each new adapter must implement <code>can_parse()</code> and return the
-   canonical Meet schema. No detector / caption code changes are needed.</p>
+<p class="muted">Not sure your file will work? Upload it anyway &mdash; MediaHub tells you
+   straight away what it found and asks you to confirm anything it wasn't sure about.
+   Nothing is published without your approval.</p>
 """
         body = (
             '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">'
-            '<span class="mh-hero-eyebrow">Roadmap</span>'
-            '<h1>Adapter <em class="editorial">research</em></h1>'
-            '<p class="lede">What MediaHub can read today and what\'s coming next. Every new format becomes a single adapter — no detector or caption-engine rewrite.</p>'
+            '<span class="mh-hero-eyebrow">Getting started</span>'
+            '<h1>What files can I <em class="editorial">upload</em>?</h1>'
+            '<p class="lede">The result formats MediaHub reads today, and what\'s coming next — in plain English, no timing-software jargon required.</p>'
             "</section>"
             f'<div class="card">{html}</div>'
+            '<div class="card"><p>Ready when you are — '
+            f'<a class="btn" href="{url_for("upload")}">Upload your results</a></p></div>'
         )
-        return _layout("Research", body, active="research")
+        return _layout("What files can I upload?", body, active="research")
 
     # ---- DEVELOPER / API REFERENCE (UI 1.11) ---------------------------
     @app.route("/developer/api")
@@ -26029,19 +26444,23 @@ Relay team broke club record"></textarea>
             if r.under_18 is True:
                 extra.append("under 18")
             if r.restricted:
-                extra.append("<strong>RESTRICTED (Art 18)</strong>")
+                extra.append(
+                    '<strong title="UK GDPR Art 18 — processing restricted">' "Paused</strong>"
+                )
             rows.append(
                 f"<tr><td>{_h(r.athlete_name)}</td><td>{status_tag}</td>"
                 f"<td>{', '.join(extra) or '—'}</td><td class='muted'>{_h(r.note[:160])}</td>"
                 f"<td class='muted'>{_h(r.recorded_at[:10])}</td></tr>"
             )
         table = (
-            "<table><thead><tr><th>Athlete</th><th>Status</th><th>Flags</th><th>Note</th><th>Recorded</th></tr></thead><tbody>"
+            # I-3: scroll wrapper so the multi-column registry doesn't overflow
+            # a phone (volunteers act on consent from poolside).
+            '<div class="mh-table-scroll"><table><thead><tr><th>Athlete</th><th>Status</th><th>Flags</th><th>Note</th><th>Recorded</th></tr></thead><tbody>'
             + (
                 "".join(rows)
                 or '<tr><td colspan="5" class="muted">No consent records yet.</td></tr>'
             )
-            + "</tbody></table>"
+            + "</tbody></table></div>"
         )
         mode = (profile.consent_mode or "").strip()
 
@@ -26058,20 +26477,21 @@ Relay team broke club record"></textarea>
 <div class="card">
   <h2>Lawful basis &amp; gating mode</h2>
   <form method="post" action="{url_for("org_consent_settings")}">
-    <label>Lawful basis for publication<br>
+    <label>Why you're allowed to post about your athletes<br>
       <select name="lawful_basis_publication">
         <option value=""{_sel("", profile.lawful_basis_publication)}>— not recorded —</option>
-        <option value="consent"{_sel("consent", profile.lawful_basis_publication)}>Consent (Art 6(1)(a))</option>
-        <option value="legitimate_interests"{_sel("legitimate_interests", profile.lawful_basis_publication)}>Legitimate interests (Art 6(1)(f))</option>
-        <option value="other"{_sel("other", profile.lawful_basis_publication)}>Other (see notes)</option>
+        <option value="consent"{_sel("consent", profile.lawful_basis_publication)}>They (or a parent) said yes</option>
+        <option value="legitimate_interests"{_sel("legitimate_interests", profile.lawful_basis_publication)}>We have a good reason to (reporting club results)</option>
+        <option value="other"{_sel("other", profile.lawful_basis_publication)}>Other — explain in notes below</option>
       </select>
-    </label><br>
-    <label>Lawful basis for PB-history enrichment<br>
+    </label>
+    <small class="muted" style="display:block;margin:-4px 0 10px">In legal terms: "said yes" = consent (UK GDPR Art&nbsp;6(1)(a)); "good reason" = legitimate interests (Art&nbsp;6(1)(f)).</small>
+    <label>Why you're allowed to look up their PB history<br>
       <select name="lawful_basis_enrichment">
         <option value=""{_sel("", profile.lawful_basis_enrichment)}>— not recorded —</option>
-        <option value="consent"{_sel("consent", profile.lawful_basis_enrichment)}>Consent (Art 6(1)(a))</option>
-        <option value="legitimate_interests"{_sel("legitimate_interests", profile.lawful_basis_enrichment)}>Legitimate interests (Art 6(1)(f))</option>
-        <option value="other"{_sel("other", profile.lawful_basis_enrichment)}>Other (see notes)</option>
+        <option value="consent"{_sel("consent", profile.lawful_basis_enrichment)}>They (or a parent) said yes</option>
+        <option value="legitimate_interests"{_sel("legitimate_interests", profile.lawful_basis_enrichment)}>We have a good reason to (reporting club results)</option>
+        <option value="other"{_sel("other", profile.lawful_basis_enrichment)}>Other — explain in notes below</option>
       </select>
     </label><br>
     <label><input type="checkbox" name="pb_enrichment_enabled" value="1"{" checked" if profile.pb_enrichment_enabled else ""}> Fetch PB history from public rankings (requires telling athletes/parents — Art 14 notice template in docs/compliance/templates/)</label><br>
@@ -26124,7 +26544,7 @@ Relay team broke club record"></textarea>
     </label><br>
     <label><input type="checkbox" name="parental" value="1"> Given by a parent/guardian</label>
     <label><input type="checkbox" name="under_18" value="1"> Athlete is under 18</label>
-    <label><input type="checkbox" name="restricted" value="1"> Restrict processing (Art 18)</label><br>
+    <label title="UK GDPR Art 18 — restriction of processing"><input type="checkbox" name="restricted" value="1"> Pause all use of their data <span class="muted">(Art&nbsp;18)</span></label><br>
     <label>Note (how/when consent was collected)<br><input type="text" name="note" maxlength="1000"></label><br>
     <button class="btn" type="submit">Save record</button>
   </form>
@@ -26319,6 +26739,13 @@ Relay team broke club record"></textarea>
                         '<input type="hidden" name="op" value="resume">'
                         '<button class="btn secondary" type="submit">Resume clock</button></form>'
                     )
+            # D-21 — a completed access request keeps a working download link to
+            # its generated SAR export (any status, as long as the snapshot exists).
+            if r.request_type == "access" and _dsr_export_path(pid, r.id).exists():
+                actions.append(
+                    f'<a class="btn secondary" href="{url_for("org_dsr_export_download", request_id=r.id)}" '
+                    'download>Download export</a>'
+                )
             rows.append(
                 (
                     _is_overdue,
@@ -26333,29 +26760,32 @@ Relay team broke club record"></textarea>
         rows.sort(key=lambda t: not t[0])
         _rows_html = "".join(h for _, h in rows)
         table = (
-            "<table><thead><tr><th>Ref</th><th>Type</th><th>Athlete</th><th>Received</th>"
+            # I-3: scroll wrapper so the 7-column rights table (with inline action
+            # forms) doesn't overflow a phone.
+            '<div class="mh-table-scroll"><table><thead><tr><th>Ref</th><th>Type</th><th>Athlete</th><th>Received</th>'
             "<th>Due</th><th>Status</th><th>Actions</th></tr></thead><tbody>"
             + (_rows_html or '<tr><td colspan="7" class="muted">No requests logged.</td></tr>')
-            + "</tbody></table>"
+            + "</tbody></table></div>"
         )
         body = f"""
 <section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">
   <span class="mh-hero-eyebrow">Privacy &amp; data</span>
   <h1>Athlete <em class="editorial">rights.</em></h1>
-  <p class="lede">When an athlete or parent asks to see, fix, restrict or erase their data, log it here — the due date and the stop-the-clock rules (Article 12A) are tracked for you, and the actions reach every store on this deployment.</p>
+  <p class="lede">When an athlete or parent asks to see, fix, restrict or erase their data, log it here — the deadline (and any time you spend waiting on them for ID) is tracked for you, and the actions reach every store on this deployment.</p>
 </section>
 <div class="card">
   <h2>Log a request</h2>
   <form method="post" action="{url_for("org_dsr_open")}">
     <label>Athlete name<br><input type="text" name="athlete_name" maxlength="200" required></label><br>
-    <label>Request type<br>
+    <label>What did they ask for?<br>
       <select name="request_type">
-        <option value="access">Access — export everything we hold (SAR)</option>
-        <option value="rectification">Rectification — correct their name</option>
-        <option value="erasure">Erasure — delete them everywhere</option>
-        <option value="restriction">Restriction — pause processing (Art 18)</option>
+        <option value="access" title="Subject access request (SAR) — UK GDPR Art 15">See everything we hold about them</option>
+        <option value="rectification" title="UK GDPR Art 16 — rectification">Correct their name</option>
+        <option value="erasure" title="UK GDPR Art 17 — erasure / right to be forgotten">Delete them everywhere</option>
+        <option value="restriction" title="UK GDPR Art 18 — restriction">Pause all use of their data</option>
       </select>
-    </label><br>
+    </label>
+    <small class="muted" style="display:block;margin:-4px 0 10px">These are the UK GDPR rights (access, rectification, erasure, restriction) — you don't need to know the article numbers.</small>
     <label>Note<br><input type="text" name="note" maxlength="1000"></label><br>
     <button class="btn" type="submit">Log request</button>
   </form>
@@ -26407,23 +26837,46 @@ Relay team broke club record"></textarea>
             pass
         if req.request_type == "access":
             export = _dsr.export_athlete(pid, req.athlete_name)
+            # D-21 — persist the snapshot and redirect back with a confirmation,
+            # so the request visibly flips to "completed" and the clock stops,
+            # instead of a bare attachment that left the table looking un-actioned.
+            export_path = _dsr_export_path(pid, request_id)
+            export_path.parent.mkdir(parents=True, exist_ok=True)
+            export_path.write_text(json.dumps(export, indent=2), encoding="utf-8")
             log_store.complete(request_id, note="export generated")
             from mediahub.compliance.security_log import record_event
 
             record_event("dsr_export", profile_id=pid, subject=req.athlete_name, actor=recorded_by)
-            resp = app.response_class(json.dumps(export, indent=2), mimetype="application/json")
-            resp.headers["Content-Disposition"] = f"attachment; filename=sar-{request_id}.json"
-            return resp
+            _flash_toast(
+                "Export ready — request marked complete and the clock stopped. "
+                "Download it from the Actions column.",
+                "success",
+            )
+            return redirect(url_for("org_athlete_rights"))
         if req.request_type == "erasure":
             report = _dsr.erase_athlete(pid, req.athlete_name, recorded_by=recorded_by)
             log_store.complete(request_id, note="erasure executed")
             from mediahub.compliance.security_log import record_event
 
             record_event("dsr_erasure", profile_id=pid, subject=req.athlete_name, actor=recorded_by)
+            import urllib.parse as _up  # noqa: PLC0415
+
+            report_json = json.dumps(report, indent=2)
+            report_href = "data:application/json;charset=utf-8," + _up.quote(report_json)
             body = (
-                '<div class="card"><h2>Erasure report</h2><pre style="white-space:pre-wrap">'
-                + _h(json.dumps(report, indent=2))
-                + f'</pre><p><a href="{url_for("org_athlete_rights")}">Back to athlete rights</a></p></div>'
+                '<div class="card"><h2>What was removed</h2>'
+                f"<p class='muted'>Erasure completed for <strong>{_h(req.athlete_name)}</strong>.</p>"
+                # Pass the cascade so the compliant Art-17 summary counts the
+                # cascade-only figures (research-cache, result rows, …) instead of
+                # showing 0 — same numbers as the /privacy quick-erase sibling.
+                + _erasure_removed_html(report, report.get("cascade"))
+                + "<p class='muted'>Remaining mentions inside multi-athlete captions were "
+                "redacted. Content already published to social platforms must be deleted "
+                "there too.</p>"
+                f'<p><a class="btn secondary" href="{report_href}" '
+                f'download="erasure-{_h(request_id)}.json">Download technical report (JSON)</a> '
+                f'<a class="btn" href="{url_for("org_athlete_rights")}">Back to athlete rights</a></p>'
+                "</div>"
             )
             return _layout("Erasure report", body, active="settings")
         if req.request_type == "restriction":
@@ -26438,6 +26891,26 @@ Relay team broke club record"></textarea>
             log_store.complete(request_id, note=f"rectified to '{new_name}'")
             return redirect(url_for("org_athlete_rights"))
         return jsonify({"error": "unknown request type"}), 400
+
+    @app.route("/organisation/athlete-rights/<request_id>/export.json")
+    def org_dsr_export_download(request_id):
+        """D-21 — serve the persisted SAR export snapshot for a completed access
+        request (tenant-scoped), so "Run export" can redirect + confirm and the
+        officer still gets the file on demand."""
+        pid = _active_profile_id() or ""
+        if not pid or load_profile(pid) is None:
+            return jsonify({"error": "no active organisation"}), 404
+        from mediahub.compliance import dsr as _dsr
+
+        req = _dsr.DsrRequestLog().get(request_id)
+        if req is None or req.profile_id != pid:
+            return jsonify({"error": "request not found"}), 404
+        path = _dsr_export_path(pid, request_id)
+        if not path.exists():
+            return jsonify({"error": "export not generated"}), 404
+        resp = app.response_class(path.read_text(encoding="utf-8"), mimetype="application/json")
+        resp.headers["Content-Disposition"] = f"attachment; filename=sar-{_h(request_id)}.json"
+        return resp
 
     @app.route("/organisation/athlete-rights/<request_id>/clock", methods=["POST"])
     def org_dsr_clock(request_id):
@@ -26498,26 +26971,14 @@ Relay team broke club record"></textarea>
             pass
         report = _dsr_erase(active, name, recorded_by=recorded_by)
         cascade = report.get("cascade") or {}
-        _runs_n = len(
-            set(list(cascade.get("runs_touched", [])) + list(report.get("runs_touched", [])))
-        )
         body = (
             '<section class="mh-hero" style="padding-top:var(--sp-7);'
             'padding-bottom:var(--sp-5);margin-bottom:var(--sp-5)">'
             '<span class="mh-hero-eyebrow">Privacy &amp; data</span>'
             '<h1>Athlete <em class="editorial">erased.</em></h1></section>'
-            '<div class="card"><h2>What was removed</h2><ul>'
-            f"<li>{cascade.get('cards_removed', 0) + report.get('cards_removed', 0)} card(s) and "
-            f"{cascade.get('swims_removed', 0)} result row(s) across {_runs_n} run(s)</li>"
-            f"<li>{cascade.get('assets_removed', 0) + len(report.get('visual_files_deleted', []))} rendered file(s)</li>"
-            f"<li>{cascade.get('pb_cache_files', 0) + len(report.get('pb_cache_files_deleted', []))} PB-cache and "
-            f"{cascade.get('research_cache_files', 0)} research-cache file(s)</li>"
-            f"<li>{cascade.get('memory_rows', 0) + report.get('memory_rows_deleted', 0)} caption-memory row(s)</li>"
-            f"<li>{cascade.get('posting_excerpts', 0)} posting-log excerpt(s) blanked</li>"
-            f"<li>{len(report.get('media_assets_deleted', []))} media-library photo(s) deleted, "
-            f"{len(report.get('media_assets_unlinked', []))} unlinked</li>"
-            "<li>Suppression recorded in both consent registries &mdash; the athlete cannot reappear in new content</li>"
-            "</ul><p class='muted'>Remaining mentions inside multi-athlete captions "
+            '<div class="card"><h2>What was removed</h2>'
+            + _erasure_removed_html(report, cascade)
+            + "<p class='muted'>Remaining mentions inside multi-athlete captions "
             "were redacted. Content already published to social "
             "platforms must be deleted there too &mdash; use the correction tools "
             "on the Privacy page.</p>"
@@ -26768,7 +27229,11 @@ Relay team broke club record"></textarea>
     # bus) are intercepted. Online they pass straight through; offline they are
     # persisted to IndexedDB and a Background Sync is registered, then replayed
     # when the connection returns. The workflow API is idempotent (re-approving
-    # is a no-op), so replay is always safe.
+    # is a no-op), so a replay never double-applies. It is NOT, however, always
+    # a success: a consent/brand/task gate can refuse an approval (403) and the
+    # group-approver rule can hold it as a vote (200 status:'queue'). D-4:
+    # drainQueue inspects each replay's body and reports those outcomes to the
+    # client instead of silently dropping them and claiming "All changes synced".
     _SERVICE_WORKER_JS = r"""
 const CACHE = 'mediahub-shell-v2';
 const DB_NAME = 'mediahub-pwa';
@@ -26840,20 +27305,27 @@ function registerSync(){
   return Promise.resolve();
 }
 
-async function notifyClients(){
+async function notifyClients(problems){
   var n = await idbCount();
   var cs = await self.clients.matchAll({ includeUncontrolled: true, type: 'window' });
-  cs.forEach(function(c){ c.postMessage({ type: 'mediahub-queue', count: n }); });
+  cs.forEach(function(c){ c.postMessage({ type: 'mediahub-queue', count: n, problems: problems || [] }); });
 }
 
-// Replay every queued action in submission order. A 2xx/3xx/4xx is a final
-// server decision (idempotent — re-approving is a no-op), so the entry is
-// dropped; a 5xx or a network failure keeps it for the next sync.
+// Replay every queued action in submission order. A 5xx or a network failure is
+// transient — the entry stays for the next sync. A 2xx/3xx/4xx is a FINAL server
+// decision (idempotent — re-approving is a no-op), so the entry is dropped — but
+// D-4: we inspect the body first. A 4xx gate refusal (consent/brand/task) or a
+// 200 "held for another approver" vote (status:'queue') is NOT the approval the
+// volunteer intended, so it's collected as a problem and reported to the client
+// rather than silently dropped as "synced".
 async function drainQueue(){
   var items = await idbGetAll();
   items.sort(function(a, b){ return a.ts - b.ts; });
+  var problems = [];
   for (var i = 0; i < items.length; i++){
     var it = items[i];
+    var requested = '';
+    try { requested = (JSON.parse(it.body) || {}).status || ''; } catch (e) {}
     try {
       var res = await fetch(it.url, {
         method: it.method,
@@ -26861,12 +27333,26 @@ async function drainQueue(){
         body: it.body,
         credentials: 'same-origin'
       });
-      if (res && res.status < 500) { await idbDelete(it.id); }
+      if (!res || res.status >= 500) { continue; } // transient — keep for next sync
+      var j = null;
+      try { j = await res.clone().json(); } catch (e) {}
+      var blocked = res.status >= 400 || !!(j && j.ok === false);
+      var held = !blocked && !!(j && j.status && requested && j.status !== requested);
+      await idbDelete(it.id);
+      if (blocked || held){
+        problems.push({
+          requested: requested,
+          httpStatus: res.status,
+          error: (j && j.error) || '',
+          reason: (j && (j.reason || j.message)) || '',
+          held: held
+        });
+      }
     } catch (e) {
       break; // still offline — leave the remainder queued
     }
   }
-  await notifyClients();
+  await notifyClients(problems);
 }
 
 async function handleWorkflowPost(req){
@@ -28359,7 +28845,45 @@ self.addEventListener('fetch', function(e){
             "real photography; AI-generated images are marked as such.</p></div>"
         )
 
-        return usage_card + perms_card + prov_card
+        # D-17 — a visible AI-availability row. Previously the only signal that
+        # AI was off lived in a hover tooltip on a tiny dot (useless on a phone),
+        # and nothing in Settings said whether a provider was live.
+        try:
+            from mediahub.media_ai.llm import active_provider as _active_prov
+            from mediahub.media_ai.llm import is_available as _llm_available
+
+            _ai_live = bool(_llm_available())
+            _prov_label = (
+                {
+                    "gemini-api": "Google Gemini",
+                    "anthropic-api": "Anthropic (Claude)",
+                }.get(_active_prov())
+                if _ai_live
+                else ""
+            )
+        except Exception:
+            _ai_live, _prov_label = False, ""
+        if _ai_live:
+            status_card = (
+                '<div class="card"><h2 style="margin-top:0;font-size:18px">AI status</h2>'
+                '<p style="font-size:13px;margin-bottom:0">'
+                '<span class="tag good">Live</span> AI captions, imagery and translation are '
+                "enabled"
+                + (f" via <strong>{_h(_prov_label)}</strong>" if _prov_label else "")
+                + ".</p></div>"
+            )
+        else:
+            status_card = (
+                '<div class="card" style="border-color:var(--mh-prim-warning-500)">'
+                '<h2 style="margin-top:0;font-size:18px">AI status</h2>'
+                '<p style="font-size:13px;margin-bottom:0">'
+                '<span class="tag warn">Disabled</span> No AI provider is live on this deployment, '
+                "so captions, imagery and translation will show an honest error rather than a made-up "
+                "result. You can still review, edit and approve cards by hand. Ask your operator to "
+                "configure a provider key to turn AI back on.</p></div>"
+            )
+
+        return status_card + usage_card + perms_card + prov_card
 
     # Detail pages behind the settings cards. ``developer`` is operator-only;
     # everything else is org-scoped and degrades gracefully with no org.
@@ -28641,7 +29165,7 @@ self.addEventListener('fetch', function(e){
     }
     _AUDIO_UPLOAD_MAX_BYTES = 25 * 1024 * 1024  # 25 MB — clips/beds, not albums
 
-    def _audio_back_or_json(payload: dict, status: int = 200):
+    def _audio_back_or_json(payload: dict, status: int = 200, *, flash_status: str = ""):
         from flask import request as _req
 
         wants_json = (
@@ -28650,6 +29174,17 @@ self.addEventListener('fetch', function(e){
         )
         if wants_json:
             return jsonify(payload), status
+        # D-14: a browser form POST must never land on a bare JSON error page.
+        # Redirect back with a friendly banner instead — the styled error card
+        # the graceful pages use — keeping the JSON body only for JSON callers.
+        if payload.get("error"):
+            emsg = payload.get("message") or "That didn't work — check the file and try again."
+            return redirect(url_for("settings_section", section="audio", status="error", emsg=emsg))
+        # D-7: a form POST navigates back to the audio settings; carry a status
+        # so the section can confirm the action ("Track added" / "Track removed")
+        # instead of a silent redirect the volunteer can't tell worked.
+        if flash_status:
+            return redirect(url_for("settings_section", section="audio", status=flash_status))
         return redirect(url_for("settings_section", section="audio"))
 
     @app.route("/api/audio/library")
@@ -28748,22 +29283,36 @@ self.addEventListener('fetch', function(e){
 
         pid = _active_profile_id()
         if not pid:
-            return jsonify(
-                {"error": "no_org", "message": "Choose an organisation to upload audio."}
-            ), 403
+            return _audio_back_or_json(
+                {"error": "no_org", "message": "Choose an organisation to upload audio."}, 403
+            )
         f = _req.files.get("file")
         if not f:
-            return jsonify({"error": "no_file"}), 400
+            return _audio_back_or_json(
+                {"error": "no_file", "message": "Choose an audio file first."}, 400
+            )
         ext = Path(f.filename or "clip.wav").suffix.lower()
         if ext not in _AUDIO_UPLOAD_SUFFIXES:
-            return jsonify(
-                {"error": "bad_type", "message": f"Unsupported audio type {ext!r}."}
-            ), 415
+            allowed = ", ".join(sorted(s.lstrip(".").upper() for s in _AUDIO_UPLOAD_SUFFIXES))
+            return _audio_back_or_json(
+                {
+                    "error": "bad_type",
+                    "message": f"That file type isn't supported. Use one of: {allowed}.",
+                },
+                415,
+            )
         try:
             from mediahub.audio import rights as _rights
             from mediahub.audio.library import Licence
         except Exception as e:
-            return jsonify({"error": "audio_unavailable", "detail": str(e)}), 503
+            return _audio_back_or_json(
+                {
+                    "error": "audio_unavailable",
+                    "detail": str(e),
+                    "message": "Audio isn't available.",
+                },
+                503,
+            )
 
         import uuid as _uuid
 
@@ -28775,9 +29324,17 @@ self.addEventListener('fetch', function(e){
         try:
             if dest.stat().st_size > _AUDIO_UPLOAD_MAX_BYTES:
                 dest.unlink(missing_ok=True)
-                return jsonify({"error": "too_large", "message": "Audio exceeds 25 MB."}), 413
+                return _audio_back_or_json(
+                    {"error": "too_large", "message": "That audio is over the 25 MB limit."}, 413
+                )
         except OSError:
-            return jsonify({"error": "save_failed"}), 500
+            return _audio_back_or_json(
+                {
+                    "error": "save_failed",
+                    "message": "We couldn't save that file — please try again.",
+                },
+                500,
+            )
 
         # Optional one-tap clean-up (denoise + loudness) for recordings.
         if (_req.form.get("enhance") or "").strip().lower() in {"1", "true", "on", "yes"}:
@@ -28818,8 +29375,50 @@ self.addEventListener('fetch', function(e){
                 "asset": rec.to_dict(),
                 "duplicate": check.is_duplicate,
                 "fingerprint_method": check.fingerprint.method,
-            }
+            },
+            flash_status="audio_added",
         )
+
+    @app.route("/api/audio/upload/<asset_id>")
+    def api_audio_upload_file(asset_id):
+        """D-7: serve one of the active org's own uploaded audio files for
+        in-browser preview. Tenant-scoped by the rights ledger's profile_id —
+        an id owned by another org 404s (no IDOR), and the filename resolves to
+        a basename inside the org's own directory (no path traversal)."""
+        from flask import send_file
+
+        from mediahub.audio import rights as _rights
+
+        pid = _active_profile_id()
+        if not pid:
+            abort(404)
+        rec = _rights.RightsLedger().get(asset_id)
+        if rec is None or rec.profile_id != pid:
+            abort(404)
+        path = DATA_DIR / "audio_uploads" / pid / Path(rec.filename).name
+        if not path.is_file():
+            abort(404)
+        return send_file(str(path))
+
+    @app.route("/api/audio/upload/<asset_id>/delete", methods=["POST"])
+    def api_audio_upload_delete(asset_id):
+        """D-7: remove one of the active org's own uploaded audio files and its
+        rights-ledger row. Tenant-scoped exactly like the preview route."""
+        from mediahub.audio import rights as _rights
+
+        pid = _active_profile_id()
+        if not pid:
+            return _audio_back_or_json({"error": "no_org"}, 403)
+        led = _rights.RightsLedger()
+        rec = led.get(asset_id)
+        if rec is None or rec.profile_id != pid:
+            return _audio_back_or_json({"error": "not_found"}, 404)
+        try:
+            (DATA_DIR / "audio_uploads" / pid / Path(rec.filename).name).unlink(missing_ok=True)
+        except OSError:
+            pass
+        led.delete(asset_id)
+        return _audio_back_or_json({"ok": True}, flash_status="audio_removed")
 
     @app.route("/api/audio/voice-consent", methods=["GET", "POST"])
     def api_audio_voice_consent():
@@ -28917,17 +29516,21 @@ self.addEventListener('fetch', function(e){
             )
         library_html = (
             '<h2 style="font-size:18px;margin:24px 0 6px">Music &amp; sound effects</h2>'
+            # F-3: customer copy, no env-var names — uploading their own tracks is
+            # the customer action; the reel-bed default is an operator setting.
             '<p class="dim" style="margin:0 0 12px">MediaHub ships its own licence-clean '
-            "(CC0) pool so reels have sound out of the box. Set "
-            "<code>MEDIAHUB_REEL_MUSIC_LIBRARY=1</code> to use it as the default reel bed, "
-            "or point <code>MEDIAHUB_AUDIO_LIBRARY_DIR</code> at your own licensed tracks.</p>"
+            "(CC0) pool so reels have sound out of the box. Prefer your own music? "
+            "Upload your licensed tracks under &ldquo;Upload your own audio&rdquo; below.</p>"
             f'<div style="display:grid;gap:8px">{track_rows}</div>'
         )
 
         # --- Voice catalogue ---
         voice_rows = ""
         for v in list_voices():
-            tag = "local" if v.local else "online"
+            # F-3: "built-in"/"premium" reads for a customer; "local"/"online" is
+            # deployment jargon (and the on-server backend is never "local" in
+            # customer copy, per the fonts/cutout naming rule).
+            tag = "built-in" if v.local else "premium"
             voice_rows += (
                 '<li style="margin-bottom:4px">'
                 f"<strong>{_h(v.name or v.id)}</strong> "
@@ -28937,8 +29540,8 @@ self.addEventListener('fetch', function(e){
         voices_html = (
             '<h2 style="font-size:18px;margin:28px 0 6px">Voices</h2>'
             '<p class="dim" style="margin:0 0 8px">Voiceover speaks the approved caption '
-            "verbatim — no AI script. The local voice is the zero-cost default; Welsh and "
-            "other voices are available on the online backend.</p>"
+            "verbatim — no AI script. The built-in voice is the zero-cost default; Welsh and "
+            "other premium voices are available too.</p>"
             f'<ul style="margin:0 0 4px;padding-left:18px">{voice_rows}</ul>'
         )
 
@@ -28981,6 +29584,7 @@ self.addEventListener('fetch', function(e){
 
         # --- Upload own audio + browser recorder ---
         if pid:
+            _types_hint = ", ".join(sorted(s.lstrip(".").upper() for s in _AUDIO_UPLOAD_SUFFIXES))
             upload_html = (
                 '<h2 style="font-size:18px;margin:28px 0 6px">Upload your own audio</h2>'
                 '<p class="dim" style="margin:0 0 12px">Add a track you hold the licence for. '
@@ -28988,6 +29592,7 @@ self.addEventListener('fetch', function(e){
                 f'<form method="post" action="{url_for("api_audio_upload")}" '
                 'enctype="multipart/form-data" style="display:grid;gap:8px;max-width:560px">'
                 '<input type="file" id="mh-audio-file" name="file" accept="audio/*" required>'
+                f'<span class="dim" style="font-size:12px">{_types_hint} · up to 25 MB.</span>'
                 '<input name="licence_name" placeholder="Licence (e.g. Licensed, CC-BY)" '
                 'style="padding:8px">'
                 '<input name="attribution" placeholder="Attribution (if required)" '
@@ -29004,6 +29609,70 @@ self.addEventListener('fetch', function(e){
             )
         else:
             upload_html = ""
+
+        # --- Your uploaded audio (D-7: list + preview + remove) ---
+        uploads_html = ""
+        if pid:
+            from mediahub.audio import rights as _rights
+
+            up_rows = ""
+            for rec in _rights.RightsLedger().list_for_profile(pid):
+                fpath = DATA_DIR / "audio_uploads" / pid / Path(rec.filename).name
+                if not fpath.is_file():
+                    continue  # a ledger row whose file is gone (cleaned/removed) — skip
+                src = url_for("api_audio_upload_file", asset_id=rec.asset_id)
+                lic = _h(rec.licence.name or "operator-supplied")
+                when = _h((rec.attested_at or "")[:10])
+                del_url = url_for("api_audio_upload_delete", asset_id=rec.asset_id)
+                up_rows += (
+                    '<div class="card" style="padding:12px 14px;display:flex;align-items:center;'
+                    'gap:12px;flex-wrap:wrap">'
+                    f'<div style="flex:1;min-width:180px"><strong>{_h(rec.filename)}</strong>'
+                    f'<div class="dim" style="font-size:12px">{lic}'
+                    f'{(" · " + when) if when else ""}</div></div>'
+                    f'<audio controls preload="none" src="{src}" style="height:34px"></audio>'
+                    f'<form method="post" action="{del_url}" style="margin:0" '
+                    "onsubmit=\"return confirm('Remove this uploaded track?')\">"
+                    '<button class="btn btn-ghost" style="padding:4px 10px">Remove</button>'
+                    "</form></div>"
+                )
+            if up_rows:
+                uploads_html = (
+                    '<h2 style="font-size:18px;margin:28px 0 6px">Your uploaded audio</h2>'
+                    '<p class="dim" style="margin:0 0 12px">Tracks you\'ve added for this '
+                    "organisation — preview or remove them here.</p>"
+                    f'<div style="display:grid;gap:8px">{up_rows}</div>'
+                )
+            else:
+                uploads_html = (
+                    '<h2 style="font-size:18px;margin:28px 0 6px">Your uploaded audio</h2>'
+                    '<p class="dim" style="margin:0 0 12px">No uploads yet — add a track above '
+                    "and it'll appear here to preview or remove.</p>"
+                )
+
+        # D-7: confirm the upload/remove that a form POST just performed, so the
+        # volunteer sees it worked instead of a silent redirect.
+        _audio_flash = (request.args.get("status") or "").strip()
+        banner_html = ""
+        if _audio_flash == "audio_added":
+            banner_html = (
+                '<div class="card" style="border-left:2px solid var(--good);margin-bottom:14px">'
+                '<strong style="color:var(--good)">Track added.</strong> '
+                'It\'s listed under "Your uploaded audio" below.</div>'
+            )
+        elif _audio_flash == "audio_removed":
+            banner_html = (
+                '<div class="card" style="border-left:2px solid var(--warn);margin-bottom:14px">'
+                "Track removed.</div>"
+            )
+        elif _audio_flash == "error":
+            # D-14: an upload validation error, rendered as a styled card instead
+            # of a bare JSON page. The message is server-supplied; escape it.
+            _emsg = _h((request.args.get("emsg") or "").strip()[:300]) or "That upload didn't work."
+            banner_html = (
+                '<div class="card" style="border-left:2px solid var(--bad);margin-bottom:14px">'
+                f'<strong style="color:var(--bad)">Upload failed.</strong> {_emsg}</div>'
+            )
 
         # --- Voice consent (cloning / changer; off by default) ---
         if pid:
@@ -29071,12 +29740,14 @@ self.addEventListener('fetch', function(e){
 
         return (
             '<div style="max-width:760px">'
-            '<p class="lede" style="margin-top:0">Sound for your videos — music, effects and '
+            + banner_html
+            + '<p class="lede" style="margin-top:0">Sound for your videos — music, effects and '
             "voiceover — all rights-clean and explainable.</p>"
             + library_html
             + voices_html
             + lexicon_html
             + upload_html
+            + uploads_html
             + consent_html
             + (recorder_js if pid else "")
             + "</div>"
@@ -29124,7 +29795,7 @@ self.addEventListener('fetch', function(e){
             return (
                 f"{section_header}"
                 f"{section_intro}"
-                '<div class="card empty">No runs yet for this organisation. '
+                '<div class="card empty">No results yet for this organisation. '
                 f'<a href="{url_for("make_page")}">Create your first piece of content &rarr;</a>'
                 "</div>"
             )
@@ -29939,10 +30610,12 @@ self.addEventListener('fetch', function(e){
                 "pin a sport, so pick one here</span>"
             )
 
+        # F-6: plain-language signal-source chips (the engine's OWN/EXTERNAL/DIRECT
+        # taxonomy meant nothing to a volunteer and had no legend on the page).
         src_chip = {
-            "own": '<span class="tag" style="background:rgba(34,211,238,.12);color:var(--accent)">OWN</span>',
-            "external": '<span class="tag" style="background:rgba(167,139,250,.12);color:var(--medal)">EXTERNAL</span>',
-            "direct": '<span class="tag" style="background:rgba(250,204,21,.12);color:var(--lane)">DIRECT</span>',
+            "own": '<span class="tag" style="background:rgba(34,211,238,.12);color:var(--accent)">From your results</span>',
+            "external": '<span class="tag" style="background:rgba(167,139,250,.12);color:var(--medal)">From the calendar</span>',
+            "direct": '<span class="tag" style="background:rgba(250,204,21,.12);color:var(--lane)">You told us</span>',
         }
 
         # Persisted plans are durable state — DATA_DIR is a mounted disk that
@@ -29983,13 +30656,11 @@ self.addEventListener('fetch', function(e){
                             create_link = ""
                 chips = "".join(src_chip.get(s, "") for s in _as_list(item.get("sources_used")))
                 if not chips:
-                    chips = '<span class="tag">baseline</span>'
+                    # F-6: a bare "baseline" tag meant nothing — say what it is.
+                    chips = '<span class="tag">General suggestion</span>'
                 reasons = "".join(
                     f'<li style="margin:2px 0;color:var(--ink-muted);font-size:12.5px">{_h(r)}</li>'
                     for r in _as_list(item.get("reasons"))
-                )
-                autonomy = _h(
-                    (item.get("default_autonomy") or "approval_required").replace("_", " ")
                 )
                 badge = (
                     '<span class="tag live">Ready to create</span>'
@@ -30003,7 +30674,6 @@ self.addEventListener('fetch', function(e){
     <strong style="flex:1">{_h(item.get("title") or slug)}</strong>
     {chips}
     {badge}
-    <span class="tag" title="Default autonomy for this type">{autonomy}</span>
     <span style="font-variant-numeric:tabular-nums;font-weight:700;font-size:15px" title="Priority score">{_as_int(item.get("score"))}</span>
     {create_link}
   </summary>
@@ -30022,8 +30692,8 @@ self.addEventListener('fetch', function(e){
 <div class="card" style="margin-bottom:14px">
   <div style="display:flex;gap:18px;flex-wrap:wrap;align-items:center">
     <strong>{_h(plan.get("sport_display") or plan.get("sport", ""))} plan</strong>
-    <span class="dim" style="font-size:12.5px">generated {_h(str(plan.get("generated_at", ""))[:16].replace("T", " "))} · horizon {_as_int(plan.get("horizon_days"), 14)}d</span>
-    <span style="font-size:12.5px">{src_chip["own"]} {_as_int(counts.get("own"))} · {src_chip["external"]} {_as_int(counts.get("external"))} · {src_chip["direct"]} {_as_int(counts.get("direct"))} signals</span>
+    <span class="dim" style="font-size:12.5px">generated {_h(str(plan.get("generated_at", ""))[:16].replace("T", " "))} · next {_as_int(plan.get("horizon_days"), 14)} days</span>
+    <span style="font-size:12.5px">{_as_int(counts.get("own"))} from your results · {_as_int(counts.get("external"))} from the calendar · {_as_int(counts.get("direct"))} you told us</span>
   </div>
   {f'<ul style="margin:8px 0 0 0;padding-left:18px">{notes_html}</ul>' if notes_html else ""}
 </div>"""
@@ -30315,7 +30985,11 @@ function mhPlanInterpret(btn) {{
   var status = document.getElementById('mh-plan-nl-status');
   var text = document.getElementById('mh-plan-nl').value.trim();
   if (!text) {{ status.textContent = 'Type a note first.'; return; }}
+  // D-27: these AI buttons are type=button outside any form, so the shared
+  // form-submit loader never fired — long LLM+web-research calls showed only a
+  // tiny status line. Drive the loader from data-loader-text directly.
   btn.disabled = true; status.textContent = 'Reading your note…';
+  if (window.MH) MH.showLoader(btn.dataset.loaderText || 'Reading your note', 'Checking dates on the web when it needs to…');
   document.getElementById('mh-plan-nl-result').innerHTML = '';
   fetch({json.dumps(url_for("api_plan_interpret"))}, {{
     method: 'POST', headers: {{'Content-Type': 'application/json'}},
@@ -30323,17 +30997,20 @@ function mhPlanInterpret(btn) {{
   }}).then(function (r) {{ return r.json().then(function (j) {{ return {{ ok: r.ok, j: j }}; }}); }})
     .then(function (res) {{
       btn.disabled = false;
+      if (window.MH) MH.hideLoader();
       var j = res.j || {{}};
       if (!res.ok || !j.ok) {{ status.textContent = j.error || 'Could not interpret that.'; return; }}
       var p = j.parsed || {{}};
       var added = mhPlanMergeParsed(p);
       status.textContent = 'Filled in ' + added + ' item' + (added === 1 ? '' : 's') + ' below — review, then Save inputs.';
       mhPlanRenderNote(p, added);
-    }}).catch(function () {{ btn.disabled = false; status.textContent = 'Could not interpret that.'; }});
+    }}).catch(function () {{ btn.disabled = false; if (window.MH) MH.hideLoader(); status.textContent = 'Could not interpret that.'; }});
 }}
 function mhPlanGenerate(btn) {{
   var status = document.getElementById('mh-plan-status');
   btn.disabled = true; status.textContent = 'Saving your inputs…';
+  // D-27: visible loading treatment for the long fuse-and-generate call.
+  if (window.MH) MH.showLoader(btn.dataset.loaderText || 'Fusing signals', 'Building your ranked plan…');
   // H-7: persist whatever is on the page BEFORE generating. Generate builds
   // the plan from the PERSISTED inputs and the page reloads on success, so an
   // event/goal/blackout the volunteer just typed (or added via "Interpret &
@@ -30355,8 +31032,8 @@ function mhPlanGenerate(btn) {{
     }});
   }}).then(function(r){{ return r.json(); }}).then(function(j){{
     if (j.ok) {{ window.location.reload(); }}
-    else {{ btn.disabled = false; status.textContent = j.error || 'Plan generation failed'; }}
-  }}).catch(function(){{ btn.disabled = false; status.textContent = 'Plan generation failed'; }});
+    else {{ btn.disabled = false; if (window.MH) MH.hideLoader(); status.textContent = j.error || 'Plan generation failed'; }}
+  }}).catch(function(){{ btn.disabled = false; if (window.MH) MH.hideLoader(); status.textContent = 'Plan generation failed'; }});
 }}
 </script>
 """
@@ -30551,15 +31228,26 @@ function mhPlanGenerate(btn) {{
 
         # Side rail — unscheduled drafts to drag onto a day.
         def _rail_card(d: dict) -> str:
+            # I-1: a non-drag "Plan for…" date field so touch + keyboard users
+            # can schedule a draft (HTML5 drag never fires from touch). Drag onto
+            # a day stays as the desktop enhancement.
+            plan_input = (
+                f'<input type="date" class="mh-cal-plan-date" data-pack="{_h(d["pack_id"])}" '
+                f'aria-label="Plan a date to post {_h(d["title"])}" '
+                f'onchange="mhCalPlanInput(this)" onclick="event.stopPropagation()" '
+                'style="margin-top:6px;width:100%;font-size:11px;padding:3px 6px;'
+                "border:1px solid var(--border);border-radius:6px;background:var(--panel);"
+                'color:inherit">'
+            )
             return (
                 f'<div class="mh-cal-draft mh-cal-rail-card" draggable="true" '
                 f'data-pack="{_h(d["pack_id"])}" '
                 f'data-href="{_h(url_for("stub_pack_view", pack_id=d["pack_id"]))}" '
-                f'title="Drag onto a day to plan when to post it">'
+                f'title="Drag onto a day — or use the date field — to plan when to post it">'
                 f'<span class="mh-cal-draft-dot"></span>'
                 f'<span class="mh-cal-draft-t">{_h(d["title"])}'
                 f'<span style="opacity:.6"> · {int(d["n_cards"])} card'
-                f"{'s' if int(d['n_cards']) != 1 else ''}</span></span></div>"
+                f"{'s' if int(d['n_cards']) != 1 else ''}</span></span>{plan_input}</div>"
             )
 
         rail = "".join(_rail_card(d) for d in model.unscheduled_drafts)
@@ -30638,6 +31326,10 @@ function mhCalStatus(msg, warn) {{
   var s = document.getElementById('mh-cal-status');
   if (!s) return; s.textContent = msg || ''; s.style.color = warn ? 'var(--warn)' : 'var(--ink-muted)';
 }}
+// I-1: non-drag scheduling (touch / keyboard) via the rail card's date field.
+function mhCalPlanInput(el) {{
+  if (el && el.value) mhCalSchedule(el.getAttribute('data-pack'), el.value);
+}}
 function mhCalSchedule(packId, date) {{
   if (!packId) return;
   mhCalStatus(date ? 'Scheduling…' : 'Unscheduling…', false);
@@ -30646,10 +31338,21 @@ function mhCalSchedule(packId, date) {{
     body: JSON.stringify({{ pack_id: packId, date: date || '' }})
   }}).then(function (r) {{ return r.json(); }}).then(function (j) {{
     if (!j.ok) {{ mhCalStatus(j.error || 'Could not update.', true); return; }}
-    if (j.warning) {{ mhCalStatus(j.warning, true); setTimeout(function(){{ window.location.reload(); }}, 1200); }}
-    else {{ window.location.reload(); }}
+    if (j.warning) {{
+      // D-24: the reload used to wipe the blackout warning after 1.2s — the
+      // soft gate's one chance to warn. Persist it across the reload so it
+      // shows as a dismissible toast the volunteer actually reads.
+      try {{ sessionStorage.setItem('mhCalWarn', j.warning); }} catch (e) {{}}
+      window.location.reload();
+    }} else {{ window.location.reload(); }}
   }}).catch(function () {{ mhCalStatus('Could not update.', true); }});
 }}
+// D-24: surface a blackout warning carried across the reload.
+(function () {{
+  var w = null;
+  try {{ w = sessionStorage.getItem('mhCalWarn'); sessionStorage.removeItem('mhCalWarn'); }} catch (e) {{}}
+  if (w && window.MH && MH.toast) MH.toast(w, 'error', 8000);
+}})();
 document.addEventListener('dragstart', function (e) {{
   var card = e.target.closest ? e.target.closest('.mh-cal-draft') : null;
   if (!card) return;
@@ -30973,7 +31676,8 @@ document.addEventListener('click', function (e) {{
         pack = save_pack(
             "free_text",
             {"free_text": seed},
-            [{"platform": "Draft", "caption": seed, "hashtags": [], "confidence": 0.5}],
+            # D-25: prompt-led draft — no fabricated confidence badge.
+            [{"platform": "Draft", "caption": seed, "hashtags": [], "confidence": None}],
             profile_id=pid,
         )
         updated = link_pack(pid, card_id, pack["pack_id"], column="drafted")
@@ -31013,13 +31717,26 @@ document.addEventListener('click', function (e) {{
                 )
             else:
                 actions = ""
+            # I-1: a non-drag "Move to" select so touch + keyboard users can move
+            # a card between columns (HTML5 drag never fires from touch). Drag
+            # stays as the desktop enhancement.
+            move_opts = "".join(
+                f'<option value="{_h(c2)}">{_h(COLUMN_LABELS[c2])}</option>'
+                for c2 in COLUMNS
+                if c2 != card.column
+            )
+            move_select = (
+                f'<select class="mh-bd-move" onchange="mhBoardMove(this)" '
+                f'data-card="{_h(card.id)}" aria-label="Move {_h(card.title)} to a column">'
+                f'<option value="">Move to&hellip;</option>{move_opts}</select>'
+            )
             return (
                 f'<div class="mh-bd-card" draggable="true" data-card="{_h(card.id)}">'
                 f'<div class="mh-bd-card-head"><strong>{_h(card.title)}</strong>'
                 f'<button type="button" class="mh-bd-del" onclick="mhBoardDelete(this)" '
                 f'data-card="{_h(card.id)}" title="Delete">&times;</button></div>'
                 f"{note}"
-                f'<div class="mh-bd-actions">{actions}</div></div>'
+                f'<div class="mh-bd-actions">{actions}{move_select}</div></div>'
             )
 
         columns_html = ""
@@ -31096,6 +31813,11 @@ function mhBoardDrop(e) {{
   var col = e.currentTarget; if (col) col.classList.remove('mh-bd-drop');
   var id = e.dataTransfer.getData('text/plain');
   if (id && col) mhBoardPost(MH_BD.move, {{card_id: id, column: col.dataset.col}});
+}}
+// I-1: non-drag move (touch / keyboard) via the per-card "Move to" select.
+function mhBoardMove(sel) {{
+  if (!sel || !sel.value) return;
+  mhBoardPost(MH_BD.move, {{card_id: sel.getAttribute('data-card'), column: sel.value}});
 }}
 </script>
 """
@@ -31327,10 +32049,13 @@ function mhAnDelete(btn) {{
 function mhAnDigest(btn) {{
   var box = document.getElementById('mh-an-digest');
   btn.disabled = true; box.innerHTML = '<span class="dim">Writing…</span>';
+  // D-27: visible loading treatment for the AI digest call.
+  if (window.MH) MH.showLoader(btn.dataset.loaderText || 'Writing', 'Reading your logged results…');
   fetch(MH_AN.digest, {{method:'POST', headers:{{'Content-Type':'application/json'}}, body: '{{}}'}})
     .then(function(r){{ return r.json().then(function(j){{ return {{ok:r.ok, j:j}}; }}); }})
     .then(function(res){{
       btn.disabled = false;
+      if (window.MH) MH.hideLoader();
       var j = res.j || {{}};
       if (!res.ok || !j.ok) {{ box.innerHTML = '<p class="dim" style="color:var(--warn)">' + (j.error || 'Could not write a digest.') + '</p>'; return; }}
       var d = j.digest || {{}};
@@ -31338,7 +32063,7 @@ function mhAnDigest(btn) {{
       if (d.summary) html += '<p style="font-weight:600;margin:0 0 6px">' + d.summary.replace(/</g,'&lt;') + '</p>';
       (d.takeaways || []).forEach(function(t){{ html += '<li style="margin:2px 0">' + (t.text||'').replace(/</g,'&lt;') + '</li>'; }});
       box.innerHTML = html ? ('<ul style="margin:0;padding-left:18px">' + html + '</ul>') : '<p class="dim">No takeaways.</p>';
-    }}).catch(function(){{ btn.disabled = false; box.innerHTML = '<p class="dim" style="color:var(--warn)">Could not write a digest.</p>'; }});
+    }}).catch(function(){{ btn.disabled = false; if (window.MH) MH.hideLoader(); box.innerHTML = '<p class="dim" style="color:var(--warn)">Could not write a digest.</p>'; }});
 }}
 </script>
 """
@@ -31458,6 +32183,93 @@ function mhAnDigest(btn) {{
             headers={"Content-Disposition": f'attachment; filename="{safe}.txt"'},
         )
 
+    def _card_export_assets(
+        run_id: str, card_id: str, run_data: dict, *, caption_override: str = ""
+    ):
+        """Resolve one card's postable assets — (slug, caption, png_bytes,
+        png_name) — or ``None`` if the card isn't in this run.
+
+        Shared by the per-card ``/download`` route and the F-5 bulk
+        "Download content" route so the two never disagree about which caption
+        or visual ships. Caption priority (E-3): explicit override → approved
+        active-tone caption (same source as the run-level export.zip / public
+        API export) → any persisted human edit → the internal headline last.
+        """
+        rr = (run_data or {}).get("recognition_report") or {}
+        ranked = rr.get("ranked_achievements") or []
+        target = None
+        for ra in ranked:
+            ach = ra.get("achievement") or {}
+            if ach.get("swim_id") == card_id or ra.get("id") == card_id:
+                target = ra
+                break
+        if target is None:
+            for c in (run_data or {}).get("cards") or []:
+                if c.get("swim_id") == card_id or c.get("id") == card_id:
+                    target = {"achievement": c}
+                    break
+        if target is None:
+            return None
+
+        ach = target.get("achievement") or {}
+        swimmer = (ach.get("swimmer_name") or "swimmer").strip()
+        event = (ach.get("event") or "").strip()
+        slug = re.sub(r"[^A-Za-z0-9]+", "-", f"{swimmer} {event}").strip("-").lower() or "card"
+
+        caption = (caption_override or "").strip()
+        if not caption:
+            try:
+                from mediahub.workflow.pack import build_content_pack as _bcp
+
+                for _card in _bcp(run_id, _active_profile_id() or "default", RUNS_DIR):
+                    if str(_card.get("_card_id") or "") == str(card_id):
+                        _active = _card.get("active_caption") or {}
+                        if isinstance(_active, dict):
+                            caption = " ".join(
+                                str(v).strip()
+                                for v in _active.values()
+                                if isinstance(v, str) and v.strip()
+                            ).strip()
+                        break
+            except Exception:
+                caption = ""
+        if not caption:
+            try:
+                _ws = _get_wf_store()
+                _st = _ws.load(run_id).get(card_id) if _ws else None
+                _edits = (getattr(_st, "edited_captions", None) or {}) if _st else {}
+                _parts = [
+                    _edits[k]
+                    for k in sorted(_edits)
+                    if k and not str(k).startswith("insp.") and k != "alt_text" and _edits.get(k)
+                ]
+                caption = "\n".join(p for p in _parts if p).strip()
+            except Exception:
+                caption = ""
+        if not caption:
+            caption = (ach.get("headline") or f"{swimmer} — {event}").strip()
+
+        # Try to locate the rendered PNG for this card. Best-effort:
+        # not every card has a generated visual yet.
+        png_bytes: Optional[bytes] = None
+        png_name = ""
+        try:
+            visuals = (
+                target.get("visuals")
+                or (ach.get("visuals") if isinstance(ach, dict) else None)
+                or []
+            )
+            for v in visuals:
+                fp = v.get("file_path") or v.get("path") or ""
+                if fp and Path(fp).exists():
+                    png_bytes = Path(fp).read_bytes()
+                    png_name = Path(fp).name
+                    break
+        except Exception:
+            png_bytes = None
+
+        return slug, caption, png_bytes, png_name
+
     @app.route(
         "/api/runs/<run_id>/card/<path:card_id>/download",
         methods=["GET"],
@@ -31480,96 +32292,12 @@ function mhAnDigest(btn) {{
         if run_data is None:
             return jsonify({"error": "run_not_found"}), 404
 
-        # Find the achievement / card.
-        rr = run_data.get("recognition_report") or {}
-        ranked = rr.get("ranked_achievements") or []
-        target = None
-        for ra in ranked:
-            ach = ra.get("achievement") or {}
-            if ach.get("swim_id") == card_id or ra.get("id") == card_id:
-                target = ra
-                break
-        if target is None:
-            for c in run_data.get("cards") or []:
-                if c.get("swim_id") == card_id or c.get("id") == card_id:
-                    target = {"achievement": c}
-                    break
-        if target is None:
+        assets = _card_export_assets(
+            run_id, card_id, run_data, caption_override=request.args.get("caption") or ""
+        )
+        if assets is None:
             return jsonify({"error": "card_not_found"}), 404
-
-        ach = target.get("achievement") or {}
-        swimmer = (ach.get("swimmer_name") or "swimmer").strip()
-        event = (ach.get("event") or "").strip()
-        slug = re.sub(r"[^A-Za-z0-9]+", "-", f"{swimmer} {event}").strip("-").lower() or "card"
-
-        # Caption text. Priority (E-3):
-        #   1. an explicit ?caption= override (rare — a caller passing its own),
-        #   2. the card's APPROVED / active-tone caption — the SAME source the
-        #      run-level export.zip and the public API export write, so the two
-        #      never contradict each other,
-        #   3. the internal headline, only as a last resort.
-        # Previously this fell straight through to ach.get("headline"), so the
-        # volunteer posted the internal headline while their edited caption was
-        # silently dropped (and the ZIP README claimed it was the real caption).
-        caption = (request.args.get("caption") or "").strip()
-        # 2. The approved active-tone caption — byte-for-byte the source the
-        #    run-level export.zip and public API export use (only approved
-        #    cards appear here).
-        if not caption:
-            try:
-                from mediahub.workflow.pack import build_content_pack as _bcp
-
-                for _card in _bcp(run_id, _active_profile_id() or "default", RUNS_DIR):
-                    if str(_card.get("_card_id") or "") == str(card_id):
-                        _active = _card.get("active_caption") or {}
-                        if isinstance(_active, dict):
-                            caption = " ".join(
-                                str(v).strip()
-                                for v in _active.values()
-                                if isinstance(v, str) and v.strip()
-                            ).strip()
-                        break
-            except Exception:
-                caption = ""
-        # 3. Any human edit persisted on the card even if not formally approved
-        #    (build_content_pack returns approved cards only). Excludes the
-        #    inspector overrides (insp.*) and alt-text slots — those aren't the
-        #    post caption.
-        if not caption:
-            try:
-                _ws = _get_wf_store()
-                _st = _ws.load(run_id).get(card_id) if _ws else None
-                _edits = (getattr(_st, "edited_captions", None) or {}) if _st else {}
-                _parts = [
-                    _edits[k]
-                    for k in sorted(_edits)
-                    if k and not str(k).startswith("insp.") and k != "alt_text" and _edits.get(k)
-                ]
-                caption = "\n".join(p for p in _parts if p).strip()
-            except Exception:
-                caption = ""
-        # 4. Last resort: the internal headline.
-        if not caption:
-            caption = (ach.get("headline") or f"{swimmer} — {event}").strip()
-
-        # Try to locate the rendered PNG for this card. Best-effort:
-        # not every card has a generated visual yet.
-        png_bytes: Optional[bytes] = None
-        png_name = ""
-        try:
-            visuals = (
-                target.get("visuals")
-                or (ach.get("visuals") if isinstance(ach, dict) else None)
-                or []
-            )
-            for v in visuals:
-                fp = v.get("file_path") or v.get("path") or ""
-                if fp and Path(fp).exists():
-                    png_bytes = Path(fp).read_bytes()
-                    png_name = Path(fp).name
-                    break
-        except Exception:
-            png_bytes = None
+        slug, caption, png_bytes, png_name = assets
 
         # Build the ZIP in memory.
         buf = io.BytesIO()
@@ -32677,7 +33405,9 @@ function mhAnDigest(btn) {{
             "platform": "Instagram",
             "caption": result["caption"],
             "hashtags": ["#spotlight", "#swimming"],
-            "confidence": 0.9,
+            # D-25: prompt-led drafts carry no real model confidence — leave it
+            # unset so the honest "% conf" badge doesn't render a fabricated one.
+            "confidence": None,
             "notes": (
                 f"Composed from {result['n_approved']} approved achievement(s) "
                 f"for {result['swimmer_name']}."
@@ -33840,7 +34570,8 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             "platform": brief.get("platform") or "Instagram",
             "caption": caption,
             "hashtags": brief.get("hashtags") or [],
-            "confidence": 0.9,
+            # D-25: prompt-led draft — no fabricated confidence badge.
+            "confidence": None,
             "notes": brief.get("visual_concept", "") or "",
             "status": "queue",
         }
@@ -34097,7 +34828,10 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             try:
                 next_assistant_turn(s, club_brand=_active_club_brand_for_llm())
             except Exception as e:
-                s.add_assistant_message(f"Error: {e}", meta={"error": True})
+                s.add_assistant_message(
+                    _friendly_failure_message(e, kind="ai", context="free-text chat"),
+                    meta={"error": True},
+                )
                 save_session(s)
         return redirect(url_for("free_text_chat_view", chat_id=chat_id))
 
@@ -34139,7 +34873,10 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             try:
                 next_assistant_turn(s, club_brand=_active_club_brand_for_llm())
             except Exception as e:
-                s.add_assistant_message(f"Error: {e}", meta={"error": True})
+                s.add_assistant_message(
+                    _friendly_failure_message(e, kind="ai", context="free-text chat"),
+                    meta={"error": True},
+                )
                 save_session(s)
         return redirect(url_for("free_text_chat_view", chat_id=chat_id))
 
@@ -34160,7 +34897,8 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 [p for p in [brief.get("headline", ""), brief.get("body", "")] if p]
             ).strip(),
             "hashtags": brief.get("hashtags") or [],
-            "confidence": 0.85,
+            # D-25: prompt-led chat draft — no fabricated confidence badge.
+            "confidence": None,
             "notes": brief.get("visual_concept", "") or "",
             "status": "queue",
         }
@@ -34711,7 +35449,14 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 forced_bg_asset_id=chosen_asset_id,
             )
         except Exception as e:
-            return jsonify({"error": f"render_failed: {e}"}), 500
+            return jsonify(
+                {
+                    "error": "render_failed",
+                    "user_message": _friendly_failure_message(
+                        e, kind="render", context="draft graphic"
+                    ),
+                }
+            ), 500
         return jsonify(
             {
                 "ok": True,
@@ -36935,7 +37680,17 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             log.warning("invite activation failed for a new account", exc_info=True)
         # PC.14: verification mail (best-effort; only when the email seam
         # is configured — signup never blocks on it).
-        _send_verification_email(user.email)
+        _verify_sent = _send_verification_email(user.email)
+        # D-35 — tell the user their account was created (and, honestly, whether
+        # a verification link is on its way) instead of a silent redirect.
+        if _verify_sent:
+            _flash_toast(
+                f"Account created — we've sent a verification link to {user.email}. "
+                "Verify it so password resets and notices reach you.",
+                "success",
+            )
+        else:
+            _flash_toast("Account created — you're signed in.", "success")
         # PC.9: a referral code records the new club as a code-tracked lead
         # in the PC.6 funnel — zero operator typing. Best-effort: a bad
         # code must never break a signup.
@@ -37339,6 +38094,8 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             _auth.login_user(user)
             if not _legal.AcceptanceStore().needs_terms_reacceptance(user.email):
                 session["terms_ok_version"] = _legal.TERMS_VERSION
+            # D-35 — confirm the change instead of a silent login + redirect.
+            _flash_toast("Password updated — you're signed in.", "success")
             return redirect(url_for("make_page"))
         body = _account_email_card(
             f'<form method="post" action="{url_for("password_reset", token=token)}">'
@@ -37381,13 +38138,17 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             active="signin",
         )
 
-    def _send_verification_email(email: str) -> None:
-        """Best-effort post-signup verification mail (configured-only)."""
+    def _send_verification_email(email: str) -> bool:
+        """Best-effort post-signup verification mail (configured-only).
+
+        Returns True only if a verification email was actually dispatched, so the
+        signup flow can give an honest "we've sent a link" notice (D-35) rather
+        than claiming a mail that the unconfigured email seam never sent."""
         from mediahub.notify.email import email_configured, send_email
         from mediahub.web import account_tokens as _tokens
 
         if not email_configured():
-            return
+            return False
         try:
             token = _tokens.mint_verify_token(app.secret_key, email)
             send_email(
@@ -37397,8 +38158,10 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 "and service notices reach you:\n\n"
                 f"{url_for('verify_email', token=token, _external=True)}\n",
             )
+            return True
         except Exception:
             log.warning("verification email failed", exc_info=True)
+            return False
 
     # ---- /legal/accept (versioned ToS re-acceptance) -------------------
 
@@ -38839,7 +39602,18 @@ what you're doing, what they should do.</p>
         return redirect(portal_url, code=303)
 
     def _billing_unconfigured_response():
-        """The honest 503 for billing actions when Stripe is unset."""
+        """The honest 503 for billing actions when Stripe is unset.
+
+        D-14: a browser navigation (Accept: text/html) gets the styled billing
+        error card the graceful pages use — not a bare ``{"error":...}`` JSON
+        body dumped into a full-page load. JSON/AJAX callers still get the 503
+        machine body.
+        """
+        if not _req_wants_json(request):
+            return (
+                _layout("Billing", _billing_error_body(_billing.NOT_CONFIGURED_MESSAGE), active=""),
+                503,
+            )
         return (
             jsonify(
                 {
@@ -38873,7 +39647,18 @@ what you're doing, what they should do.</p>
         rather than a silent 200.
         """
         if not _billing.billing_configured():
-            return _billing_unconfigured_response()
+            # A machine caller (Stripe) always gets JSON — never the styled HTML
+            # card the browser-facing routes now return (D-14).
+            return (
+                jsonify(
+                    {
+                        "ok": False,
+                        "error": "billing_not_configured",
+                        "message": _billing.NOT_CONFIGURED_MESSAGE,
+                    }
+                ),
+                503,
+            )
         sig = request.headers.get("Stripe-Signature", "")
         payload = request.get_data()  # raw bytes — required for signature check
         try:
@@ -40073,9 +40858,10 @@ what you're doing, what they should do.</p>
         lock_checks = ""
         for tok in LOCKABLE_TOKENS:
             checked = "checked" if tok in (kit.locks or []) else ""
+            tok_label = _BRAND_LOCK_LABELS.get(tok, tok.replace("_", " ").capitalize())
             lock_checks += (
                 f'<label style="margin-right:14px;font-size:12px;color:var(--ink-muted)">'
-                f'<input type="checkbox" name="lock" value="{tok}" {checked}/> {tok}</label>'
+                f'<input type="checkbox" name="lock" value="{tok}" {checked}/> {_h(tok_label)}</label>'
             )
         # 1.18 per-content-type approver overrides: a stricter rule for the
         # sensitive types the roadmap names. Empty inputs → no override (the
@@ -40107,24 +40893,64 @@ what you're doing, what they should do.</p>
             + _per_type_row("sponsor_activation", "Sponsor activation")
         )
         pal = kit.palette or {}
+        # F-10 — colour pickers (validated by construction, so "red" or a typo
+        # can't be silently dropped) instead of bare "#hex" text inputs. Empty
+        # slots fall back to the kit's primary, then a neutral, so the picker
+        # always shows something on-brand.
+        _pal_default = (
+            pal.get("primary") if str(pal.get("primary", "")).startswith("#") else "#5b6b7a"
+        )
+
+        def _kit_colour_slot(slot: str, label: str) -> str:
+            cur = pal.get(slot, "")
+            val = cur if str(cur).startswith("#") else _pal_default
+            return (
+                '<label style="display:flex;flex-direction:column;gap:3px;'
+                'font-size:11px;color:var(--ink-muted)">'
+                f"{label}"
+                f'<input type="color" name="{slot}" value="{_h(val)}" '
+                'style="width:64px;height:40px;padding:0;border:1px solid var(--border);'
+                'border-radius:4px;background:var(--panel);cursor:pointer"/>'
+                "</label>"
+            )
+
+        palette_pickers = "".join(
+            _kit_colour_slot(slot, label)
+            for slot, label in (
+                ("primary", "Primary"),
+                ("secondary", "Secondary"),
+                ("accent", "Accent"),
+                ("fourth", "Fourth"),
+            )
+        )
+        font_options = "".join(
+            f'<option value="{_h(fid)}"'
+            f"{' selected' if kit.font_pairing == fid else ''}>{_h(flabel)}</option>"
+            for fid, flabel in _BRAND_FONT_PAIRINGS
+        )
+        from mediahub.brand.tone import TONE_META as _TONE_META  # noqa: PLC0415
+
+        tone_options = '<option value="">Club default (inherit)</option>' + "".join(
+            f'<option value="{_h(t.value)}"'
+            f"{' selected' if kit.tone == t.value else ''}>{_h(meta.get('label', t.value))}</option>"
+            for t, meta in _TONE_META.items()
+        )
         edit_form = (
             f'<details style="margin-top:10px"><summary style="cursor:pointer;'
             'color:var(--accent);font-size:13px">Edit kit</summary>'
             f'<form method="post" action="{url_for("api_brand_kit_update", kit_id=kit.kit_id)}" '
             'style="display:flex;flex-direction:column;gap:8px;margin-top:10px">'
             f'<input class="mh-input" name="name" value="{_h(kit.name)}" placeholder="Kit name" required />'
-            '<div style="display:flex;gap:8px;flex-wrap:wrap">'
-            + "".join(
-                f'<input class="mh-input" name="{slot}" value="{_h(pal.get(slot, ""))}" '
-                f'placeholder="{slot} #hex" style="max-width:160px" />'
-                for slot in ("primary", "secondary", "accent", "fourth")
-            )
+            '<div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">'
+            + palette_pickers
             + "</div>"
-            f'<input class="mh-input" name="font_pairing" value="{_h(kit.font_pairing)}" '
-            'placeholder="font pairing id (optional)" style="max-width:260px" />'
-            f'<input class="mh-input" name="tone" value="{_h(kit.tone)}" '
-            'placeholder="tone override (optional)" style="max-width:260px" />'
-            '<div style="font-size:12px;color:var(--ink-muted)">Lock tokens (block off-brand approval):</div>'
+            '<label style="font-size:12px;color:var(--ink-muted)">Fonts'
+            f'<select class="mh-input" name="font_pairing" style="max-width:320px;display:block">{font_options}</select>'
+            "</label>"
+            '<label style="font-size:12px;color:var(--ink-muted)">Caption tone'
+            f'<select class="mh-input" name="tone" style="max-width:320px;display:block">{tone_options}</select>'
+            "</label>"
+            '<div style="font-size:12px;color:var(--ink-muted)">Block approval when content strays from these (off-brand guard):</div>'
             f"<div>{lock_checks}</div>"
             '<div style="font-size:12px;color:var(--ink-muted)">Group approval (members-only workspaces):</div>'
             '<div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap">'
@@ -40252,10 +41078,19 @@ what you're doing, what they should do.</p>
             '<option value="section">Team / section</option>'
             '<option value="personal">Personal</option>'
             "</select>"
-            '<div style="display:flex;gap:8px;flex-wrap:wrap">'
+            '<div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">'
             + "".join(
-                f'<input class="mh-input" name="{slot}" placeholder="{slot} #hex" style="max-width:160px" />'
-                for slot in ("primary", "secondary", "accent")
+                '<label style="display:flex;flex-direction:column;gap:3px;'
+                'font-size:11px;color:var(--ink-muted)">'
+                f"{label}"
+                f'<input type="color" name="{slot}" value="{default}" '
+                'style="width:64px;height:40px;padding:0;border:1px solid var(--border);'
+                'border-radius:4px;background:var(--panel);cursor:pointer"/></label>'
+                for slot, label, default in (
+                    ("primary", "Primary", "#0a2540"),
+                    ("secondary", "Secondary", "#5b6b7a"),
+                    ("accent", "Accent", "#22d3ee"),
+                )
             )
             + "</div>"
             '<div><button class="btn" type="submit">Create kit</button></div>'
@@ -40398,8 +41233,21 @@ what you're doing, what they should do.</p>
         kit = normalise_kit(raw)
         if kit is None:
             return _brand_redirect(err="A kit needs a name.")
+        # F-10 — be honest about anything the normaliser dropped instead of a
+        # blanket "Saved kit". With colour pickers + dropdowns this is normally
+        # empty, but a palette-file import or a hand-crafted POST can still carry
+        # an unreadable value, and the user deserves to know it didn't stick.
+        submitted_pal = _form_palette()
+        dropped = [
+            slot for slot, val in submitted_pal.items() if val and slot not in (kit.palette or {})
+        ]
         upsert_kit(prof, kit)
         save_profile(prof)
+        if dropped:
+            return _brand_redirect(
+                msg=f"Saved kit “{kit.name}” — but could not read the "
+                f"{', '.join(dropped)} colour(s); please give a valid #hex."
+            )
         return _brand_redirect(msg=f"Saved kit “{kit.name}”.")
 
     @app.route("/api/brand/kits/<kit_id>/delete", methods=["POST"])
@@ -41316,6 +42164,28 @@ what you're doing, what they should do.</p>
                 + "</div>"
             )
 
+        # D-16: surface any logo files the last save couldn't use — the upload
+        # handler stashes {filename, reason} rejections so they don't just vanish
+        # from the grid with no explanation.
+        _logo_reject_html = ""
+        _rejections = session.pop("logo_rejections", None)
+        if isinstance(_rejections, list) and _rejections:
+            _items = "".join(
+                f"<li><strong>{_h(str(r.get('filename') or 'file'))}</strong> — "
+                f"{_h(str(r.get('reason') or 'couldn’t be used'))}</li>"
+                for r in _rejections[:8]
+                if isinstance(r, dict)
+            )
+            _logo_reject_html = (
+                '<div style="margin-top:12px;padding:10px 12px;border:1px solid var(--warn);'
+                "border-radius:8px;background:color-mix(in oklab, var(--warn) 7%, transparent);"
+                'font-size:12px;line-height:1.5">'
+                f'<div style="font-weight:600;color:var(--warn)">'
+                f"{len(_rejections)} file{'s' if len(_rejections) != 1 else ''} couldn&rsquo;t be used</div>"
+                f'<ul style="margin:6px 0 0;padding-left:18px;color:var(--ink-dim)">{_items}</ul>'
+                "</div>"
+            )
+
         # M2 — "Where can AI read you" defaults to OPEN so a first-run
         # user sees the inputs (they're entirely optional but easy to
         # miss if collapsed). Once submitted with at least one link
@@ -41366,24 +42236,50 @@ what you're doing, what they should do.</p>
                     "</div>"
                     "</div>"
                 )
-            _gl_status_html = (
-                '<div style="margin-top:12px;padding:10px 12px;border:1px solid var(--border);'
-                'border-radius:8px;background:rgba(44,201,127,0.05);font-size:12px;line-height:1.5">'
-                f'<div style="font-weight:600;color:var(--ink)">Loaded: {_h(prof.brand_guidelines_filename)}</div>'
-                f'<div class="muted" style="margin-top:2px">{_h(prof.brand_guidelines_uploaded_at[:19] if prof.brand_guidelines_uploaded_at else "")}'
-                f" &middot; {_h(prof.brand_guidelines_status or '')} via {_h(prof.brand_guidelines_extractor or '')}</div>"
-                + (
-                    f'<div style="margin-top:6px;color:var(--ink-dim)">{_h(summary)}</div>'
-                    if summary
-                    else ""
+            _gl_status = prof.brand_guidelines_status or ""
+            _gl_failed = _gl_status.startswith(("unsupported_binary", "error:"))
+            if _gl_failed:
+                # D-30: a rejected guidelines upload is a FAILURE — warning
+                # styling, no green "Loaded", and no raw internal status /
+                # extractor codes; a plain-English reason instead.
+                if _gl_status.startswith("unsupported_binary"):
+                    _gl_reason = (
+                        "It looks like an image or binary file. Brand guidelines must be a "
+                        "text document — PDF, DOCX, TXT, RTF or MD."
+                    )
+                else:
+                    _gl_reason = (
+                        "We couldn't read this file. Try a PDF, DOCX, TXT, RTF or MD export "
+                        "of your guidelines."
+                    )
+                _gl_status_html = (
+                    '<div style="margin-top:12px;padding:10px 12px;border:1px solid var(--warn);'
+                    "border-radius:8px;background:color-mix(in oklab, var(--warn) 7%, transparent);"
+                    'font-size:12px;line-height:1.5">'
+                    '<div style="font-weight:600;color:var(--warn)">Couldn&rsquo;t read: '
+                    f"{_h(prof.brand_guidelines_filename)}</div>"
+                    f'<div class="muted" style="margin-top:4px;color:var(--ink-dim)">{_h(_gl_reason)}</div>'
+                    "</div>"
                 )
-                + f'<div style="margin-top:6px;color:var(--ink-dim)">Voice attributes: {_h(attrs)} &middot; '
-                f"{n_dos} do{'s' if n_dos != 1 else ''}, {n_donts} don't{'s' if n_donts != 1 else ''}, "
-                f"{n_prohib} prohibited word{'s' if n_prohib != 1 else ''}.</div>"
-                + rules_html
-                + '<div class="muted" style="font-size:11px;margin-top:6px">Upload a new file to replace, or leave blank to keep this one.</div>'
-                "</div>"
-            )
+            else:
+                _gl_status_html = (
+                    '<div style="margin-top:12px;padding:10px 12px;border:1px solid var(--border);'
+                    'border-radius:8px;background:rgba(44,201,127,0.05);font-size:12px;line-height:1.5">'
+                    f'<div style="font-weight:600;color:var(--ink)">Loaded: {_h(prof.brand_guidelines_filename)}</div>'
+                    f'<div class="muted" style="margin-top:2px">{_h(prof.brand_guidelines_uploaded_at[:19] if prof.brand_guidelines_uploaded_at else "")}'
+                    f" &middot; {_h(prof.brand_guidelines_status or '')} via {_h(prof.brand_guidelines_extractor or '')}</div>"
+                    + (
+                        f'<div style="margin-top:6px;color:var(--ink-dim)">{_h(summary)}</div>'
+                        if summary
+                        else ""
+                    )
+                    + f'<div style="margin-top:6px;color:var(--ink-dim)">Voice attributes: {_h(attrs)} &middot; '
+                    f"{n_dos} do{'s' if n_dos != 1 else ''}, {n_donts} don't{'s' if n_donts != 1 else ''}, "
+                    f"{n_prohib} prohibited word{'s' if n_prohib != 1 else ''}.</div>"
+                    + rules_html
+                    + '<div class="muted" style="font-size:11px;margin-top:6px">Upload a new file to replace, or leave blank to keep this one.</div>'
+                    "</div>"
+                )
 
         # Per-link status chips (M5): map each captured status to a
         # chip styled by severity. The mapping is kept here next to the
@@ -41802,6 +42698,7 @@ what you're doing, what they should do.</p>
          accept="image/*,application/pdf,application/postscript,application/illustrator,application/x-photoshop,.png,.jpg,.jpeg,.webp,.gif,.bmp,.tiff,.tif,.heic,.heif,.avif,.ico,.jxl,.jp2,.svg,.eps,.ai,.cdr,.wmf,.emf,.pdf,.psd,.indd,.sketch,.fig,.xd,.afdesign,.afphoto,.exr,.tga,.dng"
          style="display:none"/>
   <div id="logos-pending" class="muted" style="font-size:11px;margin-top:8px"></div>
+  {_logo_reject_html}
   {_logos_grid_html}
 </div>
 
@@ -42424,14 +43321,21 @@ function mhSetupMode(mode) {{
             from mediahub.brand import logos as _logos_mod
 
             current_logos = list(prof.brand_logos or [])
+            logo_rejections: list[dict] = []
             for upload in logo_uploads:
                 if not upload or not upload.filename:
                     continue
                 try:
                     raw = upload.read() or b""
                 except Exception:
+                    logo_rejections.append(
+                        {"filename": upload.filename, "reason": "couldn’t be read"}
+                    )
                     continue
                 if not raw:
+                    logo_rejections.append(
+                        {"filename": upload.filename, "reason": "the file was empty"}
+                    )
                     continue
                 try:
                     meta = _logos_mod.store_logo(
@@ -42441,15 +43345,21 @@ function mhSetupMode(mode) {{
                         existing_logos=current_logos,
                     )
                 except ValueError as e:
-                    # Surface the problem on the next render without
-                    # blocking the rest of the save.
+                    # D-16: stash the reason so it's surfaced on the next render
+                    # instead of the file silently vanishing from the grid.
                     log.info("logo rejected: %s", e)
+                    logo_rejections.append({"filename": upload.filename, "reason": str(e)})
                     continue
                 except Exception as e:
                     log.warning("logo store failed: %s", e)
+                    logo_rejections.append(
+                        {"filename": upload.filename, "reason": "couldn’t be saved"}
+                    )
                     continue
                 current_logos.append(meta)
             prof.brand_logos = current_logos
+            if logo_rejections:
+                session["logo_rejections"] = logo_rejections
 
         # ---- Unified palette resolution across ALL sources ------------
         # Previously the palette displayed on the confirmation page came
@@ -42640,14 +43550,21 @@ function mhSetupMode(mode) {{
             from mediahub.brand import logos as _logos_mod
 
             current_logos = list(prof.brand_logos or [])
+            logo_rejections: list[dict] = []
             for upload in logo_uploads:
                 if not upload or not upload.filename:
                     continue
                 try:
                     raw_bytes = upload.read() or b""
                 except Exception:
+                    logo_rejections.append(
+                        {"filename": upload.filename, "reason": "couldn’t be read"}
+                    )
                     continue
                 if not raw_bytes:
+                    logo_rejections.append(
+                        {"filename": upload.filename, "reason": "the file was empty"}
+                    )
                     continue
                 try:
                     meta = _logos_mod.store_logo(
@@ -42656,11 +43573,22 @@ function mhSetupMode(mode) {{
                         file_bytes=raw_bytes,
                         existing_logos=current_logos,
                     )
+                except ValueError as e:
+                    # D-16: stash the reason so a rejected logo is explained on
+                    # the next render rather than silently missing from the grid.
+                    log.info("manual setup: logo rejected: %s", e)
+                    logo_rejections.append({"filename": upload.filename, "reason": str(e)})
+                    continue
                 except Exception as e:
-                    log.info("manual setup: logo rejected/failed: %s", e)
+                    log.warning("manual setup: logo store failed: %s", e)
+                    logo_rejections.append(
+                        {"filename": upload.filename, "reason": "couldn’t be saved"}
+                    )
                     continue
                 current_logos.append(meta)
             prof.brand_logos = current_logos
+            if logo_rejections:
+                session["logo_rejections"] = logo_rejections
 
         save_profile(prof)
         if _is_new_profile:
@@ -44214,6 +45142,74 @@ if (typeof mhReelComposerSync === 'function') mhReelComposerSync();
             mimetype="application/json",
             headers={"Content-Disposition": f'attachment; filename="{fname}"'},
         )
+
+    @app.route("/api/runs/<run_id>/cards/bulk-download", methods=["POST"])
+    def api_cards_bulk_download(run_id):
+        """F-5 — download the selected cards' postable content as one ZIP.
+
+        The reviewer's content companion to the JSON "Export data" dump: each
+        selected card contributes a folder with its ready-to-post caption and
+        branded visual (the same assets the per-card Download button ships,
+        resolved through the shared ``_card_export_assets`` helper). A native
+        attachment download, so it works with or without JS.
+        """
+        from flask import send_file
+        import io
+        import zipfile
+
+        run_data = _load_run(run_id)
+        if not _can_access_run(run_id, run_data, _active_profile_id()):
+            return jsonify({"error": "run not found"}), 404
+        ids = _bulk_ids_from_request(request, "ids", "card_ids")
+        if not ids:
+            if _req_wants_json(request):
+                return jsonify({"error": "no_selection"}), 400
+            _flash_toast("Select at least one card to download.", "info")
+            return redirect(url_for("review", run_id=run_id))
+
+        resolved = []
+        for cid in ids:
+            assets = _card_export_assets(run_id, cid, run_data)
+            if assets is not None:
+                resolved.append(assets)
+        if not resolved:
+            if _req_wants_json(request):
+                return jsonify({"error": "no_cards_found"}), 404
+            _flash_toast("None of the selected cards could be found.", "error")
+            return redirect(url_for("review", run_id=run_id))
+
+        n_missing_visual = 0
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            for idx, (slug, caption, png_bytes, png_name) in enumerate(resolved, start=1):
+                folder = f"{idx:02d}-{slug}"
+                zf.writestr(f"{folder}/{slug}-caption.txt", caption)
+                if png_bytes:
+                    zf.writestr(f"{folder}/{png_name or slug + '.png'}", png_bytes)
+                else:
+                    n_missing_visual += 1
+            readme = [
+                "MediaHub content export.\n",
+                f"{len(resolved)} card(s), one folder each: the ready-to-post caption",
+                "(.txt) and the branded visual (.png) where it has been generated.\n",
+            ]
+            if n_missing_visual:
+                readme.append(
+                    f"{n_missing_visual} card(s) had no visual yet — open the card in the\n"
+                    "content builder and click 'Create graphic' first, then download again.\n"
+                )
+            readme.append(
+                "\nPost each visual + caption to your chosen platform manually.\n"
+                "No third-party scheduler required.\n"
+            )
+            zf.writestr("README.txt", "".join(readme))
+        buf.seek(0)
+        fname = (
+            "mediahub-content-"
+            + (re.sub(r"[^A-Za-z0-9_.-]+", "_", run_id)[:40] or "export")
+            + ".zip"
+        )
+        return send_file(buf, mimetype="application/zip", as_attachment=True, download_name=fname)
 
     # ---- Emoji reactions (UI 1.25) -------------------------------------
     @app.route("/api/runs/<run_id>/card/<card_id>/reactions", methods=["POST"])
@@ -45811,6 +46807,24 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                     e,
                 )
         rows_html = ""
+
+        def _media_approval_badge(status: str) -> str:
+            """D-29 — a visible Draft/Ready badge per photo (JS updates it in
+            place after a bulk mark), so a volunteer can see which photos are
+            approved for cards and which still need it."""
+            ready = str(status or "").strip() == "approved"
+            cls = "tag good" if ready else "tag"
+            label = "Ready" if ready else "Draft"
+            title = (
+                "Ready to use on cards (the photo picker prefers these)"
+                if ready
+                else "Not yet marked ready for cards"
+            )
+            return (
+                f'<span class="{cls}" data-mh-approval title="{title}" '
+                f'style="font-size:10px">{label}</span>'
+            )
+
         gallery_items = ""  # UI 1.27 — drag-scroll filmstrip cards
         untagged_n = 0  # M34 — photos with no athlete link, tags, or vision record
         _skip_tag_types = {"footage", "logo", "sponsor_logo", "brand_pattern"}
@@ -45889,12 +46903,14 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
   <td data-label="Athlete">{_h(athlete_names)}{_tag_badges}</td>
   <td data-label="Venue / Event">{_h(ad.get("linked_venue") or ad.get("linked_event") or "")}</td>
   <td data-label="Permission">{_h(ad.get("permission_status", ""))}</td>
+  <td data-label="Status">{_media_approval_badge(ad.get("approval_status", ""))}</td>
   <td data-label="ID"><code>{_h(ad.get("id", "")[:12])}</code></td>
   <td style="white-space:nowrap">
     <a class="btn ghost" href="{_edit_url}" style="font-size:11px;padding:3px 9px;margin-right:6px" title="Filters, adjustments, crop, shapes, blur brush — non-destructive edits">&#9998; Edit</a>
     <a class="btn ghost" href="{_studio_url}" style="font-size:11px;padding:3px 9px;margin-right:6px" title="Edit this photo with AI — fill, erase, expand, upscale, restyle">&#x2726; Studio</a>
     <a class="btn ghost" href="{_cutout_url}" style="font-size:11px;padding:3px 9px;margin-right:6px" title="See exactly what background removal knocks out">Cut-out</a>
     <button class="btn ghost mh-ml-qa" type="button" data-qa-url="{_qa_url}"
+            aria-haspopup="menu" aria-expanded="false"
             style="font-size:11px;padding:3px 9px;margin-right:6px"
             title="One-click convert — pick a format from the export engine and download the result">&#x21C4; Convert</button>
     <button class="btn danger" type="submit" formaction="{_delete_url}" formnovalidate
@@ -45919,11 +46935,12 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             _note = (
                 ""
                 if _img_avail
+                # F-3: no env-var names in customer copy — the fix is an
+                # operator action, so point the customer at their operator.
                 else (
-                    '<p class="dim" style="margin-bottom:var(--sp-4)">No image provider is '
-                    "configured yet, so generation is disabled. The default is the in-house "
-                    "local model (set MEDIAHUB_IMAGINE_LOCAL_ENDPOINT); a Gemini key also "
-                    "enables cloud generation.</p>"
+                    '<p class="dim" style="margin-bottom:var(--sp-4)">Image generation '
+                    "isn&rsquo;t switched on for this workspace yet &mdash; ask your "
+                    "operator to enable it.</p>"
                 )
             )
             _imagine_js = (
@@ -46149,7 +47166,12 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
       <div class="mh-bulkbar-actions">
         <button type="submit" class="btn secondary" data-mh-bulk="approve"
                 formaction="{url_for("api_media_library_bulk_approve")}"
-                data-confirm="Mark {{n}} selected photo(s) as approved?">Approve</button>
+                title="Mark these photos ready — the card photo picker prefers them"
+                data-confirm="Mark {{n}} selected photo(s) ready for cards?">Mark ready for cards</button>
+        <button type="submit" class="btn secondary" data-mh-bulk="unapprove"
+                formaction="{url_for("api_media_library_bulk_unapprove")}"
+                title="Move these photos back to Draft"
+                data-confirm="Move {{n}} selected photo(s) back to Draft?">Unapprove</button>
         <span style="display:inline-flex;gap:6px;align-items:center">
           <select id="mh-ml-collage-layout" name="layout" aria-label="Collage layout"
                   style="font-size:12px;padding:5px 8px;min-height:0">
@@ -46172,17 +47194,17 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
       </div>
     </div>
     <table class="mh-table-stack" style="width:100%">
-      <thead><tr><th class="mh-bulk-cell"><input type="checkbox" id="mh-ml-all" class="mh-check-all" aria-label="Select all photos" title="Select all"></th><th>Preview</th><th>Type</th><th>Athlete</th><th>Venue / Event</th><th>Permission</th><th>ID</th><th></th></tr></thead>
+      <thead><tr><th class="mh-bulk-cell"><input type="checkbox" id="mh-ml-all" class="mh-check-all" aria-label="Select all photos" title="Select all"></th><th>Preview</th><th>Type</th><th>Athlete</th><th>Venue / Event</th><th>Permission</th><th>Status</th><th>ID</th><th></th></tr></thead>
       <tbody>{
             rows_html
             or (
-                '<tr><td colspan="8" style="text-align:center;padding:var(--sp-7);color:var(--ink-muted)">'
+                '<tr><td colspan="9" style="text-align:center;padding:var(--sp-7);color:var(--ink-muted)">'
                 "Couldn&rsquo;t load library assets &mdash; the store wasn&rsquo;t readable. "
                 "Uploads above still work; if this persists, ask your operator to check the data volume."
                 "</td></tr>"
                 if store_failed
                 else (
-                    '<tr><td colspan="8" style="padding:var(--sp-7)">'
+                    '<tr><td colspan="9" style="padding:var(--sp-7)">'
                     '<div style="max-width:520px;margin:0 auto;text-align:left">'
                     '<div style="font-size:14px;font-weight:700;margin-bottom:6px;color:var(--ink)">'
                     "Get your club&rsquo;s photos onto cards in three steps</div>"
@@ -47444,6 +48466,52 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         if n_skipped:
             msg += f" {n_skipped} skipped (safeguarding)."
         _flash_toast(msg, "success" if n_ok else "info")
+        return redirect(url_for("media_library_page"))
+
+    @app.route("/api/media-library/bulk-unapprove", methods=["POST"])
+    def api_media_library_bulk_unapprove():
+        """D-29 — move many library assets back to ``approval_status='draft'``.
+
+        The reverse of bulk-approve, so "Mark ready for cards" is undoable. No
+        safeguarding gate here: demoting a photo to Draft only makes the picker
+        stop preferring it — it can never expose anything.
+        """
+        if not _v8_ok:
+            return jsonify({"error": "v8_unavailable"}), 503
+        store = _v8_get_media_store()
+        ids = _bulk_ids_from_request(request, "ids", "asset_ids")
+        wants_json = _req_wants_json(request)
+        if not ids:
+            if wants_json:
+                return jsonify({"error": "no_selection", "results": []}), 400
+            _flash_toast("Select at least one photo first.", "info")
+            return redirect(url_for("media_library_page"))
+        results: list[dict] = []
+        n_ok = 0
+        for aid in ids:
+            a = store.get(aid)
+            if not a:
+                results.append({"id": aid, "ok": False, "error": "not_found"})
+                continue
+            if not _session_can_access_profile(a.profile_id):
+                results.append({"id": aid, "ok": False, "error": "forbidden"})
+                continue
+            store.update_fields(aid, {"approval_status": "draft"})
+            results.append({"id": aid, "ok": True})
+            n_ok += 1
+        if wants_json:
+            return jsonify(
+                {
+                    "ok": True,
+                    "unapproved": [r["id"] for r in results if r["ok"]],
+                    "results": results,
+                    "n_ok": n_ok,
+                }
+            )
+        _flash_toast(
+            f"Moved {n_ok} photo{'' if n_ok == 1 else 's'} back to Draft.",
+            "success" if n_ok else "info",
+        )
         return redirect(url_for("media_library_page"))
 
     @app.route("/api/media-library/bulk-export", methods=["POST"])
@@ -50123,10 +51191,23 @@ workflow, and the publish log &mdash; deterministic and auditable.</p>
                     '<button type="submit" class="btn secondary" style="font-size:12px;padding:3px 10px">Hide</button>'
                     "</form></td></tr>"
                 )
+            # F-12: resolve the excluded keys to card titles + meet names so the
+            # "Hidden cards" list matches the visible table, instead of opaque
+            # run_id::card_id strings that make "Show again" a guessing game.
+            _excluded_labels = _pw.card_labels(prof, excluded)
             excluded_rows = ""
             for key in sorted(excluded):
+                _lbl = _excluded_labels.get(key)
+                if _lbl:
+                    _name_cell = (
+                        f"<td>{_h(_lbl['title'])}</td>"
+                        f"<td class='dim'>{_h(_lbl['meet_name'])}</td>"
+                    )
+                else:
+                    # The run no longer exists — fall back to the raw key.
+                    _name_cell = f"<td colspan='2'><code>{_h(key)}</code></td>"
                 excluded_rows += (
-                    f"<tr><td><code>{_h(key)}</code></td>"
+                    f"<tr>{_name_cell}"
                     f'<td><form method="post" action="{url_for("public_wall_update")}" style="margin:0">'
                     f'<input type="hidden" name="action" value="include">'
                     f'<input type="hidden" name="card_key" value="{_h(key)}">'
@@ -50545,7 +51626,6 @@ ever appear; queued, edited and rejected cards never do.</p>
         # ---- light parse for the club picker (same as the real upload) ----
         clubs: list[str] = []
         meet_name = ""
-        parse_error = ""
         try:
             from mediahub.interpreter import interpret_document
 
@@ -50560,19 +51640,18 @@ ever appear; queued, edited and rejected cards never do.</p>
             clubs.sort(key=str.lower)
             meet_name = interpreted.meet_name or ""
         except Exception as exc:
-            parse_error = str(exc)
+            # D-23: keep the raw parser exception operator-only. The anonymous
+            # demo is the top of the acquisition funnel — a first-time visitor
+            # must never see a Python traceback or "Parser said: <exception>".
+            log.warning("try-demo parse failed: %s", exc, exc_info=True)
         if not clubs:
-            detail = (
-                f'<p class="dim" style="font-size:13px">Parser said: <code>{_h(parse_error)}</code></p>'
-                if parse_error
-                else ""
-            )
             inner = f"""
 <h1>We couldn't read that file</h1>
 <div class="card" style="max-width:560px">
   <p>It doesn't look like a meet results file we can parse (Hy-Tek PDF, HY3, or a ZIP of
   one). Entry lists and heat sheets won't work — it needs finished results.</p>
-  {detail}
+  <p class="dim" style="font-size:13px">Double-check it's a finished-results export and
+  try again — or use the sample meet to see how it works.</p>
   <a class="btn" href="{url_for("try_demo")}">&larr; Try another file</a>
 </div>"""
             return _try_page(inner)
@@ -50693,21 +51772,32 @@ ever appear; queued, edited and rejected cards never do.</p>
     def try_demo_run(run_id: str):
         state = _demo_run_or_404(run_id)
         if state["status"] in ("queued", "running"):
+            # D-23: an animated indeterminate bar instead of a blank wait, so a
+            # first-time visitor sees the demo is working rather than a stalled
+            # page that silently reloads.
             inner = """
 <h1>Reading your results&hellip;</h1>
 <div class="card" style="max-width:560px">
   <p>MediaHub is parsing the file, detecting achievements, and ranking what's worth
   posting. This usually takes under a minute.</p>
-  <p class="dim" style="font-size:13px">This page refreshes itself.</p>
+  <div style="height:6px;border-radius:999px;background:var(--hairline);overflow:hidden;margin:14px 0 4px">
+    <div style="height:100%;width:40%;border-radius:999px;background:var(--lane);
+                animation:mhTryBar 1.4s ease-in-out infinite"></div>
+  </div>
+  <p class="dim" style="font-size:13px">This page updates itself &mdash; no need to refresh.</p>
 </div>
+<style>@keyframes mhTryBar{0%{margin-left:-40%}100%{margin-left:100%}}</style>
 <script>setTimeout(function () { location.reload(); }, 3000);</script>"""
             return _try_page(inner, title="Working…")
         if state["status"] != "done":
+            # D-23: log the raw pipeline error operator-only; the anonymous
+            # visitor sees plain-language copy, never a traceback.
+            log.warning("try-demo run %s failed: %s", run_id, (state.get("error") or "")[:500])
             inner = f"""
 <h1>That run didn't finish</h1>
 <div class="card" style="max-width:560px">
-  <p>Something went wrong processing the file.</p>
-  <p class="dim" style="font-size:13px"><code>{_h(state["error"][:300])}</code></p>
+  <p>Something went wrong while we were processing that file. It might be a partial or
+  unusual export &mdash; try another results file, or use the sample meet.</p>
   <a class="btn" href="{url_for("try_demo")}">&larr; Try another file</a>
 </div>"""
             return _try_page(inner, title="Demo run failed")
@@ -53508,15 +54598,23 @@ voice, and queues them for one-click approval.</p>
                 f'<button class="btn secondary mh-cap-btn" data-cap-url="{_h(cap_url)}" '
                 'style="font-size:12px;padding:5px 12px">✍ Caption</button>'
                 '<span style="margin-left:auto;display:inline-flex;gap:6px;flex-wrap:wrap">'
-                f'<a class="btn" style="font-size:12px;padding:5px 12px" href="{_h(png_pt)}" '
-                'title="1080×1350 — Instagram post">PNG ◫</a>'
-                f'<a class="btn secondary" style="font-size:12px;padding:5px 10px" href="{_h(png_sq)}" '
-                'title="1080×1080 — square">▣</a>'
-                f'<a class="btn secondary" style="font-size:12px;padding:5px 10px" href="{_h(png_st)}" '
-                'title="1080×1920 — story">▮</a>'
-                f'<a class="btn secondary" style="font-size:12px;padding:5px 10px" href="{_h(svg_dl)}" '
-                'title="Vector SVG">SVG</a>'
+                # D-33 — label by intent (was bare geometric glyphs), and fetch the
+                # PNG via JS so a raster failure shows inline with an SVG fallback
+                # instead of navigating onto a raw JSON error blob.
+                f'<button type="button" class="btn mh-chart-dl" style="font-size:12px;padding:5px 12px" '
+                f'data-dl-url="{_h(png_pt)}" data-dl-name="{_h(c.chart_id)}-post.png" '
+                f'data-svg-fallback="{_h(svg_dl)}" title="1080×1350 — Instagram / Facebook post">Post 4:5</button>'
+                f'<button type="button" class="btn secondary mh-chart-dl" style="font-size:12px;padding:5px 10px" '
+                f'data-dl-url="{_h(png_sq)}" data-dl-name="{_h(c.chart_id)}-square.png" '
+                f'data-svg-fallback="{_h(svg_dl)}" title="1080×1080 — square post">Square 1:1</button>'
+                f'<button type="button" class="btn secondary mh-chart-dl" style="font-size:12px;padding:5px 10px" '
+                f'data-dl-url="{_h(png_st)}" data-dl-name="{_h(c.chart_id)}-story.png" '
+                f'data-svg-fallback="{_h(svg_dl)}" title="1080×1920 — story / reel">Story 9:16</button>'
+                f'<a class="btn ghost" style="font-size:12px;padding:5px 10px" href="{_h(svg_dl)}" '
+                'download title="Vector SVG — scales losslessly, for designers">Vector</a>'
                 "</span></div>"
+                '<div class="mh-chart-export-msg" style="display:none;font-size:12.5px;line-height:1.5;'
+                'color:var(--warn);background:var(--panel);border-radius:8px;padding:10px"></div>'
                 '<div class="mh-cap-out" style="display:none;font-size:13px;line-height:1.5;'
                 'background:var(--panel);border-radius:8px;padding:10px"></div></div>'
             )
@@ -54702,9 +55800,20 @@ voice, and queues them for one-click approval.</p>
         img_fmts = [
             f for f in ee.formats_for_category("image") if f.key in ("png", "jpg", "webp", "avif")
         ]
+        # F-11 — one-line plain-English guidance per format so a volunteer isn't
+        # picking blind between raw codec names.
+        _fmt_hint = {
+            "jpg": "smallest, works everywhere — best for photos",
+            "png": "sharpest text &amp; logos; larger files",
+            "webp": "small and sharp; most apps now accept it",
+            "avif": "smallest of all, but some apps can't open it yet",
+        }
         boxes = "".join(
-            f'<label class="mh-check"><input type="checkbox" name="fmt" value="{f.key}"'
-            f"{' checked' if f.key == 'jpg' else ''}> {_h(f.label)}</label>"
+            f'<label class="mh-check" style="display:block;margin-bottom:8px">'
+            f'<input type="checkbox" name="fmt" value="{f.key}"'
+            f"{' checked' if f.key == 'jpg' else ''}> <strong>{_h(f.label)}</strong>"
+            f'<span class="muted" style="font-size:12px"> — {_fmt_hint.get(f.key, "")}</span>'
+            f"</label>"
             for f in img_fmts
         )
         kick_url = url_for("api_run_bulk_export", run_id=run_id)
@@ -54716,9 +55825,14 @@ voice, and queues them for one-click approval.</p>
             '<p class="muted">Convert every rendered card in this pack to the formats you '
             "tick, bundled into one ZIP with a manifest. A format a card can't become is "
             "listed honestly in the manifest — the rest still export.</p>"
-            f'<div class="mh-chip-row" style="margin:var(--sp-3) 0">{boxes}</div>'
-            '<label class="mh-field">Quality '
-            '<input type="range" id="bx-quality" min="10" max="100" value="90"></label>'
+            f'<div style="margin:var(--sp-3) 0">{boxes}</div>'
+            '<label class="mh-field" for="bx-quality">Quality '
+            '<input type="range" id="bx-quality" min="10" max="100" value="90" '
+            'style="vertical-align:middle"> '
+            '<output id="bx-quality-out" for="bx-quality" '
+            'style="font-variant-numeric:tabular-nums;font-weight:600">90</output></label>'
+            '<p class="muted" style="font-size:12px;margin:4px 0 0">Higher = sharper, '
+            "but larger files. 90 suits most posts.</p>"
             '<div style="margin-top:var(--sp-3)">'
             '<button class="btn primary" id="bx-start">Start export</button> '
             '<span id="bx-status" class="muted" role="status" aria-live="polite"></span>'
@@ -57267,7 +58381,18 @@ voice, and queues them for one-click approval.</p>
         jobs = _bulk_store.list_jobs(pid)
         msg = ""
         if request.args.get("msg"):
-            msg = f'<div class="card" style="border-color:var(--mh-success)"><p>{_h(request.args.get("msg"))}</p></div>'
+            # D-20: link straight to the run's review queue where the cards landed.
+            _review_run = (request.args.get("review_run") or "").strip()
+            _review_link = (
+                f'<p style="margin:6px 0 0"><a class="btn" href="{url_for("review", run_id=_review_run)}">'
+                "Review these cards &rarr;</a></p>"
+                if _review_run
+                else ""
+            )
+            msg = (
+                '<div class="card" style="border-color:var(--mh-success)">'
+                f'<p>{_h(request.args.get("msg"))}</p>{_review_link}</div>'
+            )
         if request.args.get("err"):
             msg = f'<div class="card" style="border-color:var(--mh-error)"><p>{_h(request.args.get("err"))}</p></div>'
         body = msg + _ui.render_index(
@@ -57615,10 +58740,15 @@ voice, and queues them for one-click approval.</p>
             return redirect(url_for("data_hub_page", err=str(exc)))
         if is_json:
             return jsonify({"ok": True, "job": job.to_dict()})
+        # D-20: name the human format (not the internal slug) and carry the run
+        # id so the page can offer a direct link to the queued cards — otherwise
+        # "Queued 24 cards" is a dead end with no path into reviewing them.
+        human_format = format_slug.replace("_", " ").replace("-", " ").strip().title()
         return redirect(
             url_for(
                 "data_hub_page",
-                msg=f"Queued {job.n_queued} card(s) for review from {format_slug}.",
+                msg=f"Queued {job.n_queued} card(s) for review from {human_format}.",
+                review_run=job.run_id,
             )
         )
 
@@ -58016,13 +59146,56 @@ voice, and queues them for one-click approval.</p>
         _ss.set_site_password(pid, site_id, pw)
         if request.is_json:
             return jsonify({"ok": True})
-        return redirect(
-            url_for(
-                "site_editor",
-                site_id=site_id,
-                msg="Password updated." if pw else "Password cleared.",
+        # D-8: a password only does anything if at least one page is marked
+        # members-only. Setting one while no page is protected changes nothing
+        # public-facing, so say so honestly instead of "Password updated."
+        spec = _ss.load_site(pid, site_id)
+        any_protected = bool(spec and any(p.protected for p in spec.pages))
+        if pw and not any_protected:
+            msg = (
+                "Password saved, but no page is set to members-only yet — the site is "
+                "still fully public. Tick a page under Members-only pages to protect it."
             )
-        )
+        elif pw:
+            msg = "Password updated."
+        else:
+            msg = "Password cleared."
+        return redirect(url_for("site_editor", site_id=site_id, msg=msg))
+
+    @app.route("/api/sites/<site_id>/page-protection", methods=["POST"])
+    def api_site_page_protection(site_id):
+        """D-8: set which pages are members-only (require the site password).
+        Replaces the previous raw-JSON-only ``protected`` flag with a real
+        editor control."""
+        if not _sites_ok:
+            return jsonify({"error": "unavailable"}), 404
+        pid = _active_profile_id()
+        if not pid:
+            return jsonify({"error": "not signed in"}), 403
+        from mediahub.sites import store as _ss
+        from mediahub.sites.models import SiteSpec
+
+        spec = _ss.load_site(pid, site_id)
+        if spec is None:
+            abort(404)
+        protected_slugs = set(request.form.getlist("protected"))
+        data = spec.to_dict()
+        for pg in data.get("pages", []):
+            pg["protected"] = pg.get("slug", "") in protected_slugs
+        _ss.save_site(pid, SiteSpec.from_dict(data))
+        n_prot = len(protected_slugs)
+        if request.is_json:
+            return jsonify({"ok": True, "protected": n_prot})
+        if n_prot and not _ss.has_password(pid, site_id):
+            msg = (
+                f"{n_prot} page(s) marked members-only — but no password is set yet, so "
+                "they're still open. Set a page password above to lock them."
+            )
+        elif n_prot:
+            msg = f"{n_prot} page(s) are now members-only."
+        else:
+            msg = "All pages are public."
+        return redirect(url_for("site_editor", site_id=site_id, msg=msg))
 
     @app.route("/sites/<site_id>/preview")
     def site_preview_home(site_id):
@@ -58404,6 +59577,8 @@ voice, and queues them for one-click approval.</p>
         regime = regime_active(pid)
         msg = (request.args.get("msg") or "").strip()
         msg_html = f'<p class="tag good" style="margin-bottom:14px">{_h(msg)}</p>' if msg else ""
+        # D-19: list exactly which rows the last consent import couldn't read.
+        msg_html += _import_skipped_html(session.pop("consent_import_skipped", None))
 
         level_options = list(LEVEL_LABELS.items())
         rows = []
@@ -58553,6 +59728,9 @@ voice, and queues them for one-click approval.</p>
             msg = f"Imported {result['imported']} rows."
             if result["skipped"]:
                 msg += f" Skipped {len(result['skipped'])} (unreadable level/name)."
+                # D-19: stash the failed rows so the page can list exactly which
+                # ones need fixing, not just a count.
+                session["consent_import_skipped"] = result["skipped"]
         elif action == "backfill":
             prof = load_profile(pid)
 
@@ -58590,6 +59768,8 @@ voice, and queues them for one-click approval.</p>
 
         msg = (request.args.get("msg") or "").strip()
         msg_html = f'<p class="tag good" style="margin-bottom:14px">{_h(msg)}</p>' if msg else ""
+        # D-19: list exactly which rows the last records import couldn't read.
+        msg_html += _import_skipped_html(session.pop("records_import_skipped", None))
         records = list_records(pid)
         rows = "".join(
             "<tr>"
@@ -58659,6 +59839,8 @@ voice, and queues them for one-click approval.</p>
             msg = f"Imported {result['imported']} records."
             if result["skipped"]:
                 msg += f" Skipped {len(result['skipped'])} unreadable rows."
+                # D-19: stash the failed rows so the page lists which to fix.
+                session["records_import_skipped"] = result["skipped"]
         elif action == "delete":
             try:
                 ok = delete_record(
@@ -59736,8 +60918,9 @@ voice, and queues them for one-click approval.</p>
                 '<div class="card" style="margin-bottom:14px">'
                 "<strong>Publish a hosted web version</strong>"
                 '<p class="dim" style="font-size:13px;margin:4px 0 8px">A shareable '
-                "browser-readable page &mdash; and the link the card images need to show in "
-                "the downloaded email.</p>"
+                "browser-readable page. The downloaded email embeds its card images inline, "
+                "but publishing also gives hosted image links that every email client renders "
+                "reliably.</p>"
                 '<button class="btn" onclick="nlPublish(true)">Publish</button></div>'
             )
 
@@ -59777,9 +60960,30 @@ voice, and queues them for one-click approval.</p>
         )
         return _layout(spec.title, body, active="create")
 
-    def _nl_render_html(pid, newsletter_id, spec, *, preview=False, published_token=""):
+    def _nl_embed_card_src(pid: str, run_id: str, card_id: str) -> str:
+        """D-18 — a self-contained ``data:`` URI for a card image so a downloaded
+        (unpublished) email actually carries its images instead of silently
+        dropping them. Falls back to the honest "unavailable" placeholder when
+        the card isn't approved/rendered, never a blank."""
+        path = _nl_card_image_path(pid, run_id, card_id)
+        if not path:
+            return _nl_unavailable_src("publish the hosted version to include this image")
+        try:
+            import base64 as _b64  # noqa: PLC0415
+            import mimetypes  # noqa: PLC0415
+
+            raw = Path(path).read_bytes()
+            mime = mimetypes.guess_type(path)[0] or "image/png"
+            return f"data:{mime};base64," + _b64.b64encode(raw).decode("ascii")
+        except Exception:
+            return _nl_unavailable_src("image could not be read")
+
+    def _nl_render_html(
+        pid, newsletter_id, spec, *, preview=False, published_token="", embed=False
+    ):
         """Render a newsletter to email-safe HTML, resolving card images for the
-        right context (authenticated preview route / public token route)."""
+        right context: authenticated preview route, public token route, or (for a
+        downloaded unpublished draft) inline ``data:`` URIs (D-18)."""
         from mediahub.email_design.render import render_email_html
 
         prof = load_profile(pid)
@@ -59809,6 +61013,8 @@ voice, and queues them for one-click approval.</p>
                     _external=True,
                 ),
             )
+        elif embed:
+            spec = _nl_resolve_images(spec, lambda r, c: _nl_embed_card_src(pid, r, c))
         return render_email_html(spec, profile=prof)
 
     @app.route("/api/newsletters/<newsletter_id>/html")
@@ -59821,12 +61027,21 @@ voice, and queues them for one-click approval.</p>
         from mediahub.email_design import store as _ns
 
         preview = request.args.get("preview") == "1"
+        is_dl = request.args.get("dl") == "1"
         token = ""
+        embed = False
         if not preview:
             rec = _ns.newsletter_record(pid, newsletter_id) or {}
             if rec.get("published"):
                 token = rec.get("public_token", "")
-        html = _nl_render_html(pid, newsletter_id, spec, preview=preview, published_token=token)
+            elif is_dl:
+                # D-18 — a downloaded draft used to omit every card image. Embed
+                # them inline so the file is self-contained; publishing still
+                # gives hosted URLs that every email client renders.
+                embed = True
+        html = _nl_render_html(
+            pid, newsletter_id, spec, preview=preview, published_token=token, embed=embed
+        )
         resp = make_response(html)
         resp.headers["Content-Type"] = "text/html; charset=utf-8"
         if request.args.get("dl") == "1":

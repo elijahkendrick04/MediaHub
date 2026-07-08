@@ -1,6 +1,6 @@
 """tests/test_u12_odometer_stats.py — U.12 animated count-up stat numerals.
 
-U.12 turns the landing-hero meta tallies (organisations / total runs / moments
+U.12 turns the landing-hero meta tallies (organisations / results processed / moments
 detected) into odometer numerals: zero-padded digit reels that roll upward on
 page load + scroll-into-view, inspired by Max Yinger (yinger.dev).
 
@@ -148,7 +148,7 @@ class TestOdometerServerMarkup:
         app, _ = home_app
         body = _get_home(app)
         assert f'data-mh-count="5" data-mh-odometer data-mh-count-pad="3">{EXP_RUNS}</b>' in body
-        assert "total runs" in body
+        assert "results processed" in body
 
     def test_moments_uses_achievements_not_cards(self, home_app):
         """The third figure is SUM(n_achievements)=1234, never the ~0 n_cards."""
@@ -207,7 +207,7 @@ class TestOdometerServerEdges:
         assert '<b class="mh-odo"' in body  # an odometer rendered
         assert "</b> organisation</span>" in body
         assert "</b> organisations</span>" not in body
-        assert "</b> total run</span>" in body
+        assert "</b> result processed</span>" in body
         assert "</b> moment detected</span>" in body
         assert "</b> moments detected</span>" not in body
 

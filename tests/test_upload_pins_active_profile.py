@@ -143,7 +143,7 @@ class TestRunPinsActiveProfile:
         resp = c.get("/activity")
         assert resp.status_code == 200
         body = resp.get_data(as_text=True)
-        assert "No runs yet for this organisation" not in body, (
+        assert "No results yet for this organisation" not in body, (
             "activity page shows empty state even though we just ran a "
             "successful upload for the active org"
         )

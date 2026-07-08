@@ -20,10 +20,11 @@ _WEB = Path(__file__).resolve().parents[1] / "src" / "mediahub" / "web" / "web.p
 
 def test_export_action_hides_loader():
     src = _WEB.read_text(encoding="utf-8")
-    # The bulk export branch installs a hide-loader handler rather than just
-    # returning and leaving the global loader up.
-    idx = src.index("if (action === 'export') {")
-    snippet = src[idx: idx + 700]
+    # The bulk export/download branch installs a hide-loader handler rather than
+    # just returning and leaving the global loader up. (F-5 folded the new
+    # 'download' content-ZIP action into this same native-submit branch.)
+    idx = src.index("if (action === 'export' || action === 'download') {")
+    snippet = src[idx: idx + 800]
     assert "MH.hideLoader" in snippet, "export submit must hide the global loader"
 
 

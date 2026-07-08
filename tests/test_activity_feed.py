@@ -503,8 +503,8 @@ class TestFeedRoute:
         _pin(c, "club-a")
         feed_body = c.get("/activity/feed").get_data(as_text=True)
         table_body = c.get("/activity").get_data(as_text=True)
-        assert ">Runs table<" in feed_body and ">Feed<" in feed_body
-        assert ">Runs table<" in table_body and ">Feed<" in table_body
+        assert ">Results table<" in feed_body and ">Feed<" in feed_body
+        assert ">Results table<" in table_body and ">Feed<" in table_body
         assert "/activity/feed" in table_body  # discoverable from the table view
 
     def test_failed_run_renders_bad_badge(self, feed_client):

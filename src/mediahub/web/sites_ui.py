@@ -242,20 +242,55 @@ function mhSiteSpecValid(f) {{
     insights_html = _render_insights(insights)
     forms_html = _render_forms_card(forms)
 
+    # D-8: a per-page "members-only" toggle so protection is a real editor
+    # control, not a raw-JSON flag — and honest warnings when a password and
+    # protected pages are out of step (either one alone protects nothing).
+    has_pw = bool(rec.get("has_password"))
+    any_protected = any(p.protected for p in spec.pages)
+    prot_rows = ""
+    for pg in spec.pages:
+        label = pg.title or (pg.slug or "Home")
+        checked = " checked" if pg.protected else ""
+        prot_rows += (
+            '<label style="display:flex;gap:8px;align-items:center;font-size:13px;margin:2px 0">'
+            f'<input type="checkbox" name="protected" value="{_h(pg.slug)}"{checked}> '
+            f"{_h(label)}</label>"
+        )
+    if has_pw and not any_protected:
+        prot_warn = (
+            '<p style="color:var(--mh-error,#e66);font-size:12px;margin:8px 0 0">A password is '
+            "set, but no page is members-only yet — the site is still fully public. Tick a page "
+            "above to protect it.</p>"
+        )
+    elif any_protected and not has_pw:
+        prot_warn = (
+            '<p style="color:var(--mh-error,#e66);font-size:12px;margin:8px 0 0">Some pages are '
+            "members-only, but no password is set — set one above to actually lock them.</p>"
+        )
+    else:
+        prot_warn = ""
+    protection = (
+        f'<form method="post" action="{url_for("api_site_page_protection", site_id=site_id)}" '
+        'style="margin:12px 0 0">'
+        '<div class="dim" style="font-size:12px;margin-bottom:4px">Members-only pages '
+        "(shown only after the password):</div>"
+        + (prot_rows or '<span class="dim" style="font-size:12px">No pages yet.</span>')
+        + '<div style="margin-top:8px"><button class="btn secondary" type="submit">'
+        "Update members-only pages</button></div>" + prot_warn + "</form>"
+    )
+
     danger = (
         '<div class="card" style="border-color:var(--mh-error,#e66)">'
         '<h3 style="margin-top:0">Access &amp; danger zone</h3>'
         f'<form method="post" action="{url_for("api_site_password", site_id=site_id)}" '
         'style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px">'
         '<input name="password" type="text" placeholder="Set a page password (blank to clear)" style="padding:7px">'
-        f'<button class="btn secondary" type="submit">{"Update" if rec.get("has_password") else "Set"} password</button>'
-        + (
-            '  <span class="dim" style="font-size:12px">A password is set.</span>'
-            if rec.get("has_password")
-            else ""
-        )
+        f'<button class="btn secondary" type="submit">{"Update" if has_pw else "Set"} password</button>'
+        + ('  <span class="dim" style="font-size:12px">A password is set.</span>' if has_pw else "")
         + "</form>"
-        f'<form method="post" action="{url_for("api_site_delete", site_id=site_id)}" '
+        + protection
+        + '<hr style="border:none;border-top:1px solid var(--line,#2a3550);margin:14px 0">'
+        + f'<form method="post" action="{url_for("api_site_delete", site_id=site_id)}" '
         "onsubmit=\"return confirm('Delete this site permanently?')\">"
         '<button class="btn secondary" type="submit" style="color:var(--mh-error,#e66)">Delete site</button>'
         "</form></div>"
