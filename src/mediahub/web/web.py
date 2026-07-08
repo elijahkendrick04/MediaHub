@@ -34848,8 +34848,72 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 save_session(s)
         return redirect(url_for("free_text_chat_view", chat_id=chat_id))
 
+    def _chat_brief_to_pack(s, chat_id, selected_ids):
+        """Turn a session's accepted brief into a saved stub-pack.
+
+        Shared by "Accept & generate" (B-6) and the standalone "Generate content
+        from this brief" step so both build the pack identically. Returns the
+        pack URL with ?autographic=1 so the draft renders its graphic on arrival,
+        matching the quick path; None when there's no accepted brief to build.
+        """
+        from mediahub.club_platform.stub_pack_store import save_pack
+
+        brief = s.accepted_brief
+        if not brief:
+            return None
+        card = {
+            "platform": brief.get("platform") or "Instagram",
+            "caption": "\n\n".join(
+                [p for p in [brief.get("headline", ""), brief.get("body", "")] if p]
+            ).strip(),
+            "hashtags": brief.get("hashtags") or [],
+            # D-25: prompt-led chat draft — no fabricated confidence badge.
+            "confidence": None,
+            "notes": brief.get("visual_concept", "") or "",
+            "status": "queue",
+        }
+        pack_form_data = {
+            "free_text": s.title or "Chat brief",
+            "source": "chat",
+            "chat_id": chat_id,
+        }
+        # Resolve library picks the same way _render_stub does — strictly
+        # scoped to the active organisation; foreign ids are silently dropped.
+        active_pid_for_pack = _active_profile_id() or ""
+        # Stamp the active profile id on the pack regardless of whether
+        # a library asset was picked. Without this, the renderer can't
+        # resolve the BrandKit later (no profile_id → no theme JSON →
+        # falls back to MediaHub defaults), which is exactly the
+        # "brand colours don't carry through" bug for chat briefs.
+        if active_pid_for_pack:
+            pack_form_data["profile_id"] = active_pid_for_pack
+        if selected_ids and _v8_get_media_store is not None:
+            try:
+                _ml = _v8_get_media_store()
+                resolved = []
+                for aid in selected_ids:
+                    a = _ml.get(aid)
+                    if not a or a.profile_id != active_pid_for_pack:
+                        continue
+                    resolved.append({"id": a.id, "path": a.path, "filename": a.filename})
+                if resolved:
+                    pack_form_data["library_asset_ids"] = ",".join(r["id"] for r in resolved)
+                    pack_form_data["library_asset_paths"] = ",".join(r["path"] for r in resolved)
+                    pack_form_data["attached_photo_path"] = resolved[0]["path"]
+                    pack_form_data["attached_photo_filename"] = resolved[0]["filename"]
+                    pack_form_data["profile_id"] = active_pid_for_pack
+            except Exception:
+                app.logger.exception("free-text chat library picker resolve failed")
+        saved = save_pack("free_text", pack_form_data, [card], profile_id=_active_profile_id())
+        return url_for("stub_pack_view", pack_id=saved["pack_id"]) + "?autographic=1"
+
     @app.route("/free-text/chat/<chat_id>/accept", methods=["POST"])
     def free_text_chat_accept(chat_id):
+        # B-6: "Accept & generate" now actually generates. It used to only mark
+        # the brief accepted and reload, leaving the user to hunt for a second
+        # "Generate content from this brief" button and a third "Create graphic"
+        # click. Accepting the brief and building the draft is a single POST that
+        # ends on the rendered graphic (?autographic=1), like the quick path.
         from mediahub.free_text_chat.session import load_session, save_session
 
         s = load_session(chat_id)
@@ -34866,6 +34930,9 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 }
             )
             save_session(s)
+        pack_url = _chat_brief_to_pack(s, chat_id, request.form.getlist("library_asset_id"))
+        if pack_url:
+            return redirect(pack_url)
         return redirect(url_for("free_text_chat_view", chat_id=chat_id))
 
     @app.route("/free-text/chat/<chat_id>/decline", methods=["POST"])
@@ -34898,58 +34965,15 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         """Turn an accepted brief into a saved stub-pack so the existing
         approval pills + export flow apply."""
         from mediahub.free_text_chat.session import load_session
-        from mediahub.club_platform.stub_pack_store import save_pack
 
         s = load_session(chat_id)
         if not s or not s.accepted_brief:
             return redirect(url_for("free_text_chat_view", chat_id=chat_id))
-        brief = s.accepted_brief
-        card = {
-            "platform": brief.get("platform") or "Instagram",
-            "caption": "\n\n".join(
-                [p for p in [brief.get("headline", ""), brief.get("body", "")] if p]
-            ).strip(),
-            "hashtags": brief.get("hashtags") or [],
-            # D-25: prompt-led chat draft — no fabricated confidence badge.
-            "confidence": None,
-            "notes": brief.get("visual_concept", "") or "",
-            "status": "queue",
-        }
-        pack_form_data = {
-            "free_text": s.title or "Chat brief",
-            "source": "chat",
-            "chat_id": chat_id,
-        }
-        # Resolve library picks the same way _render_stub does — strictly
-        # scoped to the active organisation; foreign ids are silently dropped.
-        active_pid_for_pack = _active_profile_id() or ""
-        # Stamp the active profile id on the pack regardless of whether
-        # a library asset was picked. Without this, the renderer can't
-        # resolve the BrandKit later (no profile_id → no theme JSON →
-        # falls back to MediaHub defaults), which is exactly the
-        # "brand colours don't carry through" bug for chat briefs.
-        if active_pid_for_pack:
-            pack_form_data["profile_id"] = active_pid_for_pack
-        selected_ids = request.form.getlist("library_asset_id")
-        if selected_ids and _v8_get_media_store is not None:
-            try:
-                _ml = _v8_get_media_store()
-                resolved = []
-                for aid in selected_ids:
-                    a = _ml.get(aid)
-                    if not a or a.profile_id != active_pid_for_pack:
-                        continue
-                    resolved.append({"id": a.id, "path": a.path, "filename": a.filename})
-                if resolved:
-                    pack_form_data["library_asset_ids"] = ",".join(r["id"] for r in resolved)
-                    pack_form_data["library_asset_paths"] = ",".join(r["path"] for r in resolved)
-                    pack_form_data["attached_photo_path"] = resolved[0]["path"]
-                    pack_form_data["attached_photo_filename"] = resolved[0]["filename"]
-                    pack_form_data["profile_id"] = active_pid_for_pack
-            except Exception:
-                app.logger.exception("free-text chat library picker resolve failed")
-        saved = save_pack("free_text", pack_form_data, [card], profile_id=_active_profile_id())
-        return redirect(url_for("stub_pack_view", pack_id=saved["pack_id"]))
+        # B-6: land on the draft with the graphic already rendering, like the
+        # quick path (?autographic=1) — the chat path used to drop the user on a
+        # blank draft needing a third "Create graphic" click.
+        pack_url = _chat_brief_to_pack(s, chat_id, request.form.getlist("library_asset_id"))
+        return redirect(pack_url or url_for("free_text_chat_view", chat_id=chat_id))
 
     # ---- Saved stub packs &mdash; list + view + export -----------------------
     _STUB_TYPE_LABEL = {
