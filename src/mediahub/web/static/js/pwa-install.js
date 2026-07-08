@@ -39,30 +39,32 @@
 
   function makeChip(label, onActivate) {
     if (chip) return chip;
-    chip = document.createElement("button");
-    chip.type = "button";
+    // I-7: two real, keyboard-focusable buttons — an install action and a
+    // separate Dismiss — rather than one <button> with a mouse-only × span.
+    // (A <button> can't nest a <button>, so the chip is a container.)
+    chip = document.createElement("div");
     chip.id = "mh-install-chip";
 
-    var text = document.createElement("span");
-    text.className = "mh-install-label";
-    text.textContent = label;
-    chip.appendChild(text);
+    var action = document.createElement("button");
+    action.type = "button";
+    action.className = "mh-install-action";
+    action.textContent = label;
+    action.addEventListener("click", onActivate);
+    chip.appendChild(action);
 
-    var close = document.createElement("span");
+    var close = document.createElement("button");
+    close.type = "button";
     close.className = "mh-install-x";
-    close.setAttribute("aria-hidden", "true");
+    close.setAttribute("aria-label", "Dismiss");
     close.textContent = "×"; // ×
+    close.addEventListener("click", function (e) {
+      e.stopPropagation();
+      hide();
+      remember();
+    });
     chip.appendChild(close);
 
     chip.hidden = true;
-    chip.addEventListener("click", function (e) {
-      if (e.target === close) {
-        hide();
-        remember();
-        return;
-      }
-      onActivate();
-    });
     if (document.body) document.body.appendChild(chip);
     return chip;
   }
