@@ -16525,6 +16525,51 @@ _PARSE_NOTE_LABELS: dict[str, str] = {
     "no_club_filter": "No club selected",
 }
 
+# F-7 — one source of truth for the PB identity-match status shown on the audit
+# table AND the per-swimmer Verify screen, so the two never disagree (the Verify
+# screen used to render the raw `needs_verification` / `asa_id_verified` enum
+# while the table one screen earlier showed a friendly label). Maps the internal
+# `identity.method` enum to (human label, semantic tag class).
+_PB_MATCH_STATUS_META: dict[str, tuple[str, str]] = {
+    "asa_id_verified": ("Verified", "good"),
+    "needs_verification": ("Needs check", "warn"),
+    "asa_id_unverified": ("Unverified", ""),
+    "no_id": ("Not linked", ""),
+    "manual_override": ("Override", "info"),
+}
+
+
+def _pb_match_status_meta(method: str) -> tuple[str, str]:
+    """(human label, tag class) for a PB identity-match ``method``.
+
+    Unknown codes humanise the raw code rather than leak snake_case, so a newly
+    added status is never shown as ``needs_verification`` to a volunteer.
+    """
+    m = (method or "").strip()
+    if m in _PB_MATCH_STATUS_META:
+        return _PB_MATCH_STATUS_META[m]
+    return (m.replace("_", " ").capitalize() or "—", "")
+
+
+# Plain-language trust key for the PB-audit surfaces (F-7): what "confirmed"
+# means and what each match status is telling the volunteer. Rendered as a
+# collapsible so it explains without crowding the numbers.
+_PB_TRUST_KEY_HTML = (
+    '<details class="mh-trust-key" style="margin-top:var(--sp-3)">'
+    '<summary style="cursor:pointer;font-size:12.5px;color:var(--ink-dim)">'
+    "What do these mean?</summary>"
+    '<ul style="margin:8px 0 0 18px;font-size:12.5px;color:var(--ink-dim);line-height:1.6">'
+    "<li><strong>Confirmed PB</strong> &mdash; the time matched an official record "
+    "for that swimmer, so we're confident it's a genuine personal best.</li>"
+    "<li><strong>Verified</strong> &mdash; we matched the swimmer to their official "
+    "member ID.</li>"
+    "<li><strong>Needs check</strong> &mdash; we couldn't confirm the swimmer's ID, "
+    "so their PBs aren't confirmed yet. Use the Verify action to set the right ID.</li>"
+    "<li><strong>Not linked / Unverified</strong> &mdash; no official member ID on "
+    "file to check against; the swim still appears, just not as a confirmed PB.</li>"
+    "</ul></details>"
+)
+
 
 def _humanise_parse_code(code: str) -> str:
     """Plain-English label for a parse-warning code, falling back to a
@@ -24974,15 +25019,9 @@ function copyWhyCard(btn, taId) {{
             for sa in per_swimmer:
                 identity = sa.get("identity") or {}
                 method = identity.get("method", "")
-                # Map internal `method` enum to a human label + semantic tag class.
-                method_meta = {
-                    "asa_id_verified": ("Verified", "good"),
-                    "needs_verification": ("Needs check", "warn"),
-                    "asa_id_unverified": ("Unverified", ""),
-                    "no_id": ("Not linked", ""),
-                    "manual_override": ("Override", "info"),
-                }.get(method, (method.replace("_", " ").capitalize() or "—", ""))
-                method_label, method_cls = method_meta
+                # F-7: one shared label map (see _pb_match_status_meta) so this
+                # table and the Verify screen never show different words.
+                method_label, method_cls = _pb_match_status_meta(method)
                 _sw_key = sa.get("asa_id") or f"name:{sa.get('hy3_name', '')}"
                 _verify_url = url_for("pb_verify_form", run_id=run_id, swimmer_key=_sw_key)
                 _ignore_url = url_for("pb_ignore", run_id=run_id, swimmer_key=_sw_key)
@@ -25068,6 +25107,7 @@ function copyWhyCard(btn, taId) {{
     <div class="stat"><div class="l">Total decisions</div><div class="v">{pb_audit.get("pb_decisions_count", 0)}</div></div>
     <div class="stat"><div class="l">Fetch time</div><div class="v">{pb_audit.get("fetch_total_seconds", 0):.1f}s</div></div>
   </div>
+  {_PB_TRUST_KEY_HTML}
 </div>
 <div class="card">
   <h2>Per-swimmer</h2>
@@ -25128,14 +25168,10 @@ function copyWhyCard(btn, taId) {{
             ident = target.get("identity") or {}
             hy3_name = _h(target.get("hy3_name") or "—")
             sr_name = _h(target.get("sr_name") or "— (no record returned)")
-            method = _h(ident.get("method") or "—")
-            method_pill = {
-                "asa_id_verified": "good",
-                "needs_verification": "warn",
-                "asa_id_unverified": "warn",
-                "no_id": "bad",
-                "manual_override": "info",
-            }.get(ident.get("method", ""), "")
+            # F-7: show the SAME friendly label the audit table shows, never the
+            # raw `needs_verification` / `asa_id_verified` enum.
+            _method_label, method_pill = _pb_match_status_meta(ident.get("method", ""))
+            method = _h(_method_label)
             cur_asa = _h(target.get("asa_id") or "—")
             notes_list = ident.get("notes") or []
             notes_html = (
@@ -25159,6 +25195,7 @@ function copyWhyCard(btn, taId) {{
     <strong>Why this matters:</strong>
     <ul style="margin:4px 0 0 20px">{notes_html}</ul>
   </div>
+  {_PB_TRUST_KEY_HTML}
 </div>"""
         else:
             context_html = f"""
