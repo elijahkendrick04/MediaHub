@@ -11990,6 +11990,11 @@ _VIDEO_STUDIO_HTML = """
   function jpost(u, body){
     return fetch(u, {method:'POST', headers:{'Content-Type':'application/json','X-CSRF-Token':CSRF,'Accept':'application/json'}, body:JSON.stringify(body||{})}).then(function(r){return r.json().then(function(j){j.__status=r.status;return j;});});
   }
+  // J-2: the studio's fetch chains used to have no .catch, so a network failure
+  // (the likely outcome of the long synchronous endpoints) left buttons stuck on
+  // "Rendering..." forever or cleared nothing at all, and server errors surfaced
+  // via the browser's native dialog. vsToast routes both through the styled toast.
+  function vsToast(m){ if(window.MH && MH.toast){ MH.toast(m, 'error'); } }
 
   // ---- footage upload ----
   function uploadFile(file){
@@ -12077,7 +12082,8 @@ _VIDEO_STUDIO_HTML = """
         sel.addEventListener('click', function(ev){ ev.stopPropagation(); });
         sel.addEventListener('change', function(){
           jpost(aurl(FOOTAGE_PERM_TMPL, sel.getAttribute('data-id')), {permission_status: sel.value})
-            .then(function(j){ if(j.ok){ loadFootage(); } else { alert(j.message || j.error || 'Could not change the permission.'); } });
+            .then(function(j){ if(j.ok){ loadFootage(); } else { vsToast(j.message || j.error || 'Could not change the permission.'); } })
+            .catch(function(){ vsToast('Network error — the permission may not have changed. Reload to check.'); });
         });
       });
       Array.prototype.forEach.call(wrap.querySelectorAll('.vs-frame'), function(b){
@@ -12088,7 +12094,7 @@ _VIDEO_STUDIO_HTML = """
           jpost(aurl(FOOTAGE_FRAME_TMPL, b.getAttribute('data-id')), {}).then(function(j){
             b.disabled = false;
             if(st){ st.textContent = j.ok ? 'Saved to your photo library.' : ('Failed: '+(j.message||j.error||'error')); }
-          });
+          }).catch(function(){ b.disabled = false; if(st){ st.textContent = 'Network error — try again.'; } });
         });
       });
     });
@@ -12136,7 +12142,7 @@ _VIDEO_STUDIO_HTML = """
     }).then(function(j){
       if(j.ok){ status.textContent = 'Clip created. Render it below.'; loadProjects(); }
       else { status.textContent = 'Failed: '+(j.message||j.error||'error'); }
-    });
+    }).catch(function(){ status.textContent = 'Network error — the analysis may still be running. Reload to check.'; });
   });
 
   // ---- AI reel (multi-clip) ----
@@ -12160,7 +12166,7 @@ _VIDEO_STUDIO_HTML = """
       btn.disabled = false;
       if(j.ok){ status.textContent = 'Reel directed. Render it below.'; loadProjects(); }
       else { status.textContent = 'Failed: '+(j.message||j.error||'error'); }
-    });
+    }).catch(function(){ btn.disabled = false; status.textContent = 'Network error — the director may still be watching. Reload to check.'; });
   });
 
   // ---- projects ----
@@ -12196,7 +12202,7 @@ _VIDEO_STUDIO_HTML = """
       Array.prototype.forEach.call(wrap.querySelectorAll('.vs-apply'), function(b){ b.addEventListener('click', function(){ var id=b.getAttribute('data-id'); var sel=wrap.querySelector('.vs-look-sel[data-id="'+id+'"]'); enhanceProject(id, {look: sel?sel.value:'none'}, b); }); });
       Array.prototype.forEach.call(wrap.querySelectorAll('.vs-music'), function(b){ b.addEventListener('click', function(){ enhanceProject(b.getAttribute('data-id'), {enhance_audio:true, with_music:true}, b); }); });
       Array.prototype.forEach.call(wrap.querySelectorAll('.vs-stab'), function(b){ b.addEventListener('click', function(){ enhanceProject(b.getAttribute('data-id'), {stabilize:true}, b); }); });
-    });
+    }).catch(function(){ var wrap = $('vs-projects'); if(wrap){ wrap.innerHTML = '<p class="muted">Couldn\\u2019t load your clips — reload to try again.</p>'; } });
   }
   function enhanceProject(id, body, btn){
     var st = document.querySelector('.vs-enh-status[data-id="'+id+'"]');
@@ -12206,14 +12212,14 @@ _VIDEO_STUDIO_HTML = """
       if(btn){ btn.disabled = false; }
       if(j.ok){ if(st){ st.textContent = 'Applied — re-render to see it.'; } loadProjects(); }
       else { if(st){ st.textContent = 'Failed: '+(j.message||j.error||'error'); } }
-    });
+    }).catch(function(){ if(btn){ btn.disabled = false; } if(st){ st.textContent = 'Network error — try again.'; } });
   }
   function renderProject(id, btn){
     if(btn){ btn.disabled = true; btn.textContent = 'Rendering...'; }
     jpost(url(RENDER_TMPL, id), {}).then(function(j){
-      if(!j.ok && j.message){ alert(j.message); }
+      if(!j.ok && j.message){ vsToast(j.message); }
       loadProjects();
-    });
+    }).catch(function(){ if(btn){ btn.disabled = false; btn.textContent = 'Render'; } vsToast('Network error — the render may still be running; reload to check.'); });
   }
   function approveProject(id){
     // M26 — the approve dialog lists each source clip's permission state so
@@ -12249,7 +12255,7 @@ _VIDEO_STUDIO_HTML = """
   function openEditor(id){
     editorPid = id;
     fetch(url(PROJECT_TMPL, id), {headers:{'Accept':'application/json'}}).then(function(r){return r.json();}).then(function(j){
-      if(!j.ok || !j.project){ alert('Could not load this clip.'); return; }
+      if(!j.ok || !j.project){ vsToast('Could not load this clip.'); return; }
       editorEdl = j.project.edl || {clips:[]};
       wfCache = {}; wfFailed = {};
       $('vs-ed-name').textContent = j.project.name || '';
@@ -12258,7 +12264,7 @@ _VIDEO_STUDIO_HTML = """
       renderEditorRows();
       prefetchWaveforms();
       $('vs-editor').hidden = false;
-    });
+    }).catch(function(){ vsToast('Network error — could not load this clip. Reload to try again.'); });
   }
   // Fetch each clip's audio waveform ONCE at open, while the client order still
   // matches the server's (the route is keyed by clip index). Cache by source so
