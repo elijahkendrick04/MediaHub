@@ -12259,10 +12259,11 @@ _VIDEO_STUDIO_HTML = """
     // render panel. The cheap look/music branches stay synchronous.
     if(body && body.stabilize){
       var panel = document.querySelector('.vs-render-panel[data-id="'+id+'"]');
+      var sib = document.querySelector('.vs-render[data-id="'+id+'"]');
       runVideoJob(btn, url(STABILIZE_JOB_TMPL, id), {}, panel, {
         busyLabel: 'Stabilising…', idleLabel: 'Stabilise',
         label: 'Stabilising your footage', sub: 'Two-pass steadying — can take a few minutes',
-        expectedMs: 120000, errLabel: 'Stabilise error'
+        expectedMs: 120000, errLabel: 'Stabilise error', alsoButtons: [sib]
       });
       return;
     }
@@ -12286,17 +12287,29 @@ _VIDEO_STUDIO_HTML = """
   function runVideoJob(btn, jobUrl, body, panel, opts, onDone){
     if(!panel){ if(btn){ btn.disabled=true; } jpost(jobUrl, body||{}); return; }
     panel.hidden = false;
+    // Disable sibling buttons that share this panel too (render + stabilise on
+    // one tile both target .vs-render-panel[data-id]) so a second op can't
+    // overwrite the first's mount mid-poll; restore() re-enables them all.
+    var also = (opts.alsoButtons || []).filter(Boolean);
     var origLabel = btn ? btn.textContent : '';
     if(btn){ btn.disabled = true; btn.textContent = opts.busyLabel; }
+    also.forEach(function(b){ b.disabled = true; });
     var prog = MH.renderProgress(panel, {label: opts.label, sub: opts.sub, expectedMs: opts.expectedMs, accent: 'medal'});
-    var restore = function(){ if(btn){ btn.disabled=false; btn.textContent=origLabel||opts.idleLabel; } };
+    var restore = function(){ if(btn){ btn.disabled=false; btn.textContent=origLabel||opts.idleLabel; } also.forEach(function(b){ b.disabled=false; }); };
     var fail = function(msg){
       prog.stop(); restore();
       panel.hidden = false;
       panel.innerHTML = '<div style="padding:10px;color:var(--bad);font-size:13px">'+esc(opts.errLabel)+': '+esc(msg)+'</div>';
       vsToast(msg);
     };
-    var done = function(j){ prog.complete(function(){ restore(); (onDone||loadProjects)(j); }); };
+    var done = function(j){ prog.complete(function(){
+      restore();
+      // Clear the mount after the finish animation. For a tile's .vs-render-panel
+      // loadProjects rebuilds it anyway, but #vs-make-panel / #vs-reel-panel are
+      // standalone and would otherwise keep showing a stuck 100% bar.
+      if(panel){ panel.hidden = true; panel.innerHTML = ''; }
+      (onDone||loadProjects)(j);
+    }); };
     fetch(jobUrl, {method:'POST', headers:{'Content-Type':'application/json','X-CSRF-Token':CSRF,'Accept':'application/json'}, body: JSON.stringify(body||{})})
       .then(function(r){ return r.json().then(function(j){ return {status:r.status, body:j}; }); })
       .then(function(res){
@@ -12306,7 +12319,11 @@ _VIDEO_STUDIO_HTML = """
         var tries = 0;
         var poll = function(){
           tries++;
-          if(tries > 100){ fail('timed out waiting — reload to check'); return; }
+          // Poll toward the 15-min job TTL (300 * 3s), not a flat 5min — a healthy
+          // multi-minute stabilise / large reel keeps heartbeating and must not be
+          // abandoned early; a genuinely dead job is reported job_lost by the
+          // server's stall check and caught below well before this cap.
+          if(tries > 300){ fail('timed out waiting — reload to check'); return; }
           fetch(res.body.poll_url).then(function(r){ return r.json(); }).then(function(j){
             if(j.status === 'done'){ done(j); return; }
             if(j.status === 'error' || (j.error && j.status !== 'running')){ fail(j.user_message || j.error || 'failed'); return; }
@@ -12319,10 +12336,11 @@ _VIDEO_STUDIO_HTML = """
   }
   function renderProject(id, btn){
     var panel = document.querySelector('.vs-render-panel[data-id="'+id+'"]');
+    var sib = document.querySelector('.vs-stab[data-id="'+id+'"]');
     runVideoJob(btn, url(RENDER_TMPL, id) + '-job', {}, panel, {
       busyLabel: 'Rendering…', idleLabel: 'Render',
       label: 'Rendering your clip', sub: 'First render can take up to 90 seconds; repeats are instant',
-      expectedMs: 60000, errLabel: 'Render error'
+      expectedMs: 60000, errLabel: 'Render error', alsoButtons: [sib]
     });
   }
   function approveProject(id){
@@ -58905,14 +58923,27 @@ voice, and queues them for one-click approval.</p>
 
             try:
                 with _job_heartbeat(job):
-                    p = _video_project_store().get(project_id)
-                    if p is None:
-                        raise RuntimeError("project not found")
-                    _video_stabilize_edl(p.edl, project_id)
-                    p.status = "draft"  # an edit reopens approval (rule 6)
-                    _video_project_store().save(p)
-                    job["project"] = p.to_dict()
+                    # Hold the shared render slot: two-pass vidstab is a heavy
+                    # encode, and the async path makes concurrent heavy jobs (a
+                    # second tab, a queued render) far more likely than the sync
+                    # route did, so serialise them on the box.
+                    with _render_slot("video", project_id, timeout=_RENDER_TRY_TIMEOUT):
+                        p = _video_project_store().get(project_id)
+                        if p is None:
+                            raise RuntimeError("project not found")
+                        _video_stabilize_edl(p.edl, project_id)
+                        p.status = "draft"  # an edit reopens approval (rule 6)
+                        _video_project_store().save(p)
+                        proj_dict = p.to_dict()
+                # Single-writer: mutate the job dict only outside the heartbeat block.
+                job["project"] = proj_dict
                 job["status"] = "done"
+            except _RenderBusy:
+                job["status"] = "error"
+                job["error"] = "renderer_busy"
+                job["user_message"] = (
+                    "Another video is rendering right now — try again in a minute."
+                )
             except VideoEnhanceUnavailable as e:
                 job["status"] = "error"
                 job["error"] = "stabilize_unavailable"

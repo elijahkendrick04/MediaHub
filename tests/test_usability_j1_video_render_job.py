@@ -327,3 +327,32 @@ def test_stabilize_job_foreign_profile_404(app):
         assert (
             c.post(f"/api/video/projects/{proj.id}/stabilize-job", json={}).status_code == 404
         )
+
+
+# --- Adversarial-review fixes (guarded at the source level: JS behaviours) ----
+
+import pathlib  # noqa: E402
+
+_SRC = pathlib.Path("src/mediahub/web/web.py").read_text(encoding="utf-8")
+
+
+def test_runvideojob_clears_panel_on_done():
+    # Fix 1: clip/reel success must not leave a stuck 100% bar in the standalone
+    # #vs-make-panel / #vs-reel-panel (loadProjects rebuilds only #vs-projects).
+    assert "panel.hidden = true; panel.innerHTML = ''" in _SRC
+
+
+def test_render_and_stabilise_disable_each_other():
+    # Fix 2: render + stabilise share one .vs-render-panel per tile, so starting
+    # one disables the sibling button (alsoButtons) to stop the second op
+    # overwriting the first's mount mid-poll.
+    assert "opts.alsoButtons" in _SRC
+    assert "document.querySelector('.vs-stab[data-id=\"'+id+'\"]')" in _SRC
+    assert "document.querySelector('.vs-render[data-id=\"'+id+'\"]')" in _SRC
+
+
+def test_poll_cap_reaches_toward_the_job_ttl():
+    # Fix 3: a healthy multi-minute stabilise/reel must not be abandoned at ~5min;
+    # poll toward the 15-min TTL (300 * 3s) — a dead job is reported job_lost first.
+    assert "if(tries > 300)" in _SRC
+    assert "if(tries > 100)" not in _SRC
