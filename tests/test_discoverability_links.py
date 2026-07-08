@@ -50,6 +50,14 @@ def test_drafts_reachable_from_account_menu(client):
     assert ">Drafts<" in body
 
 
+def test_club_data_reachable_from_account_menu(client):
+    """C-4: the club-data tools (records, ask-the-data, data hub) are surfaced
+    from the account menu on every signed-in page, not buried in Settings."""
+    body = client.get("/make").get_data(as_text=True)
+    assert "/settings/clubdata" in body, "Club data must be linked from the account menu (C-4)"
+    assert ">Club data<" in body
+
+
 def test_consent_and_dsr_reachable_from_settings_privacy(client):
     body = client.get("/settings/privacy").get_data(as_text=True)
     assert "/organisation/consent" in body, "consent registry must be linked (C-7)"

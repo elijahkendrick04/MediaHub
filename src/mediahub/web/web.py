@@ -14128,6 +14128,11 @@ def _layout(
            the compose surfaces. #}
         <a href="{{ url_for('stub_packs_list') }}" role="menuitem"
            class="mh-orgmenu-item {{ 'active' if active=='drafts' else '' }}">Drafts</a>
+        {# C-4: the club-data tools (records, ask-the-data, data hub) were
+           filed 3–4 clicks deep under Settings and absent from the nav.
+           Surface them from every page. #}
+        <a href="{{ url_for('settings_section', section='clubdata') }}" role="menuitem"
+           class="mh-orgmenu-item">Club data</a>
         <a href="{{ url_for('settings_page') }}" role="menuitem"
            class="mh-orgmenu-item {{ 'active' if active=='settings' else '' }}">{{ t('nav.settings') }}</a>
         <a href="{{ url_for('help_page') }}" role="menuitem"
