@@ -17464,6 +17464,93 @@ _ML_PERMISSION_JS = r"""
 })();
 """
 
+# C-14 — an in-page product-mockup + sticker picker. Replaces the hardcoded
+# "Poster mockup" anchor that opened the raw-JSON API route in a new tab (a dead
+# end on any failure) and gives the orphaned make-sticker API its first UI.
+_ML_MOCKUP_MODAL = """
+<div class="mh-modal" id="mh-mockup-modal" role="dialog" aria-modal="true" aria-labelledby="mh-mockup-title" aria-hidden="true">
+  <div class="mh-modal-panel" style="position:relative;max-width:560px;text-align:left">
+    <button type="button" class="mh-modal-close" data-mh-modal-close aria-label="Close">&times;</button>
+    <h2 class="mh-modal-title" id="mh-mockup-title">Product mockups</h2>
+    <div class="mh-modal-body" style="margin-bottom:var(--sp-3)">See this image as a poster, framed print, phone post or flatlay &mdash; or save it as a reusable sticker for your Elements.</div>
+    <div id="mh-mockup-templates" style="margin-bottom:var(--sp-3)"></div>
+    <div id="mh-mockup-preview" style="min-height:40px;margin-bottom:var(--sp-2)"></div>
+    <div id="mh-mockup-status" class="dim" role="status" aria-live="polite" style="min-height:1.2em"></div>
+    <div class="mh-modal-actions" style="margin-top:var(--sp-3)">
+      <a id="mh-mockup-download" class="btn secondary" style="display:none" download>Download PNG</a>
+      <button type="button" class="btn secondary" id="mh-mockup-sticker">Save as sticker</button>
+      <button type="button" class="btn" data-mh-modal-close>Done</button>
+    </div>
+  </div>
+</div>
+"""
+
+_ML_MOCKUP_PICKER_JS = r"""
+(function(){
+  var TPL_URL = "__TEMPLATES_URL__", MOCKUP_TMPL = "__MOCKUP_TMPL__",
+      STICKER_TMPL = "__STICKER_TMPL__", CSRF = "__CSRF__";
+  var modal = document.getElementById('mh-mockup-modal');
+  if(!modal) return;
+  var g = function(id){ return document.getElementById(id); };
+  var tplWrap=g('mh-mockup-templates'), preview=g('mh-mockup-preview'), stat=g('mh-mockup-status'),
+      dl=g('mh-mockup-download'), stickerBtn=g('mh-mockup-sticker');
+  var curId=null, closeFn=null, templates=null, curBlobUrl=null;
+  function openFor(id){
+    curId=id; stat.textContent=''; preview.innerHTML=''; dl.style.display='none';
+    if(curBlobUrl){ URL.revokeObjectURL(curBlobUrl); curBlobUrl=null; }
+    if(window.MH && MH.openModal){ closeFn = MH.openModal(modal, {onClose: function(){ if(curBlobUrl){ URL.revokeObjectURL(curBlobUrl); curBlobUrl=null; } }}); }
+    else { modal.classList.add('is-open'); modal.setAttribute('aria-hidden','false'); }
+    loadTemplates();
+  }
+  function loadTemplates(){
+    if(templates){ renderTemplates(); return; }
+    fetch(TPL_URL, {headers:{'Accept':'application/json'}}).then(function(r){ return r.json(); }).then(function(j){
+      templates = (j && j.templates) || []; renderTemplates();
+    }).catch(function(){ stat.textContent = 'Couldn’t load mockup styles — reload and try again.'; });
+  }
+  function renderTemplates(){
+    tplWrap.innerHTML='';
+    if(!templates.length){ tplWrap.innerHTML = '<p class="dim">No mockup styles available on this deployment.</p>'; return; }
+    templates.forEach(function(t){
+      var b=document.createElement('button'); b.type='button'; b.className='btn secondary';
+      b.style.cssText='margin:0 6px 6px 0;font-size:12px;padding:4px 10px';
+      b.textContent = t.label || t.id; b.title = t.description || '';
+      b.addEventListener('click', function(){ renderMockup(t.id); });
+      tplWrap.appendChild(b);
+    });
+  }
+  function renderMockup(tid){
+    stat.textContent='Rendering…'; preview.innerHTML=''; dl.style.display='none';
+    var url = MOCKUP_TMPL.replace('__AID__', encodeURIComponent(curId)).replace('__T__', encodeURIComponent(tid));
+    fetch(url).then(function(r){
+      if(!r.ok){ return r.json().catch(function(){ return {}; }).then(function(j){ throw new Error(j.user_message || j.error || 'Mockup failed'); }); }
+      return r.blob();
+    }).then(function(blob){
+      if(curBlobUrl) URL.revokeObjectURL(curBlobUrl);
+      curBlobUrl = URL.createObjectURL(blob);
+      var img=document.createElement('img'); img.src=curBlobUrl; img.alt='Mockup preview';
+      img.style.cssText='max-width:100%;border-radius:8px;display:block';
+      preview.appendChild(img); stat.textContent='';
+      dl.href=curBlobUrl; dl.setAttribute('download', 'mockup-'+tid+'.png'); dl.style.display='inline-flex';
+    }).catch(function(e){ stat.textContent = (e && e.message) || 'Couldn’t render this mockup.'; });
+  }
+  stickerBtn.addEventListener('click', function(){
+    if(!curId) return; stickerBtn.disabled=true; stat.textContent='Saving sticker…';
+    fetch(STICKER_TMPL.replace('__AID__', encodeURIComponent(curId)), {
+      method:'POST', headers:{'Content-Type':'application/json','X-CSRF-Token':CSRF,'Accept':'application/json'}, body:'{}'
+    }).then(function(r){ return r.json(); }).then(function(j){
+      stickerBtn.disabled=false;
+      if(j.ok){ stat.textContent='Saved to your Elements stickers.'; if(window.MH && MH.toast) MH.toast('Sticker saved to Elements.', 'success'); }
+      else { stat.textContent = j.user_message || j.error || 'Couldn’t make a sticker.'; }
+    }).catch(function(){ stickerBtn.disabled=false; stat.textContent='Network error — try again.'; });
+  });
+  document.addEventListener('click', function(e){
+    var t = e.target.closest ? e.target.closest('[data-mh-mockup-open]') : null;
+    if(!t) return; e.preventDefault(); openFor(t.getAttribute('data-asset-id'));
+  });
+})();
+"""
+
 
 # Module-level JS for the palette confirmation form (rendered inside an
 # f-string). Lifted out so we don't have to double every `{` for f-string
@@ -48898,7 +48985,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                 '<div class="mh-gen-actions">'
                 f'<a class="btn secondary" href="{url_for("image_studio_page", asset_id=ad.get("id", ""))}">&#x2726; Edit</a>'
                 f'<a class="btn secondary" href="{file_url}" download>Download</a>'
-                f'<a class="btn secondary" href="{url_for("api_media_library_mockup", asset_id=ad.get("id", ""), template="poster_wall")}" target="_blank" rel="noopener">Poster mockup</a>'
+                f'<button type="button" class="btn secondary" data-mh-mockup-open data-asset-id="{_h(ad.get("id", ""))}">Mockups &amp; sticker</button>'
                 "</div>"
                 "</figcaption></figure>"
             )
@@ -48923,6 +49010,23 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             "</section>"
             + (f'<div class="mh-gen-grid">{cards}</div>' if cards else empty)
             + f"<style>{_GENERATED_GALLERY_CSS}</style>"
+            + _ML_MOCKUP_MODAL
+            + "<script>"
+            + (
+                _ML_MOCKUP_PICKER_JS.replace(
+                    "__TEMPLATES_URL__", url_for("api_mockup_templates")
+                )
+                .replace(
+                    "__MOCKUP_TMPL__",
+                    url_for("api_media_library_mockup", asset_id="__AID__", template="__T__"),
+                )
+                .replace(
+                    "__STICKER_TMPL__",
+                    url_for("api_make_sticker", asset_id="__AID__"),
+                )
+                .replace("__CSRF__", _h(_csrf_token()))
+            )
+            + "</script>"
         )
         return _layout("Generated images", body, active="media")
 
@@ -49420,7 +49524,24 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             f'<a class="btn ghost" href="{back_url}">&larr; Back to library</a>'
             f'<a class="btn secondary" href="{url_for("image_studio_page", asset_id=a.id)}">'
             "&#x2726; Open in image studio</a>"
+            # C-14 — a cut-out is the ideal sticker/mockup source, so offer the
+            # picker here (the make-sticker API's other UI home).
+            f'<button type="button" class="btn secondary" data-mh-mockup-open data-asset-id="{_h(a.id)}">Mockups &amp; sticker</button>'
             "</div>"
+            + _ML_MOCKUP_MODAL
+            + "<script>"
+            + (
+                _ML_MOCKUP_PICKER_JS.replace(
+                    "__TEMPLATES_URL__", url_for("api_mockup_templates")
+                )
+                .replace(
+                    "__MOCKUP_TMPL__",
+                    url_for("api_media_library_mockup", asset_id="__AID__", template="__T__"),
+                )
+                .replace("__STICKER_TMPL__", url_for("api_make_sticker", asset_id="__AID__"))
+                .replace("__CSRF__", _h(_csrf_token()))
+            )
+            + "</script>"
         )
         return _layout("Cut-out preview", body, active="media")
 
