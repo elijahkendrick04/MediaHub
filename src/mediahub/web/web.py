@@ -4145,7 +4145,15 @@ _RUN_DELETE_JS = """
         var restore = function(errMsg){
           if (done && !errMsg) return; done = true;
           window.removeEventListener('beforeunload', beacon);
-          if (row && parent) parent.insertBefore(row, anchor);
+          // The captured `anchor` may itself have been removed (deleting the row
+          // that followed this one), so insertBefore(row, detachedAnchor) would
+          // throw NotFoundError — fall back to append, and never let a throw
+          // swallow the error toast below.
+          if (row && parent) {
+            try {
+              parent.insertBefore(row, (anchor && anchor.parentNode === parent) ? anchor : null);
+            } catch (e) { try { parent.appendChild(row); } catch (e2) {} }
+          }
           if (errMsg && window.MH && MH.toast) MH.toast(errMsg, 'error');
         };
         var beacon = function(){
@@ -17390,7 +17398,13 @@ _ML_META_EDIT_JS = r"""
       row.setAttribute('data-venue', a.venue);
       row.setAttribute('data-event', a.event);
       row.setAttribute('data-tags', a.tags);
-      var ac=row.querySelector('[data-label="Athlete"]'); if(ac) ac.textContent = a.athletes;
+      // Update ONLY the leading names text node so the trailing badge spans
+      // (the clickable "auto" edit-trigger, the "untagged" flag) survive — a
+      // full textContent overwrite would wipe them until reload.
+      var ac=row.querySelector('[data-label="Athlete"]');
+      if(ac){ var tn=ac.firstChild;
+        if(tn && tn.nodeType===3){ tn.nodeValue=a.athletes; }
+        else { ac.insertBefore(document.createTextNode(a.athletes), tn||null); } }
       var vc=row.querySelector('[data-label="Venue / Event"]'); if(vc) vc.textContent = a.venue || a.event || '';
       if(window.MH && MH.toast) MH.toast('Photo details saved.', 'success');
       close();
@@ -28944,10 +28958,14 @@ self.addEventListener('fetch', function(e){
                 from urllib.parse import urlsplit
 
                 parts = urlsplit(ref)
-                if (not parts.netloc or parts.netloc == request.host) and parts.path.startswith(
-                    "/"
-                ):
-                    dest = parts.path + (("?" + parts.query) if parts.query else "")
+                path = parts.path or ""
+                # Same-origin only, and a plain absolute path — reject "//host"
+                # and "/\host" which browsers resolve as protocol-relative
+                # (an open-redirect vector).
+                same_origin = not parts.netloc or parts.netloc == request.host
+                safe_path = path.startswith("/") and not path.startswith(("//", "/\\"))
+                if same_origin and safe_path:
+                    dest = path + (("?" + parts.query) if parts.query else "")
             except Exception:
                 dest = url_for("settings_page")
         return redirect(dest)

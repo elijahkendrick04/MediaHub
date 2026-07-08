@@ -33,6 +33,14 @@ def test_run_delete_has_undo_soft_delete():
     assert "Delete this meet’s results?" in _SRC
 
 
+def test_undo_restore_guards_a_detached_anchor():
+    # Pre-merge review: undoing one delete after the following row was also
+    # deleted must not throw on insertBefore(row, detachedAnchor) — the anchor is
+    # only reused when still a child of parent, and the re-insert is try/caught.
+    assert "anchor.parentNode === parent" in _SRC
+    assert "parent.appendChild(row)" in _SRC
+
+
 def test_clear_all_and_collection_use_styled_confirm():
     assert "MH.confirm({ title: 'Clear all meets?'" in _SRC
     assert "MH.confirm({title:'Delete this collection?'" in _SRC

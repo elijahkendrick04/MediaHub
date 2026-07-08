@@ -96,6 +96,20 @@ def test_referer_open_redirect_is_blocked(client):
     assert r.headers["Location"].endswith("/settings")
 
 
+def test_backslash_path_referer_is_blocked(client):
+    # A same-origin Referer whose path is protocol-relative-ish (/\ or //) must
+    # not be used verbatim — browsers resolve "/\host" as "//host" (off-site).
+    for bad in ("http://localhost/\\evil.com", "http://localhost//evil.com"):
+        r = client.post(
+            "/settings/interface-language",
+            data={"ui_lang": "en"},
+            headers={"Referer": bad},
+        )
+        assert r.status_code == 302
+        loc = r.headers["Location"]
+        assert loc.endswith("/settings"), f"unsafe redirect to {loc!r}"
+
+
 def test_switcher_does_not_echo_request_path(client):
     # The switcher must not echo the current request path into the page — the
     # path can carry PII in its segments (a swimmer name), and the footer renders

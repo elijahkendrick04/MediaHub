@@ -126,3 +126,14 @@ def test_library_page_has_editor_affordance(client):
     assert "mh-meta-modal" in html  # the editor modal is on the page
     assert "data-mh-meta-open" in html  # a trigger exists
     assert "Edit photo details" in html
+
+
+def test_save_preserves_athlete_badges():
+    # Pre-merge review: saving must update only the leading names text node, not
+    # overwrite the whole Athlete cell (which would wipe the clickable "auto" and
+    # "untagged" badge spans until reload).
+    import pathlib
+
+    src = pathlib.Path("src/mediahub/web/web.py").read_text(encoding="utf-8")
+    assert "ac.textContent = a.athletes" not in src
+    assert "tn.nodeValue=a.athletes" in src

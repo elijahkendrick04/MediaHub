@@ -71,12 +71,16 @@ def test_legacy_org_page_points_to_setup(make_client):
 
 def test_entry_points_link_to_setup_not_legacy(make_client):
     c = make_client(ready=True)
-    # The configure page's "organisation profile" default link → setup.
-    # (Rendered on /upload/configure would need a run; assert on the source-level
-    # repointing via the home signed-in edit-profile CTA instead.)
     home = c.get("/").get_data(as_text=True)
-    # The signed-in home's "Edit profile" secondary CTA now targets setup.
     import re
 
-    # Find the Edit profile anchor and confirm it points at the setup route.
-    assert "/organisation/setup" in home
+    # The signed-in home's "Edit profile" secondary CTA must specifically point
+    # at the canonical setup route — assert the actual anchor, not just that the
+    # substring appears somewhere on the page.
+    m = re.search(r'<a\b[^>]*\bhref="([^"]+)"[^>]*>\s*Edit profile\s*</a>', home)
+    assert m is not None, "no 'Edit profile' CTA found on the signed-in home"
+    assert m.group(1).endswith("/organisation/setup"), (
+        f"Edit-profile CTA points at {m.group(1)!r}, not the canonical setup page"
+    )
+    # And it does NOT point at the demoted legacy /organisation editor.
+    assert not m.group(1).endswith("/organisation")
