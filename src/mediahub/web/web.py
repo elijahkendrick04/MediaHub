@@ -41387,6 +41387,9 @@ what you're doing, what they should do.</p>
   <button type="button" class="btn secondary" id="mh-mode-btn-manual" role="tab" aria-selected="false"
           onclick="mhSetupMode('manual')">Manual build &mdash; I&rsquo;ll pick everything</button>
 </div>
+<p class="muted" style="font-size:11px;margin:-8px 0 18px">
+  Fields marked <span style="color:var(--warn,#FFB454)">*</span> are required.
+</p>
 
 <div id="mh-setup-ai-panel">
 <form method="POST" action="{capture_url}" enctype="multipart/form-data"
@@ -41632,7 +41635,20 @@ function mhSetupMode(mode) {{
   if (man) man.style.display = isAi ? 'none' : '';
   if (bAi) {{ bAi.className = isAi ? 'btn' : 'btn secondary'; bAi.setAttribute('aria-selected', String(isAi)); }}
   if (bMan) {{ bMan.className = isAi ? 'btn secondary' : 'btn'; bMan.setAttribute('aria-selected', String(!isAi)); }}
+  // A-7: remember the chosen mode so a validation redirect or a reload
+  // reopens the tab the user was working in (compounds the A-2 "pick your
+  // colours" shortcut, which lands on the manual tab).
+  try {{ sessionStorage.setItem('mhSetupMode', mode); }} catch (e) {{}}
 }}
+(function() {{
+  // Restore the last-used tab on load: an explicit ?mode= wins, else the
+  // remembered pick. Default (AI) needs no action.
+  try {{
+    var want = (new URLSearchParams(window.location.search)).get('mode')
+               || sessionStorage.getItem('mhSetupMode');
+    if (want === 'manual') {{ mhSetupMode('manual'); }}
+  }} catch (e) {{}}
+}})();
 </script>
 
 <style>
