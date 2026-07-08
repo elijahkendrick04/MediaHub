@@ -16949,10 +16949,27 @@ _BULK_ACTIONS_JS = r"""
         var n = (body && typeof body.n_ok === 'number') ? body.n_ok : gone.length;
         toast('Deleted ' + n + ' photo' + (n === 1 ? '' : 's') + '.', 'success', 2500);
         refresh();
-      } else if (action === 'approve'){
-        var n2 = (body && typeof body.n_ok === 'number') ? body.n_ok : ids.length;
+      } else if (action === 'approve' || action === 'unapprove'){
+        // D-29 — repaint each affected photo's Draft/Ready badge in place, so
+        // the approval state is visible after the toast fades (and undoable).
+        var ready = action === 'approve';
+        var okIds = (body && (body.approved || body.unapproved)) || ids;
+        okIds.forEach(function(id){
+          var esc = (window.CSS && CSS.escape) ? CSS.escape(id) : id;
+          var row = form.querySelector('.mh-asset-row[data-asset-id="' + esc + '"]');
+          var badge = row ? row.querySelector('[data-mh-approval]') : null;
+          if (badge){
+            badge.textContent = ready ? 'Ready' : 'Draft';
+            badge.classList.toggle('good', ready);
+            badge.title = ready ? 'Ready to use on cards (the photo picker prefers these)'
+                                : 'Not yet marked ready for cards';
+          }
+        });
+        var n2 = (body && typeof body.n_ok === 'number') ? body.n_ok : okIds.length;
         var sk = (body && body.n_skipped) || 0;
-        var msg = 'Approved ' + n2 + ' photo' + (n2 === 1 ? '' : 's') + '.';
+        var msg = ready
+          ? ('Marked ' + n2 + ' photo' + (n2 === 1 ? '' : 's') + ' ready for cards.')
+          : ('Moved ' + n2 + ' photo' + (n2 === 1 ? '' : 's') + ' back to Draft.');
         if (sk) msg += ' ' + sk + ' skipped (safeguarding).';
         toast(msg, n2 ? 'success' : 'info', 3000);
         selected().forEach(function(c){ c.checked = false; });
@@ -46733,6 +46750,24 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                     e,
                 )
         rows_html = ""
+
+        def _media_approval_badge(status: str) -> str:
+            """D-29 — a visible Draft/Ready badge per photo (JS updates it in
+            place after a bulk mark), so a volunteer can see which photos are
+            approved for cards and which still need it."""
+            ready = str(status or "").strip() == "approved"
+            cls = "tag good" if ready else "tag"
+            label = "Ready" if ready else "Draft"
+            title = (
+                "Ready to use on cards (the photo picker prefers these)"
+                if ready
+                else "Not yet marked ready for cards"
+            )
+            return (
+                f'<span class="{cls}" data-mh-approval title="{title}" '
+                f'style="font-size:10px">{label}</span>'
+            )
+
         gallery_items = ""  # UI 1.27 — drag-scroll filmstrip cards
         untagged_n = 0  # M34 — photos with no athlete link, tags, or vision record
         _skip_tag_types = {"footage", "logo", "sponsor_logo", "brand_pattern"}
@@ -46811,6 +46846,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
   <td data-label="Athlete">{_h(athlete_names)}{_tag_badges}</td>
   <td data-label="Venue / Event">{_h(ad.get("linked_venue") or ad.get("linked_event") or "")}</td>
   <td data-label="Permission">{_h(ad.get("permission_status", ""))}</td>
+  <td data-label="Status">{_media_approval_badge(ad.get("approval_status", ""))}</td>
   <td data-label="ID"><code>{_h(ad.get("id", "")[:12])}</code></td>
   <td style="white-space:nowrap">
     <a class="btn ghost" href="{_edit_url}" style="font-size:11px;padding:3px 9px;margin-right:6px" title="Filters, adjustments, crop, shapes, blur brush — non-destructive edits">&#9998; Edit</a>
@@ -47073,7 +47109,12 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
       <div class="mh-bulkbar-actions">
         <button type="submit" class="btn secondary" data-mh-bulk="approve"
                 formaction="{url_for("api_media_library_bulk_approve")}"
-                data-confirm="Mark {{n}} selected photo(s) as approved?">Approve</button>
+                title="Mark these photos ready — the card photo picker prefers them"
+                data-confirm="Mark {{n}} selected photo(s) ready for cards?">Mark ready for cards</button>
+        <button type="submit" class="btn secondary" data-mh-bulk="unapprove"
+                formaction="{url_for("api_media_library_bulk_unapprove")}"
+                title="Move these photos back to Draft"
+                data-confirm="Move {{n}} selected photo(s) back to Draft?">Unapprove</button>
         <span style="display:inline-flex;gap:6px;align-items:center">
           <select id="mh-ml-collage-layout" name="layout" aria-label="Collage layout"
                   style="font-size:12px;padding:5px 8px;min-height:0">
@@ -47096,17 +47137,17 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
       </div>
     </div>
     <table class="mh-table-stack" style="width:100%">
-      <thead><tr><th class="mh-bulk-cell"><input type="checkbox" id="mh-ml-all" class="mh-check-all" aria-label="Select all photos" title="Select all"></th><th>Preview</th><th>Type</th><th>Athlete</th><th>Venue / Event</th><th>Permission</th><th>ID</th><th></th></tr></thead>
+      <thead><tr><th class="mh-bulk-cell"><input type="checkbox" id="mh-ml-all" class="mh-check-all" aria-label="Select all photos" title="Select all"></th><th>Preview</th><th>Type</th><th>Athlete</th><th>Venue / Event</th><th>Permission</th><th>Status</th><th>ID</th><th></th></tr></thead>
       <tbody>{
             rows_html
             or (
-                '<tr><td colspan="8" style="text-align:center;padding:var(--sp-7);color:var(--ink-muted)">'
+                '<tr><td colspan="9" style="text-align:center;padding:var(--sp-7);color:var(--ink-muted)">'
                 "Couldn&rsquo;t load library assets &mdash; the store wasn&rsquo;t readable. "
                 "Uploads above still work; if this persists, ask your operator to check the data volume."
                 "</td></tr>"
                 if store_failed
                 else (
-                    '<tr><td colspan="8" style="padding:var(--sp-7)">'
+                    '<tr><td colspan="9" style="padding:var(--sp-7)">'
                     '<div style="max-width:520px;margin:0 auto;text-align:left">'
                     '<div style="font-size:14px;font-weight:700;margin-bottom:6px;color:var(--ink)">'
                     "Get your club&rsquo;s photos onto cards in three steps</div>"
@@ -48368,6 +48409,52 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         if n_skipped:
             msg += f" {n_skipped} skipped (safeguarding)."
         _flash_toast(msg, "success" if n_ok else "info")
+        return redirect(url_for("media_library_page"))
+
+    @app.route("/api/media-library/bulk-unapprove", methods=["POST"])
+    def api_media_library_bulk_unapprove():
+        """D-29 — move many library assets back to ``approval_status='draft'``.
+
+        The reverse of bulk-approve, so "Mark ready for cards" is undoable. No
+        safeguarding gate here: demoting a photo to Draft only makes the picker
+        stop preferring it — it can never expose anything.
+        """
+        if not _v8_ok:
+            return jsonify({"error": "v8_unavailable"}), 503
+        store = _v8_get_media_store()
+        ids = _bulk_ids_from_request(request, "ids", "asset_ids")
+        wants_json = _req_wants_json(request)
+        if not ids:
+            if wants_json:
+                return jsonify({"error": "no_selection", "results": []}), 400
+            _flash_toast("Select at least one photo first.", "info")
+            return redirect(url_for("media_library_page"))
+        results: list[dict] = []
+        n_ok = 0
+        for aid in ids:
+            a = store.get(aid)
+            if not a:
+                results.append({"id": aid, "ok": False, "error": "not_found"})
+                continue
+            if not _session_can_access_profile(a.profile_id):
+                results.append({"id": aid, "ok": False, "error": "forbidden"})
+                continue
+            store.update_fields(aid, {"approval_status": "draft"})
+            results.append({"id": aid, "ok": True})
+            n_ok += 1
+        if wants_json:
+            return jsonify(
+                {
+                    "ok": True,
+                    "unapproved": [r["id"] for r in results if r["ok"]],
+                    "results": results,
+                    "n_ok": n_ok,
+                }
+            )
+        _flash_toast(
+            f"Moved {n_ok} photo{'' if n_ok == 1 else 's'} back to Draft.",
+            "success" if n_ok else "info",
+        )
         return redirect(url_for("media_library_page"))
 
     @app.route("/api/media-library/bulk-export", methods=["POST"])
