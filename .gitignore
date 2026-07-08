@@ -85,6 +85,8 @@ src/stock_thumb_cache/
 src/mediahub/print_exports/
 src/mediahub/season_wraps/
 src/mediahub/autonomy_audit/
+# DSR (athlete SAR) export snapshots — runtime only, never source (D-21)
+src/mediahub/dsr_exports/
 # Node (legacy frontend tooling)
 node_modules/
 
