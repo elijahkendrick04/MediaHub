@@ -30763,7 +30763,11 @@ function mhPlanInterpret(btn) {{
   var status = document.getElementById('mh-plan-nl-status');
   var text = document.getElementById('mh-plan-nl').value.trim();
   if (!text) {{ status.textContent = 'Type a note first.'; return; }}
+  // D-27: these AI buttons are type=button outside any form, so the shared
+  // form-submit loader never fired — long LLM+web-research calls showed only a
+  // tiny status line. Drive the loader from data-loader-text directly.
   btn.disabled = true; status.textContent = 'Reading your note…';
+  if (window.MH) MH.showLoader(btn.dataset.loaderText || 'Reading your note', 'Checking dates on the web when it needs to…');
   document.getElementById('mh-plan-nl-result').innerHTML = '';
   fetch({json.dumps(url_for("api_plan_interpret"))}, {{
     method: 'POST', headers: {{'Content-Type': 'application/json'}},
@@ -30771,17 +30775,20 @@ function mhPlanInterpret(btn) {{
   }}).then(function (r) {{ return r.json().then(function (j) {{ return {{ ok: r.ok, j: j }}; }}); }})
     .then(function (res) {{
       btn.disabled = false;
+      if (window.MH) MH.hideLoader();
       var j = res.j || {{}};
       if (!res.ok || !j.ok) {{ status.textContent = j.error || 'Could not interpret that.'; return; }}
       var p = j.parsed || {{}};
       var added = mhPlanMergeParsed(p);
       status.textContent = 'Filled in ' + added + ' item' + (added === 1 ? '' : 's') + ' below — review, then Save inputs.';
       mhPlanRenderNote(p, added);
-    }}).catch(function () {{ btn.disabled = false; status.textContent = 'Could not interpret that.'; }});
+    }}).catch(function () {{ btn.disabled = false; if (window.MH) MH.hideLoader(); status.textContent = 'Could not interpret that.'; }});
 }}
 function mhPlanGenerate(btn) {{
   var status = document.getElementById('mh-plan-status');
   btn.disabled = true; status.textContent = 'Saving your inputs…';
+  // D-27: visible loading treatment for the long fuse-and-generate call.
+  if (window.MH) MH.showLoader(btn.dataset.loaderText || 'Fusing signals', 'Building your ranked plan…');
   // H-7: persist whatever is on the page BEFORE generating. Generate builds
   // the plan from the PERSISTED inputs and the page reloads on success, so an
   // event/goal/blackout the volunteer just typed (or added via "Interpret &
@@ -30803,8 +30810,8 @@ function mhPlanGenerate(btn) {{
     }});
   }}).then(function(r){{ return r.json(); }}).then(function(j){{
     if (j.ok) {{ window.location.reload(); }}
-    else {{ btn.disabled = false; status.textContent = j.error || 'Plan generation failed'; }}
-  }}).catch(function(){{ btn.disabled = false; status.textContent = 'Plan generation failed'; }});
+    else {{ btn.disabled = false; if (window.MH) MH.hideLoader(); status.textContent = j.error || 'Plan generation failed'; }}
+  }}).catch(function(){{ btn.disabled = false; if (window.MH) MH.hideLoader(); status.textContent = 'Plan generation failed'; }});
 }}
 </script>
 """
@@ -31787,10 +31794,13 @@ function mhAnDelete(btn) {{
 function mhAnDigest(btn) {{
   var box = document.getElementById('mh-an-digest');
   btn.disabled = true; box.innerHTML = '<span class="dim">Writing…</span>';
+  // D-27: visible loading treatment for the AI digest call.
+  if (window.MH) MH.showLoader(btn.dataset.loaderText || 'Writing', 'Reading your logged results…');
   fetch(MH_AN.digest, {{method:'POST', headers:{{'Content-Type':'application/json'}}, body: '{{}}'}})
     .then(function(r){{ return r.json().then(function(j){{ return {{ok:r.ok, j:j}}; }}); }})
     .then(function(res){{
       btn.disabled = false;
+      if (window.MH) MH.hideLoader();
       var j = res.j || {{}};
       if (!res.ok || !j.ok) {{ box.innerHTML = '<p class="dim" style="color:var(--warn)">' + (j.error || 'Could not write a digest.') + '</p>'; return; }}
       var d = j.digest || {{}};
@@ -31798,7 +31808,7 @@ function mhAnDigest(btn) {{
       if (d.summary) html += '<p style="font-weight:600;margin:0 0 6px">' + d.summary.replace(/</g,'&lt;') + '</p>';
       (d.takeaways || []).forEach(function(t){{ html += '<li style="margin:2px 0">' + (t.text||'').replace(/</g,'&lt;') + '</li>'; }});
       box.innerHTML = html ? ('<ul style="margin:0;padding-left:18px">' + html + '</ul>') : '<p class="dim">No takeaways.</p>';
-    }}).catch(function(){{ btn.disabled = false; box.innerHTML = '<p class="dim" style="color:var(--warn)">Could not write a digest.</p>'; }});
+    }}).catch(function(){{ btn.disabled = false; if (window.MH) MH.hideLoader(); box.innerHTML = '<p class="dim" style="color:var(--warn)">Could not write a digest.</p>'; }});
 }}
 </script>
 """
