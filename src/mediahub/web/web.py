@@ -13568,6 +13568,64 @@ def _ui_locale() -> str:
     return DEFAULT_UI_LOCALE
 
 
+def _ui_locale_label(code: str) -> str:
+    """Human label for a UI locale, endonym-first (e.g. 'Cymraeg (Welsh)')."""
+    try:
+        from mediahub.web.languages import get_language
+
+        lang = get_language(code)
+        if lang is None:
+            return code
+        if lang.native_name and lang.native_name != lang.name:
+            return f"{lang.native_name} ({lang.name})"
+        return lang.name
+    except Exception:
+        return code
+
+
+def _interface_language_switcher_html(*, compact: bool = True) -> str:
+    """C-16 — a visible interface-language switcher with a real off-ramp.
+
+    The UI locale could previously only be changed by hand-typing ``?lang=cy``,
+    which then pinned with no way back to English. This renders a select that
+    POSTs to ``set_interface_language`` (English is always an option), returning
+    to the same page. Renders nothing when only English ships (no half-language
+    trap), so it appears exactly when there's a real choice to make.
+    """
+    from mediahub.localize.ui_catalogue import available_ui_locales
+
+    locales = available_ui_locales()
+    if len(locales) < 2:
+        return ""
+    current = _ui_locale()
+    try:
+        nxt = request.full_path if request.query_string else request.path
+    except Exception:
+        nxt = "/"
+    opts = "".join(
+        f'<option value="{_h(c)}"{" selected" if c == current else ""}>{_h(_ui_locale_label(c))}</option>'
+        for c in locales
+    )
+    label = (
+        ""
+        if compact
+        else '<label for="mh-ui-lang" style="display:block;margin-bottom:6px">Interface language</label>'
+    )
+    aria = ' aria-label="Interface language"' if compact else ' id="mh-ui-lang"'
+    cls = "mh-ui-lang-form" + (" mh-ui-lang-compact" if compact else "")
+    return (
+        f'<form method="post" action="{url_for("set_interface_language")}" '
+        f'class="{cls}" data-no-loader="1" style="display:inline-flex;align-items:center;gap:6px">'
+        f'<input type="hidden" name="next" value="{_h(nxt)}">'
+        f'{label}'
+        f'<select name="ui_lang"{aria} onchange="this.form.submit()" '
+        'style="font-size:12px;padding:3px 6px;min-height:0">'
+        f"{opts}</select>"
+        '<noscript><button type="submit" class="btn secondary" style="font-size:12px;padding:3px 8px">Set</button></noscript>'
+        "</form>"
+    )
+
+
 def _layout(
     title: str,
     body: str,
@@ -14172,6 +14230,11 @@ def _layout(
       <span class="mh-footer-sep">/</span>
       <a href="{{ url_for('api_docs_page') }}">API</a>
     </div>
+    {% if interface_lang_html %}
+    <div class="mh-footer-meta" style="margin-top:8px;display:flex;align-items:center;gap:8px;justify-content:center">
+      <span aria-hidden="true">&#127760;</span>{{ interface_lang_html|safe }}
+    </div>
+    {% endif %}
     <div class="mh-footer-meta" style="margin-top:6px;opacity:0.75">
       {{ provider_identity }}
     </div>
@@ -16346,6 +16409,7 @@ def _layout(
         provider_identity=(
             f"{_legal.COMPANY_NAME} · {_legal.REGISTERED_ADDRESS} · {_legal.CONTACT_EMAIL}"
         ),
+        interface_lang_html=_interface_language_switcher_html(compact=True),
     )
 
 
@@ -28781,6 +28845,22 @@ self.addEventListener('fetch', function(e){
     def settings_page():
         return _render_settings_page()
 
+    @app.route("/settings/interface-language", methods=["POST"])
+    def set_interface_language():
+        """C-16 — set the interface (chrome) language deliberately, with English
+        always an off-ramp. Distinct from the org's caption-output language."""
+        from mediahub.localize.ui_catalogue import has_ui_locale
+
+        choice = (request.form.get("ui_lang") or "").strip().lower()
+        if has_ui_locale(choice):
+            session["ui_lang"] = choice.split("-", 1)[0]
+        # Return to the page the user was on; only same-origin relative paths are
+        # honoured so the redirect can't be pointed off-site.
+        nxt = request.form.get("next") or ""
+        if not nxt.startswith("/") or nxt.startswith("//"):
+            nxt = url_for("settings_page")
+        return redirect(nxt)
+
     # Settings is a card grid like Create: each heading is a tile you click
     # into for the detail. The detail pages are served by ``settings_section``
     # below (plus a few that link straight to an existing full page). This
@@ -28966,6 +29046,19 @@ self.addEventListener('fetch', function(e){
             "</section>"
             f'<div class="mh-template-grid mh-reveal-group">{tiles}</div>'
         )
+        # C-16 — a deliberate interface-language control (distinct from the org's
+        # caption-output language), shown only when more than English ships.
+        lang_switcher = _interface_language_switcher_html(compact=False)
+        if lang_switcher:
+            body += (
+                '<div class="card" style="margin-top:var(--sp-5);max-width:420px">'
+                '<div class="strap" style="margin-bottom:var(--sp-2)">Interface language</div>'
+                '<p class="dim" style="margin-bottom:var(--sp-3);font-size:13px">Changes the '
+                "app&rsquo;s own menus and buttons. Your caption-output language is set "
+                "separately under Organisation &amp; brand.</p>"
+                f"{lang_switcher}"
+                "</div>"
+            )
         return _layout("Settings", body, active="settings")
 
     def _render_settings_governance_section(prof: Optional[ClubProfile]) -> str:
