@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-07-08 · `fe29073a3` · docs: consolidated usability audit work list (#1080) [skip render]
+**Last updated:** 2026-07-08 · `3fc2bbb4d` · Usability fixes: first-run breakages + high-severity quick wins (#1082)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1228,15 +1228,16 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
-| 2026-07-07 | `ee5ac4519` | docs: add consolidated usability audit work list |
-| 2026-07-07 | `07b3f88d6` | fix(ops): wipe_all_runs pre-flight guard + honest failure reporting |
-| 2026-07-07 | `646b089aa` | feat(motion): per-card connective reel transitions + firmer on-video text/scrim + Video Maker rebran |
-| 2026-07-07 | `ac8c31ac9` | feat(ops): add guarded all-org run-data wipe maintenance script |
-| 2026-07-07 | `bf7f5f59d` | fix(ci): bandit B324 on selection markers + re-baseline reel frame for the paired-transition upgrade |
-| 2026-07-07 | `732138867` | chore(quality): final sweep — docs, moments memo, theme-token budget, formatting |
-| 2026-07-07 | `b547d4977` | feat(quality): phase D — club footage into the graphic + reel engines (M23-M28) |
-| 2026-07-07 | `868b4488e` | test: align fixtures with phase A/B/E contracts (matte gate, canonical types, multi-upload copy) |
-| 2026-07-07 | `4559f56f7` | feat(motion): still↔motion parity pass — photo modes, exact filters, data weight, layered scenes |
-| 2026-07-07 | `d6909ee3f` | feat(quality): phase E — review-to-export UX overhaul (M29-M36) |
-| 2026-07-07 | `22422946a` | feat(quality): register the M12 layered archetypes in the template gallery |
+| 2026-07-08 | `d8f87e3d4` | fix(ui): polished empty states for sponsors and collections (D-34) |
+| 2026-07-08 | `1e8346acd` | fix(status): honest "Status unavailable" state, not a green default (D-28) |
+| 2026-07-08 | `95b4c032e` | fix(privacy): flag overdue athlete-rights (DSR) requests (D-9) |
+| 2026-07-08 | `db5c66a5f` | fix(account): safe, honest account deletion (E-9) |
+| 2026-07-08 | `38ab009e8` | fix(nav): surface Club data tools from the account menu (C-4) |
+| 2026-07-08 | `a54944cad` | fix(nav): surface Drafts and the consent/DSR pages (C-3, C-7) |
+| 2026-07-08 | `b19bd3f63` | fix(create): Live meet + Season wraps are live tiles, not "Coming soon" (C-5, C-6) |
+| 2026-07-08 | `646821359` | fix(sites): a JSON typo no longer throws away the editor's edits (H-6) |
+| 2026-07-08 | `476f6baf1` | fix(plan): auto-save on-page inputs before Generate (H-7) |
+| 2026-07-08 | `e6b8de432` | test: update setup optional-section copy assertion for A-2 |
+| 2026-07-08 | `3c2b7bbed` | fix(export): never ship rejected cards in any pack export (E-2) |
+| 2026-07-08 | `ca6cd3eb1` | fix(export): per-card ZIP exports the real caption, not the headline (E-3) |
 <!-- /ROADMAP:ACTIVITY -->
