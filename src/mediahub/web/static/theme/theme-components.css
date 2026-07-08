@@ -5366,7 +5366,6 @@ span.mh-an-down { background: var(--warn); }
   font-family: var(--font-mono);
   font-size: 11px;
   letter-spacing: 0.06em;
-  white-space: nowrap;
   animation: mh-oq-in var(--dur-slow) var(--ease-spring) both;
 }
 #mh-offline-queue::before {
@@ -5381,6 +5380,27 @@ span.mh-an-down { background: var(--warn); }
 }
 #mh-offline-queue[data-state="synced"] { color: var(--good); }
 #mh-offline-queue[data-state="synced"]::before { background: var(--good); }
+/* D-4: some queued approvals were refused or held on replay — never a green
+   "synced" over a lost approval intent. */
+#mh-offline-queue[data-state="problem"] {
+  color: var(--bad);
+  white-space: normal;
+  max-width: min(360px, calc(100vw - 24px));
+  line-height: 1.4;
+}
+#mh-offline-queue[data-state="problem"]::before { background: var(--bad); }
+/* D-5: a tappable manual drain — iOS Safari has no Background Sync. */
+.mh-oq-sync {
+  margin-left: 10px;
+  padding: 2px 10px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--chrome);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.mh-oq-sync:hover { border-color: var(--lane); color: var(--ink); }
 @keyframes mh-oq-in {
   from { opacity: 0; transform: translate(-50%, 8px); }
   to   { opacity: 1; transform: translate(-50%, 0); }

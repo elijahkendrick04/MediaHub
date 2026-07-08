@@ -26887,7 +26887,11 @@ Relay team broke club record"></textarea>
     # bus) are intercepted. Online they pass straight through; offline they are
     # persisted to IndexedDB and a Background Sync is registered, then replayed
     # when the connection returns. The workflow API is idempotent (re-approving
-    # is a no-op), so replay is always safe.
+    # is a no-op), so a replay never double-applies. It is NOT, however, always
+    # a success: a consent/brand/task gate can refuse an approval (403) and the
+    # group-approver rule can hold it as a vote (200 status:'queue'). D-4:
+    # drainQueue inspects each replay's body and reports those outcomes to the
+    # client instead of silently dropping them and claiming "All changes synced".
     _SERVICE_WORKER_JS = r"""
 const CACHE = 'mediahub-shell-v2';
 const DB_NAME = 'mediahub-pwa';
@@ -26959,20 +26963,27 @@ function registerSync(){
   return Promise.resolve();
 }
 
-async function notifyClients(){
+async function notifyClients(problems){
   var n = await idbCount();
   var cs = await self.clients.matchAll({ includeUncontrolled: true, type: 'window' });
-  cs.forEach(function(c){ c.postMessage({ type: 'mediahub-queue', count: n }); });
+  cs.forEach(function(c){ c.postMessage({ type: 'mediahub-queue', count: n, problems: problems || [] }); });
 }
 
-// Replay every queued action in submission order. A 2xx/3xx/4xx is a final
-// server decision (idempotent — re-approving is a no-op), so the entry is
-// dropped; a 5xx or a network failure keeps it for the next sync.
+// Replay every queued action in submission order. A 5xx or a network failure is
+// transient — the entry stays for the next sync. A 2xx/3xx/4xx is a FINAL server
+// decision (idempotent — re-approving is a no-op), so the entry is dropped — but
+// D-4: we inspect the body first. A 4xx gate refusal (consent/brand/task) or a
+// 200 "held for another approver" vote (status:'queue') is NOT the approval the
+// volunteer intended, so it's collected as a problem and reported to the client
+// rather than silently dropped as "synced".
 async function drainQueue(){
   var items = await idbGetAll();
   items.sort(function(a, b){ return a.ts - b.ts; });
+  var problems = [];
   for (var i = 0; i < items.length; i++){
     var it = items[i];
+    var requested = '';
+    try { requested = (JSON.parse(it.body) || {}).status || ''; } catch (e) {}
     try {
       var res = await fetch(it.url, {
         method: it.method,
@@ -26980,12 +26991,26 @@ async function drainQueue(){
         body: it.body,
         credentials: 'same-origin'
       });
-      if (res && res.status < 500) { await idbDelete(it.id); }
+      if (!res || res.status >= 500) { continue; } // transient — keep for next sync
+      var j = null;
+      try { j = await res.clone().json(); } catch (e) {}
+      var blocked = res.status >= 400 || !!(j && j.ok === false);
+      var held = !blocked && !!(j && j.status && requested && j.status !== requested);
+      await idbDelete(it.id);
+      if (blocked || held){
+        problems.push({
+          requested: requested,
+          httpStatus: res.status,
+          error: (j && j.error) || '',
+          reason: (j && (j.reason || j.message)) || '',
+          held: held
+        });
+      }
     } catch (e) {
       break; // still offline — leave the remainder queued
     }
   }
-  await notifyClients();
+  await notifyClients(problems);
 }
 
 async function handleWorkflowPost(req){
