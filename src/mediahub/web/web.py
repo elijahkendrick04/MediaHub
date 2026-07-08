@@ -16640,6 +16640,30 @@ def _import_skipped_html(rows) -> str:
     )
 
 
+def _erasure_removed_html(report: dict, cascade: Optional[dict] = None) -> str:
+    """F-9: the shared "What was removed" summary for a DSR erasure. Both the
+    formal Article-12A workflow and the /privacy quick-erase render this, so the
+    compliant path no longer gives the worse (raw-JSON) experience."""
+    c = cascade or {}
+    r = report or {}
+    runs_n = len(set(list(c.get("runs_touched", [])) + list(r.get("runs_touched", []))))
+    return (
+        "<ul>"
+        f"<li>{c.get('cards_removed', 0) + r.get('cards_removed', 0)} card(s) and "
+        f"{c.get('swims_removed', 0)} result row(s) across {runs_n} run(s)</li>"
+        f"<li>{c.get('assets_removed', 0) + len(r.get('visual_files_deleted', []))} rendered file(s)</li>"
+        f"<li>{c.get('pb_cache_files', 0) + len(r.get('pb_cache_files_deleted', []))} PB-cache and "
+        f"{c.get('research_cache_files', 0)} research-cache file(s)</li>"
+        f"<li>{c.get('memory_rows', 0) + r.get('memory_rows_deleted', 0)} caption-memory row(s)</li>"
+        f"<li>{c.get('posting_excerpts', 0)} posting-log excerpt(s) blanked</li>"
+        f"<li>{len(r.get('media_assets_deleted', []))} media-library photo(s) deleted, "
+        f"{len(r.get('media_assets_unlinked', []))} unlinked</li>"
+        "<li>Suppression recorded in both consent registries &mdash; the athlete "
+        "cannot reappear in new content</li>"
+        "</ul>"
+    )
+
+
 def _flash_toast(message: str, kind: str = "success") -> None:
     """Queue a one-shot toast to show on the next rendered page.
 
@@ -26769,10 +26793,21 @@ Relay team broke club record"></textarea>
             from mediahub.compliance.security_log import record_event
 
             record_event("dsr_erasure", profile_id=pid, subject=req.athlete_name, actor=recorded_by)
+            import urllib.parse as _up  # noqa: PLC0415
+
+            report_json = json.dumps(report, indent=2)
+            report_href = "data:application/json;charset=utf-8," + _up.quote(report_json)
             body = (
-                '<div class="card"><h2>Erasure report</h2><pre style="white-space:pre-wrap">'
-                + _h(json.dumps(report, indent=2))
-                + f'</pre><p><a href="{url_for("org_athlete_rights")}">Back to athlete rights</a></p></div>'
+                '<div class="card"><h2>What was removed</h2>'
+                f"<p class='muted'>Erasure completed for <strong>{_h(req.athlete_name)}</strong>.</p>"
+                + _erasure_removed_html(report)
+                + "<p class='muted'>Remaining mentions inside multi-athlete captions were "
+                "redacted. Content already published to social platforms must be deleted "
+                "there too.</p>"
+                f'<p><a class="btn secondary" href="{report_href}" '
+                f'download="erasure-{_h(request_id)}.json">Download technical report (JSON)</a> '
+                f'<a class="btn" href="{url_for("org_athlete_rights")}">Back to athlete rights</a></p>'
+                "</div>"
             )
             return _layout("Erasure report", body, active="settings")
         if req.request_type == "restriction":
@@ -26847,26 +26882,14 @@ Relay team broke club record"></textarea>
             pass
         report = _dsr_erase(active, name, recorded_by=recorded_by)
         cascade = report.get("cascade") or {}
-        _runs_n = len(
-            set(list(cascade.get("runs_touched", [])) + list(report.get("runs_touched", [])))
-        )
         body = (
             '<section class="mh-hero" style="padding-top:var(--sp-7);'
             'padding-bottom:var(--sp-5);margin-bottom:var(--sp-5)">'
             '<span class="mh-hero-eyebrow">Privacy &amp; data</span>'
             '<h1>Athlete <em class="editorial">erased.</em></h1></section>'
-            '<div class="card"><h2>What was removed</h2><ul>'
-            f"<li>{cascade.get('cards_removed', 0) + report.get('cards_removed', 0)} card(s) and "
-            f"{cascade.get('swims_removed', 0)} result row(s) across {_runs_n} run(s)</li>"
-            f"<li>{cascade.get('assets_removed', 0) + len(report.get('visual_files_deleted', []))} rendered file(s)</li>"
-            f"<li>{cascade.get('pb_cache_files', 0) + len(report.get('pb_cache_files_deleted', []))} PB-cache and "
-            f"{cascade.get('research_cache_files', 0)} research-cache file(s)</li>"
-            f"<li>{cascade.get('memory_rows', 0) + report.get('memory_rows_deleted', 0)} caption-memory row(s)</li>"
-            f"<li>{cascade.get('posting_excerpts', 0)} posting-log excerpt(s) blanked</li>"
-            f"<li>{len(report.get('media_assets_deleted', []))} media-library photo(s) deleted, "
-            f"{len(report.get('media_assets_unlinked', []))} unlinked</li>"
-            "<li>Suppression recorded in both consent registries &mdash; the athlete cannot reappear in new content</li>"
-            "</ul><p class='muted'>Remaining mentions inside multi-athlete captions "
+            '<div class="card"><h2>What was removed</h2>'
+            + _erasure_removed_html(report, cascade)
+            + "<p class='muted'>Remaining mentions inside multi-athlete captions "
             "were redacted. Content already published to social "
             "platforms must be deleted there too &mdash; use the correction tools "
             "on the Privacy page.</p>"
