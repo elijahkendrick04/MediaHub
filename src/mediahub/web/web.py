@@ -58375,13 +58375,56 @@ voice, and queues them for one-click approval.</p>
         _ss.set_site_password(pid, site_id, pw)
         if request.is_json:
             return jsonify({"ok": True})
-        return redirect(
-            url_for(
-                "site_editor",
-                site_id=site_id,
-                msg="Password updated." if pw else "Password cleared.",
+        # D-8: a password only does anything if at least one page is marked
+        # members-only. Setting one while no page is protected changes nothing
+        # public-facing, so say so honestly instead of "Password updated."
+        spec = _ss.load_site(pid, site_id)
+        any_protected = bool(spec and any(p.protected for p in spec.pages))
+        if pw and not any_protected:
+            msg = (
+                "Password saved, but no page is set to members-only yet — the site is "
+                "still fully public. Tick a page under Members-only pages to protect it."
             )
-        )
+        elif pw:
+            msg = "Password updated."
+        else:
+            msg = "Password cleared."
+        return redirect(url_for("site_editor", site_id=site_id, msg=msg))
+
+    @app.route("/api/sites/<site_id>/page-protection", methods=["POST"])
+    def api_site_page_protection(site_id):
+        """D-8: set which pages are members-only (require the site password).
+        Replaces the previous raw-JSON-only ``protected`` flag with a real
+        editor control."""
+        if not _sites_ok:
+            return jsonify({"error": "unavailable"}), 404
+        pid = _active_profile_id()
+        if not pid:
+            return jsonify({"error": "not signed in"}), 403
+        from mediahub.sites import store as _ss
+        from mediahub.sites.models import SiteSpec
+
+        spec = _ss.load_site(pid, site_id)
+        if spec is None:
+            abort(404)
+        protected_slugs = set(request.form.getlist("protected"))
+        data = spec.to_dict()
+        for pg in data.get("pages", []):
+            pg["protected"] = pg.get("slug", "") in protected_slugs
+        _ss.save_site(pid, SiteSpec.from_dict(data))
+        n_prot = len(protected_slugs)
+        if request.is_json:
+            return jsonify({"ok": True, "protected": n_prot})
+        if n_prot and not _ss.has_password(pid, site_id):
+            msg = (
+                f"{n_prot} page(s) marked members-only — but no password is set yet, so "
+                "they're still open. Set a page password above to lock them."
+            )
+        elif n_prot:
+            msg = f"{n_prot} page(s) are now members-only."
+        else:
+            msg = "All pages are public."
+        return redirect(url_for("site_editor", site_id=site_id, msg=msg))
 
     @app.route("/sites/<site_id>/preview")
     def site_preview_home(site_id):
