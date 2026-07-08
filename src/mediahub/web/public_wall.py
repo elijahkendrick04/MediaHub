@@ -322,6 +322,47 @@ def wall_cards(
     return cards
 
 
+def card_labels(profile: ClubProfile, keys) -> dict:
+    """F-12: resolve wall-card keys ("run_id::card_id") to
+    ``{key: {"title", "meet_name"}}`` for the members-only "Hidden cards" list,
+    so a volunteer sees the card name + meet instead of an opaque id. Best-effort
+    and consent-honouring (initials where required); a key whose run no longer
+    exists is simply absent from the result, and the caller falls back to the key.
+    """
+    want = [k for k in (keys or []) if isinstance(k, str) and "::" in k]
+    if not want:
+        return {}
+    initials_only = bool(getattr(profile, "public_wall_initials_only", True))
+    by_run: dict[str, set] = {}
+    for k in want:
+        run_id, _, cid = k.partition("::")
+        if run_id and cid:
+            by_run.setdefault(run_id, set()).add(cid)
+    out: dict[str, dict] = {}
+    for run_id, cids in by_run.items():
+        run_data = _load_run_json(run_id)
+        if not run_data:
+            continue  # run gone — leave absent so the caller falls back to the key
+        owner = run_data.get("profile_id") or ""
+        if owner and owner != profile.profile_id:
+            continue  # tenant guard — never resolve another org's run
+        achs = _achievements_by_card_id(run_data)
+        meet_name = (run_data.get("meet") or {}).get("name") or run_data.get("meet_name") or ""
+        for cid in cids:
+            ach = achs.get(cid) or {}
+            raw_name = str(ach.get("swimmer_name") or "").strip()
+            policy = _consent_display_policy(profile.profile_id, raw_name)
+            use_initials = initials_only or (policy is not None and policy.level == "initials_only")
+            display_name = initials_of(raw_name) if use_initials else raw_name
+            event = str(ach.get("event") or "").strip()
+            time_str = str(ach.get("time") or ach.get("final_time") or "").strip()
+            title = (
+                " — ".join(b for b in (display_name, event, time_str) if b) or "Club achievement"
+            )
+            out[card_key(run_id, cid)] = {"title": title, "meet_name": meet_name}
+    return out
+
+
 def wall_image_path(profile: ClubProfile, run_id: str, card_id: str) -> Optional[str]:
     """Resolve the PNG path for one wall card — only if it would appear on
     the wall (approved, rendered, not excluded, owned by this org, and the

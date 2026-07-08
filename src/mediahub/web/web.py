@@ -50819,10 +50819,23 @@ workflow, and the publish log &mdash; deterministic and auditable.</p>
                     '<button type="submit" class="btn secondary" style="font-size:12px;padding:3px 10px">Hide</button>'
                     "</form></td></tr>"
                 )
+            # F-12: resolve the excluded keys to card titles + meet names so the
+            # "Hidden cards" list matches the visible table, instead of opaque
+            # run_id::card_id strings that make "Show again" a guessing game.
+            _excluded_labels = _pw.card_labels(prof, excluded)
             excluded_rows = ""
             for key in sorted(excluded):
+                _lbl = _excluded_labels.get(key)
+                if _lbl:
+                    _name_cell = (
+                        f"<td>{_h(_lbl['title'])}</td>"
+                        f"<td class='dim'>{_h(_lbl['meet_name'])}</td>"
+                    )
+                else:
+                    # The run no longer exists — fall back to the raw key.
+                    _name_cell = f"<td colspan='2'><code>{_h(key)}</code></td>"
                 excluded_rows += (
-                    f"<tr><td><code>{_h(key)}</code></td>"
+                    f"<tr>{_name_cell}"
                     f'<td><form method="post" action="{url_for("public_wall_update")}" style="margin:0">'
                     f'<input type="hidden" name="action" value="include">'
                     f'<input type="hidden" name="card_key" value="{_h(key)}">'
