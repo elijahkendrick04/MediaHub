@@ -64,22 +64,30 @@ class TestStatusPageReachableWithoutOrg:
         assert resp.status_code == 200
         body = resp.get_data(as_text=True)
         assert "Status" in body
-        # The public status indicator. (Previously this asserted "Backend",
-        # which was only ever present via the header "online" status pill's
-        # title; that pill was removed, so assert on the real status card.)
-        assert "Website operational" in body
+        # The public status indicator. D-28: with no heartbeat the honest state
+        # is "Status unavailable" (not a green default), so accept any of the
+        # three real states.
+        assert (
+            "Website operational" in body
+            or "Website down" in body
+            or "Status unavailable" in body
+        )
 
     def test_status_page_is_simple_operational_or_down(self, fresh_app):
-        # The public status page is now the simple "Website operational" /
-        # "Website down" view — no uptime percentages are shown to the public.
-        # The detailed uptime/incident breakdown moved to operator-only
+        # The public status page is the simple three-state view (operational /
+        # down / unavailable) — no uptime percentages shown to the public. The
+        # detailed uptime/incident breakdown moved to operator-only
         # Settings -> Developer.
         c, _ = fresh_app
         resp = c.get("/status")
         body = resp.get_data(as_text=True)
-        # No uptime-percentage claims, and the reachable site reads operational.
+        # No uptime-percentage claims, and the page reads one of the honest states.
         assert "uptime" not in body.lower()
-        assert "Website operational" in body or "Website down" in body
+        assert (
+            "Website operational" in body
+            or "Website down" in body
+            or "Status unavailable" in body
+        )
 
 
 class TestApiStatusJsonShape:

@@ -29423,7 +29423,12 @@ self.addEventListener('fetch', function(e){
 
         The detailed uptime/incident/version view moved to Developer settings.
         """
-        operational = True
+        # D-28: three honest states, not a green default. If there is no
+        # heartbeat, or reading the uptime store throws, we genuinely CANNOT
+        # confirm the system is healthy — say so rather than flashing green
+        # (which would tell a volunteer "all is well" during an outage the
+        # observability layer can't see).
+        state = "unknown"
         try:
             from mediahub.observability import uptime as _uptime
 
@@ -29435,10 +29440,10 @@ self.addEventListener('fetch', function(e){
                 from datetime import datetime as _dt
 
                 age_s = (datetime.now(timezone.utc) - _dt.fromisoformat(ts_raw)).total_seconds()
-                operational = bool(latest.get("ok")) and age_s <= 1800
+                state = "up" if (bool(latest.get("ok")) and age_s <= 1800) else "down"
         except Exception:
-            operational = True
-        if operational:
+            state = "unknown"
+        if state == "up":
             return (
                 '<div class="card" style="padding:22px 24px">'
                 '<div style="display:flex;align-items:center;gap:12px">'
@@ -29448,14 +29453,26 @@ self.addEventListener('fetch', function(e){
                 '<p class="dim" style="margin:10px 0 0 0;font-size:13px">Everything is running '
                 "normally.</p></div>"
             )
+        if state == "down":
+            return (
+                '<div class="card" style="padding:22px 24px;border-left:2px solid var(--mh-prim-error-500)">'
+                '<div style="display:flex;align-items:center;gap:12px">'
+                '<span style="display:inline-block;width:12px;height:12px;border-radius:50%;'
+                'background:#ff5d6c;box-shadow:0 0 0 4px rgba(255,93,108,0.18)"></span>'
+                '<span style="font-size:18px;font-weight:600">Website down</span></div>'
+                '<p class="dim" style="margin:10px 0 0 0;font-size:13px">We are working on getting '
+                "things back up and running. Please check back shortly.</p></div>"
+            )
+        # unknown — we can't confirm either way.
         return (
-            '<div class="card" style="padding:22px 24px;border-left:2px solid var(--mh-prim-error-500)">'
+            '<div class="card" style="padding:22px 24px;border-left:2px solid var(--warn)">'
             '<div style="display:flex;align-items:center;gap:12px">'
             '<span style="display:inline-block;width:12px;height:12px;border-radius:50%;'
-            'background:#ff5d6c;box-shadow:0 0 0 4px rgba(255,93,108,0.18)"></span>'
-            '<span style="font-size:18px;font-weight:600">Website down</span></div>'
-            '<p class="dim" style="margin:10px 0 0 0;font-size:13px">We are working on getting '
-            "things back up and running. Please check back shortly.</p></div>"
+            'background:var(--warn);box-shadow:0 0 0 4px rgba(255,180,84,0.18)"></span>'
+            '<span style="font-size:18px;font-weight:600">Status unavailable</span></div>'
+            '<p class="dim" style="margin:10px 0 0 0;font-size:13px">We can&rsquo;t confirm the '
+            "system&rsquo;s health right now. This usually means the monitoring signal is missing, "
+            "not that anything is broken &mdash; please check back shortly.</p></div>"
         )
 
     def _render_settings_developer_section() -> str:
