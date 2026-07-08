@@ -21786,7 +21786,7 @@ def create_app() -> Flask:
 </section>
 
 <div class="card">
-  <div class="strap live" style="margin-bottom:var(--sp-3)"><span id="mh-current-stage">Starting&hellip;</span>{_dev_stepcount}</div>
+  <div class="strap live" role="status" aria-live="polite" style="margin-bottom:var(--sp-3)"><span id="mh-current-stage">Starting&hellip;</span>{_dev_stepcount}</div>
   <div class="mh-progress-bar indeterminate"><span></span></div>
   <div id="mh-percent" aria-live="polite" style="margin-top:var(--sp-2);font-size:13px;color:var(--ink-dim);font-variant-numeric:tabular-nums">0%</div>
   {_dev_steploader}
@@ -23205,10 +23205,10 @@ details.why-card[open] > summary .why-peek {{ display: none; }}
   <details>
     <summary style="cursor:pointer;font-size:15px;font-weight:700;color:var(--ink)">Legacy content cards <span class="muted" style="font-weight:400;font-size:13px">&mdash; {len(cards)} cards</span></summary>
     <div style="margin-top:14px">
-      <table>
+      <div class="mh-table-scroll"><table>
         <thead><tr><th>Card</th><th>Confidence</th><th>Safe to post</th><th>Bucket</th><th>Why</th></tr></thead>
         <tbody>{"".join(v4_rows) or '<tr><td colspan="5" class="muted">No cards generated.</td></tr>'}</tbody>
-      </table>
+      </table></div>
       <div style="margin-top:14px">{captions_html or '<p class="muted">No captions.</p>'}</div>
     </div>
   </details>
@@ -23219,10 +23219,10 @@ details.why-card[open] > summary .why-peek {{ display: none; }}
     <summary style="cursor:pointer;font-size:15px;font-weight:700;color:var(--ink)">Not generated <span class="muted" style="font-weight:400;font-size:13px">&mdash; {len(no_ach_traces)} swims with no achievements{f", {_n_close_calls} close {'call' if _n_close_calls == 1 else 'calls'}" if _n_close_calls else ""}</span></summary>
     <div style="margin-top:8px">
       <p class="muted" style="font-size:12px;margin:0 0 12px">Every swim was traced by the recognition engine. These produced no card &mdash; the close calls are led out first, each with the reason in plain English so you can override if you disagree. Nothing here was silently dropped.</p>
-      <table>
+      <div class="mh-table-scroll"><table>
         <thead><tr><th>Swimmer</th><th>Event</th><th>Time</th><th>Why not</th></tr></thead>
         <tbody>{not_gen_rows or '<tr><td colspan="4" class="muted">All swims produced achievements, or no trace data available.</td></tr>'}</tbody>
-      </table>
+      </table></div>
     </div>
   </details>
 </div>
@@ -23231,10 +23231,10 @@ details.why-card[open] > summary .why-peek {{ display: none; }}
   <details>
     <summary style="cursor:pointer;font-size:15px;font-weight:700;color:var(--ink)">Sources used <span class="muted" style="font-weight:400;font-size:13px">&mdash; {len(all_sources)} source(s)</span></summary>
     <div style="margin-top:14px">
-      <table>
+      <div class="mh-table-scroll"><table>
         <thead><tr><th>Source</th><th>Used for</th><th>Fetched</th></tr></thead>
         <tbody>{sources_rows}</tbody>
-      </table>
+      </table></div>
     </div>
   </details>
 </div>

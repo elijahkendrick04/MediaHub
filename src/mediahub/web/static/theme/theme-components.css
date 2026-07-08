@@ -4439,6 +4439,21 @@ kbd {
   tab-size: 2;
   -webkit-overflow-scrolling: touch;
 }
+/* I-2: long tokenised parse-note / diagnostics strings wrap instead of forcing
+   the review page body to scroll sideways on a phone. */
+.mh-tok-string,
+.mh-tok-property,
+.mh-tok-comment,
+.mh-tok-variable {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+/* I-2: wide diagnostics tables scroll inside their own box, never the page. */
+.mh-table-scroll {
+  overflow-x: auto;
+  max-width: 100%;
+  -webkit-overflow-scrolling: touch;
+}
 .mh-cs-panel code {
   font: inherit;
   color: inherit;
