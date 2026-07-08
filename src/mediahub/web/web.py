@@ -21369,10 +21369,12 @@ def create_app() -> Flask:
                     **entry,
                     "status": "error",
                     "error": (
-                        "The fetch stalled while reading the site and didn't finish. "
-                        "This site is unusually heavy to crawl; try again, or ask your "
-                        "administrator to raise MEDIAHUB_RESULTS_FETCH_TIMEOUT_S / "
-                        "RENDER_BUDGET_S (or set MEDIAHUB_SEARCH_ENDPOINT)."
+                        # F-3: no env-var names in customer copy (hosted SaaS —
+                        # the customer has no shell). The operator sees the
+                        # tunables in the server log.
+                        "This site is unusually heavy to read and the fetch didn't "
+                        "finish. Try again, or download the results file from the site "
+                        "and upload it directly instead."
                     ),
                 }
         payload = {
@@ -29364,17 +29366,21 @@ self.addEventListener('fetch', function(e){
             )
         library_html = (
             '<h2 style="font-size:18px;margin:24px 0 6px">Music &amp; sound effects</h2>'
+            # F-3: customer copy, no env-var names — uploading their own tracks is
+            # the customer action; the reel-bed default is an operator setting.
             '<p class="dim" style="margin:0 0 12px">MediaHub ships its own licence-clean '
-            "(CC0) pool so reels have sound out of the box. Set "
-            "<code>MEDIAHUB_REEL_MUSIC_LIBRARY=1</code> to use it as the default reel bed, "
-            "or point <code>MEDIAHUB_AUDIO_LIBRARY_DIR</code> at your own licensed tracks.</p>"
+            "(CC0) pool so reels have sound out of the box. Prefer your own music? "
+            "Upload your licensed tracks under &ldquo;Upload your own audio&rdquo; below.</p>"
             f'<div style="display:grid;gap:8px">{track_rows}</div>'
         )
 
         # --- Voice catalogue ---
         voice_rows = ""
         for v in list_voices():
-            tag = "local" if v.local else "online"
+            # F-3: "built-in"/"premium" reads for a customer; "local"/"online" is
+            # deployment jargon (and the on-server backend is never "local" in
+            # customer copy, per the fonts/cutout naming rule).
+            tag = "built-in" if v.local else "premium"
             voice_rows += (
                 '<li style="margin-bottom:4px">'
                 f"<strong>{_h(v.name or v.id)}</strong> "
@@ -29384,8 +29390,8 @@ self.addEventListener('fetch', function(e){
         voices_html = (
             '<h2 style="font-size:18px;margin:28px 0 6px">Voices</h2>'
             '<p class="dim" style="margin:0 0 8px">Voiceover speaks the approved caption '
-            "verbatim — no AI script. The local voice is the zero-cost default; Welsh and "
-            "other voices are available on the online backend.</p>"
+            "verbatim — no AI script. The built-in voice is the zero-cost default; Welsh and "
+            "other premium voices are available too.</p>"
             f'<ul style="margin:0 0 4px;padding-left:18px">{voice_rows}</ul>'
         )
 
@@ -46609,11 +46615,12 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             _note = (
                 ""
                 if _img_avail
+                # F-3: no env-var names in customer copy — the fix is an
+                # operator action, so point the customer at their operator.
                 else (
-                    '<p class="dim" style="margin-bottom:var(--sp-4)">No image provider is '
-                    "configured yet, so generation is disabled. The default is the in-house "
-                    "local model (set MEDIAHUB_IMAGINE_LOCAL_ENDPOINT); a Gemini key also "
-                    "enables cloud generation.</p>"
+                    '<p class="dim" style="margin-bottom:var(--sp-4)">Image generation '
+                    "isn&rsquo;t switched on for this workspace yet &mdash; ask your "
+                    "operator to enable it.</p>"
                 )
             )
             _imagine_js = (
