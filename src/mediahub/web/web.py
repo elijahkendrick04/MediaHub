@@ -31048,15 +31048,26 @@ function mhPlanGenerate(btn) {{
 
         # Side rail — unscheduled drafts to drag onto a day.
         def _rail_card(d: dict) -> str:
+            # I-1: a non-drag "Plan for…" date field so touch + keyboard users
+            # can schedule a draft (HTML5 drag never fires from touch). Drag onto
+            # a day stays as the desktop enhancement.
+            plan_input = (
+                f'<input type="date" class="mh-cal-plan-date" data-pack="{_h(d["pack_id"])}" '
+                f'aria-label="Plan a date to post {_h(d["title"])}" '
+                f'onchange="mhCalPlanInput(this)" onclick="event.stopPropagation()" '
+                'style="margin-top:6px;width:100%;font-size:11px;padding:3px 6px;'
+                "border:1px solid var(--border);border-radius:6px;background:var(--panel);"
+                'color:inherit">'
+            )
             return (
                 f'<div class="mh-cal-draft mh-cal-rail-card" draggable="true" '
                 f'data-pack="{_h(d["pack_id"])}" '
                 f'data-href="{_h(url_for("stub_pack_view", pack_id=d["pack_id"]))}" '
-                f'title="Drag onto a day to plan when to post it">'
+                f'title="Drag onto a day — or use the date field — to plan when to post it">'
                 f'<span class="mh-cal-draft-dot"></span>'
                 f'<span class="mh-cal-draft-t">{_h(d["title"])}'
                 f'<span style="opacity:.6"> · {int(d["n_cards"])} card'
-                f"{'s' if int(d['n_cards']) != 1 else ''}</span></span></div>"
+                f"{'s' if int(d['n_cards']) != 1 else ''}</span></span>{plan_input}</div>"
             )
 
         rail = "".join(_rail_card(d) for d in model.unscheduled_drafts)
@@ -31134,6 +31145,10 @@ function mhCalLeave(e) {{ var c = e.currentTarget; if (c) c.classList.remove('mh
 function mhCalStatus(msg, warn) {{
   var s = document.getElementById('mh-cal-status');
   if (!s) return; s.textContent = msg || ''; s.style.color = warn ? 'var(--warn)' : 'var(--ink-muted)';
+}}
+// I-1: non-drag scheduling (touch / keyboard) via the rail card's date field.
+function mhCalPlanInput(el) {{
+  if (el && el.value) mhCalSchedule(el.getAttribute('data-pack'), el.value);
 }}
 function mhCalSchedule(packId, date) {{
   if (!packId) return;
@@ -31522,13 +31537,26 @@ document.addEventListener('click', function (e) {{
                 )
             else:
                 actions = ""
+            # I-1: a non-drag "Move to" select so touch + keyboard users can move
+            # a card between columns (HTML5 drag never fires from touch). Drag
+            # stays as the desktop enhancement.
+            move_opts = "".join(
+                f'<option value="{_h(c2)}">{_h(COLUMN_LABELS[c2])}</option>'
+                for c2 in COLUMNS
+                if c2 != card.column
+            )
+            move_select = (
+                f'<select class="mh-bd-move" onchange="mhBoardMove(this)" '
+                f'data-card="{_h(card.id)}" aria-label="Move {_h(card.title)} to a column">'
+                f'<option value="">Move to&hellip;</option>{move_opts}</select>'
+            )
             return (
                 f'<div class="mh-bd-card" draggable="true" data-card="{_h(card.id)}">'
                 f'<div class="mh-bd-card-head"><strong>{_h(card.title)}</strong>'
                 f'<button type="button" class="mh-bd-del" onclick="mhBoardDelete(this)" '
                 f'data-card="{_h(card.id)}" title="Delete">&times;</button></div>'
                 f"{note}"
-                f'<div class="mh-bd-actions">{actions}</div></div>'
+                f'<div class="mh-bd-actions">{actions}{move_select}</div></div>'
             )
 
         columns_html = ""
@@ -31605,6 +31633,11 @@ function mhBoardDrop(e) {{
   var col = e.currentTarget; if (col) col.classList.remove('mh-bd-drop');
   var id = e.dataTransfer.getData('text/plain');
   if (id && col) mhBoardPost(MH_BD.move, {{card_id: id, column: col.dataset.col}});
+}}
+// I-1: non-drag move (touch / keyboard) via the per-card "Move to" select.
+function mhBoardMove(sel) {{
+  if (!sel || !sel.value) return;
+  mhBoardPost(MH_BD.move, {{card_id: sel.getAttribute('data-card'), column: sel.value}});
 }}
 </script>
 """
