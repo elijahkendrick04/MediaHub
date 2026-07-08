@@ -16944,11 +16944,12 @@ _BULK_ACTIONS_JS = r"""
     }
     Array.prototype.slice.call(form.querySelectorAll('[data-mh-bulk]')).forEach(function(btn){
       var action = btn.getAttribute('data-mh-bulk');
-      if (action === 'export') {
+      if (action === 'export' || action === 'download') {
         // Native submit → file download (Content-Disposition: attachment),
         // which never navigates the page — so the global form loader would
         // hang on "Working on it" forever and the volunteer thinks it crashed.
         // The download starts on submit, so hide the loader a beat later.
+        // 'export' = the JSON data dump; 'download' = the F-5 content ZIP.
         btn.addEventListener('click', function(){
           setTimeout(function(){ if (window.MH && MH.hideLoader) MH.hideLoader(); }, 1200);
         });
@@ -23224,8 +23225,13 @@ details.why-card[open] > summary .why-peek {{ display: none; }}
         <button type="submit" class="btn secondary" data-mh-bulk="reject" name="op" value="rejected"
                 formaction="{url_for("api_cards_bulk_status", run_id=run_id)}"
                 data-confirm="Reject {{n}} selected card(s)? They move out of the queue; you can re-queue them later.">Reject</button>
-        <button type="submit" class="btn secondary" data-mh-bulk="export"
-                formaction="{url_for("api_cards_bulk_export", run_id=run_id)}">Export</button>
+        <button type="submit" class="btn secondary" data-mh-bulk="download"
+                formaction="{url_for("api_cards_bulk_download", run_id=run_id)}"
+                title="Download the selected cards' captions + visuals as a ZIP, ready to post">Download content (.zip)</button>
+        <button type="submit" class="btn ghost" data-mh-bulk="export"
+                style="font-size:12px;padding:6px 12px"
+                formaction="{url_for("api_cards_bulk_export", run_id=run_id)}"
+                title="Developer export: the selected cards' data (rank, scores, status) as JSON">Export data (JSON)</button>
       </div>
     </div>
     <div id="ach-list" data-wf-filter="{_h(_wf_filter)}">{ach_rows_html_wf}</div>
@@ -32060,6 +32066,93 @@ function mhAnDigest(btn) {{
             headers={"Content-Disposition": f'attachment; filename="{safe}.txt"'},
         )
 
+    def _card_export_assets(
+        run_id: str, card_id: str, run_data: dict, *, caption_override: str = ""
+    ):
+        """Resolve one card's postable assets — (slug, caption, png_bytes,
+        png_name) — or ``None`` if the card isn't in this run.
+
+        Shared by the per-card ``/download`` route and the F-5 bulk
+        "Download content" route so the two never disagree about which caption
+        or visual ships. Caption priority (E-3): explicit override → approved
+        active-tone caption (same source as the run-level export.zip / public
+        API export) → any persisted human edit → the internal headline last.
+        """
+        rr = (run_data or {}).get("recognition_report") or {}
+        ranked = rr.get("ranked_achievements") or []
+        target = None
+        for ra in ranked:
+            ach = ra.get("achievement") or {}
+            if ach.get("swim_id") == card_id or ra.get("id") == card_id:
+                target = ra
+                break
+        if target is None:
+            for c in (run_data or {}).get("cards") or []:
+                if c.get("swim_id") == card_id or c.get("id") == card_id:
+                    target = {"achievement": c}
+                    break
+        if target is None:
+            return None
+
+        ach = target.get("achievement") or {}
+        swimmer = (ach.get("swimmer_name") or "swimmer").strip()
+        event = (ach.get("event") or "").strip()
+        slug = re.sub(r"[^A-Za-z0-9]+", "-", f"{swimmer} {event}").strip("-").lower() or "card"
+
+        caption = (caption_override or "").strip()
+        if not caption:
+            try:
+                from mediahub.workflow.pack import build_content_pack as _bcp
+
+                for _card in _bcp(run_id, _active_profile_id() or "default", RUNS_DIR):
+                    if str(_card.get("_card_id") or "") == str(card_id):
+                        _active = _card.get("active_caption") or {}
+                        if isinstance(_active, dict):
+                            caption = " ".join(
+                                str(v).strip()
+                                for v in _active.values()
+                                if isinstance(v, str) and v.strip()
+                            ).strip()
+                        break
+            except Exception:
+                caption = ""
+        if not caption:
+            try:
+                _ws = _get_wf_store()
+                _st = _ws.load(run_id).get(card_id) if _ws else None
+                _edits = (getattr(_st, "edited_captions", None) or {}) if _st else {}
+                _parts = [
+                    _edits[k]
+                    for k in sorted(_edits)
+                    if k and not str(k).startswith("insp.") and k != "alt_text" and _edits.get(k)
+                ]
+                caption = "\n".join(p for p in _parts if p).strip()
+            except Exception:
+                caption = ""
+        if not caption:
+            caption = (ach.get("headline") or f"{swimmer} — {event}").strip()
+
+        # Try to locate the rendered PNG for this card. Best-effort:
+        # not every card has a generated visual yet.
+        png_bytes: Optional[bytes] = None
+        png_name = ""
+        try:
+            visuals = (
+                target.get("visuals")
+                or (ach.get("visuals") if isinstance(ach, dict) else None)
+                or []
+            )
+            for v in visuals:
+                fp = v.get("file_path") or v.get("path") or ""
+                if fp and Path(fp).exists():
+                    png_bytes = Path(fp).read_bytes()
+                    png_name = Path(fp).name
+                    break
+        except Exception:
+            png_bytes = None
+
+        return slug, caption, png_bytes, png_name
+
     @app.route(
         "/api/runs/<run_id>/card/<path:card_id>/download",
         methods=["GET"],
@@ -32082,96 +32175,12 @@ function mhAnDigest(btn) {{
         if run_data is None:
             return jsonify({"error": "run_not_found"}), 404
 
-        # Find the achievement / card.
-        rr = run_data.get("recognition_report") or {}
-        ranked = rr.get("ranked_achievements") or []
-        target = None
-        for ra in ranked:
-            ach = ra.get("achievement") or {}
-            if ach.get("swim_id") == card_id or ra.get("id") == card_id:
-                target = ra
-                break
-        if target is None:
-            for c in run_data.get("cards") or []:
-                if c.get("swim_id") == card_id or c.get("id") == card_id:
-                    target = {"achievement": c}
-                    break
-        if target is None:
+        assets = _card_export_assets(
+            run_id, card_id, run_data, caption_override=request.args.get("caption") or ""
+        )
+        if assets is None:
             return jsonify({"error": "card_not_found"}), 404
-
-        ach = target.get("achievement") or {}
-        swimmer = (ach.get("swimmer_name") or "swimmer").strip()
-        event = (ach.get("event") or "").strip()
-        slug = re.sub(r"[^A-Za-z0-9]+", "-", f"{swimmer} {event}").strip("-").lower() or "card"
-
-        # Caption text. Priority (E-3):
-        #   1. an explicit ?caption= override (rare — a caller passing its own),
-        #   2. the card's APPROVED / active-tone caption — the SAME source the
-        #      run-level export.zip and the public API export write, so the two
-        #      never contradict each other,
-        #   3. the internal headline, only as a last resort.
-        # Previously this fell straight through to ach.get("headline"), so the
-        # volunteer posted the internal headline while their edited caption was
-        # silently dropped (and the ZIP README claimed it was the real caption).
-        caption = (request.args.get("caption") or "").strip()
-        # 2. The approved active-tone caption — byte-for-byte the source the
-        #    run-level export.zip and public API export use (only approved
-        #    cards appear here).
-        if not caption:
-            try:
-                from mediahub.workflow.pack import build_content_pack as _bcp
-
-                for _card in _bcp(run_id, _active_profile_id() or "default", RUNS_DIR):
-                    if str(_card.get("_card_id") or "") == str(card_id):
-                        _active = _card.get("active_caption") or {}
-                        if isinstance(_active, dict):
-                            caption = " ".join(
-                                str(v).strip()
-                                for v in _active.values()
-                                if isinstance(v, str) and v.strip()
-                            ).strip()
-                        break
-            except Exception:
-                caption = ""
-        # 3. Any human edit persisted on the card even if not formally approved
-        #    (build_content_pack returns approved cards only). Excludes the
-        #    inspector overrides (insp.*) and alt-text slots — those aren't the
-        #    post caption.
-        if not caption:
-            try:
-                _ws = _get_wf_store()
-                _st = _ws.load(run_id).get(card_id) if _ws else None
-                _edits = (getattr(_st, "edited_captions", None) or {}) if _st else {}
-                _parts = [
-                    _edits[k]
-                    for k in sorted(_edits)
-                    if k and not str(k).startswith("insp.") and k != "alt_text" and _edits.get(k)
-                ]
-                caption = "\n".join(p for p in _parts if p).strip()
-            except Exception:
-                caption = ""
-        # 4. Last resort: the internal headline.
-        if not caption:
-            caption = (ach.get("headline") or f"{swimmer} — {event}").strip()
-
-        # Try to locate the rendered PNG for this card. Best-effort:
-        # not every card has a generated visual yet.
-        png_bytes: Optional[bytes] = None
-        png_name = ""
-        try:
-            visuals = (
-                target.get("visuals")
-                or (ach.get("visuals") if isinstance(ach, dict) else None)
-                or []
-            )
-            for v in visuals:
-                fp = v.get("file_path") or v.get("path") or ""
-                if fp and Path(fp).exists():
-                    png_bytes = Path(fp).read_bytes()
-                    png_name = Path(fp).name
-                    break
-        except Exception:
-            png_bytes = None
+        slug, caption, png_bytes, png_name = assets
 
         # Build the ZIP in memory.
         buf = io.BytesIO()
@@ -44935,6 +44944,74 @@ if (typeof mhReelComposerSync === 'function') mhReelComposerSync();
             mimetype="application/json",
             headers={"Content-Disposition": f'attachment; filename="{fname}"'},
         )
+
+    @app.route("/api/runs/<run_id>/cards/bulk-download", methods=["POST"])
+    def api_cards_bulk_download(run_id):
+        """F-5 — download the selected cards' postable content as one ZIP.
+
+        The reviewer's content companion to the JSON "Export data" dump: each
+        selected card contributes a folder with its ready-to-post caption and
+        branded visual (the same assets the per-card Download button ships,
+        resolved through the shared ``_card_export_assets`` helper). A native
+        attachment download, so it works with or without JS.
+        """
+        from flask import send_file
+        import io
+        import zipfile
+
+        run_data = _load_run(run_id)
+        if not _can_access_run(run_id, run_data, _active_profile_id()):
+            return jsonify({"error": "run not found"}), 404
+        ids = _bulk_ids_from_request(request, "ids", "card_ids")
+        if not ids:
+            if _req_wants_json(request):
+                return jsonify({"error": "no_selection"}), 400
+            _flash_toast("Select at least one card to download.", "info")
+            return redirect(url_for("review", run_id=run_id))
+
+        resolved = []
+        for cid in ids:
+            assets = _card_export_assets(run_id, cid, run_data)
+            if assets is not None:
+                resolved.append(assets)
+        if not resolved:
+            if _req_wants_json(request):
+                return jsonify({"error": "no_cards_found"}), 404
+            _flash_toast("None of the selected cards could be found.", "error")
+            return redirect(url_for("review", run_id=run_id))
+
+        n_missing_visual = 0
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            for idx, (slug, caption, png_bytes, png_name) in enumerate(resolved, start=1):
+                folder = f"{idx:02d}-{slug}"
+                zf.writestr(f"{folder}/{slug}-caption.txt", caption)
+                if png_bytes:
+                    zf.writestr(f"{folder}/{png_name or slug + '.png'}", png_bytes)
+                else:
+                    n_missing_visual += 1
+            readme = [
+                "MediaHub content export.\n",
+                f"{len(resolved)} card(s), one folder each: the ready-to-post caption",
+                "(.txt) and the branded visual (.png) where it has been generated.\n",
+            ]
+            if n_missing_visual:
+                readme.append(
+                    f"{n_missing_visual} card(s) had no visual yet — open the card in the\n"
+                    "content builder and click 'Create graphic' first, then download again.\n"
+                )
+            readme.append(
+                "\nPost each visual + caption to your chosen platform manually.\n"
+                "No third-party scheduler required.\n"
+            )
+            zf.writestr("README.txt", "".join(readme))
+        buf.seek(0)
+        fname = (
+            "mediahub-content-"
+            + (re.sub(r"[^A-Za-z0-9_.-]+", "_", run_id)[:40] or "export")
+            + ".zip"
+        )
+        return send_file(buf, mimetype="application/zip", as_attachment=True, download_name=fname)
 
     # ---- Emoji reactions (UI 1.25) -------------------------------------
     @app.route("/api/runs/<run_id>/card/<card_id>/reactions", methods=["POST"])
