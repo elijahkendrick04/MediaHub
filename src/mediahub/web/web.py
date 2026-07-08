@@ -15676,6 +15676,19 @@ def _layout(
         // (idempotently) the moment the connection returns. The optimistic UI
         // above stands — the volunteer can keep triaging on the bus.
         if (window.MH && MH.toast) MH.toast('Saved offline — will sync when you reconnect', 'info', 2400);
+        return;
+      }
+      // D-3: the group-approver rule can HOLD an approve as a recorded vote,
+      // answering status:'queue' instead of the requested 'approved'. The
+      // optimistic paint flipped the button to "Approved ✓"; repaint to what
+      // the server actually stored so the button/pile/counts don't lie, and
+      // tell the volunteer their vote counted but the card is still held.
+      var applied = (result && result.status) || status;
+      if (applied !== status) {
+        paintState(applied);
+        if (window.MH && MH.toast) {
+          MH.toast(result.reason || 'Vote recorded — still held for another approver', 'info', 3800);
+        }
       } else if (window.MH && MH.toast) {
         MH.toast('Marked as ' + status, 'success', 1500);
       }
