@@ -71,6 +71,12 @@ jobs:
                 continue
               fi
               echo "merge #$num ($title): all $total checks green"
+              # [skip render]: an Actions-`uses:` bump only changes CI workflow
+              # files, never the deployed app image, so a Render redeploy is pure
+              # waste. The marker must ride the MERGE-COMMIT subject (the commit
+              # Render inspects on a push to main), so set it via --subject — the
+              # same mechanism roadmap-autoupdate.yml uses for its docs-only merges.
               gh pr merge "$num" --repo "$REPO" --merge \
+                --subject "$title (#$num) [skip render]" \
                 || echo "::warning::merge of #$num failed (race/conflict) — next sweep retries"
             done

@@ -79,6 +79,8 @@
   tagged (`[engine=…]` in evidence) so a WebKit-only break gets its own fingerprint;
   the engine is recorded in `run_meta`. New nightly matrix workflow runs Firefox/WebKit/
   Pixel-7 read-only (AI judges off), artifacts only — never races the main ledger.
+  **[Nightly matrix workflow removed 2026-07-08 — see docs/adr/0021; the local
+  `AUTOTEST_BROWSER`/`AUTOTEST_DEVICE` browser-select capability in `run.py` is retained.]**
 - Tests: `tests/test_autotest_browser.py` (new, 8 cases).
 
 **B2 accessibility** — `autotest/a11y.py` (new), wired in `run.py`
@@ -96,7 +98,7 @@
   deferred** (see below) — the diff engine + lifecycle land now.
 - Tests: `tests/test_autotest_visual.py` (new, 8 cases).
 
-**B4 performance / Core Web Vitals** — `.github/workflows/lighthouse.yml` (new), `.github/lighthouse/lighthouserc.json`
+**B4 performance / Core Web Vitals** — `.github/workflows/lighthouse.yml` (new), `.github/lighthouse/lighthouserc.json` **[Removed 2026-07-08 — see docs/adr/0021.]**
 - Lighthouse CI against the live URL, median of 3 runs; a11y/best-practices/SEO category
   scores asserted as **errors** (min 0.8 — tune once the prod baseline is known), raw
   timings/perf as **warnings** (documented CI noise). Separate, non-gating workflow.
@@ -123,7 +125,7 @@
 
 ## Tier C — live-site monitoring
 
-**C1/C2 external monitor** — `.upptimerc.yml` (new), `.github/workflows/upptime.yml` (new), `monitoring/README.md` (new)
+**C1/C2 external monitor** — `.upptimerc.yml` (new), `.github/workflows/upptime.yml` (new), `monitoring/README.md` (new) **[Removed 2026-07-08 — see docs/adr/0021.]**
 - Scaffolded **Upptime** (GitHub-Actions-native, zero-server): 5-min cron over the live
   home + `/healthz` (keyword check = behaviour, not just 200), auto-opens/closes a GitHub
   Issue, status page. **Dispatch-only until the operator adds a `GH_PAT` secret and
@@ -222,14 +224,15 @@
       the full per-advisor transcript and deliver the precision/recall metrics; true
       per-finding per-advisor structured votes (N×findings extra CLI calls) are deferred to
       respect the Claude subscription rate limits the council is tuned for.
-- [ ] **B1 nightly matrix is read-only/artifacts-only.** Cross-engine findings aren't
+- [x] **B1 nightly matrix is read-only/artifacts-only.** Cross-engine findings aren't
       folded into the main ledger yet (to avoid racing the 6h sweep). A future merge step
-      could reconcile engine-tagged findings into the ledger.
+      could reconcile engine-tagged findings into the ledger. — obsolete, nightly
+      cross-browser matrix removed 2026-07-08 (ADR-0021)
 - [ ] **D1 Playwright `@flaky` quarantine job.** Applies to the Node/Remotion specs; the
       pytest flake tooling (rerunfailures/randomly) is wired, the Playwright-test-project
       quarantine is a follow-up (MediaHub's E2E today is the pytest suite + the finder).
-- [ ] **B4 Lighthouse thresholds** are conservative (0.8) pending the measured prod
-      baseline; promote to the report's targets once known.
+- [x] **B4 Lighthouse thresholds** are conservative (0.8) pending the measured prod
+      baseline; promote to the report's targets once known. — obsolete, Lighthouse removed 2026-07-08 (ADR-0021)
 - [ ] **Calibration set curation.** 81 auto-seeded draft labels exist; a human must curate
       ≥ 20 (esp. disagreements with the council) before precision is published and starts
       scaling the confirm gate.
@@ -273,7 +276,7 @@
 - The fix pass snapshots the finder's reports to `/tmp` first (crash insurance);
   `fix_loop._persist_to_main` re-applies the fixer journal onto that snapshot instead of
   onto a stale `origin/main` checkout, and no longer pushes anywhere itself.
-- The cross-browser matrix restores the same state read-only for current dedup context.
+- The cross-browser matrix restores the same state read-only for current dedup context. **[Cross-browser matrix workflow removed 2026-07-08 — see docs/adr/0021.]**
 
 **`fixing` → `fixed` reconcile + deploy grace** — `autotest/fix_loop.py`, `autotest/report.py`
 - `fix_loop.reconcile_in_flight()` (runs first every fix pass) asks GitHub what happened
