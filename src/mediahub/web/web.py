@@ -4120,54 +4120,93 @@ _RUN_DELETE_JS = """
     if (!form || !form.classList) return;
     if (form.classList.contains('mh-run-delete')) {
       e.preventDefault();
-      if (!window.confirm('Delete these results? This cannot be undone.')) return;
       var rid = form.getAttribute('data-run-id');
       var btn = form.querySelector('button');
-      if (btn) btn.disabled = true;
-      // Send the form body so the auto-injected csrf_token rides along (the
-      // delete route is not CSRF-exempt); X-Requested-With asks for JSON back.
-      fetch(form.action, {method:'POST', headers:{'X-Requested-With':'XMLHttpRequest'}, body:new FormData(form)})
-        .then(function(r){ return r.json().catch(function(){ return {}; }); })
-        .then(function(j){
-          if (j && j.ok) {
-            var row = document.querySelector('[data-run-row="'+esc(rid)+'"]');
-            var err = document.querySelector('[data-run-err="'+esc(rid)+'"]');
-            if (err && err.parentNode) err.parentNode.removeChild(err);
-            if (row && row.parentNode) row.parentNode.removeChild(row);
-            if (window.MH && MH.toast) MH.toast('Run deleted.', 'success');
-          } else {
-            if (btn) btn.disabled = false;
-            if (window.MH && MH.toast) MH.toast('Could not delete — reload and try again.', 'error');
+      // E-1: the row is removed optimistically and the actual server delete is
+      // held for ~8s behind an "Undo" toast (a soft delete). Undo restores the
+      // row and never hits the server; leaving the page flushes the delete via
+      // sendBeacon so the intent isn't silently lost.
+      var runDelete = function(){
+        var row = document.querySelector('[data-run-row="'+esc(rid)+'"]');
+        var err = document.querySelector('[data-run-err="'+esc(rid)+'"]');
+        if (err && err.parentNode) err.parentNode.removeChild(err);
+        var parent = row && row.parentNode;
+        var anchor = row && row.nextSibling;
+        if (row && parent) parent.removeChild(row);
+        var done = false;  // committed or undone — whichever happens first wins
+        var commit = function(){
+          if (done) return; done = true;
+          window.removeEventListener('beforeunload', beacon);
+          fetch(form.action, {method:'POST', headers:{'X-Requested-With':'XMLHttpRequest'}, body:new FormData(form)})
+            .then(function(r){ return r.json().catch(function(){ return {}; }); })
+            .then(function(j){ if (!(j && j.ok)) restore('Could not delete — reload and try again.'); })
+            .catch(function(){ restore('Could not delete — reload and try again.'); });
+        };
+        var restore = function(errMsg){
+          if (done && !errMsg) return; done = true;
+          window.removeEventListener('beforeunload', beacon);
+          // The captured `anchor` may itself have been removed (deleting the row
+          // that followed this one), so insertBefore(row, detachedAnchor) would
+          // throw NotFoundError — fall back to append, and never let a throw
+          // swallow the error toast below.
+          if (row && parent) {
+            try {
+              parent.insertBefore(row, (anchor && anchor.parentNode === parent) ? anchor : null);
+            } catch (e) { try { parent.appendChild(row); } catch (e2) {} }
           }
-        })
-        .catch(function(){
-          if (btn) btn.disabled = false;
-          if (window.MH && MH.toast) MH.toast('Could not delete — reload and try again.', 'error');
+          if (errMsg && window.MH && MH.toast) MH.toast(errMsg, 'error');
+        };
+        var beacon = function(){
+          if (done) return; done = true;
+          try { navigator.sendBeacon(form.action, new FormData(form)); } catch(e){}
+        };
+        var timer = setTimeout(commit, 8000);
+        window.addEventListener('beforeunload', beacon);
+        if (window.MH && MH.toast) {
+          MH.toast('Meet deleted', 'success', 8000, { text:'Undo', onClick: function(){ clearTimeout(timer); restore(); } });
+        } else {
+          clearTimeout(timer); commit();
+        }
+      };
+      if (window.MH && MH.confirm) {
+        MH.confirm({
+          title: 'Delete this meet’s results?',
+          body: 'The meet and its cards, captions and rendered files will be removed. You’ll have a few seconds to undo.',
+          confirmText: 'Delete', onConfirm: runDelete
         });
+      } else if (window.confirm('Delete these results? This cannot be undone.')) {
+        runDelete();
+      }
     } else if (form.classList.contains('mh-clear-all-runs')) {
       e.preventDefault();
       var n = form.getAttribute('data-count') || '';
-      var msg = n
-        ? ('Permanently delete all ' + n + ' runs for this organisation? This cannot be undone.')
-        : 'Permanently delete every run for this organisation? This cannot be undone.';
-      if (!window.confirm(msg)) return;
-      var cbtn = form.querySelector('button');
-      if (cbtn) cbtn.disabled = true;
-      fetch(form.action, {method:'POST', headers:{'X-Requested-With':'XMLHttpRequest'}, body:new FormData(form)})
-        .then(function(r){ return r.json().catch(function(){ return {}; }); })
-        .then(function(j){
-          if (j && j.ok) {
-            if (window.MH && MH.toast) MH.toast((j.deleted || 0) + ' runs deleted.', 'success');
-            window.location.reload();
-          } else {
+      var body = n
+        ? ('Permanently delete all ' + n + ' meets for this organisation. This cannot be undone.')
+        : 'Permanently delete every meet for this organisation. This cannot be undone.';
+      var clearAll = function(){
+        var cbtn = form.querySelector('button');
+        if (cbtn) cbtn.disabled = true;
+        fetch(form.action, {method:'POST', headers:{'X-Requested-With':'XMLHttpRequest'}, body:new FormData(form)})
+          .then(function(r){ return r.json().catch(function(){ return {}; }); })
+          .then(function(j){
+            if (j && j.ok) {
+              if (window.MH && MH.toast) MH.toast((j.deleted || 0) + ' meets deleted.', 'success');
+              window.location.reload();
+            } else {
+              if (cbtn) cbtn.disabled = false;
+              if (window.MH && MH.toast) MH.toast('Could not delete — reload and try again.', 'error');
+            }
+          })
+          .catch(function(){
             if (cbtn) cbtn.disabled = false;
             if (window.MH && MH.toast) MH.toast('Could not delete — reload and try again.', 'error');
-          }
-        })
-        .catch(function(){
-          if (cbtn) cbtn.disabled = false;
-          if (window.MH && MH.toast) MH.toast('Could not delete — reload and try again.', 'error');
-        });
+          });
+      };
+      if (window.MH && MH.confirm) {
+        MH.confirm({ title: 'Clear all meets?', body: body, confirmText: 'Delete all', onConfirm: clearAll });
+      } else if (window.confirm(body)) {
+        clearAll();
+      }
     }
   }, false);
 })();
@@ -11990,6 +12029,11 @@ _VIDEO_STUDIO_HTML = """
   function jpost(u, body){
     return fetch(u, {method:'POST', headers:{'Content-Type':'application/json','X-CSRF-Token':CSRF,'Accept':'application/json'}, body:JSON.stringify(body||{})}).then(function(r){return r.json().then(function(j){j.__status=r.status;return j;});});
   }
+  // J-2: the studio's fetch chains used to have no .catch, so a network failure
+  // (the likely outcome of the long synchronous endpoints) left buttons stuck on
+  // "Rendering..." forever or cleared nothing at all, and server errors surfaced
+  // via the browser's native dialog. vsToast routes both through the styled toast.
+  function vsToast(m){ if(window.MH && MH.toast){ MH.toast(m, 'error'); } }
 
   // ---- footage upload ----
   function uploadFile(file){
@@ -12077,7 +12121,8 @@ _VIDEO_STUDIO_HTML = """
         sel.addEventListener('click', function(ev){ ev.stopPropagation(); });
         sel.addEventListener('change', function(){
           jpost(aurl(FOOTAGE_PERM_TMPL, sel.getAttribute('data-id')), {permission_status: sel.value})
-            .then(function(j){ if(j.ok){ loadFootage(); } else { alert(j.message || j.error || 'Could not change the permission.'); } });
+            .then(function(j){ if(j.ok){ loadFootage(); } else { vsToast(j.message || j.error || 'Could not change the permission.'); } })
+            .catch(function(){ vsToast('Network error — the permission may not have changed. Reload to check.'); });
         });
       });
       Array.prototype.forEach.call(wrap.querySelectorAll('.vs-frame'), function(b){
@@ -12088,7 +12133,7 @@ _VIDEO_STUDIO_HTML = """
           jpost(aurl(FOOTAGE_FRAME_TMPL, b.getAttribute('data-id')), {}).then(function(j){
             b.disabled = false;
             if(st){ st.textContent = j.ok ? 'Saved to your photo library.' : ('Failed: '+(j.message||j.error||'error')); }
-          });
+          }).catch(function(){ b.disabled = false; if(st){ st.textContent = 'Network error — try again.'; } });
         });
       });
     });
@@ -12136,7 +12181,7 @@ _VIDEO_STUDIO_HTML = """
     }).then(function(j){
       if(j.ok){ status.textContent = 'Clip created. Render it below.'; loadProjects(); }
       else { status.textContent = 'Failed: '+(j.message||j.error||'error'); }
-    });
+    }).catch(function(){ status.textContent = 'Network error — the analysis may still be running. Reload to check.'; });
   });
 
   // ---- AI reel (multi-clip) ----
@@ -12160,7 +12205,7 @@ _VIDEO_STUDIO_HTML = """
       btn.disabled = false;
       if(j.ok){ status.textContent = 'Reel directed. Render it below.'; loadProjects(); }
       else { status.textContent = 'Failed: '+(j.message||j.error||'error'); }
-    });
+    }).catch(function(){ btn.disabled = false; status.textContent = 'Network error — the director may still be watching. Reload to check.'; });
   });
 
   // ---- projects ----
@@ -12196,7 +12241,7 @@ _VIDEO_STUDIO_HTML = """
       Array.prototype.forEach.call(wrap.querySelectorAll('.vs-apply'), function(b){ b.addEventListener('click', function(){ var id=b.getAttribute('data-id'); var sel=wrap.querySelector('.vs-look-sel[data-id="'+id+'"]'); enhanceProject(id, {look: sel?sel.value:'none'}, b); }); });
       Array.prototype.forEach.call(wrap.querySelectorAll('.vs-music'), function(b){ b.addEventListener('click', function(){ enhanceProject(b.getAttribute('data-id'), {enhance_audio:true, with_music:true}, b); }); });
       Array.prototype.forEach.call(wrap.querySelectorAll('.vs-stab'), function(b){ b.addEventListener('click', function(){ enhanceProject(b.getAttribute('data-id'), {stabilize:true}, b); }); });
-    });
+    }).catch(function(){ var wrap = $('vs-projects'); if(wrap){ wrap.innerHTML = '<p class="muted">Couldn\\u2019t load your clips — reload to try again.</p>'; } });
   }
   function enhanceProject(id, body, btn){
     var st = document.querySelector('.vs-enh-status[data-id="'+id+'"]');
@@ -12206,14 +12251,14 @@ _VIDEO_STUDIO_HTML = """
       if(btn){ btn.disabled = false; }
       if(j.ok){ if(st){ st.textContent = 'Applied — re-render to see it.'; } loadProjects(); }
       else { if(st){ st.textContent = 'Failed: '+(j.message||j.error||'error'); } }
-    });
+    }).catch(function(){ if(btn){ btn.disabled = false; } if(st){ st.textContent = 'Network error — try again.'; } });
   }
   function renderProject(id, btn){
     if(btn){ btn.disabled = true; btn.textContent = 'Rendering...'; }
     jpost(url(RENDER_TMPL, id), {}).then(function(j){
-      if(!j.ok && j.message){ alert(j.message); }
+      if(!j.ok && j.message){ vsToast(j.message); }
       loadProjects();
-    });
+    }).catch(function(){ if(btn){ btn.disabled = false; btn.textContent = 'Render'; } vsToast('Network error — the render may still be running; reload to check.'); });
   }
   function approveProject(id){
     // M26 — the approve dialog lists each source clip's permission state so
@@ -12249,7 +12294,7 @@ _VIDEO_STUDIO_HTML = """
   function openEditor(id){
     editorPid = id;
     fetch(url(PROJECT_TMPL, id), {headers:{'Accept':'application/json'}}).then(function(r){return r.json();}).then(function(j){
-      if(!j.ok || !j.project){ alert('Could not load this clip.'); return; }
+      if(!j.ok || !j.project){ vsToast('Could not load this clip.'); return; }
       editorEdl = j.project.edl || {clips:[]};
       wfCache = {}; wfFailed = {};
       $('vs-ed-name').textContent = j.project.name || '';
@@ -12258,7 +12303,7 @@ _VIDEO_STUDIO_HTML = """
       renderEditorRows();
       prefetchWaveforms();
       $('vs-editor').hidden = false;
-    });
+    }).catch(function(){ vsToast('Network error — could not load this clip. Reload to try again.'); });
   }
   // Fetch each clip's audio waveform ONCE at open, while the client order still
   // matches the server's (the route is keyed by clip index). Cache by source so
@@ -13531,6 +13576,65 @@ def _ui_locale() -> str:
     return DEFAULT_UI_LOCALE
 
 
+def _ui_locale_label(code: str) -> str:
+    """Human label for a UI locale, endonym-first (e.g. 'Cymraeg (Welsh)')."""
+    try:
+        from mediahub.web.languages import get_language
+
+        lang = get_language(code)
+        if lang is None:
+            return code
+        if lang.native_name and lang.native_name != lang.name:
+            return f"{lang.native_name} ({lang.name})"
+        return lang.name
+    except Exception:
+        return code
+
+
+def _interface_language_switcher_html(*, compact: bool = True) -> str:
+    """C-16 — a visible interface-language switcher with a real off-ramp.
+
+    The UI locale could previously only be changed by hand-typing ``?lang=cy``,
+    which then pinned with no way back to English. This renders a select that
+    POSTs to ``set_interface_language`` (English is always an option), returning
+    to the same page. Renders nothing when only English ships (no half-language
+    trap), so it appears exactly when there's a real choice to make.
+    """
+    from mediahub.localize.ui_catalogue import available_ui_locales
+
+    locales = available_ui_locales()
+    if len(locales) < 2:
+        return ""
+    current = _ui_locale()
+    # NB: the form deliberately does NOT echo the current request path — the
+    # switcher renders on every page (footer + Settings), including error pages
+    # and pages showing a foreign org's resource, and the request path can carry
+    # PII in its segments (e.g. a swimmer name in /spotlight/<run>/<name>).
+    # set_interface_language returns the user to their page via the Referer
+    # header instead, which never lands in a rendered response body.
+    opts = "".join(
+        f'<option value="{_h(c)}"{" selected" if c == current else ""}>{_h(_ui_locale_label(c))}</option>'
+        for c in locales
+    )
+    label = (
+        ""
+        if compact
+        else '<label for="mh-ui-lang" style="display:block;margin-bottom:6px">Interface language</label>'
+    )
+    aria = ' aria-label="Interface language"' if compact else ' id="mh-ui-lang"'
+    cls = "mh-ui-lang-form" + (" mh-ui-lang-compact" if compact else "")
+    return (
+        f'<form method="post" action="{url_for("set_interface_language")}" '
+        f'class="{cls}" data-no-loader="1" style="display:inline-flex;align-items:center;gap:6px">'
+        f"{label}"
+        f'<select name="ui_lang"{aria} onchange="this.form.submit()" '
+        'style="font-size:12px;padding:3px 6px;min-height:0">'
+        f"{opts}</select>"
+        '<noscript><button type="submit" class="btn secondary" style="font-size:12px;padding:3px 8px">Set</button></noscript>'
+        "</form>"
+    )
+
+
 def _layout(
     title: str,
     body: str,
@@ -13972,7 +14076,11 @@ def _layout(
        the footage→reel video studio). Keeping them off the top bar leaves the
        signed-in chrome focused on the core workflow. #}
     <a href="{{ url_for('media_library_page') }}" class="{{ 'active' if active=='media' else '' }}">Media library</a>
-    <a href="{{ url_for('elements_page') }}" class="{{ 'active' if active=='elements' else '' }}">Elements</a>
+    {# C-1/C-2 — Activity (where a volunteer resumes approving a pack) takes the
+       primary slot that browse-only "Elements" held, so desktop matches the
+       mobile bottom nav. Elements stays reachable in its add-to-card context
+       from the card editor; it no longer holds a top-bar slot it can't act in. #}
+    <a href="{{ url_for('activity_page') }}" class="{{ 'active' if active=='activity' else '' }}">Activity</a>
     <a href="{{ url_for('season_timeline_page') }}" class="{{ 'active' if active=='season' else '' }}">My Season</a>
     {% if research_enabled %}<a href="{{ url_for('web_research_console') }}" class="{{ 'active' if active=='research' else '' }}">Research</a>{% endif %}
     {# Spacer — pushes the utility / account cluster to the right edge (it used
@@ -14094,6 +14202,10 @@ def _layout(
            class="mh-orgmenu-item {{ 'active' if active=='settings' else '' }}">{{ t('nav.settings') }}</a>
         <a href="{{ url_for('help_page') }}" role="menuitem"
            class="mh-orgmenu-item {{ 'active' if active=='help' else '' }}">Help</a>
+        {# C-18 — the slide remote had no in-app path (reachable only by typing
+           /remote); give a phone user a menu shortcut to the pairing screen. #}
+        <a href="{{ url_for('remote_landing') }}" role="menuitem"
+           class="mh-orgmenu-item">Slide remote</a>
         <a href="{{ url_for('sign_in_page') }}" role="menuitem"
            class="mh-orgmenu-item {{ 'active' if active=='signin' else '' }}">{{ t('nav.switch_org') }}</a>
         <a href="{{ url_for('sign_out') }}" role="menuitem" class="mh-orgmenu-item">{{ t('nav.sign_out') }}</a>
@@ -14135,6 +14247,11 @@ def _layout(
       <span class="mh-footer-sep">/</span>
       <a href="{{ url_for('api_docs_page') }}">API</a>
     </div>
+    {% if interface_lang_html %}
+    <div class="mh-footer-meta" style="margin-top:8px;display:flex;align-items:center;gap:8px;justify-content:center">
+      <span aria-hidden="true">&#127760;</span>{{ interface_lang_html|safe }}
+    </div>
+    {% endif %}
     <div class="mh-footer-meta" style="margin-top:6px;opacity:0.75">
       {{ provider_identity }}
     </div>
@@ -14182,6 +14299,13 @@ def _layout(
   <a href="{{ url_for('make_page') }}" class="{{ 'is-active' if active=='create' else '' }}" aria-label="Create">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
     Create
+  </a>
+  {# C-13 — the media library is the surface built for phones (camera capture,
+     the PWA share-target, "share a photo straight from your camera roll"), so it
+     earns a mobile bottom-nav slot instead of being hidden behind the hamburger. #}
+  <a href="{{ url_for('media_library_page') }}" class="{{ 'is-active' if active=='media' else '' }}" aria-label="Media library">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+    Media
   </a>
   <a href="{{ url_for('activity_page') }}" class="{{ 'is-active' if active=='activity' else '' }}" aria-label="Activity">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h4l2 7 4-16 2 9h6"/></svg>
@@ -14571,23 +14695,28 @@ def _layout(
       '<button class="mh-toast-close" aria-label="Dismiss">&times;</button>';
     var msgSlot = t.querySelector('.mh-toast-msg');
     msgSlot.textContent = (message == null ? '' : String(message));
-    // Optional inline action — a same-origin deep link (e.g. "Open in builder"
-    // for an open-task gate, D-1). The href is a trusted app path the caller
-    // builds with encodeURIComponent; the visible label is set via textContent.
-    if (action && action.href) {
-      var a = document.createElement('a');
-      a.href = action.href;
-      a.textContent = action.text || 'Open';
-      a.className = 'mh-toast-action';
-      a.style.cssText = 'margin-left:10px;color:inherit;font-weight:600;text-decoration:underline;white-space:nowrap';
-      msgSlot.appendChild(a);
-    }
     toastContainer.appendChild(t);
     var close = function(){
       t.style.transition = 'opacity 0.2s ease, transform 0.2s ease';
       t.style.opacity = '0'; t.style.transform = 'translateX(16px)';
       setTimeout(function(){ if (t.parentNode) t.remove(); }, 220);
     };
+    // Optional inline action — either a same-origin deep link (action.href, e.g.
+    // "Open in builder" for an open-task gate, D-1) or a callback button
+    // (action.onClick, e.g. "Undo" for a soft delete, E-1). The href is a
+    // trusted app path the caller builds with encodeURIComponent; the visible
+    // label is set via textContent.
+    if (action && (action.href || action.onClick)) {
+      var a = document.createElement(action.href ? 'a' : 'button');
+      if (action.href) a.href = action.href;
+      a.textContent = action.text || 'Open';
+      a.className = 'mh-toast-action';
+      a.style.cssText = 'margin-left:10px;color:inherit;font-weight:700;text-decoration:underline;white-space:nowrap;background:none;border:0;cursor:pointer;font:inherit;padding:0';
+      if (action.onClick) {
+        a.addEventListener('click', function(ev){ ev.preventDefault(); try { action.onClick(); } finally { close(); } });
+      }
+      msgSlot.appendChild(a);
+    }
     t.querySelector('.mh-toast-close').addEventListener('click', close);
     setTimeout(close, ms || (type === 'error' ? 7000 : 4500));
   };
@@ -14843,6 +14972,42 @@ def _layout(
       b.addEventListener('click', close, {once: true});
     });
     return close;
+  };
+
+  // === Styled confirm (E-1) ===
+  // A branded, focus-trapping replacement for the jarring native confirm() the
+  // destructive deletes used. opts: {title, body, confirmText, cancelText,
+  // danger, onConfirm}. Builds a throwaway .mh-modal, wires it through
+  // MH.openModal (Esc/backdrop/Tab-trap/focus-restore) and removes it on close.
+  MH.confirm = function(opts) {
+    opts = opts || {};
+    var modal = document.createElement('div');
+    modal.className = 'mh-modal';
+    modal.setAttribute('role', 'dialog');
+    modal.setAttribute('aria-modal', 'true');
+    modal.setAttribute('aria-hidden', 'true');
+    var panel = document.createElement('div');
+    panel.className = 'mh-modal-panel';
+    panel.style.position = 'relative';
+    var h = document.createElement('h2'); h.className = 'mh-modal-title';
+    h.textContent = opts.title || 'Are you sure?';
+    var b = document.createElement('div'); b.className = 'mh-modal-body';
+    b.textContent = opts.body || '';
+    var acts = document.createElement('div'); acts.className = 'mh-modal-actions';
+    var cancel = document.createElement('button');
+    cancel.type = 'button'; cancel.className = 'btn secondary';
+    cancel.textContent = opts.cancelText || 'Cancel';
+    cancel.setAttribute('data-mh-modal-close', '');
+    var ok = document.createElement('button');
+    ok.type = 'button';
+    ok.className = 'btn ' + (opts.danger === false ? '' : 'danger');
+    ok.textContent = opts.confirmText || 'Delete';
+    acts.appendChild(cancel); acts.appendChild(ok);
+    panel.appendChild(h); panel.appendChild(b); panel.appendChild(acts);
+    modal.appendChild(panel);
+    document.body.appendChild(modal);
+    var closeFn = MH.openModal(modal, { onClose: function(){ if (modal.parentNode) modal.parentNode.removeChild(modal); } });
+    ok.addEventListener('click', function(){ if (closeFn) closeFn(); if (opts.onConfirm) opts.onConfirm(); });
   };
 
   // === Relative time helper ===
@@ -16268,6 +16433,7 @@ def _layout(
         provider_identity=(
             f"{_legal.COMPANY_NAME} · {_legal.REGISTERED_ADDRESS} · {_legal.CONTACT_EMAIL}"
         ),
+        interface_lang_html=_interface_language_switcher_html(compact=True),
     )
 
 
@@ -16894,7 +17060,19 @@ _BULK_ACTIONS_JS = r"""
         var msg = ready
           ? ('Marked ' + n2 + ' photo' + (n2 === 1 ? '' : 's') + ' ready for cards.')
           : ('Moved ' + n2 + ' photo' + (n2 === 1 ? '' : 's') + ' back to Draft.');
-        if (sk) msg += ' ' + sk + ' skipped (safeguarding).';
+        if (sk){
+          // H-3 — don't just count skips: flag the blocked rows and scroll the
+          // first into view so the volunteer can set consent on the row itself.
+          msg += ' ' + sk + ' skipped (safeguarding) — set consent on the flagged row' + (sk === 1 ? '' : 's') + '.';
+          var blockedFirst = null;
+          ((body && body.results) || []).forEach(function(r){
+            if (r.ok || r.error !== 'safeguarding_block') return;
+            var e2 = (window.CSS && CSS.escape) ? CSS.escape(r.id) : r.id;
+            var brow = form.querySelector('.mh-asset-row[data-asset-id="' + e2 + '"]');
+            if (brow){ brow.classList.add('mh-safeguard-flag'); if (!blockedFirst) blockedFirst = brow; }
+          });
+          if (blockedFirst && blockedFirst.scrollIntoView) blockedFirst.scrollIntoView({behavior:'smooth', block:'center'});
+        }
         toast(msg, n2 ? 'success' : 'info', 3000);
         selected().forEach(function(c){ c.checked = false; });
         refresh();
@@ -17126,6 +17304,249 @@ _ML_QUICK_ACTION_JS = r"""
         err.textContent = 'Couldn’t load the export formats — try again.';
         menu.appendChild(err);
       });
+  });
+})();
+"""
+
+
+# H-3 — plain-English labels for the media-library permission vocabulary, and a
+# sensible order for the per-photo consent dropdown. The values are the same
+# PERMISSION_STATUSES the consent gate enforces; only the copy is humanised.
+_MEDIA_PERMISSION_ORDER = [
+    ("unknown", "Not set — needs a decision"),
+    ("needs_parental_consent", "Needs parental consent"),
+    ("needs_approval", "Needs approval"),
+    ("approved_by_club", "Consent on file — club approved"),
+    ("approved_by_photographer", "Photographer approved"),
+    ("user_owned", "We took it / no consent needed"),
+    ("approved_public", "Approved for public use"),
+    ("internal_only", "Internal use only"),
+    ("do_not_use", "Do not use"),
+]
+_MEDIA_PERMISSION_LABELS = dict(_MEDIA_PERMISSION_ORDER)
+
+
+def _media_permission_select(asset_id: str, current: str) -> str:
+    """H-3 — a plain-English per-photo consent dropdown (replaces the raw enum).
+
+    The change is saved inline via the media-library permission endpoint, so a
+    volunteer holding a signed consent form can record it without delete +
+    re-upload.
+    """
+    cur = str(current or "unknown").strip() or "unknown"
+    opts = "".join(
+        f'<option value="{_h(v)}"{" selected" if v == cur else ""}>{_h(lbl)}</option>'
+        for v, lbl in _MEDIA_PERMISSION_ORDER
+    )
+    return (
+        f'<select class="mh-ml-perm" data-asset-id="{_h(asset_id)}" data-prev="{_h(cur)}" '
+        'aria-label="Photo consent / permission" '
+        'style="font-size:11px;padding:3px 6px;min-height:0;max-width:200px">'
+        f"{opts}</select>"
+    )
+
+
+# H-4 — in-place photo metadata editor. Opens a modal prefilled from the row's
+# data-attrs, POSTs to the meta endpoint, and updates the visible cells in place.
+# __META_TMPL__ carries "__AID__" for the asset id; __CSRF__ is the token.
+_ML_META_EDIT_JS = r"""
+(function(){
+  var TMPL = "__META_TMPL__", CSRF = "__CSRF__";
+  var modal = document.getElementById('mh-meta-modal');
+  if(!modal) return;
+  var g = function(id){ return document.getElementById(id); };
+  var fDesc=g('mh-meta-desc'), fAth=g('mh-meta-athletes'), fVen=g('mh-meta-venue'),
+      fEvt=g('mh-meta-event'), fTag=g('mh-meta-tags'), stat=g('mh-meta-status'), save=g('mh-meta-save');
+  var row=null, closeFn=null;
+  function openFor(r){
+    row=r;
+    fDesc.value=r.getAttribute('data-desc')||'';
+    fAth.value=r.getAttribute('data-athletes')||'';
+    fVen.value=r.getAttribute('data-venue')||'';
+    fEvt.value=r.getAttribute('data-event')||'';
+    fTag.value=r.getAttribute('data-tags')||'';
+    stat.textContent='';
+    if(window.MH && MH.openModal){ closeFn = MH.openModal(modal); }
+    else { modal.classList.add('is-open'); modal.setAttribute('aria-hidden','false'); }
+  }
+  function close(){ if(closeFn){ closeFn(); closeFn=null; } else { modal.classList.remove('is-open'); modal.setAttribute('aria-hidden','true'); } }
+  document.addEventListener('click', function(e){
+    var t = e.target.closest ? e.target.closest('[data-mh-meta-open]') : null;
+    if(!t) return;
+    e.preventDefault();
+    var r = t.closest('.mh-asset-row');
+    if(r) openFor(r);
+  });
+  document.addEventListener('keydown', function(e){
+    if((e.key==='Enter'||e.key===' ') && e.target && e.target.hasAttribute && e.target.hasAttribute('data-mh-meta-open')){
+      e.preventDefault(); var r=e.target.closest('.mh-asset-row'); if(r) openFor(r);
+    }
+  });
+  save.addEventListener('click', function(){
+    if(!row) return;
+    var id = row.getAttribute('data-asset-id');
+    save.disabled=true; stat.textContent='Saving…';
+    fetch(TMPL.replace('__AID__', encodeURIComponent(id)), {
+      method:'POST', headers:{'Content-Type':'application/json','X-CSRF-Token':CSRF,'Accept':'application/json'},
+      body: JSON.stringify({description:fDesc.value, athletes:fAth.value, venue:fVen.value, event:fEvt.value, tags:fTag.value})
+    }).then(function(r){ return r.json(); }).then(function(j){
+      save.disabled=false;
+      if(!j.ok){ stat.textContent = j.error || 'Could not save.'; return; }
+      var a=j.asset;
+      row.setAttribute('data-desc', a.description);
+      row.setAttribute('data-athletes', a.athletes);
+      row.setAttribute('data-venue', a.venue);
+      row.setAttribute('data-event', a.event);
+      row.setAttribute('data-tags', a.tags);
+      // Update ONLY the leading names text node so the trailing badge spans
+      // (the clickable "auto" edit-trigger, the "untagged" flag) survive — a
+      // full textContent overwrite would wipe them until reload.
+      var ac=row.querySelector('[data-label="Athlete"]');
+      if(ac){ var tn=ac.firstChild;
+        if(tn && tn.nodeType===3){ tn.nodeValue=a.athletes; }
+        else { ac.insertBefore(document.createTextNode(a.athletes), tn||null); } }
+      var vc=row.querySelector('[data-label="Venue / Event"]'); if(vc) vc.textContent = a.venue || a.event || '';
+      if(window.MH && MH.toast) MH.toast('Photo details saved.', 'success');
+      close();
+    }).catch(function(){ save.disabled=false; stat.textContent='Network error — try again.'; });
+  });
+})();
+"""
+
+_ML_META_EDIT_MODAL = """
+<div class="mh-modal" id="mh-meta-modal" role="dialog" aria-modal="true" aria-labelledby="mh-meta-title" aria-hidden="true">
+  <div class="mh-modal-panel" style="position:relative;text-align:left">
+    <button type="button" class="mh-modal-close" data-mh-modal-close aria-label="Close">&times;</button>
+    <h2 class="mh-modal-title" id="mh-meta-title">Edit photo details</h2>
+    <div class="mh-modal-body" style="margin-bottom:var(--sp-4)">Correct the description, swimmer, venue, event or tags &mdash; no need to delete and re-upload.</div>
+    <label for="mh-meta-desc">Description</label>
+    <input id="mh-meta-desc" class="input" type="text" placeholder="e.g. Eira Hughes at Welsh National Open">
+    <label for="mh-meta-athletes">Swimmer(s) <span class="dim" style="font-weight:400">comma-separated</span></label>
+    <input id="mh-meta-athletes" class="input" type="text" placeholder="Eira Hughes, Tomos Rhys">
+    <label for="mh-meta-venue">Venue</label>
+    <input id="mh-meta-venue" class="input" type="text">
+    <label for="mh-meta-event">Event</label>
+    <input id="mh-meta-event" class="input" type="text">
+    <label for="mh-meta-tags">Tags <span class="dim" style="font-weight:400">comma-separated</span></label>
+    <input id="mh-meta-tags" class="input" type="text" placeholder="relay, podium, freestyle">
+    <div id="mh-meta-status" class="dim" role="status" aria-live="polite" style="min-height:1.2em;margin-top:var(--sp-2)"></div>
+    <div class="mh-modal-actions" style="margin-top:var(--sp-4)">
+      <button type="button" class="btn secondary" data-mh-modal-close>Cancel</button>
+      <button type="button" class="btn" id="mh-meta-save">Save details</button>
+    </div>
+  </div>
+</div>
+"""
+
+# H-3 — save a photo's consent/permission inline when its dropdown changes.
+# __PERM_TMPL__ carries "__AID__"; __CSRF__ is the token.
+_ML_PERMISSION_JS = r"""
+(function(){
+  var TMPL = "__PERM_TMPL__", CSRF = "__CSRF__";
+  document.addEventListener('change', function(e){
+    var sel = e.target;
+    if(!sel || !sel.classList || !sel.classList.contains('mh-ml-perm')) return;
+    var id = sel.getAttribute('data-asset-id'), prev = sel.getAttribute('data-prev') || '';
+    sel.disabled = true;
+    fetch(TMPL.replace('__AID__', encodeURIComponent(id)), {
+      method:'POST', headers:{'Content-Type':'application/json','X-CSRF-Token':CSRF,'Accept':'application/json'},
+      body: JSON.stringify({permission_status: sel.value})
+    }).then(function(r){ return r.json(); }).then(function(j){
+      sel.disabled = false;
+      if(!j.ok){ if(prev) sel.value = prev; if(window.MH && MH.toast) MH.toast(j.message || 'Could not save consent.', 'error'); return; }
+      sel.setAttribute('data-prev', sel.value);
+      // Clear a safeguarding flag once the block is resolved.
+      var row = sel.closest('.mh-asset-row');
+      if(row && j.usable) row.classList.remove('mh-safeguard-flag');
+      if(window.MH && MH.toast) MH.toast('Consent updated.', 'success');
+    }).catch(function(){ sel.disabled = false; if(prev) sel.value = prev; if(window.MH && MH.toast) MH.toast('Network error — try again.', 'error'); });
+  });
+})();
+"""
+
+# C-14 — an in-page product-mockup + sticker picker. Replaces the hardcoded
+# "Poster mockup" anchor that opened the raw-JSON API route in a new tab (a dead
+# end on any failure) and gives the orphaned make-sticker API its first UI.
+_ML_MOCKUP_MODAL = """
+<div class="mh-modal" id="mh-mockup-modal" role="dialog" aria-modal="true" aria-labelledby="mh-mockup-title" aria-hidden="true">
+  <div class="mh-modal-panel" style="position:relative;max-width:560px;text-align:left">
+    <button type="button" class="mh-modal-close" data-mh-modal-close aria-label="Close">&times;</button>
+    <h2 class="mh-modal-title" id="mh-mockup-title">Product mockups</h2>
+    <div class="mh-modal-body" style="margin-bottom:var(--sp-3)">See this image as a poster, framed print, phone post or flatlay &mdash; or save it as a reusable sticker for your Elements.</div>
+    <div id="mh-mockup-templates" style="margin-bottom:var(--sp-3)"></div>
+    <div id="mh-mockup-preview" style="min-height:40px;margin-bottom:var(--sp-2)"></div>
+    <div id="mh-mockup-status" class="dim" role="status" aria-live="polite" style="min-height:1.2em"></div>
+    <div class="mh-modal-actions" style="margin-top:var(--sp-3)">
+      <a id="mh-mockup-download" class="btn secondary" style="display:none" download>Download PNG</a>
+      <button type="button" class="btn secondary" id="mh-mockup-sticker">Save as sticker</button>
+      <button type="button" class="btn" data-mh-modal-close>Done</button>
+    </div>
+  </div>
+</div>
+"""
+
+_ML_MOCKUP_PICKER_JS = r"""
+(function(){
+  var TPL_URL = "__TEMPLATES_URL__", MOCKUP_TMPL = "__MOCKUP_TMPL__",
+      STICKER_TMPL = "__STICKER_TMPL__", CSRF = "__CSRF__";
+  var modal = document.getElementById('mh-mockup-modal');
+  if(!modal) return;
+  var g = function(id){ return document.getElementById(id); };
+  var tplWrap=g('mh-mockup-templates'), preview=g('mh-mockup-preview'), stat=g('mh-mockup-status'),
+      dl=g('mh-mockup-download'), stickerBtn=g('mh-mockup-sticker');
+  var curId=null, closeFn=null, templates=null, curBlobUrl=null;
+  function openFor(id){
+    curId=id; stat.textContent=''; preview.innerHTML=''; dl.style.display='none';
+    if(curBlobUrl){ URL.revokeObjectURL(curBlobUrl); curBlobUrl=null; }
+    if(window.MH && MH.openModal){ closeFn = MH.openModal(modal, {onClose: function(){ if(curBlobUrl){ URL.revokeObjectURL(curBlobUrl); curBlobUrl=null; } }}); }
+    else { modal.classList.add('is-open'); modal.setAttribute('aria-hidden','false'); }
+    loadTemplates();
+  }
+  function loadTemplates(){
+    if(templates){ renderTemplates(); return; }
+    fetch(TPL_URL, {headers:{'Accept':'application/json'}}).then(function(r){ return r.json(); }).then(function(j){
+      templates = (j && j.templates) || []; renderTemplates();
+    }).catch(function(){ stat.textContent = 'Couldn’t load mockup styles — reload and try again.'; });
+  }
+  function renderTemplates(){
+    tplWrap.innerHTML='';
+    if(!templates.length){ tplWrap.innerHTML = '<p class="dim">No mockup styles available on this deployment.</p>'; return; }
+    templates.forEach(function(t){
+      var b=document.createElement('button'); b.type='button'; b.className='btn secondary';
+      b.style.cssText='margin:0 6px 6px 0;font-size:12px;padding:4px 10px';
+      b.textContent = t.label || t.id; b.title = t.description || '';
+      b.addEventListener('click', function(){ renderMockup(t.id); });
+      tplWrap.appendChild(b);
+    });
+  }
+  function renderMockup(tid){
+    stat.textContent='Rendering…'; preview.innerHTML=''; dl.style.display='none';
+    var url = MOCKUP_TMPL.replace('__AID__', encodeURIComponent(curId)).replace('__T__', encodeURIComponent(tid));
+    fetch(url).then(function(r){
+      if(!r.ok){ return r.json().catch(function(){ return {}; }).then(function(j){ throw new Error(j.user_message || j.error || 'Mockup failed'); }); }
+      return r.blob();
+    }).then(function(blob){
+      if(curBlobUrl) URL.revokeObjectURL(curBlobUrl);
+      curBlobUrl = URL.createObjectURL(blob);
+      var img=document.createElement('img'); img.src=curBlobUrl; img.alt='Mockup preview';
+      img.style.cssText='max-width:100%;border-radius:8px;display:block';
+      preview.appendChild(img); stat.textContent='';
+      dl.href=curBlobUrl; dl.setAttribute('download', 'mockup-'+tid+'.png'); dl.style.display='inline-flex';
+    }).catch(function(e){ stat.textContent = (e && e.message) || 'Couldn’t render this mockup.'; });
+  }
+  stickerBtn.addEventListener('click', function(){
+    if(!curId) return; stickerBtn.disabled=true; stat.textContent='Saving sticker…';
+    fetch(STICKER_TMPL.replace('__AID__', encodeURIComponent(curId)), {
+      method:'POST', headers:{'Content-Type':'application/json','X-CSRF-Token':CSRF,'Accept':'application/json'}, body:'{}'
+    }).then(function(r){ return r.json(); }).then(function(j){
+      stickerBtn.disabled=false;
+      if(j.ok){ stat.textContent='Saved to your Elements stickers.'; if(window.MH && MH.toast) MH.toast('Sticker saved to Elements.', 'success'); }
+      else { stat.textContent = j.user_message || j.error || 'Couldn’t make a sticker.'; }
+    }).catch(function(){ stickerBtn.disabled=false; stat.textContent='Network error — try again.'; });
+  });
+  document.addEventListener('click', function(e){
+    var t = e.target.closest ? e.target.closest('[data-mh-mockup-open]') : null;
+    if(!t) return; e.preventDefault(); openFor(t.getAttribute('data-asset-id'));
   });
 })();
 """
@@ -17705,6 +18126,68 @@ def _home_faq_html() -> str:
 # live — org-scoped — rather than on the home). It reuses the Create-page tile
 # language (`.mh-template`) so the signed-in chrome stays one coherent system.
 # --------------------------------------------------------------------------- #
+def _home_resume_strip_html(profile_id: Optional[str]) -> str:
+    """C-1 — a "Pick up where you left off" strip for the signed-in home.
+
+    The most common return visit is "finish approving the pack I started", but
+    the home had no recent runs, no queue count, and no resume link. This shows
+    the latest 1-3 processed meets with their review-queue count, each linking
+    straight into /review/<id>. Renders nothing when there are no processed
+    meets yet, so a brand-new workspace isn't shown an empty strip.
+    """
+    if not profile_id:
+        return ""
+    try:
+        conn = _db()
+        rows = conn.execute(
+            "SELECT id, meet_name, n_queue, n_achievements, created_at "
+            "FROM runs WHERE profile_id = ? AND status = 'done' "
+            "ORDER BY created_at DESC LIMIT 3",
+            (profile_id,),
+        ).fetchall()
+        conn.close()
+    except Exception:  # noqa: BLE001
+        return ""
+    if not rows:
+        return ""
+    cards = ""
+    for r in rows:
+        rid = r["id"]
+        meet = (r["meet_name"] or "Meet").strip() or "Meet"
+        try:
+            n_queue = int(r["n_queue"] or 0)
+        except (TypeError, ValueError):
+            n_queue = 0
+        try:
+            n_ach = int(r["n_achievements"] or 0)
+        except (TypeError, ValueError):
+            n_ach = 0
+        if n_queue > 0:
+            status_line = f"{n_queue} awaiting review"
+            cta = "Continue reviewing &rarr;"
+        elif n_ach > 0:
+            status_line = f"{n_ach} moment{'' if n_ach == 1 else 's'} · all reviewed"
+            cta = "Open pack &rarr;"
+        else:
+            status_line = "Ready to review"
+            cta = "Open &rarr;"
+        cards += (
+            f'<a href="{url_for("review", run_id=rid)}" class="mh-template mh-glow-border" '
+            'style="display:block">'
+            '<div class="strap" style="color:var(--ink-muted);margin-bottom:4px">Meet</div>'
+            f'<h3 style="margin:0 0 4px">{_h(meet)}</h3>'
+            f'<p style="margin:0 0 8px;color:var(--ink-dim);font-size:13px">{_h(status_line)}</p>'
+            f'<span class="mh-template-cta">{cta}</span>'
+            "</a>"
+        )
+    return (
+        '<section class="mh-section" style="margin-top:var(--sp-5)">'
+        '<div class="mh-section-eyebrow-strip"><span class="label">Pick up where you left off</span></div>'
+        f'<div class="mh-template-grid">{cards}</div>'
+        "</section>"
+    )
+
+
 def _home_signed_in_quick_actions_html() -> str:
     """Quick-action grid: jump straight to the surfaces a returning club uses."""
 
@@ -18039,17 +18522,29 @@ _DOC_REMOTE = r"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 button{font-size:22px;border:0;border-radius:14px;background:#1b2440;color:#fff}
 button:active{background:#2b3a66}
 .row{display:flex;gap:10px}.row button{flex:1}
+/* E-4: End is destructive and one fat-finger tap from Blackout — deprioritise it
+   (danger tint, narrow, off to the side) and gate it behind a confirm. */
+.row .end{flex:0 0 auto;font-size:14px;padding:0 18px;background:#4a1d1d;color:#ffbdbd}
+.row .end:active{background:#6a2626}
 #pos{font-weight:700}.hd{text-align:center;color:#9fb0d0;font-size:14px}
+#rended{position:fixed;inset:0;background:#0b1020;color:#9fb0d0;font-size:20px;
+  display:none;flex-direction:column;align-items:center;justify-content:center;gap:14px;text-align:center;padding:24px}
+#rended a{color:#fff}
 </style></head><body>
 <div id="g">
   <div class="hd">Remote · code <b>__CODE__</b> · <span id="pos">–</span></div>
   <div id="rstat" class="hd" role="status" aria-live="polite" style="color:#ffb454;min-height:18px"></div>
   <button onclick="act('prev')">◀ Previous</button>
   <button onclick="act('next')">Next ▶</button>
-  <div class="row"><button onclick="act('blackout')">Blackout</button><button onclick="act('end')">End</button></div>
+  <div class="row"><button onclick="act('blackout')">Blackout</button><button class="end" onclick="endPres()">End</button></div>
 </div>
+<div id="rended"><div>Presentation ended.</div><a href="/remote">Connect to another presentation</a></div>
 <script>
 function rstat(m){ var el=document.getElementById('rstat'); if(el) el.textContent=m||''; }
+function showEnded(){ var e=document.getElementById('rended'); if(e) e.style.display='flex';
+  var g=document.getElementById('g'); if(g) g.style.display='none'; }
+// E-4: ending the talk kills it for the whole room and can't be undone — confirm first.
+function endPres(){ if(confirm('End the presentation for everyone? This cannot be undone.')) act('end'); }
 async function act(a){
   // D-31: a dead tap (offline wifi, a 429 rate-limit, a 4xx with no state) used
   // to do nothing with zero feedback — now it says what happened.
@@ -18057,11 +18552,12 @@ async function act(a){
     const r=await fetch('__ACTION_URL__',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:a})});
     const j=await r.json().catch(function(){ return {}; });
     if(!r.ok || j.ok===false){ rstat((r.status===429||j.error==='rate_limited')?'Too many taps — wait a moment':'Not connected'); return; }
+    if(j.state && j.state.ended){ showEnded(); return; }
     if(j.state){ setPos(j.state); rstat(''); }
   }catch(e){ rstat('Reconnecting…'); }
 }
 function setPos(s){ document.getElementById('pos').textContent=(s.current+1)+' / '+s.total+(s.blackout?' · black':''); }
-async function poll(){ try{ const r=await fetch('__STATE_URL__'); const s=await r.json(); if(!s.ended){ setPos(s); rstat(''); } }catch(e){ rstat('Reconnecting…'); } }
+async function poll(){ try{ const r=await fetch('__STATE_URL__'); const s=await r.json(); if(s.ended){ showEnded(); return; } setPos(s); rstat(''); }catch(e){ rstat('Reconnecting…'); } }
 setInterval(poll,1500); poll();
 </script></body></html>"""
 
@@ -18953,7 +19449,7 @@ def create_app() -> Flask:
                 "Create new content &rarr;</a>"
                 f'<a class="mh-cta-secondary" href="{url_for("sign_in_page")}">'
                 "Switch organisation</a>"
-                f'<a class="mh-cta-secondary" href="{url_for("organisation_page")}">'
+                f'<a class="mh-cta-secondary" href="{url_for("organisation_setup")}">'
                 "Edit profile</a>"
             )
             eyebrow = "Pinned organisation"
@@ -19125,6 +19621,7 @@ def create_app() -> Flask:
                 '<div class="mh-fx mh-spotlight">'
                 + hero_html
                 + "</div>"
+                + _home_resume_strip_html(prof.profile_id)
                 + _home_signed_in_quick_actions_html()
                 + final_cta_html,
                 active="home",
@@ -20447,6 +20944,10 @@ def create_app() -> Flask:
             f"<span>{n_meets:,} {'meet' if n_meets == 1 else 'meets'}</span>"
             '<span class="sep">&middot;</span>'
             f'<span><a href="{url_for("activity_page")}">View as activity log &rarr;</a></span>'
+            '<span class="sep">&middot;</span>'
+            # C-9 — a discoverable entry into Collections (folders grouping meets),
+            # previously reachable only by typing the URL.
+            f'<span><a href="{url_for("collections_page")}">Collections &rarr;</a></span>'
             f"{clear_all_html}"
             "</div></section>"
         )
@@ -21171,7 +21672,7 @@ def create_app() -> Flask:
                 prof_logo_html = (
                     '<p class="dim" style="margin:6px 0 0;font-size:12px;color:var(--warn)">'
                     "No logo on your organisation profile. "
-                    f'<a href="{url_for("organisation_page")}" '
+                    f'<a href="{url_for("organisation_setup")}" '
                     'style="color:var(--warn);text-decoration:underline">Add one</a> '
                     "so it flows through to every graphic.</p>"
                 )
@@ -21205,7 +21706,7 @@ def create_app() -> Flask:
     <fieldset class="mh-fieldset">
       <legend>Brand &mdash; loaded from your organisation</legend>
       <p class="mh-fieldset-lede">
-        Defaults come from your <a href="{url_for("organisation_page")}" style="text-decoration:underline">organisation profile</a>.
+        Defaults come from your <a href="{url_for("organisation_setup")}" style="text-decoration:underline">organisation profile</a>.
         Tweak below for a one-off override; the preview on the right updates as you move the picker.
       </p>
       {prof_logo_html}
@@ -28528,6 +29029,38 @@ self.addEventListener('fetch', function(e){
     def settings_page():
         return _render_settings_page()
 
+    @app.route("/settings/interface-language", methods=["POST"])
+    def set_interface_language():
+        """C-16 — set the interface (chrome) language deliberately, with English
+        always an off-ramp. Distinct from the org's caption-output language."""
+        from mediahub.localize.ui_catalogue import has_ui_locale
+
+        choice = (request.form.get("ui_lang") or "").strip().lower()
+        if has_ui_locale(choice):
+            session["ui_lang"] = choice.split("-", 1)[0]
+        # Return the user to the page they switched from, taken from the Referer
+        # (never echoed into a rendered response — see _interface_language_
+        # switcher_html). Only a same-origin Referer is honoured; otherwise fall
+        # back to Settings so the redirect can't be pointed off-site.
+        dest = url_for("settings_page")
+        ref = request.referrer or ""
+        if ref:
+            try:
+                from urllib.parse import urlsplit
+
+                parts = urlsplit(ref)
+                path = parts.path or ""
+                # Same-origin only, and a plain absolute path — reject "//host"
+                # and "/\host" which browsers resolve as protocol-relative
+                # (an open-redirect vector).
+                same_origin = not parts.netloc or parts.netloc == request.host
+                safe_path = path.startswith("/") and not path.startswith(("//", "/\\"))
+                if same_origin and safe_path:
+                    dest = path + (("?" + parts.query) if parts.query else "")
+            except Exception:
+                dest = url_for("settings_page")
+        return redirect(dest)
+
     # Settings is a card grid like Create: each heading is a tile you click
     # into for the detail. The detail pages are served by ``settings_section``
     # below (plus a few that link straight to an existing full page). This
@@ -28713,6 +29246,19 @@ self.addEventListener('fetch', function(e){
             "</section>"
             f'<div class="mh-template-grid mh-reveal-group">{tiles}</div>'
         )
+        # C-16 — a deliberate interface-language control (distinct from the org's
+        # caption-output language), shown only when more than English ships.
+        lang_switcher = _interface_language_switcher_html(compact=False)
+        if lang_switcher:
+            body += (
+                '<div class="card" style="margin-top:var(--sp-5);max-width:420px">'
+                '<div class="strap" style="margin-bottom:var(--sp-2)">Interface language</div>'
+                '<p class="dim" style="margin-bottom:var(--sp-3);font-size:13px">Changes the '
+                "app&rsquo;s own menus and buttons. Your caption-output language is set "
+                "separately under Organisation &amp; brand.</p>"
+                f"{lang_switcher}"
+                "</div>"
+            )
         return _layout("Settings", body, active="settings")
 
     def _render_settings_governance_section(prof: Optional[ClubProfile]) -> str:
@@ -30596,7 +31142,7 @@ self.addEventListener('fetch', function(e){
                 f'<input type="hidden" id="mh-plan-sport" value="{_h(org_sport)}"/>'
                 f'<span style="font-weight:600">Planning for {_h(_sport_display)}</span>'
                 f'<span class="dim" style="font-size:12px">set by your '
-                f'<a href="{url_for("organisation_page")}" style="text-decoration:underline">organisation profile</a></span>'
+                f'<a href="{url_for("organisation_setup")}" style="text-decoration:underline">organisation profile</a></span>'
             )
         else:
             _sport_opts = "".join(
@@ -32933,6 +33479,35 @@ function mhAnDigest(btn) {{
                 "</a>"
             )
 
+        # C-8 — the public achievements wall is a flagship shareable output (free
+        # public celebration page + embed + RSS/JSON), but its only link lived in
+        # Organisation-settings prose. It gets a first-class Create tile alongside
+        # Sites/Newsletters (independent of the email-design flag).
+        _wall_svg = (
+            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" '
+            'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" width="28" height="28">'
+            '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/>'
+            '<rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>'
+        )
+        tiles_html += (
+            f'<a href="{_h(url_for("public_wall_settings"))}" class="mh-template mh-glow-border">'
+            f'<div class="mh-template-icon">{_wall_svg}</div>'
+            '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:var(--sp-1)">'
+            '<h3 style="margin:0">Public wall</h3>'
+            '<span class="tag live">Ready</span>'
+            "</div>"
+            "<p>A free public celebration page of your approved cards &mdash; share the "
+            "link, embed it on your club website, or offer an RSS/JSON feed. One "
+            "shared URL you can switch on and off.</p>"
+            '<div class="mh-template-formats">'
+            '<span class="mh-template-fmt">Public page</span>'
+            '<span class="mh-template-fmt">Website embed</span>'
+            '<span class="mh-template-fmt">RSS / JSON</span>'
+            "</div>"
+            '<span class="mh-template-cta">Open public wall</span>'
+            "</a>"
+        )
+
         # Live meet + Season wraps — fully-built surfaces presented as Create
         # tiles so the whole "what can I make?" catalogue lives in one place.
         # These used to render as disabled "Coming soon" tiles even though both
@@ -34835,8 +35410,72 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 save_session(s)
         return redirect(url_for("free_text_chat_view", chat_id=chat_id))
 
+    def _chat_brief_to_pack(s, chat_id, selected_ids):
+        """Turn a session's accepted brief into a saved stub-pack.
+
+        Shared by "Accept & generate" (B-6) and the standalone "Generate content
+        from this brief" step so both build the pack identically. Returns the
+        pack URL with ?autographic=1 so the draft renders its graphic on arrival,
+        matching the quick path; None when there's no accepted brief to build.
+        """
+        from mediahub.club_platform.stub_pack_store import save_pack
+
+        brief = s.accepted_brief
+        if not brief:
+            return None
+        card = {
+            "platform": brief.get("platform") or "Instagram",
+            "caption": "\n\n".join(
+                [p for p in [brief.get("headline", ""), brief.get("body", "")] if p]
+            ).strip(),
+            "hashtags": brief.get("hashtags") or [],
+            # D-25: prompt-led chat draft — no fabricated confidence badge.
+            "confidence": None,
+            "notes": brief.get("visual_concept", "") or "",
+            "status": "queue",
+        }
+        pack_form_data = {
+            "free_text": s.title or "Chat brief",
+            "source": "chat",
+            "chat_id": chat_id,
+        }
+        # Resolve library picks the same way _render_stub does — strictly
+        # scoped to the active organisation; foreign ids are silently dropped.
+        active_pid_for_pack = _active_profile_id() or ""
+        # Stamp the active profile id on the pack regardless of whether
+        # a library asset was picked. Without this, the renderer can't
+        # resolve the BrandKit later (no profile_id → no theme JSON →
+        # falls back to MediaHub defaults), which is exactly the
+        # "brand colours don't carry through" bug for chat briefs.
+        if active_pid_for_pack:
+            pack_form_data["profile_id"] = active_pid_for_pack
+        if selected_ids and _v8_get_media_store is not None:
+            try:
+                _ml = _v8_get_media_store()
+                resolved = []
+                for aid in selected_ids:
+                    a = _ml.get(aid)
+                    if not a or a.profile_id != active_pid_for_pack:
+                        continue
+                    resolved.append({"id": a.id, "path": a.path, "filename": a.filename})
+                if resolved:
+                    pack_form_data["library_asset_ids"] = ",".join(r["id"] for r in resolved)
+                    pack_form_data["library_asset_paths"] = ",".join(r["path"] for r in resolved)
+                    pack_form_data["attached_photo_path"] = resolved[0]["path"]
+                    pack_form_data["attached_photo_filename"] = resolved[0]["filename"]
+                    pack_form_data["profile_id"] = active_pid_for_pack
+            except Exception:
+                app.logger.exception("free-text chat library picker resolve failed")
+        saved = save_pack("free_text", pack_form_data, [card], profile_id=_active_profile_id())
+        return url_for("stub_pack_view", pack_id=saved["pack_id"]) + "?autographic=1"
+
     @app.route("/free-text/chat/<chat_id>/accept", methods=["POST"])
     def free_text_chat_accept(chat_id):
+        # B-6: "Accept & generate" now actually generates. It used to only mark
+        # the brief accepted and reload, leaving the user to hunt for a second
+        # "Generate content from this brief" button and a third "Create graphic"
+        # click. Accepting the brief and building the draft is a single POST that
+        # ends on the rendered graphic (?autographic=1), like the quick path.
         from mediahub.free_text_chat.session import load_session, save_session
 
         s = load_session(chat_id)
@@ -34853,6 +35492,9 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 }
             )
             save_session(s)
+        pack_url = _chat_brief_to_pack(s, chat_id, request.form.getlist("library_asset_id"))
+        if pack_url:
+            return redirect(pack_url)
         return redirect(url_for("free_text_chat_view", chat_id=chat_id))
 
     @app.route("/free-text/chat/<chat_id>/decline", methods=["POST"])
@@ -34885,58 +35527,15 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         """Turn an accepted brief into a saved stub-pack so the existing
         approval pills + export flow apply."""
         from mediahub.free_text_chat.session import load_session
-        from mediahub.club_platform.stub_pack_store import save_pack
 
         s = load_session(chat_id)
         if not s or not s.accepted_brief:
             return redirect(url_for("free_text_chat_view", chat_id=chat_id))
-        brief = s.accepted_brief
-        card = {
-            "platform": brief.get("platform") or "Instagram",
-            "caption": "\n\n".join(
-                [p for p in [brief.get("headline", ""), brief.get("body", "")] if p]
-            ).strip(),
-            "hashtags": brief.get("hashtags") or [],
-            # D-25: prompt-led chat draft — no fabricated confidence badge.
-            "confidence": None,
-            "notes": brief.get("visual_concept", "") or "",
-            "status": "queue",
-        }
-        pack_form_data = {
-            "free_text": s.title or "Chat brief",
-            "source": "chat",
-            "chat_id": chat_id,
-        }
-        # Resolve library picks the same way _render_stub does — strictly
-        # scoped to the active organisation; foreign ids are silently dropped.
-        active_pid_for_pack = _active_profile_id() or ""
-        # Stamp the active profile id on the pack regardless of whether
-        # a library asset was picked. Without this, the renderer can't
-        # resolve the BrandKit later (no profile_id → no theme JSON →
-        # falls back to MediaHub defaults), which is exactly the
-        # "brand colours don't carry through" bug for chat briefs.
-        if active_pid_for_pack:
-            pack_form_data["profile_id"] = active_pid_for_pack
-        selected_ids = request.form.getlist("library_asset_id")
-        if selected_ids and _v8_get_media_store is not None:
-            try:
-                _ml = _v8_get_media_store()
-                resolved = []
-                for aid in selected_ids:
-                    a = _ml.get(aid)
-                    if not a or a.profile_id != active_pid_for_pack:
-                        continue
-                    resolved.append({"id": a.id, "path": a.path, "filename": a.filename})
-                if resolved:
-                    pack_form_data["library_asset_ids"] = ",".join(r["id"] for r in resolved)
-                    pack_form_data["library_asset_paths"] = ",".join(r["path"] for r in resolved)
-                    pack_form_data["attached_photo_path"] = resolved[0]["path"]
-                    pack_form_data["attached_photo_filename"] = resolved[0]["filename"]
-                    pack_form_data["profile_id"] = active_pid_for_pack
-            except Exception:
-                app.logger.exception("free-text chat library picker resolve failed")
-        saved = save_pack("free_text", pack_form_data, [card], profile_id=_active_profile_id())
-        return redirect(url_for("stub_pack_view", pack_id=saved["pack_id"]))
+        # B-6: land on the draft with the graphic already rendering, like the
+        # quick path (?autographic=1) — the chat path used to drop the user on a
+        # blank draft needing a third "Create graphic" click.
+        pack_url = _chat_brief_to_pack(s, chat_id, request.form.getlist("library_asset_id"))
+        return redirect(pack_url or url_for("free_text_chat_view", chat_id=chat_id))
 
     # ---- Saved stub packs &mdash; list + view + export -----------------------
     _STUB_TYPE_LABEL = {
@@ -37034,6 +37633,15 @@ function copySpotlightCaption(btn, cardIdSafe) {{
   <h1>{_h(profile.display_name) if profile.display_name else "Your organisation"}</h1>
   <p class="lede">Tell MediaHub about your club, society or team. Every generated caption, graphic, and reel is built from what's set here &mdash; brand voice, palette, sponsor rules, the lot.</p>
 </section>
+
+<div class="card" style="margin-bottom:20px;border:1px solid var(--accent);background:color-mix(in oklab, var(--accent) 6%, transparent)">
+  <p style="margin:0;font-size:14px;line-height:1.5">
+    <strong>This is the classic editor.</strong> The main place to set up your
+    brand — palette, logos, voice capture and DNA — is now
+    <a href="{url_for("organisation_setup")}" style="text-decoration:underline">Organisation &amp; brand setup</a>.
+    Colour and kit governance live on the <a href="{url_for("brand_home_page")}" style="text-decoration:underline">Brand platform</a>.
+  </p>
+</div>
 
 <div class="card" style="margin-bottom:20px;border:1px solid var(--accent);background:color-mix(in oklab, var(--lane) 4%, transparent)">
   <h2 style="margin-top:0">Re-analyse brand from website + social links</h2>
@@ -40464,7 +41072,9 @@ what you're doing, what they should do.</p>
             if can_admin:
                 remove_html = (
                     f'<form method="post" action="{url_for("organisation_members_page")}" '
-                    'style="display:inline">'
+                    'style="display:inline" '
+                    'onsubmit="return confirm(\'Remove this member from the organisation? '
+                    'They lose access immediately.\')">'
                     '<input type="hidden" name="action" value="remove"/>'
                     f'<input type="hidden" name="email" value="{_h(m.email)}"/>'
                     '<button type="submit" class="btn secondary" '
@@ -42555,18 +43165,38 @@ what you're doing, what they should do.</p>
         # UK legal baseline: DPA acceptance + lawful-basis attestation block,
         # rendered in BOTH setup forms until this workspace has a record.
         _attestation_html = _org_attestation_form_html(prof)
+        # G-3 — this page is the canonical brand home, not just first-run. For a
+        # club that already has a brand, drop the permanent "First-run setup"
+        # framing so it reads as the brand editor it actually is.
+        _returning = bool(prof and prof.is_ready())
+        _hero_eyebrow = "Organisation &amp; brand" if _returning else "First-run setup"
+        _hero_heading = (
+            'Your organisation<br><em class="editorial">&amp; brand.</em>'
+            if _returning
+            else 'Tell us about<br><em class="editorial">your club.</em>'
+        )
+        _hero_lede = (
+            (
+                "Your brand identity — palette, logos, voice and what you talk about. "
+                "The engine uses it on every caption, card and reel it makes. Re-run the "
+                "AI capture any time, or edit anything by hand below."
+            )
+            if _returning
+            else (
+                "The engine learns who you are from your existing online presence "
+                "&mdash; your website and social profiles. Paste whichever links you "
+                "have and click <b>Build my brand</b>. The AI reads your posts, palette, "
+                "tone of voice, and what you talk about, and uses that on every caption "
+                "it writes. You can come back any time to re-run it."
+            )
+        )
         body = f"""
 <div style="max-width:840px;margin:0 auto">
 <section class="mh-hero" data-lane="01" style="padding-top:var(--sp-8);padding-bottom:var(--sp-7);margin-bottom:var(--sp-5)">
-  <span class="mh-hero-eyebrow">First-run setup</span>
-  <h1>Tell us about<br><em class="editorial">your club.</em></h1>
+  <span class="mh-hero-eyebrow">{_hero_eyebrow}</span>
+  <h1>{_hero_heading}</h1>
   <p class="lede">
-  The engine learns who you are from your existing online
-  presence &mdash; your website and social profiles. Paste whichever
-  links you have and click <b>Build my brand</b>. The AI reads your
-  posts, palette, tone of voice, and what you talk about, and uses
-  that on every caption it writes. You can come back any time to
-  re-run it.
+  {_hero_lede}
   </p>
 </section>
 
@@ -46760,7 +47390,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         if not profile_id:
             _profs = list_profiles()
             if not _profs:
-                _org_url = url_for("organisation_page")
+                _org_url = url_for("organisation_setup")
                 _create_url = url_for("make_page")
                 empty_body = (
                     '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-9);padding-bottom:var(--sp-8)">'
@@ -46858,8 +47488,9 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             _tag_badges = ""
             if _has_vision and athlete_names:
                 _tag_badges += (
-                    ' <span class="tag" style="font-size:9px" '
-                    'title="AI-tagged from the photo — review and edit anytime">&#10024; auto</span>'
+                    ' <span class="tag" style="font-size:9px;cursor:pointer" '
+                    'data-mh-meta-open role="button" tabindex="0" '
+                    'title="AI-tagged from the photo — click to review and edit">&#10024; auto</span>'
                 )
             if _is_untagged:
                 _tag_badges += (
@@ -46873,6 +47504,12 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             _studio_url = url_for("image_studio_page", asset_id=ad.get("id", ""))
             _edit_url = url_for("photo_editor_page", asset_id=ad.get("id", ""))
             _qa_url = url_for("api_media_library_quick_action", asset_id=ad.get("id", ""))
+            # H-4 — the editable metadata carried on the row so the in-place
+            # editor can prefill without a round-trip.
+            _meta_desc = ad.get("description_raw", "") or ""
+            _meta_tags = ", ".join(ad.get("tags") or [])
+            _meta_venue = ad.get("linked_venue") or ""
+            _meta_event = ad.get("linked_event") or ""
             # U.14 cursor-following preview: the row shows a 60px chip, so the
             # floating frame carries the full photo at a useful size plus a
             # caption (type + athlete/venue). Escaped — parsed metadata is
@@ -46907,19 +47544,26 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             # user-supplied + AI-parsed, so an unescaped name/venue was a
             # stored-XSS vector. (Same _h() rule the rest of the app follows.)
             rows_html += f"""
-<tr class="mh-hp mh-asset-row" data-asset-id="{_h(ad.get("id", ""))}">
+<tr class="mh-hp mh-asset-row" data-asset-id="{_h(ad.get("id", ""))}"
+    data-desc="{_h(_meta_desc)}" data-athletes="{_h(athlete_names)}"
+    data-venue="{_h(_meta_venue)}" data-event="{_h(_meta_event)}" data-tags="{_h(_meta_tags)}">
   <td class="mh-bulk-cell"><input type="checkbox" class="mh-row-check" name="asset_ids" value="{_h(ad.get("id", ""))}" aria-label="Select photo"></td>
   <td data-label="Preview"><span class=\"mh-lens\" style=\"display:inline-block;border-radius:4px;overflow:hidden;line-height:0\"><img src=\"{_file_url}\" style=\"max-height:60px;border-radius:4px;display:block\" /></span>{_hp_tpl}</td>
   <td data-label="Type">{_h(ad.get("type", ""))}</td>
   <td data-label="Athlete">{_h(athlete_names)}{_tag_badges}</td>
   <td data-label="Venue / Event">{_h(ad.get("linked_venue") or ad.get("linked_event") or "")}</td>
-  <td data-label="Permission">{_h(ad.get("permission_status", ""))}</td>
+  <td data-label="Permission">{
+                _media_permission_select(ad.get("id", ""), ad.get("permission_status", ""))
+                if ad.get("type") not in _skip_tag_types
+                else _h(_MEDIA_PERMISSION_LABELS.get(ad.get("permission_status", ""), ad.get("permission_status", "")))
+            }</td>
   <td data-label="Status">{_media_approval_badge(ad.get("approval_status", ""))}</td>
   <td data-label="ID"><code>{_h(ad.get("id", "")[:12])}</code></td>
   <td style="white-space:nowrap">
     <a class="btn ghost" href="{_edit_url}" style="font-size:11px;padding:3px 9px;margin-right:6px" title="Filters, adjustments, crop, shapes, blur brush — non-destructive edits">&#9998; Edit</a>
     <a class="btn ghost" href="{_studio_url}" style="font-size:11px;padding:3px 9px;margin-right:6px" title="Edit this photo with AI — fill, erase, expand, upscale, restyle">&#x2726; Studio</a>
     <a class="btn ghost" href="{_cutout_url}" style="font-size:11px;padding:3px 9px;margin-right:6px" title="See exactly what background removal knocks out">Cut-out</a>
+    <button class="btn ghost" type="button" data-mh-meta-open style="font-size:11px;padding:3px 9px;margin-right:6px" title="Edit the description, swimmer, venue and tags">&#x270E; Info</button>
     <button class="btn ghost mh-ml-qa" type="button" data-qa-url="{_qa_url}"
             aria-haspopup="menu" aria-expanded="false"
             style="font-size:11px;padding:3px 9px;margin-right:6px"
@@ -47234,6 +47878,20 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
 <style>{_BULK_ACTIONS_CSS}</style>
 <script>{_BULK_ACTIONS_JS}</script>
 <script>{_ML_QUICK_ACTION_JS}</script>
+{_ML_META_EDIT_MODAL}
+<style>.mh-safeguard-flag{{outline:2px solid var(--warn);outline-offset:-2px}}</style>
+<script>{
+            _ML_META_EDIT_JS.replace(
+                "__META_TMPL__",
+                url_for("api_media_library_meta", asset_id="__AID__"),
+            ).replace("__CSRF__", _h(_csrf_token()))
+        }</script>
+<script>{
+            _ML_PERMISSION_JS.replace(
+                "__PERM_TMPL__",
+                url_for("api_media_library_permission", asset_id="__AID__"),
+            ).replace("__CSRF__", _h(_csrf_token()))
+        }</script>
 <script src="{
             url_for(
                 "static", filename="js/mobile-capture.js", v=_static_ver("js/mobile-capture.js")
@@ -48342,7 +49000,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                 '<div class="mh-gen-actions">'
                 f'<a class="btn secondary" href="{url_for("image_studio_page", asset_id=ad.get("id", ""))}">&#x2726; Edit</a>'
                 f'<a class="btn secondary" href="{file_url}" download>Download</a>'
-                f'<a class="btn secondary" href="{url_for("api_media_library_mockup", asset_id=ad.get("id", ""), template="poster_wall")}" target="_blank" rel="noopener">Poster mockup</a>'
+                f'<button type="button" class="btn secondary" data-mh-mockup-open data-asset-id="{_h(ad.get("id", ""))}">Mockups &amp; sticker</button>'
                 "</div>"
                 "</figcaption></figure>"
             )
@@ -48367,6 +49025,21 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             "</section>"
             + (f'<div class="mh-gen-grid">{cards}</div>' if cards else empty)
             + f"<style>{_GENERATED_GALLERY_CSS}</style>"
+            + _ML_MOCKUP_MODAL
+            + "<script>"
+            + (
+                _ML_MOCKUP_PICKER_JS.replace("__TEMPLATES_URL__", url_for("api_mockup_templates"))
+                .replace(
+                    "__MOCKUP_TMPL__",
+                    url_for("api_media_library_mockup", asset_id="__AID__", template="__T__"),
+                )
+                .replace(
+                    "__STICKER_TMPL__",
+                    url_for("api_make_sticker", asset_id="__AID__"),
+                )
+                .replace("__CSRF__", _h(_csrf_token()))
+            )
+            + "</script>"
         )
         return _layout("Generated images", body, active="media")
 
@@ -48524,6 +49197,101 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             "success" if n_ok else "info",
         )
         return redirect(url_for("media_library_page"))
+
+    @app.route("/api/media-library/<asset_id>/meta", methods=["POST"])
+    def api_media_library_meta(asset_id: str):
+        """H-4 — edit a photo's metadata after upload.
+
+        Description, swimmer/athlete link, venue, event and tags used to be
+        write-once (set only at upload), yet three pieces of UI copy told users
+        they could "review and edit anytime". When AI vision tagged the wrong
+        swimmer the only fix was delete + re-upload. This lets a volunteer
+        correct those fields in place (a full replace, so a wrong tag can be
+        removed — not just added to). Athlete-record ids are left untouched;
+        the free-text names are the reviewable display metadata the badges cite.
+        """
+        if not _v8_ok:
+            return jsonify({"ok": False, "error": "v8_unavailable"}), 503
+        store = _v8_get_media_store()
+        asset = store.get(asset_id)
+        if asset is None:
+            return jsonify({"ok": False, "error": "not_found"}), 404
+        if not _session_can_access_profile(asset.profile_id):
+            return jsonify({"ok": False, "error": "forbidden"}), 403
+        body = request.get_json(silent=True) or {}
+
+        def _list(raw):
+            return [p.strip() for p in re.split(r"[,\n]", str(raw or "")) if p.strip()]
+
+        fields: dict = {}
+        if "description" in body:
+            fields["description_raw"] = str(body.get("description") or "").strip()
+        if "venue" in body:
+            fields["linked_venue"] = (str(body.get("venue") or "").strip()) or None
+        if "event" in body:
+            fields["linked_event"] = (str(body.get("event") or "").strip()) or None
+        if "athletes" in body:
+            fields["linked_athlete_names"] = _list(body.get("athletes"))
+        if "tags" in body:
+            fields["tags"] = _list(body.get("tags"))
+        if not fields:
+            return jsonify({"ok": False, "error": "no_fields"}), 400
+        store.update_fields(asset_id, fields)
+        updated = store.get(asset_id)
+        return jsonify(
+            {
+                "ok": True,
+                "asset": {
+                    "description": updated.description_raw or "",
+                    "athletes": ", ".join(updated.linked_athlete_names or []),
+                    "venue": updated.linked_venue or "",
+                    "event": updated.linked_event or "",
+                    "tags": ", ".join(updated.tags or []),
+                },
+            }
+        )
+
+    @app.route("/api/media-library/<asset_id>/permission", methods=["POST"])
+    def api_media_library_permission(asset_id: str):
+        """H-3 — record consent / permission on a photo asset.
+
+        The only permission writer used to be the Video Studio's footage-only
+        endpoint (404 for anything that isn't a clip), so a photo blocked by the
+        consent gate (``needs_parental_consent`` / ``do_not_use`` / not
+        ``safe_for_minors``) was a hard dead end — the only fix was delete +
+        re-upload. This is a sibling writer for photo assets using the same
+        PERMISSION_STATUSES vocabulary the gate enforces.
+        """
+        if not _v8_ok:
+            return jsonify({"ok": False, "error": "v8_unavailable"}), 503
+        from mediahub.media_library.models import PERMISSION_STATUSES
+
+        store = _v8_get_media_store()
+        asset = store.get(asset_id)
+        if asset is None:
+            return jsonify({"ok": False, "error": "not_found"}), 404
+        if not _session_can_access_profile(asset.profile_id):
+            return jsonify({"ok": False, "error": "forbidden"}), 403
+        body = request.get_json(silent=True) or {}
+        status = str(body.get("permission_status") or "").strip()
+        if status not in PERMISSION_STATUSES:
+            return jsonify(
+                {"ok": False, "error": "bad_permission", "message": "Unknown permission value."}
+            ), 400
+        updated = store.update_fields(asset_id, {"permission_status": status})
+        # A photo is usable (won't be skipped by bulk-approve / the picker) when
+        # it carries no hard block and is safe for minors — mirror the gate.
+        usable = status not in ("do_not_use", "needs_parental_consent") and bool(
+            getattr(updated, "safe_for_minors", True)
+        )
+        return jsonify(
+            {
+                "ok": True,
+                "permission_status": status,
+                "label": _MEDIA_PERMISSION_LABELS.get(status, status),
+                "usable": usable,
+            }
+        )
 
     @app.route("/api/media-library/bulk-export", methods=["POST"])
     def api_media_library_bulk_export():
@@ -48769,7 +49537,22 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             f'<a class="btn ghost" href="{back_url}">&larr; Back to library</a>'
             f'<a class="btn secondary" href="{url_for("image_studio_page", asset_id=a.id)}">'
             "&#x2726; Open in image studio</a>"
+            # C-14 — a cut-out is the ideal sticker/mockup source, so offer the
+            # picker here (the make-sticker API's other UI home).
+            f'<button type="button" class="btn secondary" data-mh-mockup-open data-asset-id="{_h(a.id)}">Mockups &amp; sticker</button>'
             "</div>"
+            + _ML_MOCKUP_MODAL
+            + "<script>"
+            + (
+                _ML_MOCKUP_PICKER_JS.replace("__TEMPLATES_URL__", url_for("api_mockup_templates"))
+                .replace(
+                    "__MOCKUP_TMPL__",
+                    url_for("api_media_library_mockup", asset_id="__AID__", template="__T__"),
+                )
+                .replace("__STICKER_TMPL__", url_for("api_make_sticker", asset_id="__AID__"))
+                .replace("__CSRF__", _h(_csrf_token()))
+            )
+            + "</script>"
         )
         return _layout("Cut-out preview", body, active="media")
 
@@ -50980,7 +51763,9 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                 f'<td data-label="Tier">{_h(s["tier"])}</td>'
                 f'<td data-label="Window">{window}</td>'
                 f'<td data-label="State">{state}</td>'
-                f'<td><form method="post" action="{url_for("sponsors_delete")}" style="margin:0">'
+                f'<td><form method="post" action="{url_for("sponsors_delete")}" style="margin:0" '
+                'onsubmit="return confirm(\'Remove this sponsor? Their logo and details are '
+                'permanently deleted.\')">'
                 f'<input type="hidden" name="sponsor_id" value="{_h(s["sponsor_id"])}">'
                 '<button type="submit" class="btn secondary" style="font-size:12px;padding:4px 10px">Remove</button>'
                 "</form></td></tr>"
@@ -56673,19 +57458,24 @@ voice, and queues them for one-click approval.</p>
         can_edit = _perms.can_edit(_active_role(pid))
         rows = ""
         for c in cols:
+            # C-9 — the name links into the collection so it's no longer a
+            # look-don't-touch row; the detail page lists contents and fills it.
+            _detail = url_for("collection_detail_page", collection_id=c["id"])
             rows += (
                 '<div class="card" style="padding:12px 16px;margin-bottom:10px;display:flex;'
                 'justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">'
-                f"<div><strong>{_h(c['name'])}</strong>"
+                f'<div><a href="{_detail}" style="text-decoration:none"><strong>{_h(c["name"])}</strong></a>'
                 f'<span style="color:var(--ink-muted);font-size:12px;margin-left:8px">'
                 f"{c['count']} item{'s' if c['count'] != 1 else ''}</span></div>"
+                '<div style="display:flex;gap:8px">'
+                f'<a class="btn secondary" style="font-size:12px;padding:4px 10px" href="{_detail}">Open</a>'
                 + (
                     f'<button class="btn secondary" style="font-size:12px;padding:4px 10px" '
                     f"onclick=\"mhDeleteCollection('{c['id']}')\">Delete</button>"
                     if can_edit
                     else ""
                 )
-                + "</div>"
+                + "</div></div>"
             )
         # D-34: a designed empty state instead of a bare grey line.
         rows = rows or _empty_state(
@@ -56718,14 +57508,143 @@ voice, and queues them for one-click approval.</p>
             ".then(function(r){return r.json();}).then(function(j){if(j.ok)location.reload();"
             "else if(window.MH&&MH.toast)MH.toast(j.reason||j.detail||'Could not create','error',3000);})"
             ".catch(function(){});}\n"
-            "function mhDeleteCollection(id){if(!confirm('Delete this collection? The meets "
-            "themselves are kept.'))return;"
-            "fetch('" + url_for("api_collections") + "/'+encodeURIComponent(id),{method:'POST',"
+            "function mhDeleteCollection(id){"
+            "var go=function(){fetch('"
+            + url_for("api_collections")
+            + "/'+encodeURIComponent(id),{method:'POST',"
             "headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'delete'})})"
-            ".then(function(r){return r.json();}).then(function(){location.reload();}).catch(function(){});}\n"
+            ".then(function(r){return r.json();}).then(function(){location.reload();}).catch(function(){});};"
+            "if(window.MH&&MH.confirm){MH.confirm({title:'Delete this collection?',"
+            "body:'The folder is removed. The meets and packs inside it are kept.',"
+            "confirmText:'Delete',onConfirm:go});}"
+            "else if(confirm('Delete this collection? The meets themselves are kept.')){go();}}\n"
             "</script>"
         )
         return _layout("Collections", body, active="settings")
+
+    @app.route("/collections/<collection_id>")
+    def collection_detail_page(collection_id: str):
+        """C-9 — a collection's contents, with a picker to actually fill it.
+
+        Previously collections could be created but never filled (no
+        'add to collection' action anywhere), so every one stayed at 0 items.
+        This lists the collection's meets (resolved to names, linking into
+        review) and offers a meet picker to add/remove — the fillable path the
+        feature was missing."""
+        pid = _active_profile_id()
+        if not pid:
+            return redirect(url_for("sign_in_page"))
+        from mediahub.collab import collections as _col
+
+        items = _col.list_items(pid, collection_id)
+        if items is None:  # not this org's collection (or gone)
+            return _recovery_page(
+                "Collection not found",
+                "It may have been deleted, or it belongs to another organisation.",
+                primary_cta=("All collections", url_for("collections_page")),
+            )
+        name = next(
+            (c["name"] for c in _col.list_collections(pid) if c["id"] == collection_id),
+            "Collection",
+        )
+        can_edit = _perms.can_edit(_active_role(pid))
+        # Resolve run items to a meet name + review link via the org-scoped runs
+        # table (WHERE profile_id = pid is the tenant boundary, so a run id from
+        # another org — or a deleted run — resolves to nothing and shows as its
+        # raw id, still removable, never linked/leaked).
+        run_names: dict = {}
+        run_ids = [it["item_id"] for it in items if it["item_type"] == "run"]
+        if run_ids:
+            try:
+                conn = _db()
+                qmarks = ",".join("?" for _ in run_ids)
+                for r in conn.execute(
+                    f"SELECT id, meet_name FROM runs WHERE profile_id = ? AND id IN ({qmarks})",
+                    (pid, *run_ids),
+                ).fetchall():
+                    run_names[r["id"]] = r["meet_name"] or r["id"]
+                conn.close()
+            except Exception:
+                run_names = {}
+        rows = ""
+        for it in items:
+            iid = it["item_id"]
+            label, link = iid, None
+            if it["item_type"] == "run" and iid in run_names:
+                label = run_names[iid]
+                link = url_for("review", run_id=iid)
+            label_html = (
+                f'<a href="{link}">{_h(label)}</a>' if link else f"<span>{_h(label)}</span>"
+            )
+            remove_btn = (
+                f'<button class="btn secondary" style="font-size:12px;padding:4px 10px" '
+                f"onclick=\"mhColRemove('{_h(it['item_type'])}','{_h(iid)}')\">Remove</button>"
+                if can_edit
+                else ""
+            )
+            rows += (
+                '<div class="card" style="padding:10px 14px;margin-bottom:8px;display:flex;'
+                'justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">'
+                f'<div><span class="tag" style="font-size:10px;margin-right:8px">'
+                f'{_h(it["item_type"])}</span>{label_html}</div>{remove_btn}</div>'
+            )
+        rows = rows or (
+            '<p class="dim" style="margin:var(--sp-4) 0">Nothing in this collection yet — '
+            "add a meet below.</p>"
+        )
+        # Meet picker: this org's processed meets, minus ones already in.
+        present = {it["item_id"] for it in items if it["item_type"] == "run"}
+        picker = ""
+        if can_edit:
+            opts = ""
+            try:
+                conn = _db()
+                runs = conn.execute(
+                    "SELECT id, meet_name FROM runs WHERE profile_id = ? AND status = 'done' "
+                    "ORDER BY created_at DESC LIMIT 100",
+                    (pid,),
+                ).fetchall()
+                conn.close()
+                for r in runs:
+                    if r["id"] in present:
+                        continue
+                    opts += (
+                        f'<option value="{_h(r["id"])}">{_h(r["meet_name"] or r["id"])}</option>'
+                    )
+            except Exception:
+                opts = ""
+            opts = opts or '<option value="">No processed meets to add</option>'
+            picker = (
+                '<div class="card" style="padding:12px 16px;margin:var(--sp-4) 0;display:flex;'
+                'gap:8px;flex-wrap:wrap;align-items:center">'
+                '<label for="mh-col-add" style="margin:0">Add a meet</label>'
+                '<select id="mh-col-add" style="flex:1;min-width:200px;padding:8px 10px;'
+                "border:1px solid var(--border);border-radius:6px;background:rgba(255,255,255,0.04);"
+                f'color:inherit">{opts}</select>'
+                '<button class="btn" onclick="mhColAdd()">Add</button></div>'
+            )
+        detail_url = url_for("api_collection_detail", collection_id=collection_id)
+        body = (
+            f'<div class="strap" style="margin-bottom:var(--sp-2)">'
+            f'<a href="{url_for("collections_page")}" style="color:var(--ink-muted);'
+            'text-decoration:none">&larr; All collections</a></div>'
+            f"<h1>{_h(name)}</h1>" + picker + f'<div id="mh-col-items">{rows}</div>' + "<script>\n"
+            f"var COL_URL='{detail_url}';\n"
+            "function mhColAdd(){var s=document.getElementById('mh-col-add');"
+            "if(!s||!s.value)return;"
+            "fetch(COL_URL,{method:'POST',headers:{'Content-Type':'application/json'},"
+            "body:JSON.stringify({action:'add_item',item_type:'run',item_id:s.value})})"
+            ".then(function(r){return r.json();}).then(function(j){if(j.ok)location.reload();"
+            "else if(window.MH&&MH.toast)MH.toast(j.detail||j.error||'Could not add','error',3000);})"
+            ".catch(function(){if(window.MH&&MH.toast)MH.toast('Network error','error',3000);});}\n"
+            "function mhColRemove(t,id){"
+            "fetch(COL_URL,{method:'POST',headers:{'Content-Type':'application/json'},"
+            "body:JSON.stringify({action:'remove_item',item_type:t,item_id:id})})"
+            ".then(function(r){return r.json();}).then(function(){location.reload();})"
+            ".catch(function(){if(window.MH&&MH.toast)MH.toast('Network error','error',3000);});}\n"
+            "</script>"
+        )
+        return _layout(name + " — collection", body, active="settings")
 
     # =====================================================================
     # Video suite (roadmap 1.6) — the footage path
@@ -56941,7 +57860,7 @@ voice, and queues them for one-click approval.</p>
                     '<p class="lede">The video studio is scoped per organisation. '
                     "Set one up, then come back to turn race footage into reels.</p>"
                     f'<div class="mh-hero-actions"><a class="mh-cta-primary" '
-                    f'href="{url_for("organisation_page")}">Set up organisation &rarr;</a></div>'
+                    f'href="{url_for("organisation_setup")}">Set up organisation &rarr;</a></div>'
                     "</section>",
                     active="video",
                 )
@@ -61670,9 +62589,22 @@ voice, and queues them for one-click approval.</p>
         from mediahub.documents import presenter as _pres
         from mediahub.documents.deck import deck_view, spec_version
 
-        session = _pres.create_session(
-            doc_id, len(spec.sections), owner=pid, spec_version=spec_version(spec)
-        )
+        # G-12: resume an existing live session for this deck+owner on reload
+        # rather than reminting a session (and a new pairing code) every load —
+        # a fresh code would desync the already-paired phone and audience view.
+        _ver = spec_version(spec)
+        session = _pres.get_live_for(doc_id, pid)
+        if session is None:
+            session = _pres.create_session(doc_id, len(spec.sections), owner=pid, spec_version=_ver)
+        else:
+            # Reflect any edit to the deck since the session started (bumps the
+            # version only when the content actually changed, so an unchanged
+            # reload doesn't needlessly reload the audience).
+            resumed = _pres.update_spec(
+                session.session_id, total_slides=len(spec.sections), spec_version=_ver
+            )
+            if resumed is not None:
+                session = resumed
         view = deck_view(spec)
         # Script-safe JSON: neutralise </script> by escaping '<' (embedded as a JS
         # literal, not HTML), so speaker notes can carry any text.
@@ -61827,13 +62759,22 @@ voice, and queues them for one-click approval.</p>
                 "Too many code attempts from your network — wait a few minutes.",
                 primary_cta=("Try again", url_for("remote_landing")),
             )
-        session = _pres.get_by_pairing_code(code)
+        session = _pres.get_by_pairing_code(code, include_ended=True)
         if session is None:
             _remote_code_failed()
             return _recovery_page(
                 "Code not found",
-                "That code is wrong or the presentation has ended.",
+                "That code doesn't match a live presentation — check the code on the presenter screen.",
                 primary_cta=("Try again", url_for("remote_landing")),
+            )
+        if session.ended:
+            # A real code whose talk has finished — a friendly close, not a
+            # dead "Code not found", and it doesn't burn the failure budget.
+            return _recovery_page(
+                "Presentation ended",
+                "This presentation has finished. Ask the presenter to start a new "
+                "one for a fresh code.",
+                primary_cta=("Slide remote", url_for("remote_landing")),
             )
         body = (
             _DOC_REMOTE.replace("__CODE__", _h(session.pairing_code))
@@ -61850,10 +62791,14 @@ voice, and queues them for one-click approval.</p>
 
         if _remote_code_limited():
             return jsonify({"ok": False, "error": "rate_limited"}), 429
-        session = _pres.get_by_pairing_code(code)
+        session = _pres.get_by_pairing_code(code, include_ended=True)
         if session is None:
             _remote_code_failed()
             return jsonify({"ok": False, "error": "no_session"}), 404
+        if session.ended:
+            # Valid code, but the talk is over — let the remote flip to its
+            # "ended" screen without counting a real code as a failed attempt.
+            return jsonify({"ok": True, "state": session.public_state()})
         body = request.get_json(silent=True) or {}
         updated = _pres.apply_action(
             session.session_id, str(body.get("action", "")), body.get("value")

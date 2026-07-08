@@ -128,7 +128,15 @@ def get_session(session_id: str) -> Optional[PresenterSession]:
     return s
 
 
-def get_by_pairing_code(code: str) -> Optional[PresenterSession]:
+def get_by_pairing_code(code: str, *, include_ended: bool = False) -> Optional[PresenterSession]:
+    """Resolve a live session by its pairing code.
+
+    ``include_ended=True`` also returns a session whose talk has ended (but not
+    one that has expired/been purged), so the remote can tell a *finished*
+    presentation apart from a *wrong* code — an ended-but-valid code gets a
+    friendly "presentation ended" screen instead of "Code not found", and never
+    burns the shared-NAT failure budget (E-4).
+    """
     code = (code or "").strip().upper()
     if not code:
         return None
@@ -137,7 +145,7 @@ def get_by_pairing_code(code: str) -> Optional[PresenterSession]:
             s = PresenterSession.from_dict(json.loads(f.read_text(encoding="utf-8")))
         except (OSError, ValueError, TypeError):
             continue
-        if s.pairing_code == code and not s.is_expired() and not s.ended:
+        if s.pairing_code == code and not s.is_expired() and (include_ended or not s.ended):
             return s
     return None
 
@@ -184,6 +192,23 @@ def _iter_live():
             continue
         if not s.is_expired(now=now):
             yield s
+
+
+def get_live_for(doc_id: str, owner: str) -> Optional[PresenterSession]:
+    """The current live (non-ended, non-expired) session for this deck+owner.
+
+    Lets the console *resume* an existing session on reload instead of minting a
+    fresh one every load — a reload used to create a new session with a new
+    pairing code, desyncing the already-paired phone and audience projector
+    (G-12). Returns the most-recently-updated match, or None to start fresh.
+    """
+    doc_id, owner = str(doc_id), str(owner)
+    best: Optional[PresenterSession] = None
+    for s in _iter_live():
+        if s.doc_id == doc_id and s.owner == owner and not s.ended:
+            if best is None or s.updated_at > best.updated_at:
+                best = s
+    return best
 
 
 def apply_action(session_id: str, action: str, value=None) -> Optional[PresenterSession]:
@@ -262,6 +287,7 @@ __all__ = [
     "PresenterSession",
     "create_session",
     "get_session",
+    "get_live_for",
     "get_by_pairing_code",
     "apply_action",
     "update_spec",

@@ -162,13 +162,20 @@ class TestHomeIsStripped:
         assert "Pick a format" not in body
 
     def test_home_has_no_recent_runs_table(self, gated_client):
-        """Runs are surfaced under /activity now, not on the home page."""
+        """The old full "Recent runs" table stays gone; the home now shows only
+        the curated C-1 "Pick up where you left off" resume strip (latest 1-3
+        runs), scoped to the pinned org."""
         c, _ = gated_client
         c.post("/api/organisation/active", data={"profile_id": "club-a"})
         resp = c.get("/")
         body = resp.get_data(as_text=True)
+        # The old full activity table never renders on home.
         assert "Recent runs" not in body
-        assert "Club A meet 1" not in body  # would appear if the table leaked back
+        # C-1: the resume strip surfaces this org's own recent meets…
+        assert "Pick up where you left off" in body
+        assert "Club A meet 2" in body  # newest club-a run
+        # …but never another org's runs (tenant isolation holds).
+        assert "Club B meet" not in body
 
     def test_home_keeps_org_banner_and_how_it_works(self, gated_client):
         c, _ = gated_client

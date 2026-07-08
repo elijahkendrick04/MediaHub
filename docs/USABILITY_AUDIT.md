@@ -74,25 +74,26 @@ The 15 highest-leverage items: all three severe first-run breakages, the high-se
 
 ## Implementation status
 
-**70 of 161 findings shipped** (plus I-4 assessed as already satisfied). Delivered across two merged/merging PRs, each finding as its own commit with a dedicated regression test:
+**86 of 161 findings shipped** (plus I-4 assessed as already satisfied). Delivered across three merged/merging PRs, each finding as its own commit with a dedicated regression test:
 
 - **PR #1082** (merged) — all of Theme A + the 15-item fix-first shortlist and adjacent high-severity data-safety/discoverability items (23 findings).
-- **PR #1085** (this branch) — Theme F complete, Theme I complete (bar the I-4 no-op), and the bulk of Theme D feedback/error states (47 findings).
+- **PR #1085** (merged) — Theme F complete, Theme I complete (bar the I-4 no-op), and the bulk of Theme D feedback/error states (47 findings).
+- **PR #1093** (this branch) — the remaining high-severity findings plus the owner-decided IA changes: E-4, G-12, B-6, J-2, H-4, H-3, E-1, C-16, G-3, C-1, C-2, C-8, C-13, C-18, and the owner-decided orphans C-14 (sticker/mockup picker) and C-9 (finish Collections) (16 findings). Owner decisions for this batch: customer vocab = "Results"; Developer link on /login only; nav = replace Elements with Activity; Collections = finish; sticker/mockup = wire a picker; brand = /organisation/setup canonical. Pre-merge adversarial review (5 dimensions) confirmed 4 defects (E-1 undo re-insert throw, H-4 badge wipe, C-16 open-redirect, a weak G-3 test) — all fixed.
 
-Themes **A**, **F** and **I** are complete. Remaining work is concentrated in **B** (too-many-steps), **J** (dead-ends), **H** (forms), **G** (consistency), **E** (destructive/data-safety), **C** (discoverability) and the **D** tail — several of these (nav placement, orphaned pages, brand-surface consolidation) are owner-facing decisions.
+Themes **A**, **F** and **I** are complete. Remaining work is concentrated in **B** (too-many-steps), **J** (dead-ends), **H** (forms), **G** (consistency), **E** (destructive/data-safety), **C** (discoverability) and the **D** tail — the two large high-severity items (Video Studio background-jobs J-1 and structured editor H-5) are queued next.
 
 | Theme | Done | Remaining |
 |-------|------|-----------|
 | A — First-run & onboarding | 7/7 ✅ | — none — |
-| B — Too-many-steps | 0/8 | B-1, B-2, B-3, B-4, B-5, B-6, B-7, B-8 |
-| C — Discoverability / IA | 5/20 | C-1, C-2, C-8, C-9, C-10, C-11, C-12, C-13, C-14, C-15, C-16, C-17, C-18, C-19, C-20 |
+| B — Too-many-steps | 1/8 | B-1, B-2, B-3, B-4, B-5, B-7, B-8 |
+| C — Discoverability / IA | 13/20 | C-10, C-11, C-12, C-15, C-17, C-19, C-20 |
 | D — Feedback & error states | 28/35 | D-10, D-11, D-12, D-13, D-15, D-26, D-32 |
-| E — Destructive / data-safety | 3/14 | E-1, E-4, E-5, E-6, E-7, E-8, E-10, E-11, E-12, E-13, E-14 |
+| E — Destructive / data-safety | 5/14 | E-5, E-6, E-7, E-8, E-10, E-11, E-12, E-13, E-14 |
 | F — Jargon & labels | 14/14 ✅ | — none — |
-| G — Consistency | 1/15 | G-1, G-2, G-3, G-5, G-6, G-7, G-8, G-9, G-10, G-11, G-12, G-13, G-14, G-15 |
-| H — Forms | 4/23 | H-3, H-4, H-5, H-8, H-9, H-10, H-11, H-12, H-13, H-14, H-15, H-16, H-17, H-18, H-19, H-20, H-21, H-22, H-23 |
+| G — Consistency | 3/15 | G-1, G-2, G-5, G-6, G-7, G-8, G-9, G-10, G-11, G-13, G-14, G-15 |
+| H — Forms | 6/23 | H-5, H-8, H-9, H-10, H-11, H-12, H-13, H-14, H-15, H-16, H-17, H-18, H-19, H-20, H-21, H-22, H-23 |
 | I — Mobile & a11y | 8/9 (+1 N/A) ✅ | — none — |
-| J — Dead-ends | 0/16 | J-1, J-2, J-3, J-4, J-5, J-6, J-7, J-8, J-9, J-10, J-11, J-12, J-13, J-14, J-15, J-16 |
+| J — Dead-ends | 1/16 | J-1, J-3, J-4, J-5, J-6, J-7, J-8, J-9, J-10, J-11, J-12, J-13, J-14, J-15, J-16 |
 
 Done findings are marked **✅ DONE (PR #…)** inline on each block below. Everything unmarked is still open.
 
