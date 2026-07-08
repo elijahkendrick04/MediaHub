@@ -13,9 +13,18 @@
   var statusEl = document.getElementById("bx-status");
   var resultEl = document.getElementById("bx-result");
   var qualityEl = document.getElementById("bx-quality");
+  var qualityOut = document.getElementById("bx-quality-out");
   var kickUrl = panel.getAttribute("data-kick-url");
   var shareUrl = panel.getAttribute("data-share-url");
   var lastJobId = "";
+
+  // F-11 — a live readout beside the quality slider so the user can see the
+  // value they picked (was a bare range input with no output).
+  if (qualityEl && qualityOut) {
+    var syncQuality = function () { qualityOut.textContent = qualityEl.value; };
+    qualityEl.addEventListener("input", syncQuality);
+    syncQuality();
+  }
 
   function chosenFormats() {
     return Array.prototype.slice

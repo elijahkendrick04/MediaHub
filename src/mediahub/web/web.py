@@ -55565,9 +55565,20 @@ voice, and queues them for one-click approval.</p>
         img_fmts = [
             f for f in ee.formats_for_category("image") if f.key in ("png", "jpg", "webp", "avif")
         ]
+        # F-11 — one-line plain-English guidance per format so a volunteer isn't
+        # picking blind between raw codec names.
+        _fmt_hint = {
+            "jpg": "smallest, works everywhere — best for photos",
+            "png": "sharpest text &amp; logos; larger files",
+            "webp": "small and sharp; most apps now accept it",
+            "avif": "smallest of all, but some apps can't open it yet",
+        }
         boxes = "".join(
-            f'<label class="mh-check"><input type="checkbox" name="fmt" value="{f.key}"'
-            f"{' checked' if f.key == 'jpg' else ''}> {_h(f.label)}</label>"
+            f'<label class="mh-check" style="display:block;margin-bottom:8px">'
+            f'<input type="checkbox" name="fmt" value="{f.key}"'
+            f"{' checked' if f.key == 'jpg' else ''}> <strong>{_h(f.label)}</strong>"
+            f'<span class="muted" style="font-size:12px"> — {_fmt_hint.get(f.key, "")}</span>'
+            f"</label>"
             for f in img_fmts
         )
         kick_url = url_for("api_run_bulk_export", run_id=run_id)
@@ -55579,9 +55590,14 @@ voice, and queues them for one-click approval.</p>
             '<p class="muted">Convert every rendered card in this pack to the formats you '
             "tick, bundled into one ZIP with a manifest. A format a card can't become is "
             "listed honestly in the manifest — the rest still export.</p>"
-            f'<div class="mh-chip-row" style="margin:var(--sp-3) 0">{boxes}</div>'
-            '<label class="mh-field">Quality '
-            '<input type="range" id="bx-quality" min="10" max="100" value="90"></label>'
+            f'<div style="margin:var(--sp-3) 0">{boxes}</div>'
+            '<label class="mh-field" for="bx-quality">Quality '
+            '<input type="range" id="bx-quality" min="10" max="100" value="90" '
+            'style="vertical-align:middle"> '
+            '<output id="bx-quality-out" for="bx-quality" '
+            'style="font-variant-numeric:tabular-nums;font-weight:600">90</output></label>'
+            '<p class="muted" style="font-size:12px;margin:4px 0 0">Higher = sharper, '
+            "but larger files. 90 suits most posts.</p>"
             '<div style="margin-top:var(--sp-3)">'
             '<button class="btn primary" id="bx-start">Start export</button> '
             '<span id="bx-status" class="muted" role="status" aria-live="polite"></span>'
