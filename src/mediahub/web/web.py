@@ -17137,6 +17137,93 @@ _ML_QUICK_ACTION_JS = r"""
 """
 
 
+# H-4 — in-place photo metadata editor. Opens a modal prefilled from the row's
+# data-attrs, POSTs to the meta endpoint, and updates the visible cells in place.
+# __META_TMPL__ carries "__AID__" for the asset id; __CSRF__ is the token.
+_ML_META_EDIT_JS = r"""
+(function(){
+  var TMPL = "__META_TMPL__", CSRF = "__CSRF__";
+  var modal = document.getElementById('mh-meta-modal');
+  if(!modal) return;
+  var g = function(id){ return document.getElementById(id); };
+  var fDesc=g('mh-meta-desc'), fAth=g('mh-meta-athletes'), fVen=g('mh-meta-venue'),
+      fEvt=g('mh-meta-event'), fTag=g('mh-meta-tags'), stat=g('mh-meta-status'), save=g('mh-meta-save');
+  var row=null, closeFn=null;
+  function openFor(r){
+    row=r;
+    fDesc.value=r.getAttribute('data-desc')||'';
+    fAth.value=r.getAttribute('data-athletes')||'';
+    fVen.value=r.getAttribute('data-venue')||'';
+    fEvt.value=r.getAttribute('data-event')||'';
+    fTag.value=r.getAttribute('data-tags')||'';
+    stat.textContent='';
+    if(window.MH && MH.openModal){ closeFn = MH.openModal(modal); }
+    else { modal.classList.add('is-open'); modal.setAttribute('aria-hidden','false'); }
+  }
+  function close(){ if(closeFn){ closeFn(); closeFn=null; } else { modal.classList.remove('is-open'); modal.setAttribute('aria-hidden','true'); } }
+  document.addEventListener('click', function(e){
+    var t = e.target.closest ? e.target.closest('[data-mh-meta-open]') : null;
+    if(!t) return;
+    e.preventDefault();
+    var r = t.closest('.mh-asset-row');
+    if(r) openFor(r);
+  });
+  document.addEventListener('keydown', function(e){
+    if((e.key==='Enter'||e.key===' ') && e.target && e.target.hasAttribute && e.target.hasAttribute('data-mh-meta-open')){
+      e.preventDefault(); var r=e.target.closest('.mh-asset-row'); if(r) openFor(r);
+    }
+  });
+  save.addEventListener('click', function(){
+    if(!row) return;
+    var id = row.getAttribute('data-asset-id');
+    save.disabled=true; stat.textContent='Saving…';
+    fetch(TMPL.replace('__AID__', encodeURIComponent(id)), {
+      method:'POST', headers:{'Content-Type':'application/json','X-CSRF-Token':CSRF,'Accept':'application/json'},
+      body: JSON.stringify({description:fDesc.value, athletes:fAth.value, venue:fVen.value, event:fEvt.value, tags:fTag.value})
+    }).then(function(r){ return r.json(); }).then(function(j){
+      save.disabled=false;
+      if(!j.ok){ stat.textContent = j.error || 'Could not save.'; return; }
+      var a=j.asset;
+      row.setAttribute('data-desc', a.description);
+      row.setAttribute('data-athletes', a.athletes);
+      row.setAttribute('data-venue', a.venue);
+      row.setAttribute('data-event', a.event);
+      row.setAttribute('data-tags', a.tags);
+      var ac=row.querySelector('[data-label="Athlete"]'); if(ac) ac.textContent = a.athletes;
+      var vc=row.querySelector('[data-label="Venue / Event"]'); if(vc) vc.textContent = a.venue || a.event || '';
+      if(window.MH && MH.toast) MH.toast('Photo details saved.', 'success');
+      close();
+    }).catch(function(){ save.disabled=false; stat.textContent='Network error — try again.'; });
+  });
+})();
+"""
+
+_ML_META_EDIT_MODAL = """
+<div class="mh-modal" id="mh-meta-modal" role="dialog" aria-modal="true" aria-labelledby="mh-meta-title" aria-hidden="true">
+  <div class="mh-modal-panel" style="position:relative;text-align:left">
+    <button type="button" class="mh-modal-close" data-mh-modal-close aria-label="Close">&times;</button>
+    <h2 class="mh-modal-title" id="mh-meta-title">Edit photo details</h2>
+    <div class="mh-modal-body" style="margin-bottom:var(--sp-4)">Correct the description, swimmer, venue, event or tags &mdash; no need to delete and re-upload.</div>
+    <label for="mh-meta-desc">Description</label>
+    <input id="mh-meta-desc" class="input" type="text" placeholder="e.g. Eira Hughes at Welsh National Open">
+    <label for="mh-meta-athletes">Swimmer(s) <span class="dim" style="font-weight:400">comma-separated</span></label>
+    <input id="mh-meta-athletes" class="input" type="text" placeholder="Eira Hughes, Tomos Rhys">
+    <label for="mh-meta-venue">Venue</label>
+    <input id="mh-meta-venue" class="input" type="text">
+    <label for="mh-meta-event">Event</label>
+    <input id="mh-meta-event" class="input" type="text">
+    <label for="mh-meta-tags">Tags <span class="dim" style="font-weight:400">comma-separated</span></label>
+    <input id="mh-meta-tags" class="input" type="text" placeholder="relay, podium, freestyle">
+    <div id="mh-meta-status" class="dim" role="status" aria-live="polite" style="min-height:1.2em;margin-top:var(--sp-2)"></div>
+    <div class="mh-modal-actions" style="margin-top:var(--sp-4)">
+      <button type="button" class="btn secondary" data-mh-modal-close>Cancel</button>
+      <button type="button" class="btn" id="mh-meta-save">Save details</button>
+    </div>
+  </div>
+</div>
+"""
+
+
 # Module-level JS for the palette confirmation form (rendered inside an
 # f-string). Lifted out so we don't have to double every `{` for f-string
 # escaping every time the form is rendered.
@@ -46890,8 +46977,9 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             _tag_badges = ""
             if _has_vision and athlete_names:
                 _tag_badges += (
-                    ' <span class="tag" style="font-size:9px" '
-                    'title="AI-tagged from the photo — review and edit anytime">&#10024; auto</span>'
+                    ' <span class="tag" style="font-size:9px;cursor:pointer" '
+                    'data-mh-meta-open role="button" tabindex="0" '
+                    'title="AI-tagged from the photo — click to review and edit">&#10024; auto</span>'
                 )
             if _is_untagged:
                 _tag_badges += (
@@ -46905,6 +46993,12 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             _studio_url = url_for("image_studio_page", asset_id=ad.get("id", ""))
             _edit_url = url_for("photo_editor_page", asset_id=ad.get("id", ""))
             _qa_url = url_for("api_media_library_quick_action", asset_id=ad.get("id", ""))
+            # H-4 — the editable metadata carried on the row so the in-place
+            # editor can prefill without a round-trip.
+            _meta_desc = ad.get("description_raw", "") or ""
+            _meta_tags = ", ".join(ad.get("tags") or [])
+            _meta_venue = ad.get("linked_venue") or ""
+            _meta_event = ad.get("linked_event") or ""
             # U.14 cursor-following preview: the row shows a 60px chip, so the
             # floating frame carries the full photo at a useful size plus a
             # caption (type + athlete/venue). Escaped — parsed metadata is
@@ -46939,7 +47033,9 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             # user-supplied + AI-parsed, so an unescaped name/venue was a
             # stored-XSS vector. (Same _h() rule the rest of the app follows.)
             rows_html += f"""
-<tr class="mh-hp mh-asset-row" data-asset-id="{_h(ad.get("id", ""))}">
+<tr class="mh-hp mh-asset-row" data-asset-id="{_h(ad.get("id", ""))}"
+    data-desc="{_h(_meta_desc)}" data-athletes="{_h(athlete_names)}"
+    data-venue="{_h(_meta_venue)}" data-event="{_h(_meta_event)}" data-tags="{_h(_meta_tags)}">
   <td class="mh-bulk-cell"><input type="checkbox" class="mh-row-check" name="asset_ids" value="{_h(ad.get("id", ""))}" aria-label="Select photo"></td>
   <td data-label="Preview"><span class=\"mh-lens\" style=\"display:inline-block;border-radius:4px;overflow:hidden;line-height:0\"><img src=\"{_file_url}\" style=\"max-height:60px;border-radius:4px;display:block\" /></span>{_hp_tpl}</td>
   <td data-label="Type">{_h(ad.get("type", ""))}</td>
@@ -46952,6 +47048,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
     <a class="btn ghost" href="{_edit_url}" style="font-size:11px;padding:3px 9px;margin-right:6px" title="Filters, adjustments, crop, shapes, blur brush — non-destructive edits">&#9998; Edit</a>
     <a class="btn ghost" href="{_studio_url}" style="font-size:11px;padding:3px 9px;margin-right:6px" title="Edit this photo with AI — fill, erase, expand, upscale, restyle">&#x2726; Studio</a>
     <a class="btn ghost" href="{_cutout_url}" style="font-size:11px;padding:3px 9px;margin-right:6px" title="See exactly what background removal knocks out">Cut-out</a>
+    <button class="btn ghost" type="button" data-mh-meta-open style="font-size:11px;padding:3px 9px;margin-right:6px" title="Edit the description, swimmer, venue and tags">&#9998; Info</button>
     <button class="btn ghost mh-ml-qa" type="button" data-qa-url="{_qa_url}"
             aria-haspopup="menu" aria-expanded="false"
             style="font-size:11px;padding:3px 9px;margin-right:6px"
@@ -47266,6 +47363,13 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
 <style>{_BULK_ACTIONS_CSS}</style>
 <script>{_BULK_ACTIONS_JS}</script>
 <script>{_ML_QUICK_ACTION_JS}</script>
+{_ML_META_EDIT_MODAL}
+<script>{
+            _ML_META_EDIT_JS.replace(
+                "__META_TMPL__",
+                url_for("api_media_library_meta", asset_id="__AID__"),
+            ).replace("__CSRF__", _h(_csrf_token()))
+        }</script>
 <script src="{
             url_for(
                 "static", filename="js/mobile-capture.js", v=_static_ver("js/mobile-capture.js")
@@ -48556,6 +48660,59 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             "success" if n_ok else "info",
         )
         return redirect(url_for("media_library_page"))
+
+    @app.route("/api/media-library/<asset_id>/meta", methods=["POST"])
+    def api_media_library_meta(asset_id: str):
+        """H-4 — edit a photo's metadata after upload.
+
+        Description, swimmer/athlete link, venue, event and tags used to be
+        write-once (set only at upload), yet three pieces of UI copy told users
+        they could "review and edit anytime". When AI vision tagged the wrong
+        swimmer the only fix was delete + re-upload. This lets a volunteer
+        correct those fields in place (a full replace, so a wrong tag can be
+        removed — not just added to). Athlete-record ids are left untouched;
+        the free-text names are the reviewable display metadata the badges cite.
+        """
+        if not _v8_ok:
+            return jsonify({"ok": False, "error": "v8_unavailable"}), 503
+        store = _v8_get_media_store()
+        asset = store.get(asset_id)
+        if asset is None:
+            return jsonify({"ok": False, "error": "not_found"}), 404
+        if not _session_can_access_profile(asset.profile_id):
+            return jsonify({"ok": False, "error": "forbidden"}), 403
+        body = request.get_json(silent=True) or {}
+
+        def _list(raw):
+            return [p.strip() for p in re.split(r"[,\n]", str(raw or "")) if p.strip()]
+
+        fields: dict = {}
+        if "description" in body:
+            fields["description_raw"] = str(body.get("description") or "").strip()
+        if "venue" in body:
+            fields["linked_venue"] = (str(body.get("venue") or "").strip()) or None
+        if "event" in body:
+            fields["linked_event"] = (str(body.get("event") or "").strip()) or None
+        if "athletes" in body:
+            fields["linked_athlete_names"] = _list(body.get("athletes"))
+        if "tags" in body:
+            fields["tags"] = _list(body.get("tags"))
+        if not fields:
+            return jsonify({"ok": False, "error": "no_fields"}), 400
+        store.update_fields(asset_id, fields)
+        updated = store.get(asset_id)
+        return jsonify(
+            {
+                "ok": True,
+                "asset": {
+                    "description": updated.description_raw or "",
+                    "athletes": ", ".join(updated.linked_athlete_names or []),
+                    "venue": updated.linked_venue or "",
+                    "event": updated.linked_event or "",
+                    "tags": ", ".join(updated.tags or []),
+                },
+            }
+        )
 
     @app.route("/api/media-library/bulk-export", methods=["POST"])
     def api_media_library_bulk_export():
