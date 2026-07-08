@@ -171,12 +171,16 @@ def test_signals_cover_all_three_sources(tmp_path):
         queued=3,
         approved=1,
     )
-    _seed_pack(tmp_path, profile_id=ORG_A, stub_type="weekend_preview", created=TODAY - timedelta(days=30))
+    _seed_pack(
+        tmp_path, profile_id=ORG_A, stub_type="weekend_preview", created=TODAY - timedelta(days=30)
+    )
     _seed_discovered_meet(tmp_path, name="Spring Open")
     save_planner_inputs(
         ORG_A,
         {
-            "upcoming_events": [{"name": "County Champs", "date": (TODAY + timedelta(days=3)).isoformat()}],
+            "upcoming_events": [
+                {"name": "County Champs", "date": (TODAY + timedelta(days=3)).isoformat()}
+            ],
             "goals": [{"post_type": "behind_the_scenes", "note": ""}],
             "blackout_dates": [(TODAY + timedelta(days=5)).isoformat()],
         },
@@ -212,7 +216,11 @@ def test_signals_are_tenant_isolated(tmp_path):
     _seed_pack(tmp_path, profile_id=ORG_B, stub_type="free_text", created=TODAY - timedelta(days=1))
     save_planner_inputs(
         ORG_B,
-        {"upcoming_events": [{"name": "Beta Cup", "date": (TODAY + timedelta(days=2)).isoformat()}]},
+        {
+            "upcoming_events": [
+                {"name": "Beta Cup", "date": (TODAY + timedelta(days=2)).isoformat()}
+            ]
+        },
         data_dir=tmp_path,
     )
 
@@ -221,7 +229,9 @@ def test_signals_are_tenant_isolated(tmp_path):
     assert own_a == []
     assert all(s.kind != "upcoming_event" for s in direct_a)
     # And org B sees its own.
-    assert any(s.kind == "run_results" for s in gather_own_signals(ORG_B, data_dir=tmp_path, now=TODAY))
+    assert any(
+        s.kind == "run_results" for s in gather_own_signals(ORG_B, data_dir=tmp_path, now=TODAY)
+    )
 
 
 def test_anniversary_signal_from_year_old_meet(tmp_path):
@@ -289,8 +299,15 @@ def _full_org_a(tmp_path):
     save_planner_inputs(
         ORG_A,
         {
-            "upcoming_events": [{"name": "County Champs", "date": (TODAY + timedelta(days=3)).isoformat()}],
-            "goals": [{"post_type": "milestone_celebration", "note": "celebrate club captain's 100th meet"}],
+            "upcoming_events": [
+                {"name": "County Champs", "date": (TODAY + timedelta(days=3)).isoformat()}
+            ],
+            "goals": [
+                {
+                    "post_type": "milestone_celebration",
+                    "note": "celebrate club captain's 100th meet",
+                }
+            ],
         },
         data_dir=tmp_path,
     )
@@ -336,9 +353,7 @@ def test_plan_is_deterministic(tmp_path):
     _full_org_a(tmp_path)
     p1 = build_content_plan("swimming", ORG_A, data_dir=tmp_path, now=TODAY)
     p2 = build_content_plan("swimming", ORG_A, data_dir=tmp_path, now=TODAY)
-    strip = lambda p: [
-        {k: v for k, v in i.to_dict().items()} for i in p.items
-    ]  # noqa: E731
+    strip = lambda p: [{k: v for k, v in i.to_dict().items()} for i in p.items]  # noqa: E731
     assert strip(p1) == strip(p2)
 
 
@@ -510,7 +525,10 @@ def test_plan_generate_persist_and_page_render(app_with_org, tmp_path):
             "/api/plan/inputs",
             json={
                 "upcoming_events": [
-                    {"name": "County Champs", "date": (date.today() + timedelta(days=4)).isoformat()}
+                    {
+                        "name": "County Champs",
+                        "date": (date.today() + timedelta(days=4)).isoformat(),
+                    }
                 ],
                 "blackout_dates": [],
             },
@@ -542,7 +560,10 @@ def test_plan_generate_persist_and_page_render(app_with_org, tmp_path):
         assert "What should we" in html
         assert "Meet Recap" in html
         assert "Test Gala" in html  # signal text surfaces in reasons
-        assert "OWN" in html and "DIRECT" in html
+        # F-6: the signal-source chips read in plain language now, not the raw
+        # OWN/EXTERNAL/DIRECT taxonomy.
+        assert "From your results" in html and "You told us" in html
+        assert ">OWN<" not in html and ">DIRECT<" not in html
 
 
 def test_plan_latest_is_org_scoped(app_with_org, tmp_path):
