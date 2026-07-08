@@ -14207,7 +14207,7 @@ def _layout(
       <span class="mh-footer-sep">/</span>
       <a href="{{ url_for('dpa_page') }}">DPA</a>
       <span class="mh-footer-sep">/</span>
-      <a href="{{ url_for('research_page') }}">Roadmap</a>
+      <a href="{{ url_for('research_page') }}">Supported files</a>
       <span class="mh-footer-sep">/</span>
       <a href="{{ url_for('api_docs_page') }}">API</a>
     </div>
@@ -18981,7 +18981,7 @@ def create_app() -> Flask:
         if not (prof and prof.is_ready()):
             demo_line_html = (
                 '<p class="mh-demo-line">Just looking? '
-                f'<a href="{url_for("research_page")}">See what the engine does</a> '
+                '<a href="#mh-see-it-work">See it in action</a> '
                 'or <a href="' + url_for("sign_in_page") + '">browse pinned organisations</a>.'
                 "</p>"
             )
@@ -19164,13 +19164,13 @@ def create_app() -> Flask:
             + _reveal_lines(["Can't find the", '<em class="editorial">answer</em>?'])
             + '<p class="mh-reveal" style="color:var(--ink-dim);max-width:62ch">'
             "Check the live system status, audit exactly what's stored about your "
-            "club on the privacy page, or see what's shipping next on the roadmap."
+            "club on the privacy page, or see which result files you can upload."
             "</p>"
             '<div class="mh-hero-actions" style="margin-top:var(--sp-4)">'
             f'<a class="btn" href="{url_for("status_page")}">System status</a>'
             f'<a class="btn secondary" href="{url_for("privacy_page")}">'
             "Privacy &amp; data</a>"
-            f'<a class="btn secondary" href="{url_for("research_page")}">Roadmap</a>'
+            f'<a class="btn secondary" href="{url_for("research_page")}">Supported files</a>'
             f'<a class="btn secondary" href="{url_for("export_center_page")}">'
             "Export &amp; convert</a>"
             f'<a class="btn secondary" href="{url_for("print_center_page")}">'
@@ -25404,39 +25404,43 @@ Relay team broke club record"></textarea>
     # ---- RESEARCH ------------------------------------------------------
     @app.route("/research")
     def research_page():
-        # Try to render a research markdown if present
-        md_path = RESEARCH_DIR / "parser_roadmap.md"
-        if md_path.exists():
-            content = md_path.read_text()
-            html = _render_markdown(content)
-        else:
-            html = """
-<h2>Adapter roadmap (interim)</h2>
-<p>The research substream is collecting source-format coverage across UK and US meets.
-   This page will populate when the roadmap document is written.</p>
-<h3>Currently supported</h3>
+        # F-4 — a customer-facing "what can I upload?" page, not the old
+        # parser/adapter research notes. Plain language for a club volunteer
+        # deciding whether their meet file will work; the engine-internal
+        # can_parse()/adapter detail lives on /developer/api instead.
+        html = """
+<h2>Files you can upload today</h2>
 <ul>
-  <li><strong>HY3</strong> &mdash; Hytek Meet Manager (UK + US) &mdash; full parser with splits.</li>
+  <li><strong>Hytek results (.hy3)</strong> &mdash; the file Meet Manager exports after
+      a gala. This is the richest input: individual swims, splits and heats all come
+      through.</li>
+  <li><strong>PDF result sheets</strong> &mdash; the printed-style results many meets
+      publish. We read the tables and flag anything that looks unclear for your review.</li>
+  <li><strong>Spreadsheets (.csv / .xls / .xlsx)</strong> &mdash; results exported from
+      Meet Mobile, SwimTopia or a hand-kept sheet.</li>
+  <li><strong>A results link</strong> &mdash; paste the web address of a public results
+      page and we'll read it for you.</li>
 </ul>
-<h3>Planned next</h3>
+<h3>Coming soon</h3>
 <ul>
-  <li>SDIF / CL2 &mdash; sibling format produced by Hytek and used by USA Swimming.</li>
-  <li>Meet Mobile / SwimTopia exports (CSV).</li>
-  <li>Public meet-result pages from external swim-results sites (HTML adapter).</li>
-  <li>USA Swimming Times Search exports.</li>
+  <li>SDIF / CL2 timing exports (the sibling of the Hytek file, used by USA Swimming).</li>
+  <li>Direct import from more meet-management and timing platforms.</li>
 </ul>
-<p class="muted">Each new adapter must implement <code>can_parse()</code> and return the
-   canonical Meet schema. No detector / caption code changes are needed.</p>
+<p class="muted">Not sure your file will work? Upload it anyway &mdash; MediaHub tells you
+   straight away what it found and asks you to confirm anything it wasn't sure about.
+   Nothing is published without your approval.</p>
 """
         body = (
             '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">'
-            '<span class="mh-hero-eyebrow">Roadmap</span>'
-            '<h1>Adapter <em class="editorial">research</em></h1>'
-            '<p class="lede">What MediaHub can read today and what\'s coming next. Every new format becomes a single adapter — no detector or caption-engine rewrite.</p>'
+            '<span class="mh-hero-eyebrow">Getting started</span>'
+            '<h1>What files can I <em class="editorial">upload</em>?</h1>'
+            '<p class="lede">The result formats MediaHub reads today, and what\'s coming next — in plain English, no timing-software jargon required.</p>'
             "</section>"
             f'<div class="card">{html}</div>'
+            '<div class="card"><p>Ready when you are — '
+            f'<a class="btn" href="{url_for("upload")}">Upload your results</a></p></div>'
         )
-        return _layout("Research", body, active="research")
+        return _layout("What files can I upload?", body, active="research")
 
     # ---- DEVELOPER / API REFERENCE (UI 1.11) ---------------------------
     @app.route("/developer/api")

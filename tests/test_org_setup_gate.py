@@ -12,6 +12,7 @@ Asserts that:
   4. After a successful capture the session is pinned and the gate lifts
      for the same browser session.
 """
+
 from __future__ import annotations
 
 import sys
@@ -40,6 +41,7 @@ def isolated_profiles(tmp_path, monkeypatch):
     import importlib
     import mediahub.web.club_profile as cp
     import mediahub.web.web as wm
+
     importlib.reload(cp)
     importlib.reload(wm)
     yield tmp_path
@@ -51,6 +53,7 @@ def gated_client(isolated_profiles, monkeypatch):
     gate is actually active (the gate is bypassed under plain TESTING
     mode by default so the existing test suite isn't disturbed)."""
     import mediahub.web.web as wm
+
     app = wm.create_app()
     app.config["TESTING"] = True
     app.config["ENFORCE_ORG_GATE"] = True
@@ -61,6 +64,7 @@ def gated_client(isolated_profiles, monkeypatch):
 # ---------------------------------------------------------------------------
 # 1. Browser routes are redirected when no org is set up
 # ---------------------------------------------------------------------------
+
 
 class TestBrowserRoutesGated:
     def test_add_input_redirects_to_setup(self, gated_client):
@@ -80,6 +84,7 @@ class TestBrowserRoutesGated:
 # 2. JSON routes return 409
 # ---------------------------------------------------------------------------
 
+
 class TestApiRoutesReturn409:
     def test_caption_api_returns_409(self, gated_client):
         c, _ = gated_client
@@ -93,6 +98,7 @@ class TestApiRoutesReturn409:
 # ---------------------------------------------------------------------------
 # 3. Exempt routes remain reachable
 # ---------------------------------------------------------------------------
+
 
 class TestExemptRoutesReachable:
     def test_home_loads(self, gated_client):
@@ -131,23 +137,27 @@ class TestExemptRoutesReachable:
         assert resp.status_code == 200
 
     def test_research_page_loads_without_org(self, gated_client):
-        """/research is a public informational page (supported formats + adapter
-        roadmap); it must be reachable before sign-in, not redirected to setup."""
+        """/research is a public informational page ("What files can I upload?");
+        it must be reachable before sign-in, not redirected to setup. F-4 rewrote
+        it from the parser/adapter research notes into customer-facing copy."""
         c, _ = gated_client
         resp = c.get("/research", follow_redirects=False)
         assert resp.status_code == 200
         body = resp.get_data(as_text=True)
-        assert "research" in body.lower()
-        assert "Adapter" in body
+        assert "What files can I upload?" in body
+        assert "can_parse" not in body and "adapter" not in body.lower()
 
 
 # ---------------------------------------------------------------------------
 # 4. After capture, the gate lifts within the same session
 # ---------------------------------------------------------------------------
 
+
 class TestGateLiftsAfterSetup:
     def test_capture_pins_session_and_unlocks(
-        self, gated_client, monkeypatch,
+        self,
+        gated_client,
+        monkeypatch,
     ):
         # Stub the social_dna capture to return a complete brand profile
         # without hitting the network or an LLM.
@@ -213,7 +223,9 @@ class TestGateLiftsAfterSetup:
         )
 
     def test_setup_accepts_optional_brand_guidelines_file(
-        self, gated_client, monkeypatch,
+        self,
+        gated_client,
+        monkeypatch,
     ):
         """The setup form has an optional file upload. When a file IS
         provided, the AI ingestion fields land on the saved profile;
@@ -260,6 +272,7 @@ class TestGateLiftsAfterSetup:
 
         c, _ = gated_client
         import io
+
         file_bytes = b"Brand voice: warm, inclusive. Never compare swimmers."
         resp = c.post(
             "/organisation/setup/capture",
@@ -274,6 +287,7 @@ class TestGateLiftsAfterSetup:
 
         # The profile must now carry the AI-interpreted guidelines.
         from mediahub.web.club_profile import list_profiles
+
         profs = [p for p in list_profiles() if p.display_name == "Upload Club"]
         assert len(profs) == 1, "profile not saved"
         p = profs[0]
@@ -289,6 +303,7 @@ class TestGateLiftsAfterSetup:
         """The file upload is genuinely optional — the form must
         succeed without it, leaving brand_guidelines fields empty."""
         from mediahub.brand import social_dna
+
         monkeypatch.setattr(
             social_dna,
             "capture_from_socials",
@@ -318,6 +333,7 @@ class TestGateLiftsAfterSetup:
         )
         assert resp.status_code in (301, 302, 303, 307, 308)
         from mediahub.web.club_profile import list_profiles
+
         profs = [p for p in list_profiles() if p.display_name == "No-File Club"]
         assert len(profs) == 1
         assert profs[0].brand_guidelines == {}
@@ -342,12 +358,12 @@ class TestGateLiftsAfterSetup:
         tag_start = body.rfind("<input", 0, upload_idx)
         tag_end = body.find(">", upload_idx) + 1
         upload_tag = body[tag_start:tag_end]
-        assert " required" not in upload_tag, (
-            "brand_guidelines_file must be optional, not required"
-        )
+        assert " required" not in upload_tag, "brand_guidelines_file must be optional, not required"
 
     def test_active_org_api_reports_pinned_profile(
-        self, gated_client, monkeypatch,
+        self,
+        gated_client,
+        monkeypatch,
     ):
         """/api/organisation/active should reflect the session pin."""
         from mediahub.brand import social_dna
@@ -391,37 +407,46 @@ class TestGateLiftsAfterSetup:
 # 5. ClubProfile.is_ready() rules
 # ---------------------------------------------------------------------------
 
+
 class TestIsReady:
     def test_blank_profile_not_ready(self):
         from mediahub.web.club_profile import ClubProfile
+
         p = ClubProfile(profile_id="x", display_name="")
         assert p.is_ready() is False
 
     def test_name_only_not_ready(self):
         from mediahub.web.club_profile import ClubProfile
+
         p = ClubProfile(profile_id="x", display_name="Some Club")
         assert p.is_ready() is False
 
     def test_brand_voice_summary_makes_ready(self):
         from mediahub.web.club_profile import ClubProfile
+
         p = ClubProfile(
-            profile_id="x", display_name="Some Club",
+            profile_id="x",
+            display_name="Some Club",
             brand_voice_summary="A community club that celebrates effort.",
         )
         assert p.is_ready() is True
 
     def test_voice_examples_make_ready(self):
         from mediahub.web.club_profile import ClubProfile
+
         p = ClubProfile(
-            profile_id="x", display_name="Some Club",
+            profile_id="x",
+            display_name="Some Club",
             voice_examples=["a", "b", "c"],
         )
         assert p.is_ready() is True
 
     def test_voice_profile_makes_ready(self):
         from mediahub.web.club_profile import ClubProfile
+
         p = ClubProfile(
-            profile_id="x", display_name="Some Club",
+            profile_id="x",
+            display_name="Some Club",
             voice_profile={"preferred_swimmer_address": "first_name"},
         )
         assert p.is_ready() is True
