@@ -4120,54 +4120,85 @@ _RUN_DELETE_JS = """
     if (!form || !form.classList) return;
     if (form.classList.contains('mh-run-delete')) {
       e.preventDefault();
-      if (!window.confirm('Delete these results? This cannot be undone.')) return;
       var rid = form.getAttribute('data-run-id');
       var btn = form.querySelector('button');
-      if (btn) btn.disabled = true;
-      // Send the form body so the auto-injected csrf_token rides along (the
-      // delete route is not CSRF-exempt); X-Requested-With asks for JSON back.
-      fetch(form.action, {method:'POST', headers:{'X-Requested-With':'XMLHttpRequest'}, body:new FormData(form)})
-        .then(function(r){ return r.json().catch(function(){ return {}; }); })
-        .then(function(j){
-          if (j && j.ok) {
-            var row = document.querySelector('[data-run-row="'+esc(rid)+'"]');
-            var err = document.querySelector('[data-run-err="'+esc(rid)+'"]');
-            if (err && err.parentNode) err.parentNode.removeChild(err);
-            if (row && row.parentNode) row.parentNode.removeChild(row);
-            if (window.MH && MH.toast) MH.toast('Run deleted.', 'success');
-          } else {
-            if (btn) btn.disabled = false;
-            if (window.MH && MH.toast) MH.toast('Could not delete — reload and try again.', 'error');
-          }
-        })
-        .catch(function(){
-          if (btn) btn.disabled = false;
-          if (window.MH && MH.toast) MH.toast('Could not delete — reload and try again.', 'error');
+      // E-1: the row is removed optimistically and the actual server delete is
+      // held for ~8s behind an "Undo" toast (a soft delete). Undo restores the
+      // row and never hits the server; leaving the page flushes the delete via
+      // sendBeacon so the intent isn't silently lost.
+      var runDelete = function(){
+        var row = document.querySelector('[data-run-row="'+esc(rid)+'"]');
+        var err = document.querySelector('[data-run-err="'+esc(rid)+'"]');
+        if (err && err.parentNode) err.parentNode.removeChild(err);
+        var parent = row && row.parentNode;
+        var anchor = row && row.nextSibling;
+        if (row && parent) parent.removeChild(row);
+        var done = false;  // committed or undone — whichever happens first wins
+        var commit = function(){
+          if (done) return; done = true;
+          window.removeEventListener('beforeunload', beacon);
+          fetch(form.action, {method:'POST', headers:{'X-Requested-With':'XMLHttpRequest'}, body:new FormData(form)})
+            .then(function(r){ return r.json().catch(function(){ return {}; }); })
+            .then(function(j){ if (!(j && j.ok)) restore('Could not delete — reload and try again.'); })
+            .catch(function(){ restore('Could not delete — reload and try again.'); });
+        };
+        var restore = function(errMsg){
+          if (done && !errMsg) return; done = true;
+          window.removeEventListener('beforeunload', beacon);
+          if (row && parent) parent.insertBefore(row, anchor);
+          if (errMsg && window.MH && MH.toast) MH.toast(errMsg, 'error');
+        };
+        var beacon = function(){
+          if (done) return; done = true;
+          try { navigator.sendBeacon(form.action, new FormData(form)); } catch(e){}
+        };
+        var timer = setTimeout(commit, 8000);
+        window.addEventListener('beforeunload', beacon);
+        if (window.MH && MH.toast) {
+          MH.toast('Meet deleted', 'success', 8000, { text:'Undo', onClick: function(){ clearTimeout(timer); restore(); } });
+        } else {
+          clearTimeout(timer); commit();
+        }
+      };
+      if (window.MH && MH.confirm) {
+        MH.confirm({
+          title: 'Delete this meet’s results?',
+          body: 'The meet and its cards, captions and rendered files will be removed. You’ll have a few seconds to undo.',
+          confirmText: 'Delete', onConfirm: runDelete
         });
+      } else if (window.confirm('Delete these results? This cannot be undone.')) {
+        runDelete();
+      }
     } else if (form.classList.contains('mh-clear-all-runs')) {
       e.preventDefault();
       var n = form.getAttribute('data-count') || '';
-      var msg = n
-        ? ('Permanently delete all ' + n + ' runs for this organisation? This cannot be undone.')
-        : 'Permanently delete every run for this organisation? This cannot be undone.';
-      if (!window.confirm(msg)) return;
-      var cbtn = form.querySelector('button');
-      if (cbtn) cbtn.disabled = true;
-      fetch(form.action, {method:'POST', headers:{'X-Requested-With':'XMLHttpRequest'}, body:new FormData(form)})
-        .then(function(r){ return r.json().catch(function(){ return {}; }); })
-        .then(function(j){
-          if (j && j.ok) {
-            if (window.MH && MH.toast) MH.toast((j.deleted || 0) + ' runs deleted.', 'success');
-            window.location.reload();
-          } else {
+      var body = n
+        ? ('Permanently delete all ' + n + ' meets for this organisation. This cannot be undone.')
+        : 'Permanently delete every meet for this organisation. This cannot be undone.';
+      var clearAll = function(){
+        var cbtn = form.querySelector('button');
+        if (cbtn) cbtn.disabled = true;
+        fetch(form.action, {method:'POST', headers:{'X-Requested-With':'XMLHttpRequest'}, body:new FormData(form)})
+          .then(function(r){ return r.json().catch(function(){ return {}; }); })
+          .then(function(j){
+            if (j && j.ok) {
+              if (window.MH && MH.toast) MH.toast((j.deleted || 0) + ' meets deleted.', 'success');
+              window.location.reload();
+            } else {
+              if (cbtn) cbtn.disabled = false;
+              if (window.MH && MH.toast) MH.toast('Could not delete — reload and try again.', 'error');
+            }
+          })
+          .catch(function(){
             if (cbtn) cbtn.disabled = false;
             if (window.MH && MH.toast) MH.toast('Could not delete — reload and try again.', 'error');
-          }
-        })
-        .catch(function(){
-          if (cbtn) cbtn.disabled = false;
-          if (window.MH && MH.toast) MH.toast('Could not delete — reload and try again.', 'error');
-        });
+          });
+      };
+      if (window.MH && MH.confirm) {
+        MH.confirm({ title: 'Clear all meets?', body: body, confirmText: 'Delete all', onConfirm: clearAll });
+      } else if (window.confirm(body)) {
+        clearAll();
+      }
     }
   }, false);
 })();
@@ -14577,23 +14608,28 @@ def _layout(
       '<button class="mh-toast-close" aria-label="Dismiss">&times;</button>';
     var msgSlot = t.querySelector('.mh-toast-msg');
     msgSlot.textContent = (message == null ? '' : String(message));
-    // Optional inline action — a same-origin deep link (e.g. "Open in builder"
-    // for an open-task gate, D-1). The href is a trusted app path the caller
-    // builds with encodeURIComponent; the visible label is set via textContent.
-    if (action && action.href) {
-      var a = document.createElement('a');
-      a.href = action.href;
-      a.textContent = action.text || 'Open';
-      a.className = 'mh-toast-action';
-      a.style.cssText = 'margin-left:10px;color:inherit;font-weight:600;text-decoration:underline;white-space:nowrap';
-      msgSlot.appendChild(a);
-    }
     toastContainer.appendChild(t);
     var close = function(){
       t.style.transition = 'opacity 0.2s ease, transform 0.2s ease';
       t.style.opacity = '0'; t.style.transform = 'translateX(16px)';
       setTimeout(function(){ if (t.parentNode) t.remove(); }, 220);
     };
+    // Optional inline action — either a same-origin deep link (action.href, e.g.
+    // "Open in builder" for an open-task gate, D-1) or a callback button
+    // (action.onClick, e.g. "Undo" for a soft delete, E-1). The href is a
+    // trusted app path the caller builds with encodeURIComponent; the visible
+    // label is set via textContent.
+    if (action && (action.href || action.onClick)) {
+      var a = document.createElement(action.href ? 'a' : 'button');
+      if (action.href) a.href = action.href;
+      a.textContent = action.text || 'Open';
+      a.className = 'mh-toast-action';
+      a.style.cssText = 'margin-left:10px;color:inherit;font-weight:700;text-decoration:underline;white-space:nowrap;background:none;border:0;cursor:pointer;font:inherit;padding:0';
+      if (action.onClick) {
+        a.addEventListener('click', function(ev){ ev.preventDefault(); try { action.onClick(); } finally { close(); } });
+      }
+      msgSlot.appendChild(a);
+    }
     t.querySelector('.mh-toast-close').addEventListener('click', close);
     setTimeout(close, ms || (type === 'error' ? 7000 : 4500));
   };
@@ -14849,6 +14885,42 @@ def _layout(
       b.addEventListener('click', close, {once: true});
     });
     return close;
+  };
+
+  // === Styled confirm (E-1) ===
+  // A branded, focus-trapping replacement for the jarring native confirm() the
+  // destructive deletes used. opts: {title, body, confirmText, cancelText,
+  // danger, onConfirm}. Builds a throwaway .mh-modal, wires it through
+  // MH.openModal (Esc/backdrop/Tab-trap/focus-restore) and removes it on close.
+  MH.confirm = function(opts) {
+    opts = opts || {};
+    var modal = document.createElement('div');
+    modal.className = 'mh-modal';
+    modal.setAttribute('role', 'dialog');
+    modal.setAttribute('aria-modal', 'true');
+    modal.setAttribute('aria-hidden', 'true');
+    var panel = document.createElement('div');
+    panel.className = 'mh-modal-panel';
+    panel.style.position = 'relative';
+    var h = document.createElement('h2'); h.className = 'mh-modal-title';
+    h.textContent = opts.title || 'Are you sure?';
+    var b = document.createElement('div'); b.className = 'mh-modal-body';
+    b.textContent = opts.body || '';
+    var acts = document.createElement('div'); acts.className = 'mh-modal-actions';
+    var cancel = document.createElement('button');
+    cancel.type = 'button'; cancel.className = 'btn secondary';
+    cancel.textContent = opts.cancelText || 'Cancel';
+    cancel.setAttribute('data-mh-modal-close', '');
+    var ok = document.createElement('button');
+    ok.type = 'button';
+    ok.className = 'btn ' + (opts.danger === false ? '' : 'danger');
+    ok.textContent = opts.confirmText || 'Delete';
+    acts.appendChild(cancel); acts.appendChild(ok);
+    panel.appendChild(h); panel.appendChild(b); panel.appendChild(acts);
+    modal.appendChild(panel);
+    document.body.appendChild(modal);
+    var closeFn = MH.openModal(modal, { onClose: function(){ if (modal.parentNode) modal.parentNode.removeChild(modal); } });
+    ok.addEventListener('click', function(){ if (closeFn) closeFn(); if (opts.onConfirm) opts.onConfirm(); });
   };
 
   // === Relative time helper ===
@@ -40658,7 +40730,9 @@ what you're doing, what they should do.</p>
             if can_admin:
                 remove_html = (
                     f'<form method="post" action="{url_for("organisation_members_page")}" '
-                    'style="display:inline">'
+                    'style="display:inline" '
+                    'onsubmit="return confirm(\'Remove this member from the organisation? '
+                    'They lose access immediately.\')">'
                     '<input type="hidden" name="action" value="remove"/>'
                     f'<input type="hidden" name="email" value="{_h(m.email)}"/>'
                     '<button type="submit" class="btn secondary" '
@@ -51297,7 +51371,9 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                 f'<td data-label="Tier">{_h(s["tier"])}</td>'
                 f'<td data-label="Window">{window}</td>'
                 f'<td data-label="State">{state}</td>'
-                f'<td><form method="post" action="{url_for("sponsors_delete")}" style="margin:0">'
+                f'<td><form method="post" action="{url_for("sponsors_delete")}" style="margin:0" '
+                'onsubmit="return confirm(\'Remove this sponsor? Their logo and details are '
+                'permanently deleted.\')">'
                 f'<input type="hidden" name="sponsor_id" value="{_h(s["sponsor_id"])}">'
                 '<button type="submit" class="btn secondary" style="font-size:12px;padding:4px 10px">Remove</button>'
                 "</form></td></tr>"
@@ -57035,11 +57111,14 @@ voice, and queues them for one-click approval.</p>
             ".then(function(r){return r.json();}).then(function(j){if(j.ok)location.reload();"
             "else if(window.MH&&MH.toast)MH.toast(j.reason||j.detail||'Could not create','error',3000);})"
             ".catch(function(){});}\n"
-            "function mhDeleteCollection(id){if(!confirm('Delete this collection? The meets "
-            "themselves are kept.'))return;"
-            "fetch('" + url_for("api_collections") + "/'+encodeURIComponent(id),{method:'POST',"
+            "function mhDeleteCollection(id){"
+            "var go=function(){fetch('" + url_for("api_collections") + "/'+encodeURIComponent(id),{method:'POST',"
             "headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'delete'})})"
-            ".then(function(r){return r.json();}).then(function(){location.reload();}).catch(function(){});}\n"
+            ".then(function(r){return r.json();}).then(function(){location.reload();}).catch(function(){});};"
+            "if(window.MH&&MH.confirm){MH.confirm({title:'Delete this collection?',"
+            "body:'The folder is removed. The meets and packs inside it are kept.',"
+            "confirmText:'Delete',onConfirm:go});}"
+            "else if(confirm('Delete this collection? The meets themselves are kept.')){go();}}\n"
             "</script>"
         )
         return _layout("Collections", body, active="settings")
