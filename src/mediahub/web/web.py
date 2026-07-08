@@ -22685,10 +22685,46 @@ def create_app() -> Flask:
                 s += f" · best {best}"
             return s
 
-        def opts(items, label):
+        # F-2: map the engine's raw enums to display labels in the filters —
+        # every other part of the page is humanised, so "not_worthy" /
+        # "medal_gold" / "main_feed" with underscores read as a leak. The
+        # <option value> keeps the raw enum (the JS filter matches on it); only
+        # the visible label is humanised.
+        _BAND_SHORT = {
+            "elite": "Elite",
+            "strong": "Strong",
+            "story": "Story",
+            "nice": "Nice",
+            "not_worthy": "Below the bar",
+        }
+        _ACH_TYPE_LABELS = {
+            "medal_gold": "Gold medal",
+            "medal_silver": "Silver medal",
+            "medal_bronze": "Bronze medal",
+            "top_of_field_top_3": "Top-3 finish",
+            "pb_confirmed": "Personal best",
+            "pb_probable": "Likely personal best",
+            "first_time": "First-time swim",
+            "season_best": "Season best",
+        }
+        _POST_TYPE_LABELS = {
+            "main_feed": "Feed post",
+            "feed": "Feed post",
+            "story": "Story",
+            "stories": "Story",
+            "reel": "Reel",
+            "spotlight": "Athlete spotlight",
+            "meet_recap": "Meet recap",
+        }
+
+        def _humanise_enum(v: str) -> str:
+            return (v or "").replace("_", " ").replace("-", " ").strip().title() or (v or "")
+
+        def opts(items, label, labels=None):
             o = f'<option value="">All {label}</option>'
             for item in items:
-                o += f'<option value="{_h(item)}">{_h(item)}</option>'
+                disp = (labels or {}).get(item) or _humanise_enum(item)
+                o += f'<option value="{_h(item)}">{_h(disp)}</option>'
             return o
 
         # --- V7: build workflow summary card (triage counts)
@@ -23138,12 +23174,12 @@ details.why-card[open] > summary .why-peek {{ display: none; }}
     <span class="muted" style="font-size:12px">Approve cards here &mdash; build graphics, video &amp; the reel in the content builder.</span>
   </div>
   <div class="filters-bar">
-    <select id="f-type" onchange="applyFilters()">{opts(types_set, "types")}</select>
+    <select id="f-type" onchange="applyFilters()">{opts(types_set, "types", _ACH_TYPE_LABELS)}</select>
     <select id="f-conf" onchange="applyFilters()"><option value="">All confidence</option><option>high</option><option>medium</option><option>low</option></select>
     <select id="f-swimmer" onchange="applyFilters()">{opts(swimmers_set, "swimmers")}</select>
     <select id="f-event" onchange="applyFilters()">{opts(events_set, "events")}</select>
-    <select id="f-band" onchange="applyFilters()">{opts(bands_set, "bands")}</select>
-    <select id="f-post" onchange="applyFilters()">{opts(post_types_set, "post types")}</select>
+    <select id="f-band" onchange="applyFilters()">{opts(bands_set, "bands", _BAND_SHORT)}</select>
+    <select id="f-post" onchange="applyFilters()">{opts(post_types_set, "post types", _POST_TYPE_LABELS)}</select>
     <button class="btn secondary" style="font-size:13px;padding:6px 12px" onclick="clearFilters()">Clear</button>
     <span id="f-count" class="muted" style="font-size:12px;align-self:center"></span>
     <button type="button" class="btn secondary" id="mh-expand-all-why" aria-pressed="false"
@@ -23644,7 +23680,11 @@ function copyWhyCard(btn, taId) {{
             if (_wf_summary or ranked_achs)
             else None
         )
-        return _layout("Recognition", body, active="home", dock=_review_dock)
+        # F-2: the browser tab read the engine's "Recognition"; title it by the
+        # meet the volunteer is reviewing instead.
+        _meet_name = (meet.get("name") or "").strip() if isinstance(meet, dict) else ""
+        _review_title = f"Review — {_meet_name}" if _meet_name else "Review"
+        return _layout(_review_title, body, active="home", dock=_review_dock)
 
     @app.route("/runs/<run_id>/results")
     def run_results_table(run_id):
