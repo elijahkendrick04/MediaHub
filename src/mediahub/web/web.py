@@ -18039,17 +18039,29 @@ _DOC_REMOTE = r"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 button{font-size:22px;border:0;border-radius:14px;background:#1b2440;color:#fff}
 button:active{background:#2b3a66}
 .row{display:flex;gap:10px}.row button{flex:1}
+/* E-4: End is destructive and one fat-finger tap from Blackout — deprioritise it
+   (danger tint, narrow, off to the side) and gate it behind a confirm. */
+.row .end{flex:0 0 auto;font-size:14px;padding:0 18px;background:#4a1d1d;color:#ffbdbd}
+.row .end:active{background:#6a2626}
 #pos{font-weight:700}.hd{text-align:center;color:#9fb0d0;font-size:14px}
+#rended{position:fixed;inset:0;background:#0b1020;color:#9fb0d0;font-size:20px;
+  display:none;flex-direction:column;align-items:center;justify-content:center;gap:14px;text-align:center;padding:24px}
+#rended a{color:#fff}
 </style></head><body>
 <div id="g">
   <div class="hd">Remote · code <b>__CODE__</b> · <span id="pos">–</span></div>
   <div id="rstat" class="hd" role="status" aria-live="polite" style="color:#ffb454;min-height:18px"></div>
   <button onclick="act('prev')">◀ Previous</button>
   <button onclick="act('next')">Next ▶</button>
-  <div class="row"><button onclick="act('blackout')">Blackout</button><button onclick="act('end')">End</button></div>
+  <div class="row"><button onclick="act('blackout')">Blackout</button><button class="end" onclick="endPres()">End</button></div>
 </div>
+<div id="rended"><div>Presentation ended.</div><a href="/remote">Connect to another presentation</a></div>
 <script>
 function rstat(m){ var el=document.getElementById('rstat'); if(el) el.textContent=m||''; }
+function showEnded(){ var e=document.getElementById('rended'); if(e) e.style.display='flex';
+  var g=document.getElementById('g'); if(g) g.style.display='none'; }
+// E-4: ending the talk kills it for the whole room and can't be undone — confirm first.
+function endPres(){ if(confirm('End the presentation for everyone? This cannot be undone.')) act('end'); }
 async function act(a){
   // D-31: a dead tap (offline wifi, a 429 rate-limit, a 4xx with no state) used
   // to do nothing with zero feedback — now it says what happened.
@@ -18057,11 +18069,12 @@ async function act(a){
     const r=await fetch('__ACTION_URL__',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:a})});
     const j=await r.json().catch(function(){ return {}; });
     if(!r.ok || j.ok===false){ rstat((r.status===429||j.error==='rate_limited')?'Too many taps — wait a moment':'Not connected'); return; }
+    if(j.state && j.state.ended){ showEnded(); return; }
     if(j.state){ setPos(j.state); rstat(''); }
   }catch(e){ rstat('Reconnecting…'); }
 }
 function setPos(s){ document.getElementById('pos').textContent=(s.current+1)+' / '+s.total+(s.blackout?' · black':''); }
-async function poll(){ try{ const r=await fetch('__STATE_URL__'); const s=await r.json(); if(!s.ended){ setPos(s); rstat(''); } }catch(e){ rstat('Reconnecting…'); } }
+async function poll(){ try{ const r=await fetch('__STATE_URL__'); const s=await r.json(); if(s.ended){ showEnded(); return; } setPos(s); rstat(''); }catch(e){ rstat('Reconnecting…'); } }
 setInterval(poll,1500); poll();
 </script></body></html>"""
 
@@ -61816,13 +61829,22 @@ voice, and queues them for one-click approval.</p>
                 "Too many code attempts from your network — wait a few minutes.",
                 primary_cta=("Try again", url_for("remote_landing")),
             )
-        session = _pres.get_by_pairing_code(code)
+        session = _pres.get_by_pairing_code(code, include_ended=True)
         if session is None:
             _remote_code_failed()
             return _recovery_page(
                 "Code not found",
-                "That code is wrong or the presentation has ended.",
+                "That code doesn't match a live presentation — check the code on the presenter screen.",
                 primary_cta=("Try again", url_for("remote_landing")),
+            )
+        if session.ended:
+            # A real code whose talk has finished — a friendly close, not a
+            # dead "Code not found", and it doesn't burn the failure budget.
+            return _recovery_page(
+                "Presentation ended",
+                "This presentation has finished. Ask the presenter to start a new "
+                "one for a fresh code.",
+                primary_cta=("Slide remote", url_for("remote_landing")),
             )
         body = (
             _DOC_REMOTE.replace("__CODE__", _h(session.pairing_code))
@@ -61839,10 +61861,14 @@ voice, and queues them for one-click approval.</p>
 
         if _remote_code_limited():
             return jsonify({"ok": False, "error": "rate_limited"}), 429
-        session = _pres.get_by_pairing_code(code)
+        session = _pres.get_by_pairing_code(code, include_ended=True)
         if session is None:
             _remote_code_failed()
             return jsonify({"ok": False, "error": "no_session"}), 404
+        if session.ended:
+            # Valid code, but the talk is over — let the remote flip to its
+            # "ended" screen without counting a real code as a failed attempt.
+            return jsonify({"ok": True, "state": session.public_state()})
         body = request.get_json(silent=True) or {}
         updated = _pres.apply_action(
             session.session_id, str(body.get("action", "")), body.get("value")

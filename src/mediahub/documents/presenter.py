@@ -128,7 +128,17 @@ def get_session(session_id: str) -> Optional[PresenterSession]:
     return s
 
 
-def get_by_pairing_code(code: str) -> Optional[PresenterSession]:
+def get_by_pairing_code(
+    code: str, *, include_ended: bool = False
+) -> Optional[PresenterSession]:
+    """Resolve a live session by its pairing code.
+
+    ``include_ended=True`` also returns a session whose talk has ended (but not
+    one that has expired/been purged), so the remote can tell a *finished*
+    presentation apart from a *wrong* code — an ended-but-valid code gets a
+    friendly "presentation ended" screen instead of "Code not found", and never
+    burns the shared-NAT failure budget (E-4).
+    """
     code = (code or "").strip().upper()
     if not code:
         return None
@@ -137,7 +147,7 @@ def get_by_pairing_code(code: str) -> Optional[PresenterSession]:
             s = PresenterSession.from_dict(json.loads(f.read_text(encoding="utf-8")))
         except (OSError, ValueError, TypeError):
             continue
-        if s.pairing_code == code and not s.is_expired() and not s.ended:
+        if s.pairing_code == code and not s.is_expired() and (include_ended or not s.ended):
             return s
     return None
 
