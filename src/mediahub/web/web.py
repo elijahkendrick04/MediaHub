@@ -13598,10 +13598,12 @@ def _interface_language_switcher_html(*, compact: bool = True) -> str:
     if len(locales) < 2:
         return ""
     current = _ui_locale()
-    try:
-        nxt = request.full_path if request.query_string else request.path
-    except Exception:
-        nxt = "/"
+    # NB: the form deliberately does NOT echo the current request path — the
+    # switcher renders on every page (footer + Settings), including error pages
+    # and pages showing a foreign org's resource, and the request path can carry
+    # PII in its segments (e.g. a swimmer name in /spotlight/<run>/<name>).
+    # set_interface_language returns the user to their page via the Referer
+    # header instead, which never lands in a rendered response body.
     opts = "".join(
         f'<option value="{_h(c)}"{" selected" if c == current else ""}>{_h(_ui_locale_label(c))}</option>'
         for c in locales
@@ -13616,8 +13618,7 @@ def _interface_language_switcher_html(*, compact: bool = True) -> str:
     return (
         f'<form method="post" action="{url_for("set_interface_language")}" '
         f'class="{cls}" data-no-loader="1" style="display:inline-flex;align-items:center;gap:6px">'
-        f'<input type="hidden" name="next" value="{_h(nxt)}">'
-        f'{label}'
+        f"{label}"
         f'<select name="ui_lang"{aria} onchange="this.form.submit()" '
         'style="font-size:12px;padding:3px 6px;min-height:0">'
         f"{opts}</select>"
@@ -28932,12 +28933,24 @@ self.addEventListener('fetch', function(e){
         choice = (request.form.get("ui_lang") or "").strip().lower()
         if has_ui_locale(choice):
             session["ui_lang"] = choice.split("-", 1)[0]
-        # Return to the page the user was on; only same-origin relative paths are
-        # honoured so the redirect can't be pointed off-site.
-        nxt = request.form.get("next") or ""
-        if not nxt.startswith("/") or nxt.startswith("//"):
-            nxt = url_for("settings_page")
-        return redirect(nxt)
+        # Return the user to the page they switched from, taken from the Referer
+        # (never echoed into a rendered response — see _interface_language_
+        # switcher_html). Only a same-origin Referer is honoured; otherwise fall
+        # back to Settings so the redirect can't be pointed off-site.
+        dest = url_for("settings_page")
+        ref = request.referrer or ""
+        if ref:
+            try:
+                from urllib.parse import urlsplit
+
+                parts = urlsplit(ref)
+                if (not parts.netloc or parts.netloc == request.host) and parts.path.startswith(
+                    "/"
+                ):
+                    dest = parts.path + (("?" + parts.query) if parts.query else "")
+            except Exception:
+                dest = url_for("settings_page")
+        return redirect(dest)
 
     # Settings is a card grid like Create: each heading is a tile you click
     # into for the detail. The detail pages are served by ``settings_section``
@@ -47430,7 +47443,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
     <a class="btn ghost" href="{_edit_url}" style="font-size:11px;padding:3px 9px;margin-right:6px" title="Filters, adjustments, crop, shapes, blur brush — non-destructive edits">&#9998; Edit</a>
     <a class="btn ghost" href="{_studio_url}" style="font-size:11px;padding:3px 9px;margin-right:6px" title="Edit this photo with AI — fill, erase, expand, upscale, restyle">&#x2726; Studio</a>
     <a class="btn ghost" href="{_cutout_url}" style="font-size:11px;padding:3px 9px;margin-right:6px" title="See exactly what background removal knocks out">Cut-out</a>
-    <button class="btn ghost" type="button" data-mh-meta-open style="font-size:11px;padding:3px 9px;margin-right:6px" title="Edit the description, swimmer, venue and tags">&#9998; Info</button>
+    <button class="btn ghost" type="button" data-mh-meta-open style="font-size:11px;padding:3px 9px;margin-right:6px" title="Edit the description, swimmer, venue and tags">&#x270E; Info</button>
     <button class="btn ghost mh-ml-qa" type="button" data-qa-url="{_qa_url}"
             aria-haspopup="menu" aria-expanded="false"
             style="font-size:11px;padding:3px 9px;margin-right:6px"

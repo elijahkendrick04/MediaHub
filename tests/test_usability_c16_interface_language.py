@@ -55,8 +55,11 @@ def test_settings_has_interface_language_card(client):
 
 def test_set_welsh_then_english_off_ramp(client):
     # Switch to Welsh — the chrome uses the Welsh catalogue (nav home = "Hafan").
+    # The switcher returns the user via the Referer, not an echoed form field.
     r = client.post(
-        "/settings/interface-language", data={"ui_lang": "cy", "next": "/activity"}
+        "/settings/interface-language",
+        data={"ui_lang": "cy"},
+        headers={"Referer": "http://localhost/activity"},
     )
     assert r.status_code == 302
     assert r.headers["Location"].endswith("/activity")
@@ -64,7 +67,11 @@ def test_set_welsh_then_english_off_ramp(client):
     assert "Hafan" in html  # nav.home in Welsh — the interface really switched
 
     # Off-ramp: switch back to English.
-    client.post("/settings/interface-language", data={"ui_lang": "en", "next": "/activity"})
+    client.post(
+        "/settings/interface-language",
+        data={"ui_lang": "en"},
+        headers={"Referer": "http://localhost/activity"},
+    )
     html2 = client.get("/activity").get_data(as_text=True)
     assert "Hafan" not in html2
 
@@ -77,14 +84,22 @@ def test_invalid_locale_is_ignored(client):
         assert s.get("ui_lang") == "cy"
 
 
-def test_next_open_redirect_is_blocked(client):
+def test_referer_open_redirect_is_blocked(client):
+    # An off-site Referer is never honoured — falls back to Settings.
     r = client.post(
         "/settings/interface-language",
-        data={"ui_lang": "en", "next": "https://evil.example/x"},
+        data={"ui_lang": "en"},
+        headers={"Referer": "https://evil.example/x"},
     )
     assert r.status_code == 302
     assert "evil.example" not in r.headers["Location"]
-    r2 = client.post(
-        "/settings/interface-language", data={"ui_lang": "en", "next": "//evil.example"}
-    )
-    assert "evil.example" not in r2.headers["Location"]
+    assert r.headers["Location"].endswith("/settings")
+
+
+def test_switcher_does_not_echo_request_path(client):
+    # The switcher must not echo the current request path into the page — the
+    # path can carry PII in its segments (a swimmer name), and the footer renders
+    # on every page including foreign 404s (run-route isolation invariant).
+    html = client.get("/spotlight/some-run/Jane%20Doe").get_data(as_text=True)
+    assert "Jane Doe" not in html
+    assert 'name="next"' not in html
