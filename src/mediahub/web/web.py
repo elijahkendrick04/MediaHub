@@ -14039,6 +14039,11 @@ def _layout(
     {% elif account_email %}
       <a href="{{ url_for('billing_page') }}" title="{{ account_email }}">Billing</a>
       <a href="{{ url_for('logout') }}">Log out</a>
+    {% elif signed_in %}
+      {# A-5: a workspace is active but there is no account yet. Don't show the
+         prospect's "Sign up + Log in" pair (which reads as "you're not signed
+         in"); offer a single, honest CTA to persist the work. #}
+      <a href="{{ url_for('signup_page') }}" class="mh-nav-signup">Save your workspace</a>
     {% else %}
       <a href="{{ url_for('signup_page') }}" class="mh-nav-signup">Sign up</a>
       <a href="{{ url_for('login_page') }}">Log in</a>
@@ -18623,11 +18628,11 @@ def create_app() -> Flask:
     def home():
         """Rebuilt home page (Phase 1.5 polish).
 
-        Two-button hero — "Sign up" (primary) + "Sign in" (secondary) —
-        plus the established four-step explainer. When an org is already
-        pinned, the hero swaps in a "Continue as <name>" CTA pointing at
-        Create, with the sign-in / create paths still accessible below
-        so the user can switch tenants without rummaging through nav.
+        Two-button hero — "Sign up" (primary) + "Log in" (secondary, the
+        ACCOUNT log-in) — plus the established four-step explainer. When an
+        org is already pinned, the hero swaps in a "Continue as <name>" CTA
+        pointing at Create, with the log-in / create paths still accessible
+        below so the user can switch tenants without rummaging through nav.
         """
         prof = _active_profile()
         existing = list_profiles()
@@ -18694,14 +18699,15 @@ def create_app() -> Flask:
                 "Nothing posts without you."
             )
             # Sign up is the unambiguous entry point for a first-time visitor.
-            # 'Set up my organisation' reads as configuring an existing org;
-            # 'Sign in' implies an account already exists. Both mislead new
-            # users. Sign in stays visible as secondary for returning users.
+            # The secondary CTA is the ACCOUNT log-in for returning users
+            # (A-5): authentication is an account action, and organisation
+            # selection happens afterwards — so it points at /login, not the
+            # org picker, and the words never collide with the org vocabulary.
             hero_actions = (
                 f'<a class="mh-cta-primary" href="{url_for("signup_page")}">'
                 "Sign up &rarr;</a>"
-                f'<a class="mh-cta-secondary" href="{url_for("sign_in_page")}">'
-                "Sign in</a>"
+                f'<a class="mh-cta-secondary" href="{url_for("login_page")}">'
+                "Log in</a>"
             )
             eyebrow = "The content engine for sports clubs"
             lane_no = "01"
@@ -18824,7 +18830,7 @@ def create_app() -> Flask:
                 "</div>"
                 '<div class="mh-final-cta-actions">'
                 f'<a class="btn large" href="{url_for("organisation_setup")}">Create your organisation &rarr;</a>'
-                f'<a class="btn secondary" href="{url_for("sign_in_page")}">Sign in</a>'
+                f'<a class="btn secondary" href="{url_for("login_page")}">Log in</a>'
                 "</div>"
                 "</section>"
             )
@@ -28620,7 +28626,7 @@ self.addEventListener('fetch', function(e){
 
         pid = _active_profile_id()
         if not pid:
-            return jsonify({"error": "no_org", "message": "Sign in to manage a lexicon."}), 403
+            return jsonify({"error": "no_org", "message": "Choose an organisation to manage a lexicon."}), 403
         try:
             from mediahub.audio.voice import OrgLexicon
         except Exception as e:
@@ -28653,7 +28659,7 @@ self.addEventListener('fetch', function(e){
 
         pid = _active_profile_id()
         if not pid:
-            return jsonify({"error": "no_org", "message": "Sign in to upload audio."}), 403
+            return jsonify({"error": "no_org", "message": "Choose an organisation to upload audio."}), 403
         f = _req.files.get("file")
         if not f:
             return jsonify({"error": "no_file"}), 400
@@ -28879,7 +28885,7 @@ self.addEventListener('fetch', function(e){
         else:
             lexicon_html = (
                 '<h2 style="font-size:18px;margin:28px 0 6px">Name pronunciation</h2>'
-                '<p class="dim">Sign in to a club to manage its pronunciation lexicon.</p>'
+                '<p class="dim">Choose an organisation to manage its pronunciation lexicon.</p>'
             )
 
         # --- Upload own audio + browser recorder ---
@@ -28998,11 +29004,11 @@ self.addEventListener('fetch', function(e){
             return (
                 f"{section_header}"
                 '<p class="dim" style="margin-bottom:14px">'
-                "Sign in to an organisation to see its recent runs here. "
+                "Choose an organisation to see its recent runs here. "
                 "Activity is scoped per-organisation so the data never "
                 "leaks between profiles.</p>"
                 '<div class="card empty">No organisation pinned. '
-                f'<a href="{url_for("sign_in_page")}">Sign in &rarr;</a></div>'
+                f'<a href="{url_for("sign_in_page")}">Choose organisation &rarr;</a></div>'
             )
 
         try:
@@ -37222,7 +37228,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             'required style="width:100%" '
             'placeholder="&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;" />'
             '<button type="submit" class="btn" style="margin-top:20px;width:100%">'
-            "Sign in</button>"
+            "Log in</button>"
             "</form>"
             '<div class="dim" style="font-size:13px;margin-top:18px;'
             'text-align:center">'
@@ -38680,10 +38686,10 @@ what you're doing, what they should do.</p>
             new_org_url = url_for("organisation_setup")
             home_url = url_for("home")
             empty_body = (
-                "<h1>Sign in</h1>"
+                "<h1>Choose your organisation</h1>"
                 '<p class="lede" style="margin-bottom:var(--sp-6)">'
                 "You don't have access to any organisation yet. "
-                "Create one and it will appear here for sign-in next time."
+                "Create one and it will appear here next time."
                 "</p>"
                 '<div class="card" style="padding:24px 28px;margin-bottom:18px">'
                 '<h2 style="margin-top:0;font-size:18px">Get started</h2>'
@@ -38700,7 +38706,7 @@ what you're doing, what they should do.</p>
                 'style="margin-left:10px">Back to home</a>'
                 "</div>"
             )
-            return _layout("Sign in", empty_body, active="signin")
+            return _layout("Choose organisation", empty_body, active="signin")
 
         def _initials(name: str) -> str:
             parts = [p for p in (name or "").strip().split() if p]
@@ -38807,7 +38813,7 @@ what you're doing, what they should do.</p>
                 f'<input type="hidden" name="profile_id" value="{_h(p.profile_id)}">'
                 + (f'<input type="hidden" name="next" value="{_h(_next_val)}">' if _next_val else "")
                 + '<button type="submit" class="btn-sign-in">'
-                f"{'Continue' if is_current else 'Sign in'} &rarr;</button>"
+                f"{'Continue' if is_current else 'Enter'} &rarr;</button>"
                 "</form>"
                 f'<form method="post" action="{delete_url}" data-no-loader="1" '
                 f"onsubmit=\"return confirm('Delete the &quot;{_h(p.display_name)}&quot; profile? "
@@ -38847,8 +38853,8 @@ what you're doing, what they should do.</p>
 
         body = (
             '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">'
-            '<span class="mh-hero-eyebrow">Sign in</span>'
-            '<h1>Pick the <em class="editorial">organisation</em>.</h1>'
+            '<span class="mh-hero-eyebrow">Organisation</span>'
+            '<h1>Choose your <em class="editorial">organisation</em>.</h1>'
             f'<p class="lede">{len(profiles):02d} saved {"profile" if len(profiles) == 1 else "profiles"} on this deployment. '
             "Picking one loads its brand voice, palette, logo, and history. "
             "Switch any time from the home page.</p>"
@@ -38856,7 +38862,7 @@ what you're doing, what they should do.</p>
             f"{err_html}"
             f'<div class="mh-profile-grid">{cards_html}</div>'
         )
-        return _layout("Sign in", body, active="signin")
+        return _layout("Choose organisation", body, active="signin")
 
     @app.route("/sign-in", methods=["POST"])
     def sign_in_post():

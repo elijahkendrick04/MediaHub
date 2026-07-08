@@ -28,8 +28,12 @@ _EN: dict[str, str] = {
     "nav.create": "Create",
     "nav.review": "Review",
     "nav.settings": "Settings",
-    "nav.sign_in": "Sign in",
-    "nav.sign_out": "Sign out",
+    # Organisation (workspace) vocabulary — kept deliberately distinct from the
+    # account "Log in / Log out" so the two never collide (A-5). nav.sign_in is
+    # the first org pick; nav.switch_org is swapping between orgs you're in;
+    # nav.sign_out leaves the current org (it never ends the account session).
+    "nav.sign_in": "Choose organisation",
+    "nav.sign_out": "Leave organisation",
     "nav.switch_org": "Switch organisation",
     "nav.notifications": "Notifications",
     "action.approve": "Approve",
@@ -47,8 +51,8 @@ _CY: dict[str, str] = {
     "nav.create": "Creu",
     "nav.review": "Adolygu",
     "nav.settings": "Gosodiadau",
-    "nav.sign_in": "Mewngofnodi",
-    "nav.sign_out": "Allgofnodi",
+    "nav.sign_in": "Dewis sefydliad",
+    "nav.sign_out": "Gadael sefydliad",
     "nav.switch_org": "Newid sefydliad",
     "nav.notifications": "Hysbysiadau",
     "action.approve": "Cymeradwyo",

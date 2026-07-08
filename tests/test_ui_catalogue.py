@@ -12,7 +12,9 @@ class TestLookup:
 
     def test_welsh_flagship(self):
         assert UI.t("nav.home", "cy") == "Hafan"
-        assert UI.t("nav.sign_out", "cy") == "Allgofnodi"
+        # A-5: the org "sign out" is now "Leave organisation" (Gadael sefydliad),
+        # kept distinct from the account log-out (Allgofnodi).
+        assert UI.t("nav.sign_out", "cy") == "Gadael sefydliad"
         assert UI.t("action.approve", "cy") == "Cymeradwyo"
 
     def test_unknown_locale_falls_back_to_english(self):
