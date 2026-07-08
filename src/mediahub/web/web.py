@@ -7475,6 +7475,10 @@ def _execute_run(
     _hb_thread = threading.Thread(target=_heartbeat_ticker, name=f"hb-{run_id[:8]}", daemon=True)
     _hb_thread.start()
 
+    # D-6: only a SUCCESSFUL run reclaims its stored launch input. A failed run
+    # keeps input.bin + resume.json so the volunteer can re-run it from the saved
+    # file (a killed worker never reaches the finally, so it stays resumable too).
+    _ended_ok = False
     try:
         run = run_pipeline_v4(
             file_bytes=file_bytes,
@@ -7492,6 +7496,7 @@ def _execute_run(
             run.error if run.error else None,
         )
         if not run.error:
+            _ended_ok = True
             # "Pack ready for review" ping. Inert (no-op) unless an operator
             # configured a notification channel; runs in its own thread so it
             # never delays the run, and never raises.
@@ -7562,10 +7567,11 @@ def _execute_run(
         # or error) so a finished run's heartbeat freezes and the entry can
         # settle into its terminal status.
         _hb_stop.set()
-        # Reaching here means a clean terminal — the run will not be resumed,
-        # so reclaim its stored launch input. A killed worker never gets here,
-        # so an interrupted run keeps its input and stays resumable.
-        _cleanup_run_input(run_id)
+        # D-6: reclaim the stored launch input only on SUCCESS. A failed run
+        # keeps it so it can be re-run from the saved file; a killed worker never
+        # gets here, so an interrupted run keeps its input and stays resumable.
+        if _ended_ok:
+            _cleanup_run_input(run_id)
 
 
 def _spawn_run_thread(
@@ -7597,9 +7603,9 @@ def _spawn_run_thread(
 def _mark_run_errored(run_id: str, message: str) -> None:
     """Stamp a still-non-terminal run as errored (DB + any in-memory entry).
 
-    Errored is terminal — the run will never be resumed — so reclaim its stored
-    launch input here too (covers the resume-budget-exhausted / unrecoverable
-    paths, which never reach the worker's own cleanup)."""
+    D-6: the stored launch input is deliberately KEPT (not reclaimed) so a
+    failed run — including a resume-budget-exhausted / stale one — can still be
+    re-run from the saved file. Input is only reclaimed on a successful run."""
     try:
         conn = _db()
         conn.execute(
@@ -7616,7 +7622,6 @@ def _mark_run_errored(run_id: str, message: str) -> None:
         if isinstance(entry, dict) and entry.get("status") in ("queued", "running", None):
             entry["status"] = "error"
             entry["error"] = entry.get("error") or message
-    _cleanup_run_input(run_id)
 
 
 def _claim_stale_run_for_resume(run_id: str, max_resumes: int) -> str:
