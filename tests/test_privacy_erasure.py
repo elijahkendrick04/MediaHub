@@ -233,7 +233,10 @@ def test_account_delete_route_requires_password(app, data_dir):
 
     assert UserStore().get("del@club.org") is not None
     r = client.post("/account/delete", data={"password": "twelvechars1"})
-    assert r.status_code == 302
+    # E-9: a successful delete now renders an explicit confirmation page
+    # (200), not a silent 302 bounce to home.
+    assert r.status_code == 200
+    assert b"deleted" in r.data.lower()
     assert UserStore().get("del@club.org") is None
 
 

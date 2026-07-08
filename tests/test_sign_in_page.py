@@ -74,12 +74,14 @@ class TestSignInPage:
         resp = c.get("/sign-in", follow_redirects=False)
         assert resp.status_code == 200
         body = resp.get_data(as_text=True)
-        # The empty state announces "no profiles" and offers a clear
-        # path forward (create one) and a way back home.
-        assert "No organisation profiles" in body
+        # The empty state is honest about the user's own access (A-4: not a
+        # false "none exist on this deployment") and offers a clear path
+        # forward (create one) and a way back home.
+        assert "don't have access to any organisation" in body
         assert "Create your first organisation" in body
-        # The sign-in page is in the topnav as active.
-        assert "Sign in" in body
+        # A-5: the org picker is titled with organisation vocabulary, not the
+        # account "Sign in".
+        assert "Choose your organisation" in body
 
     def test_renders_card_per_profile(self, app_two_profiles):
         c, _, _ = app_two_profiles
@@ -173,11 +175,12 @@ class TestHomeHeroSwitching:
         c, _, _ = app_two_profiles
         # A fresh session is signed out — the home page must NOT resume
         # the last-used org. With profiles on disk but none pinned, the
-        # signed-out hero surfaces Sign up (primary) and Sign in (secondary).
+        # signed-out hero surfaces Sign up (primary) and Log in (secondary)
+        # — A-5: the account log-in, not the org picker.
         resp = c.get("/")
         body = resp.get_data(as_text=True)
         # Hero copy + both CTAs.
-        assert "Sign in" in body
+        assert "Log in" in body
         assert "Sign up" in body
         assert 'class="mh-cta-primary"' in body
         assert 'class="mh-cta-secondary"' in body
@@ -190,10 +193,9 @@ class TestHomeHeroSwitching:
         body = resp.get_data(as_text=True)
         # Primary CTA leads to sign up for new users.
         assert "Sign up" in body
-        # AND the secondary CTA offers the sign-in path — the user
-        # must see both options even on a fresh deployment so the
-        # "Sign in" button never looks broken.
-        assert "Sign in" in body
+        # AND the secondary CTA offers the account log-in path (A-5), so a
+        # returning user always has an entry point even on a fresh deployment.
+        assert "Log in" in body
         assert 'class="mh-cta-primary"' in body
         assert 'class="mh-cta-secondary"' in body
 

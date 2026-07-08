@@ -101,9 +101,12 @@ class TestM2OptionalSection:
 
     def test_section_explicitly_says_skip_if_you_want(self, client):
         """The section's prose has to make optionality unmistakable —
-        otherwise users feel they must fill it in."""
+        otherwise users feel they must fill it in. (A-2: the copy now also
+        states a brand signal is still required to unlock content, so the
+        'works fine without it' over-promise is gone.)"""
         body = client.get("/organisation/setup").get_data(as_text=True)
-        assert "Skip this section entirely" in body
+        assert "Skip the links" in body
+        assert "brand signal to unlock" in body
 
     def test_collapsing_section_doesnt_break_form_submission(self, client, iso_root, monkeypatch):
         """Audit safety net: a user who collapses the section without

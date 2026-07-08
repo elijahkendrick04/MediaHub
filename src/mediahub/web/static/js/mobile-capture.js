@@ -138,14 +138,67 @@
       });
   }
 
+  // Upload EVERY selected file, not just the first. The input is `multiple`
+  // and the copy invites picking a batch, so dropping files[1..] silently lost
+  // 29 of a volunteer's 30 gala photos. Downscale + upload each in sequence
+  // (bounded canvas/memory use on a phone), then redirect with the REAL saved
+  // count so the "N photos added" banner is honest.
+  function processAndUploadAll(fileList) {
+    var files = Array.prototype.slice.call(fileList);
+    if (!files.length) return;
+    var total = files.length;
+    var saved = 0;
+    setStatus("Uploading " + total + " photos…");
+    var chain = Promise.resolve();
+    files.forEach(function (file, i) {
+      chain = chain.then(function () {
+        setStatus("Uploading " + (i + 1) + " of " + total + "…");
+        var prep =
+          canDownscale() && file.size > DOWNSCALE_MIN_BYTES
+            ? downscale(file).catch(function () {
+                return file;
+              })
+            : Promise.resolve(file);
+        return prep
+          .then(function (blob) {
+            var fname = (file.name || "photo.jpg").replace(/\.(heic|heif)$/i, ".jpg");
+            return uploadBlob(blob, fname);
+          })
+          .then(
+            function () {
+              saved += 1;
+            },
+            function () {
+              /* one file failed — keep going with the rest */
+            }
+          );
+      });
+    });
+    chain.then(function () {
+      if (saved === 0) {
+        // Every AJAX upload failed — fall back to a native multipart submit so
+        // the whole batch still reaches the server (which reads getlist('file')).
+        nativeFallback();
+        return;
+      }
+      setStatus("Added " + saved + " to your library.");
+      var base = window.location.pathname;
+      window.location.assign(base + "?shared=" + saved);
+    });
+  }
+
   // (1) Intercept the main upload form to downscale before sending. Only when
-  //     a file is actually chosen and the browser can downscale; otherwise let
-  //     the native multipart submit run untouched.
+  //     file(s) are actually chosen and the browser can downscale; otherwise
+  //     let the native multipart submit run untouched.
   form.addEventListener("submit", function (ev) {
     if (!fileInput || !fileInput.files || !fileInput.files.length) return;
     if (!canDownscale()) return;
     ev.preventDefault();
-    processAndUpload(fileInput.files[0]);
+    if (fileInput.files.length > 1) {
+      processAndUploadAll(fileInput.files);
+    } else {
+      processAndUpload(fileInput.files[0]);
+    }
   });
 
   // (2) Camera capture affordance. The button is only revealed when this script

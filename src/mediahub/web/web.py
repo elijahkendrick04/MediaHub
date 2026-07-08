@@ -4232,8 +4232,15 @@ function _fetchCaption(captionUrl, tone, panel, cacheKey, isAi, cardId) {
   if (captionDiv) {
     captionDiv.innerHTML = '<span style="color:var(--ink-muted);font-style:italic">Generating&hellip;<span class="spin" style="display:inline-block;margin-left:6px;animation:spin 0.8s linear infinite">&#x27F3;</span></span>';
   }
-  fetch(captionUrl + '?tone=' + encodeURIComponent(tone), {method: 'POST'})
-    .then(function(r) { return r.json(); })
+  // The tone rides in the query string; the JSON content-type is what keeps
+  // this same-origin write CSRF-exempt (mirrors every other fetch on the
+  // page). Without it the server 403s with {"error":"csrf"} and the caption
+  // silently renders blank. r.ok / r.status are threaded onto the parsed
+  // body so the catch-all error branch below can never fall through to an
+  // empty caption.
+  fetch(captionUrl + '?tone=' + encodeURIComponent(tone),
+        {method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}'})
+    .then(function(r) { return r.json().then(function(j) { j.__ok = r.ok; j.__status = r.status; return j; }); })
     .then(function(j) {
       var text = j.caption || '';
       var ts = j.generated_at ? new Date(j.generated_at).toLocaleTimeString() : '';
@@ -4270,6 +4277,19 @@ function _fetchCaption(captionUrl, tone, panel, cacheKey, isAi, cardId) {
       // Render the caption + a variant picker if we got multiple back.
       var variants = (j.variants && j.variants.length) ? j.variants : [text];
       var safeText = function(t){ return (t||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); };
+      // Catch-all: anything the transient/terminal branches above did not
+      // classify — a CSRF 403 ({"error":"csrf"}), an unexpected 4xx/5xx, or
+      // an empty body with no variants — must surface a retry, never a blank
+      // caption. This is the last line of defence before the render.
+      if (j.__ok === false || j.error || (!text && !(j.variants && j.variants.length))) {
+        if (captionDiv) {
+          captionDiv.innerHTML = '<div style="padding:10px;border:1px solid var(--border);border-radius:6px;background:rgba(255,93,108,0.06)">'
+            + '<div style="font-weight:600;color:var(--ink);margin-bottom:4px">&#x21BB; Couldn&rsquo;t generate a caption</div>'
+            + '<div style="font-size:11px;line-height:1.5;color:var(--ink-dim)">' + safeText(j.message || 'Something went wrong. Pick a tone again to retry.') + '</div>'
+            + '</div>';
+        }
+        return;
+      }
       function _renderActive(idx, reveal) {
         var active = variants[idx] || text;
         if (captionDiv) {
@@ -14019,6 +14039,11 @@ def _layout(
     {% elif account_email %}
       <a href="{{ url_for('billing_page') }}" title="{{ account_email }}">Billing</a>
       <a href="{{ url_for('logout') }}">Log out</a>
+    {% elif signed_in %}
+      {# A-5: a workspace is active but there is no account yet. Don't show the
+         prospect's "Sign up + Log in" pair (which reads as "you're not signed
+         in"); offer a single, honest CTA to persist the work. #}
+      <a href="{{ url_for('signup_page') }}" class="mh-nav-signup">Save your workspace</a>
     {% else %}
       <a href="{{ url_for('signup_page') }}" class="mh-nav-signup">Sign up</a>
       <a href="{{ url_for('login_page') }}">Log in</a>
@@ -14098,6 +14123,16 @@ def _layout(
       </button>
       <div id="mh-orgmenu-panel" class="mh-orgmenu-panel" role="menu"
            aria-label="Account and organisation">
+        {# C-3: Drafts (where every free-text / spotlight / preview output
+           lands) is now reachable from any page, not just a footer link on
+           the compose surfaces. #}
+        <a href="{{ url_for('stub_packs_list') }}" role="menuitem"
+           class="mh-orgmenu-item {{ 'active' if active=='drafts' else '' }}">Drafts</a>
+        {# C-4: the club-data tools (records, ask-the-data, data hub) were
+           filed 3–4 clicks deep under Settings and absent from the nav.
+           Surface them from every page. #}
+        <a href="{{ url_for('settings_section', section='clubdata') }}" role="menuitem"
+           class="mh-orgmenu-item">Club data</a>
         <a href="{{ url_for('settings_page') }}" role="menuitem"
            class="mh-orgmenu-item {{ 'active' if active=='settings' else '' }}">{{ t('nav.settings') }}</a>
         <a href="{{ url_for('help_page') }}" role="menuitem"
@@ -14598,6 +14633,14 @@ def _layout(
         var msg = form.dataset.loaderText || 'Working on it';
         var sub = form.dataset.loaderSub || 'This usually takes a few seconds';
         MH.showLoader(msg, sub);
+        // Safety net: a POST that downloads a file (Content-Disposition) or
+        // otherwise never navigates would leave this full-screen loader up
+        // forever. A navigating submit replaces the whole document long before
+        // this fires, so the timeout only ever clears a stuck overlay.
+        setTimeout(function(){
+          if (window.MH && MH.hideLoader) MH.hideLoader();
+          if (btn) btn.classList.remove('loading');
+        }, 20000);
       });
     });
   }
@@ -16748,7 +16791,16 @@ _BULK_ACTIONS_JS = r"""
     }
     Array.prototype.slice.call(form.querySelectorAll('[data-mh-bulk]')).forEach(function(btn){
       var action = btn.getAttribute('data-mh-bulk');
-      if (action === 'export') return;  // native submit → file download
+      if (action === 'export') {
+        // Native submit → file download (Content-Disposition: attachment),
+        // which never navigates the page — so the global form loader would
+        // hang on "Working on it" forever and the volunteer thinks it crashed.
+        // The download starts on submit, so hide the loader a beat later.
+        btn.addEventListener('click', function(){
+          setTimeout(function(){ if (window.MH && MH.hideLoader) MH.hideLoader(); }, 1200);
+        });
+        return;
+      }
       btn.addEventListener('click', function(e){
         e.preventDefault();
         var ids = selected().map(function(c){ return c.value; });
@@ -17162,7 +17214,7 @@ _CHARTS_PAGE_JS = """
     var tile = btn.closest('.mh-chartpack-tile'); if(!tile) return;
     var out = tile.querySelector('.mh-cap-out'); if(!out) return;
     busy(btn, true, 'Writing…');
-    fetch(btn.getAttribute('data-cap-url'), {method:'POST'}).then(function(r){return r.json();}).then(function(j){
+    fetch(btn.getAttribute('data-cap-url'), {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'}).then(function(r){return r.json();}).then(function(j){
       busy(btn, false);
       out.style.display='block'; out.textContent='';
       if(j.available===false || !j.caption){ out.textContent = j.message || 'AI captions are not configured on this deployment.'; return; }
@@ -18042,6 +18094,20 @@ def create_app() -> Flask:
             "organisation_page",
             "organisation_setup",
             "organisation_setup_capture",
+            # The manual-build POST (no AI) and the palette confirm/reorder
+            # POSTs are the *other* ways a brand-new user creates and tunes
+            # their organisation — they legitimately run while the profile
+            # is still not-ready. Without these exemptions the gate 302's
+            # the multipart form POST to /organisation/setup before the
+            # handler runs, silently discarding everything the volunteer
+            # typed (name, tone, platforms, brand colours, logos). Each
+            # handler carries its own guards (display_name / active-profile
+            # / _require_org_data_attestation / _session_can_use_profile),
+            # so exempting them from the READY gate does not weaken access
+            # control — same rationale as the capture POST above.
+            "organisation_setup_manual",
+            "organisation_setup_palette",
+            "organisation_setup_palette_reorder",
             # Setup-page side-routes — the user is still pre-ready when
             # they click "re-read" or "delete logo" or view a logo
             # thumbnail, so these must bypass the gate just like the
@@ -18490,7 +18556,25 @@ def create_app() -> Flask:
         # when a not-yet-ready org is already pinned (so they can finish
         # its setup).
         if prof is None and list_profiles():
+            # Preserve the page the user was heading to (A-6): when an idle
+            # timeout drops the org pin, re-entry through the picker should
+            # land back on that deep link, not home. Only GET navigations
+            # carry a replayable destination.
+            _dest = _safe_next(request.full_path.rstrip("?")) if request.method == "GET" else ""
+            if _dest and _dest != url_for("sign_in_page"):
+                return redirect(url_for("sign_in_page", next=_dest))
             return redirect(url_for("sign_in_page"))
+        # Hardening: never discard a browser POST in silence. The setup
+        # POSTs themselves are exempt above, so reaching here on a POST
+        # means an unexpected case (an expired session mid-setup, or a
+        # content POST attempted before setup finished). Stash a one-shot
+        # notice the setup page surfaces so the user learns their submit
+        # was not saved instead of watching it vanish.
+        if request.method == "POST":
+            session["_setup_gate_notice"] = (
+                "Your changes weren't saved yet — finish setting up your "
+                "organisation below, then try that again."
+            )
         return redirect(url_for("organisation_setup"))
 
     # ---- Versioned ToS re-acceptance gate (UK legal baseline) -----------
@@ -18571,11 +18655,11 @@ def create_app() -> Flask:
     def home():
         """Rebuilt home page (Phase 1.5 polish).
 
-        Two-button hero — "Sign up" (primary) + "Sign in" (secondary) —
-        plus the established four-step explainer. When an org is already
-        pinned, the hero swaps in a "Continue as <name>" CTA pointing at
-        Create, with the sign-in / create paths still accessible below
-        so the user can switch tenants without rummaging through nav.
+        Two-button hero — "Sign up" (primary) + "Log in" (secondary, the
+        ACCOUNT log-in) — plus the established four-step explainer. When an
+        org is already pinned, the hero swaps in a "Continue as <name>" CTA
+        pointing at Create, with the log-in / create paths still accessible
+        below so the user can switch tenants without rummaging through nav.
         """
         prof = _active_profile()
         existing = list_profiles()
@@ -18642,14 +18726,15 @@ def create_app() -> Flask:
                 "Nothing posts without you."
             )
             # Sign up is the unambiguous entry point for a first-time visitor.
-            # 'Set up my organisation' reads as configuring an existing org;
-            # 'Sign in' implies an account already exists. Both mislead new
-            # users. Sign in stays visible as secondary for returning users.
+            # The secondary CTA is the ACCOUNT log-in for returning users
+            # (A-5): authentication is an account action, and organisation
+            # selection happens afterwards — so it points at /login, not the
+            # org picker, and the words never collide with the org vocabulary.
             hero_actions = (
                 f'<a class="mh-cta-primary" href="{url_for("signup_page")}">'
                 "Sign up &rarr;</a>"
-                f'<a class="mh-cta-secondary" href="{url_for("sign_in_page")}">'
-                "Sign in</a>"
+                f'<a class="mh-cta-secondary" href="{url_for("login_page")}">'
+                "Log in</a>"
             )
             eyebrow = "The content engine for sports clubs"
             lane_no = "01"
@@ -18772,7 +18857,7 @@ def create_app() -> Flask:
                 "</div>"
                 '<div class="mh-final-cta-actions">'
                 f'<a class="btn large" href="{url_for("organisation_setup")}">Create your organisation &rarr;</a>'
-                f'<a class="btn secondary" href="{url_for("sign_in_page")}">Sign in</a>'
+                f'<a class="btn secondary" href="{url_for("login_page")}">Log in</a>'
                 "</div>"
                 "</section>"
             )
@@ -26152,12 +26237,49 @@ Relay team broke club record"></textarea>
                 '<div class="card"><p class="tag bad">Set up your organisation first.</p></div>',
                 active="settings",
             ), 404
+        from datetime import datetime, timezone
+
         from mediahub.compliance.dsr import DsrRequestLog
+
+        _now = datetime.now(timezone.utc)
+
+        def _due_cell(r) -> tuple:
+            """D-9: render the statutory due date with an OVERDUE badge / a
+            'due in N days' countdown so a busy officer can't silently blow the
+            one-month deadline. Only OPEN requests count down (clock_stopped is
+            paused; completed is done). Returns (is_overdue, cell_html)."""
+            base = _h(r.due_at[:10])
+            if r.status != "open":
+                return False, base
+            try:
+                due = datetime.fromisoformat(r.due_at)
+                if due.tzinfo is None:
+                    due = due.replace(tzinfo=timezone.utc)
+            except Exception:
+                return False, base
+            if due < _now:
+                days_late = (_now - due).days
+                return True, (
+                    f'{base} <span class="tag bad">OVERDUE</span>'
+                    f'<span class="muted" style="font-size:11px"> {days_late}d late</span>'
+                )
+            days_left = (due - _now).days
+            hint = "due today" if days_left == 0 else f"due in {days_left}d"
+            _warn = ' style="color:var(--warn)"' if days_left <= 5 else ""
+            return (
+                False,
+                f'{base} <span class="muted" style="font-size:11px"{_warn}>({hint})</span>',
+            )
 
         rows = []
         for r in DsrRequestLog().all(profile_id=pid):
+            _is_overdue, _due_html = _due_cell(r)
             status_tag = {
-                "open": '<span class="tag">open</span>',
+                "open": (
+                    '<span class="tag bad">OVERDUE</span>'
+                    if _is_overdue
+                    else '<span class="tag">open</span>'
+                ),
                 "clock_stopped": '<span class="tag bad">clock stopped</span>',
                 "completed": '<span class="tag ok">completed</span>',
             }.get(r.status, _h(r.status))
@@ -26198,14 +26320,22 @@ Relay team broke club record"></textarea>
                         '<button class="btn secondary" type="submit">Resume clock</button></form>'
                     )
             rows.append(
-                f"<tr><td><code>{_h(r.id)}</code></td><td>{_h(r.request_type)}</td>"
-                f"<td>{_h(r.athlete_name)}</td><td>{_h(r.received_at[:10])}</td>"
-                f"<td>{_h(r.due_at[:10])}</td><td>{status_tag}</td><td>{''.join(actions) or '—'}</td></tr>"
+                (
+                    _is_overdue,
+                    f"<tr><td><code>{_h(r.id)}</code></td><td>{_h(r.request_type)}</td>"
+                    f"<td>{_h(r.athlete_name)}</td><td>{_h(r.received_at[:10])}</td>"
+                    f"<td>{_due_html}</td><td>{status_tag}</td>"
+                    f"<td>{''.join(actions) or '—'}</td></tr>",
+                )
             )
+        # D-9: float overdue requests to the top so a late one can't hide at the
+        # bottom of a long list; preserve original order within each group.
+        rows.sort(key=lambda t: not t[0])
+        _rows_html = "".join(h for _, h in rows)
         table = (
             "<table><thead><tr><th>Ref</th><th>Type</th><th>Athlete</th><th>Received</th>"
             "<th>Due</th><th>Status</th><th>Actions</th></tr></thead><tbody>"
-            + ("".join(rows) or '<tr><td colspan="7" class="muted">No requests logged.</td></tr>')
+            + (_rows_html or '<tr><td colspan="7" class="muted">No requests logged.</td></tr>')
             + "</tbody></table>"
         )
         body = f"""
@@ -26482,6 +26612,9 @@ Relay team broke club record"></textarea>
         # Deleting an account is irreversible — re-verify the password so a
         # hijacked session can't silently destroy the account.
         password = request.form.get("password") or ""
+        # E-9: return the user to the page they deleted from (Settings account
+        # or /privacy), not a hardcoded /privacy.
+        _back = _safe_next(request.form.get("return_to")) or url_for("privacy_page")
         try:
             _user_store().authenticate(email, password)
         except _auth.AuthError:
@@ -26490,9 +26623,9 @@ Relay team broke club record"></textarea>
                     "Account not deleted",
                     '<div class="card"><p class="tag bad">Password check failed '
                     "&mdash; account NOT deleted.</p>"
-                    f'<p><a class="btn secondary" href="{url_for("privacy_page")}">'
+                    f'<p><a class="btn secondary" href="{_h(_back)}">'
                     "&larr; Back</a></p></div>",
-                    active="privacy",
+                    active="settings",
                 ),
                 403,
             )
@@ -26501,7 +26634,19 @@ Relay team broke club record"></textarea>
         erase_account(email)
         _auth.logout_user()
         session.clear()
-        return redirect(url_for("home"))
+        # E-9: land on an explicit confirmation, not a silent bounce to home
+        # that leaves the user unsure whether it worked.
+        return _layout(
+            "Account deleted",
+            '<section class="mh-hero" style="padding-top:var(--sp-7);'
+            'padding-bottom:var(--sp-5);margin-bottom:var(--sp-5)">'
+            '<span class="mh-hero-eyebrow">Account</span>'
+            '<h1>Your account has been <em class="editorial">deleted.</em></h1></section>'
+            '<div class="card"><p>Your MediaHub account and its personal data have been '
+            "erased. You have been signed out.</p>"
+            f'<p><a class="btn" href="{url_for("home")}">Back to home</a></p></div>',
+            active="home",
+        )
 
     # ---- HEALTH --------------------------------------------------------
     APP_VERSION = "v4.0.0"
@@ -28568,7 +28713,9 @@ self.addEventListener('fetch', function(e){
 
         pid = _active_profile_id()
         if not pid:
-            return jsonify({"error": "no_org", "message": "Sign in to manage a lexicon."}), 403
+            return jsonify(
+                {"error": "no_org", "message": "Choose an organisation to manage a lexicon."}
+            ), 403
         try:
             from mediahub.audio.voice import OrgLexicon
         except Exception as e:
@@ -28601,7 +28748,9 @@ self.addEventListener('fetch', function(e){
 
         pid = _active_profile_id()
         if not pid:
-            return jsonify({"error": "no_org", "message": "Sign in to upload audio."}), 403
+            return jsonify(
+                {"error": "no_org", "message": "Choose an organisation to upload audio."}
+            ), 403
         f = _req.files.get("file")
         if not f:
             return jsonify({"error": "no_file"}), 400
@@ -28827,7 +28976,7 @@ self.addEventListener('fetch', function(e){
         else:
             lexicon_html = (
                 '<h2 style="font-size:18px;margin:28px 0 6px">Name pronunciation</h2>'
-                '<p class="dim">Sign in to a club to manage its pronunciation lexicon.</p>'
+                '<p class="dim">Choose an organisation to manage its pronunciation lexicon.</p>'
             )
 
         # --- Upload own audio + browser recorder ---
@@ -28946,11 +29095,11 @@ self.addEventListener('fetch', function(e){
             return (
                 f"{section_header}"
                 '<p class="dim" style="margin-bottom:14px">'
-                "Sign in to an organisation to see its recent runs here. "
+                "Choose an organisation to see its recent runs here. "
                 "Activity is scoped per-organisation so the data never "
                 "leaks between profiles.</p>"
                 '<div class="card empty">No organisation pinned. '
-                f'<a href="{url_for("sign_in_page")}">Sign in &rarr;</a></div>'
+                f'<a href="{url_for("sign_in_page")}">Choose organisation &rarr;</a></div>'
             )
 
         try:
@@ -29258,7 +29407,11 @@ self.addEventListener('fetch', function(e){
             '<form method="post" action="'
             + url_for("account_delete")
             + '" onsubmit="return confirm(\'Permanently delete your account? This cannot be undone.\')">'
-            '<input type="password" name="password" placeholder="Confirm password" '
+            # E-9: `required` stops an empty submit that used to sail past the
+            # confirm and dead-end on a full-page "Password check failed"; the
+            # return_to lands a failed check back on THIS page, not /privacy.
+            f'<input type="hidden" name="return_to" value="{_h(url_for("settings_section", section="account"))}"/>'
+            '<input type="password" name="password" required placeholder="Confirm password" '
             'style="font-size:13px;padding:8px 10px;border:1px solid var(--panel);border-radius:6px;'
             'background:var(--bg);color:var(--ink);margin-right:8px"/>'
             '<button class="btn danger" type="submit" style="font-size:13px">Delete my account</button>'
@@ -29270,7 +29423,12 @@ self.addEventListener('fetch', function(e){
 
         The detailed uptime/incident/version view moved to Developer settings.
         """
-        operational = True
+        # D-28: three honest states, not a green default. If there is no
+        # heartbeat, or reading the uptime store throws, we genuinely CANNOT
+        # confirm the system is healthy — say so rather than flashing green
+        # (which would tell a volunteer "all is well" during an outage the
+        # observability layer can't see).
+        state = "unknown"
         try:
             from mediahub.observability import uptime as _uptime
 
@@ -29282,10 +29440,10 @@ self.addEventListener('fetch', function(e){
                 from datetime import datetime as _dt
 
                 age_s = (datetime.now(timezone.utc) - _dt.fromisoformat(ts_raw)).total_seconds()
-                operational = bool(latest.get("ok")) and age_s <= 1800
+                state = "up" if (bool(latest.get("ok")) and age_s <= 1800) else "down"
         except Exception:
-            operational = True
-        if operational:
+            state = "unknown"
+        if state == "up":
             return (
                 '<div class="card" style="padding:22px 24px">'
                 '<div style="display:flex;align-items:center;gap:12px">'
@@ -29295,14 +29453,26 @@ self.addEventListener('fetch', function(e){
                 '<p class="dim" style="margin:10px 0 0 0;font-size:13px">Everything is running '
                 "normally.</p></div>"
             )
+        if state == "down":
+            return (
+                '<div class="card" style="padding:22px 24px;border-left:2px solid var(--mh-prim-error-500)">'
+                '<div style="display:flex;align-items:center;gap:12px">'
+                '<span style="display:inline-block;width:12px;height:12px;border-radius:50%;'
+                'background:#ff5d6c;box-shadow:0 0 0 4px rgba(255,93,108,0.18)"></span>'
+                '<span style="font-size:18px;font-weight:600">Website down</span></div>'
+                '<p class="dim" style="margin:10px 0 0 0;font-size:13px">We are working on getting '
+                "things back up and running. Please check back shortly.</p></div>"
+            )
+        # unknown — we can't confirm either way.
         return (
-            '<div class="card" style="padding:22px 24px;border-left:2px solid var(--mh-prim-error-500)">'
+            '<div class="card" style="padding:22px 24px;border-left:2px solid var(--warn)">'
             '<div style="display:flex;align-items:center;gap:12px">'
             '<span style="display:inline-block;width:12px;height:12px;border-radius:50%;'
-            'background:#ff5d6c;box-shadow:0 0 0 4px rgba(255,93,108,0.18)"></span>'
-            '<span style="font-size:18px;font-weight:600">Website down</span></div>'
-            '<p class="dim" style="margin:10px 0 0 0;font-size:13px">We are working on getting '
-            "things back up and running. Please check back shortly.</p></div>"
+            'background:var(--warn);box-shadow:0 0 0 4px rgba(255,180,84,0.18)"></span>'
+            '<span style="font-size:18px;font-weight:600">Status unavailable</span></div>'
+            '<p class="dim" style="margin:10px 0 0 0;font-size:13px">We can&rsquo;t confirm the '
+            "system&rsquo;s health right now. This usually means the monitoring signal is missing, "
+            "not that anything is broken &mdash; please check back shortly.</p></div>"
         )
 
     def _render_settings_developer_section() -> str:
@@ -29319,6 +29489,21 @@ self.addEventListener('fetch', function(e){
             "merge duplicate names, set photo/name permission per athlete, import the consent "
             "register, and export it for the welfare officer.</p>"
             f'<a class="btn secondary" href="{url_for("athletes_page")}">Manage athletes &amp; consent</a>'
+            "</div>"
+        )
+        # C-7: the two pages a safeguarding officer needs most — the consent
+        # registry and the athlete-rights (DSR) tracker — were reachable only
+        # by typing the URL. Surface them here in Settings → Privacy & data.
+        consent_card = (
+            '<div class="card">'
+            '<h3 style="margin-top:0">Consent &amp; data requests</h3>'
+            '<p class="dim" style="font-size:13px">Record a parent&rsquo;s consent '
+            "(grant, refuse or revoke, lawful basis, child controls, retention), and log and "
+            "clock a &ldquo;delete or export my child&rsquo;s data&rdquo; request.</p>"
+            '<div style="display:flex;gap:8px;flex-wrap:wrap">'
+            f'<a class="btn secondary" href="{url_for("org_consent_page")}">Consent &amp; lawful basis</a>'
+            f'<a class="btn secondary" href="{url_for("org_athlete_rights")}">Athlete data requests</a>'
+            "</div>"
             "</div>"
         )
         try:
@@ -29359,6 +29544,8 @@ self.addEventListener('fetch', function(e){
 </div>
 
 {athletes_card}
+
+{consent_card}
 
 <div class="card">
   <h3 style="margin-top:0">What we store</h3>
@@ -30146,10 +30333,26 @@ function mhPlanInterpret(btn) {{
 }}
 function mhPlanGenerate(btn) {{
   var status = document.getElementById('mh-plan-status');
-  btn.disabled = true; status.textContent = 'Fusing own + external + direct signals…';
-  fetch({json.dumps(url_for("api_plan_generate"))}, {{
+  btn.disabled = true; status.textContent = 'Saving your inputs…';
+  // H-7: persist whatever is on the page BEFORE generating. Generate builds
+  // the plan from the PERSISTED inputs and the page reloads on success, so an
+  // event/goal/blackout the volunteer just typed (or added via "Interpret &
+  // fill in", which only creates DOM rows) would otherwise be silently wiped
+  // and never reach the plan. Auto-saving first makes the big primary action
+  // do what the user expects.
+  fetch({json.dumps(url_for("api_plan_inputs"))}, {{
     method: 'POST', headers: {{'Content-Type': 'application/json'}},
-    body: JSON.stringify({{ sport: document.getElementById('mh-plan-sport').value }})
+    body: JSON.stringify({{
+      upcoming_events: mhPlanCollectEvents(),
+      blackout_dates: document.getElementById('mh-plan-blackouts').value.split(',').map(function(s){{return s.trim();}}).filter(Boolean),
+      goals: mhPlanCollectGoals()
+    }})
+  }}).then(function(r){{ return r.json(); }}).catch(function(){{ return {{ok:false}}; }}).then(function(){{
+    status.textContent = 'Fusing own + external + direct signals…';
+    return fetch({json.dumps(url_for("api_plan_generate"))}, {{
+      method: 'POST', headers: {{'Content-Type': 'application/json'}},
+      body: JSON.stringify({{ sport: document.getElementById('mh-plan-sport').value }})
+    }});
   }}).then(function(r){{ return r.json(); }}).then(function(j){{
     if (j.ok) {{ window.location.reload(); }}
     else {{ btn.disabled = false; status.textContent = j.error || 'Plan generation failed'; }}
@@ -31299,11 +31502,55 @@ function mhAnDigest(btn) {{
         event = (ach.get("event") or "").strip()
         slug = re.sub(r"[^A-Za-z0-9]+", "-", f"{swimmer} {event}").strip("-").lower() or "card"
 
-        # Caption text from the caller (preferred — preserves edits)
-        # or fall back to the achievement headline.
-        caption = (
-            request.args.get("caption") or ach.get("headline") or f"{swimmer} — {event}"
-        ).strip()
+        # Caption text. Priority (E-3):
+        #   1. an explicit ?caption= override (rare — a caller passing its own),
+        #   2. the card's APPROVED / active-tone caption — the SAME source the
+        #      run-level export.zip and the public API export write, so the two
+        #      never contradict each other,
+        #   3. the internal headline, only as a last resort.
+        # Previously this fell straight through to ach.get("headline"), so the
+        # volunteer posted the internal headline while their edited caption was
+        # silently dropped (and the ZIP README claimed it was the real caption).
+        caption = (request.args.get("caption") or "").strip()
+        # 2. The approved active-tone caption — byte-for-byte the source the
+        #    run-level export.zip and public API export use (only approved
+        #    cards appear here).
+        if not caption:
+            try:
+                from mediahub.workflow.pack import build_content_pack as _bcp
+
+                for _card in _bcp(run_id, _active_profile_id() or "default", RUNS_DIR):
+                    if str(_card.get("_card_id") or "") == str(card_id):
+                        _active = _card.get("active_caption") or {}
+                        if isinstance(_active, dict):
+                            caption = " ".join(
+                                str(v).strip()
+                                for v in _active.values()
+                                if isinstance(v, str) and v.strip()
+                            ).strip()
+                        break
+            except Exception:
+                caption = ""
+        # 3. Any human edit persisted on the card even if not formally approved
+        #    (build_content_pack returns approved cards only). Excludes the
+        #    inspector overrides (insp.*) and alt-text slots — those aren't the
+        #    post caption.
+        if not caption:
+            try:
+                _ws = _get_wf_store()
+                _st = _ws.load(run_id).get(card_id) if _ws else None
+                _edits = (getattr(_st, "edited_captions", None) or {}) if _st else {}
+                _parts = [
+                    _edits[k]
+                    for k in sorted(_edits)
+                    if k and not str(k).startswith("insp.") and k != "alt_text" and _edits.get(k)
+                ]
+                caption = "\n".join(p for p in _parts if p).strip()
+            except Exception:
+                caption = ""
+        # 4. Last resort: the internal headline.
+        if not caption:
+            caption = (ach.get("headline") or f"{swimmer} — {event}").strip()
 
         # Try to locate the rendered PNG for this card. Best-effort:
         # not every card has a generated visual yet.
@@ -31958,9 +32205,13 @@ function mhAnDigest(btn) {{
                 "</a>"
             )
 
-        # Coming-soon surfaces relocated here from the old Club-data tab —
-        # presented as Create tiles so the whole "what can I make?" catalogue
-        # lives in one place. Disabled until they ship.
+        # Live meet + Season wraps — fully-built surfaces presented as Create
+        # tiles so the whole "what can I make?" catalogue lives in one place.
+        # These used to render as disabled "Coming soon" tiles even though both
+        # pages ship and work (C-5 / C-6): the UI contradicted reality and the
+        # pages were reachable only by typing the URL. They now link straight
+        # through, falling back to an honest disabled tile only if the route is
+        # genuinely absent on a deployment.
         _live_svg = (
             '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" '
             'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" width="28" height="28">'
@@ -31976,31 +32227,52 @@ function mhAnDigest(btn) {{
             '<path d="M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7z"/>'
             '<path d="M12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z"/></svg>'
         )
-        for _cs_title, _cs_desc, _cs_icon in (
+        for _cs_title, _cs_desc, _cs_icon, _cs_endpoint, _cs_cta in (
             (
                 "Live meet",
                 "Point MediaHub at the host club's live-results page during a gala; "
                 "new results queue cards for approval as they land.",
                 _live_svg,
+                "live_meet_page",
+                "Open Live meet",
             ),
             (
                 "Season wraps",
                 "Month-in-numbers and season recap packs built from your stored "
                 "history — PBs, medals, records, debuts, busiest swimmer.",
                 _wraps_svg,
+                "season_wraps_page",
+                "Open Season wraps",
             ),
         ):
-            tiles_html += (
-                '<a href="#" onclick="return false" class="mh-template is-disabled" aria-disabled="true">'
-                f'<div class="mh-template-icon">{_cs_icon}</div>'
-                '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:var(--sp-1)">'
-                f'<h3 style="margin:0">{_h(_cs_title)}</h3>'
-                '<span class="tag">Coming soon</span>'
-                "</div>"
-                f"<p>{_h(_cs_desc)}</p>"
-                '<span class="mh-template-cta">Soon</span>'
-                "</a>"
-            )
+            try:
+                _cs_url = url_for(_cs_endpoint)
+            except Exception:
+                _cs_url = ""
+            if _cs_url:
+                tiles_html += (
+                    f'<a href="{_cs_url}" class="mh-template">'
+                    f'<div class="mh-template-icon">{_cs_icon}</div>'
+                    '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:var(--sp-1)">'
+                    f'<h3 style="margin:0">{_h(_cs_title)}</h3>'
+                    '<span class="tag good">Ready</span>'
+                    "</div>"
+                    f"<p>{_h(_cs_desc)}</p>"
+                    f'<span class="mh-template-cta">{_h(_cs_cta)}</span>'
+                    "</a>"
+                )
+            else:
+                tiles_html += (
+                    '<a href="#" onclick="return false" class="mh-template is-disabled" aria-disabled="true">'
+                    f'<div class="mh-template-icon">{_cs_icon}</div>'
+                    '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:var(--sp-1)">'
+                    f'<h3 style="margin:0">{_h(_cs_title)}</h3>'
+                    '<span class="tag">Coming soon</span>'
+                    "</div>"
+                    f"<p>{_h(_cs_desc)}</p>"
+                    '<span class="mh-template-cta">Soon</span>'
+                    "</a>"
+                )
 
         if tiles_html:
             tiles_section = f'<div class="mh-template-grid">{tiles_html}</div>'
@@ -32074,12 +32346,27 @@ function mhAnDigest(btn) {{
             "</a>"
         )
 
+        # C-3: everything you make (free text, spotlights, previews, event
+        # packs) lands in Drafts, but it had no link from the nav, home, or
+        # here — so returning users couldn't find their work. Surface it at the
+        # top of Create.
+        try:
+            _drafts_strip = (
+                '<div style="display:flex;justify-content:flex-end;margin-bottom:var(--sp-3)">'
+                f'<a href="{url_for("stub_packs_list")}" class="mh-template-cta" '
+                'style="font-size:13px">Your saved drafts &rarr;</a>'
+                "</div>"
+            )
+        except Exception:
+            _drafts_strip = ""
+
         body = (
             '<section class="mh-hero" data-lane="03" style="padding-top:var(--sp-9);padding-bottom:var(--sp-7);margin-bottom:var(--sp-6)">'
             '<span class="mh-hero-eyebrow">Create</span>'
             '<h1>What do you want<br>to <em class="editorial">make</em>?</h1>'
             '<p class="lede">Upload a file, paste a brief, or describe a moment in your own words. Pick a starting point and the engine takes it from there.</p>'
             "</section>"
+            f"{_drafts_strip}"
             f"{_free_tier_banner_html()}"
             f"{plan_entry_html}"
             f"{first_run_cta}"
@@ -35490,12 +35777,41 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 ]
                 codes_raw = request.form.get("club_codes") or ""
                 existing.club_codes = [c.strip() for c in codes_raw.split(",") if c.strip()]
-                existing.brand_primary = (
+                _new_pri = (
                     request.form.get("brand_primary") or existing.brand_primary or "#0A2540"
                 ).strip()
-                existing.brand_secondary = (
+                _new_sec = (
                     request.form.get("brand_secondary") or existing.brand_secondary or "#000000"
                 ).strip()
+                # G-4: make the colour pickers actually take effect. The
+                # rendered palette resolves brand_palette_manual/extracted
+                # BEFORE the legacy brand_primary/secondary, so writing only
+                # the legacy fields was a silent no-op for any club that went
+                # through AI setup. Pin a *changed* colour into
+                # brand_palette_manual (the winning slot); leave manual
+                # untouched when the value equals the current effective palette
+                # so an unedited save never locks an AI palette. Recompute the
+                # derived theme only when something actually changed.
+                from mediahub.brand.palette import effective_palette as _eff_save
+
+                _hex_pat = re.compile(r"^#[0-9a-fA-F]{6}$")
+                _eff_now = _eff_save(
+                    manual=getattr(existing, "brand_palette_manual", {}) or {},
+                    extracted=getattr(existing, "brand_palette_extracted", {}) or {},
+                )
+                _man = dict(getattr(existing, "brand_palette_manual", {}) or {})
+                _palette_changed = False
+                for _slot, _val, _eff_cur in (
+                    ("primary", _new_pri, (_eff_now.get("primary") or "")),
+                    ("secondary", _new_sec, (_eff_now.get("secondary") or "")),
+                ):
+                    if _hex_pat.fullmatch(_val) and _val.lower() != _eff_cur.lower():
+                        _man[_slot] = _val
+                        _palette_changed = True
+                if _palette_changed:
+                    existing.brand_palette_manual = _man
+                existing.brand_primary = _new_pri
+                existing.brand_secondary = _new_sec
                 existing.tone = (request.form.get("tone") or "warm-club").strip()
                 existing.caption_tone = existing.tone
                 existing.platforms = [
@@ -35605,6 +35921,16 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                         "artefact_voice": {},
                         "status": "error",
                     }
+                # G-4: if the brand colours actually changed, force-recompute
+                # the derived theme so the chrome + still/motion renderers pick
+                # up the new primary (mirrors the palette-reorder handler).
+                if _palette_changed:
+                    try:
+                        _kit = existing.get_brand_kit()
+                        _kit.ensure_derived_palette(force=True)
+                        existing.brand_kit = _kit.to_dict()
+                    except Exception as e:
+                        log.warning("organisation save: derived palette recompute failed: %s", e)
                 save_profile(existing)
                 if _is_new_profile:
                     # PC.3: a workspace created by a signed-in user is born
@@ -35943,8 +36269,18 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         # the colour inputs share one literal each (keeps the inline-hex
         # budget in test_theme_tokens green — the literals live in plain
         # assignments, not inline styles).
-        _org_pri = profile.brand_primary or "#0A2540"
-        _org_sec = profile.brand_secondary or "#000000"
+        # G-4: show the EFFECTIVE palette (what actually renders on cards and
+        # reels), not the legacy brand_primary/secondary fields — which lose to
+        # any AI-extracted / setup-confirmed palette. Showing the legacy value
+        # made the picker display one colour while the cards used another.
+        from mediahub.brand.palette import effective_palette as _eff_pal
+
+        _org_eff = _eff_pal(
+            manual=getattr(profile, "brand_palette_manual", {}) or {},
+            extracted=getattr(profile, "brand_palette_extracted", {}) or {},
+        )
+        _org_pri = _org_eff.get("primary") or profile.brand_primary or "#0A2540"
+        _org_sec = _org_eff.get("secondary") or profile.brand_secondary or "#000000"
 
         body = f"""
 {saved_msg}{capture_preview}{capture_error}{voice_preview}{voice_error}
@@ -36611,8 +36947,16 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 record_referred_signup(ref_code, user.email)
             except Exception:
                 log.warning("referral signup recording failed", exc_info=True)
-        # Land new users on the create surface (Step 7: redirect to /add-input).
-        return redirect(url_for("make_page"))
+        # First-run routing (A-4): a brand-new account has no workspace yet,
+        # so sending it to /make just trips the org-ready gate, which bounces
+        # to /sign-in and — on a shared deployment — falsely reads "no
+        # organisations exist". Route straight to setup instead. An account
+        # that signed up via an invite already has an accessible workspace, so
+        # send it to the picker to choose/enter it.
+        accessible = [p for p in list_profiles() if _session_can_use_profile(p.profile_id)]
+        if accessible:
+            return redirect(url_for("sign_in_page"))
+        return redirect(url_for("organisation_setup"))
 
     @app.route("/login", methods=["GET"])
     def login_page():
@@ -37162,7 +37506,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             'required style="width:100%" '
             'placeholder="&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;" />'
             '<button type="submit" class="btn" style="margin-top:20px;width:100%">'
-            "Sign in</button>"
+            "Log in</button>"
             "</form>"
             '<div class="dim" style="font-size:13px;margin-top:18px;'
             'text-align:center">'
@@ -38606,6 +38950,9 @@ what you're doing, what they should do.</p>
         # bound orgs are invisible to non-members (ADR-0014).
         profiles = [p for p in list_profiles() if _session_can_use_profile(p.profile_id)]
         current_id = _active_profile_id() or ""
+        # A-6: a same-site destination threaded here by the org-ready gate, so
+        # signing in resumes the page the user was heading to.
+        _next_val = _safe_next(request.args.get("next"))
 
         # No profiles yet — render an honest empty state with a clear
         # path forward. Previously this redirected straight to
@@ -38617,10 +38964,10 @@ what you're doing, what they should do.</p>
             new_org_url = url_for("organisation_setup")
             home_url = url_for("home")
             empty_body = (
-                "<h1>Sign in</h1>"
+                "<h1>Choose your organisation</h1>"
                 '<p class="lede" style="margin-bottom:var(--sp-6)">'
-                "No organisation profiles exist on this deployment yet. "
-                "Create one and it will appear here for sign-in next time."
+                "You don't have access to any organisation yet. "
+                "Create one and it will appear here next time."
                 "</p>"
                 '<div class="card" style="padding:24px 28px;margin-bottom:18px">'
                 '<h2 style="margin-top:0;font-size:18px">Get started</h2>'
@@ -38637,7 +38984,7 @@ what you're doing, what they should do.</p>
                 'style="margin-left:10px">Back to home</a>'
                 "</div>"
             )
-            return _layout("Sign in", empty_body, active="signin")
+            return _layout("Choose organisation", empty_body, active="signin")
 
         def _initials(name: str) -> str:
             parts = [p for p in (name or "").strip().split() if p]
@@ -38742,8 +39089,13 @@ what you're doing, what they should do.</p>
                 '<div class="actions">'
                 f'<form method="post" action="{sign_in_url}" style="flex:1;display:flex" data-loader-text="Switching organisation">'
                 f'<input type="hidden" name="profile_id" value="{_h(p.profile_id)}">'
-                f'<button type="submit" class="btn-sign-in">'
-                f"{'Continue' if is_current else 'Sign in'} &rarr;</button>"
+                + (
+                    f'<input type="hidden" name="next" value="{_h(_next_val)}">'
+                    if _next_val
+                    else ""
+                )
+                + '<button type="submit" class="btn-sign-in">'
+                f"{'Continue' if is_current else 'Enter'} &rarr;</button>"
                 "</form>"
                 f'<form method="post" action="{delete_url}" data-no-loader="1" '
                 f"onsubmit=\"return confirm('Delete the &quot;{_h(p.display_name)}&quot; profile? "
@@ -38783,8 +39135,8 @@ what you're doing, what they should do.</p>
 
         body = (
             '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">'
-            '<span class="mh-hero-eyebrow">Sign in</span>'
-            '<h1>Pick the <em class="editorial">organisation</em>.</h1>'
+            '<span class="mh-hero-eyebrow">Organisation</span>'
+            '<h1>Choose your <em class="editorial">organisation</em>.</h1>'
             f'<p class="lede">{len(profiles):02d} saved {"profile" if len(profiles) == 1 else "profiles"} on this deployment. '
             "Picking one loads its brand voice, palette, logo, and history. "
             "Switch any time from the home page.</p>"
@@ -38792,7 +39144,7 @@ what you're doing, what they should do.</p>
             f"{err_html}"
             f'<div class="mh-profile-grid">{cards_html}</div>'
         )
-        return _layout("Sign in", body, active="signin")
+        return _layout("Choose organisation", body, active="signin")
 
     @app.route("/sign-in", methods=["POST"])
     def sign_in_post():
@@ -38801,10 +39153,17 @@ what you're doing, what they should do.</p>
         Failure paths now surface an error via the flash session so the
         sign-in picker can show the user why nothing happened.
         """
+        # A-6: a same-site destination the picker carried through from the
+        # gate; on success resume it, and preserve it across error re-renders.
+        _nxt = _safe_next(request.form.get("next"))
+
+        def _back_to_picker():
+            return redirect(url_for("sign_in_page", next=_nxt) if _nxt else url_for("sign_in_page"))
+
         pid = (request.form.get("profile_id") or "").strip()
         if not pid:
             session["sign_in_error"] = "Pick an organisation before signing in."
-            return redirect(url_for("sign_in_page"))
+            return _back_to_picker()
         prof = load_profile(pid)
         if prof is None or not _session_can_use_profile(prof.profile_id):
             # Same message for "doesn't exist" and "members-only" so the
@@ -38812,10 +39171,10 @@ what you're doing, what they should do.</p>
             session["sign_in_error"] = (
                 f"Couldn't find a profile with id '{pid}'. It may have been deleted."
             )
-            return redirect(url_for("sign_in_page"))
+            return _back_to_picker()
         _pin_active_profile(prof.profile_id)
         session.pop("sign_in_error", None)
-        return redirect(url_for("home"))
+        return redirect(_nxt or url_for("home"))
 
     @app.route("/sign-out", methods=["GET", "POST"])
     def sign_out():
@@ -40489,6 +40848,21 @@ what you're doing, what they should do.</p>
                 "</div>"
             )
 
+        # A-1 hardening: surface a one-shot notice when the org-ready gate
+        # cancelled a POST (set in _gate_until_org_ready). Popped so it
+        # shows exactly once, and prepended to the banner slot that is
+        # already rendered at the top of the setup form.
+        _gate_notice = session.pop("_setup_gate_notice", "")
+        if _gate_notice:
+            llm_banner_html = (
+                '<div style="margin-bottom:14px;padding:12px 14px;'
+                "border:1px solid rgba(255,180,84,0.45);border-radius:8px;"
+                "background:rgba(255,180,84,0.08);font-size:13px;"
+                'color:var(--ink);line-height:1.5">'
+                '<strong style="color:var(--warn)">Not saved.</strong> '
+                f"{_h(_gate_notice)}</div>" + llm_banner_html
+            )
+
         from mediahub.web._countries import COUNTRIES
 
         # JSON-safe array literal for inlining into the combobox JS.
@@ -41221,6 +41595,56 @@ what you're doing, what they should do.</p>
             )
 
         capture_url = url_for("organisation_setup_capture")
+
+        # A-2: an org can be created but still "not ready" — a name-only AI
+        # submit, or an AI capture that read the links but found no usable
+        # brand signal. Previously that left the user on an unchanged form
+        # while every nav click bounced silently back here (the org-ready
+        # gate), with no explanation — a hard lockout. is_ready() is
+        # deliberately strict (no anonymous/generic content), so the fix is
+        # to explain exactly what unlocks content and give a one-click path
+        # to finish. The manual colours are the fastest route, and the
+        # manual form already carries over the name/type/country the user
+        # typed, so switching tabs loses nothing.
+        not_ready_html = ""
+        if prof and not prof.is_ready():
+            _cap = (prof.brand_capture_status or "").strip().lower()
+            if _cap in ("ok", "ok_heuristic"):
+                _lead = (
+                    "We read your links but couldn't find a usable brand signal "
+                    "(colours, voice or keywords)."
+                )
+            elif _cap in ("", "no_sources"):
+                _lead = (
+                    "You've given us your name — now MediaHub needs one real "
+                    "brand signal before it can create content for you."
+                )
+            else:
+                _lead = "We couldn't read enough from your links to unlock content yet."
+            not_ready_html = (
+                '<div class="card" id="mh-setup-not-ready" role="status" '
+                'style="margin-bottom:20px;border:1px solid rgba(255,180,84,0.5);'
+                'background:rgba(255,180,84,0.07)">'
+                '<h2 style="margin-top:0;font-size:18px;color:var(--ink)">'
+                f'Almost there &mdash; {_h(prof.display_name or "your organisation")} '
+                "isn&rsquo;t unlocked yet</h2>"
+                '<p style="font-size:14px;line-height:1.55;color:var(--ink);margin:0 0 12px">'
+                f"{_h(_lead)} Add <strong>any one</strong> of these and you&rsquo;re in:</p>"
+                '<ul style="font-size:13px;line-height:1.7;color:var(--ink-dim);'
+                'margin:0 0 14px 18px">'
+                "<li>your brand colours (fastest &mdash; a few taps)</li>"
+                "<li>a website or social link the AI can read</li>"
+                "<li>a brand-guidelines document (PDF, DOCX, TXT)</li>"
+                "<li>a couple of sentences on how your club sounds</li>"
+                "</ul>"
+                '<button type="button" class="btn" '
+                "onclick=\"mhSetupMode('manual');var m="
+                "document.getElementById('mh-setup-manual-panel');"
+                "if(m){m.scrollIntoView({behavior:'smooth',block:'start'});}\">"
+                "Pick your colours now &rarr;</button>"
+                "</div>"
+            )
+
         # UK legal baseline: DPA acceptance + lawful-basis attestation block,
         # rendered in BOTH setup forms until this workspace has a record.
         _attestation_html = _org_attestation_form_html(prof)
@@ -41240,6 +41664,7 @@ what you're doing, what they should do.</p>
 </section>
 
 {llm_banner_html}
+{not_ready_html}
 {preview_html}
 
 <div style="display:flex;gap:8px;margin-bottom:20px;flex-wrap:wrap" role="tablist" aria-label="How do you want to set up?">
@@ -41248,6 +41673,9 @@ what you're doing, what they should do.</p>
   <button type="button" class="btn secondary" id="mh-mode-btn-manual" role="tab" aria-selected="false"
           onclick="mhSetupMode('manual')">Manual build &mdash; I&rsquo;ll pick everything</button>
 </div>
+<p class="muted" style="font-size:11px;margin:-8px 0 18px">
+  Fields marked <span style="color:var(--warn)">*</span> are required.
+</p>
 
 <div id="mh-setup-ai-panel">
 <form method="POST" action="{capture_url}" enctype="multipart/form-data"
@@ -41305,11 +41733,12 @@ what you're doing, what they should do.</p>
     </span>
   </summary>
   <p class="dim" style="font-size:13px;line-height:1.5;margin:14px 0 14px 0">
-    Skip this section entirely if you want &mdash; the AI works fine
-    without it. If you DO paste a link, the AI reads it, picks up your
-    palette, tone of voice, characteristic phrases and the things you
-    actually talk about, and uses that on every caption it writes &mdash;
-    so you never have to explain "this is how we sound".
+    Skip the links if you&rsquo;d rather &mdash; but MediaHub still needs
+    <b>one</b> brand signal to unlock content, so add your colours or a
+    guidelines document below instead. If you DO paste a link, the AI reads
+    it, picks up your palette, tone of voice, characteristic phrases and the
+    things you actually talk about, and uses that on every caption it writes
+    &mdash; so you never have to explain &ldquo;this is how we sound&rdquo;.
   </p>
   <div style="margin-bottom:14px">
     <label>
@@ -41492,7 +41921,20 @@ function mhSetupMode(mode) {{
   if (man) man.style.display = isAi ? 'none' : '';
   if (bAi) {{ bAi.className = isAi ? 'btn' : 'btn secondary'; bAi.setAttribute('aria-selected', String(isAi)); }}
   if (bMan) {{ bMan.className = isAi ? 'btn secondary' : 'btn'; bMan.setAttribute('aria-selected', String(!isAi)); }}
+  // A-7: remember the chosen mode so a validation redirect or a reload
+  // reopens the tab the user was working in (compounds the A-2 "pick your
+  // colours" shortcut, which lands on the manual tab).
+  try {{ sessionStorage.setItem('mhSetupMode', mode); }} catch (e) {{}}
 }}
+(function() {{
+  // Restore the last-used tab on load: an explicit ?mode= wins, else the
+  // remembered pick. Default (AI) needs no action.
+  try {{
+    var want = (new URLSearchParams(window.location.search)).get('mode')
+               || sessionStorage.getItem('mhSetupMode');
+    if (want === 'manual') {{ mhSetupMode('manual'); }}
+  }} catch (e) {{}}
+}})();
 </script>
 
 <style>
@@ -49465,9 +49907,17 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                 "</form></td></tr>"
             )
         if not rows:
+            # D-34: a designed empty state (art + headline + guidance), not a
+            # bare grey table line, on the first-run moment.
             rows = (
-                '<tr><td colspan="5" class="dim" style="padding:16px">No sponsors yet. '
-                "Add one below &mdash; its slot then rotates across your cards automatically.</td></tr>"
+                '<tr><td colspan="5" style="padding:0">'
+                + _empty_state(
+                    art="inbox",
+                    headline="No sponsors yet",
+                    sub="Add your first sponsor below &mdash; its slot then rotates across your "
+                    "cards automatically.",
+                )
+                + "</td></tr>"
             )
 
         tier_opts = "".join(
@@ -53784,15 +54234,52 @@ voice, and queues them for one-click approval.</p>
         d.mkdir(parents=True, exist_ok=True)
         return d
 
+    def _rejected_card_ids(run_id: str) -> set:
+        """Card ids a human rejected. Every pack export must exclude these
+        (E-2) — the same rule pack_export.py already applies to the
+        all-formats ZIP — so a club never ships content it explicitly
+        rejected. Best-effort: any workflow-store failure yields an empty
+        set (fail open to the pre-existing "include everything" behaviour,
+        never crash an export)."""
+        out: set = set()
+        try:
+            ws = _get_wf_store()
+            if ws is not None:
+                for cid, st in (ws.load(run_id) or {}).items():
+                    try:
+                        if st and st.status == CardStatus.REJECTED:
+                            out.add(str(cid))
+                    except Exception:
+                        continue
+        except Exception:
+            return out
+        return out
+
+    def _visual_dir_card_id(sub, default: str) -> str:
+        """Resolve a visuals subdir to its workflow card id (the visual's
+        content_item_id), falling back to the directory name."""
+        try:
+            sc = sub / "visual.json"
+            if sc.exists():
+                return str(json.loads(sc.read_text()).get("content_item_id") or default)
+        except Exception:
+            pass
+        return default
+
     def _bulk_items_for_run(run_id: str):
-        """One BulkItem per rendered card in a run (a representative still)."""
+        """One BulkItem per rendered card in a run (a representative still).
+
+        Rejected cards are excluded (E-2)."""
         from mediahub.export_engine.bulk import BulkItem
 
         visuals = RUNS_DIR / run_id / "visuals"
         items: list = []
         if not visuals.is_dir():
             return items
+        rejected = _rejected_card_ids(run_id)
         for sub in sorted(p for p in visuals.iterdir() if p.is_dir()):
+            if _visual_dir_card_id(sub, sub.name) in rejected:
+                continue
             pick = None
             for cand in ("feed_portrait.png", "story.png", "feed_square.png"):
                 if (sub / cand).is_file():
@@ -55075,7 +55562,13 @@ voice, and queues them for one-click approval.</p>
                 )
                 + "</div>"
             )
-        rows = rows or '<p class="lede">No collections yet — create one to group your meets.</p>'
+        # D-34: a designed empty state instead of a bare grey line.
+        rows = rows or _empty_state(
+            art="inbox",
+            headline="No collections yet",
+            sub="Group related meets and packs &mdash; a season, a championship, a sponsor "
+            "campaign &mdash; into one place.",
+        )
         create_html = ""
         if can_edit:
             create_html = (
@@ -56409,6 +56902,8 @@ voice, and queues them for one-click approval.</p>
 
         buf = io.BytesIO()
         approval = []
+        # E-2: a human who rejected a card must never see it ship in this ZIP.
+        _rejected = _rejected_card_ids(run_id)
         # W.11: the approver-edited alt text (saved in review) outranks
         # whatever the visual sidecar recorded at generation time.
         _wf_alt_edits: dict[str, str] = {}
@@ -56433,6 +56928,10 @@ voice, and queues them for one-click approval.</p>
                 except Exception:
                     continue
                 vid = visual.get("id", brief_dir.name)
+                # E-2: skip cards a human rejected (match on the workflow
+                # card id, falling back to the visual id / dir name).
+                if str(visual.get("content_item_id") or vid) in _rejected:
+                    continue
                 fmt = (visual.get("format") or "").lower()
                 if "story" in fmt:
                     sub = "stories"
@@ -57422,11 +57921,27 @@ voice, and queues them for one-click approval.</p>
         except ValueError:
             if request.is_json:
                 return jsonify({"ok": False, "error": "invalid_json"}), 400
-            return redirect(
-                url_for(
-                    "site_editor", site_id=site_id, msg="That wasn't valid JSON — nothing saved."
-                )
+            # H-6: re-render the editor with the user's SUBMITTED text and an
+            # error-styled message, instead of redirecting — the redirect
+            # reloaded the stored spec and silently threw away every edit.
+            from mediahub.forms import store as _fs
+            from mediahub.sites import insights as _ins
+            from mediahub.web import sites_ui as _ui
+
+            rec = _ss.site_record(pid, site_id)
+            spec = _ss.load_site(pid, site_id)
+            forms = _fs.list_forms(pid) if _forms_ok else []
+            insights = _ins.view_counts(pid, site_id)
+            body = _ui.render_editor(
+                rec,
+                spec,
+                forms=forms,
+                insights=insights,
+                flash="That wasn't valid JSON — nothing saved. Your text is kept below; fix it and save again.",
+                flash_is_error=True,
+                spec_override=raw or "",
             )
+            return _layout(f"Sites — {spec.title}", body, active="create"), 400
         if not isinstance(data, dict):
             data = {}
         data["site_id"] = site_id  # the id is never editable from the body
