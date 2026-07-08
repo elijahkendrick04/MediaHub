@@ -61672,9 +61672,24 @@ voice, and queues them for one-click approval.</p>
         from mediahub.documents import presenter as _pres
         from mediahub.documents.deck import deck_view, spec_version
 
-        session = _pres.create_session(
-            doc_id, len(spec.sections), owner=pid, spec_version=spec_version(spec)
-        )
+        # G-12: resume an existing live session for this deck+owner on reload
+        # rather than reminting a session (and a new pairing code) every load —
+        # a fresh code would desync the already-paired phone and audience view.
+        _ver = spec_version(spec)
+        session = _pres.get_live_for(doc_id, pid)
+        if session is None:
+            session = _pres.create_session(
+                doc_id, len(spec.sections), owner=pid, spec_version=_ver
+            )
+        else:
+            # Reflect any edit to the deck since the session started (bumps the
+            # version only when the content actually changed, so an unchanged
+            # reload doesn't needlessly reload the audience).
+            resumed = _pres.update_spec(
+                session.session_id, total_slides=len(spec.sections), spec_version=_ver
+            )
+            if resumed is not None:
+                session = resumed
         view = deck_view(spec)
         # Script-safe JSON: neutralise </script> by escaping '<' (embedded as a JS
         # literal, not HTML), so speaker notes can carry any text.

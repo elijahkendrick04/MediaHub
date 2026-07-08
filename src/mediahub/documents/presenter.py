@@ -196,6 +196,23 @@ def _iter_live():
             yield s
 
 
+def get_live_for(doc_id: str, owner: str) -> Optional[PresenterSession]:
+    """The current live (non-ended, non-expired) session for this deck+owner.
+
+    Lets the console *resume* an existing session on reload instead of minting a
+    fresh one every load — a reload used to create a new session with a new
+    pairing code, desyncing the already-paired phone and audience projector
+    (G-12). Returns the most-recently-updated match, or None to start fresh.
+    """
+    doc_id, owner = str(doc_id), str(owner)
+    best: Optional[PresenterSession] = None
+    for s in _iter_live():
+        if s.doc_id == doc_id and s.owner == owner and not s.ended:
+            if best is None or s.updated_at > best.updated_at:
+                best = s
+    return best
+
+
 def apply_action(session_id: str, action: str, value=None) -> Optional[PresenterSession]:
     """Apply a control action (used by the phone remote and the console)."""
     s = get_session(session_id)
@@ -272,6 +289,7 @@ __all__ = [
     "PresenterSession",
     "create_session",
     "get_session",
+    "get_live_for",
     "get_by_pairing_code",
     "apply_action",
     "update_spec",
