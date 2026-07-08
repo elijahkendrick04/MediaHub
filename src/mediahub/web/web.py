@@ -5725,6 +5725,11 @@ function addGraphicToPack(btn, visualId) {
             var btn = d.closest('button');
             if (btn) btn.title = title;
           });
+          // D-17 — reveal a visible inline banner when AI is off (a tooltip on a
+          // tiny dot is invisible on a phone). Hidden again the moment AI is live.
+          document.querySelectorAll('.ai-disabled-banner').forEach(function(b){
+            b.hidden = !!j.live;
+          });
         })
         .catch(function(){});
     } catch(e){}
@@ -23278,6 +23283,13 @@ details.why-card[open] > summary .why-peek {{ display: none; }}
 
 {weekend_glance_html}
 
+<div class="ai-disabled-banner card" role="status" hidden style="border-color:var(--mh-prim-warning-500);margin-bottom:var(--sp-4)">
+  <strong>AI captions are turned off on this deployment.</strong>
+  You can still review, edit and approve every card by hand — the AI tone options and
+  imagery will show an honest error until your operator enables a provider.
+  <a href="{url_for("settings_section", section="governance")}">See AI status &rarr;</a>
+</div>
+
 <div class="card">
   <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:8px">
     <h2 style="margin:0">Top achievements</h2>
@@ -28845,7 +28857,45 @@ self.addEventListener('fetch', function(e){
             "real photography; AI-generated images are marked as such.</p></div>"
         )
 
-        return usage_card + perms_card + prov_card
+        # D-17 — a visible AI-availability row. Previously the only signal that
+        # AI was off lived in a hover tooltip on a tiny dot (useless on a phone),
+        # and nothing in Settings said whether a provider was live.
+        try:
+            from mediahub.media_ai.llm import active_provider as _active_prov
+            from mediahub.media_ai.llm import is_available as _llm_available
+
+            _ai_live = bool(_llm_available())
+            _prov_label = (
+                {
+                    "gemini-api": "Google Gemini",
+                    "anthropic-api": "Anthropic (Claude)",
+                }.get(_active_prov())
+                if _ai_live
+                else ""
+            )
+        except Exception:
+            _ai_live, _prov_label = False, ""
+        if _ai_live:
+            status_card = (
+                '<div class="card"><h2 style="margin-top:0;font-size:18px">AI status</h2>'
+                '<p style="font-size:13px;margin-bottom:0">'
+                '<span class="tag good">Live</span> AI captions, imagery and translation are '
+                "enabled"
+                + (f" via <strong>{_h(_prov_label)}</strong>" if _prov_label else "")
+                + ".</p></div>"
+            )
+        else:
+            status_card = (
+                '<div class="card" style="border-color:var(--mh-prim-warning-500)">'
+                '<h2 style="margin-top:0;font-size:18px">AI status</h2>'
+                '<p style="font-size:13px;margin-bottom:0">'
+                '<span class="tag warn">Disabled</span> No AI provider is live on this deployment, '
+                "so captions, imagery and translation will show an honest error rather than a made-up "
+                "result. You can still review, edit and approve cards by hand. Ask your operator to "
+                "configure a provider key to turn AI back on.</p></div>"
+            )
+
+        return status_card + usage_card + perms_card + prov_card
 
     # Detail pages behind the settings cards. ``developer`` is operator-only;
     # everything else is org-scoped and degrades gracefully with no org.
