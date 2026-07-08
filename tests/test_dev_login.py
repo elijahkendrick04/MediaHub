@@ -69,13 +69,14 @@ def test_route_available_and_asks_for_credentials(client):
     assert 'name="dev_password"' in body
 
 
-def test_footer_link_on_home(client):
+def test_footer_has_no_developer_access_link(client):
+    # F-13: the operator "Developer access" pill was removed from the customer
+    # landing footer — the developer entry point now lives only on /login.
     home = client.get("/").get_data(as_text=True)
-    assert "Developer access" in home
-    assert "/developer" in home
+    assert "Developer access" not in home
 
 
-def test_footer_pill_is_home_only(client):
+def test_developer_link_absent_from_pricing_too(client):
     assert "Developer access" not in client.get("/pricing").get_data(as_text=True)
 
 

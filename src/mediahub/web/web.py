@@ -8690,26 +8690,6 @@ main.wrap { max-width: 1200px; margin: 0 auto; padding: 36px 28px 96px; }
   color: var(--ink-dim);
   text-align: center;
 }
-.mh-footer-devlink {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-family: var(--font-mono);
-  font-size: 11px;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--ink);
-  border: 1px solid var(--lane);
-  border-radius: 999px;
-  padding: 6px 14px;
-  text-decoration: none;
-  transition: color var(--transition), background var(--transition);
-}
-.mh-footer-devlink:hover {
-  background: var(--lane);
-  color: var(--bg-deep);
-  text-decoration: none;
-}
 .mh-footer-meta {
   display: inline-flex; align-items: center; gap: var(--sp-3);
   flex-wrap: wrap;
@@ -14213,9 +14193,8 @@ def _layout(
     </div>
     <div class="mh-footer-center">
       <div class="mh-footer-tag">Structured input. Meaningful moments. Ready-to-post content.</div>
-      {% if active == 'home' %}
-      <a class="mh-footer-devlink" href="{{ url_for('developer_login') }}" title="Operator sign-in (unrestricted)">Developer access &rarr;</a>
-      {% endif %}
+      {# F-13: the operator "Developer access" link no longer sits in the
+         customer landing footer — it lives only on the sign-in page. #}
     </div>
     <div class="mh-footer-meta">
       <a href="{{ url_for('status_page') }}">System status</a>
