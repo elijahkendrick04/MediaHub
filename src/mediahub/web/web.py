@@ -31073,10 +31073,21 @@ function mhCalSchedule(packId, date) {{
     body: JSON.stringify({{ pack_id: packId, date: date || '' }})
   }}).then(function (r) {{ return r.json(); }}).then(function (j) {{
     if (!j.ok) {{ mhCalStatus(j.error || 'Could not update.', true); return; }}
-    if (j.warning) {{ mhCalStatus(j.warning, true); setTimeout(function(){{ window.location.reload(); }}, 1200); }}
-    else {{ window.location.reload(); }}
+    if (j.warning) {{
+      // D-24: the reload used to wipe the blackout warning after 1.2s — the
+      // soft gate's one chance to warn. Persist it across the reload so it
+      // shows as a dismissible toast the volunteer actually reads.
+      try {{ sessionStorage.setItem('mhCalWarn', j.warning); }} catch (e) {{}}
+      window.location.reload();
+    }} else {{ window.location.reload(); }}
   }}).catch(function () {{ mhCalStatus('Could not update.', true); }});
 }}
+// D-24: surface a blackout warning carried across the reload.
+(function () {{
+  var w = null;
+  try {{ w = sessionStorage.getItem('mhCalWarn'); sessionStorage.removeItem('mhCalWarn'); }} catch (e) {{}}
+  if (w && window.MH && MH.toast) MH.toast(w, 'error', 8000);
+}})();
 document.addEventListener('dragstart', function (e) {{
   var card = e.target.closest ? e.target.closest('.mh-cal-draft') : null;
   if (!card) return;
