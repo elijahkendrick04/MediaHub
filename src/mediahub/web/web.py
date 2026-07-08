@@ -16900,7 +16900,19 @@ _BULK_ACTIONS_JS = r"""
         var msg = ready
           ? ('Marked ' + n2 + ' photo' + (n2 === 1 ? '' : 's') + ' ready for cards.')
           : ('Moved ' + n2 + ' photo' + (n2 === 1 ? '' : 's') + ' back to Draft.');
-        if (sk) msg += ' ' + sk + ' skipped (safeguarding).';
+        if (sk){
+          // H-3 — don't just count skips: flag the blocked rows and scroll the
+          // first into view so the volunteer can set consent on the row itself.
+          msg += ' ' + sk + ' skipped (safeguarding) — set consent on the flagged row' + (sk === 1 ? '' : 's') + '.';
+          var blockedFirst = null;
+          ((body && body.results) || []).forEach(function(r){
+            if (r.ok || r.error !== 'safeguarding_block') return;
+            var e2 = (window.CSS && CSS.escape) ? CSS.escape(r.id) : r.id;
+            var brow = form.querySelector('.mh-asset-row[data-asset-id="' + e2 + '"]');
+            if (brow){ brow.classList.add('mh-safeguard-flag'); if (!blockedFirst) blockedFirst = brow; }
+          });
+          if (blockedFirst && blockedFirst.scrollIntoView) blockedFirst.scrollIntoView({behavior:'smooth', block:'center'});
+        }
         toast(msg, n2 ? 'success' : 'info', 3000);
         selected().forEach(function(c){ c.checked = false; });
         refresh();
@@ -17137,6 +17149,43 @@ _ML_QUICK_ACTION_JS = r"""
 """
 
 
+# H-3 — plain-English labels for the media-library permission vocabulary, and a
+# sensible order for the per-photo consent dropdown. The values are the same
+# PERMISSION_STATUSES the consent gate enforces; only the copy is humanised.
+_MEDIA_PERMISSION_ORDER = [
+    ("unknown", "Not set — needs a decision"),
+    ("needs_parental_consent", "Needs parental consent"),
+    ("needs_approval", "Needs approval"),
+    ("approved_by_club", "Consent on file — club approved"),
+    ("approved_by_photographer", "Photographer approved"),
+    ("user_owned", "We took it / no consent needed"),
+    ("approved_public", "Approved for public use"),
+    ("internal_only", "Internal use only"),
+    ("do_not_use", "Do not use"),
+]
+_MEDIA_PERMISSION_LABELS = dict(_MEDIA_PERMISSION_ORDER)
+
+
+def _media_permission_select(asset_id: str, current: str) -> str:
+    """H-3 — a plain-English per-photo consent dropdown (replaces the raw enum).
+
+    The change is saved inline via the media-library permission endpoint, so a
+    volunteer holding a signed consent form can record it without delete +
+    re-upload.
+    """
+    cur = str(current or "unknown").strip() or "unknown"
+    opts = "".join(
+        f'<option value="{_h(v)}"{" selected" if v == cur else ""}>{_h(lbl)}</option>'
+        for v, lbl in _MEDIA_PERMISSION_ORDER
+    )
+    return (
+        f'<select class="mh-ml-perm" data-asset-id="{_h(asset_id)}" data-prev="{_h(cur)}" '
+        'aria-label="Photo consent / permission" '
+        'style="font-size:11px;padding:3px 6px;min-height:0;max-width:200px">'
+        f"{opts}</select>"
+    )
+
+
 # H-4 — in-place photo metadata editor. Opens a modal prefilled from the row's
 # data-attrs, POSTs to the meta endpoint, and updates the visible cells in place.
 # __META_TMPL__ carries "__AID__" for the asset id; __CSRF__ is the token.
@@ -17221,6 +17270,32 @@ _ML_META_EDIT_MODAL = """
     </div>
   </div>
 </div>
+"""
+
+# H-3 — save a photo's consent/permission inline when its dropdown changes.
+# __PERM_TMPL__ carries "__AID__"; __CSRF__ is the token.
+_ML_PERMISSION_JS = r"""
+(function(){
+  var TMPL = "__PERM_TMPL__", CSRF = "__CSRF__";
+  document.addEventListener('change', function(e){
+    var sel = e.target;
+    if(!sel || !sel.classList || !sel.classList.contains('mh-ml-perm')) return;
+    var id = sel.getAttribute('data-asset-id'), prev = sel.getAttribute('data-prev') || '';
+    sel.disabled = true;
+    fetch(TMPL.replace('__AID__', encodeURIComponent(id)), {
+      method:'POST', headers:{'Content-Type':'application/json','X-CSRF-Token':CSRF,'Accept':'application/json'},
+      body: JSON.stringify({permission_status: sel.value})
+    }).then(function(r){ return r.json(); }).then(function(j){
+      sel.disabled = false;
+      if(!j.ok){ if(prev) sel.value = prev; if(window.MH && MH.toast) MH.toast(j.message || 'Could not save consent.', 'error'); return; }
+      sel.setAttribute('data-prev', sel.value);
+      // Clear a safeguarding flag once the block is resolved.
+      var row = sel.closest('.mh-asset-row');
+      if(row && j.usable) row.classList.remove('mh-safeguard-flag');
+      if(window.MH && MH.toast) MH.toast('Consent updated.', 'success');
+    }).catch(function(){ sel.disabled = false; if(prev) sel.value = prev; if(window.MH && MH.toast) MH.toast('Network error — try again.', 'error'); });
+  });
+})();
 """
 
 
@@ -47041,7 +47116,11 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
   <td data-label="Type">{_h(ad.get("type", ""))}</td>
   <td data-label="Athlete">{_h(athlete_names)}{_tag_badges}</td>
   <td data-label="Venue / Event">{_h(ad.get("linked_venue") or ad.get("linked_event") or "")}</td>
-  <td data-label="Permission">{_h(ad.get("permission_status", ""))}</td>
+  <td data-label="Permission">{
+                _media_permission_select(ad.get("id", ""), ad.get("permission_status", ""))
+                if ad.get("type") not in _skip_tag_types
+                else _h(_MEDIA_PERMISSION_LABELS.get(ad.get("permission_status", ""), ad.get("permission_status", "")))
+            }</td>
   <td data-label="Status">{_media_approval_badge(ad.get("approval_status", ""))}</td>
   <td data-label="ID"><code>{_h(ad.get("id", "")[:12])}</code></td>
   <td style="white-space:nowrap">
@@ -47364,10 +47443,17 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
 <script>{_BULK_ACTIONS_JS}</script>
 <script>{_ML_QUICK_ACTION_JS}</script>
 {_ML_META_EDIT_MODAL}
+<style>.mh-safeguard-flag{{outline:2px solid var(--warn);outline-offset:-2px}}</style>
 <script>{
             _ML_META_EDIT_JS.replace(
                 "__META_TMPL__",
                 url_for("api_media_library_meta", asset_id="__AID__"),
+            ).replace("__CSRF__", _h(_csrf_token()))
+        }</script>
+<script>{
+            _ML_PERMISSION_JS.replace(
+                "__PERM_TMPL__",
+                url_for("api_media_library_permission", asset_id="__AID__"),
             ).replace("__CSRF__", _h(_csrf_token()))
         }</script>
 <script src="{
@@ -48711,6 +48797,48 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                     "event": updated.linked_event or "",
                     "tags": ", ".join(updated.tags or []),
                 },
+            }
+        )
+
+    @app.route("/api/media-library/<asset_id>/permission", methods=["POST"])
+    def api_media_library_permission(asset_id: str):
+        """H-3 — record consent / permission on a photo asset.
+
+        The only permission writer used to be the Video Studio's footage-only
+        endpoint (404 for anything that isn't a clip), so a photo blocked by the
+        consent gate (``needs_parental_consent`` / ``do_not_use`` / not
+        ``safe_for_minors``) was a hard dead end — the only fix was delete +
+        re-upload. This is a sibling writer for photo assets using the same
+        PERMISSION_STATUSES vocabulary the gate enforces.
+        """
+        if not _v8_ok:
+            return jsonify({"ok": False, "error": "v8_unavailable"}), 503
+        from mediahub.media_library.models import PERMISSION_STATUSES
+
+        store = _v8_get_media_store()
+        asset = store.get(asset_id)
+        if asset is None:
+            return jsonify({"ok": False, "error": "not_found"}), 404
+        if not _session_can_access_profile(asset.profile_id):
+            return jsonify({"ok": False, "error": "forbidden"}), 403
+        body = request.get_json(silent=True) or {}
+        status = str(body.get("permission_status") or "").strip()
+        if status not in PERMISSION_STATUSES:
+            return jsonify(
+                {"ok": False, "error": "bad_permission", "message": "Unknown permission value."}
+            ), 400
+        updated = store.update_fields(asset_id, {"permission_status": status})
+        # A photo is usable (won't be skipped by bulk-approve / the picker) when
+        # it carries no hard block and is safe for minors — mirror the gate.
+        usable = status not in ("do_not_use", "needs_parental_consent") and bool(
+            getattr(updated, "safe_for_minors", True)
+        )
+        return jsonify(
+            {
+                "ok": True,
+                "permission_status": status,
+                "label": _MEDIA_PERMISSION_LABELS.get(status, status),
+                "usable": usable,
             }
         )
 
