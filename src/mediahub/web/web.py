@@ -14123,6 +14123,11 @@ def _layout(
       </button>
       <div id="mh-orgmenu-panel" class="mh-orgmenu-panel" role="menu"
            aria-label="Account and organisation">
+        {# C-3: Drafts (where every free-text / spotlight / preview output
+           lands) is now reachable from any page, not just a footer link on
+           the compose surfaces. #}
+        <a href="{{ url_for('stub_packs_list') }}" role="menuitem"
+           class="mh-orgmenu-item {{ 'active' if active=='drafts' else '' }}">Drafts</a>
         <a href="{{ url_for('settings_page') }}" role="menuitem"
            class="mh-orgmenu-item {{ 'active' if active=='settings' else '' }}">{{ t('nav.settings') }}</a>
         <a href="{{ url_for('help_page') }}" role="menuitem"
@@ -29400,6 +29405,21 @@ self.addEventListener('fetch', function(e){
             f'<a class="btn secondary" href="{url_for("athletes_page")}">Manage athletes &amp; consent</a>'
             "</div>"
         )
+        # C-7: the two pages a safeguarding officer needs most — the consent
+        # registry and the athlete-rights (DSR) tracker — were reachable only
+        # by typing the URL. Surface them here in Settings → Privacy & data.
+        consent_card = (
+            '<div class="card">'
+            '<h3 style="margin-top:0">Consent &amp; data requests</h3>'
+            '<p class="dim" style="font-size:13px">Record a parent&rsquo;s consent '
+            "(grant, refuse or revoke, lawful basis, child controls, retention), and log and "
+            "clock a &ldquo;delete or export my child&rsquo;s data&rdquo; request.</p>"
+            '<div style="display:flex;gap:8px;flex-wrap:wrap">'
+            f'<a class="btn secondary" href="{url_for("org_consent_page")}">Consent &amp; lawful basis</a>'
+            f'<a class="btn secondary" href="{url_for("org_athlete_rights")}">Athlete data requests</a>'
+            "</div>"
+            "</div>"
+        )
         try:
             conn = _db()
             n_runs = conn.execute("SELECT COUNT(*) FROM runs").fetchone()[0]
@@ -29438,6 +29458,8 @@ self.addEventListener('fetch', function(e){
 </div>
 
 {athletes_card}
+
+{consent_card}
 
 <div class="card">
   <h3 style="margin-top:0">What we store</h3>
@@ -32238,12 +32260,27 @@ function mhAnDigest(btn) {{
             "</a>"
         )
 
+        # C-3: everything you make (free text, spotlights, previews, event
+        # packs) lands in Drafts, but it had no link from the nav, home, or
+        # here — so returning users couldn't find their work. Surface it at the
+        # top of Create.
+        try:
+            _drafts_strip = (
+                '<div style="display:flex;justify-content:flex-end;margin-bottom:var(--sp-3)">'
+                f'<a href="{url_for("stub_packs_list")}" class="mh-template-cta" '
+                'style="font-size:13px">Your saved drafts &rarr;</a>'
+                "</div>"
+            )
+        except Exception:
+            _drafts_strip = ""
+
         body = (
             '<section class="mh-hero" data-lane="03" style="padding-top:var(--sp-9);padding-bottom:var(--sp-7);margin-bottom:var(--sp-6)">'
             '<span class="mh-hero-eyebrow">Create</span>'
             '<h1>What do you want<br>to <em class="editorial">make</em>?</h1>'
             '<p class="lede">Upload a file, paste a brief, or describe a moment in your own words. Pick a starting point and the engine takes it from there.</p>'
             "</section>"
+            f"{_drafts_strip}"
             f"{_free_tier_banner_html()}"
             f"{plan_entry_html}"
             f"{first_run_cta}"
