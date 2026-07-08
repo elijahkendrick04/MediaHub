@@ -57759,11 +57759,27 @@ voice, and queues them for one-click approval.</p>
         except ValueError:
             if request.is_json:
                 return jsonify({"ok": False, "error": "invalid_json"}), 400
-            return redirect(
-                url_for(
-                    "site_editor", site_id=site_id, msg="That wasn't valid JSON — nothing saved."
-                )
+            # H-6: re-render the editor with the user's SUBMITTED text and an
+            # error-styled message, instead of redirecting — the redirect
+            # reloaded the stored spec and silently threw away every edit.
+            from mediahub.forms import store as _fs
+            from mediahub.sites import insights as _ins
+            from mediahub.web import sites_ui as _ui
+
+            rec = _ss.site_record(pid, site_id)
+            spec = _ss.load_site(pid, site_id)
+            forms = _fs.list_forms(pid) if _forms_ok else []
+            insights = _ins.view_counts(pid, site_id)
+            body = _ui.render_editor(
+                rec,
+                spec,
+                forms=forms,
+                insights=insights,
+                flash="That wasn't valid JSON — nothing saved. Your text is kept below; fix it and save again.",
+                flash_is_error=True,
+                spec_override=raw or "",
             )
+            return _layout(f"Sites — {spec.title}", body, active="create"), 400
         if not isinstance(data, dict):
             data = {}
         data["site_id"] = site_id  # the id is never editable from the body

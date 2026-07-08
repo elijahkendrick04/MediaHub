@@ -150,6 +150,8 @@ def render_editor(
     forms: list[dict],
     insights: dict,
     flash: str = "",
+    flash_is_error: bool = False,
+    spec_override=None,
 ) -> str:
     site_id = rec["site_id"]
     published = bool(rec.get("published"))
@@ -179,8 +181,10 @@ def render_editor(
         '<button class="btn" type="submit">Publish</button></form>'
     )
 
+    # H-6: an error flash (e.g. invalid JSON) must NOT wear the success colour.
+    _flash_border = "var(--mh-bad,#c33)" if flash_is_error else "var(--mh-success,#3a7)"
     flash_html = (
-        f'<div class="card" style="border-color:var(--mh-success,#3a7)"><p>{_h(flash)}</p></div>'
+        f'<div class="card" style="border-color:{_flash_border}"><p>{_h(flash)}</p></div>'
         if flash
         else ""
     )
@@ -205,17 +209,35 @@ def render_editor(
 #dev-m:checked~.dev-stage .dev-frame{{width:390px}}
 </style></div>"""
 
-    spec_json = _h(_pretty(spec))
+    # H-6: on a failed save the caller passes the user's SUBMITTED text so a
+    # single JSON typo never wipes their edits; otherwise pretty-print the
+    # stored spec as before.
+    spec_json = _h(spec_override) if spec_override is not None else _h(_pretty(spec))
     editor = f"""
 <div class="card"><h3 style="margin-top:0">Edit content</h3>
 <p class="dim" style="font-size:13px">The site is plain data (pages → sections → blocks). Edit it
 here and save; the preview refreshes. Publishing freezes a snapshot of the current draft.</p>
-<form method="post" action="{url_for("api_site_save", site_id=site_id)}">
+<form method="post" action="{url_for("api_site_save", site_id=site_id)}" onsubmit="return mhSiteSpecValid(this)">
 <textarea name="spec" spellcheck="false" style="width:100%;min-height:420px;font-family:ui-monospace,monospace;
   font-size:12px;padding:12px;border-radius:8px;border:1px solid var(--line,#2a3550);
   background:#0c1018;color:#cfe">{spec_json}</textarea>
+<div id="mh-site-spec-err" style="display:none;margin-top:8px;padding:8px 10px;border-radius:6px;
+  border:1px solid var(--mh-bad,#c33);color:var(--mh-bad,#c33);font-size:12px"></div>
 <div style="margin-top:10px"><button class="btn" type="submit">Save changes</button></div>
-</form></div>"""
+</form>
+<script>
+function mhSiteSpecValid(f) {{
+  var box = document.getElementById('mh-site-spec-err');
+  try {{ JSON.parse(f.spec.value); if (box) box.style.display = 'none'; return true; }}
+  catch (e) {{
+    if (box) {{
+      box.textContent = 'Not valid JSON (' + e.message + '). Fix it and save again — your text is kept.';
+      box.style.display = 'block';
+    }}
+    return false;
+  }}
+}}
+</script></div>"""
 
     insights_html = _render_insights(insights)
     forms_html = _render_forms_card(forms)
