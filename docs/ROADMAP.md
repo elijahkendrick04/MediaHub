@@ -143,9 +143,9 @@ second sport on Phases 1–3 — the swimming wedge is sold before we broaden
 
 <!-- ROADMAP:TODO -->
 - **RP.1** · Repo-private fast-track (pre-flight, do first) — Full-history secret re-audit + public-exposure inventory: re-run gitleaks over all history, confirm `.env`/keys were never committed, list what stays permanently clonable by anyone who already took a copy (children's-data fixtures + the committed pricing/sales strategy in `docs/`, no credentials per the prior audit), rotate anything found, and re-confirm 0 forks / no unauthenticated runtime fetch of this repo's own files (README badges are static shields.io; the Dockerfile's raw.githubusercontent fetch targets SearXNG, not us) · ❌ **NOT STARTED**
-- **RP.2** · Repo-private fast-track (pre-flight) — Trim CI Actions-minutes and ship it BEFORE the flip (the one real cost: a private repo on Free gets 2,000 min/mo, and today's `autotest` every 6 h × 70 min + `dependabot-automerge` every 30 min + nightly Lighthouse/cross-browser + daily contract would burn that in days): `autotest` 6 h → daily, automerge 30 min → 4–6 h, consolidate the nightlies, add `concurrency: cancel-in-progress` on the push/PR suites · ❌ **NOT STARTED**
+- **RP.2** · Repo-private fast-track (pre-flight) — Trim CI Actions-minutes and ship it BEFORE the flip (the one real cost: a private repo on Free gets 2,000 min/mo, and today's `autotest` every 6 h × 70 min + `dependabot-automerge` every 30 min + daily contract would burn that in days; the nightly Lighthouse + cross-browser sweeps were **removed 2026-07-08** — see docs/adr/0021 — trimming that slice already): `autotest` 6 h → daily, automerge 30 min → 4–6 h, add `concurrency: cancel-in-progress` on the push/PR suites · ❌ **NOT STARTED**
 - **RP.3** · Repo-private fast-track (pre-flight) — Keep `main` protection alive on private: classic protected-branches are **public-only on the Free plan**, so migrate `main`'s protection to a repository **ruleset** (free on private) and verify the three self-merging bots (autotest fixer, `roadmap-autoupdate`, `dependabot-automerge`) and the `claude/*` app-token PRs all still merge under it — else the flip silently drops branch protection and the bot-merge model breaks · ❌ **NOT STARTED**
-- **RP.4** · Repo-private fast-track (pre-flight) — Make "private repo" read true in the docs + leave no dangling public dependency: update `DATA_MAP` §6 + `OPEN_LEGAL_QUESTIONS` Q13 with the honest public-window dates, keep the CI security gates (gitleaks/bandit/semgrep/pip-audit) that replace GitHub's free public-repo secret-scanning, and record that Upptime's public status page / GitHub Pages must not be turned on while private without Pro · ❌ **NOT STARTED**
+- **RP.4** · Repo-private fast-track (pre-flight) — Make "private repo" read true in the docs + leave no dangling public dependency: update `DATA_MAP` §6 + `OPEN_LEGAL_QUESTIONS` Q13 with the honest public-window dates, keep the CI security gates (gitleaks/bandit/semgrep/pip-audit) that replace GitHub's free public-repo secret-scanning (the Upptime status-page caveat is moot — Upptime was **removed 2026-07-08**, see docs/adr/0021) · ❌ **NOT STARTED**
 - **1.25** · Phase 1 (Product) — Pro editor & round-trip: layers/align/guides/page management as validated spec patches, vector node/boolean ops, curves/levels recipes, layered SVG/PSD export-import; deep darkroom/DTP stays a round-trip non-goal · ❌ **NOT STARTED**
 - **1.26** · Phase 1 (Product) — Ollama local LLM provider behind the existing `ai_core.llm` interface · ❌ **NOT STARTED**
 - **1.27** · Phase 1 (Product) — Satori graphics fast-path (~100× lighter than headless Chromium; rides the reel-engine seam P0.1 shipped) · ❌ **NOT STARTED**
@@ -643,11 +643,12 @@ left is to stop adding to the public window — do it now (fast-tracked
    SearXNG repo, not ours).
 3. **Decide the Actions-minutes plan — the one real cost.** Public repos run
    GitHub-hosted CI free; a private repo on the Free plan gets
-   **2,000 min/month**, and today's schedules (autotest every 6 h, nightly
-   Lighthouse + cross-browser sweeps, the daily contract suite, the
-   half-hourly dependabot-automerge sweep, plus every push/PR) would burn
-   that in days. Cheapest first: have Claude Code trim the schedules (autotest
-   6 h → daily, automerge 30 min → 2–6 h, consolidate the nightlies) and
+   **2,000 min/month**, and today's schedules (autotest every 6 h, the daily
+   contract suite, the half-hourly dependabot-automerge sweep, plus every
+   push/PR) would burn that in days (the nightly Lighthouse + cross-browser
+   sweeps were removed 2026-07-08, see docs/adr/0021). Cheapest first: have
+   Claude Code trim the schedules (autotest 6 h → daily, automerge 30 min →
+   2–6 h) and
    ship the trim *before* the flip so the quota never silently stalls CI;
    GitHub Pro (~$4/mo, 3,000 min) if trimming isn't enough; heavy jobs onto
    a self-hosted runner (the F.12 box) later if both fall short.

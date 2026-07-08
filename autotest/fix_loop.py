@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 from pathlib import Path
 
@@ -57,6 +58,27 @@ def _is_meta_finding(bug: dict) -> bool:
        blind-spots are re-filed as semantic findings BEFORE this rule applies, so
        none are lost.)"""
     return report.is_meta_entry(bug)
+
+
+# A 502/503/504 is the GATEWAY, not the app: for MediaHub that is a Render
+# free-tier instance cold-starting (it sleeps after ~15 min idle, so a 6-hourly
+# sweep always wakes it) or momentarily overloaded — the app never got the
+# request. There is no product-code fix for it, so the coder can only write a
+# throwaway "document the 502" note (exactly the four low-value July fix PRs).
+# Keep these OUT of the fix queue; a genuine 500 (the app itself raised) is a
+# real defect and stays eligible. The finding is still recorded in the ledger /
+# BUGS.md for human visibility — it is de-queued from AUTO-FIXING, not hidden.
+_GATEWAY_5XX = re.compile(r"\b(?:502|503|504)\b")
+
+
+def _is_transient_5xx(bug: dict) -> bool:
+    """True for a gateway/infra 5xx (502/503/504) that the autonomous coder
+    cannot fix in product code — the hosting layer, not the app. Scoped to the
+    HTTP-status finding categories so a 500 (app raised) is never excluded and an
+    unrelated finding that merely mentions a number is never matched."""
+    if bug.get("category") not in ("http_5xx", "network_error"):
+        return False
+    return bool(_GATEWAY_5XX.search(f"{bug.get('title', '')} {bug.get('actual', '')}"))
 
 
 def reconcile_in_flight() -> list[dict]:
@@ -143,9 +165,10 @@ def _open_bugs(limit: int) -> list[dict]:
     """Open bugs eligible for a fix attempt. NEVER-SKIP policy: every open
     product bug stays eligible forever — we never drop one for having too many
     attempts or for not being reproduced on the latest (input-rotated) sweep.
-    The only exclusions are fixes already in flight (``fix_pr``) and meta-findings
-    about the tester itself (not product code the coder can fix). Priority is set
-    by ORDER, not by exclusion (see below)."""
+    The only exclusions are fixes already in flight (``fix_pr``), meta-findings
+    about the tester itself, and gateway/infra 5xx (502/503/504) — none of which
+    are product code the coder can fix. Priority is set by ORDER, not by
+    exclusion (see below)."""
     ledger = report.load_ledger()
     # ``open`` = confirmed-and-actionable (deterministic, or a subjective finding that
     # passed the A1 confirm gate). ``regressed`` = a closed defect that came back (A3)
@@ -153,7 +176,7 @@ def _open_bugs(limit: int) -> list[dict]:
     # subjective finding is not yet a bug, so the fixer must ignore it (A6).
     bugs = [b for b in ledger["bugs"].values()
             if b.get("status") in ("open", "regressed") and not b.get("fix_pr")
-            and not _is_meta_finding(b)]
+            and not _is_meta_finding(b) and not _is_transient_5xx(b)]
     # NEVER-SKIP ordering (not exclusion). A bounded "verified-critical" tier
     # jumps the queue FIRST (real security/data bugs beat cosmetics), but only
     # for its first few attempts (see _is_verified_critical) so it can't starve

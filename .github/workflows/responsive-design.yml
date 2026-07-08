@@ -137,5 +137,5 @@ jobs:
             echo "|---|---|"
             echo "| Pytest contract suite | ${{ needs.responsive-tests.result }} |"
             echo
-            echo "See [docs/responsive-design.md](../blob/${{ github.sha }}/docs/responsive-design.md) for what these guardrails cover and how to extend them."
+            echo "See [docs/RESPONSIVE_DESIGN.md](../blob/${{ github.sha }}/docs/RESPONSIVE_DESIGN.md) for what these guardrails cover and how to extend them."
           } >> "$GITHUB_STEP_SUMMARY"

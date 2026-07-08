@@ -100,13 +100,13 @@ These are the "human tester replacement done deterministically" exemplars. Media
 
 ### TIER B — Coverage gaps a human tester would catch
 
-**B1. Cross-browser + mobile viewports.** *Gap:* Chromium-only. *Borrow:* Playwright `projects` (Firefox, WebKit, `devices['iPhone 13']`, `Pixel 7`). *Change:* add `firefox`, `webkit`, and 1–2 mobile projects to your Playwright config; run the smoke/primary flow across all on the schedule, full matrix nightly.
+**B1. Cross-browser + mobile viewports.** *Gap:* Chromium-only. *Borrow:* Playwright `projects` (Firefox, WebKit, `devices['iPhone 13']`, `Pixel 7`). *Change:* add `firefox`, `webkit`, and 1–2 mobile projects to your Playwright config; run the smoke/primary flow across all on the schedule, full matrix nightly. **[The nightly CI matrix built from this was removed 2026-07-08 — see docs/adr/0021; the local `AUTOTEST_BROWSER`/`AUTOTEST_DEVICE` browser-select capability is retained.]**
 
 **B2. Accessibility.** *Gap:* none today. *Borrow:* **@axe-core/playwright** (and/or pa11y-ci WCAG2AA). *Change:* in `run.py`, after each rendered page, run axe and emit violations as a *new deterministic finding class* (`a11y`) with severity from axe impact — these are deterministic, so they bypass A1 gating.
 
 **B3. Visual regression baselines.** *Gap:* your VLM is great for novel defects but has no stable baseline, contributing to nondeterminism. *Borrow:* **Playwright `toHaveScreenshot()`** for committed baselines of home/review pages (with `animations:'disabled'`, masking dynamic captions/timestamps), optionally **Argos** or **Lost Pixel** for a review UI + ARIA snapshots. *Change:* keep the VLM as the "novel defect" judge **but** add deterministic snapshot assertions as the regression backbone; this gives you a human-blessed visual golden baseline analogous to your `baseline.py`.
 
-**B4. Performance / Core Web Vitals budgets.** *Borrow:* **Lighthouse CI** + `treosh/lighthouse-ci-action`, `budget.json`, `numberOfRuns:3`. *Change:* assert a11y/best-practices/SEO scores and resource budgets as errors; treat raw timing metrics as *warnings* (documented CI noise). Run against the live Render URL.
+**B4. Performance / Core Web Vitals budgets.** *Borrow:* **Lighthouse CI** + `treosh/lighthouse-ci-action`, `budget.json`, `numberOfRuns:3`. *Change:* assert a11y/best-practices/SEO scores and resource budgets as errors; treat raw timing metrics as *warnings* (documented CI noise). Run against the live Render URL. **[The Lighthouse CI job built from this was removed 2026-07-08 — see docs/adr/0021.]**
 
 **B5. API contract/schema testing for `/api`.** *Borrow:* **Schemathesis** (Python/pytest-native, `from_wsgi` for Flask). *Change:* generate an OpenAPI spec for your Flask API (if not present), add `schema.parametrize()` tests to the pytest suite; these find 5xx/serialization/validation bugs deterministically and feed straight into the oracle, not the judges.
 
@@ -114,7 +114,7 @@ These are the "human tester replacement done deterministically" exemplars. Media
 
 ### TIER C — Monitoring & reliability of the live site (distinct from the 6-hour CI)
 
-**C1. External synthetic monitor at 1–5 min cadence.** *Gap:* your finder runs every 6h inside CI; that's not uptime/behavior monitoring. *Borrow:* **Checkly** (reuse your Playwright specs as monitors, alerts to Slack/PagerDuty, Web Vitals, traces) or, to stay GitHub-native and free, **Upptime** (5-min cron, opens/closes GitHub Issues, status page) or self-hosted **Uptime Kuma**. *Change:* deploy a Checkly monitor of the primary login + a lightweight health endpoint; keep it separate from the bug-finding/fixing pipeline so monitoring noise never reaches the fixer.
+**C1. External synthetic monitor at 1–5 min cadence.** *Gap:* your finder runs every 6h inside CI; that's not uptime/behavior monitoring. *Borrow:* **Checkly** (reuse your Playwright specs as monitors, alerts to Slack/PagerDuty, Web Vitals, traces) or, to stay GitHub-native and free, **Upptime** (5-min cron, opens/closes GitHub Issues, status page) or self-hosted **Uptime Kuma**. *Change:* deploy a Checkly monitor of the primary login + a lightweight health endpoint; keep it separate from the bug-finding/fixing pipeline so monitoring noise never reaches the fixer. **[The Upptime monitor built from this was removed 2026-07-08 — see docs/adr/0021.]**
 
 **C2. Status/incident hygiene.** Use the monitor's native issue/alert flow (Upptime auto-opens/closes issues; Checkly→PagerDuty) rather than your `notify.py` for *uptime* events, reserving `notify.py` for confirmed functional bugs.
 
