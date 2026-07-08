@@ -41731,6 +41731,28 @@ what you're doing, what they should do.</p>
                 + "</div>"
             )
 
+        # D-16: surface any logo files the last save couldn't use — the upload
+        # handler stashes {filename, reason} rejections so they don't just vanish
+        # from the grid with no explanation.
+        _logo_reject_html = ""
+        _rejections = session.pop("logo_rejections", None)
+        if isinstance(_rejections, list) and _rejections:
+            _items = "".join(
+                f"<li><strong>{_h(str(r.get('filename') or 'file'))}</strong> — "
+                f"{_h(str(r.get('reason') or 'couldn’t be used'))}</li>"
+                for r in _rejections[:8]
+                if isinstance(r, dict)
+            )
+            _logo_reject_html = (
+                '<div style="margin-top:12px;padding:10px 12px;border:1px solid var(--warn);'
+                "border-radius:8px;background:color-mix(in oklab, var(--warn) 7%, transparent);"
+                'font-size:12px;line-height:1.5">'
+                f'<div style="font-weight:600;color:var(--warn)">'
+                f"{len(_rejections)} file{'s' if len(_rejections) != 1 else ''} couldn&rsquo;t be used</div>"
+                f'<ul style="margin:6px 0 0;padding-left:18px;color:var(--ink-dim)">{_items}</ul>'
+                "</div>"
+            )
+
         # M2 — "Where can AI read you" defaults to OPEN so a first-run
         # user sees the inputs (they're entirely optional but easy to
         # miss if collapsed). Once submitted with at least one link
@@ -42243,6 +42265,7 @@ what you're doing, what they should do.</p>
          accept="image/*,application/pdf,application/postscript,application/illustrator,application/x-photoshop,.png,.jpg,.jpeg,.webp,.gif,.bmp,.tiff,.tif,.heic,.heif,.avif,.ico,.jxl,.jp2,.svg,.eps,.ai,.cdr,.wmf,.emf,.pdf,.psd,.indd,.sketch,.fig,.xd,.afdesign,.afphoto,.exr,.tga,.dng"
          style="display:none"/>
   <div id="logos-pending" class="muted" style="font-size:11px;margin-top:8px"></div>
+  {_logo_reject_html}
   {_logos_grid_html}
 </div>
 
@@ -42865,14 +42888,21 @@ function mhSetupMode(mode) {{
             from mediahub.brand import logos as _logos_mod
 
             current_logos = list(prof.brand_logos or [])
+            logo_rejections: list[dict] = []
             for upload in logo_uploads:
                 if not upload or not upload.filename:
                     continue
                 try:
                     raw = upload.read() or b""
                 except Exception:
+                    logo_rejections.append(
+                        {"filename": upload.filename, "reason": "couldn’t be read"}
+                    )
                     continue
                 if not raw:
+                    logo_rejections.append(
+                        {"filename": upload.filename, "reason": "the file was empty"}
+                    )
                     continue
                 try:
                     meta = _logos_mod.store_logo(
@@ -42882,15 +42912,21 @@ function mhSetupMode(mode) {{
                         existing_logos=current_logos,
                     )
                 except ValueError as e:
-                    # Surface the problem on the next render without
-                    # blocking the rest of the save.
+                    # D-16: stash the reason so it's surfaced on the next render
+                    # instead of the file silently vanishing from the grid.
                     log.info("logo rejected: %s", e)
+                    logo_rejections.append({"filename": upload.filename, "reason": str(e)})
                     continue
                 except Exception as e:
                     log.warning("logo store failed: %s", e)
+                    logo_rejections.append(
+                        {"filename": upload.filename, "reason": "couldn’t be saved"}
+                    )
                     continue
                 current_logos.append(meta)
             prof.brand_logos = current_logos
+            if logo_rejections:
+                session["logo_rejections"] = logo_rejections
 
         # ---- Unified palette resolution across ALL sources ------------
         # Previously the palette displayed on the confirmation page came
@@ -43081,14 +43117,21 @@ function mhSetupMode(mode) {{
             from mediahub.brand import logos as _logos_mod
 
             current_logos = list(prof.brand_logos or [])
+            logo_rejections: list[dict] = []
             for upload in logo_uploads:
                 if not upload or not upload.filename:
                     continue
                 try:
                     raw_bytes = upload.read() or b""
                 except Exception:
+                    logo_rejections.append(
+                        {"filename": upload.filename, "reason": "couldn’t be read"}
+                    )
                     continue
                 if not raw_bytes:
+                    logo_rejections.append(
+                        {"filename": upload.filename, "reason": "the file was empty"}
+                    )
                     continue
                 try:
                     meta = _logos_mod.store_logo(
@@ -43097,11 +43140,22 @@ function mhSetupMode(mode) {{
                         file_bytes=raw_bytes,
                         existing_logos=current_logos,
                     )
+                except ValueError as e:
+                    # D-16: stash the reason so a rejected logo is explained on
+                    # the next render rather than silently missing from the grid.
+                    log.info("manual setup: logo rejected: %s", e)
+                    logo_rejections.append({"filename": upload.filename, "reason": str(e)})
+                    continue
                 except Exception as e:
-                    log.info("manual setup: logo rejected/failed: %s", e)
+                    log.warning("manual setup: logo store failed: %s", e)
+                    logo_rejections.append(
+                        {"filename": upload.filename, "reason": "couldn’t be saved"}
+                    )
                     continue
                 current_logos.append(meta)
             prof.brand_logos = current_logos
+            if logo_rejections:
+                session["logo_rejections"] = logo_rejections
 
         save_profile(prof)
         if _is_new_profile:
