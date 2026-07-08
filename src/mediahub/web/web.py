@@ -18042,6 +18042,20 @@ def create_app() -> Flask:
             "organisation_page",
             "organisation_setup",
             "organisation_setup_capture",
+            # The manual-build POST (no AI) and the palette confirm/reorder
+            # POSTs are the *other* ways a brand-new user creates and tunes
+            # their organisation — they legitimately run while the profile
+            # is still not-ready. Without these exemptions the gate 302's
+            # the multipart form POST to /organisation/setup before the
+            # handler runs, silently discarding everything the volunteer
+            # typed (name, tone, platforms, brand colours, logos). Each
+            # handler carries its own guards (display_name / active-profile
+            # / _require_org_data_attestation / _session_can_use_profile),
+            # so exempting them from the READY gate does not weaken access
+            # control — same rationale as the capture POST above.
+            "organisation_setup_manual",
+            "organisation_setup_palette",
+            "organisation_setup_palette_reorder",
             # Setup-page side-routes — the user is still pre-ready when
             # they click "re-read" or "delete logo" or view a logo
             # thumbnail, so these must bypass the gate just like the
@@ -18491,6 +18505,17 @@ def create_app() -> Flask:
         # its setup).
         if prof is None and list_profiles():
             return redirect(url_for("sign_in_page"))
+        # Hardening: never discard a browser POST in silence. The setup
+        # POSTs themselves are exempt above, so reaching here on a POST
+        # means an unexpected case (an expired session mid-setup, or a
+        # content POST attempted before setup finished). Stash a one-shot
+        # notice the setup page surfaces so the user learns their submit
+        # was not saved instead of watching it vanish.
+        if request.method == "POST":
+            session["_setup_gate_notice"] = (
+                "Your changes weren't saved yet — finish setting up your "
+                "organisation below, then try that again."
+            )
         return redirect(url_for("organisation_setup"))
 
     # ---- Versioned ToS re-acceptance gate (UK legal baseline) -----------
@@ -40487,6 +40512,21 @@ what you're doing, what they should do.</p>
                 '<code style="font-family:var(--font-mono,monospace);font-size:12px">'
                 "ANTHROPIC_API_KEY</code> is set on the server."
                 "</div>"
+            )
+
+        # A-1 hardening: surface a one-shot notice when the org-ready gate
+        # cancelled a POST (set in _gate_until_org_ready). Popped so it
+        # shows exactly once, and prepended to the banner slot that is
+        # already rendered at the top of the setup form.
+        _gate_notice = session.pop("_setup_gate_notice", "")
+        if _gate_notice:
+            llm_banner_html = (
+                '<div style="margin-bottom:14px;padding:12px 14px;'
+                "border:1px solid rgba(255,180,84,0.45);border-radius:8px;"
+                "background:rgba(255,180,84,0.08);font-size:13px;"
+                'color:var(--ink);line-height:1.5">'
+                '<strong style="color:var(--warn,#FFB454)">Not saved.</strong> '
+                f"{_h(_gate_notice)}</div>" + llm_banner_html
             )
 
         from mediahub.web._countries import COUNTRIES
