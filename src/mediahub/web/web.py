@@ -14067,7 +14067,11 @@ def _layout(
        the footage→reel video studio). Keeping them off the top bar leaves the
        signed-in chrome focused on the core workflow. #}
     <a href="{{ url_for('media_library_page') }}" class="{{ 'active' if active=='media' else '' }}">Media library</a>
-    <a href="{{ url_for('elements_page') }}" class="{{ 'active' if active=='elements' else '' }}">Elements</a>
+    {# C-1/C-2 — Activity (where a volunteer resumes approving a pack) takes the
+       primary slot that browse-only "Elements" held, so desktop matches the
+       mobile bottom nav. Elements stays reachable in its add-to-card context
+       from the card editor; it no longer holds a top-bar slot it can't act in. #}
+    <a href="{{ url_for('activity_page') }}" class="{{ 'active' if active=='activity' else '' }}">Activity</a>
     <a href="{{ url_for('season_timeline_page') }}" class="{{ 'active' if active=='season' else '' }}">My Season</a>
     {% if research_enabled %}<a href="{{ url_for('web_research_console') }}" class="{{ 'active' if active=='research' else '' }}">Research</a>{% endif %}
     {# Spacer — pushes the utility / account cluster to the right edge (it used
@@ -18009,6 +18013,68 @@ def _home_faq_html() -> str:
 # live — org-scoped — rather than on the home). It reuses the Create-page tile
 # language (`.mh-template`) so the signed-in chrome stays one coherent system.
 # --------------------------------------------------------------------------- #
+def _home_resume_strip_html(profile_id: Optional[str]) -> str:
+    """C-1 — a "Pick up where you left off" strip for the signed-in home.
+
+    The most common return visit is "finish approving the pack I started", but
+    the home had no recent runs, no queue count, and no resume link. This shows
+    the latest 1-3 processed meets with their review-queue count, each linking
+    straight into /review/<id>. Renders nothing when there are no processed
+    meets yet, so a brand-new workspace isn't shown an empty strip.
+    """
+    if not profile_id:
+        return ""
+    try:
+        conn = _db()
+        rows = conn.execute(
+            "SELECT id, meet_name, n_queue, n_achievements, created_at "
+            "FROM runs WHERE profile_id = ? AND status = 'done' "
+            "ORDER BY created_at DESC LIMIT 3",
+            (profile_id,),
+        ).fetchall()
+        conn.close()
+    except Exception:  # noqa: BLE001
+        return ""
+    if not rows:
+        return ""
+    cards = ""
+    for r in rows:
+        rid = r["id"]
+        meet = (r["meet_name"] or "Meet").strip() or "Meet"
+        try:
+            n_queue = int(r["n_queue"] or 0)
+        except (TypeError, ValueError):
+            n_queue = 0
+        try:
+            n_ach = int(r["n_achievements"] or 0)
+        except (TypeError, ValueError):
+            n_ach = 0
+        if n_queue > 0:
+            status_line = f"{n_queue} awaiting review"
+            cta = "Continue reviewing &rarr;"
+        elif n_ach > 0:
+            status_line = f"{n_ach} moment{'' if n_ach == 1 else 's'} · all reviewed"
+            cta = "Open pack &rarr;"
+        else:
+            status_line = "Ready to review"
+            cta = "Open &rarr;"
+        cards += (
+            f'<a href="{url_for("review", run_id=rid)}" class="mh-template mh-glow-border" '
+            'style="display:block">'
+            '<div class="strap" style="color:var(--ink-muted);margin-bottom:4px">Meet</div>'
+            f'<h3 style="margin:0 0 4px">{_h(meet)}</h3>'
+            f'<p style="margin:0 0 8px;color:var(--ink-dim);font-size:13px">{_h(status_line)}</p>'
+            f'<span class="mh-template-cta">{cta}</span>'
+            "</a>"
+        )
+    return (
+        '<section class="mh-section" style="margin-top:var(--sp-5)">'
+        '<div class="mh-section-eyebrow-strip"><span class="label">Pick up where you left off</span></div>'
+        f'<div class="mh-template-grid">{cards}</div>'
+        "</section>"
+    )
+
+
 def _home_signed_in_quick_actions_html() -> str:
     """Quick-action grid: jump straight to the surfaces a returning club uses."""
 
@@ -19442,6 +19508,7 @@ def create_app() -> Flask:
                 '<div class="mh-fx mh-spotlight">'
                 + hero_html
                 + "</div>"
+                + _home_resume_strip_html(prof.profile_id)
                 + _home_signed_in_quick_actions_html()
                 + final_cta_html,
                 active="home",
