@@ -14623,6 +14623,14 @@ def _layout(
         var msg = form.dataset.loaderText || 'Working on it';
         var sub = form.dataset.loaderSub || 'This usually takes a few seconds';
         MH.showLoader(msg, sub);
+        // Safety net: a POST that downloads a file (Content-Disposition) or
+        // otherwise never navigates would leave this full-screen loader up
+        // forever. A navigating submit replaces the whole document long before
+        // this fires, so the timeout only ever clears a stuck overlay.
+        setTimeout(function(){
+          if (window.MH && MH.hideLoader) MH.hideLoader();
+          if (btn) btn.classList.remove('loading');
+        }, 20000);
       });
     });
   }
@@ -16773,7 +16781,16 @@ _BULK_ACTIONS_JS = r"""
     }
     Array.prototype.slice.call(form.querySelectorAll('[data-mh-bulk]')).forEach(function(btn){
       var action = btn.getAttribute('data-mh-bulk');
-      if (action === 'export') return;  // native submit → file download
+      if (action === 'export') {
+        // Native submit → file download (Content-Disposition: attachment),
+        // which never navigates the page — so the global form loader would
+        // hang on "Working on it" forever and the volunteer thinks it crashed.
+        // The download starts on submit, so hide the loader a beat later.
+        btn.addEventListener('click', function(){
+          setTimeout(function(){ if (window.MH && MH.hideLoader) MH.hideLoader(); }, 1200);
+        });
+        return;
+      }
       btn.addEventListener('click', function(e){
         e.preventDefault();
         var ids = selected().map(function(c){ return c.value; });
@@ -35548,12 +35565,41 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 ]
                 codes_raw = request.form.get("club_codes") or ""
                 existing.club_codes = [c.strip() for c in codes_raw.split(",") if c.strip()]
-                existing.brand_primary = (
+                _new_pri = (
                     request.form.get("brand_primary") or existing.brand_primary or "#0A2540"
                 ).strip()
-                existing.brand_secondary = (
+                _new_sec = (
                     request.form.get("brand_secondary") or existing.brand_secondary or "#000000"
                 ).strip()
+                # G-4: make the colour pickers actually take effect. The
+                # rendered palette resolves brand_palette_manual/extracted
+                # BEFORE the legacy brand_primary/secondary, so writing only
+                # the legacy fields was a silent no-op for any club that went
+                # through AI setup. Pin a *changed* colour into
+                # brand_palette_manual (the winning slot); leave manual
+                # untouched when the value equals the current effective palette
+                # so an unedited save never locks an AI palette. Recompute the
+                # derived theme only when something actually changed.
+                from mediahub.brand.palette import effective_palette as _eff_save
+
+                _hex_pat = re.compile(r"^#[0-9a-fA-F]{6}$")
+                _eff_now = _eff_save(
+                    manual=getattr(existing, "brand_palette_manual", {}) or {},
+                    extracted=getattr(existing, "brand_palette_extracted", {}) or {},
+                )
+                _man = dict(getattr(existing, "brand_palette_manual", {}) or {})
+                _palette_changed = False
+                for _slot, _val, _eff_cur in (
+                    ("primary", _new_pri, (_eff_now.get("primary") or "")),
+                    ("secondary", _new_sec, (_eff_now.get("secondary") or "")),
+                ):
+                    if _hex_pat.fullmatch(_val) and _val.lower() != _eff_cur.lower():
+                        _man[_slot] = _val
+                        _palette_changed = True
+                if _palette_changed:
+                    existing.brand_palette_manual = _man
+                existing.brand_primary = _new_pri
+                existing.brand_secondary = _new_sec
                 existing.tone = (request.form.get("tone") or "warm-club").strip()
                 existing.caption_tone = existing.tone
                 existing.platforms = [
@@ -35663,6 +35709,16 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                         "artefact_voice": {},
                         "status": "error",
                     }
+                # G-4: if the brand colours actually changed, force-recompute
+                # the derived theme so the chrome + still/motion renderers pick
+                # up the new primary (mirrors the palette-reorder handler).
+                if _palette_changed:
+                    try:
+                        _kit = existing.get_brand_kit()
+                        _kit.ensure_derived_palette(force=True)
+                        existing.brand_kit = _kit.to_dict()
+                    except Exception as e:
+                        log.warning("organisation save: derived palette recompute failed: %s", e)
                 save_profile(existing)
                 if _is_new_profile:
                     # PC.3: a workspace created by a signed-in user is born
@@ -36001,8 +36057,17 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         # the colour inputs share one literal each (keeps the inline-hex
         # budget in test_theme_tokens green — the literals live in plain
         # assignments, not inline styles).
-        _org_pri = profile.brand_primary or "#0A2540"
-        _org_sec = profile.brand_secondary or "#000000"
+        # G-4: show the EFFECTIVE palette (what actually renders on cards and
+        # reels), not the legacy brand_primary/secondary fields — which lose to
+        # any AI-extracted / setup-confirmed palette. Showing the legacy value
+        # made the picker display one colour while the cards used another.
+        from mediahub.brand.palette import effective_palette as _eff_pal
+        _org_eff = _eff_pal(
+            manual=getattr(profile, "brand_palette_manual", {}) or {},
+            extracted=getattr(profile, "brand_palette_extracted", {}) or {},
+        )
+        _org_pri = _org_eff.get("primary") or profile.brand_primary or "#0A2540"
+        _org_sec = _org_eff.get("secondary") or profile.brand_secondary or "#000000"
 
         body = f"""
 {saved_msg}{capture_preview}{capture_error}{voice_preview}{voice_error}
@@ -40577,7 +40642,7 @@ what you're doing, what they should do.</p>
                 "border:1px solid rgba(255,180,84,0.45);border-radius:8px;"
                 "background:rgba(255,180,84,0.08);font-size:13px;"
                 'color:var(--ink);line-height:1.5">'
-                '<strong style="color:var(--warn,#FFB454)">Not saved.</strong> '
+                '<strong style="color:var(--warn)">Not saved.</strong> '
                 f"{_h(_gate_notice)}</div>" + llm_banner_html
             )
 
@@ -41394,7 +41459,7 @@ what you're doing, what they should do.</p>
           onclick="mhSetupMode('manual')">Manual build &mdash; I&rsquo;ll pick everything</button>
 </div>
 <p class="muted" style="font-size:11px;margin:-8px 0 18px">
-  Fields marked <span style="color:var(--warn,#FFB454)">*</span> are required.
+  Fields marked <span style="color:var(--warn)">*</span> are required.
 </p>
 
 <div id="mh-setup-ai-panel">
