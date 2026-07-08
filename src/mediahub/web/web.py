@@ -19270,7 +19270,7 @@ def create_app() -> Flask:
                 "Create new content &rarr;</a>"
                 f'<a class="mh-cta-secondary" href="{url_for("sign_in_page")}">'
                 "Switch organisation</a>"
-                f'<a class="mh-cta-secondary" href="{url_for("organisation_page")}">'
+                f'<a class="mh-cta-secondary" href="{url_for("organisation_setup")}">'
                 "Edit profile</a>"
             )
             eyebrow = "Pinned organisation"
@@ -21488,7 +21488,7 @@ def create_app() -> Flask:
                 prof_logo_html = (
                     '<p class="dim" style="margin:6px 0 0;font-size:12px;color:var(--warn)">'
                     "No logo on your organisation profile. "
-                    f'<a href="{url_for("organisation_page")}" '
+                    f'<a href="{url_for("organisation_setup")}" '
                     'style="color:var(--warn);text-decoration:underline">Add one</a> '
                     "so it flows through to every graphic.</p>"
                 )
@@ -21522,7 +21522,7 @@ def create_app() -> Flask:
     <fieldset class="mh-fieldset">
       <legend>Brand &mdash; loaded from your organisation</legend>
       <p class="mh-fieldset-lede">
-        Defaults come from your <a href="{url_for("organisation_page")}" style="text-decoration:underline">organisation profile</a>.
+        Defaults come from your <a href="{url_for("organisation_setup")}" style="text-decoration:underline">organisation profile</a>.
         Tweak below for a one-off override; the preview on the right updates as you move the picker.
       </p>
       {prof_logo_html}
@@ -30942,7 +30942,7 @@ self.addEventListener('fetch', function(e){
                 f'<input type="hidden" id="mh-plan-sport" value="{_h(org_sport)}"/>'
                 f'<span style="font-weight:600">Planning for {_h(_sport_display)}</span>'
                 f'<span class="dim" style="font-size:12px">set by your '
-                f'<a href="{url_for("organisation_page")}" style="text-decoration:underline">organisation profile</a></span>'
+                f'<a href="{url_for("organisation_setup")}" style="text-decoration:underline">organisation profile</a></span>'
             )
         else:
             _sport_opts = "".join(
@@ -37405,6 +37405,15 @@ function copySpotlightCaption(btn, cardIdSafe) {{
   <p class="lede">Tell MediaHub about your club, society or team. Every generated caption, graphic, and reel is built from what's set here &mdash; brand voice, palette, sponsor rules, the lot.</p>
 </section>
 
+<div class="card" style="margin-bottom:20px;border:1px solid var(--accent);background:color-mix(in oklab, var(--accent) 6%, transparent)">
+  <p style="margin:0;font-size:14px;line-height:1.5">
+    <strong>This is the classic editor.</strong> The main place to set up your
+    brand — palette, logos, voice capture and DNA — is now
+    <a href="{url_for("organisation_setup")}" style="text-decoration:underline">Organisation &amp; brand setup</a>.
+    Colour and kit governance live on the <a href="{url_for("brand_home_page")}" style="text-decoration:underline">Brand platform</a>.
+  </p>
+</div>
+
 <div class="card" style="margin-bottom:20px;border:1px solid var(--accent);background:color-mix(in oklab, var(--lane) 4%, transparent)">
   <h2 style="margin-top:0">Re-analyse brand from website + social links</h2>
   <p class="dim" style="margin-bottom:12px;font-size:13px">Paste your club's website URL and/or social profile links. MediaHub reads each link, extracts the palette, tone of voice, characteristic phrases and recent captions, and updates the brand profile below. AI-driven &mdash; no manual style guide needed.</p>
@@ -42916,18 +42925,38 @@ what you're doing, what they should do.</p>
         # UK legal baseline: DPA acceptance + lawful-basis attestation block,
         # rendered in BOTH setup forms until this workspace has a record.
         _attestation_html = _org_attestation_form_html(prof)
+        # G-3 — this page is the canonical brand home, not just first-run. For a
+        # club that already has a brand, drop the permanent "First-run setup"
+        # framing so it reads as the brand editor it actually is.
+        _returning = bool(prof and prof.is_ready())
+        _hero_eyebrow = "Organisation &amp; brand" if _returning else "First-run setup"
+        _hero_heading = (
+            'Your organisation<br><em class="editorial">&amp; brand.</em>'
+            if _returning
+            else 'Tell us about<br><em class="editorial">your club.</em>'
+        )
+        _hero_lede = (
+            (
+                "Your brand identity — palette, logos, voice and what you talk about. "
+                "The engine uses it on every caption, card and reel it makes. Re-run the "
+                "AI capture any time, or edit anything by hand below."
+            )
+            if _returning
+            else (
+                "The engine learns who you are from your existing online presence "
+                "&mdash; your website and social profiles. Paste whichever links you "
+                "have and click <b>Build my brand</b>. The AI reads your posts, palette, "
+                "tone of voice, and what you talk about, and uses that on every caption "
+                "it writes. You can come back any time to re-run it."
+            )
+        )
         body = f"""
 <div style="max-width:840px;margin:0 auto">
 <section class="mh-hero" data-lane="01" style="padding-top:var(--sp-8);padding-bottom:var(--sp-7);margin-bottom:var(--sp-5)">
-  <span class="mh-hero-eyebrow">First-run setup</span>
-  <h1>Tell us about<br><em class="editorial">your club.</em></h1>
+  <span class="mh-hero-eyebrow">{_hero_eyebrow}</span>
+  <h1>{_hero_heading}</h1>
   <p class="lede">
-  The engine learns who you are from your existing online
-  presence &mdash; your website and social profiles. Paste whichever
-  links you have and click <b>Build my brand</b>. The AI reads your
-  posts, palette, tone of voice, and what you talk about, and uses
-  that on every caption it writes. You can come back any time to
-  re-run it.
+  {_hero_lede}
   </p>
 </section>
 
@@ -47121,7 +47150,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         if not profile_id:
             _profs = list_profiles()
             if not _profs:
-                _org_url = url_for("organisation_page")
+                _org_url = url_for("organisation_setup")
                 _create_url = url_for("make_page")
                 empty_body = (
                     '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-9);padding-bottom:var(--sp-8)">'
@@ -57430,7 +57459,7 @@ voice, and queues them for one-click approval.</p>
                     '<p class="lede">The video studio is scoped per organisation. '
                     "Set one up, then come back to turn race footage into reels.</p>"
                     f'<div class="mh-hero-actions"><a class="mh-cta-primary" '
-                    f'href="{url_for("organisation_page")}">Set up organisation &rarr;</a></div>'
+                    f'href="{url_for("organisation_setup")}">Set up organisation &rarr;</a></div>'
                     "</section>",
                     active="video",
                 )
