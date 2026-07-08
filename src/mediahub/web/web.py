@@ -1764,6 +1764,18 @@ RUNS_DIR.mkdir(parents=True, exist_ok=True)
 UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 RESEARCH_DIR.mkdir(parents=True, exist_ok=True)
 
+
+def _dsr_export_path(profile_id: str, request_id: str) -> Path:
+    """D-21 — where a generated SAR (access-request) export snapshot is kept so
+    the officer downloads it from a refreshed page instead of a dead-end
+    attachment. Both ids are sanitised so neither can escape the export dir."""
+    import re as _re
+
+    safe_pid = _re.sub(r"[^A-Za-z0-9_-]+", "_", profile_id or "")[:80] or "org"
+    safe_rid = _re.sub(r"[^A-Za-z0-9_-]+", "_", request_id or "")[:80] or "req"
+    return DATA_DIR / "dsr_exports" / safe_pid / f"{safe_rid}.json"
+
+
 # V7: workflow store (sidecar JSON per run)
 _wf_store = None  # initialised after imports complete
 
@@ -26790,6 +26802,13 @@ Relay team broke club record"></textarea>
                         '<input type="hidden" name="op" value="resume">'
                         '<button class="btn secondary" type="submit">Resume clock</button></form>'
                     )
+            # D-21 — a completed access request keeps a working download link to
+            # its generated SAR export (any status, as long as the snapshot exists).
+            if r.request_type == "access" and _dsr_export_path(pid, r.id).exists():
+                actions.append(
+                    f'<a class="btn secondary" href="{url_for("org_dsr_export_download", request_id=r.id)}" '
+                    'download>Download export</a>'
+                )
             rows.append(
                 (
                     _is_overdue,
@@ -26881,13 +26900,22 @@ Relay team broke club record"></textarea>
             pass
         if req.request_type == "access":
             export = _dsr.export_athlete(pid, req.athlete_name)
+            # D-21 — persist the snapshot and redirect back with a confirmation,
+            # so the request visibly flips to "completed" and the clock stops,
+            # instead of a bare attachment that left the table looking un-actioned.
+            export_path = _dsr_export_path(pid, request_id)
+            export_path.parent.mkdir(parents=True, exist_ok=True)
+            export_path.write_text(json.dumps(export, indent=2), encoding="utf-8")
             log_store.complete(request_id, note="export generated")
             from mediahub.compliance.security_log import record_event
 
             record_event("dsr_export", profile_id=pid, subject=req.athlete_name, actor=recorded_by)
-            resp = app.response_class(json.dumps(export, indent=2), mimetype="application/json")
-            resp.headers["Content-Disposition"] = f"attachment; filename=sar-{request_id}.json"
-            return resp
+            _flash_toast(
+                "Export ready — request marked complete and the clock stopped. "
+                "Download it from the Actions column.",
+                "success",
+            )
+            return redirect(url_for("org_athlete_rights"))
         if req.request_type == "erasure":
             report = _dsr.erase_athlete(pid, req.athlete_name, recorded_by=recorded_by)
             log_store.complete(request_id, note="erasure executed")
@@ -26923,6 +26951,26 @@ Relay team broke club record"></textarea>
             log_store.complete(request_id, note=f"rectified to '{new_name}'")
             return redirect(url_for("org_athlete_rights"))
         return jsonify({"error": "unknown request type"}), 400
+
+    @app.route("/organisation/athlete-rights/<request_id>/export.json")
+    def org_dsr_export_download(request_id):
+        """D-21 — serve the persisted SAR export snapshot for a completed access
+        request (tenant-scoped), so "Run export" can redirect + confirm and the
+        officer still gets the file on demand."""
+        pid = _active_profile_id() or ""
+        if not pid or load_profile(pid) is None:
+            return jsonify({"error": "no active organisation"}), 404
+        from mediahub.compliance import dsr as _dsr
+
+        req = _dsr.DsrRequestLog().get(request_id)
+        if req is None or req.profile_id != pid:
+            return jsonify({"error": "request not found"}), 404
+        path = _dsr_export_path(pid, request_id)
+        if not path.exists():
+            return jsonify({"error": "export not generated"}), 404
+        resp = app.response_class(path.read_text(encoding="utf-8"), mimetype="application/json")
+        resp.headers["Content-Disposition"] = f"attachment; filename=sar-{_h(request_id)}.json"
+        return resp
 
     @app.route("/organisation/athlete-rights/<request_id>/clock", methods=["POST"])
     def org_dsr_clock(request_id):
