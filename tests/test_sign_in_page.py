@@ -74,9 +74,10 @@ class TestSignInPage:
         resp = c.get("/sign-in", follow_redirects=False)
         assert resp.status_code == 200
         body = resp.get_data(as_text=True)
-        # The empty state announces "no profiles" and offers a clear
-        # path forward (create one) and a way back home.
-        assert "No organisation profiles" in body
+        # The empty state is honest about the user's own access (A-4: not a
+        # false "none exist on this deployment") and offers a clear path
+        # forward (create one) and a way back home.
+        assert "don't have access to any organisation" in body
         assert "Create your first organisation" in body
         # The sign-in page is in the topnav as active.
         assert "Sign in" in body

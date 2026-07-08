@@ -18524,6 +18524,13 @@ def create_app() -> Flask:
         # when a not-yet-ready org is already pinned (so they can finish
         # its setup).
         if prof is None and list_profiles():
+            # Preserve the page the user was heading to (A-6): when an idle
+            # timeout drops the org pin, re-entry through the picker should
+            # land back on that deep link, not home. Only GET navigations
+            # carry a replayable destination.
+            _dest = _safe_next(request.full_path.rstrip("?")) if request.method == "GET" else ""
+            if _dest and _dest != url_for("sign_in_page"):
+                return redirect(url_for("sign_in_page", next=_dest))
             return redirect(url_for("sign_in_page"))
         # Hardening: never discard a browser POST in silence. The setup
         # POSTs themselves are exempt above, so reaching here on a POST
@@ -38659,6 +38666,9 @@ what you're doing, what they should do.</p>
         # bound orgs are invisible to non-members (ADR-0014).
         profiles = [p for p in list_profiles() if _session_can_use_profile(p.profile_id)]
         current_id = _active_profile_id() or ""
+        # A-6: a same-site destination threaded here by the org-ready gate, so
+        # signing in resumes the page the user was heading to.
+        _next_val = _safe_next(request.args.get("next"))
 
         # No profiles yet — render an honest empty state with a clear
         # path forward. Previously this redirected straight to
@@ -38795,7 +38805,8 @@ what you're doing, what they should do.</p>
                 '<div class="actions">'
                 f'<form method="post" action="{sign_in_url}" style="flex:1;display:flex" data-loader-text="Switching organisation">'
                 f'<input type="hidden" name="profile_id" value="{_h(p.profile_id)}">'
-                f'<button type="submit" class="btn-sign-in">'
+                + (f'<input type="hidden" name="next" value="{_h(_next_val)}">' if _next_val else "")
+                + '<button type="submit" class="btn-sign-in">'
                 f"{'Continue' if is_current else 'Sign in'} &rarr;</button>"
                 "</form>"
                 f'<form method="post" action="{delete_url}" data-no-loader="1" '
@@ -38854,10 +38865,17 @@ what you're doing, what they should do.</p>
         Failure paths now surface an error via the flash session so the
         sign-in picker can show the user why nothing happened.
         """
+        # A-6: a same-site destination the picker carried through from the
+        # gate; on success resume it, and preserve it across error re-renders.
+        _nxt = _safe_next(request.form.get("next"))
+
+        def _back_to_picker():
+            return redirect(url_for("sign_in_page", next=_nxt) if _nxt else url_for("sign_in_page"))
+
         pid = (request.form.get("profile_id") or "").strip()
         if not pid:
             session["sign_in_error"] = "Pick an organisation before signing in."
-            return redirect(url_for("sign_in_page"))
+            return _back_to_picker()
         prof = load_profile(pid)
         if prof is None or not _session_can_use_profile(prof.profile_id):
             # Same message for "doesn't exist" and "members-only" so the
@@ -38865,10 +38883,10 @@ what you're doing, what they should do.</p>
             session["sign_in_error"] = (
                 f"Couldn't find a profile with id '{pid}'. It may have been deleted."
             )
-            return redirect(url_for("sign_in_page"))
+            return _back_to_picker()
         _pin_active_profile(prof.profile_id)
         session.pop("sign_in_error", None)
-        return redirect(url_for("home"))
+        return redirect(_nxt or url_for("home"))
 
     @app.route("/sign-out", methods=["GET", "POST"])
     def sign_out():
