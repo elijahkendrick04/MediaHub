@@ -186,7 +186,11 @@ def test_configure_warns_when_no_club_matches(app_mod):
     with c.session_transaction() as s:
         s["active_profile_id"] = "p9"
     body = c.get(f"/upload/configure?run_id={rid}").get_data(as_text=True)
-    assert " selected>" not in body  # nothing cleared the floor → no auto-pick
+    # No club is auto-picked — assert neither detected club's option is selected.
+    # (Checking the specific club options rather than a bare " selected>" scan,
+    # which now also matches the chrome's interface-language <select>.)
+    assert '<option value="City of Leeds" selected>' not in body
+    assert '<option value="Otter SC" selected>' not in body
     assert "none of the clubs in this" in body
     assert "Edinburgh Penguins" in body
 
