@@ -14193,6 +14193,10 @@ def _layout(
            class="mh-orgmenu-item {{ 'active' if active=='settings' else '' }}">{{ t('nav.settings') }}</a>
         <a href="{{ url_for('help_page') }}" role="menuitem"
            class="mh-orgmenu-item {{ 'active' if active=='help' else '' }}">Help</a>
+        {# C-18 — the slide remote had no in-app path (reachable only by typing
+           /remote); give a phone user a menu shortcut to the pairing screen. #}
+        <a href="{{ url_for('remote_landing') }}" role="menuitem"
+           class="mh-orgmenu-item">Slide remote</a>
         <a href="{{ url_for('sign_in_page') }}" role="menuitem"
            class="mh-orgmenu-item {{ 'active' if active=='signin' else '' }}">{{ t('nav.switch_org') }}</a>
         <a href="{{ url_for('sign_out') }}" role="menuitem" class="mh-orgmenu-item">{{ t('nav.sign_out') }}</a>
@@ -14286,6 +14290,13 @@ def _layout(
   <a href="{{ url_for('make_page') }}" class="{{ 'is-active' if active=='create' else '' }}" aria-label="Create">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
     Create
+  </a>
+  {# C-13 — the media library is the surface built for phones (camera capture,
+     the PWA share-target, "share a photo straight from your camera roll"), so it
+     earns a mobile bottom-nav slot instead of being hidden behind the hamburger. #}
+  <a href="{{ url_for('media_library_page') }}" class="{{ 'is-active' if active=='media' else '' }}" aria-label="Media library">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+    Media
   </a>
   <a href="{{ url_for('activity_page') }}" class="{{ 'is-active' if active=='activity' else '' }}" aria-label="Activity">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h4l2 7 4-16 2 9h6"/></svg>
@@ -33345,6 +33356,35 @@ function mhAnDigest(btn) {{
                 '<span class="mh-template-cta">Open newsletters</span>'
                 "</a>"
             )
+
+        # C-8 — the public achievements wall is a flagship shareable output (free
+        # public celebration page + embed + RSS/JSON), but its only link lived in
+        # Organisation-settings prose. It gets a first-class Create tile alongside
+        # Sites/Newsletters (independent of the email-design flag).
+        _wall_svg = (
+            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" '
+            'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" width="28" height="28">'
+            '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/>'
+            '<rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>'
+        )
+        tiles_html += (
+            f'<a href="{_h(url_for("public_wall_settings"))}" class="mh-template mh-glow-border">'
+            f'<div class="mh-template-icon">{_wall_svg}</div>'
+            '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:var(--sp-1)">'
+            '<h3 style="margin:0">Public wall</h3>'
+            '<span class="tag live">Ready</span>'
+            "</div>"
+            "<p>A free public celebration page of your approved cards &mdash; share the "
+            "link, embed it on your club website, or offer an RSS/JSON feed. One "
+            "shared URL you can switch on and off.</p>"
+            '<div class="mh-template-formats">'
+            '<span class="mh-template-fmt">Public page</span>'
+            '<span class="mh-template-fmt">Website embed</span>'
+            '<span class="mh-template-fmt">RSS / JSON</span>'
+            "</div>"
+            '<span class="mh-template-cta">Open public wall</span>'
+            "</a>"
+        )
 
         # Live meet + Season wraps — fully-built surfaces presented as Create
         # tiles so the whole "what can I make?" catalogue lives in one place.
