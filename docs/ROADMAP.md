@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-07-08 · `9c400d47f` · Cull the GitHub bots that never delivered; sharpen the ones that do (#1090)
+**Last updated:** 2026-07-08 · `0e5fc9d31` · Usability audit — 16 findings + owner-decided IA changes (#1093)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1227,16 +1227,16 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
-| 2026-07-08 | `2bd6ee0f5` | docs(autotest): annotate the removed B1/B4/C1 bots in the historical build-docs |
-| 2026-07-08 | `97c7dc7dd` | Cull the GitHub bots that never delivered; sharpen the ones that do |
-| 2026-07-08 | `ac47d1c93` | Fix production sentinel/autotest findings (#1067 #1066 #1065 #884) |
-| 2026-07-08 | `423b8ce54` | chore(gitignore): ignore src/mediahub/dsr_exports runtime SAR snapshots |
-| 2026-07-08 | `3b64973b8` | fix: address pre-merge adversarial review (F-9 undercount, D-17 dead banner, F-4 dead code) |
-| 2026-07-08 | `588251f24` | docs(audit): mark shipped findings + add implementation-status matrix |
-| 2026-07-08 | `b31f5b86c` | fix(charts): intent-labelled exports + JS blob download with SVG fallback (D-33) |
-| 2026-07-08 | `36326d7fe` | fix(dsr): confirm SAR export + keep a working download, not a dead-end attachment (D-21) |
-| 2026-07-08 | `8a385ed55` | fix(ai): make AI-unavailability discoverable, not a hover-only dot (D-17) |
-| 2026-07-08 | `00bb637d1` | fix(feedback): confirm password reset & signup, reassure on the progress page (D-35) |
-| 2026-07-08 | `05a3ad65e` | fix(media): Draft/Ready badge + Unapprove for library photo approval (D-29) |
-| 2026-07-08 | `7f0c5fd62` | fix(newsletter): embed card images in the downloaded draft email (D-18) |
+| 2026-07-08 | `5944c2344` | docs(audit): session hand-off for the next batch |
+| 2026-07-08 | `e82fa0612` | style: ruff-format the C-14/C-9 additions (CI hygiene) |
+| 2026-07-08 | `8df8b39c3` | docs(audit): C-14 + C-9 shipped — 86/161 |
+| 2026-07-08 | `fd8435ce4` | feat(collections): finish Collections — reachable, fillable, clickable (C-9) |
+| 2026-07-08 | `5decaccd9` | feat(media): in-page mockup + sticker picker, no raw-JSON dead-end (C-14) |
+| 2026-07-08 | `5d6ed82ee` | test: make the no-auto-pick assertion club-specific (CI shard 3) |
+| 2026-07-08 | `84d8eda80` | docs(audit): reference PR #1093 and note the pre-merge review outcome |
+| 2026-07-08 | `2ec6addc7` | fix(review): address 4 confirmed pre-merge adversarial-review findings |
+| 2026-07-08 | `4df52fefd` | fix(i18n): don't echo the request path in the language switcher (CI: tenant leak + hex budget) |
+| 2026-07-08 | `b70927938` | style: apply ruff-format to the usability-audit changes |
+| 2026-07-08 | `ef19a7439` | docs(audit): update implementation-status matrix — 84/161 shipped |
+| 2026-07-08 | `d6c99bd35` | feat(nav): surface public wall, media (mobile) and slide remote (C-8, C-13, C-18) |
 <!-- /ROADMAP:ACTIVITY -->
