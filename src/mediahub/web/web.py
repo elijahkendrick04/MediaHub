@@ -54062,15 +54062,52 @@ voice, and queues them for one-click approval.</p>
         d.mkdir(parents=True, exist_ok=True)
         return d
 
+    def _rejected_card_ids(run_id: str) -> set:
+        """Card ids a human rejected. Every pack export must exclude these
+        (E-2) — the same rule pack_export.py already applies to the
+        all-formats ZIP — so a club never ships content it explicitly
+        rejected. Best-effort: any workflow-store failure yields an empty
+        set (fail open to the pre-existing "include everything" behaviour,
+        never crash an export)."""
+        out: set = set()
+        try:
+            ws = _get_wf_store()
+            if ws is not None:
+                for cid, st in (ws.load(run_id) or {}).items():
+                    try:
+                        if st and st.status == CardStatus.REJECTED:
+                            out.add(str(cid))
+                    except Exception:
+                        continue
+        except Exception:
+            return out
+        return out
+
+    def _visual_dir_card_id(sub, default: str) -> str:
+        """Resolve a visuals subdir to its workflow card id (the visual's
+        content_item_id), falling back to the directory name."""
+        try:
+            sc = sub / "visual.json"
+            if sc.exists():
+                return str(json.loads(sc.read_text()).get("content_item_id") or default)
+        except Exception:
+            pass
+        return default
+
     def _bulk_items_for_run(run_id: str):
-        """One BulkItem per rendered card in a run (a representative still)."""
+        """One BulkItem per rendered card in a run (a representative still).
+
+        Rejected cards are excluded (E-2)."""
         from mediahub.export_engine.bulk import BulkItem
 
         visuals = RUNS_DIR / run_id / "visuals"
         items: list = []
         if not visuals.is_dir():
             return items
+        rejected = _rejected_card_ids(run_id)
         for sub in sorted(p for p in visuals.iterdir() if p.is_dir()):
+            if _visual_dir_card_id(sub, sub.name) in rejected:
+                continue
             pick = None
             for cand in ("feed_portrait.png", "story.png", "feed_square.png"):
                 if (sub / cand).is_file():
@@ -56687,6 +56724,8 @@ voice, and queues them for one-click approval.</p>
 
         buf = io.BytesIO()
         approval = []
+        # E-2: a human who rejected a card must never see it ship in this ZIP.
+        _rejected = _rejected_card_ids(run_id)
         # W.11: the approver-edited alt text (saved in review) outranks
         # whatever the visual sidecar recorded at generation time.
         _wf_alt_edits: dict[str, str] = {}
@@ -56711,6 +56750,10 @@ voice, and queues them for one-click approval.</p>
                 except Exception:
                     continue
                 vid = visual.get("id", brief_dir.name)
+                # E-2: skip cards a human rejected (match on the workflow
+                # card id, falling back to the visual id / dir name).
+                if str(visual.get("content_item_id") or vid) in _rejected:
+                    continue
                 fmt = (visual.get("format") or "").lower()
                 if "story" in fmt:
                     sub = "stories"
