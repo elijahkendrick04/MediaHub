@@ -40,9 +40,14 @@ def test_render_and_clip_and_reel_have_catch_handlers():
     assert "function runVideoJob(" in js
     assert "Network error: " in js  # the outer job-POST .catch
     assert "btn.disabled=false" in js  # restore() re-enables the render button
-    # make-clip and reel-direct clear their stuck status lines on failure.
-    assert "the analysis may still be running" in js
-    assert "the director may still be watching" in js
+    # make-clip and reel-direct now also run as polled background jobs (J-1)
+    # through the same runVideoJob helper, so their failures re-enable the button
+    # and surface a styled error rather than sticking on "Analysing..."/leaving a
+    # stuck status line. Each carries its own error label.
+    assert "CLIPMAKER_URL + '-job'" in js
+    assert "REEL_URL + '-job'" in js
+    assert "errLabel: 'Clip error'" in js
+    assert "errLabel: 'Reel error'" in js
 
 
 def test_no_error_alert_in_studio():

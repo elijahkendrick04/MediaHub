@@ -31,6 +31,12 @@ def app(tmp_path, monkeypatch):
 
     importlib.reload(cp)
     importlib.reload(wm)
+    from mediahub.media_library import store as _mls
+
+    _mls._default_store = _mls.MediaLibraryStore(
+        db_path=tmp_path / "media.db",
+        uploads_dir=tmp_path / "uploads_v4" / "media_library",
+    )
     from mediahub.video import projects as _vproj
 
     _vproj._store = None
@@ -40,7 +46,34 @@ def app(tmp_path, monkeypatch):
 
     save_profile(ClubProfile(profile_id="alpha", display_name="Alpha SC"))
     save_profile(ClubProfile(profile_id="beta", display_name="Beta SC"))
-    return application, tmp_path
+    return application, tmp_path, _mls._default_store
+
+
+def _add_footage(store, tmp_path, *, asset_id="ft_1", profile_id="alpha"):
+    from mediahub.media_library.models import MediaAsset
+
+    src = tmp_path / f"{asset_id}.mp4"
+    src.write_bytes(b"\x00" * 4096)
+    return store.save(
+        MediaAsset(
+            id=asset_id,
+            filename=f"{asset_id}.mp4",
+            path=str(src),
+            type="footage",
+            profile_id=profile_id,
+            permission_status="approved_by_club",
+            approval_status="approved",
+            width=1920,
+            height=1080,
+            media_meta={"duration_ms": 12000, "has_audio": True},
+        )
+    )
+
+
+def _fake_edl():
+    from mediahub.video.edl import EDL, Clip
+
+    return EDL(clips=[Clip(source="a.mp4", out_ms=3000)])
 
 
 def _pin(client, pid):
@@ -67,7 +100,7 @@ def _poll_until(client, poll_url, want, tries=120, delay=0.05):
 
 
 def test_render_job_returns_202_and_completes(app, monkeypatch):
-    application, tmp_path = app
+    application, tmp_path, _store = app
     proj = _make_project("alpha")
 
     # A fast stub render that writes the MP4 where the real engine would, so the
@@ -103,7 +136,7 @@ def test_render_job_returns_202_and_completes(app, monkeypatch):
 
 
 def test_render_job_foreign_profile_404(app):
-    application, _ = app
+    application, _tmp, _store = app
     proj = _make_project("alpha")
     with application.test_client() as c:
         _pin(c, "beta")
@@ -114,7 +147,7 @@ def test_render_job_foreign_profile_404(app):
 
 
 def test_render_job_engine_unavailable_is_503_no_job(app, monkeypatch):
-    application, _ = app
+    application, _tmp, _store = app
     proj = _make_project("alpha")
     monkeypatch.setattr("mediahub.video.render.available", lambda: False)
     with application.test_client() as c:
@@ -128,7 +161,7 @@ def test_render_job_engine_unavailable_is_503_no_job(app, monkeypatch):
 
 
 def test_render_job_honest_error(app, monkeypatch):
-    application, tmp_path = app
+    application, tmp_path, _store = app
     proj = _make_project("alpha")
 
     def _boom(edl_input, out_path):
@@ -152,7 +185,7 @@ def test_render_job_honest_error(app, monkeypatch):
 def test_reel_job_status_admits_video_render_kind(app):
     """The shared poll route's allowlist now accepts the video-render kind and
     still enforces the owner-pid IDOR gate."""
-    application, _ = app
+    application, _tmp, _store = app
     import mediahub.web.web as wm
 
     job = {
@@ -171,3 +204,126 @@ def test_reel_job_status_admits_video_render_kind(app):
         # A foreign profile can't see it (IDOR gate).
         _pin(c, "beta")
         assert c.get(f"/api/reel-jobs/{'a' * 32}").status_code == 404
+
+
+def test_all_video_job_kinds_in_allowlist(app):
+    """The poll route admits all four new kinds (and still gates on owner)."""
+    application, _tmp, _store = app
+    import mediahub.web.web as wm
+
+    for i, kind in enumerate(
+        ("video-render", "video-clip", "video-reel", "video-stabilize")
+    ):
+        jid = format(i, "x").rjust(32, "0")
+        wm._variant_job_save(
+            {"id": jid, "kind": kind, "status": "running", "owner_pid": "alpha"}
+        )
+        with application.test_client() as c:
+            _pin(c, "alpha")
+            r = c.get(f"/api/reel-jobs/{jid}")
+            assert r.status_code == 200, kind
+            assert r.get_json()["kind"] == kind
+
+
+def test_clip_maker_job_completes_no_duplicate(app, monkeypatch):
+    application, tmp_path, store = app
+    _add_footage(store, tmp_path)
+    import types
+
+    calls = {"n": 0}
+
+    def _fake_clip(*a, **k):
+        calls["n"] += 1
+        return types.SimpleNamespace(edl=_fake_edl(), manifest={})
+
+    monkeypatch.setattr("mediahub.video.clip_maker.clip_maker", _fake_clip)
+    from mediahub.video.projects import get_store
+
+    with application.test_client() as c:
+        _pin(c, "alpha")
+        r = c.post("/api/video/clip-maker-job", json={"asset_id": "ft_1", "format": "story"})
+        assert r.status_code == 202, r.get_data(as_text=True)
+        j = _poll_until(c, r.get_json()["poll_url"], "done")
+        assert j["status"] == "done", j
+        assert j.get("project_id")
+        # Analysis job hands back a project id, not a video_url (no MP4 yet).
+        assert j.get("video_url", "") == ""
+    # H-19: exactly ONE project row created for the one job (no duplicates).
+    assert len(get_store().list(profile_id="alpha")) == 1
+    assert calls["n"] == 1
+
+
+def test_clip_maker_job_honest_error_leaves_no_orphan(app, monkeypatch):
+    application, tmp_path, store = app
+    _add_footage(store, tmp_path)
+
+    def _boom(*a, **k):
+        raise RuntimeError("asr model missing")
+
+    monkeypatch.setattr("mediahub.video.clip_maker.clip_maker", _boom)
+    from mediahub.video.projects import get_store
+
+    with application.test_client() as c:
+        _pin(c, "alpha")
+        r = c.post("/api/video/clip-maker-job", json={"asset_id": "ft_1"})
+        assert r.status_code == 202
+        j = _poll_until(c, r.get_json()["poll_url"], "done")
+        assert j["status"] == "error"
+        assert "asr model missing" in (j.get("error") or "")
+    # The project row is created only on success — a failed analysis leaves none.
+    assert get_store().list(profile_id="alpha") == []
+
+
+def test_reel_job_completes(app, monkeypatch):
+    application, tmp_path, store = app
+    _add_footage(store, tmp_path, asset_id="ft_1")
+    _add_footage(store, tmp_path, asset_id="ft_2")
+    import types
+
+    def _fake_reel(*a, **k):
+        return types.SimpleNamespace(
+            edl=_fake_edl(), plan=types.SimpleNamespace(hook="Big win"), manifest={}
+        )
+
+    monkeypatch.setattr("mediahub.video.reel_builder.make_reel", _fake_reel)
+    with application.test_client() as c:
+        _pin(c, "alpha")
+        r = c.post(
+            "/api/video/reel-job", json={"asset_ids": ["ft_1", "ft_2"], "format": "story"}
+        )
+        assert r.status_code == 202, r.get_data(as_text=True)
+        j = _poll_until(c, r.get_json()["poll_url"], "done")
+        assert j["status"] == "done", j
+        assert j.get("project_id")
+
+
+def test_reel_job_requires_asset_ids(app):
+    application, _tmp, _store = app
+    with application.test_client() as c:
+        _pin(c, "alpha")
+        assert c.post("/api/video/reel-job", json={}).status_code == 400
+
+
+def test_stabilize_job_honest_error_when_unavailable(app, monkeypatch):
+    application, _tmp, _store = app
+    proj = _make_project("alpha")
+    # Force the no-vidstab path so the honest error is deterministic.
+    monkeypatch.setattr("mediahub.video.enhance.is_stabilize_available", lambda: False)
+    with application.test_client() as c:
+        _pin(c, "alpha")
+        r = c.post(f"/api/video/projects/{proj.id}/stabilize-job", json={})
+        assert r.status_code == 202
+        j = _poll_until(c, r.get_json()["poll_url"], "done")
+        # Honest surface — never a fabricated "stabilised" success.
+        assert j["status"] == "error"
+        assert j.get("error") == "stabilize_unavailable"
+
+
+def test_stabilize_job_foreign_profile_404(app):
+    application, _tmp, _store = app
+    proj = _make_project("alpha")
+    with application.test_client() as c:
+        _pin(c, "beta")
+        assert (
+            c.post(f"/api/video/projects/{proj.id}/stabilize-job", json={}).status_code == 404
+        )

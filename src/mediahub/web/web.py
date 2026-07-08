@@ -11865,6 +11865,7 @@ _VIDEO_STUDIO_HTML = """
       <label class="vstudio-check"><input type="checkbox" id="vs-fillers"> Remove filler words (um, uh)</label>
       <button class="btn primary" id="vs-make" type="button">Make clip &rarr;</button>
       <span id="vs-make-status" class="muted" aria-live="polite"></span>
+      <div id="vs-make-panel" hidden></div>
     </div>
   </section>
 </div>
@@ -11879,6 +11880,7 @@ _VIDEO_STUDIO_HTML = """
     <button class="btn primary" id="vs-reel-make" type="button">Direct the reel &rarr;</button>
     <span id="vs-reel-status" class="muted" aria-live="polite"></span>
   </div>
+  <div id="vs-reel-panel" hidden></div>
 </section>
 
 <section class="vstudio-panel" style="margin-top:var(--sp-5)">
@@ -11990,6 +11992,7 @@ _VIDEO_STUDIO_HTML = """
   var FILE_TMPL = "__PROJECT_FILE_TMPL__";
   var REEL_URL = "__REEL_URL__";
   var ENHANCE_TMPL = "__PROJECT_ENHANCE_TMPL__";
+  var STABILIZE_JOB_TMPL = "__PROJECT_STABILIZE_JOB_TMPL__";
   var PROJECT_TMPL = "__PROJECT_TMPL__";
   var WAVEFORM_TMPL = "__PROJECT_WAVEFORM_TMPL__";
   var LOOK_OPTIONS = __LOOK_OPTIONS_JS__;
@@ -12163,8 +12166,10 @@ _VIDEO_STUDIO_HTML = """
   // ---- make clip ----
   $('vs-make').addEventListener('click', function(){
     if(!selectedId){ return; }
-    var status = $('vs-make-status'); status.textContent = 'Analysing footage...';
-    jpost(CLIPMAKER_URL, {
+    var btn = this;
+    // J-1/H-19: analysis runs as a polled background job so the button stays
+    // disabled for the whole run (no double-click duplicates) and shows progress.
+    runVideoJob(btn, CLIPMAKER_URL + '-job', {
       asset_id: selectedId,
       format: $('vs-format').value,
       title: $('vs-title').value,
@@ -12178,10 +12183,11 @@ _VIDEO_STUDIO_HTML = """
       with_music: $('vs-music').checked,
       remove_silence: $('vs-silence').checked,
       remove_fillers: $('vs-fillers').checked
-    }).then(function(j){
-      if(j.ok){ status.textContent = 'Clip created. Render it below.'; loadProjects(); }
-      else { status.textContent = 'Failed: '+(j.message||j.error||'error'); }
-    }).catch(function(){ status.textContent = 'Network error — the analysis may still be running. Reload to check.'; });
+    }, $('vs-make-panel'), {
+      busyLabel: 'Analysing…', idleLabel: 'Make clip →',
+      label: 'Analysing your footage', sub: 'Finding the best moments — up to a minute',
+      expectedMs: 40000, errLabel: 'Clip error'
+    }, function(){ var s=$('vs-make-status'); if(s){ s.textContent = 'Clip created. Render it below.'; } loadProjects(); });
   });
 
   // ---- AI reel (multi-clip) ----
@@ -12194,18 +12200,18 @@ _VIDEO_STUDIO_HTML = """
   $('vs-reel-make').addEventListener('click', function(){
     var ids = Object.keys(reelSet);
     if(!ids.length){ return; }
-    var status = $('vs-reel-status'); status.textContent = 'The director is watching '+ids.length+' clip(s)...';
-    var btn = $('vs-reel-make'); btn.disabled = true;
-    jpost(REEL_URL, {
+    var btn = this;
+    // J-1: the director's ASR + moment analysis runs as a polled background job.
+    runVideoJob(btn, REEL_URL + '-job', {
       asset_ids: ids,
       format: $('vs-format').value,
       brief_context: $('vs-reel-brief').value,
       with_captions: true, with_reframe: true, with_music: true, enhance_audio: true
-    }).then(function(j){
-      btn.disabled = false;
-      if(j.ok){ status.textContent = 'Reel directed. Render it below.'; loadProjects(); }
-      else { status.textContent = 'Failed: '+(j.message||j.error||'error'); }
-    }).catch(function(){ btn.disabled = false; status.textContent = 'Network error — the director may still be watching. Reload to check.'; });
+    }, $('vs-reel-panel'), {
+      busyLabel: 'Directing…', idleLabel: 'Direct the reel →',
+      label: 'The director is watching '+ids.length+' clip(s)', sub: 'Ordering the strongest moments — a minute or two',
+      expectedMs: 90000, errLabel: 'Reel error'
+    }, function(){ var s=$('vs-reel-status'); if(s){ s.textContent = 'Reel directed. Render it below.'; } loadProjects(); });
   });
 
   // ---- projects ----
@@ -12248,6 +12254,18 @@ _VIDEO_STUDIO_HTML = """
     }).catch(function(){ var wrap = $('vs-projects'); if(wrap){ wrap.innerHTML = '<p class="muted">Couldn\\u2019t load your clips — reload to try again.</p>'; } });
   }
   function enhanceProject(id, body, btn){
+    // J-1: stabilise is two-pass vidstab (up to minutes per source) — the single
+    // heaviest sync op — so it runs as a polled background job on the tile's
+    // render panel. The cheap look/music branches stay synchronous.
+    if(body && body.stabilize){
+      var panel = document.querySelector('.vs-render-panel[data-id="'+id+'"]');
+      runVideoJob(btn, url(STABILIZE_JOB_TMPL, id), {}, panel, {
+        busyLabel: 'Stabilising…', idleLabel: 'Stabilise',
+        label: 'Stabilising your footage', sub: 'Two-pass steadying — can take a few minutes',
+        expectedMs: 120000, errLabel: 'Stabilise error'
+      });
+      return;
+    }
     var st = document.querySelector('.vs-enh-status[data-id="'+id+'"]');
     if(btn){ btn.disabled = true; }
     if(st){ st.textContent = 'Applying...'; }
@@ -12257,13 +12275,16 @@ _VIDEO_STUDIO_HTML = """
       else { if(st){ st.textContent = 'Failed: '+(j.message||j.error||'error'); } }
     }).catch(function(){ if(btn){ btn.disabled = false; } if(st){ st.textContent = 'Network error — try again.'; } });
   }
-  // J-1: render on a background job the client polls, showing the branded
-  // MH.renderProgress panel — a 30-90s synchronous render held one connection
-  // open, which proxies kill, so the button "did nothing". POST returns 202
-  // {job_id, poll_url}; on completion the tile rebuilds and flips to the preview.
-  function runVideoJob(id, btn, jobUrl, opts){
-    var panel = document.querySelector('.'+opts.panelClass+'[data-id="'+id+'"]');
-    if(!panel){ if(btn){ btn.disabled=true; } jpost(jobUrl, {}); return; }
+  // J-1: run one of the studio's heavy operations on a background job the client
+  // polls, showing the branded MH.renderProgress panel — the synchronous
+  // endpoints held one connection open (30-90s render, up to minutes for
+  // stabilise/reel), which proxies kill, so the button "did nothing" and a
+  // double-click made duplicates (H-19). POST returns 202 {job_id, poll_url};
+  // the button stays disabled for the whole poll; on completion onDone runs.
+  // `panel` is the mount element; `body` rides the job POST; onDone(j) defaults
+  // to loadProjects (which rebuilds the tile and flips it to the preview).
+  function runVideoJob(btn, jobUrl, body, panel, opts, onDone){
+    if(!panel){ if(btn){ btn.disabled=true; } jpost(jobUrl, body||{}); return; }
     panel.hidden = false;
     var origLabel = btn ? btn.textContent : '';
     if(btn){ btn.disabled = true; btn.textContent = opts.busyLabel; }
@@ -12275,8 +12296,8 @@ _VIDEO_STUDIO_HTML = """
       panel.innerHTML = '<div style="padding:10px;color:var(--bad);font-size:13px">'+esc(opts.errLabel)+': '+esc(msg)+'</div>';
       vsToast(msg);
     };
-    var done = function(){ prog.complete(function(){ restore(); loadProjects(); }); };
-    fetch(jobUrl, {method:'POST', headers:{'Content-Type':'application/json','X-CSRF-Token':CSRF,'Accept':'application/json'}, body:'{}'})
+    var done = function(j){ prog.complete(function(){ restore(); (onDone||loadProjects)(j); }); };
+    fetch(jobUrl, {method:'POST', headers:{'Content-Type':'application/json','X-CSRF-Token':CSRF,'Accept':'application/json'}, body: JSON.stringify(body||{})})
       .then(function(r){ return r.json().then(function(j){ return {status:r.status, body:j}; }); })
       .then(function(res){
         if(res.status !== 202 || !res.body || !res.body.poll_url){
@@ -12287,7 +12308,7 @@ _VIDEO_STUDIO_HTML = """
           tries++;
           if(tries > 100){ fail('timed out waiting — reload to check'); return; }
           fetch(res.body.poll_url).then(function(r){ return r.json(); }).then(function(j){
-            if(j.status === 'done'){ done(); return; }
+            if(j.status === 'done'){ done(j); return; }
             if(j.status === 'error' || (j.error && j.status !== 'running')){ fail(j.user_message || j.error || 'failed'); return; }
             setTimeout(poll, 3000);
           }).catch(function(){ setTimeout(poll, 3000); });
@@ -12297,8 +12318,9 @@ _VIDEO_STUDIO_HTML = """
       .catch(function(err){ fail('Network error: ' + err); });
   }
   function renderProject(id, btn){
-    runVideoJob(id, btn, url(RENDER_TMPL, id) + '-job', {
-      panelClass: 'vs-render-panel', busyLabel: 'Rendering…', idleLabel: 'Render',
+    var panel = document.querySelector('.vs-render-panel[data-id="'+id+'"]');
+    runVideoJob(btn, url(RENDER_TMPL, id) + '-job', {}, panel, {
+      busyLabel: 'Rendering…', idleLabel: 'Render',
       label: 'Rendering your clip', sub: 'First render can take up to 90 seconds; repeats are instant',
       expectedMs: 60000, errLabel: 'Render error'
     });
@@ -58111,6 +58133,10 @@ voice, and queues them for one-click approval.</p>
                 "__PROJECT_ENHANCE_TMPL__",
                 url_for("api_video_project_enhance", project_id="__PID__"),
             )
+            .replace(
+                "__PROJECT_STABILIZE_JOB_TMPL__",
+                url_for("api_video_project_stabilize_job", project_id="__PID__"),
+            )
             .replace("__PROJECT_TMPL__", url_for("api_video_project", project_id="__PID__"))
             .replace(
                 "__PROJECT_WAVEFORM_TMPL__",
@@ -58401,6 +58427,137 @@ voice, and queues them for one-click approval.</p>
         proj = _video_project_store().save(proj)
         return jsonify({"ok": True, "project_id": proj.id, "manifest": result.manifest})
 
+    @app.route("/api/video/clip-maker-job", methods=["POST"])
+    def api_video_clip_maker_job():
+        """J-1/H-19: async twin of api_video_clip_maker.
+
+        The ASR + moment analysis ran synchronously for tens of seconds with the
+        button live, so an impatient double-click made duplicate projects. This
+        validates in the request thread, returns 202 {job_id, poll_url}, and runs
+        the analysis on a background thread the client polls — the button stays
+        disabled for the whole run and the finished project id rides the poll.
+        The project row is created only on success, so a failed analysis (honest
+        engine error) leaves no orphan.
+        """
+        if not _v8_ok:
+            return jsonify({"error": "v8_unavailable"}), 503
+        payload = request.get_json(silent=True) or {}
+        asset_id = (payload.get("asset_id") or "").strip()
+        if not asset_id:
+            return jsonify({"error": "asset_id_required"}), 400
+        store = _v8_get_media_store()
+        asset = store.get(asset_id)
+        if not asset or asset.type != "footage":
+            return jsonify({"error": "footage_not_found"}), 404
+        if not _session_can_access_profile(asset.profile_id):
+            return jsonify({"error": "forbidden"}), 403
+        if not Path(asset.path).exists():
+            return jsonify({"error": "footage_missing_on_disk"}), 410
+        _blocked = _footage_permission_error(asset)
+        if _blocked:
+            return jsonify(_blocked), 403
+
+        fmt = (payload.get("format") or "story").strip().lower()
+        from mediahub.visual.motion import MOTION_FORMATS
+
+        if fmt not in MOTION_FORMATS:
+            return jsonify({"error": "bad_format"}), 400
+        try:
+            target_moments = max(1, min(5, int(payload.get("target_moments", 1))))
+        except (TypeError, ValueError):
+            target_moments = 1
+        title = (payload.get("title") or "").strip()[:120]
+        with_captions = bool(payload.get("with_captions", True))
+        with_reframe = bool(payload.get("with_reframe", True))
+        look = _video_safe_look(payload.get("look"))
+        enhance_audio = bool(payload.get("enhance_audio", False))
+        with_music = bool(payload.get("with_music", False))
+        remove_silence = bool(payload.get("remove_silence", False))
+        remove_fillers = bool(payload.get("remove_fillers", False))
+        music_mood = (payload.get("music_mood") or "uplifting").strip().lower()[:24]
+        caption_style = "karaoke" if payload.get("animated_captions") else "static"
+        slow_mo = 0.5 if payload.get("slow_mo") else 1.0
+
+        # Capture everything the detached worker needs (no request context there).
+        asset_path = asset.path
+        asset_profile_id = asset.profile_id
+        asset_filename = asset.filename
+        colours = _video_brand_colours()
+
+        job_id = uuid.uuid4().hex
+        job: dict = {
+            "id": job_id,
+            "kind": "video-clip",
+            "status": "running",
+            "error": "",
+            "user_message": "",
+            "video_url": "",
+            "project_id": "",
+            "created_at": time.time(),
+            "owner_pid": _active_profile_id() or "",
+        }
+        _variant_jobs_gc()
+        _variant_job_save(job)
+
+        def _worker() -> None:
+            from mediahub.video.clip_maker import clip_maker
+            from mediahub.video.probe import ProbeUnavailable
+            from mediahub.video.projects import VideoProject
+
+            try:
+                with _job_heartbeat(job):
+                    result = clip_maker(
+                        asset_path,
+                        format_name=fmt,
+                        target_moments=target_moments,
+                        title=title,
+                        with_captions=with_captions,
+                        with_reframe=with_reframe,
+                        caption_style=caption_style,
+                        look=look,
+                        enhance_audio=enhance_audio,
+                        with_music=with_music,
+                        music_mood=music_mood,
+                        remove_silence=remove_silence,
+                        remove_fillers=remove_fillers,
+                        slow_mo=slow_mo,
+                        colours=colours,
+                    )
+                    proj = VideoProject(
+                        id="",
+                        profile_id=asset_profile_id,
+                        name=title or f"Clip from {asset_filename}"[:80],
+                        edl=result.edl,
+                        source_asset_id=asset_id,
+                        format_name=fmt,
+                    )
+                    proj = _video_project_store().save(proj)
+                job["status"] = "done"
+                job["project_id"] = proj.id
+            except ProbeUnavailable:
+                job["status"] = "error"
+                job["error"] = "engine_unavailable"
+                job["user_message"] = (
+                    "The video engine (FFmpeg) isn't available to analyse this clip "
+                    "on this deployment."
+                )
+            except Exception as e:  # honest surface; never a fabricated clip
+                job["status"] = "error"
+                job["error"] = str(e)[:200]
+            _variant_job_save(job)
+
+        threading.Thread(target=_worker, name=f"vidclip-{job_id[:8]}", daemon=True).start()
+        return (
+            jsonify(
+                {
+                    "ok": True,
+                    "job_id": job_id,
+                    "poll_url": url_for("api_reel_job_status", job_id=job_id),
+                }
+            ),
+            202,
+        )
+
     @app.route("/api/video/reel", methods=["POST"])
     def api_video_reel():
         """Build an AI-directed reel from several footage clips and save it.
@@ -58503,6 +58660,132 @@ voice, and queues them for one-click approval.</p>
         proj = _video_project_store().save(proj)
         return jsonify({"ok": True, "project_id": proj.id, "manifest": result.manifest})
 
+    @app.route("/api/video/reel-job", methods=["POST"])
+    def api_video_reel_job():
+        """J-1: async twin of api_video_reel (per-clip moment detection + the AI
+        director + assembly ran synchronously up to a few minutes). Validates in
+        the request thread, returns 202, directs on a background thread the client
+        polls; the finished project id rides the poll. The row is created only on
+        success, so a failed direction leaves no orphan."""
+        if not _v8_ok:
+            return jsonify({"error": "v8_unavailable"}), 503
+        payload = request.get_json(silent=True) or {}
+        raw_ids = payload.get("asset_ids") or []
+        if not isinstance(raw_ids, list) or not raw_ids:
+            return jsonify({"error": "asset_ids_required"}), 400
+        asset_ids = [str(a).strip() for a in raw_ids if str(a).strip()][:8]
+        if not asset_ids:
+            return jsonify({"error": "asset_ids_required"}), 400
+        store = _v8_get_media_store()
+        paths: list[str] = []
+        profile_id = None
+        for aid in asset_ids:
+            asset = store.get(aid)
+            if not asset or asset.type != "footage":
+                return jsonify({"error": "footage_not_found", "asset_id": aid}), 404
+            if not _session_can_access_profile(asset.profile_id):
+                return jsonify({"error": "forbidden"}), 403
+            if not Path(asset.path).exists():
+                return jsonify({"error": "footage_missing_on_disk", "asset_id": aid}), 410
+            _blocked = _footage_permission_error(asset)
+            if _blocked:
+                return jsonify({**_blocked, "asset_id": aid}), 403
+            paths.append(asset.path)
+            profile_id = asset.profile_id
+
+        fmt = (payload.get("format") or "story").strip().lower()
+        from mediahub.visual.motion import MOTION_FORMATS
+
+        if fmt not in MOTION_FORMATS:
+            return jsonify({"error": "bad_format"}), 400
+        try:
+            max_beats = max(1, min(5, int(payload.get("max_beats", 5))))
+        except (TypeError, ValueError):
+            max_beats = 5
+        brief = (payload.get("brief_context") or "").strip()[:200]
+        with_captions = bool(payload.get("with_captions", True))
+        with_reframe = bool(payload.get("with_reframe", True))
+        with_music = bool(payload.get("with_music", True))
+        enhance_audio = bool(payload.get("enhance_audio", True))
+        caption_style = "static" if payload.get("animated_captions") is False else "karaoke"
+        try:
+            caption_beats = max(1, min(max_beats, int(payload.get("caption_beats", 3))))
+        except (TypeError, ValueError):
+            caption_beats = 3
+        colours = _video_brand_colours()
+        first_asset_id = asset_ids[0]
+
+        job_id = uuid.uuid4().hex
+        job: dict = {
+            "id": job_id,
+            "kind": "video-reel",
+            "status": "running",
+            "error": "",
+            "user_message": "",
+            "video_url": "",
+            "project_id": "",
+            "created_at": time.time(),
+            "owner_pid": _active_profile_id() or "",
+        }
+        _variant_jobs_gc()
+        _variant_job_save(job)
+
+        def _worker() -> None:
+            from mediahub.video.probe import ProbeUnavailable
+            from mediahub.video.projects import VideoProject
+            from mediahub.video.reel_builder import make_reel
+
+            try:
+                with _job_heartbeat(job):
+                    result = make_reel(
+                        paths,
+                        format_name=fmt,
+                        max_beats=max_beats,
+                        with_captions=with_captions,
+                        caption_style=caption_style,
+                        caption_beats=caption_beats,
+                        with_reframe=with_reframe,
+                        with_music=with_music,
+                        enhance_audio=enhance_audio,
+                        brief_context=brief,
+                        colours=colours,
+                    )
+                    name = (result.plan.hook or brief or "AI reel").strip()[:80] or "AI reel"
+                    proj = VideoProject(
+                        id="",
+                        profile_id=profile_id,
+                        name=name,
+                        edl=result.edl,
+                        source_asset_id=first_asset_id,
+                        format_name=fmt,
+                    )
+                    proj = _video_project_store().save(proj)
+                job["status"] = "done"
+                job["project_id"] = proj.id
+            except ProbeUnavailable:
+                job["status"] = "error"
+                job["error"] = "engine_unavailable"
+                job["user_message"] = (
+                    "The video engine (FFmpeg) isn't available to analyse footage "
+                    "on this deployment."
+                )
+            except Exception as e:  # honest surface; never a fabricated reel
+                job["status"] = "error"
+                job["error"] = str(e)[:200]
+            _variant_job_save(job)
+
+        threading.Thread(target=_worker, name=f"vidreel-{job_id[:8]}", daemon=True).start()
+        return (
+            jsonify(
+                {
+                    "ok": True,
+                    "job_id": job_id,
+                    "poll_url": url_for("api_reel_job_status", job_id=job_id),
+                }
+            ),
+            202,
+        )
+
     def _video_stabilize_edl(edl, project_id: str) -> None:
         """Stabilise each distinct source and repoint the EDL clips at the result.
 
@@ -58587,6 +58870,69 @@ voice, and queues them for one-click approval.</p>
             proj.status = "draft"  # an edit reopens approval (rule 6)
             store.save(proj)
         return jsonify({"ok": True, "project": proj.to_dict()})
+
+    @app.route("/api/video/projects/<project_id>/stabilize-job", methods=["POST"])
+    def api_video_project_stabilize_job(project_id: str):
+        """J-1: async twin of the enhance route's stabilise branch — two-pass
+        vidstab (up to minutes per source) is the studio's heaviest sync op, well
+        past the proxy timeout. Validates + returns 202, stabilises on a
+        background thread the client polls; the updated project (status reopened
+        to 'draft', rule 6) rides the poll. The cheap look/music enhance branches
+        stay on the synchronous enhance route.
+        """
+        store = _video_project_store()
+        proj = store.get(project_id)
+        if not _video_can_access_project(proj):
+            return jsonify({"error": "not_found"}), 404
+
+        job_id = uuid.uuid4().hex
+        job: dict = {
+            "id": job_id,
+            "kind": "video-stabilize",
+            "status": "running",
+            "error": "",
+            "user_message": "",
+            "video_url": "",
+            "project_id": project_id,
+            "created_at": time.time(),
+            "owner_pid": _active_profile_id() or "",
+        }
+        _variant_jobs_gc()
+        _variant_job_save(job)
+
+        def _worker() -> None:
+            from mediahub.video.enhance import VideoEnhanceUnavailable
+
+            try:
+                with _job_heartbeat(job):
+                    p = _video_project_store().get(project_id)
+                    if p is None:
+                        raise RuntimeError("project not found")
+                    _video_stabilize_edl(p.edl, project_id)
+                    p.status = "draft"  # an edit reopens approval (rule 6)
+                    _video_project_store().save(p)
+                    job["project"] = p.to_dict()
+                job["status"] = "done"
+            except VideoEnhanceUnavailable as e:
+                job["status"] = "error"
+                job["error"] = "stabilize_unavailable"
+                job["user_message"] = str(e)
+            except Exception as e:
+                job["status"] = "error"
+                job["error"] = str(e)[:200]
+            _variant_job_save(job)
+
+        threading.Thread(target=_worker, name=f"vidstab-{job_id[:8]}", daemon=True).start()
+        return (
+            jsonify(
+                {
+                    "ok": True,
+                    "job_id": job_id,
+                    "poll_url": url_for("api_reel_job_status", job_id=job_id),
+                }
+            ),
+            202,
+        )
 
     @app.route("/api/video/projects/<project_id>/caption", methods=["POST"])
     def api_video_project_caption(project_id: str):
