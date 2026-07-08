@@ -66,3 +66,18 @@ class TestSignupPrerequisiteWarning:
         assert 'name="email"' in body
         assert 'name="password"' in body
         assert 'name="accept_terms"' in body
+
+    def test_signup_page_explains_what_happens_next(self, client):
+        """Stating the prerequisite is not enough — the page must tell the
+        user HOW they'll actually supply it. A volunteer who reads "have your
+        website, social profiles and brand guidelines to hand" still has no
+        idea what happens after they click "Create account": is it a form?
+        A wizard? Do they need everything before they can start? Without a
+        pointer to the guided step that follows sign-up, the prerequisite
+        reads as a wall rather than an onboarding path."""
+        body = client.get("/signup").get_data(as_text=True).lower()
+        assert "walk you through" in body or "guide you through" in body, (
+            "Sign-up page must tell users that a guided step follows account "
+            "creation — otherwise the brand/club prerequisite is stated but "
+            "never explained."
+        )

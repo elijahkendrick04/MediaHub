@@ -37603,8 +37603,10 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 "One account runs your club&rsquo;s content. Free to start &mdash; "
                 "3 runs a month, no card required. "
                 "Before you start, have your club&rsquo;s website, social profiles, and brand "
-                "guidelines to hand &mdash; the engine needs them to produce on-brand content "
-                "(setup takes about 5&nbsp;minutes)."
+                "guidelines to hand &mdash; the engine needs them to produce on-brand content. "
+                "Right after you sign up we&rsquo;ll walk you through pasting those links (or "
+                "uploading a guidelines document) so the AI can build your brand kit &mdash; "
+                "most fields are optional, and the whole thing takes about 5&nbsp;minutes."
             ),
             action_url=url_for("signup_post"),
             submit_label="Create account",
