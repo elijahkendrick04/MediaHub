@@ -14643,7 +14643,7 @@ def _layout(
     error:   '<svg class="mh-toast-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>',
     info:    '<svg class="mh-toast-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>'
   };
-  MH.toast = function(message, type, ms) {
+  MH.toast = function(message, type, ms, action) {
     if (!toastContainer) return;
     type = type || 'info';
     var t = document.createElement('div');
@@ -14655,7 +14655,19 @@ def _layout(
     t.innerHTML = (ICONS[type] || ICONS.info) +
       '<div class="mh-toast-msg" style="flex:1;min-width:0"></div>' +
       '<button class="mh-toast-close" aria-label="Dismiss">&times;</button>';
-    t.querySelector('.mh-toast-msg').textContent = (message == null ? '' : String(message));
+    var msgSlot = t.querySelector('.mh-toast-msg');
+    msgSlot.textContent = (message == null ? '' : String(message));
+    // Optional inline action — a same-origin deep link (e.g. "Open in builder"
+    // for an open-task gate, D-1). The href is a trusted app path the caller
+    // builds with encodeURIComponent; the visible label is set via textContent.
+    if (action && action.href) {
+      var a = document.createElement('a');
+      a.href = action.href;
+      a.textContent = action.text || 'Open';
+      a.className = 'mh-toast-action';
+      a.style.cssText = 'margin-left:10px;color:inherit;font-weight:600;text-decoration:underline;white-space:nowrap';
+      msgSlot.appendChild(a);
+    }
     toastContainer.appendChild(t);
     var close = function(){
       t.style.transition = 'opacity 0.2s ease, transform 0.2s ease';
@@ -15570,17 +15582,37 @@ def _layout(
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({action: 'set_status', status: status})
     }).then(function(r){
-      return r.json().then(function(j){ return {ok: r.ok, body: j}; });
+      return r.json().then(
+        function(j){ return {ok: r.ok, status: r.status, body: j}; },
+        function(){ return {ok: r.ok, status: r.status, body: null}; }
+      );
     }).then(function(o){
       if (!o.ok || !o.body || o.body.ok === false) {
-        var msg = (o.body && (o.body.error || o.body.message)) || ('HTTP ' + (o.ok ? 200 : 'err'));
-        if (window.MH && MH.toast) MH.toast('Workflow update failed: ' + msg, 'error', 4000);
-        throw new Error(msg);
+        var body = o.body || {};
+        // D-1: the consent / brand-lock / open-task gates answer with
+        // {error:<code>, reason:<plain English>}. Show the reason — never the
+        // raw "consent_blocked" code — and mark a 4xx-with-code as a deliberate
+        // safeguarding block (err.gate) so the caller suppresses the
+        // contradictory "try again" retry advice a permanent block can't act on.
+        var human = body.reason || body.message || 'We couldn\\u2019t save that change.';
+        var isGate = (o.status >= 400 && o.status < 500) && !!body.error;
+        if (window.MH && MH.toast) {
+          if (isGate && body.error === 'tasks_open') {
+            // The tasks that hold this card live on the content builder, not
+            // the review page — deep-link straight there to resolve them.
+            MH.toast(human, 'error', 6500,
+              {text: 'Open in builder', href: base + '/pack/' + encodeURIComponent(runId)});
+          } else {
+            MH.toast(human, 'error', 4500);
+          }
+        }
+        var err = new Error(human);
+        err.handled = true;   // already toasted — the caller must not double-toast
+        err.gate = isGate;    // a deliberate block, not a transient failure
+        err.code = body.error || '';
+        throw err;
       }
       return o.body;
-    }).catch(function(e){
-      if (window.MH && MH.toast) MH.toast('Workflow update failed: ' + (e && e.message || e), 'error', 4000);
-      throw e;
     });
   };
 
@@ -15647,13 +15679,19 @@ def _layout(
       } else if (window.MH && MH.toast) {
         MH.toast('Marked as ' + status, 'success', 1500);
       }
-    }).catch(function(){
+    }).catch(function(err){
       btn.disabled = false; btn.style.opacity = '';
       btn.textContent = origLabel;
       // Server rejected the change: revert the optimistic flip on the straps,
       // buttons and row, and resync tab counts so the card returns to its pile.
       paintState(prevStatus);
-      if (window.MH && MH.toast) MH.toast('Could not save — reverted. Try again.', 'error', 2600);
+      // D-1: a gate block (consent / brand-lock / open task) already surfaced
+      // its plain-English reason via mhWorkflowSet and is NOT retryable — don't
+      // pile the contradictory "Could not save — reverted. Try again." on top.
+      // Only genuinely transient failures (network / server error) get the retry.
+      if (!(err && (err.handled || err.gate))) {
+        if (window.MH && MH.toast) MH.toast('Could not save — reverted. Try again.', 'error', 2600);
+      }
     });
   });
 
