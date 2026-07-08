@@ -4110,7 +4110,7 @@ _RUN_DELETE_JS = """
     if (!form || !form.classList) return;
     if (form.classList.contains('mh-run-delete')) {
       e.preventDefault();
-      if (!window.confirm('Delete this run? This cannot be undone.')) return;
+      if (!window.confirm('Delete these results? This cannot be undone.')) return;
       var rid = form.getAttribute('data-run-id');
       var btn = form.querySelector('button');
       if (btn) btn.disabled = true;
@@ -18958,7 +18958,7 @@ def create_app() -> Flask:
             )
         if n_runs:
             meta_parts.append(
-                f"<span>{_odometer(n_runs, 3)} total {'run' if n_runs == 1 else 'runs'}</span>"
+                f"<span>{_odometer(n_runs, 3)} {'result' if n_runs == 1 else 'results'} processed</span>"
             )
         if n_moments:
             meta_parts.append(
@@ -19409,7 +19409,7 @@ def create_app() -> Flask:
                 '<span class="mh-hero-eyebrow">Activity</span>'
                 f'<h1>Quiet weekend, <em class="editorial">{_h(prof.display_name)}</em>.</h1>'
                 '<p class="lede">'
-                "No runs yet for this organisation. Upload a results file, paste "
+                "No results yet for this organisation. Upload a results file, paste "
                 "a sponsor brief, or describe a moment in your own words &mdash; "
                 "every run lands here with the meet name, status, queue, and a "
                 "one-click link back into the review."
@@ -19700,7 +19700,7 @@ def create_app() -> Flask:
             'style="margin-bottom:var(--sp-4)">'
             f'<a class="{table_cls.strip()}" '
             f'aria-current="{"page" if active_view == "table" else "false"}" '
-            f'href="{url_for("activity_page")}">Runs table</a>'
+            f'href="{url_for("activity_page")}">Results table</a>'
             f'<a class="{feed_cls.strip()}" '
             f'aria-current="{"page" if active_view == "feed" else "false"}" '
             f'href="{url_for("activity_feed_page")}">Feed</a>'
@@ -19933,7 +19933,7 @@ def create_app() -> Flask:
                     "operator to check the data volume.</p>"
                     '<div class="mh-hero-actions">'
                     f'<a class="mh-cta-primary" href="{url_for("activity_feed_page")}">Refresh &rarr;</a>'
-                    f'<a class="mh-cta-secondary" href="{url_for("activity_page")}">Runs table</a>'
+                    f'<a class="mh-cta-secondary" href="{url_for("activity_page")}">Results table</a>'
                     "</div></section>"
                 )
                 return _layout("Activity feed", empty_body, active="activity")
@@ -19946,7 +19946,7 @@ def create_app() -> Flask:
                 "detail behind it. Create your first piece to get started.</p>"
                 '<div class="mh-hero-actions">'
                 f'<a class="mh-cta-primary" href="{url_for("make_page")}">Create your first piece &rarr;</a>'
-                f'<a class="mh-cta-secondary" href="{url_for("activity_page")}">Runs table</a>'
+                f'<a class="mh-cta-secondary" href="{url_for("activity_page")}">Results table</a>'
                 "</div></section>"
             )
             return _layout("Activity feed", empty_body, active="activity")
@@ -22166,12 +22166,12 @@ def create_app() -> Flask:
 <div class="card" style="border-color:rgba(255,107,107,0.25);margin-top:var(--sp-6)">
   <div style="display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap">
     <div>
-      <h2 style="margin:0 0 2px 0;font-size:15px">Delete this run</h2>
+      <h2 style="margin:0 0 2px 0;font-size:15px">Delete these results</h2>
       <p class="muted" style="margin:0;font-size:12px">Removes the failed run. Source files stay
         on disk and can be re-processed.</p>
     </div>
     <form method="post" action="{url_for("privacy_delete_run", run_id=run_id)}"
-          onsubmit="return confirm('Delete this run permanently?')">
+          onsubmit="return confirm('Delete these results permanently?')">
       <button class="btn danger" type="submit">Delete run</button>
     </form>
   </div>
@@ -23282,10 +23282,10 @@ details.why-card[open] > summary .why-peek {{ display: none; }}
 <div class="card" style="border-color:rgba(255,107,107,0.25);margin-top:var(--sp-6)">
   <div style="display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap">
     <div>
-      <h2 style="margin:0 0 2px 0;font-size:15px">Delete this run</h2>
+      <h2 style="margin:0 0 2px 0;font-size:15px">Delete these results</h2>
       <p class="muted" style="margin:0;font-size:12px">Removes the generated cards and review state for this run. Source files stay on disk and can be re-processed.</p>
     </div>
-    <form method="post" action="{_delete_url}" onsubmit="return confirm('Delete this run permanently? Source files stay on disk; generated cards and the review state are removed.')">
+    <form method="post" action="{_delete_url}" onsubmit="return confirm('Delete these results permanently? Source files stay on disk; generated cards and the review state are removed.')">
       <button class="btn danger" type="submit">Delete run</button>
     </form>
   </div>
@@ -29620,7 +29620,7 @@ self.addEventListener('fetch', function(e){
             return (
                 f"{section_header}"
                 f"{section_intro}"
-                '<div class="card empty">No runs yet for this organisation. '
+                '<div class="card empty">No results yet for this organisation. '
                 f'<a href="{url_for("make_page")}">Create your first piece of content &rarr;</a>'
                 "</div>"
             )

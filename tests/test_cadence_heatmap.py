@@ -483,7 +483,7 @@ class TestActivityPageRendersHeatmap:
         # Club A has no runs at all -> empty hero, no heatmap panel.
         _pin(c, "club-a")
         body = c.get("/activity").get_data(as_text=True)
-        assert "No runs yet for this organisation" in body
+        assert "No results yet for this organisation" in body
         assert "Content cadence over the last year" not in body
 
     def test_panel_absent_when_no_runs(self, gated_client):
