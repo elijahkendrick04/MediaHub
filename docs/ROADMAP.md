@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-07-08 · `3fc2bbb4d` · Usability fixes: first-run breakages + high-severity quick wins (#1082)
+**Last updated:** 2026-07-08 · `56e31a34a` · Usability audit — Theme F complete, Theme I complete, D feedback/error states (#1085)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1228,16 +1228,16 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
-| 2026-07-08 | `d8f87e3d4` | fix(ui): polished empty states for sponsors and collections (D-34) |
-| 2026-07-08 | `1e8346acd` | fix(status): honest "Status unavailable" state, not a green default (D-28) |
-| 2026-07-08 | `95b4c032e` | fix(privacy): flag overdue athlete-rights (DSR) requests (D-9) |
-| 2026-07-08 | `db5c66a5f` | fix(account): safe, honest account deletion (E-9) |
-| 2026-07-08 | `38ab009e8` | fix(nav): surface Club data tools from the account menu (C-4) |
-| 2026-07-08 | `a54944cad` | fix(nav): surface Drafts and the consent/DSR pages (C-3, C-7) |
-| 2026-07-08 | `b19bd3f63` | fix(create): Live meet + Season wraps are live tiles, not "Coming soon" (C-5, C-6) |
-| 2026-07-08 | `646821359` | fix(sites): a JSON typo no longer throws away the editor's edits (H-6) |
-| 2026-07-08 | `476f6baf1` | fix(plan): auto-save on-page inputs before Generate (H-7) |
-| 2026-07-08 | `e6b8de432` | test: update setup optional-section copy assertion for A-2 |
-| 2026-07-08 | `3c2b7bbed` | fix(export): never ship rejected cards in any pack export (E-2) |
-| 2026-07-08 | `ca6cd3eb1` | fix(export): per-card ZIP exports the real caption, not the headline (E-3) |
+| 2026-07-08 | `3b64973b8` | fix: address pre-merge adversarial review (F-9 undercount, D-17 dead banner, F-4 dead code) |
+| 2026-07-08 | `588251f24` | docs(audit): mark shipped findings + add implementation-status matrix |
+| 2026-07-08 | `b31f5b86c` | fix(charts): intent-labelled exports + JS blob download with SVG fallback (D-33) |
+| 2026-07-08 | `36326d7fe` | fix(dsr): confirm SAR export + keep a working download, not a dead-end attachment (D-21) |
+| 2026-07-08 | `8a385ed55` | fix(ai): make AI-unavailability discoverable, not a hover-only dot (D-17) |
+| 2026-07-08 | `00bb637d1` | fix(feedback): confirm password reset & signup, reassure on the progress page (D-35) |
+| 2026-07-08 | `05a3ad65e` | fix(media): Draft/Ready badge + Unapprove for library photo approval (D-29) |
+| 2026-07-08 | `7f0c5fd62` | fix(newsletter): embed card images in the downloaded draft email (D-18) |
+| 2026-07-08 | `7ebbf1867` | test: update export-loader guard for F-5's broadened native-submit branch |
+| 2026-07-08 | `df939de03` | fix(brand): colour pickers + font/tone dropdowns for the kit editor (F-10) |
+| 2026-07-08 | `202631d7a` | fix(export): live quality readout + plain-English format hints (F-11) |
+| 2026-07-08 | `967c0c579` | fix(consent): lead consent & rights UI with plain English, demote GDPR articles (F-8) |
 <!-- /ROADMAP:ACTIVITY -->
