@@ -89,17 +89,28 @@ def test_billing_routes_503_when_unconfigured(monkeypatch, tmp_path):
     c = app.test_client()
     c.post("/signup", data={"email": "u@club.org", "password": "twelvechars1", "accept_terms": "1"})
 
-    # Billing actions honest-error with 503 + the exact message.
+    # D-14: a browser form POST (no JSON Accept) gets the styled HTML 503 card,
+    # not a bare JSON body dumped into a full-page navigation.
     r = c.post("/billing/checkout", data={"plan": "club"})
+    assert r.status_code == 503
+    assert b"Something went wrong" in r.data
+    assert b"not configured" in r.data.lower()
+
+    # An AJAX/JSON caller still gets the machine 503 body + exact message.
+    r = c.post(
+        "/billing/checkout", data={"plan": "club"}, headers={"Accept": "application/json"}
+    )
     assert r.status_code == 503
     assert r.get_json()["message"] == billing.NOT_CONFIGURED_MESSAGE
 
     r = c.post("/billing/portal")
     assert r.status_code == 503
 
-    # Webhook also 503s (so Stripe surfaces a clear delivery error).
+    # Webhook (a machine caller) always 503s with a JSON body, so Stripe
+    # surfaces a clear delivery error.
     r = c.post("/webhooks/stripe", data=b"{}", headers={"Stripe-Signature": "x"})
     assert r.status_code == 503
+    assert r.get_json()["error"] == "billing_not_configured"
 
 
 def test_billing_page_shows_not_configured(monkeypatch, tmp_path):

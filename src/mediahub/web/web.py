@@ -28882,6 +28882,12 @@ self.addEventListener('fetch', function(e){
         )
         if wants_json:
             return jsonify(payload), status
+        # D-14: a browser form POST must never land on a bare JSON error page.
+        # Redirect back with a friendly banner instead — the styled error card
+        # the graceful pages use — keeping the JSON body only for JSON callers.
+        if payload.get("error"):
+            emsg = payload.get("message") or "That didn't work — check the file and try again."
+            return redirect(url_for("settings_section", section="audio", status="error", emsg=emsg))
         # D-7: a form POST navigates back to the audio settings; carry a status
         # so the section can confirm the action ("Track added" / "Track removed")
         # instead of a silent redirect the volunteer can't tell worked.
@@ -28985,22 +28991,36 @@ self.addEventListener('fetch', function(e){
 
         pid = _active_profile_id()
         if not pid:
-            return jsonify(
-                {"error": "no_org", "message": "Choose an organisation to upload audio."}
-            ), 403
+            return _audio_back_or_json(
+                {"error": "no_org", "message": "Choose an organisation to upload audio."}, 403
+            )
         f = _req.files.get("file")
         if not f:
-            return jsonify({"error": "no_file"}), 400
+            return _audio_back_or_json(
+                {"error": "no_file", "message": "Choose an audio file first."}, 400
+            )
         ext = Path(f.filename or "clip.wav").suffix.lower()
         if ext not in _AUDIO_UPLOAD_SUFFIXES:
-            return jsonify(
-                {"error": "bad_type", "message": f"Unsupported audio type {ext!r}."}
-            ), 415
+            allowed = ", ".join(sorted(s.lstrip(".").upper() for s in _AUDIO_UPLOAD_SUFFIXES))
+            return _audio_back_or_json(
+                {
+                    "error": "bad_type",
+                    "message": f"That file type isn't supported. Use one of: {allowed}.",
+                },
+                415,
+            )
         try:
             from mediahub.audio import rights as _rights
             from mediahub.audio.library import Licence
         except Exception as e:
-            return jsonify({"error": "audio_unavailable", "detail": str(e)}), 503
+            return _audio_back_or_json(
+                {
+                    "error": "audio_unavailable",
+                    "detail": str(e),
+                    "message": "Audio isn't available.",
+                },
+                503,
+            )
 
         import uuid as _uuid
 
@@ -29012,9 +29032,17 @@ self.addEventListener('fetch', function(e){
         try:
             if dest.stat().st_size > _AUDIO_UPLOAD_MAX_BYTES:
                 dest.unlink(missing_ok=True)
-                return jsonify({"error": "too_large", "message": "Audio exceeds 25 MB."}), 413
+                return _audio_back_or_json(
+                    {"error": "too_large", "message": "That audio is over the 25 MB limit."}, 413
+                )
         except OSError:
-            return jsonify({"error": "save_failed"}), 500
+            return _audio_back_or_json(
+                {
+                    "error": "save_failed",
+                    "message": "We couldn't save that file — please try again.",
+                },
+                500,
+            )
 
         # Optional one-tap clean-up (denoise + loudness) for recordings.
         if (_req.form.get("enhance") or "").strip().lower() in {"1", "true", "on", "yes"}:
@@ -29260,6 +29288,7 @@ self.addEventListener('fetch', function(e){
 
         # --- Upload own audio + browser recorder ---
         if pid:
+            _types_hint = ", ".join(sorted(s.lstrip(".").upper() for s in _AUDIO_UPLOAD_SUFFIXES))
             upload_html = (
                 '<h2 style="font-size:18px;margin:28px 0 6px">Upload your own audio</h2>'
                 '<p class="dim" style="margin:0 0 12px">Add a track you hold the licence for. '
@@ -29267,6 +29296,7 @@ self.addEventListener('fetch', function(e){
                 f'<form method="post" action="{url_for("api_audio_upload")}" '
                 'enctype="multipart/form-data" style="display:grid;gap:8px;max-width:560px">'
                 '<input type="file" id="mh-audio-file" name="file" accept="audio/*" required>'
+                f'<span class="dim" style="font-size:12px">{_types_hint} · up to 25 MB.</span>'
                 '<input name="licence_name" placeholder="Licence (e.g. Licensed, CC-BY)" '
                 'style="padding:8px">'
                 '<input name="attribution" placeholder="Attribution (if required)" '
@@ -29338,6 +29368,14 @@ self.addEventListener('fetch', function(e){
             banner_html = (
                 '<div class="card" style="border-left:2px solid var(--warn);margin-bottom:14px">'
                 "Track removed.</div>"
+            )
+        elif _audio_flash == "error":
+            # D-14: an upload validation error, rendered as a styled card instead
+            # of a bare JSON page. The message is server-supplied; escape it.
+            _emsg = _h((request.args.get("emsg") or "").strip()[:300]) or "That upload didn't work."
+            banner_html = (
+                '<div class="card" style="border-left:2px solid var(--bad);margin-bottom:14px">'
+                f'<strong style="color:var(--bad)">Upload failed.</strong> {_emsg}</div>'
             )
 
         # --- Voice consent (cloning / changer; off by default) ---
@@ -39189,7 +39227,18 @@ what you're doing, what they should do.</p>
         return redirect(portal_url, code=303)
 
     def _billing_unconfigured_response():
-        """The honest 503 for billing actions when Stripe is unset."""
+        """The honest 503 for billing actions when Stripe is unset.
+
+        D-14: a browser navigation (Accept: text/html) gets the styled billing
+        error card the graceful pages use — not a bare ``{"error":...}`` JSON
+        body dumped into a full-page load. JSON/AJAX callers still get the 503
+        machine body.
+        """
+        if not _req_wants_json(request):
+            return (
+                _layout("Billing", _billing_error_body(_billing.NOT_CONFIGURED_MESSAGE), active=""),
+                503,
+            )
         return (
             jsonify(
                 {
@@ -39223,7 +39272,18 @@ what you're doing, what they should do.</p>
         rather than a silent 200.
         """
         if not _billing.billing_configured():
-            return _billing_unconfigured_response()
+            # A machine caller (Stripe) always gets JSON — never the styled HTML
+            # card the browser-facing routes now return (D-14).
+            return (
+                jsonify(
+                    {
+                        "ok": False,
+                        "error": "billing_not_configured",
+                        "message": _billing.NOT_CONFIGURED_MESSAGE,
+                    }
+                ),
+                503,
+            )
         sig = request.headers.get("Stripe-Signature", "")
         payload = request.get_data()  # raw bytes — required for signature check
         try:
