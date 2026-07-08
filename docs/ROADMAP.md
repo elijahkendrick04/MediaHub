@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-07-08 · `014c8481b` · Fix production sentinel/autotest findings (#1067 #1066 #1065 #884) (#1089)
+**Last updated:** 2026-07-08 · `9c400d47f` · Cull the GitHub bots that never delivered; sharpen the ones that do (#1090)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1227,6 +1227,8 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-07-08 | `2bd6ee0f5` | docs(autotest): annotate the removed B1/B4/C1 bots in the historical build-docs |
+| 2026-07-08 | `97c7dc7dd` | Cull the GitHub bots that never delivered; sharpen the ones that do |
 | 2026-07-08 | `ac47d1c93` | Fix production sentinel/autotest findings (#1067 #1066 #1065 #884) |
 | 2026-07-08 | `423b8ce54` | chore(gitignore): ignore src/mediahub/dsr_exports runtime SAR snapshots |
 | 2026-07-08 | `3b64973b8` | fix: address pre-merge adversarial review (F-9 undercount, D-17 dead banner, F-4 dead code) |
@@ -1237,6 +1239,4 @@ list and the auto table below, not here.
 | 2026-07-08 | `00bb637d1` | fix(feedback): confirm password reset & signup, reassure on the progress page (D-35) |
 | 2026-07-08 | `05a3ad65e` | fix(media): Draft/Ready badge + Unapprove for library photo approval (D-29) |
 | 2026-07-08 | `7f0c5fd62` | fix(newsletter): embed card images in the downloaded draft email (D-18) |
-| 2026-07-08 | `7ebbf1867` | test: update export-loader guard for F-5's broadened native-submit branch |
-| 2026-07-08 | `df939de03` | fix(brand): colour pickers + font/tone dropdowns for the kit editor (F-10) |
 <!-- /ROADMAP:ACTIVITY -->
