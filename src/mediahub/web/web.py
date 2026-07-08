@@ -17988,7 +17988,7 @@ document.body.addEventListener('click', function(){ if(document.documentElement.
 _DOC_REMOTE = r"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1"><title>Slide remote</title>
 <style>html,body{margin:0;height:100%;font-family:system-ui,sans-serif;background:#0b1020;color:#fff}
-#g{position:fixed;inset:0;display:grid;grid-template-rows:auto 1fr 1fr auto;gap:10px;padding:14px}
+#g{position:fixed;inset:0;display:grid;grid-template-rows:auto auto 1fr 1fr auto;gap:10px;padding:14px}
 button{font-size:22px;border:0;border-radius:14px;background:#1b2440;color:#fff}
 button:active{background:#2b3a66}
 .row{display:flex;gap:10px}.row button{flex:1}

@@ -26,6 +26,10 @@ def test_remote_act_handles_failures():
     assert "Too many taps" in _SRC
     assert "Reconnecting" in _SRC
     assert 'id="rstat"' in _SRC
+    # Adding the #rstat status band as a 5th grid child must keep a matching
+    # row track, or the primary "Next" tap target collapses (review-workflow
+    # regression fix): 5 children -> 5 tracks.
+    assert "grid-template-rows:auto auto 1fr 1fr auto" in _SRC
 
 
 def test_console_act_handles_failures():
