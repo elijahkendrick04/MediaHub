@@ -74,14 +74,14 @@ The 15 highest-leverage items: all three severe first-run breakages, the high-se
 
 ## Implementation status
 
-**98 of 161 findings shipped** (plus I-4 assessed as already satisfied). Delivered across four merged/merging PRs, each finding as its own commit with a dedicated regression test:
+**100 of 161 findings shipped** (plus I-4 assessed as already satisfied). Delivered across four merged/merging PRs, each finding as its own commit with a dedicated regression test:
 
 - **PR #1082** (merged) — all of Theme A + the 15-item fix-first shortlist and adjacent high-severity data-safety/discoverability items (23 findings).
 - **PR #1085** (merged) — Theme F complete, Theme I complete (bar the I-4 no-op), and the bulk of Theme D feedback/error states (47 findings).
 - **PR #1093** (merged) — the remaining high-severity findings plus the owner-decided IA changes: E-4, G-12, B-6, J-2, H-4, H-3, E-1, C-16, G-3, C-1, C-2, C-8, C-13, C-18, and the owner-decided orphans C-14 (sticker/mockup picker) and C-9 (finish Collections) (16 findings). Owner decisions for this batch: customer vocab = "Results"; Developer link on /login only; nav = replace Elements with Activity; Collections = finish; sticker/mockup = wire a picker; brand = /organisation/setup canonical. Pre-merge adversarial review (5 dimensions) confirmed 4 defects (E-1 undo re-insert throw, H-4 badge wipe, C-16 open-redirect, a weak G-3 test) — all fixed.
-- **PR #1097** (this branch) — the medium quick-win tail across five themes, each with a dedicated regression test: D-10 (Documents/Newsletters AI toggle + busy state + toast, replacing the ambiguous OK/Cancel confirm), E-6 & E-7 (merge-athletes and consent-enforcement confirms with a real impact preview), G-13 (audience autoplay honours the session's configured cadence), G-15 (single demo CTA when signed in), H-21 (board "Add" button + empty-title feedback), H-22 (remote-code client-side validation before it burns a shared-NAT attempt), H-23 (spotlight build disabled with 0 approved), J-5 (export hub links straight to the real export tool), J-7 (channel-preview empty-state escape link), J-10 (Settings "Coming soon" tiles badged), J-13 (console "End presentation") (12 findings).
+- **PR #1097** (this branch) — the medium quick-win tail across five themes plus the large high J-1, each with a dedicated regression test: D-10 (Documents/Newsletters AI toggle + busy state + toast, replacing the ambiguous OK/Cancel confirm), E-6 & E-7 (merge-athletes and consent-enforcement confirms with a real impact preview), G-13 (audience autoplay honours the session's configured cadence), G-15 (single demo CTA when signed in), H-21 (board "Add" button + empty-title feedback), H-22 (remote-code client-side validation before it burns a shared-NAT attempt), H-23 (spotlight build disabled with 0 approved), J-5 (export hub links straight to the real export tool), J-7 (channel-preview empty-state escape link), J-10 (Settings "Coming soon" tiles badged), J-13 (console "End presentation"); then **J-1** (the Video Studio's render / make-clip / direct-reel / stabilise now run as disk-backed background jobs the client polls with a branded progress panel) which also resolves **H-19** (the clip button stays disabled for the whole run, and one job maps to one project — no duplicates) (14 findings).
 
-Themes **A**, **F** and **I** are complete. Remaining work is concentrated in **B** (too-many-steps), **J** (dead-ends), **H** (forms), **G** (consistency), **E** (destructive/data-safety), **C** (discoverability) and the **D** tail — the two large high-severity items (Video Studio background-jobs J-1 and structured editor H-5) are queued next.
+Themes **A**, **F** and **I** are complete. Remaining work is concentrated in **B** (too-many-steps), **J** (dead-ends), **H** (forms), **G** (consistency), **E** (destructive/data-safety), **C** (discoverability) and the **D** tail — the remaining large high-severity item is the structured editor **H-5**.
 
 | Theme | Done | Remaining |
 |-------|------|-----------|
@@ -92,9 +92,9 @@ Themes **A**, **F** and **I** are complete. Remaining work is concentrated in **
 | E — Destructive / data-safety | 7/14 | E-5, E-8, E-10, E-11, E-12, E-13, E-14 |
 | F — Jargon & labels | 14/14 ✅ | — none — |
 | G — Consistency | 5/15 | G-1, G-2, G-5, G-6, G-7, G-8, G-9, G-10, G-11, G-14 |
-| H — Forms | 9/23 | H-5, H-8, H-9, H-10, H-11, H-12, H-13, H-14, H-15, H-16, H-17, H-18, H-19, H-20 |
+| H — Forms | 10/23 | H-5, H-8, H-9, H-10, H-11, H-12, H-13, H-14, H-15, H-16, H-17, H-18, H-20 |
 | I — Mobile & a11y | 8/9 (+1 N/A) ✅ | — none — |
-| J — Dead-ends | 5/16 | J-1, J-3, J-4, J-6, J-8, J-9, J-11, J-12, J-14, J-15, J-16 |
+| J — Dead-ends | 6/16 | J-3, J-4, J-6, J-8, J-9, J-11, J-12, J-14, J-15, J-16 |
 
 Done findings are marked **✅ DONE (PR #…)** inline on each block below. Everything unmarked is still open.
 
@@ -922,7 +922,7 @@ What the user hits: All three server-side rejections (no file, unsupported exten
 Evidence: `web.py:20144-20148`/`20169-20174`/`20176-20181` return a bare error card with no form; `14754-14762` drop handler bypasses `accept`; `20566` fallback "results may be partial" vs `20168-20174` 400; `inferFormat` (`20554-20566`) omits `.xlsx` (in `accept` at `20495`).
 Fix: Re-render the full upload page with the error inline above the dropzone (the client `showError()` at `20540` exists); make `inferFormat` mirror the server allowlist exactly (add a "good" `.xlsx` branch, turn the unknown-extension branch into an honest blocker that disables submit).
 
-**[H-19] "Make clip" button stays enabled during the long clip-maker run — double-clicks create duplicate projects** — `medium` / `quick-win`
+**[H-19] ✅ DONE (PR #1097) — "Make clip" button stays enabled during the long clip-maker run — double-clicks create duplicate projects** — `medium` / `quick-win`
 Affects: `/video`
 What the user hits: The Make clip handler never disables its button while the synchronous analysis runs (tens of seconds). An impatient volunteer who clicks again fires a second clip-maker run and ends up with duplicate projects in "Your clips", each needing its own render/approve — and there's no delete button on project tiles to remove the extra.
 Evidence: `web.py:12153-12174` — `vs-make` sets status text but never `btn.disabled` (contrast `vs-reel-make` at `12187`); `55651-55659` every POST creates a new project unconditionally; `12219-12225` project tiles have no delete control.
@@ -1014,7 +1014,7 @@ Fix: Add `role="status" aria-live="polite"` to the stage container (mirroring th
 
 ### J. Dead ends & orphaned features
 
-**[J-1] The Video Studio's render/analysis buttons block on synchronous endpoints with no progress for multi-minute waits** — `high` / `large`
+**[J-1] ✅ DONE (PR #1097) — The Video Studio's render/analysis buttons block on synchronous endpoints with no progress for multi-minute waits** — `high` / `large`
 Affects: `/video`
 What the user hits: Clicking Render holds one HTTP request open for the entire FFmpeg render; Make clip and Direct the reel do the same for ASR + moment analysis; Stabilise runs two-pass vidstab inline. The volunteer sees only a caption swap ("Rendering...") — no progress, no ETA, no way to leave and come back — while the rest of the app renders this class of work through background jobs precisely because (per the code's own comment) proxies kill 30–90s held connections and the button then "does nothing".
 Evidence: `web.py:56036-56042` (`render_edl()` inline, no job); `12245-12251` (`renderProject` awaits the sync jpost); `55764-55795`/`55837-55842` (stabilise inline); contrast `53109-53111` docstring warning about held connections.
