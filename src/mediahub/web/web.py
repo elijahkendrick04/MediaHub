@@ -17504,6 +17504,43 @@ _CHARTS_PAGE_JS = """
       out.appendChild(copy);
     }).catch(function(){ busy(btn,false); out.style.display='block'; out.textContent='Could not reach the caption writer. Try again.'; });
   });
+
+  // D-33 — download a chart PNG via fetch+blob so a raster failure (e.g. no
+  // Chromium on the worker) renders inline with an SVG fallback, instead of the
+  // anchor navigating the whole page onto a raw JSON error. Shows a busy state.
+  document.addEventListener('click', function(ev){
+    var btn = ev.target.closest ? ev.target.closest('.mh-chart-dl') : null;
+    if(!btn) return;
+    ev.preventDefault();
+    var tile = btn.closest('.mh-chartpack-tile');
+    var msg = tile ? tile.querySelector('.mh-chart-export-msg') : null;
+    var url = btn.getAttribute('data-dl-url');
+    var svg = btn.getAttribute('data-svg-fallback');
+    var name = btn.getAttribute('data-dl-name') || 'chart.png';
+    if(msg){ msg.style.display='none'; msg.textContent=''; }
+    busy(btn, true, '…');
+    fetch(url).then(function(r){
+      if(!r.ok) throw new Error('unavailable');
+      return r.blob();
+    }).then(function(blob){
+      busy(btn, false);
+      var obj = URL.createObjectURL(blob);
+      var a = document.createElement('a');
+      a.href = obj; a.download = name;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(function(){ URL.revokeObjectURL(obj); }, 4000);
+    }).catch(function(){
+      busy(btn, false);
+      if(msg){
+        msg.style.display = 'block';
+        msg.textContent = 'PNG export is not available on this deployment right now. ';
+        var link = document.createElement('a');
+        link.href = svg; link.setAttribute('download', '');
+        link.textContent = 'Download the vector (SVG) instead';
+        msg.appendChild(link);
+      }
+    });
+  });
 })();
 </script>
 """
@@ -54658,15 +54695,23 @@ voice, and queues them for one-click approval.</p>
                 f'<button class="btn secondary mh-cap-btn" data-cap-url="{_h(cap_url)}" '
                 'style="font-size:12px;padding:5px 12px">✍ Caption</button>'
                 '<span style="margin-left:auto;display:inline-flex;gap:6px;flex-wrap:wrap">'
-                f'<a class="btn" style="font-size:12px;padding:5px 12px" href="{_h(png_pt)}" '
-                'title="1080×1350 — Instagram post">PNG ◫</a>'
-                f'<a class="btn secondary" style="font-size:12px;padding:5px 10px" href="{_h(png_sq)}" '
-                'title="1080×1080 — square">▣</a>'
-                f'<a class="btn secondary" style="font-size:12px;padding:5px 10px" href="{_h(png_st)}" '
-                'title="1080×1920 — story">▮</a>'
-                f'<a class="btn secondary" style="font-size:12px;padding:5px 10px" href="{_h(svg_dl)}" '
-                'title="Vector SVG">SVG</a>'
+                # D-33 — label by intent (was bare geometric glyphs), and fetch the
+                # PNG via JS so a raster failure shows inline with an SVG fallback
+                # instead of navigating onto a raw JSON error blob.
+                f'<button type="button" class="btn mh-chart-dl" style="font-size:12px;padding:5px 12px" '
+                f'data-dl-url="{_h(png_pt)}" data-dl-name="{_h(c.chart_id)}-post.png" '
+                f'data-svg-fallback="{_h(svg_dl)}" title="1080×1350 — Instagram / Facebook post">Post 4:5</button>'
+                f'<button type="button" class="btn secondary mh-chart-dl" style="font-size:12px;padding:5px 10px" '
+                f'data-dl-url="{_h(png_sq)}" data-dl-name="{_h(c.chart_id)}-square.png" '
+                f'data-svg-fallback="{_h(svg_dl)}" title="1080×1080 — square post">Square 1:1</button>'
+                f'<button type="button" class="btn secondary mh-chart-dl" style="font-size:12px;padding:5px 10px" '
+                f'data-dl-url="{_h(png_st)}" data-dl-name="{_h(c.chart_id)}-story.png" '
+                f'data-svg-fallback="{_h(svg_dl)}" title="1080×1920 — story / reel">Story 9:16</button>'
+                f'<a class="btn ghost" style="font-size:12px;padding:5px 10px" href="{_h(svg_dl)}" '
+                'download title="Vector SVG — scales losslessly, for designers">Vector</a>'
                 "</span></div>"
+                '<div class="mh-chart-export-msg" style="display:none;font-size:12.5px;line-height:1.5;'
+                'color:var(--warn);background:var(--panel);border-radius:8px;padding:10px"></div>'
                 '<div class="mh-cap-out" style="display:none;font-size:13px;line-height:1.5;'
                 'background:var(--panel);border-radius:8px;padding:10px"></div></div>'
             )
