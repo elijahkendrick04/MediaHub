@@ -32097,9 +32097,13 @@ function mhAnDigest(btn) {{
                 "</a>"
             )
 
-        # Coming-soon surfaces relocated here from the old Club-data tab —
-        # presented as Create tiles so the whole "what can I make?" catalogue
-        # lives in one place. Disabled until they ship.
+        # Live meet + Season wraps — fully-built surfaces presented as Create
+        # tiles so the whole "what can I make?" catalogue lives in one place.
+        # These used to render as disabled "Coming soon" tiles even though both
+        # pages ship and work (C-5 / C-6): the UI contradicted reality and the
+        # pages were reachable only by typing the URL. They now link straight
+        # through, falling back to an honest disabled tile only if the route is
+        # genuinely absent on a deployment.
         _live_svg = (
             '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" '
             'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" width="28" height="28">'
@@ -32115,31 +32119,52 @@ function mhAnDigest(btn) {{
             '<path d="M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7z"/>'
             '<path d="M12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z"/></svg>'
         )
-        for _cs_title, _cs_desc, _cs_icon in (
+        for _cs_title, _cs_desc, _cs_icon, _cs_endpoint, _cs_cta in (
             (
                 "Live meet",
                 "Point MediaHub at the host club's live-results page during a gala; "
                 "new results queue cards for approval as they land.",
                 _live_svg,
+                "live_meet_page",
+                "Open Live meet",
             ),
             (
                 "Season wraps",
                 "Month-in-numbers and season recap packs built from your stored "
                 "history — PBs, medals, records, debuts, busiest swimmer.",
                 _wraps_svg,
+                "season_wraps_page",
+                "Open Season wraps",
             ),
         ):
-            tiles_html += (
-                '<a href="#" onclick="return false" class="mh-template is-disabled" aria-disabled="true">'
-                f'<div class="mh-template-icon">{_cs_icon}</div>'
-                '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:var(--sp-1)">'
-                f'<h3 style="margin:0">{_h(_cs_title)}</h3>'
-                '<span class="tag">Coming soon</span>'
-                "</div>"
-                f"<p>{_h(_cs_desc)}</p>"
-                '<span class="mh-template-cta">Soon</span>'
-                "</a>"
-            )
+            try:
+                _cs_url = url_for(_cs_endpoint)
+            except Exception:
+                _cs_url = ""
+            if _cs_url:
+                tiles_html += (
+                    f'<a href="{_cs_url}" class="mh-template">'
+                    f'<div class="mh-template-icon">{_cs_icon}</div>'
+                    '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:var(--sp-1)">'
+                    f'<h3 style="margin:0">{_h(_cs_title)}</h3>'
+                    '<span class="tag good">Ready</span>'
+                    "</div>"
+                    f"<p>{_h(_cs_desc)}</p>"
+                    f'<span class="mh-template-cta">{_h(_cs_cta)}</span>'
+                    "</a>"
+                )
+            else:
+                tiles_html += (
+                    '<a href="#" onclick="return false" class="mh-template is-disabled" aria-disabled="true">'
+                    f'<div class="mh-template-icon">{_cs_icon}</div>'
+                    '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:var(--sp-1)">'
+                    f'<h3 style="margin:0">{_h(_cs_title)}</h3>'
+                    '<span class="tag">Coming soon</span>'
+                    "</div>"
+                    f"<p>{_h(_cs_desc)}</p>"
+                    '<span class="mh-template-cta">Soon</span>'
+                    "</a>"
+                )
 
         if tiles_html:
             tiles_section = f'<div class="mh-template-grid">{tiles_html}</div>'
