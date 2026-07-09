@@ -8687,7 +8687,7 @@ header.topnav nav a.live::before {
   border: 1px solid var(--chrome);
   border-radius: 6px;
   box-shadow: 0 18px 50px -12px rgba(0,0,0,0.7), 0 0 0 1px rgba(0,0,0,0.3);
-  z-index: 1200; overflow: hidden; padding: 6px;
+  z-index: 1200; overflow: hidden auto; padding: 6px;
   animation: mh-notif-in 0.16s ease-out;
 }
 .mh-js .mh-orgmenu-panel.is-open { display: flex; }
@@ -14525,8 +14525,27 @@ def _layout(
 
   function position(){
     var r = btn.getBoundingClientRect();
-    panel.style.top = (r.bottom + 8) + 'px';
-    panel.style.right = Math.max(8, window.innerWidth - r.right) + 'px';
+    var vw = window.innerWidth, vh = window.innerHeight;
+    var pw = panel.offsetWidth || 320, ph = panel.offsetHeight || 320;
+    // Anchor the panel's right edge under the trigger, then clamp so the
+    // WHOLE panel stays within the viewport (min 8px gutters). Inside the
+    // mobile hamburger drawer the trigger sits near the LEFT edge, where a
+    // pure right-anchor pushed the panel off the left of the screen — the
+    // dropdown looked like it never opened on an iPhone.
+    var right = vw - r.right;
+    right = Math.min(Math.max(8, right), Math.max(8, vw - pw - 8));
+    panel.style.right = right + 'px';
+    // Open below the trigger, but flip up to a bottom gutter if it would
+    // spill past the bottom of the viewport (the drawer stacks the trigger
+    // low on a small phone).
+    var top = r.bottom + 8;
+    if (top + ph > vh - 8) top = Math.max(8, vh - ph - 8);
+    panel.style.top = top + 'px';
+    // Never let the panel run past the bottom of the viewport: cap its
+    // height to the space that remains and let it scroll internally, so the
+    // last menu item stays reachable on a short phone even while the mobile
+    // URL bar is shrinking the visible area.
+    panel.style.maxHeight = Math.max(120, vh - top - 8) + 'px';
   }
 
   function setOpen(v){
@@ -14537,6 +14556,12 @@ def _layout(
       // one never fires the other's click-outside close. Announce the open so
       // the sibling panel (same right edge) closes and they can't overlap.
       document.dispatchEvent(new CustomEvent('mh:dropdown-open', {detail:'notif'}));
+      // Portal the panel to <body> so its position:fixed coords always
+      // resolve against the viewport. Inside the mobile hamburger drawer the
+      // nav carries a `transform`, which makes it the containing block for
+      // fixed descendants — the panel would otherwise anchor to the drawer
+      // (offset down by the nav's top), landing off-screen on a phone.
+      if (panel.parentNode !== document.body) document.body.appendChild(panel);
       panel.hidden = false;
       position();
       poll();
@@ -14592,8 +14617,27 @@ def _layout(
   var open = false;
   function position(){
     var r = btn.getBoundingClientRect();
-    panel.style.top = (r.bottom + 8) + 'px';
-    panel.style.right = Math.max(8, window.innerWidth - r.right) + 'px';
+    var vw = window.innerWidth, vh = window.innerHeight;
+    var pw = panel.offsetWidth || 320, ph = panel.offsetHeight || 320;
+    // Anchor the panel's right edge under the trigger, then clamp so the
+    // WHOLE panel stays within the viewport (min 8px gutters). Inside the
+    // mobile hamburger drawer the trigger sits near the LEFT edge, where a
+    // pure right-anchor pushed the panel off the left of the screen — the
+    // dropdown looked like it never opened on an iPhone.
+    var right = vw - r.right;
+    right = Math.min(Math.max(8, right), Math.max(8, vw - pw - 8));
+    panel.style.right = right + 'px';
+    // Open below the trigger, but flip up to a bottom gutter if it would
+    // spill past the bottom of the viewport (the drawer stacks the trigger
+    // low on a small phone).
+    var top = r.bottom + 8;
+    if (top + ph > vh - 8) top = Math.max(8, vh - ph - 8);
+    panel.style.top = top + 'px';
+    // Never let the panel run past the bottom of the viewport: cap its
+    // height to the space that remains and let it scroll internally, so the
+    // last menu item stays reachable on a short phone even while the mobile
+    // URL bar is shrinking the visible area.
+    panel.style.maxHeight = Math.max(120, vh - top - 8) + 'px';
   }
   function setOpen(v){
     open = v;
@@ -14602,6 +14646,10 @@ def _layout(
       // Close the sibling notifications panel so the two right-anchored
       // dropdowns are mutually exclusive (see mh:dropdown-open below).
       document.dispatchEvent(new CustomEvent('mh:dropdown-open', {detail:'orgmenu'}));
+      // Portal to <body> so the fixed-position panel anchors to the viewport,
+      // not the transformed mobile nav drawer (which would otherwise become
+      // the containing block and push the menu off-screen on a phone).
+      if (panel.parentNode !== document.body) document.body.appendChild(panel);
       panel.classList.add('is-open');
       position();
       window.addEventListener('resize', position, {passive:true});
