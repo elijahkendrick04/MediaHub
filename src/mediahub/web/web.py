@@ -60684,6 +60684,36 @@ voice, and queues them for one-click approval.</p>
             return jsonify({"ok": True})
         return redirect(url_for("site_editor", site_id=site_id, msg="Saved."))
 
+    @app.route("/api/sites/<site_id>/content-edit", methods=["POST"])
+    def api_site_content_edit(site_id):
+        """H-5: apply the structured content editor's form onto the site draft —
+        the non-technical path that replaces hand-editing the raw spec JSON.
+
+        Mirrors api_site_page_protection exactly: load → to_dict → apply the
+        whitelisted (block_id, prop) edits by id → from_dict → save. The JSON
+        hatch (api_site_save) and its H-6 fail-safe are untouched; every field the
+        structured form doesn't expose survives byte-for-byte.
+        """
+        if not _sites_ok:
+            return jsonify({"error": "unavailable"}), 404
+        pid = _active_profile_id()
+        if not pid:
+            return jsonify({"error": "not signed in"}), 403
+        from mediahub.sites import store as _ss
+        from mediahub.sites.models import SiteSpec
+        from mediahub.web import spec_editor as _se
+
+        spec = _ss.load_site(pid, site_id)
+        if spec is None:
+            abort(404)
+        data = spec.to_dict()
+        _se.apply_structured(data, request.form, "site")
+        data["site_id"] = site_id  # identity is never editable from the body
+        _ss.save_site(pid, SiteSpec.from_dict(data))
+        if request.is_json:
+            return jsonify({"ok": True})
+        return redirect(url_for("site_editor", site_id=site_id, msg="Saved."))
+
     @app.route("/api/sites/<site_id>/publish", methods=["POST"])
     def api_site_publish(site_id):
         if not _sites_ok:
