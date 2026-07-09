@@ -74,7 +74,7 @@ The 15 highest-leverage items: all three severe first-run breakages, the high-se
 
 ## Implementation status
 
-**104 of 161 findings shipped** (plus I-4 assessed as already satisfied). Delivered across four merged/merging PRs, each finding as its own commit with a dedicated regression test:
+**105 of 161 findings shipped** (plus I-4 assessed as already satisfied). Delivered across four merged/merging PRs, each finding as its own commit with a dedicated regression test:
 
 - **PR #1082** (merged) — all of Theme A + the 15-item fix-first shortlist and adjacent high-severity data-safety/discoverability items (23 findings).
 - **PR #1085** (merged) — Theme F complete, Theme I complete (bar the I-4 no-op), and the bulk of Theme D feedback/error states (47 findings).
@@ -94,7 +94,7 @@ Themes **A**, **F** and **I** are complete. Both large high-severity items (**J-
 | G — Consistency | 5/15 | G-1, G-2, G-5, G-6, G-7, G-8, G-9, G-10, G-11, G-14 |
 | H — Forms | 12/23 | H-9, H-10, H-11, H-12, H-13, H-14, H-15, H-16, H-17, H-18, H-20 |
 | I — Mobile & a11y | 8/9 (+1 N/A) ✅ | — none — |
-| J — Dead-ends | 7/16 | J-3, J-4, J-6, J-8, J-9, J-11, J-14, J-15, J-16 |
+| J — Dead-ends | 8/16 | J-3, J-4, J-6, J-8, J-9, J-14, J-15, J-16 |
 
 Done findings are marked **✅ DONE (PR #…)** inline on each block below. Everything unmarked is still open.
 
@@ -1074,7 +1074,7 @@ What the user hits: "Auto scheduling" and "Autonomy" occupy two of the 17 tiles 
 Evidence: `web.py:27979-27990` appends both tiles unconditionally; `29165-29193` both section renderers return only `_coming_soon_card(...)`; the badge lives inside the destination, not on the grid tiles; observed live — both show "Open →".
 Fix: Put a visible "Coming soon" badge on the tiles themselves (or collapse both into one muted strip at the bottom) and disable/soften the "Open" CTA so the state is clear before the click.
 
-**[J-11] A photo shared to MediaHub while signed out is silently thrown away** — `medium` / `moderate`
+**[J-11] ✅ DONE (PR #1097) — A photo shared to MediaHub while signed out is silently thrown away** — `medium` / `moderate`
 Affects: `/share-target`
 What the user hits: The OS share sheet is pitched as "the single highest-value poolside mobile behaviour". If the session has lapsed (common on a phone), the receiver discards the shared photo and bounces to sign-in with no message. After signing in the user lands on the normal post-login page, never back at their photo, with no hint it wasn't saved — so they believe the shot is in the library when it's gone.
 Evidence: `web.py:46144-46149` — with no active profile it `redirect(url_for('sign_in_page'))` and the comment states "the photo isn't kept"; no flash, no stash, no return-to-share flow.
