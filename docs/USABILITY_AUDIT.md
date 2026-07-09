@@ -74,12 +74,12 @@ The 15 highest-leverage items: all three severe first-run breakages, the high-se
 
 ## Implementation status
 
-**101 of 161 findings shipped** (plus I-4 assessed as already satisfied). Delivered across four merged/merging PRs, each finding as its own commit with a dedicated regression test:
+**104 of 161 findings shipped** (plus I-4 assessed as already satisfied). Delivered across four merged/merging PRs, each finding as its own commit with a dedicated regression test:
 
 - **PR #1082** (merged) — all of Theme A + the 15-item fix-first shortlist and adjacent high-severity data-safety/discoverability items (23 findings).
 - **PR #1085** (merged) — Theme F complete, Theme I complete (bar the I-4 no-op), and the bulk of Theme D feedback/error states (47 findings).
 - **PR #1093** (merged) — the remaining high-severity findings plus the owner-decided IA changes: E-4, G-12, B-6, J-2, H-4, H-3, E-1, C-16, G-3, C-1, C-2, C-8, C-13, C-18, and the owner-decided orphans C-14 (sticker/mockup picker) and C-9 (finish Collections) (16 findings). Owner decisions for this batch: customer vocab = "Results"; Developer link on /login only; nav = replace Elements with Activity; Collections = finish; sticker/mockup = wire a picker; brand = /organisation/setup canonical. Pre-merge adversarial review (5 dimensions) confirmed 4 defects (E-1 undo re-insert throw, H-4 badge wipe, C-16 open-redirect, a weak G-3 test) — all fixed.
-- **PR #1097** (this branch) — the medium quick-win tail across five themes plus the large high J-1, each with a dedicated regression test: D-10 (Documents/Newsletters AI toggle + busy state + toast, replacing the ambiguous OK/Cancel confirm), E-6 & E-7 (merge-athletes and consent-enforcement confirms with a real impact preview), G-13 (audience autoplay honours the session's configured cadence), G-15 (single demo CTA when signed in), H-21 (board "Add" button + empty-title feedback), H-22 (remote-code client-side validation before it burns a shared-NAT attempt), H-23 (spotlight build disabled with 0 approved), J-5 (export hub links straight to the real export tool), J-7 (channel-preview empty-state escape link), J-10 (Settings "Coming soon" tiles badged), J-13 (console "End presentation"); then **J-1** (the Video Studio's render / make-clip / direct-reel / stabilise now run as disk-backed background jobs the client polls with a branded progress panel) which also resolves **H-19** (the clip button stays disabled for the whole run, and one job maps to one project — no duplicates); and **H-5** (a structured content editor for microsites / newsletters / documents — per-section title/text/link fields driven by a per-surface field whitelist, with the raw-JSON textarea kept as the labelled "advanced" hatch) (15 findings).
+- **PR #1097** (this branch) — the medium quick-win tail across five themes plus the large high J-1, each with a dedicated regression test: D-10 (Documents/Newsletters AI toggle + busy state + toast, replacing the ambiguous OK/Cancel confirm), E-6 & E-7 (merge-athletes and consent-enforcement confirms with a real impact preview), G-13 (audience autoplay honours the session's configured cadence), G-15 (single demo CTA when signed in), H-21 (board "Add" button + empty-title feedback), H-22 (remote-code client-side validation before it burns a shared-NAT attempt), H-23 (spotlight build disabled with 0 approved), J-5 (export hub links straight to the real export tool), J-7 (channel-preview empty-state escape link), J-10 (Settings "Coming soon" tiles badged), J-13 (console "End presentation"); then **J-1** (the Video Studio's render / make-clip / direct-reel / stabilise now run as disk-backed background jobs the client polls with a branded progress panel) which also resolves **H-19** (the clip button stays disabled for the whole run, and one job maps to one project — no duplicates); and **H-5** (a structured content editor for microsites / newsletters / documents — per-section title/text/link fields driven by a per-surface field whitelist, with the raw-JSON textarea kept as the labelled "advanced" hatch); then the contained tail J-12 (offline shell gets a retry + auto-reload + link back), H-8 (a failed free-text build preserves the typed prompt) and E-8 (plain-spoken org-delete confirm + non-owner feedback) (18 findings).
 
 Themes **A**, **F** and **I** are complete. Both large high-severity items (**J-1** background jobs, **H-5** structured editor) are now shipped; remaining work is the medium/low tail across **B** (too-many-steps), **J** (dead-ends), **H** (forms), **G** (consistency), **E** (destructive/data-safety), **C** (discoverability) and **D**.
 
@@ -89,12 +89,12 @@ Themes **A**, **F** and **I** are complete. Both large high-severity items (**J-
 | B — Too-many-steps | 1/8 | B-1, B-2, B-3, B-4, B-5, B-7, B-8 |
 | C — Discoverability / IA | 13/20 | C-10, C-11, C-12, C-15, C-17, C-19, C-20 |
 | D — Feedback & error states | 29/35 | D-11, D-12, D-13, D-15, D-26, D-32 |
-| E — Destructive / data-safety | 7/14 | E-5, E-8, E-10, E-11, E-12, E-13, E-14 |
+| E — Destructive / data-safety | 8/14 | E-5, E-10, E-11, E-12, E-13, E-14 |
 | F — Jargon & labels | 14/14 ✅ | — none — |
 | G — Consistency | 5/15 | G-1, G-2, G-5, G-6, G-7, G-8, G-9, G-10, G-11, G-14 |
-| H — Forms | 11/23 | H-8, H-9, H-10, H-11, H-12, H-13, H-14, H-15, H-16, H-17, H-18, H-20 |
+| H — Forms | 12/23 | H-9, H-10, H-11, H-12, H-13, H-14, H-15, H-16, H-17, H-18, H-20 |
 | I — Mobile & a11y | 8/9 (+1 N/A) ✅ | — none — |
-| J — Dead-ends | 6/16 | J-3, J-4, J-6, J-8, J-9, J-11, J-12, J-14, J-15, J-16 |
+| J — Dead-ends | 7/16 | J-3, J-4, J-6, J-8, J-9, J-11, J-14, J-15, J-16 |
 
 Done findings are marked **✅ DONE (PR #…)** inline on each block below. Everything unmarked is still open.
 
@@ -586,7 +586,7 @@ What the user hits: "Switch enforcement on" is a bare button. Turning it on mean
 Evidence: `web.py:57957-57960` — the toggle form has no confirm; `57938-57944` describes the ACTIVE state; `58032-58035` flips it and returns only a success message.
 Fix: Confirm before enabling, and show the impact ("N of M athletes currently have no consent and would be blocked").
 
-**[E-8] Permanent org-profile delete is one native confirm away, adjacent to the primary "Sign in" button, and fails silently for members** — `medium` / `moderate`
+**[E-8] ✅ DONE (PR #1097) — Permanent org-profile delete is one native confirm away, adjacent to the primary "Sign in" button, and fails silently for members** — `medium` / `moderate`
 Affects: `/sign-in`
 What the user hits: Every org card on the picker carries a small × delete button directly beside the primary "Sign in" button. One `confirm()` later the profile is permanently unlinked — a fully configured brand gone with no undo — and the confirm copy uses jargon ("Its runs stay on disk but it disappears from this picker"). A non-owner member who clicks delete is silently bounced with no message, so the button appears to do nothing.
 Evidence: `web.py:38742-38753` renders the delete form with a native `confirm()` in the same `.actions` row as sign-in; `38842-38845` unlinks with no soft-delete; `38836-38839` silently bounces non-owners.
@@ -856,7 +856,7 @@ What the user hits: A volunteer types upcoming events (or uses "Interpret & fill
 Evidence: `web.py:30015-30023` `mhPlanAddEvent` only appends a DOM row; `30054-30067` `mhPlanSaveInputs` is the sole persistence call; `30147-30157` `mhPlanGenerate` POSTs only `{sport}` then reloads, with no unsaved-input guard.
 Fix: Have `mhPlanGenerate` auto-save the current on-page inputs before generating, or block with "You have unsaved inputs — save first?" when DOM rows differ from persisted state.
 
-**[H-8] AI failure on the quick path throws away the prompt the volunteer typed** — `medium` / `quick-win`
+**[H-8] ✅ DONE (PR #1097) — AI failure on the quick path throws away the prompt the volunteer typed** — `medium` / `quick-win`
 Affects: `/free-text/quick-build`
 What the user hits: If the LLM errors or is unconfigured when "Generate graphic" is submitted, the handler stashes the error in the session and redirects to the landing page, where the textarea renders empty. A poolside volunteer's carefully written multi-sentence prompt (and photo selections) is gone; they must retype everything to retry.
 Evidence: `web.py:33544-33547` catches the provider error, sets a session error, redirects to `free_text_chat_page`; the landing textarea (`33432-33434`) has no value/restoration; the prompt is never stashed back.
@@ -1080,7 +1080,7 @@ What the user hits: The OS share sheet is pitched as "the single highest-value p
 Evidence: `web.py:46144-46149` — with no active profile it `redirect(url_for('sign_in_page'))` and the comment states "the photo isn't kept"; no flash, no stash, no return-to-share flow.
 Fix: Stash the shared file (a short-lived pending upload keyed to the session) and, after sign-in, complete the drop and land on the library with the "1 photo added" banner — or at minimum flash "Sign in first, then re-share the photo".
 
-**[J-12] The offline shell page is a dead end — no retry, no auto-refresh, no way back into the app** — `low` / `quick-win`
+**[J-12] ✅ DONE (PR #1097) — The offline shell page is a dead end — no retry, no auto-refresh, no way back into the app** — `low` / `quick-win`
 Affects: offline navigation shell
 What the user hits: When a volunteer taps a link while offline, the service worker replaces the page with a bare "You are offline" screen with no reload/retry button, no link back to the review queue, and no auto-refresh when connectivity returns — so the user is stranded on a static page until they know to pull-to-refresh, even though the connection may already be back.
 Evidence: `web.py:26794-26804` — the navigate fallback returns fixed inline HTML with only an `<h1>You are offline</h1>` and a paragraph; no button, link, or `online` listener.
