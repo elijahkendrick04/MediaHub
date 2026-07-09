@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-07-08 · `0e5fc9d31` · Usability audit — 16 findings + owner-decided IA changes (#1093)
+**Last updated:** 2026-07-09 · `1877da6c3` · fix(elements): accurate swim-stroke & dive pictograms (#1094)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1227,6 +1227,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-07-08 | `3e71918a7` | fix(elements): use approved single-colour silhouette swim pictograms |
 | 2026-07-08 | `5944c2344` | docs(audit): session hand-off for the next batch |
 | 2026-07-08 | `e82fa0612` | style: ruff-format the C-14/C-9 additions (CI hygiene) |
 | 2026-07-08 | `8df8b39c3` | docs(audit): C-14 + C-9 shipped — 86/161 |
@@ -1235,8 +1236,7 @@ list and the auto table below, not here.
 | 2026-07-08 | `5d6ed82ee` | test: make the no-auto-pick assertion club-specific (CI shard 3) |
 | 2026-07-08 | `84d8eda80` | docs(audit): reference PR #1093 and note the pre-merge review outcome |
 | 2026-07-08 | `2ec6addc7` | fix(review): address 4 confirmed pre-merge adversarial-review findings |
+| 2026-07-08 | `dc4e1ed67` | fix(elements): redraw swim-stroke & dive pictograms as accurate icons |
 | 2026-07-08 | `4df52fefd` | fix(i18n): don't echo the request path in the language switcher (CI: tenant leak + hex budget) |
 | 2026-07-08 | `b70927938` | style: apply ruff-format to the usability-audit changes |
-| 2026-07-08 | `ef19a7439` | docs(audit): update implementation-status matrix — 84/161 shipped |
-| 2026-07-08 | `d6c99bd35` | feat(nav): surface public wall, media (mobile) and slide remote (C-8, C-13, C-18) |
 <!-- /ROADMAP:ACTIVITY -->
