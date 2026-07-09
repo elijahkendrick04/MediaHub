@@ -280,3 +280,105 @@ def test_settings_page_requires_org(wall_world):
     c = wall_world["app"].test_client()
     r = c.get("/public-wall")
     assert r.status_code == 302  # no pinned org → setup redirect
+
+
+# ---- RUNS_DIR override (regression) ----------------------------------------
+
+
+def test_wall_honours_runs_dir_override_distinct_from_data_dir(tmp_path, monkeypatch):
+    """The wall must read runs from RUNS_DIR when it points OUTSIDE
+    DATA_DIR/runs_v4 — render.yaml sets RUNS_DIR and .env.example documents it,
+    and every sibling helper (web.py RUNS_DIR, content_pack.builder,
+    compliance.retention, autonomy.app_env) honours it. Before the fix
+    public_wall hardcoded DATA_DIR/runs_v4, so a deployment with a distinct
+    RUNS_DIR served an empty wall while cards were approved and rendered.
+    """
+    data_dir = tmp_path / "data"
+    runs_dir = tmp_path / "elsewhere_runs"  # deliberately != data_dir/runs_v4
+    data_dir.mkdir(parents=True)
+    runs_dir.mkdir(parents=True)
+    monkeypatch.setenv("DATA_DIR", str(data_dir))
+    monkeypatch.setenv("RUNS_DIR", str(runs_dir))
+    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
+
+    import mediahub.web.club_profile as cp
+    import mediahub.web.web as wm
+
+    importlib.reload(cp)
+    importlib.reload(wm)
+
+    from mediahub.web.club_profile import ClubProfile, load_profile, save_profile
+    from mediahub.web.public_wall import _runs_dir, wall_cards, wall_image_path
+
+    # public_wall now resolves to the SAME place web.py does.
+    assert str(_runs_dir()) == str(wm.RUNS_DIR) == str(runs_dir)
+
+    save_profile(
+        ClubProfile(
+            profile_id="org-a",
+            display_name="Org A SC",
+            public_wall_enabled=True,
+            public_wall_token="tok-a",
+        )
+    )
+    _seed_run(runs_dir, "run-a-1", "org-a")
+
+    app = wm.create_app()
+    app.config["TESTING"] = True
+    conn = wm._db()
+    conn.execute(
+        "INSERT OR REPLACE INTO runs (id, created_at, status, profile_id, meet_name, file_name) "
+        "VALUES (?, datetime('now'), 'done', ?, ?, ?)",
+        ("run-a-1", "org-a", "Spring Gala 2026", "gala.hy3"),
+    )
+    conn.commit()
+    conn.close()
+
+    cards = wall_cards(load_profile("org-a"))
+    assert {c["card_id"] for c in cards} == {"swim-1"}  # found in the custom RUNS_DIR
+    assert wall_image_path(load_profile("org-a"), "run-a-1", "swim-1") is not None
+
+    client = app.test_client()
+    assert client.get("/wall/tok-a").status_code == 200
+    assert client.get("/wall/tok-a/card/run-a-1/swim-1.png").status_code == 200
+
+
+# ---- output-injection safety across every public surface (regression) ------
+
+
+def test_hostile_names_are_neutralised_on_every_surface(wall_world):
+    """A hostile swimmer/meet/club name must not break out on ANY public exit:
+    the HTML page, the RSS feed (well-formed XML, no raw script), or the JSON
+    feed (served as application/json). Locks the escaping so a future edit to
+    _wall_page_html / the RSS builder can't reintroduce stored XSS.
+    """
+    import xml.dom.minidom as minidom
+
+    from mediahub.web.club_profile import load_profile, save_profile
+
+    payload = "<script>alert(1)</script>\"><img src=x onerror=alert(2)>&'"
+    prof = load_profile("org-a")
+    prof.display_name = payload
+    prof.public_wall_initials_only = False
+    save_profile(prof)
+
+    runs = wall_world["tmp"] / "runs_v4"
+    data = json.loads((runs / "run-a-1.json").read_text())
+    data["meet"] = {"name": payload}
+    data["recognition_report"]["ranked_achievements"][0]["achievement"]["swimmer_name"] = payload
+    (runs / "run-a-1.json").write_text(json.dumps(data))
+
+    c = wall_world["app"].test_client()
+
+    html = c.get("/wall/token-org-a-secret").get_data(as_text=True)
+    assert "<script>alert(1)</script>" not in html
+    assert "&lt;script&gt;" in html  # neutralised as text
+
+    rss = c.get("/wall/token-org-a-secret/feed.rss")
+    body = rss.get_data(as_text=True)
+    assert "<script>alert(1)</script>" not in body
+    minidom.parseString(body)  # raises if the RSS is not well-formed XML
+
+    j = c.get("/wall/token-org-a-secret/feed.json")
+    assert j.headers["Content-Type"].startswith("application/json")
+    assert j.get_json()["items"]  # parses cleanly; consumers escape text fields

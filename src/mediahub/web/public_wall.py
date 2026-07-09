@@ -53,7 +53,13 @@ def _data_dir() -> Path:
 
 
 def _runs_dir() -> Path:
-    return _data_dir() / "runs_v4"
+    # Honour the RUNS_DIR override exactly as web.py's RUNS_DIR and the sibling
+    # helpers (compliance/retention, autonomy/app_env, visual/pronunciation) do.
+    # Falling back to DATA_DIR/runs_v4 keeps the default identical; without this
+    # a deployment that points RUNS_DIR outside DATA_DIR (render.yaml sets it,
+    # .env.example documents it) would read the wrong tree and silently show an
+    # empty wall while cards are approved and rendered.
+    return Path(os.environ.get("RUNS_DIR", str(_data_dir() / "runs_v4")))
 
 
 def generate_token() -> str:
