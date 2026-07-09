@@ -183,4 +183,122 @@ def test_render_shows_only_whitelisted_kinds():
 
 def test_has_structured_editor_flags_supported_surfaces():
     assert se.has_structured_editor("site") is True
+    assert se.has_structured_editor("newsletter") is True
+    assert se.has_structured_editor("document") is True
     assert se.has_structured_editor("nope") is False
+
+
+# --- newsletter surface (top-level sections, no page layer) ------------------
+
+
+def _nl():
+    from mediahub.email_design.models import EmailBlock, NewsletterSpec, Section
+
+    return NewsletterSpec(
+        title="March news",
+        subject="",
+        sections=[
+            Section(
+                background="",
+                blocks=[
+                    EmailBlock("heading", {"text": "Results"}),
+                    EmailBlock("button", {"label": "Read", "href": "https://x", "align": "center"}),
+                    EmailBlock("card", {"title": "Win", "body": "Great meet", "src": "a.jpg"}),
+                    EmailBlock("image", {"src": "b.jpg", "alt": "x"}),  # non-whitelisted
+                ],
+            )
+        ],
+    )
+
+
+def _nl_block(d, kind):
+    return next(b for b in d["sections"][0]["blocks"] if b["kind"] == kind)
+
+
+def test_newsletter_edits_text_and_link_and_preserves_image():
+    d = _nl().to_dict()
+    card = _nl_block(d, "card")
+    btn = _nl_block(d, "button")
+    form = {
+        "spec__subject": "Big wins in March",
+        f"block__{card['block_id']}__title": "Huge win",
+        f"block__{card['block_id']}__body": "Records tumbled",
+        f"block__{btn['block_id']}__href": "https://new",
+    }
+    out = se.apply_structured(d, form, "newsletter")
+    assert out["subject"] == "Big wins in March"
+    assert _nl_block(out, "card")["props"]["title"] == "Huge win"
+    assert _nl_block(out, "card")["props"]["body"] == "Records tumbled"
+    # the card image (src) is not whitelisted → preserved
+    assert _nl_block(out, "card")["props"]["src"] == "a.jpg"
+    assert _nl_block(out, "button")["props"]["href"] == "https://new"
+    # button align (not whitelisted) survives
+    assert _nl_block(out, "button")["props"]["align"] == "center"
+    # the image block is untouched
+    assert _nl_block(out, "image")["props"] == {"src": "b.jpg", "alt": "x"}
+
+
+def test_newsletter_round_trips_through_from_dict():
+    from mediahub.email_design.models import NewsletterSpec
+
+    d = _nl().to_dict()
+    h = _nl_block(d, "heading")
+    out = se.apply_structured(d, {f"block__{h['block_id']}__text": "Season review"}, "newsletter")
+    spec2 = NewsletterSpec.from_dict(out)
+    assert [b.kind for b in spec2.sections[0].blocks] == ["heading", "button", "card", "image"]
+    assert spec2.sections[0].blocks[0].props["text"] == "Season review"
+
+
+# --- document surface (top-level sections, notes/layout chrome) --------------
+
+
+def _doc():
+    from mediahub.documents.models import Block, DocumentSpec, Section, heading, quote, text
+
+    return DocumentSpec(
+        title="AGM report",
+        sections=[
+            Section(
+                notes="",
+                layout="flow",
+                blocks=[
+                    heading("Overview"),
+                    text("Body"),
+                    quote("Nice season", attribution="Coach"),
+                    Block("table", {"columns": ["A"], "rows": [["1"]]}),  # non-whitelisted
+                ],
+            )
+        ],
+    )
+
+
+def _doc_block(d, kind):
+    return next(b for b in d["sections"][0]["blocks"] if b["kind"] == kind)
+
+
+def test_document_edits_text_and_section_notes_preserves_table():
+    d = _doc().to_dict()
+    sid = d["sections"][0]["section_id"]
+    heading_b = _doc_block(d, "heading")
+    form = {
+        "spec__title": "Annual report 2026",
+        f"section__{sid}__notes": "say hello",
+        f"block__{heading_b['block_id']}__text": "Year in review",
+    }
+    out = se.apply_structured(d, form, "document")
+    assert out["title"] == "Annual report 2026"
+    assert out["sections"][0]["notes"] == "say hello"
+    assert _doc_block(out, "heading")["props"]["text"] == "Year in review"
+    # the table (non-whitelisted) is byte-for-byte intact
+    assert _doc_block(out, "table")["props"] == {"columns": ["A"], "rows": [["1"]]}
+
+
+def test_document_out_of_range_enum_clamped_by_from_dict():
+    from mediahub.documents.models import DocumentSpec
+
+    d = _doc().to_dict()
+    sid = d["sections"][0]["section_id"]
+    out = se.apply_structured(d, {f"section__{sid}__layout": "bogus"}, "document")
+    # apply_structured writes the raw value; from_dict clamps it to the default.
+    spec2 = DocumentSpec.from_dict(out)
+    assert spec2.sections[0].layout == "flow"

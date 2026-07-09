@@ -62580,6 +62580,20 @@ voice, and queues them for one-click approval.</p>
             )
 
         spec_json = _h(json.dumps(spec.to_dict(), indent=2))
+        # H-5: a structured content editor so editing wording/links no longer
+        # means hand-writing raw spec JSON; the JSON textarea stays as the
+        # "advanced" hatch for images and anything the fields don't cover.
+        from mediahub.web import spec_editor as _se
+
+        nl_structured = (
+            '<div class="card" style="margin-bottom:14px"><h3 style="margin-top:0">Edit content</h3>'
+            '<p class="dim" style="font-size:13px">Change your wording and links here — no JSON needed. '
+            "Photos stay in the advanced editor below.</p>"
+            f'<form method="post" action="{url_for("api_newsletter_content_edit", newsletter_id=newsletter_id)}">'
+            f'{_se.render_structured(spec.to_dict(), "newsletter")}'
+            '<div style="margin-top:10px"><button class="btn" type="submit">Save changes</button></div>'
+            "</form></div>"
+        )
         period = _h(spec.subtitle or spec.newsletter_format.replace("_", " ").title())
         body = (
             f'<section class="mh-hero"><h1>{_h(spec.title)}</h1>'
@@ -62599,7 +62613,8 @@ voice, and queues them for one-click approval.</p>
             f'<iframe src="{html_url}?preview=1" '
             'style="width:100%;height:72vh;border:1px solid var(--panel);border-radius:8px;'
             'background:var(--panel)"></iframe>'
-            '<details style="margin-top:18px"><summary class="dim">Edit newsletter (advanced — spec JSON)</summary>'
+            + nl_structured
+            + '<details style="margin-top:18px"><summary class="dim">Advanced — raw spec (JSON)</summary>'
             f'<textarea id="nl-spec" class="input" style="width:100%;height:300px;font-family:monospace;font-size:12px">{spec_json}</textarea>'
             '<button class="btn" style="margin-top:8px" onclick="nlSave()">Save changes</button> '
             '<button class="btn secondary" style="margin-top:8px" onclick="nlDelete()">Delete newsletter</button>'
@@ -62740,6 +62755,30 @@ voice, and queues them for one-click approval.</p>
         raw["newsletter_id"] = newsletter_id  # never let an edit reassign identity
         _ns.save_newsletter(pid, NewsletterSpec.from_dict(raw))
         return jsonify({"ok": True})
+
+    @app.route("/api/newsletters/<newsletter_id>/content-edit", methods=["POST"])
+    def api_newsletter_content_edit(newsletter_id: str):
+        """H-5: apply the structured content editor's form onto the newsletter.
+
+        Reads request.form (a plain server-rendered POST) rather than JSON, so it
+        is distinct from api_newsletter_save's JSON hatch. Load → to_dict → apply
+        whitelisted (block_id, prop) edits by id → from_dict → save; identity id
+        and every non-whitelisted field survive untouched.
+        """
+        if not _email_design_ok:
+            return jsonify({"ok": False, "error": "unavailable"}), 503
+        pid, spec = _nl_load_owned(newsletter_id)
+        if spec is None:
+            abort(404)
+        from mediahub.email_design import store as _ns
+        from mediahub.email_design.models import NewsletterSpec
+        from mediahub.web import spec_editor as _se
+
+        data = spec.to_dict()
+        _se.apply_structured(data, request.form, "newsletter")
+        data["newsletter_id"] = newsletter_id
+        _ns.save_newsletter(pid, NewsletterSpec.from_dict(data))
+        return redirect(url_for("newsletter_view", newsletter_id=newsletter_id))
 
     @app.route("/api/newsletters/<newsletter_id>/delete", methods=["POST"])
     def api_newsletter_delete(newsletter_id: str):
@@ -63026,6 +63065,18 @@ voice, and queues them for one-click approval.</p>
                 f'<a class="btn secondary" href="{url_for("api_document_video", doc_id=doc_id)}">Download video (MP4)</a> '
             )
         spec_json = _h(json.dumps(spec.to_dict(), indent=2))
+        # H-5: structured content editor above the raw-JSON hatch.
+        from mediahub.web import spec_editor as _se
+
+        doc_structured = (
+            '<div class="card" style="margin-bottom:14px"><h3 style="margin-top:0">Edit content</h3>'
+            '<p class="dim" style="font-size:13px">Change your wording here — no JSON needed. Tables, charts '
+            "and images stay in the advanced editor below.</p>"
+            f'<form method="post" action="{url_for("api_document_content_edit", doc_id=doc_id)}">'
+            f'{_se.render_structured(spec.to_dict(), "document")}'
+            '<div style="margin-top:10px"><button class="btn" type="submit">Save changes</button></div>'
+            "</form></div>"
+        )
         body = (
             f'<section class="mh-hero"><h1>{_h(spec.title)}</h1>'
             f'<p class="muted">{_h(spec.subtitle or spec.doc_format.replace("_", " ").title())}</p></section>'
@@ -63037,7 +63088,8 @@ voice, and queues them for one-click approval.</p>
             "</div>"
             f'<iframe src="{url_for("api_document_pdf", doc_id=doc_id)}" '
             'style="width:100%;height:70vh;border:1px solid var(--panel);border-radius:8px;background:var(--panel)"></iframe>'
-            '<details style="margin-top:18px"><summary class="dim">Edit document (advanced — spec JSON)</summary>'
+            + doc_structured
+            + '<details style="margin-top:18px"><summary class="dim">Advanced — raw spec (JSON)</summary>'
             f'<textarea id="spec-json" class="input" style="width:100%;height:300px;font-family:monospace;font-size:12px">{spec_json}</textarea>'
             '<button class="btn" style="margin-top:8px" onclick="saveSpec()">Save changes</button> '
             '<button class="btn secondary" style="margin-top:8px" onclick="delDoc()">Delete document</button>'
@@ -63171,6 +63223,29 @@ voice, and queues them for one-click approval.</p>
         new_spec = DocumentSpec.from_dict(raw)
         _docstore.save_document(pid, new_spec)
         return jsonify({"ok": True})
+
+    @app.route("/api/documents/<doc_id>/content-edit", methods=["POST"])
+    def api_document_content_edit(doc_id: str):
+        """H-5: apply the structured content editor's form onto the document.
+
+        Reads request.form; load → to_dict → apply whitelisted edits by id →
+        from_dict → save. Identity id and every non-whitelisted field (tables,
+        charts, images, layout of untouched sections) survive verbatim.
+        """
+        if not _documents_ok:
+            return jsonify({"ok": False, "error": "unavailable"}), 503
+        pid, spec = _doc_load_owned(doc_id)
+        if spec is None:
+            abort(404)
+        from mediahub.documents import store as _docstore
+        from mediahub.documents.models import DocumentSpec
+        from mediahub.web import spec_editor as _se
+
+        data = spec.to_dict()
+        _se.apply_structured(data, request.form, "document")
+        data["doc_id"] = doc_id
+        _docstore.save_document(pid, DocumentSpec.from_dict(data))
+        return redirect(url_for("document_view", doc_id=doc_id))
 
     @app.route("/api/documents/<doc_id>/delete", methods=["POST"])
     def api_document_delete(doc_id: str):

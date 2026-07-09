@@ -84,17 +84,57 @@ FIELD_WHITELIST: dict[str, dict[str, list[tuple[str, str, str]]]] = {
             ("address", "Address", "textarea"),
         ],
     },
+    "newsletter": {
+        "heading": [("text", "Heading", "text")],
+        "text": [("text", "Text", "textarea")],
+        "button": [("label", "Button label", "text"), ("href", "Button link", "url")],
+        # card is a rich recap block ({title, body, src, ...}); only its text is
+        # editable here — the image (src) stays in the advanced hatch.
+        "card": [("title", "Title", "text"), ("body", "Body", "textarea")],
+        "quote": [("text", "Quote", "textarea"), ("attribution", "Attribution", "text")],
+        "sponsor": [
+            ("name", "Sponsor name", "text"),
+            ("href", "Sponsor link", "url"),
+            ("label", "Label", "text"),
+        ],
+    },
+    "document": {
+        # Only the plain-text document blocks; card/media (images), table, chart
+        # and columns (nested) stay in the advanced hatch.
+        "heading": [("text", "Heading", "text")],
+        "text": [("text", "Text", "textarea")],
+        "quote": [("text", "Quote", "textarea"), ("attribution", "Attribution", "text")],
+        "stat": [
+            ("value", "Value", "text"),
+            ("label", "Label", "text"),
+            ("sublabel", "Sub-label", "text"),
+        ],
+    },
 }
 
 # Top-level spec text fields. ``(field, label, input_type)``.
 SPEC_CHROME: dict[str, list[tuple[str, str, str]]] = {
     "site": [("title", "Site title", "text"), ("tagline", "Tagline", "text")],
+    "newsletter": [
+        ("title", "Title", "text"),
+        ("subtitle", "Subtitle / date line", "text"),
+        ("kicker", "Kicker", "text"),
+        ("preheader", "Inbox preview text", "text"),
+        ("subject", "Email subject", "text"),
+    ],
+    "document": [("title", "Title", "text"), ("subtitle", "Subtitle", "text")],
 }
 
 # Per-section chrome. A scalar field is ``(field, label, "text"|"textarea")``; a
 # choice field is ``(field, label, tuple_of_options)`` rendered as a <select>.
 SECTION_CHROME: dict[str, list[tuple[str, str, Any]]] = {
     "site": [("background", "Background", ("", "surface", "ground", "primary", "accent"))],
+    "newsletter": [("background", "Background", ("", "surface", "accent"))],
+    "document": [
+        ("notes", "Speaker notes", "textarea"),
+        ("layout", "Layout", ("flow", "cover", "section_break", "centered", "two_col", "closing")),
+        ("background", "Background", ("", "surface", "ground", "primary", "accent")),
+    ],
 }
 
 
