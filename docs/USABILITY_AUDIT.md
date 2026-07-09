@@ -74,14 +74,14 @@ The 15 highest-leverage items: all three severe first-run breakages, the high-se
 
 ## Implementation status
 
-**100 of 161 findings shipped** (plus I-4 assessed as already satisfied). Delivered across four merged/merging PRs, each finding as its own commit with a dedicated regression test:
+**101 of 161 findings shipped** (plus I-4 assessed as already satisfied). Delivered across four merged/merging PRs, each finding as its own commit with a dedicated regression test:
 
 - **PR #1082** (merged) — all of Theme A + the 15-item fix-first shortlist and adjacent high-severity data-safety/discoverability items (23 findings).
 - **PR #1085** (merged) — Theme F complete, Theme I complete (bar the I-4 no-op), and the bulk of Theme D feedback/error states (47 findings).
 - **PR #1093** (merged) — the remaining high-severity findings plus the owner-decided IA changes: E-4, G-12, B-6, J-2, H-4, H-3, E-1, C-16, G-3, C-1, C-2, C-8, C-13, C-18, and the owner-decided orphans C-14 (sticker/mockup picker) and C-9 (finish Collections) (16 findings). Owner decisions for this batch: customer vocab = "Results"; Developer link on /login only; nav = replace Elements with Activity; Collections = finish; sticker/mockup = wire a picker; brand = /organisation/setup canonical. Pre-merge adversarial review (5 dimensions) confirmed 4 defects (E-1 undo re-insert throw, H-4 badge wipe, C-16 open-redirect, a weak G-3 test) — all fixed.
-- **PR #1097** (this branch) — the medium quick-win tail across five themes plus the large high J-1, each with a dedicated regression test: D-10 (Documents/Newsletters AI toggle + busy state + toast, replacing the ambiguous OK/Cancel confirm), E-6 & E-7 (merge-athletes and consent-enforcement confirms with a real impact preview), G-13 (audience autoplay honours the session's configured cadence), G-15 (single demo CTA when signed in), H-21 (board "Add" button + empty-title feedback), H-22 (remote-code client-side validation before it burns a shared-NAT attempt), H-23 (spotlight build disabled with 0 approved), J-5 (export hub links straight to the real export tool), J-7 (channel-preview empty-state escape link), J-10 (Settings "Coming soon" tiles badged), J-13 (console "End presentation"); then **J-1** (the Video Studio's render / make-clip / direct-reel / stabilise now run as disk-backed background jobs the client polls with a branded progress panel) which also resolves **H-19** (the clip button stays disabled for the whole run, and one job maps to one project — no duplicates) (14 findings).
+- **PR #1097** (this branch) — the medium quick-win tail across five themes plus the large high J-1, each with a dedicated regression test: D-10 (Documents/Newsletters AI toggle + busy state + toast, replacing the ambiguous OK/Cancel confirm), E-6 & E-7 (merge-athletes and consent-enforcement confirms with a real impact preview), G-13 (audience autoplay honours the session's configured cadence), G-15 (single demo CTA when signed in), H-21 (board "Add" button + empty-title feedback), H-22 (remote-code client-side validation before it burns a shared-NAT attempt), H-23 (spotlight build disabled with 0 approved), J-5 (export hub links straight to the real export tool), J-7 (channel-preview empty-state escape link), J-10 (Settings "Coming soon" tiles badged), J-13 (console "End presentation"); then **J-1** (the Video Studio's render / make-clip / direct-reel / stabilise now run as disk-backed background jobs the client polls with a branded progress panel) which also resolves **H-19** (the clip button stays disabled for the whole run, and one job maps to one project — no duplicates); and **H-5** (a structured content editor for microsites / newsletters / documents — per-section title/text/link fields driven by a per-surface field whitelist, with the raw-JSON textarea kept as the labelled "advanced" hatch) (15 findings).
 
-Themes **A**, **F** and **I** are complete. Remaining work is concentrated in **B** (too-many-steps), **J** (dead-ends), **H** (forms), **G** (consistency), **E** (destructive/data-safety), **C** (discoverability) and the **D** tail — the remaining large high-severity item is the structured editor **H-5**.
+Themes **A**, **F** and **I** are complete. Both large high-severity items (**J-1** background jobs, **H-5** structured editor) are now shipped; remaining work is the medium/low tail across **B** (too-many-steps), **J** (dead-ends), **H** (forms), **G** (consistency), **E** (destructive/data-safety), **C** (discoverability) and **D**.
 
 | Theme | Done | Remaining |
 |-------|------|-----------|
@@ -92,7 +92,7 @@ Themes **A**, **F** and **I** are complete. Remaining work is concentrated in **
 | E — Destructive / data-safety | 7/14 | E-5, E-8, E-10, E-11, E-12, E-13, E-14 |
 | F — Jargon & labels | 14/14 ✅ | — none — |
 | G — Consistency | 5/15 | G-1, G-2, G-5, G-6, G-7, G-8, G-9, G-10, G-11, G-14 |
-| H — Forms | 10/23 | H-5, H-8, H-9, H-10, H-11, H-12, H-13, H-14, H-15, H-16, H-17, H-18, H-20 |
+| H — Forms | 11/23 | H-8, H-9, H-10, H-11, H-12, H-13, H-14, H-15, H-16, H-17, H-18, H-20 |
 | I — Mobile & a11y | 8/9 (+1 N/A) ✅ | — none — |
 | J — Dead-ends | 6/16 | J-3, J-4, J-6, J-8, J-9, J-11, J-12, J-14, J-15, J-16 |
 
@@ -838,7 +838,7 @@ What the user hits: Description, athlete link, venue and tags can only be set at
 Evidence: `web.py:45394-45401` (badge copy), `45748-45750` (empty-state), and the whole `/api/media-library` inventory (`46051-53833`) contains no endpoint to update an existing photo's metadata.
 Fix: Add an inline metadata editor per asset (a small `POST /api/media-library/<id>/meta` + an edit affordance on the row / a per-asset detail view), and make the "auto" badge open it.
 
-**[H-5] Editing a site, newsletter or document requires hand-editing raw spec JSON** — `high` / `large`
+**[H-5] ✅ DONE (PR #1097) — Editing a site, newsletter or document requires hand-editing raw spec JSON** — `high` / `large`
 Affects: `/sites/<site_id>`, `/newsletters/<id>`, `/documents/<id>`
 What the user hits: The only way to change any content on a club microsite is a 420px monospace textarea of the raw spec JSON — the card is titled "Edit content" with the hint "The site is plain data (pages → sections → blocks)". Newsletters and documents hide the same JSON textarea behind an "Edit… (advanced — spec JSON)" toggle, so there is NO non-advanced edit path: to fix a typo in a newsletter intro you must edit JSON. For the stated non-technical audience these are generate-only surfaces.
 Evidence: `sites_ui.py:209-218` — the "Edit content" card is a `<textarea name="spec">` of pretty-printed JSON; `web.py:59249-59252`/`59651-59654` — newsletter/document "advanced — spec JSON" textareas; `sites_ui.py:131-136` — placing a form means hand-writing a `form_embed` block.
