@@ -40705,8 +40705,9 @@ what you're doing, what they should do.</p>
                 f"{'Continue' if is_current else 'Enter'} &rarr;</button>"
                 "</form>"
                 f'<form method="post" action="{delete_url}" data-no-loader="1" '
-                f"onsubmit=\"return confirm('Delete the &quot;{_h(p.display_name)}&quot; profile? "
-                f"Its runs stay on disk but it disappears from this picker. This cannot be undone.')\">"
+                f"onsubmit=\"return confirm('Remove &quot;{_h(p.display_name)}&quot; from this sign-in "
+                f"list permanently? Its brand setup goes with it and this can\\u2019t be undone. "
+                f"(Your processed results are kept.)')\">"
                 f'<input type="hidden" name="profile_id" value="{_h(p.profile_id)}">'
                 f'<button type="submit" class="btn-delete" aria-label="Delete profile" title="Delete profile">&times;</button>'
                 "</form>"
@@ -40800,8 +40801,10 @@ what you're doing, what they should do.</p>
         if not pid:
             return redirect(url_for("sign_in_page"))
         if _tenancy.MembershipStore().is_bound(pid) and not _session_owns_profile(pid):
-            # Deleting a bound workspace is owner/operator-only (ADR-0014);
-            # silently bounce — the picker never offered it to this session.
+            # Deleting a bound workspace is owner/operator-only (ADR-0014). E-8:
+            # tell the member why the button did nothing instead of a silent bounce
+            # (reusing the existing sign_in_error flash).
+            session["sign_in_error"] = "Only the workspace owner can delete this organisation."
             return redirect(url_for("sign_in_page"))
         from .club_profile import _profiles_dir
 
