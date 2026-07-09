@@ -40550,6 +40550,27 @@ what you're doing, what they should do.</p>
         # signing in resumes the page the user was heading to.
         _next_val = _safe_next(request.args.get("next"))
 
+        # Surface any error flashed by sign_in_post / a delete bounce / a
+        # signed-out share-target (silent failures fixed). Computed up here so it
+        # renders on BOTH the empty state and the picker.
+        err = session.pop("sign_in_error", None)
+        err_html = ""
+        if err:
+            err_html = (
+                '<div class="mh-flash error" role="alert" style="'
+                "margin: 0 0 var(--sp-5);"
+                "padding: 14px 18px;"
+                "border: 1px solid rgba(255,107,107,0.30);"
+                "border-left: 3px solid var(--bad);"
+                "background: var(--bad-bg);"
+                "color: var(--ink);"
+                "font-family: var(--font-mono);"
+                "font-size: 12px;"
+                "letter-spacing: 0.10em;"
+                "text-transform: uppercase;"
+                f'">[ ERROR ] {_h(err)}</div>'
+            )
+
         # No profiles yet — render an honest empty state with a clear
         # path forward. Previously this redirected straight to
         # /organisation/setup, which made the home page "Sign in" button
@@ -40560,7 +40581,7 @@ what you're doing, what they should do.</p>
             new_org_url = url_for("organisation_setup")
             home_url = url_for("home")
             empty_body = (
-                "<h1>Choose your organisation</h1>"
+                err_html + "<h1>Choose your organisation</h1>"
                 '<p class="lede" style="margin-bottom:var(--sp-6)">'
                 "You don't have access to any organisation yet. "
                 "Create one and it will appear here next time."
@@ -40721,25 +40742,6 @@ what you're doing, what they should do.</p>
             '<div><div class="plus">+</div>'
             "Create new organisation</div></a>"
         )
-
-        # Surface any error flashed by sign_in_post (silent failures fixed).
-        err = session.pop("sign_in_error", None)
-        err_html = ""
-        if err:
-            err_html = (
-                '<div class="mh-flash error" role="alert" style="'
-                "margin: 0 0 var(--sp-5);"
-                "padding: 14px 18px;"
-                "border: 1px solid rgba(255,107,107,0.30);"
-                "border-left: 3px solid var(--bad);"
-                "background: var(--bad-bg);"
-                "color: var(--ink);"
-                "font-family: var(--font-mono);"
-                "font-size: 12px;"
-                "letter-spacing: 0.10em;"
-                "text-transform: uppercase;"
-                f'">[ ERROR ] {_h(err)}</div>'
-            )
 
         body = (
             '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">'
@@ -48482,9 +48484,13 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
 
         profile_id = _active_profile_id()
         if not profile_id:
-            # Shared while signed out — the org-readiness gate normally catches
-            # this, but guard explicitly: bounce to sign-in (the photo isn't
-            # kept) rather than 500 on a missing tenant.
+            # Shared while signed out (a lapsed phone session is common). The
+            # bytes can't be safely kept without a tenant, so J-11: don't fail
+            # silently — flash so the user knows to sign in and re-share, instead
+            # of believing the shot is in the library when it was dropped.
+            session["sign_in_error"] = (
+                "Sign in first, then re-share the photo from your camera roll — it wasn't saved."
+            )
             return redirect(url_for("sign_in_page"))
 
         # Browsers post shared files under the manifest-declared "photos" field;
