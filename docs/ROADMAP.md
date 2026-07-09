@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-07-09 · `51bdb00ca` · Merge pull request #1099 from elijahkendrick04/claude/iphone-dropdown-menus-bbwdy8
+**Last updated:** 2026-07-09 · `b1b2d6508` · Usability audit — quick-win tail + both large highs (J-1, H-5) + tail (#1097)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1227,16 +1227,16 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-07-09 | `a62fcb542` | docs: session hand-off for the next usability-audit session |
+| 2026-07-09 | `fdb24ad3e` | docs(audit): J-11 shipped — 105/161 |
+| 2026-07-09 | `8a69697f3` | feat(pwa): tell the user when a signed-out shared photo isn't kept (J-11) |
+| 2026-07-09 | `5c117d28b` | docs(audit): J-12 + H-8 + E-8 shipped — 104/161 |
+| 2026-07-09 | `38c762f38` | feat(auth): plain-spoken org-delete confirm + non-owner feedback (E-8) |
+| 2026-07-09 | `eec492725` | feat(pwa,free-text): offline retry + preserve failed prompt (J-12, H-8) |
+| 2026-07-09 | `6c0d753dd` | docs(audit): H-5 shipped — 101/161 (both large highs done) |
+| 2026-07-09 | `e705a4825` | feat(editorial): structured content editor for newsletters + documents (H-5 pt.2) |
+| 2026-07-09 | `b12c7f5b5` | feat(sites): structured content editor for microsites (H-5 pt.1) |
 | 2026-07-09 | `b5a282253` | fix(web): top-bar dropdowns open off-screen on iPhone |
+| 2026-07-09 | `96aafc9ed` | test(i5): write the review-filter test's run.json to the real RUNS_DIR |
 | 2026-07-08 | `3e71918a7` | fix(elements): use approved single-colour silhouette swim pictograms |
-| 2026-07-08 | `5944c2344` | docs(audit): session hand-off for the next batch |
-| 2026-07-08 | `e82fa0612` | style: ruff-format the C-14/C-9 additions (CI hygiene) |
-| 2026-07-08 | `8df8b39c3` | docs(audit): C-14 + C-9 shipped — 86/161 |
-| 2026-07-08 | `fd8435ce4` | feat(collections): finish Collections — reachable, fillable, clickable (C-9) |
-| 2026-07-08 | `5decaccd9` | feat(media): in-page mockup + sticker picker, no raw-JSON dead-end (C-14) |
-| 2026-07-08 | `5d6ed82ee` | test: make the no-auto-pick assertion club-specific (CI shard 3) |
-| 2026-07-08 | `84d8eda80` | docs(audit): reference PR #1093 and note the pre-merge review outcome |
-| 2026-07-08 | `2ec6addc7` | fix(review): address 4 confirmed pre-merge adversarial-review findings |
-| 2026-07-08 | `dc4e1ed67` | fix(elements): redraw swim-stroke & dive pictograms as accurate icons |
-| 2026-07-08 | `4df52fefd` | fix(i18n): don't echo the request path in the language switcher (CI: tenant leak + hex budget) |
 <!-- /ROADMAP:ACTIVITY -->
