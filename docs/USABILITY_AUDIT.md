@@ -74,26 +74,27 @@ The 15 highest-leverage items: all three severe first-run breakages, the high-se
 
 ## Implementation status
 
-**86 of 161 findings shipped** (plus I-4 assessed as already satisfied). Delivered across three merged/merging PRs, each finding as its own commit with a dedicated regression test:
+**105 of 161 findings shipped** (plus I-4 assessed as already satisfied). Delivered across four merged/merging PRs, each finding as its own commit with a dedicated regression test:
 
 - **PR #1082** (merged) — all of Theme A + the 15-item fix-first shortlist and adjacent high-severity data-safety/discoverability items (23 findings).
 - **PR #1085** (merged) — Theme F complete, Theme I complete (bar the I-4 no-op), and the bulk of Theme D feedback/error states (47 findings).
-- **PR #1093** (this branch) — the remaining high-severity findings plus the owner-decided IA changes: E-4, G-12, B-6, J-2, H-4, H-3, E-1, C-16, G-3, C-1, C-2, C-8, C-13, C-18, and the owner-decided orphans C-14 (sticker/mockup picker) and C-9 (finish Collections) (16 findings). Owner decisions for this batch: customer vocab = "Results"; Developer link on /login only; nav = replace Elements with Activity; Collections = finish; sticker/mockup = wire a picker; brand = /organisation/setup canonical. Pre-merge adversarial review (5 dimensions) confirmed 4 defects (E-1 undo re-insert throw, H-4 badge wipe, C-16 open-redirect, a weak G-3 test) — all fixed.
+- **PR #1093** (merged) — the remaining high-severity findings plus the owner-decided IA changes: E-4, G-12, B-6, J-2, H-4, H-3, E-1, C-16, G-3, C-1, C-2, C-8, C-13, C-18, and the owner-decided orphans C-14 (sticker/mockup picker) and C-9 (finish Collections) (16 findings). Owner decisions for this batch: customer vocab = "Results"; Developer link on /login only; nav = replace Elements with Activity; Collections = finish; sticker/mockup = wire a picker; brand = /organisation/setup canonical. Pre-merge adversarial review (5 dimensions) confirmed 4 defects (E-1 undo re-insert throw, H-4 badge wipe, C-16 open-redirect, a weak G-3 test) — all fixed.
+- **PR #1097** (this branch) — the medium quick-win tail across five themes plus the large high J-1, each with a dedicated regression test: D-10 (Documents/Newsletters AI toggle + busy state + toast, replacing the ambiguous OK/Cancel confirm), E-6 & E-7 (merge-athletes and consent-enforcement confirms with a real impact preview), G-13 (audience autoplay honours the session's configured cadence), G-15 (single demo CTA when signed in), H-21 (board "Add" button + empty-title feedback), H-22 (remote-code client-side validation before it burns a shared-NAT attempt), H-23 (spotlight build disabled with 0 approved), J-5 (export hub links straight to the real export tool), J-7 (channel-preview empty-state escape link), J-10 (Settings "Coming soon" tiles badged), J-13 (console "End presentation"); then **J-1** (the Video Studio's render / make-clip / direct-reel / stabilise now run as disk-backed background jobs the client polls with a branded progress panel) which also resolves **H-19** (the clip button stays disabled for the whole run, and one job maps to one project — no duplicates); and **H-5** (a structured content editor for microsites / newsletters / documents — per-section title/text/link fields driven by a per-surface field whitelist, with the raw-JSON textarea kept as the labelled "advanced" hatch); then the contained tail J-12 (offline shell gets a retry + auto-reload + link back), H-8 (a failed free-text build preserves the typed prompt) and E-8 (plain-spoken org-delete confirm + non-owner feedback) (18 findings).
 
-Themes **A**, **F** and **I** are complete. Remaining work is concentrated in **B** (too-many-steps), **J** (dead-ends), **H** (forms), **G** (consistency), **E** (destructive/data-safety), **C** (discoverability) and the **D** tail — the two large high-severity items (Video Studio background-jobs J-1 and structured editor H-5) are queued next.
+Themes **A**, **F** and **I** are complete. Both large high-severity items (**J-1** background jobs, **H-5** structured editor) are now shipped; remaining work is the medium/low tail across **B** (too-many-steps), **J** (dead-ends), **H** (forms), **G** (consistency), **E** (destructive/data-safety), **C** (discoverability) and **D**.
 
 | Theme | Done | Remaining |
 |-------|------|-----------|
 | A — First-run & onboarding | 7/7 ✅ | — none — |
 | B — Too-many-steps | 1/8 | B-1, B-2, B-3, B-4, B-5, B-7, B-8 |
 | C — Discoverability / IA | 13/20 | C-10, C-11, C-12, C-15, C-17, C-19, C-20 |
-| D — Feedback & error states | 28/35 | D-10, D-11, D-12, D-13, D-15, D-26, D-32 |
-| E — Destructive / data-safety | 5/14 | E-5, E-6, E-7, E-8, E-10, E-11, E-12, E-13, E-14 |
+| D — Feedback & error states | 29/35 | D-11, D-12, D-13, D-15, D-26, D-32 |
+| E — Destructive / data-safety | 8/14 | E-5, E-10, E-11, E-12, E-13, E-14 |
 | F — Jargon & labels | 14/14 ✅ | — none — |
-| G — Consistency | 3/15 | G-1, G-2, G-5, G-6, G-7, G-8, G-9, G-10, G-11, G-13, G-14, G-15 |
-| H — Forms | 6/23 | H-5, H-8, H-9, H-10, H-11, H-12, H-13, H-14, H-15, H-16, H-17, H-18, H-19, H-20, H-21, H-22, H-23 |
+| G — Consistency | 5/15 | G-1, G-2, G-5, G-6, G-7, G-8, G-9, G-10, G-11, G-14 |
+| H — Forms | 12/23 | H-9, H-10, H-11, H-12, H-13, H-14, H-15, H-16, H-17, H-18, H-20 |
 | I — Mobile & a11y | 8/9 (+1 N/A) ✅ | — none — |
-| J — Dead-ends | 1/16 | J-1, J-3, J-4, J-5, J-6, J-7, J-8, J-9, J-10, J-11, J-12, J-13, J-14, J-15, J-16 |
+| J — Dead-ends | 8/16 | J-3, J-4, J-6, J-8, J-9, J-14, J-15, J-16 |
 
 Done findings are marked **✅ DONE (PR #…)** inline on each block below. Everything unmarked is still open.
 
@@ -383,7 +384,7 @@ What the user hits: Each request's "Due" date is plain text with only open/clock
 Evidence: `web.py:26159-26163` `status_tag` has only open/clock_stopped/completed; `26200-26203` renders the due date as bare text with no overdue styling — unlike the operator complaints table which computes `overdue_ids` (`25821`) and badges "ACK OVERDUE" (`25830`).
 Fix: Compute overdue status from `DsrRequestLog.due_at` (mirroring `overdue()`) and render a red "OVERDUE" badge + "due in N days" countdown; sort/highlight overdue requests to the top.
 
-**[D-10] Documents/Newsletters use raw `alert()`/`confirm()` for errors and a product choice, with no busy state — double-clicks make duplicates** — `medium` / `moderate`
+**[D-10] ✅ DONE (PR #1097) — Documents/Newsletters use raw `alert()`/`confirm()` for errors and a product choice, with no busy state — double-clicks make duplicates** — `medium` / `moderate`
 Affects: `/documents`, `/newsletters` — merges the cross-cutting "three error systems", the distribution "confirm/alert generation" and the "no loading state" findings
 What the user hits: Which error UI a volunteer sees depends on which feature they opened: Review/reel show a branded toast, but the whole Documents+Newsletters area throws the browser's raw `alert()` for every failure and uses a native `confirm()` to make a *product* decision — "OK = AI draft · Cancel = build from data only" — where OK/Cancel give no hint which is which, and Cancel doesn't cancel (it still generates). After the dialog nothing changes while a multi-second AI job runs (buttons stay enabled, no spinner), so a double-click quietly creates duplicate documents. Failures can show raw codes (`generate_failed`, `need_two_pdfs`).
 Evidence: `web.py:17540/17608` — `confirm('…OK = AI draft · Cancel = build from data only')`, still generating on Cancel; `17538-17556` — no button-disable/progress, `alert(...)` on failure; `59174/59611/59841` return bare error codes; because they aren't form submits, the auto-loader (`14586`) never fires; contrast reel `5056/5064` (renderProgress) and motion `4879-4880`.
@@ -573,19 +574,19 @@ What the user hits: Creating a share link (which exposes club content — often 
 Evidence: `bulk_export.js:89-98` — readonly input, `expires_at` unused, no copy/revoke; `web.py:6171` — `shareLoad` filters to `card_id`, hiding run-wide tokens; `6205-6206` — `shareRevoke` ignores the body and has an empty `.catch`.
 Fix: Add a Copy button and an "expires <date>" label wherever a share URL renders; list run-wide tokens (with revoke) in the bulk-export result or a per-run "Active share links" section; surface revoke failures.
 
-**[E-6] Merging two athletes is irreversible yet has no confirmation and no undo** — `medium` / `quick-win`
+**[E-6] ✅ DONE (PR #1097) — Merging two athletes is irreversible yet has no confirmation and no undo** — `medium` / `quick-win`
 Affects: `/athletes`
 What the user hits: The "Same swimmer twice?" merge is two dropdowns and a button. Picking the wrong pair fuses two distinct swimmers' entire race histories, and the copy states the decision "sticks for every future upload" with no undo. A non-technical volunteer can silently corrupt the roster with one mis-click and a bare success toast.
 Evidence: `web.py:57980-57985` — the merge form has no `onsubmit` confirm; `58024-58029` executes `merge_athletes` and returns "Merged — the decision is recorded and persists." with no undo.
 Fix: Add a confirmation showing both names and their race counts ("Merge Patel, Maya (14 races) into Maya Patel (9 races)? This can't be undone"); ideally an unmerge for a grace period.
 
-**[E-7] The consent-enforcement toggle flips a club-wide content block with one unconfirmed click** — `medium` / `quick-win`
+**[E-7] ✅ DONE (PR #1097) — The consent-enforcement toggle flips a club-wide content block with one unconfirmed click** — `medium` / `quick-win`
 Affects: `/athletes`
 What the user hits: "Switch enforcement on" is a bare button. Turning it on means every athlete with no consent on file is blocked from content — potentially suppressing most of the roster instantly — with no confirmation and no preview of how many athletes would be affected, so a volunteer can accidentally break their whole content pipeline and only see a one-line toast.
 Evidence: `web.py:57957-57960` — the toggle form has no confirm; `57938-57944` describes the ACTIVE state; `58032-58035` flips it and returns only a success message.
 Fix: Confirm before enabling, and show the impact ("N of M athletes currently have no consent and would be blocked").
 
-**[E-8] Permanent org-profile delete is one native confirm away, adjacent to the primary "Sign in" button, and fails silently for members** — `medium` / `moderate`
+**[E-8] ✅ DONE (PR #1097) — Permanent org-profile delete is one native confirm away, adjacent to the primary "Sign in" button, and fails silently for members** — `medium` / `moderate`
 Affects: `/sign-in`
 What the user hits: Every org card on the picker carries a small × delete button directly beside the primary "Sign in" button. One `confirm()` later the profile is permanently unlinked — a fully configured brand gone with no undo — and the confirm copy uses jargon ("Its runs stay on disk but it disappears from this picker"). A non-owner member who clicks delete is silently bounced with no message, so the button appears to do nothing.
 Evidence: `web.py:38742-38753` renders the delete form with a native `confirm()` in the same `.actions` row as sign-in; `38842-38845` unlinks with no soft-delete; `38836-38839` silently bounces non-owners.
@@ -791,7 +792,7 @@ What the user hits: `document_present` calls `create_session` on every page load
 Evidence: `web.py:59932` calls `create_session` with no check for an existing live session; `presenter.py:164-165` always mints a fresh `session_id` + `pairing_code` on every GET.
 Fix: Reuse an existing non-ended session for the same doc+owner on reload (resume rather than remint), or warn before discarding a live session; keep the audience URL and pairing code stable across console reloads.
 
-**[G-13] Audience autoplay advances every 6s, ignoring the session's configured 8s cadence** — `low` / `quick-win`
+**[G-13] ✅ DONE (PR #1097) — Audience autoplay advances every 6s, ignoring the session's configured 8s cadence** — `low` / `quick-win`
 Affects: `/present/<session_id>`
 What the user hits: When the presenter toggles Autoplay, the audience view advances on a hardcoded 6-second interval, but the session model stores `autoplay_seconds` (default 8.0) and even exposes it in `public_state`. A kiosk/foyer loop runs faster than configured, and any future per-deck timing setting is silently ignored.
 Evidence: `web.py:17732` — `setInterval(..., 6000)`; `presenter.py:60` defines `autoplay_seconds: float = 8.0`, published in `public_state` (`88`) but never consumed by the audience poll.
@@ -803,7 +804,7 @@ What the user hits: Every long-running button hand-rolls its own "working" state
 Evidence: `web.py:4879` "Rendering motion…", `5063` "Rendering reel…", `12246` "Rendering..." (three dots), `6192` "Creating…", `44683` "Saving…" — all ad-hoc; the shared `MH.btnState` (`ui-kit.js:436`) has only 3 references in web.py.
 Fix: Standardise on `MH.btnState(btn,'busy'|'idle')` (or one `mhBusy(btn,label)` wrapper) so every action button gets the same disable + label + spinner and one ellipsis spelling.
 
-**[G-15] Signed-in users on the demo preview see both "Sign up — keep your preview" and "Keep this preview in my workspace"** — `low` / `quick-win`
+**[G-15] ✅ DONE (PR #1097) — Signed-in users on the demo preview see both "Sign up — keep your preview" and "Keep this preview in my workspace"** — `low` / `quick-win`
 Affects: `/try/<run_id>`
 What the user hits: The demo footer renders the "Sign up — keep your preview →" primary button unconditionally, and additionally renders the "Keep this preview in my workspace" claim button when a profile is active. An already-signed-in user sees two near-identical CTAs, one of which leads to an account flow they've already completed.
 Evidence: `web.py:50354-50368` — `claim_html` is gated on an active profile but the `signup_page` button renders in all cases.
@@ -837,7 +838,7 @@ What the user hits: Description, athlete link, venue and tags can only be set at
 Evidence: `web.py:45394-45401` (badge copy), `45748-45750` (empty-state), and the whole `/api/media-library` inventory (`46051-53833`) contains no endpoint to update an existing photo's metadata.
 Fix: Add an inline metadata editor per asset (a small `POST /api/media-library/<id>/meta` + an edit affordance on the row / a per-asset detail view), and make the "auto" badge open it.
 
-**[H-5] Editing a site, newsletter or document requires hand-editing raw spec JSON** — `high` / `large`
+**[H-5] ✅ DONE (PR #1097) — Editing a site, newsletter or document requires hand-editing raw spec JSON** — `high` / `large`
 Affects: `/sites/<site_id>`, `/newsletters/<id>`, `/documents/<id>`
 What the user hits: The only way to change any content on a club microsite is a 420px monospace textarea of the raw spec JSON — the card is titled "Edit content" with the hint "The site is plain data (pages → sections → blocks)". Newsletters and documents hide the same JSON textarea behind an "Edit… (advanced — spec JSON)" toggle, so there is NO non-advanced edit path: to fix a typo in a newsletter intro you must edit JSON. For the stated non-technical audience these are generate-only surfaces.
 Evidence: `sites_ui.py:209-218` — the "Edit content" card is a `<textarea name="spec">` of pretty-printed JSON; `web.py:59249-59252`/`59651-59654` — newsletter/document "advanced — spec JSON" textareas; `sites_ui.py:131-136` — placing a form means hand-writing a `form_embed` block.
@@ -855,7 +856,7 @@ What the user hits: A volunteer types upcoming events (or uses "Interpret & fill
 Evidence: `web.py:30015-30023` `mhPlanAddEvent` only appends a DOM row; `30054-30067` `mhPlanSaveInputs` is the sole persistence call; `30147-30157` `mhPlanGenerate` POSTs only `{sport}` then reloads, with no unsaved-input guard.
 Fix: Have `mhPlanGenerate` auto-save the current on-page inputs before generating, or block with "You have unsaved inputs — save first?" when DOM rows differ from persisted state.
 
-**[H-8] AI failure on the quick path throws away the prompt the volunteer typed** — `medium` / `quick-win`
+**[H-8] ✅ DONE (PR #1097) — AI failure on the quick path throws away the prompt the volunteer typed** — `medium` / `quick-win`
 Affects: `/free-text/quick-build`
 What the user hits: If the LLM errors or is unconfigured when "Generate graphic" is submitted, the handler stashes the error in the session and redirects to the landing page, where the textarea renders empty. A poolside volunteer's carefully written multi-sentence prompt (and photo selections) is gone; they must retype everything to retry.
 Evidence: `web.py:33544-33547` catches the provider error, sets a session error, redirects to `free_text_chat_page`; the landing textarea (`33432-33434`) has no value/restoration; the prompt is never stashed back.
@@ -921,7 +922,7 @@ What the user hits: All three server-side rejections (no file, unsupported exten
 Evidence: `web.py:20144-20148`/`20169-20174`/`20176-20181` return a bare error card with no form; `14754-14762` drop handler bypasses `accept`; `20566` fallback "results may be partial" vs `20168-20174` 400; `inferFormat` (`20554-20566`) omits `.xlsx` (in `accept` at `20495`).
 Fix: Re-render the full upload page with the error inline above the dropzone (the client `showError()` at `20540` exists); make `inferFormat` mirror the server allowlist exactly (add a "good" `.xlsx` branch, turn the unknown-extension branch into an honest blocker that disables submit).
 
-**[H-19] "Make clip" button stays enabled during the long clip-maker run — double-clicks create duplicate projects** — `medium` / `quick-win`
+**[H-19] ✅ DONE (PR #1097) — "Make clip" button stays enabled during the long clip-maker run — double-clicks create duplicate projects** — `medium` / `quick-win`
 Affects: `/video`
 What the user hits: The Make clip handler never disables its button while the synchronous analysis runs (tens of seconds). An impatient volunteer who clicks again fires a second clip-maker run and ends up with duplicate projects in "Your clips", each needing its own render/approve — and there's no delete button on project tiles to remove the extra.
 Evidence: `web.py:12153-12174` — `vs-make` sets status text but never `btn.disabled` (contrast `vs-reel-make` at `12187`); `55651-55659` every POST creates a new project unconditionally; `12219-12225` project tiles have no delete control.
@@ -933,19 +934,19 @@ What the user hits: The 2FA page prints the raw base32 secret and the `otpauth:/
 Evidence: `web.py:36815-36827` renders the secret in `<code>` and the URI as muted text with no image; a QR module exists (`mediahub.sites.qr`, used at `57565`) but not here; no "recovery/backup code" in `auth.py`; `login_post` always routes TOTP users to `/login/2fa` (`36694-36696`).
 Fix: Render the URI as a QR (the module exists), keep the secret as a copyable fallback, generate 8–10 one-time recovery codes at enable time, and accept a recovery code on `/login/2fa`.
 
-**[H-21] Adding a board idea works only by pressing Enter — there is no visible Add button** — `low` / `quick-win`
+**[H-21] ✅ DONE (PR #1097) — Adding a board idea works only by pressing Enter — there is no visible Add button** — `low` / `quick-win`
 Affects: `/plan/board`
 What the user hits: The Ideas column's "New idea…" input submits solely via an Enter keydown; nothing on screen indicates how to confirm, and a volunteer who types an idea and clicks elsewhere loses it silently (empty-title submits also return silently). On mobile soft keyboards the action key isn't always an obvious "Enter".
 Evidence: `web.py:30826-30830` — a lone `<input>` with `onkeydown` and no button; `30874-30877` `mhBoardAdd` returns silently on empty input.
 Fix: Add a small "Add" button beside the input (sharing `mhBoardAdd`) and a hint "press Enter to add"; show a status message when the title is empty.
 
-**[H-22] The remote landing has no length check — a typo submits and burns a shared-IP failure attempt** — `low` / `quick-win`
+**[H-22] ✅ DONE (PR #1097) — The remote landing has no length check — a typo submits and burns a shared-IP failure attempt** — `low` / `quick-win`
 Affects: `/remote`
 What the user hits: The code-entry field accepts up to 6 characters but Connect fires with no client-side validation, so a partial or mistyped code navigates to `/remote/<code>`, fails the lookup, increments the per-IP failure counter, and shows "Code not found". Because the rate-limit budget is shared across a venue's NAT, careless typos erode everyone's remaining attempts.
 Evidence: `web.py:60070-60071` — Connect is `location.href='/remote/'+value.toUpperCase()` with no length/format guard; `60091` a failed lookup calls `_remote_code_failed()`.
 Fix: Disable Connect until 6 valid characters are entered and validate format client-side, so obvious typos never reach the server or consume the shared budget.
 
-**[H-23] "Build spotlight post" with nothing approved lands on a full-page 400 error** — `low` / `quick-win`
+**[H-23] ✅ DONE (PR #1097) — "Build spotlight post" with nothing approved lands on a full-page 400 error** — `low` / `quick-win`
 Affects: `/spotlight/<run_id>/<swimmer_key>`
 What the user hits: The build button is always active; if the user hasn't approved any achievements, the POST navigates to a bare error page ("No achievements approved yet…") with a back link, losing their tone selection and page position. The precondition is known client-side (the page renders the approved count).
 Evidence: `web.py:32844-32848` — the always-enabled build form; the empty-approved branch returns a full `_layout` 400 (`32209-32216`); the inline helper copy already exists at `32850`.
@@ -1013,7 +1014,7 @@ Fix: Add `role="status" aria-live="polite"` to the stage container (mirroring th
 
 ### J. Dead ends & orphaned features
 
-**[J-1] The Video Studio's render/analysis buttons block on synchronous endpoints with no progress for multi-minute waits** — `high` / `large`
+**[J-1] ✅ DONE (PR #1097) — The Video Studio's render/analysis buttons block on synchronous endpoints with no progress for multi-minute waits** — `high` / `large`
 Affects: `/video`
 What the user hits: Clicking Render holds one HTTP request open for the entire FFmpeg render; Make clip and Direct the reel do the same for ASR + moment analysis; Stabilise runs two-pass vidstab inline. The volunteer sees only a caption swap ("Rendering...") — no progress, no ETA, no way to leave and come back — while the rest of the app renders this class of work through background jobs precisely because (per the code's own comment) proxies kill 30–90s held connections and the button then "does nothing".
 Evidence: `web.py:56036-56042` (`render_edl()` inline, no job); `12245-12251` (`renderProject` awaits the sync jpost); `55764-55795`/`55837-55842` (stabilise inline); contrast `53109-53111` docstring warning about held connections.
@@ -1037,7 +1038,7 @@ What the user hits: The Turn-Into pack promises "edit each caption before using 
 Evidence: `web.py:44644-44648` (only Save edits per artefact); `44706-44720` (`tiRegenerate`: confirm → sync fetch → alert on failure); naming at `44658`/`44724`/`6983`; "artefacts" at `44661`.
 Fix: Add a Copy button per caption block (the `copyText` helper exists) and a download for the newsletter HTML; make regenerate use the async job + inline status the builder has; pick one user-facing name and one item word.
 
-**[J-5] The `/export` hub is a no-CTA catalogue that misdirects users to the wrong page** — `medium` / `quick-win`
+**[J-5] ✅ DONE (PR #1097) — The `/export` hub is a no-CTA catalogue that misdirects users to the wrong page** — `medium` / `quick-win`
 Affects: `/export`
 What the user hits: The "Export & convert" page — reachable only from a button at the bottom of Help — lists format chips and FFmpeg engine status, with no run picker and no link to any actual export. Its one instruction, "Open a meet's review page to bulk-export its content pack", is wrong: the bulk-export entry lives on the Content builder (`/pack`), not review, so a volunteer following it lands on review and finds nothing.
 Evidence: `web.py:54165-54200` renders only chips + engine status + the wrong "review page" copy; `export_run_tool_page` is linked solely from the pack page (`42987`); `export_center_page`'s only inbound link is the Help strip (`18888`).
@@ -1049,7 +1050,7 @@ What the user hits: The hero's step 3 says "Click Create on an item to open the 
 Evidence: `web.py:29931` the promise; `29791-29794` `create_link` is `url_for(meta.primary_route_endpoint)` with no query params or seed payload.
 Fix: Pass the plan item's title/reason as query params the target tool prefills (seed the free-text field), or soften the copy until seeding exists.
 
-**[J-7] The channel-preview empty state is a dead end while the ad-variants equivalent offers a way out** — `low` / `quick-win`
+**[J-7] ✅ DONE (PR #1097) — The channel-preview empty state is a dead end while the ad-variants equivalent offers a way out** — `low` / `quick-win`
 Affects: `/plan/preview/<pack_id>`
 What the user hits: A draft with no cards renders just "This draft has no cards to preview yet." with no link or action, whereas the ad-variants page's identical situation links back to the draft to "Add or regenerate cards". Same product, same condition, one page helps and the other strands the user.
 Evidence: `web.py:30594` the preview fallback is a bare `<p>` with no link, vs `31196-31201` where the ad-variants fallback links to `stub_pack_view`.
@@ -1067,25 +1068,25 @@ What the user hits: The public wall, a Sites "meet microsite" and a published ne
 Evidence: `web.py:49750`/`49725` (wall) vs `sites_ui.py:174-180` (Publish/Unpublish) vs `web.py:59215/59226` (Take offline/Publish); a second run-scoped generator at `44364-44365` alongside `newsletters_home` (`59009`).
 Fix: Standardise the publish/unpublish vocabulary across all token-URL surfaces; add a single "Share publicly" chooser (on the review/export flow) explaining when to use the wall vs a microsite vs a newsletter; fold the run-page newsletter export into the composer as a "meet digest for this run" shortcut.
 
-**[J-10] Two full-size Settings tiles lead only to "Coming soon" placeholder pages and still say "Open →"** — `low` / `quick-win` (confirmed live)
+**[J-10] ✅ DONE (PR #1097) — Two full-size Settings tiles lead only to "Coming soon" placeholder pages and still say "Open →"** — `low` / `quick-win` (confirmed live)
 Affects: `/settings`, `/settings/scheduling`, `/settings/autonomy` — merges the two "coming soon tile" findings
 What the user hits: "Auto scheduling" and "Autonomy" occupy two of the 17 tiles with the same visual weight and the same "Open →" affordance as working features; clicking either costs a page load to reach a single placeholder card with no notify-me and nothing to configure. For a time-poor volunteer scanning the grid these are wasted clicks that inflate the sense of surface area.
 Evidence: `web.py:27979-27990` appends both tiles unconditionally; `29165-29193` both section renderers return only `_coming_soon_card(...)`; the badge lives inside the destination, not on the grid tiles; observed live — both show "Open →".
 Fix: Put a visible "Coming soon" badge on the tiles themselves (or collapse both into one muted strip at the bottom) and disable/soften the "Open" CTA so the state is clear before the click.
 
-**[J-11] A photo shared to MediaHub while signed out is silently thrown away** — `medium` / `moderate`
+**[J-11] ✅ DONE (PR #1097) — A photo shared to MediaHub while signed out is silently thrown away** — `medium` / `moderate`
 Affects: `/share-target`
 What the user hits: The OS share sheet is pitched as "the single highest-value poolside mobile behaviour". If the session has lapsed (common on a phone), the receiver discards the shared photo and bounces to sign-in with no message. After signing in the user lands on the normal post-login page, never back at their photo, with no hint it wasn't saved — so they believe the shot is in the library when it's gone.
 Evidence: `web.py:46144-46149` — with no active profile it `redirect(url_for('sign_in_page'))` and the comment states "the photo isn't kept"; no flash, no stash, no return-to-share flow.
 Fix: Stash the shared file (a short-lived pending upload keyed to the session) and, after sign-in, complete the drop and land on the library with the "1 photo added" banner — or at minimum flash "Sign in first, then re-share the photo".
 
-**[J-12] The offline shell page is a dead end — no retry, no auto-refresh, no way back into the app** — `low` / `quick-win`
+**[J-12] ✅ DONE (PR #1097) — The offline shell page is a dead end — no retry, no auto-refresh, no way back into the app** — `low` / `quick-win`
 Affects: offline navigation shell
 What the user hits: When a volunteer taps a link while offline, the service worker replaces the page with a bare "You are offline" screen with no reload/retry button, no link back to the review queue, and no auto-refresh when connectivity returns — so the user is stranded on a static page until they know to pull-to-refresh, even though the connection may already be back.
 Evidence: `web.py:26794-26804` — the navigate fallback returns fixed inline HTML with only an `<h1>You are offline</h1>` and a paragraph; no button, link, or `online` listener.
 Fix: Add a "Try again" button (`location.reload`) and a small script that auto-reloads on the `online` event, plus a link back to the review queue.
 
-**[J-13] There is no way to end the presentation from the console; closing the tab leaves the projector stuck on the last slide** — `medium` / `quick-win`
+**[J-13] ✅ DONE (PR #1097) — There is no way to end the presentation from the console; closing the tab leaves the projector stuck on the last slide** — `medium` / `quick-win`
 Affects: `/documents/<id>/present`
 What the user hits: The console exposes Prev, Next, Blackout, Autoplay and Reset timer but no "End presentation" — only the phone remote can end. A presenter driving from the laptop who closes the tab leaves the session live (6-hour TTL), so the projector keeps displaying the final slide indefinitely with no clean "that's a wrap" state.
 Evidence: `web.py:17667-17671` — the console button row has no "end" action and no back-to-document link; `presenter.py:31` `SESSION_TTL_SECONDS = 6*3600`.

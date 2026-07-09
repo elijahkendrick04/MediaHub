@@ -14,6 +14,7 @@ from flask import url_for
 from markupsafe import escape as _h
 
 from mediahub.sites.models import SITE_ARCHETYPES, SiteSpec
+from mediahub.web import spec_editor as _se
 
 _ARCHETYPE_LABELS = {
     "club_home": "Club home",
@@ -209,14 +210,28 @@ def render_editor(
 #dev-m:checked~.dev-stage .dev-frame{{width:390px}}
 </style></div>"""
 
+    # H-5: a structured content editor (per-section title / intro / link fields)
+    # so editing wording no longer means hand-writing raw spec JSON. Advanced
+    # blocks (images, cards, charts) stay in the raw hatch below, which is kept
+    # verbatim as the "Advanced" escape hatch.
+    structured_body = _se.render_structured(spec.to_dict(), "site")
+    structured = f"""
+<div class="card"><h3 style="margin-top:0">Edit content</h3>
+<p class="dim" style="font-size:13px">Change your wording and links here — no JSON needed. Photos, card
+grids and charts stay in the advanced editor below. Publishing freezes a snapshot of the current draft.</p>
+<form method="post" action="{url_for("api_site_content_edit", site_id=site_id)}">
+{structured_body}
+<div style="margin-top:10px"><button class="btn" type="submit">Save changes</button></div>
+</form></div>"""
+
     # H-6: on a failed save the caller passes the user's SUBMITTED text so a
     # single JSON typo never wipes their edits; otherwise pretty-print the
     # stored spec as before.
     spec_json = _h(spec_override) if spec_override is not None else _h(_pretty(spec))
     editor = f"""
-<div class="card"><h3 style="margin-top:0">Edit content</h3>
-<p class="dim" style="font-size:13px">The site is plain data (pages → sections → blocks). Edit it
-here and save; the preview refreshes. Publishing freezes a snapshot of the current draft.</p>
+<div class="card"><h3 style="margin-top:0">Advanced — raw spec (JSON)</h3>
+<p class="dim" style="font-size:13px">The site is plain data (pages → sections → blocks). This is the full
+editor for anything the structured fields above don't cover; edit and save, and the preview refreshes.</p>
 <form method="post" action="{url_for("api_site_save", site_id=site_id)}" onsubmit="return mhSiteSpecValid(this)">
 <textarea name="spec" spellcheck="false" style="width:100%;min-height:420px;font-family:ui-monospace,monospace;
   font-size:12px;padding:12px;border-radius:8px;border:1px solid var(--line,#2a3550);
@@ -309,6 +324,7 @@ function mhSiteSpecValid(f) {{
         + header
         + '<div class="mh-sites-grid" style="display:grid;gap:16px;grid-template-columns:1fr">'
         + preview
+        + structured
         + editor
         + forms_html
         + insights_html
