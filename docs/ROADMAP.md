@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-07-09 · `1877da6c3` · fix(elements): accurate swim-stroke & dive pictograms (#1094)
+**Last updated:** 2026-07-09 · `51bdb00ca` · Merge pull request #1099 from elijahkendrick04/claude/iphone-dropdown-menus-bbwdy8
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1227,6 +1227,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-07-09 | `b5a282253` | fix(web): top-bar dropdowns open off-screen on iPhone |
 | 2026-07-08 | `3e71918a7` | fix(elements): use approved single-colour silhouette swim pictograms |
 | 2026-07-08 | `5944c2344` | docs(audit): session hand-off for the next batch |
 | 2026-07-08 | `e82fa0612` | style: ruff-format the C-14/C-9 additions (CI hygiene) |
@@ -1238,5 +1239,4 @@ list and the auto table below, not here.
 | 2026-07-08 | `2ec6addc7` | fix(review): address 4 confirmed pre-merge adversarial-review findings |
 | 2026-07-08 | `dc4e1ed67` | fix(elements): redraw swim-stroke & dive pictograms as accurate icons |
 | 2026-07-08 | `4df52fefd` | fix(i18n): don't echo the request path in the language switcher (CI: tenant leak + hex budget) |
-| 2026-07-08 | `b70927938` | style: apply ruff-format to the usability-audit changes |
 <!-- /ROADMAP:ACTIVITY -->
