@@ -28077,6 +28077,10 @@ self.addEventListener('fetch', function(e){
       var cached = await caches.match(req);
       if (cached) return cached;
       if (req.mode === 'navigate') {
+        // J-12: not a dead end — offer a manual retry, auto-reload the moment
+        // connectivity returns, and a link back into the app.
+        var _btn = 'padding:9px 16px;border:1px solid rgba(245,242,232,.3);border-radius:8px;'
+          + 'background:transparent;color:inherit;cursor:pointer;font-size:14px;text-decoration:none';
         return new Response('<!doctype html><meta charset=utf-8>'
           + '<meta name=viewport content="width=device-width,initial-scale=1">'
           + '<title>Offline — MediaHub</title>'
@@ -28084,7 +28088,12 @@ self.addEventListener('fetch', function(e){
           + 'color:rgb(245,242,232);display:flex;align-items:center;justify-content:center;'
           + 'height:100vh;margin:0"><div style="text-align:center;padding:24px">'
           + '<h1 style="margin:0 0 8px">You are offline</h1>'
-          + '<p style="opacity:.7">Your approvals are saved and will sync when you reconnect.</p></div></body>',
+          + '<p style="opacity:.7">Your approvals are saved and will sync when you reconnect.</p>'
+          + '<div style="margin-top:18px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap">'
+          + '<button onclick="location.reload()" style="' + _btn + '">Try again</button>'
+          + '<a href="/" style="' + _btn + '">Back to MediaHub</a></div>'
+          + '<script>addEventListener("online",function(){location.reload();});</script>'
+          + '</div></body>',
           { headers: { 'Content-Type': 'text/html; charset=utf-8' } });
       }
       return new Response('', { status: 503 });
@@ -35183,6 +35192,8 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         new_url = url_for("free_text_chat_new")
         quick_url = url_for("free_text_quick_build")
         quick_err = session.pop("free_text_quick_error", "")
+        # H-8: restore the prompt the user typed if the last build failed.
+        quick_prompt = session.pop("free_text_quick_prompt", "")
         quick_err_html = (
             '<div class="mh-flash error" role="alert" style="margin:0 0 14px;padding:12px 16px;'
             "border:1px solid rgba(255,107,107,0.30);border-left:3px solid var(--bad);"
@@ -35212,7 +35223,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
     <label for="ft-prompt" style="font-weight:600;display:block;margin-bottom:6px">What do you want to make?</label>
     <textarea id="ft-prompt" name="prompt" rows="4" required {_CYCLE_PH_ATTR_MOMENT}
       placeholder="e.g. A bold thank-you post for our sponsor Riverside Physio after a great gala weekend — upbeat, club colours."
-      style="width:100%;font-size:14px;padding:10px 12px;border:1px solid var(--panel);border-radius:8px;background:var(--bg);color:var(--ink);resize:vertical"></textarea>
+      style="width:100%;font-size:14px;padding:10px 12px;border:1px solid var(--panel);border-radius:8px;background:var(--bg);color:var(--ink);resize:vertical">{_h(quick_prompt)}</textarea>
     <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:12px">
       <label class="btn secondary" style="font-size:13px;cursor:pointer;margin:0">
         &#x1F4CE; Add photos
@@ -35323,8 +35334,11 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         try:
             brief = build_brief_from_prompt(prompt, club_brand=club_brand)
         except (ProviderNotConfigured, ProviderError) as e:
-            # Honest error — no fake graphic. Bounce back with the reason.
+            # Honest error — no fake graphic. Bounce back with the reason AND the
+            # prompt the user typed (H-8) so a poolside volunteer doesn't have to
+            # retype a multi-sentence brief to retry.
             session["free_text_quick_error"] = str(e)
+            session["free_text_quick_prompt"] = prompt
             return redirect(url_for("free_text_chat_page"))
 
         caption = "\n\n".join(
