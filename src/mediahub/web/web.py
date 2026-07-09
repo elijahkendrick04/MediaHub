@@ -19135,6 +19135,16 @@ def create_app() -> Flask:
             # hit /settings URL doesn't get caught by the gate before reaching
             # the redirect.
             "settings_page",
+            # C-16 — the interface-language switcher renders in the footer of
+            # every page (including the signed-out home, pricing and legal pages
+            # that are exempt above), so its POST target must be reachable
+            # without a ready org too. It only sets session["ui_lang"] (a UI
+            # preference) after validating the locale — no org-scoped data
+            # access — so exempting it does not weaken access control. Without
+            # this a signed-out visitor's language choice is intercepted by the
+            # gate and 302'd to /organisation/setup, and the language never
+            # changes (the visible control silently fails).
+            "set_interface_language",
             "healthz",
             "healthz_deps",
             "healthz_memory",
