@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-07-10 · `0c1373887` · [live-meet] add audit report (docs/audits/AUDIT_live-meet.md)
+**Last updated:** 2026-07-10 · `71a627d25` · [live-meet] record final merge status in audit report
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1227,6 +1227,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-07-10 | `71a627d25` | [live-meet] record final merge status in audit report |
 | 2026-07-10 | `0c1373887` | [live-meet] add audit report (docs/audits/AUDIT_live-meet.md) |
 | 2026-07-10 | `13a6b5e4a` | [live-meet] lock fixed behaviour with regression tests |
 | 2026-07-10 | `01477c49b` | [live-meet] fix dead poll runner (P0) + harden action, engine, a11y |
@@ -1238,5 +1239,4 @@ list and the auto table below, not here.
 | 2026-07-10 | `b9d62fc45` | [elements] lock XSS/render fixes with tests + audit report |
 | 2026-07-10 | `acb6fe8be` | [elements] harden element SVGs against XSS and render org-custom packs |
 | 2026-07-09 | `a62fcb542` | docs: session hand-off for the next usability-audit session |
-| 2026-07-09 | `fdb24ad3e` | docs(audit): J-11 shipped — 105/161 |
 <!-- /ROADMAP:ACTIVITY -->
