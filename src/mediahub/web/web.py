@@ -2678,6 +2678,13 @@ _CYCLE_PH_ATTR_MOMENT = _cycle_ph_attr(_CYCLE_PH_MOMENT)
 _CYCLE_PH_ATTR_RESEARCH = _cycle_ph_attr(_CYCLE_PH_RESEARCH)
 _CYCLE_PH_ATTR_ASKDATA = _cycle_ph_attr(_CYCLE_PH_ASKDATA)
 
+# Upper bound on a single free-text prompt / chat reply before it reaches the
+# LLM. A describe-your-post prompt is a sentence or two; this is a generous
+# ceiling that still stops a several-hundred-KB paste from being forwarded to
+# the provider verbatim and billed as input tokens (the only other limit is the
+# 50 MB MAX_CONTENT_LENGTH, far too high to bound LLM cost).
+_FREE_TEXT_MAX_PROMPT_CHARS = 8000
+
 
 # UI2.6 — Vanish search. The /activity (global run) search uses the design-kit
 # Vanish input (.mh-vanish): a rotating overlay-placeholder element
@@ -21378,7 +21385,7 @@ def create_app() -> Flask:
                         meta_line = (
                             '<span class="tag bad" style="font-size:10px">Didn\'t finish</span>'
                             if failed
-                            else f'{n_swims} swim{"" if n_swims == 1 else "s"}'
+                            else f"{n_swims} swim{'' if n_swims == 1 else 's'}"
                         )
                         items_html += (
                             "<li>"
@@ -21390,7 +21397,7 @@ def create_app() -> Flask:
                             f'<time class="mh-rel" datetime="{_h(when_iso)}">{_h(when)}</time></span>'
                             "</div>"
                             f'<a class="go" href="{configure_href}">'
-                            f'{"Try again" if failed else "Re-configure"} &rarr;</a>'
+                            f"{'Try again' if failed else 'Re-configure'} &rarr;</a>"
                             "</li>"
                         )
                     recent_html = (
@@ -27265,7 +27272,7 @@ Relay team broke club record"></textarea>
                 extra.append("under 18")
             if r.restricted:
                 extra.append(
-                    '<strong title="UK GDPR Art 18 — processing restricted">' "Paused</strong>"
+                    '<strong title="UK GDPR Art 18 — processing restricted">Paused</strong>'
                 )
             rows.append(
                 f"<tr><td>{_h(r.athlete_name)}</td><td>{status_tag}</td>"
@@ -27564,7 +27571,7 @@ Relay team broke club record"></textarea>
             if r.request_type == "access" and _dsr_export_path(pid, r.id).exists():
                 actions.append(
                     f'<a class="btn secondary" href="{url_for("org_dsr_export_download", request_id=r.id)}" '
-                    'download>Download export</a>'
+                    "download>Download export</a>"
                 )
             rows.append(
                 (
@@ -29264,7 +29271,7 @@ self.addEventListener('fetch', function(e){
                 f'<div style="font-weight:600;margin-bottom:4px">'
                 f"Last LLM error &mdash; {_h(last_err.get('provider', 'unknown'))}</div>"
                 f'<div class="dim" style="font-size:12px;margin-bottom:6px">'
-                f"{_h(last_err.get('ts', '')[:19])} UTC"
+                f"{_h((last_err.get('ts') or '')[:19])} UTC"
                 + (
                     f" &middot; {_h(last_err.get('error_kind'))}"
                     if last_err.get("error_kind")
@@ -29272,7 +29279,7 @@ self.addEventListener('fetch', function(e){
                 )
                 + "</div>"
                 f'<code style="font-size:12px">'
-                f"{_h(last_err.get('error_message', '')[:300])}</code>"
+                f"{_h((last_err.get('error_message') or '')[:300])}</code>"
                 "</div>"
             )
         else:
@@ -30527,7 +30534,7 @@ self.addEventListener('fetch', function(e){
                     'gap:12px;flex-wrap:wrap">'
                     f'<div style="flex:1;min-width:180px"><strong>{_h(rec.filename)}</strong>'
                     f'<div class="dim" style="font-size:12px">{lic}'
-                    f'{(" · " + when) if when else ""}</div></div>'
+                    f"{(' · ' + when) if when else ''}</div></div>"
                     f'<audio controls preload="none" src="{src}" style="height:34px"></audio>'
                     f'<form method="post" action="{del_url}" style="margin:0" '
                     "onsubmit=\"return confirm('Remove this uploaded track?')\">"
@@ -35447,7 +35454,12 @@ function copySpotlightCaption(btn) {{
         sessions: list = []
         store_failed = False
         try:
-            sessions = list_sessions(limit=20)
+            # Tenant isolation: a chat title is the first line of another org's
+            # free-text brief (often an athlete name), so the landing list must
+            # be scoped to the active organisation — mirrors the /drafts index
+            # and _can_access_pack. Unstamped legacy chats stay visible, and the
+            # no-org sandbox (active pid None) keeps everything visible.
+            sessions = list_sessions(limit=20, profile_id=_active_profile_id())
         except Exception as e:
             log.warning("free-text: list_sessions failed: %s", e)
             store_failed = True
@@ -35502,7 +35514,8 @@ function copySpotlightCaption(btn) {{
       placeholder="e.g. A bold thank-you post for our sponsor Riverside Physio after a great gala weekend — upbeat, club colours."
       style="width:100%;font-size:14px;padding:10px 12px;border:1px solid var(--panel);border-radius:8px;background:var(--bg);color:var(--ink);resize:vertical">{_h(quick_prompt)}</textarea>
     <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:12px">
-      <label class="btn secondary" style="font-size:13px;cursor:pointer;margin:0">
+      <label class="btn secondary" style="font-size:13px;cursor:pointer;margin:0" tabindex="0" role="button"
+        onkeydown="if(event.key==='Enter'||event.key===' '){{event.preventDefault();this.querySelector('input[type=file]').click();}}">
         &#x1F4CE; Add photos
         <input type="file" name="photos" accept="image/*" multiple style="display:none"
           onchange="var n=this.files.length;var s=document.getElementById('ft-photo-count');if(s)s.textContent=n?(n+' photo'+(n===1?'':'s')+' attached'):'';">
@@ -35590,6 +35603,12 @@ function copySpotlightCaption(btn) {{
 
         prompt = (request.form.get("prompt") or "").strip()
         if not prompt:
+            return redirect(url_for("free_text_chat_page"))
+        if len(prompt) > _FREE_TEXT_MAX_PROMPT_CHARS:
+            session["free_text_quick_error"] = (
+                f"That prompt is very long ({len(prompt):,} characters). "
+                f"Please keep it under {_FREE_TEXT_MAX_PROMPT_CHARS:,} characters."
+            )
             return redirect(url_for("free_text_chat_page"))
         active_pid = _active_profile_id() or ""
 
@@ -35679,14 +35698,31 @@ function copySpotlightCaption(btn) {{
             return redirect(url_for("free_text_chat_page"))
         from mediahub.free_text_chat.session import create_session
 
-        s = create_session()
+        # Stamp the creating organisation so the chat is tenant-scoped from
+        # birth (mirrors runs/packs). Without this every web chat is ownerless
+        # and readable by any org via /free-text/chat/<id>.
+        s = create_session(profile_id=_active_profile_id() or "")
         return redirect(url_for("free_text_chat_view", chat_id=s.chat_id))
+
+    def _load_accessible_chat(chat_id):
+        """Load a chat only if the active organisation may access it.
+
+        Returns None both when the chat is missing AND when it belongs to a
+        different organisation — a foreign chat is indistinguishable from a
+        nonexistent one, the same anti-enumeration posture as the run/pack
+        guards (_can_access_run / _can_access_pack). Legacy ownerless chats
+        stay accessible so historical conversations aren't orphaned.
+        """
+        from mediahub.free_text_chat.session import load_session, can_access_session
+
+        s = load_session(chat_id)
+        if s is None or not can_access_session(s, _active_profile_id()):
+            return None
+        return s
 
     @app.route("/free-text/chat/<chat_id>", methods=["GET"])
     def free_text_chat_view(chat_id):
-        from mediahub.free_text_chat.session import load_session
-
-        s = load_session(chat_id)
+        s = _load_accessible_chat(chat_id)
         if not s:
             return _recovery_page(
                 "Chat not found",
@@ -35810,6 +35846,8 @@ function copySpotlightCaption(btn) {{
   </div>
 </section>
 
+{_llm_unavailable_banner()}
+
 <div id="chat-log">
   {msgs_html or '<p class="muted">Start by telling the assistant what you want to post. It will ask questions, research the web, and propose a brief.</p>'}
 </div>
@@ -35823,7 +35861,7 @@ function copySpotlightCaption(btn) {{
             {_CYCLE_PH_ATTR_MOMENT} style="min-height:110px" required></textarea>
   <div style="margin-top:var(--sp-3);display:flex;gap:var(--sp-3);align-items:center;flex-wrap:wrap">
     <button type="submit" class="btn">Send reply &rarr;</button>
-    <span class="strap" style="color:var(--ink-muted)">Assistant uses Claude · web research</span>
+    <span class="strap" style="color:var(--ink-muted)">AI assistant · web research</span>
   </div>
 </form>
 """
@@ -35865,10 +35903,10 @@ function copySpotlightCaption(btn) {{
 
     @app.route("/free-text/chat/<chat_id>/send", methods=["POST"])
     def free_text_chat_send(chat_id):
-        from mediahub.free_text_chat.session import load_session, save_session
+        from mediahub.free_text_chat.session import save_session
         from mediahub.free_text_chat.agent import next_assistant_turn
 
-        s = load_session(chat_id)
+        s = _load_accessible_chat(chat_id)
         if not s:
             return _recovery_page(
                 "Chat not found",
@@ -35877,6 +35915,14 @@ function copySpotlightCaption(btn) {{
                 secondary_cta=("Free-text home", url_for("free_text_chat_page")),
             )
         msg = (request.form.get("message") or "").strip()
+        if len(msg) > _FREE_TEXT_MAX_PROMPT_CHARS:
+            s.add_assistant_message(
+                f"That reply is very long ({len(msg):,} characters). Please shorten "
+                f"it to under {_FREE_TEXT_MAX_PROMPT_CHARS:,} characters and send again.",
+                meta={"error": True},
+            )
+            save_session(s)
+            return redirect(url_for("free_text_chat_view", chat_id=chat_id))
         if msg:
             s.add_user_message(msg)
             save_session(s)
@@ -35903,12 +35949,19 @@ function copySpotlightCaption(btn) {{
         brief = s.accepted_brief
         if not brief:
             return None
+        # The chat brief is the propose_brief tool input verbatim (unconstrained
+        # schema), so hashtags may arrive as a list, a string, or nothing. Reuse
+        # the quick path's normaliser so a stray string isn't iterated
+        # character-by-character into per-letter chips at render/export.
+        from mediahub.free_text_chat.agent import normalise_hashtags
+
+        hashtags = normalise_hashtags(brief.get("hashtags"))
         card = {
             "platform": brief.get("platform") or "Instagram",
             "caption": "\n\n".join(
                 [p for p in [brief.get("headline", ""), brief.get("body", "")] if p]
             ).strip(),
-            "hashtags": brief.get("hashtags") or [],
+            "hashtags": hashtags,
             # D-25: prompt-led chat draft — no fabricated confidence badge.
             "confidence": None,
             "notes": brief.get("visual_concept", "") or "",
@@ -35956,9 +36009,9 @@ function copySpotlightCaption(btn) {{
         # "Generate content from this brief" button and a third "Create graphic"
         # click. Accepting the brief and building the draft is a single POST that
         # ends on the rendered graphic (?autographic=1), like the quick path.
-        from mediahub.free_text_chat.session import load_session, save_session
+        from mediahub.free_text_chat.session import save_session
 
-        s = load_session(chat_id)
+        s = _load_accessible_chat(chat_id)
         if not s:
             return redirect(url_for("free_text_chat_page"))
         if s.pending_brief:
@@ -35972,17 +36025,22 @@ function copySpotlightCaption(btn) {{
                 }
             )
             save_session(s)
-        pack_url = _chat_brief_to_pack(s, chat_id, request.form.getlist("library_asset_id"))
-        if pack_url:
-            return redirect(pack_url)
+            # Build the draft exactly once, on the accepting POST. A stale or
+            # double-submitted re-POST (pending_brief already cleared) falls
+            # through to the chat view rather than minting another draft —
+            # deliberate regeneration is the explicit "Generate content from
+            # this brief" action (free_text_chat_generate).
+            pack_url = _chat_brief_to_pack(s, chat_id, request.form.getlist("library_asset_id"))
+            if pack_url:
+                return redirect(pack_url)
         return redirect(url_for("free_text_chat_view", chat_id=chat_id))
 
     @app.route("/free-text/chat/<chat_id>/decline", methods=["POST"])
     def free_text_chat_decline(chat_id):
-        from mediahub.free_text_chat.session import load_session, save_session
+        from mediahub.free_text_chat.session import save_session
         from mediahub.free_text_chat.agent import next_assistant_turn
 
-        s = load_session(chat_id)
+        s = _load_accessible_chat(chat_id)
         if not s:
             return redirect(url_for("free_text_chat_page"))
         if s.pending_brief:
@@ -36006,9 +36064,7 @@ function copySpotlightCaption(btn) {{
     def free_text_chat_generate(chat_id):
         """Turn an accepted brief into a saved stub-pack so the existing
         approval pills + export flow apply."""
-        from mediahub.free_text_chat.session import load_session
-
-        s = load_session(chat_id)
+        s = _load_accessible_chat(chat_id)
         if not s or not s.accepted_brief:
             return redirect(url_for("free_text_chat_view", chat_id=chat_id))
         # B-6: land on the draft with the graphic already rendering, like the
@@ -41591,8 +41647,8 @@ what you're doing, what they should do.</p>
                 remove_html = (
                     f'<form method="post" action="{url_for("organisation_members_page")}" '
                     'style="display:inline" '
-                    'onsubmit="return confirm(\'Remove this member from the organisation? '
-                    'They lose access immediately.\')">'
+                    "onsubmit=\"return confirm('Remove this member from the organisation? "
+                    "They lose access immediately.')\">"
                     '<input type="hidden" name="action" value="remove"/>'
                     f'<input type="hidden" name="email" value="{_h(m.email)}"/>'
                     '<button type="submit" class="btn secondary" '
@@ -43661,7 +43717,7 @@ what you're doing, what they should do.</p>
                 'style="margin-bottom:20px;border:1px solid rgba(255,180,84,0.5);'
                 'background:rgba(255,180,84,0.07)">'
                 '<h2 style="margin-top:0;font-size:18px;color:var(--ink)">'
-                f'Almost there &mdash; {_h(prof.display_name or "your organisation")} '
+                f"Almost there &mdash; {_h(prof.display_name or 'your organisation')} "
                 "isn&rsquo;t unlocked yet</h2>"
                 '<p style="font-size:14px;line-height:1.55;color:var(--ink);margin:0 0 12px">'
                 f"{_h(_lead)} Add <strong>any one</strong> of these and you&rsquo;re in:</p>"
@@ -48065,22 +48121,36 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
 <tr class="mh-hp mh-asset-row" data-asset-id="{_h(ad.get("id", ""))}"
     data-desc="{_h(_meta_desc)}" data-athletes="{_h(athlete_names)}"
     data-venue="{_h(_meta_venue)}" data-event="{_h(_meta_event)}" data-tags="{_h(_meta_tags)}">
-  <td class="mh-bulk-cell"><input type="checkbox" class="mh-row-check" name="asset_ids" value="{_h(ad.get("id", ""))}" aria-label="Select photo"></td>
-  <td data-label="Preview"><span class=\"mh-lens\" style=\"display:inline-block;border-radius:4px;overflow:hidden;line-height:0\"><img src=\"{_file_url}\" style=\"max-height:60px;border-radius:4px;display:block\" /></span>{_hp_tpl}</td>
+  <td class="mh-bulk-cell"><input type="checkbox" class="mh-row-check" name="asset_ids" value="{
+                _h(ad.get("id", ""))
+            }" aria-label="Select photo"></td>
+  <td data-label="Preview"><span class=\"mh-lens\" style=\"display:inline-block;border-radius:4px;overflow:hidden;line-height:0\"><img src=\"{
+                _file_url
+            }\" style=\"max-height:60px;border-radius:4px;display:block\" /></span>{_hp_tpl}</td>
   <td data-label="Type">{_h(ad.get("type", ""))}</td>
   <td data-label="Athlete">{_h(athlete_names)}{_tag_badges}</td>
   <td data-label="Venue / Event">{_h(ad.get("linked_venue") or ad.get("linked_event") or "")}</td>
   <td data-label="Permission">{
                 _media_permission_select(ad.get("id", ""), ad.get("permission_status", ""))
                 if ad.get("type") not in _skip_tag_types
-                else _h(_MEDIA_PERMISSION_LABELS.get(ad.get("permission_status", ""), ad.get("permission_status", "")))
+                else _h(
+                    _MEDIA_PERMISSION_LABELS.get(
+                        ad.get("permission_status", ""), ad.get("permission_status", "")
+                    )
+                )
             }</td>
   <td data-label="Status">{_media_approval_badge(ad.get("approval_status", ""))}</td>
   <td data-label="ID"><code>{_h(ad.get("id", "")[:12])}</code></td>
   <td style="white-space:nowrap">
-    <a class="btn ghost" href="{_edit_url}" style="font-size:11px;padding:3px 9px;margin-right:6px" title="Filters, adjustments, crop, shapes, blur brush — non-destructive edits">&#9998; Edit</a>
-    <a class="btn ghost" href="{_studio_url}" style="font-size:11px;padding:3px 9px;margin-right:6px" title="Edit this photo with AI — fill, erase, expand, upscale, restyle">&#x2726; Studio</a>
-    <a class="btn ghost" href="{_cutout_url}" style="font-size:11px;padding:3px 9px;margin-right:6px" title="See exactly what background removal knocks out">Cut-out</a>
+    <a class="btn ghost" href="{
+                _edit_url
+            }" style="font-size:11px;padding:3px 9px;margin-right:6px" title="Filters, adjustments, crop, shapes, blur brush — non-destructive edits">&#9998; Edit</a>
+    <a class="btn ghost" href="{
+                _studio_url
+            }" style="font-size:11px;padding:3px 9px;margin-right:6px" title="Edit this photo with AI — fill, erase, expand, upscale, restyle">&#x2726; Studio</a>
+    <a class="btn ghost" href="{
+                _cutout_url
+            }" style="font-size:11px;padding:3px 9px;margin-right:6px" title="See exactly what background removal knocks out">Cut-out</a>
     <button class="btn ghost" type="button" data-mh-meta-open style="font-size:11px;padding:3px 9px;margin-right:6px" title="Edit the description, swimmer, venue and tags">&#x270E; Info</button>
     <button class="btn ghost mh-ml-qa" type="button" data-qa-url="{_qa_url}"
             aria-haspopup="menu" aria-expanded="false"
@@ -52297,8 +52367,8 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                 f'<td data-label="Window">{window}</td>'
                 f'<td data-label="State">{state}</td>'
                 f'<td><form method="post" action="{url_for("sponsors_delete")}" style="margin:0" '
-                'onsubmit="return confirm(\'Remove this sponsor? Their logo and details are '
-                'permanently deleted.\')">'
+                "onsubmit=\"return confirm('Remove this sponsor? Their logo and details are "
+                "permanently deleted.')\">"
                 f'<input type="hidden" name="sponsor_id" value="{_h(s["sponsor_id"])}">'
                 '<button type="submit" class="btn secondary" style="font-size:12px;padding:4px 10px">Remove</button>'
                 "</form></td></tr>"
@@ -52529,8 +52599,7 @@ workflow, and the publish log &mdash; deterministic and auditable.</p>
                 _lbl = _excluded_labels.get(key)
                 if _lbl:
                     _name_cell = (
-                        f"<td>{_h(_lbl['title'])}</td>"
-                        f"<td class='dim'>{_h(_lbl['meet_name'])}</td>"
+                        f"<td>{_h(_lbl['title'])}</td><td class='dim'>{_h(_lbl['meet_name'])}</td>"
                     )
                 else:
                     # The run no longer exists — fall back to the raw key.
@@ -58175,7 +58244,7 @@ voice, and queues them for one-click approval.</p>
                 '<div class="card" style="padding:10px 14px;margin-bottom:8px;display:flex;'
                 'justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">'
                 f'<div><span class="tag" style="font-size:10px;margin-right:8px">'
-                f'{_h(it["item_type"])}</span>{label_html}</div>{remove_btn}</div>'
+                f"{_h(it['item_type'])}</span>{label_html}</div>{remove_btn}</div>"
             )
         rows = rows or (
             '<p class="dim" style="margin:var(--sp-4) 0">Nothing in this collection yet — '
@@ -60339,7 +60408,7 @@ voice, and queues them for one-click approval.</p>
             )
             msg = (
                 '<div class="card" style="border-color:var(--mh-success)">'
-                f'<p>{_h(request.args.get("msg"))}</p>{_review_link}</div>'
+                f"<p>{_h(request.args.get('msg'))}</p>{_review_link}</div>"
             )
         if request.args.get("err"):
             msg = f'<div class="card" style="border-color:var(--mh-error)"><p>{_h(request.args.get("err"))}</p></div>'
