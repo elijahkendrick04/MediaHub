@@ -6516,6 +6516,32 @@ function shareToggle(btn, cardId) {
   shareLoad(cardId);
 }
 
+// E-5: one share row — link input, Copy button, permission, an explicit
+// "expires <date>" label (the API always returned expires_at; the UI never
+// showed it), and Revoke.
+function shareRowEl(cardId, s) {
+  var row=document.createElement('div'); row.style.cssText='display:flex;gap:8px;align-items:center;padding:5px 0;border-top:1px solid var(--border);flex-wrap:wrap';
+  var inp=document.createElement('input'); inp.type='text'; inp.readOnly=true;
+  inp.value = (s.url && s.url.indexOf('http') === 0) ? s.url : (window.location.origin + s.url);
+  inp.style.cssText='flex:1;min-width:160px;font-size:11px;padding:4px 6px;border:1px solid var(--border);border-radius:6px;background:rgba(255,255,255,0.04);color:inherit';
+  inp.onclick=function(){ inp.select(); };
+  var cp=document.createElement('button'); cp.className='btn secondary'; cp.style.cssText='font-size:11px;padding:3px 9px'; cp.textContent='Copy';
+  cp.onclick=function(){
+    var done=function(ok){ cp.textContent = ok ? 'Copied!' : 'Copy failed'; setTimeout(function(){ cp.textContent='Copy'; }, 1600); };
+    var legacy=function(){ inp.focus(); inp.select(); try { done(document.execCommand('copy')); } catch(e) { done(false); } };
+    if (navigator.clipboard && window.isSecureContext) { navigator.clipboard.writeText(inp.value).then(function(){ done(true); }).catch(legacy); }
+    else { legacy(); }
+  };
+  var tag=document.createElement('span'); tag.style.cssText='font-size:11px;color:var(--ink-muted)'; tag.textContent = (s.perm==='comment'?'can comment':'view only');
+  var exp=document.createElement('span'); exp.style.cssText='font-size:11px;color:var(--ink-muted)';
+  if (s.expired) { exp.textContent='expired'; exp.style.color='var(--bad)'; }
+  else if (s.expires_at) { exp.textContent='expires ' + new Date(s.expires_at * 1000).toLocaleDateString(); }
+  var rev=document.createElement('a'); rev.href='#'; rev.style.cssText='font-size:11px;color:var(--bad)'; rev.textContent='Revoke';
+  rev.onclick=function(ev){ ev.preventDefault(); shareRevoke(cardId, s.token); };
+  row.appendChild(inp); row.appendChild(cp); row.appendChild(tag); row.appendChild(exp); row.appendChild(rev);
+  return row;
+}
+
 function shareLoad(cardId) {
   var panel = document.querySelector('.share-panel[data-card="' + cardId + '"]');
   if (!panel) return;
@@ -6523,19 +6549,24 @@ function shareLoad(cardId) {
   fetch(panel.dataset.sharesUrl).then(function(r){return r.json().then(function(j){return {ok:r.ok,j:j};});}).then(function(res){
     var list = panel.querySelector('.sh-list'); list.textContent='';
     if (!res.ok) { list.textContent = res.j.reason || 'Only an owner can manage share links.'; return; }
-    var mine = (res.j.shares||[]).filter(function(s){ return s.card_id === realCard; });
-    if (!mine.length) { list.textContent = 'No active links for this card.'; return; }
-    mine.forEach(function(s){
-      var row=document.createElement('div'); row.style.cssText='display:flex;gap:8px;align-items:center;padding:5px 0;border-top:1px solid var(--border);flex-wrap:wrap';
-      var inp=document.createElement('input'); inp.type='text'; inp.readOnly=true; inp.value=s.url;
-      inp.style.cssText='flex:1;min-width:160px;font-size:11px;padding:4px 6px;border:1px solid var(--border);border-radius:6px;background:rgba(255,255,255,0.04);color:inherit';
-      inp.onclick=function(){ inp.select(); };
-      var tag=document.createElement('span'); tag.style.cssText='font-size:11px;color:var(--ink-muted)'; tag.textContent = (s.perm==='comment'?'can comment':'view only');
-      var rev=document.createElement('a'); rev.href='#'; rev.style.cssText='font-size:11px;color:var(--bad)'; rev.textContent='Revoke';
-      rev.onclick=function(ev){ ev.preventDefault(); shareRevoke(cardId, s.token); };
-      row.appendChild(inp); row.appendChild(tag); row.appendChild(rev); list.appendChild(row);
-    });
-  }).catch(function(){});
+    var shares = res.j.shares || [];
+    var mine = shares.filter(function(s){ return s.card_id === realCard; });
+    if (!mine.length) { var none=document.createElement('div'); none.textContent='No active links for this card.'; list.appendChild(none); }
+    mine.forEach(function(s){ list.appendChild(shareRowEl(cardId, s)); });
+    // E-5: whole-meet links (minted by the bulk-export share button) appeared
+    // in no list at all, so they could never be revoked. Manage them here.
+    var wholeMeet = shares.filter(function(s){ return !s.card_id; });
+    if (wholeMeet.length) {
+      var hd=document.createElement('div');
+      hd.style.cssText='font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-top:10px';
+      hd.textContent='Whole-meet links (from bulk export)';
+      list.appendChild(hd);
+      wholeMeet.forEach(function(s){ list.appendChild(shareRowEl(cardId, s)); });
+    }
+  }).catch(function(){
+    var list = panel.querySelector('.sh-list');
+    if (list) list.textContent = 'Could not load share links — check your connection and reopen this panel.';
+  });
 }
 
 function shareCreate(btn, cardId) {
@@ -6557,8 +6588,20 @@ function shareRevoke(cardId, token) {
   if (!confirm('Revoke this link? Anyone holding it loses access immediately.')) return;
   var panel = document.querySelector('.share-panel[data-card="' + cardId + '"]');
   if (!panel) return;
+  // E-5: the revoke used to ignore the response and swallow every error, so
+  // a failed revoke looked identical to a successful one. Read the outcome
+  // and say so.
   fetch(panel.dataset.sharesUrl + '/' + encodeURIComponent(token) + '/revoke', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'})
-    .then(function(r){return r.json();}).then(function(){ shareLoad(cardId); }).catch(function(){});
+    .then(function(r){return r.json().then(function(j){return {ok:r.ok,j:j};});}).then(function(res){
+      if (!res.ok || !res.j.ok || res.j.revoked === false) {
+        if (window.MH && MH.toast) MH.toast((res.j && (res.j.reason || res.j.detail)) || 'Could not revoke that link — it may already be gone.', 'error', 3500);
+      } else if (window.MH && MH.toast) {
+        MH.toast('Link revoked — anyone holding it has lost access.', 'success', 2500);
+      }
+      shareLoad(cardId);
+    }).catch(function(){
+      if (window.MH && MH.toast) MH.toast('Could not revoke the link — network error. Try again.', 'error', 3500);
+    });
 }
 </script>
 """
