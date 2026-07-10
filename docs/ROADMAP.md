@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-07-10 · `8706d0130` · [elements] record final merge status in audit report
+**Last updated:** 2026-07-10 · `b8f098388` · [language] audit report for the interface-language switcher (C-16)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1227,6 +1227,10 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-07-10 | `b0fc4ea7a` | [language] record final merge status in audit report |
+| 2026-07-10 | `b8f098388` | [language] audit report for the interface-language switcher (C-16) |
+| 2026-07-10 | `4ec7ec77d` | [language] stop ?lang= reverting an explicit switch; localise mobile nav |
+| 2026-07-10 | `9435f89bc` | [language] fix interface-language switcher silently failing for no-org visitors |
 | 2026-07-10 | `8706d0130` | [elements] record final merge status in audit report |
 | 2026-07-10 | `b9d62fc45` | [elements] lock XSS/render fixes with tests + audit report |
 | 2026-07-10 | `acb6fe8be` | [elements] harden element SVGs against XSS and render org-custom packs |
@@ -1235,8 +1239,4 @@ list and the auto table below, not here.
 | 2026-07-09 | `8a69697f3` | feat(pwa): tell the user when a signed-out shared photo isn't kept (J-11) |
 | 2026-07-09 | `5c117d28b` | docs(audit): J-12 + H-8 + E-8 shipped — 104/161 |
 | 2026-07-09 | `38c762f38` | feat(auth): plain-spoken org-delete confirm + non-owner feedback (E-8) |
-| 2026-07-09 | `eec492725` | feat(pwa,free-text): offline retry + preserve failed prompt (J-12, H-8) |
-| 2026-07-09 | `6c0d753dd` | docs(audit): H-5 shipped — 101/161 (both large highs done) |
-| 2026-07-09 | `e705a4825` | feat(editorial): structured content editor for newsletters + documents (H-5 pt.2) |
-| 2026-07-09 | `b12c7f5b5` | feat(sites): structured content editor for microsites (H-5 pt.1) |
 <!-- /ROADMAP:ACTIVITY -->
