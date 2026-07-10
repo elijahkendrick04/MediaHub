@@ -38680,9 +38680,10 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             body = f"""
 <div class="card" style="max-width:420px;margin:40px auto">
   <h2>Two-factor code</h2>
-  <p class="muted">Enter the 6-digit code from your authenticator app.</p>
+  <p class="muted">Enter the 6-digit code from your authenticator app — or, if you have lost
+  your device, one of your recovery codes (looks like XXXX-XXXX; each works once).</p>
   <form method="post" action="{url_for("login_2fa")}">
-    <input type="text" name="totp" inputmode="numeric" autocomplete="one-time-code" maxlength="7" required autofocus>
+    <input type="text" name="totp" autocomplete="one-time-code" maxlength="12" required autofocus>
     <button class="btn" type="submit">Verify</button>
   </form>
 </div>
@@ -38694,9 +38695,17 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 '<div class="card"><p class="tag bad">Too many failed attempts — try again later.</p></div>',
                 active="",
             ), 429
-        user = _user_store().get(email)
+        store = _user_store()
+        user = store.get(email)
         code = request.form.get("totp") or ""
-        if user is None or not _auth.totp_verify(user.totp_secret, code):
+        ok = user is not None and _auth.totp_verify(user.totp_secret, code)
+        used_recovery = False
+        if not ok and user is not None:
+            # Same input doubles as the recovery-code field: a consumed code
+            # (single-use, hash removed on success) logs in like a TOTP match.
+            used_recovery = store.consume_recovery_code(email, code)
+            ok = used_recovery
+        if not ok:
             locked_now = _auth.record_login_failure(email)
             _sec_event(
                 "login_lockout" if locked_now else "login_2fa_failed",
@@ -38712,8 +38721,145 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         _auth.clear_login_failures(email)
         session.clear()
         _auth.login_user(user)
-        _sec_event("login", actor=user.email, detail="2fa")
+        _sec_event("login", actor=user.email, detail="2fa_recovery" if used_recovery else "2fa")
         return redirect(url_for("make_page"))
+
+    # Tiny clipboard helper shared by the 2FA setup + recovery-code pages.
+    # Plain string (not an f-string), so single braces are literal.
+    _TWOFA_COPY_JS = """
+<script>
+document.addEventListener('click', function (ev) {
+  var btn = ev.target.closest('[data-copy-target]');
+  if (!btn) return;
+  var el = document.getElementById(btn.getAttribute('data-copy-target'));
+  if (!el) return;
+  var text = (el.textContent || '').trim();
+  var orig = btn.textContent;
+  var done = function (ok) {
+    btn.textContent = ok ? 'Copied' : 'Copy failed';
+    setTimeout(function () { btn.textContent = orig; }, 1800);
+  };
+  if (navigator.clipboard && window.isSecureContext) {
+    navigator.clipboard.writeText(text).then(function () { done(true); }, function () { done(false); });
+  } else {
+    var ta = document.createElement('textarea');
+    ta.value = text; ta.style.position = 'fixed'; ta.style.left = '-9999px';
+    document.body.appendChild(ta); ta.select();
+    try { done(document.execCommand('copy')); } catch (e) { done(false); }
+    document.body.removeChild(ta);
+  }
+});
+</script>
+"""
+
+    def _twofa_no_store(page_html: str, status: int = 200):
+        """2FA pages that carry the secret or plaintext recovery codes must
+        never land in a shared cache."""
+        resp = make_response(page_html, status)
+        resp.headers["Cache-Control"] = "no-store"
+        return resp
+
+    def _twofa_setup_body(email: str, error: str = "") -> str:
+        """The enrolment page: QR of the otpauth URI + copyable secret."""
+        from mediahub.sites import qr as _qr
+
+        secret = session.get("totp_setup_secret") or _auth.totp_generate_secret()
+        session["totp_setup_secret"] = secret
+        uri = _auth.totp_provisioning_uri(secret, email)
+        qr_html = ""
+        if _qr.is_available():
+            try:
+                # Inline SVG on this already-authenticated page: the secret is
+                # never exposed on a fetchable URL and nothing touches the
+                # content-addressed QR export cache on disk.
+                svg = _qr.qr_svg(uri, scale=4, border=3)
+                qr_html = (
+                    "<p>Scan this QR code with your authenticator app "
+                    "(Aegis, Google Authenticator, 1Password…):</p>"
+                    f'<div style="display:inline-block;line-height:0;border-radius:8px;overflow:hidden">{svg}</div>'
+                )
+            except Exception:
+                qr_html = ""
+        if not qr_html:
+            qr_html = "<p>Add this secret to your authenticator app (Aegis, Google Authenticator, 1Password…):</p>"
+        error_html = f'<p class="tag bad" role="alert">{_h(error)}</p>' if error else ""
+        return (
+            f"""
+<div class="card" style="max-width:560px;margin:40px auto">
+  <h2>Set up two-factor authentication</h2>
+  {error_html}
+  {qr_html}
+  <p>Or enter the secret by hand:</p>
+  <p><code id="totp-setup-secret">{_h(secret)}</code>
+  <button class="btn secondary" type="button" data-copy-target="totp-setup-secret">Copy secret</button></p>
+  <p class="muted" style="word-break:break-all">{_h(uri)}</p>
+  <form method="post" action="{url_for("account_2fa")}">
+    <input type="hidden" name="action" value="enable">
+    <label>Enter the current 6-digit code to confirm<br><input type="text" name="totp" inputmode="numeric" autocomplete="one-time-code" maxlength="7" required autofocus></label>
+    <button class="btn" type="submit">Enable 2FA</button>
+  </form>
+</div>
+"""
+            + _TWOFA_COPY_JS
+        )
+
+    def _twofa_enabled_body(user, error: str = "", error_action: str = "") -> str:
+        """The 2FA-on page: disable form + recovery-code status/regenerate."""
+        n = len(user.recovery_codes)
+        if n:
+            codes_note = (
+                f"<p>You have <strong>{n}</strong> unused recovery "
+                f"code{'s' if n != 1 else ''} left. Each one logs you in once if you "
+                "lose your authenticator device.</p>"
+            )
+        else:
+            codes_note = (
+                '<p class="tag bad">You have no recovery codes left — without them, '
+                "losing your authenticator device locks you out. Issue a fresh set now.</p>"
+            )
+        error_html = f'<p class="tag bad" role="alert">{_h(error)}</p>' if error else ""
+        disable_focus = " autofocus" if error_action == "disable" else ""
+        regen_focus = " autofocus" if error_action == "regenerate" else ""
+        return f"""
+<div class="card" style="max-width:560px;margin:40px auto">
+  <h2>Two-factor authentication is <span class="tag ok">on</span></h2>
+  {error_html}
+  <form method="post" action="{url_for("account_2fa")}">
+    <input type="hidden" name="action" value="disable">
+    <label>Current code to switch it off<br><input type="text" name="totp" inputmode="numeric" autocomplete="one-time-code" maxlength="7" required{disable_focus}></label>
+    <button class="btn secondary" type="submit">Disable 2FA</button>
+  </form>
+  <h3 style="margin-top:24px">Recovery codes</h3>
+  {codes_note}
+  <form method="post" action="{url_for("account_2fa")}">
+    <input type="hidden" name="action" value="regenerate">
+    <label>Current code to issue a fresh set<br><input type="text" name="totp" inputmode="numeric" autocomplete="one-time-code" maxlength="7" required{regen_focus}></label>
+    <button class="btn secondary" type="submit">Regenerate recovery codes</button>
+  </form>
+  <p class="muted">Regenerating replaces every unused code — the new set is shown once.</p>
+</div>
+"""
+
+    def _twofa_codes_page(codes: list[str], heading: str):
+        """Show the plaintext recovery codes exactly once (never persisted)."""
+        lines = "\n".join(codes)
+        body = (
+            f"""
+<div class="card" style="max-width:560px;margin:40px auto">
+  <h2>{heading}</h2>
+  <p><strong>Save these recovery codes now — this is the only time they are shown.</strong>
+  Each code logs you in once if you lose your authenticator device. Keep them somewhere
+  safe, such as a password manager. They replace any codes issued before.</p>
+  <code id="recovery-codes" style="display:block;white-space:pre;font-size:15px;line-height:1.9;padding:12px 16px">{_h(lines)}</code>
+  <p style="margin-top:12px">
+    <button class="btn" type="button" data-copy-target="recovery-codes">Copy all codes</button>
+    <a class="btn secondary" href="{url_for("account_2fa")}">Done &mdash; back to two-factor settings</a>
+  </p>
+</div>
+"""
+            + _TWOFA_COPY_JS
+        )
+        return _twofa_no_store(_layout("Two-factor", body, active=""))
 
     @app.route("/account/2fa", methods=["GET", "POST"])
     def account_2fa():
@@ -38728,13 +38874,18 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             return redirect(url_for("login_page"))
         if request.method == "POST":
             action = request.form.get("action") or ""
+            code = request.form.get("totp") or ""
             if action == "enable":
                 secret = session.get("totp_setup_secret") or ""
-                if secret and _auth.totp_verify(secret, request.form.get("totp") or ""):
+                if secret and _auth.totp_verify(secret, code):
                     store.set_totp(email, secret)
+                    # Issue the one-time recovery codes: only salted hashes are
+                    # persisted; the plaintext is shown once on the next page.
+                    codes = _auth.recovery_generate_codes()
+                    store.set_recovery_codes(email, [_auth.recovery_hash(c) for c in codes])
                     session.pop("totp_setup_secret", None)
                     _sec_event("totp_enabled", actor=email)
-                    return redirect(url_for("account_2fa"))
+                    return _twofa_codes_page(codes, "Two-factor authentication is on")
                 return _layout(
                     "Two-factor",
                     '<div class="card"><p class="tag bad">Code didn\'t match — scan the secret again and retry.</p>'
@@ -38742,10 +38893,8 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                     active="",
                 ), 400
             if action == "disable":
-                if user.totp_secret and _auth.totp_verify(
-                    user.totp_secret, request.form.get("totp") or ""
-                ):
-                    store.set_totp(email, "")
+                if user.totp_secret and _auth.totp_verify(user.totp_secret, code):
+                    store.set_totp(email, "")  # also drops the recovery-code hashes
                     _sec_event("totp_disabled", actor=email)
                     return redirect(url_for("account_2fa"))
                 return _layout(
@@ -38754,36 +38903,25 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                     f'<p><a href="{url_for("account_2fa")}">Back</a></p></div>',
                     active="",
                 ), 400
+            if action == "regenerate":
+                if user.totp_secret and _auth.totp_verify(user.totp_secret, code):
+                    codes = _auth.recovery_generate_codes()
+                    store.set_recovery_codes(email, [_auth.recovery_hash(c) for c in codes])
+                    _sec_event("totp_recovery_regenerated", actor=email)
+                    return _twofa_codes_page(codes, "Fresh recovery codes")
+                return _layout(
+                    "Two-factor",
+                    _twofa_enabled_body(
+                        user,
+                        error="Enter a valid current code to issue fresh recovery codes.",
+                        error_action="regenerate",
+                    ),
+                    active="",
+                ), 400
             return jsonify({"error": "unknown action"}), 400
         if user.totp_secret:
-            body = f"""
-<div class="card" style="max-width:520px;margin:40px auto">
-  <h2>Two-factor authentication is <span class="tag ok">on</span></h2>
-  <form method="post" action="{url_for("account_2fa")}">
-    <input type="hidden" name="action" value="disable">
-    <label>Current code to switch it off<br><input type="text" name="totp" inputmode="numeric" maxlength="7" required></label>
-    <button class="btn secondary" type="submit">Disable 2FA</button>
-  </form>
-</div>
-"""
-        else:
-            secret = session.get("totp_setup_secret") or _auth.totp_generate_secret()
-            session["totp_setup_secret"] = secret
-            uri = _auth.totp_provisioning_uri(secret, email)
-            body = f"""
-<div class="card" style="max-width:560px;margin:40px auto">
-  <h2>Set up two-factor authentication</h2>
-  <p>Add this secret to your authenticator app (Aegis, Google Authenticator, 1Password…):</p>
-  <p><code>{_h(secret)}</code></p>
-  <p class="muted" style="word-break:break-all">{_h(uri)}</p>
-  <form method="post" action="{url_for("account_2fa")}">
-    <input type="hidden" name="action" value="enable">
-    <label>Enter the current 6-digit code to confirm<br><input type="text" name="totp" inputmode="numeric" maxlength="7" required></label>
-    <button class="btn" type="submit">Enable 2FA</button>
-  </form>
-</div>
-"""
-        return _layout("Two-factor", body, active="")
+            return _layout("Two-factor", _twofa_enabled_body(user), active="")
+        return _twofa_no_store(_layout("Two-factor", _twofa_setup_body(email), active=""))
 
     @app.route("/logout", methods=["GET", "POST"])
     def logout():

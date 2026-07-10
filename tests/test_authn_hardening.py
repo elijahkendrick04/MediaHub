@@ -200,7 +200,10 @@ def test_2fa_enable_and_login_flow(client, tmp_path):
 
     code = _totp_code(secret, int(time.time() // 30))
     r = client.post("/account/2fa", data={"action": "enable", "totp": code})
-    assert r.status_code == 302
+    # H-20: enable success renders the show-once recovery-codes page (200)
+    # instead of redirecting straight back to the settings page.
+    assert r.status_code == 200
+    assert "recovery" in r.get_data(as_text=True).lower()
 
     # fresh login now requires the second factor
     client.get("/logout")
