@@ -6,7 +6,13 @@ that launched 150+ concurrent fetches and stacked up to 150 success toasts,
 with no aggregate result and any failure reverting silently. A single-request
 bulk endpoint (``api_cards_bulk_status``) that returns per-card gate results
 already exists and is used by the neighbouring bulk bar. This guards that
-"Approve all in queue" now routes through that bulk bar.
+"Approve all in queue" makes exactly ONE bulk POST.
+
+J-3 update: the review list is now paginated server-side, so the handler no
+longer ticks the visible rows' checkboxes (that would approve only the current
+page). It reads the server-embedded FULL queued-id list (``#mh-queued-ids``)
+and POSTs it to ``api_cards_bulk_status`` in one request — same single-POST
+intent, now covering the whole queue.
 """
 
 from __future__ import annotations
@@ -86,12 +92,17 @@ def _seed_run(env, swim_ids):
 def test_approve_all_routes_through_single_post_bulk_bar(env):
     run_id = _seed_run(env, ["s1", "s2", "s3"])
     html = env["client"].get(f"/review/{run_id}").get_data(as_text=True)
-    # The handler ticks every queued row's checkbox and triggers the bulk bar's
-    # Approve — one request, one summary toast.
+    # One request, one summary toast: the handler reads the server-embedded
+    # full queued-id list and fires a single JSON POST to the bulk endpoint
+    # (J-3 replaced the old tick-the-visible-checkboxes path, which under
+    # pagination would only ever approve the current page).
     assert "mh-review-bulk" in html
-    assert '[data-mh-bulk="approve"]' in html
-    assert ".mh-row-check" in html
-    assert "approveBtn.click()" in html
+    assert '<script type="application/json" id="mh-queued-ids">' in html
+    assert f"/api/runs/{run_id}/cards/bulk-status" in html
+    assert "JSON.stringify({ids: ids, status: 'approved'})" in html
+    # The legacy per-card / per-page paths are gone.
+    assert "approveBtn.click()" not in html
+    assert "Approving ' + n + ' card" not in html
 
 
 def test_bulk_endpoint_approves_many_in_one_request(env):
