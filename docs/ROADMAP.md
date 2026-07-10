@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-07-10 · `71a627d25` · [live-meet] record final merge status in audit report
+**Last updated:** 2026-07-10 · `651cf2bc3` · [spotlight] audit report for the athlete-spotlight (meet recap) feature
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1227,6 +1227,10 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-07-10 | `651cf2bc3` | [spotlight] audit report for the athlete-spotlight (meet recap) feature |
+| 2026-07-10 | `cb253ae35` | [spotlight] regression tests locking the audit fixes |
+| 2026-07-10 | `4f859259f` | [spotlight] harden spotlight routes: JS-context XSS, path traversal, reel guards |
+| 2026-07-10 | `9c37fe49b` | [spotlight] fix null-priority crash and drop dead QualityBand map |
 | 2026-07-10 | `71a627d25` | [live-meet] record final merge status in audit report |
 | 2026-07-10 | `0c1373887` | [live-meet] add audit report (docs/audits/AUDIT_live-meet.md) |
 | 2026-07-10 | `13a6b5e4a` | [live-meet] lock fixed behaviour with regression tests |
@@ -1235,8 +1239,4 @@ list and the auto table below, not here.
 | 2026-07-10 | `b8f098388` | [language] audit report for the interface-language switcher (C-16) |
 | 2026-07-10 | `4ec7ec77d` | [language] stop ?lang= reverting an explicit switch; localise mobile nav |
 | 2026-07-10 | `9435f89bc` | [language] fix interface-language switcher silently failing for no-org visitors |
-| 2026-07-10 | `8706d0130` | [elements] record final merge status in audit report |
-| 2026-07-10 | `b9d62fc45` | [elements] lock XSS/render fixes with tests + audit report |
-| 2026-07-10 | `acb6fe8be` | [elements] harden element SVGs against XSS and render org-custom packs |
-| 2026-07-09 | `a62fcb542` | docs: session hand-off for the next usability-audit session |
 <!-- /ROADMAP:ACTIVITY -->
