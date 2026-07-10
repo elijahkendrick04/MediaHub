@@ -26679,15 +26679,40 @@ Relay team broke club record"></textarea>
   files, caches, caption memory and posting-log excerpts. Irreversible.</p>
   {_erase_error_html}
   <form method="post" action="{url_for("privacy_athlete_erase")}"
-        onsubmit="return confirm('Erase this athlete from all stored data? This cannot be undone.')"
+        onsubmit="return mhEraseAthleteConfirm(this)"
         style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
     <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--ink-muted)">Full name
       <input type="text" name="athlete_name" required placeholder="e.g. Jane Smith" value="{_ev_name}" /></label>
     <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--ink-muted)">Club (optional)
       <input type="text" name="athlete_club" placeholder="for exact cache match" value="{_ev_club}" /></label>
-    <button class="btn secondary" type="submit">Erase athlete</button>
+    <button class="btn danger" type="submit">Erase athlete</button>
   </form>
 </div>"""
+            # E-14: erasing a person is irreversible and wide-reaching, so the
+            # confirm spells out exactly what it wipes — via the styled
+            # MH.confirm where loaded, with a native confirm fallback. Plain
+            # string (not an f-string) so the JS braces stay single.
+            _rights_tools_html += """
+<script>
+function mhEraseAthleteConfirm(f) {
+  if (f.dataset.mhConfirmed === '1') { f.dataset.mhConfirmed = ''; return true; }
+  var name = (f.athlete_name && f.athlete_name.value ? f.athlete_name.value.trim() : '') || 'this athlete';
+  var scope = 'Erasing ' + name + ' removes them from every meet\\u2019s results, rendered graphics, caches, caption memory and posting logs \\u2014 this cannot be undone.';
+  if (window.MH && MH.confirm) {
+    MH.confirm({
+      title: 'Erase ' + name + ' from everything?',
+      body: scope,
+      confirmText: 'Erase athlete',
+      onConfirm: function() {
+        f.dataset.mhConfirmed = '1';
+        if (f.requestSubmit) f.requestSubmit(); else f.submit();
+      }
+    });
+    return false;
+  }
+  return confirm(scope);
+}
+</script>"""
             from mediahub.privacy import list_corrections
 
             open_corrections = list_corrections(active_org, status="open")
@@ -52203,6 +52228,10 @@ where they appeared, ready to forward.</p>
         if entry is not None:
             registry = [s for s in (prof.sponsors or [])]
             # Replace an entry with the same id (same name) instead of duplicating.
+            _had_existing = any(
+                isinstance(s, dict) and s.get("sponsor_id") == entry["sponsor_id"]
+                for s in registry
+            )
             registry = [
                 s
                 for s in registry
@@ -52211,6 +52240,14 @@ where they appeared, ready to forward.</p>
             registry.append(entry)
             prof.sponsors = registry
             save_profile(prof)
+            # E-14: the replace semantics stay, but the user is told — a
+            # same-named add used to overwrite the existing entry silently.
+            if _had_existing:
+                _flash_toast(
+                    f"Updated existing sponsor {entry['name']} — "
+                    "its previous details were replaced.",
+                    "info",
+                )
         return redirect(url_for("sponsors_page"))
 
     @app.route("/sponsors/delete", methods=["POST"])
