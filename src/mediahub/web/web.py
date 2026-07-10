@@ -13616,10 +13616,14 @@ def _render_content_builder(pack_id: str, rec: dict, mode: str = "spotlight") ->
 def _ui_locale() -> str:
     """Resolve the UI-chrome language for this request (1.24 localisation).
 
-    Order: a ``?lang=`` override → a ``ui_lang`` session pin → the signed-in
-    org's primary caption language when we ship that UI locale → English. Only
+    Order: a ``?lang=`` override → a ``ui_lang`` session pin → English. Only
     locales that actually have a UI catalogue are honoured, so the chrome is
     never half-translated into a locale we don't have — it degrades to English.
+
+    G-11: deliberately NO fallback to the org's caption language — choosing
+    "Cymraeg (Welsh)" as the *caption* language must not silently flip the
+    whole interface. The interface language is driven only by the explicit
+    controls (the C-16 switcher / ``?lang=``).
     """
     from mediahub.localize.ui_catalogue import DEFAULT_UI_LOCALE, has_ui_locale
 
@@ -13644,16 +13648,6 @@ def _ui_locale() -> str:
         s = (session.get("ui_lang") or "").strip().lower()
         if s and has_ui_locale(s):
             return s.split("-", 1)[0]
-    except Exception:
-        pass
-    try:
-        pid = (session.get("active_profile_id") or "").strip()
-        if pid:
-            from mediahub.web.languages import primary_language_for
-
-            prim = primary_language_for(load_profile(pid))
-            if has_ui_locale(prim):
-                return prim
     except Exception:
         pass
     return DEFAULT_UI_LOCALE
@@ -29711,6 +29705,11 @@ self.addEventListener('fetch', function(e){
         "no-attest": (False, "Tick the licence box to confirm you're allowed to embed this font."),
         "bad-font": (False, "That file isn't a usable font, or its licence forbids embedding."),
         "no-tooling": (False, "Font processing isn't available on this deployment right now."),
+        "pairing-applied": (True, "Pairing applied — your cards will use this typography trio."),
+        "pairing-invalid": (
+            False,
+            "That pairing could not be applied — ask for a new suggestion and try again.",
+        ),
     }
 
     def _typography_banner(status: str) -> str:
@@ -29761,6 +29760,23 @@ self.addEventListener('fetch', function(e){
         )
 
         # --- AI pairing ---
+        # H-16: show the pairing the club has applied (if any) so the state of
+        # "Apply this pairing to my brand" is visible where it was chosen.
+        applied_line = ""
+        try:
+            from mediahub.brand.store import load_brand as _load_brand_for_type
+
+            _kit_for_type, _t_unused, _tpl_unused = _load_brand_for_type(pid)
+            _applied = getattr(_kit_for_type, "type_pairing", None) or {}
+        except Exception:
+            _applied = {}
+        if _applied.get("headline_family"):
+            applied_line = (
+                '<p style="font-size:12px;color:var(--ink-dim);margin:8px 0 0">'
+                f"Applied pairing: <strong>{_h(_applied.get('headline_family') or '')}</strong> "
+                f"headlines · {_h(_applied.get('body_family') or '')} body · "
+                f"{_h(_applied.get('numeral_family') or '')} numerals</p>"
+            )
         pairing = (
             '<div class="card"><h2 style="margin-top:0">AI font pairing</h2>'
             '<p style="color:var(--ink-dim)">Ask the engine to pick a headline / body / numeral '
@@ -29771,7 +29787,8 @@ self.addEventListener('fetch', function(e){
             'style="flex:1;min-width:220px;padding:8px 10px" maxlength="60">'
             '<button class="btn" type="submit">Suggest a pairing</button></form>'
             '<p style="font-size:12px;color:var(--ink-muted);margin-bottom:0">Uses your '
-            "configured AI provider; shows an honest message if none is set.</p></div>"
+            "configured AI provider; shows an honest message if none is set.</p>"
+            f"{applied_line}</div>"
         )
 
         # --- Club's own uploaded fonts ---
@@ -29890,11 +29907,21 @@ self.addEventListener('fetch', function(e){
         try:
             result = _dt.ai_type_pairing(PairingContext(club_name=name, mood=mood))
         except Exception as e:
+            # H-16: honest, plain-English failure — the raw exception goes to
+            # the server log only, never the page (and never a fabricated
+            # pairing).
+            log.warning("AI font pairing failed: %s", e, exc_info=True)
+            from mediahub.ai_core import ProviderNotConfigured as _PNC
+            from mediahub.media_ai.llm import ClaudeUnavailableError as _CUE
+
+            if isinstance(e, (_PNC, _CUE)):
+                msg = "AI suggestions are unavailable on this deployment."
+            else:
+                msg = "We could not suggest a pairing just now — please try again in a moment."
             body = (
                 '<section class="mh-hero"><span class="mh-hero-eyebrow">Typography</span>'
                 '<h1 style="margin-bottom:0">AI pairing</h1></section>'
-                '<div class="card"><p style="color:#e74c3c">AI pairing is unavailable: '
-                f"{_h(str(e)[:200])}</p>"
+                f'<div class="card"><p style="color:var(--bad)">{_h(msg)}</p>'
                 f'<a class="btn" href="{back}">Back to typography</a></div>'
             )
             return _layout("Typography · pairing", body, active="settings")
@@ -29904,6 +29931,17 @@ self.addEventListener('fetch', function(e){
             if result.get("corrected")
             else ""
         )
+        # H-16: the suggestion is applicable, not a dead end — the form carries
+        # the trio to typography_pair_apply, which persists it to the brand kit.
+        apply_form = (
+            f'<form method="post" action="{url_for("typography_pair_apply")}" '
+            'style="display:inline-block;margin-right:8px">'
+            f'<input type="hidden" name="pairing" value="{_h(result.get("pairing") or "")}">'
+            f'<input type="hidden" name="headline_family" value="{_h(result["headline_family"])}">'
+            f'<input type="hidden" name="body_family" value="{_h(result["body_family"])}">'
+            f'<input type="hidden" name="numeral_family" value="{_h(result["numeral_family"])}">'
+            '<button class="btn" type="submit">Apply this pairing to my brand</button></form>'
+        )
         body = (
             '<section class="mh-hero"><span class="mh-hero-eyebrow">Typography</span>'
             '<h1 style="margin-bottom:0">Suggested pairing</h1></section>'
@@ -29912,9 +29950,49 @@ self.addEventListener('fetch', function(e){
             f"<strong>Body:</strong> {_h(result['body_family'])}<br>"
             f"<strong>Numerals:</strong> {_h(result['numeral_family'])}</p>"
             f'<p style="color:var(--ink-dim)">{_h(result["reason"])}</p>{corrected}'
-            f'<a class="btn" href="{back}">Back to typography</a></div>'
+            f'{apply_form}<a class="btn ghost" href="{back}">Back to typography</a></div>'
         )
         return _layout("Typography · pairing", body, active="settings")
+
+    @app.route("/settings/typography/pair/apply", methods=["POST"])
+    def typography_pair_apply():
+        """H-16: persist an AI-suggested pairing to the active club's brand kit.
+
+        The trio is re-validated against the self-hosted catalogue (family
+        names only — a form value can't smuggle an arbitrary font), then saved
+        through the brand write path everything else uses (``save_brand`` on
+        the profile JSON). ``resolve_design_tokens`` surfaces it as the
+        club's ``type`` block.
+        """
+        prof = _active_profile()
+        if prof is None:
+            return redirect(url_for("settings_page"))
+        from mediahub.typography import catalog as _cat
+
+        families = {f.family for f in _cat.load_catalog()}
+        headline = (request.form.get("headline_family") or "").strip()
+        body_family = (request.form.get("body_family") or "").strip()
+        numeral = (request.form.get("numeral_family") or "").strip()
+        if not ({headline, body_family, numeral} <= families):
+            return redirect(
+                url_for("settings_section", section="typography", status="pairing-invalid")
+            )
+        # The renderer override key the AI path emits (Pairing.typography_pair).
+        pairing_key = (request.form.get("pairing") or "").strip().lower()
+        if pairing_key not in {"anton-inter", "bebas-grotesk", "bowlby-inter"}:
+            pairing_key = "anton-inter"
+        from mediahub.brand.store import load_brand, save_brand
+
+        kit, _tone_unused, _templates_unused = load_brand(prof.profile_id)
+        kit.type_pairing = {
+            "pairing": pairing_key,
+            "headline_family": headline,
+            "body_family": body_family,
+            "numeral_family": numeral,
+            "source": "ai",
+        }
+        save_brand(prof.profile_id, kit=kit)
+        return redirect(url_for("settings_section", section="typography", status="pairing-applied"))
 
     # ------------------------------------------------------------------
     # Audio engine (roadmap 1.8) — library, voices, pronunciation lexicon,
@@ -29932,6 +30010,42 @@ self.addEventListener('fetch', function(e){
     }
     _AUDIO_UPLOAD_MAX_BYTES = 25 * 1024 * 1024  # 25 MB — clips/beds, not albums
 
+    # H-15: every status code a form POST can redirect back with, mapped to the
+    # plain-English banner copy the audio settings page renders (mirrors the
+    # _TYPOGRAPHY_STATUS pattern). Copy lives here server-side — raw exception
+    # text never reaches the page or the URL.
+    _AUDIO_ALLOWED_TYPES = ", ".join(sorted(s.lstrip(".").upper() for s in _AUDIO_UPLOAD_SUFFIXES))
+    _AUDIO_STATUS = {
+        "audio_added": (True, "Track added — it is listed under Your uploaded audio below."),
+        "audio_removed": (True, "Track removed."),
+        "lexicon_saved": (True, "Pronunciation saved — voiceovers will now say the name that way."),
+        "lexicon_removed": (True, "Pronunciation override removed."),
+        "consent_recorded": (True, "Consent recorded — the feature is now enabled."),
+        "consent_revoked": (True, "Consent revoked — the feature is switched off."),
+        "lexicon_invalid": (
+            False,
+            "Pronunciation not saved — enter both the written name and how to say it.",
+        ),
+        "consent_invalid": (
+            False,
+            "That consent change could not be recorded — please try again.",
+        ),
+        "no_file": (False, "Upload failed — choose an audio file first."),
+        "bad_type": (
+            False,
+            f"Upload failed — that file type is not supported. Use one of: {_AUDIO_ALLOWED_TYPES}.",
+        ),
+        "too_large": (False, "Upload failed — that audio is over the 25 MB limit."),
+        "save_failed": (False, "Upload failed — we could not save that file. Please try again."),
+        "no_org": (False, "Choose an organisation first, then try again."),
+        "not_found": (False, "That track was not found — it may already have been removed."),
+        "audio_unavailable": (
+            False,
+            "Audio features are not available on this deployment right now.",
+        ),
+        "error": (False, "That did not work — please try again."),
+    }
+
     def _audio_back_or_json(payload: dict, status: int = 200, *, flash_status: str = ""):
         from flask import request as _req
 
@@ -29941,17 +30055,14 @@ self.addEventListener('fetch', function(e){
         )
         if wants_json:
             return jsonify(payload), status
-        # D-14: a browser form POST must never land on a bare JSON error page.
-        # Redirect back with a friendly banner instead — the styled error card
-        # the graceful pages use — keeping the JSON body only for JSON callers.
-        if payload.get("error"):
-            emsg = payload.get("message") or "That didn't work — check the file and try again."
-            return redirect(url_for("settings_section", section="audio", status="error", emsg=emsg))
-        # D-7: a form POST navigates back to the audio settings; carry a status
-        # so the section can confirm the action ("Track added" / "Track removed")
-        # instead of a silent redirect the volunteer can't tell worked.
-        if flash_status:
-            return redirect(url_for("settings_section", section="audio", status=flash_status))
+        # D-14 / D-7 / H-15: a browser form POST must never land on a bare JSON
+        # page or a silent redirect. Carry a status CODE back to the audio
+        # settings page — _AUDIO_STATUS maps each code to plain-English banner
+        # copy server-side (success confirmations and error explanations), so
+        # raw exception text never reaches the customer.
+        code = flash_status or (payload.get("error") or "")
+        if code:
+            return redirect(url_for("settings_section", section="audio", status=code))
         return redirect(url_for("settings_section", section="audio"))
 
     @app.route("/api/audio/library")
@@ -30035,8 +30146,13 @@ self.addEventListener('fetch', function(e){
                     (_req.form.get("spoken") or "").strip(),
                 )
         except ValueError as e:
-            return _audio_back_or_json({"error": "invalid", "message": str(e)}, 400)
-        return _audio_back_or_json({"ok": True, "entries": lex.entries()})
+            return _audio_back_or_json(
+                {"error": "invalid", "message": str(e)}, 400, flash_status="lexicon_invalid"
+            )
+        return _audio_back_or_json(
+            {"ok": True, "entries": lex.entries()},
+            flash_status="lexicon_removed" if op == "remove" else "lexicon_saved",
+        )
 
     @app.route("/api/audio/upload", methods=["POST"])
     def api_audio_upload():
@@ -30222,8 +30338,13 @@ self.addEventListener('fetch', function(e){
                     granted_by=pid,
                 )
         except ValueError as e:
-            return _audio_back_or_json({"error": "invalid", "message": str(e)}, 400)
-        return _audio_back_or_json({"ok": True})
+            return _audio_back_or_json(
+                {"error": "invalid", "message": str(e)}, 400, flash_status="consent_invalid"
+            )
+        return _audio_back_or_json(
+            {"ok": True},
+            flash_status="consent_revoked" if action == "revoke" else "consent_recorded",
+        )
 
     @app.route("/api/audio/suggest")
     def api_audio_suggest():
@@ -30417,28 +30538,19 @@ self.addEventListener('fetch', function(e){
                     "and it'll appear here to preview or remove.</p>"
                 )
 
-        # D-7: confirm the upload/remove that a form POST just performed, so the
-        # volunteer sees it worked instead of a silent redirect.
+        # D-7 / D-14 / H-15: confirm or explain the action a form POST just
+        # performed. Every code maps to plain-English copy in _AUDIO_STATUS —
+        # the volunteer always sees a styled banner (success confirmation or
+        # error explanation), never raw exception text or a silent redirect.
         _audio_flash = (request.args.get("status") or "").strip()
         banner_html = ""
-        if _audio_flash == "audio_added":
+        _spec = _AUDIO_STATUS.get(_audio_flash)
+        if _spec:
+            _ok, _text = _spec
+            _colour = "var(--good)" if _ok else "var(--bad)"
             banner_html = (
-                '<div class="card" style="border-left:2px solid var(--good);margin-bottom:14px">'
-                '<strong style="color:var(--good)">Track added.</strong> '
-                'It\'s listed under "Your uploaded audio" below.</div>'
-            )
-        elif _audio_flash == "audio_removed":
-            banner_html = (
-                '<div class="card" style="border-left:2px solid var(--warn);margin-bottom:14px">'
-                "Track removed.</div>"
-            )
-        elif _audio_flash == "error":
-            # D-14: an upload validation error, rendered as a styled card instead
-            # of a bare JSON page. The message is server-supplied; escape it.
-            _emsg = _h((request.args.get("emsg") or "").strip()[:300]) or "That upload didn't work."
-            banner_html = (
-                '<div class="card" style="border-left:2px solid var(--bad);margin-bottom:14px">'
-                f'<strong style="color:var(--bad)">Upload failed.</strong> {_emsg}</div>'
+                f'<div class="card" style="border-left:2px solid {_colour};margin-bottom:14px">'
+                f'<p style="margin:0">{_h(_text)}</p></div>'
             )
 
         # --- Voice consent (cloning / changer; off by default) ---
@@ -37995,6 +38107,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
       <label>Caption language</label>
       <select name="language" style="{_input_style}">{language_opts}</select>
       <p style="font-size:12px;color:var(--ink-dim);margin-top:4px">Captions and alt text are written in this language. Bilingual options write every caption in English with a side-by-side translation, approved together in one pass.</p>
+      <p style="font-size:12px;color:var(--ink-muted);margin-top:4px">This affects generated captions only &mdash; change the app language from the Interface language control.</p>
     </div>
     <div>
       <label>Result file codes</label>

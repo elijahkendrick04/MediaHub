@@ -173,6 +173,7 @@ def render_editor_body(
         '<button type="button" class="btn secondary" id="pe-enhance">&#10022; Enhance</button>'
         '<button type="button" class="btn ghost" id="pe-undo">Undo</button>'
         '<button type="button" class="btn ghost" id="pe-reset">Reset</button>'
+        '<button type="button" class="btn ghost" id="pe-undo-reset" hidden>Undo reset</button>'
         '<span class="pe-saved dim" id="pe-saved" role="status" aria-live="polite"></span>'
         "</div>"
         "</div>"
@@ -348,6 +349,15 @@ _JS = r"""
   var blurStamps=[], eraseStamps=[];
   var history=[];             // recipe snapshots for Undo
   var brushMode='blur_brush', brushSize=8, cropDrag=null;
+  // E-10: edits live only client-side until "Apply & save" — track a dirty
+  // flag so a mis-click on "← Library" (or any navigation) can't silently
+  // throw work away, and hold the last reset-away recipe for "Undo reset".
+  var dirty=false, undoRecipe=null;
+
+  function markDirty(){ dirty=true;
+    undoRecipe=null; var ur=document.getElementById('pe-undo-reset'); if(ur) ur.hidden=true; }
+  window.addEventListener('beforeunload',function(ev){
+    if(!dirty) return; ev.preventDefault(); ev.returnValue=''; });
 
   function snapshot(){ history.push(JSON.stringify(serialise())); if(history.length>40) history.shift(); }
 
@@ -362,7 +372,7 @@ _JS = r"""
 
   // ---- server preview (debounced) ----
   var timer=null, inflight=false, pending=false;
-  function schedulePreview(){ if(timer) clearTimeout(timer); timer=setTimeout(preview,160); }
+  function schedulePreview(){ markDirty(); if(timer) clearTimeout(timer); timer=setTimeout(preview,160); }
   function preview(){
     if(inflight){pending=true;return;}
     inflight=true; busy.hidden=false;
@@ -528,24 +538,89 @@ _JS = r"""
         j.recipe.steps.forEach(function(s){ ops[s.op]=s.params; }); schedulePreview();
         flash('Enhanced — review & save'); }}).catch(function(){});
   });
-  document.getElementById('pe-reset').addEventListener('click',function(){ snapshot();
+  // E-10: Reset is confirmed and two-staged — discarding unsaved tweaks
+  // (client-side only) is a different act from deleting the saved edit (the
+  // POST), and a deleted saved edit can be brought straight back.
+  function confirmBox(opts){
+    if(window.MH&&MH.confirm){ MH.confirm(opts); }
+    else if(window.confirm((opts.title||'Are you sure?')+'\n\n'+(opts.body||''))){
+      if(opts.onConfirm) opts.onConfirm(); }
+  }
+  function hasSavedEdit(){ return !!(cfg.recipe&&cfg.recipe.steps&&cfg.recipe.steps.length); }
+  function clearControls(){
+    Array.prototype.forEach.call(document.querySelectorAll('input[type=range][data-op]'),function(el){
+      el.value=el.getAttribute('data-default'); var l=document.getElementById(el.id+'-v'); if(l)l.textContent=el.value;});
+    Array.prototype.forEach.call(document.querySelectorAll('.pe-filter'),function(b){b.classList.remove('is-on');});
+    if(filterInt){ filterInt.value=100; if(filterIntV) filterIntV.textContent='100'; }
+    if(duoOn) duoOn.checked=false; if(frOn) frOn.checked=false;
+    if(shapeSel) shapeSel.value=''; if(shapeF){ shapeF.value=0; if(shapeFV) shapeFV.textContent='0'; }
+    if(pH){ pH.value=0; document.getElementById('pe-persp-h-v').textContent='0'; }
+    if(pV){ pV.value=0; document.getElementById('pe-persp-v-v').textContent='0'; }
+    document.getElementById('pe-fliph').classList.remove('is-on');
+    document.getElementById('pe-flipv').classList.remove('is-on');
+  }
+  function loadRecipe(rec){ ops={}; blurStamps=[]; eraseStamps=[];
+    ((rec&&rec.steps)||[]).forEach(function(s){ if(s.op==='blur_brush'){blurStamps=(s.params&&s.params.stamps)||[];}
+      else if(s.op==='eraser'){eraseStamps=(s.params&&s.params.stamps)||[];} else {ops[s.op]=s.params;} }); }
+  function discardTweaks(){
+    if(timer) clearTimeout(timer);
+    loadRecipe(cfg.recipe); clearControls(); restoreControls(); paintStamps();
+    img.src=(hasSavedEdit()?cfg.editedUrl:cfg.assetUrl)+'?t='+Date.now();
+    history=[]; dirty=false;
+    flash(hasSavedEdit()?'Back to your saved edit':'Tweaks discarded');
+  }
+  function serverReset(){
+    var previous=hasSavedEdit()?cfg.recipe:null;
     fetch(cfg.resetUrl,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'})
       .then(function(r){return r.json();}).then(function(j){
         if(!(j&&j.ok)){ flash((j&&j.error)||'Reset failed'); return; }
+        if(timer) clearTimeout(timer);
+        undoRecipe=previous; cfg.recipe={steps:[]};
         ops={}; blurStamps=[];eraseStamps=[];
-        Array.prototype.forEach.call(document.querySelectorAll('input[type=range][data-op]'),function(el){
-          el.value=el.getAttribute('data-default'); var l=document.getElementById(el.id+'-v'); if(l)l.textContent=el.value;});
-        setFilter(''); paintStamps(); img.src=cfg.assetUrl+'?t='+Date.now(); flash('Reset');
-      }).catch(function(){flash('Reset failed');}); });
+        clearControls(); paintStamps(); img.src=cfg.assetUrl+'?t='+Date.now();
+        history=[]; dirty=false;
+        var ur=document.getElementById('pe-undo-reset');
+        if(ur&&undoRecipe) ur.hidden=false;
+        flash(undoRecipe?'Saved edit deleted':'Reset');
+      }).catch(function(){flash('Reset failed');});
+  }
+  document.getElementById('pe-reset').addEventListener('click',function(){
+    if(dirty){
+      confirmBox({title:'Discard your unsaved tweaks?',
+        body:hasSavedEdit()
+          ?'This returns the photo to its last saved edit. The saved edit is kept — press Reset again afterwards to delete it too.'
+          :'This returns the photo to the original. Nothing has been saved yet.',
+        confirmText:'Discard tweaks', onConfirm:discardTweaks});
+    } else if(hasSavedEdit()){
+      confirmBox({title:'Delete the saved edit?',
+        body:'This permanently clears the saved edit for this photo and returns it to the original. You can bring it straight back with Undo reset.',
+        confirmText:'Delete saved edit', onConfirm:serverReset});
+    } else { flash('Nothing to reset'); }
+  });
+  document.getElementById('pe-undo-reset').addEventListener('click',function(){
+    if(!undoRecipe) return; var rec=undoRecipe;
+    fetch(cfg.applyUrl,{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(rec)}).then(function(r){return r.json();})
+      .then(function(j){ if(j&&j.ok){
+          if(timer) clearTimeout(timer);
+          undoRecipe=null; var ur=document.getElementById('pe-undo-reset'); if(ur) ur.hidden=true;
+          cfg.recipe=rec; loadRecipe(rec); clearControls(); restoreControls(); paintStamps();
+          img.src=(j.edited_url||cfg.editedUrl)+'?t='+Date.now();
+          dirty=false; flash('Edit restored'); }
+        else { flash((j&&j.error)||'Undo failed'); } }).catch(function(){flash('Undo failed');});
+  });
   document.getElementById('pe-undo').addEventListener('click',function(){ if(!history.length) return;
     var prev=JSON.parse(history.pop()); ops={}; blurStamps=[];eraseStamps=[];
     (prev.steps||[]).forEach(function(s){ if(s.op==='blur_brush'){blurStamps=s.params.stamps||[];}
       else if(s.op==='eraser'){eraseStamps=s.params.stamps||[];} else {ops[s.op]=s.params;} });
     paintStamps(); preview(); });
   document.getElementById('pe-apply').addEventListener('click',function(){
+    var rec=serialise();
     fetch(cfg.applyUrl,{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify(serialise())}).then(function(r){return r.json();})
-      .then(function(j){ if(j&&j.ok){ flash('Saved'); if(j.edited_url){ img.src=j.edited_url+'?t='+Date.now(); } }
+      body:JSON.stringify(rec)}).then(function(r){return r.json();})
+      .then(function(j){ if(j&&j.ok){ cfg.recipe=rec; dirty=false; undoRecipe=null;
+          var ur=document.getElementById('pe-undo-reset'); if(ur) ur.hidden=true;
+          flash('Saved'); if(j.edited_url){ img.src=j.edited_url+'?t='+Date.now(); } }
         else { flash((j&&j.error)||'Save failed'); } }).catch(function(){flash('Save failed');});
   });
   Array.prototype.forEach.call(document.querySelectorAll('.pe-profile'),function(b){
