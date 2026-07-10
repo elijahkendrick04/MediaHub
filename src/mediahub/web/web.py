@@ -30039,7 +30039,10 @@ self.addEventListener('fetch', function(e){
         "save_failed": (False, "Upload failed — we could not save that file. Please try again."),
         "no_org": (False, "Choose an organisation first, then try again."),
         "not_found": (False, "That track was not found — it may already have been removed."),
-        "audio_unavailable": (False, "Audio features are not available on this deployment right now."),
+        "audio_unavailable": (
+            False,
+            "Audio features are not available on this deployment right now.",
+        ),
         "error": (False, "That did not work — please try again."),
     }
 
