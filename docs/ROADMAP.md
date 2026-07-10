@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-07-10 · `21a8c1e5d` · Merge pull request #1103 from elijahkendrick04/claude/audit-free-text-bb9chy
+**Last updated:** 2026-07-10 · `f9e1d8205` · Merge pull request #1122 from claude/design-studio-audit-x8856m
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1234,7 +1234,8 @@ list and the auto table below, not here.
 | 2026-07-10 | `1503bb485` | chore: apply end-of-file-fixer autofix to AUDIT_meet-recap.md |
 | 2026-07-10 | `118ae4e46` | [org-brand] audit report |
 | 2026-07-10 | `95331bcb4` | [season-wraps] fix dropped swimmer/time, non-ISO dates, crashes, idempotency, poster injection |
-| 2026-07-10 | `b7db9b653` | [org-brand] fix palette-defer, reread-None crash and finalise path leak |
-| 2026-07-10 | `1f49c3faa` | [developer-settings] record final merge status in audit report |
-| 2026-07-10 | `1a1b232a8` | [developer-settings] report: baseline comparison confirms flakes are pre-existing |
+| 2026-07-10 | `38a0ebb46` | [design-studio] chore: fix trailing newline tripping pre-commit on main |
+| 2026-07-10 | `6d69ec52a` | [design-studio] audit report: finalise merge status (draft PR #1122) |
+| 2026-07-10 | `93d82592b` | [design-studio] audit report |
+| 2026-07-10 | `4be4273b2` | [design-studio] fix 429 busy copy, 3-digit hex swatch, overlay live region, full coercion |
 <!-- /ROADMAP:ACTIVITY -->
