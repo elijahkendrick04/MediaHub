@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-07-10 · `ca6f02514` · [meet-recap] add end-to-end audit report
+**Last updated:** 2026-07-10 · `fe2605d66` · [meet-recap] record merge status in audit report
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1227,6 +1227,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-07-10 | `fe2605d66` | [meet-recap] record merge status in audit report |
 | 2026-07-10 | `ca6f02514` | [meet-recap] add end-to-end audit report |
 | 2026-07-10 | `56a04395c` | [meet-recap] lock audit fixes with tests |
 | 2026-07-10 | `b24525282` | [meet-recap] fix recap "by the numbers" swimmer undercount |
@@ -1238,5 +1239,4 @@ list and the auto table below, not here.
 | 2026-07-10 | `9c37fe49b` | [spotlight] fix null-priority crash and drop dead QualityBand map |
 | 2026-07-10 | `71a627d25` | [live-meet] record final merge status in audit report |
 | 2026-07-10 | `0c1373887` | [live-meet] add audit report (docs/audits/AUDIT_live-meet.md) |
-| 2026-07-10 | `13a6b5e4a` | [live-meet] lock fixed behaviour with regression tests |
 <!-- /ROADMAP:ACTIVITY -->
