@@ -153,7 +153,13 @@ def load_metrics(org_id: str, *, data_dir: Optional[Path] = None) -> list[PostMe
         return []
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    except (OSError, ValueError):
+        # "missing/corrupt loads empty" (per the module docstring). ValueError
+        # covers both json.JSONDecodeError (malformed JSON) and UnicodeDecodeError
+        # (a non-UTF-8 file on the durable disk) — both are ValueError subclasses,
+        # neither is an OSError, so the narrower (OSError, JSONDecodeError) used to
+        # let a non-UTF-8 metrics file escape and 500 /plan/analytics and every
+        # analytics API (QA-016; matches inputs.py / planner.py).
         return []
     posts = raw.get("posts") if isinstance(raw, dict) else None
     if not isinstance(posts, list):

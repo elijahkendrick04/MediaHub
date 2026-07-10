@@ -261,3 +261,70 @@ def test_analytics_page_record_and_digest(app_with_org):
 
         # Digest honest-errors without a provider (503), not a fake.
         assert client.post("/api/plan/analytics/digest", json={}).status_code == 503
+
+
+def test_record_route_never_500s_on_malformed_metrics(app_with_org):
+    """Audit: a nested 'metrics' that is a non-dict (number/string/list) must be a
+    clean 400, never an unhandled AttributeError 500."""
+    with app_with_org.test_client() as client:
+        _with_org(client, "org-test")
+        for bad in (5, "x", [1, 2], True):
+            r = client.post(
+                "/api/plan/analytics/record",
+                json={"post_type": "pb_spotlight", "posted_date": "2026-06-10", "metrics": bad},
+            )
+            assert r.status_code == 400, f"metrics={bad!r} should 400, got {r.status_code}"
+
+
+def test_record_route_rejects_data_free_submissions(app_with_org):
+    """Audit: the 'at least one metric' the error promises is now enforced — an
+    all-zero (the form default) or negative-only submission is rejected with 400
+    and never persisted, so no data-free row fabricates a '% below average' signal.
+    A single positive metric (incl. impressions-only) still records."""
+    from mediahub.analytics.store import load_metrics
+
+    with app_with_org.test_client() as client:
+        _with_org(client, "org-test")
+        allzero = client.post(
+            "/api/plan/analytics/record",
+            json={
+                "post_type": "pb_spotlight",
+                "posted_date": "2026-06-10",
+                "metrics": {"likes": 0, "comments": 0, "shares": 0, "saves": 0, "impressions": 0},
+            },
+        )
+        assert allzero.status_code == 400
+        neg = client.post(
+            "/api/plan/analytics/record",
+            json={"post_type": "pb_spotlight", "posted_date": "2026-06-10",
+                  "metrics": {"likes": -5}},
+        )
+        assert neg.status_code == 400
+        # Nothing data-free reached the store.
+        assert load_metrics("org-test") == []
+        # A real metric — including impressions-only — still records.
+        assert client.post(
+            "/api/plan/analytics/record",
+            json={"post_type": "pb_spotlight", "posted_date": "2026-06-11",
+                  "metrics": {"impressions": 200}},
+        ).status_code == 200
+        assert len(load_metrics("org-test")) == 1
+
+
+def test_analytics_surface_survives_non_utf8_metrics_file(app_with_org, tmp_path):
+    """Audit (QA-016 class): a non-UTF-8 metrics file must degrade to empty, not
+    500 /plan/analytics and every analytics API with an unhandled UnicodeDecodeError."""
+    (tmp_path / "analytics").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "analytics" / "org-test.json").write_bytes(
+        b'{"posts": [{"post_type": "result_recap", "posted_date": "2026-01-01", '
+        b'"platform": "caf\xe9\xff"}]}'
+    )
+    with app_with_org.test_client() as client:
+        _with_org(client, "org-test")
+        assert client.get("/plan/analytics").status_code == 200
+        # Recording still works (the corrupt file loaded as empty).
+        assert client.post(
+            "/api/plan/analytics/record",
+            json={"post_type": "result_recap", "posted_date": "2026-01-02",
+                  "metrics": {"likes": 3}},
+        ).status_code == 200

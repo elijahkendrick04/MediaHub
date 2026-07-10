@@ -164,6 +164,27 @@ def test_preview_routes_require_org(app_with_org):
         assert client.get("/plan/grid").status_code == 302
 
 
+def test_channel_preview_route_tolerates_non_list_hashtags(app_with_org):
+    """Audit: a JSON body whose 'hashtags' is a truthy non-list (number/bool)
+    must not 500 the endpoint (the old ``body.get('hashtags') or []`` let it
+    reach preview_card and raise a TypeError). It degrades to no hashtags."""
+    with app_with_org.test_client() as client:
+        _with_org(client, "org-test")
+        for bad in (5, True, {"a": 1}):
+            r = client.post(
+                "/api/channel-preview",
+                json={"caption": "hi", "hashtags": bad, "platform": "instagram"},
+            )
+            assert r.status_code == 200, f"hashtags={bad!r} should not 500"
+            assert r.get_json()["preview"]["hashtags"]["count"] == 0
+        # A real list still counts.
+        good = client.post(
+            "/api/channel-preview",
+            json={"caption": "hi", "hashtags": ["a", "b"], "platform": "instagram"},
+        )
+        assert good.get_json()["preview"]["hashtags"]["count"] == 2
+
+
 def test_channel_preview_page_and_switching(app_with_org):
     with app_with_org.test_client() as client:
         _with_org(client, "org-test")

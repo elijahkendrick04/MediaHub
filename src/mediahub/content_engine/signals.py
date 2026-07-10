@@ -96,6 +96,15 @@ def _today(now: Optional[date] = None) -> date:
     return now or datetime.now(timezone.utc).date()
 
 
+def _anniversary_on(finished: date, year: int) -> date:
+    """The anniversary of ``finished`` in ``year`` (29 Feb → 1 Mar), mirroring the
+    calendar's ``_anniversary_entries`` so the two surfaces never disagree."""
+    try:
+        return finished.replace(year=year)
+    except ValueError:  # 29 Feb in a non-leap year
+        return date(year, 3, 1)
+
+
 # ---------------------------------------------------------------------------
 # OWN — runs, workflow state, draft packs, posting history
 # ---------------------------------------------------------------------------
@@ -170,8 +179,9 @@ def gather_own_signals(
                     kind="run_results",
                     summary=(
                         f"Processed results: {meet_name} ({age_txt}) — "
-                        f"{n_achievements} achievements detected, "
-                        f"{queued} cards in review queue, {approved} approved, {posted} posted."
+                        f"{n_achievements} achievement{'s' if n_achievements != 1 else ''} detected, "
+                        f"{queued} card{'s' if queued != 1 else ''} in review queue, "
+                        f"{approved} approved, {posted} posted."
                     ),
                     provenance=f"runs_v4/{run_id}.json",
                     occurs_at=finished.isoformat() if finished else None,
@@ -354,31 +364,40 @@ def gather_external_signals(
         finished = _parse_when(rec.get("finished_at"))
         if not meet_name or finished is None:
             continue
-        years = today.year - finished.year
-        if years < 1:
+        # The nearest anniversary can fall in the previous, current OR next
+        # calendar year: near a year boundary (late-Dec / early-Jan) the true
+        # nearest occurrence is in today.year ± 1, so testing only
+        # finished.replace(year=today.year) silently misses it and disagrees
+        # with the calendar, which iterates every year the window touches.
+        # Pick the closest real anniversary (past finished.year) to today.
+        best: Optional[tuple[date, int]] = None
+        for cy in (today.year - 1, today.year, today.year + 1):
+            if cy <= finished.year:
+                continue
+            anniv = _anniversary_on(finished, cy)
+            delta = (anniv - today).days
+            if best is None or abs(delta) < abs(best[1]):
+                best = (anniv, delta)
+        if best is None:
             continue
-        try:
-            anniversary = finished.replace(year=today.year)
-        except ValueError:  # 29 Feb
-            anniversary = date(today.year, 3, 1)
-        delta = (anniversary - today).days
-        if abs(delta) <= ANNIVERSARY_WINDOW_DAYS:
-            when_txt = (
-                "today" if delta == 0 else (f"in {delta}d" if delta > 0 else f"{-delta}d ago")
+        anniversary, delta = best
+        if abs(delta) > ANNIVERSARY_WINDOW_DAYS:
+            continue
+        years = anniversary.year - finished.year
+        when_txt = "today" if delta == 0 else (f"in {delta}d" if delta > 0 else f"{-delta}d ago")
+        signals.append(
+            Signal(
+                source="external",
+                kind="anniversary",
+                summary=(
+                    f"{years} year{'s' if years != 1 else ''} since {meet_name} "
+                    f"(anniversary {when_txt})."
+                ),
+                provenance=f"calendar × runs_v4/{rec.get('run_id')}.json",
+                occurs_at=anniversary.isoformat(),
+                payload={"meet_name": meet_name, "years": years, "delta_days": delta},
             )
-            signals.append(
-                Signal(
-                    source="external",
-                    kind="anniversary",
-                    summary=(
-                        f"{years} year{'s' if years > 1 else ''} since {meet_name} "
-                        f"(anniversary {when_txt})."
-                    ),
-                    provenance=f"calendar × runs_v4/{rec.get('run_id')}.json",
-                    occurs_at=anniversary.isoformat(),
-                    payload={"meet_name": meet_name, "years": years, "delta_days": delta},
-                )
-            )
+        )
 
     return signals
 
