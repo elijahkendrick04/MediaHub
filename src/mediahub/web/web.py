@@ -48085,7 +48085,8 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
 {shared_banner}
 <div class="card">
   <h2>Upload photos</h2>
-  <p class="dim" style="margin-bottom:var(--sp-5)">Reusable photos for branded content cards. Pick several at once &mdash; each upload is parsed for athlete, venue, and event metadata so the engine can pull the right shot into the right moment. On a phone you can take a photo or share one straight from your camera roll into the library.</p>
+  <p class="dim" style="margin-bottom:var(--sp-5)">Reusable photos for branded content cards. Pick several at once &mdash; each upload is parsed for athlete, venue, and event metadata so the engine can pull the right shot into the right moment. On a phone you can take a photo or share one straight from your camera roll into the library.
+    No photos of your own yet? <a href="{url_for("stock_page")}">Find stock photos &rarr;</a> &mdash; licence-clean, saved straight into this library.</p>
   <form id="ml-upload-form" data-mh-capture-form method="POST" action="{
             url_for("api_media_library_upload")
         }" enctype="multipart/form-data" data-loader-text="Uploading photos">
@@ -50815,7 +50816,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         run_id = (_req.args.get("run_id") or "").strip()
         card_id = (_req.args.get("card_id") or "").strip()
         add_url = list_url = suggest_url = ""
-        card_label = ""
+        card_label = card_url = ""
         if run_id and card_id:
             run_data = _load_run(run_id)
             if run_data and _can_access_run(run_id, run_data, profile_id):
@@ -50823,6 +50824,9 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                 list_url = add_url
                 suggest_url = url_for("api_element_suggestions", run_id=run_id, card_id=card_id)
                 card_label = card_id
+                # C-12: the add-to-card toast links straight back to the
+                # card's review page so "Added" isn't a dead end.
+                card_url = url_for("review", run_id=run_id)
 
         body = _eb.render_browser_body(
             elements=seed,
@@ -50835,6 +50839,10 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             suggest_url=suggest_url,
             card_label=card_label,
             stock_url=url_for("stock_page"),
+            # C-12: browse-only visits get an explainer + a route into the
+            # card flow (Activity lists the processed meets).
+            activity_url=url_for("activity_page"),
+            card_url=card_url,
         )
         return _layout("Elements", body, active="elements")
 

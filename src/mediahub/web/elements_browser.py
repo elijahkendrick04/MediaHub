@@ -33,8 +33,15 @@ def render_browser_body(
     suggest_url: str = "",
     card_label: str = "",
     stock_url: str = "",
+    activity_url: str = "",
+    card_url: str = "",
 ) -> str:
-    """The Elements browser page body (HTML + scoped CSS + JS)."""
+    """The Elements browser page body (HTML + scoped CSS + JS).
+
+    ``activity_url`` (C-12): where to send a browse-only visitor so they can
+    open a meet's cards and actually place elements. ``card_url`` (C-12): the
+    review page of the card being edited, linked from the add-to-card toast.
+    """
     in_card = bool(add_url and list_url)
     boot = {
         "searchUrl": search_url,
@@ -43,6 +50,7 @@ def render_browser_body(
         "suggestUrl": suggest_url,
         "semantic": bool(semantic),
         "inCard": in_card,
+        "cardUrl": card_url,
     }
 
     kind_chips = "".join(
@@ -67,6 +75,19 @@ def render_browser_body(
             f'<div class="eb-context">Adding to <strong>{_h(card_label or "this card")}</strong>'
             ' · <button type="button" id="eb-suggest" class="eb-link">Suggest for this card</button>'
             ' · <button type="button" id="eb-clear" class="eb-link danger">Clear elements</button></div>'
+        )
+    elif activity_url:
+        # C-12: opened from a plain link (no run/card context) the page used
+        # to be silently look-don't-touch. Say what elements are FOR and route
+        # the visitor into the card flow where "Add to card" actually works.
+        context_line = (
+            '<div class="eb-explain">'
+            "<strong>Elements are stickers and badges you add to a card.</strong> "
+            "Browse them here any time — to place one, open a processed meet and "
+            "pick a card; the card&rsquo;s builder brings you back with "
+            "&ldquo;Add to card&rdquo; switched on. "
+            f'<a href="{_h(activity_url)}">Open a meet&rsquo;s builder &rarr;</a>'
+            "</div>"
         )
 
     grad_html = "".join(
@@ -94,6 +115,10 @@ def render_browser_body(
       border:1px solid var(--line,#2a3140); background:transparent; color:var(--ink-dim,#9aa3b2); }}
     .eb-chip.active {{ background:var(--accent,#FFB81C); color:#10131a; border-color:var(--accent,#FFB81C); font-weight:700; }}
     .eb-context {{ font-size:13px; color:var(--ink-muted,#9aa3b2); margin:6px 0 14px; }}
+    .eb-explain {{ font-size:13px; line-height:1.55; color:var(--ink-muted,#9aa3b2);
+      border:1px dashed var(--line,#2a3140); border-radius:12px; padding:12px 14px; margin:6px 0 16px; }}
+    .eb-explain strong {{ color:var(--ink,#e8ecf3); }}
+    .eb-explain a {{ color:var(--accent,#FFB81C); }}
     .eb-link {{ background:none; border:none; color:var(--accent,#FFB81C); cursor:pointer; font-size:13px; padding:0; }}
     .eb-link.danger {{ color:#f0808a; }}
     .eb-grid {{ display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:14px; }}
@@ -119,6 +144,9 @@ def render_browser_body(
       background:var(--accent,#FFB81C); color:#10131a; padding:10px 18px; border-radius:10px;
       font-weight:700; font-size:13px; opacity:0; transition:opacity .2s; pointer-events:none; z-index:50; }}
     .eb-toast.show {{ opacity:1; }}
+    /* C-12: a toast carrying a "back to the card" link must be clickable. */
+    .eb-toast.linky {{ pointer-events:auto; }}
+    .eb-toast a {{ color:inherit; text-decoration:underline; }}
   </style>
 
   <div class="eb-head">
@@ -158,8 +186,24 @@ def render_browser_body(
   var timer = null;
 
   function toast(msg) {{
-    toastEl.textContent = msg; toastEl.classList.add('show');
-    setTimeout(function(){{ toastEl.classList.remove('show'); }}, 1600);
+    toastEl.textContent = msg; toastEl.classList.remove('linky'); toastEl.classList.add('show');
+    clearTimeout(toastEl._t);
+    toastEl._t = setTimeout(function(){{ toastEl.classList.remove('show'); }}, 1600);
+  }}
+
+  // C-12: success toasts that should route the user somewhere carry a real
+  // link (DOM-built — never innerHTML with data) and stay up long enough to
+  // click.
+  function toastLink(msg, href, label) {{
+    if (!href) {{ toast(msg); return; }}
+    toastEl.textContent = '';
+    toastEl.appendChild(document.createTextNode(msg + ' '));
+    var a = document.createElement('a');
+    a.href = href; a.textContent = label;
+    toastEl.appendChild(a);
+    toastEl.classList.add('show', 'linky');
+    clearTimeout(toastEl._t);
+    toastEl._t = setTimeout(function(){{ toastEl.classList.remove('show', 'linky'); }}, 6000);
   }}
 
   function card(el) {{
@@ -211,7 +255,14 @@ def render_browser_body(
       method: 'POST', headers: {{'Content-Type':'application/json'}},
       body: JSON.stringify({{element_id: b.getAttribute('data-id')}})
     }}).then(function(r){{ return r.json(); }})
-      .then(function(d){{ toast(d.ok ? 'Added — re-render the card to see it' : (d.error || 'Could not add')); b.disabled = false; }})
+      .then(function(d){{
+        if (d.ok) {{
+          toastLink('Added — re-render the card to see it.', BOOT.cardUrl, 'Back to the card →');
+        }} else {{
+          toast(d.error || 'Could not add');
+        }}
+        b.disabled = false;
+      }})
       .catch(function(){{ toast('Could not add'); b.disabled = false; }});
   }});
 
