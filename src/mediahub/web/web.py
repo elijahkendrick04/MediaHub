@@ -40107,22 +40107,22 @@ what you're doing, what they should do.</p>
                     else '<div class="dim mh-cta-note">Included</div>'
                 )
             else:
-                if not configured:
+                if not _billing.plan_purchasable(tier.plan):
+                    # J-15: a tier that can't be bought here (billing not
+                    # configured, or no price wired for it) gets a live route
+                    # to a human — never a dead "Not yet available" pill that
+                    # leaves a treasurer with nothing to click.
                     cta = (
-                        '<div class="btn secondary mh-cta" '
-                        'style="pointer-events:none;opacity:0.6" '
-                        'title="' + _billing.NOT_CONFIGURED_MESSAGE + '">Unavailable</div>'
+                        '<a class="btn secondary mh-cta" '
+                        f'href="mailto:{_legal.CONTACT_EMAIL}'
+                        '?subject=MediaHub%20club%20pricing">'
+                        "Talk to us about pricing</a>"
                     )
                 elif not signed_in:
                     cta = (
                         f'<a class="btn mh-cta" '
                         f'href="{url_for("login_page", next=url_for("pricing_page"))}">'
                         "Log in to upgrade</a>"
-                    )
-                elif not _billing.plan_purchasable(tier.plan):
-                    cta = (
-                        '<div class="btn secondary mh-cta" '
-                        'style="pointer-events:none;opacity:0.6">Not yet available</div>'
                     )
                 else:
                     # CCR 2013: route through the pre-contract information
@@ -40221,7 +40221,7 @@ what you're doing, what they should do.</p>
             '<span class="mh-hero-eyebrow">Pricing</span>'
             '<h1>Simple <em class="editorial">plans</em> for every club.</h1>'
             '<p class="lede">Start free. Upgrade when your club is posting in earnest. '
-            "Annual prepay keeps it cheaper.</p>"
+            "Simple annual pricing.</p>"
             "</section>"
             '<div id="mh-pricing" class="mh-pricing" data-period="annual">'
             f"{toggle}"
