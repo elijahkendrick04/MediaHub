@@ -192,6 +192,15 @@ CSRF-token wiring reuses the existing `_csrf_token()` / `_csrf_protect` guard â€
 the guard itself). One `ruff format` line-wrap was applied to the single import-route line I
 lengthened; no unrelated lines in `web.py` were reformatted.
 
+**Shared-file hygiene fix (recorded for reconciliation).** The `Hygiene hooks (pre-commit)`
+CI check runs `--all-files`, so it failed on my PR because of a pre-existing `end-of-file-fixer`
+violation in **`docs/audits/AUDIT_meet-recap.md`** (a different session's already-merged audit
+report carried a trailing blank line â€” this blocks *every* open PR, not just mine). I applied
+the smallest possible fix: strip the extra trailing newline so the file ends with exactly one.
+No content change; it is not part of the Documents feature and is flagged here purely so the
+`meet-recap` session/maintainer can reconcile. After the fix, `pre-commit run --all-files`
+passes clean.
+
 **Parallel-session coordination (important).** While this audit ran, another session landed
 a broad "editorial-JS" refactor of the Documents + Newsletters home JS on `main` (new
 per-card "Write with AI" toggle, `_genBusy` button-disable, `MH.toast` errors, an "End
