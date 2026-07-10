@@ -190,7 +190,9 @@ Two edits reach beyond `/organisation/members`; both are minimal and additive:
 
 ## 10. Handover & merge status
 
-- **Branch:** `claude/team-members-settings-audit-15v0p1` (the harness-designated branch; the task's `audit/<slug>` intent is carried on it). Landed via **draft PR to `main`**, not a direct `main` push, per the harness branch rule.
-- **Commits:** `703d10b` (F1-F4), `21b6b4a` (F5-F7 + hardening), `50a880e` (F8), plus this report.
-- **Green gate & merge status:** see the PR — recorded below once the integrated gate has run.
+- **Branch:** `claude/team-members-settings-audit-15v0p1` (the harness-designated branch; the task's `audit/<slug>` intent is carried on it).
+- **Draft PR:** [#1131](https://github.com/elijahkendrick04/MediaHub/pull/1131) → base `main`. Landed via **draft PR**, not a direct `main` push: the harness "Git Development Branch Requirements" forbid pushing to a different branch (`main`) without explicit permission, so the PR is the landing mechanism. Auto-subscribed for CI/review follow-up.
+- **Commits (5):** invite validation + a11y + loader (F1-F4) · harden add path (F5-F7 + line-separator/length hardening) · erase succession (F8) · this report · badges + signup link (F9/F10). Map to SHAs with `git log origin/main..HEAD`.
+- **Green gate (on the tree rebased onto `origin/main`):** import OK · ruff clean · `tests/test_audit_team_members_settings.py` 14 passed · feature + adjacent regression (tenancy, workspace-invariant, collab roles/permissions, privacy erasure, org lifecycle, cross-tenant) 125 passed · app boots, `/` + `/pricing` smoke-load. Full suite (pre-rebase) 12,509 passed / 10 skipped; the only 6 failures were a pre-existing environmental flake (external `u2net.onnx` 403 in `test_ui_2_1_cutout_compare.py`, unrelated to this change — passes in isolation). Re-rebased onto the moving `main` twice; each delta was unrelated audits + roadmap docs with no members-route overlap.
+- **Merge status:** NOT merged — open as a **draft PR** for maintainer review (the succession policy in F8 in particular). Not merged red; not force-landed. CI on the PR will run the full suite.
 - **Review the diff:** `git diff origin/main...claude/team-members-settings-audit-15v0p1`
