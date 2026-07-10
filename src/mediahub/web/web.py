@@ -34351,6 +34351,15 @@ function mhAnDigest(btn) {{
             recent_runs = [r for r in recent_runs if r["id"] not in _stale_set]
 
         run_id_param = request.args.get("run_id", "")
+        # Path-traversal guard: unlike the <run_id> route converter (which
+        # rejects slashes), this query param reaches the shared _load_run
+        # helper — which builds RUNS_DIR / f"{run_id}.json" — completely
+        # unfiltered. A tampered ?run_id=../../<dir>/victim would otherwise
+        # escape DATA_DIR and reflect an arbitrary JSON file's swimmer roster
+        # (PII) onto the page. Real run ids are uuid hex, so any separator or
+        # ".." means the value is hostile: treat it as "no meet selected".
+        if run_id_param and ("/" in run_id_param or "\\" in run_id_param or ".." in run_id_param):
+            run_id_param = ""
 
         # Empty state when no meets have been processed yet
         if not recent_runs:
@@ -34453,6 +34462,19 @@ function mhAnDigest(btn) {{
                     swimmers_html += "</div></div>"
                 else:
                     swimmers_html = '<div class="card"><p class="muted">No achievements found for this run. The recognition report may not be available.</p></div>'
+            elif run_id_param:
+                # A meet was selected but couldn't be opened — a run stored in
+                # the legacy nested layout (runs_v4/<id>/run.json, which the
+                # shared _load_run helper doesn't read), a run the active org
+                # can't access, or a corrupt file. Surface an honest message
+                # instead of a silent dead-end (the dropdown selected, no roster,
+                # no explanation).
+                swimmers_html = (
+                    '<div class="card"><p class="muted">We couldn&rsquo;t open that '
+                    "meet. It may have been processed on an older version, be "
+                    "owned by another organisation, or its data file may be "
+                    "unreadable. Pick another meet above.</p></div>"
+                )
 
         change_js = url_for("spotlight_landing")
         body = f"""
@@ -34574,7 +34596,11 @@ function mhAnDigest(btn) {{
 
             cap_text = headline
             if angle:
-                cap_text = f"{headline}\\n\\n{angle}"
+                # Real newlines (not the literal backslash-n a normal f-string's
+                # "\\n" would emit) so the hidden span's textContent — which
+                # copySpotlightCaption copies verbatim to the clipboard — carries
+                # actual line breaks between the headline and the angle.
+                cap_text = f"{headline}\n\n{angle}"
 
             # "Create graphic" — only for achievements with a real swim_id,
             # which api_create_graphic can resolve in the run's recognition
@@ -34585,9 +34611,20 @@ function mhAnDigest(btn) {{
             sp_visual_panel = ""
             if _sp_swim_id:
                 _sp_g_url = url_for("api_create_graphic", run_id=run_id, card_id=_sp_swim_id)
+                # JS-context safety: the card id derives from swim_id, which
+                # carries the swimmer key (e.g. a surname like O'Brien) verbatim,
+                # so it can contain an apostrophe or other JS-breaking chars.
+                # _h() (HTML-escape) is the WRONG escaping here — the browser
+                # decodes &#39; back to ' before the JS string is compiled, so an
+                # apostrophe would break out of the literal (a broken control,
+                # and a stored-XSS vector from a crafted results file). Encode
+                # for the JS context first (json.dumps) then the HTML-attribute
+                # context (_h), the standard two-layer safe pattern.
+                _g_url_js = _h(json.dumps(str(_sp_g_url)))
+                _card_id_js = _h(json.dumps(card_id_raw))
                 sp_graphic_btn = (
                     f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" '
-                    f"onclick=\"mhCreateGraphic(this, '{_h(_sp_g_url)}', '{card_id_safe}')\">"
+                    f'onclick="mhCreateGraphic(this, {_g_url_js}, {_card_id_js})">'
                     f"&#x2726; Create graphic</button>"
                 )
                 sp_visual_panel = (
@@ -34610,11 +34647,11 @@ function mhAnDigest(btn) {{
     <div style="font-size:13px;color:var(--ink-dim);margin-top:2px">{headline}</div>
     <div style="display:flex;gap:8px;margin-top:8px;align-items:center;flex-wrap:wrap">
       {_render_wf_actions(run_id, card_id_raw, wf_status)}
-      <button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="copySpotlightCaption(this, '{card_id_safe}')">Copy caption</button>
+      <button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="copySpotlightCaption(this)">Copy caption</button>
       {sp_graphic_btn}
       <span style="flex:1;min-width:8px"></span>
       {_render_reactions(run_id, card_id_raw, _react_counts)}
-      <span id="sp-cap-{card_id_safe}" style="display:none">{cap_text}</span>
+      <span class="sp-cap-src" style="display:none">{cap_text}</span>
     </div>
     {sp_visual_panel}
   </div>
@@ -34716,12 +34753,17 @@ function mhAnDigest(btn) {{
 
 <div class="card">
   <h2>{"More achievements" if _approved_ras else "Achievements"}</h2>
-  {other_rows or '<p class="muted">Everything is approved — build the post above.</p>' if _approved_ras else (other_rows or '<p class="muted">No achievements.</p>')}
+  {other_rows or '<p class="muted">Everything is approved. Build the post above.</p>' if _approved_ras else (other_rows or '<p class="muted">No achievements.</p>')}
 </div>
 
 <script>
-function copySpotlightCaption(btn, cardIdSafe) {{
-  var span = document.getElementById('sp-cap-' + cardIdSafe);
+function copySpotlightCaption(btn) {{
+  // Locate the caption span relative to the clicked button (both live in the
+  // same .sp-row) rather than by an id built from user data — the card id can
+  // carry an apostrophe (e.g. a surname like O'Brien) which would break an
+  // interpolated selector.
+  var row = btn.closest('.sp-row');
+  var span = row ? row.querySelector('.sp-cap-src') : null;
   if (!span) {{ btn.textContent = 'Error'; return; }}
   var text = span.textContent.trim();
   var done = function(ok) {{
@@ -36399,6 +36441,25 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         swimmer_key = str(fd.get("swimmer_key") or "")
         result, err = _compose_spotlight_caption(run_id, swimmer_key, tone=tone)
         if err is not None or not result:
+            _err_status = err[1] if (isinstance(err, tuple) and len(err) == 2) else None
+            if _err_status == 400:
+                # _compose_spotlight_caption returns a 400 only for the
+                # "no achievements approved yet" case — the reviewer un-approved
+                # every moment after building the draft. Name the real cause
+                # instead of the generic AI-transient message.
+                return jsonify(
+                    {
+                        "caption": "",
+                        "tone": _tone_in,
+                        "live": True,
+                        "generated_at": now_iso,
+                        "error": "no_approved",
+                        "message": (
+                            "No moments are approved for this spotlight. Approve at "
+                            "least one on the spotlight page, then regenerate."
+                        ),
+                    }
+                ), 200
             # _compose_spotlight_caption returns a rendered HTML error page on
             # provider failure; a fetch caller wants JSON, so translate it.
             return jsonify(
@@ -36575,12 +36636,24 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         from mediahub.club_platform.athlete_spotlight import build_spotlight_pack
 
         fd = (rec or {}).get("form_data") or {}
+        # Type guard, mirroring api_stub_pack_caption / _caption_assist: only a
+        # genuine athlete-spotlight pack drives this reel. A non-spotlight pack
+        # that happened to carry run_id + swimmer_key would otherwise slip
+        # through on presence alone.
+        if fd.get("source") != "athlete_spotlight":
+            return None, (jsonify({"error": "unsupported_type"}), 400)
         run_id = str(fd.get("run_id") or "")
         swimmer_key = str(fd.get("swimmer_key") or "")
         if not run_id or not swimmer_key:
             return None, (jsonify({"error": "spotlight_context_missing"}), 400)
         run_data = _load_run(run_id)
         if run_data is None:
+            return None, (jsonify({"error": "run_not_found"}), 404)
+        # Tenant isolation, mirroring _compose_spotlight_caption: the pack owns
+        # the access check for its own row, but the run it names is a separate
+        # object — never render another org's run just because the pack points
+        # at it.
+        if not _can_access_run(run_id, run_data, _active_profile_id()):
             return None, (jsonify({"error": "run_not_found"}), 404)
         try:
             pack = build_spotlight_pack(run_data, swimmer_key)
@@ -36782,6 +36855,8 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         if not _can_access_pack(rec, _active_profile_id()):
             return jsonify({"error": "pack_not_found"}), 404
         fd = (rec or {}).get("form_data") or {}
+        if fd.get("source") != "athlete_spotlight":
+            return jsonify({"error": "unsupported_type"}), 400
         run_id = str(fd.get("run_id") or "")
         swimmer_key = str(fd.get("swimmer_key") or "")
         if not run_id or not swimmer_key:
