@@ -195,6 +195,7 @@ operator would try.
 
 ## 10. Handover and merge status
 
-- **Branch:** `claude/developer-settings-audit-oh85xm`
-- **Merge status:** _to be completed by Phase 5_ — integrate latest `origin/main`, run the full green gate on the integrated result, then land via non-force push. Recorded here after the attempt.
-- **Review the diff:** `git diff origin/main...claude/developer-settings-audit-oh85xm`
+- **Branch:** `claude/developer-settings-audit-oh85xm` (pushed to origin).
+- **Merge status: MERGED to `main`.** Integrated the moving `main` twice (BASE `95c83d0` -> `fe2605d` -> `33602c5`; other audit sessions and the roadmap bot were merging in parallel), re-ran the green gate on each integrated result, passed the freshness re-check (`origin/main` == BASE `33602c5` at push time), and landed via a non-force fast-forward push (`git push origin HEAD:main`). The four `[developer-settings]` commits (`494f6dd` fix, then the report commits) are the four commits on `main` above roadmap `33602c5`; `main` tip after the push: **`1a1b232`**.
+- **Green gate:** app boots clean; full suite on the prior integration = 12,491 passed / 10 skipped / 5 pre-existing flaky-or-environmental failures also present (differently) on a clean `origin/main` baseline; a 175-test gate+feature+auth+language-switcher regression subset passed on the final integration; ruff (pinned v0.8.4) lint + format clean; no secrets or `.env` staged.
+- **Review the diff:** `git diff 33602c5..1a1b232` (or `git show 494f6dd` for the code fix alone).
