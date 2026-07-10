@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-07-10 · `208cea1df` · [spotlight] update audit report: caveats fixed, verdict -> WORKS
+**Last updated:** 2026-07-10 · `4e8afd1d3` · [spotlight] record caveat-round merge status in audit report
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1227,6 +1227,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-07-10 | `4e8afd1d3` | [spotlight] record caveat-round merge status in audit report |
 | 2026-07-10 | `208cea1df` | [spotlight] update audit report: caveats fixed, verdict -> WORKS |
 | 2026-07-10 | `d93a4eead` | [spotlight] regression tests for the caveat fixes |
 | 2026-07-10 | `d5d25865b` | [spotlight] fix residual caveats: dir-form runs, traversal guard, idempotent build, roster cap, sele |
@@ -1236,5 +1237,4 @@ list and the auto table below, not here.
 | 2026-07-10 | `5dfb118a1` | [sample-pack] fix pre-existing trailing-newline hygiene failures on main |
 | 2026-07-10 | `16741d443` | [sample-pack] add feature audit report |
 | 2026-07-10 | `7d6fca41f` | [sample-pack] guard CTA double-submit; honest research comment; E2E test |
-| 2026-07-10 | `02871896f` | [developer-settings] report: record second-pass merge status |
 <!-- /ROADMAP:ACTIVITY -->
