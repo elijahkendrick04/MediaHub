@@ -202,6 +202,17 @@ _ORG_TYPE_TO_SPORT: dict[str, str] = {
     "athletics": "athletics",
 }
 
+# The social platforms an organisation posts to — (slug, display label).
+# Shared by the organisation-DNA form and the performance-log platform select
+# (H-14) so both surfaces speak the same platform vocabulary.
+_ORG_PLATFORMS: list[tuple[str, str]] = [
+    ("instagram", "Instagram"),
+    ("tiktok", "TikTok"),
+    ("twitter", "Twitter / X"),
+    ("facebook", "Facebook"),
+    ("linkedin", "LinkedIn"),
+]
+
 # A sport slug is only ever fed to ``load_sport_profile`` (which joins it into a
 # ``sport_profiles/<slug>.yaml`` path). Sport profile slugs are always
 # ``[a-z0-9_]+`` — reject anything else before it can escape the profiles dir.
@@ -12854,28 +12865,40 @@ _VISUAL_PANEL_JS = """<script>
 </script>"""
 
 
-# "Regenerate (fresh angles)" handler for the saved-draft pages. POSTs to the
+# "Regenerate (fresh angles)" handler for the saved-draft pages. Confirms
+# first (E-11 — it replaces every card and clears approval), then POSTs to the
 # content-engine regenerate route and reloads to the freshly-written set.
 _DRAFT_REGEN_JS = """<script>
-function mhRegenerateDraft(btn, url){
-  var orig = btn.innerHTML;
-  btn.disabled = true; btn.innerHTML = '\\u21BA Regenerating\\u2026';
-  fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}', credentials:'same-origin'})
-    .then(function(r){ return r.json().then(function(j){ return {ok:r.ok, body:j}; }); })
-    .then(function(res){
-      if(res.ok && res.body && res.body.ok){
-        if(window.MH && MH.toast){ MH.toast('Fresh draft generated', 'success'); }
-        location.href = (res.body && res.body.redirect) || location.href;
-      } else {
+function mhRegenerateDraft(btn, url, nCards){
+  function run(){
+    var orig = btn.innerHTML;
+    btn.disabled = true; btn.innerHTML = '\\u21BA Regenerating\\u2026';
+    fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}', credentials:'same-origin'})
+      .then(function(r){ return r.json().then(function(j){ return {ok:r.ok, body:j}; }); })
+      .then(function(res){
+        if(res.ok && res.body && res.body.ok){
+          if(window.MH && MH.toast){ MH.toast('Fresh draft generated', 'success'); }
+          location.href = (res.body && res.body.redirect) || location.href;
+        } else {
+          btn.disabled = false; btn.innerHTML = orig;
+          var msg = (res.body && (res.body.message || res.body.error)) || 'Could not regenerate';
+          if(window.MH && MH.toast){ MH.toast(msg, 'error'); } else { alert(msg); }
+        }
+      })
+      .catch(function(){
         btn.disabled = false; btn.innerHTML = orig;
-        var msg = (res.body && (res.body.message || res.body.error)) || 'Could not regenerate';
-        if(window.MH && MH.toast){ MH.toast(msg, 'error'); } else { alert(msg); }
-      }
-    })
-    .catch(function(){
-      btn.disabled = false; btn.innerHTML = orig;
-      if(window.MH && MH.toast){ MH.toast('Network error', 'error'); } else { alert('Network error'); }
-    });
+        if(window.MH && MH.toast){ MH.toast('Network error', 'error'); } else { alert('Network error'); }
+      });
+  }
+  var what = (nCards === 1) ? 'the card' : (nCards ? 'all ' + nCards + ' cards' : 'all cards');
+  var body = 'This replaces ' + what +
+    ' and clears their approval status. Previous captions stay in Previous versions below.';
+  if (window.MH && MH.confirm){
+    MH.confirm({title: 'Regenerate this draft?', body: body,
+      confirmText: 'Regenerate', danger: false, onConfirm: run});
+  } else if (window.confirm(body)) {
+    run();
+  }
 }
 </script>"""
 
@@ -31430,6 +31453,34 @@ self.addEventListener('fetch', function(e){
             return jsonify({"error": str(exc)}), 500
         return jsonify({"ok": True, "org_id": pid, "parsed": parsed})
 
+    def _plan_subnav(active: str) -> str:
+        """The planner's shared sub-nav strip (C-15).
+
+        One helper renders the same five view links — Plan · Calendar · Board
+        · Grid · Performance — on every planner page, with the current view
+        marked. Replaces the old ad-hoc per-page link subsets (each page used
+        to link a different, partial set of the others, leaving Board and
+        Grid reachable only from the calendar toolbar).
+        """
+        views = (
+            ("plan", "Plan", "plan_page"),
+            ("calendar", "Calendar", "plan_calendar_page"),
+            ("board", "Board", "plan_board_page"),
+            ("grid", "Grid", "plan_grid_page"),
+            ("performance", "Performance", "plan_analytics_page"),
+        )
+        links = ""
+        for key, label, endpoint in views:
+            is_active = key == active
+            cls = "btn primary" if is_active else "btn"
+            current = ' aria-current="page"' if is_active else ""
+            links += f'<a class="{cls}" href="{url_for(endpoint)}"{current}>{label}</a>'
+        return (
+            '<nav aria-label="Plan views" '
+            'style="display:flex;gap:8px;flex-wrap:wrap;margin:0 0 14px 0">'
+            f"{links}</nav>"
+        )
+
     @app.route("/plan")
     def plan_page():
         pid = _active_profile_id()
@@ -31527,9 +31578,31 @@ self.addEventListener('fetch', function(e){
                     meta = _ct_registry.get(ct)
                     if meta is not None:
                         try:
+                            # J-6: free-text targets carry the idea itself —
+                            # the free-text landing prefills its textarea from
+                            # ?seed=<title — reason>. Other tools are
+                            # form-driven, so their links stay plain.
+                            if meta.primary_route_endpoint == "free_text_chat_page":
+                                _seed_bits = [str(item.get("title") or slug)]
+                                _first_reason = next(
+                                    (
+                                        str(r).strip()
+                                        for r in _as_list(item.get("reasons"))
+                                        if str(r).strip()
+                                    ),
+                                    "",
+                                )
+                                if _first_reason:
+                                    _seed_bits.append(_first_reason)
+                                _create_url = url_for(
+                                    meta.primary_route_endpoint,
+                                    seed=" — ".join(_seed_bits)[:500],
+                                )
+                            else:
+                                _create_url = url_for(meta.primary_route_endpoint)
                             create_link = (
                                 f'<a class="btn" style="font-size:12px;padding:4px 12px" '
-                                f'href="{url_for(meta.primary_route_endpoint)}">Create →</a>'
+                                f'href="{_h(_create_url)}">Create →</a>'
                             )
                         except Exception:
                             create_link = ""
@@ -31661,18 +31734,18 @@ self.addEventListener('fetch', function(e){
   jump straight into the matching tool. Nothing publishes from here.</p>
 </section>
 
+{_plan_subnav("plan")}
+
 <div class="mh-next-strip" aria-label="How the plan works" style="margin-bottom:16px">
   <div class="cell"><span class="num">1</span><span class="text"><b>Generate</b><br>One click fuses your results, drafts, the calendar and your direct notes.</span></div>
   <div class="cell"><span class="num">2</span><span class="text"><b>Read the why</b><br>Every item lists the exact signals that put it at that rank.</span></div>
-  <div class="cell"><span class="num">3</span><span class="text"><b>Create</b><br>Click <i>Create</i> on an item to open the right tool with that idea.</span></div>
+  <div class="cell"><span class="num">3</span><span class="text"><b>Create</b><br>Click <i>Create</i> on an item to open the right tool &mdash; free-text ideas arrive pre-filled.</span></div>
 </div>
 
 <div class="card" style="margin-bottom:14px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;justify-content:center">
   {sport_control_html}
   <button type="button" class="btn primary" id="mh-plan-generate" onclick="mhPlanGenerate(this)"
           data-loader-text="Fusing signals">Generate plan</button>
-  <a class="btn" href="{url_for("plan_calendar_page")}" title="See planned drafts, key dates and what you've posted on a calendar">Open calendar &rarr;</a>
-  <a class="btn" href="{url_for("plan_analytics_page")}" title="Log how posts did — what works feeds the plan">Performance</a>
   <span class="dim" id="mh-plan-status" style="font-size:12.5px"></span>
 </div>
 
@@ -32159,9 +32232,10 @@ function mhPlanGenerate(btn) {{
   <span class="mh-hero-eyebrow">Plan · Calendar</span>
   <h1>Your content<br><em class="editorial">on a calendar.</em></h1>
   <p class="lede">Planned drafts, key dates, your events and what you&rsquo;ve already posted, all in one month view.
-  Drag a draft onto a day to plan when to post it &mdash; nothing publishes from here, it&rsquo;s your plan to post by hand.
-  <a href="{url_for("plan_page")}" style="text-decoration:underline">Back to the ranked plan &rarr;</a></p>
+  Drag a draft onto a day to plan when to post it &mdash; nothing publishes from here, it&rsquo;s your plan to post by hand.</p>
 </section>
+
+{_plan_subnav("calendar")}
 
 <div class="mh-cal-bar">
   <div class="mh-cal-nav">
@@ -32169,9 +32243,6 @@ function mhPlanGenerate(btn) {{
     <strong class="mh-cal-month">{_h(month_name)}</strong>
     <a class="btn" href="{next_url}" aria-label="Next month">&rarr;</a>
     <a class="btn" href="{today_url}">Today</a>
-    <a class="btn" href="{url_for("plan_grid_page")}" title="See the planned feed as a grid">Grid preview</a>
-    <a class="btn" href="{url_for("plan_board_page")}" title="The committee idea board">Board</a>
-    <a class="btn" href="{url_for("plan_analytics_page")}" title="What's working — performance feeding the plan">Performance</a>
   </div>
   <div class="mh-cal-legend">{legend}</div>
 </div>
@@ -32478,9 +32549,9 @@ document.addEventListener('click', function (e) {{
   <span class="mh-hero-eyebrow">Plan · Grid preview</span>
   <h1>Your feed, <em class="editorial">as a grid.</em></h1>
   <p class="lede">A quick Instagram-style look at how your planned drafts sit together &mdash;
-  scheduled posts first, newest at the top. Tap a tile to preview it per channel.
-  <a href="{url_for("plan_calendar_page")}" style="text-decoration:underline">Open the calendar &rarr;</a></p>
+  scheduled posts first, newest at the top. Tap a tile to preview it per channel.</p>
 </section>
+{_plan_subnav("grid")}
 {grid_html}
 """
         return _layout("Grid preview", body, active="create")
@@ -32653,9 +32724,10 @@ document.addEventListener('click', function (e) {{
   <span class="mh-hero-eyebrow">Plan · Board</span>
   <h1>The committee <em class="editorial">whiteboard.</em></h1>
   <p class="lede">Throw ideas on the board, drag them as they progress, and turn a good one into a
-  draft with one click &mdash; it flows straight into the previews and the calendar. Nothing posts from here.
-  <a href="{url_for("plan_calendar_page")}" style="text-decoration:underline">Open the calendar &rarr;</a></p>
+  draft with one click &mdash; it flows straight into the previews and the calendar. Nothing posts from here.</p>
 </section>
+
+{_plan_subnav("board")}
 
 <span class="dim" id="mh-bd-status" style="font-size:12.5px;display:block;min-height:18px;margin:0 2px 8px"></span>
 <div class="mh-bd-board">{columns_html}</div>
@@ -32802,6 +32874,44 @@ function mhBoardMove(sel) {{
             f'<option value="{_h(spt.slug)}">{_h(spt.title)}</option>' for spt in spts
         )
 
+        # H-14: the store and API already model platform + pack_id, but the
+        # form never offered them. A platform select (blank "not sure"
+        # default) and an optional "Which draft?" select of this org's recent
+        # drafts close the gap; both prefill from query params so a draft
+        # page can link straight here.
+        _sel_platform = (request.args.get("platform") or "").strip().lower()
+        _sel_pack = (request.args.get("pack_id") or "").strip()
+        platform_opts = '<option value="">Not sure / other</option>' + "".join(
+            f'<option value="{_h(slug)}"{" selected" if slug == _sel_platform else ""}>'
+            f"{_h(label)}</option>"
+            for slug, label in _ORG_PLATFORMS
+        )
+        from mediahub.club_platform.stub_pack_store import list_packs as _an_list_packs
+        from mediahub.club_platform.stub_pack_store import load_pack as _an_load_pack
+
+        _pack_rows: list[tuple[str, str]] = []
+        try:
+            for _meta in _an_list_packs(limit=40):
+                _prec = _an_load_pack(_meta.get("pack_id", ""))
+                if _prec is None or (_prec.get("profile_id") or "") != pid:
+                    continue
+                _pack_rows.append((_prec.get("pack_id", ""), _prec.get("title") or "Draft"))
+                if len(_pack_rows) >= 15:
+                    break
+            # An older draft arriving via ?pack_id= must still appear selected.
+            if _sel_pack and _sel_pack not in {pk for pk, _ in _pack_rows}:
+                _prec = _an_load_pack(_sel_pack)
+                if _prec is not None and (_prec.get("profile_id") or "") == pid:
+                    _pack_rows.insert(0, (_sel_pack, _prec.get("title") or "Draft"))
+        except Exception:
+            _pack_rows = []
+        pack_opts = '<option value="">Not linked to a draft</option>' + "".join(
+            f'<option value="{_h(pk)}"{" selected" if pk == _sel_pack else ""}>'
+            f"{_h(t[:60])}</option>"
+            for pk, t in _pack_rows
+        )
+        _platform_labels = dict(_ORG_PLATFORMS)
+
         # The attribution table — what's working, with an index bar.
         if attribution.by_type:
             rows = ""
@@ -32853,14 +32963,17 @@ function mhBoardMove(sel) {{
                 "starts ranking what actually works for your club. Nothing is auto-collected.</p></div>"
             )
 
-        # Recent recorded posts (with delete).
+        # Recent recorded posts (with delete). Platform shows when recorded.
         recent = ""
         for m in sorted(metrics, key=lambda x: x.recorded_at, reverse=True)[:12]:
             title = _h(type_titles.get(m.post_type, m.post_type.replace("_", " ").title()))
             eng = _h(str(engagement_score(m.metrics)))
+            _plat = ""
+            if m.platform:
+                _plat = f" · {_h(_platform_labels.get(m.platform, m.platform))}"
             recent += (
                 f'<div class="mh-an-row" data-id="{_h(m.id)}">'
-                f'<span style="flex:1">{title} <span class="dim">· {_h(m.posted_date)}</span></span>'
+                f'<span style="flex:1">{title} <span class="dim">· {_h(m.posted_date)}{_plat}</span></span>'
                 f'<span class="dim" style="font-variant-numeric:tabular-nums">{eng} eng</span>'
                 f'<button type="button" class="btn" style="font-size:11px;padding:2px 8px" '
                 f'onclick="mhAnDelete(this)">remove</button></div>'
@@ -32878,9 +32991,10 @@ function mhBoardMove(sel) {{
   <h1>What actually <em class="editorial">works.</em></h1>
   <p class="lede">Post by hand, then log how it did &mdash; MediaHub learns which post types earn your club
   the most engagement and feeds that straight back into the plan. First-party and honest: nothing is
-  auto-collected (that waits on publishing integrations), and the numbers are yours.
-  <a href="{url_for("plan_page")}" style="text-decoration:underline">Back to the plan &rarr;</a></p>
+  auto-collected (that waits on publishing integrations), and the numbers are yours.</p>
 </section>
+
+{_plan_subnav("performance")}
 
 {table}
 
@@ -32888,6 +33002,8 @@ function mhBoardMove(sel) {{
   <h2 style="margin-top:0">Log a post&rsquo;s performance</h2>
   <div class="mh-an-form">
     <label class="mh-an-mlabel">Post type<select id="mh-an-type" style="min-width:170px">{type_opts}</select></label>
+    <label class="mh-an-mlabel">Platform<select id="mh-an-platform" style="min-width:150px">{platform_opts}</select></label>
+    <label class="mh-an-mlabel">Which draft? (optional)<select id="mh-an-pack" style="min-width:180px">{pack_opts}</select></label>
     <label class="mh-an-mlabel">Date posted<input type="date" id="mh-an-date"/></label>
     <label class="mh-an-mlabel">Hour (0&ndash;23, optional)<input type="number" min="0" max="23" id="mh-an-hour" style="width:88px"/></label>
     {metric_inputs}
@@ -32924,6 +33040,8 @@ function mhAnRecord(btn) {{
     post_type: document.getElementById('mh-an-type').value,
     posted_date: document.getElementById('mh-an-date').value,
     posted_hour: hour === '' ? null : parseInt(hour, 10),
+    platform: document.getElementById('mh-an-platform').value,
+    pack_id: document.getElementById('mh-an-pack').value,
     metrics: metrics
   }};
   mhAnStatus('Saving…');
@@ -35354,6 +35472,10 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         quick_err = session.pop("free_text_quick_error", "")
         # H-8: restore the prompt the user typed if the last build failed.
         quick_prompt = session.pop("free_text_quick_prompt", "")
+        # J-6: a planner "Create →" link can carry the ranked idea — prefill
+        # the textarea from ?seed=… (capped; a restored failed prompt wins).
+        if not quick_prompt:
+            quick_prompt = (request.args.get("seed") or "").strip()[:500]
         quick_err_html = (
             '<div class="mh-flash error" role="alert" style="margin:0 0 14px;padding:12px 16px;'
             "border:1px solid rgba(255,107,107,0.30);border-left:3px solid var(--bad);"
@@ -36093,7 +36215,8 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         regen_api = url_for("api_stub_pack_regenerate", pack_id=pack_id)
         footer = (
             f'<div style="margin-top:24px;display:flex;gap:10px;flex-wrap:wrap">'
-            f'<button type="button" class="btn" onclick="mhRegenerateDraft(this, {repr(regen_api)})" '
+            f'<button type="button" class="btn" '
+            f'onclick="mhRegenerateDraft(this, {repr(regen_api)}, {len(_pack_cards)})" '
             f'title="Re-run the content engine — the AI Director plans fresh angles, avoiding what you already have">'
             f"&#x21BA; Regenerate (fresh angles)</button>"
             f'<a class="btn secondary" href="{export_url}">Export as text</a>'
@@ -36103,7 +36226,10 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             f'<a class="btn secondary" href="{url_for("plan_ad_variants_page", pack_id=pack_id)}" '
             f'title="Turn these angles into a sponsor A/B ad set, sized for ad managers (prepared, never placed)">'
             f"Prepare ad set</a>"
-            f'<a class="btn secondary" href="{regenerate_url}">Generate new draft</a>'
+            f'<a class="btn secondary" href="{url_for("plan_analytics_page", pack_id=pack_id)}" '
+            f'title="Posted this by hand? Log how it did — what works feeds the plan">'
+            f"Log performance</a>"
+            f'<a class="btn secondary" href="{regenerate_url}">Start a new draft from the form</a>'
             f'<a class="btn secondary" href="{back_url}">&larr; All drafts</a>'
             f"</div>"
         )
@@ -36140,6 +36266,35 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 pack_id,
             )
         cards_html = _new_cards_html
+        # E-11: "Previous versions" — the captions a Regenerate replaced.
+        # replace_cards archives {platform, caption} into card_history; this
+        # expander is the page that finally shows it (most recent first).
+        history = [
+            h
+            for h in (rec.get("card_history") or [])
+            if isinstance(h, dict) and str(h.get("caption") or "").strip()
+        ]
+        history_html = ""
+        if history:
+            rows = ""
+            for h_item in reversed(history):
+                rows += (
+                    f'<div style="padding:10px 0;border-top:1px solid var(--border)">'
+                    f'<div style="font-size:10.5px;text-transform:uppercase;'
+                    f'letter-spacing:0.14em;color:var(--ink-muted);margin-bottom:4px">'
+                    f"{_h(h_item.get('platform') or 'Post')}</div>"
+                    f'<div style="font-size:13px;line-height:1.5;white-space:pre-wrap">'
+                    f"{_h(h_item.get('caption'))}</div></div>"
+                )
+            _n_prev = len(history)
+            history_html = (
+                f'<details class="card" style="margin-top:18px">'
+                f'<summary style="cursor:pointer;font-weight:600">Previous versions '
+                f"({_n_prev})</summary>"
+                f'<p class="dim" style="font-size:12px;margin:8px 0 4px 0">'
+                f"Captions replaced by a regenerate — kept here so nothing is lost.</p>"
+                f"{rows}</details>"
+            )
         # Single-prompt flow lands here with ?autographic=1 — render the first
         # card's graphic on load (with the attached photo as background if one
         # was passed) so "describe it → get a graphic" needs no extra click.
@@ -36153,7 +36308,15 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 f"{json.dumps(f'{pack_id}-0')},{json.dumps(_g0)},"
                 f"{json.dumps(_photo)},'feed_portrait');}}}});</script>"
             )
-        body = header + attached_html + cards_html + _VISUAL_PANEL_JS + _DRAFT_REGEN_JS + auto_js
+        body = (
+            header
+            + attached_html
+            + cards_html
+            + history_html
+            + _VISUAL_PANEL_JS
+            + _DRAFT_REGEN_JS
+            + auto_js
+        )
         return _layout(rec.get("title") or "Draft", body, active="create")
 
     def _render_pack_attached_media(rec: dict) -> str:
@@ -36284,6 +36447,36 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 "status": card.get("status", status),
             }
         )
+
+    @app.route("/api/drafts/<pack_id>/card/<int:card_idx>/caption/save", methods=["POST"])
+    def api_stub_pack_caption_save(pack_id, card_idx):
+        """Persist a hand-edited caption on one saved-draft card (H-9).
+
+        Plain persistence, no AI: the draft pages reveal a per-card textarea
+        and save through the same pack-store mechanism the spotlight tone
+        rewrite uses (``update_pack``), so every stub pack type — quick
+        free-text included — can edit its captions in place. Tenant-gated
+        like the sibling caption endpoints: a foreign org's probe 404s
+        indistinguishably from a genuine miss.
+        """
+        from mediahub.club_platform.stub_pack_store import load_pack, update_pack
+
+        rec = load_pack(pack_id)
+        if not rec or not _can_access_pack(rec, _active_profile_id()):
+            return jsonify({"error": "pack_not_found"}), 404
+        cards = rec.get("cards") or []
+        if not (0 <= card_idx < len(cards)) or not isinstance(cards[card_idx], dict):
+            return jsonify({"error": "card_not_found"}), 404
+        payload = request.get_json(silent=True) or {}
+        caption = str(payload.get("caption") or "").strip()[:4000]
+        if not caption:
+            return jsonify(
+                {"error": "empty_caption", "message": "Type a caption before saving."}
+            ), 400
+        new_cards = list(cards)
+        new_cards[card_idx] = {**new_cards[card_idx], "caption": caption}
+        update_pack(pack_id, cards=new_cards)
+        return jsonify({"ok": True, "caption": caption})
 
     @app.route("/api/drafts/<pack_id>/card/<int:card_idx>/create-graphic", methods=["POST"])
     def api_stub_pack_create_graphic(pack_id, card_idx):
@@ -37223,13 +37416,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             ("university_society", "University society or sports club"),
             ("corporate_team", "Corporate team"),
         ]
-        _PLATFORMS = [
-            ("instagram", "Instagram"),
-            ("tiktok", "TikTok"),
-            ("twitter", "Twitter / X"),
-            ("facebook", "Facebook"),
-            ("linkedin", "LinkedIn"),
-        ]
+        _PLATFORMS = _ORG_PLATFORMS
         _TONES = [
             (
                 "warm-club",

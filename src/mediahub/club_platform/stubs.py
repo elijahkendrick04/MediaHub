@@ -547,10 +547,14 @@ def _platform_icon(platform: str) -> str:
     )
 
 
-_PILL_STYLE = {
-    "queue": ("rgba(255,174,59,0.18)", "#ffae3b", "queue"),
-    "approved": ("rgba(74,222,128,0.18)", "#4ade80", "approved"),
-    "rejected": ("rgba(244,63,94,0.18)", "#f43f5e", "rejected"),
+# Per-status badge styling + humanised customer-facing label. The badge is a
+# read-only display; the state changes through the labelled Approve / Re-queue
+# buttons in the card's action row (G-6 — no click-to-cycle pill, no
+# right-click gesture).
+_STATUS_STYLE = {
+    "queue": ("rgba(255,174,59,0.18)", "#ffae3b", "In queue"),
+    "approved": ("rgba(74,222,128,0.18)", "#4ade80", "Approved"),
+    "rejected": ("rgba(244,63,94,0.18)", "#f43f5e", "Rejected"),
 }
 
 
@@ -574,7 +578,7 @@ def render_cards_html(
         )
 
     cards_html = ""
-    show_pill = bool(pack_id and status_api_base)
+    show_workflow = bool(pack_id and status_api_base)
     for idx, card in enumerate(cards):
         platform = str(card.get("platform", "Post") or "Post")
         caption = str(card.get("caption", "") or "").strip()
@@ -582,7 +586,7 @@ def render_cards_html(
         confidence = card.get("confidence")
         notes = str(card.get("notes", "") or "").strip()
         status = str(card.get("status") or "queue").lower()
-        if status not in _PILL_STYLE:
+        if status not in _STATUS_STYLE:
             status = "queue"
 
         # Brief-led cards deliberately carry no confidence (the engine refuses
@@ -617,18 +621,54 @@ def render_cards_html(
             else ""
         )
 
-        pill_html = ""
-        if show_pill:
-            bg, fg, label = _PILL_STYLE[status]
-            pill_url = f"{status_api_base}/{idx}/status"
-            pill_html = (
-                f'<button type="button" class="stub-wf-pill" data-pack="{_h(pack_id)}" '
-                f'data-idx="{idx}" data-status="{_h(status)}" data-url="{_h(pill_url)}" '
-                f'style="border:none;cursor:pointer;padding:3px 10px;border-radius:999px;'
+        badge_html = ""
+        status_button = ""
+        if show_workflow:
+            bg, fg, label = _STATUS_STYLE[status]
+            status_url = f"{status_api_base}/{idx}/status"
+            # Read-only status badge — a display, not a control.
+            badge_html = (
+                f'<span class="stub-wf-badge" '
+                f'style="display:inline-block;padding:3px 10px;border-radius:999px;'
                 f"font-size:11px;font-weight:600;background:{bg};color:{fg};"
-                f'font-family:inherit;margin-left:8px"'
-                f' title="Click: queue ↔ approved. Right-click to reset to queue.">'
-                f"{_h(label)}</button>"
+                f'margin-left:8px">{_h(label)}</span>'
+            )
+            # Explicit labelled control, matching the review vocabulary:
+            # Approve while queued/rejected, Re-queue once approved.
+            btn_label = "Re-queue" if status == "approved" else "Approve"
+            status_button = (
+                f'<button type="button" class="stub-wf-btn" data-pack="{_h(pack_id)}" '
+                f'data-idx="{idx}" data-status="{_h(status)}" data-url="{_h(status_url)}" '
+                f'style="font-size:13px">{btn_label}</button>'
+            )
+
+        # Inline caption editing (H-9) — saved packs only: reveal a textarea,
+        # persist through the pack store, update the card in place.
+        edit_button = ""
+        caption_editor = ""
+        if show_workflow:
+            save_url = f"{status_api_base}/{idx}/caption/save"
+            edit_button = (
+                f'<button type="button" class="stub-cap-edit" data-idx="{idx}" '
+                f'style="font-size:13px">Edit caption</button>'
+            )
+            caption_editor = (
+                f'<div class="stub-cap-editor" data-idx="{idx}" '
+                f'style="display:none;margin-top:10px;padding:12px;'
+                f"border:1px solid var(--border);border-radius:8px;"
+                f'background:rgba(255,255,255,0.02)">'
+                f'<label for="stub-cap-ta-{idx}" style="display:block;font-size:12px;'
+                f'font-weight:600;margin-bottom:6px">Edit caption</label>'
+                f'<textarea id="stub-cap-ta-{idx}" rows="5" maxlength="4000" '
+                f'style="width:100%;font-size:13px;padding:8px 10px;'
+                f"border:1px solid var(--border);border-radius:6px;"
+                f'background:var(--bg);color:var(--ink);resize:vertical">{_h(caption)}</textarea>'
+                f'<div style="display:flex;gap:8px;margin-top:8px">'
+                f'<button type="button" class="primary stub-cap-save" data-idx="{idx}" '
+                f'data-url="{_h(save_url)}" style="font-size:13px">Save caption</button>'
+                f'<button type="button" class="stub-cap-cancel" data-idx="{idx}" '
+                f'style="font-size:13px">Cancel</button>'
+                f"</div></div>"
             )
 
         # "Create graphic" affordance — only when the page wired a graphic API
@@ -659,62 +699,128 @@ def render_cards_html(
 
         cards_html += f"""
 <div class="mh-content-card" id="stub-card-{idx}" data-interactive data-card-status="{_h(status)}">
-  <div class="mh-card-confidence">{conf_html}{pill_html}</div>
+  <div class="mh-card-confidence">{conf_html}{badge_html}</div>
   <div class="mh-card-platform">{_platform_icon(platform)} {_h(platform)}</div>
   <div class="mh-card-caption">{_h(caption)}</div>
   {f'<div class="mh-card-tags">{tag_chips}</div>' if tag_chips else ""}
   {notes_html}
   <div class="mh-card-actions">
     <button type="button" class="primary" onclick='(function(b){{
-      var c = {caption_for_copy};
+      var card = b.closest(".mh-content-card");
+      var capEl = card && card.querySelector(".mh-card-caption");
+      var c = (capEl && capEl.textContent) ? capEl.textContent : {caption_for_copy};
       if (navigator.clipboard) {{
         navigator.clipboard.writeText(c).then(function(){{ window.MH && MH.toast("Caption copied", "success"); }});
       }} else {{ window.MH && MH.toast("Clipboard not available", "error"); }}
     }})(this)'>Copy caption</button>
+    {edit_button}
+    {status_button}
     {graphic_button}
     {extra_action}
   </div>
+  {caption_editor}
   {visual_panel}
 </div>"""
 
-    pill_js = ""
-    if show_pill:
-        pill_js = """
+    workflow_js = ""
+    if show_workflow:
+        workflow_js = """
 <script>
 (function(){
-  // Approve-only flow: the pill toggles queue <-> approved. Skipping a
-  // card just leaves it queued; there is no reject state to manage.
-  var NEXT = {queue:'approved', approved:'queue', rejected:'queue'};
+  // Approve-only flow with explicit labelled buttons: "Approve" moves a
+  // queued (or rejected) card to approved; "Re-queue" sends it back to the
+  // queue. Skipping a card just leaves it queued. The badge is display-only.
   var STYLE = {
-    queue:    ['rgba(255,174,59,0.18)','#ffae3b'],
-    approved: ['rgba(74,222,128,0.18)','#4ade80'],
-    rejected: ['rgba(244,63,94,0.18)','#f43f5e']
+    queue:    ['rgba(255,174,59,0.18)','#ffae3b','In queue'],
+    approved: ['rgba(74,222,128,0.18)','#4ade80','Approved'],
+    rejected: ['rgba(244,63,94,0.18)','#f43f5e','Rejected']
   };
   function apply(btn, status){
     var s = STYLE[status] || STYLE.queue;
-    btn.style.background = s[0]; btn.style.color = s[1];
-    btn.dataset.status = status; btn.textContent = status;
+    btn.dataset.status = status;
+    btn.textContent = (status === 'approved') ? 'Re-queue' : 'Approve';
     var card = btn.closest('[data-card-status]');
-    if (card) card.dataset.cardStatus = status;
+    if (!card) return;
+    card.dataset.cardStatus = status;
+    var badge = card.querySelector('.stub-wf-badge');
+    if (badge){
+      badge.style.background = s[0];
+      badge.style.color = s[1];
+      badge.textContent = s[2];
+    }
   }
-  function send(btn, status){
+  document.addEventListener('click', function(e){
+    var btn = e.target.closest('.stub-wf-btn'); if (!btn) return;
+    e.preventDefault();
     var prev = btn.dataset.status;
-    apply(btn, status);
-    var fd = new FormData(); fd.append('status', status);
+    var next = (prev === 'approved') ? 'queue' : 'approved';
+    apply(btn, next);
+    var fd = new FormData(); fd.append('status', next);
     fetch(btn.dataset.url, {method:'POST', body:fd, credentials:'same-origin'})
       .then(function(r){ if(!r.ok) throw 0; return r.json(); })
       .then(function(j){ if(j && j.status) apply(btn, j.status); })
       .catch(function(){ apply(btn, prev); window.MH && MH.toast('Could not save status','error'); });
-  }
-  document.addEventListener('click', function(e){
-    var btn = e.target.closest('.stub-wf-pill'); if (!btn) return;
-    e.preventDefault();
-    send(btn, NEXT[btn.dataset.status] || 'approved');
   });
-  document.addEventListener('contextmenu', function(e){
-    var btn = e.target.closest('.stub-wf-pill'); if (!btn) return;
+})();
+(function(){
+  // Inline caption editing (H-9): "Edit caption" reveals a per-card textarea;
+  // Save persists through the pack store and updates the card in place.
+  function cardOf(el){ return el.closest('.mh-content-card'); }
+  document.addEventListener('click', function(e){
+    var edit = e.target.closest('.stub-cap-edit');
+    if (edit){
+      e.preventDefault();
+      var card = cardOf(edit); if (!card) return;
+      var ed = card.querySelector('.stub-cap-editor'); if (!ed) return;
+      var open = ed.style.display !== 'none';
+      ed.style.display = open ? 'none' : '';
+      if (!open){
+        var ta = ed.querySelector('textarea');
+        var cap = card.querySelector('.mh-card-caption');
+        if (ta && cap) ta.value = cap.textContent;
+        if (ta) ta.focus();
+      }
+      return;
+    }
+    var cancel = e.target.closest('.stub-cap-cancel');
+    if (cancel){
+      e.preventDefault();
+      var box = cancel.closest('.stub-cap-editor');
+      if (box) box.style.display = 'none';
+      return;
+    }
+    var save = e.target.closest('.stub-cap-save');
+    if (!save) return;
     e.preventDefault();
-    send(btn, 'queue');
+    var editor = save.closest('.stub-cap-editor'); if (!editor) return;
+    var area = editor.querySelector('textarea');
+    var val = (area && area.value ? area.value : '').trim();
+    if (!val){
+      window.MH && MH.toast('Type a caption before saving', 'error');
+      if (area) area.focus();
+      return;
+    }
+    save.disabled = true;
+    fetch(save.dataset.url, {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({caption: val}), credentials:'same-origin'})
+      .then(function(r){ return r.json().then(function(j){ return {ok: r.ok, body: j}; }); })
+      .then(function(res){
+        save.disabled = false;
+        if (res.ok && res.body && res.body.ok){
+          var card = cardOf(save);
+          var capEl = card && card.querySelector('.mh-card-caption');
+          if (capEl) capEl.textContent = res.body.caption || val;
+          editor.style.display = 'none';
+          window.MH && MH.toast('Caption saved', 'success');
+        } else {
+          var msg = (res.body && (res.body.message || res.body.error)) || 'Could not save caption';
+          window.MH && MH.toast(msg, 'error');
+        }
+      })
+      .catch(function(){
+        save.disabled = false;
+        window.MH && MH.toast('Network error', 'error');
+      });
   });
 })();
 </script>
@@ -725,7 +831,7 @@ def render_cards_html(
         f'<p class="dim" style="margin-bottom:20px">{len(cards)} draft '
         f"{'card' if len(cards) == 1 else 'cards'} generated. Review, edit, approve, and post.</p>"
         f"{cards_html}"
-        f"{pill_js}"
+        f"{workflow_js}"
         f'<div style="margin-top:24px;display:flex;gap:10px">'
         f'<a class="btn secondary" href="{_h(back_url)}">← Start over</a>'
         f"</div>"
