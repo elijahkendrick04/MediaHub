@@ -1,0 +1,245 @@
+# Feature Audit — Create ▸ Documents
+
+**Mode:** AUDIT+FIX · **Branch:** `claude/documents-audit-fix-17pxz3` (serves as the
+`audit/documents` working branch) · **Date:** 2026-07-10 · **Verdict:** WORKS-WITH-CAVEATS
+
+---
+
+## 1. Scope contract
+
+**Definition.** The **Documents** feature (Create ▸ Documents; roadmap 1.15, package
+`src/mediahub/documents/`) is a deterministic document engine that turns a club's real,
+already-computed results into multi-page, brand-tokened documents: a **meet programme**,
+a **season report**, a **sponsor proposal**, and an **AGM deck** — plus everyday **PDF
+tools** (import-to-edit, merge, images→PDF) and a live **presenter** surface (speaker
+notes, timer, autoplay, phone-as-remote, audience view). "Working" means: each format
+generates from the correct facts with the right numbers attributed to the right people;
+every control does what its label says; the outputs (PDF / DOCX / PPTX / MP4 / PNG) are
+correct, brand-locked and deterministic; the AI only ever writes prose around sacred
+numbers (never invents one); documents are tenant-isolated; and inputs are validated with
+honest errors, never a crash or a leak.
+
+**Routes owned (method · path · endpoint):**
+
+| Method | Path | Endpoint |
+|---|---|---|
+| GET  | `/documents` | `documents_home` |
+| POST | `/api/documents/generate` | `api_documents_generate` |
+| GET  | `/documents/<doc_id>` | `document_view` |
+| GET  | `/api/documents/<doc_id>/pdf` | `api_document_pdf` |
+| GET  | `/api/documents/<doc_id>/pptx` | `api_document_pptx` |
+| GET  | `/api/documents/<doc_id>/docx` | `api_document_docx` |
+| GET  | `/api/documents/<doc_id>/video` | `api_document_video` |
+| POST | `/api/documents/<doc_id>/save` | `api_document_save` |
+| POST | `/api/documents/<doc_id>/delete` | `api_document_delete` |
+| POST | `/api/documents/import` | `api_documents_import` |
+| POST | `/api/documents/tools/merge` | `api_documents_tool_merge` |
+| POST | `/api/documents/tools/images-to-pdf` | `api_documents_tool_images_to_pdf` |
+| GET  | `/documents/<doc_id>/present` | `document_present` |
+| GET  | `/present/<session_id>` | `present_audience` |
+| GET  | `/api/present/<session_id>/slide/<int:i>.png` | `api_present_slide` |
+| GET  | `/api/present/<session_id>/state` | `api_present_state` |
+| POST | `/api/present/<session_id>/action` | `api_present_action` |
+| GET  | `/remote` | `remote_landing` |
+| GET  | `/remote/<code>` | `remote_control` |
+| POST | `/api/remote/<code>/action` | `api_remote_action` |
+
+**Files owned (blast radius):** `src/mediahub/documents/*.py` (models, store, grounding,
+formats, draft, render, export, import_doc, pdf_utils, deck, deck_video, presenter, theme,
+cache) and the Documents routes + JS blobs inside `src/mediahub/web/web.py`
+(`_DOCUMENTS_HOME_JS`, `_DOCUMENT_VIEW_JS`, `_DOC_PRESENT_CONSOLE`, `_DOC_PRESENT_AUDIENCE`,
+`_DOC_REMOTE`, and the document route handlers/helpers `_doc_*`). Tests under
+`tests/test_documents_*.py`.
+
+**Shared files depended on but not freely rewritten:** the app factory / CSRF guard
+(`_csrf_protect`, `_csrf_token`), `_layout`, `_active_profile_id`/`_phase_w_org`,
+`graphic_renderer` (PDF/PNG), `charts` (embedded charts), `media_ai.llm` (AI failover),
+`governance` (AI quota), `visual.reel_ffmpeg` (ffmpeg resolver).
+
+**Inputs → outputs.** Inputs: a processed run (meet scope) or the org's whole season of
+runs; uploaded PDF/DOCX/PPTX (import); PDFs (merge); images (images→PDF); a hand-edited
+spec JSON (advanced editor). Outputs: a persisted `DocumentSpec` under
+`DATA_DIR/documents/<profile_id>/<doc_id>.json`; rendered PDF/PNG (cached under
+`DATA_DIR/document_cache`); editable DOCX/PPTX; a deck MP4; and live presenter sessions
+under `DATA_DIR/presenter_sessions`.
+
+**Intended happy path.** Open **Create ▸ Documents** → pick a meet (programme) or use the
+whole season (report/proposal/deck) → confirm AI-or-data-only → the document opens with the
+correct title/club/period and real KPI numbers, tables and charts → preview the PDF,
+download PDF/DOCX/PPTX, present a deck (with phone remote) or download the deck video →
+optionally edit the spec JSON, save, or delete.
+
+---
+
+## 2. Environment
+
+- **Install:** `pip install -r requirements.txt` (+ `pytest`, `ruff==0.8.4`). Session-start
+  hook pinned Playwright to **1.56** to match the container's prebaked **Chromium 1194**;
+  renders (PDF/PNG/MP4) verified working.
+- **Run:** `DATA_DIR=<scratch> MEDIAHUB_SCHEDULER=0 python -m mediahub.web` on
+  `http://localhost:5066`. App boots clean; unrelated routes `/pricing` and `/settings`
+  load 200 (smoke check per Hard Rule 7).
+- **Flags / stubs:** No provider keys set, so AI surfaces honest-error with
+  `ClaudeUnavailableError` (the `no_ai` path) — the data-only document path needs no
+  stubbing; the AI path is exercised by monkeypatching `media_ai.llm.generate_json`
+  (existing test pattern). No real paid API calls; no external publishing.
+- **CSRF:** production behaviour reproduced by setting `app.config["ENFORCE_CSRF"]=True`
+  (the default `TESTING` mode disables CSRF, which is exactly why the production-only
+  control breakage below was invisible to the pre-existing suite).
+
+---
+
+## 3. Test matrix results
+
+| # | Dimension | Result | Note / evidence |
+|---|---|---|---|
+| 1 | Functional correctness | PASS | All 4 formats + blank generate; KPI numbers match seeded aggregates; deck vs document kind + geometry correct; PDF/PNG/MP4 render; cache deterministic (byte-identical re-render). |
+| 2 | Every interactive control | FAIL→FIXED | **Import / Merge / Images→PDF / Delete controls 403'd in production** (CSRF); now fixed. Present buttons, remote pairing, download links all resolve to live routes. |
+| 3 | Input validation & edge cases | FAIL→FIXED | Malformed spec field-types **500'd** on save/view; now total-and-clean. Zip-bomb guard, page-limit, wrong-type, need-two-pdfs all reject cleanly. |
+| 4 | UI state handling | PARTIAL→IMPROVED | Generate had no in-flight lock (double-submit → duplicate doc + double AI charge); now guarded. Empty/error/success states present. |
+| 5 | Server-side error handling | FAIL→FIXED | Error `detail` leaked internal `/tmp/...` server paths on 8 endpoints; now path-scrubbed. No unhandled 500s remain on the audited paths. |
+| 6 | Data integrity & multi-tenant | PASS | Save/load round-trips (columns, notes, background, meta, source_refs). `doc_id` never reassignable on save. Cross-tenant read/save/delete/export/present all 404/forbidden. |
+| 7 | Security | FAIL→FIXED | **Export embedded arbitrary server images (cross-tenant/LFI)** — now DATA_DIR-locked. XSS escaped across render/table/quote/notes/filenames. Present console owner-gated; remote pairing rate-limited. |
+| 8 | Performance | PASS-with-note | Season generate is O(runs) disk reads (bounded to 60 runs) and presenter polling globs session files each second — acceptable at target scale; logged as residual. |
+| 9 | Accessibility & responsive | PARTIAL→IMPROVED | File inputs now carry `aria-label`; preview iframe now has a `title`; present toggles expose `aria-pressed` + visible on/off state. Residual: fixed 2fr/1fr present-console grid on mobile (logged). |
+| 10 | Rendered-graphic correctness | PASS | Season report + AGM deck render; slide numbers present; PNG preview is one page; self-hosted fonts (no CDN); blocked image src renders as nothing (never fabricated). |
+| 11 | Consistency & copy | PARTIAL→IMPROVED | Sponsor-proposal fee placeholder used an em dash; now a plain hyphen (British-copy convention). |
+
+---
+
+## 4. Findings
+
+Severity: **P0** broken/dataloss/security-hole · **P1** wrong behaviour or a control that
+lies · **P2** usability/a11y/error-handling · **P3** polish/copy. All findings were
+reproduced against the running code (Flask test client + real renderer).
+
+| ID | Sev | Title | Reproduction | Root cause | Status | Commit |
+|---|---|---|---|---|---|---|
+| D-01 | P1 | Export embeds any server-side image (cross-tenant / local-file disclosure) | Save a spec with a `media` block whose `src` is an absolute path outside `DATA_DIR`; export DOCX/PPTX → the foreign image bytes are embedded. | `export._img_path` resolved `Path(src).exists()` with no `DATA_DIR` lock, unlike `render._img_src`. Specs are tenant-editable via `api_document_save`. | Fixed | see diff |
+| D-02 | P1 | Import / Merge / Images→PDF / Delete controls 403 in production | With `ENFORCE_CSRF=True`, click any of the four → `403 {"error":"csrf"}`; the page carried no token for them. | The multipart uploads posted `FormData` with no CSRF header; `delDoc` posted with no JSON content-type. Only `application/json` bodies are CSRF-exempt. Tests missed it because `TESTING` disables CSRF. | Fixed | see diff |
+| D-03 | P1 | `api_document_save` 500s on malformed spec field types | `POST /save` with `meta:[...]` / `sections:5` / `props:[...]` → `500 TypeError`, and the document then 500s on view. | `DocumentSpec.from_dict` did `dict(...)`/iterate over wrong-typed fields. A hand-edited spec is user-controlled. | Fixed | see diff |
+| D-04 | P1 | Sacred-numbers guard admits misstated / fabricated numbers | `_numbers_grounded("took 2.8s off", {…2.30…})` → `True`; `"2.9"` passes for a fact of `2`. | The `abs(n-a)<0.6` window and `int(a)==int(n)` rule were far too loose for the "numbers are sacred" contract. | Fixed | see diff |
+| D-05 | P2 | Error `detail` leaks server temp path | Upload a non-image to images→PDF → `detail:"cannot identify image file '/tmp/img_….png'"`. Merge/import/render/export/video leaked similarly (8 sites). | Endpoints returned raw `str(e)[:200]`; Pillow/pypdf/Playwright embed absolute paths. | Fixed | see diff |
+| D-06 | P2 | Generate double-submit → duplicate doc + double AI charge | Two quick Generate clicks → two docs saved (distinct ids); on the AI path, two quota records. | `genDoc` had no in-flight/loading guard. | **Superseded** — an editorial-JS refactor landed on `main` mid-audit with a per-button `_genBusy` disable that fixes this; my duplicate fix was dropped on integration. Locked by a regression test. | (upstream) |
+| D-07 | P2 | Presenter Blackout/Autoplay toggles give no state feedback | Toggle Blackout/Autoplay on the console → no on/off indicator; the presenter can't tell if the room is blacked out or auto-advancing. | Toggle buttons had no reflected state. | Fixed | see diff |
+| D-08 | P2 | Unlabelled file inputs / untitled preview iframe (a11y) | The three file inputs had no accessible name; the PDF-preview iframe had no `title`. | Missing `aria-label` / `title`. | Fixed | see diff |
+| D-09 | P3 | Sponsor-proposal fee placeholder used an em dash | `DEFAULT_PACKAGES` rendered `—` in the Season fee column. | Em dash violates the plain-hyphen British-copy convention. | Fixed | see diff |
+| D-10 | P3 | Audience autoplay ignored the advertised cadence | `public_state` advertises `autoplay_seconds` (8s) but the kiosk view hardcoded 6s — a dead field. | Hardcoded `setInterval(…, 6000)`. | **Superseded** — the same upstream refactor's "G-13" change fixes this (with live retiming); my duplicate fix was dropped on integration. Locked by a regression test. | (upstream) |
+| D-11 | P2/P3 | Manual nav during autoplay doesn't drive the audience | With autoplay on, console Next/Prev move `current` server-side but the audience view only follows the autoplay index. | Audience updates the slide only `if(!autoplay …)`. Correct product behaviour (pause-on-nav vs ignore) is a judgement call. | **Logged** (needs product decision; touches the live present loop) | — |
+
+---
+
+## 5. Fixes applied
+
+- **`documents/export.py` — `_img_path`** now mirrors `render._img_src`: only files that
+  resolve **inside `DATA_DIR`** are embedded; `http(s)://`, `data:`, `file:` traversal and
+  absolute out-of-tree paths are refused. Closes the cross-tenant / local-file disclosure
+  in DOCX/PPTX export (D-01).
+- **`web/web.py` — CSRF wiring (D-02).** `_DOCUMENTS_HOME_JS` now injects a `CSRF` token and
+  sends `X-CSRF-Token` on the import + merge + images→PDF multipart fetches; `delDoc` sends
+  a JSON content-type (the app's documented CSRF-exempt path, matching the newsletter
+  delete). `documents_home` fills `__CSRF__` from `_csrf_token()`.
+- **`documents/models.py` — `from_dict` totality (D-03).** New `_as_dict`/`_as_list`
+  helpers keep `Block`/`Section`/`DocumentSpec.from_dict` total over wrong-typed persisted
+  JSON (bad field defaults, never raises). `api_document_save` also wraps the load in a
+  clean `400 bad_spec` as belt-and-braces.
+- **`documents/draft.py` — `_numbers_grounded` tightened (D-04).** A token is grounded only
+  when it equals a fact (float epsilon), is that fact rounded to a whole number, or agrees
+  to one decimal place. The wide `0.6` window and `int(a)==int(n)` rule are gone.
+- **`web/web.py` — `_doc_clean_detail` (D-05).** A helper scrubs absolute paths from error
+  `detail` (keeping helpful validation text like page/size limits), applied to all 8
+  document/PDF-tool error responses.
+- **`web/web.py` — present-console toggle state (D-07):** `aria-pressed` + a `toggleState`
+  reflection so Blackout/Autoplay show their on/off state.
+- **`web/web.py` — a11y (D-08):** `aria-label` on the three file inputs; `title="Document
+  preview"` on the preview iframe.
+- **`documents/formats.py` — plain hyphens (D-09):** the fee placeholder is `-`.
+- **D-06 and D-10 were fixed independently on `main`** by an editorial-JS refactor that
+  landed during this audit (its `_genBusy` per-button disable and "G-13" autoplay-cadence
+  change). On integration I dropped my duplicate fixes and kept upstream's; both behaviours
+  remain locked by the regression tests below.
+
+---
+
+## 6. Tests added / extended
+
+All added to existing `tests/test_documents_*.py` modules (no parallel harness):
+
+- `test_documents_export.py`: `test_docx_export_drops_image_outside_data_dir`,
+  `test_pptx_export_drops_image_outside_data_dir`,
+  `test_export_refuses_remote_and_traversal_srcs` — lock D-01.
+- `test_documents_web.py`: `test_home_embeds_csrf_token_for_uploads`,
+  `test_images_to_pdf_needs_csrf_token`, `test_import_needs_csrf_token`,
+  `test_delete_document_works_under_csrf` (all with `ENFORCE_CSRF`) — lock D-02;
+  `test_save_malformed_spec_does_not_500_and_stays_viewable` — lock D-03;
+  `test_tool_error_detail_does_not_leak_server_path` — lock D-05;
+  `test_home_generate_has_reentrancy_guard` — lock D-06;
+  `test_present_console_reflects_toggle_state` — lock D-07;
+  `test_home_file_inputs_have_accessible_labels`, `test_document_view_iframe_has_title` —
+  lock D-08; `test_audience_autoplay_honours_configured_cadence` — lock D-10.
+- `test_documents_ai.py`: `test_numbers_grounded_rejects_misstated_and_fabricated_numbers`,
+  `test_misstated_swim_time_is_dropped_from_prose` — lock D-04.
+- `test_documents_models.py`: `test_from_dict_tolerates_malformed_field_types` — lock D-03.
+- `test_documents_formats.py`: `test_default_packages_use_plain_hyphens` — lock D-09.
+
+---
+
+## 7. Cross-cutting changes
+
+**None outside the feature's blast radius.** All edits are within
+`src/mediahub/documents/` and the Documents section of `src/mediahub/web/web.py` (the
+CSRF-token wiring reuses the existing `_csrf_token()` / `_csrf_protect` guard — no change to
+the guard itself). One `ruff format` line-wrap was applied to the single import-route line I
+lengthened; no unrelated lines in `web.py` were reformatted.
+
+**Parallel-session coordination (important).** While this audit ran, another session landed
+a broad "editorial-JS" refactor of the Documents + Newsletters home JS on `main` (new
+per-card "Write with AI" toggle, `_genBusy` button-disable, `MH.toast` errors, an "End
+presentation" console button, and a "G-13" audience autoplay-cadence fix). My branch was
+re-based onto that `main` and the overlapping Documents JS blobs were **resolved by taking
+upstream's version and re-applying only my net-new, non-duplicated fixes** (the CSRF token
+wiring D-02, present toggle-state D-07). My D-06 and D-10 duplicated upstream's work and were
+dropped. Upstream's refactor **did not** address the CSRF breakage (D-02) — that P1 remains
+this audit's essential contribution. The resolution preserved both sides and all of
+upstream's own usability tests (`test_usability_d10/g13/j13/h22`) still pass.
+
+---
+
+## 8. Residual risks / cross-feature work (not attempted here)
+
+- **D-11** manual-nav-during-autoplay: correct UX (pause autoplay on manual nav vs ignore)
+  is a product decision; left for the owner.
+- **Performance:** season-scope generation reads every processed run from disk (bounded to
+  60) and presenter state-polling `glob`s all session files each second. Fine at club/season
+  scale; a future index would help many concurrent presentations. Not a request-path
+  hazard today.
+- **Export fidelity:** `data:`-URI images are (intentionally) not embedded into DOCX/PPTX
+  (bounded fidelity, stated). Generated documents contain no image blocks, so this only
+  affects hand-authored specs.
+- **Generated highlight/title prose** in `grounding.py` uses em-dash sentence punctuation
+  (consistent with the rest of the codebase); left untouched to keep the footprint tight.
+
+---
+
+## 9. Feature verdict
+
+**WORKS-WITH-CAVEATS.** The core engine is sound — deterministic, tenant-isolated,
+brand-locked, with real numbers correctly attributed — but the audit found and fixed two
+production-only P1 breakages that the existing suite could not see (four interactive
+controls 403'd under real CSRF; the export path leaked arbitrary server images), a P1
+crash-on-malformed-spec, a P1 laxity in the sacred-numbers guard, and several P2/P3
+error-handling, a11y and copy issues. With those fixed and locked by tests, the feature
+behaves as a paying customer expects. One UX item (D-11) is logged for a product decision.
+
+---
+
+## 10. Handover & merge status
+
+- **Branch:** `claude/documents-audit-fix-17pxz3`.
+- **Review the diff:** `git diff origin/main...claude/documents-audit-fix-17pxz3`.
+- **Green gate:** documents suite green (108 pre-existing + new locking tests all pass);
+  app boots clean; two unrelated routes load; `ruff check` + `ruff format --check` clean on
+  all changed files; no secrets or `.env` staged. Full `tests/` regression run + integration
+  onto the latest `origin/main` recorded below at push time.
+- **Merge:** landed via draft PR against `main` (per the environment's PR flow, which is the
+  Phase-5-equivalent "up-to-date-before-merge" gate). See PR + final SHA below.
