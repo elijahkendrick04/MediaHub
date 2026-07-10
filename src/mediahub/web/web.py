@@ -38669,6 +38669,25 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         session["terms_ok_version"] = _legal.TERMS_VERSION
         return redirect(nxt or url_for("make_page"))
 
+    def _login_2fa_page(error: str = "", status: int = 200):
+        """The one /login/2fa surface: errors re-render this same form inline
+        (input cleared + autofocused) — never a dead-end interstitial."""
+        error_html = f'<p class="tag bad" role="alert">{_h(error)}</p>' if error else ""
+        body = f"""
+<div class="card" style="max-width:420px;margin:40px auto">
+  <h2>Two-factor code</h2>
+  <p class="muted">Enter the 6-digit code from your authenticator app — or, if you have lost
+  your device, one of your recovery codes (looks like XXXX-XXXX; each works once).</p>
+  {error_html}
+  <form method="post" action="{url_for("login_2fa")}">
+    <input type="text" name="totp" autocomplete="one-time-code" maxlength="12" required autofocus>
+    <button class="btn" type="submit">Verify</button>
+  </form>
+  <p style="margin-top:14px"><a href="{url_for("login_2fa", cancel=1)}">&larr; Back to log in</a></p>
+</div>
+"""
+        return _layout("Two-factor", body, active=""), status
+
     @app.route("/login/2fa", methods=["GET", "POST"])
     def login_2fa():
         from mediahub.compliance.security_log import record_event as _sec_event
@@ -38677,24 +38696,13 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         if not email:
             return redirect(url_for("login_page"))
         if request.method == "GET":
-            body = f"""
-<div class="card" style="max-width:420px;margin:40px auto">
-  <h2>Two-factor code</h2>
-  <p class="muted">Enter the 6-digit code from your authenticator app — or, if you have lost
-  your device, one of your recovery codes (looks like XXXX-XXXX; each works once).</p>
-  <form method="post" action="{url_for("login_2fa")}">
-    <input type="text" name="totp" autocomplete="one-time-code" maxlength="12" required autofocus>
-    <button class="btn" type="submit">Verify</button>
-  </form>
-</div>
-"""
-            return _layout("Two-factor", body, active="")
+            if request.args.get("cancel"):
+                # Back to log in: abandon the half-finished 2FA login.
+                session.pop("pending_2fa_email", None)
+                return redirect(url_for("login_page"))
+            return _login_2fa_page()
         if _auth.login_locked(email):
-            return _layout(
-                "Two-factor",
-                '<div class="card"><p class="tag bad">Too many failed attempts — try again later.</p></div>',
-                active="",
-            ), 429
+            return _login_2fa_page("Too many failed attempts — try again in 15 minutes.", 429)
         store = _user_store()
         user = store.get(email)
         code = request.form.get("totp") or ""
@@ -38712,12 +38720,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 actor=email,
                 outcome="lockout" if locked_now else "failed",
             )
-            return _layout(
-                "Two-factor",
-                f'<div class="card"><p class="tag bad">That code didn\'t match.</p>'
-                f'<p><a href="{url_for("login_2fa")}">Try again</a></p></div>',
-                active="",
-            ), 401
+            return _login_2fa_page("That code did not match — try again.", 401)
         _auth.clear_login_failures(email)
         session.clear()
         _auth.login_user(user)
@@ -38886,12 +38889,18 @@ document.addEventListener('click', function (ev) {
                     session.pop("totp_setup_secret", None)
                     _sec_event("totp_enabled", actor=email)
                     return _twofa_codes_page(codes, "Two-factor authentication is on")
-                return _layout(
-                    "Two-factor",
-                    '<div class="card"><p class="tag bad">Code didn\'t match — scan the secret again and retry.</p>'
-                    f'<p><a href="{url_for("account_2fa")}">Back</a></p></div>',
-                    active="",
-                ), 400
+                # Inline re-render of the same setup page (QR + secret intact —
+                # the session still holds the pending secret), not a dead end.
+                return _twofa_no_store(
+                    _layout(
+                        "Two-factor",
+                        _twofa_setup_body(
+                            email, error="That code did not match — scan the code again and retry."
+                        ),
+                        active="",
+                    ),
+                    400,
+                )
             if action == "disable":
                 if user.totp_secret and _auth.totp_verify(user.totp_secret, code):
                     store.set_totp(email, "")  # also drops the recovery-code hashes
@@ -38899,8 +38908,11 @@ document.addEventListener('click', function (ev) {
                     return redirect(url_for("account_2fa"))
                 return _layout(
                     "Two-factor",
-                    '<div class="card"><p class="tag bad">Enter a valid current code to disable 2FA.</p>'
-                    f'<p><a href="{url_for("account_2fa")}">Back</a></p></div>',
+                    _twofa_enabled_body(
+                        user,
+                        error="Enter a valid current code to switch 2FA off.",
+                        error_action="disable",
+                    ),
                     active="",
                 ), 400
             if action == "regenerate":
