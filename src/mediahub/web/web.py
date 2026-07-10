@@ -202,6 +202,17 @@ _ORG_TYPE_TO_SPORT: dict[str, str] = {
     "athletics": "athletics",
 }
 
+# The social platforms an organisation posts to — (slug, display label).
+# Shared by the organisation-DNA form and the performance-log platform select
+# (H-14) so both surfaces speak the same platform vocabulary.
+_ORG_PLATFORMS: list[tuple[str, str]] = [
+    ("instagram", "Instagram"),
+    ("tiktok", "TikTok"),
+    ("twitter", "Twitter / X"),
+    ("facebook", "Facebook"),
+    ("linkedin", "LinkedIn"),
+]
+
 # A sport slug is only ever fed to ``load_sport_profile`` (which joins it into a
 # ``sport_profiles/<slug>.yaml`` path). Sport profile slugs are always
 # ``[a-z0-9_]+`` — reject anything else before it can escape the profiles dir.
@@ -32724,6 +32735,44 @@ function mhBoardMove(sel) {{
             f'<option value="{_h(spt.slug)}">{_h(spt.title)}</option>' for spt in spts
         )
 
+        # H-14: the store and API already model platform + pack_id, but the
+        # form never offered them. A platform select (blank "not sure"
+        # default) and an optional "Which draft?" select of this org's recent
+        # drafts close the gap; both prefill from query params so a draft
+        # page can link straight here.
+        _sel_platform = (request.args.get("platform") or "").strip().lower()
+        _sel_pack = (request.args.get("pack_id") or "").strip()
+        platform_opts = '<option value="">Not sure / other</option>' + "".join(
+            f'<option value="{_h(slug)}"{" selected" if slug == _sel_platform else ""}>'
+            f"{_h(label)}</option>"
+            for slug, label in _ORG_PLATFORMS
+        )
+        from mediahub.club_platform.stub_pack_store import list_packs as _an_list_packs
+        from mediahub.club_platform.stub_pack_store import load_pack as _an_load_pack
+
+        _pack_rows: list[tuple[str, str]] = []
+        try:
+            for _meta in _an_list_packs(limit=40):
+                _prec = _an_load_pack(_meta.get("pack_id", ""))
+                if _prec is None or (_prec.get("profile_id") or "") != pid:
+                    continue
+                _pack_rows.append((_prec.get("pack_id", ""), _prec.get("title") or "Draft"))
+                if len(_pack_rows) >= 15:
+                    break
+            # An older draft arriving via ?pack_id= must still appear selected.
+            if _sel_pack and _sel_pack not in {pk for pk, _ in _pack_rows}:
+                _prec = _an_load_pack(_sel_pack)
+                if _prec is not None and (_prec.get("profile_id") or "") == pid:
+                    _pack_rows.insert(0, (_sel_pack, _prec.get("title") or "Draft"))
+        except Exception:
+            _pack_rows = []
+        pack_opts = '<option value="">Not linked to a draft</option>' + "".join(
+            f'<option value="{_h(pk)}"{" selected" if pk == _sel_pack else ""}>'
+            f"{_h(t[:60])}</option>"
+            for pk, t in _pack_rows
+        )
+        _platform_labels = dict(_ORG_PLATFORMS)
+
         # The attribution table — what's working, with an index bar.
         if attribution.by_type:
             rows = ""
@@ -32775,14 +32824,17 @@ function mhBoardMove(sel) {{
                 "starts ranking what actually works for your club. Nothing is auto-collected.</p></div>"
             )
 
-        # Recent recorded posts (with delete).
+        # Recent recorded posts (with delete). Platform shows when recorded.
         recent = ""
         for m in sorted(metrics, key=lambda x: x.recorded_at, reverse=True)[:12]:
             title = _h(type_titles.get(m.post_type, m.post_type.replace("_", " ").title()))
             eng = _h(str(engagement_score(m.metrics)))
+            _plat = ""
+            if m.platform:
+                _plat = f" · {_h(_platform_labels.get(m.platform, m.platform))}"
             recent += (
                 f'<div class="mh-an-row" data-id="{_h(m.id)}">'
-                f'<span style="flex:1">{title} <span class="dim">· {_h(m.posted_date)}</span></span>'
+                f'<span style="flex:1">{title} <span class="dim">· {_h(m.posted_date)}{_plat}</span></span>'
                 f'<span class="dim" style="font-variant-numeric:tabular-nums">{eng} eng</span>'
                 f'<button type="button" class="btn" style="font-size:11px;padding:2px 8px" '
                 f'onclick="mhAnDelete(this)">remove</button></div>'
@@ -32810,6 +32862,8 @@ function mhBoardMove(sel) {{
   <h2 style="margin-top:0">Log a post&rsquo;s performance</h2>
   <div class="mh-an-form">
     <label class="mh-an-mlabel">Post type<select id="mh-an-type" style="min-width:170px">{type_opts}</select></label>
+    <label class="mh-an-mlabel">Platform<select id="mh-an-platform" style="min-width:150px">{platform_opts}</select></label>
+    <label class="mh-an-mlabel">Which draft? (optional)<select id="mh-an-pack" style="min-width:180px">{pack_opts}</select></label>
     <label class="mh-an-mlabel">Date posted<input type="date" id="mh-an-date"/></label>
     <label class="mh-an-mlabel">Hour (0&ndash;23, optional)<input type="number" min="0" max="23" id="mh-an-hour" style="width:88px"/></label>
     {metric_inputs}
@@ -32846,6 +32900,8 @@ function mhAnRecord(btn) {{
     post_type: document.getElementById('mh-an-type').value,
     posted_date: document.getElementById('mh-an-date').value,
     posted_hour: hour === '' ? null : parseInt(hour, 10),
+    platform: document.getElementById('mh-an-platform').value,
+    pack_id: document.getElementById('mh-an-pack').value,
     metrics: metrics
   }};
   mhAnStatus('Saving…');
@@ -36030,6 +36086,9 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             f'<a class="btn secondary" href="{url_for("plan_ad_variants_page", pack_id=pack_id)}" '
             f'title="Turn these angles into a sponsor A/B ad set, sized for ad managers (prepared, never placed)">'
             f"Prepare ad set</a>"
+            f'<a class="btn secondary" href="{url_for("plan_analytics_page", pack_id=pack_id)}" '
+            f'title="Posted this by hand? Log how it did — what works feeds the plan">'
+            f"Log performance</a>"
             f'<a class="btn secondary" href="{regenerate_url}">Start a new draft from the form</a>'
             f'<a class="btn secondary" href="{back_url}">&larr; All drafts</a>'
             f"</div>"
@@ -37217,13 +37276,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             ("university_society", "University society or sports club"),
             ("corporate_team", "Corporate team"),
         ]
-        _PLATFORMS = [
-            ("instagram", "Instagram"),
-            ("tiktok", "TikTok"),
-            ("twitter", "Twitter / X"),
-            ("facebook", "Facebook"),
-            ("linkedin", "LinkedIn"),
-        ]
+        _PLATFORMS = _ORG_PLATFORMS
         _TONES = [
             (
                 "warm-club",
