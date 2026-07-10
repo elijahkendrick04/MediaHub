@@ -7257,9 +7257,21 @@ def _sample_pack_cta(
     if not _SAMPLE_MEET_PDF.exists():
         return ""
     action = url_for("onboarding_sample")
+    # A sample pack kicks off a real 30-90s pipeline run, so an accidental
+    # double-click would queue two identical demo packs (and two worker jobs).
+    # Guard the submit: block a second submit synchronously, then disable the
+    # button just after the first one starts (setTimeout keeps the in-flight
+    # POST from being cancelled). Progressive enhancement — with JS off the
+    # form still posts, exactly as before.
+    guard = (
+        "if(this.dataset.mhSent)return false;this.dataset.mhSent='1';"
+        "var b=this.querySelector('button');"
+        "if(b){setTimeout(function(){b.disabled=true;},0);}return true;"
+    )
     if compact:
         return (
-            f'<form method="post" action="{action}" style="margin:0;display:inline">'
+            f'<form method="post" action="{action}" onsubmit="{guard}" '
+            'style="margin:0;display:inline">'
             f'<button type="submit" class="btn secondary">{_h(button_label)}</button>'
             "</form>"
         )
@@ -7271,7 +7283,7 @@ def _sample_pack_cta(
         f'<h3 style="margin:0 0 6px;font-size:15px">{_h(heading)}</h3>'
         f'<p class="dim" style="margin:0;font-size:13px;line-height:1.5">{_h(sub)}</p>'
         "</div>"
-        f'<form method="post" action="{action}" style="margin:0">'
+        f'<form method="post" action="{action}" onsubmit="{guard}" style="margin:0">'
         f'<button type="submit" class="btn">{_h(button_label)}</button>'
         "</form>"
         "</div>"
@@ -22128,9 +22140,12 @@ def create_app() -> Flask:
                 code=404,
             )
         file_bytes = _SAMPLE_MEET_PDF.read_bytes()
-        # Synthetic swimmers — there is nothing to web-verify, so PB fetch is
-        # off (faster, and no third-party calls for demo data). The hero club
-        # is pre-selected so the pack shows its best spread of cards.
+        # Synthetic swimmers — there is nothing to web-verify, so PB web
+        # verification is off (faster, and no PB-verification calls for demo
+        # data). Meet-identity research inside the recognition report still
+        # runs, but it is globally cached, so only the first uncached sample
+        # generation on a deployment can trigger an outbound lookup. The hero
+        # club is pre-selected so the pack shows its best spread of cards.
         run_id = _start_run(
             file_bytes,
             _SAMPLE_MEET_FILENAME,
