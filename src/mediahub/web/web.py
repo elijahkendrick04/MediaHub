@@ -35209,14 +35209,18 @@ function copySpotlightCaption(btn) {{
                     from mediahub.brand.guidelines import extract_text as _doc_text
                     from mediahub.web_research.safe_fetch import safe_fetch as _sfetch
 
+                    # Bound each fetch tightly: this runs synchronously inside
+                    # the request, and two links plus the LLM call must finish
+                    # well inside the worker timeout. A slow or hostile host
+                    # gets a short leash rather than stalling the worker.
                     _site_url = (form_data.get("event_website_url") or "").strip()
                     if _site_url:
-                        _site_text = _sfetch(_site_url, max_chars=8000)
+                        _site_text = _sfetch(_site_url, max_chars=8000, timeout=6.0, max_hops=2)
                         if _site_text:
                             form_data["event_site_text"] = _site_text
                     _entries_url = (form_data.get("entries_url") or "").strip()
                     if _entries_url:
-                        _etext = _sfetch(_entries_url, max_chars=20000)
+                        _etext = _sfetch(_entries_url, max_chars=20000, timeout=6.0, max_hops=2)
                         if _etext:
                             form_data["entries_text"] = _etext
                     for _field, _key, _cap in (
@@ -35286,6 +35290,22 @@ function copySpotlightCaption(btn) {{
                         form_data["club_name"] = _pv_prof.display_name
                 except Exception:
                     app.logger.exception("event preview enrichment failed")
+                # Reject an empty submission: with no event name, no readable
+                # website/pack/entries text, and no typed ones-to-watch, the
+                # model would have nothing to ground on and would guess. Ask
+                # for a real source instead of generating an ungrounded preview.
+                if not stub.has_meaningful_input(form_data):
+                    return _recovery_page(
+                        "Add something to preview",
+                        (
+                            "Give us at least the event name, or upload the "
+                            "entries file, or add the event's website or meet "
+                            "pack, so the preview has real facts to work from. "
+                            "It never guesses."
+                        ),
+                        primary_cta=("Back to Event Preview", url_for(route_endpoint)),
+                        code=400,
+                    )
             generation_error = None
             try:
                 cards_payload = stub.generate_cards(form_data)
@@ -36498,7 +36518,14 @@ function copySpotlightCaption(btn) {{
         existing = load_pack(pack_id)
         if not _can_access_pack(existing, _active_profile_id()):
             return jsonify({"ok": False, "error": "invalid_request"}), 400
-        status = (request.form.get("status") or "").strip().lower()
+        # Read the status from a JSON body (the pill posts application/json so
+        # the write stays inside the CSRF layer's same-origin JSON exemption);
+        # fall back to a form field for any legacy caller.
+        _body = request.get_json(silent=True) if request.is_json else None
+        status = (
+            (_body or {}).get("status") if isinstance(_body, dict) else request.form.get("status")
+        ) or ""
+        status = status.strip().lower()
         rec = update_card_status(pack_id, card_idx, status)
         if not rec:
             return jsonify({"ok": False, "error": "invalid_request"}), 400

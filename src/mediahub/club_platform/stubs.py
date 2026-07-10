@@ -209,16 +209,16 @@ class WeekendPreviewStub(_StubContentType):
   <form method="POST" enctype="multipart/form-data" data-loader-text="Reading the event"
         data-loader-sub="Fetching links, reading the pack, picking the ones to watch…" style="margin-top:16px">
     <div style="margin-bottom:14px">
-      <label>Event name <span class="muted" style="font-size:11px">(optional if you attach the entry file — it names the meet)</span></label>
-      <input type="text" name="meet_name" placeholder="e.g. County Championships"/>
+      <label for="pv-meet-name">Event name <span class="muted" style="font-size:11px">(optional if you attach the entry file — it names the meet)</span></label>
+      <input id="pv-meet-name" type="text" name="meet_name" placeholder="e.g. County Championships"/>
     </div>
     <div style="margin-bottom:14px">
-      <label>Event website link <span class="muted" style="font-size:11px">(optional)</span></label>
-      <input type="url" name="event_website_url" placeholder="https://…"/>
+      <label for="pv-event-website">Event website link <span class="muted" style="font-size:11px">(optional)</span></label>
+      <input id="pv-event-website" type="url" name="event_website_url" placeholder="https://…"/>
     </div>
     <div style="margin-bottom:14px">
-      <label>Meet pack / event pack <span class="muted" style="font-size:11px">(optional — PDF, Word, text)</span></label>
-      <input type="file" name="event_pack" accept=".pdf,.docx,.txt,.md,.markdown,.rtf,.html,.htm"/>
+      <label for="pv-event-pack">Meet pack / event pack <span class="muted" style="font-size:11px">(optional — PDF, Word, text)</span></label>
+      <input id="pv-event-pack" type="file" name="event_pack" accept=".pdf,.docx,.txt,.md,.markdown,.rtf,.html,.htm"/>
     </div>
 
     <div style="margin-bottom:14px;padding:14px;background:rgba(34,211,238,0.04);border:1px solid var(--border);border-radius:8px">
@@ -233,23 +233,23 @@ class WeekendPreviewStub(_StubContentType):
         </label>
       </div>
       <div id="pv-watch-ai">
-        <label>Link to the entries / psych sheet <span class="muted" style="font-size:11px">(optional)</span></label>
-        <input type="url" name="entries_url" placeholder="https://… (accepted entries list)"/>
-        <label style="margin-top:10px">Or upload an entries file <span class="muted" style="font-size:11px">(optional — the organiser&rsquo;s entry file (.lef / .lxf), PDF, Word, CSV, text)</span></label>
-        <input type="file" name="entries_file" accept=".lef,.lxf,.pdf,.docx,.txt,.csv,.md,.html,.htm"/>
+        <label for="pv-entries-url">Link to the entries / psych sheet <span class="muted" style="font-size:11px">(optional)</span></label>
+        <input id="pv-entries-url" type="url" name="entries_url" placeholder="https://… (accepted entries list)"/>
+        <label for="pv-entries-file" style="margin-top:10px">Or upload an entries file <span class="muted" style="font-size:11px">(optional — the organiser&rsquo;s entry file (.lef / .lxf), PDF, Word, CSV, text)</span></label>
+        <input id="pv-entries-file" type="file" name="entries_file" accept=".lef,.lxf,.pdf,.docx,.txt,.csv,.md,.html,.htm"/>
         <p class="muted" style="font-size:11px;margin:8px 0 0 0">The AI reads the entries and picks your club&rsquo;s
         ones to watch — name, events, and a factual one-line reason each. It only ever names athletes
         who actually appear in the entries.</p>
       </div>
       <div id="pv-watch-manual" style="display:none">
-        <label>Athletes to watch (one per line)</label>
-        <textarea name="athletes" rows="4" placeholder="Sam Jones — 200 Free&#10;Alex Smith — 100 Back"></textarea>
+        <label for="pv-athletes">Athletes to watch (one per line)</label>
+        <textarea id="pv-athletes" name="athletes" rows="4" placeholder="Sam Jones — 200 Free&#10;Alex Smith — 100 Back"></textarea>
       </div>
     </div>
 
     <div style="margin-bottom:14px">
-      <label>Key angles or story hooks <span class="muted" style="font-size:11px">(optional)</span></label>
-      <textarea name="angles" rows="3" placeholder="First open meet of the season, three swimmers chasing qualifying times"></textarea>
+      <label for="pv-angles">Key angles or story hooks <span class="muted" style="font-size:11px">(optional)</span></label>
+      <textarea id="pv-angles" name="angles" rows="3" placeholder="First open meet of the season, three swimmers chasing qualifying times"></textarea>
     </div>
     <button type="submit" class="btn">Generate preview cards →</button>
   </form>
@@ -266,9 +266,13 @@ function mhPvWatchMode() {
 </script>"""
 
     def generate_brief(self, form_data: dict) -> str:
-        meet = form_data.get("meet_name", "the upcoming event").strip()
-        athletes = _split_lines(form_data.get("athletes", ""))
-        angles = (form_data.get("angles") or "").strip()
+        # Cap the free-text user fields the same way the extracted website /
+        # pack / entries text is capped below, so a huge paste can't balloon
+        # the prompt (and the persisted pack). The extracted sources already
+        # have their own caps; these mirror that for the typed fields.
+        meet = form_data.get("meet_name", "the upcoming event").strip()[:300]
+        athletes = _split_lines(form_data.get("athletes", ""))[:50]
+        angles = (form_data.get("angles") or "").strip()[:3000]
         # Enriched by the route before generation: extracted text from the
         # event website, the uploaded meet pack, and the entries source.
         site_text = (form_data.get("event_site_text") or "").strip()
@@ -306,6 +310,25 @@ function mhPvWatchMode() {
             "it out; never guess."
         )
         return "\n\n".join(parts)
+
+    # Fields that carry a real, groundable fact into the brief. The route
+    # enriches ``form_data`` with the extracted website / pack / entries text
+    # BEFORE this runs, so a URL that failed to fetch counts as no source.
+    _SOURCE_FIELDS = (
+        "meet_name",
+        "event_site_text",
+        "event_pack_text",
+        "entries_text",
+        "athletes",
+    )
+
+    def has_meaningful_input(self, form_data: dict) -> bool:
+        """True when at least one factual source is present to ground the
+        preview in — an event name, the extracted website/pack/entries text,
+        or a typed ones-to-watch list. An empty (or whitespace-only) form must
+        be rejected rather than sent to the model with nothing to ground on,
+        which would otherwise invite an ungrounded, guessed preview."""
+        return any((form_data.get(k) or "").strip() for k in self._SOURCE_FIELDS)
 
     def generate_cards(self, form_data: dict) -> dict:
         return _generate_cards_via_llm(
@@ -700,8 +723,13 @@ def render_cards_html(
   function send(btn, status){
     var prev = btn.dataset.status;
     apply(btn, status);
-    var fd = new FormData(); fd.append('status', status);
-    fetch(btn.dataset.url, {method:'POST', body:fd, credentials:'same-origin'})
+    // Post as JSON so the write stays inside the app's same-origin JSON CSRF
+    // exemption. A multipart FormData post carries no CSRF token and is
+    // rejected 403 once CSRF is enforced in production, which silently lost
+    // every approval.
+    fetch(btn.dataset.url, {method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({status: status}), credentials:'same-origin'})
       .then(function(r){ if(!r.ok) throw 0; return r.json(); })
       .then(function(j){ if(j && j.status) apply(btn, j.status); })
       .catch(function(){ apply(btn, prev); window.MH && MH.toast('Could not save status','error'); });
