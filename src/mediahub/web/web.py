@@ -19183,6 +19183,14 @@ def create_app() -> Flask:
             # crawls the app's own pages in a hidden frame), so it bypasses
             # the org gate exactly like the operator console above.
             "mobile_parity_tool",
+            # Site-wide cache purge — the "Clear all caches" action on the
+            # developer settings page (now reachable without an org, above).
+            # Operator-only and org-independent: the handler re-checks
+            # _require_operator(), so exempting it from the org-setup wall is
+            # not an auth grant — same pattern as the operator_commercial POSTs.
+            # Without it a no-org operator's purge click 302s to org setup and
+            # silently never runs.
+            "operator_cache_purge",
             # /settings now redirects to / so doesn't actually need exempting,
             # but we keep the endpoint name in the allow-list so a directly-
             # hit /settings URL doesn't get caught by the gate before reaching
@@ -19219,6 +19227,14 @@ def create_app() -> Flask:
             "status_page",
             "api_status_json",
             "healthz_usage",
+            # /healthz/governance is the operator "AI governance — usage"
+            # dashboard, the twin of /healthz/usage above and linked from the
+            # developer settings page. It enforces its own is_dev_operator()
+            # gate inside the handler, so like its sibling it only needs to get
+            # past the org-setup wall — an operator checking a fresh deployment
+            # has no organisation yet. (Its docstring already assumed this
+            # exemption existed.)
+            "healthz_governance",
             "healthz_ping",
             # Installable-PWA endpoints — the browser fetches the manifest,
             # service-worker script, and icon on every page load (including
@@ -19516,6 +19532,20 @@ def create_app() -> Flask:
         # Always allow static, the home page, settings, health, and the
         # organisation routes themselves.
         if ep in _SETUP_EXEMPT_ENDPOINTS:
+            return None
+        # The operator-only "Developer" settings section is a deployment
+        # surface (health, deployment status, site-wide cache purge, links to
+        # the operator dashboards), org-independent exactly like the operator
+        # console and mobile-parity tool exempted above — an operator on a
+        # fresh deployment has no organisation yet. Its endpoint (settings_section)
+        # also serves the org-scoped sections, so it can't be a flat exemption;
+        # carve out only the developer section for a signed-in operator (the
+        # handler re-checks is_dev_operator, so this is not an auth grant).
+        if (
+            ep == "settings_section"
+            and (request.view_args or {}).get("section") == "developer"
+            and _auth.is_dev_operator()
+        ):
             return None
         path = request.path or ""
         # Any /static/ asset (fonts.css, woff2, theme CSS, …) must load for
