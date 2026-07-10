@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-07-10 · `472cff387` · [season-wraps] audit report: record merge status + SHA
+**Last updated:** 2026-07-10 · `22fefbb1f` · [developer-settings] report: record F-5/F-6 from the re-audit pass
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1227,6 +1227,9 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-07-10 | `02871896f` | [developer-settings] report: record second-pass merge status |
+| 2026-07-10 | `22fefbb1f` | [developer-settings] report: record F-5/F-6 from the re-audit pass |
+| 2026-07-10 | `ec66e8b0b` | [developer-settings] purge every re-derivable cache + fix stale reel doc default |
 | 2026-07-10 | `472cff387` | [season-wraps] audit report: record merge status + SHA |
 | 2026-07-10 | `95331bcb4` | [season-wraps] fix dropped swimmer/time, non-ISO dates, crashes, idempotency, poster injection |
 | 2026-07-10 | `1f49c3faa` | [developer-settings] record final merge status in audit report |
@@ -1235,7 +1238,4 @@ list and the auto table below, not here.
 | 2026-07-10 | `06a3fc2f1` | [developer-settings] audit report |
 | 2026-07-10 | `494f6ddf6` | [developer-settings] reach operator dashboards on a fresh deployment |
 | 2026-07-10 | `fe2605d66` | [meet-recap] record merge status in audit report |
-| 2026-07-10 | `ca6f02514` | [meet-recap] add end-to-end audit report |
-| 2026-07-10 | `56a04395c` | [meet-recap] lock audit fixes with tests |
-| 2026-07-10 | `b24525282` | [meet-recap] fix recap "by the numbers" swimmer undercount |
 <!-- /ROADMAP:ACTIVITY -->
