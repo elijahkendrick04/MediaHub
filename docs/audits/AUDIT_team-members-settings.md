@@ -84,3 +84,102 @@ coupling.
   directly from Python). Screenshots at desktop 1280px and mobile 390px.
 
 <!-- SECTIONS 3-10 appended after verification completes -->
+
+---
+
+## 3. Test matrix results
+
+| # | Dimension | Result | Note (evidence) |
+|---|-----------|--------|-----------------|
+| 1 | Functional correctness | PASS | Owner add/invite, role change, remove all produce correct ledger state + honest notices. Verified via test client + Playwright + live probe. |
+| 2 | Every interactive control | PASS (after fixes) | Add form, per-row role picker (Update), Remove (confirm), Back link, Log-in CTA enumerated. The picker's Update mis-fired invite emails and could silently downgrade (F5/F7) — fixed. Remove-confirm loader stuck on cancel (F1) — fixed. |
+| 3 | Input validation / edge cases | PASS (after fixes) | Empty/missing action, email, role handled cleanly; unknown action → clean error; invalid role coerces to member; unicode ok; un-activatable + line-separator + over-long emails now rejected (F4 + hardening). |
+| 4 | UI state handling | PASS (after fixes) | Loading/empty/error/success states render. The full-screen loader no longer sticks after a cancelled confirm (F1). |
+| 5 | Server-side error handling | PASS | No 500s / stack traces; `TenancyError` surfaces as a clean flash; non-admin POST → 404 (anti-enumeration). |
+| 6 | Data integrity | PASS (after fixes) | In matches out; append-only last-write-wins; idempotent view. `invited_by` no longer overwritten on edits (F6); line-separator rows no longer silently lost (hardening); the last-owner-erasure ownerless-workspace P1 fixed with succession (F8). |
+| 7 | Security | PASS | Authz on GET+POST for anon/foreign/member/owner/operator; CSRF enforced + auto-injected (tokenless POST → 403); no secrets in responses; XSS escaped via `_h()`; PII gate on open workspaces; tenant isolation held (test_cross_tenant_access green). One owner-privileged enumeration oracle logged (L1). |
+| 8 | Performance | PASS-WITH-NOTES | No pathological slowness for realistic club sizes. The route re-parses the small membership ledger several times per request instead of the request-scoped snapshot (L5) and appends without compaction (L6) — logged, not pathological. |
+| 9 | Responsive / accessibility | PASS (after fixes) | Mobile 390px: no horizontal overflow (stacked table). Labels now associated (F2), `th scope` added (F3), email `autocomplete` (F2), per-row role `<select>` given an accessible name. Residual a11y polish logged (L12). |
+| 10 | Rendered-graphic correctness | N/A | This feature renders no card graphics. |
+| 11 | Consistency / copy quality | PASS-WITH-NOTES | British English throughout the route; no TODO/debug/placeholder text. Tenant named four ways across the screen (L10) and one jargon phrase on open workspaces (L11) logged as polish. |
+
+## 4. Findings
+
+Severity: P0 broken/dataloss/security-hole · P1 wrong behaviour or lying control · P2 usability/a11y/error-handling · P3 polish.
+
+### Fixed
+
+| ID | Sev | Title | Reproduction | Root cause | Status | Commit |
+|----|-----|-------|--------------|------------|--------|--------|
+| F1 | P2 | Full-screen loader sticks after a cancelled "Remove" confirm | Open members, click Remove, dismiss the confirm → "Working on it" overlay stayed until the 20s safety timeout | Shared `bindForms` submit handler raised the loader even when an earlier `onsubmit` handler cancelled the submit | Fixed | 703d10b |
+| F2 | P2 | Add-member form labels not associated; email lacks autocomplete | Screen reader can't tie "Email"/"Role" to their fields | `<label>` had no `for`; inputs no `id`; no `autocomplete` | Fixed | 703d10b |
+| F3 | P3 | Members table headers lack `scope` | Screen-reader table nav ambiguous | `<th>` had no `scope="col"` | Fixed | 703d10b |
+| F4 | P3 | Un-activatable invite stored (e.g. `coach@club`, no TLD) | Add `coach@club` → row sits "invited" forever (signup rejects that address) | Store only checks for `@`; route did not pre-validate | Fixed | 703d10b |
+| F5 | P2 | Invite email re-sent on every role edit of an invited member | Configure email seam, invite X, click Update on X's row repeatedly → an invite email each time | Picker's `action=add` re-ran the invite branch (no new-vs-edit distinction) | Fixed | 21b6b4a |
+| F6 | P3 | `Invited by` overwritten to the last editor on any role change | A invites X; B changes X's role → column shows "Invited by B" | Route always passed `invited_by=<current admin>`; store prefers the passed value | Fixed | 21b6b4a |
+| F7 | P3 | Add form silently changes an existing member's role | Type an existing member's email in the Add form (role defaults to Member) → silent downgrade | Add form + picker share `action=add`; blind upsert | Fixed (via `add_form` marker + guard) | 21b6b4a |
+| F8 | P1 | Account deletion strands a bound workspace with no owner | Sole owner of a workspace with other active members deletes their account → workspace stays bound but ownerless; every remaining member locked out of all admin, no in-product recovery | `erase_email` (via `privacy.erase_account`) removed the owner with no succession; `is_bound` is role-agnostic | Fixed (ownership succession) | 50a880e |
+| — | P2 | Member email with U+2028/U+2029/U+0085 silently lost on read-back | Add `a<U+2028>b@club.org` → "success" but row vanishes (`splitlines()` tears the JSON line) | No control/line-separator rejection | Fixed (folded into F5 commit) | 21b6b4a |
+| — | P3 | Per-row role `<select>` had no accessible name | Screen reader can't tell which member a role dropdown changes | Bare `<select>` with no label/aria | Fixed (`aria-label="Change role for <email>"`) | 21b6b4a |
+| — | P3 | Legacy dotless-domain member's role picker was unusable | After F4, editing a pre-existing `foo@bar` member re-validated and refused | Email validation ran for edits too | Fixed (validate new memberships only) | 21b6b4a |
+| — | P3 | No length bound on the member email | An admin could persist an arbitrarily long address | No cap | Fixed (254-char RFC 5321 ceiling) | 21b6b4a |
+
+### Logged (not fixed — with rationale)
+
+| ID | Sev | Title | Disposition |
+|----|-----|-------|-------------|
+| L1 | P2 | Add-member response is a registered-account enumeration oracle ("added" vs "invited") | By-design: owner-privileged, and the invite-vs-add distinction is necessary UX. Reveals only "does this email have an account". Accept. |
+| L2 | P2 | No Post/Redirect/Get: reload re-submits (false "No such membership" after Remove) | App-wide convention — the sibling `/organisation/api` route also renders inline on POST. Browser resubmit-warning mitigates. Needs a repo-wide PRG pass, not a members-only change (footprint discipline). |
+| L3 | P2 | "Log in to manage members" is a dead-end CTA on an open workspace | Copy/UX: an open (unbound) workspace has no owners to log in as; only the operator seeds the first membership. Reword recommended. |
+| L4 | P3 | Last-owner demotion guard is a non-atomic route check (TOCTOU) | Two owners demoting each other concurrently could both pass. Recommend moving the invariant into `MembershipStore.add` under `_LEDGER_LOCK` (as `remove` does) — but that affects every `add` caller, so coordinate. Window is tiny; operator-recoverable. |
+| L5 | P2 | Members route re-parses the ledger ~4x/GET, ~6-7x/POST instead of the `flask.g` snapshot | Perf: the small members ledger (dozens of rows for a real club) makes this non-pathological; scales with member count, not results volume. Recommend routing reads through `_memberships_snapshot`. |
+| L6 | P2 | Append-only ledger never compacted on normal writes | By-design (crash-safe audit trail); compaction happens on erase. Grows with the number of edits, not unbounded per request. |
+| L7 | P3 | `_active_profile_id()` (a profile disk read) runs ~3x per request | Minor perf; memoise on `flask.g`. |
+| L8 | P3 | Role picker + Remove render enabled for the sole/last owner (actions that always fail) | Minor UX; the server guard + clear error message is the safety net. Consider disabling with a tooltip. |
+| L9 | P3 | Stale `can_admin` for one render after an owner demotes/removes themselves | Self-heals on the next request (the resolver drops the pin). Cosmetic. |
+| L10 | P3 | The tenant is named four ways on one screen (Team / Workspace / organisation / club) | Consistency/copy. The tile says "Team members", the page `<h1>` "Workspace members". |
+| L11 | P3 | Open-workspace explanation leaks jargon ("the pre-multi-tenant behaviour") | Copy: meaningless to a coach; only shown on unbound/pilot workspaces. |
+| L12 | P3 | Update/Remove buttons share identical accessible names across all rows | A11y minor — the role `<select>` was given a per-member name (fixed); the buttons still read "Update"/"Remove" for every row (adjacent email cell gives row context). |
+| L13 | P3 | Bound workspace could revert to open if its last active member were removed | Largely unreachable via the UI (the last owner is remove-guarded); the genuine gap was the erase path (F8), now fixed. |
+
+## 5. Fixes applied
+
+- **`src/mediahub/web/web.py`** — `organisation_members_page` add-branch rewritten to be prior-row aware: validate the address (format + control/separator chars + length) only for a NEW membership; a `via=add_form` marker lets the Add form refuse an existing active member (role changes go through the picker); preserve the original inviter on edits; send the invite email only when the invite is newly created; honest notices for new-vs-edit. Per-row role `<select>` given `aria-label`. (Plus the pre-existing F1-F4 fixes: `_layout` submit-loader guard, add-form label association + autocomplete, `th scope`, email pre-validation.)
+- **`src/mediahub/web/tenancy.py`** — `MembershipStore.erase_email` now performs ownership succession: if erasing an owner would leave a still-populated workspace without an owner, the longest-standing remaining active member is promoted. The erased email's rows are still removed in full.
+
+## 6. Tests added / extended
+
+`tests/test_audit_team_members_settings.py` (all green):
+- `test_add_member_form_labels_are_associated`, `test_members_table_headers_carry_scope` — F2/F3 a11y.
+- `test_invalid_email_is_rejected_not_stored`, `test_valid_email_is_still_invited` — F4.
+- `test_submit_loader_bails_when_default_prevented` — F1 (source-level lock).
+- `test_editing_invited_member_role_does_not_resend_invite` — F5 (mocks the email seam, asserts one send across an invite + a role edit).
+- `test_invited_by_is_preserved_on_role_change` — F6.
+- `test_add_form_refuses_an_existing_active_member`, `test_picker_can_still_change_an_active_member_role` — F7 (guard + backward-compat).
+- `test_email_with_line_separator_is_rejected` — U+2028 hardening.
+- `test_erasing_last_owner_promotes_a_remaining_member`, `test_erasing_sole_member_still_unbinds` — F8 (succession + zero-member model preserved).
+
+## 7. Cross-cutting changes (for reconciliation)
+
+Two edits reach beyond `/organisation/members`; both are minimal and additive:
+
+1. **`_layout` shared submit-loader JS (web.py, F1)** — added a single guard `if (e && e.defaultPrevented) return;` in `bindForms`. Strictly improves every `onsubmit="return confirm(...)"` form across the app (it only *skips* the loader when the submit was already cancelled). No behaviour change on normal submits.
+2. **`MembershipStore.erase_email` succession (tenancy.py, F8)** — changes GDPR-erasure behaviour: a workspace that would be left ownerless now promotes a remaining member. Reached through **Settings → Account → delete account** (`privacy.erase_account`), which may be another audit's territory. The membership invariant and fix belong to the store, but flagging for coordination. **Maintainer review of the succession policy is recommended** (promote longest-standing member vs. notify vs. other) — auto-succession was chosen because a GDPR erasure cannot be refused, so keeping the workspace manageable is the only legally-consistent option.
+
+## 8. Residual risks / cross-feature work (not attempted here)
+
+- **L4 (concurrency):** the last-owner invariant is enforced in the route, not atomically in `MembershipStore.add`. Hardening it under `_LEDGER_LOCK` touches every `add` caller and should be done deliberately.
+- **L2 (PRG):** the whole settings surface renders inline on POST; a repo-wide Post/Redirect/Get pass (with `_flash_toast`) is the right fix, not a members-only divergence.
+- **L5/L6/L7 (perf):** routing members-page reads through the existing `flask.g` membership snapshot and memoising `_active_profile_id()` would cut redundant ledger/profile reads. Non-urgent at realistic club sizes.
+- The membership model is an append-only JSONL ledger (no SQL); all of the above ultimately point at a future move to indexed multi-tenant storage (already noted in `docs/TECHNICAL_DEBT.md`).
+
+## 9. Feature verdict
+
+**WORKS-WITH-CAVEATS.** The Team-members page is functionally correct, secure (authz, CSRF, anti-enumeration, PII-gated, XSS-safe, tenant-isolated), and now hardened against the invite-email resend, the silent role downgrade, the a11y gaps, and the malformed-address data-loss found in the audit. The one P1 — a bound workspace bricked ownerless when its last owner deleted their account — is fixed via ownership succession, but its trigger lives in the account-deletion feature and the succession policy is flagged for maintainer review. Remaining items are P2/P3 usability, perf, and copy polish, logged with rationale.
+
+## 10. Handover & merge status
+
+- **Branch:** `claude/team-members-settings-audit-15v0p1` (the harness-designated branch; the task's `audit/<slug>` intent is carried on it). Landed via **draft PR to `main`**, not a direct `main` push, per the harness branch rule.
+- **Commits:** `703d10b` (F1-F4), `21b6b4a` (F5-F7 + hardening), `50a880e` (F8), plus this report.
+- **Green gate & merge status:** see the PR — recorded below once the integrated gate has run.
+- **Review the diff:** `git diff origin/main...claude/team-members-settings-audit-15v0p1`
