@@ -110,11 +110,11 @@ at it + the source. Fix only CONFIRMED findings; add a regression test for each.
   completion flips to the preview. J-2 already made the failure paths graceful,
   so this is the throughput half. Files: `web.py` ~`56036` (`render_edl`),
   ~`12245`/`12153` (JS), ~`55764` (stabilise).
-- **H-5** (`high`/large) — sites/newsletters/documents can only be edited via a
+- **H-5** (`high`/large) — newsletters/documents can only be edited via a
   raw-JSON `<textarea>`. Ship a minimal structured editor (per-section
   title/intro/link fields generated from the spec schema) keeping the JSON
-  textarea as the "advanced" escape hatch. Start with `sites_ui.py:209` (the
-  "Edit content" card) then newsletters/documents (`web.py` ~`59249`/`59651`).
+  textarea as the "advanced" escape hatch. Start with newsletters/documents
+  (`web.py` ~`59249`/`59651`).
 
 **Then the medium quick-win tail** (each small, contained, low-risk):
 D-10 (Documents/Newsletters `alert()`→toast + busy-state + AI-draft checkbox),

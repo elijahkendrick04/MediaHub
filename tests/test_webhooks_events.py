@@ -5,12 +5,11 @@ from __future__ import annotations
 from mediahub.webhooks import events as ev
 
 
-def test_catalogue_has_the_four_events():
+def test_catalogue_has_the_three_events():
     assert set(ev.ALL_EVENTS) == {
         "run.finished",
         "card.approved",
         "pack.exported",
-        "form.submitted",
     }
 
 
@@ -34,5 +33,3 @@ def test_payload_builders_are_whitelisted():
     assert rf["data"] == {"run_id": "r1", "card_count": 3, "meet_name": "Gala"}
     pe = ev.pack_exported("org-a", "r1")
     assert pe["data"]["run_id"] == "r1"
-    fs = ev.form_submitted("org-a", "f1", submission_id="s1", site_id="site1")
-    assert fs["data"] == {"form_id": "f1", "submission_id": "s1", "site_id": "site1"}

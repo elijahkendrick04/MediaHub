@@ -128,8 +128,8 @@ def test_purge_clears_graphic_render_cache_on_disk(monkeypatch, tmp_path):
 
 
 def test_purge_covers_newer_cache_roots(monkeypatch, tmp_path):
-    """document_cache, site_cache, asr_cache and stock_thumb_cache are all
-    re-derivable and must be enrolled in the site-wide purge.
+    """document_cache, asr_cache and stock_thumb_cache are all re-derivable and
+    must be enrolled in the site-wide purge.
 
     Regression: these roots were added after the purge shipped and were
     silently skipped (and under-counted on the settings card).
@@ -138,10 +138,10 @@ def test_purge_covers_newer_cache_roots(monkeypatch, tmp_path):
     from mediahub.privacy.cache_purge import cache_roots, purge_all_caches
 
     labels = {label for label, _ in cache_roots()}
-    expected = {"document_cache", "site_cache", "asr_cache", "stock_thumb_cache"}
+    expected = {"document_cache", "asr_cache", "stock_thumb_cache"}
     assert expected <= labels
 
-    for name in ("document_cache", "site_cache", "asr_cache", "stock_thumb_cache"):
+    for name in ("document_cache", "asr_cache", "stock_thumb_cache"):
         d = tmp_path / name
         d.mkdir(parents=True, exist_ok=True)
         (d / "entry.bin").write_bytes(b"cached")

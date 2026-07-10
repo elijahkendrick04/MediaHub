@@ -45,7 +45,7 @@ marked 🔒 throughout.
 
 - **Phase 1 — Product** · MediaHub's own first-party creative suite **and the
   local-AI foundation that powers it** — imagery, photo/video/audio editing,
-  charts, documents, templates, planner, collaboration, microsites… plus the
+  charts, documents, templates, planner, collaboration… plus the
   zero-cost local backends, each sequenced **in front of** the feature that needs
   it (the local image model before the imagery edit-family, local ASR before
   video captions, local TTS before the voice layer).
@@ -734,7 +734,7 @@ in-house local path the default), platform-publish APIs, print fulfilment, and
 music rights.
 
 **Exit criterion.** A club can run its **entire content life inside
-MediaHub** — social, print, email, microsite, video, documents — without
+MediaHub** — social, print, email, video, documents — without
 reaching for Canva/Express; measured per-item (each P6 item carries its own
 exit in the companion doc) and in aggregate by wedge clubs actually
 cancelling their Canva habit.
@@ -1066,7 +1066,6 @@ the old ids — use this map to bridge them.
 | **1.13** | P6.15 | Data hub + bulk personalisation |
 | **1.14** | P6.16 | Planner calendar/board |
 | **1.15** | P6.12 | Document engine |
-| **1.16** | P6.13 | Club microsites + forms + widgets |
 | **1.17** | P6.14 | Email & newsletter composer |
 | **1.18** | P6.17 | Collaboration & review |
 | **1.19** | P6.18 | Export & conversion engine |

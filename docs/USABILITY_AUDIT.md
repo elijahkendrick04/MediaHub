@@ -2,7 +2,7 @@
 
 **What this is.** MediaHub turns swim-meet result files into ready-to-post, branded social content for non-technical sports-club volunteers. This document is the deduplicated output of a large usability audit: ~40 auditor and fact-checker agents walked 15 product surfaces, plus one live in-browser walkthrough of the primary flow and three gap-fill rounds (PWA/offline, localization, present/remote). Every claim below is grounded in a concrete `file:line` code fact and, where a fact-checker corrected an auditor, the corrected version is used. It is written to be picked up by an engineering session as a prioritized fix list.
 
-**How it was produced.** 197 raw findings were verified against the code (172 CONFIRMED, 12 ADJUSTED, 13 live-walkthrough observations trusted as directly observed, 1 rejected and dropped). Duplicates that appeared from multiple surfaces (the mandatory interstitial, the overlapping export paths, jargon leakage, native `confirm()`/`alert()` dialogs, silent `fetch` failures) were merged into single findings that cite all the relevant evidence and list every affected surface. The result is **161 unique findings** grouped into ten themes (A first-run: 7, B too-many-steps: 8, C discoverability/IA: 20, D feedback/errors: 35, E destructive/data-safety: 14, F jargon: 14, G consistency: 15, H forms: 23, I mobile/a11y: 9, J dead-ends: 16).
+**How it was produced.** 197 raw findings were verified against the code (172 CONFIRMED, 12 ADJUSTED, 13 live-walkthrough observations trusted as directly observed, 1 rejected and dropped). Duplicates that appeared from multiple surfaces (the mandatory interstitial, the overlapping export paths, jargon leakage, native `confirm()`/`alert()` dialogs, silent `fetch` failures) were merged into single findings that cite all the relevant evidence and list every affected surface. The result is **159 unique findings** grouped into ten themes (A first-run: 7, B too-many-steps: 8, C discoverability/IA: 20, D feedback/errors: 34, E destructive/data-safety: 14, F jargon: 14, G consistency: 15, H forms: 22, I mobile/a11y: 9, J dead-ends: 16).
 
 ## How to read this
 
@@ -195,11 +195,11 @@ What the user hits: Each roster row is its own mini-form (permission dropdown + 
 Evidence: `web.py:57919-57924` per-row `<form method="POST">`; `58016-58021` handles a single `set_consent`; `58052` redirects back to the full page (no AJAX).
 Fix: Save consent changes inline via `fetch` (like the run-delete rows already do), or add a "save all changed rows" / "apply to selected" control so a club can process the roster in one pass.
 
-**[B-8] Pairing a presenter phone requires hand-typing a URL + 6-char code — no QR to scan, though a QR generator already exists** — `medium` / `moderate`
+**[B-8] Pairing a presenter phone requires hand-typing a URL + 6-char code — no QR to scan** — `medium` / `moderate`
 Affects: `/documents/<id>/present`
 What the user hits: The console tells the presenter to read out the pairing details, but the remote URL is shown as static bold text (not even a link) and there is no QR. A poolside volunteer must type the full host URL, tap Go, type the 6-character code and tap Connect across two screens (~30 hand-typed characters).
-Evidence: `web.py:17679` renders "Open **__REMOTE_URL__**" as bold text (not an `<a>`); no QR anywhere in `_DOC_PRESENT_CONSOLE` (`17662-17716`); a deterministic QR generator exists at `mediahub/sites/qr.py`, wired via `api_site_qr` (`web.py:57558-57565`).
-Fix: Render a QR encoding `/remote/<code>` (deep-link, no code typing) plus a tappable fallback link, reusing `mediahub.sites.qr`.
+Evidence: `web.py:17679` renders "Open **__REMOTE_URL__**" as bold text (not an `<a>`); no QR anywhere in `_DOC_PRESENT_CONSOLE` (`17662-17716`).
+Fix: Render a QR encoding `/remote/<code>` (deep-link, no code typing) plus a tappable fallback link.
 
 ---
 
@@ -370,12 +370,6 @@ Affects: `/settings/audio`
 What the user hits: After a successful audio upload the form redirects back to `/settings/audio` with no success message, and the page has no section listing the org's own uploaded audio (the list is built solely from the deployment-global catalogue). The volunteer can't confirm it worked, preview it, or delete it — and likely re-uploads the same track assuming it failed.
 Evidence: `web.py:28666-28673` — success returns a bare redirect; `28756` — the track list iterates only `lib.all()` (catalogue); a repo-wide grep for `audio_uploads` finds only the write site (`28621`).
 Fix: Add a "Your uploaded audio" list to `_render_settings_audio_section` (reading the rights ledger / `DATA_DIR/audio_uploads/<pid>`) with preview players and Remove, and show a "Track added" banner after redirect (the `?status=` pattern typography already uses).
-
-**[D-8] ✅ DONE (PR #1085) — Setting a site password silently does nothing unless a page is marked "protected" in raw JSON** — `high` / `moderate`
-Affects: `/sites/<site_id>`
-What the user hits: The site editor's "Access & danger zone" lets a volunteer set a page password and confirms "Password updated." — but the public site only shows the unlock prompt when a page has `protected:true`, a per-page flag that defaults false, that no archetype sets, and that has no UI control (only editable via raw JSON). A treasurer who sets a password believing the members page is now private has changed nothing.
-Evidence: `web.py:57695-57700` — public serve only prompts `if page.protected and _ss.has_password(...)`; `sites/models.py:357` — `protected: bool = False` with no setter; `57504-57510` flashes "Password updated." with no check that any page is protected.
-Fix: Add a per-page "Require password" toggle in the editor, and when a password is set while zero pages are protected, replace the success flash with "Password saved, but no page is set to members-only yet — the site is still fully public."
 
 **[D-9] ✅ DONE (PR #1082) — The athlete-rights table shows a due date but no overdue/countdown warning — the officer can silently blow the statutory deadline** — `high` / `moderate`
 Affects: `/organisation/athlete-rights`
@@ -837,17 +831,11 @@ What the user hits: Description, athlete link, venue and tags can only be set at
 Evidence: `web.py:45394-45401` (badge copy), `45748-45750` (empty-state), and the whole `/api/media-library` inventory (`46051-53833`) contains no endpoint to update an existing photo's metadata.
 Fix: Add an inline metadata editor per asset (a small `POST /api/media-library/<id>/meta` + an edit affordance on the row / a per-asset detail view), and make the "auto" badge open it.
 
-**[H-5] Editing a site, newsletter or document requires hand-editing raw spec JSON** — `high` / `large`
-Affects: `/sites/<site_id>`, `/newsletters/<id>`, `/documents/<id>`
-What the user hits: The only way to change any content on a club microsite is a 420px monospace textarea of the raw spec JSON — the card is titled "Edit content" with the hint "The site is plain data (pages → sections → blocks)". Newsletters and documents hide the same JSON textarea behind an "Edit… (advanced — spec JSON)" toggle, so there is NO non-advanced edit path: to fix a typo in a newsletter intro you must edit JSON. For the stated non-technical audience these are generate-only surfaces.
-Evidence: `sites_ui.py:209-218` — the "Edit content" card is a `<textarea name="spec">` of pretty-printed JSON; `web.py:59249-59252`/`59651-59654` — newsletter/document "advanced — spec JSON" textareas; `sites_ui.py:131-136` — placing a form means hand-writing a `form_embed` block.
+**[H-5] Editing a newsletter or document requires hand-editing raw spec JSON** — `high` / `large`
+Affects: `/newsletters/<id>`, `/documents/<id>`
+What the user hits: Newsletters and documents hide a raw-spec-JSON textarea behind an "Edit… (advanced — spec JSON)" toggle, so there is NO non-advanced edit path: to fix a typo in a newsletter intro you must edit JSON. For the stated non-technical audience these are generate-only surfaces.
+Evidence: `web.py:59249-59252`/`59651-59654` — newsletter/document "advanced — spec JSON" textareas.
 Fix: Ship a minimal structured editor (per-section text fields, image pickers, block add/remove/reorder generated from the spec schema) keeping the JSON textarea as the genuine "advanced" escape hatch; start with titles, intro text and links.
-
-**[H-6] ✅ DONE (PR #1082) — A JSON mistake in the site editor throws away all the user's edits** — `high` / `quick-win`
-Affects: `/sites/<site_id>`
-What the user hits: One trailing comma and the save redirects back with "That wasn't valid JSON — nothing saved." — and the textarea re-renders from the stored spec, so every edit is gone. Worse, the flash box uses the success border colour, so the failure looks like a confirmation. Twenty minutes of JSON editing destroyed by one syntax error.
-Evidence: `web.py:57420-57429` — on `json.loads` `ValueError` it redirects without echoing the submitted text; `sites_ui.py:182-186` — the flash renders with `border-color:var(--mh-success)` regardless.
-Fix: Validate JSON client-side before submit (like the document editor's `saveSpec` at `17590-17591`) and on server failure re-render with the user's submitted text preserved and an error-styled (not success-styled) message.
 
 **[H-7] ✅ DONE (PR #1082) — "Generate plan" silently discards unsaved events/goals/blackouts** — `high` / `quick-win`
 Affects: `/plan`
@@ -930,8 +918,8 @@ Fix: Disable the Make clip button (show the existing `.btn.loading` style at `94
 **[H-20] 2FA setup demands manually typing a raw 32-character secret (no QR) and issues no recovery codes** — `medium` / `moderate`
 Affects: `/account/2fa`
 What the user hits: The 2FA page prints the raw base32 secret and the `otpauth://` URI as plain text and says "add this secret to your authenticator app". Non-technical volunteers expect a QR; hand-typing 32 chars from desktop to phone is error-prone. Worse, enabling generates no backup/recovery codes and no recovery path exists — a volunteer who loses their phone is permanently locked out (password reset parks on the TOTP prompt).
-Evidence: `web.py:36815-36827` renders the secret in `<code>` and the URI as muted text with no image; a QR module exists (`mediahub.sites.qr`, used at `57565`) but not here; no "recovery/backup code" in `auth.py`; `login_post` always routes TOTP users to `/login/2fa` (`36694-36696`).
-Fix: Render the URI as a QR (the module exists), keep the secret as a copyable fallback, generate 8–10 one-time recovery codes at enable time, and accept a recovery code on `/login/2fa`.
+Evidence: `web.py:36815-36827` renders the secret in `<code>` and the URI as muted text with no image; no "recovery/backup code" in `auth.py`; `login_post` always routes TOTP users to `/login/2fa` (`36694-36696`).
+Fix: Render the URI as a QR, keep the secret as a copyable fallback, generate 8–10 one-time recovery codes at enable time, and accept a recovery code on `/login/2fa`.
 
 **[H-21] Adding a board idea works only by pressing Enter — there is no visible Add button** — `low` / `quick-win`
 Affects: `/plan/board`
@@ -1061,11 +1049,11 @@ What the user hits: The Print & merch reference page lists product chips and say
 Evidence: `web.py:52101-52113` (catalogue is chips only); `print_run_tool_page` linked only from the run page (`42988`, rendered at `43350`); `18890` the sole inbound link is the Help strip; `43350-43352` the two adjacent Print controls.
 Fix: On `/print`, list the user's recent meets with "Open print tool" links; on the run page rename "Print / Export PDF" to "Print this page" or move it out of the export row.
 
-**[J-9] Three overlapping ways to publish the same cards, each with different verbs and homes — plus two separate newsletter systems** — `medium` / `large`
-Affects: `/public-wall`, `/sites`, `/newsletters`
-What the user hits: The public wall, a Sites "meet microsite" and a published newsletter all produce a token-URL public page of the club's approved cards, but they live in three different places and name the same action three ways: the wall "Switch[es] on"/"Switch[es] off & revoke[s]", sites "Publish"/"Unpublish", newsletters "Publish"/"Take offline". On top, the app has two unrelated newsletter features (the run page's `/api/runs/<run_id>/newsletter` export and the standalone `/newsletters` composer). A volunteer asking "how do I share results with parents?" faces four near-equivalent answers.
-Evidence: `web.py:49750`/`49725` (wall) vs `sites_ui.py:174-180` (Publish/Unpublish) vs `web.py:59215/59226` (Take offline/Publish); a second run-scoped generator at `44364-44365` alongside `newsletters_home` (`59009`).
-Fix: Standardise the publish/unpublish vocabulary across all token-URL surfaces; add a single "Share publicly" chooser (on the review/export flow) explaining when to use the wall vs a microsite vs a newsletter; fold the run-page newsletter export into the composer as a "meet digest for this run" shortcut.
+**[J-9] Two overlapping ways to publish the same cards, each with different verbs and homes — plus two separate newsletter systems** — `medium` / `large`
+Affects: `/public-wall`, `/newsletters`
+What the user hits: The public wall and a published newsletter both produce a token-URL public page of the club's approved cards, but they live in different places and name the same action different ways: the wall "Switch[es] on"/"Switch[es] off & revoke[s]", newsletters "Publish"/"Take offline". On top, the app has two unrelated newsletter features (the run page's `/api/runs/<run_id>/newsletter` export and the standalone `/newsletters` composer). A volunteer asking "how do I share results with parents?" faces three near-equivalent answers.
+Evidence: `web.py:49750`/`49725` (wall) vs `web.py:59215/59226` (Take offline/Publish); a second run-scoped generator at `44364-44365` alongside `newsletters_home` (`59009`).
+Fix: Standardise the publish/unpublish vocabulary across all token-URL surfaces; add a single "Share publicly" chooser (on the review/export flow) explaining when to use the wall vs a newsletter; fold the run-page newsletter export into the composer as a "meet digest for this run" shortcut.
 
 **[J-10] Two full-size Settings tiles lead only to "Coming soon" placeholder pages and still say "Open →"** — `low` / `quick-win` (confirmed live)
 Affects: `/settings`, `/settings/scheduling`, `/settings/autonomy` — merges the two "coming soon tile" findings
@@ -1113,7 +1101,7 @@ Fix: Re-render the code form with an inline error and the input focused/cleared 
 
 ## Coverage & method
 
-**Scope covered.** The audit walked **15 product surfaces** — home/nav/IA; signup/login/account/billing/pricing; upload & pipeline; review & approval; content pack & export; motion/reels/video/charts; media library & image tools; organisation & brand setup; settings/developer/status; the content planner; the Create hub/free-text/drafts/spotlight; distribution (wall/sites/newsletters/documents/print/sponsors); data & records (athletes/records/live/data-hub/season/activity/audit); privacy/consent/compliance/legal; and cross-cutting interaction patterns (feedback/errors/dialogs/a11y/mobile) — plus **one live in-browser walkthrough** of the primary flow (fresh `DATA_DIR`, no AI key, Playwright-driven) and **three gap-fill rounds** for surfaces that started with zero coverage: the installable-PWA / offline-approval / share-target / poolside-capture stack; interface localization (Welsh UI + per-card translate); and document presentation / slide-remote pairing.
+**Scope covered.** The audit walked **15 product surfaces** — home/nav/IA; signup/login/account/billing/pricing; upload & pipeline; review & approval; content pack & export; motion/reels/video/charts; media library & image tools; organisation & brand setup; settings/developer/status; the content planner; the Create hub/free-text/drafts/spotlight; distribution (wall/newsletters/documents/print/sponsors); data & records (athletes/records/live/data-hub/season/activity/audit); privacy/consent/compliance/legal; and cross-cutting interaction patterns (feedback/errors/dialogs/a11y/mobile) — plus **one live in-browser walkthrough** of the primary flow (fresh `DATA_DIR`, no AI key, Playwright-driven) and **three gap-fill rounds** for surfaces that started with zero coverage: the installable-PWA / offline-approval / share-target / poolside-capture stack; interface localization (Welsh UI + per-card translate); and document presentation / slide-remote pairing.
 
 **Verification.** 197 raw findings were fact-checked against the code: **172 CONFIRMED**, **12 ADJUSTED** (severity or evidence corrected — e.g. the Settings tile count raised from ~14 to 17; the empty-`.catch` count corrected to 24; organisation delete recognised as well-protected and removed from the weak-delete list), **1 rejected and dropped**, and **13 live-walkthrough observations** carried no code-fact verdict and are trusted because they were directly observed in the running app (marked *(confirmed live)*). Those 197 were deduplicated to **161 unique findings** by merging cross-surface repeats (the mandatory interstitial appeared from 4 surfaces; "drafts unreachable", "collections orphan", "live meet orphan", the env-var jargon leak, and the raw-JSON error page each appeared from 2–3). No unique issue was dropped in the merge.
 
