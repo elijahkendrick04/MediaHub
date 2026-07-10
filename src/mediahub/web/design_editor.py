@@ -323,10 +323,21 @@ class StudioParams:
         return (max(2, round(w * PREVIEW_SCALE)), max(2, round(h * PREVIEW_SCALE)))
 
     def signature(self) -> str:
-        """A stable cache key over everything that changes the pixels."""
+        """A stable cache key over everything that changes the render payload.
+
+        This keys the ``_studio_render_cache`` entry, which stores the whole
+        response — the PNG *and* the explainability ``meta``. ``pack_eased`` does
+        not change a single pixel (both the eased and the direct request resolve
+        to the same ``pack_id``), but it DOES change ``meta.notices`` (the honest
+        "levers were eased" notice). Two requests that resolve to the same pack
+        by different routes — e.g. the same decorative levers at Bold (eased) vs
+        Standard (direct) — would otherwise share a cache entry and be served the
+        wrong notice, so ``pack_eased`` is part of the key.
+        """
         payload = {
             "a": self.archetype,
             "p": self.pack_id,
+            "eased": self.pack_eased,
             "f": self.format_id,
             "full": self.full,
             "pal": self.palette,
@@ -640,7 +651,8 @@ def _palette_inputs(palette: dict[str, str]) -> str:
             '<span class="mh-studio-colour-pair">'
             '<input type="color" class="mh-studio-swatch" data-studio-colour="{key}" value="{val}">'
             '<input type="text" class="mh-studio-input mh-studio-hex" data-studio-hex="{key}" '
-            'value="{val}" maxlength="7" spellcheck="false" autocomplete="off"></span></label>'.format(
+            'aria-label="{cap} colour hex" value="{val}" maxlength="7" spellcheck="false" '
+            'autocomplete="off"></span></label>'.format(
                 cap=escape(captions[key]), key=escape(key), val=escape(val)
             )
         )
@@ -728,7 +740,7 @@ def render_editor_body(
     <aside class="mh-studio-controls" aria-label="Design controls">
       <section class="mh-studio-group">
         <h2 class="mh-studio-h2">Archetype</h2>
-        {_select("archetype", arch_opts, archetype, attrs='data-studio="archetype"')}
+        {_select("archetype", arch_opts, archetype, attrs='data-studio="archetype" aria-label="Archetype"')}
         <p class="mh-studio-note" data-studio-archetype-summary></p>
       </section>
 
@@ -742,7 +754,7 @@ def render_editor_body(
 
       <section class="mh-studio-group">
         <h2 class="mh-studio-h2">Format</h2>
-        {_select("format", fmt_opts, DEFAULT_FORMAT, attrs='data-studio="format"')}
+        {_select("format", fmt_opts, DEFAULT_FORMAT, attrs='data-studio="format" aria-label="Format"')}
       </section>
 
       <section class="mh-studio-group">
@@ -906,7 +918,13 @@ _STUDIO_JS = r"""
     var palette = {}, text = {}, roles = {};
     ['primary', 'secondary', 'accent'].forEach(function (k) {
       var el = root.querySelector('[data-studio-hex="' + k + '"]');
-      if (el) palette[k] = el.value;
+      var sw = root.querySelector('[data-studio-colour="' + k + '"]');
+      // A hex field left mid-edit / invalid never triggers a re-render (its input
+      // handler is HEX_RE-gated), so the shown preview reflects the swatch's last
+      // valid colour. Fall back to the swatch for an invalid hex so a Download (or
+      // a role/text change) carries that SAME colour instead of being coerced to
+      // the server default — which would ship a card that differs from the preview.
+      if (el) palette[k] = HEX_RE.test(el.value) ? el.value : (sw ? sw.value : el.value);
     });
     root.querySelectorAll('[data-studio-text]').forEach(function (el) {
       text[el.getAttribute('data-studio-text')] = el.value;
@@ -1069,8 +1087,12 @@ _STUDIO_JS = r"""
   root.querySelector('[data-studio-action="download"]').addEventListener('click', function () {
     showOverlay('Rendering full resolution…', false);
     render(true).then(function (data) {
-      hideOverlay();
+      // On failure render() has already put its error message on the overlay and
+      // resolved to null; bail BEFORE hideOverlay() so that error stays visible
+      // (mirrors renderPreview). Hiding first would erase the only feedback and
+      // leave the click a silent no-op — no file, no error.
       if (!data) return;
+      hideOverlay();
       var a = document.createElement('a');
       a.href = data.image;
       a.download = (val('archetype') || 'card') + '_' + val('format') + '.png';

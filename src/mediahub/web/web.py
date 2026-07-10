@@ -33462,7 +33462,10 @@ function mhAnDigest(btn) {{
             make_url=url_for("make_page"),
             palette=seed_palette,
         )
-        return _layout("Studio", body, active="studio")
+        # The studio is a sub-surface of Create (reached from the Create tile), so
+        # it highlights the Create nav item — active="studio" matched no nav key and
+        # left the top bar with nothing lit, orphaning the page in the IA.
+        return _layout("Studio", body, active="create")
 
     @app.route("/api/studio/render", methods=["POST"])
     def api_studio_render():

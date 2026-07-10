@@ -755,3 +755,120 @@ def test_studio_render_is_a_single_unmirrored_card(client, full, expected_size):
     right = im.crop((w - w // 2, 0, w, h)).transpose(Image.FLIP_LEFT_RIGHT)
     assert _mean_diff(left, right) > 3.0, "card is mirror-symmetric — not a real oriented card"
     assert d["render_ms"] >= 0
+
+
+# =========================================================================== #
+# Audit hardening — audit/design-studio (QA pass)
+#
+# Locks five defects found auditing the Design Studio end to end:
+#   F1  archetype/format selects + palette hex inputs were unlabelled (a11y)
+#   F2  the render cache key omitted pack_eased -> stale "eased" notice
+#   F3  the /studio page lit no nav item (active="studio" matched nothing)
+#   F4  a failed Download PNG hid its own error overlay -> silent no-op
+#   F5  an invalid hex left in a field could ship a card unlike the preview
+# =========================================================================== #
+
+
+def test_studio_selects_and_hex_inputs_are_labelled():
+    """F1 (a11y): every studio control must expose a programmatic name.
+
+    The archetype and format ``<select>``s sit after an ``<h2>`` (no wrapping
+    ``<label>``), and the palette hex ``<input>``s share a ``<label>`` with the
+    colour swatch (which binds the label to the swatch only) — so all three were
+    nameless to a screen reader. They now carry an explicit ``aria-label``.
+    """
+    body = DE.render_editor_body(render_url="/r", gallery_url="/g", make_url="/m")
+    assert 'aria-label="Archetype"' in body
+    assert 'aria-label="Format"' in body
+    for cap in ("Primary", "Secondary", "Accent"):
+        assert f'aria-label="{cap} colour hex"' in body, cap
+    # the aria-label rides on the SAME element as the data-studio binding, and
+    # does not introduce a second data-studio hook (invariant of the existing
+    # one-binding-per-control test).
+    import re
+
+    for tag in re.findall(r"<select[^>]*>", body):
+        assert tag.count("data-studio=") <= 1, tag
+
+
+def test_signature_distinguishes_eased_from_non_eased_same_pack():
+    """F2: two requests that resolve to the SAME pack_id by different routes —
+    one eased under the taste cap, one direct — must NOT share a cache entry,
+    because they carry different explainability notices. pack_eased is therefore
+    part of signature()."""
+    over_cap = DE.coerce_params(
+        {
+            "pack": {
+                "ground": "vignette",
+                "texture": "dots",
+                "accent_geo": "corner_ticks",
+                "density": "bold",  # weight 4 > Bold cap 3 -> eased to standard
+            }
+        }
+    )
+    in_cap = DE.coerce_params(
+        {
+            "pack": {
+                "ground": "vignette",
+                "texture": "dots",
+                "accent_geo": "corner_ticks",
+                "density": "standard",  # weight 4 == Standard cap -> direct
+            }
+        }
+    )
+    assert over_cap.pack_id == in_cap.pack_id  # identical pixels
+    assert over_cap.pack_eased is True and in_cap.pack_eased is False
+    assert over_cap.signature() != in_cap.signature()  # but distinct cache keys
+
+
+def test_render_cache_does_not_serve_a_stale_eased_notice(client, stub_render):
+    """F2 end-to-end: rendering the Standard (not eased) card first must not
+    poison the Bold (eased) card's cached explainability, and vice versa."""
+    levers = {"ground": "vignette", "texture": "dots", "accent_geo": "corner_ticks"}
+
+    def _notices(density):
+        req = {"archetype": "big_number_dominant", "pack": {**levers, "density": density}}
+        return client.post("/api/studio/render", json=req).get_json()["meta"]["notices"]
+
+    # Standard first, then Bold — the Bold response must still report the easing.
+    std_notices = _notices("standard")
+    bold_notices = _notices("bold")
+    assert not any("eased" in n.lower() for n in std_notices)
+    assert any("eased" in n.lower() for n in bold_notices)
+
+
+def test_studio_page_highlights_the_create_nav(client):
+    """F3: the Design Studio is a sub-surface of Create, so /studio must light
+    the Create nav item (it previously passed active="studio", which matched no
+    nav key and left the top bar with nothing highlighted)."""
+    import re
+
+    html = client.get("/studio").get_data(as_text=True)
+    assert re.search(r'<a href="/make"[^>]*class="[^"]*\bactive\b', html), (
+        "the Create nav link is not marked active on /studio"
+    )
+
+
+def test_download_handler_keeps_its_error_overlay_on_failure():
+    """F4: the Download PNG handler must bail on a failed full render BEFORE
+    hiding the overlay, so render()'s error message stays on screen instead of
+    the click being a silent no-op (no file, no error)."""
+    body = DE.render_editor_body(render_url="/r", gallery_url="/g", make_url="/m")
+    # The download handler is the render(true) call (full-resolution); the preview
+    # uses render(false). Anchor on it so we inspect the correct .then() block.
+    i = body.index("render(true).then")
+    block = body[i : i + 600]
+    # Match the executable statements (trailing ';'), not prose in the comment.
+    guard = block.index("if (!data) return;")
+    hide = block.index("hideOverlay();")
+    assert guard < hide, "download handler hides the overlay before the failure guard"
+
+
+def test_collect_falls_back_to_swatch_for_an_invalid_hex():
+    """F5: collect() must send the swatch's last-valid colour when a hex field
+    holds an invalid value, so a Download never coerces to the server default
+    and ships a card that differs from the shown preview."""
+    body = DE.render_editor_body(render_url="/r", gallery_url="/g", make_url="/m")
+    assert "HEX_RE.test(el.value) ? el.value :" in body
+    # and the fallback actually reads the swatch element for that role
+    assert 'data-studio-colour="' in body
