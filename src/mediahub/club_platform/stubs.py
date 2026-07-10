@@ -655,7 +655,7 @@ def render_cards_html(
             caption_editor = (
                 f'<div class="stub-cap-editor" data-idx="{idx}" '
                 f'style="display:none;margin-top:10px;padding:12px;'
-                f'border:1px solid var(--border);border-radius:8px;'
+                f"border:1px solid var(--border);border-radius:8px;"
                 f'background:rgba(255,255,255,0.02)">'
                 f'<label for="stub-cap-ta-{idx}" style="display:block;font-size:12px;'
                 f'font-weight:600;margin-bottom:6px">Edit caption</label>'
