@@ -2678,6 +2678,13 @@ _CYCLE_PH_ATTR_MOMENT = _cycle_ph_attr(_CYCLE_PH_MOMENT)
 _CYCLE_PH_ATTR_RESEARCH = _cycle_ph_attr(_CYCLE_PH_RESEARCH)
 _CYCLE_PH_ATTR_ASKDATA = _cycle_ph_attr(_CYCLE_PH_ASKDATA)
 
+# Upper bound on a single free-text prompt / chat reply before it reaches the
+# LLM. A describe-your-post prompt is a sentence or two; this is a generous
+# ceiling that still stops a several-hundred-KB paste from being forwarded to
+# the provider verbatim and billed as input tokens (the only other limit is the
+# 50 MB MAX_CONTENT_LENGTH, far too high to bound LLM cost).
+_FREE_TEXT_MAX_PROMPT_CHARS = 8000
+
 
 # UI2.6 — Vanish search. The /activity (global run) search uses the design-kit
 # Vanish input (.mh-vanish): a rotating overlay-placeholder element
@@ -35020,7 +35027,12 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         sessions: list = []
         store_failed = False
         try:
-            sessions = list_sessions(limit=20)
+            # Tenant isolation: a chat title is the first line of another org's
+            # free-text brief (often an athlete name), so the landing list must
+            # be scoped to the active organisation — mirrors the /drafts index
+            # and _can_access_pack. Unstamped legacy chats stay visible, and the
+            # no-org sandbox (active pid None) keeps everything visible.
+            sessions = list_sessions(limit=20, profile_id=_active_profile_id())
         except Exception as e:
             log.warning("free-text: list_sessions failed: %s", e)
             store_failed = True
@@ -35073,7 +35085,8 @@ function copySpotlightCaption(btn, cardIdSafe) {{
       placeholder="e.g. A bold thank-you post for our sponsor Riverside Physio after a great gala weekend — upbeat, club colours."
       style="width:100%;font-size:14px;padding:10px 12px;border:1px solid var(--panel);border-radius:8px;background:var(--bg);color:var(--ink);resize:vertical"></textarea>
     <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:12px">
-      <label class="btn secondary" style="font-size:13px;cursor:pointer;margin:0">
+      <label class="btn secondary" style="font-size:13px;cursor:pointer;margin:0" tabindex="0" role="button"
+        onkeydown="if(event.key==='Enter'||event.key===' '){{event.preventDefault();this.querySelector('input[type=file]').click();}}">
         &#x1F4CE; Add photos
         <input type="file" name="photos" accept="image/*" multiple style="display:none"
           onchange="var n=this.files.length;var s=document.getElementById('ft-photo-count');if(s)s.textContent=n?(n+' photo'+(n===1?'':'s')+' attached'):'';">
@@ -35162,6 +35175,12 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         prompt = (request.form.get("prompt") or "").strip()
         if not prompt:
             return redirect(url_for("free_text_chat_page"))
+        if len(prompt) > _FREE_TEXT_MAX_PROMPT_CHARS:
+            session["free_text_quick_error"] = (
+                f"That prompt is very long ({len(prompt):,} characters). "
+                f"Please keep it under {_FREE_TEXT_MAX_PROMPT_CHARS:,} characters."
+            )
+            return redirect(url_for("free_text_chat_page"))
         active_pid = _active_profile_id() or ""
 
         # Uploaded photos → media library so they're available to the graphic
@@ -35247,14 +35266,31 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             return redirect(url_for("free_text_chat_page"))
         from mediahub.free_text_chat.session import create_session
 
-        s = create_session()
+        # Stamp the creating organisation so the chat is tenant-scoped from
+        # birth (mirrors runs/packs). Without this every web chat is ownerless
+        # and readable by any org via /free-text/chat/<id>.
+        s = create_session(profile_id=_active_profile_id() or "")
         return redirect(url_for("free_text_chat_view", chat_id=s.chat_id))
+
+    def _load_accessible_chat(chat_id):
+        """Load a chat only if the active organisation may access it.
+
+        Returns None both when the chat is missing AND when it belongs to a
+        different organisation — a foreign chat is indistinguishable from a
+        nonexistent one, the same anti-enumeration posture as the run/pack
+        guards (_can_access_run / _can_access_pack). Legacy ownerless chats
+        stay accessible so historical conversations aren't orphaned.
+        """
+        from mediahub.free_text_chat.session import load_session, can_access_session
+
+        s = load_session(chat_id)
+        if s is None or not can_access_session(s, _active_profile_id()):
+            return None
+        return s
 
     @app.route("/free-text/chat/<chat_id>", methods=["GET"])
     def free_text_chat_view(chat_id):
-        from mediahub.free_text_chat.session import load_session
-
-        s = load_session(chat_id)
+        s = _load_accessible_chat(chat_id)
         if not s:
             return _recovery_page(
                 "Chat not found",
@@ -35378,6 +35414,8 @@ function copySpotlightCaption(btn, cardIdSafe) {{
   </div>
 </section>
 
+{_llm_unavailable_banner()}
+
 <div id="chat-log">
   {msgs_html or '<p class="muted">Start by telling the assistant what you want to post. It will ask questions, research the web, and propose a brief.</p>'}
 </div>
@@ -35391,7 +35429,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             {_CYCLE_PH_ATTR_MOMENT} style="min-height:110px" required></textarea>
   <div style="margin-top:var(--sp-3);display:flex;gap:var(--sp-3);align-items:center;flex-wrap:wrap">
     <button type="submit" class="btn">Send reply &rarr;</button>
-    <span class="strap" style="color:var(--ink-muted)">Assistant uses Claude · web research</span>
+    <span class="strap" style="color:var(--ink-muted)">AI assistant · web research</span>
   </div>
 </form>
 """
@@ -35433,10 +35471,10 @@ function copySpotlightCaption(btn, cardIdSafe) {{
 
     @app.route("/free-text/chat/<chat_id>/send", methods=["POST"])
     def free_text_chat_send(chat_id):
-        from mediahub.free_text_chat.session import load_session, save_session
+        from mediahub.free_text_chat.session import save_session
         from mediahub.free_text_chat.agent import next_assistant_turn
 
-        s = load_session(chat_id)
+        s = _load_accessible_chat(chat_id)
         if not s:
             return _recovery_page(
                 "Chat not found",
@@ -35445,6 +35483,14 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 secondary_cta=("Free-text home", url_for("free_text_chat_page")),
             )
         msg = (request.form.get("message") or "").strip()
+        if len(msg) > _FREE_TEXT_MAX_PROMPT_CHARS:
+            s.add_assistant_message(
+                f"That reply is very long ({len(msg):,} characters). Please shorten "
+                f"it to under {_FREE_TEXT_MAX_PROMPT_CHARS:,} characters and send again.",
+                meta={"error": True},
+            )
+            save_session(s)
+            return redirect(url_for("free_text_chat_view", chat_id=chat_id))
         if msg:
             s.add_user_message(msg)
             save_session(s)
@@ -35471,12 +35517,19 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         brief = s.accepted_brief
         if not brief:
             return None
+        # The chat brief is the propose_brief tool input verbatim (unconstrained
+        # schema), so hashtags may arrive as a list, a string, or nothing. Reuse
+        # the quick path's normaliser so a stray string isn't iterated
+        # character-by-character into per-letter chips at render/export.
+        from mediahub.free_text_chat.agent import normalise_hashtags
+
+        hashtags = normalise_hashtags(brief.get("hashtags"))
         card = {
             "platform": brief.get("platform") or "Instagram",
             "caption": "\n\n".join(
                 [p for p in [brief.get("headline", ""), brief.get("body", "")] if p]
             ).strip(),
-            "hashtags": brief.get("hashtags") or [],
+            "hashtags": hashtags,
             # D-25: prompt-led chat draft — no fabricated confidence badge.
             "confidence": None,
             "notes": brief.get("visual_concept", "") or "",
@@ -35524,9 +35577,9 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         # "Generate content from this brief" button and a third "Create graphic"
         # click. Accepting the brief and building the draft is a single POST that
         # ends on the rendered graphic (?autographic=1), like the quick path.
-        from mediahub.free_text_chat.session import load_session, save_session
+        from mediahub.free_text_chat.session import save_session
 
-        s = load_session(chat_id)
+        s = _load_accessible_chat(chat_id)
         if not s:
             return redirect(url_for("free_text_chat_page"))
         if s.pending_brief:
@@ -35540,17 +35593,24 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 }
             )
             save_session(s)
-        pack_url = _chat_brief_to_pack(s, chat_id, request.form.getlist("library_asset_id"))
-        if pack_url:
-            return redirect(pack_url)
+            # Build the draft exactly once, on the accepting POST. A stale or
+            # double-submitted re-POST (pending_brief already cleared) falls
+            # through to the chat view rather than minting another draft —
+            # deliberate regeneration is the explicit "Generate content from
+            # this brief" action (free_text_chat_generate).
+            pack_url = _chat_brief_to_pack(
+                s, chat_id, request.form.getlist("library_asset_id")
+            )
+            if pack_url:
+                return redirect(pack_url)
         return redirect(url_for("free_text_chat_view", chat_id=chat_id))
 
     @app.route("/free-text/chat/<chat_id>/decline", methods=["POST"])
     def free_text_chat_decline(chat_id):
-        from mediahub.free_text_chat.session import load_session, save_session
+        from mediahub.free_text_chat.session import save_session
         from mediahub.free_text_chat.agent import next_assistant_turn
 
-        s = load_session(chat_id)
+        s = _load_accessible_chat(chat_id)
         if not s:
             return redirect(url_for("free_text_chat_page"))
         if s.pending_brief:
@@ -35574,9 +35634,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
     def free_text_chat_generate(chat_id):
         """Turn an accepted brief into a saved stub-pack so the existing
         approval pills + export flow apply."""
-        from mediahub.free_text_chat.session import load_session
-
-        s = load_session(chat_id)
+        s = _load_accessible_chat(chat_id)
         if not s or not s.accepted_brief:
             return redirect(url_for("free_text_chat_view", chat_id=chat_id))
         # B-6: land on the draft with the graphic already rendering, like the
