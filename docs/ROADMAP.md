@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-07-09 · `b1b2d6508` · Usability audit — quick-win tail + both large highs (J-1, H-5) + tail (#1097)
+**Last updated:** 2026-07-10 · `b9d62fc45` · [elements] lock XSS/render fixes with tests + audit report
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1227,6 +1227,8 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-07-10 | `b9d62fc45` | [elements] lock XSS/render fixes with tests + audit report |
+| 2026-07-10 | `acb6fe8be` | [elements] harden element SVGs against XSS and render org-custom packs |
 | 2026-07-09 | `a62fcb542` | docs: session hand-off for the next usability-audit session |
 | 2026-07-09 | `fdb24ad3e` | docs(audit): J-11 shipped — 105/161 |
 | 2026-07-09 | `8a69697f3` | feat(pwa): tell the user when a signed-out shared photo isn't kept (J-11) |
@@ -1237,6 +1239,4 @@ list and the auto table below, not here.
 | 2026-07-09 | `e705a4825` | feat(editorial): structured content editor for newsletters + documents (H-5 pt.2) |
 | 2026-07-09 | `b12c7f5b5` | feat(sites): structured content editor for microsites (H-5 pt.1) |
 | 2026-07-09 | `b5a282253` | fix(web): top-bar dropdowns open off-screen on iPhone |
-| 2026-07-09 | `96aafc9ed` | test(i5): write the review-filter test's run.json to the real RUNS_DIR |
-| 2026-07-08 | `3e71918a7` | fix(elements): use approved single-colour silhouette swim pictograms |
 <!-- /ROADMAP:ACTIVITY -->
