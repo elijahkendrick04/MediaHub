@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-07-10 · `1a1b232a8` · [developer-settings] report: baseline comparison confirms flakes are pre-existing
+**Last updated:** 2026-07-10 · `1f49c3faa` · [developer-settings] record final merge status in audit report
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
