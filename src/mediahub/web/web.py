@@ -8977,7 +8977,7 @@ p:last-child { margin-bottom: 0; }
   background: var(--lane); color: var(--lane-ink);
   border: 0; padding: 11px 22px;
   /* Touch-target minimum so .btn (and every inline-styled variant on
-     /pack, /sponsor-post, /upload, /make) clears the 44px tap-area
+     /pack, /upload, /make) clears the 44px tap-area
      guideline on every viewport, even when an inline `padding:6px`
      override tries to shrink it. */
   min-height: 44px;
@@ -9982,8 +9982,7 @@ a.card:hover, .card[data-interactive]:hover {
 /* Phone / tablet (≤860px): every interactive control needs the full
    44px tap area. Card-action utility buttons (Copy caption, etc.) and
    inline-styled .btn variants on /pack get their compact desktop sizing
-   overridden here so the touch flow on /pack and /sponsor-post is
-   usable on iPhone / iPad. */
+   overridden here so the touch flow on /pack is usable on iPhone / iPad. */
 @media (max-width: 860px) {
   .mh-card-actions button,
   .mh-card-actions .btn,
@@ -34774,9 +34773,22 @@ function copySpotlightCaption(btn, cardIdSafe) {{
     # ---- Stub routes (now functional with real LLM + fallback) ---------
     _STUB_TYPE_BY_CLASS = {
         "WeekendPreviewStub": "event_preview",
-        "SponsorPostStub": "sponsor_activation",
-        "SessionUpdateStub": "session_update",
         "FreeTextStub": "free_text",
+    }
+
+    # C-11: seed prompts for the retired Sponsor Post / Session Update forms.
+    # Their routes now redirect into the free-text landing with these seeds
+    # (the landing's textarea prefills from ?seed=), and old saved drafts of
+    # those types point their "start a new draft" link the same way.
+    _RETIRED_STUB_SEEDS = {
+        "sponsor_activation": (
+            "A sponsor thank-you post — name the sponsor, the event and the "
+            "moment to celebrate, in club colours."
+        ),
+        "session_update": (
+            "A mid-session update from poolside — the event, what has "
+            "happened so far, and who swims next."
+        ),
     }
 
     # Per-content-type hero copy. Centralised once so every stub form
@@ -34793,18 +34805,6 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             "Set the scene.",
             "preview it",
             "Give us the event name — add its website or meet pack and the AI works out what the event is. It can even read the entries and pick your ones to watch.",
-        ),
-        "Sponsor Post": (
-            "Sponsor post",
-            "Name the partner.",
-            "activate it",
-            "Lead with the moment. Tell us the sponsor, the event, the key achievement, and brand rules. We make the partnership feel natural in every caption.",
-        ),
-        "Session Update": (
-            "Session update",
-            "Mid-session.",
-            "live from poolside",
-            "Type the event, what's happened so far, and the current session. We draft short Stories and Twitter cards for mid-event sharing.",
         ),
         "Free Text (quick)": (
             "Free text — quick",
@@ -35241,13 +35241,24 @@ function copySpotlightCaption(btn, cardIdSafe) {{
     def stub_weekend_preview():
         return _render_stub("WeekendPreviewStub", "stub_weekend_preview", "Event Preview")
 
-    @app.route("/sponsor-post", methods=["GET", "POST"])
+    # C-11: Sponsor Post and Session Update are retired as standalone forms —
+    # Free Text interprets any such prompt, so there is ONE "describe it"
+    # story instead of two hidden form paths. The old URLs live on as
+    # redirects into the free-text landing carrying a seed prompt for the
+    # textarea, so bookmarks, old draft links and the content-type registry
+    # endpoints keep resolving. Nothing renders forms that POST here any
+    # more, so the POST methods are gone with the forms.
+    @app.route("/sponsor-post")
     def stub_sponsor_post():
-        return _render_stub("SponsorPostStub", "stub_sponsor_post", "Sponsor Post")
+        return redirect(
+            url_for("free_text_chat_page", seed=_RETIRED_STUB_SEEDS["sponsor_activation"])
+        )
 
-    @app.route("/session-update", methods=["GET", "POST"])
+    @app.route("/session-update")
     def stub_session_update():
-        return _render_stub("SessionUpdateStub", "stub_session_update", "Session Update")
+        return redirect(
+            url_for("free_text_chat_page", seed=_RETIRED_STUB_SEEDS["session_update"])
+        )
 
     @app.route("/free-text/quick", methods=["GET", "POST"])
     def stub_free_text_quick():
@@ -35363,12 +35374,6 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             )
         }
 </div>
-
-<p style="margin-top:18px;font-size:12px;color:var(--ink-muted)">
-  Prefer the one-shot form? <a href="{
-            url_for("stub_free_text_quick")
-        }">Use the legacy quick generator →</a>
-</p>
 """
         return _layout("Free text — chat", body, active="create")
 
@@ -35897,9 +35902,10 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 '<span class="mh-hero-eyebrow">Saved drafts</span>'
                 '<h1>Nothing <em class="editorial">drafted</em> yet.</h1>'
                 '<p class="lede">'
-                "Content packs you generate from Free Text, Event Preview, "
-                "Sponsor Post and Session Update are kept here so you can "
-                "come back, edit, and approve later."
+                "Content packs you generate are kept here so you can come "
+                "back, edit, and approve later. Describe any moment in Free "
+                "Text &mdash; a sponsor thank-you, a mid-session update, a "
+                "shout-out &mdash; or build an Event Preview."
                 "</p>"
                 '<div class="mh-hero-actions">'
                 f'<a class="mh-cta-primary" href="{url_for("make_page")}">Start creating &rarr;</a>'
@@ -36016,16 +36022,24 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         )
         # Replace the renderer's default footer to add export + regenerate.
         export_url = url_for("stub_pack_export", pack_id=pack_id)
-        regenerate_url = url_for(
-            {
-                # Endpoint names are implementation artifacts (kept across the
-                # ADR-0013 slug rename); keys are canonical post-type slugs.
-                "free_text": "free_text_chat_page",
-                "event_preview": "stub_weekend_preview",
-                "sponsor_activation": "stub_sponsor_post",
-                "session_update": "stub_session_update",
-            }.get(stub_type, "free_text_chat_page")
-        )
+        # C-11: sponsor / session drafts predate the retirement of their
+        # standalone forms — their "new draft" path is now the free-text
+        # landing, seeded with the retired type's ask so the prompt box
+        # starts in the right place. Other types keep their live form.
+        if stub_type in _RETIRED_STUB_SEEDS:
+            regenerate_url = url_for(
+                "free_text_chat_page", seed=_RETIRED_STUB_SEEDS[stub_type]
+            )
+        else:
+            regenerate_url = url_for(
+                {
+                    # Endpoint names are implementation artifacts (kept across
+                    # the ADR-0013 slug rename); keys are canonical post-type
+                    # slugs.
+                    "free_text": "free_text_chat_page",
+                    "event_preview": "stub_weekend_preview",
+                }.get(stub_type, "free_text_chat_page")
+            )
         regen_api = url_for("api_stub_pack_regenerate", pack_id=pack_id)
         footer = (
             f'<div style="margin-top:24px;display:flex;gap:10px;flex-wrap:wrap">'

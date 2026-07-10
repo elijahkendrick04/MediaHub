@@ -360,12 +360,15 @@ class TestStubLibraryPicker:
         )
 
     def test_picker_appears_on_all_stub_forms(self, two_org_app):
+        # C-11: /sponsor-post and /session-update no longer render forms —
+        # they redirect into the free-text landing (which has its own
+        # picker-equivalent photo attach) — so only the live stub forms
+        # are asserted here.
         app, tmp_path = two_org_app
         with app.test_client() as c:
             c.post("/api/organisation/active", data={"profile_id": "alpha"})
             _seed_asset(tmp_path, "alpha")
-            for url in ("/weekend-preview", "/sponsor-post",
-                        "/session-update", "/free-text/quick"):
+            for url in ("/weekend-preview", "/free-text/quick"):
                 resp = c.get(url)
                 assert resp.status_code == 200, f"{url} returned {resp.status_code}"
                 assert "Pick from your library" in resp.get_data(as_text=True), (
