@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-07-10 · `22fefbb1f` · [developer-settings] report: record F-5/F-6 from the re-audit pass
+**Last updated:** 2026-07-10 · `02871896f` · [developer-settings] report: record second-pass merge status
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1237,5 +1237,4 @@ list and the auto table below, not here.
 | 2026-07-10 | `f03993d28` | [developer-settings] report: record green-gate result + pre-existing flakes |
 | 2026-07-10 | `06a3fc2f1` | [developer-settings] audit report |
 | 2026-07-10 | `494f6ddf6` | [developer-settings] reach operator dashboards on a fresh deployment |
-| 2026-07-10 | `fe2605d66` | [meet-recap] record merge status in audit report |
 <!-- /ROADMAP:ACTIVITY -->
