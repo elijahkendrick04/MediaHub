@@ -29711,6 +29711,11 @@ self.addEventListener('fetch', function(e){
         "no-attest": (False, "Tick the licence box to confirm you're allowed to embed this font."),
         "bad-font": (False, "That file isn't a usable font, or its licence forbids embedding."),
         "no-tooling": (False, "Font processing isn't available on this deployment right now."),
+        "pairing-applied": (True, "Pairing applied — your cards will use this typography trio."),
+        "pairing-invalid": (
+            False,
+            "That pairing could not be applied — ask for a new suggestion and try again.",
+        ),
     }
 
     def _typography_banner(status: str) -> str:
@@ -29761,6 +29766,23 @@ self.addEventListener('fetch', function(e){
         )
 
         # --- AI pairing ---
+        # H-16: show the pairing the club has applied (if any) so the state of
+        # "Apply this pairing to my brand" is visible where it was chosen.
+        applied_line = ""
+        try:
+            from mediahub.brand.store import load_brand as _load_brand_for_type
+
+            _kit_for_type, _t_unused, _tpl_unused = _load_brand_for_type(pid)
+            _applied = getattr(_kit_for_type, "type_pairing", None) or {}
+        except Exception:
+            _applied = {}
+        if _applied.get("headline_family"):
+            applied_line = (
+                '<p style="font-size:12px;color:var(--ink-dim);margin:8px 0 0">'
+                f"Applied pairing: <strong>{_h(_applied.get('headline_family') or '')}</strong> "
+                f"headlines · {_h(_applied.get('body_family') or '')} body · "
+                f"{_h(_applied.get('numeral_family') or '')} numerals</p>"
+            )
         pairing = (
             '<div class="card"><h2 style="margin-top:0">AI font pairing</h2>'
             '<p style="color:var(--ink-dim)">Ask the engine to pick a headline / body / numeral '
@@ -29771,7 +29793,8 @@ self.addEventListener('fetch', function(e){
             'style="flex:1;min-width:220px;padding:8px 10px" maxlength="60">'
             '<button class="btn" type="submit">Suggest a pairing</button></form>'
             '<p style="font-size:12px;color:var(--ink-muted);margin-bottom:0">Uses your '
-            "configured AI provider; shows an honest message if none is set.</p></div>"
+            "configured AI provider; shows an honest message if none is set.</p>"
+            f"{applied_line}</div>"
         )
 
         # --- Club's own uploaded fonts ---
@@ -29890,11 +29913,21 @@ self.addEventListener('fetch', function(e){
         try:
             result = _dt.ai_type_pairing(PairingContext(club_name=name, mood=mood))
         except Exception as e:
+            # H-16: honest, plain-English failure — the raw exception goes to
+            # the server log only, never the page (and never a fabricated
+            # pairing).
+            log.warning("AI font pairing failed: %s", e, exc_info=True)
+            from mediahub.ai_core import ProviderNotConfigured as _PNC
+            from mediahub.media_ai.llm import ClaudeUnavailableError as _CUE
+
+            if isinstance(e, (_PNC, _CUE)):
+                msg = "AI suggestions are unavailable on this deployment."
+            else:
+                msg = "We could not suggest a pairing just now — please try again in a moment."
             body = (
                 '<section class="mh-hero"><span class="mh-hero-eyebrow">Typography</span>'
                 '<h1 style="margin-bottom:0">AI pairing</h1></section>'
-                '<div class="card"><p style="color:#e74c3c">AI pairing is unavailable: '
-                f"{_h(str(e)[:200])}</p>"
+                f'<div class="card"><p style="color:var(--bad)">{_h(msg)}</p>'
                 f'<a class="btn" href="{back}">Back to typography</a></div>'
             )
             return _layout("Typography · pairing", body, active="settings")
@@ -29904,6 +29937,17 @@ self.addEventListener('fetch', function(e){
             if result.get("corrected")
             else ""
         )
+        # H-16: the suggestion is applicable, not a dead end — the form carries
+        # the trio to typography_pair_apply, which persists it to the brand kit.
+        apply_form = (
+            f'<form method="post" action="{url_for("typography_pair_apply")}" '
+            'style="display:inline-block;margin-right:8px">'
+            f'<input type="hidden" name="pairing" value="{_h(result.get("pairing") or "")}">'
+            f'<input type="hidden" name="headline_family" value="{_h(result["headline_family"])}">'
+            f'<input type="hidden" name="body_family" value="{_h(result["body_family"])}">'
+            f'<input type="hidden" name="numeral_family" value="{_h(result["numeral_family"])}">'
+            '<button class="btn" type="submit">Apply this pairing to my brand</button></form>'
+        )
         body = (
             '<section class="mh-hero"><span class="mh-hero-eyebrow">Typography</span>'
             '<h1 style="margin-bottom:0">Suggested pairing</h1></section>'
@@ -29912,9 +29956,49 @@ self.addEventListener('fetch', function(e){
             f"<strong>Body:</strong> {_h(result['body_family'])}<br>"
             f"<strong>Numerals:</strong> {_h(result['numeral_family'])}</p>"
             f'<p style="color:var(--ink-dim)">{_h(result["reason"])}</p>{corrected}'
-            f'<a class="btn" href="{back}">Back to typography</a></div>'
+            f'{apply_form}<a class="btn ghost" href="{back}">Back to typography</a></div>'
         )
         return _layout("Typography · pairing", body, active="settings")
+
+    @app.route("/settings/typography/pair/apply", methods=["POST"])
+    def typography_pair_apply():
+        """H-16: persist an AI-suggested pairing to the active club's brand kit.
+
+        The trio is re-validated against the self-hosted catalogue (family
+        names only — a form value can't smuggle an arbitrary font), then saved
+        through the brand write path everything else uses (``save_brand`` on
+        the profile JSON). ``resolve_design_tokens`` surfaces it as the
+        club's ``type`` block.
+        """
+        prof = _active_profile()
+        if prof is None:
+            return redirect(url_for("settings_page"))
+        from mediahub.typography import catalog as _cat
+
+        families = {f.family for f in _cat.load_catalog()}
+        headline = (request.form.get("headline_family") or "").strip()
+        body_family = (request.form.get("body_family") or "").strip()
+        numeral = (request.form.get("numeral_family") or "").strip()
+        if not ({headline, body_family, numeral} <= families):
+            return redirect(
+                url_for("settings_section", section="typography", status="pairing-invalid")
+            )
+        # The renderer override key the AI path emits (Pairing.typography_pair).
+        pairing_key = (request.form.get("pairing") or "").strip().lower()
+        if pairing_key not in {"anton-inter", "bebas-grotesk", "bowlby-inter"}:
+            pairing_key = "anton-inter"
+        from mediahub.brand.store import load_brand, save_brand
+
+        kit, _tone_unused, _templates_unused = load_brand(prof.profile_id)
+        kit.type_pairing = {
+            "pairing": pairing_key,
+            "headline_family": headline,
+            "body_family": body_family,
+            "numeral_family": numeral,
+            "source": "ai",
+        }
+        save_brand(prof.profile_id, kit=kit)
+        return redirect(url_for("settings_section", section="typography", status="pairing-applied"))
 
     # ------------------------------------------------------------------
     # Audio engine (roadmap 1.8) — library, voices, pronunciation lexicon,
