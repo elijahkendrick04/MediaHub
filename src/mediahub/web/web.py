@@ -27277,8 +27277,21 @@ Relay team broke club record"></textarea>
         return hero + intro + auth + quickstart + endpoints_html
 
     # ---- PRIVACY -------------------------------------------------------
-    @app.route("/privacy")
-    def privacy_page():
+    def _privacy_page_render(
+        *,
+        correction_error: str = "",
+        correction_values: Optional[dict] = None,
+        erase_error: str = "",
+        erase_values: Optional[dict] = None,
+        status: int = 200,
+    ):
+        """Render the /privacy page, optionally with an inline form error.
+
+        H-17: the correction / erase POST routes used to redirect back here
+        on a validation failure with no message, silently discarding what
+        the user typed. They now re-render this page with a styled error
+        beside the failing form and every submitted value preserved.
+        """
         # Every inventory probe is fail-soft so a corrupted DB or missing
         # directory falls through to a "0" count instead of 500ing this
         # page — the user came here precisely BECAUSE they want to know
@@ -27323,21 +27336,56 @@ Relay team broke club record"></textarea>
         )
         _rights_tools_html = ""
         if active_org:
+            _ev = erase_values or {}
+            _ev_name = _h(str(_ev.get("athlete_name", "")))
+            _ev_club = _h(str(_ev.get("athlete_club", "")))
+            _erase_error_html = (
+                f'<p class="tag bad" role="alert" style="margin-bottom:10px">'
+                f"{_h(erase_error)}</p>"
+                if erase_error
+                else ""
+            )
             _rights_tools_html += f"""
 <div class="card">
   <h2>Erase an athlete</h2>
   <p class="muted">Removes a named athlete from this organisation's runs, rendered
   files, caches, caption memory and posting-log excerpts. Irreversible.</p>
+  {_erase_error_html}
   <form method="post" action="{url_for("privacy_athlete_erase")}"
-        onsubmit="return confirm('Erase this athlete from all stored data? This cannot be undone.')"
+        onsubmit="return mhEraseAthleteConfirm(this)"
         style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
     <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--ink-muted)">Full name
-      <input type="text" name="athlete_name" required placeholder="e.g. Jane Smith" /></label>
+      <input type="text" name="athlete_name" required placeholder="e.g. Jane Smith" value="{_ev_name}" /></label>
     <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--ink-muted)">Club (optional)
-      <input type="text" name="athlete_club" placeholder="for exact cache match" /></label>
-    <button class="btn secondary" type="submit">Erase athlete</button>
+      <input type="text" name="athlete_club" placeholder="for exact cache match" value="{_ev_club}" /></label>
+    <button class="btn danger" type="submit">Erase athlete</button>
   </form>
 </div>"""
+            # E-14: erasing a person is irreversible and wide-reaching, so the
+            # confirm spells out exactly what it wipes — via the styled
+            # MH.confirm where loaded, with a native confirm fallback. Plain
+            # string (not an f-string) so the JS braces stay single.
+            _rights_tools_html += """
+<script>
+function mhEraseAthleteConfirm(f) {
+  if (f.dataset.mhConfirmed === '1') { f.dataset.mhConfirmed = ''; return true; }
+  var name = (f.athlete_name && f.athlete_name.value ? f.athlete_name.value.trim() : '') || 'this athlete';
+  var scope = 'Erasing ' + name + ' removes them from every meet\\u2019s results, rendered graphics, caches, caption memory and posting logs \\u2014 this cannot be undone.';
+  if (window.MH && MH.confirm) {
+    MH.confirm({
+      title: 'Erase ' + name + ' from everything?',
+      body: scope,
+      confirmText: 'Erase athlete',
+      onConfirm: function() {
+        f.dataset.mhConfirmed = '1';
+        if (f.requestSubmit) f.requestSubmit(); else f.submit();
+      }
+    });
+    return false;
+  }
+  return confirm(scope);
+}
+</script>"""
             from mediahub.privacy import list_corrections
 
             open_corrections = list_corrections(active_org, status="open")
@@ -27355,20 +27403,31 @@ Relay team broke club record"></textarea>
                 if rows_html
                 else "<p class='muted' style='margin-top:10px'>No open corrections.</p>"
             )
+            _cv = correction_values or {}
+            _cv_run = _h(str(_cv.get("run_id", "")))
+            _cv_card = _h(str(_cv.get("card_id", "")))
+            _cv_reason = _h(str(_cv.get("reason", "")))
+            _correction_error_html = (
+                f'<p class="tag bad" role="alert" style="margin-bottom:10px">'
+                f"{_h(correction_error)}</p>"
+                if correction_error
+                else ""
+            )
             _rights_tools_html += f"""
 <div class="card">
   <h2>Correct a published card</h2>
   <p class="muted">A published card was wrong (wrong result, wrong athlete)? Open a
   correction: it's recorded, the card is pulled from the public wall, and you get the
   takedown checklist for the social platforms.</p>
+  {_correction_error_html}
   <form method="post" action="{url_for("privacy_correction_open")}"
         style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
     <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--ink-muted)">Run id
-      <input type="text" name="run_id" required /></label>
+      <input type="text" name="run_id" required value="{_cv_run}" /></label>
     <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--ink-muted)">Card id
-      <input type="text" name="card_id" required /></label>
+      <input type="text" name="card_id" required value="{_cv_card}" /></label>
     <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--ink-muted);flex:1;min-width:min(220px,100%)">What's wrong?
-      <input type="text" name="reason" required placeholder="e.g. wrong time — was 58.21 not 56.21" /></label>
+      <input type="text" name="reason" required placeholder="e.g. wrong time — was 58.21 not 56.21" value="{_cv_reason}" /></label>
     <button class="btn secondary" type="submit">Open correction</button>
   </form>
   {open_list}
@@ -27417,7 +27476,11 @@ Relay team broke club record"></textarea>
             dpa_url=url_for("dpa_page"),
             deployment_inventory_html=inventory_html if signed_in else "",
         )
-        return _layout("Privacy Notice", body, active="privacy")
+        return _layout("Privacy Notice", body, active="privacy"), status
+
+    @app.route("/privacy")
+    def privacy_page():
+        return _privacy_page_render()
 
     @app.route("/terms")
     def terms_page():
@@ -28332,7 +28395,16 @@ Relay team broke club record"></textarea>
         name = (request.form.get("athlete_name") or "").strip()
         club = (request.form.get("athlete_club") or "").strip()
         if not name:
-            return redirect(url_for("privacy_page"))
+            # H-17: re-render with an inline error instead of a silent
+            # redirect that discarded what the user typed.
+            return _privacy_page_render(
+                erase_error=(
+                    "Enter the athlete's full name — nothing was erased. "
+                    "The name must match how it appears in the results."
+                ),
+                erase_values={"athlete_name": name, "athlete_club": club},
+                status=400,
+            )
         # ONE erasure engine: compliance.dsr delegates to the privacy
         # cascade and adds the media-library / profile-text / suppression
         # extras, so this quick action and the Art 12A DSR workflow
@@ -28375,12 +28447,33 @@ Relay team broke club record"></textarea>
         run_id = (request.form.get("run_id") or "").strip()
         card_id = (request.form.get("card_id") or "").strip()
         reason = (request.form.get("reason") or "").strip()
-        if not (
+        _ids_ok = bool(
             re.fullmatch(r"[A-Za-z0-9_-]{1,64}", run_id)
             and re.fullmatch(r"[A-Za-z0-9_.:-]{1,128}", card_id)
-            and reason
-        ):
-            return redirect(url_for("privacy_page"))
+        )
+        if not (_ids_ok and reason):
+            # H-17: re-render with an inline error next to the form and the
+            # typed values preserved, instead of a silent redirect that
+            # discarded them.
+            if not _ids_ok:
+                _msg = (
+                    "That meet or card id doesn't look right — copy both from "
+                    "the meet's page and try again. Nothing was recorded."
+                )
+            else:
+                _msg = (
+                    "Say what's wrong with the card — the reason is recorded "
+                    "with the correction. Nothing was recorded yet."
+                )
+            return _privacy_page_render(
+                correction_error=_msg,
+                correction_values={
+                    "run_id": run_id,
+                    "card_id": card_id,
+                    "reason": reason,
+                },
+                status=400,
+            )
         from mediahub.privacy import TAKEDOWN_CHECKLIST, open_correction
 
         cid = open_correction(profile_id=active, run_id=run_id, card_id=card_id, reason=reason)
@@ -52983,6 +53076,42 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                 return run_data, {"achievement": c}
         return run_data, None
 
+    def _sponsor_variant_sidecar(run_id: str, card_id: str) -> Optional[Path]:
+        """Path of the card's sponsor-variant result sidecar, or None if the
+        card id would escape the run's directory (defence-in-depth — the id
+        is a single URL segment, but never trust it as a filename)."""
+        svdir = RUNS_DIR / run_id / "sponsor_variants"
+        path = svdir / f"{card_id}.json"
+        try:
+            if svdir.resolve() not in path.resolve().parents:
+                return None
+        except OSError:
+            return None
+        return path
+
+    def _sponsor_variant_cached(run_id: str, card_id: str, sponsor_name: str) -> Optional[dict]:
+        """The last successfully rendered sponsor variant for this card, or
+        None when there is nothing usable (never rendered, PNG purged, or the
+        rotation now assigns a different sponsor). Only a render that
+        produced a visual counts — failures are never cached, so the page
+        retries them automatically."""
+        path = _sponsor_variant_sidecar(run_id, card_id)
+        if path is None or not path.exists():
+            return None
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            return None
+        if not isinstance(data, dict):
+            return None
+        if (data.get("sponsor_name") or "") != sponsor_name:
+            return None
+        vid = data.get("visual_id") or ""
+        png = str(data.get("png_path") or "")
+        if not vid or not png or not Path(png).exists():
+            return None
+        return data
+
     @app.route("/runs/<run_id>/card/<card_id>/sponsor-variant")
     def sponsor_variant_view(run_id: str, card_id: str):
         """Server-rendered sponsor variant page for one card."""
@@ -53039,171 +53168,433 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             return _layout("Sponsor variant", body, active="home")
 
         ach = target.get("achievement") or {}
-        meet_name = (run_data.get("meet") or {}).get("name") or run_data.get("meet_name", "")
 
-        # ---- 1. Render the sponsor-branded visual via the existing pipeline ----
-        visual_html = ""
-        visual_error = ""
-        if _v8_ok and _v8_create_visual_for_item is not None:
-            try:
-                item = {
-                    "id": ach.get("swim_id") or card_id,
-                    "swim_id": ach.get("swim_id") or card_id,
-                    "achievement": ach,
-                    "post_angle": ach.get("post_angle"),
-                    "meet_name": meet_name,
-                    "safe_to_post": target.get("safe_to_post") or {"level": "safe"},
-                }
-                resolved_pid = profile_id or "_run_" + run_id
-                resolved_pid = re.sub(r"[^a-z0-9_-]", "-", resolved_pid.lower()).strip("-") or (
-                    "_run_" + run_id
+        # ---- D-32: the render + caption used to run synchronously inside
+        # this GET (30–90s cold, LLM call included) before any HTML returned.
+        # The page shell now returns immediately: a cached variant renders
+        # straight away; otherwise a branded progress panel mounts and the
+        # background job (api_sponsor_variant_job → api_reel_job_status poll)
+        # does the work. "Refresh to regenerate" became a Regenerate button
+        # that starts a fresh job.
+        cached = _sponsor_variant_cached(run_id, card_id, sponsor_name)
+        if cached is not None:
+            img_url = url_for(
+                "api_visual_png",
+                vid=cached["visual_id"],
+                format_name=cached.get("format_name") or "feed_portrait",
+            )
+            visual_block = (
+                f'<img src="{_h(img_url)}" alt="Sponsor-branded variant" '
+                f'style="max-width:100%;border-radius:10px;border:1px solid var(--border)"/>'
+            )
+            _cap_text = str(cached.get("caption") or "")
+            if _cap_text:
+                caption_block = (
+                    f'<textarea readonly style="width:100%;min-height:140px;font-size:14px;'
+                    f"padding:12px;border:1px solid var(--border);border-radius:8px;"
+                    f'background:var(--bg);color:var(--ink);font-family:inherit">'
+                    f"{_h(_cap_text)}</textarea>"
+                    f'<button class="btn" style="margin-top:8px;font-size:12px;padding:6px 14px" '
+                    f'onclick="navigator.clipboard.writeText(this.previousElementSibling.value);'
+                    f"this.textContent='Copied ✓'\">Copy caption</button>"
                 )
-                if not _session_can_access_profile(resolved_pid):
-                    visual_error = "forbidden"
-                    raise RuntimeError("forbidden")
-                brand_kit = _v8_brand_kit_for(resolved_pid, run_id=run_id)
-                media_assets = []
-                try:
-                    from mediahub.media_library.photo_edit import asset_dicts_for_render
-
-                    store = _v8_get_media_store()
-                    assets = store.list(profile_id=resolved_pid)
-                    media_assets = asset_dicts_for_render(assets, store)
-                except Exception:
-                    pass
-                # UI 1.18 — honour the card's persisted inspector overrides,
-                # minus hide_sponsor: this surface's whole job is showing
-                # the sponsor slot.
-                _insp = {
-                    k: v
-                    for k, v in _inspector_overrides_for_card(run_id, card_id).items()
-                    if k != "hide_sponsor"
-                }
-                res = _v8_create_visual_for_item(
-                    item,
-                    brand_kit,
-                    profile_id=resolved_pid,
-                    run_id=run_id,
-                    media_assets=media_assets,
-                    sponsor_name=sponsor_name,
-                    user_overrides=_insp,
-                )
-                visuals = res.get("visuals") or []
-                if visuals:
-                    v0 = visuals[0]
-                    vid = v0.get("id") or v0.get("brief_id")
-                    fmt = v0.get("format_name") or "feed_portrait"
-                    if vid:
-                        img_url = url_for(
-                            "api_visual_png",
-                            vid=vid,
-                            format_name=fmt,
-                        )
-                        visual_html = (
-                            f'<img src="{_h(img_url)}" alt="Sponsor-branded variant" '
-                            f'style="max-width:100%;border-radius:10px;border:1px solid var(--border)"/>'
-                        )
-                        if _rotated and _rotated.get("sponsor_id"):
-                            try:
-                                from mediahub.club_platform.sponsors import (
-                                    record_exposure as _rec_exposure,
-                                )
-
-                                _rec_exposure(
-                                    resolved_pid,
-                                    run_id=run_id,
-                                    card_id=card_id,
-                                    sponsor_id=_rotated["sponsor_id"],
-                                    sponsor_name=sponsor_name,
-                                    surface="sponsor_variant",
-                                )
-                            except Exception:
-                                pass
-                    else:
-                        visual_error = "Visual rendered but no asset id returned."
-                else:
-                    errs = res.get("errors") or []
-                    visual_error = "Sponsor-branded visual could not be rendered: " + (
-                        errs[0] if errs else "no visuals returned"
-                    )
-            except Exception as e:
-                visual_error = f"render_failed: {e}"
-        else:
-            visual_error = "Visual pipeline unavailable in this environment."
-
-        # ---- 2. Generate the sponsor-acknowledging caption ----
-        caption_text = ""
-        caption_error = ""
-        caption_unavailable = False
-        try:
-            from mediahub.brand.sponsor import generate_sponsor_caption
-
-            caption_text = generate_sponsor_caption(ach, profile=profile)
-        except Exception as e:
-            # Detect "no LLM provider configured" by class name rather than
-            # importing ClaudeUnavailableError directly — keeps this surface
-            # resilient if the exception module moves.
-            if type(e).__name__ == "ClaudeUnavailableError":
-                caption_unavailable = True
             else:
-                caption_error = str(e)
-
-        # ---- 3. Render the page ----
-        _pack_url = url_for("content_pack_grouped", run_id=run_id)
-        visual_block = (
-            visual_html
-            if visual_html
-            else (
-                f'<div class="empty" style="text-align:left;padding:14px">'
-                f'<strong style="color:var(--warn)">Visual not available.</strong>'
-                f'<br><span class="muted" style="font-size:12px">{_h(visual_error)}</span>'
-                "</div>"
-            )
-        )
-        if caption_text:
-            caption_block = (
-                f'<textarea readonly style="width:100%;min-height:140px;font-size:14px;'
-                f"padding:12px;border:1px solid var(--border);border-radius:8px;"
-                f'background:var(--bg);color:var(--ink);font-family:inherit">'
-                f"{_h(caption_text)}</textarea>"
-                f'<button class="btn" style="margin-top:8px;font-size:12px;padding:6px 14px" '
-                f'onclick="navigator.clipboard.writeText(this.previousElementSibling.value);'
-                f"this.textContent='Copied ✓'\">Copy caption</button>"
-            )
-        elif caption_unavailable:
-            caption_block = (
-                '<div class="empty" style="text-align:left;padding:14px">'
-                "<strong>AI captions are unavailable on this deployment.</strong>"
-                '<br><span class="muted" style="font-size:13px">'
-                "The sponsor-branded visual is still ready to download. "
-                "Contact your administrator to enable AI captions."
-                "</span></div>"
-            )
+                caption_block = (
+                    '<div class="empty" style="text-align:left;padding:14px">'
+                    f"{_h(str(cached.get('caption_message') or 'No caption was generated — use Regenerate to try again.'))}"
+                    "</div>"
+                )
         else:
-            caption_block = (
-                f'<div class="empty" style="text-align:left;padding:14px">'
-                f'<strong style="color:var(--warn)">Caption not available.</strong>'
-                f'<br><span class="muted" style="font-size:12px">{_h(caption_error)}</span>'
-                "</div>"
+            # No-JS fallback copy; the script below replaces both panels the
+            # moment the job starts.
+            visual_block = (
+                '<p class="muted" style="padding:14px;font-size:13px">'
+                "Preparing the sponsor graphic&hellip;</p>"
             )
+            caption_block = (
+                '<p class="muted" style="padding:14px;font-size:13px">'
+                "The caption is written alongside the graphic&hellip;</p>"
+            )
+
+        _pack_url = url_for("content_pack_grouped", run_id=run_id)
+        _job_url = url_for("api_sponsor_variant_job", run_id=run_id, card_id=card_id)
         swimmer = _h(ach.get("swimmer_name") or "")
         event = _h(ach.get("event") or "")
         body = f"""
 <p class="dim"><a href="{_pack_url}">&larr; Back to recommendations</a></p>
 <h1 style="margin-bottom:4px">Sponsor variant &mdash; {swimmer}{(" · " + event) if event else ""}</h1>
-<p class="dim" style="margin-bottom:24px">Sponsor-branded result card + sponsor-acknowledging caption for <b>{_h(sponsor_name)}</b>. Generated on demand &mdash; refresh to regenerate.</p>
+<div style="display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:24px">
+  <p class="dim" style="margin:0">Sponsor-branded result card + sponsor-acknowledging caption for <b>{_h(sponsor_name)}</b>.</p>
+  <button id="sv-regen" class="btn secondary" type="button">Regenerate</button>
+</div>
 <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;align-items:start">
   <div class="card">
     <h3 style="margin-top:0;font-size:14px;text-transform:uppercase;letter-spacing:0.5px;color:var(--ink-dim)">Sponsor-branded visual</h3>
-    {visual_block}
+    <div id="sv-visual">{visual_block}</div>
   </div>
   <div class="card">
     <h3 style="margin-top:0;font-size:14px;text-transform:uppercase;letter-spacing:0.5px;color:var(--ink-dim)">Sponsor-acknowledging caption</h3>
-    {caption_block}
+    <div id="sv-caption">{caption_block}</div>
   </div>
 </div>
 """
+        # Plain string (not an f-string) so the JS braces stay single; the two
+        # dynamic values ride in via json.dumps.
+        body += (
+            "<script>\n(function(){\n"
+            "  var jobUrl = " + json.dumps(_job_url) + ";\n"
+            "  var autostart = " + ("false" if cached is not None else "true") + ";\n"
+            """  var visual = document.getElementById('sv-visual');
+  var caption = document.getElementById('sv-caption');
+  var btn = document.getElementById('sv-regen');
+  function emptyBox(text) {
+    var d = document.createElement('div');
+    d.className = 'empty';
+    d.style.cssText = 'text-align:left;padding:14px;font-size:13px';
+    d.textContent = text;
+    return d;
+  }
+  function fillVisual(j) {
+    visual.innerHTML = '';
+    if (j.image_url) {
+      var img = document.createElement('img');
+      img.src = j.image_url;
+      img.alt = 'Sponsor-branded variant';
+      img.style.cssText = 'max-width:100%;border-radius:10px;border:1px solid var(--border)';
+      visual.appendChild(img);
+    } else {
+      visual.appendChild(emptyBox(j.image_message || 'The graphic couldn\\u2019t be rendered \\u2014 try again.'));
+    }
+  }
+  function fillCaption(j) {
+    caption.innerHTML = '';
+    if (j.caption) {
+      var ta = document.createElement('textarea');
+      ta.readOnly = true;
+      ta.style.cssText = 'width:100%;min-height:140px;font-size:14px;padding:12px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--ink);font-family:inherit';
+      ta.value = j.caption;
+      var copy = document.createElement('button');
+      copy.className = 'btn';
+      copy.style.cssText = 'margin-top:8px;font-size:12px;padding:6px 14px';
+      copy.textContent = 'Copy caption';
+      copy.addEventListener('click', function(){ navigator.clipboard.writeText(ta.value); copy.textContent = 'Copied \\u2713'; });
+      caption.appendChild(ta);
+      caption.appendChild(copy);
+    } else {
+      caption.appendChild(emptyBox(j.caption_message || 'The caption couldn\\u2019t be generated \\u2014 try again.'));
+    }
+  }
+  function restoreBtn() { if (btn) { btn.disabled = false; btn.textContent = 'Regenerate'; } }
+  function fail(msg) {
+    fillVisual({image_message: msg});
+    fillCaption({caption_message: msg});
+    restoreBtn();
+  }
+  function svStart() {
+    if (btn) { btn.disabled = true; btn.textContent = 'Generating\\u2026'; }
+    caption.innerHTML = '';
+    caption.appendChild(emptyBox('The caption is written alongside the graphic\\u2026'));
+    visual.innerHTML = '';
+    var mount = document.createElement('div');
+    visual.appendChild(mount);
+    var prog = (window.MH && MH.renderProgress)
+      ? MH.renderProgress(mount, {label: 'Rendering the sponsor graphic', sub: 'Usually 30\\u201390 seconds the first time', expectedMs: 45000, accent: 'lane'})
+      : {stop: function(){}, complete: function(cb){ cb(); }};
+    fetch(jobUrl, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}'})
+      .then(function(r){ return r.json().then(function(j){ return {status: r.status, body: j}; }); })
+      .then(function(res){
+        if (res.status !== 202 || !res.body || !res.body.poll_url) {
+          prog.stop();
+          fail((res.body && (res.body.user_message || res.body.error)) || 'The sponsor variant couldn\\u2019t be started \\u2014 try again.');
+          return;
+        }
+        var tries = 0;
+        var poll = function(){
+          tries++;
+          if (tries > 100) { prog.stop(); fail('This is taking longer than expected \\u2014 reload the page to check again.'); return; }
+          fetch(res.body.poll_url)
+            .then(function(r){ return r.json(); })
+            .then(function(j){
+              if (j.status === 'done') {
+                prog.complete(function(){
+                  restoreBtn();
+                  fillVisual(j);
+                  fillCaption(j);
+                });
+                return;
+              }
+              if (j.status === 'error') {
+                prog.stop();
+                fail(j.user_message || 'The sponsor variant couldn\\u2019t be generated \\u2014 try again.');
+                return;
+              }
+              setTimeout(poll, 3000);
+            })
+            .catch(function(){ setTimeout(poll, 3000); });
+        };
+        setTimeout(poll, 3000);
+      })
+      .catch(function(){ prog.stop(); fail('Network error \\u2014 check your connection and try again.'); });
+  }
+  if (btn) btn.addEventListener('click', svStart);
+  if (autostart) {
+    if (document.readyState !== 'loading') svStart();
+    else document.addEventListener('DOMContentLoaded', svStart);
+  }
+})();
+</script>"""
+        )
         return _layout(f"Sponsor variant — {swimmer}", body, active="home")
+
+    @app.route("/api/runs/<run_id>/card/<card_id>/sponsor-variant-job", methods=["POST"])
+    def api_sponsor_variant_job(run_id: str, card_id: str):
+        """D-32: background render + caption for the sponsor-variant page;
+        ``202`` + ``{job_id, poll_url}``.
+
+        The synchronous page GET used to hold the HTTP connection for the
+        whole visual render *and* an LLM caption call. Fail-fast gates
+        (tenant, sponsor configured) stay in the request thread; the worker
+        does the heavy work and the shared ``api_reel_job_status`` route
+        reports ``image_url`` / ``caption`` (or their plain-copy failure
+        messages — raw exceptions go to the server log only).
+        """
+        run_data, target = _load_run_for_card(run_id, card_id)
+        if not _can_access_run(run_id, run_data, _active_profile_id()):
+            run_data = None
+            target = None
+        if run_data is None or target is None:
+            return jsonify({"error": "run_not_found"}), 404
+
+        profile_id = run_data.get("profile_id") or run_data.get("club_filter") or ""
+        profile = load_profile(profile_id) if profile_id else None
+        if profile is None:
+            profile = _active_profile()
+        _rotated = None
+        if profile is not None:
+            try:
+                from mediahub.club_platform.sponsors import sponsor_for_card as _sponsor_for_card
+
+                _rotated = _sponsor_for_card(profile, run_id, card_id)
+            except Exception:
+                _rotated = None
+        sponsor_name = (_rotated or {}).get("name", "").strip()
+        if not sponsor_name:
+            return (
+                jsonify(
+                    {
+                        "error": "no_sponsor",
+                        "user_message": (
+                            "No sponsor is configured for this organisation — "
+                            "add one on the Organisation page first."
+                        ),
+                    }
+                ),
+                400,
+            )
+        sponsor_id = (_rotated or {}).get("sponsor_id", "")
+        resolved_pid = profile_id or "_run_" + run_id
+        resolved_pid = re.sub(r"[^a-z0-9_-]", "-", resolved_pid.lower()).strip("-") or (
+            "_run_" + run_id
+        )
+        if not _session_can_access_profile(resolved_pid):
+            return jsonify({"error": "run_not_found"}), 404
+        sidecar = _sponsor_variant_sidecar(run_id, card_id)
+        if sidecar is None:
+            return jsonify({"error": "run_not_found"}), 404
+
+        # Capture everything the worker needs at enqueue — it has no request
+        # context (_active_profile_id() returns nothing on the thread).
+        ach = target.get("achievement") or {}
+        meet_name = (run_data.get("meet") or {}).get("name") or run_data.get("meet_name", "")
+        item = {
+            "id": ach.get("swim_id") or card_id,
+            "swim_id": ach.get("swim_id") or card_id,
+            "achievement": ach,
+            "post_angle": ach.get("post_angle"),
+            "meet_name": meet_name,
+            "safe_to_post": target.get("safe_to_post") or {"level": "safe"},
+        }
+        brand_kit = None
+        media_assets: list[dict] = []
+        if _v8_ok:
+            brand_kit = _v8_brand_kit_for(resolved_pid, run_id=run_id)
+            try:
+                from mediahub.media_library.photo_edit import asset_dicts_for_render
+
+                store = _v8_get_media_store()
+                assets = store.list(profile_id=resolved_pid)
+                media_assets = asset_dicts_for_render(assets, store)
+            except Exception:
+                pass
+        # UI 1.18 — honour the card's persisted inspector overrides, minus
+        # hide_sponsor: this surface's whole job is showing the sponsor slot.
+        _insp = {
+            k: v
+            for k, v in _inspector_overrides_for_card(run_id, card_id).items()
+            if k != "hide_sponsor"
+        }
+
+        job_id = uuid.uuid4().hex
+        job: dict = {
+            "id": job_id,
+            "kind": "sponsor-variant",
+            "status": "running",
+            "error": "",
+            "user_message": "",
+            "video_url": "",
+            "visual_id": "",
+            "format_name": "",
+            "png_path": "",
+            "image_message": "",
+            "caption": "",
+            "caption_message": "",
+            "created_at": time.time(),
+            "owner_pid": _active_profile_id() or "",
+        }
+        _variant_jobs_gc()
+        _variant_job_save(job)
+
+        def _worker() -> None:
+            try:
+                with _job_heartbeat(job):
+                    # ---- 1. Sponsor-branded visual (render-engine bound) ----
+                    if _v8_ok and _v8_create_visual_for_item is not None:
+                        try:
+                            with _render_slot(
+                                "graphic", f"sponsor:{card_id}", timeout=_RENDER_TRY_TIMEOUT
+                            ):
+                                res = _v8_create_visual_for_item(
+                                    item,
+                                    brand_kit,
+                                    profile_id=resolved_pid,
+                                    run_id=run_id,
+                                    media_assets=media_assets,
+                                    sponsor_name=sponsor_name,
+                                    user_overrides=_insp,
+                                )
+                            visuals = res.get("visuals") or []
+                            v0 = visuals[0] if visuals else {}
+                            vid = v0.get("id") or v0.get("brief_id") or ""
+                            if vid:
+                                job["visual_id"] = vid
+                                job["format_name"] = v0.get("format_name") or "feed_portrait"
+                                job["png_path"] = str(v0.get("file_path") or "")
+                                if sponsor_id:
+                                    try:
+                                        from mediahub.club_platform.sponsors import (
+                                            record_exposure as _rec_exposure,
+                                        )
+
+                                        _rec_exposure(
+                                            resolved_pid,
+                                            run_id=run_id,
+                                            card_id=card_id,
+                                            sponsor_id=sponsor_id,
+                                            sponsor_name=sponsor_name,
+                                            surface="sponsor_variant",
+                                        )
+                                    except Exception:
+                                        pass
+                            else:
+                                log.warning(
+                                    "sponsor variant %s/%s: no visual produced: %s",
+                                    run_id,
+                                    card_id,
+                                    (res.get("errors") or ["no visuals returned"])[0],
+                                )
+                                job["image_message"] = (
+                                    "The graphic couldn't be rendered — try again."
+                                )
+                        except _RenderBusy:
+                            job["image_message"] = (
+                                "Another render is in progress — try again in a minute."
+                            )
+                        except Exception:
+                            log.warning(
+                                "sponsor variant %s/%s: render failed",
+                                run_id,
+                                card_id,
+                                exc_info=True,
+                            )
+                            job["image_message"] = "The graphic couldn't be rendered — try again."
+                    else:
+                        job["image_message"] = (
+                            "Graphic rendering isn't available on this deployment."
+                        )
+                    _variant_job_save(job)
+                    # ---- 2. Sponsor-acknowledging caption (LLM) ----
+                    try:
+                        from mediahub.brand.sponsor import generate_sponsor_caption
+
+                        job["caption"] = generate_sponsor_caption(ach, profile=profile)
+                    except Exception as e:
+                        # Detect "no LLM provider configured" by class name
+                        # rather than importing ClaudeUnavailableError directly
+                        # — keeps this surface resilient if the module moves.
+                        if type(e).__name__ == "ClaudeUnavailableError":
+                            job["caption_message"] = (
+                                "AI captions are unavailable on this deployment. "
+                                "The sponsor-branded graphic is still ready to "
+                                "download. Contact your administrator to enable "
+                                "AI captions."
+                            )
+                        else:
+                            log.warning(
+                                "sponsor variant %s/%s: caption failed",
+                                run_id,
+                                card_id,
+                                exc_info=True,
+                            )
+                            job["caption_message"] = (
+                                "The caption couldn't be generated — try again."
+                            )
+                job["status"] = "done"
+                # A successful render is cached via the sidecar so the next
+                # page load shows it instantly, without a new job.
+                if job["visual_id"]:
+                    try:
+                        sidecar.parent.mkdir(parents=True, exist_ok=True)
+                        sidecar.write_text(
+                            json.dumps(
+                                {
+                                    "visual_id": job["visual_id"],
+                                    "format_name": job["format_name"],
+                                    "png_path": job["png_path"],
+                                    "caption": job["caption"],
+                                    "caption_message": job["caption_message"],
+                                    "sponsor_name": sponsor_name,
+                                    "created_at": time.time(),
+                                }
+                            ),
+                            encoding="utf-8",
+                        )
+                    except Exception:
+                        log.warning(
+                            "sponsor variant %s/%s: sidecar write failed",
+                            run_id,
+                            card_id,
+                            exc_info=True,
+                        )
+            except Exception:
+                # Raw exception text stays in the server log — the client
+                # only ever sees the plain user_message.
+                log.warning("sponsor variant %s/%s: job failed", run_id, card_id, exc_info=True)
+                job["status"] = "error"
+                job["error"] = "sponsor_variant_failed"
+                job["user_message"] = "The sponsor variant couldn't be generated — try again."
+            _variant_job_save(job)
+
+        threading.Thread(target=_worker, name=f"sponsor-variant-{job_id[:8]}", daemon=True).start()
+        return (
+            jsonify(
+                {
+                    "ok": True,
+                    "job_id": job_id,
+                    "poll_url": url_for("api_reel_job_status", job_id=job_id),
+                }
+            ),
+            202,
+        )
 
     # ------------------------------------------------------------------
     # PC.8 — Sponsor manager + per-sponsor exposure reports.
@@ -53354,6 +53745,9 @@ where they appeared, ready to forward.</p>
         if entry is not None:
             registry = [s for s in (prof.sponsors or [])]
             # Replace an entry with the same id (same name) instead of duplicating.
+            _had_existing = any(
+                isinstance(s, dict) and s.get("sponsor_id") == entry["sponsor_id"] for s in registry
+            )
             registry = [
                 s
                 for s in registry
@@ -53362,6 +53756,14 @@ where they appeared, ready to forward.</p>
             registry.append(entry)
             prof.sponsors = registry
             save_profile(prof)
+            # E-14: the replace semantics stay, but the user is told — a
+            # same-named add used to overwrite the existing entry silently.
+            if _had_existing:
+                _flash_toast(
+                    f"Updated existing sponsor {entry['name']} — "
+                    "its previous details were replaced.",
+                    "info",
+                )
         return redirect(url_for("sponsors_page"))
 
     @app.route("/sponsors/delete", methods=["POST"])
@@ -53526,7 +53928,8 @@ workflow, and the publish log &mdash; deterministic and auditable.</p>
       enforced on top &mdash; this blanket setting can only tighten it further)</label>
     <button type="submit" class="btn secondary" style="font-size:12px">Save</button>
   </form>
-  <form method="post" action="{url_for("public_wall_update")}" style="margin-top:14px">
+  <form method="post" action="{url_for("public_wall_update")}" style="margin-top:14px"
+        onsubmit="return mhWallOffConfirm(this)">
     <input type="hidden" name="action" value="disable">
     <button type="submit" class="btn secondary">Switch off &amp; revoke the link</button>
   </form>
@@ -53544,6 +53947,31 @@ workflow, and the publish log &mdash; deterministic and auditable.</p>
   {excluded_rows or '<tr><td class="dim" style="padding:12px">None hidden.</td></tr>'}
   </tbody></table>
 </div>"""
+            # E-12: switching off clears the token, so every shared URL,
+            # embed, feed and QR code dies permanently (re-enabling mints a
+            # NEW link). That deserves an explicit confirm — styled
+            # MH.confirm where loaded, native confirm fallback. Plain string
+            # (not an f-string) so the JS braces stay single.
+            status_block += """
+<script>
+function mhWallOffConfirm(f) {
+  if (f.dataset.mhConfirmed === '1') { f.dataset.mhConfirmed = ''; return true; }
+  var body = 'Your public link, website embed, feeds and any QR codes will stop working. Switching back on creates a DIFFERENT link.';
+  if (window.MH && MH.confirm) {
+    MH.confirm({
+      title: 'Switch off the public wall?',
+      body: body,
+      confirmText: 'Switch off & revoke',
+      onConfirm: function() {
+        f.dataset.mhConfirmed = '1';
+        if (f.requestSubmit) f.requestSubmit(); else f.submit();
+      }
+    });
+    return false;
+  }
+  return confirm('Switch off the public wall? ' + body);
+}
+</script>"""
         else:
             status_block = f"""
 <div class="card empty">
@@ -57252,6 +57680,8 @@ voice, and queues them for one-click approval.</p>
             "video-stabilize",
             # D-12: the certificates-ZIP build (one Chromium PDF per card).
             "certificates",
+            # D-32: the sponsor-variant page's render + caption job.
+            "sponsor-variant",
         ):
             return jsonify({"error": "job_not_found"}), 404
         if (job.get("owner_pid") or "") != (_active_profile_id() or ""):
@@ -57292,6 +57722,23 @@ voice, and queues them for one-click approval.</p>
         # download URL instead of a video_url; other pollers ignore the key.
         if job.get("download_url"):
             payload["download_url"] = job.get("download_url")
+        # D-32: the sponsor-variant job hands back the rendered visual +
+        # caption (or their plain-copy failure messages) instead of a
+        # video_url. Other kinds never carry these keys, so nothing changes
+        # for the existing pollers.
+        if job.get("kind") == "sponsor-variant":
+            payload["image_url"] = (
+                url_for(
+                    "api_visual_png",
+                    vid=job.get("visual_id"),
+                    format_name=job.get("format_name") or "feed_portrait",
+                )
+                if job.get("visual_id")
+                else ""
+            )
+            payload["image_message"] = job.get("image_message") or ""
+            payload["caption"] = job.get("caption") or ""
+            payload["caption_message"] = job.get("caption_message") or ""
         return jsonify(payload)
 
     @app.route("/api/runs/<run_id>/reel-file", methods=["GET"])
