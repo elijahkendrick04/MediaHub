@@ -20449,19 +20449,26 @@ def create_app() -> Flask:
 
     # ---- ACTIVITY FEED — unified runs/approvals/exports stream (UI 1.16) ---
     def _activity_view_toggle(active_view: str) -> str:
-        """Segmented "Runs table | Feed" switch shared by both Activity views."""
-        table_cls = " is-active" if active_view == "table" else ""
-        feed_cls = " is-active" if active_view == "feed" else ""
+        """Segmented "Table | Feed | Season" switch shared by the three
+        history lenses (G-2: /activity, /activity/feed and /season all render
+        the same result history — one strip cross-links them with an active
+        state instead of each page hiding the others)."""
+        tabs = (
+            ("table", "Results table", url_for("activity_page")),
+            ("feed", "Feed", url_for("activity_feed_page")),
+            ("season", "Season", url_for("season_timeline_page")),
+        )
+        links = ""
+        for key, label, href in tabs:
+            active = active_view == key
+            links += (
+                f'<a class="{"is-active" if active else ""}" '
+                f'aria-current="{"page" if active else "false"}" '
+                f'href="{href}">{label}</a>'
+            )
         return (
             '<nav class="mh-segmented" aria-label="Activity view" '
-            'style="margin-bottom:var(--sp-4)">'
-            f'<a class="{table_cls.strip()}" '
-            f'aria-current="{"page" if active_view == "table" else "false"}" '
-            f'href="{url_for("activity_page")}">Results table</a>'
-            f'<a class="{feed_cls.strip()}" '
-            f'aria-current="{"page" if active_view == "feed" else "false"}" '
-            f'href="{url_for("activity_feed_page")}">Feed</a>'
-            "</nav>"
+            f'style="margin-bottom:var(--sp-4)">{links}</nav>'
         )
 
     def _render_activity_feed(events) -> str:
@@ -21156,8 +21163,8 @@ def create_app() -> Flask:
             f"{range_html}"
             f"<span>{n_meets:,} {'meet' if n_meets == 1 else 'meets'}</span>"
             '<span class="sep">&middot;</span>'
-            f'<span><a href="{url_for("activity_page")}">View as activity log &rarr;</a></span>'
-            '<span class="sep">&middot;</span>'
+            # (G-2: the "View as activity log →" link moved into the shared
+            # Table · Feed · Season strip below the hero.)
             # C-9 — a discoverable entry into Collections (folders grouping meets),
             # previously reachable only by typing the URL.
             f'<span><a href="{url_for("collections_page")}">Collections &rarr;</a></span>'
@@ -21173,7 +21180,14 @@ def create_app() -> Flask:
             "</div></div>"
         )
 
-        body = season_css + hero + summary_html + timeline_html + _RUN_DELETE_JS
+        body = (
+            season_css
+            + hero
+            + _activity_view_toggle("season")
+            + summary_html
+            + timeline_html
+            + _RUN_DELETE_JS
+        )
         return _layout("Season timeline", body, active="season")
 
     # ---- UPLOAD --------------------------------------------------------
@@ -29428,7 +29442,9 @@ self.addEventListener('fetch', function(e){
                 "System status",
                 "Whether the site is operational right now.",
                 "status",
-                url_for("settings_section", section="status"),
+                # G-2: straight to the canonical /status page — the settings
+                # sub-page was a byte-identical mirror of it.
+                url_for("status_page"),
             ),
         ]
         if is_dev:
@@ -29687,9 +29703,13 @@ self.addEventListener('fetch', function(e){
                 lambda prof: _render_settings_governance_section(prof),
             ),
             "account": ("Account", lambda prof: _render_settings_account_section()),
-            "status": ("System status", lambda prof: _render_settings_status_public_section()),
             "developer": ("Developer", lambda prof: _render_settings_developer_section()),
         }
+        # G-2: /settings/status used to render the exact same public
+        # status card as /status — one canonical page now; old links
+        # follow it there.
+        if section == "status":
+            return redirect(url_for("status_page"))
         entry = renderers.get(section)
         if entry is None:
             return redirect(url_for("settings_page"))
@@ -30533,120 +30553,37 @@ self.addEventListener('fetch', function(e){
         )
 
     def _render_settings_activity_section(prof: Optional[ClubProfile]) -> str:
-        """Activity section — recent runs for the pinned org.
+        """Activity section — a pointer to the canonical /activity page.
 
-        Mirrors the standalone /activity page but degrades gracefully
-        when no profile is pinned (Settings is reachable pre-org-setup).
-        The settings sub-page supplies its own hero title, so this section
-        carries no big header of its own.
+        G-2: this used to re-render its own copy of the results table
+        ("Mirrors /activity") — a fourth surface showing the same history.
+        The canonical Activity page carries everything the mirror had (and
+        more): per-row delete, the why-it-failed explainers, search, status
+        filters, bulk clear, and the Table · Feed · Season views. Settings
+        now links instead of duplicating. Degrades gracefully when no
+        profile is pinned (Settings is reachable pre-org-setup).
         """
-        section_header = ""
         if prof is None:
             return (
-                f"{section_header}"
                 '<p class="dim" style="margin-bottom:14px">'
-                "Choose an organisation to see its recent runs here. "
+                "Choose an organisation to see its recent results. "
                 "Activity is scoped per-organisation so the data never "
                 "leaks between profiles.</p>"
                 '<div class="card empty">No organisation pinned. '
                 f'<a href="{url_for("sign_in_page")}">Choose organisation &rarr;</a></div>'
             )
-
-        try:
-            conn = _db()
-            rows = conn.execute(
-                "SELECT id, created_at, finished_at, status, profile_id, "
-                "meet_name, our_swims, n_cards, n_queue, error, file_name "
-                "FROM runs WHERE profile_id = ? "
-                "ORDER BY created_at DESC LIMIT 100",
-                (prof.profile_id,),
-            ).fetchall()
-            conn.close()
-        except Exception:
-            rows = []
-
-        section_intro = (
-            f'<p class="dim" style="margin-bottom:14px">Recent runs for '
-            f"<b>{_h(prof.display_name)}</b>.</p>"
-        )
-
-        if not rows:
-            return (
-                f"{section_header}"
-                f"{section_intro}"
-                '<div class="card empty">No results yet for this organisation. '
-                f'<a href="{url_for("make_page")}">Create your first piece of content &rarr;</a>'
-                "</div>"
-            )
-
-        rows_html = ""
-        n_errored = 0
-        for r in rows:
-            badge = {"done": "good", "running": "info", "queued": "info", "error": "bad"}.get(
-                r["status"], ""
-            )
-            review_href = url_for("review", run_id=r["id"])
-            delete_href = url_for("privacy_delete_run", run_id=r["id"])
-            started = (r["created_at"] or "")[:19]
-            started_iso = started.replace(" ", "T") + "Z" if started else ""
-            rows_html += (
-                f'<tr data-run-row="{_h(r["id"])}"><td data-label="Input"><a href="{review_href}">{_h(r["meet_name"] or r["file_name"] or r["id"])}</a></td>'
-                f'<td data-label="Status"><span class="tag {badge}">{_h(r["status"])}</span></td>'
-                f'<td data-label="Matched">{_h(r["our_swims"] or 0)}</td>'
-                f'<td data-label="Queue / Total">{_h(r["n_queue"] or 0)} / {_h(r["n_cards"] or 0)}</td>'
-                f'<td data-label="Started"><time class="mh-rel" datetime="{_h(started_iso)}">{_h(started)}</time></td>'
-                f'<td><form method="post" action="{delete_href}" '
-                f'class="mh-run-delete" data-run-id="{_h(r["id"])}" '
-                f'style="display:inline" data-no-loader="1">'
-                f'<input type="hidden" name="next" value="{_h(request.path)}">'
-                f'<button class="btn danger" type="submit" '
-                f'style="font-size:11px;padding:4px 10px">Delete</button>'
-                f"</form></td></tr>"
-            )
-            if r["status"] == "error" and r["error"]:
-                n_errored += 1
-                err_text = str(r["error"])
-                truncated = err_text[:600] + ("…" if len(err_text) > 600 else "")
-                rows_html += (
-                    f'<tr class="run-error-row" data-run-err="{_h(r["id"])}">'
-                    '<td colspan="7" style="padding:6px 14px 14px 14px;'
-                    'background:rgba(255,93,108,0.06);border-left:3px solid var(--mh-prim-error-500)">'
-                    "<details>"
-                    '<summary style="cursor:pointer;font-size:13px;font-weight:600;'
-                    'color:var(--mh-prim-error-300)">Why did this run fail?</summary>'
-                    '<pre style="margin:8px 0 0;padding:10px 12px;'
-                    "background:rgba(0,0,0,0.25);border-radius:6px;"
-                    'font-size:12px;white-space:pre-wrap;word-break:break-word">'
-                    f"{_h(truncated)}</pre>"
-                    "</details>"
-                    "</td></tr>"
-                )
-
-        failure_callout = ""
-        if n_errored:
-            label = "1 run failed" if n_errored == 1 else f"{n_errored} runs failed"
-            failure_callout = (
-                '<div class="card" style="padding:12px 18px;margin-bottom:20px;'
-                'background:rgba(255,93,108,0.06);border-left:3px solid var(--mh-prim-error-500)">'
-                f"<b>{_h(label)}</b> in the last 100 runs. "
-                "Expand <i>Why did this run fail?</i> on each row below to "
-                "see the pipeline error.</div>"
-            )
-
-        # Delete in place + bulk clear: shared, delegated handler (mh-run-delete
-        # removes a row via fetch; mh-clear-all-runs confirms then reloads).
-        # No-JS falls back to the plain form POST (honours ``next``).
         return (
-            f"{section_header}"
-            f"{section_intro}"
-            f"{failure_callout}"
-            '<div class="card"><table class="mh-table-stack">'
-            "<thead><tr><th>Input</th><th>Status</th>"
-            "<th>Matched</th><th>Queue / Total</th>"
-            "<th>Started</th><th></th></tr></thead>"
-            f"<tbody>{rows_html}</tbody>"
-            "</table></div>"
-            f"{_RUN_DELETE_JS}"
+            f'<p class="dim" style="margin-bottom:14px">Results for '
+            f"<b>{_h(prof.display_name)}</b> live in one place &mdash; the "
+            "Activity page &mdash; rather than a second copy here.</p>"
+            '<div class="card" style="padding:22px 20px;max-width:640px">'
+            '<h2 style="margin:0 0 6px 0;font-size:18px">Activity</h2>'
+            '<p class="dim" style="margin:0 0 14px 0;line-height:1.55">'
+            "Every processed meet for this organisation &mdash; status, matched "
+            "swims, achievements, why a result failed, per-row delete and bulk "
+            "clear &mdash; with table, feed and season views.</p>"
+            f'<a class="btn" href="{url_for("activity_page")}">Open Activity &rarr;</a>'
+            "</div>"
         )
 
     def _render_settings_status_section() -> str:
@@ -31019,7 +30956,7 @@ self.addEventListener('fetch', function(e){
 
 <div class="card">
   <h3 style="margin-top:0">Delete runs</h3>
-  <p class="muted" style="margin-top:0">To delete an individual run, open <a href="{url_for("settings_section", section="activity")}">Activity</a> and use the Delete button on its row — it's removed from everywhere across the site, including the athlete spotlight.</p>
+  <p class="muted" style="margin-top:0">To delete an individual result, open <a href="{url_for("activity_page")}">Activity</a> and use the Delete button on its row — it's removed from everywhere across the site, including the athlete spotlight.</p>
 </div>
 """
 
