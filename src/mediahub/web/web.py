@@ -12671,7 +12671,7 @@ _VIDEO_STUDIO_HTML = """
     jpost(url(PROJECT_TMPL, editorPid), {edl: editorEdl}).then(function(j){
       if(j.ok){ $('vs-ed-status').textContent = 'Saved — re-render to see it.'; $('vs-editor').hidden = true; loadProjects(); }
       else { $('vs-ed-status').textContent = 'Failed: '+(j.message||j.error||'invalid timeline'); }
-    });
+    }).catch(function(){ $('vs-ed-status').textContent = 'Network error. The timeline may not have saved; reload to check.'; });
   });
 
   loadFootage();
@@ -58318,6 +58318,13 @@ voice, and queues them for one-click approval.</p>
         name = str(raw or "none").strip().lower()
         return name if name in LOOKS else "none"
 
+    def _video_norm_source(src) -> str:
+        """Normalise a clip source path for identity comparison (resolve ./..)."""
+        try:
+            return str(Path(str(src or "")).resolve())
+        except Exception:
+            return str(src or "")
+
     def _footage_permission_error(asset) -> Optional[dict]:
         """Plain-language block reason when a clip may not be used (M26), or None.
 
@@ -59351,8 +59358,15 @@ voice, and queues them for one-click approval.</p>
                 return jsonify(
                     {"error": "bad_op", "message": "op must be edit|delete|retime|shift"}
                 ), 400
-        except (TypeError, ValueError) as e:
-            return jsonify({"error": "bad_params", "message": str(e)}), 400
+        except (TypeError, ValueError):
+            # A missing/non-numeric index or frame value fails an int() cast;
+            # surface an actionable message, never the raw Python cast error.
+            return jsonify(
+                {
+                    "error": "bad_params",
+                    "message": "A caption edit needs a whole-number index (and frame values).",
+                }
+            ), 400
         edl.captions = track
         proj.edl = edl
         proj.status = "draft"  # an edit reopens approval (rule 6)
@@ -59410,6 +59424,39 @@ voice, and queues them for one-click approval.</p>
                 validate(new_edl)
             except EDLError as e:
                 return jsonify({"error": "invalid_edl", "message": str(e)}), 400
+            except (ValueError, TypeError, AttributeError):
+                # EDL.from_dict coerces fields (int/float casts, per-clip dicts),
+                # so a wrong-typed field ("width": "abc", "clips": "x", a null
+                # fps) raises a plain ValueError/TypeError/AttributeError rather
+                # than EDLError. Catch those too so a malformed timeline is an
+                # honest 400, never an unhandled 500 with a Python-internals trace.
+                return jsonify(
+                    {
+                        "error": "invalid_edl",
+                        "message": "The timeline is malformed. Reload the studio and try again.",
+                    }
+                ), 400
+            # Bind every clip source to one already on this project's saved
+            # timeline. The EDL validator only checks a source is non-empty, so
+            # without this a caller could point a clip at ANY file on the box
+            # (another tenant's footage, any readable media) and have the
+            # render / waveform / export engine read it back. A legitimate edit
+            # only ever reorders / trims / grades / drops the clips it was given
+            # — new footage enters solely via Clip-Maker / the reel (new
+            # projects), never by rewriting an existing timeline's sources.
+            allowed = {_video_norm_source(c.source) for c in (proj.edl.clips or [])}
+            foreign = next(
+                (c.source for c in new_edl.clips if _video_norm_source(c.source) not in allowed),
+                None,
+            )
+            if foreign is not None:
+                return jsonify(
+                    {
+                        "error": "invalid_edl",
+                        "message": "A clip points at a source that isn't part of "
+                        "this project's footage. Reload the studio and try again.",
+                    }
+                ), 400
             proj.edl = new_edl
             proj.status = "draft"  # an edit reopens approval (rule 6)
         store.save(proj)
@@ -59652,11 +59699,16 @@ voice, and queues them for one-click approval.</p>
             _blocked = _project_blocked_source(proj)
             if _blocked:
                 return jsonify(_blocked), 403
+        # Strip control characters (newlines especially) from the download name:
+        # send_file writes it into the Content-Disposition header, and werkzeug
+        # raises on a header value with a newline — an unhandled 500 on export
+        # for a project whose name contains one.
+        safe_name = re.sub(r"[\x00-\x1f\x7f]+", " ", proj.name[:48]).strip() or "clip"
         return send_file(
             str(path),
             mimetype="video/mp4",
             as_attachment=download,
-            download_name=f"{proj.name[:48] or 'clip'}.mp4",
+            download_name=f"{safe_name}.mp4",
         )
 
     @app.route("/api/runs/<run_id>/card/<card_id>/voiceover", methods=["POST", "GET"])
