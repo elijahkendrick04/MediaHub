@@ -321,6 +321,24 @@ def test_calendar_schedule_endpoint_moves_and_warns(app_with_org, tmp_path):
         assert r.get_json()["planned_date"] in (None, "")
 
 
+def test_planned_chip_has_nondrag_reschedule_and_unschedule(app_with_org, tmp_path):
+    """Audit (a11y / I-1 parity): a planned draft chip must carry the same non-drag
+    date field (reschedule) + an unschedule control the rail cards have, so touch
+    and keyboard users can move/clear it — not only mouse-drag it."""
+    _seed_pack(tmp_path, pack_id="ppX", profile_id="org-test", title="Gala recap",
+               planned_date="2026-06-12")
+    with app_with_org.test_client() as client:
+        _with_org(client, "org-test")
+        html = client.get("/plan/calendar?m=2026-06").get_data(as_text=True)
+        assert "Gala recap" in html  # the planned chip rendered
+        # The non-drag reschedule date field, pre-filled with the current day.
+        assert 'class="mh-cal-plan-date"' in html and 'value="2026-06-12"' in html
+        assert 'aria-label="Move Gala recap to another day"' in html
+        # The unschedule control + its handler are present.
+        assert 'class="mh-cal-unplan"' in html
+        assert "function mhCalUnplan" in html
+
+
 def test_calendar_schedule_is_tenant_isolated(app_with_org, tmp_path):
     from mediahub.club_platform import stub_pack_store as sps
 

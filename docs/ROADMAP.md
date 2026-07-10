@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-07-10 · `1f49c3faa` · [developer-settings] record final merge status in audit report
+**Last updated:** 2026-07-10 · `472cff387` · [season-wraps] audit report: record merge status + SHA
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1226,6 +1226,8 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-07-10 | `472cff387` | [season-wraps] audit report: record merge status + SHA |
+| 2026-07-10 | `95331bcb4` | [season-wraps] fix dropped swimmer/time, non-ISO dates, crashes, idempotency, poster injection |
 | 2026-07-10 | `1f49c3faa` | [developer-settings] record final merge status in audit report |
 | 2026-07-10 | `1a1b232a8` | [developer-settings] report: baseline comparison confirms flakes are pre-existing |
 | 2026-07-10 | `f03993d28` | [developer-settings] report: record green-gate result + pre-existing flakes |
@@ -1235,7 +1237,4 @@ list and the auto table below, not here.
 | 2026-07-10 | `ca6f02514` | [meet-recap] add end-to-end audit report |
 | 2026-07-10 | `56a04395c` | [meet-recap] lock audit fixes with tests |
 | 2026-07-10 | `b24525282` | [meet-recap] fix recap "by the numbers" swimmer undercount |
-| 2026-07-10 | `b9d8eb2e1` | [meet-recap] fix re-run link 404, review error leak, upload status, club_filter persistence |
-| 2026-07-10 | `3ef825947` | [spotlight] record final merge status in audit report |
-| 2026-07-10 | `651cf2bc3` | [spotlight] audit report for the athlete-spotlight (meet recap) feature |
 <!-- /ROADMAP:ACTIVITY -->
