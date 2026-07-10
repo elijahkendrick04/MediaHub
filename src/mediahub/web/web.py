@@ -26604,8 +26604,21 @@ Relay team broke club record"></textarea>
         return hero + intro + auth + quickstart + endpoints_html
 
     # ---- PRIVACY -------------------------------------------------------
-    @app.route("/privacy")
-    def privacy_page():
+    def _privacy_page_render(
+        *,
+        correction_error: str = "",
+        correction_values: Optional[dict] = None,
+        erase_error: str = "",
+        erase_values: Optional[dict] = None,
+        status: int = 200,
+    ):
+        """Render the /privacy page, optionally with an inline form error.
+
+        H-17: the correction / erase POST routes used to redirect back here
+        on a validation failure with no message, silently discarding what
+        the user typed. They now re-render this page with a styled error
+        beside the failing form and every submitted value preserved.
+        """
         # Every inventory probe is fail-soft so a corrupted DB or missing
         # directory falls through to a "0" count instead of 500ing this
         # page — the user came here precisely BECAUSE they want to know
@@ -26650,18 +26663,28 @@ Relay team broke club record"></textarea>
         )
         _rights_tools_html = ""
         if active_org:
+            _ev = erase_values or {}
+            _ev_name = _h(str(_ev.get("athlete_name", "")))
+            _ev_club = _h(str(_ev.get("athlete_club", "")))
+            _erase_error_html = (
+                f'<p class="tag bad" role="alert" style="margin-bottom:10px">'
+                f"{_h(erase_error)}</p>"
+                if erase_error
+                else ""
+            )
             _rights_tools_html += f"""
 <div class="card">
   <h2>Erase an athlete</h2>
   <p class="muted">Removes a named athlete from this organisation's runs, rendered
   files, caches, caption memory and posting-log excerpts. Irreversible.</p>
+  {_erase_error_html}
   <form method="post" action="{url_for("privacy_athlete_erase")}"
         onsubmit="return confirm('Erase this athlete from all stored data? This cannot be undone.')"
         style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
     <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--ink-muted)">Full name
-      <input type="text" name="athlete_name" required placeholder="e.g. Jane Smith" /></label>
+      <input type="text" name="athlete_name" required placeholder="e.g. Jane Smith" value="{_ev_name}" /></label>
     <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--ink-muted)">Club (optional)
-      <input type="text" name="athlete_club" placeholder="for exact cache match" /></label>
+      <input type="text" name="athlete_club" placeholder="for exact cache match" value="{_ev_club}" /></label>
     <button class="btn secondary" type="submit">Erase athlete</button>
   </form>
 </div>"""
@@ -26682,20 +26705,31 @@ Relay team broke club record"></textarea>
                 if rows_html
                 else "<p class='muted' style='margin-top:10px'>No open corrections.</p>"
             )
+            _cv = correction_values or {}
+            _cv_run = _h(str(_cv.get("run_id", "")))
+            _cv_card = _h(str(_cv.get("card_id", "")))
+            _cv_reason = _h(str(_cv.get("reason", "")))
+            _correction_error_html = (
+                f'<p class="tag bad" role="alert" style="margin-bottom:10px">'
+                f"{_h(correction_error)}</p>"
+                if correction_error
+                else ""
+            )
             _rights_tools_html += f"""
 <div class="card">
   <h2>Correct a published card</h2>
   <p class="muted">A published card was wrong (wrong result, wrong athlete)? Open a
   correction: it's recorded, the card is pulled from the public wall, and you get the
   takedown checklist for the social platforms.</p>
+  {_correction_error_html}
   <form method="post" action="{url_for("privacy_correction_open")}"
         style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
     <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--ink-muted)">Run id
-      <input type="text" name="run_id" required /></label>
+      <input type="text" name="run_id" required value="{_cv_run}" /></label>
     <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--ink-muted)">Card id
-      <input type="text" name="card_id" required /></label>
+      <input type="text" name="card_id" required value="{_cv_card}" /></label>
     <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--ink-muted);flex:1;min-width:min(220px,100%)">What's wrong?
-      <input type="text" name="reason" required placeholder="e.g. wrong time — was 58.21 not 56.21" /></label>
+      <input type="text" name="reason" required placeholder="e.g. wrong time — was 58.21 not 56.21" value="{_cv_reason}" /></label>
     <button class="btn secondary" type="submit">Open correction</button>
   </form>
   {open_list}
@@ -26744,7 +26778,11 @@ Relay team broke club record"></textarea>
             dpa_url=url_for("dpa_page"),
             deployment_inventory_html=inventory_html if signed_in else "",
         )
-        return _layout("Privacy Notice", body, active="privacy")
+        return _layout("Privacy Notice", body, active="privacy"), status
+
+    @app.route("/privacy")
+    def privacy_page():
+        return _privacy_page_render()
 
     @app.route("/terms")
     def terms_page():
@@ -27659,7 +27697,16 @@ Relay team broke club record"></textarea>
         name = (request.form.get("athlete_name") or "").strip()
         club = (request.form.get("athlete_club") or "").strip()
         if not name:
-            return redirect(url_for("privacy_page"))
+            # H-17: re-render with an inline error instead of a silent
+            # redirect that discarded what the user typed.
+            return _privacy_page_render(
+                erase_error=(
+                    "Enter the athlete's full name — nothing was erased. "
+                    "The name must match how it appears in the results."
+                ),
+                erase_values={"athlete_name": name, "athlete_club": club},
+                status=400,
+            )
         # ONE erasure engine: compliance.dsr delegates to the privacy
         # cascade and adds the media-library / profile-text / suppression
         # extras, so this quick action and the Art 12A DSR workflow
@@ -27702,12 +27749,33 @@ Relay team broke club record"></textarea>
         run_id = (request.form.get("run_id") or "").strip()
         card_id = (request.form.get("card_id") or "").strip()
         reason = (request.form.get("reason") or "").strip()
-        if not (
+        _ids_ok = bool(
             re.fullmatch(r"[A-Za-z0-9_-]{1,64}", run_id)
             and re.fullmatch(r"[A-Za-z0-9_.:-]{1,128}", card_id)
-            and reason
-        ):
-            return redirect(url_for("privacy_page"))
+        )
+        if not (_ids_ok and reason):
+            # H-17: re-render with an inline error next to the form and the
+            # typed values preserved, instead of a silent redirect that
+            # discarded them.
+            if not _ids_ok:
+                _msg = (
+                    "That meet or card id doesn't look right — copy both from "
+                    "the meet's page and try again. Nothing was recorded."
+                )
+            else:
+                _msg = (
+                    "Say what's wrong with the card — the reason is recorded "
+                    "with the correction. Nothing was recorded yet."
+                )
+            return _privacy_page_render(
+                correction_error=_msg,
+                correction_values={
+                    "run_id": run_id,
+                    "card_id": card_id,
+                    "reason": reason,
+                },
+                status=400,
+            )
         from mediahub.privacy import TAKEDOWN_CHECKLIST, open_correction
 
         cid = open_correction(profile_id=active, run_id=run_id, card_id=card_id, reason=reason)
