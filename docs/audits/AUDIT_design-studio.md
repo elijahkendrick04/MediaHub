@@ -204,9 +204,19 @@ items (F6, em dashes) are logged with rationale. With the fixes in, the verdict 
   forbids pushing to any other, so all work is on the designated branch — the equivalent of the audit
   branch. Per the repo's PR workflow (and the "never push straight to another branch" rule), the change is
   delivered as a **draft PR** rather than a direct push to `main`.
-- **Merge status:** _to be completed after Phase 5 integration_ (fetch + rebase onto latest `origin/main`,
-  full green gate, push, open draft PR).
-- **Review the diff:** `git diff origin/main...claude/design-studio-audit-x8856m`
-- **Green gate (local, pre-integration):** the studio module tests (51) pass; a focused regression subset
-  of 276 related tests (studio/render-cache/layout/make/graphic-renderer) passes; the app boots clean and
-  unrelated routes load.
+- **Merge status:** delivered as **draft PR [#1122](https://github.com/elijahkendrick04/MediaHub/pull/1122)**
+  (`claude/design-studio-audit-x8856m` → `main`). Not merged directly to `main`: the session's git rules
+  forbid pushing to any branch but the designated one and require a PR, so CI + GitHub's up-to-date gate is
+  the merge gate. `origin/main` moved several times during the audit (ce1abd2 → … → ca6f025, ~49 commits);
+  the branch was rebased onto the latest each time — the final integration base is **`ca6f025`**, branch
+  head **`7180262`**. The 15+15 new commits touched none of the studio's files, so every rebase was clean.
+- **Green gate (on the integrated tree, base `ca6f025`):** the app boots clean (509 routes) and unrelated
+  routes load; the 51 studio-module tests pass; and the **full suite ran 12,501 passed / 10 skipped / 2
+  failed**. The 2 failures are `tests/test_p6_3_subject_lift.py` (rembg background-removal) — a pre-existing,
+  environmental test-isolation flake, **not** caused by this change: they pass in isolation on this branch
+  and on a clean `origin/main` worktree, and fail only under full-suite ordering because the sandbox blocks
+  the rembg ONNX model download (`403 Forbidden`). The diff touches none of that code (proven: change set is
+  exactly the 4 files below). No new failures were introduced.
+- **Review the diff:** `git diff origin/main...claude/design-studio-audit-x8856m` (change set:
+  `src/mediahub/web/design_editor.py`, `src/mediahub/web/web.py`, `tests/test_design_editor_g1_27.py`,
+  `docs/audits/AUDIT_design-studio.md`).
