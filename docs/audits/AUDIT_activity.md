@@ -154,9 +154,14 @@ the `tests/test_activity_scoping.py` fixture pattern:
 
 **None.** No shared file was rewritten. The fix reuses the existing shared
 `_warm_run_achievements` helper (unchanged) and the shared `privacy_delete_run`
-route (unchanged). The only edited production file is `web.py`, and only inside
-the single feature-owned function — the smallest possible footprint for parallel
-reconciliation.
+route (unchanged), editing only the single feature-owned function in `web.py`.
+
+*Note (parallel-session traffic):* during the merge window the shared
+`end-of-file-fixer` hygiene check was transiently red for all open PRs because a
+sibling session's already-merged report had a stray trailing newline. It was
+fixed upstream by that session before this branch merged, so this branch carries
+no hygiene change of its own (a redundant fix committed here was dropped on
+rebase as "already upstream").
 
 ---
 
@@ -192,11 +197,13 @@ handling were already sound.
 - **Branch:** `claude/activity-feature-audit-djfuym` (the session's designated
   development branch, per the environment's Git requirements; all work and the
   final push go here).
-- **Merge status:** see the PR opened for this branch against `main`. Per the
-  environment's Git rules this session pushes to its designated branch and opens
-  a **draft PR** rather than pushing directly to `main`; CI is the green gate for
-  any merge. Green gate run locally before push: app boots clean; the new module
-  (12) + the related regression subset (activity / privacy / run / settings —
-  144 tests) pass; `ruff check` clean on both changed files; no secrets/`.env`
-  staged.
+- **PR:** #1112 against `main`. Merged on green at the operator's instruction,
+  via a **merge commit** (the repo's only enabled method).
+- **Green gate (integrated result):** the branch was rebased onto the live
+  `origin/main` before merge; app boots clean; the new module (12) + a broad
+  regression subset (activity / privacy / run / settings / web / security —
+  1589 tests) pass, plus the full CI matrix on the integrated head (unit-suite
+  shards, ground-truth oracle, bandit / semgrep / gitleaks / pip-audit,
+  pre-commit hygiene, bloat guard, stylelint, responsive, schemathesis).
+  `ruff` + full `pre-commit --all-files` clean; no secrets/`.env` staged.
 - **Review the diff:** `git diff origin/main...claude/activity-feature-audit-djfuym`
