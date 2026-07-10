@@ -31341,6 +31341,34 @@ self.addEventListener('fetch', function(e){
             return jsonify({"error": str(exc)}), 500
         return jsonify({"ok": True, "org_id": pid, "parsed": parsed})
 
+    def _plan_subnav(active: str) -> str:
+        """The planner's shared sub-nav strip (C-15).
+
+        One helper renders the same five view links — Plan · Calendar · Board
+        · Grid · Performance — on every planner page, with the current view
+        marked. Replaces the old ad-hoc per-page link subsets (each page used
+        to link a different, partial set of the others, leaving Board and
+        Grid reachable only from the calendar toolbar).
+        """
+        views = (
+            ("plan", "Plan", "plan_page"),
+            ("calendar", "Calendar", "plan_calendar_page"),
+            ("board", "Board", "plan_board_page"),
+            ("grid", "Grid", "plan_grid_page"),
+            ("performance", "Performance", "plan_analytics_page"),
+        )
+        links = ""
+        for key, label, endpoint in views:
+            is_active = key == active
+            cls = "btn primary" if is_active else "btn"
+            current = ' aria-current="page"' if is_active else ""
+            links += f'<a class="{cls}" href="{url_for(endpoint)}"{current}>{label}</a>'
+        return (
+            '<nav aria-label="Plan views" '
+            'style="display:flex;gap:8px;flex-wrap:wrap;margin:0 0 14px 0">'
+            f"{links}</nav>"
+        )
+
     @app.route("/plan")
     def plan_page():
         pid = _active_profile_id()
@@ -31594,6 +31622,8 @@ self.addEventListener('fetch', function(e){
   jump straight into the matching tool. Nothing publishes from here.</p>
 </section>
 
+{_plan_subnav("plan")}
+
 <div class="mh-next-strip" aria-label="How the plan works" style="margin-bottom:16px">
   <div class="cell"><span class="num">1</span><span class="text"><b>Generate</b><br>One click fuses your results, drafts, the calendar and your direct notes.</span></div>
   <div class="cell"><span class="num">2</span><span class="text"><b>Read the why</b><br>Every item lists the exact signals that put it at that rank.</span></div>
@@ -31604,8 +31634,6 @@ self.addEventListener('fetch', function(e){
   {sport_control_html}
   <button type="button" class="btn primary" id="mh-plan-generate" onclick="mhPlanGenerate(this)"
           data-loader-text="Fusing signals">Generate plan</button>
-  <a class="btn" href="{url_for("plan_calendar_page")}" title="See planned drafts, key dates and what you've posted on a calendar">Open calendar &rarr;</a>
-  <a class="btn" href="{url_for("plan_analytics_page")}" title="Log how posts did — what works feeds the plan">Performance</a>
   <span class="dim" id="mh-plan-status" style="font-size:12.5px"></span>
 </div>
 
@@ -32092,9 +32120,10 @@ function mhPlanGenerate(btn) {{
   <span class="mh-hero-eyebrow">Plan · Calendar</span>
   <h1>Your content<br><em class="editorial">on a calendar.</em></h1>
   <p class="lede">Planned drafts, key dates, your events and what you&rsquo;ve already posted, all in one month view.
-  Drag a draft onto a day to plan when to post it &mdash; nothing publishes from here, it&rsquo;s your plan to post by hand.
-  <a href="{url_for("plan_page")}" style="text-decoration:underline">Back to the ranked plan &rarr;</a></p>
+  Drag a draft onto a day to plan when to post it &mdash; nothing publishes from here, it&rsquo;s your plan to post by hand.</p>
 </section>
+
+{_plan_subnav("calendar")}
 
 <div class="mh-cal-bar">
   <div class="mh-cal-nav">
@@ -32102,9 +32131,6 @@ function mhPlanGenerate(btn) {{
     <strong class="mh-cal-month">{_h(month_name)}</strong>
     <a class="btn" href="{next_url}" aria-label="Next month">&rarr;</a>
     <a class="btn" href="{today_url}">Today</a>
-    <a class="btn" href="{url_for("plan_grid_page")}" title="See the planned feed as a grid">Grid preview</a>
-    <a class="btn" href="{url_for("plan_board_page")}" title="The committee idea board">Board</a>
-    <a class="btn" href="{url_for("plan_analytics_page")}" title="What's working — performance feeding the plan">Performance</a>
   </div>
   <div class="mh-cal-legend">{legend}</div>
 </div>
@@ -32411,9 +32437,9 @@ document.addEventListener('click', function (e) {{
   <span class="mh-hero-eyebrow">Plan · Grid preview</span>
   <h1>Your feed, <em class="editorial">as a grid.</em></h1>
   <p class="lede">A quick Instagram-style look at how your planned drafts sit together &mdash;
-  scheduled posts first, newest at the top. Tap a tile to preview it per channel.
-  <a href="{url_for("plan_calendar_page")}" style="text-decoration:underline">Open the calendar &rarr;</a></p>
+  scheduled posts first, newest at the top. Tap a tile to preview it per channel.</p>
 </section>
+{_plan_subnav("grid")}
 {grid_html}
 """
         return _layout("Grid preview", body, active="create")
@@ -32586,9 +32612,10 @@ document.addEventListener('click', function (e) {{
   <span class="mh-hero-eyebrow">Plan · Board</span>
   <h1>The committee <em class="editorial">whiteboard.</em></h1>
   <p class="lede">Throw ideas on the board, drag them as they progress, and turn a good one into a
-  draft with one click &mdash; it flows straight into the previews and the calendar. Nothing posts from here.
-  <a href="{url_for("plan_calendar_page")}" style="text-decoration:underline">Open the calendar &rarr;</a></p>
+  draft with one click &mdash; it flows straight into the previews and the calendar. Nothing posts from here.</p>
 </section>
+
+{_plan_subnav("board")}
 
 <span class="dim" id="mh-bd-status" style="font-size:12.5px;display:block;min-height:18px;margin:0 2px 8px"></span>
 <div class="mh-bd-board">{columns_html}</div>
@@ -32852,9 +32879,10 @@ function mhBoardMove(sel) {{
   <h1>What actually <em class="editorial">works.</em></h1>
   <p class="lede">Post by hand, then log how it did &mdash; MediaHub learns which post types earn your club
   the most engagement and feeds that straight back into the plan. First-party and honest: nothing is
-  auto-collected (that waits on publishing integrations), and the numbers are yours.
-  <a href="{url_for("plan_page")}" style="text-decoration:underline">Back to the plan &rarr;</a></p>
+  auto-collected (that waits on publishing integrations), and the numbers are yours.</p>
 </section>
+
+{_plan_subnav("performance")}
 
 {table}
 
