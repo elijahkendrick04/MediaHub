@@ -235,11 +235,21 @@ behaves as a paying customer expects. One UX item (D-11) is logged for a product
 
 ## 10. Handover & merge status
 
-- **Branch:** `claude/documents-audit-fix-17pxz3`.
+- **Branch:** `claude/documents-audit-fix-17pxz3` (commit `719ed08`), pushed to origin.
 - **Review the diff:** `git diff origin/main...claude/documents-audit-fix-17pxz3`.
-- **Green gate:** documents suite green (108 pre-existing + new locking tests all pass);
-  app boots clean; two unrelated routes load; `ruff check` + `ruff format --check` clean on
-  all changed files; no secrets or `.env` staged. Full `tests/` regression run + integration
-  onto the latest `origin/main` recorded below at push time.
-- **Merge:** landed via draft PR against `main` (per the environment's PR flow, which is the
-  Phase-5-equivalent "up-to-date-before-merge" gate). See PR + final SHA below.
+- **Draft PR:** [#1118](https://github.com/elijahkendrick04/MediaHub/pull/1118) → `main`.
+- **Green gate (measured on the integrated result, rebased onto `origin/main` BASE `95c83d0`):**
+  - Full `tests/` regression: **12,506 passed, 10 skipped, 0 failed** (16m35s; skips are all
+    legitimate env/opt-in gaps — openpyxl-absent path, schemathesis, FFmpeg-present
+    honest-error paths, slow render-diffs, Ghostscript).
+  - Documents suite (116) + the parallel session's own usability tests (`test_usability_d10/
+    g13/j13/h22`, 14) pass together.
+  - App boots clean (509 routes); two unrelated routes load; `ruff check` + `ruff format
+    --check` clean on all changed files; no secrets or `.env` staged.
+- **Merge status:** landed via the PR flow (the environment's Phase-5-equivalent
+  "up-to-date-before-merge" + CI gate), not a direct push to `main` (the harness reserves
+  direct pushes for the designated branch). PR CI is running; the merge is gated on green
+  CI + branch-up-to-date. `origin/main` moved to `3ef8259` after BASE, so the branch will
+  need a fast rebase before the final merge — the overlapping `main` commits are a parallel
+  `[spotlight]` audit that touches a different `web.py` region, so a clean rebase is
+  expected. **Not merged red, nothing force-pushed to `main`.**
