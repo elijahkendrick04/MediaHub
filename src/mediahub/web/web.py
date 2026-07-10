@@ -45900,7 +45900,8 @@ function mhSetupMode(mode) {{
        title="Convert this pack to JPG / WebP / AVIF / PNG with quality options, bundled into one ZIP">Bulk export &amp; convert&hellip;</a>
     <a class="btn secondary" href="{_print_tool_url}"
        title="Proof and export a print-ready PDF (posters, flyers, banners, merch) from this meet's cards — pre-flight checked before you send it to a printer">Print &amp; merch&hellip;</a>
-    <button class="btn secondary" onclick="window.print()">Print / Export PDF</button>
+    <button class="btn secondary" onclick="window.print()"
+            title="Use the browser print dialog on this page as it stands — for a press-ready file use Print &amp; merch instead">Print this page</button>
   </div>
 </div>
 
@@ -55039,6 +55040,51 @@ voice, and queues them for one-click approval.</p>
                 f'<h2 style="text-transform:capitalize">{_h(grp["label"])}</h2>'
                 f'<div class="mh-chip-row">{chips}</div></section>'
             )
+        # J-8: the catalogue was a dead end — product chips and engine status
+        # with no path to any meet's actual print tool. List the active org's
+        # recent processed meets, each opening its own print tool.
+        _meet_rows = []
+        _pid = _active_profile_id()
+        if _pid:
+            try:
+                conn = _db()
+                _meet_rows = conn.execute(
+                    "SELECT id, meet_name, created_at FROM runs "
+                    "WHERE profile_id = ? AND status = 'done' "
+                    "ORDER BY created_at DESC LIMIT 8",
+                    (_pid,),
+                ).fetchall()
+                conn.close()
+            except Exception:  # noqa: BLE001
+                _meet_rows = []
+        if _meet_rows:
+            _meet_items = "".join(
+                f'<li style="margin-bottom:6px">'
+                f'<a href="{url_for("print_run_tool_page", run_id=r["id"])}">'
+                f"{_h((r['meet_name'] or 'Meet').strip() or 'Meet')}</a>"
+                f'<span class="muted" style="margin-left:8px;font-size:12px">'
+                f"processed {_h((r['created_at'] or '')[:10])}</span></li>"
+                for r in _meet_rows
+            )
+            _meets_inner = (
+                '<p class="muted" style="margin-top:0">Each meet opens its own print '
+                "tool: pick a card and a product, proof it, then export the "
+                "print-ready file.</p>"
+                f'<ul style="margin:0;padding-left:20px">{_meet_items}</ul>'
+            )
+        else:
+            _meets_inner = _empty_state(
+                "inbox",
+                "No results to print from yet",
+                "Process a results file first &mdash; every meet you process "
+                "appears here, ready to turn into posters, certificates and merch.",
+                actions=f'<a class="btn" href="{url_for("home")}">Upload results</a>',
+            )
+        _meets_html = (
+            '<section class="panel" style="margin-bottom:var(--sp-4)">'
+            "<h2>Print from a meet</h2>"
+            f"{_meets_inner}</section>"
+        )
         ff = _ff.status()
         # Name the piece that's actually missing: PDF/X-3 needs Ghostscript AND
         # an ICC profile, so "needs an ICC profile" when Ghostscript itself is
@@ -55063,9 +55109,9 @@ voice, and queues them for one-click approval.</p>
             '<p class="lede">Turn any approved design into a file a high-street or online '
             "printer will accept — posters, flyers, certificates, banners, and fundraising "
             "merch. MediaHub checks resolution, bleed, text size, contrast and ink before you "
-            "ever send it, and explains anything to fix. Open a meet's print tool to proof and "
-            "export a card.</p>"
-            f"{caps}</section>" + "".join(sections)
+            "ever send it, and explains anything to fix. Pick a meet below to proof and "
+            "export its cards.</p>"
+            f"{caps}</section>" + _meets_html + "".join(sections)
         )
         return _layout("Print & merch", body)
 
