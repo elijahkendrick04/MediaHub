@@ -50579,10 +50579,15 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                 brand_kit = None
         return _el_recolour.role_vars_from_palette(None, brand_kit)
 
-    def _element_to_payload(el, role_vars) -> dict:
+    def _element_to_payload(el, role_vars, profile_id=None) -> dict:
         from mediahub.elements import render as _el_render
 
-        svg = _el_render.render_element_markup(el, role_vars, uid=el.id.replace(".", "_"))
+        # profile_id must flow through so an org-custom element's SVG (which lives
+        # under the org's pack dir, not the bundled dir) actually resolves — else
+        # custom stickers render blank. The markup is sanitised inside recolour.
+        svg = _el_render.render_element_markup(
+            el, role_vars, uid=el.id.replace(".", "_"), profile_id=profile_id
+        )
         return {
             "id": el.id,
             "name": el.name,
@@ -50607,7 +50612,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         role_vars = _elements_role_vars(profile_id)
 
         hits = _el_search.search(q, profile_id=profile_id, kind=kind, sport=sport, limit=60)
-        payload = [_element_to_payload(h.element, role_vars) for h in hits]
+        payload = [_element_to_payload(h.element, role_vars, profile_id) for h in hits]
         return jsonify(
             {
                 "elements": payload,
@@ -50664,7 +50669,10 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         role_vars = _elements_role_vars(profile_id)
         suggested = _el_search.suggest_for_context(facts, profile_id=profile_id, limit=12)
         return jsonify(
-            {"elements": [_element_to_payload(el, role_vars) for el in suggested], "context": facts}
+            {
+                "elements": [_element_to_payload(el, role_vars, profile_id) for el in suggested],
+                "context": facts,
+            }
         )
 
     @app.route("/api/runs/<run_id>/card/<card_id>/elements", methods=["GET", "POST"])
@@ -50744,7 +50752,10 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
 
         profile_id = _active_profile_id()
         role_vars = _elements_role_vars(profile_id)
-        seed = [_element_to_payload(el, role_vars) for el in _el_catalog.load_catalog(profile_id)]
+        seed = [
+            _element_to_payload(el, role_vars, profile_id)
+            for el in _el_catalog.load_catalog(profile_id)
+        ]
         grad = [
             {"name": p.name, "css": _el_grad.gradient_css(p, role_vars)}
             for p in _el_grad.list_presets()
