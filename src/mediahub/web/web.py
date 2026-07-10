@@ -63575,32 +63575,52 @@ voice, and queues them for one-click approval.</p>
         updated = _pres.apply_action(session_id, str(body.get("action", "")), body.get("value"))
         return jsonify({"ok": True, "state": updated.public_state() if updated else None})
 
-    # Per-IP budget on FAILED pairing-code lookups: the 6-char code drives a
-    # live presentation, so wrong-code guesses are throttled (presenter.py's
-    # documented guard). Successful lookups never count, so a presenter
-    # clicking through slides with the right code is unaffected.
-    _remote_code_attempts: dict = {}
+    # Budget on FAILED pairing-code lookups (J-14): the code is looked up
+    # BEFORE any limit check, so a correct code always connects — a venue
+    # full of phones behind one NAT can never be locked out of a live talk
+    # by someone else's typos. Confirmed-wrong guesses are throttled per
+    # (client IP, submitted code) so one member hammering their own typo
+    # doesn't burn the venue's budget, with a generous per-IP ceiling as
+    # the code-enumeration backstop.
+    _remote_code_attempts: dict = {}  # client IP -> [(ts, submitted code), ...]
     _remote_code_lock = threading.Lock()
-    _REMOTE_CODE_MAX_FAILURES = 20
+    _REMOTE_CODE_MAX_FAILURES = 20  # per (IP, code)
+    _REMOTE_CODE_IP_CEILING = 100  # per IP across all codes
     _REMOTE_CODE_WINDOW_S = 300
 
-    def _remote_code_limited() -> bool:
-        """True when this IP has exhausted its failed pairing-code budget."""
+    def _remote_code_limited(code: str) -> int:
+        """Seconds until this IP may retry ``code``; 0 when not limited.
+
+        Limited when this IP has exhausted its failed budget for this exact
+        code, or tripped the per-IP ceiling across all codes.
+        """
         now = time.time()
         key = _client_ip()
+        code = (code or "").strip().upper()
         with _remote_code_lock:
             window = [
-                t for t in _remote_code_attempts.get(key, []) if now - t < _REMOTE_CODE_WINDOW_S
+                e for e in _remote_code_attempts.get(key, []) if now - e[0] < _REMOTE_CODE_WINDOW_S
             ]
             _remote_code_attempts[key] = window
             if len(_remote_code_attempts) > 4096:  # opportunistic cleanup
                 for k in [k for k, v in _remote_code_attempts.items() if not v]:
                     _remote_code_attempts.pop(k, None)
-            return len(window) >= _REMOTE_CODE_MAX_FAILURES
+            frees_at = 0.0
+            same_code = [t for t, c in window if c == code]
+            if len(same_code) >= _REMOTE_CODE_MAX_FAILURES:
+                # Clears when enough same-code failures age out of the window.
+                frees_at = same_code[len(same_code) - _REMOTE_CODE_MAX_FAILURES]
+            if len(window) >= _REMOTE_CODE_IP_CEILING:
+                frees_at = max(frees_at, window[len(window) - _REMOTE_CODE_IP_CEILING][0])
+            if not frees_at:
+                return 0
+            return max(1, int(frees_at + _REMOTE_CODE_WINDOW_S - now) + 1)
 
-    def _remote_code_failed() -> None:
+    def _remote_code_failed(code: str) -> None:
         with _remote_code_lock:
-            _remote_code_attempts.setdefault(_client_ip(), []).append(time.time())
+            _remote_code_attempts.setdefault(_client_ip(), []).append(
+                (time.time(), (code or "").strip().upper())
+            )
 
     @app.route("/remote")
     def remote_landing():
@@ -63649,15 +63669,26 @@ voice, and queues them for one-click approval.</p>
             )
         from mediahub.documents import presenter as _pres
 
-        if _remote_code_limited():
-            return _recovery_page(
-                "Too many attempts",
-                "Too many code attempts from your network — wait a few minutes.",
-                primary_cta=("Try again", url_for("remote_landing")),
-            )
+        # A correct code always connects — the lookup runs before any
+        # throttle check, so a shared venue NAT can never lock out someone
+        # holding the real code (J-14).
         session = _pres.get_by_pairing_code(code, include_ended=True)
         if session is None:
-            _remote_code_failed()
+            wait_s = _remote_code_limited(code)
+            if wait_s:
+                mins = max(1, (wait_s + 59) // 60)
+                return _recovery_page(
+                    "Too many attempts",
+                    "Too many wrong code attempts — wait about "
+                    f"{mins} minute{'s' if mins != 1 else ''}, then check again. "
+                    "If you have the correct code from the presenter screen, it will still connect.",
+                    primary_cta=(
+                        f"Check again in about {mins} minute{'s' if mins != 1 else ''}",
+                        url_for("remote_control", code=code),
+                    ),
+                    code=429,
+                )
+            _remote_code_failed(code)
             return _recovery_page(
                 "Code not found",
                 "That code doesn't match a live presentation — check the code on the presenter screen.",
@@ -63685,11 +63716,15 @@ voice, and queues them for one-click approval.</p>
             return jsonify({"ok": False, "error": "unavailable"}), 503
         from mediahub.documents import presenter as _pres
 
-        if _remote_code_limited():
-            return jsonify({"ok": False, "error": "rate_limited"}), 429
+        # Lookup before throttle: a correct code is never rate limited (J-14).
         session = _pres.get_by_pairing_code(code, include_ended=True)
         if session is None:
-            _remote_code_failed()
+            wait_s = _remote_code_limited(code)
+            if wait_s:
+                resp = jsonify({"ok": False, "error": "rate_limited", "retry_after_s": wait_s})
+                resp.headers["Retry-After"] = str(wait_s)
+                return resp, 429
+            _remote_code_failed(code)
             return jsonify({"ok": False, "error": "no_session"}), 404
         if session.ended:
             # Valid code, but the talk is over — let the remote flip to its
