@@ -52759,7 +52759,15 @@ ever appear; queued, edited and rejected cards never do.</p>
 
     def _wall_page_html(prof, cards, token: str, *, embed: bool) -> str:
         kit = prof.get_brand_kit()
-        primary = getattr(kit, "primary_colour", None) or "#0A2540"
+        # The brand colour is interpolated into a <style> block below, where _h
+        # (HTML escaping) does NOT neutralise CSS metacharacters ({ } ; :). A
+        # non-hex brand_primary (e.g. set via a raw form POST that bypasses the
+        # type=color widget) could otherwise break out of the header selector and
+        # inject arbitrary CSS onto this public page. Gate it to a hex colour and
+        # fall back to the default otherwise.
+        primary = getattr(kit, "primary_colour", None) or ""
+        if not re.fullmatch(r"#[0-9A-Fa-f]{3,8}", primary):
+            primary = "#0A2540"
         items = ""
         for c in cards:
             img = url_for(
@@ -52802,7 +52810,7 @@ ever appear; queued, edited and rejected cards never do.</p>
 </style></head><body>
 {header}
 <div class="grid">{items}</div>
-<span class="powered">Powered by <a href="{_h(badge_href)}" rel="noopener">MediaHub</a></span>
+<span class="powered">Powered by <a href="{_h(badge_href)}" target="_blank" rel="noopener noreferrer">MediaHub</a></span>
 </body></html>"""
 
     def _resolve_wall_or_404(token: str):
@@ -52957,7 +52965,11 @@ ever appear; queued, edited and rejected cards never do.</p>
         if not path:
             abort(404)
         resp = make_response(send_file(path, mimetype="image/png"))
-        resp.headers["Cache-Control"] = "public, max-age=3600"
+        # Match the page/feed TTL (max-age=300) and require revalidation. On a
+        # children's-data surface where consent can be withdrawn or a card hidden
+        # at any moment, a 1-hour public cache could keep serving a withdrawn
+        # child's card image long after it should be gone.
+        resp.headers["Cache-Control"] = "public, max-age=300, must-revalidate"
         return resp
 
     # ------------------------------------------------------------------
