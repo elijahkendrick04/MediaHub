@@ -642,6 +642,35 @@ def render_cards_html(
                 f'style="font-size:13px">{btn_label}</button>'
             )
 
+        # Inline caption editing (H-9) — saved packs only: reveal a textarea,
+        # persist through the pack store, update the card in place.
+        edit_button = ""
+        caption_editor = ""
+        if show_workflow:
+            save_url = f"{status_api_base}/{idx}/caption/save"
+            edit_button = (
+                f'<button type="button" class="stub-cap-edit" data-idx="{idx}" '
+                f'style="font-size:13px">Edit caption</button>'
+            )
+            caption_editor = (
+                f'<div class="stub-cap-editor" data-idx="{idx}" '
+                f'style="display:none;margin-top:10px;padding:12px;'
+                f'border:1px solid var(--border);border-radius:8px;'
+                f'background:rgba(255,255,255,0.02)">'
+                f'<label for="stub-cap-ta-{idx}" style="display:block;font-size:12px;'
+                f'font-weight:600;margin-bottom:6px">Edit caption</label>'
+                f'<textarea id="stub-cap-ta-{idx}" rows="5" maxlength="4000" '
+                f'style="width:100%;font-size:13px;padding:8px 10px;'
+                f"border:1px solid var(--border);border-radius:6px;"
+                f'background:var(--bg);color:var(--ink);resize:vertical">{_h(caption)}</textarea>'
+                f'<div style="display:flex;gap:8px;margin-top:8px">'
+                f'<button type="button" class="primary stub-cap-save" data-idx="{idx}" '
+                f'data-url="{_h(save_url)}" style="font-size:13px">Save caption</button>'
+                f'<button type="button" class="stub-cap-cancel" data-idx="{idx}" '
+                f'style="font-size:13px">Cancel</button>'
+                f"</div></div>"
+            )
+
         # "Create graphic" affordance — only when the page wired a graphic API
         # base (the saved-pack flows do; the unsaved one-shot render doesn't).
         # The button + panel reuse window.mhCreateGraphic (injected by the
@@ -677,15 +706,19 @@ def render_cards_html(
   {notes_html}
   <div class="mh-card-actions">
     <button type="button" class="primary" onclick='(function(b){{
-      var c = {caption_for_copy};
+      var card = b.closest(".mh-content-card");
+      var capEl = card && card.querySelector(".mh-card-caption");
+      var c = (capEl && capEl.textContent) ? capEl.textContent : {caption_for_copy};
       if (navigator.clipboard) {{
         navigator.clipboard.writeText(c).then(function(){{ window.MH && MH.toast("Caption copied", "success"); }});
       }} else {{ window.MH && MH.toast("Clipboard not available", "error"); }}
     }})(this)'>Copy caption</button>
+    {edit_button}
     {status_button}
     {graphic_button}
     {extra_action}
   </div>
+  {caption_editor}
   {visual_panel}
 </div>"""
 
@@ -727,6 +760,67 @@ def render_cards_html(
       .then(function(r){ if(!r.ok) throw 0; return r.json(); })
       .then(function(j){ if(j && j.status) apply(btn, j.status); })
       .catch(function(){ apply(btn, prev); window.MH && MH.toast('Could not save status','error'); });
+  });
+})();
+(function(){
+  // Inline caption editing (H-9): "Edit caption" reveals a per-card textarea;
+  // Save persists through the pack store and updates the card in place.
+  function cardOf(el){ return el.closest('.mh-content-card'); }
+  document.addEventListener('click', function(e){
+    var edit = e.target.closest('.stub-cap-edit');
+    if (edit){
+      e.preventDefault();
+      var card = cardOf(edit); if (!card) return;
+      var ed = card.querySelector('.stub-cap-editor'); if (!ed) return;
+      var open = ed.style.display !== 'none';
+      ed.style.display = open ? 'none' : '';
+      if (!open){
+        var ta = ed.querySelector('textarea');
+        var cap = card.querySelector('.mh-card-caption');
+        if (ta && cap) ta.value = cap.textContent;
+        if (ta) ta.focus();
+      }
+      return;
+    }
+    var cancel = e.target.closest('.stub-cap-cancel');
+    if (cancel){
+      e.preventDefault();
+      var box = cancel.closest('.stub-cap-editor');
+      if (box) box.style.display = 'none';
+      return;
+    }
+    var save = e.target.closest('.stub-cap-save');
+    if (!save) return;
+    e.preventDefault();
+    var editor = save.closest('.stub-cap-editor'); if (!editor) return;
+    var area = editor.querySelector('textarea');
+    var val = (area && area.value ? area.value : '').trim();
+    if (!val){
+      window.MH && MH.toast('Type a caption before saving', 'error');
+      if (area) area.focus();
+      return;
+    }
+    save.disabled = true;
+    fetch(save.dataset.url, {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({caption: val}), credentials:'same-origin'})
+      .then(function(r){ return r.json().then(function(j){ return {ok: r.ok, body: j}; }); })
+      .then(function(res){
+        save.disabled = false;
+        if (res.ok && res.body && res.body.ok){
+          var card = cardOf(save);
+          var capEl = card && card.querySelector('.mh-card-caption');
+          if (capEl) capEl.textContent = res.body.caption || val;
+          editor.style.display = 'none';
+          window.MH && MH.toast('Caption saved', 'success');
+        } else {
+          var msg = (res.body && (res.body.message || res.body.error)) || 'Could not save caption';
+          window.MH && MH.toast(msg, 'error');
+        }
+      })
+      .catch(function(){
+        save.disabled = false;
+        window.MH && MH.toast('Network error', 'error');
+      });
   });
 })();
 </script>

@@ -36173,6 +36173,36 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             }
         )
 
+    @app.route("/api/drafts/<pack_id>/card/<int:card_idx>/caption/save", methods=["POST"])
+    def api_stub_pack_caption_save(pack_id, card_idx):
+        """Persist a hand-edited caption on one saved-draft card (H-9).
+
+        Plain persistence, no AI: the draft pages reveal a per-card textarea
+        and save through the same pack-store mechanism the spotlight tone
+        rewrite uses (``update_pack``), so every stub pack type — quick
+        free-text included — can edit its captions in place. Tenant-gated
+        like the sibling caption endpoints: a foreign org's probe 404s
+        indistinguishably from a genuine miss.
+        """
+        from mediahub.club_platform.stub_pack_store import load_pack, update_pack
+
+        rec = load_pack(pack_id)
+        if not rec or not _can_access_pack(rec, _active_profile_id()):
+            return jsonify({"error": "pack_not_found"}), 404
+        cards = rec.get("cards") or []
+        if not (0 <= card_idx < len(cards)) or not isinstance(cards[card_idx], dict):
+            return jsonify({"error": "card_not_found"}), 404
+        payload = request.get_json(silent=True) or {}
+        caption = str(payload.get("caption") or "").strip()[:4000]
+        if not caption:
+            return jsonify(
+                {"error": "empty_caption", "message": "Type a caption before saving."}
+            ), 400
+        new_cards = list(cards)
+        new_cards[card_idx] = {**new_cards[card_idx], "caption": caption}
+        update_pack(pack_id, cards=new_cards)
+        return jsonify({"ok": True, "caption": caption})
+
     @app.route("/api/drafts/<pack_id>/card/<int:card_idx>/create-graphic", methods=["POST"])
     def api_stub_pack_create_graphic(pack_id, card_idx):
         """Render a branded text-led graphic for one caption-only stub card.
