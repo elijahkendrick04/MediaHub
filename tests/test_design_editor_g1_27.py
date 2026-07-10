@@ -872,3 +872,64 @@ def test_collect_falls_back_to_swatch_for_an_invalid_hex():
     assert "HEX_RE.test(el.value) ? el.value :" in body
     # and the fallback actually reads the swatch element for that role
     assert 'data-studio-colour="' in body
+
+
+def test_render_error_reads_busy_user_message():
+    """NEW-1: the render-gate 429 busy payload carries `user_message` (not
+    `message`); the client must read it, so a busy worker shows its retry
+    guidance instead of a misleading dead-end failure message."""
+    body = DE.render_editor_body(render_url="/r", gallery_url="/g", make_url="/m")
+    assert "r.data.message || r.data.user_message" in body
+
+
+def test_render_busy_payload_actually_uses_user_message(stub_render, monkeypatch):
+    """NEW-1 (contract): pin that the studio's 429 busy payload really carries
+    `user_message` — the exact key the client above now reads. If a refactor
+    renamed it, this test and the JS would move together."""
+    monkeypatch.setenv("MEDIAHUB_PREVIEW_RENDER_TIMEOUT", "0.05")
+    import mediahub.web.web as wm
+
+    app = wm.create_app()
+    app.config["TESTING"] = True
+    c = app.test_client()
+    assert wm._render_semaphore.acquire(timeout=1)
+    try:
+        r = c.post("/api/studio/render", json={"archetype": DE.default_archetype()})
+    finally:
+        wm._render_semaphore.release()
+    assert r.status_code == 429
+    d = r.get_json()
+    assert d.get("user_message")  # the key the client falls back to
+    assert "busy" in d["user_message"].lower()
+
+
+def test_three_digit_hex_widens_the_swatch():
+    """NEW-2: a valid #rgb typed into a hex box must widen to #rrggbb before it
+    is assigned to the <input type=color> swatch, which only accepts #rrggbb and
+    would otherwise collapse to black and desync from the typed colour."""
+    body = DE.render_editor_body(render_url="/r", gallery_url="/g", make_url="/m")
+    assert "function expandHex" in body
+    assert "swatch.value = expandHex(hex.value)" in body
+
+
+def test_render_overlay_is_an_aria_live_region():
+    """NEW-3 (a11y): the render/error overlay must be a live region so a screen
+    reader announces "Rendering…" and any error, not leave the user in silence."""
+    import re
+
+    body = DE.render_editor_body(render_url="/r", gallery_url="/g", make_url="/m")
+    m = re.search(r"<div class=\"mh-studio-overlay\"[^>]*>", body)
+    assert m, "overlay element not found"
+    tag = m.group(0)
+    assert 'aria-live="polite"' in tag and 'role="status"' in tag, tag
+
+
+def test_coerce_full_requires_an_explicit_boolean_true():
+    """NEW-4: `full` must be an explicit JSON boolean true; the string "false"
+    (and other truthy junk) must NOT quietly trigger the heavier full render."""
+    assert DE.coerce_params({"full": True}).full is True
+    assert DE.coerce_params({"full": False}).full is False
+    assert DE.coerce_params({"full": "false"}).full is False  # the footgun case
+    assert DE.coerce_params({"full": "true"}).full is False
+    assert DE.coerce_params({"full": 1}).full is False
+    assert DE.coerce_params({}).full is False

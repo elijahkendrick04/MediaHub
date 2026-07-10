@@ -415,7 +415,11 @@ def coerce_params(raw: Any) -> StudioParams:
         palette=palette,
         text=text,
         role_assignment=role_assignment,
-        full=bool(data.get("full")),
+        # The light preview is the safe default; a full-resolution render must be
+        # asked for with an explicit JSON boolean ``true``. Plain ``bool(...)``
+        # would treat the string ``"false"`` (and any non-empty junk) as truthy
+        # and quietly serve the heavier full render.
+        full=data.get("full") is True,
     )
 
 
@@ -777,7 +781,7 @@ def render_editor_body(
     <section class="mh-studio-stage" aria-label="Live preview">
       <div class="mh-studio-canvas" data-studio-canvas>
         <img class="mh-studio-preview" data-studio-img alt="Live card preview" />
-        <div class="mh-studio-overlay" data-studio-overlay hidden>
+        <div class="mh-studio-overlay" data-studio-overlay role="status" aria-live="polite" hidden>
           <div class="mh-studio-spinner" aria-hidden="true"></div>
           <p data-studio-status>Rendering…</p>
         </div>
@@ -905,6 +909,14 @@ _STUDIO_JS = r"""
   var downloadBtn = root.querySelector('[data-studio-action="download"]');
 
   var HEX_RE = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
+  function expandHex(h) {
+    // <input type="color"> only accepts #rrggbb — assigning a valid #rgb makes it
+    // collapse to #000000 (black), desyncing the swatch from the colour the user
+    // typed. Widen #rgb -> #rrggbb so the swatch mirrors the hex field.
+    return /^#[0-9a-fA-F]{3}$/.test(h)
+      ? '#' + h.slice(1).replace(/./g, function (c) { return c + c; })
+      : h;
+  }
   var lastBlobUrl = null;
   var reqSeq = 0;
   var debounceTimer = null;
@@ -999,7 +1011,11 @@ _STUDIO_JS = r"""
     }).then(function (r) {
       if (seq !== reqSeq) return null;            // a newer request superseded this
       if (!r.ok || !r.data || !r.data.ok) {
-        var msg = (r.data && r.data.message) || 'Render failed.';
+        // Render error payloads carry `message`; the render-gate 429 busy payload
+        // carries `user_message` (and is a "try again in a moment", not a real
+        // failure). Read both so a busy worker shows its retry guidance instead of
+        // a misleading, dead-end "Render failed."
+        var msg = (r.data && (r.data.message || r.data.user_message)) || 'Render failed.';
         showOverlay(msg, true);
         return null;
       }
@@ -1042,7 +1058,7 @@ _STUDIO_JS = r"""
     if (swatch && hex) {
       swatch.addEventListener('input', function () { hex.value = swatch.value.toUpperCase(); scheduleRender(); });
       hex.addEventListener('input', function () {
-        if (HEX_RE.test(hex.value)) { swatch.value = hex.value; scheduleRender(); }
+        if (HEX_RE.test(hex.value)) { swatch.value = expandHex(hex.value); scheduleRender(); }
       });
     }
   });
