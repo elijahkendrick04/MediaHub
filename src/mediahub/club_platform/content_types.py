@@ -196,9 +196,11 @@ REGISTRY: dict[ContentType, ContentTypeMeta] = {
         title="Event Preview",
         description="Tease upcoming athletes and story angles before an event.",
         input_contract=(
-            "Tell us the event name, date / venue, athletes to watch, and any story angles. "
-            "We generate Instagram, Stories and Twitter preview captions ready to edit and post. "
-            "Full entry-list parsing is coming next — this form already produces usable cards."
+            "All we need is the event name. Add the event's website or its meet pack "
+            "and the AI reads them to work out what the event is: dates, venue, level "
+            "and format. Upload the entries file too and it picks your ones to watch "
+            "from the real entry list. You get Instagram, Stories and Twitter preview "
+            "captions ready to edit and post."
         ),
         is_implemented=True,
         icon_svg=_CALENDAR_SVG,
@@ -206,16 +208,16 @@ REGISTRY: dict[ContentType, ContentTypeMeta] = {
         how_it_works=HowItWorks(
             tagline="Build the hype before the first whistle.",
             inputs=(
-                ("Event details", "event"),
-                ("Athletes to watch", "swimmer"),
+                ("Event name or entries file", "event"),
+                ("Ones to watch (AI or typed)", "swimmer"),
                 ("Photo (optional)", "photo"),
             ),
             steps=(
-                "Tell us the event, the date and venue, and who to watch.",
-                "The engine shapes the story angles and writes preview copy in your voice.",
-                "You get feed and story captions plus a branded graphic to approve.",
+                "Give us the event name, or upload the entries file and we read the meet name straight from it.",
+                "Add the website or meet pack and the AI works out the dates, venue, level and format before it writes a word.",
+                "You get feed and story preview captions plus a branded graphic to approve.",
             ),
-            engine_process="angle · write · brand",
+            engine_process="read · angle · write · brand",
         ),
     ),
     ContentType.SPONSOR_ACTIVATION: ContentTypeMeta(
