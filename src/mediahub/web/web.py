@@ -61623,11 +61623,9 @@ voice, and queues them for one-click approval.</p>
         far) is a separate file and survives. Cards land in QUEUE — the
         autonomy posture is structural, nothing here can publish.
         """
-        from mediahub.web.pipeline_v4 import run_pipeline_v4
-
         run = run_pipeline_v4(
-            data,
-            f"live-{watch.id}.html",
+            file_bytes=data,
+            filename=f"live-{watch.id}.html",
             profile_id=watch.profile_id,
             run_id=watch.run_id or watch.id,
         )
@@ -61640,9 +61638,30 @@ voice, and queues them for one-click approval.</p>
             return _layout("Live meet", _PW_NO_ORG, active="create")
         from mediahub.results_fetch.live_watch import list_watches
 
+        # Success feedback rides ?msg=, failures ride ?err= so the banner can
+        # style them honestly (green success vs amber warning) instead of
+        # painting every message — including "could not start the watch" — green.
         msg = (request.args.get("msg") or "").strip()
-        msg_html = f'<p class="tag good" style="margin-bottom:14px">{_h(msg)}</p>' if msg else ""
+        err = (request.args.get("err") or "").strip()
+        if err:
+            msg_html = f'<p class="tag warn" style="margin-bottom:14px">{_h(err)}</p>'
+        elif msg:
+            msg_html = f'<p class="tag good" style="margin-bottom:14px">{_h(msg)}</p>'
+        else:
+            msg_html = ""
         watches = list_watches(pid)
+
+        def _review_cell(w) -> str:
+            # A run only exists on disk once a poll has actually carded new
+            # swims. Until then the review link would dead-end on "Run not
+            # found", so show an honest "No cards yet" placeholder instead.
+            if w.new_swims_total > 0:
+                return (
+                    "<a class='btn secondary' style='font-size:12px;padding:4px 10px' "
+                    f'href="{url_for("review", run_id=w.run_id or w.id)}">Review cards</a>'
+                )
+            return "<span class='muted' style='font-size:12px'>No cards yet</span>"
+
         rows = (
             "".join(
                 "<tr>"
@@ -61651,8 +61670,7 @@ voice, and queues them for one-click approval.</p>
                 f"<td>every {w.interval_minutes} min</td>"
                 f"<td>{w.polls} polls &middot; {w.new_swims_total} new swims</td>"
                 f"<td>{_h((w.last_error or '')[:80])}</td>"
-                f"<td><a class='btn secondary' style='font-size:12px;padding:4px 10px' "
-                f'href="{url_for("review", run_id=w.run_id or w.id)}">Review cards</a></td>'
+                f"<td>{_review_cell(w)}</td>"
                 f'<td><form method="POST" action="{url_for("live_meet_action")}">'
                 f'<input type="hidden" name="action" value="stop"/>'
                 f'<input type="hidden" name="watch_id" value="{_h(w.id)}"/>'
@@ -61680,15 +61698,15 @@ voice, and queues them for one-click approval.</p>
   are not supported — they don&rsquo;t allow it.</p>
   <form method="POST" action="{url_for("live_meet_action")}" style="display:grid;gap:8px;max-width:640px">
     <input type="hidden" name="action" value="create"/>
-    <label>Live results page URL</label>
-    <input type="url" name="url" required placeholder="https://hostclub.org.uk/gala/live-results.htm"/>
-    <label>Name (so you recognise it)</label>
-    <input type="text" name="label" placeholder="Swansea Spring Open — Sunday"/>
+    <label for="lm-url">Live results page URL</label>
+    <input id="lm-url" type="url" name="url" required placeholder="https://hostclub.org.uk/gala/live-results.htm"/>
+    <label for="lm-label">Name (so you recognise it)</label>
+    <input id="lm-label" type="text" name="label" placeholder="Swansea Spring Open — Sunday"/>
     <div style="display:flex;gap:14px;flex-wrap:wrap">
-      <div><label>Check every</label>
-        <select name="interval_minutes"><option value="3">3 min</option><option value="5" selected>5 min</option><option value="10">10 min</option></select></div>
-      <div><label>Stop after</label>
-        <select name="hours"><option value="6">6 hours</option><option value="12" selected>12 hours</option><option value="24">24 hours</option></select></div>
+      <div><label for="lm-interval">Check every</label>
+        <select id="lm-interval" name="interval_minutes"><option value="3">3 min</option><option value="5" selected>5 min</option><option value="10">10 min</option></select></div>
+      <div><label for="lm-hours">Stop after</label>
+        <select id="lm-hours" name="hours"><option value="6">6 hours</option><option value="12" selected>12 hours</option><option value="24">24 hours</option></select></div>
     </div>
     <div><button type="submit" class="btn">Start watching</button></div>
   </form>
@@ -61696,7 +61714,7 @@ voice, and queues them for one-click approval.</p>
 <div class="card">
   <h2 style="margin-top:0">Watches</h2>
   <table class="mh-table" style="width:100%">
-    <thead><tr><th>Meet</th><th>Status</th><th>Interval</th><th>Activity</th><th>Last issue</th><th></th><th></th></tr></thead>
+    <thead><tr><th>Meet</th><th>Status</th><th>Interval</th><th>Activity</th><th>Last issue</th><th><span class="mh-sr-only">Review</span></th><th><span class="mh-sr-only">Actions</span></th></tr></thead>
     <tbody>{rows}</tbody>
   </table>
 </div>
@@ -61710,37 +61728,77 @@ voice, and queues them for one-click approval.</p>
             abort(403)
         from datetime import timedelta as _td
 
-        from mediahub.results_fetch.live_watch import create_watch, stop_watch
+        from mediahub.results_fetch.live_watch import create_watch, list_watches, stop_watch
 
         action = (request.form.get("action") or "").strip()
         msg = ""
+        err = ""
         if action == "create":
             try:
                 hours = max(1, min(48, int(request.form.get("hours") or 12)))
             except (TypeError, ValueError):
                 hours = 12
-            rid = uuid.uuid4().hex[:12]
+            # interval_minutes comes from a <select> (3/5/10), but a hand-crafted
+            # POST can send anything. Parse defensively so a bad value is a clean
+            # default rather than a leaked ValueError; create_watch clamps range.
             try:
-                watch = create_watch(
-                    pid,
-                    (request.form.get("url") or "").strip(),
-                    interval_minutes=int(request.form.get("interval_minutes") or 5),
-                    expires_at=datetime.now(timezone.utc) + _td(hours=hours),
-                    label=(request.form.get("label") or "").strip(),
-                    run_id=rid,
-                    review_url=url_for("review", run_id=rid, _external=True),
-                )
-                _ensure_live_watch_schedule()
-                msg = f"Watching. Cards will queue under Review as results land ({watch.interval_minutes}-min checks)."
-            except ValueError as e:
-                msg = f"Could not start the watch: {e}"
+                interval = int(request.form.get("interval_minutes") or 5)
+            except (TypeError, ValueError):
+                interval = 5
+            url = (request.form.get("url") or "").strip()
+            # Politeness: at most one active watch per (org, url). A repeat
+            # submission reuses the existing watch instead of doubling the poll
+            # rate against the host club's site.
+            existing = next(
+                (w for w in list_watches(pid) if w.status == "active" and w.url == url),
+                None,
+            )
+            if existing is not None:
+                msg = f"Already watching that page ({existing.interval_minutes}-min checks)."
+            else:
+                rid = uuid.uuid4().hex[:12]
+                try:
+                    watch = create_watch(
+                        pid,
+                        url,
+                        interval_minutes=interval,
+                        expires_at=datetime.now(timezone.utc) + _td(hours=hours),
+                        label=(request.form.get("label") or "").strip(),
+                        run_id=rid,
+                        review_url=url_for("review", run_id=rid, _external=True),
+                    )
+                except ValueError as e:
+                    err = f"Could not start the watch: {e}"
+                except Exception:
+                    log.warning("live watch create failed", exc_info=True)
+                    err = "Could not start the watch: something went wrong. Please try again."
+                else:
+                    if _ensure_live_watch_schedule():
+                        msg = f"Watching. Cards will queue under Review as results land ({watch.interval_minutes}-min checks)."
+                    else:
+                        err = "Watch saved, but polling could not be scheduled. Please try again shortly."
         elif action == "stop":
-            ok = stop_watch(pid, (request.form.get("watch_id") or "").strip())
-            msg = "Watch stopped." if ok else "Watch not found."
+            try:
+                ok = stop_watch(pid, (request.form.get("watch_id") or "").strip())
+            except Exception:
+                log.warning("live watch stop failed", exc_info=True)
+                err = "Could not stop the watch: something went wrong. Please try again."
+            else:
+                msg = "Watch stopped." if ok else ""
+                if not ok:
+                    err = "Watch not found."
+        if err:
+            return redirect(url_for("live_meet_page", err=err))
         return redirect(url_for("live_meet_page", msg=msg))
 
-    def _ensure_live_watch_schedule() -> None:
-        """One global poll task drives every org's due watches (idempotent)."""
+    def _ensure_live_watch_schedule() -> bool:
+        """One global poll task drives every org's due watches (idempotent).
+
+        Returns True when the poll task is present (already existed or was just
+        created), False if it could not be ensured — so the caller reports the
+        outcome honestly instead of claiming success on a watch that will never
+        be polled.
+        """
         try:
             from mediahub.workflow.schedule import create_task as _ct
             from mediahub.workflow.schedule import list_tasks as _lt
@@ -61752,8 +61810,10 @@ voice, and queues them for one-click approval.</p>
                     schedule_kind="cron",
                     schedule_expr="*/2 * * * *",
                 )
+            return True
         except Exception:
             log.warning("could not ensure live watch schedule", exc_info=True)
+            return False
 
     # ---- W.8: season wraps -------------------------------------------------
 
