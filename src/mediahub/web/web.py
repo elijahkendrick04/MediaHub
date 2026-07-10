@@ -20253,7 +20253,7 @@ def create_app() -> Flask:
                     _sp_href = url_for("spotlight_landing", run_id=r["id"], older=1)
                     spotlight_link = (
                         f'<a href="{_sp_href}" style="font-size:11px;'
-                        'color:var(--ink-muted);white-space:nowrap;'
+                        "color:var(--ink-muted);white-space:nowrap;"
                         'margin-right:10px">Spotlight a swimmer &rarr;</a>'
                     )
                 rows_html += (
@@ -35203,9 +35203,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
 
     @app.route("/session-update")
     def stub_session_update():
-        return redirect(
-            url_for("free_text_chat_page", seed=_RETIRED_STUB_SEEDS["session_update"])
-        )
+        return redirect(url_for("free_text_chat_page", seed=_RETIRED_STUB_SEEDS["session_update"]))
 
     @app.route("/free-text/quick", methods=["GET", "POST"])
     def stub_free_text_quick():
@@ -35974,9 +35972,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         # landing, seeded with the retired type's ask so the prompt box
         # starts in the right place. Other types keep their live form.
         if stub_type in _RETIRED_STUB_SEEDS:
-            regenerate_url = url_for(
-                "free_text_chat_page", seed=_RETIRED_STUB_SEEDS[stub_type]
-            )
+            regenerate_url = url_for("free_text_chat_page", seed=_RETIRED_STUB_SEEDS[stub_type])
         else:
             regenerate_url = url_for(
                 {
@@ -58882,7 +58878,9 @@ voice, and queues them for one-click approval.</p>
                         brief_context=brief,
                         colours=colours,
                     )
-                    name = (result.plan.hook or brief or "Footage reel").strip()[:80] or "Footage reel"
+                    name = (result.plan.hook or brief or "Footage reel").strip()[
+                        :80
+                    ] or "Footage reel"
                     proj = VideoProject(
                         id="",
                         profile_id=profile_id,
