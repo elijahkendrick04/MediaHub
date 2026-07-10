@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-07-10 · `2517e6178` · [documents] audit fixes: CSRF on uploads/delete, export DATA_DIR lock, robustness + a11y (#1118)
+**Last updated:** 2026-07-10 · `16583782f` · Merge pull request #1124 from elijahkendrick04/claude/sample-pack-audit-99itin
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1227,6 +1227,9 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-07-10 | `5dfb118a1` | [sample-pack] fix pre-existing trailing-newline hygiene failures on main |
+| 2026-07-10 | `16741d443` | [sample-pack] add feature audit report |
+| 2026-07-10 | `7d6fca41f` | [sample-pack] guard CTA double-submit; honest research comment; E2E test |
 | 2026-07-10 | `02871896f` | [developer-settings] report: record second-pass merge status |
 | 2026-07-10 | `22fefbb1f` | [developer-settings] report: record F-5/F-6 from the re-audit pass |
 | 2026-07-10 | `ec66e8b0b` | [developer-settings] purge every re-derivable cache + fix stale reel doc default |
@@ -1236,7 +1239,4 @@ list and the auto table below, not here.
 | 2026-07-10 | `bce8e0dd2` | [event-preview] reject empty submissions, fix CSRF-lost approvals, a11y labels, bound work |
 | 2026-07-10 | `8c0767328` | [event-preview] refresh stale What-you'll-need copy |
 | 2026-07-10 | `7698bec30` | [documents] fix pre-existing EOF hygiene in AUDIT_season-wraps.md |
-| 2026-07-10 | `3f64196da` | [documents] fix pre-existing EOF hygiene in AUDIT_meet-recap.md (unblocks repo-wide pre-commit CI) |
-| 2026-07-10 | `537c17387` | [documents] record green gate + PR status in audit report |
-| 2026-07-10 | `22c611d76` | [documents] audit fixes: CSRF on uploads/delete, export DATA_DIR lock, robustness + a11y |
 <!-- /ROADMAP:ACTIVITY -->
