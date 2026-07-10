@@ -215,7 +215,9 @@ class TestReviewFilterIsTabs:
         assert 'data-wf-filter-to=""' in nav  # All
         assert 'data-wf-filter-to="queue"' in nav
         assert 'data-wf-filter-to="approved"' in nav
-        assert nav.count('role="tab"') == 3
+        # G-1: rejected cards get a first-class tab too.
+        assert 'data-wf-filter-to="rejected"' in nav
+        assert nav.count('role="tab"') == 4
 
     def test_tabs_keep_wf_href_for_no_js(self, world):
         """Progressive enhancement: each tab is still a real link, so a no-JS

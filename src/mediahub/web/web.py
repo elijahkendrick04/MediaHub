@@ -15780,6 +15780,7 @@ def _layout(
     set('mh-wf-tabcount-all', total);
     set('mh-wf-tabcount-queue', nQueue);
     set('mh-wf-tabcount-approved', nApproved);
+    set('mh-wf-tabcount-rejected', nRejected);
     if (window.mhWfTabsSync) window.mhWfTabsSync();
   };
 
@@ -17213,7 +17214,8 @@ _BULK_ACTIONS_JS = r"""
       }
     }
     function afterReview(action, body, ids){
-      var status = action === 'approve' ? 'approved' : (action === 'reject' ? 'rejected' : action);
+      var status = action === 'approve' ? 'approved'
+        : (action === 'reject' ? 'rejected' : (action === 'requeue' ? 'queue' : action));
       var results = (body && body.results) || null;
       if (results){
         // Paint each card by its ACTUAL server status: a group-approval-held
@@ -17234,7 +17236,8 @@ _BULK_ACTIONS_JS = r"""
       var okIds = results ? results.filter(function(r){ return r.ok && (r.status || status) === status; }).map(function(r){ return r.id; }) : ids;
       var held = results ? results.filter(function(r){ return r.ok && r.status && r.status !== status; }).length : 0;
       var nb = (body && body.n_blocked) || 0;
-      var verb = action === 'approve' ? 'Approved' : 'Rejected';
+      var verb = action === 'approve' ? 'Approved'
+        : (action === 'requeue' ? 'Re-queued' : 'Rejected');
       var msg = verb + ' ' + okIds.length + ' card' + (okIds.length === 1 ? '' : 's') + '.';
       if (held){
         msg += ' ' + held + ' held for another approver.';
@@ -17850,8 +17853,11 @@ def _hero_product_demo() -> str:
         '<p class="mh-demo-caption">A lifetime best for <mark>Tom Davies</mark>. '
         "<mark>52.41</mark> in the <mark>100m freestyle</mark>, a clean "
         "<mark>0.74s</mark> off his old mark.</p>"
-        '<div class="mh-demo-acts"><span>Edit</span>'
-        '<span class="ghost">Reject</span><span class="go">Approve</span></div>'
+        # G-1: mirror the REAL review-row actions (Approve / Re-queue /
+        # Inspect) — the mock previously promised Edit/Reject buttons the
+        # per-card flow doesn't have.
+        '<div class="mh-demo-acts"><span>&#9881; Inspect</span>'
+        '<span class="ghost">Re-queue</span><span class="go">Approve</span></div>'
         "</div>"
         "</div>"
         "</div>"
@@ -23043,10 +23049,11 @@ def create_app() -> Flask:
             _review_swatches = []
 
         # Workflow filter from query param. Triage states only — a malformed
-        # or retired (`posted` / `rejected`) ``?wf=`` value falls back to
-        # "show all". Reject was removed from the review flow entirely.
+        # or retired (`posted`) ``?wf=`` value falls back to "show all".
+        # G-1: `rejected` is a first-class filter — bulk Reject puts cards in
+        # that state, so the reviewer must be able to see (and re-queue) them.
         _wf_filter = (request.args.get("wf", "") or "").strip().lower()
-        if _wf_filter not in ("", "queue", "approved"):
+        if _wf_filter not in ("", "queue", "approved", "rejected"):
             _wf_filter = ""
 
         # --- Recognition summary band
@@ -23520,6 +23527,7 @@ def create_app() -> Flask:
             _wf_card_counts[_cst_val] = _wf_card_counts.get(_cst_val, 0) + 1
         _n_queue_cards = _wf_card_counts.get("queue", 0)
         _n_approved_cards = _wf_card_counts.get("approved", 0)
+        _n_rejected_cards = _wf_card_counts.get("rejected", 0)
 
         # Only show workflow card if there's any state or any achievements
         if _wf_summary or ranked_achs:
@@ -23529,6 +23537,7 @@ def create_app() -> Flask:
                 "": len(ranked_achs) or _wf_n_total,
                 "queue": _n_queue_cards,
                 "approved": _n_approved_cards,
+                "rejected": _n_rejected_cards,
             }
             # UI2.4 — the filter is a client-side tab control (kit `.mh-tabs`
             # sliding indicator): switching shows/hides cards in place with no
@@ -23540,11 +23549,13 @@ def create_app() -> Flask:
                 "": "mh-wf-tabcount-all",
                 "queue": "mh-wf-tabcount-queue",
                 "approved": "mh-wf-tabcount-approved",
+                "rejected": "mh-wf-tabcount-rejected",
             }
             for _wf_opt in [
                 ("", "All"),
                 ("queue", "Queue"),
                 ("approved", "Approved"),
+                ("rejected", "Rejected"),
             ]:
                 _wf_is_on = _wf_filter == _wf_opt[0]
                 _wf_opt_url = _review_base + (f"?wf={_wf_opt[0]}" if _wf_opt[0] else "")
@@ -23600,6 +23611,7 @@ def create_app() -> Flask:
       <div class="stat-block">
         <div class="stat"><div class="l">Queue</div><div class="v" id="mh-wf-n-queue">{_n_queue_cards}</div></div>
         <div class="stat good"><div class="l">Approved</div><div class="v" id="mh-wf-n-approved">{_n_approved_cards}</div></div>
+        <div class="stat bad"><div class="l">Rejected</div><div class="v" id="mh-wf-n-rejected">{_n_rejected_cards}</div></div>
       </div>
     </div>
     <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
@@ -23874,6 +23886,7 @@ def create_app() -> Flask:
    filters above): a row hidden by either axis stays hidden. */
 #ach-list[data-wf-filter="queue"] .ach-row:not([data-status="queue"]) {{ display:none; }}
 #ach-list[data-wf-filter="approved"] .ach-row:not([data-status="approved"]) {{ display:none; }}
+#ach-list[data-wf-filter="rejected"] .ach-row:not([data-status="rejected"]) {{ display:none; }}
 #mh-wf-empty {{ margin-top: var(--sp-2); }}
 /* Council UI verdict (2026-05-31) — the review list collapses each card's
    reasoning by default for scroll relief (a 249-card meet was a ~70,000px
@@ -23971,6 +23984,9 @@ details.why-card[open] > summary .why-peek {{ display: none; }}
         <button type="submit" class="btn secondary" data-mh-bulk="reject" name="op" value="rejected"
                 formaction="{url_for("api_cards_bulk_status", run_id=run_id)}"
                 data-confirm="Reject {{n}} selected card(s)? They move out of the queue; you can re-queue them later.">Reject</button>
+        <button type="submit" class="btn secondary" data-mh-bulk="requeue" name="op" value="queue"
+                formaction="{url_for("api_cards_bulk_status", run_id=run_id)}"
+                title="Send the selected cards back to the queue — undoes an approval or rejection">Re-queue</button>
         <button type="submit" class="btn secondary" data-mh-bulk="download"
                 formaction="{url_for("api_cards_bulk_download", run_id=run_id)}"
                 title="Download the selected cards' captions + visuals as a ZIP, ready to post">Download content (.zip)</button>
@@ -24154,6 +24170,9 @@ applyFilters();
         if (wf === 'approved') {{
           if (t) t.textContent = 'Nothing approved yet';
           if (b) b.textContent = 'Approve cards from the Queue and they move here.';
+        }} else if (wf === 'rejected') {{
+          if (t) t.textContent = 'No rejected cards';
+          if (b) b.textContent = 'Cards you reject move here \\u2014 you can re-queue them any time.';
         }} else if (wf === 'queue') {{
           if (t) t.textContent = 'Queue clear';
           if (b) b.textContent = 'Every card has been reviewed \\u2014 nice work.';
