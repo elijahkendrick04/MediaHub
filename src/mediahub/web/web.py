@@ -41851,12 +41851,17 @@ what you're doing, what they should do.</p>
                             "activates when they sign up with that email."
                         )
                         delivered = _send_invite_email(m.email, pid)
-                        notice += (
-                            " An invite email is on its way."
-                            if delivered
-                            else " Email delivery isn't configured here, so share "
-                            "the signup link with them yourself."
-                        )
+                        if delivered:
+                            notice += " An invite email is on its way."
+                        else:
+                            # No mail seam configured: the owner has to pass the
+                            # link on themselves, so actually SHOW it rather than
+                            # referring to a "signup link" that appears nowhere on
+                            # the page.
+                            notice += (
+                                " Email delivery isn't configured here, so share this "
+                                f"signup link with them: {url_for('signup_page', _external=True)}"
+                            )
                 elif action == "remove":
                     store.remove(target, pid)
                     _invalidate_memberships_snapshot()
@@ -41903,11 +41908,21 @@ what you're doing, what they should do.</p>
 
         def _row_html(m):
             role_badge = _role_cell_html(m)
+            # The bare ``.pill`` class has no base rule outside a profile card,
+            # so give both status badges self-contained pill styling here — else
+            # "Active" renders as plain text and "Invited" loses its shape.
+            _pill_base = (
+                "display:inline-block;padding:2px 9px;border-radius:999px;"
+                "font-size:11px;font-weight:600;border:1px solid "
+            )
             status_badge = {
-                _tenancy.STATUS_ACTIVE: '<span class="pill">Active</span>',
+                _tenancy.STATUS_ACTIVE: (
+                    f'<span class="pill" style="{_pill_base}rgba(16,185,129,0.30);'
+                    'background:rgba(16,185,129,0.10);color:var(--good)">Active</span>'
+                ),
                 _tenancy.STATUS_INVITED: (
-                    '<span class="pill" style="background:rgba(245,158,11,0.10);'
-                    'border-color:rgba(245,158,11,0.30);color:var(--warn)">'
+                    f'<span class="pill" style="{_pill_base}rgba(245,158,11,0.30);'
+                    'background:rgba(245,158,11,0.10);color:var(--warn)">'
                     "Invited — activates at signup</span>"
                 ),
             }.get(m.status, "")

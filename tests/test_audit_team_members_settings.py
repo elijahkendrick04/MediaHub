@@ -309,3 +309,44 @@ def test_erasing_sole_member_still_unbinds(tmp_path):
     s.erase_email("solo@club.org")
     assert s.is_bound("club-solo") is False
     assert s.list_for_profile("club-solo") == []
+
+
+# ---- F9 (P2) — status badges must actually render as pills ------------------
+
+
+def test_status_badges_are_self_styled(members_world):
+    """The bare ``.pill`` class has no base CSS rule outside a profile card, so the
+    Active/Invited badges must carry their own shape inline — else "Active"
+    renders as plain text. Guards the self-contained styling against removal."""
+    _seed_second_active_member("active2@club.org")  # an Active row
+    # And an invited row so both badge variants render.
+    from mediahub.web import tenancy as t
+
+    t.MembershipStore().add("pending@club.org", "club-a", status=t.STATUS_INVITED)
+    html = _owner_client(members_world["app"]).get("/organisation/members").get_data(as_text=True)
+    # Both badges are pill-shaped (border-radius) rather than unstyled text.
+    assert html.count("border-radius:999px") >= 2
+    assert ">Active</span>" in html
+    assert "Invited — activates at signup" in html
+
+
+# ---- F10 (P2) — the invite notice must show the signup link it references ----
+
+
+def test_invite_notice_shows_the_signup_link_when_mail_unconfigured(members_world, monkeypatch):
+    """When no email seam is configured the owner has to pass the signup link on
+    themselves — so the page must actually show it, not refer to a 'signup link'
+    that appears nowhere."""
+    import mediahub.notify.email as _email
+
+    # Force the "no mail seam" branch deterministically.
+    monkeypatch.setattr(_email, "email_configured", lambda: False, raising=True)
+    c = _owner_client(members_world["app"])
+    r = c.post(
+        "/organisation/members",
+        data={"action": "add", "email": "linkme@club.org", "role": "member"},
+        follow_redirects=True,
+    )
+    body = r.get_data(as_text=True)
+    assert "share this signup link" in body
+    assert "/signup" in body  # the actual url_for('signup_page') target is rendered

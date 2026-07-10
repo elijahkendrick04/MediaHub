@@ -94,7 +94,7 @@ coupling.
 | 1 | Functional correctness | PASS | Owner add/invite, role change, remove all produce correct ledger state + honest notices. Verified via test client + Playwright + live probe. |
 | 2 | Every interactive control | PASS (after fixes) | Add form, per-row role picker (Update), Remove (confirm), Back link, Log-in CTA enumerated. The picker's Update mis-fired invite emails and could silently downgrade (F5/F7) — fixed. Remove-confirm loader stuck on cancel (F1) — fixed. |
 | 3 | Input validation / edge cases | PASS (after fixes) | Empty/missing action, email, role handled cleanly; unknown action → clean error; invalid role coerces to member; unicode ok; un-activatable + line-separator + over-long emails now rejected (F4 + hardening). |
-| 4 | UI state handling | PASS (after fixes) | Loading/empty/error/success states render. The full-screen loader no longer sticks after a cancelled confirm (F1). |
+| 4 | UI state handling | PASS (after fixes) | Loading/empty/error/success states render. The full-screen loader no longer sticks after a cancelled confirm (F1); status badges now render as pills (F9); the invite notice shows the signup link it references (F10). |
 | 5 | Server-side error handling | PASS | No 500s / stack traces; `TenancyError` surfaces as a clean flash; non-admin POST → 404 (anti-enumeration). |
 | 6 | Data integrity | PASS (after fixes) | In matches out; append-only last-write-wins; idempotent view. `invited_by` no longer overwritten on edits (F6); line-separator rows no longer silently lost (hardening); the last-owner-erasure ownerless-workspace P1 fixed with succession (F8). |
 | 7 | Security | PASS | Authz on GET+POST for anon/foreign/member/owner/operator; CSRF enforced + auto-injected (tokenless POST → 403); no secrets in responses; XSS escaped via `_h()`; PII gate on open workspaces; tenant isolation held (test_cross_tenant_access green). One owner-privileged enumeration oracle logged (L1). |
@@ -111,18 +111,22 @@ Severity: P0 broken/dataloss/security-hole · P1 wrong behaviour or lying contro
 
 | ID | Sev | Title | Reproduction | Root cause | Status | Commit |
 |----|-----|-------|--------------|------------|--------|--------|
-| F1 | P2 | Full-screen loader sticks after a cancelled "Remove" confirm | Open members, click Remove, dismiss the confirm → "Working on it" overlay stayed until the 20s safety timeout | Shared `bindForms` submit handler raised the loader even when an earlier `onsubmit` handler cancelled the submit | Fixed | 703d10b |
-| F2 | P2 | Add-member form labels not associated; email lacks autocomplete | Screen reader can't tie "Email"/"Role" to their fields | `<label>` had no `for`; inputs no `id`; no `autocomplete` | Fixed | 703d10b |
-| F3 | P3 | Members table headers lack `scope` | Screen-reader table nav ambiguous | `<th>` had no `scope="col"` | Fixed | 703d10b |
-| F4 | P3 | Un-activatable invite stored (e.g. `coach@club`, no TLD) | Add `coach@club` → row sits "invited" forever (signup rejects that address) | Store only checks for `@`; route did not pre-validate | Fixed | 703d10b |
-| F5 | P2 | Invite email re-sent on every role edit of an invited member | Configure email seam, invite X, click Update on X's row repeatedly → an invite email each time | Picker's `action=add` re-ran the invite branch (no new-vs-edit distinction) | Fixed | 21b6b4a |
-| F6 | P3 | `Invited by` overwritten to the last editor on any role change | A invites X; B changes X's role → column shows "Invited by B" | Route always passed `invited_by=<current admin>`; store prefers the passed value | Fixed | 21b6b4a |
-| F7 | P3 | Add form silently changes an existing member's role | Type an existing member's email in the Add form (role defaults to Member) → silent downgrade | Add form + picker share `action=add`; blind upsert | Fixed (via `add_form` marker + guard) | 21b6b4a |
-| F8 | P1 | Account deletion strands a bound workspace with no owner | Sole owner of a workspace with other active members deletes their account → workspace stays bound but ownerless; every remaining member locked out of all admin, no in-product recovery | `erase_email` (via `privacy.erase_account`) removed the owner with no succession; `is_bound` is role-agnostic | Fixed (ownership succession) | 50a880e |
-| — | P2 | Member email with U+2028/U+2029/U+0085 silently lost on read-back | Add `a<U+2028>b@club.org` → "success" but row vanishes (`splitlines()` tears the JSON line) | No control/line-separator rejection | Fixed (folded into F5 commit) | 21b6b4a |
-| — | P3 | Per-row role `<select>` had no accessible name | Screen reader can't tell which member a role dropdown changes | Bare `<select>` with no label/aria | Fixed (`aria-label="Change role for <email>"`) | 21b6b4a |
-| — | P3 | Legacy dotless-domain member's role picker was unusable | After F4, editing a pre-existing `foo@bar` member re-validated and refused | Email validation ran for edits too | Fixed (validate new memberships only) | 21b6b4a |
-| — | P3 | No length bound on the member email | An admin could persist an arbitrarily long address | No cap | Fixed (254-char RFC 5321 ceiling) | 21b6b4a |
+| F1 | P2 | Full-screen loader sticks after a cancelled "Remove" confirm | Open members, click Remove, dismiss the confirm → "Working on it" overlay stayed until the 20s safety timeout | Shared `bindForms` submit handler raised the loader even when an earlier `onsubmit` handler cancelled the submit | Fixed | invite validation + a11y + loader |
+| F2 | P2 | Add-member form labels not associated; email lacks autocomplete | Screen reader can't tie "Email"/"Role" to their fields | `<label>` had no `for`; inputs no `id`; no `autocomplete` | Fixed | invite validation + a11y + loader |
+| F3 | P3 | Members table headers lack `scope` | Screen-reader table nav ambiguous | `<th>` had no `scope="col"` | Fixed | invite validation + a11y + loader |
+| F4 | P3 | Un-activatable invite stored (e.g. `coach@club`, no TLD) | Add `coach@club` → row sits "invited" forever (signup rejects that address) | Store only checks for `@`; route did not pre-validate | Fixed | invite validation + a11y + loader |
+| F5 | P2 | Invite email re-sent on every role edit of an invited member | Configure email seam, invite X, click Update on X's row repeatedly → an invite email each time | Picker's `action=add` re-ran the invite branch (no new-vs-edit distinction) | Fixed | harden add path |
+| F6 | P3 | `Invited by` overwritten to the last editor on any role change | A invites X; B changes X's role → column shows "Invited by B" | Route always passed `invited_by=<current admin>`; store prefers the passed value | Fixed | harden add path |
+| F7 | P3 | Add form silently changes an existing member's role | Type an existing member's email in the Add form (role defaults to Member) → silent downgrade | Add form + picker share `action=add`; blind upsert | Fixed (via `add_form` marker + guard) | harden add path |
+| F8 | P1 | Account deletion strands a bound workspace with no owner | Sole owner of a workspace with other active members deletes their account → workspace stays bound but ownerless; every remaining member locked out of all admin, no in-product recovery | `erase_email` (via `privacy.erase_account`) removed the owner with no succession; `is_bound` is role-agnostic | Fixed (ownership succession) | erase succession |
+| — | P2 | Member email with U+2028/U+2029/U+0085 silently lost on read-back | Add `a<U+2028>b@club.org` → "success" but row vanishes (`splitlines()` tears the JSON line) | No control/line-separator rejection | Fixed (folded into F5 commit) | harden add path |
+| — | P3 | Per-row role `<select>` had no accessible name | Screen reader can't tell which member a role dropdown changes | Bare `<select>` with no label/aria | Fixed (`aria-label="Change role for <email>"`) | harden add path |
+| — | P3 | Legacy dotless-domain member's role picker was unusable | After F4, editing a pre-existing `foo@bar` member re-validated and refused | Email validation ran for edits too | Fixed (validate new memberships only) | harden add path |
+| — | P3 | No length bound on the member email | An admin could persist an arbitrarily long address | No cap | Fixed (254-char RFC 5321 ceiling) | harden add path |
+| F9 | P2 | Status badges render unstyled ("Active" is plain text) | Open members → the Active/Invited status column shows text with no pill shape | The bare `.pill` class has no base CSS rule outside `.mh-profile-card .meta-line` (static CSS defines `.mh-badge`, not `.pill`); "Active" carried no inline style at all | Fixed (self-contained inline pill styling on both badges) | badges + signup link |
+| F10 | P2 | Invite notice references a signup link the page never shows | With no email seam, inviting X flashes "share the signup link with them yourself" — but no link appears anywhere | The notice text referred to a link that was never rendered | Fixed (the actual `signup_page` URL is now shown in the notice) | badges + signup link |
+
+*(Commit column uses the commit subject-tag rather than a SHA — hashes churn on each rebase onto the moving `main`. Map to SHAs with `git log origin/main..HEAD`.)*
 
 ### Logged (not fixed — with rationale)
 
@@ -146,6 +150,8 @@ Severity: P0 broken/dataloss/security-hole · P1 wrong behaviour or lying contro
 
 - **`src/mediahub/web/web.py`** — `organisation_members_page` add-branch rewritten to be prior-row aware: validate the address (format + control/separator chars + length) only for a NEW membership; a `via=add_form` marker lets the Add form refuse an existing active member (role changes go through the picker); preserve the original inviter on edits; send the invite email only when the invite is newly created; honest notices for new-vs-edit. Per-row role `<select>` given `aria-label`. (Plus the pre-existing F1-F4 fixes: `_layout` submit-loader guard, add-form label association + autocomplete, `th scope`, email pre-validation.)
 - **`src/mediahub/web/tenancy.py`** — `MembershipStore.erase_email` now performs ownership succession: if erasing an owner would leave a still-populated workspace without an owner, the longest-standing remaining active member is promoted. The erased email's rows are still removed in full.
+- **`src/mediahub/web/web.py` (F9)** — both status badges are given self-contained inline pill styling (`display:inline-block`, `border-radius`, padding, border, the app's `--good`/`--warn` colours) so "Active"/"Invited" render as pills. The bare `.pill` class has no base rule here, so this is deliberately feature-scoped (no shared-CSS change — see §7).
+- **`src/mediahub/web/web.py` (F10)** — when the email seam is unconfigured, the invite notice now renders the real `signup_page` URL instead of referring to a "signup link" the page never showed.
 
 ## 6. Tests added / extended
 
@@ -158,6 +164,10 @@ Severity: P0 broken/dataloss/security-hole · P1 wrong behaviour or lying contro
 - `test_add_form_refuses_an_existing_active_member`, `test_picker_can_still_change_an_active_member_role` — F7 (guard + backward-compat).
 - `test_email_with_line_separator_is_rejected` — U+2028 hardening.
 - `test_erasing_last_owner_promotes_a_remaining_member`, `test_erasing_sole_member_still_unbinds` — F8 (succession + zero-member model preserved).
+- `test_status_badges_are_self_styled` — F9 (both badges carry pill shape).
+- `test_invite_notice_shows_the_signup_link_when_mail_unconfigured` — F10 (mocks the mail seam off, asserts the signup URL is rendered).
+
+14 tests total, all green (`python -m pytest tests/test_audit_team_members_settings.py -q` → 14 passed).
 
 ## 7. Cross-cutting changes (for reconciliation)
 
@@ -172,6 +182,7 @@ Two edits reach beyond `/organisation/members`; both are minimal and additive:
 - **L2 (PRG):** the whole settings surface renders inline on POST; a repo-wide Post/Redirect/Get pass (with `_flash_toast`) is the right fix, not a members-only divergence.
 - **L5/L6/L7 (perf):** routing members-page reads through the existing `flask.g` membership snapshot and memoising `_active_profile_id()` would cut redundant ledger/profile reads. Non-urgent at realistic club sizes.
 - The membership model is an append-only JSONL ledger (no SQL); all of the above ultimately point at a future move to indexed multi-tenant storage (already noted in `docs/TECHNICAL_DEBT.md`).
+- **Global `.pill` CSS gap (cross-feature):** the `.pill` class has no base rule in the shared cascade (static CSS defines `.mh-badge`; the only `.pill` rule is scoped to `.mh-profile-card .meta-line`). Every `.pill` badge across the app (this page, `/organisation/api` tokens & webhooks, etc.) is therefore unstyled. This audit fixed only its own badges inline (F9, footprint discipline); a proper repo-wide fix is a single base `.pill` rule in `theme-components.css`, which should be reconciled centrally rather than per-feature.
 
 ## 9. Feature verdict
 
