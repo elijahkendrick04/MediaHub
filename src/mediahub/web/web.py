@@ -4229,14 +4229,180 @@ def _translatable_langs_js() -> str:
     return "<script>window.MH_TR_LANGS = " + json.dumps(langs) + ";</script>\n"
 
 
+# ---------------------------------------------------------------------------
+# D-12 — shared motion-render client JS: async job + poll + finished panel.
+#
+# ONE copy serves every page with a per-card "Motion video" action: the
+# Content builder (appended by `_card_creative_js()`) and the grouped
+# recommendations page, which previously exposed the synchronous motion GET
+# as a plain link with no progress UI. Plain string — single braces are
+# literal JS, embed verbatim via {_MOTION_CLIENT_JS}.
+# ---------------------------------------------------------------------------
+_MOTION_CLIENT_JS = """
+<script>
+// Escapers shared with the host page (guarded — a host page's own
+// declaration, e.g. the creative-toolbar JS, takes precedence).
+window.safeText = window.safeText || function(t){ return String(t==null?'':t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); };
+window._attrEsc = window._attrEsc || function(jsExpr) {
+  return '"' + jsExpr.replace(/&/g, '&amp;').replace(/"/g, '&quot;') + '"';
+};
+
+// Motion-graphic generation: async job + poll, cached server-side. fmt picks
+// the output cut (story 9:16 default, portrait 4:5, square 1:1, landscape
+// 16:9) — same card facts, same brand, re-laid-out per platform.
+var _motionCache = {};
+var _MOTION_FMT_DIMS = {story: '1080&times;1920', portrait: '1080&times;1350', square: '1080&times;1080', landscape: '1920&times;1080'};
+function _motionFmtChips(motionUrl, cardId, active) {
+  var out = '';
+  ['story', 'portrait', 'square', 'landscape'].forEach(function(f) {
+    var label = f.charAt(0).toUpperCase() + f.slice(1);
+    if (f === active) {
+      out += '<span class="btn secondary" style="font-size:11px;padding:4px 10px;opacity:0.55;pointer-events:none">' + label + ' &#x2713;</span>';
+    } else {
+      out += '<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick=' +
+        _attrEsc('generateMotion(this, ' + JSON.stringify(motionUrl) + ', ' + JSON.stringify(cardId) + ', ' + JSON.stringify(f) + ')') +
+        '>' + label + '</button>';
+    }
+  });
+  return out;
+}
+// M32 (UX-4): per-card motion now uses the same async job + poll pattern the
+// reel adopted — a cold Remotion render (30-90s) on a held connection gets
+// killed by front-line proxies as a bogus "Network error". The button kicks
+// a background job, polls, then streams the finished MP4 from the motion-file
+// route (a real URL that survives navigation, with a ?poster=1 sidecar).
+function generateMotion(btn, motionUrl, cardId, fmt) {
+  fmt = fmt || 'story';
+  var panel = document.querySelector('.motion-panel[data-card="' + cardId + '"]');
+  if (!panel) return;
+  panel.style.display = '';
+  var origLabel = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Rendering motion…';
+  var prog = MH.renderProgress(panel, {label: 'Rendering ' + fmt + ' motion', sub: 'First render can take up to 90 seconds — repeats are instant', expectedMs: 45000, accent: 'medal'});
+  var fail = function(msg) {
+    prog.stop();
+    btn.disabled = false; btn.textContent = origLabel;
+    // msg can be a raw str(e) detail (meet names, node stderr) — escape
+    // before it touches innerHTML.
+    panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">' + window.safeText(msg) + '</div>';
+  };
+  var jobUrl = motionUrl + '-job' + (fmt !== 'story' ? '?format=' + encodeURIComponent(fmt) : '');
+  // JSON content-type: the CSRF layer exempts application/json fetches
+  // (a cross-site page can't send them without a CORS preflight).
+  fetch(jobUrl, {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'})
+    .then(function(r) { return r.json().then(function(j){ return {status: r.status, body: j}; }); })
+    .then(function(res) {
+      if (res.status !== 202 || !res.body || !res.body.poll_url) {
+        fail((res.body && (res.body.user_message || res.body.detail || res.body.error)) || 'could not start the render');
+        return;
+      }
+      var tries = 0;
+      var poll = function() {
+        tries++;
+        if (tries > 80) { fail('timed out waiting for the render — try again'); return; }
+        fetch(res.body.poll_url)
+          .then(function(r){ return r.json(); })
+          .then(function(j) {
+            if (j.status === 'done' && j.video_url) {
+              prog.complete(function(){
+                btn.disabled = false; btn.textContent = origLabel;
+                _motionCache[cardId + ':' + fmt] = j.video_url;
+                mhRenderMotion(panel, motionUrl, cardId, fmt, j.video_url);
+              });
+              return;
+            }
+            if (j.status === 'error' || (j.error && j.status !== 'running')) {
+              fail(j.user_message || j.error || 'render failed'); return;
+            }
+            setTimeout(poll, 3000);
+          })
+          .catch(function() { setTimeout(poll, 3000); });
+      };
+      setTimeout(poll, 3000);
+    })
+    .catch(function(err) { fail('Network error: ' + err); });
+}
+
+// The finished per-card motion panel — used by generateMotion's success path
+// and the on-load "Rendered videos" restore. videoUrl is the persistent
+// motion-file route; its ?poster=1 sidecar becomes the <video> poster.
+function mhRenderMotion(panel, motionUrl, cardId, fmt, videoUrl) {
+  var poster = videoUrl + (videoUrl.indexOf('?') === -1 ? '?' : '&') + 'poster=1';
+  var vidCol = fmt === 'landscape' ? 'flex:0 0 min(300px,100%);max-width:320px' : 'flex:0 0 min(200px,100%);max-width:220px';
+  panel.innerHTML =
+    '<div style="display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap">' +
+      '<div style="' + vidCol + '">' +
+        '<video class="mh-motion-video" src="' + videoUrl + '" poster="' + poster + '" controls playsinline preload="metadata" style="width:100%;border-radius:6px;border:1px solid var(--border);background:#000"></video>' +
+      '</div>' +
+      '<div style="flex:1;min-width:min(200px,100%)">' +
+        '<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:4px">Motion &middot; ' + (_MOTION_FMT_DIMS[fmt] || '') + ' &middot; 6s</div>' +
+        '<div style="font-size:12px;color:var(--ink);margin-bottom:8px;line-height:1.4">Branded MP4. Same archetype, colours, and seed as the static card &mdash; including your Inspector accent and photo on/off choices. An Inspector crop applies to stills only for now.</div>' +
+        '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px">' + _motionFmtChips(motionUrl, cardId, fmt) + '</div>' +
+        '<div style="display:flex;gap:6px;flex-wrap:wrap">' +
+          '<a class="btn secondary" href="' + videoUrl + '" download="motion-' + cardId + '-' + fmt + '.mp4" style="font-size:11px;padding:4px 10px">Download MP4</a>' +
+        '</div>' +
+        '<div class="mh-motion-why" style="font-size:11px;color:var(--ink-muted);margin-top:8px"></div>' +
+      '</div>' +
+    '</div>' +
+    '<div class="mh-reel-comments" style="margin-top:12px"></div>';
+  _loadMotionWhy(panel, motionUrl, fmt);
+  // UI 1.8 - pin timestamp comments to this card's motion clip too. The
+  // run-level comments endpoint sits at the path before '/card/'.
+  var _cmRoot = motionUrl.split('/card/')[0];
+  var _cmMount = panel.querySelector('.mh-reel-comments');
+  if (_cmMount && typeof mhReelComments === 'function') {
+    mhReelComments({mount: _cmMount, video: panel.querySelector('video.mh-motion-video'), baseUrl: _cmRoot + '/reel/comments', target: 'card:' + cardId});
+  }
+}
+
+// "Why this motion design" — the render's explainability sidecar, fetched
+// after the MP4 lands. Absence is fine (legacy renders predate manifests).
+function _loadMotionWhy(panel, motionUrl, fmt) {
+  var slot = panel.querySelector('.mh-motion-why');
+  if (!slot) return;
+  var mUrl = motionUrl + '/manifest' + (fmt !== 'story' ? '?format=' + encodeURIComponent(fmt) : '');
+  fetch(mUrl).then(function(r){ return r.ok ? r.json() : null; }).then(function(m) {
+    if (!m || !m.card) return;
+    var bits = [];
+    if (m.card.archetype) bits.push('archetype <b>' + m.card.archetype + '</b>');
+    if (m.card.motion_intent) bits.push('motion <b>' + m.card.motion_intent + '</b>');
+    if (m.card.mood) bits.push('mood <b>' + m.card.mood + '</b>');
+    bits.push(m.card.colour_source === 'still-parity-roles' ? 'colours mirror the approved still' : 'colours from seed ' + (m.card.variation_seed || ''));
+    slot.innerHTML = 'Why this design: ' + bits.join(' &middot; ') + mhEngineNoteHtml(m);
+  }).catch(function(){});
+}
+
+// M22 handoff — honest engine disclosure. The manifest names the engine that
+// produced this video; the reduced-motion FFmpeg fallback writes plain-language
+// capability notes (no text choreography / count-up, static cover chips) that
+// the user deserves to see instead of silently wondering why the video looks
+// simpler. Manifest fields are engine-written but escaped anyway.
+function mhEngineNoteHtml(m) {
+  if (!m || m.engine !== 'ffmpeg') return '';
+  var notes = m.notes || {};
+  var line = notes.engine_note || 'Rendered by the reduced-motion FFmpeg engine.';
+  var extra = [];
+  if (notes.captions === 'unsupported-on-engine') extra.push('burned captions are unavailable on this engine');
+  if (notes.stat_chips === 'static-cover') extra.push('cover stats are static (no count-up)');
+  return '<div style="margin-top:4px;color:var(--ink-muted)">' + window.safeText(line) +
+    (extra.length ? ' (' + window.safeText(extra.join('; ')) + ')' : '') + '</div>';
+}
+</script>
+"""
+
+
 def _card_creative_js() -> str:
     """Shared client JS for the per-card creative toolbar: live caption
     tone tabs, create-graphic, motion render, and the 3-variant graphic
     picker. Lives on the Content builder page (post-approval). The host
     page must define `WF_API_BASE` and `window._API_BASE` before this
-    block so caption edits and visual picks can persist."""
+    block so caption edits and visual picks can persist. The motion
+    render functions ship in the shared `_MOTION_CLIENT_JS` block (D-12)
+    so the grouped page can reuse them without a drifted copy."""
     return (
         _translatable_langs_js()
+        + _MOTION_CLIENT_JS
         + """
 <script>
 // V8: Live caption tone toggle + regenerate
@@ -4949,148 +5115,6 @@ function _renderVisualPanel(panel, data, cardId, createUrl) {
         '</div>' +
       '</div>' +
     '</div>';
-}
-
-// Motion-graphic generation: async job + poll, cached server-side. fmt picks
-// the output cut (story 9:16 default, portrait 4:5, square 1:1, landscape
-// 16:9) \u2014 same card facts, same brand, re-laid-out per platform.
-var _motionCache = {};
-var _MOTION_FMT_DIMS = {story: '1080&times;1920', portrait: '1080&times;1350', square: '1080&times;1080', landscape: '1920&times;1080'};
-function _motionFmtChips(motionUrl, cardId, active) {
-  var out = '';
-  ['story', 'portrait', 'square', 'landscape'].forEach(function(f) {
-    var label = f.charAt(0).toUpperCase() + f.slice(1);
-    if (f === active) {
-      out += '<span class="btn secondary" style="font-size:11px;padding:4px 10px;opacity:0.55;pointer-events:none">' + label + ' &#x2713;</span>';
-    } else {
-      out += '<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick=' +
-        _attrEsc('generateMotion(this, ' + JSON.stringify(motionUrl) + ', ' + JSON.stringify(cardId) + ', ' + JSON.stringify(f) + ')') +
-        '>' + label + '</button>';
-    }
-  });
-  return out;
-}
-// M32 (UX-4): per-card motion now uses the same async job + poll pattern the
-// reel adopted — a cold Remotion render (30-90s) on a held connection gets
-// killed by front-line proxies as a bogus "Network error". The button kicks
-// a background job, polls, then streams the finished MP4 from the motion-file
-// route (a real URL that survives navigation, with a ?poster=1 sidecar).
-function generateMotion(btn, motionUrl, cardId, fmt) {
-  fmt = fmt || 'story';
-  var panel = document.querySelector('.motion-panel[data-card="' + cardId + '"]');
-  if (!panel) return;
-  panel.style.display = '';
-  var origLabel = btn.textContent;
-  btn.disabled = true;
-  btn.textContent = 'Rendering motion…';
-  var prog = MH.renderProgress(panel, {label: 'Rendering ' + fmt + ' motion', sub: 'First render can take up to 90 seconds — repeats are instant', expectedMs: 45000, accent: 'medal'});
-  var fail = function(msg) {
-    prog.stop();
-    btn.disabled = false; btn.textContent = origLabel;
-    // msg can be a raw str(e) detail (meet names, node stderr) — escape
-    // before it touches innerHTML.
-    panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">' + window.safeText(msg) + '</div>';
-  };
-  var jobUrl = motionUrl + '-job' + (fmt !== 'story' ? '?format=' + encodeURIComponent(fmt) : '');
-  // JSON content-type: the CSRF layer exempts application/json fetches
-  // (a cross-site page can't send them without a CORS preflight).
-  fetch(jobUrl, {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'})
-    .then(function(r) { return r.json().then(function(j){ return {status: r.status, body: j}; }); })
-    .then(function(res) {
-      if (res.status !== 202 || !res.body || !res.body.poll_url) {
-        fail((res.body && (res.body.user_message || res.body.detail || res.body.error)) || 'could not start the render');
-        return;
-      }
-      var tries = 0;
-      var poll = function() {
-        tries++;
-        if (tries > 80) { fail('timed out waiting for the render — try again'); return; }
-        fetch(res.body.poll_url)
-          .then(function(r){ return r.json(); })
-          .then(function(j) {
-            if (j.status === 'done' && j.video_url) {
-              prog.complete(function(){
-                btn.disabled = false; btn.textContent = origLabel;
-                _motionCache[cardId + ':' + fmt] = j.video_url;
-                mhRenderMotion(panel, motionUrl, cardId, fmt, j.video_url);
-              });
-              return;
-            }
-            if (j.status === 'error' || (j.error && j.status !== 'running')) {
-              fail(j.user_message || j.error || 'render failed'); return;
-            }
-            setTimeout(poll, 3000);
-          })
-          .catch(function() { setTimeout(poll, 3000); });
-      };
-      setTimeout(poll, 3000);
-    })
-    .catch(function(err) { fail('Network error: ' + err); });
-}
-
-// The finished per-card motion panel — used by generateMotion's success path
-// and the on-load "Rendered videos" restore. videoUrl is the persistent
-// motion-file route; its ?poster=1 sidecar becomes the <video> poster.
-function mhRenderMotion(panel, motionUrl, cardId, fmt, videoUrl) {
-  var poster = videoUrl + (videoUrl.indexOf('?') === -1 ? '?' : '&') + 'poster=1';
-  var vidCol = fmt === 'landscape' ? 'flex:0 0 min(300px,100%);max-width:320px' : 'flex:0 0 min(200px,100%);max-width:220px';
-  panel.innerHTML =
-    '<div style="display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap">' +
-      '<div style="' + vidCol + '">' +
-        '<video class="mh-motion-video" src="' + videoUrl + '" poster="' + poster + '" controls playsinline preload="metadata" style="width:100%;border-radius:6px;border:1px solid var(--border);background:#000"></video>' +
-      '</div>' +
-      '<div style="flex:1;min-width:min(200px,100%)">' +
-        '<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:4px">Motion &middot; ' + (_MOTION_FMT_DIMS[fmt] || '') + ' &middot; 6s</div>' +
-        '<div style="font-size:12px;color:var(--ink);margin-bottom:8px;line-height:1.4">Branded MP4. Same archetype, colours, and seed as the static card &mdash; including your Inspector accent and photo on/off choices. An Inspector crop applies to stills only for now.</div>' +
-        '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px">' + _motionFmtChips(motionUrl, cardId, fmt) + '</div>' +
-        '<div style="display:flex;gap:6px;flex-wrap:wrap">' +
-          '<a class="btn secondary" href="' + videoUrl + '" download="motion-' + cardId + '-' + fmt + '.mp4" style="font-size:11px;padding:4px 10px">Download MP4</a>' +
-        '</div>' +
-        '<div class="mh-motion-why" style="font-size:11px;color:var(--ink-muted);margin-top:8px"></div>' +
-      '</div>' +
-    '</div>' +
-    '<div class="mh-reel-comments" style="margin-top:12px"></div>';
-  _loadMotionWhy(panel, motionUrl, fmt);
-  // UI 1.8 - pin timestamp comments to this card's motion clip too. The
-  // run-level comments endpoint sits at the path before '/card/'.
-  var _cmRoot = motionUrl.split('/card/')[0];
-  var _cmMount = panel.querySelector('.mh-reel-comments');
-  if (_cmMount && typeof mhReelComments === 'function') {
-    mhReelComments({mount: _cmMount, video: panel.querySelector('video.mh-motion-video'), baseUrl: _cmRoot + '/reel/comments', target: 'card:' + cardId});
-  }
-}
-
-// "Why this motion design" \u2014 the render's explainability sidecar, fetched
-// after the MP4 lands. Absence is fine (legacy renders predate manifests).
-function _loadMotionWhy(panel, motionUrl, fmt) {
-  var slot = panel.querySelector('.mh-motion-why');
-  if (!slot) return;
-  var mUrl = motionUrl + '/manifest' + (fmt !== 'story' ? '?format=' + encodeURIComponent(fmt) : '');
-  fetch(mUrl).then(function(r){ return r.ok ? r.json() : null; }).then(function(m) {
-    if (!m || !m.card) return;
-    var bits = [];
-    if (m.card.archetype) bits.push('archetype <b>' + m.card.archetype + '</b>');
-    if (m.card.motion_intent) bits.push('motion <b>' + m.card.motion_intent + '</b>');
-    if (m.card.mood) bits.push('mood <b>' + m.card.mood + '</b>');
-    bits.push(m.card.colour_source === 'still-parity-roles' ? 'colours mirror the approved still' : 'colours from seed ' + (m.card.variation_seed || ''));
-    slot.innerHTML = 'Why this design: ' + bits.join(' &middot; ') + mhEngineNoteHtml(m);
-  }).catch(function(){});
-}
-
-// M22 handoff — honest engine disclosure. The manifest names the engine that
-// produced this video; the reduced-motion FFmpeg fallback writes plain-language
-// capability notes (no text choreography / count-up, static cover chips) that
-// the user deserves to see instead of silently wondering why the video looks
-// simpler. Manifest fields are engine-written but escaped anyway.
-function mhEngineNoteHtml(m) {
-  if (!m || m.engine !== 'ffmpeg') return '';
-  var notes = m.notes || {};
-  var line = notes.engine_note || 'Rendered by the reduced-motion FFmpeg engine.';
-  var extra = [];
-  if (notes.captions === 'unsupported-on-engine') extra.push('burned captions are unavailable on this engine');
-  if (notes.stat_chips === 'static-cover') extra.push('cover stats are static (no count-up)');
-  return '<div style="margin-top:4px;color:var(--ink-muted)">' + window.safeText(line) +
-    (extra.length ? ' (' + window.safeText(extra.join('; ')) + ')' : '') + '</div>';
 }
 
 // Voiceover (opt-in, MEDIAHUB_VOICEOVER=1): speak the human-approved caption.
@@ -45255,6 +45279,10 @@ function mhSetupMode(mode) {{
         _print_tool_url = url_for("print_run_tool_page", run_id=run_id)
         _certs_url = url_for("pack_certificates_zip", run_id=run_id)
         _certs_print_url = url_for("pack_certificates_zip", run_id=run_id, print=1)
+        # D-12: the anchors keep their direct hrefs as the no-JS fallback;
+        # with JS the click kicks the background job and polls for progress.
+        _certs_job_url = url_for("api_run_certificates_job", run_id=run_id)
+        _certs_print_job_url = url_for("api_run_certificates_job", run_id=run_id, print=1)
         _turn_into_html = _render_turn_into_card(run_id)
 
         # W.14: what this club's own approval history says it prefers —
@@ -45584,14 +45612,17 @@ function mhSetupMode(mode) {{
   <div>
     <div style="font-size:13px;font-weight:700">Print for the noticeboard</div>
     <div style="font-size:12px;color:var(--ink-dim);margin-top:2px">A branded A4 certificate for every approved achievement — the thing families frame. Photo/name consent is honoured automatically.</div>
+    <div id="mh-certs-status" class="dim" role="status" aria-live="polite" style="font-size:12px;margin-top:4px;min-height:1.2em"></div>
   </div>
   <div style="display:flex;gap:8px;flex-wrap:wrap">
-    <a class="btn secondary" style="font-size:12px;padding:6px 12px" href="{
+    <a class="btn secondary mh-certs-go" style="font-size:12px;padding:6px 12px" href="{
             _h(_certs_url)
-        }">Download certificates (.zip of PDFs)</a>
-    <a class="btn secondary" style="font-size:12px;padding:6px 12px" href="{
+        }" data-certs-job="{_h(_certs_job_url)}" onclick="return mhCertificatesJob(this)">Download certificates (.zip of PDFs)</a>
+    <a class="btn secondary mh-certs-go" style="font-size:12px;padding:6px 12px" href="{
             _h(_certs_print_url)
-        }" title="A4 + 3mm bleed and crop marks, ready for a professional print shop">Print-shop pack (bleed + crop marks)</a>
+        }" data-certs-job="{
+            _h(_certs_print_job_url)
+        }" onclick="return mhCertificatesJob(this)" title="A4 + 3mm bleed and crop marks, ready for a professional print shop">Print-shop pack (bleed + crop marks)</a>
   </div>
 </div>
 
@@ -45654,6 +45685,58 @@ function mhSetupMode(mode) {{
 
 // M31 - initialise the reel composer readout (duration + max-5 rule).
 if (typeof mhReelComposerSync === 'function') mhReelComposerSync();
+
+// D-12 - the certificates ZIP renders one Chromium PDF per approved card,
+// far too slow to hold the click's request open. Kick the background job,
+// report per-certificate progress, then trigger the finished ZIP download
+// from the same gated file route. Returning false keeps the anchor's href
+// as the no-JS fallback.
+function mhCertificatesJob(a) {{
+  var status = document.getElementById('mh-certs-status');
+  var say = function(m) {{ if (status) status.textContent = m; }};
+  if (a.getAttribute('aria-disabled') === 'true') return false;
+  var siblings = document.querySelectorAll('a.mh-certs-go');
+  var setBusy = function(busy) {{
+    Array.prototype.forEach.call(siblings, function(el) {{
+      if (busy) {{ el.setAttribute('aria-disabled', 'true'); el.style.opacity = '0.55'; }}
+      else {{ el.removeAttribute('aria-disabled'); el.style.opacity = ''; }}
+    }});
+  }};
+  setBusy(true);
+  var finish = function(msg) {{ setBusy(false); say(msg || ''); }};
+  say('Starting…');
+  fetch(a.dataset.certsJob, {{method:'POST', headers:{{'Content-Type':'application/json'}}, body:'{{}}'}})
+    .then(function(r){{ return r.json().then(function(j){{ return {{status: r.status, j: j}}; }}); }})
+    .then(function(res){{
+      var j = res.j || {{}};
+      if (res.status !== 202 || !j.poll_url) {{
+        finish(j.user_message || j.error || 'Could not start the certificates export.');
+        return;
+      }}
+      var tries = 0;
+      var poll = function() {{
+        tries++;
+        if (tries > 200) {{ finish('Timed out waiting for the certificates — try again.'); return; }}
+        fetch(j.poll_url).then(function(r){{ return r.json(); }}).then(function(s){{
+          if (s.status === 'done' && s.download_url) {{
+            finish('Done — your download is starting.');
+            window.location.href = s.download_url;
+            return;
+          }}
+          if (s.status === 'error') {{
+            finish(s.user_message || s.error || 'Certificates export failed.');
+            return;
+          }}
+          var n = Math.min((s.done || 0) + 1, s.total || 1);
+          say('Rendering certificate ' + n + ' of ' + (s.total || '?') + (s.current ? (' — ' + s.current) : '') + '…');
+          setTimeout(poll, 2000);
+        }}).catch(function(){{ setTimeout(poll, 4000); }});
+      }};
+      setTimeout(poll, 1000);
+    }})
+    .catch(function(){{ finish('Network error — try again.'); }});
+  return false;
+}}
 
 // M30 - "Create all graphics": one background job over the approved cards
 // still missing a graphic, with honest per-card progress, then a reload so
@@ -47160,10 +47243,13 @@ function tiRegenerate() {{
                 else:
                     wf_status = str((item.get("workflow") or {}).get("status") or "queue").lower()
                 schedule_btn = _schedule_button_html(run_id, card_id_raw, f"g-{card_uuid}")
-                # Per-card motion download — the endpoint renders (or
-                # serves cached) MP4. New tab so the user lands on the
-                # video preview rather than blocking the pack page.
+                # Per-card motion render — D-12: the same background job +
+                # poll + progress UI the Content builder uses (the shared
+                # _MOTION_CLIENT_JS block), instead of a plain link that
+                # held a 30-90s synchronous render open in a new tab with
+                # zero feedback.
                 motion_btn = ""
+                motion_panel = ""
                 if card_id_raw:
                     _motion_url = url_for(
                         "api_card_motion",
@@ -47171,11 +47257,18 @@ function tiRegenerate() {{
                         card_id=str(card_id_raw),
                     )
                     motion_btn = (
-                        f'<a class="btn secondary" style="font-size:12px;padding:4px 10px" '
-                        f'href="{_h(_motion_url)}" target="_blank" rel="noopener" '
+                        f'<button class="btn secondary" style="font-size:12px;padding:4px 10px" '
+                        f"onclick=\"generateMotion(this, {repr(_motion_url)}, '{card_uuid}')\" "
                         f'title="Render a 6-second branded story-format MP4 for this card. '
-                        f'First time can take 30-90s while Video Maker renders.">'
-                        f"&#x25B6; Motion video</a>"
+                        f'The first render can take up to 90 seconds; repeats are instant.">'
+                        f"&#x25B6; Motion video</button>"
+                    )
+                    motion_panel = (
+                        f'<div class="motion-panel" data-card="{card_uuid}" '
+                        f'data-motion-url="{_h(_motion_url)}" '
+                        f'style="display:none;margin-top:10px;padding:12px;'
+                        f'background:rgba(244,213,141,0.04);border:1px solid var(--border);'
+                        f'border-radius:8px"></div>'
                     )
                 # Per-card sponsor variant — Phase 1.2 deliverable.
                 # Sponsor-branded result-card graphic + sponsor-
@@ -47252,6 +47345,7 @@ function tiRegenerate() {{
     {sponsor_btn}
     {schedule_btn}
   </div>
+  {motion_panel}
 </div>"""
             if not rows:
                 rows = f'<p class="muted">{_h(empty_msg)}</p>'
@@ -47397,6 +47491,7 @@ function tiRegenerate() {{
 {_section_html("Needs review", grouped.get("needs_review", []), icon="&#x26A0;")}
 {_section_html("Not recommended", grouped.get("rejected", []), icon="&#x2715;")}
 
+{_MOTION_CLIENT_JS}
 <script>
 function copyText(btn, taId) {{
   var ta = document.getElementById(taId);
@@ -55986,6 +56081,8 @@ voice, and queues them for one-click approval.</p>
             "video-clip",
             "video-reel",
             "video-stabilize",
+            # D-12: the certificates-ZIP build (one Chromium PDF per card).
+            "certificates",
         ):
             return jsonify({"error": "job_not_found"}), 404
         if (job.get("owner_pid") or "") != (_active_profile_id() or ""):
@@ -56022,6 +56119,10 @@ voice, and queues them for one-click approval.</p>
             payload["project_id"] = job.get("project_id")
         if job.get("project") is not None:
             payload["project"] = job.get("project")
+        # D-12: a file-producing job (certificates ZIP) hands back the gated
+        # download URL instead of a video_url; other pollers ignore the key.
+        if job.get("download_url"):
+            payload["download_url"] = job.get("download_url")
         return jsonify(payload)
 
     @app.route("/api/runs/<run_id>/reel-file", methods=["GET"])
@@ -62019,25 +62120,16 @@ voice, and queues them for one-click approval.</p>
 
     # ---- W.12: print exports on the pack ------------------------------------
 
-    @app.route("/pack/<run_id>/certificates.zip")
-    def pack_certificates_zip(run_id: str):
-        if not _can_access_run(run_id, _load_run(run_id), _active_profile_id()):
-            abort(404)
-        import io as _io
-        import zipfile as _zip
+    def _certificates_approved_for(run_id: str):
+        """(run_data, pid, prof, approved_items) for the certificates export.
 
+        Shared by the synchronous ZIP route and the D-12 background job so
+        both build from exactly the same approved, consent-cleared set."""
         from mediahub.content_pack.builder import build_grouped_pack
-        from mediahub.graphic_renderer.print_export import (
-            CmykUnavailable,
-            build_certificate_html,
-            export_certificate_print_pdf,
-            ghostscript_available,
-            render_html_to_pdf,
-        )
 
         data = _load_run(run_id)
         if not data:
-            abort(404)
+            return None, "", None, []
         pid = _run_owner_profile_id(run_id) or ""
         prof = load_profile(pid) if pid else None
         pack = build_grouped_pack(data, pid, RUNS_DIR)
@@ -62047,16 +62139,37 @@ voice, and queues them for one-click approval.</p>
             for item in (pack.get(group) or [])
             if item.get("wf_status") in ("approved", "posted") and not item.get("consent_blocked")
         ]
-        if not approved:
-            return (
-                _layout(
-                    "Certificates",
-                    '<div class="card"><h2>No approved cards yet</h2>'
-                    '<p class="dim">Certificates are printed from approved achievements '
-                    "only — approve some cards first, then come back.</p></div>",
-                ),
-                200,
-            )
+        return data, pid, prof, approved
+
+    def _write_certificates_zip(
+        stream,
+        run_id: str,
+        data: dict,
+        pid: str,
+        prof,
+        approved: list,
+        *,
+        print_mode: bool,
+        bleed_mm: float,
+        crop_marks: bool,
+        colour_bar: bool,
+        want_cmyk: bool,
+        progress=None,
+    ) -> None:
+        """Render one A4 certificate PDF per approved card into ``stream``
+        as a ZIP. ``progress(i, total, swimmer_name)`` (optional) is called
+        before each render so the D-12 background job can report
+        "Rendering certificate N of M" honestly."""
+        import zipfile as _zip
+
+        from mediahub.graphic_renderer.print_export import (
+            CmykUnavailable,
+            build_certificate_html,
+            export_certificate_print_pdf,
+            ghostscript_available,
+            render_html_to_pdf,
+        )
+
         brand = {
             "primary": getattr(prof, "brand_primary", "#0A2540") if prof else "#0A2540",
             "secondary": getattr(prof, "brand_secondary", "#000000") if prof else "#000000",
@@ -62064,15 +62177,6 @@ voice, and queues them for one-click approval.</p>
         meet = data.get("meet") or {}
         meet_name = meet.get("name") or data.get("file_name") or run_id
         meet_date = str(meet.get("start_date") or "")
-        # G1.17: print-production mode (?print=1) adds bleed + crop marks; an
-        # optional ?cmyk=1 converts to DeviceCMYK via Ghostscript when present.
-        print_mode = (request.args.get("print") or "").strip().lower() in _TRUTHY
-        bleed_mm = _clamp_float(request.args.get("bleed"), default=3.0, lo=0.0, hi=10.0)
-        crop_marks = (request.args.get("marks") or "1").strip().lower() in _TRUTHY
-        colour_bar = (
-            request.args.get("colorbar") or request.args.get("colourbar") or "1"
-        ).strip().lower() in _TRUTHY
-        want_cmyk = (request.args.get("cmyk") or "").strip().lower() in _TRUTHY
         do_cmyk = print_mode and want_cmyk and ghostscript_available()
         cmyk_note = None
         if print_mode and want_cmyk and not do_cmyk:
@@ -62086,11 +62190,12 @@ voice, and queues them for one-click approval.</p>
         out_dir = DATA_DIR / "print_exports" / run_id
         out_dir.mkdir(parents=True, exist_ok=True)
         rgb_fallbacks: list = []  # certs where gs failed mid-run and RGB shipped
-        buf = _io.BytesIO()
-        with _zip.ZipFile(buf, "w", _zip.ZIP_DEFLATED) as zf:
+        with _zip.ZipFile(stream, "w", _zip.ZIP_DEFLATED) as zf:
             for i, item in enumerate(approved):
                 a = item.get("achievement") or {}
                 name = a.get("swimmer_name") or "Swimmer"
+                if progress is not None:
+                    progress(i, len(approved), name)
                 facts = a.get("raw_facts") or {}
                 time_str = facts.get("new_time") or facts.get("time") or facts.get("time_str") or ""
                 cert_kwargs = dict(
@@ -62133,6 +62238,71 @@ voice, and queues them for one-click approval.</p>
                 )
             if cmyk_note:
                 zf.writestr("certificates/CMYK-NOTE.txt", cmyk_note)
+
+    @app.route("/pack/<run_id>/certificates.zip")
+    def pack_certificates_zip(run_id: str):
+        if not _can_access_run(run_id, _load_run(run_id), _active_profile_id()):
+            abort(404)
+        import io as _io
+
+        # D-12: serve a ZIP a finished background job already built
+        # (?file=<job_id>) — this route stays the one gated file server.
+        _file_job = (request.args.get("file") or "").strip()
+        if _file_job:
+            job = _variant_job_load(_file_job)
+            if (
+                job is None
+                or job.get("kind") != "certificates"
+                or job.get("run_id") != run_id
+                or job.get("status") != "done"
+            ):
+                abort(404)
+            zip_path = Path(str(job.get("zip_path") or ""))
+            if not zip_path.is_file():
+                abort(404)
+            return send_file(
+                str(zip_path),
+                mimetype="application/zip",
+                as_attachment=True,
+                download_name=str(job.get("download_name") or f"certificates-{run_id}.zip"),
+            )
+
+        data, pid, prof, approved = _certificates_approved_for(run_id)
+        if data is None:
+            abort(404)
+        if not approved:
+            return (
+                _layout(
+                    "Certificates",
+                    '<div class="card"><h2>No approved cards yet</h2>'
+                    '<p class="dim">Certificates are printed from approved achievements '
+                    "only — approve some cards first, then come back.</p></div>",
+                ),
+                200,
+            )
+        # G1.17: print-production mode (?print=1) adds bleed + crop marks; an
+        # optional ?cmyk=1 converts to DeviceCMYK via Ghostscript when present.
+        print_mode = (request.args.get("print") or "").strip().lower() in _TRUTHY
+        bleed_mm = _clamp_float(request.args.get("bleed"), default=3.0, lo=0.0, hi=10.0)
+        crop_marks = (request.args.get("marks") or "1").strip().lower() in _TRUTHY
+        colour_bar = (
+            request.args.get("colorbar") or request.args.get("colourbar") or "1"
+        ).strip().lower() in _TRUTHY
+        want_cmyk = (request.args.get("cmyk") or "").strip().lower() in _TRUTHY
+        buf = _io.BytesIO()
+        _write_certificates_zip(
+            buf,
+            run_id,
+            data,
+            pid,
+            prof,
+            approved,
+            print_mode=print_mode,
+            bleed_mm=bleed_mm,
+            crop_marks=crop_marks,
+            colour_bar=colour_bar,
+            want_cmyk=want_cmyk,
+        )
         buf.seek(0)
         kind = "print" if print_mode else "certificates"
         return send_file(
@@ -62140,6 +62310,130 @@ voice, and queues them for one-click approval.</p>
             mimetype="application/zip",
             as_attachment=True,
             download_name=f"{kind}-{run_id}.zip",
+        )
+
+    @app.route("/api/runs/<run_id>/certificates-job", methods=["POST"])
+    def api_run_certificates_job(run_id: str):
+        """D-12: build the certificates ZIP in the background; ``202`` +
+        ``{job_id, poll_url}``.
+
+        The synchronous ``certificates.zip`` route renders one Chromium PDF
+        per approved card inside the request — the same held-connection
+        failure the reel/motion routes already cured with the disk-backed
+        job store. Fail-fast gates (tenant, approved set) stay in the
+        request thread; the worker reports "Rendering certificate N of M"
+        via the shared poll route, and completion carries the download URL
+        served by the existing (equally gated) GET route."""
+        if not _can_access_run(run_id, _load_run(run_id), _active_profile_id()):
+            return jsonify({"error": "run_not_found"}), 404
+        data, pid, prof, approved = _certificates_approved_for(run_id)
+        if data is None:
+            return jsonify({"error": "run_not_found"}), 404
+        if not approved:
+            return (
+                jsonify(
+                    {
+                        "error": "no_approved_cards",
+                        "user_message": (
+                            "Certificates are printed from approved achievements only "
+                            "— approve some cards first, then come back."
+                        ),
+                    }
+                ),
+                409,
+            )
+        print_mode = (request.args.get("print") or "").strip().lower() in _TRUTHY
+        bleed_mm = _clamp_float(request.args.get("bleed"), default=3.0, lo=0.0, hi=10.0)
+        crop_marks = (request.args.get("marks") or "1").strip().lower() in _TRUTHY
+        colour_bar = (
+            request.args.get("colorbar") or request.args.get("colourbar") or "1"
+        ).strip().lower() in _TRUTHY
+        want_cmyk = (request.args.get("cmyk") or "").strip().lower() in _TRUTHY
+
+        job_id = uuid.uuid4().hex
+        out_dir = DATA_DIR / "print_exports" / run_id
+        out_dir.mkdir(parents=True, exist_ok=True)
+        zip_path = out_dir / f"certificates-{job_id}.zip"
+        kind_name = "print" if print_mode else "certificates"
+        # url_for needs the request context — resolve before the thread.
+        download_url = url_for("pack_certificates_zip", run_id=run_id, file=job_id)
+        job: dict = {
+            "id": job_id,
+            "kind": "certificates",
+            "status": "running",
+            "error": "",
+            "user_message": "",
+            "video_url": "",
+            "run_id": run_id,
+            "zip_path": str(zip_path),
+            "download_url": "",
+            "download_name": f"{kind_name}-{run_id}.zip",
+            "total": len(approved),
+            "done": 0,
+            "current": "",
+            "created_at": time.time(),
+            "owner_pid": _active_profile_id() or "",
+        }
+        _variant_jobs_gc()
+        _variant_job_save(job)
+
+        def _worker() -> None:
+            try:
+                with _job_heartbeat(job):
+                    with _render_slot("certificates", run_id, timeout=_RENDER_TRY_TIMEOUT):
+
+                        def _progress(i: int, total: int, name: str) -> None:
+                            job["done"] = i
+                            job["total"] = total
+                            job["current"] = str(name or "")
+                            _variant_job_save(job)
+
+                        with open(zip_path, "wb") as fh:
+                            _write_certificates_zip(
+                                fh,
+                                run_id,
+                                data,
+                                pid,
+                                prof,
+                                approved,
+                                print_mode=print_mode,
+                                bleed_mm=bleed_mm,
+                                crop_marks=crop_marks,
+                                colour_bar=colour_bar,
+                                want_cmyk=want_cmyk,
+                                progress=_progress,
+                            )
+                job["status"] = "done"
+                job["done"] = int(job.get("total") or len(approved))
+                job["current"] = ""
+                job["download_url"] = download_url
+            except _RenderBusy:
+                job["status"] = "error"
+                job["error"] = "renderer_busy"
+                job["user_message"] = (
+                    "Another export is rendering right now — try again in a minute."
+                )
+            except Exception as e:
+                log.exception("certificates job %s failed", job_id[:8])
+                job["status"] = "error"
+                job["error"] = str(e)
+                job["user_message"] = (
+                    "We couldn't finish building the certificates just now. "
+                    "Give it a moment and try again."
+                )
+            _variant_job_save(job)
+
+        threading.Thread(target=_worker, name=f"certs-{job_id[:8]}", daemon=True).start()
+        return (
+            jsonify(
+                {
+                    "ok": True,
+                    "job_id": job_id,
+                    "poll_url": url_for("api_reel_job_status", job_id=job_id),
+                    "total": len(approved),
+                }
+            ),
+            202,
         )
 
     @app.route("/pack/<run_id>/print/separations.json")
