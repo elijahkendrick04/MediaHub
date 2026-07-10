@@ -30730,23 +30730,44 @@ self.addEventListener('fetch', function(e){
                 f'<a href="{url_for("sign_in_page")}">Choose organisation &rarr;</a></div>'
             )
 
+        rows = []
+        ach_by_id: dict[str, int] = {}
+        total_runs = 0
+        db_failed = False
         try:
             conn = _db()
             rows = conn.execute(
                 "SELECT id, created_at, finished_at, status, profile_id, "
-                "meet_name, our_swims, n_cards, n_queue, error, file_name "
+                "meet_name, our_swims, n_cards, n_queue, n_achievements, error, file_name "
                 "FROM runs WHERE profile_id = ? "
                 "ORDER BY created_at DESC LIMIT 100",
                 (prof.profile_id,),
             ).fetchall()
+            # Surface the REAL engine output (V5 recognition achievements) — the
+            # legacy n_cards/n_queue are ~0 in the recognition-first pipeline and
+            # read as "nothing produced". Mirrors the standalone /activity page.
+            ach_by_id = _warm_run_achievements(conn, rows)
+            total_runs = conn.execute(
+                "SELECT COUNT(*) FROM runs WHERE profile_id = ?",
+                (prof.profile_id,),
+            ).fetchone()[0]
             conn.close()
         except Exception:
-            rows = []
+            db_failed = True
 
         section_intro = (
             f'<p class="dim" style="margin-bottom:14px">Recent runs for '
             f"<b>{_h(prof.display_name)}</b>.</p>"
         )
+
+        if db_failed:
+            return (
+                f"{section_header}"
+                f"{section_intro}"
+                '<div class="card" style="border-left:3px solid var(--mh-prim-error-500)">'
+                "<b>Couldn&rsquo;t reach the runs store just now.</b> This is usually "
+                "temporary. Reload the page to try again; your runs are safe.</div>"
+            )
 
         if not rows:
             return (
@@ -30767,27 +30788,33 @@ self.addEventListener('fetch', function(e){
             delete_href = url_for("privacy_delete_run", run_id=r["id"])
             started = (r["created_at"] or "")[:19]
             started_iso = started.replace(" ", "T") + "Z" if started else ""
+            label = r["meet_name"] or r["file_name"] or r["id"]
             rows_html += (
-                f'<tr data-run-row="{_h(r["id"])}"><td data-label="Input"><a href="{review_href}">{_h(r["meet_name"] or r["file_name"] or r["id"])}</a></td>'
+                f'<tr data-run-row="{_h(r["id"])}"><td data-label="Input"><a href="{review_href}">{_h(label)}</a></td>'
                 f'<td data-label="Status"><span class="tag {badge}">{_h(r["status"])}</span></td>'
                 f'<td data-label="Matched">{_h(r["our_swims"] or 0)}</td>'
-                f'<td data-label="Queue / Total">{_h(r["n_queue"] or 0)} / {_h(r["n_cards"] or 0)}</td>'
+                f'<td data-label="Achievements">{_h(ach_by_id.get(r["id"], 0))}</td>'
                 f'<td data-label="Started"><time class="mh-rel" datetime="{_h(started_iso)}">{_h(started)}</time></td>'
                 f'<td><form method="post" action="{delete_href}" '
                 f'class="mh-run-delete" data-run-id="{_h(r["id"])}" '
                 f'style="display:inline" data-no-loader="1">'
                 f'<input type="hidden" name="next" value="{_h(request.path)}">'
                 f'<button class="btn danger" type="submit" '
+                f'aria-label="Delete {_h(label)}" '
                 f'style="font-size:11px;padding:4px 10px">Delete</button>'
                 f"</form></td></tr>"
             )
-            if r["status"] == "error" and r["error"]:
+            # Count every errored run for the callout (a red "error" badge without
+            # a matching tally would confuse). The expander below stays gated on
+            # captured error text — we never invent a reason we don't have.
+            if r["status"] == "error":
                 n_errored += 1
+            if r["status"] == "error" and r["error"]:
                 err_text = str(r["error"])
                 truncated = err_text[:600] + ("…" if len(err_text) > 600 else "")
                 rows_html += (
                     f'<tr class="run-error-row" data-run-err="{_h(r["id"])}">'
-                    '<td colspan="7" style="padding:6px 14px 14px 14px;'
+                    '<td colspan="6" style="padding:6px 14px 14px 14px;'
                     'background:rgba(255,93,108,0.06);border-left:3px solid var(--mh-prim-error-500)">'
                     "<details>"
                     '<summary style="cursor:pointer;font-size:13px;font-weight:600;'
@@ -30802,13 +30829,23 @@ self.addEventListener('fetch', function(e){
 
         failure_callout = ""
         if n_errored:
-            label = "1 run failed" if n_errored == 1 else f"{n_errored} runs failed"
+            fail_label = "1 run failed" if n_errored == 1 else f"{n_errored} runs failed"
             failure_callout = (
                 '<div class="card" style="padding:12px 18px;margin-bottom:20px;'
                 'background:rgba(255,93,108,0.06);border-left:3px solid var(--mh-prim-error-500)">'
-                f"<b>{_h(label)}</b> in the last 100 runs. "
+                f"<b>{_h(fail_label)}</b> in the last 100 runs. "
                 "Expand <i>Why did this run fail?</i> on each row below to "
                 "see the pipeline error.</div>"
+            )
+
+        # Honest truncation notice — the tile promises "every run", but the table
+        # is capped at the 100 most recent. Only shown when older runs exist.
+        cap_note = ""
+        if total_runs > len(rows):
+            cap_note = (
+                '<p class="dim" style="margin-top:10px;font-size:12px">'
+                f"Showing the {len(rows)} most recent runs of {total_runs:,} total. "
+                "Older runs are kept but not listed here.</p>"
             )
 
         # Delete in place + bulk clear: shared, delegated handler (mh-run-delete
@@ -30820,10 +30857,11 @@ self.addEventListener('fetch', function(e){
             f"{failure_callout}"
             '<div class="card"><table class="mh-table-stack">'
             "<thead><tr><th>Input</th><th>Status</th>"
-            "<th>Matched</th><th>Queue / Total</th>"
+            "<th>Matched</th><th>Achievements</th>"
             "<th>Started</th><th></th></tr></thead>"
             f"<tbody>{rows_html}</tbody>"
             "</table></div>"
+            f"{cap_note}"
             f"{_RUN_DELETE_JS}"
         )
 
