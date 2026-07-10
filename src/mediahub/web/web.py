@@ -18531,17 +18531,22 @@ _NEWSLETTERS_HOME_JS = (
 async function genNl(btn, fmt){
   var rangeEl=document.getElementById('nl-range');
   var range=rangeEl?rangeEl.value:'';
+  // H-12: the meet digest names its meet; '' keeps "latest meet in range".
+  var runEl=document.getElementById('nl-digest-run');
+  var runId=(fmt==='meet_digest'&&runEl)?runEl.value:'';
   _genBusy(btn, true);
   try{
-    const j = await _genNl(fmt, range, _aiChecked(btn));
+    const j = await _genNl(fmt, range, _aiChecked(btn), runId);
     if(j.ok){ location.href=j.url; return; }
     _genToast(_genMsg(j));
   }catch(e){ _genToast('Network error — nothing was created.'); }
   finally{ _genBusy(btn, false); }
 }
-async function _genNl(fmt, range, withAi){
+async function _genNl(fmt, range, withAi, runId){
+  const payload={format:fmt, range:range, with_ai:withAi};
+  if(runId) payload.run_id=runId;
   const r = await fetch('__GEN_URL__', {method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({format:fmt, range:range, with_ai:withAi})});
+    body: JSON.stringify(payload)});
   return r.json();
 }
 </script>
@@ -62595,16 +62600,30 @@ voice, and queues them for one-click approval.</p>
                 f'gap:12px">{"".join(rows)}</div>'
             )
 
-        def _tile(fmt, name, desc):
+        def _tile(fmt, name, desc, extra=""):
             return (
                 '<div class="card"><h3 style="margin-top:0">' + name + "</h3>"
                 '<p class="dim" style="font-size:13px">' + desc + "</p>"
-                '<label class="mh-ai-opt" style="display:flex;align-items:center;gap:6px;'
+                + extra
+                + '<label class="mh-ai-opt" style="display:flex;align-items:center;gap:6px;'
                 'font-size:12px;margin-top:8px;color:var(--ink-muted)">'
                 '<input type="checkbox" class="mh-ai-toggle" checked> Write the intro with AI</label>'
                 '<button class="btn" style="margin-top:8px" onclick="genNl(this,\'' + fmt + "')\">"
                 "Generate</button></div>"
             )
+
+        # H-12: the meet digest names which meet it covers. Same recent-meets
+        # query the Documents "Meet programme" tile uses; the default option
+        # keeps the pick-the-latest-in-range behaviour for one-click use.
+        digest_run_opts = '<option value="">Latest meet in range</option>' + "".join(
+            f'<option value="{_h(rid)}">{_h(name)} ({n} cards)</option>'
+            for rid, name, n in _doc_recent_runs(pid)
+        )
+        digest_meet_select = (
+            '<label class="dim" for="nl-digest-run" style="font-size:12px;display:block;'
+            'margin-top:8px">Meet</label>'
+            f'<select id="nl-digest-run" class="input">{digest_run_opts}</select>'
+        )
 
         body = (
             '<section class="mh-hero"><h1>Newsletters</h1>'
@@ -62625,6 +62644,7 @@ voice, and queues them for one-click approval.</p>
                 "meet_digest",
                 "Meet digest",
                 "One meet: the standout swims, athletes to watch and what's next.",
+                extra=digest_meet_select,
             )
             + _tile(
                 "season_highlights",
@@ -62698,6 +62718,14 @@ voice, and queues them for one-click approval.</p>
             return jsonify({"ok": False, "error": "bad_format"}), 400
         preset = (body.get("range") or "this_month").strip()
         with_ai = bool(body.get("with_ai", True))
+        # H-12: the meet digest can pin exactly one meet. Only the digest
+        # takes a run_id; ownership is tenant-gated the same way as every
+        # other per-run endpoint (a foreign run answers like a missing one).
+        run_id = (body.get("run_id") or "").strip()
+        if run_id and fmt != "meet_digest":
+            run_id = ""
+        if run_id and not _can_access_run(run_id, _load_run(run_id), pid):
+            return jsonify({"ok": False, "error": "run_not_found"}), 404
         if with_ai:  # AI drafting is metered spend — permission + quota first
             denied = _editorial_ai_gate(pid)
             if denied is not None:
@@ -62718,6 +62746,7 @@ voice, and queues them for one-click approval.</p>
                 with_ai=with_ai,
                 profile=prof,
                 runs_dir=RUNS_DIR,
+                run_id=run_id or None,
             )
         except Exception as e:  # honest AI-unavailable signal — offer a data-only build
             from mediahub.media_ai.llm import ClaudeUnavailableError
