@@ -14943,7 +14943,13 @@ def _layout(
       if (form.dataset.mhBound === '1') return;
       form.dataset.mhBound = '1';
       if (form.dataset.noLoader === '1') return;
-      form.addEventListener('submit', function(){
+      form.addEventListener('submit', function(e){
+        // If an earlier handler already cancelled the submit — e.g. an inline
+        // onsubmit="return confirm(...)" the user dismissed, or client-side
+        // validation — the form will not navigate, so the full-screen loader
+        // must NOT be raised. Without this guard it would stick on screen until
+        // the 20s safety timeout (e.g. cancelling a member "Remove" confirm).
+        if (e && e.defaultPrevented) return;
         var method = (form.getAttribute('method') || 'get').toLowerCase();
         if (method === 'get') return;
         var btn = form.querySelector('button[type=submit], input[type=submit]');
@@ -41746,6 +41752,15 @@ what you're doing, what they should do.</p>
             target = (request.form.get("email") or "").strip()
             try:
                 if action == "add":
+                    # Reject an address that can never activate (e.g. "coach@club"
+                    # with no TLD) up front, with the same liberal check signup
+                    # uses — otherwise the row sits "invited" forever because the
+                    # owner is told it "activates at signup" but that email can
+                    # never complete signup. The store only checks for an "@".
+                    if not _auth._looks_like_email(target):
+                        raise _tenancy.TenancyError(
+                            "Enter a valid email address (like coach@club.org)."
+                        )
                     role = (request.form.get("role") or _tenancy.ROLE_MEMBER).strip().lower()
                     # Don't let the upsert demote the last active owner to a
                     # non-owner seat — that would leave the workspace with no
@@ -41902,11 +41917,12 @@ what you're doing, what they should do.</p>
                 f'<form method="post" action="{url_for("organisation_members_page")}" '
                 'style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">'
                 '<input type="hidden" name="action" value="add"/>'
-                "<div><label>Email</label><br/>"
-                '<input type="email" name="email" required placeholder="coach@club.org" '
+                '<div><label for="mh-member-email">Email</label><br/>'
+                '<input type="email" id="mh-member-email" name="email" required '
+                'autocomplete="email" placeholder="coach@club.org" '
                 'style="padding:8px 10px;min-width:min(260px,100%)"/></div>'
-                "<div><label>Role</label><br/>"
-                '<select name="role" style="padding:8px 10px">'
+                '<div><label for="mh-member-role">Role</label><br/>'
+                '<select id="mh-member-role" name="role" style="padding:8px 10px">'
                 + "".join(
                     f'<option value="{r}"{" selected" if r == _tenancy.ROLE_MEMBER else ""}>'
                     f"{_h(_perms.role_label(r))} — {_h(_perms.role_description(r))}</option>"
@@ -41938,11 +41954,12 @@ what you're doing, what they should do.</p>
                 '<table class="mh-table-stack" style="width:100%;border-collapse:collapse;font-size:13px">'
                 '<thead><tr style="text-align:left;border-bottom:1px solid '
                 'rgba(255,255,255,0.08)">'
-                '<th style="padding:10px 12px">Email</th>'
-                '<th style="padding:10px 12px">Role</th>'
-                '<th style="padding:10px 12px">Status</th>'
-                '<th style="padding:10px 12px">Invited by</th>'
-                "<th></th></tr></thead>"
+                '<th scope="col" style="padding:10px 12px">Email</th>'
+                '<th scope="col" style="padding:10px 12px">Role</th>'
+                '<th scope="col" style="padding:10px 12px">Status</th>'
+                '<th scope="col" style="padding:10px 12px">Invited by</th>'
+                '<th scope="col" aria-label="Actions"></th>'
+                "</tr></thead>"
                 f"<tbody>{rows_html}</tbody></table></div>"
             )
         else:
