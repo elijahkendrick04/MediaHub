@@ -175,6 +175,10 @@ No changes to `requirements.txt`, `pyproject.toml`, base templates, shared CSS/J
 - **F-4 (`/healthz/deps` path disclosure)** — a shared health route; owner should decide whether to operator-gate it or redact absolute paths. Low severity.
 - **Operator-with-an-org path was already correct** — the three fixes only affect the no-org state; an operator with a ready organisation always reached the console. No regression risk there.
 - **Whole-file formatting drift in `web.py`** — the newest `ruff` reports quote-style deviations across pre-existing, untouched parts of `web.py`, but under the CI-pinned `ruff==0.8.4` the file is already clean and my edits pass. I deliberately did **not** run a whole-file reformat (it would churn dozens of unrelated lines and collide with parallel sessions).
+- **Pre-existing sandbox-flaky/environmental test failures (not caused by this change)** — the full-suite green-gate run (12,491 passed, 10 skipped) surfaced 5 failures, all outside this feature and all passing in isolation:
+  - `tests/test_ui_2_1_cutout_compare.py::TestEnsureCutoutResolver` (3 tests) — **environmental**: the rembg cutout model download is network-blocked in this sandbox (`403 Forbidden ... releases/download/.../u2net.onnx`), so the resolver honestly reports `failed` instead of `generated`/`cached`/`unavailable`. Unrelated to routing.
+  - `tests/test_club_profile_token_scrub.py::test_legacy_secrets_json_is_scrubbed` and `tests/test_status_unavailable_state.py::test_no_heartbeat_shows_unavailable_not_green` — cross-test global-state pollution under parallel xdist (a one-time secrets scrub / a shared heartbeat singleton); both pass when run alone.
+  A clean `origin/main` worktree is being re-run under identical parallel conditions to confirm the same failure set (baseline comparison); the org-gate change (two frozenset entries + a section carve-out) has no causal path to token scrubbing, image cutout, or heartbeat state, and all 5 pass in isolation.
 
 ---
 
