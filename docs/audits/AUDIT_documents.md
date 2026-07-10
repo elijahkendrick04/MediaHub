@@ -192,14 +192,18 @@ CSRF-token wiring reuses the existing `_csrf_token()` / `_csrf_protect` guard �
 the guard itself). One `ruff format` line-wrap was applied to the single import-route line I
 lengthened; no unrelated lines in `web.py` were reformatted.
 
-**Shared-file hygiene fix (recorded for reconciliation).** The `Hygiene hooks (pre-commit)`
-CI check runs `--all-files`, so it failed on my PR because of a pre-existing `end-of-file-fixer`
-violation in **`docs/audits/AUDIT_meet-recap.md`** (a different session's already-merged audit
-report carried a trailing blank line — this blocks *every* open PR, not just mine). I applied
-the smallest possible fix: strip the extra trailing newline so the file ends with exactly one.
-No content change; it is not part of the Documents feature and is flagged here purely so the
-`meet-recap` session/maintainer can reconcile. After the fix, `pre-commit run --all-files`
-passes clean.
+**Shared-file hygiene fixes (recorded for reconciliation).** The `Hygiene hooks (pre-commit)`
+CI check runs `--all-files`, so it fails on *every* open PR whenever any file in the repo has a
+hygiene violation. Two other sessions' already-merged audit reports —
+**`docs/audits/AUDIT_meet-recap.md`** and **`docs/audits/AUDIT_season-wraps.md`** — sit on
+`main` with a trailing blank line (`end-of-file-fixer` violation) that blocked this PR's CI. I
+applied the smallest possible fix to each: remove the extra trailing newline so the file ends
+with exactly one (their content is otherwise untouched — both remain their sessions' reports).
+Neither is part of the Documents feature; they are flagged here purely for the
+`meet-recap`/`season-wraps` sessions or the maintainer to reconcile. **Root cause (out of
+scope):** audit-report merges to `main` are not being gated by the same `pre-commit` hook, so
+this rot recurs as each new report lands — worth fixing at the source. After the fixes,
+`pre-commit run --all-files` passes clean.
 
 **Parallel-session coordination (important).** While this audit ran, another session landed
 a broad "editorial-JS" refactor of the Documents + Newsletters home JS on `main` (new
