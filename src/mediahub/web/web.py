@@ -18522,6 +18522,7 @@ _DOCUMENTS_HOME_JS = (
     "<script>\n"
     + _EDITORIAL_GEN_HELPERS
     + r"""
+const CSRF = "__CSRF__";
 async function genDoc(btn, fmt, scope, runId){
   if(fmt==='meet_programme' && !runId){ _genToast('Pick a meet first.'); return; }
   _genBusy(btn, true);
@@ -18541,7 +18542,10 @@ async function importDoc(){
   const f=document.getElementById('imp-file').files[0];
   if(!f){ _genToast('Choose a file.'); return; }
   const fd=new FormData(); fd.append('file', f);
-  const r=await fetch('__IMPORT_URL__', {method:'POST', body:fd}); const j=await r.json();
+  // Multipart upload: the JSON-content-type CSRF exemption can't apply, so carry
+  // the token in a header (mirrors the app's other multipart writes) — without it
+  // the _csrf_protect guard 403s the POST in production.
+  const r=await fetch('__IMPORT_URL__', {method:'POST', headers:{'X-CSRF-Token':CSRF}, body:fd}); const j=await r.json();
   if(j.ok){ location.href=j.url; } else { _genToast(j.detail||j.message||j.error||'Import failed.'); }
 }
 async function mergePdfs(){
@@ -18557,7 +18561,7 @@ async function imagesToPdf(){
   await _download('__IMG_URL__', fd, 'images.pdf');
 }
 async function _download(url, fd, name){
-  const r=await fetch(url,{method:'POST',body:fd});
+  const r=await fetch(url,{method:'POST',headers:{'X-CSRF-Token':CSRF},body:fd});
   if(!r.ok){ const j=await r.json().catch(()=>({})); _genToast(j.detail||j.message||j.error||'Failed.'); return; }
   const blob=await r.blob(); const a=document.createElement('a');
   a.href=URL.createObjectURL(blob); a.download=name; a.click();
@@ -18578,7 +18582,9 @@ async function saveSpec(){
 }
 async function delDoc(){
   if(!confirm('Delete this document?')) return;
-  const r=await fetch('__DEL_URL__',{method:'POST'}); const j=await r.json();
+  // JSON content-type keeps this same-origin write CSRF-exempt (per the app's
+  // _csrf_protect guard); without it the empty POST is 403d in production.
+  const r=await fetch('__DEL_URL__',{method:'POST',headers:{'Content-Type':'application/json'}}); const j=await r.json();
   if(j.ok) location.href='__HOME_URL__'; else alert('Delete failed.');
 }
 </script>
@@ -18648,8 +18654,8 @@ _DOC_PRESENT_CONSOLE = r"""
     <div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
       <button class="btn" onclick="act('prev')">◀ Prev</button>
       <button class="btn" onclick="act('next')">Next ▶</button>
-      <button class="btn secondary" onclick="act('blackout')">Blackout</button>
-      <button class="btn secondary" onclick="act('autoplay')">Autoplay</button>
+      <button id="btn-blackout" class="btn secondary" aria-pressed="false" onclick="act('blackout')">Blackout</button>
+      <button id="btn-autoplay" class="btn secondary" aria-pressed="false" onclick="act('autoplay')">Autoplay</button>
       <button class="btn secondary" onclick="act('timer_reset')">Reset timer</button>
       <span id="pos" class="dim"></span>
       <span id="cstat" class="dim" role="status" aria-live="polite" style="color:var(--warn)"></span>
@@ -18687,6 +18693,12 @@ async function act(a){
   poll();
 }
 function fmtT(s){ const m=Math.floor(s/60), ss=s%60; return m+':'+String(ss).padStart(2,'0'); }
+function toggleState(id, on, onLabel, offLabel){
+  var el=document.getElementById(id); if(!el) return;
+  el.setAttribute('aria-pressed', on?'true':'false');
+  el.style.outline = on?'2px solid var(--accent)':'';
+  el.textContent = on?onLabel:offLabel;
+}
 // J-13: end the talk cleanly from the console (the remote had this; the driving
 // laptop did not), then return the presenter to the document.
 async function endPres(){
@@ -18707,6 +18719,10 @@ async function poll(){
       document.getElementById('next-title').textContent=(cur+1<TOTAL)?TITLES[nx]:'End of deck';
       document.getElementById('next-slide').src=BASE+'/'+nx+'.png?v='+v;
     }
+    // Reflect the toggle state so the presenter can see when the room is blacked
+    // out or the deck is auto-advancing (both are otherwise invisible feedback).
+    toggleState('btn-blackout', !!s.blackout, 'Blackout: on', 'Blackout');
+    toggleState('btn-autoplay', !!s.autoplay, 'Autoplay: on', 'Autoplay');
     document.getElementById('timer').textContent='⏱ '+fmtT(s.timer_elapsed||0);
   }catch(e){}
 }
@@ -62768,6 +62784,16 @@ voice, and queues them for one-click approval.</p>
         slug = re.sub(r"[^A-Za-z0-9_-]+", "-", str(title or "document")).strip("-").lower()
         return f"{slug or 'document'}.{ext}"
 
+    def _doc_clean_detail(exc) -> str:
+        """A user-safe one-line failure reason for a document/PDF-tool error.
+
+        The document endpoints operate on server-side temp files, and library
+        errors (Pillow/pypdf/Playwright) embed the absolute path — leaking the
+        server's filesystem layout and the temp-naming scheme (CLAUDE.md: never
+        expose internal paths). Scrub any absolute path to a neutral token while
+        keeping the helpful validation text (e.g. page/size limits)."""
+        return re.sub(r"(?:/[^\s'\"]+)+", "a file", str(exc))[:200]
+
     def _doc_recent_runs(pid, limit=60):
         out = []
         try:
@@ -63527,15 +63553,18 @@ voice, and queues them for one-click approval.</p>
             '<div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px">'
             '<div class="card"><h3 style="margin-top:0">Import to edit</h3>'
             '<p class="dim" style="font-size:13px">Open a PDF, Word or PowerPoint file as an editable document (bounded fidelity).</p>'
-            '<input type="file" id="imp-file" accept=".pdf,.docx,.pptx" class="input">'
+            '<input type="file" id="imp-file" accept=".pdf,.docx,.pptx" class="input" '
+            'aria-label="Choose a PDF, Word or PowerPoint file to import">'
             '<button class="btn secondary" style="margin-top:8px" onclick="importDoc()">Import</button></div>'
             '<div class="card"><h3 style="margin-top:0">Merge PDFs</h3>'
             '<p class="dim" style="font-size:13px">Combine several PDFs into one, in order.</p>'
-            '<input type="file" id="merge-files" accept="application/pdf" multiple class="input">'
+            '<input type="file" id="merge-files" accept="application/pdf" multiple class="input" '
+            'aria-label="Choose PDF files to merge">'
             '<button class="btn secondary" style="margin-top:8px" onclick="mergePdfs()">Merge &amp; download</button></div>'
             '<div class="card"><h3 style="margin-top:0">Images → PDF</h3>'
             '<p class="dim" style="font-size:13px">Turn photos/screenshots into a single PDF.</p>'
-            '<input type="file" id="img-files" accept="image/*" multiple class="input">'
+            '<input type="file" id="img-files" accept="image/*" multiple class="input" '
+            'aria-label="Choose images to combine into a PDF">'
             '<button class="btn secondary" style="margin-top:8px" onclick="imagesToPdf()">Build &amp; download</button></div>'
             "</div>"
             + saved
@@ -63543,6 +63572,7 @@ voice, and queues them for one-click approval.</p>
             .replace("__IMPORT_URL__", url_for("api_documents_import"))
             .replace("__MERGE_URL__", url_for("api_documents_tool_merge"))
             .replace("__IMG_URL__", url_for("api_documents_tool_images_to_pdf"))
+            .replace("__CSRF__", _csrf_token())
         )
         return _layout("Documents", body, active="create")
 
@@ -63654,6 +63684,7 @@ voice, and queues them for one-click approval.</p>
             f'<a class="btn secondary" href="{url_for("api_document_docx", doc_id=doc_id)}">Word (.docx)</a>'
             "</div>"
             f'<iframe src="{url_for("api_document_pdf", doc_id=doc_id)}" '
+            'title="Document preview" '
             'style="width:100%;height:70vh;border:1px solid var(--panel);border-radius:8px;background:var(--panel)"></iframe>'
             + doc_structured
             + '<details style="margin-top:18px"><summary class="dim">Advanced — raw spec (JSON)</summary>'
@@ -63680,7 +63711,7 @@ voice, and queues them for one-click approval.</p>
             path = render_document_pdf(spec, brand_kit=_doc_brand_kit(pid))
         except Exception as e:
             log.warning("document pdf render failed", exc_info=True)
-            return jsonify({"error": "render_failed", "detail": str(e)[:200]}), 503
+            return jsonify({"error": "render_failed", "detail": _doc_clean_detail(e)}), 503
         dl = request.args.get("dl") == "1"
         return send_file(
             path,
@@ -63706,7 +63737,7 @@ voice, and queues them for one-click approval.</p>
             try:
                 document_pptx(spec, out, brand_kit=_doc_brand_kit(pid))
             except Exception as e:
-                return jsonify({"error": "export_failed", "detail": str(e)[:200]}), 503
+                return jsonify({"error": "export_failed", "detail": _doc_clean_detail(e)}), 503
             return send_file(
                 out,
                 as_attachment=True,
@@ -63735,7 +63766,7 @@ voice, and queues them for one-click approval.</p>
             try:
                 document_docx(spec, out, brand_kit=_doc_brand_kit(pid))
             except Exception as e:
-                return jsonify({"error": "export_failed", "detail": str(e)[:200]}), 503
+                return jsonify({"error": "export_failed", "detail": _doc_clean_detail(e)}), 503
             return send_file(
                 out,
                 as_attachment=True,
@@ -63764,7 +63795,7 @@ voice, and queues them for one-click approval.</p>
         try:
             path = deck_to_mp4(spec, brand_kit=_doc_brand_kit(pid))
         except Exception as e:
-            return jsonify({"error": "video_failed", "detail": str(e)[:200]}), 503
+            return jsonify({"error": "video_failed", "detail": _doc_clean_detail(e)}), 503
         return send_file(
             path,
             mimetype="video/mp4",
@@ -63787,8 +63818,14 @@ voice, and queues them for one-click approval.</p>
         from mediahub.documents import store as _docstore
 
         raw["doc_id"] = doc_id  # never let an edit reassign identity
-        new_spec = DocumentSpec.from_dict(raw)
-        _docstore.save_document(pid, new_spec)
+        # from_dict is total over wrong-typed fields, but a spec the editor sends
+        # can still be unparseable in other ways — answer with a clean 400, never
+        # an unhandled 500, since this is a user-editable payload.
+        try:
+            new_spec = DocumentSpec.from_dict(raw)
+            _docstore.save_document(pid, new_spec)
+        except (TypeError, ValueError):
+            return jsonify({"ok": False, "error": "bad_spec"}), 400
         return jsonify({"ok": True})
 
     @app.route("/api/documents/<doc_id>/content-edit", methods=["POST"])
@@ -63846,7 +63883,9 @@ voice, and queues them for one-click approval.</p>
         try:
             spec = import_file(tmp)
         except Exception as e:
-            return jsonify({"ok": False, "error": "import_failed", "detail": str(e)[:200]}), 422
+            return jsonify(
+                {"ok": False, "error": "import_failed", "detail": _doc_clean_detail(e)}
+            ), 422
         finally:
             try:
                 tmp.unlink()
@@ -63883,7 +63922,7 @@ voice, and queues them for one-click approval.</p>
             try:
                 merge_pdfs(paths, out)
             except Exception as e:
-                return jsonify({"error": "merge_failed", "detail": str(e)[:200]}), 422
+                return jsonify({"error": "merge_failed", "detail": _doc_clean_detail(e)}), 422
             finally:
                 for p in paths:
                     try:
@@ -63921,7 +63960,7 @@ voice, and queues them for one-click approval.</p>
             try:
                 images_to_pdf(paths, out)
             except Exception as e:
-                return jsonify({"error": "convert_failed", "detail": str(e)[:200]}), 422
+                return jsonify({"error": "convert_failed", "detail": _doc_clean_detail(e)}), 422
             finally:
                 for p in paths:
                     try:
@@ -64041,7 +64080,7 @@ voice, and queues them for one-click approval.</p>
         try:
             path = render_section_png(spec, i, brand_kit=_doc_brand_kit(session.owner))
         except Exception as e:
-            return jsonify({"error": "render_failed", "detail": str(e)[:160]}), 503
+            return jsonify({"error": "render_failed", "detail": _doc_clean_detail(e)}), 503
         return send_file(path, mimetype="image/png")
 
     @app.route("/api/present/<session_id>/state")

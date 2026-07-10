@@ -139,6 +139,15 @@ def test_sponsor_proposal_has_default_packages():
     assert any("Package" in t.props["columns"] for t in tables)
 
 
+def test_default_packages_use_plain_hyphens():
+    """British-copy convention: no em/en dashes in the rendered proposal. The
+    'no fee set' placeholder in the fee column must be a plain hyphen."""
+    flat = "".join(str(c) for row in formats.DEFAULT_PACKAGES["rows"] for c in row)
+    assert "—" not in flat and "–" not in flat  # no em/en dash
+    fees = [row[1] for row in formats.DEFAULT_PACKAGES["rows"]]
+    assert fees == ["-", "-", "-"]
+
+
 def test_meet_programme_builds():
     f = facts_from_run(_run(), club_name="Otters SC")
     spec = formats.build_meet_programme(f)
