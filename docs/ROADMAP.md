@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-07-10 · `f9e1d8205` · Merge pull request #1122 from claude/design-studio-audit-x8856m
+**Last updated:** 2026-07-10 · `2517e6178` · [documents] audit fixes: CSRF on uploads/delete, export DATA_DIR lock, robustness + a11y (#1118)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1230,12 +1230,13 @@ list and the auto table below, not here.
 | 2026-07-10 | `02871896f` | [developer-settings] report: record second-pass merge status |
 | 2026-07-10 | `22fefbb1f` | [developer-settings] report: record F-5/F-6 from the re-audit pass |
 | 2026-07-10 | `ec66e8b0b` | [developer-settings] purge every re-derivable cache + fix stale reel doc default |
-| 2026-07-10 | `472cff387` | [season-wraps] audit report: record merge status + SHA |
-| 2026-07-10 | `1503bb485` | chore: apply end-of-file-fixer autofix to AUDIT_meet-recap.md |
-| 2026-07-10 | `118ae4e46` | [org-brand] audit report |
-| 2026-07-10 | `95331bcb4` | [season-wraps] fix dropped swimmer/time, non-ISO dates, crashes, idempotency, poster injection |
-| 2026-07-10 | `38a0ebb46` | [design-studio] chore: fix trailing newline tripping pre-commit on main |
-| 2026-07-10 | `6d69ec52a` | [design-studio] audit report: finalise merge status (draft PR #1122) |
-| 2026-07-10 | `93d82592b` | [design-studio] audit report |
-| 2026-07-10 | `4be4273b2` | [design-studio] fix 429 busy copy, 3-digit hex swatch, overlay live region, full coercion |
+| 2026-07-10 | `c92628328` | [event-preview] fix trailing newlines in audit reports blocking hygiene CI |
+| 2026-07-10 | `afb853309` | [event-preview] add end-to-end audit report |
+| 2026-07-10 | `e8faa5e74` | [event-preview] lock audit fixes with tests |
+| 2026-07-10 | `bce8e0dd2` | [event-preview] reject empty submissions, fix CSRF-lost approvals, a11y labels, bound work |
+| 2026-07-10 | `8c0767328` | [event-preview] refresh stale What-you'll-need copy |
+| 2026-07-10 | `7698bec30` | [documents] fix pre-existing EOF hygiene in AUDIT_season-wraps.md |
+| 2026-07-10 | `3f64196da` | [documents] fix pre-existing EOF hygiene in AUDIT_meet-recap.md (unblocks repo-wide pre-commit CI) |
+| 2026-07-10 | `537c17387` | [documents] record green gate + PR status in audit report |
+| 2026-07-10 | `22c611d76` | [documents] audit fixes: CSRF on uploads/delete, export DATA_DIR lock, robustness + a11y |
 <!-- /ROADMAP:ACTIVITY -->
