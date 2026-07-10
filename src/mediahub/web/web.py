@@ -31427,9 +31427,31 @@ self.addEventListener('fetch', function(e){
                     meta = _ct_registry.get(ct)
                     if meta is not None:
                         try:
+                            # J-6: free-text targets carry the idea itself —
+                            # the free-text landing prefills its textarea from
+                            # ?seed=<title — reason>. Other tools are
+                            # form-driven, so their links stay plain.
+                            if meta.primary_route_endpoint == "free_text_chat_page":
+                                _seed_bits = [str(item.get("title") or slug)]
+                                _first_reason = next(
+                                    (
+                                        str(r).strip()
+                                        for r in _as_list(item.get("reasons"))
+                                        if str(r).strip()
+                                    ),
+                                    "",
+                                )
+                                if _first_reason:
+                                    _seed_bits.append(_first_reason)
+                                _create_url = url_for(
+                                    meta.primary_route_endpoint,
+                                    seed=" — ".join(_seed_bits)[:500],
+                                )
+                            else:
+                                _create_url = url_for(meta.primary_route_endpoint)
                             create_link = (
                                 f'<a class="btn" style="font-size:12px;padding:4px 12px" '
-                                f'href="{url_for(meta.primary_route_endpoint)}">Create →</a>'
+                                f'href="{_h(_create_url)}">Create →</a>'
                             )
                         except Exception:
                             create_link = ""
@@ -31564,7 +31586,7 @@ self.addEventListener('fetch', function(e){
 <div class="mh-next-strip" aria-label="How the plan works" style="margin-bottom:16px">
   <div class="cell"><span class="num">1</span><span class="text"><b>Generate</b><br>One click fuses your results, drafts, the calendar and your direct notes.</span></div>
   <div class="cell"><span class="num">2</span><span class="text"><b>Read the why</b><br>Every item lists the exact signals that put it at that rank.</span></div>
-  <div class="cell"><span class="num">3</span><span class="text"><b>Create</b><br>Click <i>Create</i> on an item to open the right tool with that idea.</span></div>
+  <div class="cell"><span class="num">3</span><span class="text"><b>Create</b><br>Click <i>Create</i> on an item to open the right tool &mdash; free-text ideas arrive pre-filled.</span></div>
 </div>
 
 <div class="card" style="margin-bottom:14px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;justify-content:center">
@@ -35254,6 +35276,10 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         quick_err = session.pop("free_text_quick_error", "")
         # H-8: restore the prompt the user typed if the last build failed.
         quick_prompt = session.pop("free_text_quick_prompt", "")
+        # J-6: a planner "Create →" link can carry the ranked idea — prefill
+        # the textarea from ?seed=… (capped; a restored failed prompt wins).
+        if not quick_prompt:
+            quick_prompt = (request.args.get("seed") or "").strip()[:500]
         quick_err_html = (
             '<div class="mh-flash error" role="alert" style="margin:0 0 14px;padding:12px 16px;'
             "border:1px solid rgba(255,107,107,0.30);border-left:3px solid var(--bad);"
