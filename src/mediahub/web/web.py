@@ -13616,10 +13616,14 @@ def _render_content_builder(pack_id: str, rec: dict, mode: str = "spotlight") ->
 def _ui_locale() -> str:
     """Resolve the UI-chrome language for this request (1.24 localisation).
 
-    Order: a ``?lang=`` override → a ``ui_lang`` session pin → the signed-in
-    org's primary caption language when we ship that UI locale → English. Only
+    Order: a ``?lang=`` override → a ``ui_lang`` session pin → English. Only
     locales that actually have a UI catalogue are honoured, so the chrome is
     never half-translated into a locale we don't have — it degrades to English.
+
+    G-11: deliberately NO fallback to the org's caption language — choosing
+    "Cymraeg (Welsh)" as the *caption* language must not silently flip the
+    whole interface. The interface language is driven only by the explicit
+    controls (the C-16 switcher / ``?lang=``).
     """
     from mediahub.localize.ui_catalogue import DEFAULT_UI_LOCALE, has_ui_locale
 
@@ -13644,16 +13648,6 @@ def _ui_locale() -> str:
         s = (session.get("ui_lang") or "").strip().lower()
         if s and has_ui_locale(s):
             return s.split("-", 1)[0]
-    except Exception:
-        pass
-    try:
-        pid = (session.get("active_profile_id") or "").strip()
-        if pid:
-            from mediahub.web.languages import primary_language_for
-
-            prim = primary_language_for(load_profile(pid))
-            if has_ui_locale(prim):
-                return prim
     except Exception:
         pass
     return DEFAULT_UI_LOCALE
@@ -38110,6 +38104,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
       <label>Caption language</label>
       <select name="language" style="{_input_style}">{language_opts}</select>
       <p style="font-size:12px;color:var(--ink-dim);margin-top:4px">Captions and alt text are written in this language. Bilingual options write every caption in English with a side-by-side translation, approved together in one pass.</p>
+      <p style="font-size:12px;color:var(--ink-muted);margin-top:4px">This affects generated captions only &mdash; change the app language from the Interface language control.</p>
     </div>
     <div>
       <label>Result file codes</label>
