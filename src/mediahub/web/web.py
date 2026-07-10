@@ -20239,6 +20239,18 @@ def create_app() -> Flask:
                 started_iso = started.replace(" ", "T") + "Z" if started else ""
                 search_haystack = (r["meet_name"] or r["file_name"] or r["id"] or "").lower()
                 dup_badge = _dup_badge_html(dup_map.get(r["id"]))
+                # C-10: processed meets get an explicit route into the athlete
+                # spotlight — otherwise its only entries are the Review view
+                # switch or a hand-typed URL. ?older=1 keeps the spotlight's
+                # meet picker consistent even for meets past its 31-day window.
+                spotlight_link = ""
+                if r["status"] == "done" and _club_platform_ok:
+                    _sp_href = url_for("spotlight_landing", run_id=r["id"], older=1)
+                    spotlight_link = (
+                        f'<a href="{_sp_href}" style="font-size:11px;'
+                        'color:var(--ink-muted);white-space:nowrap;'
+                        'margin-right:10px">Spotlight a swimmer &rarr;</a>'
+                    )
                 rows_html += (
                     f'<tr data-run-row="{_h(r["id"])}" data-status="{_h(r["status"])}" data-q="{_h(search_haystack)}">'
                     f'<td data-label="Input"><a href="{review_href}">{_h(r["meet_name"] or r["file_name"] or r["id"])}</a>{dup_badge}</td>'
@@ -20246,7 +20258,8 @@ def create_app() -> Flask:
                     f'<td data-label="Matched">{_h(r["our_swims"] or 0)}</td>'
                     f'<td data-label="Achievements">{_h(ach_by_id.get(r["id"], 0))}</td>'
                     f'<td data-label="Started"><time class="mh-rel" datetime="{_h(started_iso)}">{_h(started)}</time></td>'
-                    f'<td><form method="post" action="{delete_href}" '
+                    f"<td>{spotlight_link}"
+                    f'<form method="post" action="{delete_href}" '
                     f'class="mh-run-delete" data-run-id="{_h(r["id"])}" '
                     f'style="display:inline" data-no-loader="1">'
                     f'<input type="hidden" name="next" value="{_h(request.path)}">'
@@ -34273,34 +34286,41 @@ function mhAnDigest(btn) {{
         _active_pid = _active_profile_id()
         recent_runs: list = []
         db_failed = False
-        # Spotlight is a *fresh-moments* surface: it only offers meets from the
-        # last month of runs. created_at is a tz-aware isoformat() string, so the
-        # cutoff is computed the same way and compared lexically (ISO-8601 sorts
-        # lexically for a fixed shape) — never SQLite datetime(), whose space/no-
-        # offset format wouldn't compare cleanly against the stored "T…+00:00".
+        # Spotlight is a *fresh-moments* surface: by default it only offers
+        # meets from the last 31 days of runs. C-10: ?older=1 lifts that cutoff
+        # so an older meet stays reachable (the hint below links the toggle).
+        # created_at is a tz-aware isoformat() string, so the cutoff is computed
+        # the same way and compared lexically (ISO-8601 sorts lexically for a
+        # fixed shape) — never SQLite datetime(), whose space/no-offset format
+        # wouldn't compare cleanly against the stored "T…+00:00".
         from datetime import timedelta as _td
 
+        show_older = request.args.get("older") == "1"
         _spot_cutoff = (datetime.now(timezone.utc) - _td(days=31)).isoformat()
+        _where = ["status='done'"]
+        _params: list = []
+        if not show_older:
+            _where.append("created_at >= ?")
+            _params.append(_spot_cutoff)
+        if _active_pid:
+            # TENANT ISOLATION (see comment above); without an active org
+            # (pre-onboarding sandbox / tests) there's nothing to isolate
+            # against, so list everything in-window.
+            _where.append("(profile_id = ? OR profile_id IS NULL OR profile_id = '')")
+            _params.append(_active_pid)
+        # The recent view keeps its tight shortlist; the older view lists up
+        # to 100 (matching Activity) so lifting the cutoff actually surfaces
+        # older meets for busy clubs.
+        _spot_limit = 100 if show_older else 20
         try:
             conn = _db()
             try:
-                if _active_pid:
-                    recent_runs = conn.execute(
-                        "SELECT id, meet_name, file_name, created_at FROM runs "
-                        "WHERE status='done' AND created_at >= ? AND "
-                        "(profile_id = ? OR profile_id IS NULL OR profile_id = '') "
-                        "ORDER BY created_at DESC LIMIT 20",
-                        (_spot_cutoff, _active_pid),
-                    ).fetchall()
-                else:
-                    # No active org (pre-onboarding sandbox / tests):
-                    # nothing to isolate against, so list everything in-window.
-                    recent_runs = conn.execute(
-                        "SELECT id, meet_name, file_name, created_at FROM runs "
-                        "WHERE status='done' AND created_at >= ? "
-                        "ORDER BY created_at DESC LIMIT 20",
-                        (_spot_cutoff,),
-                    ).fetchall()
+                recent_runs = conn.execute(
+                    "SELECT id, meet_name, file_name, created_at FROM runs "
+                    "WHERE " + " AND ".join(_where) + " "
+                    f"ORDER BY created_at DESC LIMIT {_spot_limit}",
+                    tuple(_params),
+                ).fetchall()
             finally:
                 conn.close()
         except Exception as e:
@@ -34348,6 +34368,13 @@ function mhAnDigest(btn) {{
                     "</section>"
                 )
                 return _layout("Athlete Spotlight", empty_body, active="create")
+            # C-10: with the 31-day window on, a club whose meets are all
+            # older would otherwise hit this hero with no way to reach them.
+            _older_cta = (
+                ""
+                if show_older
+                else f'<a class="mh-cta-secondary" href="{url_for("spotlight_landing", older=1)}">Show older meets</a>'
+            )
             empty_body = (
                 '<section class="mh-hero" data-lane="01" style="padding-top:var(--sp-9);padding-bottom:var(--sp-8)">'
                 '<span class="mh-hero-eyebrow">Athlete spotlight</span>'
@@ -34359,6 +34386,7 @@ function mhAnDigest(btn) {{
                 '<div class="mh-hero-actions">'
                 f'<a class="mh-cta-primary" href="{url_for("upload")}">Upload a meet &rarr;</a>'
                 f'<a class="mh-cta-secondary" href="{url_for("make_page")}">All input types</a>'
+                f"{_older_cta}"
                 "</div>"
                 "</section>"
             )
@@ -34432,6 +34460,25 @@ function mhAnDigest(btn) {{
                     swimmers_html = '<div class="card"><p class="muted">No achievements found for this run. The recognition report may not be available.</p></div>'
 
         change_js = url_for("spotlight_landing")
+        # C-10: the window hint states the cutoff and links the toggle, so the
+        # 31-day filter is a choice rather than a silent limit. The toggle
+        # keeps the current meet selection; the hidden input keeps the mode
+        # across the picker's own GET submit.
+        _toggle_args = {"run_id": run_id_param} if run_id_param else {}
+        if show_older:
+            window_hint = (
+                "Showing all processed meets. "
+                f'<a href="{url_for("spotlight_landing", **_toggle_args)}">Show the last 31 days only</a>. '
+                "A meet deleted in Settings disappears from here too."
+            )
+            older_field = '<input type="hidden" name="older" value="1">'
+        else:
+            window_hint = (
+                "Showing meets from the last 31 days. "
+                f'<a href="{url_for("spotlight_landing", older=1, **_toggle_args)}">Show older meets</a>. '
+                "A meet deleted in Settings disappears from here too."
+            )
+            older_field = ""
         body = f"""
 <section class="mh-hero" data-lane="" style="padding-top:var(--sp-8);padding-bottom:var(--sp-7);margin-bottom:var(--sp-5)">
   <span class="mh-hero-eyebrow">Athlete spotlight</span>
@@ -34443,8 +34490,9 @@ function mhAnDigest(btn) {{
 
 <div class="card">
   <h2>Choose a meet</h2>
-  <p class="muted" style="margin-top:0;font-size:13px">Showing meets from the last month. Older runs roll off automatically, and a run deleted in Settings disappears from here too.</p>
+  <p class="muted" style="margin-top:0;font-size:13px">{window_hint}</p>
   <form method="get" action="{url_for("spotlight_landing")}">
+    {older_field}
     <select name="run_id" onchange="this.form.submit()" style="max-width:480px">
       {runs_opts}
     </select>
