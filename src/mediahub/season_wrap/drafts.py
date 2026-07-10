@@ -41,6 +41,7 @@ def _draft_from_stats(stats, *, draft_id: str, title: str) -> dict:
             "event": a["event"],
             "headline": a["headline"],
             "type": a["type"],
+            "time": a.get("time", ""),
         }
         for a in stats.top_achievements[:_HIGHLIGHTS_CAP]
     ]
@@ -70,12 +71,17 @@ def build_monthly_draft(profile_id: str, runs_dir: Path, *, year: int, month: in
 def build_season_draft(
     profile_id: str, runs_dir: Path, *, season_start: str, season_end: str
 ) -> dict:
-    """The configurable season-end wrap over [season_start, season_end]."""
+    """The configurable season-end wrap over [season_start, season_end].
+
+    The id is keyed to the season *start* only, so re-drafting the same season
+    (the web action re-runs it with today's moving end date) overwrites one
+    stable file instead of spawning a new draft every day it is clicked.
+    """
     stats = aggregate_window(profile_id, Path(runs_dir), start=season_start, end=season_end)
     return _draft_from_stats(
         stats,
-        draft_id=f"season-{stats.start}-{stats.end}",
-        title=f"Season wrap {stats.start}–{stats.end}",
+        draft_id=f"season-{stats.start}",
+        title=f"Season wrap {stats.start} to {stats.end}",
     )
 
 

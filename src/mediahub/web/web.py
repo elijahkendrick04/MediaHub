@@ -62136,17 +62136,27 @@ voice, and queues them for one-click approval.</p>
         now = datetime.now(timezone.utc)
         msg = ""
         if action == "month":
-            year, month = (now.year, now.month - 1) if now.month > 1 else (now.year - 1, 12)
-            draft = build_monthly_draft(pid, RUNS_DIR, year=year, month=month)
-            save_draft(pid, draft)
-            msg = f"Drafted: {draft.get('title', '')}"
+            # Drafting reads every stored run; a single malformed one must not
+            # 500 with a stack trace — fail with an honest message instead.
+            try:
+                year, month = (now.year, now.month - 1) if now.month > 1 else (now.year - 1, 12)
+                draft = build_monthly_draft(pid, RUNS_DIR, year=year, month=month)
+                save_draft(pid, draft)
+                msg = f"Drafted: {draft.get('title', '')}"
+            except Exception:
+                log.warning("season wrap month draft failed", exc_info=True)
+                msg = "Could not draft this wrap - please check your stored runs."
         elif action == "season":
-            season_start = f"{now.year}-09-01" if now.month >= 9 else f"{now.year - 1}-09-01"
-            draft = build_season_draft(
-                pid, RUNS_DIR, season_start=season_start, season_end=now.date().isoformat()
-            )
-            save_draft(pid, draft)
-            msg = f"Drafted: {draft.get('title', '')}"
+            try:
+                season_start = f"{now.year}-09-01" if now.month >= 9 else f"{now.year - 1}-09-01"
+                draft = build_season_draft(
+                    pid, RUNS_DIR, season_start=season_start, season_end=now.date().isoformat()
+                )
+                save_draft(pid, draft)
+                msg = f"Drafted: {draft.get('title', '')}"
+            except Exception:
+                log.warning("season wrap season draft failed", exc_info=True)
+                msg = "Could not draft this wrap - please check your stored runs."
         elif action == "monthly_on":
             try:
                 from mediahub.workflow.schedule import create_task as _ct
@@ -62201,7 +62211,7 @@ voice, and queues them for one-click approval.</p>
         highlights = (
             "".join(
                 "<tr>"
-                f"<td>{_h(h.get('swimmer_name', ''))}</td><td>{_h(h.get('event', ''))}</td>"
+                f"<td>{_h(h.get('swimmer', ''))}</td><td>{_h(h.get('event', ''))}</td>"
                 f"<td>{_h(h.get('headline', ''))}</td>"
                 "</tr>"
                 for h in (draft.get("highlights") or [])
@@ -62246,17 +62256,24 @@ voice, and queues them for one-click approval.</p>
         if not draft:
             abort(404)
         prof = load_profile(pid)
+
+        def _safe_hex(value, default: str) -> str:
+            # Defence in depth: brand colours are substituted raw into the
+            # poster's <style> block by the shared print renderer, so a non-hex
+            # stored value could break out of the CSS and inject markup into the
+            # server-side PDF render. Only let a strict hex literal through.
+            v = str(value or "").strip()
+            return v if re.fullmatch(r"#[0-9A-Fa-f]{3,8}", v) else default
+
         brand = {
-            "primary": getattr(prof, "brand_primary", "#0A2540") if prof else "#0A2540",
-            "secondary": getattr(prof, "brand_secondary", "#000000") if prof else "#000000",
+            "primary": _safe_hex(getattr(prof, "brand_primary", "") if prof else "", "#0A2540"),
+            "secondary": _safe_hex(getattr(prof, "brand_secondary", "") if prof else "", "#000000"),
         }
         highlight_rows = [
             {
-                "swimmer": h.get("swimmer_name", ""),
+                "swimmer": h.get("swimmer", ""),
                 "event": h.get("event", ""),
-                "time": (h.get("raw_facts") or {}).get("time", "")
-                if isinstance(h.get("raw_facts"), dict)
-                else "",
+                "time": h.get("time", ""),
                 "note": h.get("headline", ""),
             }
             for h in (draft.get("highlights") or [])[:10]

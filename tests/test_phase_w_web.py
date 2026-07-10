@@ -641,3 +641,99 @@ class TestLiveMeet:
     def test_action_requires_org(self, env):
         c = env["client"]
         assert self._create(c).status_code == 403
+# W.8 — Season wraps surface (audit regressions)
+# ---------------------------------------------------------------------------
+
+
+class TestSeasonWrapsSurface:
+    def _draft_june(self, env, ranked=None):
+        """Seed a June-2026 run whose headline does NOT contain the swimmer
+        name, then build + persist its monthly draft. A populated Swimmer cell
+        can then only come from the swimmer field itself, not the headline."""
+        from mediahub.season_wrap import build_monthly_draft, save_draft
+
+        runs = env["tmp"] / "runs_v4"
+        run = {
+            "run_id": "wrap-src",
+            "profile_id": "org-alpha",
+            "meet": {"name": "June Gala", "start_date": "2026-06-06"},
+            "recognition_report": {
+                "ranked_achievements": ranked
+                or [
+                    {
+                        "achievement": {
+                            "type": "club_record",
+                            "swimmer_name": "Dylan Rhys",
+                            "event": "50m Butterfly (LC)",
+                            "headline": "New club record set",
+                            "raw_facts": {"time": "25.99"},
+                        },
+                        "priority": 0.99,
+                        "rank": 1,
+                    }
+                ]
+            },
+        }
+        (runs / "wrap-src.json").write_text(json.dumps(run))
+        draft = build_monthly_draft("org-alpha", runs, year=2026, month=6)
+        save_draft("org-alpha", draft)
+        return draft["id"]
+
+    def test_view_shows_swimmer_name_in_its_own_column(self, env):
+        """Regression: the highlights table's Swimmer column was always blank
+        (route read 'swimmer_name'; the draft stores 'swimmer')."""
+        c = env["client"]
+        _pin(c, "org-alpha")
+        did = self._draft_june(env)
+        r = c.get(f"/wraps/{did}")
+        assert r.status_code == 200
+        html = r.get_data(as_text=True)
+        assert "<td>Dylan Rhys</td>" in html  # first cell = swimmer, not blank
+
+    def test_poster_html_shows_swimmer_time_and_sanitises_brand(self, env, monkeypatch):
+        """Regression: poster Swimmer + Time columns render, and a malicious
+        brand colour cannot break out of the poster <style> (audit F1 + F7)."""
+        c = env["client"]
+        _pin(c, "org-alpha")
+        from mediahub.web.club_profile import load_profile, save_profile
+
+        prof = load_profile("org-alpha")
+        prof.brand_primary = "#000;}</style><img src=x onerror=alert(1)><style>{"
+        save_profile(prof)
+
+        did = self._draft_june(env)
+
+        import mediahub.graphic_renderer.print_export as pe
+
+        captured = {}
+
+        def fake_render(html, output_path, **kw):
+            from pathlib import Path as _P
+
+            captured["html"] = html
+            _P(output_path).write_bytes(b"%PDF-1.4 fake")
+            return output_path
+
+        monkeypatch.setattr(pe, "render_html_to_pdf", fake_render)
+
+        r = c.get(f"/wraps/{did}/poster.pdf")
+        assert r.status_code == 200
+        assert r.content_type == "application/pdf"
+        html = captured["html"]
+        assert "Dylan Rhys" in html  # swimmer no longer blank on the poster
+        assert "25.99" in html  # display time flows through to the poster
+        assert "onerror" not in html and "</style><img" not in html  # sanitised
+
+    def test_action_draft_failure_is_graceful_not_500(self, env, monkeypatch):
+        """Regression: a failing draft build returns an honest message, not a
+        raw 500 stack trace (audit F3)."""
+        c = env["client"]
+        _pin(c, "org-alpha")
+
+        def _boom(*a, **k):
+            raise RuntimeError("boom")
+
+        monkeypatch.setattr("mediahub.season_wrap.build_monthly_draft", _boom)
+        r = c.post("/wraps/action", data={"action": "month"}, follow_redirects=True)
+        assert r.status_code == 200
+        assert b"Could not draft" in r.data
