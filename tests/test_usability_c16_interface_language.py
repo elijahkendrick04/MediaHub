@@ -221,3 +221,39 @@ def test_switcher_form_carries_a_working_csrf_token(tmp_path, monkeypatch):
     )
     assert r_ok.status_code == 302
     assert r_ok.headers["Location"].endswith("/activity")
+
+
+def test_explicit_choice_strips_stale_lang_query_from_redirect(client):
+    # A user who arrived on a shared /activity?lang=cy link and then picks English
+    # in the dropdown must land on /activity WITHOUT ?lang=cy — otherwise
+    # _ui_locale (which gives ?lang= top precedence) re-pins Welsh on the next
+    # request and silently reverts the switch. Other query params are preserved.
+    r = client.post(
+        "/settings/interface-language",
+        data={"ui_lang": "en"},
+        headers={"Referer": "http://localhost/activity?lang=cy&tab=stories"},
+    )
+    assert r.status_code == 302
+    loc = r.headers["Location"]
+    assert "lang=cy" not in loc and "lang=en" not in loc
+    assert loc.startswith("/activity")
+    assert "tab=stories" in loc  # unrelated params survive
+
+
+def test_mobile_bottom_nav_localises_available_terms(client):
+    # The mobile bottom-nav must localise the terms that HAVE a verified Welsh
+    # translation (Home/Create/Settings -> Hafan/Creu/Gosodiadau), matching the
+    # desktop nav — the switch should apply everywhere we have the words.
+    client.post(
+        "/settings/interface-language",
+        data={"ui_lang": "cy"},
+        headers={"Referer": "http://localhost/activity"},
+    )
+    html = client.get("/activity").get_data(as_text=True)
+    nav = html.split('class="mh-bottomnav"', 1)[1].split("</nav>", 1)[0]
+    assert "Hafan" in nav  # nav.home
+    assert "Creu" in nav  # nav.create
+    assert "Gosodiadau" in nav  # nav.settings
+    # Terms with no verified Welsh stay English (no fabricated translations).
+    assert "Media" in nav
+    assert "Activity" in nav

@@ -14375,13 +14375,13 @@ def _layout(
   </div>
 </footer>
 <nav class="mh-bottomnav" aria-label="Primary (mobile)">
-  <a href="{{ url_for('home') }}" class="{{ 'is-active' if active=='home' else '' }}" aria-label="Home">
+  <a href="{{ url_for('home') }}" class="{{ 'is-active' if active=='home' else '' }}" aria-label="{{ t('nav.home') }}">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11l9-8 9 8"/><path d="M5 10v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V10"/></svg>
-    Home
+    {{ t('nav.home') }}
   </a>
-  <a href="{{ url_for('make_page') }}" class="{{ 'is-active' if active=='create' else '' }}" aria-label="Create">
+  <a href="{{ url_for('make_page') }}" class="{{ 'is-active' if active=='create' else '' }}" aria-label="{{ t('nav.create') }}">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
-    Create
+    {{ t('nav.create') }}
   </a>
   {# C-13 — the media library is the surface built for phones (camera capture,
      the PWA share-target, "share a photo straight from your camera roll"), so it
@@ -14394,9 +14394,9 @@ def _layout(
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h4l2 7 4-16 2 9h6"/></svg>
     Activity
   </a>
-  <a href="{{ url_for('settings_page') }}" class="{{ 'is-active' if active=='settings' else '' }}" aria-label="Settings">
+  <a href="{{ url_for('settings_page') }}" class="{{ 'is-active' if active=='settings' else '' }}" aria-label="{{ t('nav.settings') }}">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-    Settings
+    {{ t('nav.settings') }}
   </a>
 </nav>
 {# UI 1.28 — Global keyboard-shortcuts overlay (GitHub-style). Press ? on any
@@ -29266,7 +29266,7 @@ self.addEventListener('fetch', function(e){
         ref = request.referrer or ""
         if ref:
             try:
-                from urllib.parse import urlsplit
+                from urllib.parse import parse_qsl, urlencode, urlsplit
 
                 parts = urlsplit(ref)
                 path = parts.path or ""
@@ -29276,7 +29276,20 @@ self.addEventListener('fetch', function(e){
                 same_origin = not parts.netloc or parts.netloc == request.host
                 safe_path = path.startswith("/") and not path.startswith(("//", "/\\"))
                 if same_origin and safe_path:
-                    dest = path + (("?" + parts.query) if parts.query else "")
+                    # Drop any ``?lang=`` from the referring URL. This POST is the
+                    # user's deliberate choice; _ui_locale gives ?lang= top
+                    # precedence and re-pins the session from it, so a stale
+                    # ?lang=cy in the Referer (e.g. they arrived on a shared
+                    # /pricing?lang=cy link, then picked English) would silently
+                    # revert the switch on the very next request. Preserve every
+                    # other query param.
+                    kept = [
+                        (k, v)
+                        for k, v in parse_qsl(parts.query, keep_blank_values=True)
+                        if k != "lang"
+                    ]
+                    query = urlencode(kept)
+                    dest = path + (("?" + query) if query else "")
             except Exception:
                 dest = url_for("settings_page")
         return redirect(dest)
