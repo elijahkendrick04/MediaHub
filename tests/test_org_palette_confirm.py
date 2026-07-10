@@ -485,3 +485,100 @@ class TestSetupPageRendersForm:
         resp = c.get("/organisation/setup")
         body = resp.get_data(as_text=True)
         assert "/organisation/setup/palette/reorder" not in body
+
+
+# ---------------------------------------------------------------------------
+# 6. "Leave a slot blank to fall back to the AI's pick" must actually work.
+#
+# The form pairs a ``<input type=color name="palette_<slot>">`` (which can
+# never submit an empty value) with a blankable ``<input type=text
+# name="palette_<slot>_hex">`` mirror. The server must read the blankable hex
+# field so an untouched slot defers to the AI — otherwise every "Save brand
+# colours" silently freezes the AI palette as a manual override and later
+# re-analysis can never update it, contradicting the on-screen copy.
+# ---------------------------------------------------------------------------
+
+class TestPaletteBlankDefersToAI:
+    def test_hex_text_field_renders_blank_with_ai_pick_as_placeholder(
+        self, client, monkeypatch,
+    ):
+        c, _ = client
+        # AI capture only — no manual override yet.
+        _seed_profile_via_capture(
+            c, monkeypatch, palette_extracted={"primary": "#0066cc"},
+        )
+        body = c.get("/organisation/setup").get_data(as_text=True)
+        # The colour picker carries the AI value (it can't be blank) …
+        assert 'id="palette-primary-color" value="#0066cc"' in body
+        # … but the blankable hex text mirror is EMPTY, with the AI pick shown
+        # only as placeholder ghost text, so leaving it be defers to the AI.
+        assert 'id="palette-primary-hex" value="" placeholder="#0066cc"' in body
+
+    def test_untouched_save_defers_to_ai_not_freezing_it(self, client, monkeypatch):
+        c, _ = client
+        _seed_profile_via_capture(
+            c, monkeypatch, palette_extracted={"primary": "#0066cc"},
+        )
+        monkeypatch.setattr("mediahub.media_ai.llm.is_available", lambda: False)
+        # Exactly what a real browser posts when the user changes nothing:
+        # blank hex mirrors + the colour inputs still carrying the AI values.
+        c.post(
+            "/organisation/setup/palette",
+            data={
+                "palette_primary_hex": "",
+                "palette_secondary_hex": "",
+                "palette_accent_hex": "",
+                "palette_primary": "#0066cc",
+                "palette_secondary": "#000000",
+                "palette_accent": "#0066cc",
+            },
+        )
+        from mediahub.web.club_profile import load_profile
+        prof = load_profile("demo-club")
+        # No manual override was frozen — the AI palette still flows through.
+        assert prof.brand_palette_manual == {}
+        assert prof.brand_palette_extracted.get("primary") == "#0066cc"
+
+    def test_typed_hex_pins_only_that_slot(self, client, monkeypatch):
+        c, _ = client
+        _seed_profile_via_capture(
+            c, monkeypatch,
+            palette_extracted={
+                "primary": "#0066cc", "secondary": "#ff8800", "accent": "#222222",
+            },
+        )
+        monkeypatch.setattr("mediahub.media_ai.llm.is_available", lambda: False)
+        # User types a hex into primary only; leaves the other two blank.
+        c.post(
+            "/organisation/setup/palette",
+            data={
+                "palette_primary_hex": "#aa0000",
+                "palette_secondary_hex": "",
+                "palette_accent_hex": "",
+                "palette_primary": "#aa0000",
+                "palette_secondary": "#ff8800",
+                "palette_accent": "#222222",
+            },
+        )
+        from mediahub.web.club_profile import load_profile
+        prof = load_profile("demo-club")
+        manual = prof.brand_palette_manual
+        # Only the typed slot is pinned; the others defer to the AI's pick.
+        assert manual.get("primary") == "#aa0000"
+        assert "secondary" not in manual
+        assert "accent" not in manual
+
+    def test_existing_manual_override_prefills_the_hex_field(self, client, monkeypatch):
+        """A slot the user previously pinned must render its value in the hex
+        field (so it's preserved and editable), not blank."""
+        c, _ = client
+        _seed_profile_via_capture(
+            c, monkeypatch, palette_extracted={"primary": "#0066cc"},
+        )
+        monkeypatch.setattr("mediahub.media_ai.llm.is_available", lambda: False)
+        c.post(
+            "/organisation/setup/palette",
+            data={"palette_primary_hex": "#aa0000"},
+        )
+        body = c.get("/organisation/setup").get_data(as_text=True)
+        assert 'id="palette-primary-hex" value="#aa0000"' in body
