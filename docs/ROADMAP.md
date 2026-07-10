@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-07-10 · `4d67a32ed` · [activity] Settings ▸ Activity: show real achievements, not legacy 0/0 counts (#1112)
+**Last updated:** 2026-07-10 · `208cea1df` · [spotlight] update audit report: caveats fixed, verdict -> WORKS
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1227,6 +1227,9 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-07-10 | `208cea1df` | [spotlight] update audit report: caveats fixed, verdict -> WORKS |
+| 2026-07-10 | `d93a4eead` | [spotlight] regression tests for the caveat fixes |
+| 2026-07-10 | `d5d25865b` | [spotlight] fix residual caveats: dir-form runs, traversal guard, idempotent build, roster cap, sele |
 | 2026-07-10 | `46bce47a4` | [activity] docs: record cross-cutting hygiene fix and merge status in report |
 | 2026-07-10 | `4888aa4bb` | [activity] Add Settings Activity feature audit report |
 | 2026-07-10 | `189a94529` | [activity] Settings Activity: show real achievements, not legacy 0/0 counts |
@@ -1234,8 +1237,4 @@ list and the auto table below, not here.
 | 2026-07-10 | `16741d443` | [sample-pack] add feature audit report |
 | 2026-07-10 | `7d6fca41f` | [sample-pack] guard CTA double-submit; honest research comment; E2E test |
 | 2026-07-10 | `02871896f` | [developer-settings] report: record second-pass merge status |
-| 2026-07-10 | `22fefbb1f` | [developer-settings] report: record F-5/F-6 from the re-audit pass |
-| 2026-07-10 | `ec66e8b0b` | [developer-settings] purge every re-derivable cache + fix stale reel doc default |
-| 2026-07-10 | `c92628328` | [event-preview] fix trailing newlines in audit reports blocking hygiene CI |
-| 2026-07-10 | `afb853309` | [event-preview] add end-to-end audit report |
 <!-- /ROADMAP:ACTIVITY -->
