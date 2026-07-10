@@ -5312,7 +5312,9 @@ function generateReel(btn, reelUrl, fmt) {
       .then(function(r) { return r.json().then(function(j){ return {status: r.status, body: j}; }); })
       .then(function(res) {
         if (res.status !== 202 || !res.body || !res.body.poll_url) {
-          _mhJobFail(ctx, (res.body && (res.body.user_message || res.body.detail || res.body.error)) || 'could not start the render');
+          // C-17: an unsupported ?lang= answers {error:'bad_language', message}
+          // — surface the plain-English message, never the raw enum.
+          _mhJobFail(ctx, (res.body && (res.body.user_message || res.body.message || res.body.detail || res.body.error)) || 'could not start the render');
           return;
         }
         mhJobRemember('reel', reelUrl, {poll_url: res.body.poll_url, job_id: res.body.job_id || '', fmt: fmt});
@@ -5449,7 +5451,8 @@ function generateReelBatch(btn, reelUrl) {
       .then(function(r) { return r.json().then(function(j){ return {status: r.status, body: j}; }); })
       .then(function(res) {
         if (res.status !== 202 || !res.body || !res.body.poll_url) {
-          _mhJobFail(ctx, (res.body && (res.body.user_message || res.body.detail || res.body.error)) || 'could not start the render');
+          // C-17: surface bad_language's plain-English message here too.
+          _mhJobFail(ctx, (res.body && (res.body.user_message || res.body.message || res.body.detail || res.body.error)) || 'could not start the render');
           return;
         }
         mhJobRemember('reel-batch', reelUrl, {poll_url: res.body.poll_url, job_id: res.body.job_id || ''});
@@ -5613,12 +5616,14 @@ function mhReelComposerState() {
   var defaults = (comp.getAttribute('data-default-cards') || '').split(',').filter(Boolean);
   var rhythmSel = document.getElementById('mh-reel-rhythm');
   var mixSel = document.getElementById('mh-reel-mix');
+  var dubSel = document.getElementById('mh-reel-dub');
   return {
     comp: comp,
     picks: picks,
     defaults: defaults,
     rhythm: rhythmSel ? rhythmSel.value : 'steady',
-    mix: mixSel ? mixSel.value : ''
+    mix: mixSel ? mixSel.value : '',
+    dub: dubSel ? dubSel.value : ''
   };
 }
 function mhReelComposerQuery() {
@@ -5639,6 +5644,9 @@ function mhReelComposerQuery() {
     params.push('outro=' + MH_REEL_MATHS.showcaseOutro);
   }
   if (st.mix) params.push('mix=' + encodeURIComponent(st.mix));
+  // C-17: the AI-dub language rides the same request; "" (no dub) adds
+  // nothing, keeping the default request byte-identical.
+  if (st.dub) params.push('lang=' + encodeURIComponent(st.dub));
   return params.join('&');
 }
 // Keep the readout + max-5 rule live as the user ticks moments.
@@ -45571,6 +45579,7 @@ function mhSetupMode(mode) {{
                 "</label>"
             )
         _mix_select = ""
+        _dub_select = ""
         if _voiceover_enabled():
             _mix_select = (
                 '<label style="display:inline-flex;align-items:center;gap:6px;font-size:12px;'
@@ -45583,6 +45592,32 @@ function mhSetupMode(mode) {{
                 '<option value="music_forward">Music-forward</option>'
                 "</select></label>"
             )
+            # C-17 — the 1.24 AI-dub language was URL-only (?lang=), invisible
+            # from the composer. Offer the caption-language registry's
+            # dubbable languages (same registry as the Settings picker;
+            # English IS the original narration, so it isn't a dub target).
+            # Gated with the mix select: a dub re-voices the narration, which
+            # only exists when voiceover is enabled.
+            try:
+                from mediahub.visual import dub as _dub_mod
+                from mediahub.web.languages import single_language_options as _lang_opts
+
+                _dub_opts = "".join(
+                    f'<option value="{_h(code)}">{_h(label)}</option>'
+                    for code, label in _lang_opts()
+                    if code != "en" and _dub_mod.is_dubbable(code)
+                )
+            except Exception:
+                _dub_opts = ""
+            if _dub_opts:
+                _dub_select = (
+                    '<label style="display:inline-flex;align-items:center;gap:6px;font-size:12px;'
+                    'color:var(--ink-dim)">Narration language '
+                    '<select id="mh-reel-dub" onchange="mhReelComposerSync()" '
+                    'title="Re-voice the reel&#39;s fact-only narration in another language (clearly labelled as AI-dubbed)" '
+                    'style="font-size:12px;padding:4px 8px;min-height:0">'
+                    '<option value="">No narration dub</option>' + _dub_opts + "</select></label>"
+                )
         _reel_composer_html = f"""
 <div class="card no-print" id="mh-reel-composer" data-default-cards="{_h(",".join(_default_reel_ids))}" style="margin-bottom:14px">
   <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap">
@@ -45602,6 +45637,7 @@ function mhSetupMode(mode) {{
       </select>
     </label>
     {_mix_select}
+    {_dub_select}
   </div>
   <div style="display:flex;gap:6px;flex-wrap:wrap">
     <button class="btn mh-reel-go" style="font-size:12px;padding:6px 14px;background:var(--medal);color:var(--medal-ink);border:none"
