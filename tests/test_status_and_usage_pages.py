@@ -106,6 +106,29 @@ class TestApiStatusJsonShape:
             assert "uptime_pct" in w
             assert "has_data" in w
 
+    def test_public_json_does_not_leak_heartbeat_error_text(self, fresh_app):
+        """AUDIT (system-status): /api/status is public and unauthenticated, so
+        it must NOT echo the raw deep-/health failure string — that text can
+        carry an internal filesystem path (e.g. a DB file path or an OS
+        permission error). The ``ok`` flag still signals the failure honestly.
+        """
+        c, _ = fresh_app
+        import mediahub.observability.uptime as upt
+
+        leaky = "database: unable to open database file /srv/data/data.db"
+        upt.record_heartbeat(ok=False, source="health", error=leaky)
+
+        resp = c.get("/api/status")
+        assert resp.status_code == 200
+        body = resp.get_json() or {}
+        latest = body.get("latest_heartbeat") or {}
+        # The raw error text (and the internal path inside it) is gone...
+        assert "error" not in latest
+        assert leaky not in resp.get_data(as_text=True)
+        assert "/srv/data/data.db" not in resp.get_data(as_text=True)
+        # ...but the failure is still visible via the honest ok flag.
+        assert latest.get("ok") is False
+
 
 class TestHealthzRecordsHeartbeat:
     def test_healthz_call_records_heartbeat_row(self, fresh_app):
@@ -261,6 +284,70 @@ class TestStatusPageWithSeededHeartbeats:
         assert "operational" not in body or "unknown" in body or "stale" in body
 
 
+def _as_operator_session(c):
+    with c.session_transaction() as s:
+        s["dev_operator"] = True
+
+
+class TestOperatorStatusHonestyAndResilience:
+    """AUDIT (system-status): operator /status must not (a) round a window with
+    real downtime up to a bare "100%" beside its non-zero Downtime cell, nor
+    (b) 500 if the observability layer raises unexpectedly.
+    """
+
+    def test_window_with_downtime_never_renders_bare_100pct(self, fresh_app):
+        c, _ = fresh_app
+        _as_operator_session(c)
+        import mediahub.observability.uptime as upt
+        from datetime import datetime, timezone, timedelta
+        import re
+
+        now = datetime.now(timezone.utc)
+        # 30 days of 5-min heartbeats with exactly ONE failure → 60s counted
+        # downtime, uptime ≈ 99.9977% which would round up to "100%".
+        step = 5
+        for k in range(30 * 24 * 60 // step, -1, -1):
+            upt.record_heartbeat(
+                ok=(k != 100),
+                ts=(now - timedelta(minutes=k * step)).isoformat(),
+            )
+        body = c.get("/status").get_data(as_text=True)
+        m = re.search(r"30 days.*?</tr>", body, re.S)
+        assert m is not None
+        row = re.sub(r"<[^>]+>", " ", m.group(0))
+        # Real downtime is shown, and the uptime cell is NOT a bare "100%".
+        assert "min" in row  # a downtime figure is present
+        assert "100%" not in row, f"100% shown beside downtime: {row!r}"
+        assert "99.99%" in row
+
+    def test_operator_status_degrades_not_500_when_observability_raises(self, fresh_app):
+        c, _ = fresh_app
+        _as_operator_session(c)
+        import mediahub.observability.uptime as upt
+
+        def _boom(*a, **k):
+            raise RuntimeError("observability exploded /internal/secret/path")
+
+        orig = (upt.uptime_stats, upt.latest_heartbeat, upt.recent_gaps)
+        upt.uptime_stats = _boom
+        upt.latest_heartbeat = _boom
+        upt.recent_gaps = _boom
+        try:
+            resp = c.get("/status")
+        finally:
+            upt.uptime_stats, upt.latest_heartbeat, upt.recent_gaps = orig
+        assert resp.status_code == 200  # no unhandled 500
+        body = resp.get_data(as_text=True)
+        assert "/internal/secret/path" not in body
+        assert "Traceback" not in body
+        # Falls back to the honest public status section.
+        assert (
+            "Website operational" in body
+            or "Website down" in body
+            or "Status unavailable" in body
+        )
+
+
 class TestHealthzUsageReachableWithoutOrg:
     def test_usage_page_redirects_anonymous(self, fresh_app):
         # The usage dashboard exposes call counts, token totals, cost and the
@@ -352,3 +439,37 @@ class TestHealthzUsageWithSeededCalls:
         assert "Gemini free-tier today" in body
         # 50 used, 1450 remaining.
         assert "1450 remaining" in body or "remaining" in body
+
+
+class TestSettingsSystemStatusCardReachable:
+    """AUDIT (system-status): the Settings landing 'System status' tile must
+    land on a status view for EVERY visitor — including signed-out / no-org
+    ones, the exact audience a public status signal is for. It used to point at
+    the org-gated /settings/status, which the org gate bounced to /organisation
+    setup; it now points at the public, gate-exempt /status.
+    """
+
+    def test_landing_card_points_at_public_status_and_resolves_without_org(self, fresh_app):
+        import re
+
+        c, _ = fresh_app  # ENFORCE_ORG_GATE=True, no org, signed out
+        landing = c.get("/settings")
+        assert landing.status_code == 200
+        html = landing.get_data(as_text=True)
+        m = re.search(
+            r'<a href="([^"]+)"[^>]*>(?:(?!</a>).)*?System status', html, re.S
+        )
+        assert m is not None, "System status card missing from Settings landing"
+        href = m.group(1)
+        # The card targets the public /status, not the gated members surface.
+        assert href.endswith("/status") and "settings" not in href, href
+        # ...and following it as a no-org visitor reaches a real status view,
+        # not a redirect into org setup.
+        followed = c.get(href)
+        assert followed.status_code == 200
+        body = followed.get_data(as_text=True)
+        assert (
+            "Website operational" in body
+            or "Website down" in body
+            or "Status unavailable" in body
+        )

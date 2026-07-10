@@ -28714,7 +28714,11 @@ self.addEventListener('fetch', function(e){
             return "&mdash;"
         pct = float(stats.get("uptime_pct") or 0.0) * 100.0
         if pct >= 99.995:
-            return "100%"
+            # Never round a window that had real, counted downtime up to a bare
+            # "100%" — it reads as a contradiction beside the non-zero Downtime
+            # cell on the same row. Show the honest "99.99%" instead; "100%" is
+            # reserved for a genuinely gap-free window.
+            return "100%" if not stats.get("downtime_seconds") else "99.99%"
         if pct >= 99.9:
             return f"{pct:.3f}%"
         if pct >= 95.0:
@@ -28807,12 +28811,28 @@ self.addEventListener('fetch', function(e){
         from mediahub.observability import uptime as _uptime
 
         # Pull three windows so the page reads "24h / 7d / 30d uptime"
-        # straight off the database, with no aggregation in the view.
-        s24 = _uptime.uptime_stats(window_hours=24)
-        s7d = _uptime.uptime_stats(window_hours=24 * 7)
-        s30 = _uptime.uptime_stats(window_hours=24 * 30)
-        latest = _uptime.latest_heartbeat()
-        gaps = _uptime.recent_gaps(window_hours=24 * 30, limit=5)
+        # straight off the database, with no aggregation in the view. The
+        # uptime store is exception-safe by contract, but defend the operator
+        # page the same way _render_settings_status_section already does — an
+        # unexpected observability error degrades to the honest public view,
+        # never an unhandled 500.
+        try:
+            s24 = _uptime.uptime_stats(window_hours=24)
+            s7d = _uptime.uptime_stats(window_hours=24 * 7)
+            s30 = _uptime.uptime_stats(window_hours=24 * 30)
+            latest = _uptime.latest_heartbeat()
+            gaps = _uptime.recent_gaps(window_hours=24 * 30, limit=5)
+        except Exception:
+            body = (
+                '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-8);padding-bottom:var(--sp-6);margin-bottom:var(--sp-4)">'
+                '<span class="mh-hero-eyebrow">Status</span>'
+                '<h1>Service <em class="editorial">status</em></h1></section>'
+                + _render_settings_status_public_section()
+            )
+            resp = make_response(_layout("Status", body, active="status"))
+            resp.headers["Refresh"] = "60"
+            resp.headers["Cache-Control"] = "no-store"
+            return resp
 
         # Current pill — green if last heartbeat < 5 min ago AND ok.
         pill_class = "muted"
@@ -28949,11 +28969,21 @@ self.addEventListener('fetch', function(e){
         and dashboards that want the raw uptime numbers."""
         from mediahub.observability import uptime as _uptime
 
+        # /api/status is public and unauthenticated. The heartbeat's ``error``
+        # field carries the raw deep-/health failure string, which can include
+        # an internal filesystem path (e.g. "database: unable to open database
+        # file /srv/data/data.db") or an OS error. Drop it from this public
+        # surface — the ``ok`` flag already signals the failure honestly, with
+        # no internal text. The operator HTML views never rendered it.
+        latest = _uptime.latest_heartbeat()
+        if isinstance(latest, dict):
+            latest.pop("error", None)
+
         return jsonify(
             {
                 "ok": True,
                 "version": APP_VERSION,
-                "latest_heartbeat": _uptime.latest_heartbeat(),
+                "latest_heartbeat": latest,
                 "windows": {
                     "24h": _uptime.uptime_stats(window_hours=24),
                     "7d": _uptime.uptime_stats(window_hours=24 * 7),
@@ -29551,10 +29581,16 @@ self.addEventListener('fetch', function(e){
                 url_for("settings_section", section="account"),
             ),
             (
+                # Point at the org-gate-exempt public /status, not the gated
+                # /settings/status members surface, so this "is the site up?"
+                # tile resolves for signed-out / not-yet-onboarded visitors
+                # too (settings_section is not setup-exempt, so it would bounce
+                # them to org setup). Operators still get full detail via the
+                # Developer card below.
                 "System status",
                 "Whether the site is operational right now.",
                 "status",
-                url_for("settings_section", section="status"),
+                url_for("status_page"),
             ),
         ]
         if is_dev:
