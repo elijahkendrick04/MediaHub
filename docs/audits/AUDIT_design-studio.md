@@ -163,6 +163,13 @@ tests, all pass):
   helper, or template, and is guarded by `test_studio_page_highlights_the_create_nav`. Minimal and
   low-risk, but flagged here for reconciliation with any parallel session editing `web.py`.
 
+- **`docs/audits/AUDIT_meet-recap.md` — 1 line (CI unblock, not my feature):** the merged meet-recap audit
+  report ended with a stray trailing blank line, which the repo's own `end-of-file-fixer` pre-commit hook
+  (run `--all-files`) rejects, turning the shared **Hygiene hooks** CI check red on `main` and therefore on
+  every PR based on it (including this one). Applied exactly the mechanical fix the hook dictates (remove the
+  trailing blank line); the meet-recap session is already merged, so no active owner conflicts. Flagged for
+  reconciliation.
+
 No changes to `requirements.txt`, `pyproject.toml`, base templates, shared CSS/JS, or config.
 
 ---
