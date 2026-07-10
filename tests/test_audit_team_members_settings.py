@@ -273,3 +273,39 @@ def test_email_with_line_separator_is_rejected(members_world):
     )
     assert "Enter a valid email address" in r.get_data(as_text=True)
     assert t.MembershipStore().get(bad, "club-a") is None
+
+
+# ---- F8 (P1) — erasing the last owner must not brick the workspace ----------
+
+
+def test_erasing_last_owner_promotes_a_remaining_member(tmp_path):
+    """Self-serve account deletion (erase_email) has no last-owner guard — right,
+    a GDPR erasure can't be refused. But it must not leave a still-populated
+    workspace bound-but-ownerless (every remaining member locked out of admin).
+    Ownership passes to the longest-standing remaining active member."""
+    from mediahub.web import tenancy as t
+
+    s = t.MembershipStore(path=tmp_path / "memberships.jsonl")
+    s.add("owner@club.org", "club-z", role=t.ROLE_OWNER)
+    s.add("editor@club.org", "club-z", role=t.ROLE_EDITOR)
+    s.add("viewer@club.org", "club-z", role=t.ROLE_VIEWER)
+
+    s.erase_email("owner@club.org")
+
+    assert s.get("owner@club.org", "club-z") is None  # erased in full
+    assert s.is_bound("club-z") is True  # still a members-only workspace
+    # The earliest-joined remaining active member inherits ownership.
+    assert s.is_active_owner("editor@club.org", "club-z") is True
+    assert s.is_active_member("viewer@club.org", "club-z") is True
+
+
+def test_erasing_sole_member_still_unbinds(tmp_path):
+    """The documented zero-member model is preserved: erasing the only member of
+    a workspace leaves it unbound, with no phantom promotion."""
+    from mediahub.web import tenancy as t
+
+    s = t.MembershipStore(path=tmp_path / "memberships.jsonl")
+    s.add("solo@club.org", "club-solo", role=t.ROLE_OWNER)
+    s.erase_email("solo@club.org")
+    assert s.is_bound("club-solo") is False
+    assert s.list_for_profile("club-solo") == []
