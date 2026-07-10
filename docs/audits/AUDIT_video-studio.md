@@ -221,8 +221,22 @@ behaviours (F-13/F-14), all logged, none blocking normal use.
 
 ## 10. Handover & merge status
 
-- **Branch:** `claude/video-studio-audit-bkhvvu`.
-- **Merge:** landed via draft PR against `main` (managed-environment path — CI +
-  "branch up to date" is the merge gate; see PR). Green gate = full relevant test
-  run + ruff lint/format on changed files + app-boot smoke on two unrelated routes.
+- **Branch:** `claude/video-studio-audit-bkhvvu` — pushed to `origin` at commit
+  `2a280c3`, rebased cleanly (no conflicts) onto `origin/main` `f999823`.
+- **Green gate (passed):** the full `pytest tests/` suite (xdist, `autotest`
+  excluded per CI) was run green on three consecutive `origin/main` bases as main
+  advanced under the audit — **12,242 / 12,282 / 12,299 passed, 10 skipped** each
+  (all skips legitimate: FFmpeg-present honest-error paths, opt-in slow render
+  diffs). On the final tree a targeted re-gate (the video-studio feature suite plus
+  the two orthogonal newly-merged features' own tests) was **172 passed, 1 skipped**;
+  ruff lint + `ruff format --check` clean on all changed files; app boots and
+  `/`, `/help`, `/video` all serve 200. No secrets or `.env` staged.
+- **Draft PR:** not yet opened from this session — the GitHub MCP connector
+  disconnected mid-session, and there is no `gh` CLI in this environment, so the PR
+  could not be created programmatically. The branch is pushed and ready; open the
+  draft PR at `https://github.com/elijahkendrick04/MediaHub/pull/new/claude/video-studio-audit-bkhvvu`
+  (or via the GitHub MCP once it reconnects). CI on the PR merge result plus the
+  "branch up to date" protection is the authoritative merge gate for `main`.
 - **Review the diff:** `git diff origin/main...claude/video-studio-audit-bkhvvu`
+  (6 files, +506/-8: `web.py` video routes, `video/captions.py`, three test files,
+  this report).
