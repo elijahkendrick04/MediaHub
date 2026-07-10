@@ -3372,19 +3372,33 @@ def _persist_run(run: PipelineRunV4, file_name: str) -> None:
 
 
 def _load_run(run_id: str) -> Optional[dict]:
-    p = RUNS_DIR / f"{run_id}.json"
-    if not p.exists():
+    # Path-traversal guard: run ids are minted as uuid hex / slugs and never
+    # contain a path separator or "..", so any such value is hostile (e.g. a
+    # tampered ?run_id=../../<dir>/victim query param that would otherwise
+    # escape RUNS_DIR / DATA_DIR and reflect an arbitrary JSON file's contents).
+    # Refusing it here protects every caller, not just the slash-rejecting
+    # <run_id> route converter.
+    if not run_id or "/" in run_id or "\\" in run_id or ".." in run_id:
         return None
-    try:
-        return json.loads(p.read_text())
-    except (json.JSONDecodeError, OSError, UnicodeDecodeError) as e:
-        # A corrupted run JSON would otherwise 500 every route that
-        # reads it (/review, /pack, /audit, /drafts/<pack_id>). Surface
-        # "run not found" instead so the recovery_page renders cleanly;
-        # the operator can find the offending file in the log.
-        # UnicodeDecodeError covers files written in a non-UTF-8 encoding.
-        log.warning("run %s on disk but unreadable: %s", run_id, e)
-        return None
+    # Canonical flat layout first, then the legacy nested runs_v4/<id>/run.json
+    # form that ~15 other routes fall back to individually — centralised here so
+    # every run-scoped surface (spotlight included) reads both without its own
+    # fallback. A corrupt/unreadable flat file returns None immediately (matching
+    # the historical contract) rather than masking it with the nested form.
+    for p in (RUNS_DIR / f"{run_id}.json", RUNS_DIR / run_id / "run.json"):
+        if not p.exists():
+            continue
+        try:
+            return json.loads(p.read_text())
+        except (json.JSONDecodeError, OSError, UnicodeDecodeError) as e:
+            # A corrupted run JSON would otherwise 500 every route that
+            # reads it (/review, /pack, /audit, /drafts/<pack_id>). Surface
+            # "run not found" instead so the recovery_page renders cleanly;
+            # the operator can find the offending file in the log.
+            # UnicodeDecodeError covers files written in a non-UTF-8 encoding.
+            log.warning("run %s on disk but unreadable: %s", run_id, e)
+            return None
+    return None
 
 
 def _machine_readable_run(data: Optional[dict], run_id: str, *, max_achievements: int = 60) -> str:
@@ -34493,7 +34507,12 @@ function mhAnDigest(btn) {{
         approving them first. Accepts an optional ``tone`` field (warm-club /
         hype / data-led) — empty means the organisation's brand voice."""
         try:
-            from mediahub.club_platform.stub_pack_store import save_pack
+            from mediahub.club_platform.stub_pack_store import (
+                list_packs,
+                load_pack,
+                save_pack,
+                update_pack,
+            )
         except ImportError:
             return _recovery_page(
                 "Spotlight unavailable",
@@ -34525,23 +34544,53 @@ function mhAnDigest(btn) {{
             ),
             "status": "queue",
         }
+        _active_pid = _active_profile_id()
+        _form_data = {
+            "free_text": f"Spotlight — {result['swimmer_name']}",
+            "source": "athlete_spotlight",
+            "swimmer_name": result["swimmer_name"],
+            "meet_name": result["meet_name"],
+            "run_id": run_id,
+            "swimmer_key": swimmer_key,
+            "n_approved": result["n_approved"],
+            "n_pbs": result["n_pbs"],
+            "n_medals": result["n_medals"],
+            "tone": tone,
+            "results_lines": result["results_lines"],
+        }
+
+        # Idempotency: re-building the same swimmer's spotlight refreshes the
+        # existing draft in place rather than minting a duplicate — a double-
+        # click or a deliberate rebuild would otherwise litter /drafts with
+        # clones keyed on the same (run_id, swimmer_key). Preserve the existing
+        # card's approval status (and update_pack leaves any planned_date
+        # untouched) so a rebuild never silently un-approves or unschedules a
+        # draft the reviewer already actioned.
+        existing = None
+        for _meta in list_packs(limit=200):
+            rec = load_pack(_meta["pack_id"])
+            if not rec or not _can_access_pack(rec, _active_pid):
+                continue
+            _fd = rec.get("form_data") or {}
+            if (
+                _fd.get("source") == "athlete_spotlight"
+                and str(_fd.get("run_id") or "") == str(run_id)
+                and str(_fd.get("swimmer_key") or "") == str(swimmer_key)
+            ):
+                existing = rec
+                break
+
+        if existing is not None:
+            _prev_card = (existing.get("cards") or [{}])[0]
+            card["status"] = _prev_card.get("status") or "queue"
+            update_pack(existing["pack_id"], cards=[card], form_data_updates=_form_data)
+            return redirect(url_for("stub_pack_view", pack_id=existing["pack_id"]))
+
         saved = save_pack(
             "free_text",  # reuses the stub-pack list; tagged in form_data
-            {
-                "free_text": f"Spotlight — {result['swimmer_name']}",
-                "source": "athlete_spotlight",
-                "swimmer_name": result["swimmer_name"],
-                "meet_name": result["meet_name"],
-                "run_id": run_id,
-                "swimmer_key": swimmer_key,
-                "n_approved": result["n_approved"],
-                "n_pbs": result["n_pbs"],
-                "n_medals": result["n_medals"],
-                "tone": tone,
-                "results_lines": result["results_lines"],
-            },
+            _form_data,
             [card],
-            profile_id=_active_profile_id(),
+            profile_id=_active_pid,
         )
         return redirect(url_for("stub_pack_view", pack_id=saved["pack_id"]))
 
@@ -34712,9 +34761,19 @@ function mhAnDigest(btn) {{
                     _sp_club = (
                         run_data.get("profile_display") or run_data.get("club_filter") or ""
                     ).strip()
-                    swimmers_html = f'<div style="margin-top:20px"><h2>Swimmers in this meet <span class="muted" style="font-weight:400;font-size:13px">({len(swimmers)})</span></h2>'
+                    # Bound the render: a big multi-club invitational can list
+                    # hundreds of swimmers (~1.6KB of card markup each -> an
+                    # 800KB+ page), so cap the grid to the most content-worthy
+                    # names (list_swimmers_in_run already sorts by achievement
+                    # count) and point to the full meet review for the rest.
+                    # Realistic single-club rosters sit well under the cap and
+                    # are never truncated.
+                    _ROSTER_CAP = 120
+                    _total_sw = len(swimmers)
+                    _shown_sw = swimmers[:_ROSTER_CAP]
+                    swimmers_html = f'<div style="margin-top:20px"><h2>Swimmers in this meet <span class="muted" style="font-weight:400;font-size:13px">({_total_sw})</span></h2>'
                     swimmers_html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px;margin-top:12px">'
-                    for sw in swimmers:
+                    for sw in _shown_sw:
                         sp_url = url_for(
                             "spotlight_view", run_id=run_id_param, swimmer_key=sw["swimmer_key"]
                         )
@@ -34738,16 +34797,23 @@ function mhAnDigest(btn) {{
     <div style="font-size:12px;color:var(--ink-dim)">{_ach_label}</div>
   </div>
 </a>"""
-                    swimmers_html += "</div></div>"
+                    swimmers_html += "</div>"
+                    if _total_sw > len(_shown_sw):
+                        swimmers_html += (
+                            '<p class="muted" style="margin-top:12px;font-size:13px">'
+                            f"Showing the {len(_shown_sw)} swimmers with the most "
+                            f'achievements. <a href="{_review_url}" style="color:var(--ink)">'
+                            "Open the full meet review</a> to reach the other "
+                            f"{_total_sw - len(_shown_sw)}.</p>"
+                        )
+                    swimmers_html += "</div>"
                 else:
                     swimmers_html = '<div class="card"><p class="muted">No achievements found for this run. The recognition report may not be available.</p></div>'
             elif run_id_param:
-                # A meet was selected but couldn't be opened — a run stored in
-                # the legacy nested layout (runs_v4/<id>/run.json, which the
-                # shared _load_run helper doesn't read), a run the active org
-                # can't access, or a corrupt file. Surface an honest message
-                # instead of a silent dead-end (the dropdown selected, no roster,
-                # no explanation).
+                # A meet was selected but couldn't be opened — a run the active
+                # org can't access, or a corrupt/unreadable data file. Surface an
+                # honest message instead of a silent dead-end (the dropdown
+                # selected, no roster, no explanation).
                 swimmers_html = (
                     '<div class="card"><p class="muted">We couldn&rsquo;t open that '
                     "meet. It may have been processed on an older version, be "
@@ -34769,7 +34835,8 @@ function mhAnDigest(btn) {{
   <h2>Choose a meet</h2>
   <p class="muted" style="margin-top:0;font-size:13px">Showing meets from the last month. Older runs roll off automatically, and a run deleted in Settings disappears from here too.</p>
   <form method="get" action="{url_for("spotlight_landing")}">
-    <select name="run_id" onchange="this.form.submit()" style="max-width:480px">
+    <label for="sp-meet-select" class="mh-sr-only">Choose a processed meet</label>
+    <select id="sp-meet-select" name="run_id" aria-label="Choose a processed meet" onchange="this.form.submit()" style="max-width:480px">
       {runs_opts}
     </select>
     <noscript><button class="btn" type="submit" style="margin-top:var(--sp-3)">Load swimmers &rarr;</button></noscript>
@@ -35020,7 +35087,8 @@ function mhAnDigest(btn) {{
   <div style="margin-top:14px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
     <form method="post" action="{url_for("spotlight_build", run_id=run_id, swimmer_key=swimmer_key)}" style="display:inline-flex;gap:8px;align-items:center;flex-wrap:wrap"
           data-loader-text="Composing the spotlight post">
-      <select name="tone" style="font-size:12px;max-width:220px" title="Caption tone for the spotlight post">{_sp_tone_opts}</select>
+      <label for="sp-tone-select" class="mh-sr-only">Caption tone for the spotlight post</label>
+      <select id="sp-tone-select" name="tone" aria-label="Caption tone for the spotlight post" style="font-size:12px;max-width:220px" title="Caption tone for the spotlight post">{_sp_tone_opts}</select>
       <button type="submit" class="btn"{_sp_build_attr} title="{_h(_sp_build_title)}" style="font-size:13px">Build spotlight post from approved cards &rarr;</button>
     </form>
     <a class="btn secondary" href="{_pack_url}" style="font-size:13px">Open content builder &rarr;</a>
