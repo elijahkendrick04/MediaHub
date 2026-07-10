@@ -11806,11 +11806,12 @@ def _theme_seed_style_block() -> str:
 _VIDEO_STUDIO_HTML = """
 <section class="mh-hero" data-lane="" style="padding-top:var(--sp-8);padding-bottom:var(--sp-6)">
   <span class="mh-hero-eyebrow">Video &middot; the footage path</span>
-  <h1>Turn race footage into<br><em class="editorial">a branded reel.</em></h1>
+  <h1>Turn race footage into<br><em class="editorial">a footage reel.</em></h1>
   <p class="lede">Upload or record a clip; MediaHub finds the moment, crops it
   upright, puts the spoken words on screen, and brands it. You approve before
   anything is exported.</p>
   __ENGINE_NOTE__
+  __MEET_REEL_HINT__
 </section>
 
 <div class="vstudio-grid">
@@ -11870,10 +11871,10 @@ _VIDEO_STUDIO_HTML = """
 </div>
 
 <section class="vstudio-panel vstudio-reel" id="vs-reel-bar" style="margin-top:var(--sp-5)" hidden>
-  <h2 class="vstudio-h">&#10024; AI reel &middot; from <span id="vs-reel-count">0</span> selected clip(s)</h2>
+  <h2 class="vstudio-h">&#10024; Footage reel &middot; from <span id="vs-reel-count">0</span> selected clip(s)</h2>
   <p class="muted">Tick &ldquo;reel&rdquo; on two or more clips above, and the director will
   order the best moments, grade them, score them to music and write a hook &mdash; one
-  branded reel for you to approve.</p>
+  branded footage reel for you to approve.</p>
   <div class="vstudio-reel-row">
     <input type="text" id="vs-reel-brief" maxlength="200" placeholder="What's this reel about? (optional context for the director)">
     <button class="btn primary" id="vs-reel-make" type="button">Direct the reel &rarr;</button>
@@ -12104,7 +12105,7 @@ _VIDEO_STUDIO_HTML = """
           + (a.usable ? '&#10003; ' : '&#9888; ') + esc(permLabel(a.permission_status)) + '</span>';
         return '<figure class="vstudio-tile'+(a.id===selectedId?' sel':'')+'" data-id="'+esc(a.id)+'">'
           + media
-          + '<label class="vstudio-pick" title="Include in AI reel"><input type="checkbox" class="vs-reel-pick" data-id="'+esc(a.id)+'"'+(reelSet[a.id]?' checked':'')+'> reel</label>'
+          + '<label class="vstudio-pick" title="Include in the footage reel"><input type="checkbox" class="vs-reel-pick" data-id="'+esc(a.id)+'"'+(reelSet[a.id]?' checked':'')+'> reel</label>'
           + '<figcaption class="cap">'+esc(a.filename)+(a.duration_ms?(' &middot; '+fmtDur(a.duration_ms)):'')+'</figcaption>'
           + '<div class="vs-tile-meta">'+badge
           + '<select class="vs-perm" data-id="'+esc(a.id)+'" aria-label="Clip permission">'+permOpts+'</select>'
@@ -12189,7 +12190,7 @@ _VIDEO_STUDIO_HTML = """
     }, function(){ var s=$('vs-make-status'); if(s){ s.textContent = 'Clip created. Render it below.'; } loadProjects(); });
   });
 
-  // ---- AI reel (multi-clip) ----
+  // ---- Footage reel (multi-clip) ----
   function toggleReel(id, on){
     if(on){ reelSet[id] = true; } else { delete reelSet[id]; }
     var n = Object.keys(reelSet).length;
@@ -13724,6 +13725,11 @@ def _layout(
     dock: dict | None = None,
     chapters: list[tuple[str, str]] | None = None,
 ) -> str:
+    # G-7: the Video Studio passes active="video", which matches no top-bar
+    # item, so nothing highlighted. The studio is a Create tile — highlight
+    # Create in both navs.
+    if active == "video":
+        active = "create"
     # Compute whether the current request has an active organisation pinned
     # so the nav can render Sign-in vs Sign-out + Organisation-name correctly.
     try:
@@ -45367,6 +45373,7 @@ function mhSetupMode(mode) {{
     <button class="btn secondary mh-reel-go" style="font-size:12px;padding:6px 14px"
             onclick="generateReelBatch(this, {repr(_reel_url)})">All 4 formats</button>
   </div>
+  {f'<div class="dim" style="font-size:11px;margin-top:8px">Working from race footage? <a href="{url_for("video_studio_page")}">Try the Video Studio &rarr;</a></div>' if _v8_ok else ""}
 </div>"""
 
         # ---- M30: Create-all-graphics + rendered-count + pack wall ------
@@ -58207,6 +58214,30 @@ voice, and queues them for one-click approval.</p>
         look_options = "".join(
             f'<option value="{_h(n)}">{_h(describe_look(n))}</option>' for n in look_names()
         )
+        # G-7: the OTHER reel — the Meet reel built from result cards on the
+        # pack page — gets a cross-link here so the two features stop being
+        # two unrelated things both called "reel". Link the latest processed
+        # meet's pack when there is one, else Activity.
+        _meet_reel_href = url_for("activity_page")
+        try:
+            conn = _db()
+            try:
+                _mr_row = conn.execute(
+                    "SELECT id FROM runs WHERE profile_id = ? AND status='done' "
+                    "ORDER BY created_at DESC LIMIT 1",
+                    (prof.profile_id,),
+                ).fetchone()
+            finally:
+                conn.close()
+            if _mr_row:
+                _meet_reel_href = url_for("content_pack", run_id=_mr_row["id"])
+        except Exception as e:  # noqa: BLE001 - hint only, never block the studio
+            log.warning("video studio: meet-reel hint lookup failed: %s", e)
+        meet_reel_hint = (
+            '<p class="muted" style="margin-top:6px">Want a highlights reel from '
+            "your result cards instead? "
+            f'<a href="{_h(_meet_reel_href)}">Build a Meet reel &rarr;</a></p>'
+        )
         body = (
             _VIDEO_STUDIO_HTML.replace("__CSRF__", _h(_csrf_token()))
             .replace("__FOOTAGE_URL__", url_for("api_video_footage_upload"))
@@ -58253,6 +58284,7 @@ voice, and queues them for one-click approval.</p>
             .replace("__LOOK_OPTIONS__", look_options)
             .replace("__VIDEO_MAX_MB__", str(_video_upload_max // (1024 * 1024)))
             .replace("__ENGINE_NOTE__", engine_note)
+            .replace("__MEET_REEL_HINT__", meet_reel_hint)
         )
         return _layout("Video studio", body, active="video")
 
@@ -58748,7 +58780,7 @@ voice, and queues them for one-click approval.</p>
 
         from mediahub.video.projects import VideoProject
 
-        name = (result.plan.hook or brief or "AI reel").strip()[:80] or "AI reel"
+        name = (result.plan.hook or brief or "Footage reel").strip()[:80] or "Footage reel"
         proj = VideoProject(
             id="",
             profile_id=profile_id,
@@ -58850,7 +58882,7 @@ voice, and queues them for one-click approval.</p>
                         brief_context=brief,
                         colours=colours,
                     )
-                    name = (result.plan.hook or brief or "AI reel").strip()[:80] or "AI reel"
+                    name = (result.plan.hook or brief or "Footage reel").strip()[:80] or "Footage reel"
                     proj = VideoProject(
                         id="",
                         profile_id=profile_id,
