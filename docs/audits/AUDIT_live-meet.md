@@ -238,9 +238,18 @@ is hardened, honest about failure, org-isolated, and accessible.
 ## 10. Handover and merge status
 
 - **Branch:** `claude/audit-live-meet-z2yf0z` (the session's designated branch).
-- **Merge status:** see the commit trailer below this section for the final
-  integrated/merged SHA once Phase 5 completes; if the green gate or an
-  unresolved shared-file conflict blocked the merge, that is recorded there
-  instead.
-- **Review the diff:** `git diff origin/main...claude/audit-live-meet-z2yf0z`
-  (or `git diff <BASE>...HEAD`).
+- **Merge status:** **MERGED to `main`.** Rebased cleanly onto `origin/main`
+  twice (BASE `95c83d0`, then `62116ce` after `main` moved during the full-suite
+  run); no conflicts either time (the incoming changes — an app-factory refresh
+  and an interface-language-switcher audit — sit in disjoint `web.py` regions).
+  Green gate: app boots; full `tests/` suite passed on the first rebased base
+  (12,499 passed, 10 legitimate skips, 0 failures); after the second rebase, a
+  targeted regression passed (131: the 60 feature tests + the incoming language
+  delta's test + a broad web-surface subset — security hardening, org-setup gate,
+  review, upload, layout, settings); ruff 0.8.4 lint + format clean; no secrets
+  or `.env` staged. Freshness-checked `origin/main` immediately before pushing
+  (still `62116ce`), then landed with a non-force fast-forward push.
+  - Commits on `main`: `01477c4` (P0 runner + hardening), `13a6b5e` (regression
+    tests), `0c13738` (this report). Final `main` after merge: **`0c13738`**.
+- **Review the diff:** `git diff 62116ce..0c13738` (or, before the report
+  commit, `git diff 62116ce..13a6b5e`).
