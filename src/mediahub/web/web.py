@@ -1077,11 +1077,15 @@ def _use_in_caption_html(run_id: str, swim_id: str, card_uuid: str) -> tuple[str
     # JSON-encode the URLs so Jinja-style interpolation can't be
     # tricked by a card_id containing quotes — defence-in-depth.
     cap_url = url_for("api_live_caption", run_id=run_id, swim_id=swim_id)
+    # H-11: the result panel gets a "Save to card" beside Copy — persisted via
+    # the same workflow set_edits route the edit drawer's Save uses.
+    save_url = url_for("api_workflow_set", run_id=run_id, card_id=swim_id)
     btn = (
         f'<button class="btn secondary" type="button" '
         f'style="font-size:11px;padding:4px 10px;'
         f'background:color-mix(in oklab, var(--lane) 15%, transparent);border-color:color-mix(in oklab, var(--lane) 40%, transparent);color:var(--lane)" '
-        f'onclick="mhUseWhyInCaption(this, {json.dumps(cap_url)}, {json.dumps(panel_id)})">'
+        f'onclick="mhUseWhyInCaption(this, {json.dumps(cap_url)}, {json.dumps(panel_id)}, '
+        f'{json.dumps(save_url)}, {json.dumps(str(swim_id))})">'
         f"Use in next caption</button>"
     )
     panel = (
@@ -14961,7 +14965,7 @@ def _layout(
   // instruction. The result lands in a small panel below the
   // explainer (panel_id), preserving the user's reading flow rather
   // than dumping into a modal.
-  window.mhUseWhyInCaption = function(btn, captionUrl, panelId) {
+  window.mhUseWhyInCaption = function(btn, captionUrl, panelId, saveUrl, cardId) {
     var panel = document.getElementById(panelId);
     var origLabel = btn.textContent;
     btn.disabled = true; btn.textContent = 'Generating…';
@@ -14977,8 +14981,14 @@ def _layout(
       if (!panel) return;
       var caption = (o.body && o.body.caption) || '';
       if (o.body && o.body.error === 'no_key') {
-        panel.innerHTML = '<strong style="color:var(--warn)">AI is in heuristic mode.</strong> '
-          + '<span>Contact your administrator to enable AI.</span>';
+        // H-11: the standard honest-error wording, same as every other
+        // caption surface (the server sends it in `message`).
+        panel.innerHTML = '';
+        var warn = document.createElement('strong');
+        warn.style.color = 'var(--warn)';
+        warn.textContent = (o.body && o.body.message) ||
+          'AI captions are unavailable on this deployment. Contact your administrator to enable them.';
+        panel.appendChild(warn);
         return;
       }
       if (caption) {
@@ -15007,6 +15017,61 @@ def _layout(
           catch(e) { copyBtn.textContent = 'Copy failed'; }
         });
         panel.appendChild(copyBtn);
+        // H-11: persist the result — before this, the woven caption could only
+        // be copied; nothing saved it to the card. Same set_edits route (and
+        // slots) as the edit drawer's Save, so pack build honours it.
+        if (saveUrl) {
+          var saveBtn = document.createElement('button');
+          saveBtn.type = 'button';
+          saveBtn.className = 'btn secondary';
+          saveBtn.style.cssText = 'font-size:11px;padding:4px 10px;margin-left:6px';
+          saveBtn.textContent = 'Save to card';
+          saveBtn.addEventListener('click', function(){
+            var text = capDiv.textContent || '';
+            saveBtn.disabled = true;
+            fetch((window._API_BASE || '') + saveUrl, {
+              method: 'POST',
+              headers: {'Content-Type': 'application/json'},
+              body: JSON.stringify({action: 'set_edits', edits: {
+                'warm-club_headline': text, 'hype_headline': text, 'data-led_headline': text
+              }})
+            }).then(function(r){
+              return r.json().then(
+                function(j){ return {ok: r.ok, body: j}; },
+                function(){ return {ok: r.ok, body: null}; }
+              );
+            }).then(function(sv){
+              saveBtn.disabled = false;
+              var ok = sv && sv.ok && sv.body && sv.body.ok !== false;
+              if (!ok) {
+                var m = (sv && sv.body && (sv.body.reason || sv.body.error || sv.body.message)) || 'server error';
+                if (window.MH && MH.toast) MH.toast('Could not save the caption — ' + m, 'error', 4000);
+                return;
+              }
+              saveBtn.textContent = 'Saved \\u2009\\u2713';
+              if (window.MH && MH.toast) MH.toast('Caption saved to the card', 'success', 2200);
+              // Keep the row caption + the edit drawer's seed in sync.
+              try {
+                var esc = (window.CSS && CSS.escape) ? CSS.escape(cardId || '') : (cardId || '');
+                document.querySelectorAll('[data-card-id="' + esc + '"][data-mh-inspect]').forEach(function(b){
+                  var old = b.getAttribute('data-insp-caption') || '';
+                  if (old && old !== text) b.setAttribute('data-insp-caption-prev', old);
+                  b.setAttribute('data-insp-caption', text);
+                });
+                document.querySelectorAll('[data-mh-row-caption="' + esc + '"]').forEach(function(el){
+                  var t = el.querySelector('[data-mh-row-caption-text]');
+                  var disp = text.length > 140 ? text.slice(0, 140) + '…' : text;
+                  if (t) t.textContent = disp;
+                  el.hidden = !disp;
+                });
+              } catch(e) {}
+            }).catch(function(e){
+              saveBtn.disabled = false;
+              if (window.MH && MH.toast) MH.toast('Could not save the caption — ' + ((e && e.message) || 'network error'), 'error', 4000);
+            });
+          });
+          panel.appendChild(saveBtn);
+        }
       } else {
         panel.innerHTML = '<strong style="color:var(--bad)">Generation failed.</strong> '
           + ((o.body && (o.body.message || o.body.error)) || ('HTTP ' + o.status));
