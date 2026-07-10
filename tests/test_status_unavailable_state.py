@@ -16,8 +16,14 @@ import pytest
 @pytest.fixture
 def app(tmp_path, monkeypatch):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    # Reload the uptime module too, not just web: its DB_PATH is bound at import
+    # time, so without this reload the "no heartbeat" premise leaks a populated
+    # DB from a prior test (module-level global) and the test becomes
+    # order-dependent. Rebind it to this test's fresh DATA_DIR.
+    import mediahub.observability.uptime as upt
     import mediahub.web.web as wm
 
+    importlib.reload(upt)
     importlib.reload(wm)
     application = wm.create_app()
     application.config["TESTING"] = True
