@@ -42078,7 +42078,7 @@ what you're doing, what they should do.</p>
             )
         return chips or '<span style="color:var(--ink-muted);font-size:12px">No palette set</span>'
 
-    def _brand_kit_card_html(prof, kit, default_id: str) -> str:
+    def _brand_kit_card_html(prof, kit, default_id: str, can_admin: bool = True) -> str:
         from mediahub.brand.kits import LOCKABLE_TOKENS
 
         is_default = kit.kit_id == default_id
@@ -42152,16 +42152,34 @@ what you're doing, what they should do.</p>
         )
 
         def _kit_colour_slot(slot: str, label: str) -> str:
+            # A slot the kit never set must NOT be silently persisted from the
+            # picker's on-brand fallback: <input type=color> always submits a
+            # value, so an unset slot rendered at _pal_default would be read back
+            # by _form_palette() as a real user choice and fabricate a colour the
+            # club never picked (CLAUDE.md: palettes are evidence-grounded, never
+            # invented). Gate each picker behind a "set" checkbox: an unset slot
+            # renders its picker DISABLED (disabled inputs are not submitted), so
+            # a no-op save round-trips the palette unchanged. Ticking the box
+            # enables the picker so the slot can be set; unticking a set slot
+            # clears it.
             cur = pal.get(slot, "")
-            val = cur if str(cur).startswith("#") else _pal_default
+            is_set = str(cur).startswith("#")
+            val = cur if is_set else _pal_default
+            checked = " checked" if is_set else ""
+            disabled = "" if is_set else " disabled"
             return (
-                '<label style="display:flex;flex-direction:column;gap:3px;'
+                '<div style="display:flex;flex-direction:column;gap:3px;'
                 'font-size:11px;color:var(--ink-muted)">'
-                f"{label}"
-                f'<input type="color" name="{slot}" value="{_h(val)}" '
+                f"<span>{label}</span>"
+                '<span style="display:flex;align-items:center;gap:6px">'
+                f'<input type="checkbox"{checked} aria-label="Set {_h(label.lower())} colour" '
+                'onchange="this.nextElementSibling.disabled=!this.checked" '
+                'style="cursor:pointer"/>'
+                f'<input type="color" name="{slot}" value="{_h(val)}"{disabled} '
+                f'aria-label="{_h(label)} colour" '
                 'style="width:64px;height:40px;padding:0;border:1px solid var(--border);'
                 'border-radius:4px;background:var(--panel);cursor:pointer"/>'
-                "</label>"
+                "</span></div>"
             )
 
         palette_pickers = "".join(
@@ -42218,7 +42236,8 @@ what you're doing, what they should do.</p>
             f'<form method="post" action="{url_for("api_brand_kit_palette_import", kit_id=kit.kit_id)}" '
             'enctype="multipart/form-data" style="margin-top:12px;display:flex;gap:8px;'
             'align-items:center;flex-wrap:wrap">'
-            '<input type="file" name="palette_file" accept=".ase,.json,application/json" required />'
+            '<input type="file" name="palette_file" accept=".ase,.json,application/json" '
+            'aria-label="Palette file to import (Adobe .ase or Color JSON)" required />'
             '<button class="btn secondary" type="submit">Import palette file</button>'
             '<span style="font-size:12px;color:var(--ink-muted)">Adobe .ase or Color JSON</span>'
             "</form>"
@@ -42243,8 +42262,12 @@ what you're doing, what they should do.</p>
             + (f" · Font: {_h(kit.font_pairing)}" if kit.font_pairing else "")
             + (f" · Tone: {_h(kit.tone)}" if kit.tone else "")
             + "</p>"
-            f'<div style="margin-top:10px">{actions}</div>'
-            f"{edit_form}</div>"
+            # Mutating controls (make-default / delete / edit / import / resweep)
+            # only for an admin: a bound non-owner gets a read-only card instead
+            # of controls that would dead-end in a 404 (the POST routes gate on
+            # _brand_can_admin). See brand_home_page.
+            + (f'<div style="margin-top:10px">{actions}</div>{edit_form}' if can_admin else "")
+            + "</div>"
         )
 
     def _brand_identity_html(prof) -> str:
@@ -42300,7 +42323,7 @@ what you're doing, what they should do.</p>
                 )
         return "".join(bits)
 
-    def _render_brand_home(prof) -> str:
+    def _render_brand_home(prof, can_admin: bool = True) -> str:
         from mediahub.brand import kits as _kits
 
         default_id = _kits.default_kit_id(prof)
@@ -42315,36 +42338,74 @@ what you're doing, what they should do.</p>
                 '<div class="mh-notice" style="margin-bottom:14px;border-color:var(--bad);'
                 f'color:var(--bad)">{_h(err)}</div>'
             )
-        kit_cards = "".join(_brand_kit_card_html(prof, k, default_id) for k in all_kits)
+        kit_cards = "".join(_brand_kit_card_html(prof, k, default_id, can_admin) for k in all_kits)
         create_form = (
-            '<details style="margin-top:8px"><summary style="cursor:pointer;color:var(--accent)">'
-            "+ New kit</summary>"
-            f'<form method="post" action="{url_for("api_brand_kit_create")}" '
-            'style="display:flex;flex-direction:column;gap:8px;margin-top:12px;max-width:520px">'
-            '<input class="mh-input" name="name" placeholder="Kit name (e.g. Acme co-brand, Gala 2026)" required />'
-            '<select class="mh-input" name="role">'
-            '<option value="sponsor">Sponsor co-brand</option>'
-            '<option value="event">Event sub-brand</option>'
-            '<option value="section">Team / section</option>'
-            '<option value="personal">Personal</option>'
-            "</select>"
-            '<div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">'
-            + "".join(
-                '<label style="display:flex;flex-direction:column;gap:3px;'
-                'font-size:11px;color:var(--ink-muted)">'
-                f"{label}"
-                f'<input type="color" name="{slot}" value="{default}" '
-                'style="width:64px;height:40px;padding:0;border:1px solid var(--border);'
-                'border-radius:4px;background:var(--panel);cursor:pointer"/></label>'
-                for slot, label, default in (
-                    ("primary", "Primary", "#0a2540"),
-                    ("secondary", "Secondary", "#5b6b7a"),
-                    ("accent", "Accent", "#22d3ee"),
+            ""
+            if not can_admin
+            else (
+                '<details style="margin-top:8px"><summary style="cursor:pointer;color:var(--accent)">'
+                "+ New kit</summary>"
+                f'<form method="post" action="{url_for("api_brand_kit_create")}" '
+                'style="display:flex;flex-direction:column;gap:8px;margin-top:12px;max-width:520px">'
+                '<input class="mh-input" name="name" placeholder="Kit name (e.g. Acme co-brand, Gala 2026)" required />'
+                '<select class="mh-input" name="role">'
+                '<option value="sponsor">Sponsor co-brand</option>'
+                '<option value="event">Event sub-brand</option>'
+                '<option value="section">Team / section</option>'
+                '<option value="personal">Personal</option>'
+                "</select>"
+                '<div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">'
+                + "".join(
+                    '<label style="display:flex;flex-direction:column;gap:3px;'
+                    'font-size:11px;color:var(--ink-muted)">'
+                    f"{label}"
+                    f'<input type="color" name="{slot}" value="{default}" '
+                    'style="width:64px;height:40px;padding:0;border:1px solid var(--border);'
+                    'border-radius:4px;background:var(--panel);cursor:pointer"/></label>'
+                    for slot, label, default in (
+                        ("primary", "Primary", "#0a2540"),
+                        ("secondary", "Secondary", "#5b6b7a"),
+                        ("accent", "Accent", "#22d3ee"),
+                    )
                 )
+                + "</div>"
+                '<div><button class="btn" type="submit">Create kit</button></div>'
+                "</form></details>"
             )
-            + "</div>"
-            '<div><button class="btn" type="submit">Create kit</button></div>'
-            "</form></details>"
+        )
+        # Re-render sweep driver (admin-only). Both fetches send the session CSRF
+        # token via the X-CSRF-Token header so they pass _csrf_protect in
+        # production (the resweep POSTs carry no JSON body, so the content-type
+        # exemption would not cover them), and reject on !r.ok so a 403/404/500
+        # shows the .catch failure text instead of a misleading benign result.
+        resweep_js = (
+            "<script>(function(){"
+            f"var CSRF='{_csrf_token()}';"
+            "function jok(r){if(!r.ok){throw new Error('http '+r.status);}return r.json();}"
+            "document.querySelectorAll('.mh-resweep').forEach(function(box){"
+            "var prev=box.querySelector('.mh-resweep-preview'),"
+            "ap=box.querySelector('.mh-resweep-apply'),out=box.querySelector('.mh-resweep-out');"
+            "prev.addEventListener('click',function(){out.textContent='Checking…';"
+            "fetch(box.dataset.preview,{method:'POST',headers:{'X-CSRF-Token':CSRF}}).then(jok)"
+            ".then(function(d){var n=d.n_affected||0;"
+            "out.textContent=n?(n+' card(s) would change'):'No cards would change';"
+            "ap.style.display=n?'inline-block':'none';}).catch(function(){out.textContent='Preview failed.';});});"
+            # Chunked apply: each call renders at most a few cards (Playwright
+            # is seconds per card, and one big synchronous apply would blow the
+            # worker timeout), walking the offset cursor until remaining==0.
+            "ap.addEventListener('click',function(){"
+            "var total=0,off=0;ap.disabled=true;"
+            "function step(){out.textContent='Re-rendering…'+(total?(' ('+total+' done)'):'');"
+            "fetch(box.dataset.apply+'?limit=8&offset='+off,{method:'POST',headers:{'X-CSRF-Token':CSRF}})"
+            ".then(jok)"
+            ".then(function(d){total+=(d.n_rendered||0);"
+            "off=(typeof d.next_offset==='number')?d.next_offset:(off+8);"
+            "if(d.remaining){out.textContent='Re-rendered '+total+' card(s), '+d.remaining+' left…';step();return;}"
+            "out.textContent='Re-rendered '+total+' card(s) — re-queued for review.';"
+            "ap.disabled=false;}).catch(function(){"
+            "out.textContent='Apply failed'+(total?(' after '+total+' card(s)'):'')+'.';ap.disabled=false;});}"
+            "step();});"
+            "});})();</script>"
         )
         body = (
             '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-6);padding-bottom:var(--sp-4);margin-bottom:var(--sp-4)">'
@@ -42360,31 +42421,12 @@ what you're doing, what they should do.</p>
             '<p style="margin-top:24px"><a class="btn secondary" '
             f'href="{url_for("organisation_setup")}">Edit organisation &amp; brand DNA</a></p>'
             # Re-render sweep driver: preview the diff, then apply (re-queues for review).
-            "<script>(function(){"
-            "document.querySelectorAll('.mh-resweep').forEach(function(box){"
-            "var prev=box.querySelector('.mh-resweep-preview'),"
-            "ap=box.querySelector('.mh-resweep-apply'),out=box.querySelector('.mh-resweep-out');"
-            "prev.addEventListener('click',function(){out.textContent='Checking…';"
-            "fetch(box.dataset.preview,{method:'POST'}).then(function(r){return r.json();})"
-            ".then(function(d){var n=d.n_affected||0;"
-            "out.textContent=n?(n+' card(s) would change'):'No cards would change';"
-            "ap.style.display=n?'inline-block':'none';}).catch(function(){out.textContent='Preview failed.';});});"
-            # Chunked apply: each call renders at most a few cards (Playwright
-            # is seconds per card, and one big synchronous apply would blow the
-            # worker timeout), walking the offset cursor until remaining==0.
-            "ap.addEventListener('click',function(){"
-            "var total=0,off=0;ap.disabled=true;"
-            "function step(){out.textContent='Re-rendering…'+(total?(' ('+total+' done)'):'');"
-            "fetch(box.dataset.apply+'?limit=8&offset='+off,{method:'POST'})"
-            ".then(function(r){return r.json();})"
-            ".then(function(d){total+=(d.n_rendered||0);"
-            "off=(typeof d.next_offset==='number')?d.next_offset:(off+8);"
-            "if(d.remaining){out.textContent='Re-rendered '+total+' card(s), '+d.remaining+' left…';step();return;}"
-            "out.textContent='Re-rendered '+total+' card(s) — re-queued for review.';"
-            "ap.disabled=false;}).catch(function(){"
-            "out.textContent='Apply failed'+(total?(' after '+total+' card(s)'):'')+'.';ap.disabled=false;});}"
-            "step();});"
-            "});})();</script>"
+            # These are same-origin state-changing POSTs that carry no JSON body,
+            # so the app's CSRF layer (_csrf_protect) requires the X-CSRF-Token
+            # header — without it both fetches 403 in production. The .then also
+            # rejects on !r.ok so an error status surfaces as a visible failure
+            # instead of a false 'No cards would change' / '0 re-queued'.
+            + (resweep_js if can_admin else "")
         )
         return _layout("Brand platform", body, active="settings")
 
@@ -42396,7 +42438,10 @@ what you're doing, what they should do.</p>
         prof = _active_profile()
         if prof is None:
             return redirect(url_for("organisation_setup"))
-        return _render_brand_home(prof)
+        # A bound non-owner (Viewer/Reviewer/Editor) can view the brand home but
+        # not mutate kits — mirror the api_brand_kit_* POST gate so they see a
+        # read-only page rather than admin controls that dead-end in a 404.
+        return _render_brand_home(prof, can_admin=_brand_can_admin(pid))
 
     def _brand_redirect(msg: str = "", err: str = ""):
         from urllib.parse import urlencode
@@ -42427,10 +42472,18 @@ what you're doing, what they should do.</p>
         from mediahub.brand.kits import new_kit_id, upsert_kit, normalise_kit
 
         prof = _active_profile()
+        # A created kit is never the primary: an org has exactly one primary
+        # livery (synthesised or materialised), and a second role="primary" kit
+        # is undeletable (delete_kit protects every primary). Constrain to the
+        # four creatable roles so a hand-crafted/invalid role can't slip past
+        # normalise_kit's "unknown → primary" coercion and mint a duplicate.
+        role = (request.form.get("role") or "sponsor").strip().lower()
+        if role not in ("sponsor", "event", "section", "personal"):
+            role = "sponsor"
         raw = {
             "kit_id": new_kit_id(),
             "name": (request.form.get("name") or "").strip(),
-            "role": (request.form.get("role") or "sponsor").strip().lower(),
+            "role": role,
             "palette": _form_palette(),
         }
         kit = normalise_kit(raw)
@@ -42663,7 +42716,14 @@ what you're doing, what they should do.</p>
 
     def _brand_check_context(run_id: str, card_id: str):
         """Resolve (brief, kit, brand_kit) for a card, or an error response."""
-        run_data = _load_run(run_id)
+        # A run_id longer than the OS filename limit makes _load_run's p.exists()
+        # raise OSError(ENAMETOOLONG) (it stats outside its own try/except), which
+        # would 500 and log the internal RUNS_DIR path. Treat any such unusable
+        # id as a missing run — the anti-IDOR 404 the rest of this gate returns.
+        try:
+            run_data = _load_run(run_id)
+        except OSError:
+            return None, (jsonify({"error": "run_not_found"}), 404)
         if run_data is None:
             return None, (jsonify({"error": "run_not_found"}), 404)
         if not _can_access_run(run_id, run_data, _active_profile_id()):
