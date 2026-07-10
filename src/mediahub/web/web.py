@@ -28991,7 +28991,7 @@ self.addEventListener('fetch', function(e){
                 f'<div style="font-weight:600;margin-bottom:4px">'
                 f"Last LLM error &mdash; {_h(last_err.get('provider', 'unknown'))}</div>"
                 f'<div class="dim" style="font-size:12px;margin-bottom:6px">'
-                f"{_h(last_err.get('ts', '')[:19])} UTC"
+                f"{_h((last_err.get('ts') or '')[:19])} UTC"
                 + (
                     f" &middot; {_h(last_err.get('error_kind'))}"
                     if last_err.get("error_kind")
@@ -28999,7 +28999,7 @@ self.addEventListener('fetch', function(e){
                 )
                 + "</div>"
                 f'<code style="font-size:12px">'
-                f"{_h(last_err.get('error_message', '')[:300])}</code>"
+                f"{_h((last_err.get('error_message') or '')[:300])}</code>"
                 "</div>"
             )
         else:

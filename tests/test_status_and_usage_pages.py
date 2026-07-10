@@ -12,6 +12,7 @@ Pins:
 The harness pattern mirrors test_activity_schedule_summary.py — fresh
 DATA_DIR, module reload, run with the org gate enforced.
 """
+
 from __future__ import annotations
 
 import importlib
@@ -38,6 +39,7 @@ def fresh_app(tmp_path, monkeypatch):
     import mediahub.observability.uptime as upt
     import mediahub.observability.llm_usage as llmu
     import mediahub.web.web as wm
+
     importlib.reload(cp)
     importlib.reload(upt)
     importlib.reload(llmu)
@@ -68,9 +70,7 @@ class TestStatusPageReachableWithoutOrg:
         # is "Status unavailable" (not a green default), so accept any of the
         # three real states.
         assert (
-            "Website operational" in body
-            or "Website down" in body
-            or "Status unavailable" in body
+            "Website operational" in body or "Website down" in body or "Status unavailable" in body
         )
 
     def test_status_page_is_simple_operational_or_down(self, fresh_app):
@@ -84,9 +84,7 @@ class TestStatusPageReachableWithoutOrg:
         # No uptime-percentage claims, and the page reads one of the honest states.
         assert "uptime" not in body.lower()
         assert (
-            "Website operational" in body
-            or "Website down" in body
-            or "Status unavailable" in body
+            "Website operational" in body or "Website down" in body or "Status unavailable" in body
         )
 
 
@@ -119,9 +117,11 @@ class TestHealthzRecordsHeartbeat:
         # liveness probe never blocks on disk; flush the queue before
         # asserting the row landed.
         import mediahub.web.web as wm
+
         wm._HEARTBEAT_QUEUE.join()
         # The uptime log should now have one row.
         import mediahub.observability.uptime as upt
+
         latest = upt.latest_heartbeat()
         assert latest is not None
         assert latest["ok"] is True
@@ -138,8 +138,10 @@ class TestHealthzRecordsHeartbeat:
         expected_ok = bool(body.get("ok"))
         # Heartbeat write is async — flush before asserting (see above).
         import mediahub.web.web as wm
+
         wm._HEARTBEAT_QUEUE.join()
         import mediahub.observability.uptime as upt
+
         latest = upt.latest_heartbeat()
         assert latest is not None
         assert latest["source"] == "health"
@@ -196,8 +198,7 @@ class TestHeartbeatDrainResilience:
         flaky.put((True, "second", 1.0, None))
 
         assert done.wait(timeout=5.0), (
-            "drain thread died after task_done() ValueError — "
-            f"only recorded {recorded}"
+            f"drain thread died after task_done() ValueError — only recorded {recorded}"
         )
         assert recorded[:2] == ["first", "second"]
         assert t.is_alive()
@@ -218,6 +219,7 @@ class TestStatusPageWithSeededHeartbeats:
         # Seed dense, recent heartbeats so the page shows live data.
         import mediahub.observability.uptime as upt
         from datetime import datetime, timezone, timedelta
+
         now = datetime.now(timezone.utc)
         for i in range(120):
             upt.record_heartbeat(
@@ -236,6 +238,7 @@ class TestStatusPageWithSeededHeartbeats:
     def test_renders_pill_green_when_recent_heartbeat(self, fresh_app):
         c, _ = fresh_app
         import mediahub.observability.uptime as upt
+
         upt.record_heartbeat(ok=True)  # right now
         resp = c.get("/status")
         body = resp.get_data(as_text=True)
@@ -246,8 +249,10 @@ class TestStatusPageWithSeededHeartbeats:
     def test_renders_red_pill_when_only_stale_heartbeat(self, fresh_app):
         c, _ = fresh_app
         import mediahub.observability.uptime as upt
+
         # An hour-old heartbeat → "stale" or "unknown" depending on age.
         from datetime import datetime, timezone, timedelta
+
         ts = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
         upt.record_heartbeat(ok=True, ts=ts)
         resp = c.get("/status")
@@ -286,11 +291,10 @@ class TestHealthzUsageWithSeededCalls:
         c, _ = fresh_app
         _as_operator(c)
         import mediahub.observability.llm_usage as llmu
+
         # Seed a recent gemini call + an anthropic call with tokens.
-        llmu.record_call(provider="gemini", ok=True,
-                          tokens_in=1000, tokens_out=500)
-        llmu.record_call(provider="anthropic", ok=True,
-                          tokens_in=1000, tokens_out=500)
+        llmu.record_call(provider="gemini", ok=True, tokens_in=1000, tokens_out=500)
+        llmu.record_call(provider="anthropic", ok=True, tokens_in=1000, tokens_out=500)
         resp = c.get("/healthz/usage")
         body = resp.get_data(as_text=True)
         # Both providers appear.
@@ -305,8 +309,10 @@ class TestHealthzUsageWithSeededCalls:
         c, _ = fresh_app
         _as_operator(c)
         import mediahub.observability.llm_usage as llmu
+
         llmu.record_call(
-            provider="gemini", ok=False,
+            provider="gemini",
+            ok=False,
             error_kind="rate_limited",
             error_message="HTTP 429 from Gemini",
         )
@@ -316,10 +322,29 @@ class TestHealthzUsageWithSeededCalls:
         assert "HTTP 429" in body
         assert "rate_limited" in body
 
+    def test_usage_page_survives_error_with_null_message(self, fresh_app):
+        """record_call permits error_message=None (a failure with a kind but
+        no message). The dashboard must render it, not 500 on ''[:300] against
+        a None value — .get(k, '') only defaults on an ABSENT key, so a stored
+        NULL slipped straight into the slice and crashed the page."""
+        c, _ = fresh_app
+        _as_operator(c)
+        import mediahub.observability.llm_usage as llmu
+
+        llmu.record_call(
+            provider="gemini", ok=False, error_kind="ProviderNotConfigured", error_message=None
+        )
+        resp = c.get("/healthz/usage")
+        assert resp.status_code == 200
+        body = resp.get_data(as_text=True)
+        assert "Last LLM error" in body
+        assert "ProviderNotConfigured" in body
+
     def test_usage_page_surfaces_gemini_headroom_bar(self, fresh_app):
         c, _ = fresh_app
         _as_operator(c)
         import mediahub.observability.llm_usage as llmu
+
         for _ in range(50):
             llmu.record_call(provider="gemini", ok=True)
         resp = c.get("/healthz/usage")
