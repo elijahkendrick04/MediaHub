@@ -61,6 +61,7 @@ def _chat_with_pending_brief(client, brief):
 
 # --- FT-DATA-1: accept idempotency -----------------------------------------
 
+
 def test_accept_is_idempotent(app, client):
     from mediahub.club_platform.stub_pack_store import list_packs
 
@@ -88,6 +89,7 @@ def test_generate_remains_the_explicit_regenerate_path(app, client):
 
 
 # --- FT-VAL-1: input length cap --------------------------------------------
+
 
 def test_quick_build_rejects_overlong_prompt(app, client):
     from mediahub.club_platform.stub_pack_store import list_packs
@@ -130,6 +132,7 @@ def test_normal_length_prompt_is_not_blocked(app, client):
 
 # --- FT-DATA-2: hashtag coercion -------------------------------------------
 
+
 @pytest.mark.parametrize(
     "raw,expected",
     [
@@ -144,9 +147,7 @@ def test_chat_brief_hashtags_coerced_to_clean_list(app, client, raw, expected):
     from mediahub.free_text_chat.session import load_session, save_session
     from mediahub.club_platform.stub_pack_store import list_packs, load_pack
 
-    chat_id = _chat_with_pending_brief(
-        client, {"headline": "H", "body": "B", "hashtags": raw}
-    )
+    chat_id = _chat_with_pending_brief(client, {"headline": "H", "body": "B", "hashtags": raw})
     client.post(f"/free-text/chat/{chat_id}/accept")
     pack = load_pack(list_packs()[0]["pack_id"])
     tags = pack["cards"][0]["hashtags"]
@@ -155,6 +156,7 @@ def test_chat_brief_hashtags_coerced_to_clean_list(app, client, raw, expected):
 
 
 # --- FT-ERR-2 / FT-COPY-1: chat view banner + provider-neutral copy --------
+
 
 def test_chat_view_shows_ai_unavailable_banner_and_neutral_copy(app, client):
     r = client.post("/free-text/chat/new", follow_redirects=False)
@@ -169,6 +171,7 @@ def test_chat_view_shows_ai_unavailable_banner_and_neutral_copy(app, client):
 
 # --- FT-A11Y-1: photo control keyboard-operable ----------------------------
 
+
 def test_add_photos_control_is_keyboard_operable(app, client):
     body = client.get("/free-text").get_data(as_text=True)
     # The label is focusable and exposes a button role + a keydown activator,
@@ -179,6 +182,7 @@ def test_add_photos_control_is_keyboard_operable(app, client):
 
 
 # --- FT-VAL-2: hashtag normaliser is shared + string-safe ------------------
+
 
 @pytest.mark.parametrize(
     "raw,expected",
@@ -211,6 +215,7 @@ def test_quick_brief_parser_does_not_char_explode_string_hashtags():
 
 
 # --- FT-ERR-1: an errored turn must not leave an approvable brief ----------
+
 
 def test_errored_turn_rolls_back_proposed_brief(app, monkeypatch):
     """If the model proposes a brief and a later round then errors, the

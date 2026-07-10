@@ -21139,7 +21139,7 @@ def create_app() -> Flask:
                         meta_line = (
                             '<span class="tag bad" style="font-size:10px">Didn\'t finish</span>'
                             if failed
-                            else f'{n_swims} swim{"" if n_swims == 1 else "s"}'
+                            else f"{n_swims} swim{'' if n_swims == 1 else 's'}"
                         )
                         items_html += (
                             "<li>"
@@ -21151,7 +21151,7 @@ def create_app() -> Flask:
                             f'<time class="mh-rel" datetime="{_h(when_iso)}">{_h(when)}</time></span>'
                             "</div>"
                             f'<a class="go" href="{configure_href}">'
-                            f'{"Try again" if failed else "Re-configure"} &rarr;</a>'
+                            f"{'Try again' if failed else 'Re-configure'} &rarr;</a>"
                             "</li>"
                         )
                     recent_html = (
@@ -27001,7 +27001,7 @@ Relay team broke club record"></textarea>
                 extra.append("under 18")
             if r.restricted:
                 extra.append(
-                    '<strong title="UK GDPR Art 18 — processing restricted">' "Paused</strong>"
+                    '<strong title="UK GDPR Art 18 — processing restricted">Paused</strong>'
                 )
             rows.append(
                 f"<tr><td>{_h(r.athlete_name)}</td><td>{status_tag}</td>"
@@ -27300,7 +27300,7 @@ Relay team broke club record"></textarea>
             if r.request_type == "access" and _dsr_export_path(pid, r.id).exists():
                 actions.append(
                     f'<a class="btn secondary" href="{url_for("org_dsr_export_download", request_id=r.id)}" '
-                    'download>Download export</a>'
+                    "download>Download export</a>"
                 )
             rows.append(
                 (
@@ -30230,7 +30230,7 @@ self.addEventListener('fetch', function(e){
                     'gap:12px;flex-wrap:wrap">'
                     f'<div style="flex:1;min-width:180px"><strong>{_h(rec.filename)}</strong>'
                     f'<div class="dim" style="font-size:12px">{lic}'
-                    f'{(" · " + when) if when else ""}</div></div>'
+                    f"{(' · ' + when) if when else ''}</div></div>"
                     f'<audio controls preload="none" src="{src}" style="height:34px"></audio>'
                     f'<form method="post" action="{del_url}" style="margin:0" '
                     "onsubmit=\"return confirm('Remove this uploaded track?')\">"
@@ -35598,9 +35598,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             # through to the chat view rather than minting another draft —
             # deliberate regeneration is the explicit "Generate content from
             # this brief" action (free_text_chat_generate).
-            pack_url = _chat_brief_to_pack(
-                s, chat_id, request.form.getlist("library_asset_id")
-            )
+            pack_url = _chat_brief_to_pack(s, chat_id, request.form.getlist("library_asset_id"))
             if pack_url:
                 return redirect(pack_url)
         return redirect(url_for("free_text_chat_view", chat_id=chat_id))
@@ -41179,8 +41177,8 @@ what you're doing, what they should do.</p>
                 remove_html = (
                     f'<form method="post" action="{url_for("organisation_members_page")}" '
                     'style="display:inline" '
-                    'onsubmit="return confirm(\'Remove this member from the organisation? '
-                    'They lose access immediately.\')">'
+                    "onsubmit=\"return confirm('Remove this member from the organisation? "
+                    "They lose access immediately.')\">"
                     '<input type="hidden" name="action" value="remove"/>'
                     f'<input type="hidden" name="email" value="{_h(m.email)}"/>'
                     '<button type="submit" class="btn secondary" '
@@ -43249,7 +43247,7 @@ what you're doing, what they should do.</p>
                 'style="margin-bottom:20px;border:1px solid rgba(255,180,84,0.5);'
                 'background:rgba(255,180,84,0.07)">'
                 '<h2 style="margin-top:0;font-size:18px;color:var(--ink)">'
-                f'Almost there &mdash; {_h(prof.display_name or "your organisation")} '
+                f"Almost there &mdash; {_h(prof.display_name or 'your organisation')} "
                 "isn&rsquo;t unlocked yet</h2>"
                 '<p style="font-size:14px;line-height:1.55;color:var(--ink);margin:0 0 12px">'
                 f"{_h(_lead)} Add <strong>any one</strong> of these and you&rsquo;re in:</p>"
@@ -47653,22 +47651,36 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
 <tr class="mh-hp mh-asset-row" data-asset-id="{_h(ad.get("id", ""))}"
     data-desc="{_h(_meta_desc)}" data-athletes="{_h(athlete_names)}"
     data-venue="{_h(_meta_venue)}" data-event="{_h(_meta_event)}" data-tags="{_h(_meta_tags)}">
-  <td class="mh-bulk-cell"><input type="checkbox" class="mh-row-check" name="asset_ids" value="{_h(ad.get("id", ""))}" aria-label="Select photo"></td>
-  <td data-label="Preview"><span class=\"mh-lens\" style=\"display:inline-block;border-radius:4px;overflow:hidden;line-height:0\"><img src=\"{_file_url}\" style=\"max-height:60px;border-radius:4px;display:block\" /></span>{_hp_tpl}</td>
+  <td class="mh-bulk-cell"><input type="checkbox" class="mh-row-check" name="asset_ids" value="{
+                _h(ad.get("id", ""))
+            }" aria-label="Select photo"></td>
+  <td data-label="Preview"><span class=\"mh-lens\" style=\"display:inline-block;border-radius:4px;overflow:hidden;line-height:0\"><img src=\"{
+                _file_url
+            }\" style=\"max-height:60px;border-radius:4px;display:block\" /></span>{_hp_tpl}</td>
   <td data-label="Type">{_h(ad.get("type", ""))}</td>
   <td data-label="Athlete">{_h(athlete_names)}{_tag_badges}</td>
   <td data-label="Venue / Event">{_h(ad.get("linked_venue") or ad.get("linked_event") or "")}</td>
   <td data-label="Permission">{
                 _media_permission_select(ad.get("id", ""), ad.get("permission_status", ""))
                 if ad.get("type") not in _skip_tag_types
-                else _h(_MEDIA_PERMISSION_LABELS.get(ad.get("permission_status", ""), ad.get("permission_status", "")))
+                else _h(
+                    _MEDIA_PERMISSION_LABELS.get(
+                        ad.get("permission_status", ""), ad.get("permission_status", "")
+                    )
+                )
             }</td>
   <td data-label="Status">{_media_approval_badge(ad.get("approval_status", ""))}</td>
   <td data-label="ID"><code>{_h(ad.get("id", "")[:12])}</code></td>
   <td style="white-space:nowrap">
-    <a class="btn ghost" href="{_edit_url}" style="font-size:11px;padding:3px 9px;margin-right:6px" title="Filters, adjustments, crop, shapes, blur brush — non-destructive edits">&#9998; Edit</a>
-    <a class="btn ghost" href="{_studio_url}" style="font-size:11px;padding:3px 9px;margin-right:6px" title="Edit this photo with AI — fill, erase, expand, upscale, restyle">&#x2726; Studio</a>
-    <a class="btn ghost" href="{_cutout_url}" style="font-size:11px;padding:3px 9px;margin-right:6px" title="See exactly what background removal knocks out">Cut-out</a>
+    <a class="btn ghost" href="{
+                _edit_url
+            }" style="font-size:11px;padding:3px 9px;margin-right:6px" title="Filters, adjustments, crop, shapes, blur brush — non-destructive edits">&#9998; Edit</a>
+    <a class="btn ghost" href="{
+                _studio_url
+            }" style="font-size:11px;padding:3px 9px;margin-right:6px" title="Edit this photo with AI — fill, erase, expand, upscale, restyle">&#x2726; Studio</a>
+    <a class="btn ghost" href="{
+                _cutout_url
+            }" style="font-size:11px;padding:3px 9px;margin-right:6px" title="See exactly what background removal knocks out">Cut-out</a>
     <button class="btn ghost" type="button" data-mh-meta-open style="font-size:11px;padding:3px 9px;margin-right:6px" title="Edit the description, swimmer, venue and tags">&#x270E; Info</button>
     <button class="btn ghost mh-ml-qa" type="button" data-qa-url="{_qa_url}"
             aria-haspopup="menu" aria-expanded="false"
@@ -51870,8 +51882,8 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                 f'<td data-label="Window">{window}</td>'
                 f'<td data-label="State">{state}</td>'
                 f'<td><form method="post" action="{url_for("sponsors_delete")}" style="margin:0" '
-                'onsubmit="return confirm(\'Remove this sponsor? Their logo and details are '
-                'permanently deleted.\')">'
+                "onsubmit=\"return confirm('Remove this sponsor? Their logo and details are "
+                "permanently deleted.')\">"
                 f'<input type="hidden" name="sponsor_id" value="{_h(s["sponsor_id"])}">'
                 '<button type="submit" class="btn secondary" style="font-size:12px;padding:4px 10px">Remove</button>'
                 "</form></td></tr>"
@@ -52102,8 +52114,7 @@ workflow, and the publish log &mdash; deterministic and auditable.</p>
                 _lbl = _excluded_labels.get(key)
                 if _lbl:
                     _name_cell = (
-                        f"<td>{_h(_lbl['title'])}</td>"
-                        f"<td class='dim'>{_h(_lbl['meet_name'])}</td>"
+                        f"<td>{_h(_lbl['title'])}</td><td class='dim'>{_h(_lbl['meet_name'])}</td>"
                     )
                 else:
                     # The run no longer exists — fall back to the raw key.
@@ -57692,7 +57703,7 @@ voice, and queues them for one-click approval.</p>
                 '<div class="card" style="padding:10px 14px;margin-bottom:8px;display:flex;'
                 'justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">'
                 f'<div><span class="tag" style="font-size:10px;margin-right:8px">'
-                f'{_h(it["item_type"])}</span>{label_html}</div>{remove_btn}</div>'
+                f"{_h(it['item_type'])}</span>{label_html}</div>{remove_btn}</div>"
             )
         rows = rows or (
             '<p class="dim" style="margin:var(--sp-4) 0">Nothing in this collection yet — '
@@ -59427,7 +59438,7 @@ voice, and queues them for one-click approval.</p>
             )
             msg = (
                 '<div class="card" style="border-color:var(--mh-success)">'
-                f'<p>{_h(request.args.get("msg"))}</p>{_review_link}</div>'
+                f"<p>{_h(request.args.get('msg'))}</p>{_review_link}</div>"
             )
         if request.args.get("err"):
             msg = f'<div class="card" style="border-color:var(--mh-error)"><p>{_h(request.args.get("err"))}</p></div>'
