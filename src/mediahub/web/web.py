@@ -62603,7 +62603,9 @@ voice, and queues them for one-click approval.</p>
         def _tile(fmt, name, desc, extra=""):
             return (
                 '<div class="card"><h3 style="margin-top:0">' + name + "</h3>"
-                '<p class="dim" style="font-size:13px">' + desc + "</p>"
+                '<p class="dim" style="font-size:13px">'
+                + desc
+                + "</p>"
                 + extra
                 + '<label class="mh-ai-opt" style="display:flex;align-items:center;gap:6px;'
                 'font-size:12px;margin-top:8px;color:var(--ink-muted)">'
