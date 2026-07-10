@@ -29932,6 +29932,39 @@ self.addEventListener('fetch', function(e){
     }
     _AUDIO_UPLOAD_MAX_BYTES = 25 * 1024 * 1024  # 25 MB — clips/beds, not albums
 
+    # H-15: every status code a form POST can redirect back with, mapped to the
+    # plain-English banner copy the audio settings page renders (mirrors the
+    # _TYPOGRAPHY_STATUS pattern). Copy lives here server-side — raw exception
+    # text never reaches the page or the URL.
+    _AUDIO_ALLOWED_TYPES = ", ".join(sorted(s.lstrip(".").upper() for s in _AUDIO_UPLOAD_SUFFIXES))
+    _AUDIO_STATUS = {
+        "audio_added": (True, "Track added — it is listed under Your uploaded audio below."),
+        "audio_removed": (True, "Track removed."),
+        "lexicon_saved": (True, "Pronunciation saved — voiceovers will now say the name that way."),
+        "lexicon_removed": (True, "Pronunciation override removed."),
+        "consent_recorded": (True, "Consent recorded — the feature is now enabled."),
+        "consent_revoked": (True, "Consent revoked — the feature is switched off."),
+        "lexicon_invalid": (
+            False,
+            "Pronunciation not saved — enter both the written name and how to say it.",
+        ),
+        "consent_invalid": (
+            False,
+            "That consent change could not be recorded — please try again.",
+        ),
+        "no_file": (False, "Upload failed — choose an audio file first."),
+        "bad_type": (
+            False,
+            f"Upload failed — that file type is not supported. Use one of: {_AUDIO_ALLOWED_TYPES}.",
+        ),
+        "too_large": (False, "Upload failed — that audio is over the 25 MB limit."),
+        "save_failed": (False, "Upload failed — we could not save that file. Please try again."),
+        "no_org": (False, "Choose an organisation first, then try again."),
+        "not_found": (False, "That track was not found — it may already have been removed."),
+        "audio_unavailable": (False, "Audio features are not available on this deployment right now."),
+        "error": (False, "That did not work — please try again."),
+    }
+
     def _audio_back_or_json(payload: dict, status: int = 200, *, flash_status: str = ""):
         from flask import request as _req
 
@@ -29941,17 +29974,14 @@ self.addEventListener('fetch', function(e){
         )
         if wants_json:
             return jsonify(payload), status
-        # D-14: a browser form POST must never land on a bare JSON error page.
-        # Redirect back with a friendly banner instead — the styled error card
-        # the graceful pages use — keeping the JSON body only for JSON callers.
-        if payload.get("error"):
-            emsg = payload.get("message") or "That didn't work — check the file and try again."
-            return redirect(url_for("settings_section", section="audio", status="error", emsg=emsg))
-        # D-7: a form POST navigates back to the audio settings; carry a status
-        # so the section can confirm the action ("Track added" / "Track removed")
-        # instead of a silent redirect the volunteer can't tell worked.
-        if flash_status:
-            return redirect(url_for("settings_section", section="audio", status=flash_status))
+        # D-14 / D-7 / H-15: a browser form POST must never land on a bare JSON
+        # page or a silent redirect. Carry a status CODE back to the audio
+        # settings page — _AUDIO_STATUS maps each code to plain-English banner
+        # copy server-side (success confirmations and error explanations), so
+        # raw exception text never reaches the customer.
+        code = flash_status or (payload.get("error") or "")
+        if code:
+            return redirect(url_for("settings_section", section="audio", status=code))
         return redirect(url_for("settings_section", section="audio"))
 
     @app.route("/api/audio/library")
@@ -30035,8 +30065,13 @@ self.addEventListener('fetch', function(e){
                     (_req.form.get("spoken") or "").strip(),
                 )
         except ValueError as e:
-            return _audio_back_or_json({"error": "invalid", "message": str(e)}, 400)
-        return _audio_back_or_json({"ok": True, "entries": lex.entries()})
+            return _audio_back_or_json(
+                {"error": "invalid", "message": str(e)}, 400, flash_status="lexicon_invalid"
+            )
+        return _audio_back_or_json(
+            {"ok": True, "entries": lex.entries()},
+            flash_status="lexicon_removed" if op == "remove" else "lexicon_saved",
+        )
 
     @app.route("/api/audio/upload", methods=["POST"])
     def api_audio_upload():
@@ -30222,8 +30257,13 @@ self.addEventListener('fetch', function(e){
                     granted_by=pid,
                 )
         except ValueError as e:
-            return _audio_back_or_json({"error": "invalid", "message": str(e)}, 400)
-        return _audio_back_or_json({"ok": True})
+            return _audio_back_or_json(
+                {"error": "invalid", "message": str(e)}, 400, flash_status="consent_invalid"
+            )
+        return _audio_back_or_json(
+            {"ok": True},
+            flash_status="consent_revoked" if action == "revoke" else "consent_recorded",
+        )
 
     @app.route("/api/audio/suggest")
     def api_audio_suggest():
@@ -30417,28 +30457,19 @@ self.addEventListener('fetch', function(e){
                     "and it'll appear here to preview or remove.</p>"
                 )
 
-        # D-7: confirm the upload/remove that a form POST just performed, so the
-        # volunteer sees it worked instead of a silent redirect.
+        # D-7 / D-14 / H-15: confirm or explain the action a form POST just
+        # performed. Every code maps to plain-English copy in _AUDIO_STATUS —
+        # the volunteer always sees a styled banner (success confirmation or
+        # error explanation), never raw exception text or a silent redirect.
         _audio_flash = (request.args.get("status") or "").strip()
         banner_html = ""
-        if _audio_flash == "audio_added":
+        _spec = _AUDIO_STATUS.get(_audio_flash)
+        if _spec:
+            _ok, _text = _spec
+            _colour = "var(--good)" if _ok else "var(--bad)"
             banner_html = (
-                '<div class="card" style="border-left:2px solid var(--good);margin-bottom:14px">'
-                '<strong style="color:var(--good)">Track added.</strong> '
-                'It\'s listed under "Your uploaded audio" below.</div>'
-            )
-        elif _audio_flash == "audio_removed":
-            banner_html = (
-                '<div class="card" style="border-left:2px solid var(--warn);margin-bottom:14px">'
-                "Track removed.</div>"
-            )
-        elif _audio_flash == "error":
-            # D-14: an upload validation error, rendered as a styled card instead
-            # of a bare JSON page. The message is server-supplied; escape it.
-            _emsg = _h((request.args.get("emsg") or "").strip()[:300]) or "That upload didn't work."
-            banner_html = (
-                '<div class="card" style="border-left:2px solid var(--bad);margin-bottom:14px">'
-                f'<strong style="color:var(--bad)">Upload failed.</strong> {_emsg}</div>'
+                f'<div class="card" style="border-left:2px solid {_colour};margin-bottom:14px">'
+                f'<p style="margin:0">{_h(_text)}</p></div>'
             )
 
         # --- Voice consent (cloning / changer; off by default) ---
