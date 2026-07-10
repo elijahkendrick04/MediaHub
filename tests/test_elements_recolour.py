@@ -131,3 +131,34 @@ def test_element_is_legible_false_when_text_clashes():
 def test_outline_role_passthrough_when_rgba():
     out = recolour.recolour_svg('<svg><line stroke="__OUTLINE__"/></svg>', _ROLE_VARS, uid="z")
     assert "rgba(" in out
+
+
+# ---- audit/elements: recolour strips active content from SVGs ---------------
+def test_recolour_strips_active_svg_content():
+    """A hostile (org-custom) element SVG must not carry executable content into
+    the browse grid or the card render HTML — recolour is the single chokepoint."""
+    dirty = (
+        '<svg onload="x()"><script>alert(1)</script>'
+        '<image href="y" onerror="e()"/>'
+        '<a href="javascript:evil()">z</a>'
+        "<foreignObject><script>f</script></foreignObject>"
+        '<rect fill="__ACCENT__"/></svg>'
+    )
+    out = recolour.recolour_svg(dirty, _ROLE_VARS, uid="s")
+    assert "<script" not in out
+    assert "onload" not in out.lower() and "onerror" not in out.lower()
+    assert "javascript:" not in out
+    assert "foreignobject" not in out.lower()
+    assert "#FFB81C" in out  # the colour token is still substituted
+
+
+def test_recolour_leaves_clean_first_party_svg_byte_identical():
+    """Bundled library SVGs carry no active content, so the sanitiser is a no-op:
+    the recoloured output equals a plain token substitution (no drift/regression)."""
+    svg = catalog.load_svg(catalog.get_element("pictogram.freestyle"))
+    manual = svg.replace("__UID__", "s")
+    for slot, role in recolour._SLOT_TO_ROLE.items():
+        manual = manual.replace(
+            f"__{slot}__", _ROLE_VARS.get(role) or recolour._ROLE_FALLBACK[role]
+        )
+    assert recolour.recolour_svg(svg, _ROLE_VARS, uid="s") == manual

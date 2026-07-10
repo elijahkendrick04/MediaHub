@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-07-09 · `51bdb00ca` · Merge pull request #1099 from elijahkendrick04/claude/iphone-dropdown-menus-bbwdy8
+**Last updated:** 2026-07-10 · `1f49c3faa` · [developer-settings] record final merge status in audit report
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1226,16 +1226,16 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
-| 2026-07-09 | `b5a282253` | fix(web): top-bar dropdowns open off-screen on iPhone |
-| 2026-07-08 | `3e71918a7` | fix(elements): use approved single-colour silhouette swim pictograms |
-| 2026-07-08 | `5944c2344` | docs(audit): session hand-off for the next batch |
-| 2026-07-08 | `e82fa0612` | style: ruff-format the C-14/C-9 additions (CI hygiene) |
-| 2026-07-08 | `8df8b39c3` | docs(audit): C-14 + C-9 shipped — 86/161 |
-| 2026-07-08 | `fd8435ce4` | feat(collections): finish Collections — reachable, fillable, clickable (C-9) |
-| 2026-07-08 | `5decaccd9` | feat(media): in-page mockup + sticker picker, no raw-JSON dead-end (C-14) |
-| 2026-07-08 | `5d6ed82ee` | test: make the no-auto-pick assertion club-specific (CI shard 3) |
-| 2026-07-08 | `84d8eda80` | docs(audit): reference PR #1093 and note the pre-merge review outcome |
-| 2026-07-08 | `2ec6addc7` | fix(review): address 4 confirmed pre-merge adversarial-review findings |
-| 2026-07-08 | `dc4e1ed67` | fix(elements): redraw swim-stroke & dive pictograms as accurate icons |
-| 2026-07-08 | `4df52fefd` | fix(i18n): don't echo the request path in the language switcher (CI: tenant leak + hex budget) |
+| 2026-07-10 | `1f49c3faa` | [developer-settings] record final merge status in audit report |
+| 2026-07-10 | `1a1b232a8` | [developer-settings] report: baseline comparison confirms flakes are pre-existing |
+| 2026-07-10 | `f03993d28` | [developer-settings] report: record green-gate result + pre-existing flakes |
+| 2026-07-10 | `06a3fc2f1` | [developer-settings] audit report |
+| 2026-07-10 | `494f6ddf6` | [developer-settings] reach operator dashboards on a fresh deployment |
+| 2026-07-10 | `fe2605d66` | [meet-recap] record merge status in audit report |
+| 2026-07-10 | `ca6f02514` | [meet-recap] add end-to-end audit report |
+| 2026-07-10 | `56a04395c` | [meet-recap] lock audit fixes with tests |
+| 2026-07-10 | `b24525282` | [meet-recap] fix recap "by the numbers" swimmer undercount |
+| 2026-07-10 | `b9d8eb2e1` | [meet-recap] fix re-run link 404, review error leak, upload status, club_filter persistence |
+| 2026-07-10 | `3ef825947` | [spotlight] record final merge status in audit report |
+| 2026-07-10 | `651cf2bc3` | [spotlight] audit report for the athlete-spotlight (meet recap) feature |
 <!-- /ROADMAP:ACTIVITY -->

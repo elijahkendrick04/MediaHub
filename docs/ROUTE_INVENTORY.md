@@ -50,6 +50,7 @@ _Auto-generated from `app.url_map` by `scripts/build_inventories.py`._
 | `api_data_hub_delete` | `POST` | `/api/data-hub/table/<table_id>/delete` |
 | `api_data_hub_derive` | `POST` | `/api/data-hub/table/<table_id>/derive` |
 | `api_data_hub_tables` | `GET` | `/api/data-hub/tables` |
+| `api_document_content_edit` | `POST` | `/api/documents/<doc_id>/content-edit` |
 | `api_document_delete` | `POST` | `/api/documents/<doc_id>/delete` |
 | `api_document_docx` | `GET` | `/api/documents/<doc_id>/docx` |
 | `api_document_pdf` | `GET` | `/api/documents/<doc_id>/pdf` |
@@ -108,6 +109,7 @@ _Auto-generated from `app.url_map` by `scripts/build_inventories.py`._
 | `api_import_stock` | `POST` | `/api/media-library/import-stock` |
 | `api_media_library_list_json` | `GET` | `/api/media-library/list.json` |
 | `api_mockup_templates` | `GET` | `/api/media-library/mockup-templates` |
+| `api_newsletter_content_edit` | `POST` | `/api/newsletters/<newsletter_id>/content-edit` |
 | `api_newsletter_delete` | `POST` | `/api/newsletters/<newsletter_id>/delete` |
 | `api_newsletter_html` | `GET` | `/api/newsletters/<newsletter_id>/html` |
 | `api_newsletter_publish` | `POST` | `/api/newsletters/<newsletter_id>/publish` |
@@ -244,6 +246,7 @@ _Auto-generated from `app.url_map` by `scripts/build_inventories.py`._
 | `api_v1.list_webhook_deliveries` | `GET` | `/api/v1/webhooks/<endpoint_id>/deliveries` |
 | `api_variant_job_status` | `GET` | `/api/variant-jobs/<job_id>` |
 | `api_video_clip_maker` | `POST` | `/api/video/clip-maker` |
+| `api_video_clip_maker_job` | `POST` | `/api/video/clip-maker-job` |
 | `api_video_footage_upload` | `POST` | `/api/video/footage` |
 | `api_video_footage_list` | `GET` | `/api/video/footage` |
 | `api_video_footage_best_frame` | `POST` | `/api/video/footage/<asset_id>/best-frame` |
@@ -256,7 +259,10 @@ _Auto-generated from `app.url_map` by `scripts/build_inventories.py`._
 | `api_video_project_enhance` | `POST` | `/api/video/projects/<project_id>/enhance` |
 | `api_video_project_file` | `GET` | `/api/video/projects/<project_id>/file` |
 | `api_video_project_render` | `POST` | `/api/video/projects/<project_id>/render` |
+| `api_video_project_render_job` | `POST` | `/api/video/projects/<project_id>/render-job` |
+| `api_video_project_stabilize_job` | `POST` | `/api/video/projects/<project_id>/stabilize-job` |
 | `api_video_reel` | `POST` | `/api/video/reel` |
+| `api_video_reel_job` | `POST` | `/api/video/reel-job` |
 | `api_visual_get` | `GET` | `/api/visual/<vid>` |
 | `api_visual_png` | `GET` | `/api/visual/<vid>/png/<format_name>` |
 | `api_web_research_submit` | `POST` | `/api/web-research` |

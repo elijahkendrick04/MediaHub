@@ -175,6 +175,30 @@ class TestWeekendInNumbers(unittest.TestCase):
         s2p = card.get("safe_to_post", {})
         self.assertEqual(s2p.get("level"), "safe")
 
+    def test_swimmer_count_is_all_competitors_not_just_achievers(self):
+        # Regression (CDI-1): the "Swimmers" stat must count every swimmer who
+        # competed (distinct across swim_traces), not only those who earned a
+        # ranked achievement — otherwise the recap graphic pairs
+        # swimmers-with-a-medal against the all-swims total and undercounts.
+        from mediahub.recognition.weekend_in_numbers import build_weekend_in_numbers
+        report = self._make_report()  # 3 ranked achievements (Alice, Bob, Charlie)
+        # 5 swimmers actually swam; only 3 of them earned a ranked achievement.
+        report["swim_traces"] = [
+            {"swimmer_name": n}
+            for n in ("Alice", "Bob", "Charlie", "Dana", "Erin", "Alice")
+        ]
+        stats = {s["label"]: s["value"] for s in build_weekend_in_numbers(report)["stats"]}
+        self.assertEqual(stats.get("Swimmers"), "5")
+
+    def test_swimmer_count_falls_back_when_no_traces(self):
+        # With no swim_traces (older reports), the distinct-achiever count is the
+        # only signal available and must still be used (3 distinct swimmer_ids).
+        from mediahub.recognition.weekend_in_numbers import build_weekend_in_numbers
+        report = self._make_report()
+        report.pop("swim_traces", None)
+        stats = {s["label"]: s["value"] for s in build_weekend_in_numbers(report)["stats"]}
+        self.assertEqual(stats.get("Swimmers"), "3")
+
 
 class TestGroupedPack(unittest.TestCase):
     def _make_run_data(self):

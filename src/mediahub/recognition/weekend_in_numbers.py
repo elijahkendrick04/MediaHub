@@ -76,13 +76,28 @@ def build_weekend_in_numbers(report: dict) -> dict:
 
     # Build headline text
     n_swims = report.get("n_swims_analysed", 0)
+    # Count the swimmers who COMPETED — distinct across every analysed swim, not
+    # just those who earned a ranked achievement. Pairing swimmers-with-a-medal
+    # against the all-swims total published an internally inconsistent undercount
+    # on the recap graphic (e.g. "17 swimmers · 253 swims" when 33 competed).
+    # Prefer the swim traces (one per analysed swim of our club); fall back to the
+    # ranked-achievement distinct count only when the report carries no traces.
+    swim_traces = report.get("swim_traces") or []
     n_swimmers = len(
-        set(
-            (ra.get("achievement", {}) if isinstance(ra, dict) else {}).get("swimmer_id", "")
-            for ra in ranked
-            if (ra.get("achievement", {}) if isinstance(ra, dict) else {}).get("swimmer_id")
-        )
+        {
+            (s.get("swimmer_name") or "").strip()
+            for s in swim_traces
+            if isinstance(s, dict) and (s.get("swimmer_name") or "").strip()
+        }
     )
+    if not n_swimmers:
+        n_swimmers = len(
+            {
+                (ra.get("achievement", {}) if isinstance(ra, dict) else {}).get("swimmer_id", "")
+                for ra in ranked
+                if (ra.get("achievement", {}) if isinstance(ra, dict) else {}).get("swimmer_id")
+            }
+        )
 
     lines = []
     lines.append(f"{meet_name} — by the numbers")

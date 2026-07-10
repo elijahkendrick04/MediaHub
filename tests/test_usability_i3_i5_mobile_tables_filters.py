@@ -58,8 +58,12 @@ def test_review_filter_bar_non_sticky_on_mobile(client, tmp_path):
     import mediahub.web.web as wm
 
     run_id = "runfilter001"
-    (tmp_path / "runs_v4").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "runs_v4" / f"{run_id}.json").write_text(
+    # Write the run.json to the module's ACTUAL RUNS_DIR rather than a hardcoded
+    # tmp_path/runs_v4 — otherwise, if an earlier test in the shard leaves RUNS_DIR
+    # resolved elsewhere, /review can't load the run, renders a recovery page
+    # without the filter bar, and this assertion flakes (order-dependent).
+    wm.RUNS_DIR.mkdir(parents=True, exist_ok=True)
+    (wm.RUNS_DIR / f"{run_id}.json").write_text(
         json.dumps(
             {"run_id": run_id, "profile_id": ORG, "meet": {"name": "M"}, "recognition_report": {}}
         )

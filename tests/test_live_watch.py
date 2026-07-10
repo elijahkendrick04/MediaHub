@@ -157,6 +157,14 @@ class TestCreateWatch:
         w = lw.create_watch("org-a", URL, interval_minutes=1, db_path=db)
         assert w.interval_minutes == lw.MIN_INTERVAL_MINUTES
 
+    def test_interval_clamped_to_max(self, db):
+        # An absurd/malformed interval must clamp to the ceiling, never reach
+        # the INSERT as an out-of-range int (SQLite INTEGER overflow).
+        w = lw.create_watch("org-a", URL, interval_minutes=10**20, db_path=db)
+        assert w.interval_minutes == lw.MAX_INTERVAL_MINUTES
+        # And it round-trips through the DB without raising.
+        assert lw.get_watch(w.id, db_path=db).interval_minutes == lw.MAX_INTERVAL_MINUTES
+
     def test_expiry_capped_at_48h(self, db):
         far = datetime.now(timezone.utc) + timedelta(days=30)
         w = lw.create_watch("org-a", URL, expires_at=far.isoformat(), db_path=db)
@@ -490,6 +498,41 @@ class TestPollWatch:
     def test_missing_watch(self, db):
         res = lw.poll_watch("nope", fetcher=_fetcher(SESSION_1), db_path=db)
         assert res.status == "missing" and "not found" in res.error
+
+    def test_last_error_omits_raw_exception_text(self, db):
+        # last_error is displayed in the UI ("Last issue"); it must carry a
+        # short stable phrase, never the raw internal exception string (which
+        # can embed filesystem paths or other internal detail).
+        w = self._watch(db)
+
+        def dead(url):
+            raise OSError("/etc/secret/path leaked here")
+
+        res = lw.poll_watch(w.id, fetcher=dead, now=NOW, db_path=db)
+        assert "fetch failed" in res.error and "secret" not in res.error.lower()
+        assert "secret" not in (lw.get_watch(w.id, db_path=db).last_error or "").lower()
+
+        # Runner blow-up: stable prefix kept, raw detail dropped.
+        w2 = self._watch(db)
+
+        def boom(watch, data, keys):
+            raise RuntimeError("/var/secret/token boom")
+
+        res2 = lw.poll_watch(
+            w2.id,
+            fetcher=_fetcher(SESSION_1),
+            runner=boom,
+            notifier=RecordingNotifier(),
+            now=NOW,
+            db_path=db,
+        )
+        assert "runner failed" in res2.error and "secret" not in res2.error.lower()
+        assert "secret" not in (lw.get_watch(w2.id, db_path=db).last_error or "").lower()
+
+        # Parse failure carries no appended internal detail either.
+        w3 = self._watch(db)
+        res3 = lw.poll_watch(w3.id, fetcher=_fetcher(b"\x00\x01 not results"), now=NOW, db_path=db)
+        assert res3.error == "parse failed; will retry"
 
 
 # ---------------------------------------------------------------------------
