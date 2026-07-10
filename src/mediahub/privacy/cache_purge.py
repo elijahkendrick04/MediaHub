@@ -116,6 +116,25 @@ def cache_roots() -> List[Tuple[str, Path]]:
     except Exception:
         roots.append(("stock_thumb_cache", data / "stock_thumb_cache"))
 
+    # Export-engine and chart-export caches: both are content-addressed and a
+    # pure function of their inputs (a re-export/re-render is a cache hit), so
+    # they belong in the site-wide purge. Without them "clear all caches" left
+    # the generated exports (up to a 2 GB cap) and every chart PNG on disk
+    # despite the UI promising every re-derivable cache. Resolve through each
+    # module's own resolver, with the conventional DATA_DIR fallback.
+    try:
+        from mediahub.export_engine.cache import cache_dir as _export_cache_dir
+
+        roots.append(("export_cache", _export_cache_dir()))
+    except Exception:
+        roots.append(("export_cache", data / "export_cache"))
+    try:
+        from mediahub.charts.export import _cache_dir as _charts_cache_dir
+
+        roots.append(("charts_cache", _charts_cache_dir()))
+    except Exception:
+        roots.append(("charts_cache", data / "charts_cache"))
+
     return roots
 
 

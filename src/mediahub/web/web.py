@@ -26631,7 +26631,7 @@ Relay team broke club record"></textarea>
                         "cover / outro",
                         "no",
                         "Custom cover / outro scene length in seconds (clamped to a "
-                        "readable, render-safe range). Default 2.0 / 1.0.",
+                        "readable, render-safe range). Default 2.0 / 2.5.",
                     ),
                     (
                         "weights",
