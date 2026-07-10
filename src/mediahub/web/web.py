@@ -47643,7 +47643,7 @@ function tiRegenerate(btn) {{
                         f'<div class="motion-panel" data-card="{card_uuid}" '
                         f'data-motion-url="{_h(_motion_url)}" '
                         f'style="display:none;margin-top:10px;padding:12px;'
-                        f'background:rgba(244,213,141,0.04);border:1px solid var(--border);'
+                        f"background:rgba(244,213,141,0.04);border:1px solid var(--border);"
                         f'border-radius:8px"></div>'
                     )
                 # Per-card sponsor variant — Phase 1.2 deliverable.
