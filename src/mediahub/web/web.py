@@ -21903,6 +21903,59 @@ def create_app() -> Flask:
                     "so it flows through to every graphic.</p>"
                 )
 
+        # H-13: brand-kit chooser. Only rendered when the org actually has two
+        # or more kits — a single-kit org has nothing to choose, so the control
+        # is hidden entirely. Defaults to the org's current default kit; the
+        # choice applies to this run only (the org-wide default is untouched).
+        # Swatch colours come from each kit's own palette data (inheriting the
+        # org palette where a kit slot is blank) — never hardcoded here.
+        kit_select_html = ""
+        if active_prof is not None:
+            try:
+                from mediahub.brand import kits as _bkits
+
+                _org_kits = _bkits.list_kits(active_prof)
+                if len(_org_kits) >= 2:
+                    _default_kid = _bkits.default_kit_id(active_prof)
+                    _opts = ""
+                    _sel_name, _sel_cols = "", (prof_primary, prof_secondary, prof_accent)
+                    for _k in _org_kits:
+                        _kp = _k.palette or {}
+                        _o_cols = (
+                            _kp.get("primary") or prof_primary,
+                            _kp.get("secondary") or prof_secondary,
+                            _kp.get("accent") or prof_accent,
+                        )
+                        _is_def = _k.kit_id == _default_kid
+                        if _is_def or not _sel_name:
+                            _sel_name, _sel_cols = _k.name, _o_cols
+                        _opts += (
+                            f'<option value="{_h(_k.kit_id)}"{" selected" if _is_def else ""} '
+                            f'data-name="{_h(_k.name)}" data-primary="{_h(_o_cols[0])}" '
+                            f'data-secondary="{_h(_o_cols[1])}" data-accent="{_h(_o_cols[2])}">'
+                            f"{_h(_k.name)}{' (default)' if _is_def else ''}</option>"
+                        )
+                    _sw_spans = "".join(
+                        '<span style="width:14px;height:14px;border-radius:4px;'
+                        f'border:1px solid var(--border);background-color:{_h(_c)}"></span>'
+                        for _c in _sel_cols
+                    )
+                    kit_select_html = (
+                        '<div style="margin-top:14px">'
+                        '<label for="run-config-kit">Brand kit for these results</label>'
+                        f'<select name="brand_kit_id" id="run-config-kit">{_opts}</select>'
+                        '<div style="display:flex;align-items:center;gap:8px;margin-top:6px">'
+                        f'<span id="mh-kit-choice-sw" style="display:inline-flex;gap:4px" aria-hidden="true">{_sw_spans}</span>'
+                        f'<span id="mh-kit-choice-name" class="dim" style="font-size:var(--fs-sm)">{_h(_sel_name)}</span>'
+                        "</div>"
+                        '<p class="dim" style="margin-top:4px;font-size:var(--fs-sm)">'
+                        "Applies to these results only &mdash; your organisation&rsquo;s "
+                        "default kit stays unchanged for future meets.</p>"
+                        "</div>"
+                    )
+            except Exception:
+                kit_select_html = ""
+
         body = f"""
 <section class="mh-hero" data-lane="02" style="padding-top:var(--sp-7);padding-bottom:var(--sp-5);margin-bottom:var(--sp-4)">
   <span class="mh-hero-eyebrow">Configure this run</span>
@@ -21936,6 +21989,7 @@ def create_app() -> Flask:
         Tweak below for a one-off override; the preview on the right updates as you move the picker.
       </p>
       {prof_logo_html}
+      {kit_select_html}
 
       <div style="display:flex;gap:14px;align-items:flex-end;margin-top:12px;flex-wrap:wrap">
         <div style="flex:1;min-width:120px"><label for="run-config-primary">Primary</label><input id="run-config-primary" type="color" name="primary_colour" value="{_h(prof_primary)}" /></div>
@@ -22003,6 +22057,26 @@ def create_app() -> Flask:
     if (acc) acc.addEventListener(evt, paint);
   }});
   paint();
+
+  // H-13: brand-kit chooser — mirror the selected kit's name + palette
+  // swatches beside the select so the volunteer sees what the kit means
+  // before running. Colours ride on each <option>'s data attributes.
+  var kitSel  = document.getElementById('run-config-kit');
+  var kitName = document.getElementById('mh-kit-choice-name');
+  var kitSw   = document.getElementById('mh-kit-choice-sw');
+  function kitPaint() {{
+    if (!kitSel || !kitSel.options.length) return;
+    var o = kitSel.options[kitSel.selectedIndex];
+    if (!o) return;
+    if (kitName) kitName.textContent = o.getAttribute('data-name') || o.textContent;
+    if (kitSw) {{
+      var cols = [o.getAttribute('data-primary'), o.getAttribute('data-secondary'), o.getAttribute('data-accent')];
+      for (var i = 0; i < kitSw.children.length && i < 3; i++) {{
+        if (cols[i]) kitSw.children[i].style.backgroundColor = cols[i];
+      }}
+    }}
+  }}
+  if (kitSel) {{ kitSel.addEventListener('change', kitPaint); kitPaint(); }}
 
   // Colour-order tools — same idea as "Cycle colours" on organisation
   // setup, but scoped to this one run. Reset restores the official
@@ -22296,6 +22370,21 @@ def create_app() -> Flask:
             accent_form = (request.form.get("accent_colour") or "").strip() or None
             use_logo_colours = False
             display_name_form = (request.form.get("display_name") or club_filter or "").strip()
+            # H-13: which of the org's saved brand kits these results run
+            # under. Validated against the org's kit list — an unknown or
+            # foreign id degrades to "" (= the org's default kit), so a
+            # tampered form can never pin a kit the org doesn't own.
+            brand_kit_choice = (request.form.get("brand_kit_id") or "").strip()
+            if brand_kit_choice:
+                try:
+                    from mediahub.brand import kits as _bkits
+
+                    if active_prof_for_run is None or (
+                        _bkits.get_kit(active_prof_for_run, brand_kit_choice) is None
+                    ):
+                        brand_kit_choice = ""
+                except Exception:
+                    brand_kit_choice = ""
             # We always have branding now (the profile guarantees it), so
             # the old "branding required" gate is removed. If somehow
             # neither the profile nor the form supplies colours, the
@@ -22402,6 +22491,7 @@ def create_app() -> Flask:
                     accent_form=accent_form,
                     use_logo_colours=False,
                     display_name=display_name_form,
+                    brand_kit_id=brand_kit_choice,
                 )
             except Exception:
                 pass
@@ -41505,7 +41595,13 @@ what you're doing, what they should do.</p>
         return not _tenancy.MembershipStore().is_bound(pid) and _session_can_use_profile(pid)
 
     def _resolved_kit_for_run(run_id: str, run_data=None):
-        """The brand kit the pipeline applies to this run (default kit today).
+        """The brand kit the pipeline applies to this run.
+
+        H-13: prefers the kit the user chose on the configure step
+        (``brand_kit_id`` persisted with the run's brand-kit config in
+        ``data/brand_kits/<run_id>.json``). An absent, empty, or since-deleted
+        id falls back to the org's default kit via ``resolve_kit_for``, so
+        runs recorded before the chooser existed behave exactly as before.
 
         Returns (profile, kit) or (None, None) when no profile resolves.
         """
@@ -41516,7 +41612,17 @@ what you're doing, what they should do.</p>
             return None, None
         from mediahub.brand import kits as _kits
 
-        return prof, _kits.resolve_kit_for(prof)
+        chosen_kit_id = ""
+        try:
+            _kit_path = DATA_DIR / "data" / "brand_kits" / f"{run_id}.json"
+            if _kit_path.exists():
+                chosen_kit_id = str(
+                    (json.loads(_kit_path.read_text()) or {}).get("brand_kit_id") or ""
+                ).strip()
+        except Exception:
+            chosen_kit_id = ""
+
+        return prof, _kits.resolve_kit_for(prof, kit_id=chosen_kit_id or None)
 
     def _card_content_type(run_id: str, card_id: str, run_data=None) -> str:
         """Best-effort content-type key for per-type approver rules (1.18).
@@ -42325,16 +42431,16 @@ what you're doing, what they should do.</p>
         brief_dict = _latest_brief_for_card(run_id, card_id)
         if not brief_dict:
             return None, (jsonify({"error": "no_brief"}), 404)
-        from mediahub.brand import kits as _kits
         from mediahub.creative_brief.generator import CreativeBrief
 
-        profile_id = run_data.get("profile_id", "")
-        prof = load_profile(profile_id) if profile_id else _active_profile()
+        # H-13: one resolver — the check must judge the card against the same
+        # kit the approval gate (_brand_lock_block_reason) enforces, i.e. the
+        # kit chosen for this run, not unconditionally the org default.
+        prof, kit = _resolved_kit_for_run(run_id, run_data)
         if prof is None:
             return None, (jsonify({"error": "no_profile"}), 404)
         brief = CreativeBrief.from_dict(brief_dict)
-        kit = _kits.resolve_kit_for(prof)
-        brand_kit = _resolve_run_brand_kit(profile_id, run_id, run_data)
+        brand_kit = _resolve_run_brand_kit(run_data.get("profile_id", ""), run_id, run_data)
         return (brief, kit, brand_kit, prof), None
 
     @app.route("/api/runs/<run_id>/card/<card_id>/brand-check", methods=["GET"])
