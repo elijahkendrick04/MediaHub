@@ -100,6 +100,8 @@ returns with a success toast). Non-operators are redirected away and never see a
 | F-2 | P2 | "AI governance — usage" dashboard link dead for a no-org operator | On the developer page, click "AI governance — usage" (`/healthz/governance`) with no org set up -> 302 to `/organisation/setup`. Its sibling "LLM usage dashboard" (`/healthz/usage`) works. | `healthz_governance` missing from `_SETUP_EXEMPT_ENDPOINTS` while its twin `healthz_usage` is present. The handler's own docstring assumed the exemption existed. | Fixed | see section 8 |
 | F-3 | P2 | "Clear all caches" action silently no-ops for a no-org operator | On the developer page (once reachable), click "Clear all caches" with no org -> 302 to `/organisation/setup`; the purge never runs. | `operator_cache_purge` (POST) missing from `_SETUP_EXEMPT_ENDPOINTS`. The org gate swallows the POST before the handler's `_require_operator()` runs. Uncovered only after F-1's fix made the page reachable, exposing its primary action as dead. | Fixed | see section 8 |
 | F-4 | P3 | `/healthz/deps` publicly discloses binary paths | `curl /healthz/deps` (no auth) returns `/opt/node22/bin/node`, the Chromium executable path, and `/home/.../remotion`. | The deps probe is public (deliberate deployment health signal) and reports absolute binary locations. Minor info disclosure. | Logged (out of blast radius) | — |
+| F-5 | P3 | "Clear all caches" under-delivers — `export_cache` + `charts_cache` survive the purge | On a mature deployment, click "Clear all caches" to reclaim disk; up to ~2 GB of `DATA_DIR/export_cache` and the unbounded `DATA_DIR/charts_cache` are left on disk, and the success toast's "MB reclaimed" excludes them. | `cache_roots()` (`privacy/cache_purge.py`) omitted two genuine, content-addressed, re-derivable `DATA_DIR` caches, so `purge_all_caches()` skipped them and `_cache_tally()` under-counted — despite the card promising "every re-derivable cache". Same bug class the file already fixed once for `render_cache`. Found by the adversarial re-audit workflow; under-deletion only (never touches source data). | Fixed | see section 8 |
+| F-6 | P3 | `/developer/api` docs state the reel outro default as 1.0s; the real default is 2.5s | Read `GET /developer/api`; the `POST /api/runs/{id}/reel` "cover / outro" row said "Default 2.0 / 1.0". Real outro default is `REEL_OUTRO_SEC = 2.5`. | Stale copy in `_render_api_docs_body`: the outro default was extended 1.0s -> 2.5s in the engine but the public docs weren't updated, so a developer setting `?outro=1.0` to "match the default" silently shortens the outro. Found by the adversarial re-audit workflow. | Fixed | see section 8 |
 
 **Notes on F-1..F-3.** All three share one root cause: operator-only, org-independent
 surfaces reachable from the developer page were not exempt from the first-run organisation
@@ -132,6 +134,11 @@ some assume an active profile; a blanket exemption could expose a section that m
 with no profile. The carve-out is the minimal change that fixes the operator dashboard
 without altering any other section's behaviour.
 
+**Second pass (F-5, F-6)** — found by re-running the adversarial verification workflow:
+
+4. **F-5:** added `export_cache` and `charts_cache` to `cache_roots()` in `src/mediahub/privacy/cache_purge.py` (resolved through each module's own resolver, `export_engine.cache.cache_dir` / `charts.export._cache_dir`, with a `DATA_DIR` fallback — exactly the pattern the sibling roots use). Both are content-addressed, re-derivable caches; adding them makes the site-wide purge honour its "every re-derivable cache" promise. Under-deletion only, so no data-integrity risk. **This is a shared file — see Cross-cutting changes.**
+5. **F-6:** corrected the reel `outro` default in `_render_api_docs_body` (`/developer/api`) from `1.0` to `2.5` to match the engine constant `REEL_OUTRO_SEC`. One-line copy fix, wholly inside the developer feature surface.
+
 ---
 
 ## 6. Tests added / extended
@@ -153,6 +160,12 @@ operator state — and locks:
 (operator/governance/cache-purge all bounce to setup); with it applied, all 8 pass. So the
 tests genuinely pin the fix and are not tautologies.
 
+**Second pass:**
+- `tests/test_cache_purge.py::test_purge_covers_newer_cache_roots` — extended to require `export_cache` and `charts_cache` in `cache_roots()` and to assert both are actually deleted by `purge_all_caches()` (F-5).
+- `tests/test_api_docs_page.py::test_api_docs_reel_defaults_match_the_engine` (new) — asserts the documented reel cover/outro defaults equal the live `REEL_COVER_SEC`/`REEL_OUTRO_SEC` constants and that the stale "2.0 / 1.0" string is gone, so the docs can't drift from the engine again (F-6).
+
+Both fail with the source fixes stashed and pass with them applied.
+
 ---
 
 ## 7. Cross-cutting changes
@@ -165,6 +178,14 @@ non-developer endpoint or for non-operators. Reconcilers: if another session als
 `_SETUP_EXEMPT_ENDPOINTS`, the two edits are independent additions to the same frozenset and
 should merge cleanly; if they collide textually, keeping both sets of entries is the correct
 resolution.
+
+**Second shared surface (F-5):** `src/mediahub/privacy/cache_purge.py` `cache_roots()` — two
+additive `(label, path)` entries (`export_cache`, `charts_cache`), each resolved through the
+owning module's resolver with a `DATA_DIR` fallback, following the exact pattern of the roots
+already in the list. It only *adds* re-derivable caches to a purge that already existed (never
+removes or narrows), so it cannot over-delete or touch source data. Reconcilers: independent
+additions to the `roots` list; if another session edits `cache_roots()`, keeping both sets of
+entries is the correct resolution.
 
 No changes to `requirements.txt`, `pyproject.toml`, base templates, shared CSS/JS, or config.
 
