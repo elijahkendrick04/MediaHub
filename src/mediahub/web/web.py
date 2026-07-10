@@ -4462,12 +4462,27 @@ function _fetchCaption(captionUrl, tone, panel, cacheKey, isAi, cardId) {
                 trOut.innerHTML = '<div style="font-size:10px;color:var(--warn);margin-top:4px">' + safeText(jj.message || 'Translation unavailable.') + '</div>';
                 return;
               }
-              var s = (jj.slots && jj.slots.caption) || '';
+              // E-13: the route translated + SAVED every slot it was sent
+              // (caption, alt text, headline, subhead) — render them all,
+              // each labelled plainly and carrying its own dir attribute, so
+              // no saved slot rides into approval/export unreviewed.
               var lbl = jj.language_label || lang;
+              var trDir = (jj.rtl ? 'rtl' : 'auto');
+              var slotNames = {caption:'Caption', alt_text:'Alt text', headline:'Headline', subhead:'Subhead'};
+              var slotKeys = ['caption','alt_text','headline','subhead'];
+              Object.keys(jj.slots || {}).forEach(function(k){ if (slotKeys.indexOf(k) === -1) slotKeys.push(k); });
+              var slotsHtml = '';
+              slotKeys.forEach(function(k){
+                var v = (jj.slots || {})[k];
+                if (typeof v !== 'string' || !v.trim()) return;
+                var name = slotNames[k] || (k.charAt(0).toUpperCase() + k.slice(1).replace(/_/g, ' '));
+                slotsHtml += '<div style="font-size:10px;color:var(--ink-muted);text-transform:uppercase;letter-spacing:0.5px;margin-top:6px">' + safeText(name) + '</div>'
+                  + '<span style="white-space:pre-wrap;display:block" dir="' + trDir + '">' + safeText(v) + '</span>';
+              });
               var warnHtml = (jj.warnings && jj.warnings.length) ? '<div style="font-size:10px;color:var(--warn);margin-top:4px">⚠ ' + safeText(jj.warnings.join('; ')) + '</div>' : '';
               trOut.innerHTML = '<div style="margin-top:8px;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:color-mix(in oklab, var(--lane) 3%, transparent)">'
-                + '<div style="font-size:10px;color:var(--ink-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px">' + safeText(lbl) + ' · saved with this card</div>'
-                + '<span style="white-space:pre-wrap" dir="' + (jj.rtl ? 'rtl' : 'auto') + '">' + safeText(s) + '</span>' + warnHtml + '</div>';
+                + '<div style="font-size:10px;color:var(--ink-muted);text-transform:uppercase;letter-spacing:0.5px">' + safeText(lbl) + ' · saved with this card</div>'
+                + slotsHtml + warnHtml + '</div>';
             })
             .catch(function(){ trBtn.disabled = false; trBtn.textContent = 'Translate'; trOut.innerHTML = '<div style="font-size:10px;color:var(--warn);margin-top:4px">Translation failed — try again.</div>'; });
         });
@@ -6341,6 +6356,50 @@ def _schedule_button_html(run_id: str, card_id_raw, el_id: str) -> str:
     )
 
 
+# E-13: the text slots a saved translation variant can carry, in display
+# order, with the plain labels the approver sees. The /translate route accepts
+# exactly these four; a slot key outside this list still renders (labelled
+# from the key, below) so no translated text can ride into export unseen.
+_TRANSLATION_SLOT_LABELS: tuple[tuple[str, str], ...] = (
+    ("caption", "Caption"),
+    ("alt_text", "Alt text"),
+    ("headline", "Headline"),
+    ("subhead", "Subhead"),
+)
+
+
+def _translation_slot_rows_html(slots: dict, direction: str) -> str:
+    """Render EVERY text slot of a translation variant (E-13).
+
+    Each slot gets a plain label ("Caption", "Alt text", "Headline",
+    "Subhead") and its own ``dir`` attribute; unknown string slots still
+    render with a label derived from the key. All values are ``_h``-escaped
+    (provider output is untrusted). Empty string when nothing renders."""
+    if not isinstance(slots, dict):
+        return ""
+    ordered: list[tuple[str, str]] = [
+        (key, label) for key, label in _TRANSLATION_SLOT_LABELS if key in slots
+    ]
+    known = {key for key, _ in _TRANSLATION_SLOT_LABELS}
+    ordered += [
+        (str(key), str(key).replace("_", " ").strip().capitalize() or "Text")
+        for key in slots
+        if key not in known
+    ]
+    rows: list[str] = []
+    for key, label in ordered:
+        val = slots.get(key)
+        if not isinstance(val, str) or not val.strip():
+            continue
+        rows.append(
+            '<div style="font-size:10px;color:var(--ink-muted);text-transform:uppercase;'
+            f'letter-spacing:0.5px;margin-top:6px">{_h(label)}</div>'
+            f'<span style="white-space:pre-wrap;display:block" dir="{direction}">'
+            f"{_h(val.strip())}</span>"
+        )
+    return "".join(rows)
+
+
 def _render_stored_translations(card: dict) -> str:
     """Server-side render of a card's SAVED translations (1.24 bilingual pairs).
 
@@ -6350,8 +6409,11 @@ def _render_stored_translations(card: dict) -> str:
     variant from ``card["workflow"]["translations"]`` so the bilingual approval
     pair survives a page refresh — server-side and ``_h``-escaped (the persisted
     text came from a provider, so it is treated as untrusted and never injected
-    raw). Empty string when the card has no saved translations (byte-identical
-    to before for the common case)."""
+    raw). E-13: every slot the variant carries renders — caption, alt text,
+    headline, subhead — each labelled, each with its own ``dir`` attribute, so
+    no translated slot rides into approval/export unreviewed. Empty string when
+    the card has no saved translations (byte-identical to before for the
+    common case)."""
     wf = card.get("workflow") if isinstance(card, dict) else None
     translations = (wf or {}).get("translations") if isinstance(wf, dict) else None
     if not isinstance(translations, dict) or not translations:
@@ -6360,18 +6422,18 @@ def _render_stored_translations(card: dict) -> str:
     for _lang, variant in translations.items():
         if not isinstance(variant, dict):
             continue
-        caption = str((variant.get("slots") or {}).get("caption") or "").strip()
-        if not caption:
+        direction = "rtl" if variant.get("rtl") else "auto"
+        slot_rows = _translation_slot_rows_html(variant.get("slots") or {}, direction)
+        if not slot_rows:
             continue
         label = str(variant.get("language_label") or _lang or "Translation")
-        direction = "rtl" if variant.get("rtl") else "auto"
         rows.append(
             '<div style="margin-top:6px;padding:8px 10px;border:1px solid var(--border);'
             'border-radius:6px;background:color-mix(in oklab, var(--lane) 3%, transparent)">'
             '<div style="font-size:10px;color:var(--ink-muted);text-transform:uppercase;'
-            f'letter-spacing:0.5px;margin-bottom:4px">{_h(label)} &middot; saved with this card</div>'
-            f'<span style="white-space:pre-wrap" dir="{direction}">{_h(caption)}</span>'
-            "</div>"
+            f'letter-spacing:0.5px">{_h(label)} &middot; saved with this card</div>'
+            + slot_rows
+            + "</div>"
         )
     if not rows:
         return ""
@@ -23940,6 +24002,17 @@ def create_app() -> Flask:
                 f"<em data-mh-row-caption-text>{_h(_row_caption_disp)}</em></div>"
             )
 
+            # E-13: translations saved on the card (via /translate or a
+            # bilingual caption bundle) are part of what the approver signs
+            # off — every saved slot (caption, alt text, headline, subhead)
+            # renders on the row BEFORE approval, labelled, each with its own
+            # dir attribute. Empty string for the common untranslated card.
+            _row_translations_html = ""
+            if wf_state is not None and getattr(wf_state, "translations", None):
+                _row_translations_html = _render_stored_translations(
+                    {"workflow": wf_state.to_dict()}
+                )
+
             ach_rows_html_wf += f"""
 <div class="ach-row" data-type="{a.get("type", "")}" data-conf="{conf_label}" data-swimmer="{_h(a.get("swimmer_name", ""))}" data-event="{_h(a.get("event", ""))}" data-band="{band}" data-post="{ra.get("suggested_post_type", "")}" data-status="{wf_status}" data-status-initial="{wf_status}">
   <div style="display:flex;align-items:flex-start;gap:14px;padding:14px 0;border-bottom:1px solid var(--border)">
@@ -23963,6 +24036,7 @@ def create_app() -> Flask:
       </div>
       <div style="font-size:13px;color:var(--ink-dim)">{headline}</div>
       {_row_caption_html}
+      {_row_translations_html}
       {why_html}
       <!-- Approve / Reject triage. Captions, graphics, motion + scheduling
            all happen later in the Content builder (approved cards only). -->
