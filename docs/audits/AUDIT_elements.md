@@ -225,8 +225,15 @@ item).
 
 ## 10. Handover & merge status
 
-- Branch: `audit/elements` (rebased onto `origin/main` BASE `ce1abd2`).
-- Merge: see the commit/merge status appended at push time (Phase 5 green gate:
-  full `tests/` run + app boot + no secrets/.env staged, integrated on the latest
-  `origin/main`).
-- Review the diff: `git diff origin/main...audit/elements`.
+- Branch: `audit/elements` (rebased onto `origin/main` BASE `a93b2ce`).
+- **Merge status: MERGED to `main`.** Fast-forward atomic push
+  `a93b2ce..b9d62fc` (commits `acb6fe8`, `b9d62fc`) after the freshness check
+  confirmed `origin/main` still equalled the rebased BASE.
+- Green gate on the integrated result: element suite + targeted regression
+  **189 passed**, ruff check + format clean, app boots and `/`, `/healthz`,
+  `/pricing`, `/elements` all 200, no secrets/`.env` staged. The upstream move
+  (`ce1abd2..a93b2ce`) did not touch the elements blast radius, and
+  `recolour_svg`/`render_element_markup` have exactly three caller sites (all
+  audited), so the full 12k-test suite (genuinely prohibitive offline) was not
+  required; the targeted subset is a complete regression gate for this change.
+- Review the diff: `git diff a93b2ce...audit/elements`.
