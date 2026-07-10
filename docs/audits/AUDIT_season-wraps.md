@@ -194,7 +194,28 @@ wrap until date normalisation lands at the interpreter seam (out of this feature
 
 ## 10. Handover & merge status
 
-- **Branch:** `claude/season-wraps-audit-mz8tyj`
-- **Review the diff:** `git diff origin/main...claude/season-wraps-audit-mz8tyj`
-- **Merge status:** _to be updated after the Phase 5 green gate + integrate-on-green push._
+- **Branch:** `claude/season-wraps-audit-mz8tyj` (pushed to origin).
+- **Review the diff:** `git show 95331bc` (the single squashed audit commit), or
+  `git diff 7f9a677..95331bc`.
+- **Merge status: MERGED to `main`.** Landed via the Phase 5 protocol:
+  1. Full serial suite on the pre-rebase base: **12,500 passed, 10 skipped, 1 failed** —
+     the lone failure (`test_log_sentinel.py::test_boot_grace_blocks`) is a wall-clock
+     boot-grace flake that passes 3/3 in isolation on both my branch and clean `origin/main`;
+     it is unrelated to Season Wraps (my change touches no log-sentinel code). The 8 failures
+     seen in an earlier *parallel* (`-n auto`) run were xdist cross-worker pollution
+     (`ValueError: I/O operation on closed file`, leaked module state → 404s) and did **not**
+     recur in the serial run.
+  2. Rebased onto `origin/main` **BASE = `7f9a677`** (main had advanced 41 commits from other
+     sessions). One additive conflict in the shared `tests/test_phase_w_web.py` (another
+     session appended `TestLiveMeet`; I appended `TestSeasonWrapsSurface`) — resolved
+     keep-both; both classes pass (30 passed).
+  3. Re-ran the green gate on the rebased result: feature tests (season_wrap + phase_w_web +
+     create_hub_live_tiles) + a broad regression subset (web/print/scheduler/security/
+     graphic-renderer/club-profile) = **273 passed, 1 env-skip**; app boots clean (509 routes);
+     smoke check `/`, `/make`, `/settings`, `/wraps` all 200.
+  4. Freshness check immediately before landing: `origin/main` still equalled BASE `7f9a677`.
+  5. Atomic non-force fast-forward push `git push origin HEAD:main` — accepted
+     (`7f9a677..95331bc`). The fast-forward guarantees the exact tested state landed onto the
+     exact BASE tested against; no red merge.
+- **Merge commit on `main`:** **`95331bcb4d47d672763856ff1e48585dc943350d`** (now `origin/main` HEAD).
 
