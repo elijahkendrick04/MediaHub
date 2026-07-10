@@ -12854,28 +12854,40 @@ _VISUAL_PANEL_JS = """<script>
 </script>"""
 
 
-# "Regenerate (fresh angles)" handler for the saved-draft pages. POSTs to the
+# "Regenerate (fresh angles)" handler for the saved-draft pages. Confirms
+# first (E-11 — it replaces every card and clears approval), then POSTs to the
 # content-engine regenerate route and reloads to the freshly-written set.
 _DRAFT_REGEN_JS = """<script>
-function mhRegenerateDraft(btn, url){
-  var orig = btn.innerHTML;
-  btn.disabled = true; btn.innerHTML = '\\u21BA Regenerating\\u2026';
-  fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}', credentials:'same-origin'})
-    .then(function(r){ return r.json().then(function(j){ return {ok:r.ok, body:j}; }); })
-    .then(function(res){
-      if(res.ok && res.body && res.body.ok){
-        if(window.MH && MH.toast){ MH.toast('Fresh draft generated', 'success'); }
-        location.href = (res.body && res.body.redirect) || location.href;
-      } else {
+function mhRegenerateDraft(btn, url, nCards){
+  function run(){
+    var orig = btn.innerHTML;
+    btn.disabled = true; btn.innerHTML = '\\u21BA Regenerating\\u2026';
+    fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}', credentials:'same-origin'})
+      .then(function(r){ return r.json().then(function(j){ return {ok:r.ok, body:j}; }); })
+      .then(function(res){
+        if(res.ok && res.body && res.body.ok){
+          if(window.MH && MH.toast){ MH.toast('Fresh draft generated', 'success'); }
+          location.href = (res.body && res.body.redirect) || location.href;
+        } else {
+          btn.disabled = false; btn.innerHTML = orig;
+          var msg = (res.body && (res.body.message || res.body.error)) || 'Could not regenerate';
+          if(window.MH && MH.toast){ MH.toast(msg, 'error'); } else { alert(msg); }
+        }
+      })
+      .catch(function(){
         btn.disabled = false; btn.innerHTML = orig;
-        var msg = (res.body && (res.body.message || res.body.error)) || 'Could not regenerate';
-        if(window.MH && MH.toast){ MH.toast(msg, 'error'); } else { alert(msg); }
-      }
-    })
-    .catch(function(){
-      btn.disabled = false; btn.innerHTML = orig;
-      if(window.MH && MH.toast){ MH.toast('Network error', 'error'); } else { alert('Network error'); }
-    });
+        if(window.MH && MH.toast){ MH.toast('Network error', 'error'); } else { alert('Network error'); }
+      });
+  }
+  var what = (nCards === 1) ? 'the card' : (nCards ? 'all ' + nCards + ' cards' : 'all cards');
+  var body = 'This replaces ' + what +
+    ' and clears their approval status. Previous captions stay in Previous versions below.';
+  if (window.MH && MH.confirm){
+    MH.confirm({title: 'Regenerate this draft?', body: body,
+      confirmText: 'Regenerate', danger: false, onConfirm: run});
+  } else if (window.confirm(body)) {
+    run();
+  }
 }
 </script>"""
 
@@ -35981,7 +35993,8 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         regen_api = url_for("api_stub_pack_regenerate", pack_id=pack_id)
         footer = (
             f'<div style="margin-top:24px;display:flex;gap:10px;flex-wrap:wrap">'
-            f'<button type="button" class="btn" onclick="mhRegenerateDraft(this, {repr(regen_api)})" '
+            f'<button type="button" class="btn" '
+            f'onclick="mhRegenerateDraft(this, {repr(regen_api)}, {len(_pack_cards)})" '
             f'title="Re-run the content engine — the AI Director plans fresh angles, avoiding what you already have">'
             f"&#x21BA; Regenerate (fresh angles)</button>"
             f'<a class="btn secondary" href="{export_url}">Export as text</a>'
@@ -35991,7 +36004,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             f'<a class="btn secondary" href="{url_for("plan_ad_variants_page", pack_id=pack_id)}" '
             f'title="Turn these angles into a sponsor A/B ad set, sized for ad managers (prepared, never placed)">'
             f"Prepare ad set</a>"
-            f'<a class="btn secondary" href="{regenerate_url}">Generate new draft</a>'
+            f'<a class="btn secondary" href="{regenerate_url}">Start a new draft from the form</a>'
             f'<a class="btn secondary" href="{back_url}">&larr; All drafts</a>'
             f"</div>"
         )
@@ -36028,6 +36041,35 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 pack_id,
             )
         cards_html = _new_cards_html
+        # E-11: "Previous versions" — the captions a Regenerate replaced.
+        # replace_cards archives {platform, caption} into card_history; this
+        # expander is the page that finally shows it (most recent first).
+        history = [
+            h
+            for h in (rec.get("card_history") or [])
+            if isinstance(h, dict) and str(h.get("caption") or "").strip()
+        ]
+        history_html = ""
+        if history:
+            rows = ""
+            for h_item in reversed(history):
+                rows += (
+                    f'<div style="padding:10px 0;border-top:1px solid var(--border)">'
+                    f'<div style="font-size:10.5px;text-transform:uppercase;'
+                    f'letter-spacing:0.14em;color:var(--ink-muted);margin-bottom:4px">'
+                    f"{_h(h_item.get('platform') or 'Post')}</div>"
+                    f'<div style="font-size:13px;line-height:1.5;white-space:pre-wrap">'
+                    f"{_h(h_item.get('caption'))}</div></div>"
+                )
+            _n_prev = len(history)
+            history_html = (
+                f'<details class="card" style="margin-top:18px">'
+                f'<summary style="cursor:pointer;font-weight:600">Previous versions '
+                f"({_n_prev})</summary>"
+                f'<p class="dim" style="font-size:12px;margin:8px 0 4px 0">'
+                f"Captions replaced by a regenerate — kept here so nothing is lost.</p>"
+                f"{rows}</details>"
+            )
         # Single-prompt flow lands here with ?autographic=1 — render the first
         # card's graphic on load (with the attached photo as background if one
         # was passed) so "describe it → get a graphic" needs no extra click.
@@ -36041,7 +36083,15 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 f"{json.dumps(f'{pack_id}-0')},{json.dumps(_g0)},"
                 f"{json.dumps(_photo)},'feed_portrait');}}}});</script>"
             )
-        body = header + attached_html + cards_html + _VISUAL_PANEL_JS + _DRAFT_REGEN_JS + auto_js
+        body = (
+            header
+            + attached_html
+            + cards_html
+            + history_html
+            + _VISUAL_PANEL_JS
+            + _DRAFT_REGEN_JS
+            + auto_js
+        )
         return _layout(rec.get("title") or "Draft", body, active="create")
 
     def _render_pack_attached_media(rec: dict) -> str:
