@@ -172,6 +172,44 @@ def test_other_org_token_sees_nothing(wall_world):
     assert wall_image_path(prof_b, "run-a-1", "swim-1") is None
 
 
+def test_corrupt_run_json_fails_closed(wall_world):
+    """A run whose JSON snapshot is missing or corrupt cannot have its athletes'
+    consent verified, so the wall must fail closed: none of that run's cards
+    appear on the page/feeds and the card PNG route 404s — while the public page
+    itself still renders 200. Before the fix, a corrupt snapshot resolved every
+    card to an empty name and slipped past the consent gate with the real
+    rendered graphic."""
+    from mediahub.web.club_profile import load_profile
+    from mediahub.web.public_wall import wall_cards, wall_image_path
+    from mediahub.workflow.status import CardStatus
+    from mediahub.workflow.store import WorkflowStore
+
+    runs_dir = wall_world["tmp"] / "runs_v4"
+    vdir = runs_dir / "run-corrupt" / "visuals" / "brief-c"
+    vdir.mkdir(parents=True, exist_ok=True)
+    (vdir / "visual.json").write_text(json.dumps({"content_item_id": "swim-c", "id": "brief-c"}))
+    (vdir / "feed_portrait.png").write_bytes(b"\x89PNG fake")
+    (runs_dir / "run-corrupt.json").write_text("{ not valid json ")  # corrupt snapshot
+    WorkflowStore(runs_dir).set_status("run-corrupt", "swim-c", CardStatus.APPROVED)
+
+    conn = wall_world["wm"]._db()
+    conn.execute(
+        "INSERT OR REPLACE INTO runs (id, created_at, status, profile_id, meet_name, file_name) "
+        "VALUES (?, datetime('now'), 'done', ?, ?, ?)",
+        ("run-corrupt", "org-a", "Corrupt Meet", "c.hy3"),
+    )
+    conn.commit()
+    conn.close()
+
+    prof = load_profile("org-a")
+    assert "swim-c" not in {c["card_id"] for c in wall_cards(prof)}
+    assert wall_image_path(prof, "run-corrupt", "swim-c") is None
+
+    c = wall_world["app"].test_client()
+    assert c.get("/wall/token-org-a-secret/card/run-corrupt/swim-c.png").status_code == 404
+    assert c.get("/wall/token-org-a-secret").status_code == 200  # page still renders
+
+
 # ---- public routes ---------------------------------------------------------
 
 
@@ -229,6 +267,38 @@ def test_bad_token_404s_everywhere(wall_world):
         "/wall/nope/card/run-a-1/swim-1.png",
     ):
         assert c.get(path).status_code == 404, path
+
+
+def test_hostile_brand_colour_cannot_inject_css(wall_world):
+    """A non-hex brand_primary (e.g. set via a raw form POST that bypasses the
+    type=color widget) must not break out of the wall page's <style> block. It
+    is gated to a hex colour and falls back to the default, so the injected CSS
+    rule never reaches the public page or its embed."""
+    from mediahub.web.club_profile import load_profile, save_profile
+
+    payload = '#000;}body{background:url(//evil)}h1:after{content:"x"}header{'
+    prof = load_profile("org-a")
+    prof.brand_primary = payload
+    save_profile(prof)
+
+    c = wall_world["app"].test_client()
+    for path in ("/wall/token-org-a-secret", "/wall/token-org-a-secret/embed"):
+        html = c.get(path).get_data(as_text=True)
+        assert "}body{" not in html  # no CSS rule break-out
+        assert "url(//evil)" not in html  # no injected beacon
+        assert "border-bottom:3px solid #0A2540" in html  # fell back to the safe default
+
+
+def test_powered_by_badge_opens_in_new_context(wall_world):
+    """The 'Powered by MediaHub' badge must carry target=_blank + rel noopener
+    noreferrer so that, inside an embedded (iframed) wall, clicking it does not
+    navigate the club's own iframe to MediaHub's signup page (in-frame takeover)."""
+    c = wall_world["app"].test_client()
+    for path in ("/wall/token-org-a-secret", "/wall/token-org-a-secret/embed"):
+        html = c.get(path).get_data(as_text=True)
+        assert 'class="powered"' in html
+        assert 'target="_blank"' in html
+        assert 'rel="noopener noreferrer"' in html
 
 
 # ---- workspace settings routes ---------------------------------------------

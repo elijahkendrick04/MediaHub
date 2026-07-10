@@ -19,10 +19,14 @@ no platform review anywhere. Opt-in and conservative by default:
   workspace runs a consent regime, every card's athlete is resolved
   against the registry: a blocked athlete (``do_not_feature``, or no
   consent on file under an active regime) never appears on the wall, in
-  the feeds, or via the card-image route; an ``initials_only`` athlete is
-  initialled even when the blanket toggle is off. The most restrictive of
-  the toggle and the athlete's recorded consent always wins — consent can
-  only tighten the wall, never loosen it.
+  the feeds, or via the card-image route. An athlete whose consent forbids
+  a photo (``no_photo`` or ``initials_only``, both ``photo_ok=False``) is
+  likewise held off the wall entirely — the wall only serves the
+  pre-rendered, photo-forward card graphic and has no photo-less variant to
+  substitute. The most restrictive of the blanket toggle and the athlete's
+  recorded consent always wins — consent can only tighten the wall, never
+  loosen it. A run whose snapshot is missing or corrupt (so the athlete
+  cannot be resolved to check consent) is skipped wholesale — fail closed.
 
 Everything here is read-only: no caption-memory capture, no workflow
 mutation — a public page load must never have side effects.
@@ -42,6 +46,11 @@ from mediahub.web.club_profile import ClubProfile, list_profiles
 # Wall text shows at most this many cards; feeds use the same cap.
 WALL_CARD_LIMIT = 60
 _RUNS_SCANNED_LIMIT = 30
+
+# Shared fallback label for a card with no resolvable name/event/time, used for
+# BOTH the visible title and the image alt so the accessible name matches the
+# visible name (WCAG 2.5.3 label-in-name).
+_FALLBACK_LABEL = "Club achievement"
 
 # Display preference when a card was rendered in several formats.
 _FORMAT_PREFERENCE = ("feed_portrait", "feed_square", "story", "reel_cover", "carousel_slide")
@@ -148,7 +157,7 @@ def _recent_done_run_ids(profile_id: str, limit: int = _RUNS_SCANNED_LIMIT) -> l
         try:
             rows = conn.execute(
                 "SELECT id FROM runs WHERE profile_id = ? AND status = 'done' "
-                "ORDER BY created_at DESC LIMIT ?",
+                "ORDER BY created_at DESC, id DESC LIMIT ?",
                 (profile_id, int(limit)),
             ).fetchall()
         finally:
@@ -274,7 +283,13 @@ def wall_cards(
         approved = _approved_card_ids(run_id)
         if not approved:
             continue
-        run_data = _load_run_json(run_id) or {}
+        run_data = _load_run_json(run_id)
+        if run_data is None:
+            # Missing or corrupt run snapshot: we cannot resolve athlete names
+            # to check consent, so publishing any of this run's cards would let
+            # them past the consent gate with empty metadata. Fail closed — skip
+            # the whole run (consent may only ever tighten this surface).
+            continue
         # Hard tenant check: the run JSON must agree it belongs to this org.
         run_owner = run_data.get("profile_id") or ""
         if run_owner and run_owner != profile.profile_id:
@@ -306,19 +321,38 @@ def wall_cards(
                         }
                     )
                 continue
+            # Consent may forbid any photo (levels ``no_photo`` and
+            # ``initials_only`` both set ``photo_ok=False``). The wall only holds
+            # the pre-rendered, photo-forward card graphic — it has no photo-less
+            # variant to serve — so an athlete whose consent forbids a photo is
+            # held off the wall entirely, exactly like a blocked athlete. This
+            # closes the gap where consent tightened *after* a card was rendered
+            # at ``full`` would still leak the athlete's photo/full-name graphic.
+            if policy is not None and not policy.photo_ok:
+                if consent_hidden is not None:
+                    consent_hidden.append(
+                        {
+                            "run_id": run_id,
+                            "card_id": cid,
+                            "athlete": raw_name,
+                            "level": policy.level,
+                            "reason": policy.reason or "photo consent not given",
+                        }
+                    )
+                continue
             use_initials = initials_only or (policy is not None and policy.level == "initials_only")
             display_name = initials_of(raw_name) if use_initials else raw_name
             event = str(ach.get("event") or "").strip()
             time_str = str(ach.get("time") or ach.get("final_time") or "").strip()
             title_bits = [b for b in (display_name, event, time_str) if b]
-            title = " — ".join(title_bits) or "Club achievement"
+            title = " — ".join(title_bits) or _FALLBACK_LABEL
             alt_bits = title_bits + ([f"at {meet_name}"] if meet_name else [])
             cards.append(
                 {
                     "run_id": run_id,
                     "card_id": cid,
                     "title": title,
-                    "alt_text": ", ".join(alt_bits) or "Achievement card",
+                    "alt_text": ", ".join(alt_bits) or _FALLBACK_LABEL,
                     "meet_name": meet_name,
                     "event": event,
                     "time": time_str,
@@ -362,9 +396,7 @@ def card_labels(profile: ClubProfile, keys) -> dict:
             display_name = initials_of(raw_name) if use_initials else raw_name
             event = str(ach.get("event") or "").strip()
             time_str = str(ach.get("time") or ach.get("final_time") or "").strip()
-            title = (
-                " — ".join(b for b in (display_name, event, time_str) if b) or "Club achievement"
-            )
+            title = " — ".join(b for b in (display_name, event, time_str) if b) or _FALLBACK_LABEL
             out[card_key(run_id, cid)] = {"title": title, "meet_name": meet_name}
     return out
 
@@ -380,13 +412,19 @@ def wall_image_path(profile: ClubProfile, run_id: str, card_id: str) -> Optional
     approved = _approved_card_ids(run_id)
     if str(card_id) not in approved:
         return None
-    run_data = _load_run_json(run_id) or {}
+    run_data = _load_run_json(run_id)
+    if run_data is None:
+        return None  # missing/corrupt snapshot — fail closed (consent unverifiable)
     run_owner = run_data.get("profile_id") or ""
     if run_owner and run_owner != profile.profile_id:
         return None
     ach = _achievements_by_card_id(run_data).get(str(card_id)) or {}
-    if _consent_block_reason(profile.profile_id, str(ach.get("swimmer_name") or "").strip()):
+    raw_name = str(ach.get("swimmer_name") or "").strip()
+    if _consent_block_reason(profile.profile_id, raw_name):
         return None  # a blocked athlete's card is unreachable, not just unlisted
+    policy = _consent_display_policy(profile.profile_id, raw_name)
+    if policy is not None and not policy.photo_ok:
+        return None  # no_photo / initials_only: withhold the photo-forward graphic
     vis = _best_visual_for_cards(run_id, {str(card_id)}).get(str(card_id))
     return vis["png_path"] if vis else None
 
