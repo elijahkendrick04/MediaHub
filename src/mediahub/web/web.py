@@ -52412,7 +52412,8 @@ workflow, and the publish log &mdash; deterministic and auditable.</p>
       enforced on top &mdash; this blanket setting can only tighten it further)</label>
     <button type="submit" class="btn secondary" style="font-size:12px">Save</button>
   </form>
-  <form method="post" action="{url_for("public_wall_update")}" style="margin-top:14px">
+  <form method="post" action="{url_for("public_wall_update")}" style="margin-top:14px"
+        onsubmit="return mhWallOffConfirm(this)">
     <input type="hidden" name="action" value="disable">
     <button type="submit" class="btn secondary">Switch off &amp; revoke the link</button>
   </form>
@@ -52430,6 +52431,31 @@ workflow, and the publish log &mdash; deterministic and auditable.</p>
   {excluded_rows or '<tr><td class="dim" style="padding:12px">None hidden.</td></tr>'}
   </tbody></table>
 </div>"""
+            # E-12: switching off clears the token, so every shared URL,
+            # embed, feed and QR code dies permanently (re-enabling mints a
+            # NEW link). That deserves an explicit confirm — styled
+            # MH.confirm where loaded, native confirm fallback. Plain string
+            # (not an f-string) so the JS braces stay single.
+            status_block += """
+<script>
+function mhWallOffConfirm(f) {
+  if (f.dataset.mhConfirmed === '1') { f.dataset.mhConfirmed = ''; return true; }
+  var body = 'Your public link, website embed, feeds and any QR codes will stop working. Switching back on creates a DIFFERENT link.';
+  if (window.MH && MH.confirm) {
+    MH.confirm({
+      title: 'Switch off the public wall?',
+      body: body,
+      confirmText: 'Switch off & revoke',
+      onConfirm: function() {
+        f.dataset.mhConfirmed = '1';
+        if (f.requestSubmit) f.requestSubmit(); else f.submit();
+      }
+    });
+    return false;
+  }
+  return confirm('Switch off the public wall? ' + body);
+}
+</script>"""
         else:
             status_block = f"""
 <div class="card empty">
