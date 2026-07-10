@@ -15755,14 +15755,28 @@ def _layout(
     var strip = document.getElementById('mh-review-progress');
     if (!strip) return;
     var rows = document.querySelectorAll('.ach-row[data-status]');
-    var total = rows.length || parseInt(strip.getAttribute('data-wf-total'), 10) || 0;
-    var nApproved = 0, nRejected = 0, nQueue = 0;
+    // J-3: the review list is paginated server-side, so the DOM may hold only
+    // the current page's rows — absolute DOM counts would shrink the run to
+    // one page. Start from the server-rendered full-run baseline
+    // (data-wf-base-*) and apply the delta of status changes made on THIS
+    // page (each row remembers its rendered status in data-status-initial).
+    var total = parseInt(strip.getAttribute('data-wf-total'), 10) || rows.length || 0;
+    function pile(s){ return (s === 'approved' || s === 'rejected') ? s : 'queue'; }
+    var dom = {queue: 0, approved: 0, rejected: 0};
+    var delta = {queue: 0, approved: 0, rejected: 0};
     rows.forEach(function(r){
-      var st = r.dataset.status;
-      if (st === 'approved') nApproved++;
-      else if (st === 'rejected') nRejected++;
-      else nQueue++;
+      var st = pile(r.dataset.status);
+      dom[st]++;
+      var init = pile(r.dataset.statusInitial || r.dataset.status);
+      if (init !== st) { delta[init]--; delta[st]++; }
     });
+    function base(name, fallback){
+      var v = parseInt(strip.getAttribute('data-wf-base-' + name), 10);
+      return isNaN(v) ? fallback : v;
+    }
+    var nQueue = Math.max(0, base('queue', dom.queue) + delta.queue);
+    var nApproved = Math.max(0, base('approved', dom.approved) + delta.approved);
+    var nRejected = Math.max(0, base('rejected', dom.rejected) + delta.rejected);
     var reviewed = nApproved + nRejected;
     var pct = total ? Math.round(100 * reviewed / total) : 0;
     var set = function(id, val){ var el = document.getElementById(id); if (el) el.textContent = val; };
@@ -23520,11 +23534,17 @@ def create_app() -> Flask:
         # own store-summary "decided / ranked-total" maths — a separate concept
         # with its own regression guard.)
         _wf_card_counts: dict[str, int] = {}
+        # J-3: the FULL queued-id list, embedded in the page for "Approve all
+        # in queue" — with server-side pagination the DOM only holds one page
+        # of rows, so the bulk approve must not scrape it.
+        _queued_card_ids: list[str] = []
         for _ra in ranked_achs:
             _cid = (_ra.get("achievement") or {}).get("swim_id", "")
             _cst = _wf_states.get(_cid)
             _cst_val = _cst.status.value if _cst else "queue"
             _wf_card_counts[_cst_val] = _wf_card_counts.get(_cst_val, 0) + 1
+            if _cst_val == "queue" and _cid:
+                _queued_card_ids.append(str(_cid))
         _n_queue_cards = _wf_card_counts.get("queue", 0)
         _n_approved_cards = _wf_card_counts.get("approved", 0)
         _n_rejected_cards = _wf_card_counts.get("rejected", 0)
@@ -23598,7 +23618,7 @@ def create_app() -> Flask:
     </p>
   </div>
 </div>
-<div class="mh-progress-strip" role="group" aria-label="Review progress" id="mh-review-progress" data-wf-total="{_wf_grand_total}">
+<div class="mh-progress-strip" role="group" aria-label="Review progress" id="mh-review-progress" data-wf-total="{_wf_grand_total}" data-wf-base-queue="{_n_queue_cards}" data-wf-base-approved="{_n_approved_cards}" data-wf-base-rejected="{_n_rejected_cards}">
   <span class="mh-progress-strip-label">Reviewed</span>
   <span class="mh-progress-strip-value" id="mh-wf-value">{_wf_decided}<span class="total">/ {_wf_grand_total}</span></span>
   <span class="mh-progress-strip-bar"><span id="mh-wf-bar" style="width:{_wf_pct}%"></span></span>
@@ -23640,8 +23660,66 @@ def create_app() -> Flask:
         # UI 1.25 — tally every card's emoji reactions in one indexed query so
         # the per-card strips render server-side without a round-trip each.
         _react_counts = _reaction_counts_for_run(run_id)
+
+        # J-3: server-side pagination, 25 rank-ordered cards per page. A
+        # 249-card meet used to render every row into one ~70,000px page and
+        # the thumbnail loader (2 concurrent, 6 retries) permanently gave up
+        # on deep rows with "Renderer busy". Tab counts, the stat block and
+        # the progress strip above are all computed from the FULL run state;
+        # only the rendered rows are sliced. Runs of 25 cards or fewer render
+        # exactly as before (single page, no pager).
+        _REVIEW_PAGE_SIZE = 25
+        try:
+            _pg = int(request.args.get("page", "1") or "1")
+        except (TypeError, ValueError):
+            _pg = 1
+        _n_pages = max(1, -(-len(ranked_achs) // _REVIEW_PAGE_SIZE))
+        _pg = min(max(1, _pg), _n_pages)
+        _pg_start = (_pg - 1) * _REVIEW_PAGE_SIZE
+
+        def _review_page_url(p: int) -> str:
+            _q: dict = {}
+            if _wf_filter:
+                _q["wf"] = _wf_filter
+            if p > 1:
+                _q["page"] = p
+            return url_for("review", run_id=run_id, **_q)
+
+        _pager_html = ""
+        if _n_pages > 1:
+            _pg_btn_css = "font-size:12px;padding:6px 14px"
+            _prev_html = (
+                f'<a class="btn secondary" href="{_review_page_url(_pg - 1)}" '
+                f'rel="prev" style="{_pg_btn_css}">&larr; Prev</a>'
+                if _pg > 1
+                else f'<span class="btn secondary" aria-disabled="true" '
+                f'style="{_pg_btn_css};opacity:0.4;pointer-events:none">&larr; Prev</span>'
+            )
+            _next_html = (
+                f'<a class="btn secondary" href="{_review_page_url(_pg + 1)}" '
+                f'rel="next" style="{_pg_btn_css}">Next &rarr;</a>'
+                if _pg < _n_pages
+                else f'<span class="btn secondary" aria-disabled="true" '
+                f'style="{_pg_btn_css};opacity:0.4;pointer-events:none">Next &rarr;</span>'
+            )
+            _pg_lo = _pg_start + 1
+            _pg_hi = min(_pg_start + _REVIEW_PAGE_SIZE, len(ranked_achs))
+            _pager_html = (
+                '<nav class="mh-review-pager" aria-label="Review pages" '
+                'style="display:flex;align-items:center;justify-content:center;'
+                'gap:14px;flex-wrap:wrap;margin:14px 0">'
+                f"{_prev_html}"
+                f'<span class="muted" style="font-size:12px;font-family:var(--font-mono)">'
+                f"Page {_pg} of {_n_pages} &middot; cards {_pg_lo}&ndash;{_pg_hi} "
+                f"of {len(ranked_achs)}</span>"
+                f"{_next_html}"
+                "</nav>"
+            )
+
         ach_rows_html_wf = ""
-        for _why_idx, ra in enumerate(ranked_achs):
+        for _why_idx, ra in enumerate(
+            ranked_achs[_pg_start : _pg_start + _REVIEW_PAGE_SIZE], start=_pg_start
+        ):
             a = ra.get("achievement", {})
             band = ra.get("quality_band", "nice")
             prio = ra.get("priority", 0.0)
@@ -23717,7 +23795,7 @@ def create_app() -> Flask:
             )
 
             ach_rows_html_wf += f"""
-<div class="ach-row" data-type="{a.get("type", "")}" data-conf="{conf_label}" data-swimmer="{_h(a.get("swimmer_name", ""))}" data-event="{_h(a.get("event", ""))}" data-band="{band}" data-post="{ra.get("suggested_post_type", "")}" data-status="{wf_status}">
+<div class="ach-row" data-type="{a.get("type", "")}" data-conf="{conf_label}" data-swimmer="{_h(a.get("swimmer_name", ""))}" data-event="{_h(a.get("event", ""))}" data-band="{band}" data-post="{ra.get("suggested_post_type", "")}" data-status="{wf_status}" data-status-initial="{wf_status}">
   <div style="display:flex;align-items:flex-start;gap:14px;padding:14px 0;border-bottom:1px solid var(--border)">
     <label class="mh-row-check-wrap" title="Select card"><input type="checkbox" class="mh-row-check" name="card_ids" value="{_h(card_id_raw)}" aria-label="Select this card"></label>
     <div style="min-width:28px;text-align:center;color:var(--ink-muted);font-size:13px;padding-top:2px">#{rank}</div>
@@ -23840,6 +23918,11 @@ def create_app() -> Flask:
         # "AI UNAVAILABLE" alerts the previous implementation emitted. Now the
         # one shared honest-error helper (U.2), so the copy can't drift again.
         _ai_banner_html = _ai_unavailable_banner()
+
+        # J-3: the full queued-id list for "Approve all in queue" — the DOM
+        # only holds the current page's rows. \\u003c-escaped so an id can
+        # never close the <script type="application/json"> tag it rides in.
+        _queued_ids_all_json = json.dumps(_queued_card_ids).replace("<", "\\u003c")
 
         # U.4 — sample-run banner. A sample pack carries the user's brand but
         # fictional swimmers, so say so plainly (never let a demo masquerade as
@@ -23972,6 +24055,7 @@ details.why-card[open] > summary .why-peek {{ display: none; }}
             style="margin-left:auto;font-size:12px;padding:6px 12px"
             title="Show or hide every card's reasoning at once">Expand all reasoning</button>
   </div>
+  {_pager_html}
   <form id="mh-review-bulk" method="post">
     <div class="mh-bulkbar is-empty" id="mh-rv-bulkbar" role="group" aria-label="Bulk card actions"
          data-mh-bulkbar="review" data-form="mh-review-bulk" data-count="mh-rv-count"
@@ -24002,7 +24086,9 @@ details.why-card[open] > summary .why-peek {{ display: none; }}
       <span id="mh-wf-empty-body">Switch the filter to see the rest of the queue.</span>
     </div>
   </form>
+  {_pager_html}
 </div>
+<script type="application/json" id="mh-queued-ids">{_queued_ids_all_json}</script>
 
 <style>{_BULK_ACTIONS_CSS}</style>
 <script>{_BULK_ACTIONS_JS}</script>
@@ -24365,48 +24451,86 @@ function copyWhyCard(btn, taId) {{
 <script>
 (function(){{
   // ----- Bulk approve -----
+  // D-2: every queued card approves in ONE request — per-card gate results,
+  // held-vote handling and a single summary toast — never 150+ fetches.
+  // J-3: the review list is paginated server-side, so the DOM only holds the
+  // current page's rows. The FULL queued-id list is embedded by the server
+  // (#mh-queued-ids), so the approve-all button operates on the whole queue,
+  // not just the visible page.
   var bulkBtn = document.getElementById('mh-bulk-approve');
   if (bulkBtn) {{
     bulkBtn.addEventListener('click', function(){{
-      var queued = Array.prototype.slice.call(
+      var ids = [];
+      try {{
+        var idsEl = document.getElementById('mh-queued-ids');
+        if (idsEl) ids = JSON.parse(idsEl.textContent || '[]') || [];
+      }} catch (e) {{ ids = []; }}
+      var pageQueued = Array.prototype.slice.call(
         document.querySelectorAll('.ach-row[data-status="queue"]')
-      ).filter(function(el){{ return el.offsetParent !== null; }});
-      if (!queued.length) {{
+      );
+      if (!ids.length) {{
+        // Defensive fallback (embedded list absent): approve what this page
+        // can see rather than doing nothing.
+        ids = pageQueued.map(function(row){{
+          var c = row.querySelector('.mh-row-check');
+          return c ? c.value : '';
+        }}).filter(Boolean);
+      }}
+      if (!ids.length) {{
         if (window.MH) MH.toast('No cards in the queue to approve.', 'info');
         return;
       }}
-      var unseen = queued.filter(function(el){{ return !el.getAttribute('data-why-seen'); }}).length;
-      var msg = 'Approve all ' + queued.length + ' queued card' + (queued.length === 1 ? '' : 's') + '?';
+      var unseen = pageQueued.filter(function(el){{ return !el.getAttribute('data-why-seen'); }}).length;
+      var offPage = ids.length - pageQueued.length;
+      var msg = 'Approve all ' + ids.length + ' queued card' + (ids.length === 1 ? '' : 's') + '?';
+      if (offPage > 0) {{
+        msg += '  (' + offPage + ' of them ' + (offPage === 1 ? 'is' : 'are') + ' on other pages.)';
+      }}
       if (unseen > 0) {{
-        msg += '  (' + unseen + " not yet opened — you haven't read their reasoning; approving accepts them as-is.)";
+        msg += '  (' + unseen + " on this page not yet opened — you haven't read their reasoning; approving accepts them as-is.)";
       }}
       if (!window.confirm(msg)) return;
-      // D-2: route every queued card through the shared bulk bar so they
-      // approve in ONE request — per-card gate results, held-vote handling and
-      // a single summary toast ("Approved 148, 2 blocked (consent)") — instead
-      // of firing 150+ fetches and stacking 150 success toasts. Tick every
-      // queued row's checkbox, then trigger the bulk "Approve".
-      var bulkForm = document.getElementById('mh-review-bulk');
-      var approveBtn = bulkForm && bulkForm.querySelector('[data-mh-bulk="approve"]');
-      if (bulkForm && approveBtn) {{
-        Array.prototype.slice.call(bulkForm.querySelectorAll('.mh-row-check'))
-          .forEach(function(c){{ c.checked = false; }});
-        queued.forEach(function(row){{
-          var c = row.querySelector('.mh-row-check');
-          if (c) c.checked = true;
+      bulkBtn.disabled = true;
+      fetch((window._API_BASE || '') + '{url_for("api_cards_bulk_status", run_id=run_id)}', {{
+        method: 'POST',
+        headers: {{'Content-Type': 'application/json', 'Accept': 'application/json'}},
+        body: JSON.stringify({{ids: ids, status: 'approved'}})
+      }}).then(function(r){{ return r.json().then(function(j){{ return {{ok: r.ok, body: j}}; }}); }})
+        .then(function(o){{
+          if (!o.ok || !o.body || o.body.ok === false) {{
+            bulkBtn.disabled = false;
+            var m = (o.body && (o.body.reason || o.body.error || o.body.message)) || 'failed';
+            if (window.MH) MH.toast('Bulk approve failed: ' + m, 'error', 4000);
+            return;
+          }}
+          var results = o.body.results || [];
+          var okN = results.filter(function(r){{ return r.ok && (r.status || 'approved') === 'approved'; }}).length;
+          var held = results.filter(function(r){{ return r.ok && r.status && r.status !== 'approved'; }}).length;
+          var blocked = o.body.n_blocked || 0;
+          var m2 = 'Approved ' + okN + ' card' + (okN === 1 ? '' : 's') + '.';
+          if (held) m2 += ' ' + held + ' held for another approver.';
+          if (blocked) {{
+            var gateNames = {{consent_blocked: 'consent', brand_locked: 'brand lock', tasks_open: 'open task'}};
+            var byGate = {{}};
+            results.forEach(function(r){{
+              if (!r.ok && gateNames[r.error]) {{
+                var g = gateNames[r.error];
+                byGate[g] = (byGate[g] || 0) + 1;
+              }}
+            }});
+            var parts = Object.keys(byGate).map(function(g){{ return byGate[g] + ' ' + g; }});
+            m2 += ' ' + blocked + ' blocked' + (parts.length ? ' (' + parts.join(', ') + ').' : ' by review gates.');
+          }}
+          if (window.MH) MH.toast(m2, okN ? 'success' : 'info', 3500);
+          // The whole queue (other pages included) changed server-side —
+          // re-render so rows, tabs and counts reflect the new state. Leave
+          // the toast readable a beat longer when something was held/blocked.
+          setTimeout(function(){{ window.location.reload(); }}, (held || blocked) ? 2600 : 1200);
+        }})
+        .catch(function(err){{
+          bulkBtn.disabled = false;
+          if (window.MH) MH.toast('Bulk approve failed: ' + ((err && err.message) || err), 'error', 4000);
         }});
-        // The bulk handler reads the checked set fresh on click, then clears
-        // the boxes and refreshes counts once the request returns.
-        approveBtn.click();
-        return;
-      }}
-      // Defensive fallback (bulk bar absent): the legacy per-card path.
-      var n = 0;
-      queued.forEach(function(row){{
-        var btn = row.querySelector('[data-mh-wf="approved"]');
-        if (btn) {{ btn.click(); n++; }}
-      }});
-      if (window.MH) MH.toast('Approving ' + n + ' card' + (n === 1 ? '' : 's') + '…', 'success');
     }});
   }}
 
