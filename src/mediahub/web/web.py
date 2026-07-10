@@ -33879,13 +33879,17 @@ function mhAnDigest(btn) {{
             '<path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>'
             "</svg>"
         )
+        # C-20: exactly ONE "start here" on this page — the first implemented
+        # tile's START HERE ribbon (Meet Recap, the audience's actual first
+        # step). The Plan hero is the strategic aid, not the starting point,
+        # so its label stays a plain "Plan".
         plan_entry_html = (
             f'<a href="{_h(url_for("content_type_intro", ct="plan"))}" class="mh-plan-tile">'
             f'<span class="mh-plan-tile-icon">{_plan_tile_icon}</span>'
             '<span class="mh-plan-tile-body">'
-            '<span class="mh-plan-tile-eyebrow">Plan &middot; Start here</span>'
+            '<span class="mh-plan-tile-eyebrow">Plan</span>'
             '<span class="mh-plan-tile-title">Not sure what to post? '
-            '<em class="editorial">Plan your next posts.</em></span>'
+            '<em class="editorial">Plan it.</em></span>'
             '<span class="mh-plan-tile-desc">MediaHub ranks what to post next from your '
             "results, the calendar and what you tell it &mdash; with the reasoning shown for "
             "every item. Describe what&rsquo;s coming up in your own words and it fills in the "
