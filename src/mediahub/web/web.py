@@ -41752,41 +41752,72 @@ what you're doing, what they should do.</p>
             target = (request.form.get("email") or "").strip()
             try:
                 if action == "add":
-                    # Reject an address that can never activate (e.g. "coach@club"
-                    # with no TLD) up front, with the same liberal check signup
-                    # uses — otherwise the row sits "invited" forever because the
-                    # owner is told it "activates at signup" but that email can
-                    # never complete signup. The store only checks for an "@".
-                    if not _auth._looks_like_email(target):
-                        raise _tenancy.TenancyError(
-                            "Enter a valid email address (like coach@club.org)."
-                        )
                     role = (request.form.get("role") or _tenancy.ROLE_MEMBER).strip().lower()
+                    # Two forms POST action=add: the "Add a member" form (which
+                    # carries via=add_form) and the per-row change-role picker
+                    # (which does not). Read the prior row once so we can tell a
+                    # brand-new invite from an edit of an existing membership and
+                    # behave correctly — and safely — for each.
+                    prior = store.get(target, pid)
+                    is_edit = prior is not None and prior.status != _tenancy.STATUS_REMOVED
+                    # Validate the address only when creating a NEW membership.
+                    # Reject one that can never activate (e.g. "coach@club" with no
+                    # TLD — the store only checks for an "@", so it would sit
+                    # "invited" forever) or that hides a control / line-separator
+                    # character (U+2028/U+2029/U+0085 split the JSON-lines ledger
+                    # on read-back, silently losing the row after a "success").
+                    # An edit targets a row that already exists, so re-validating
+                    # would wedge the role picker of a legacy dotless address.
+                    if not is_edit:
+                        if not _auth._looks_like_email(target) or any(
+                            (ord(ch) < 0x20 or ch in "\u2028\u2029\u0085") for ch in target
+                        ):
+                            raise _tenancy.TenancyError(
+                                "Enter a valid email address (like coach@club.org)."
+                            )
+                        if len(target) > 254:  # RFC 5321 address ceiling
+                            raise _tenancy.TenancyError("That email address is too long.")
+                    # The "Add a member" form adds someone new — it must never be a
+                    # silent role change. If the address is already an active
+                    # member, say so instead of demoting them to the form's default
+                    # seat; role changes go through the per-row picker.
+                    if (
+                        (request.form.get("via") or "").strip() == "add_form"
+                        and prior
+                        and prior.status == _tenancy.STATUS_ACTIVE
+                    ):
+                        raise _tenancy.TenancyError(
+                            f"{prior.email} is already a member — use the role "
+                            "selector in their row to change their role."
+                        )
                     # Don't let the upsert demote the last active owner to a
                     # non-owner seat — that would leave the workspace with no
                     # admin (the same invariant ``remove`` protects).
-                    if role != _tenancy.ROLE_OWNER:
-                        cur = store.get(target, pid)
-                        if (
-                            cur
-                            and cur.status == _tenancy.STATUS_ACTIVE
-                            and cur.role == _tenancy.ROLE_OWNER
-                        ):
-                            norm_target = _tenancy.normalize_email(target)
-                            others = [
-                                x
-                                for x in store.list_for_profile(pid)
-                                if x.role == _tenancy.ROLE_OWNER
-                                and x.status == _tenancy.STATUS_ACTIVE
-                                and x.email != norm_target
-                            ]
-                            if not others:
-                                raise _tenancy.TenancyError(
-                                    "Make another member an owner before changing "
-                                    "the last owner's role."
-                                )
+                    if (
+                        role != _tenancy.ROLE_OWNER
+                        and prior
+                        and prior.status == _tenancy.STATUS_ACTIVE
+                        and prior.role == _tenancy.ROLE_OWNER
+                    ):
+                        norm_target = _tenancy.normalize_email(target)
+                        others = [
+                            x
+                            for x in store.list_for_profile(pid)
+                            if x.role == _tenancy.ROLE_OWNER
+                            and x.status == _tenancy.STATUS_ACTIVE
+                            and x.email != norm_target
+                        ]
+                        if not others:
+                            raise _tenancy.TenancyError(
+                                "Make another member an owner before changing "
+                                "the last owner's role."
+                            )
                     has_account = _user_store().get(target) is not None
-                    inviter = user_email or _auth._dev_operator_email()
+                    # Stamp the inviter only on a NEW row. On an edit pass "" so
+                    # the store carries the original inviter forward — the column
+                    # must show who actually invited them, not whoever last
+                    # touched their role.
+                    inviter = "" if is_edit else (user_email or _auth._dev_operator_email())
                     m = store.add(
                         target,
                         pid,
@@ -41797,7 +41828,20 @@ what you're doing, what they should do.</p>
                     )
                     _invalidate_memberships_snapshot()
                     if m.status == _tenancy.STATUS_ACTIVE:
-                        notice = f"{m.email} added as {m.role}."
+                        notice = (
+                            f"{m.email} role updated to {m.role}."
+                            if is_edit
+                            else f"{m.email} added as {m.role}."
+                        )
+                    elif is_edit:
+                        # Editing a still-invited member's seat: update the role
+                        # but do NOT re-send the invite (that would email them
+                        # again on every tweak) and make no fresh "on its way"
+                        # claim — the original invite still stands.
+                        notice = (
+                            f"{m.email} is now {m.role} — still invited, activates "
+                            "when they sign up with that email."
+                        )
                     else:
                         # PC.14: deliver the invite when the email seam is
                         # configured; otherwise say honestly that the link
@@ -41851,7 +41895,8 @@ what you're doing, what they should do.</p>
                 'style="display:flex;gap:6px;align-items:center;margin:0">'
                 '<input type="hidden" name="action" value="add"/>'
                 f'<input type="hidden" name="email" value="{_h(m.email)}"/>'
-                f'<select name="role" style="padding:3px 6px;font-size:12px">{opts}</select>'
+                f'<select name="role" aria-label="Change role for {_h(m.email)}" '
+                f'style="padding:3px 6px;font-size:12px">{opts}</select>'
                 '<button type="submit" class="btn secondary" '
                 'style="padding:3px 9px;font-size:11px">Update</button></form>'
             )
@@ -41917,6 +41962,7 @@ what you're doing, what they should do.</p>
                 f'<form method="post" action="{url_for("organisation_members_page")}" '
                 'style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">'
                 '<input type="hidden" name="action" value="add"/>'
+                '<input type="hidden" name="via" value="add_form"/>'
                 '<div><label for="mh-member-email">Email</label><br/>'
                 '<input type="email" id="mh-member-email" name="email" required '
                 'autocomplete="email" placeholder="coach@club.org" '

@@ -143,3 +143,133 @@ def test_submit_loader_bails_when_default_prevented(members_world):
     # The Remove control still guards with a confirm the user can cancel.
     assert "return confirm(" in html
     assert "lose access immediately" in html
+
+
+# ---- F5 — editing an invited member's role must not re-send the invite ------
+
+
+def _seed_second_active_member(email: str):
+    """Add a second signed-up active member to the bound club-a workspace."""
+    from mediahub.web.auth import UserStore
+    from mediahub.web import tenancy as t
+
+    UserStore().create(email, PASSWORD)
+    t.MembershipStore().add(email, "club-a", role=t.ROLE_MEMBER)
+
+
+def test_editing_invited_member_role_does_not_resend_invite(members_world, monkeypatch):
+    """The per-row role picker reuses action=add. For a member who is still only
+    *invited*, that upsert must not fire a fresh invite email on every tweak."""
+    import mediahub.notify.email as email_mod
+
+    sent: list[str] = []
+    monkeypatch.setattr(email_mod, "email_configured", lambda: True)
+    monkeypatch.setattr(
+        email_mod, "send_email", lambda to, subject, text, html=None: (sent.append(to), True)[1]
+    )
+
+    c = _owner_client(members_world["app"])
+    # A brand-new invite via the Add form sends exactly one email.
+    r = c.post(
+        "/organisation/members",
+        data={"action": "add", "email": "vol@club.org", "role": "member", "via": "add_form"},
+        follow_redirects=True,
+    )
+    assert "An invite email is on its way" in r.get_data(as_text=True)
+    assert sent == ["vol@club.org"]
+
+    # Changing that invited member's role via the picker (action=add, no via)
+    # must NOT send another email, and must not falsely claim one is on its way.
+    r2 = c.post(
+        "/organisation/members",
+        data={"action": "add", "email": "vol@club.org", "role": "viewer"},
+        follow_redirects=True,
+    )
+    body = r2.get_data(as_text=True)
+    assert sent == ["vol@club.org"], "invite email was re-sent on a role change"
+    assert "on its way" not in body
+    assert "still invited" in body
+
+    from mediahub.web import tenancy as t
+
+    assert t.MembershipStore().get("vol@club.org", "club-a").role == t.ROLE_VIEWER
+
+
+# ---- F6 — the original inviter is preserved through a role change ------------
+
+
+def test_invited_by_is_preserved_on_role_change(members_world):
+    from mediahub.web import tenancy as t
+
+    # OWNER invites x via the Add form -> invited_by == OWNER.
+    c = _owner_client(members_world["app"])
+    c.post(
+        "/organisation/members",
+        data={"action": "add", "email": "x@club.org", "role": "member", "via": "add_form"},
+        follow_redirects=True,
+    )
+    assert t.MembershipStore().get("x@club.org", "club-a").invited_by == OWNER
+
+    # A different admin (the operator) later changes x's role via the picker.
+    oc = members_world["app"].test_client()
+    with oc.session_transaction() as s:
+        s["dev_operator"] = True
+    oc.post("/api/organisation/active", data={"profile_id": "club-a"})
+    oc.post(
+        "/organisation/members",
+        data={"action": "add", "email": "x@club.org", "role": "viewer"},
+        follow_redirects=True,
+    )
+    m = t.MembershipStore().get("x@club.org", "club-a")
+    assert m.role == t.ROLE_VIEWER
+    assert m.invited_by == OWNER, "invited_by was overwritten to the last editor"
+
+
+# ---- F7 — the Add form never silently changes an existing member's role -----
+
+
+def test_add_form_refuses_an_existing_active_member(members_world):
+    from mediahub.web import tenancy as t
+
+    _seed_second_active_member("m2@club.org")
+    c = _owner_client(members_world["app"])
+    r = c.post(
+        "/organisation/members",
+        data={"action": "add", "email": "m2@club.org", "role": "viewer", "via": "add_form"},
+        follow_redirects=True,
+    )
+    assert "already a member" in r.get_data(as_text=True)
+    # Role unchanged — no silent downgrade from the "add" affordance.
+    assert t.MembershipStore().get("m2@club.org", "club-a").role == t.ROLE_MEMBER
+
+
+def test_picker_can_still_change_an_active_member_role(members_world):
+    """The per-row picker (action=add, no via) is the legitimate way to change
+    an active member's role and must keep working."""
+    from mediahub.web import tenancy as t
+
+    _seed_second_active_member("m3@club.org")
+    c = _owner_client(members_world["app"])
+    r = c.post(
+        "/organisation/members",
+        data={"action": "add", "email": "m3@club.org", "role": "viewer"},
+        follow_redirects=True,
+    )
+    assert "role updated to viewer" in r.get_data(as_text=True)
+    assert t.MembershipStore().get("m3@club.org", "club-a").role == t.ROLE_VIEWER
+
+
+def test_email_with_line_separator_is_rejected(members_world):
+    """A U+2028/U+2029/U+0085 in the address would tear the JSON-lines ledger on
+    read-back (splitlines), losing the row after a 'success'. Reject it up front."""
+    from mediahub.web import tenancy as t
+
+    c = _owner_client(members_world["app"])
+    bad = "a\u2028b@club.org"
+    r = c.post(
+        "/organisation/members",
+        data={"action": "add", "email": bad, "role": "member", "via": "add_form"},
+        follow_redirects=True,
+    )
+    assert "Enter a valid email address" in r.get_data(as_text=True)
+    assert t.MembershipStore().get(bad, "club-a") is None
