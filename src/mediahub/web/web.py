@@ -3262,6 +3262,11 @@ def _persist_run(run: PipelineRunV4, file_name: str) -> None:
         "our_swim_count": run.our_swim_count,
         "other_swim_count": run.other_swim_count,
         "n_swimmers_ours": run.n_swimmers_ours,
+        # Persist the club the run was filtered to, so the review empty-state can
+        # tell "no club was selected" from "a club was selected but matched 0
+        # swimmers" (the latter branch is otherwise unreachable — the pipeline's
+        # run.club_filter was dropped at persist time).
+        "club_filter": getattr(run, "club_filter", "") or "",
         "pb_fetch_ok": run.pb_fetch_ok,
         "pb_fetch_failed": run.pb_fetch_failed,
         "pb_fetch_errors": run.pb_fetch_errors,
@@ -7420,6 +7425,54 @@ def _load_run_input(run_id: str) -> Optional[tuple[bytes, dict]]:
 def _resume_input_exists(run_id: str) -> bool:
     d = _run_input_dir(run_id)
     return (d / "input.bin").exists() and (d / "resume.json").exists()
+
+
+def _rebuild_staged_meta(run_dir: Path, input_path: Path) -> dict:
+    """Rebuild the configure-step metadata for an already-persisted run.
+
+    The staged ``upload_meta.json`` only exists for a brand-new upload, but a
+    finished/failed run keeps ``input.bin`` + ``resume.json`` on disk. When the
+    user re-opens the configure step for such a run (the "Re-run a recent meet"
+    card), rebuild the same metadata shape ``upload()`` writes — a fresh light
+    club-parse of the saved bytes plus the launch flags from ``resume.json`` — so
+    the run can be re-configured and re-run without re-uploading. Mirrors the
+    light parse in ``upload()``; a parse failure degrades to an empty club list
+    with a ``parse_error`` note exactly as the first upload does."""
+    resume: dict = {}
+    try:
+        resume = json.loads((run_dir / "resume.json").read_text(encoding="utf-8"))
+    except Exception:
+        resume = {}
+    meta: dict = {
+        "filename": resume.get("file_name") or "upload.bin",
+        "profile_id": resume.get("profile_id"),
+        "use_cache": bool(resume.get("use_pb_cache", True)),
+        "fetch_pbs": bool(resume.get("fetch_pbs", True)),
+        "source_url": resume.get("source_url"),
+        "display_name": "",
+    }
+    try:
+        data = input_path.read_bytes()
+        meta["file_byte_size"] = len(data)
+        from mediahub.interpreter import interpret_document
+
+        interpreted = interpret_document(data, hint=None)
+        clubs: list[str] = []
+        seen: set[str] = set()
+        for ev in interpreted.events:
+            for sw in ev.swims:
+                c = (sw.club or "").strip()
+                if c and c.lower() not in seen:
+                    seen.add(c.lower())
+                    clubs.append(c)
+        meta["clubs"] = sorted(clubs, key=str.lower)
+        meta["meet_name"] = interpreted.meet_name or ""
+        meta["meet_date"] = (interpreted.dates[0] if interpreted.dates else "") or ""
+        meta["n_events"] = len(interpreted.events)
+    except Exception as exc:  # noqa: BLE001 — mirror upload()'s degrade path
+        meta.setdefault("clubs", [])
+        meta["parse_error"] = str(exc)
+    return meta
 
 
 def _cleanup_run_input(run_id: str) -> None:
@@ -21187,7 +21240,7 @@ def create_app() -> Flask:
                     "Upload",
                     '<div class="card"><p class="tag bad">No file selected.</p></div>',
                     active="create",
-                )
+                ), 400
             # Extension allowlist (THREAT_MODEL §1): results files only. The
             # file is stored as opaque bytes under a random run id and parsed
             # by deterministic parsers — but rejecting junk up front shrinks
@@ -21220,7 +21273,7 @@ def create_app() -> Flask:
                     "Upload",
                     '<div class="card"><p class="tag bad">Uploaded file was empty.</p></div>',
                     active="create",
-                )
+                ), 400
 
             temp_run_id = uuid.uuid4().hex[:12]
             tmp_dir = RUNS_DIR / temp_run_id
@@ -22232,7 +22285,7 @@ def create_app() -> Flask:
         tmp_dir = RUNS_DIR / run_id
         meta_path = tmp_dir / "upload_meta.json"
         input_path = tmp_dir / "input.bin"
-        if not (meta_path.exists() and input_path.exists()):
+        if not input_path.exists():
             return _recovery_page(
                 "Upload session expired",
                 "The staged upload only lives for a few minutes before it's swept. Start a new upload — the file picker is one click away.",
@@ -22240,10 +22293,19 @@ def create_app() -> Flask:
                 primary_cta=("Start a new upload", url_for("upload")),
                 secondary_cta=("Recent runs", url_for("activity_page")),
             )
-        try:
-            meta = json.loads(meta_path.read_text())
-        except Exception:
-            meta = {}
+        if meta_path.exists():
+            try:
+                meta = json.loads(meta_path.read_text())
+            except Exception:
+                meta = {}
+        else:
+            # Re-configuring an already-processed (or failed) run from the
+            # "Re-run a recent meet" card: the staged upload_meta.json only ever
+            # exists for a brand-new upload, but the run's saved input.bin +
+            # resume.json survive on disk, so rebuild the configure metadata here
+            # (a fresh light club-parse) instead of 404ing. Without this the card's
+            # "Try again"/"Re-configure" links always hit "Upload session expired".
+            meta = _rebuild_staged_meta(tmp_dir, input_path)
 
         if request.method == "POST":
             club_filter = (request.form.get("club_filter") or "").strip() or None
@@ -22904,6 +22966,23 @@ def create_app() -> Flask:
                 or (data.get("dispatch_log") or {}).get("chosen_filename")
                 or "your file"
             )
+            # The persisted run.error is a raw str(e) that can carry absolute
+            # server paths and exception internals. Only the signed-in operator
+            # sees it verbatim; a customer gets an honest generic reason (the
+            # "Common causes" note below stays for everyone). Mirrors the
+            # is_dev gate run_status() already applies to the same detail.
+            if _auth.is_dev_operator():
+                _err_detail_html = (
+                    '<p style="font-family:var(--font-mono);font-size:13px;color:var(--ink);'
+                    "background:var(--bad-bg);padding:12px 14px;border-radius:var(--radius-sm);"
+                    'white-space:pre-wrap;word-break:break-word">' + _h(_run_err) + "</p>"
+                )
+            else:
+                _err_detail_html = (
+                    '<p style="font-size:13px;color:var(--ink);margin-top:0">The file couldn&rsquo;t '
+                    "be read into cards. This is almost always the results file itself &mdash; the "
+                    "common causes are below.</p>"
+                )
             _err_body = f"""
 <section class="mh-hero" data-lane="failed" style="padding-top:var(--sp-9);padding-bottom:var(--sp-8)">
   <span class="mh-hero-eyebrow">Processing failed</span>
@@ -22918,8 +22997,7 @@ def create_app() -> Flask:
 </section>
 <div class="card" style="border-color:rgba(255,107,107,0.35);border-left:3px solid var(--bad)">
   <h2 style="margin-top:0">What went wrong</h2>
-  <p style="font-family:var(--font-mono);font-size:13px;color:var(--ink);background:var(--bad-bg);
-            padding:12px 14px;border-radius:var(--radius-sm);white-space:pre-wrap;word-break:break-word">{_h(_run_err)}</p>
+  {_err_detail_html}
   <p class="dim" style="font-size:13px;margin-bottom:0">Common causes: the file wasn&rsquo;t a
     readable results export, it was an entry list or heat sheet with no times, or no club was
     matched. Re-upload and check the file and the club you selected.</p>
