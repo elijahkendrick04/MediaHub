@@ -21170,14 +21170,16 @@ def create_app() -> Flask:
         # V8.2 issue 3: every upload now goes through /upload/configure.
         # The upload form has only the file input + submit. Branding is
         # collected on the configure step, after we've parsed the file.
+        #
+        # H-18: rejections never dead-end on a bare error card — they fall
+        # through to the full upload page (form, dropzone, recent meets)
+        # with the error rendered inline above the dropzone, so the
+        # volunteer can fix the problem and try again in place.
+        # upload_error values are fixed server-controlled literals (never
+        # user input — no filename/extension echo), rendered un-escaped.
+        upload_error = ""
         if request.method == "POST":
             f = request.files.get("file")
-            if not f or not f.filename:
-                return _layout(
-                    "Upload",
-                    '<div class="card"><p class="tag bad">No file selected.</p></div>',
-                    active="create",
-                )
             # Extension allowlist (THREAT_MODEL §1): results files only. The
             # file is stored as opaque bytes under a random run id and parsed
             # by deterministic parsers — but rejecting junk up front shrinks
@@ -21196,22 +21198,22 @@ def create_app() -> Flask:
                 ".txt",
                 ".xlsx",
             }
-            ext = os.path.splitext(f.filename)[1].lower()
-            if ext not in _ALLOWED_UPLOAD_EXTS:
-                return _layout(
-                    "Upload",
-                    '<div class="card"><p class="tag bad">That file type isn\'t supported. '
-                    "Upload meet results as HY3, SDIF/SD3/CL2, ZIP, PDF, HTML, CSV or Excel (.xlsx).</p></div>",
-                    active="create",
-                ), 400
-            data = f.read()
-            if not data:
-                return _layout(
-                    "Upload",
-                    '<div class="card"><p class="tag bad">Uploaded file was empty.</p></div>',
-                    active="create",
+            data = b""
+            ext = os.path.splitext(f.filename)[1].lower() if f and f.filename else ""
+            if not f or not f.filename:
+                upload_error = "Please choose a results file first."
+            elif ext not in _ALLOWED_UPLOAD_EXTS:
+                upload_error = (
+                    "That file type isn't supported. Upload meet results as "
+                    "HY3, SDIF/SD3/CL2, ZIP, PDF, HTML, CSV, TXT or Excel (.xlsx)."
                 )
-
+            else:
+                data = f.read()
+                if not data:
+                    upload_error = (
+                        "That file is empty. Export the results file again and re-upload it."
+                    )
+        if request.method == "POST" and not upload_error:
             temp_run_id = uuid.uuid4().hex[:12]
             tmp_dir = RUNS_DIR / temp_run_id
             tmp_dir.mkdir(parents=True, exist_ok=True)
@@ -21503,12 +21505,17 @@ def create_app() -> Flask:
                 .replace("__CSRF__", _csrf_token())
             )
 
+        # H-18: a rejected POST re-renders this same page with the error
+        # inline — same region and look the client-side showError() uses.
+        _upload_err_hidden = "" if upload_error else " hidden"
+        _upload_dz_invalid = ' style="border-color:var(--bad)"' if upload_error else ""
+
         body = f"""
 <div class="mh-fx mh-aurora" style="overflow:hidden;border-radius:var(--radius-lg);margin-bottom:var(--sp-4)">
 <section class="mh-hero" data-lane="01" style="padding-top:var(--sp-8);padding-bottom:var(--sp-6)">
   <span class="mh-hero-eyebrow">Upload meet file</span>
   <h1>Drop the results.<br><em class="editorial">We'll do the rest.</em></h1>
-  <p class="lede">Upload your meet results file — Hytek&nbsp;<code>.hy3</code>&hairsp;/&hairsp;<code>.zip</code>, SDIF&hairsp;/&hairsp;SD3, PDF, CSV, Excel&nbsp;<code>.xlsx</code> or HTML. You'll pick your club, upload your logo, and add photos on the next step.</p>
+  <p class="lede">Upload your meet results file — Hytek&nbsp;<code>.hy3</code>&hairsp;/&hairsp;<code>.hyv</code>&hairsp;/&hairsp;<code>.zip</code>, SDIF&hairsp;/&hairsp;SD3&hairsp;/&hairsp;CL2, PDF, CSV, TXT, Excel&nbsp;<code>.xlsx</code> or HTML. You'll pick your club, upload your logo, and add photos on the next step.</p>
 </section>
 </div>
 
@@ -21527,7 +21534,8 @@ def create_app() -> Flask:
 <div class="card">
   <form id="mh-upload-form" method="post" enctype="multipart/form-data" data-loader-text="Reading your meet file">
     <label class="req" for="upload-file">Meet results file</label>
-    <label class="mh-dropzone" for="upload-file">
+    <div id="mh-upload-error" class="mh-field-error" role="alert"{_upload_err_hidden} style="margin-bottom:var(--sp-3)">{upload_error}</div>
+    <label class="mh-dropzone" for="upload-file"{_upload_dz_invalid}>
       <svg class="mh-dropzone-icon" viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
         <path d="M24 32V12"/>
         <polyline points="16 19 24 11 32 19"/>
@@ -21536,14 +21544,13 @@ def create_app() -> Flask:
       <div class="mh-dropzone-headline">Drop your results file</div>
       <div class="mh-dropzone-sub">or click to browse</div>
       <input id="upload-file" type="file" name="file" accept=".hy3,.hyv,.sd3,.sdif,.cl2,.zip,.pdf,.htm,.html,.csv,.txt,.xlsx" required />
-      <div class="mh-dropzone-fineprint">HY3 · SDIF/SD3/CL2 · ZIP · PDF · CSV · HTML</div>
+      <div class="mh-dropzone-fineprint">HY3 · SDIF/SD3/CL2 · ZIP · PDF · CSV · TXT · HTML · Excel (.xlsx)</div>
       <div class="mh-dropzone-preview" aria-live="polite"></div>
     </label>
     <div id="mh-parse-preview" class="mh-parse-preview" role="status" aria-live="polite">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
       <div class="label"><b>—</b><span></span></div>
     </div>
-    <div id="mh-upload-error" class="mh-field-error" role="alert" hidden style="margin-top:var(--sp-3)"></div>
     <div style="margin-top:var(--sp-5);display:flex;gap:var(--sp-3);flex-wrap:wrap">
       <button id="mh-upload-submit" class="btn mh-cta-motion" type="submit">
         <span class="mh-btn-label">Continue &rarr;</span>
@@ -21594,6 +21601,8 @@ def create_app() -> Flask:
     if (n < 1024 * 1024 * 1024) return (n / (1024 * 1024)).toFixed(1) + ' MB';
     return (n / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
   }}
+  // Mirrors the server's upload extension allowlist exactly — a file the
+  // preview calls good is a file the server will accept, and vice versa.
   function inferFormat(name) {{
     var n = (name || '').toLowerCase();
     if (n.endsWith('.hy3'))  return {{kind: 'good', label: 'Hytek Meet Manager (.hy3)',  note: 'looks good'}};
@@ -21606,16 +21615,31 @@ def create_app() -> Flask:
     if (n.endsWith('.csv'))  return {{kind: 'good', label: 'CSV results file',           note: 'we\\u2019ll read every row'}};
     if (n.endsWith('.htm') || n.endsWith('.html')) return {{kind: 'good', label: 'HTML results page', note: 'we\\u2019ll extract the result tables'}};
     if (n.endsWith('.txt'))  return {{kind: 'good', label: 'Text results file',          note: 'we\\u2019ll try every adapter'}};
-    return {{kind: 'warn', label: 'Unknown extension', note: 'we\\u2019ll try every adapter; results may be partial'}};
+    if (n.endsWith('.xlsx')) return {{kind: 'good', label: 'Excel workbook (.xlsx)',     note: 'we\\u2019ll read every sheet'}};
+    if (n.endsWith('.xls'))  return {{kind: 'bad',  label: 'Old Excel format (.xls)',    note: 'save it as .xlsx and upload that instead'}};
+    var dot = n.lastIndexOf('.');
+    var ext = dot > 0 ? n.slice(dot) : '';
+    return {{kind: 'bad',
+             label: ext ? 'MediaHub can\\u2019t read ' + ext + ' files' : 'MediaHub can\\u2019t read this file',
+             note: 'upload HY3, SDIF/SD3/CL2, ZIP, PDF, HTML, CSV, TXT or Excel (.xlsx)'}};
   }}
   function refresh() {{
     var f = input.files && input.files[0];
     var has = !!f;
-    if (has) clearError();
-    if (!has) {{ if (preview) preview.removeAttribute('data-shown'); return; }}
-    if (!preview) return;
+    if (!has) {{ if (preview) preview.removeAttribute('data-shown'); btn.disabled = false; return; }}
     var info = inferFormat(f.name);
-    preview.className = 'mh-parse-preview' + (info.kind === 'warn' ? ' warn' : '');
+    // Honest blocker: the drag-and-drop path bypasses the picker's accept
+    // filter, so an unsupported file is stopped here instead of 400ing
+    // after the upload.
+    if (info.kind === 'bad') {{
+      btn.disabled = true;
+      showError(info.label + ' \\u2014 ' + info.note + '.');
+    }} else {{
+      btn.disabled = false;
+      clearError();
+    }}
+    if (!preview) return;
+    preview.className = 'mh-parse-preview' + (info.kind === 'warn' ? ' warn' : (info.kind === 'bad' ? ' bad' : ''));
     var labelEl = preview.querySelector('.label');
     labelEl.querySelector('b').textContent = info.label + ' \\u00b7 ' + fmtBytes(f.size);
     labelEl.querySelector('span').textContent = info.note;
@@ -21635,7 +21659,8 @@ def create_app() -> Flask:
 }})();
 </script>
 """
-        return _layout("Upload", body, active="create")
+        page = _layout("Upload", body, active="create")
+        return (page, 400) if upload_error else page
 
     # ---- UPLOAD CONFIGURE (V8.1 issue 6: two-step; V8.2 issue 6: photos) ---
     def _render_configure(
