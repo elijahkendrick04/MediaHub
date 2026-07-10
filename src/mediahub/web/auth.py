@@ -28,9 +28,10 @@ from __future__ import annotations
 import hmac
 import json
 import os
+import re
 import threading
 import time
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 from pathlib import Path
 from typing import Optional
 
@@ -82,12 +83,17 @@ class User:
     # verified; purely informational — no feature gates on it.
     email_verified_at: str = ""
     totp_secret: str = ""  # empty = 2FA off; set via /account/2fa
+    # One-time 2FA recovery codes: salted hashes ONLY (same argon2id scheme as
+    # passwords), never plaintext. Each hash is removed when its code is used.
+    # Accounts written before this field existed simply load with [].
+    recovery_codes: list[str] = field(default_factory=list)
 
     def to_record(self) -> dict:
         return asdict(self)
 
     @classmethod
     def from_record(cls, d: dict) -> "User":
+        raw_codes = d.get("recovery_codes")
         return cls(
             email=str(d.get("email", "")).strip().lower(),
             hashed_password=str(d.get("hashed_password", "")),
@@ -96,6 +102,7 @@ class User:
             created_at=str(d.get("created_at", "") or ""),
             email_verified_at=str(d.get("email_verified_at", "") or ""),
             totp_secret=str(d.get("totp_secret", "") or ""),
+            recovery_codes=[str(c) for c in raw_codes if c] if isinstance(raw_codes, list) else [],
         )
 
 
@@ -271,6 +278,36 @@ def totp_provisioning_uri(secret: str, email: str, issuer: str = "MediaHub") -> 
     return f"otpauth://totp/{label}?secret={secret}&issuer={quote(issuer)}&algorithm=SHA1&digits=6&period=30"
 
 
+# ---------------------------------------------------------------------------
+# 2FA recovery codes — one-time codes issued when TOTP is enabled, so a lost
+# phone is not a permanent lockout. Only salted hashes are persisted (the same
+# argon2id scheme as passwords); the plaintext codes are shown exactly once.
+# ---------------------------------------------------------------------------
+
+RECOVERY_CODE_COUNT = 8
+_RECOVERY_CANONICAL_LEN = 8  # hex chars once separators are stripped
+
+
+def recovery_generate_codes() -> list[str]:
+    """``RECOVERY_CODE_COUNT`` fresh one-time codes, formatted ``XXXX-XXXX``."""
+    import secrets as _secrets
+
+    return [
+        f"{_secrets.token_hex(2).upper()}-{_secrets.token_hex(2).upper()}"
+        for _ in range(RECOVERY_CODE_COUNT)
+    ]
+
+
+def recovery_normalize(code: str) -> str:
+    """Canonical form for hashing/verifying: uppercase hex, separators dropped."""
+    return re.sub(r"[^0-9A-F]", "", str(code or "").upper())
+
+
+def recovery_hash(code: str) -> str:
+    """Salted argon2id hash of a recovery code (same scheme as passwords)."""
+    return hash_password(recovery_normalize(code))
+
+
 class UserStore:
     """JSON-lines user ledger under ``DATA_DIR``.
 
@@ -374,15 +411,63 @@ class UserStore:
         return user
 
     def set_totp(self, email: str, secret: str) -> Optional[User]:
-        """Set (or clear, with "") the user's TOTP secret."""
+        """Set (or clear, with "") the user's TOTP secret.
+
+        Clearing the secret (disabling 2FA) also drops any stored recovery
+        code hashes — the codes belong to the 2FA enrolment they were issued
+        for and must not outlive it.
+        """
         with _LEDGER_LOCK:
             users = self._read_all()
             user = users.get(normalize_email(email))
             if user is None:
                 return None
             user.totp_secret = str(secret or "")
+            if not user.totp_secret:
+                user.recovery_codes = []
             self._append(user)
             return user
+
+    def set_recovery_codes(self, email: str, hashed_codes: list[str]) -> Optional[User]:
+        """Replace the account's one-time recovery-code hashes.
+
+        Callers pass hashes (``recovery_hash``), never plaintext codes — the
+        ledger must only ever hold the salted argon2id digests.
+        """
+        with _LEDGER_LOCK:
+            users = self._read_all()
+            user = users.get(normalize_email(email))
+            if user is None:
+                return None
+            user.recovery_codes = [str(h) for h in hashed_codes if h]
+            self._append(user)
+            return user
+
+    def consume_recovery_code(self, email: str, code: str) -> bool:
+        """Verify ``code`` against the stored one-time hashes; single-use.
+
+        On a match the matching hash is removed and the record re-appended,
+        so the same code can never be accepted twice. Every stored hash is
+        checked (no early exit) so response time does not reveal which
+        position matched. Returns True only when a code was consumed.
+        """
+        cleaned = recovery_normalize(code)
+        if len(cleaned) != _RECOVERY_CANONICAL_LEN:
+            return False
+        with _LEDGER_LOCK:
+            users = self._read_all()
+            user = users.get(normalize_email(email))
+            if user is None or not user.recovery_codes:
+                return False
+            matched: Optional[int] = None
+            for i, hashed in enumerate(user.recovery_codes):
+                if verify_password(cleaned, hashed) and matched is None:
+                    matched = i
+            if matched is None:
+                return False
+            user.recovery_codes = [h for i, h in enumerate(user.recovery_codes) if i != matched]
+            self._append(user)
+            return True
 
     def set_plan(
         self,
