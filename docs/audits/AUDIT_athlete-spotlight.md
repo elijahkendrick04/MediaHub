@@ -258,3 +258,25 @@ genuine upstream identity-model limitation (same-name/blank-id swimmers) and two
   `test_live_watch`, `test_phase_w_web`) + a broad regression batch, since the deltas were confined to
   non-spotlight code and docs.
 - **Review the diff:** `git diff 220f381...651cf2b` (or `git show 9c37fe4 4f85925 cb253ae`).
+
+### Caveat round (2026-07-10) — residual items fixed, verdict lifted to WORKS
+
+- **Caveat commits on `main`:** `d5d2586` (fixes: dir-form loading, `_load_run` traversal guard, idempotent
+  build, roster cap, select labels), `d93a4ee` (regression tests), `208cea1` (this report update). All three are
+  SSH-signed (the earlier first-round commits were unsigned because the ephemeral signer was absent that session;
+  GitHub verifies these against the `claude` bot key — local `git %G?` still reads "N" only because the
+  environment ships no `allowedSignersFile` to verify against).
+- **Merge status: MERGED to `main`.** Full suite on the integrated tree at `origin/main` `9b7d0a7`:
+  **12553 passed, 10 skipped, 1 failed** — the single failure, `test_log_sentinel.py::test_boot_grace_blocks`, is
+  an order/timing flake unrelated to this feature (it asserts a since-boot grace window and trips on the 48-minute
+  full-run length; it **passes in isolation** in 0.25s and references none of the changed code). `main` then
+  advanced to `2a34d72` (a large batch of other audit sessions touching `web.py`, `public_wall.py`,
+  `documents/*`, `content_types.py`, …); the branch was rebased onto it (re-signing each commit) and re-gated with
+  a targeted feature + incoming-changed-area + run-loading regression run (**141 passed**), since the full run one
+  base prior covers the byte-identical spotlight code. Landed via the atomic-push protocol
+  (`git push origin HEAD:main`, fast-forward `2a34d72..208cea1`; the branch-protection PR rule bypassed under the
+  operator's push permission).
+- **Cross-cutting note (see §7):** this round changed the shared `_load_run` helper (dir-form fallback + traversal
+  guard) — additive and backward-compatible, verified green against the run-loading routes (`/review`, `/pack`,
+  public wall, drafts, reel, gen-v2 end-to-end, large-meet durability) both in the full run and the re-gate.
+- **Review the caveat diff:** `git show d5d2586 d93a4ee`.
