@@ -153,18 +153,38 @@ def test_generic_panel_spinner_removed_from_render_panels():
     assert src.count("width:24px;height:24px;border:2px solid") == 0
     # Each upgraded panel now drives the shared controller and gates its result.
     # Original six U.6 panels + R1.15's generateReelBatch + J-1's runVideoJob
-    # (the Video Studio's shared render/analysis/stabilise progress helper).
-    assert src.count("MH.renderProgress(panel") == len(_RENDER_FUNCS)
+    # (the Video Studio's shared render/analysis/stabilise progress helper)
+    # + D-13's two on-load resume mounts (mhResumeReelJob / mhResumeMotionJobs)
+    # that re-attach the controller to a render still running server-side.
+    assert src.count("MH.renderProgress(panel") == len(_RENDER_FUNCS) + 2
+
+
+# D-13 restructured the reel/motion starters around persistent job watchers:
+# the starter mounts the controller, the paired watcher owns the terminal
+# states (complete on done, _mhJobFail -> prog.stop on error/timeout).
+_JOB_WATCHERS = {
+    "generateMotion": "function _mhMotionWatch(",
+    "generateReel": "function _mhReelWatch(",
+    "generateReelBatch": "function _mhReelBatchWatch(",
+}
 
 
 @pytest.mark.parametrize("name,marker", list(_RENDER_FUNCS.items()))
 def test_each_render_function_drives_the_controller(name, marker):
-    body = _func_body(_src(), marker)
+    src = _src()
+    body = _func_body(src, marker)
     assert "MH.renderProgress(" in body, f"{name} does not use the controller"
     assert "animation:spin 600ms" not in body, f"{name} still has the old spinner"
     # Honest terminal states: the loop is always either completed or stopped.
-    assert "prog.complete(" in body, f"{name} never completes the controller"
-    assert "prog.stop(" in body, f"{name} never stops on error"
+    if name in _JOB_WATCHERS:
+        watcher = _func_body(src, _JOB_WATCHERS[name])
+        assert "ctx.prog.complete(" in watcher, f"{name}'s watcher never completes"
+        assert "_mhJobFail(" in watcher, f"{name}'s watcher never fails honestly"
+        fail_helper = _func_body(src, "function _mhJobFail(")
+        assert "ctx.prog.stop()" in fail_helper, "_mhJobFail never stops the controller"
+    else:
+        assert "prog.complete(" in body, f"{name} never completes the controller"
+        assert "prog.stop(" in body, f"{name} never stops on error"
 
 
 def test_variant_batch_feeds_real_progress():

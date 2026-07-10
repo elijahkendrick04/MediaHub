@@ -4266,6 +4266,27 @@ function _motionFmtChips(motionUrl, cardId, active) {
   });
   return out;
 }
+// D-13 — an in-flight render survives navigation: the active job's
+// {poll_url, fmt, …} is remembered per (kind, url) in localStorage when a
+// job starts, re-attached on page load (or on a repeat click, instead of
+// starting a doomed second job that errors "Another video is rendering"),
+// and cleared on every terminal state.
+function _mhJobKey(kind, url) { return 'mh-job:' + kind + ':' + url; }
+function mhJobRemember(kind, url, rec) { try { localStorage.setItem(_mhJobKey(kind, url), JSON.stringify(rec)); } catch (e) {} }
+function mhJobRecall(kind, url) { try { return JSON.parse(localStorage.getItem(_mhJobKey(kind, url)) || 'null'); } catch (e) { return null; } }
+function mhJobForget(kind, url) { try { localStorage.removeItem(_mhJobKey(kind, url)); } catch (e) {} }
+
+// Shared failure surface for the job watchers (btn is null on a resumed
+// watch — the page was reloaded, so there is no button state to restore).
+function _mhJobFail(ctx, msg) {
+  if (ctx.prog) ctx.prog.stop();
+  if (ctx.btn) { ctx.btn.disabled = false; ctx.btn.textContent = ctx.origLabel; }
+  if (ctx.panel) delete ctx.panel.dataset.mhWatching;
+  // msg can be a raw str(e) detail (meet names, node stderr) — escape
+  // before it touches innerHTML.
+  ctx.panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">' + (ctx.prefix || '') + window.safeText(msg) + '</div>';
+}
+
 // M32 (UX-4): per-card motion now uses the same async job + poll pattern the
 // reel adopted — a cold Remotion render (30-90s) on a held connection gets
 // killed by front-line proxies as a bogus "Network error". The button kicks
@@ -4275,54 +4296,135 @@ function generateMotion(btn, motionUrl, cardId, fmt) {
   fmt = fmt || 'story';
   var panel = document.querySelector('.motion-panel[data-card="' + cardId + '"]');
   if (!panel) return;
+  if (panel.dataset.mhWatching) {
+    if (window.MH && MH.toast) MH.toast('A motion render is already in progress for this card — hold on…', 'info', 2500);
+    return;
+  }
   panel.style.display = '';
   var origLabel = btn.textContent;
   btn.disabled = true;
   btn.textContent = 'Rendering motion…';
   var prog = MH.renderProgress(panel, {label: 'Rendering ' + fmt + ' motion', sub: 'First render can take up to 90 seconds — repeats are instant', expectedMs: 45000, accent: 'medal'});
-  var fail = function(msg) {
-    prog.stop();
-    btn.disabled = false; btn.textContent = origLabel;
-    // msg can be a raw str(e) detail (meet names, node stderr) — escape
-    // before it touches innerHTML.
-    panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">' + window.safeText(msg) + '</div>';
+  var ctx = {panel: panel, prog: prog, btn: btn, origLabel: origLabel};
+  var startNew = function() {
+    mhJobForget('motion', motionUrl);
+    var jobUrl = motionUrl + '-job' + (fmt !== 'story' ? '?format=' + encodeURIComponent(fmt) : '');
+    // JSON content-type: the CSRF layer exempts application/json fetches
+    // (a cross-site page can't send them without a CORS preflight).
+    fetch(jobUrl, {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'})
+      .then(function(r) { return r.json().then(function(j){ return {status: r.status, body: j}; }); })
+      .then(function(res) {
+        if (res.status !== 202 || !res.body || !res.body.poll_url) {
+          _mhJobFail(ctx, (res.body && (res.body.user_message || res.body.detail || res.body.error)) || 'could not start the render');
+          return;
+        }
+        mhJobRemember('motion', motionUrl, {poll_url: res.body.poll_url, job_id: res.body.job_id || '', card: cardId, fmt: fmt});
+        _mhMotionWatch(motionUrl, cardId, fmt, res.body.poll_url, ctx);
+      })
+      .catch(function(err) { _mhJobFail(ctx, 'Network error: ' + err); });
   };
-  var jobUrl = motionUrl + '-job' + (fmt !== 'story' ? '?format=' + encodeURIComponent(fmt) : '');
-  // JSON content-type: the CSRF layer exempts application/json fetches
-  // (a cross-site page can't send them without a CORS preflight).
-  fetch(jobUrl, {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'})
-    .then(function(r) { return r.json().then(function(j){ return {status: r.status, body: j}; }); })
-    .then(function(res) {
-      if (res.status !== 202 || !res.body || !res.body.poll_url) {
-        fail((res.body && (res.body.user_message || res.body.detail || res.body.error)) || 'could not start the render');
-        return;
-      }
-      var tries = 0;
-      var poll = function() {
-        tries++;
-        if (tries > 80) { fail('timed out waiting for the render — try again'); return; }
-        fetch(res.body.poll_url)
-          .then(function(r){ return r.json(); })
-          .then(function(j) {
-            if (j.status === 'done' && j.video_url) {
-              prog.complete(function(){
-                btn.disabled = false; btn.textContent = origLabel;
-                _motionCache[cardId + ':' + fmt] = j.video_url;
-                mhRenderMotion(panel, motionUrl, cardId, fmt, j.video_url);
-              });
-              return;
-            }
-            if (j.status === 'error' || (j.error && j.status !== 'running')) {
-              fail(j.user_message || j.error || 'render failed'); return;
-            }
-            setTimeout(poll, 3000);
-          })
-          .catch(function() { setTimeout(poll, 3000); });
-      };
-      setTimeout(poll, 3000);
-    })
-    .catch(function(err) { fail('Network error: ' + err); });
+  // D-13: a render already in flight for this card (this tab or another) is
+  // resumed rather than restarted — a restart just hit the busy renderer.
+  var rec = mhJobRecall('motion', motionUrl);
+  if (rec && rec.poll_url) {
+    fetch(rec.poll_url)
+      .then(function(r){ return r.json(); })
+      .then(function(j) {
+        if (j.status === 'running') { _mhMotionWatch(motionUrl, cardId, rec.fmt || fmt, rec.poll_url, ctx); }
+        else { startNew(); }
+      })
+      .catch(function() { startNew(); });
+    return;
+  }
+  startNew();
 }
+
+// D-13 — poll one motion job to a terminal state. Polls every 3s up to the
+// server's 600s render budget (the old 240s cap abandoned healthy renders
+// the server-side heartbeat was still keeping alive).
+function _mhMotionWatch(motionUrl, cardId, fmt, pollUrl, ctx) {
+  ctx.panel.dataset.mhWatching = pollUrl;
+  var tries = 0;
+  var poll = function() {
+    tries++;
+    if (tries > 200) {
+      mhJobForget('motion', motionUrl);
+      _mhJobFail(ctx, 'timed out waiting for the render — try again');
+      return;
+    }
+    fetch(pollUrl)
+      .then(function(r){ return r.json(); })
+      .then(function(j) {
+        if (j.status === 'done' && j.video_url) {
+          mhJobForget('motion', motionUrl);
+          delete ctx.panel.dataset.mhWatching;
+          ctx.prog.complete(function(){
+            if (ctx.btn) { ctx.btn.disabled = false; ctx.btn.textContent = ctx.origLabel; }
+            _motionCache[cardId + ':' + fmt] = j.video_url;
+            mhRenderMotion(ctx.panel, motionUrl, cardId, fmt, j.video_url);
+          });
+          return;
+        }
+        if (j.status === 'error' || (j.error && j.status !== 'running')) {
+          // A busy renderer usually means an earlier job for this card still
+          // holds the slot — resume that one instead of surfacing the error.
+          var rec = (j.error === 'renderer_busy') ? mhJobRecall('motion', motionUrl) : null;
+          if (rec && rec.poll_url && rec.poll_url !== pollUrl) {
+            _mhMotionWatch(motionUrl, cardId, rec.fmt || fmt, rec.poll_url, ctx);
+            return;
+          }
+          mhJobForget('motion', motionUrl);
+          _mhJobFail(ctx, j.user_message || j.error || 'render failed');
+          return;
+        }
+        setTimeout(poll, 3000);
+      })
+      .catch(function() { setTimeout(poll, 3000); });
+  };
+  setTimeout(poll, 3000);
+}
+
+// D-13 — on page load, re-attach to any motion render still running for a
+// card on THIS page (the record's motion URL must match a mounted panel, so
+// another run's jobs are left alone). Finished-while-away jobs render their
+// video; dead records are cleared.
+function mhResumeMotionJobs() {
+  var prefix = 'mh-job:motion:';
+  var keys = [];
+  try {
+    for (var i = 0; i < localStorage.length; i++) {
+      var k = localStorage.key(i);
+      if (k && k.indexOf(prefix) === 0) keys.push(k);
+    }
+  } catch (e) { return; }
+  keys.forEach(function(k) {
+    var motionUrl = k.slice(prefix.length);
+    var rec = mhJobRecall('motion', motionUrl);
+    if (!rec || !rec.poll_url || !rec.card) return;
+    var panel = document.querySelector('.motion-panel[data-motion-url="' + motionUrl + '"]');
+    if (!panel || panel.dataset.mhWatching) return;
+    var fmt = rec.fmt || 'story';
+    fetch(rec.poll_url)
+      .then(function(r){ return r.json(); })
+      .then(function(j) {
+        if (j.status === 'running') {
+          panel.style.display = '';
+          var prog = MH.renderProgress(panel, {label: 'Rendering ' + fmt + ' motion', sub: 'Resumed — this render kept going while you were away', expectedMs: 45000, accent: 'medal'});
+          _mhMotionWatch(motionUrl, rec.card, fmt, rec.poll_url, {panel: panel, prog: prog, btn: null, origLabel: ''});
+          return;
+        }
+        mhJobForget('motion', motionUrl);
+        if (j.status === 'done' && j.video_url) {
+          panel.style.display = '';
+          _motionCache[rec.card + ':' + fmt] = j.video_url;
+          mhRenderMotion(panel, motionUrl, rec.card, fmt, j.video_url);
+        }
+      })
+      .catch(function(){});
+  });
+}
+if (document.readyState === 'loading') { document.addEventListener('DOMContentLoaded', mhResumeMotionJobs); }
+else { mhResumeMotionJobs(); }
 
 // The finished per-card motion panel — used by generateMotion's success path
 // and the on-load "Rendered videos" restore. videoUrl is the persistent
@@ -5187,56 +5289,139 @@ function generateReel(btn, reelUrl, fmt) {
   fmt = fmt || 'story';
   var panel = document.getElementById('reel-panel');
   if (!panel) return;
+  if (panel.dataset.mhWatching) {
+    if (window.MH && MH.toast) MH.toast('A reel render is already in progress — hold on…', 'info', 2500);
+    return;
+  }
   panel.style.display = '';
   var origLabel = btn.textContent;
   btn.disabled = true;
-  btn.textContent = 'Rendering reel\u2026';
-  var prog = MH.renderProgress(panel, {label: 'Producing your ' + fmt + ' reel', sub: 'Top ranked moments \u2014 up to 90 seconds the first time', expectedMs: 60000, accent: 'medal'});
-  var fail = function(msg) {
-    prog.stop();
-    btn.disabled = false; btn.textContent = origLabel;
-    // msg can fall back to a raw str(e) detail (meet names, node stderr) —
-    // escape before it touches innerHTML.
-    panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">Reel render error: ' + window.safeText(msg) + '</div>';
+  btn.textContent = 'Rendering reel…';
+  var prog = MH.renderProgress(panel, {label: 'Producing your ' + fmt + ' reel', sub: 'Top ranked moments — up to 90 seconds the first time', expectedMs: 60000, accent: 'medal'});
+  var ctx = {panel: panel, prog: prog, btn: btn, origLabel: origLabel, prefix: 'Reel render error: '};
+  var startNew = function() {
+    mhJobForget('reel', reelUrl);
+    // M31: the reel composer's picks (cards / rhythm / mix) ride the job
+    // request. An untouched composer contributes NOTHING, so the default
+    // request — and therefore the default top-3 reel — stays byte-identical.
+    var _q = [];
+    if (fmt !== 'story') _q.push('format=' + encodeURIComponent(fmt));
+    var _extra = (typeof mhReelComposerQuery === 'function') ? mhReelComposerQuery() : '';
+    if (_extra) _q.push(_extra);
+    fetch(reelUrl + '-job' + (_q.length ? '?' + _q.join('&') : ''), {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'})
+      .then(function(r) { return r.json().then(function(j){ return {status: r.status, body: j}; }); })
+      .then(function(res) {
+        if (res.status !== 202 || !res.body || !res.body.poll_url) {
+          _mhJobFail(ctx, (res.body && (res.body.user_message || res.body.detail || res.body.error)) || 'could not start the render');
+          return;
+        }
+        mhJobRemember('reel', reelUrl, {poll_url: res.body.poll_url, job_id: res.body.job_id || '', fmt: fmt});
+        _mhReelWatch(reelUrl, fmt, res.body.poll_url, ctx);
+      })
+      .catch(function(err) { _mhJobFail(ctx, 'Network error: ' + err); });
   };
-  var success = function(videoUrl) {
-    prog.complete(function(){
-      btn.disabled = false; btn.textContent = origLabel;
-      mhRenderReel(panel, reelUrl, fmt, videoUrl);
-    });
+  // D-13: a reel render already in flight (this tab or another) is resumed
+  // rather than restarted — a restart just hit the busy renderer.
+  var rec = mhJobRecall('reel', reelUrl);
+  if (rec && rec.poll_url) {
+    fetch(rec.poll_url)
+      .then(function(r){ return r.json(); })
+      .then(function(j) {
+        if (j.status === 'running') { _mhReelWatch(reelUrl, rec.fmt || fmt, rec.poll_url, ctx); }
+        else { startNew(); }
+      })
+      .catch(function() { startNew(); });
+    return;
+  }
+  startNew();
+}
+
+// D-13 — poll one reel job to a terminal state. Polls every 3s up to the
+// server's 600s render budget (the old 240s cap abandoned healthy renders
+// the server-side heartbeat was still keeping alive).
+function _mhReelWatch(reelUrl, fmt, pollUrl, ctx) {
+  ctx.panel.dataset.mhWatching = pollUrl;
+  var tries = 0;
+  var poll = function() {
+    tries++;
+    if (tries > 200) {
+      mhJobForget('reel', reelUrl);
+      _mhJobFail(ctx, 'timed out waiting for the render — try again');
+      return;
+    }
+    fetch(pollUrl)
+      .then(function(r){ return r.json(); })
+      .then(function(j) {
+        if (j.status === 'done' && j.video_url) {
+          mhJobForget('reel', reelUrl);
+          delete ctx.panel.dataset.mhWatching;
+          ctx.prog.complete(function(){
+            if (ctx.btn) { ctx.btn.disabled = false; ctx.btn.textContent = ctx.origLabel; }
+            mhRenderReel(ctx.panel, reelUrl, fmt, j.video_url);
+          });
+          return;
+        }
+        if (j.status === 'error' || (j.error && j.status !== 'running')) {
+          // A busy renderer usually means an earlier reel job still holds
+          // the slot — resume that one instead of surfacing the error.
+          var rec = (j.error === 'renderer_busy') ? mhJobRecall('reel', reelUrl) : null;
+          if (rec && rec.poll_url && rec.poll_url !== pollUrl) {
+            _mhReelWatch(reelUrl, rec.fmt || fmt, rec.poll_url, ctx);
+            return;
+          }
+          mhJobForget('reel', reelUrl);
+          _mhJobFail(ctx, j.user_message || j.error || 'render failed');
+          return;
+        }
+        setTimeout(poll, 3000);
+      })
+      .catch(function() { setTimeout(poll, 3000); });
   };
-  // M31: the reel composer's picks (cards / rhythm / mix) ride the job
-  // request. An untouched composer contributes NOTHING, so the default
-  // request — and therefore the default top-3 reel — stays byte-identical.
-  var _q = [];
-  if (fmt !== 'story') _q.push('format=' + encodeURIComponent(fmt));
-  var _extra = (typeof mhReelComposerQuery === 'function') ? mhReelComposerQuery() : '';
-  if (_extra) _q.push(_extra);
-  fetch(reelUrl + '-job' + (_q.length ? '?' + _q.join('&') : ''), {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'})
-    .then(function(r) { return r.json().then(function(j){ return {status: r.status, body: j}; }); })
-    .then(function(res) {
-      if (res.status !== 202 || !res.body || !res.body.poll_url) {
-        fail((res.body && (res.body.user_message || res.body.detail || res.body.error)) || 'could not start the render');
-        return;
-      }
-      var tries = 0;
-      var poll = function() {
-        tries++;
-        if (tries > 80) { fail('timed out waiting for the render \u2014 try again'); return; }
-        fetch(res.body.poll_url)
-          .then(function(r){ return r.json(); })
-          .then(function(j) {
-            if (j.status === 'done' && j.video_url) { success(j.video_url); return; }
-            if (j.status === 'error' || (j.error && j.status !== 'running')) {
-              fail(j.user_message || j.error || 'render failed'); return;
-            }
-            setTimeout(poll, 3000);
-          })
-          .catch(function() { setTimeout(poll, 3000); });
-      };
-      setTimeout(poll, 3000);
-    })
-    .catch(function(err) { fail('Network error: ' + err); });
+  setTimeout(poll, 3000);
+}
+
+// D-13 — on page load, re-attach to a reel render still running server-side
+// (started in this tab or another; single-format or all-formats). A job that
+// finished while the user was away renders its video; dead records are
+// cleared. Returns true when the panel was claimed so the caller skips the
+// finished-file restore.
+function mhResumeReelJob(reelUrl) {
+  var panel = document.getElementById('reel-panel');
+  if (!panel) return false;
+  var claimed = false;
+  ['reel', 'reel-batch'].forEach(function(kind) {
+    if (claimed) return;
+    var rec = mhJobRecall(kind, reelUrl);
+    if (!rec || !rec.poll_url) return;
+    claimed = true;
+    var fmt = rec.fmt || 'story';
+    fetch(rec.poll_url)
+      .then(function(r){ return r.json(); })
+      .then(function(j) {
+        if (j.status === 'running') {
+          panel.style.display = '';
+          var opts = (kind === 'reel')
+            ? {label: 'Producing your ' + fmt + ' reel', sub: 'Resumed — this render kept going while you were away', expectedMs: 60000, accent: 'medal'}
+            : {label: 'Producing every reel format', sub: 'Resumed — this render kept going while you were away', expectedMs: 150000, accent: 'medal'};
+          var ctx = {panel: panel, prog: MH.renderProgress(panel, opts), btn: null, origLabel: '', prefix: 'Reel render error: '};
+          if (kind === 'reel') _mhReelWatch(reelUrl, fmt, rec.poll_url, ctx);
+          else _mhReelBatchWatch(reelUrl, rec.poll_url, ctx);
+          return;
+        }
+        mhJobForget(kind, reelUrl);
+        if (j.status === 'done') {
+          if (kind === 'reel' && j.video_url) {
+            panel.style.display = '';
+            mhRenderReel(panel, reelUrl, fmt, j.video_url);
+          } else if (kind === 'reel-batch' && j.video_urls && Object.keys(j.video_urls).length) {
+            panel.style.display = '';
+            mhRenderReelBatch(panel, reelUrl, j.video_urls, j.formats_failed || {});
+          }
+        }
+      })
+      .catch(function(){});
+  });
+  return claimed;
 }
 
 // R1.15 - render every reel cut (story/portrait/square/landscape) in one
@@ -5246,49 +5431,81 @@ function generateReel(btn, reelUrl, fmt) {
 function generateReelBatch(btn, reelUrl) {
   var panel = document.getElementById('reel-panel');
   if (!panel) return;
+  if (panel.dataset.mhWatching) {
+    if (window.MH && MH.toast) MH.toast('A reel render is already in progress — hold on…', 'info', 2500);
+    return;
+  }
   panel.style.display = '';
   var origLabel = btn.textContent;
   btn.disabled = true;
   btn.textContent = 'Rendering all formats…';
   var prog = MH.renderProgress(panel, {label: 'Producing every reel format', sub: 'Story, portrait, square & landscape — up to a few minutes the first time', expectedMs: 150000, accent: 'medal'});
-  var fail = function(msg) {
-    prog.stop();
-    btn.disabled = false; btn.textContent = origLabel;
-    panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">Reel render error: ' + window.safeText(msg) + '</div>';
+  var ctx = {panel: panel, prog: prog, btn: btn, origLabel: origLabel, prefix: 'Reel render error: '};
+  var startNew = function() {
+    mhJobForget('reel-batch', reelUrl);
+    // M31: the composer's picks apply to the all-formats batch too.
+    var _extraB = (typeof mhReelComposerQuery === 'function') ? mhReelComposerQuery() : '';
+    fetch(reelUrl + '-batch' + (_extraB ? '?' + _extraB : ''), {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'})
+      .then(function(r) { return r.json().then(function(j){ return {status: r.status, body: j}; }); })
+      .then(function(res) {
+        if (res.status !== 202 || !res.body || !res.body.poll_url) {
+          _mhJobFail(ctx, (res.body && (res.body.user_message || res.body.detail || res.body.error)) || 'could not start the render');
+          return;
+        }
+        mhJobRemember('reel-batch', reelUrl, {poll_url: res.body.poll_url, job_id: res.body.job_id || ''});
+        _mhReelBatchWatch(reelUrl, res.body.poll_url, ctx);
+      })
+      .catch(function(err) { _mhJobFail(ctx, 'Network error: ' + err); });
   };
-  var success = function(videoUrls, failed) {
-    prog.complete(function(){
-      btn.disabled = false; btn.textContent = origLabel;
-      mhRenderReelBatch(panel, reelUrl, videoUrls, failed);
-    });
+  // D-13: an all-formats render already in flight is resumed, not restarted.
+  var rec = mhJobRecall('reel-batch', reelUrl);
+  if (rec && rec.poll_url) {
+    fetch(rec.poll_url)
+      .then(function(r){ return r.json(); })
+      .then(function(j) {
+        if (j.status === 'running') { _mhReelBatchWatch(reelUrl, rec.poll_url, ctx); }
+        else { startNew(); }
+      })
+      .catch(function() { startNew(); });
+    return;
+  }
+  startNew();
+}
+
+// D-13 — poll one all-formats batch job to a terminal state (600s budget,
+// matching the server's render timeout).
+function _mhReelBatchWatch(reelUrl, pollUrl, ctx) {
+  ctx.panel.dataset.mhWatching = pollUrl;
+  var tries = 0;
+  var poll = function() {
+    tries++;
+    if (tries > 200) {
+      mhJobForget('reel-batch', reelUrl);
+      _mhJobFail(ctx, 'timed out waiting for the render — try again');
+      return;
+    }
+    fetch(pollUrl)
+      .then(function(r){ return r.json(); })
+      .then(function(j) {
+        if (j.status === 'done' && j.video_urls && Object.keys(j.video_urls).length) {
+          mhJobForget('reel-batch', reelUrl);
+          delete ctx.panel.dataset.mhWatching;
+          ctx.prog.complete(function(){
+            if (ctx.btn) { ctx.btn.disabled = false; ctx.btn.textContent = ctx.origLabel; }
+            mhRenderReelBatch(ctx.panel, reelUrl, j.video_urls, j.formats_failed || {});
+          });
+          return;
+        }
+        if (j.status === 'error' || (j.error && j.status !== 'running')) {
+          mhJobForget('reel-batch', reelUrl);
+          _mhJobFail(ctx, j.user_message || j.error || 'render failed');
+          return;
+        }
+        setTimeout(poll, 3000);
+      })
+      .catch(function() { setTimeout(poll, 3000); });
   };
-  // M31: the composer's picks apply to the all-formats batch too.
-  var _extraB = (typeof mhReelComposerQuery === 'function') ? mhReelComposerQuery() : '';
-  fetch(reelUrl + '-batch' + (_extraB ? '?' + _extraB : ''), {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'})
-    .then(function(r) { return r.json().then(function(j){ return {status: r.status, body: j}; }); })
-    .then(function(res) {
-      if (res.status !== 202 || !res.body || !res.body.poll_url) {
-        fail((res.body && (res.body.user_message || res.body.detail || res.body.error)) || 'could not start the render');
-        return;
-      }
-      var tries = 0;
-      var poll = function() {
-        tries++;
-        if (tries > 120) { fail('timed out waiting for the render — try again'); return; }
-        fetch(res.body.poll_url)
-          .then(function(r){ return r.json(); })
-          .then(function(j) {
-            if (j.status === 'done' && j.video_urls && Object.keys(j.video_urls).length) { success(j.video_urls, j.formats_failed || {}); return; }
-            if (j.status === 'error' || (j.error && j.status !== 'running')) {
-              fail(j.user_message || j.error || 'render failed'); return;
-            }
-            setTimeout(poll, 3000);
-          })
-          .catch(function() { setTimeout(poll, 3000); });
-      };
-      setTimeout(poll, 3000);
-    })
-    .catch(function(err) { fail('Network error: ' + err); });
+  setTimeout(poll, 3000);
 }
 
 // R1.15 - the finished multi-format panel: the story cut (or first produced)
@@ -45664,6 +45881,9 @@ function mhSetupMode(mode) {{
   var prerendered = {json.dumps(_reel_prerendered)};
   var panel = document.getElementById('reel-panel');
   if (!panel || typeof mhReelComments !== 'function') return;
+  // D-13: a reel render still in flight from before navigation wins over
+  // the finished-file restore — re-attach to it and keep polling.
+  if (typeof mhResumeReelJob === 'function' && mhResumeReelJob(reelUrl)) return;
   var fileUrl = reelUrl + '-file?n=3&format=story';
   if (prerendered) {{
     panel.style.display = '';
