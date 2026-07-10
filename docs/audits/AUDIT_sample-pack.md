@@ -171,9 +171,18 @@ Result: `tests/test_u4_onboarding_sample.py` → **13 passed** (was 11).
 
 ## 7. Cross-cutting changes
 
-**None.** No shared file was functionally modified. The only edits to `web.py` are within
-the sample-pack members listed in §1 (the CTA helper and the route comment). The `runs`
-schema, gates, CSRF layer, `_recovery_page`, and the pipeline are untouched.
+- **No functional shared-file change.** The only edits to `web.py` are within the
+  sample-pack members listed in §1 (the CTA helper and the route comment). The `runs`
+  schema, gates, CSRF layer, `_recovery_page`, and the pipeline are untouched.
+- **Two mechanical hygiene fixes on files I do not own** — `docs/audits/AUDIT_meet-recap.md`
+  and `docs/audits/AUDIT_season-wraps.md` (added by the parallel meet-recap and season-wraps
+  sessions, already merged to `main`) each ended with a stray trailing blank line that fails
+  the `end-of-file-fixer` pre-commit hook. The whole-tree `pre-commit run --all-files` CI
+  job (**Hygiene hooks**) therefore failed on `main` itself, red-flagging every open PR
+  including this one. Applied the exact one-line fix the hook auto-generates to each (strip
+  the trailing blank line — no content change) so this PR's hygiene check passes and the
+  trunk is unblocked for all sessions. Flagged here for reconciliation; my own files pass
+  ruff, ruff-format and end-of-file-fixer cleanly.
 
 ---
 
