@@ -161,11 +161,18 @@ self-hosted-fonts/org-setup subset: **60 passed**.
 
 ## 7. Cross-cutting changes
 
-**None applied to shared files.** F4's root cause is in the shared `_load_run`
-(it stats `p.exists()` outside its try/except); I fixed it only for this
-feature's routes (in `_brand_check_context`) to keep the blast radius tight and
-avoid conflicting with other in-flight audits. See Residual risks for the shared
-item to coordinate.
+- **No shared *code* files changed.** F4's root cause is in the shared
+  `_load_run` (it stats `p.exists()` outside its try/except); I fixed it only for
+  this feature's routes (in `_brand_check_context`) to keep the blast radius tight
+  and avoid conflicting with other in-flight audits. See Residual risks for the
+  shared item to coordinate.
+- **One shared-build hygiene fix (not code):** `docs/audits/AUDIT_meet-recap.md`
+  (another session's report, already on `main`) ended with a trailing blank line,
+  which `end-of-file-fixer` flags. The pre-commit "Hygiene hooks" check runs
+  `--all-files`, so this pre-existing violation red-ed CI on every open PR,
+  including this one. Trimmed it to a single trailing newline (no content change)
+  to unblock the shared gate. Flagged here for reconciliation with the meet-recap
+  session.
 
 ---
 
