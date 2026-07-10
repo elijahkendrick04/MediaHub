@@ -151,3 +151,34 @@ class TestRepairFlag:
         # The Stage B engine deterministically repairs red seeds —
         # was_repaired must be True.
         assert payload["was_repaired"] is True
+
+
+class TestNoInternalPathLeak:
+    """On a save/derivation failure the 500 JSON must not echo the raw
+    exception text — it can carry the absolute DATA_DIR path / errno.
+    The detail belongs in the server log only."""
+
+    def test_save_failure_does_not_leak_path_in_response(self, app_client, monkeypatch):
+        client, wm, cp = app_client
+        prof = _seed_profile(cp, primary="#06D6A0")
+        with client.session_transaction() as sess:
+            sess["active_profile_id"] = prof.profile_id
+
+        leaky = "/var/data/mediahub/club_profiles/swim-test.json"
+
+        def boom(_profile):
+            raise OSError(f"[Errno 30] Read-only file system: '{leaky}'")
+
+        # save_profile is imported into the web module's namespace at call time.
+        monkeypatch.setattr(wm, "save_profile", boom)
+
+        r = client.post("/api/organisation/finalise")
+        assert r.status_code == 500
+        body = r.get_data(as_text=True)
+        assert leaky not in body, f"leaked internal path in response: {body!r}"
+        assert "Errno" not in body
+        assert "Read-only" not in body
+        payload = r.get_json()
+        assert payload is not None
+        assert "detail" not in payload
+        assert payload.get("error") == "profile save failed"

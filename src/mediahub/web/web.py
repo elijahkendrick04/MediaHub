@@ -42922,6 +42922,14 @@ what you're doing, what they should do.</p>
             ) -> str:
                 attr = "disabled" if disabled else ""
                 wrap_style = f"max-width:{max_width};" if max_width else ""
+                # The colour picker always needs a concrete value (it can't be
+                # empty), so it shows the effective colour (manual override, else
+                # the AI's pick). The hex TEXT field is the blankable control:
+                # pre-fill it ONLY with a real manual override, so an untouched
+                # slot posts blank and defers to the AI — exactly what the form
+                # copy promises. The AI's pick is shown as placeholder ghost text.
+                _mh = manual_pal.get(slot)
+                text_value = _mh if (isinstance(_mh, str) and _mh.startswith("#")) else ""
                 return (
                     f'<label style="display:flex;flex-direction:column;gap:4px;'
                     f'font-size:11.5px;color:var(--ink-dim);{wrap_style}">'
@@ -42933,7 +42941,8 @@ what you're doing, what they should do.</p>
                     f"border:1px solid var(--border);border-radius:4px;"
                     f'background:var(--panel);cursor:pointer;flex-shrink:0"/>'
                     f'<input type="text" name="palette_{slot}_hex" '
-                    f'id="palette-{slot}-hex" value="{_h(default_hex)}" '
+                    f'id="palette-{slot}-hex" value="{_h(text_value)}" '
+                    f'placeholder="{_h(default_hex)}" '
                     f'pattern="^#[0-9a-fA-F]{{6}}$" maxlength="7" '
                     f'data-palette-mirror="palette_{slot}" {attr} '
                     f'style="flex:1;min-width:0;padding:11px 10px;min-height:44px;'
@@ -44728,11 +44737,24 @@ function mhSetupMode(mode) {{
         )
         from mediahub.brand import palette as _palette
 
+        # The blankable ``palette_<slot>_hex`` text field is authoritative: the
+        # sibling ``<input type="color">`` can never submit an empty value, so
+        # reading it would make "leave a slot blank to fall back to the AI's
+        # pick" (promised on the form) impossible — every save would freeze the
+        # AI palette as a manual override. Prefer the hex mirror when the browser
+        # sent it; fall back to the colour input for non-browser callers (and the
+        # test corpus) that post only ``palette_<slot>``.
+        def _pal_slot(slot: str) -> str:
+            hexv = request.form.get(f"palette_{slot}_hex")
+            if hexv is not None:
+                return hexv.strip()
+            return (request.form.get(f"palette_{slot}") or "").strip()
+
         manual = _palette.sanitise_manual_palette(
-            primary=(request.form.get("palette_primary") or "").strip(),
-            secondary=(request.form.get("palette_secondary") or "").strip(),
-            accent=(request.form.get("palette_accent") or "").strip(),
-            fourth=(request.form.get("palette_fourth") or "").strip(),
+            primary=_pal_slot("primary"),
+            secondary=_pal_slot("secondary"),
+            accent=_pal_slot("accent"),
+            fourth=_pal_slot("fourth"),
             include_fourth=use_fourth,
         )
         prof.brand_palette_manual = manual
@@ -44911,7 +44933,9 @@ function mhSetupMode(mode) {{
             palette = kit.ensure_derived_palette()
         except Exception as e:
             log.warning("organisation_finalise: ensure_derived_palette failed: %s", e)
-            return jsonify({"error": "palette derivation failed", "detail": str(e)}), 500
+            # Log the exception server-side only; never echo str(e) back — it
+            # can carry the absolute DATA_DIR path / errno on a disk failure.
+            return jsonify({"error": "palette derivation failed"}), 500
         # Write the (possibly newly-cached) palette back to the profile
         # so subsequent requests see it. ensure_derived_palette mutated
         # kit in-place; we serialise that mutation through the profile
@@ -44921,7 +44945,9 @@ function mhSetupMode(mode) {{
             save_profile(prof)
         except Exception as e:
             log.warning("organisation_finalise: save_profile failed: %s", e)
-            return jsonify({"error": "profile save failed", "detail": str(e)}), 500
+            # As above — keep the raw exception (and any leaked path) in the
+            # server log, not in the client-visible JSON.
+            return jsonify({"error": "profile save failed"}), 500
         return jsonify(
             {
                 "seed_hex": (palette or {}).get("seed_hex", ""),
@@ -45152,7 +45178,7 @@ function mhSetupMode(mode) {{
                     "status": entry.get("status", "unknown"),
                     "playbook_age": entry.get("playbook_age", -1),
                     "regenerated": entry.get("regenerated", False),
-                    "voice_digest": (entry.get("dna") or {}).get("voice_summary", "")[:240],
+                    "voice_digest": ((entry.get("dna") or {}).get("voice_summary") or "")[:240],
                 }
                 prof.link_capture_state = state
                 save_profile(prof)

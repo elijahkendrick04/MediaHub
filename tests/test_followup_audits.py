@@ -372,6 +372,59 @@ class TestM5StatusAndReread:
         assert prof.link_capture_state["instagram"]["status"] == "real_content"
         assert prof.link_capture_state["instagram"]["voice_digest"] == "Fresh voice."
 
+    def test_reread_survives_none_voice_summary(self, iso_root, monkeypatch):
+        """Regression: a handler may return dna={'voice_summary': None}
+        (key present, value None). The old ``.get('voice_summary', '')[:240]``
+        raised TypeError on None[:240], which the route's broad try/except
+        swallowed — so the re-read silently no-op'd and never updated the
+        profile. The value must be coerced so the state is still written."""
+        from mediahub.brand.link_handlers import instagram as ig_handler
+
+        def fake_process(url):
+            return {
+                "platform": "instagram",
+                "url": url,
+                "status": "real_content",
+                "playbook_age": 0,
+                "regenerated": True,
+                "dna": {"voice_summary": None},
+            }
+
+        monkeypatch.setattr(ig_handler, "process", fake_process)
+
+        _seed_profile(
+            profile_id="m5none",
+            social_links={"instagram": "https://instagram.com/x"},
+            link_capture_state={
+                "instagram": {
+                    "status": "hard_blocked",
+                    "url": "https://instagram.com/x",
+                    "playbook_age": 0,
+                    "regenerated": False,
+                    "voice_digest": "",
+                }
+            },
+        )
+        from mediahub.web.web import create_app
+
+        app = create_app()
+        with app.test_client() as c:
+            with c.session_transaction() as sess:
+                sess["active_profile_id"] = "m5none"
+                sess["login_seen_at"] = int(time.time())
+                sess["_csrf"] = "audit-csrf-token-0123456789abcdef"
+            r = c.post(
+                "/organisation/setup/reread/instagram",
+                data={"csrf_token": "audit-csrf-token-0123456789abcdef"},
+            )
+            assert r.status_code in (302, 303)
+
+        prof = load_profile("m5none")
+        # The state was actually updated (not silently swallowed) and the
+        # digest coerced to an empty string rather than crashing.
+        assert prof.link_capture_state["instagram"]["status"] == "real_content"
+        assert prof.link_capture_state["instagram"]["voice_digest"] == ""
+
     def test_reread_invalidates_social_dna_cache(self, iso_root, monkeypatch):
         """A successful re-read must drop the full-capture social_dna cache
         entry for this link set — otherwise the next capture (force=False)
