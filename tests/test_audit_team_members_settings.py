@@ -348,5 +348,8 @@ def test_invite_notice_shows_the_signup_link_when_mail_unconfigured(members_worl
         follow_redirects=True,
     )
     body = r.get_data(as_text=True)
-    assert "share this signup link" in body
+    # Keep the wording aligned with the pre-existing invite-copy assertion in
+    # test_password_reset_routes.py ("share the signup link") — the fix ADDS the
+    # URL, it must not change the phrase other tests pin.
+    assert "share the signup link" in body
     assert "/signup" in body  # the actual url_for('signup_page') target is rendered

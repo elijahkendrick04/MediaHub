@@ -41859,7 +41859,7 @@ what you're doing, what they should do.</p>
                             # referring to a "signup link" that appears nowhere on
                             # the page.
                             notice += (
-                                " Email delivery isn't configured here, so share this "
+                                " Email delivery isn't configured here, so share the "
                                 f"signup link with them: {url_for('signup_page', _external=True)}"
                             )
                 elif action == "remove":
