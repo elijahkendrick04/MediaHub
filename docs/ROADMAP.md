@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-07-10 · `1f49c3faa` · [developer-settings] record final merge status in audit report
+**Last updated:** 2026-07-10 · `bff44f3b6` · [plan] Audit + fix the Create → Plan feature (8 findings) (#1110)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1237,6 +1237,6 @@ list and the auto table below, not here.
 | 2026-07-10 | `56a04395c` | [meet-recap] lock audit fixes with tests |
 | 2026-07-10 | `b24525282` | [meet-recap] fix recap "by the numbers" swimmer undercount |
 | 2026-07-10 | `b9d8eb2e1` | [meet-recap] fix re-run link 404, review error leak, upload status, club_filter persistence |
-| 2026-07-10 | `3ef825947` | [spotlight] record final merge status in audit report |
-| 2026-07-10 | `651cf2bc3` | [spotlight] audit report for the athlete-spotlight (meet recap) feature |
+| 2026-07-10 | `893cdb55c` | [plan] audit report: findings, fixes, tests, verdict |
+| 2026-07-10 | `a5d6f6485` | [plan] fix 8 audit findings across the Plan feature + lock with tests |
 <!-- /ROADMAP:ACTIVITY -->
