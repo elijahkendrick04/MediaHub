@@ -268,7 +268,9 @@ class TestMarketingMock:
         m = re.search(r'<div class="mh-demo-acts">(.*?)</div>', html)
         assert m, "the review scene's action strip must render"
         acts = m.group(1)
-        assert "Inspect" in acts
+        # H-10 renamed the row's drawer button "Inspect" -> "Edit card"; the
+        # mock mirrors the real actions.
+        assert "Edit card" in acts
         assert "Re-queue" in acts
         assert "Approve" in acts
         assert "Reject" not in acts

@@ -2077,6 +2077,11 @@ def _inspector_state_attrs(wf_state) -> str:
     caption = str(edits.get("warm-club_headline") or "").strip()
     if caption:
         parts.append(f'data-insp-caption="{_h(caption)}"')
+    # H-10: the caption this one overwrote (stashed by WorkflowStore.set_edits)
+    # feeds the drawer's one-step "Restore previous caption".
+    prev_caption = str(edits.get("prev.warm-club_headline") or "").strip()
+    if prev_caption and prev_caption != caption:
+        parts.append(f'data-insp-caption-prev="{_h(prev_caption)}"')
     return (" " + " ".join(parts)) if parts else ""
 
 
@@ -6718,6 +6723,10 @@ def _render_inspector_panel(swatches: list[dict]) -> str:
                 style="font-size:11px;padding:4px 10px">&#10024; Generate with AI</button>
         <button type="button" class="btn secondary" id="mh-insp-caption-save"
                 style="font-size:11px;padding:4px 10px">Save caption</button>
+        <button type="button" class="btn ghost" id="mh-insp-caption-restore" hidden
+                style="font-size:11px;padding:4px 10px"
+                title="Bring back the caption the last save replaced">
+          Restore previous caption</button>
         <span class="mh-insp-mini" id="mh-insp-caption-status"></span>
       </div>
     </section>
@@ -6814,6 +6823,11 @@ def _inspector_js() -> str:
     var titleEl = $('mh-insp-title'); if (titleEl) titleEl.textContent = ctx.title;
     var capEl = $('mh-insp-caption');
     if (capEl) capEl.value = btn.getAttribute('data-insp-caption') || '';
+    // H-10: the saved caption + the one the last save replaced (server-stashed)
+    // drive the one-step "Restore previous caption".
+    ctx.savedCaption = btn.getAttribute('data-insp-caption') || '';
+    ctx.prevCaption = btn.getAttribute('data-insp-caption-prev') || '';
+    syncRestoreBtn();
     var capStatus = $('mh-insp-caption-status'); if (capStatus) capStatus.textContent = '';
     // M29: seed the preview with the card's current design (the same cached
     // thumbnail the review row shows) so tweaks start from what exists. The
@@ -6968,6 +6982,23 @@ def _inspector_js() -> str:
       }).catch(function(){ if (btn) btn.disabled = false; if (cs) cs.textContent = 'Generation failed'; });
   }
 
+  function syncRestoreBtn(){
+    var rb = $('mh-insp-caption-restore');
+    if (rb) rb.hidden = !(ctx && ctx.prevCaption);
+  }
+
+  // H-10: a saved caption also shows on the review row (truncated), so the
+  // approver sees what they're signing off without opening the drawer.
+  function updateRowCaption(cardId, text){
+    var esc = (window.CSS && CSS.escape) ? CSS.escape(cardId) : cardId;
+    document.querySelectorAll('[data-mh-row-caption="' + esc + '"]').forEach(function(el){
+      var t = el.querySelector('[data-mh-row-caption-text]');
+      var disp = text.length > 140 ? text.slice(0, 140) + '…' : text;
+      if (t) t.textContent = disp;
+      el.hidden = !disp;
+    });
+  }
+
   function saveCaption(){
     if (!ctx) return;
     var ta = $('mh-insp-caption'); var cs = $('mh-insp-caption-status');
@@ -6979,14 +7010,39 @@ def _inspector_js() -> str:
     };
     if (cs) cs.textContent = 'Saving…';
     persistEdits(extra).then(function(o){
-      if (cs) cs.textContent = (o && o.ok) ? 'Caption saved' : 'Save failed';
-      if (o && o.ok) {
-        var esc = (window.CSS && CSS.escape) ? CSS.escape(ctx.cardId) : ctx.cardId;
-        document.querySelectorAll('[data-card-id="' + esc + '"][data-mh-inspect]').forEach(function(b){
-          b.setAttribute('data-insp-caption', text);
-        });
+      var ok = o && o.ok && o.body && o.body.ok !== false;
+      if (!ok) {
+        // H-10: name the reason — a bare "Save failed" left volunteers blind
+        // to role gates, locks and expired sessions.
+        var why = (o && o.body && (o.body.reason || o.body.error || o.body.message)) || 'server error';
+        if (cs) cs.textContent = 'Save failed — ' + why;
+        return;
       }
-    }).catch(function(){ if (cs) cs.textContent = 'Save failed'; });
+      if (cs) cs.textContent = 'Caption saved';
+      // Mirror the server's prev-stash: the caption this save replaced becomes
+      // the restorable "previous" (so Restore can toggle the pair).
+      if (ctx.savedCaption && ctx.savedCaption !== text) ctx.prevCaption = ctx.savedCaption;
+      ctx.savedCaption = text;
+      syncRestoreBtn();
+      var esc = (window.CSS && CSS.escape) ? CSS.escape(ctx.cardId) : ctx.cardId;
+      document.querySelectorAll('[data-card-id="' + esc + '"][data-mh-inspect]').forEach(function(b){
+        b.setAttribute('data-insp-caption', text);
+        if (ctx.prevCaption) b.setAttribute('data-insp-caption-prev', ctx.prevCaption);
+      });
+      updateRowCaption(ctx.cardId, text);
+    }).catch(function(e){
+      if (cs) cs.textContent = 'Save failed — ' + ((e && e.message) || 'network error');
+    });
+  }
+
+  // H-10: one-step restore — put the replaced caption back and save it. The
+  // save swaps the pair server-side, so Restore toggles between the two most
+  // recent captions.
+  function restoreCaption(){
+    if (!ctx || !ctx.prevCaption) return;
+    var ta = $('mh-insp-caption');
+    if (ta) ta.value = ctx.prevCaption;
+    saveCaption();
   }
 
   // --- Wiring -------------------------------------------------------------
@@ -7023,6 +7079,8 @@ def _inspector_js() -> str:
   });
   $('mh-insp-caption-ai').addEventListener('click', generateCaption);
   $('mh-insp-caption-save').addEventListener('click', saveCaption);
+  var restoreEl = $('mh-insp-caption-restore');
+  if (restoreEl) restoreEl.addEventListener('click', restoreCaption);
 })();
 </script>
 """
@@ -17867,10 +17925,10 @@ def _hero_product_demo() -> str:
         '<p class="mh-demo-caption">A lifetime best for <mark>Tom Davies</mark>. '
         "<mark>52.41</mark> in the <mark>100m freestyle</mark>, a clean "
         "<mark>0.74s</mark> off his old mark.</p>"
-        # G-1: mirror the REAL review-row actions (Approve / Re-queue /
-        # Inspect) — the mock previously promised Edit/Reject buttons the
+        # G-1/H-10: mirror the REAL review-row actions (Approve / Re-queue /
+        # Edit card) — the mock previously promised Edit/Reject buttons the
         # per-card flow doesn't have.
-        '<div class="mh-demo-acts"><span>&#9881; Inspect</span>'
+        '<div class="mh-demo-acts"><span>&#9998; Edit card</span>'
         '<span class="ghost">Re-queue</span><span class="go">Approve</span></div>'
         "</div>"
         "</div>"
@@ -23794,6 +23852,29 @@ def create_app() -> Flask:
                 size=30,
             )
 
+            # H-10: a saved caption is part of what the approver signs off, so
+            # it shows on the row (truncated, escaped) — not only inside the
+            # edit drawer. The container always ships (hidden when empty) so
+            # the drawer's save can fill it live without a reload.
+            _row_caption = ""
+            if wf_state is not None:
+                _row_caption = str(
+                    (getattr(wf_state, "edited_captions", None) or {}).get("warm-club_headline")
+                    or ""
+                ).strip()
+            _row_caption_disp = (
+                (_row_caption[:140] + "…") if len(_row_caption) > 140 else _row_caption
+            )
+            _row_caption_html = (
+                f'<div class="mh-row-caption" data-mh-row-caption="{_h(card_id_raw)}"'
+                f"{'' if _row_caption else ' hidden'}"
+                ' style="margin-top:4px;font-size:12px;color:var(--ink-dim)">'
+                '<span style="font-family:var(--font-mono);font-size:10px;'
+                'letter-spacing:0.14em;text-transform:uppercase;color:var(--ink-muted)">'
+                "Caption</span> "
+                f"<em data-mh-row-caption-text>{_h(_row_caption_disp)}</em></div>"
+            )
+
             ach_rows_html_wf += f"""
 <div class="ach-row" data-type="{a.get("type", "")}" data-conf="{conf_label}" data-swimmer="{_h(a.get("swimmer_name", ""))}" data-event="{_h(a.get("event", ""))}" data-band="{band}" data-post="{ra.get("suggested_post_type", "")}" data-status="{wf_status}" data-status-initial="{wf_status}">
   <div style="display:flex;align-items:flex-start;gap:14px;padding:14px 0;border-bottom:1px solid var(--border)">
@@ -23816,6 +23897,7 @@ def create_app() -> Flask:
         <div style="font-size:13px;font-weight:600">{swimmer} &middot; {event}</div>
       </div>
       <div style="font-size:13px;color:var(--ink-dim)">{headline}</div>
+      {_row_caption_html}
       {why_html}
       <!-- Approve / Reject triage. Captions, graphics, motion + scheduling
            all happen later in the Content builder (approved cards only). -->
@@ -23826,8 +23908,8 @@ def create_app() -> Flask:
                 data-card-uuid="{_h(card_uuid)}" data-graphic-url="{_h(_insp_graphic_url)}"
                 data-caption-url="{_h(_insp_caption_url)}" data-thumb-url="{_h(_thumb_url)}" data-card-title="{swimmer} &middot; {event}"{_inspector_state_attrs(wf_state)}
                 aria-haspopup="dialog" aria-controls="mh-inspector"
-                title="Tweak this card before approval — caption, palette, elements, crop">
-          &#9881; Inspect
+                title="Edit this card before approval — caption, palette, elements, crop">
+          &#9998; Edit card
         </button>
         <span style="flex:1;min-width:8px"></span>
         {_render_reactions(run_id, card_id_raw, _react_counts)}
@@ -33164,7 +33246,10 @@ function mhAnDigest(btn) {{
                 _parts = [
                     _edits[k]
                     for k in sorted(_edits)
-                    if k and not str(k).startswith("insp.") and k != "alt_text" and _edits.get(k)
+                    if k
+                    and not str(k).startswith(("insp.", "prev."))
+                    and k != "alt_text"
+                    and _edits.get(k)
                 ]
                 caption = "\n".join(p for p in _parts if p).strip()
             except Exception:
@@ -59607,10 +59692,11 @@ voice, and queues them for one-click approval.</p>
         text = ""
         if state is not None and state.edited_captions:
             # Honour the human's edits: join the saved slots in a stable order.
+            # ``prev.*`` slots are the H-10 restore history, not current copy.
             parts = [
                 state.edited_captions[k]
                 for k in sorted(state.edited_captions)
-                if state.edited_captions.get(k)
+                if state.edited_captions.get(k) and not str(k).startswith("prev.")
             ]
             text = "\n".join(p for p in parts if p).strip()
         if not text and _build_caption_text is not None:
