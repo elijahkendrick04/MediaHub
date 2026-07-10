@@ -7305,7 +7305,7 @@ def _render_turn_into_card(run_id: str) -> str:
             rows.append(
                 f'<li style="font-size:12px;margin-bottom:4px">'
                 f'<a href="{_view}">{_h(_gen)}</a> '
-                f'<span class="muted">&mdash; {_n} artefacts'
+                f'<span class="muted">&mdash; {_n} {"piece" if _n == 1 else "pieces"}'
                 + (f", {_skipped} skipped" if _skipped else "")
                 + "</span></li>"
             )
@@ -7335,7 +7335,7 @@ def _render_turn_into_card(run_id: str) -> str:
 <div class="card" id="turn-into-card" style="border-left:3px solid var(--accent)">
   <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap">
     <div style="flex:1;min-width:min(240px,100%)">
-      <h2 style="margin-bottom:6px">Turn this meet into more</h2>
+      <h2 style="margin-bottom:6px">Repurpose pack</h2>
       <p class="dim" style="margin:0 0 10px 0;font-size:13px;max-width:540px">
         One click re-uses everything this meet already produced &mdash; the
         results, the approved cards, your brand voice &mdash; and drafts a
@@ -7373,11 +7373,11 @@ function turnMeetIntoPack() {{
   setState('loading');
   status.style.display = '';
   status.innerHTML = '<span style="display:inline-block;width:14px;height:14px;border:2px solid color-mix(in oklab, var(--lane) 30%, transparent);border-top-color:var(--lane);border-radius:50%;vertical-align:-2px;margin-right:8px;animation:spin 600ms linear infinite"></span>' +
-    '<span id="ti-status-text">Drafting every artefact with live AI&hellip;</span>';
+    '<span id="ti-status-text">Drafting every piece with live AI&hellip;</span>';
   var statusText = document.getElementById('ti-status-text');
   var ticker = setInterval(function() {{
     secs++;
-    if (statusText) statusText.textContent = 'Drafting every artefact with live AI — ' + secs + 's. Usually under a minute.';
+    if (statusText) statusText.textContent = 'Drafting every piece with live AI — ' + secs + 's. Usually under a minute.';
   }}, 1000);
   function _fail(msg) {{
     clearInterval(ticker);
@@ -47144,7 +47144,7 @@ function mhCertificatesJob(a) {{
             )
             skipped_html = (
                 '<div class="card" style="border-color:var(--warn);background:rgba(245,158,11,0.04)">'
-                '<h2 style="margin-top:0">Skipped artefacts</h2>'
+                '<h2 style="margin-top:0">Skipped pieces</h2>'
                 f'<ul style="margin:0">{items}</ul>'
                 "</div>"
             )
@@ -47177,7 +47177,7 @@ function mhCertificatesJob(a) {{
         for art_idx, art in enumerate(artefacts):
             atype = art.get("type", "")
             atype_label = _ARTEFACT_LABEL.get(
-                atype, atype.replace("_", " ").capitalize() or "Artefact"
+                atype, atype.replace("_", " ").capitalize() or "Piece"
             )
             title = _h(art.get("title", atype_label))
             captions = art.get("captions") or {}
@@ -47206,11 +47206,13 @@ function mhCertificatesJob(a) {{
                     "background:rgba(245,158,11,0.12);border:1px solid var(--warn);"
                     'border-radius:8px;font-weight:600;color:var(--warn)">'
                     "&#9888; Template copy &mdash; the AI writer was unavailable, so this "
-                    "artefact fell back to a deterministic draft. Review before posting."
+                    "piece fell back to a deterministic draft. Review before posting."
                     "</div>"
                 )
 
-            # Caption editor blocks &mdash; one per key
+            # Caption editor blocks &mdash; one per key. J-4: every block gets
+            # a Copy button (copyText) so a finished piece is one click from
+            # the clipboard instead of a select-all-and-copy dead end.
             caption_blocks = ""
             for cap_key, cap_val in captions.items():
                 if cap_key == "x_thread" and isinstance(cap_val, list):
@@ -47219,13 +47221,18 @@ function mhCertificatesJob(a) {{
                     for ti, post in enumerate(cap_val):
                         post_chars = len(post or "")
                         cls = "good" if post_chars <= 280 else "bad"
+                        _ta_id = f"ti-cap-{art_idx}-t{ti}"
                         sub += (
                             f'<div style="margin-bottom:10px">'
                             f'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">'
                             f'<span class="muted" style="font-size:11px">Post {ti + 1}</span>'
+                            f'<span style="display:inline-flex;gap:6px;align-items:center">'
+                            f'<button class="btn secondary" style="font-size:10px;padding:2px 8px" '
+                            f"onclick=\"copyText(this,'{_ta_id}')\">Copy</button>"
                             f'<span class="tag {cls}" style="font-size:10px">{post_chars}/280</span>'
+                            f"</span>"
                             f"</div>"
-                            f'<textarea class="ti-cap" data-artefact="{art_idx}" '
+                            f'<textarea class="ti-cap" id="{_ta_id}" data-artefact="{art_idx}" '
                             f'data-thread="{ti}" '
                             f'style="width:100%;min-height:60px;font-size:13px;'
                             f"padding:8px;border:1px solid var(--border);border-radius:6px;"
@@ -47253,12 +47260,18 @@ function mhCertificatesJob(a) {{
                 if cap_key == "instagram":
                     cls = "good" if char_count <= 2200 else "bad"
                     cap_limit_html = f'<span class="tag {cls}" style="font-size:10px;margin-left:8px">{char_count}/2200</span>'
+                _key_slug = re.sub(r"[^A-Za-z0-9_-]", "-", cap_key)
+                _ta_id = f"ti-cap-{art_idx}-{_key_slug}"
                 caption_blocks += (
                     '<div style="margin-bottom:14px">'
+                    f'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">'
                     f'<div style="font-size:12px;font-weight:600;text-transform:uppercase;'
-                    f'color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:6px">'
+                    f'color:var(--ink-muted);letter-spacing:0.5px">'
                     f"{_h(key_label)}{cap_limit_html}</div>"
-                    f'<textarea class="ti-cap" data-artefact="{art_idx}" '
+                    f'<button class="btn secondary" style="font-size:10px;padding:2px 8px" '
+                    f"onclick=\"copyText(this,'{_ta_id}')\">Copy</button>"
+                    f"</div>"
+                    f'<textarea class="ti-cap" id="{_ta_id}" data-artefact="{art_idx}" '
                     f'data-key="{_h(cap_key)}" '
                     f'style="width:100%;min-height:80px;font-size:13px;'
                     f"padding:10px;border:1px solid var(--border);border-radius:6px;"
@@ -47282,17 +47295,26 @@ function mhCertificatesJob(a) {{
                     )
                 sub_cards_html = f'<div style="margin-bottom:12px">{rows}</div>'
 
-            # Newsletter HTML preview
+            # Newsletter HTML preview + download (J-4: the piece's HTML was
+            # view-only — a hidden textarea carries the exact source so
+            # "Download HTML" hands over a ready-to-send file).
             html_preview_html = ""
+            html_download_btn = ""
             if html_block:
                 # Display rendered HTML in a sandboxed-ish preview area.
                 # The templates module HTML-escapes the body, so it's safe here.
                 html_preview_html = (
+                    f'<textarea id="ti-html-{art_idx}" style="display:none">{_h(html_block)}</textarea>'
                     '<details style="margin-top:8px">'
                     '<summary style="cursor:pointer;font-size:12px;color:var(--accent)">View HTML preview</summary>'
                     f'<div style="margin-top:10px;padding:14px;border:1px dashed var(--border);'
                     f'border-radius:8px;background:rgba(255,255,255,0.02)">{html_block}</div>'
                     "</details>"
+                )
+                html_download_btn = (
+                    f'<button class="btn secondary" style="font-size:12px;padding:6px 14px" '
+                    f'onclick="tiDownloadHtml({art_idx})" '
+                    f'title="Download this piece as a ready-to-send .html file">Download HTML</button>'
                 )
 
             notes_html = ""
@@ -47300,7 +47322,7 @@ function mhCertificatesJob(a) {{
                 lis = "".join(f"<li>{_h(n)}</li>" for n in notes_list)
                 notes_html = (
                     '<details style="margin-top:8px">'
-                    '<summary style="cursor:pointer;font-size:12px;color:var(--ink-muted)">Why this artefact?</summary>'
+                    '<summary style="cursor:pointer;font-size:12px;color:var(--ink-muted)">Why this piece?</summary>'
                     f'<ul style="margin:8px 0 0 0;font-size:12px;color:var(--ink-dim)">{lis}</ul>'
                     "</details>"
                 )
@@ -47318,6 +47340,7 @@ function mhCertificatesJob(a) {{
   <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
     <button class="btn" style="font-size:12px;padding:6px 14px"
             onclick="tiSaveArtefact({art_idx})">Save edits</button>
+    {html_download_btn}
     <span class="ti-status" data-artefact="{art_idx}" style="font-size:11px;color:var(--ink-muted)"></span>
   </div>
   {html_preview_html}
@@ -47325,21 +47348,22 @@ function mhCertificatesJob(a) {{
 </div>"""
 
         if not cards_html:
-            cards_html = '<div class="empty">No artefacts generated.</div>'
+            cards_html = '<div class="empty">No pieces generated.</div>'
 
         body = f"""
 <section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">
   <span class="mh-hero-eyebrow">Repurpose pack</span>
   <h1><span class="mh-shiny-text">{meet_name}</span></h1>
   <div class="strap" style="margin-top:var(--sp-3)">
-    <span>{len(artefacts):02d} {"artefact" if len(artefacts) == 1 else "artefacts"}</span><span class="sep">·</span>
+    <span>{len(artefacts):02d} {"piece" if len(artefacts) == 1 else "pieces"}</span><span class="sep">·</span>
     <span>generated {gen_at}</span><span class="sep">/</span>
     <a href="{_review_url}" style="color:var(--ink-muted);text-decoration:none">← Back to review</a>
   </div>
 </section>
 
-<div style="margin-bottom:var(--sp-5);display:flex;gap:var(--sp-3);flex-wrap:wrap">
-  <button class="btn secondary" onclick="tiRegenerate()">&#x21BA; Regenerate pack</button>
+<div style="margin-bottom:var(--sp-5);display:flex;gap:var(--sp-3);flex-wrap:wrap;align-items:center">
+  <button class="btn secondary" onclick="tiRegenerate(this)">&#x21BA; Regenerate pack</button>
+  <span id="ti-regen-status" role="status" aria-live="polite" style="font-size:12px;color:var(--ink-muted)"></span>
 </div>
 
 {skipped_html}
@@ -47349,6 +47373,40 @@ function mhCertificatesJob(a) {{
 const TI_EDIT_API = {json.dumps(_edit_api)};
 const TI_REGEN_API = {json.dumps(_api_url)};
 const TI_REVIEW_URL = {json.dumps(_review_url)};
+
+// J-4: one-click copy for each piece's caption (same behaviour as the
+// grouped page's copy buttons).
+function copyText(btn, taId) {{
+  var ta = document.getElementById(taId);
+  if (!ta) {{ btn.textContent = 'Error'; return; }}
+  var text = ta.value;
+  var origText = btn.textContent;
+  var done = function(ok) {{ btn.textContent = ok ? 'Copied!' : 'Copy failed'; setTimeout(function(){{ btn.textContent = origText; }}, 1800); }};
+  if (navigator.clipboard && window.isSecureContext) {{
+    navigator.clipboard.writeText(text).then(function(){{ done(true); }}).catch(function(){{ fallback(); }});
+  }} else {{ fallback(); }}
+  function fallback() {{
+    var t = document.createElement('textarea');
+    t.value = text; t.style.position = 'fixed'; t.style.left = '-9999px';
+    document.body.appendChild(t); t.focus(); t.select();
+    try {{ var ok = document.execCommand('copy'); done(ok); }} catch(e) {{ done(false); }}
+    document.body.removeChild(t);
+  }}
+}}
+
+// J-4: download a piece's HTML (the newsletter) as a ready-to-send file.
+// The hidden textarea carries the exact source the engine produced.
+function tiDownloadHtml(idx) {{
+  var ta = document.getElementById('ti-html-' + idx);
+  if (!ta) return;
+  var blob = new Blob([ta.value], {{ type: 'text/html' }});
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'repurpose-pack-newsletter.html';
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(function() {{ URL.revokeObjectURL(a.href); a.remove(); }}, 400);
+}}
 
 function tiSaveArtefact(idx) {{
   const root = document.querySelector('.ti-artefact[data-artefact-index="' + idx + '"]');
@@ -47377,25 +47435,44 @@ function tiSaveArtefact(idx) {{
   }}).catch(function() {{ status.textContent = 'Error saving.'; }});
 }}
 
-function tiRegenerate() {{
-  if (!confirm('Generate a fresh Turn-Into pack? The current pack is preserved.')) return;
-  fetch(TI_REGEN_API, {{
-    method: 'POST',
-    headers: {{ 'Content-Type': 'application/json' }},
-    body: JSON.stringify({{}}),
-  }}).then(r => r.json()).then(function(j) {{
-    if (j && j.pack_url) {{
-      window.location.href = j.pack_url;
-    }} else {{
-      alert('Regenerate failed: ' + (j && j.message ? j.message : 'unknown error'));
-    }}
-  }}).catch(function(err) {{
-    alert('Regenerate failed.');
-  }});
+// J-4: styled confirm (MH.confirm), a busy state on the button, and an
+// inline styled status/error line — no native confirm()/alert() dead ends.
+function tiRegenerate(btn) {{
+  var run = function() {{
+    var status = document.getElementById('ti-regen-status');
+    var say = function(m, bad) {{
+      if (!status) return;
+      status.textContent = m || '';
+      status.style.color = bad ? 'var(--bad)' : 'var(--ink-muted)';
+    }};
+    var origLabel = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'Regenerating\u2026';
+    say('Drafting a fresh pack with live AI \u2014 usually under a minute.');
+    fetch(TI_REGEN_API, {{
+      method: 'POST',
+      headers: {{ 'Content-Type': 'application/json' }},
+      body: JSON.stringify({{}}),
+    }}).then(r => r.json()).then(function(j) {{
+      if (j && j.pack_url) {{
+        say('Done \u2014 opening the new pack\u2026');
+        window.location.href = j.pack_url;
+        return;
+      }}
+      btn.disabled = false; btn.textContent = origLabel;
+      say('Regenerate failed: ' + ((j && (j.user_message || j.message || j.error)) || 'unknown error'), true);
+    }}).catch(function() {{
+      btn.disabled = false; btn.textContent = origLabel;
+      say('Regenerate failed: network error \u2014 try again.', true);
+    }});
+  }};
+  if (window.MH && MH.confirm) {{
+    MH.confirm({{title: 'Regenerate this pack?', body: 'A fresh Repurpose pack is drafted with live AI. The current pack is preserved.', confirmText: 'Regenerate', danger: false, onConfirm: run}});
+  }} else {{ run(); }}
 }}
 </script>
 """
-        return _layout(f"Turn-Into pack — {meet_name}", body, active="home")
+        return _layout(f"Repurpose pack — {meet_name}", body, active="home")
 
     @app.route("/pack/<run_id>/grouped")
     def content_pack_grouped(run_id):
