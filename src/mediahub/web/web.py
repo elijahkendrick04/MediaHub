@@ -31657,8 +31657,8 @@ self.addEventListener('fetch', function(e){
         if goal_opts:
             goals_add_html = (
                 '<div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">'
-                f'<select id="mh-plan-goal-type" style="flex:0 0 auto;min-width:180px">{goal_opts}</select>'
-                '<input type="text" id="mh-plan-goal-note" placeholder="why — e.g. push our new sponsor" style="flex:1;min-width:160px"/>'
+                f'<select id="mh-plan-goal-type" aria-label="Post type to push" style="flex:0 0 auto;min-width:180px">{goal_opts}</select>'
+                '<input type="text" id="mh-plan-goal-note" aria-label="Why you want to push this type" placeholder="why — e.g. push our new sponsor" style="flex:1;min-width:160px"/>'
                 '<button type="button" class="btn" onclick="mhPlanAddGoal()">Add goal</button>'
                 "</div>"
             )
@@ -31720,9 +31720,9 @@ self.addEventListener('fetch', function(e){
       <label style="font-weight:600">Upcoming events</label>
       <div id="mh-plan-events">{events_rows}</div>
       <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">
-        <input type="date" id="mh-plan-ev-date" style="flex:0 0 auto"/>
-        <input type="text" id="mh-plan-ev-name" placeholder="e.g. County Championships" style="flex:1;min-width:140px"/>
-        <input type="text" id="mh-plan-ev-venue" placeholder="venue (optional)" style="flex:1;min-width:120px"/>
+        <input type="date" id="mh-plan-ev-date" aria-label="Event date" style="flex:0 0 auto"/>
+        <input type="text" id="mh-plan-ev-name" aria-label="Event name" placeholder="e.g. County Championships" style="flex:1;min-width:140px"/>
+        <input type="text" id="mh-plan-ev-venue" aria-label="Event venue (optional)" placeholder="venue (optional)" style="flex:1;min-width:120px"/>
         <button type="button" class="btn" onclick="mhPlanAddEvent()">Add</button>
       </div>
     </div>
@@ -32084,12 +32084,37 @@ function mhPlanGenerate(btn) {{
                     else ""
                 )
                 draft_url = url_for("stub_pack_view", pack_id=e.ref)
+                # I-1 parity: HTML5 drag never fires from touch and the chip isn't
+                # focusable, so a planned chip also carries a non-drag date field
+                # (reschedule) + an unschedule control — the same affordance
+                # _rail_card gives unscheduled drafts. mhCalPlanInput / mhCalUnplan →
+                # mhCalSchedule + the schedule endpoint already handle move + clear;
+                # only this UI was missing on planned chips, so touch/keyboard users
+                # could schedule but never reschedule or unschedule.
+                reschedule = (
+                    f'<input type="date" class="mh-cal-plan-date" data-pack="{_h(e.ref)}" '
+                    f'value="{_h(e.date)}" aria-label="Move {_h(e.title)} to another day" '
+                    'onchange="mhCalPlanInput(this)" onclick="event.stopPropagation()" '
+                    'style="margin-top:5px;width:100%;font-size:11px;padding:2px 5px;'
+                    "border:1px solid var(--border);border-radius:6px;background:var(--panel);"
+                    'color:inherit">'
+                )
+                unplan = (
+                    f'<button type="button" class="mh-cal-unplan" data-pack="{_h(e.ref)}" '
+                    f'aria-label="Unschedule {_h(e.title)}" '
+                    'title="Unschedule — send back to the side rail" '
+                    'onclick="mhCalUnplan(event, this)" '
+                    'style="margin-top:3px;font-size:10.5px;background:none;border:none;'
+                    'color:var(--ink-muted);text-decoration:underline;cursor:pointer;padding:0">'
+                    "unschedule</button>"
+                )
                 return (
                     f'<div class="mh-cal-draft" draggable="true" data-pack="{_h(e.ref)}" '
                     f'data-href="{_h(draft_url)}" '
-                    f'title="{_h(e.title)} — drag to a day to move, or to the side rail to unschedule">'
+                    f'title="{_h(e.title)} — drag to a day to move, or use the date field to reschedule">'
                     f'<span class="mh-cal-draft-dot"></span>'
-                    f'<span class="mh-cal-draft-t">{_h(e.title)}{ch_html}{warn}</span></div>'
+                    f'<span class="mh-cal-draft-t">{_h(e.title)}{ch_html}{warn}</span>'
+                    f"{reschedule}{unplan}</div>"
                 )
             fg, bg = _kind_style.get(e.kind, ("var(--ink-dim)", "rgba(182,178,166,.10)"))
             note = e.meta.get("note") or e.meta.get("venue") or ""
@@ -32228,6 +32253,12 @@ function mhCalStatus(msg, warn) {{
 function mhCalPlanInput(el) {{
   if (el && el.value) mhCalSchedule(el.getAttribute('data-pack'), el.value);
 }}
+// I-1 parity: unschedule a planned chip (touch / keyboard) without dragging it
+// back to the rail. stopPropagation so the chip's open-draft click never fires.
+function mhCalUnplan(e, btn) {{
+  if (e) e.stopPropagation();
+  if (btn) mhCalSchedule(btn.getAttribute('data-pack'), '');
+}}
 function mhCalSchedule(packId, date) {{
   if (!packId) return;
   mhCalStatus(date ? 'Scheduling…' : 'Unscheduling…', false);
@@ -32347,9 +32378,13 @@ document.addEventListener('click', function (e) {{
         from mediahub.channel_preview import preview_card
 
         body = request.get_json(silent=True) or {}
+        # Coerce hashtags to a real list: a truthy non-list (a number/bool) would
+        # otherwise reach preview_card's ``len([h for h in hashtags ...])`` and raise
+        # a TypeError that 500s the endpoint. Only a genuine list carries hashtags.
+        raw_tags = body.get("hashtags")
         card = {
             "caption": str(body.get("caption") or ""),
-            "hashtags": body.get("hashtags") or [],
+            "hashtags": raw_tags if isinstance(raw_tags, list) else [],
             "platform": body.get("platform_label") or "",
         }
         pv = preview_card(
@@ -32649,7 +32684,7 @@ document.addEventListener('click', function (e) {{
             cards_html = "".join(_card_html(c) for c in cards)
             add_form = (
                 '<div class="mh-bd-add">'
-                f'<input type="text" class="mh-bd-add-title" placeholder="New idea…" '
+                f'<input type="text" class="mh-bd-add-title" aria-label="New idea" placeholder="New idea…" '
                 f"onkeydown=\"if(event.key==='Enter')mhBoardAdd(this)\"/>"
                 '<button type="button" class="mh-bd-add-btn" onclick="mhBoardAdd(this)">Add</button>'
                 '<span class="mh-bd-add-hint">or press Enter to add</span>'
@@ -32746,7 +32781,28 @@ function mhBoardMove(sel) {{
         body = request.get_json(silent=True) or {}
         metrics = {k: body.get(k, 0) for k in METRIC_KEYS}
         if not any(metrics.values()):
-            metrics = {k: (body.get("metrics") or {}).get(k, 0) for k in METRIC_KEYS}
+            # Fall back to a nested {"metrics": {...}} object (what the page posts).
+            # Guard the type: a truthy non-dict (a number/string/list) made the old
+            # ``(... or {}).get`` raise AttributeError and 500 the route.
+            nested = body.get("metrics")
+            nested = nested if isinstance(nested, dict) else {}
+            metrics = {k: nested.get(k, 0) for k in METRIC_KEYS}
+
+        # Honour the "…and at least one metric" the error message promises: a
+        # submission with no metric > 0 (the form's all-zero default, or a
+        # negative-only value) carries no measurable performance. Reject it here
+        # so a data-free row never enters the store, is never counted toward
+        # MIN_SAMPLES, and never fabricates a "% below your average" planner signal.
+        def _positive(v: object) -> bool:
+            try:
+                return int(v) > 0
+            except (TypeError, ValueError):
+                return False
+
+        if not any(_positive(v) for v in metrics.values()):
+            return jsonify(
+                {"error": "Pick a post type and a valid date (and at least one metric)."}
+            ), 400
         rec = record_metric(
             pid,
             str(body.get("post_type") or ""),

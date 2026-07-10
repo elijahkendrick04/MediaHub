@@ -109,7 +109,13 @@ def load_board(org_id: str, *, data_dir: Optional[Path] = None) -> list[IdeaCard
         return []
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    except (OSError, ValueError):
+        # "missing/corrupt boards load empty" (per the docstring). ValueError
+        # covers json.JSONDecodeError (malformed JSON) and UnicodeDecodeError
+        # (a non-UTF-8 file on the durable disk) — both ValueError subclasses,
+        # neither an OSError, so the narrower (OSError, JSONDecodeError) used to
+        # let a non-UTF-8 board escape and 500 /plan/board and all board CRUD
+        # (QA-016; matches inputs.py / planner.py / analytics.store).
         return []
     cards = raw.get("cards") if isinstance(raw, dict) else None
     if not isinstance(cards, list):
