@@ -61,7 +61,6 @@ _RENDER_FUNCS = {
     "generateReelBatch": "function generateReelBatch(",
     "regenerateGraphic": "function regenerateGraphic(",
     "mhGen (draft panel)": "function mhGen(panel)",
-    "generateReelGrouped": "function generateReelGrouped(",
     # J-1: the Video Studio's shared background-job helper (render / make-clip /
     # direct-reel / stabilise all drive the same branded controller through it).
     "runVideoJob (video studio)": "function runVideoJob(",
@@ -270,10 +269,13 @@ def test_every_render_page_ships_the_controller(page_html):
 
 
 def test_grouped_pack_wires_reel_through_controller(page_html):
-    # The grouped builder renders the meet-reel surface for this run — it must
-    # kick the controller, not a bare spinner.
+    # G-8: the grouped page's drifted copy of the reel generator is gone — the
+    # meet-reel card links to the shared composer on the Content builder, and
+    # the page's remaining render surface (per-card motion, via the shared
+    # _MOTION_CLIENT_JS block) still drives the controller, not a bare spinner.
     grouped = page_html["/pack/r1/grouped"]
-    assert "function generateReelGrouped(" in grouped
+    assert "function generateReelGrouped(" not in grouped
+    assert "#mh-reel-composer" in grouped
     assert "MH.renderProgress(panel" in grouped
     # No page in the flow paints the old 24px in-panel spinner any more.
     for url, html in page_html.items():

@@ -47390,7 +47390,6 @@ function tiRegenerate() {{
         )
         _review_url = url_for("review", run_id=run_id)
         _pack_url = url_for("content_pack", run_id=run_id)
-        _reel_url = url_for("api_run_reel", run_id=run_id)
         _newsletter_html_url = url_for("api_run_newsletter", run_id=run_id)
         _newsletter_text_url = _newsletter_html_url + "?format=text"
         _newsletter_zip_url = _newsletter_html_url + "?format=zip"
@@ -47681,12 +47680,11 @@ function tiRegenerate() {{
 <div class="card" style="margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
   <div>
     <div style="font-size:13px;font-weight:700">Meet reel</div>
-    <div style="font-size:12px;color:var(--ink-dim);margin-top:2px">Stitch the top 3 cards into a 15-second branded MP4 reel.</div>
+    <div style="font-size:12px;color:var(--ink-dim);margin-top:2px">Pick up to 5 moments, set the rhythm, and render a branded MP4 reel &mdash; the reel composer works from this meet&#39;s approved cards on the Content builder.</div>
   </div>
-  <button class="btn" style="font-size:12px;padding:6px 14px;background:var(--medal);color:var(--medal-ink);border:none"
-          onclick="generateReelGrouped(this, {repr(_reel_url)})">&#x25B6; Generate reel from this meet</button>
+  <a class="btn" style="font-size:12px;padding:6px 14px;background:var(--medal);color:var(--medal-ink);border:none"
+     href="{_pack_url}#mh-reel-composer">&#x25B6; Open the reel composer</a>
 </div>
-<div id="reel-panel-grouped" style="display:none;margin-bottom:14px;padding:14px;background:rgba(244,213,141,0.04);border:1px solid var(--border);border-radius:8px"></div>
 
 <div class="card" style="margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
   <div>
@@ -47737,74 +47735,6 @@ function copyWhyCard(btn, taId) {{ copyText(btn, taId); }}
 function _attrEsc(jsExpr) {{
   return '"' + jsExpr.replace(/&/g, '&amp;').replace(/"/g, '&quot;') + '"';
 }}
-function generateReelGrouped(btn, reelUrl, fmt) {{
-  fmt = fmt || 'story';
-  var dims = {{story: '1080&times;1920', square: '1080&times;1080', landscape: '1920&times;1080'}};
-  var panel = document.getElementById('reel-panel-grouped');
-  if (!panel) return;
-  panel.style.display = '';
-  var origLabel = btn.textContent;
-  btn.disabled = true;
-  btn.textContent = 'Rendering reel\u2026';
-  var prog = MH.renderProgress(panel, {{label: 'Producing your ' + fmt + ' reel', sub: 'Top ranked moments \u2014 up to 90 seconds the first time', expectedMs: 60000, accent: 'medal'}});
-  var fail = function(msg) {{
-    prog.stop();
-    btn.disabled = false; btn.textContent = origLabel;
-    panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">Reel render error: ' + msg + '</div>';
-  }};
-  var success = function(videoUrl) {{
-    prog.complete(function(){{
-    btn.disabled = false; btn.textContent = origLabel;
-    var chips = '';
-    ['story', 'portrait', 'square', 'landscape'].forEach(function(f) {{
-      var label = f.charAt(0).toUpperCase() + f.slice(1);
-      if (f === fmt) {{
-        chips += '<span class="btn secondary" style="font-size:12px;padding:4px 12px;opacity:0.55;pointer-events:none">' + label + ' &#x2713;</span>';
-      }} else {{
-        chips += '<button class="btn secondary" style="font-size:12px;padding:4px 12px" onclick=' +
-          _attrEsc('generateReelGrouped(this, ' + JSON.stringify(reelUrl) + ', ' + JSON.stringify(f) + ')') + '>' + label + '</button>';
-      }}
-    }});
-    panel.innerHTML =
-      '<div style="display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap">' +
-        '<div style="' + (fmt === 'landscape' ? 'flex:0 0 min(320px,100%);max-width:340px' : 'flex:0 0 min(220px,100%);max-width:240px') + '">' +
-          '<video src="' + videoUrl + '" controls playsinline style="width:100%;border-radius:6px;border:1px solid var(--border);background:#000"></video>' +
-        '</div>' +
-        '<div style="flex:1;min-width:min(200px,100%)">' +
-          '<div style="font-size:11px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:6px">Meet reel &middot; ' + (dims[fmt] || '') + '</div>' +
-          '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px">' + chips + '</div>' +
-          '<a class="btn secondary" href="' + videoUrl + '" download="meet-reel-' + fmt + '.mp4" style="font-size:12px;padding:4px 12px">Download MP4</a>' +
-        '</div>' +
-      '</div>';
-    }});
-  }};
-  fetch(reelUrl + '-job' + (fmt !== 'story' ? '?format=' + encodeURIComponent(fmt) : ''), {{method:'POST'}})
-    .then(function(r) {{ return r.json().then(function(j){{ return {{status: r.status, body: j}}; }}); }})
-    .then(function(res) {{
-      if (res.status !== 202 || !res.body || !res.body.poll_url) {{
-        fail((res.body && (res.body.user_message || res.body.detail || res.body.error)) || 'could not start the render');
-        return;
-      }}
-      var tries = 0;
-      var poll = function() {{
-        tries++;
-        if (tries > 80) {{ fail('timed out waiting for the render \u2014 try again'); return; }}
-        fetch(res.body.poll_url)
-          .then(function(r){{ return r.json(); }})
-          .then(function(j) {{
-            if (j.status === 'done' && j.video_url) {{ success(j.video_url); return; }}
-            if (j.status === 'error' || (j.error && j.status !== 'running')) {{
-              fail(j.user_message || j.error || 'render failed'); return;
-            }}
-            setTimeout(poll, 3000);
-          }})
-          .catch(function() {{ setTimeout(poll, 3000); }});
-      }};
-      setTimeout(poll, 3000);
-    }})
-    .catch(function(err) {{ fail('Network error: ' + err); }});
-}}
-
 // Phase 1.4 — sort the cards within one pack section by a data
 // attribute on each .mh-pack-card. Toggles between desc / asc on
 // repeat clicks of the same key. The DOM is reordered in place,
