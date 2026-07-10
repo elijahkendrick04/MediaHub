@@ -36084,15 +36084,21 @@ function copySpotlightCaption(btn) {{
         from mediahub.free_text_chat.agent import normalise_hashtags
 
         hashtags = normalise_hashtags(brief.get("hashtags"))
+        # The chat brief is the propose_brief tool input verbatim (unconstrained
+        # schema), so headline/body/visual_concept may arrive as a non-string
+        # (a list of lines, a nested object, a number). Coerce to str before the
+        # caption join — a raw list headline used to raise a TypeError that 500'd
+        # accept/generate *and* bricked the chat (the brief was already frozen,
+        # so every retry hit the same crash).
+        _headline = str(brief.get("headline") or "").strip()
+        _body = str(brief.get("body") or "").strip()
         card = {
-            "platform": brief.get("platform") or "Instagram",
-            "caption": "\n\n".join(
-                [p for p in [brief.get("headline", ""), brief.get("body", "")] if p]
-            ).strip(),
+            "platform": str(brief.get("platform") or "Instagram").strip() or "Instagram",
+            "caption": "\n\n".join([p for p in [_headline, _body] if p]).strip(),
             "hashtags": hashtags,
             # D-25: prompt-led chat draft — no fabricated confidence badge.
             "confidence": None,
-            "notes": brief.get("visual_concept", "") or "",
+            "notes": str(brief.get("visual_concept") or "").strip(),
             "status": "queue",
         }
         pack_form_data = {
