@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-07-11 · `7c5dce753` · Usability audit — the buildable Section-A tail (42 findings) (#1143)
+**Last updated:** 2026-07-11 · `af5ee1c2b` · Merge pull request #1162 from elijahkendrick04/claude/video-studio-audit-bkhvvu
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1226,6 +1226,8 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-07-11 | `c59da68d3` | [video-studio] ruff-format the F-14 _shape tuple (CI hygiene hook) |
+| 2026-07-11 | `4f0ad506b` | [video-studio] fix logged audit caveats (F-08..F-11, F-13..F-15) |
 | 2026-07-11 | `c82dd1030` | fix(review,configure,audio): server-correctness review findings (SRV-1..4) |
 | 2026-07-11 | `b00803d69` | [documents] unblock CI: migrate one hardcoded hex to var(--bg) (brand-budget) |
 | 2026-07-11 | `94c90c383` | [documents] close audit caveats: autoplay hand-off, data: image export, plain-hyphen copy |
@@ -1236,6 +1238,4 @@ list and the auto table below, not here.
 | 2026-07-11 | `6eb7eeeb6` | [team-members] fix logged caveats: atomic last-owner guard, snapshot reads, sole-owner controls, cop |
 | 2026-07-11 | `5d75efef7` | fix(pack): escape the motion-manifest fields in _loadMotionWhy (JS-5) |
 | 2026-07-11 | `b75d3e652` | fix(pack): job start/resume races in the reel + motion client (JS-4, JS-3, CON-6) |
-| 2026-07-11 | `e9a5ad34e` | fix(review): paginated review page stops asserting falsehoods (JS-1, JS-2) |
-| 2026-07-11 | `9609e5b8e` | fix(jobs): torn-write races in the job store and the sponsor-variant sidecar (CON-4, CON-5) |
 <!-- /ROADMAP:ACTIVITY -->
