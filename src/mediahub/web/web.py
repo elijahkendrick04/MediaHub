@@ -19389,6 +19389,10 @@ _DOC_PRESENT_CONSOLE = r"""
   </div>
   <div>
     <div class="card"><strong>Phone remote</strong>
+      <!-- B-8: QR of the /remote/<code> deep link — scan and the phone is
+           connected, no hand-typing. Empty when the QR backend is absent, so
+           the text-only pairing info below stands on its own. -->
+      __REMOTE_QR_SVG__
       <p class="dim" style="font-size:13px;margin:6px 0">Open <b>__REMOTE_URL__</b> and enter:</p>
       <div style="font-size:32px;letter-spacing:6px;font-weight:700;text-align:center">__CODE__</div>
       <p style="font-size:12px;margin-top:10px"><a href="__AUDIENCE_URL__" target="_blank">Open audience view ↗</a></p>
@@ -66228,6 +66232,30 @@ voice, and queues them for one-click approval.</p>
         notes = json.dumps([s["notes"] for s in view["slides"]]).replace("<", "\\u003c")
         titles = json.dumps([s["title"] for s in view["slides"]]).replace("<", "\\u003c")
         remote_url = url_for("remote_landing", _external=True)
+        # B-8: pair the phone by QR — encode the absolute /remote/<code> deep
+        # link (a valid code always connects, J-14) so a scan connects the
+        # remote with zero typing; a tappable link of the same URL covers a
+        # console open on a tablet. No QR backend → the block stays empty and
+        # the text-only pairing info in the template stands on its own.
+        remote_link_url = url_for("remote_control", code=session.pairing_code, _external=True)
+        from mediahub.web import qr as _qr
+
+        qr_block = ""
+        if _qr.is_available():
+            try:
+                svg = _qr.qr_svg(remote_link_url, scale=4, border=3)
+                qr_block = (
+                    '<div id="remote-qr" style="text-align:center;margin:8px 0">'
+                    '<div style="display:inline-block;line-height:0;border-radius:8px;overflow:hidden">'
+                    + svg
+                    + "</div>"
+                    '<p class="dim" style="font-size:12px;margin:6px 0 0">Scan with the phone camera to connect, '
+                    f'or tap <a href="{_h(remote_link_url)}" target="_blank" rel="noopener" '
+                    f'style="word-break:break-all">{_h(remote_link_url)}</a></p>'
+                    "</div>"
+                )
+            except Exception:
+                qr_block = ""
         body = (
             _DOC_PRESENT_CONSOLE.replace("__CODE__", _h(session.pairing_code))
             .replace("__TOTAL__", str(len(spec.sections)))
@@ -66240,6 +66268,7 @@ voice, and queues them for one-click approval.</p>
             .replace("__AUDIENCE_URL__", url_for("present_audience", session_id=session.session_id))
             .replace("__DOC_URL__", url_for("document_view", doc_id=doc_id))
             .replace("__REMOTE_URL__", _h(remote_url))
+            .replace("__REMOTE_QR_SVG__", qr_block)
             .replace("__NOTES__", notes)
             .replace("__TITLES__", titles)
         )
