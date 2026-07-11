@@ -28,7 +28,7 @@ absorbed it, **delete this file** (it's superseded the moment you start).
 - **J-1 (large high) + H-19**: Video Studio render / make-clip / direct-reel /
   stabilise converted to disk-backed background jobs (see "Reusable
   infrastructure" below). Adversarially reviewed; 3 confirmed JS findings fixed.
-- **H-5 (large high)**: structured content editor for microsites / newsletters /
+- **H-5 (large high)**: structured content editor for newsletters /
   documents (new module `src/mediahub/web/spec_editor.py`).
 - **Contained tail**: J-12, H-8, E-8, J-11.
 - Also removed the previous hand-off doc; updated tests that pinned
@@ -176,9 +176,8 @@ untouched.
   (`render_structured(spec.to_dict(), surface)`) rendered above the raw-JSON
   hatch (relabel the hatch "Advanced — raw spec (JSON)"). Every emitted id/value
   goes through `_h`.
-- Wired surfaces: site (`sites_ui.render_editor` + `api_site_content_edit`),
-  newsletter (`newsletter_view` + `api_newsletter_content_edit`), document
-  (`document_view` + `api_document_content_edit`).
+- Wired surfaces: newsletter (`newsletter_view` + `api_newsletter_content_edit`),
+  document (`document_view` + `api_document_content_edit`).
 
 ### 3. `sign_in_error` flash channel
 The sign-in picker pops `session["sign_in_error"]` and renders it on **both** the
@@ -220,8 +219,7 @@ Highest-leverage first, roughly:
   pagination (huge meets) / **J-4** repurpose-pack has no copy/download + `alert()`.
 - **G-1, G-2, G-6, G-7, G-8, G-10, G-11, G-14** consistency (G-14 = standardise
   the many ad-hoc busy-button states onto one `MH.btnState`/`mhBusy` helper).
-- **H-9…H-18, H-20** forms (H-20 = 2FA QR + recovery codes; the `mediahub.sites.qr`
-  module already exists).
+- **H-9…H-18, H-20** forms (H-20 = 2FA QR + recovery codes).
 - **E-5, E-10…E-14** destructive/data-safety confirms & impact previews.
 - **C-10, C-11, C-12, C-15, C-17, C-20** discoverability/IA.
 - **D-13, D-32** feedback tail.
@@ -266,5 +264,5 @@ python -m pytest tests/test_spec_editor.py -q        # fast smoke of the H-5 eng
 
 No LLM key in the sandbox → AI surfaces honest-error
 (`ClaudeUnavailableError`/`ProviderNotConfigured`); that's expected. `_v8_ok`
-gates the media/video engine; `_email_design_ok`/`_documents_ok`/`_sites_ok`
+gates the media/video engine; `_email_design_ok`/`_documents_ok`
 gate those surfaces — tests skip when a flag is off.

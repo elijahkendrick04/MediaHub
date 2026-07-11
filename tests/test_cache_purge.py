@@ -128,9 +128,9 @@ def test_purge_clears_graphic_render_cache_on_disk(monkeypatch, tmp_path):
 
 
 def test_purge_covers_newer_cache_roots(monkeypatch, tmp_path):
-    """document_cache, site_cache, asr_cache, stock_thumb_cache, export_cache
-    and charts_cache are all re-derivable and must be enrolled in the
-    site-wide purge.
+    """document_cache, asr_cache, stock_thumb_cache, export_cache and
+    charts_cache are all re-derivable and must be enrolled in the site-wide
+    purge.
 
     Regression: these roots were added after the purge shipped and were
     silently skipped (and under-counted on the settings card). export_cache
@@ -144,7 +144,6 @@ def test_purge_covers_newer_cache_roots(monkeypatch, tmp_path):
     labels = {label for label, _ in cache_roots()}
     expected = {
         "document_cache",
-        "site_cache",
         "asr_cache",
         "stock_thumb_cache",
         "export_cache",

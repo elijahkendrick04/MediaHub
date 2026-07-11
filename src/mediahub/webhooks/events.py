@@ -1,6 +1,6 @@
 """mediahub/webhooks/events.py — the webhook event catalogue + payloads.
 
-The four events MediaHub emits, and the whitelisted payload each carries. Like
+The three events MediaHub emits, and the whitelisted payload each carries. Like
 the API scopes, this catalogue is the single source of truth: the registry, the
 delivery layer, the management UI, and the docs all read it from here.
 
@@ -19,14 +19,12 @@ from datetime import datetime, timezone
 EVENT_RUN_FINISHED = "run.finished"
 EVENT_CARD_APPROVED = "card.approved"
 EVENT_PACK_EXPORTED = "pack.exported"
-EVENT_FORM_SUBMITTED = "form.submitted"
 
 # stable name -> human label (shown when picking events in the UI / docs)
 EVENTS: dict[str, str] = {
     EVENT_RUN_FINISHED: "A pipeline run finished (cards are ready to review)",
     EVENT_CARD_APPROVED: "A card was approved",
     EVENT_PACK_EXPORTED: "A content pack was exported",
-    EVENT_FORM_SUBMITTED: "A form was submitted",
 }
 
 ALL_EVENTS: tuple[str, ...] = tuple(EVENTS.keys())
@@ -88,21 +86,10 @@ def pack_exported(profile_id: str, run_id: str, *, format: str = "all-formats") 
     )
 
 
-def form_submitted(
-    profile_id: str, form_id: str, *, submission_id: str = "", site_id: str = ""
-) -> dict:
-    return envelope(
-        EVENT_FORM_SUBMITTED,
-        profile_id,
-        {"form_id": form_id, "submission_id": submission_id, "site_id": site_id},
-    )
-
-
 __all__ = [
     "EVENT_RUN_FINISHED",
     "EVENT_CARD_APPROVED",
     "EVENT_PACK_EXPORTED",
-    "EVENT_FORM_SUBMITTED",
     "EVENTS",
     "ALL_EVENTS",
     "is_known",
@@ -112,5 +99,4 @@ __all__ = [
     "run_finished",
     "card_approved",
     "pack_exported",
-    "form_submitted",
 ]

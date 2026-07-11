@@ -5,7 +5,7 @@ easy way to turn **this month's good news** (the personal bests, the medals, the
 spotlights, the next few fixtures, a thank-you to the sponsor) into a smart, branded
 newsletter without rebuilding it by hand. This folder is that composer.
 
-Think of it like building with LEGO (the same way the cards, documents and microsites
+Think of it like building with LEGO (the same way the cards and documents
 work):
 
 - A **newsletter** is made of **sections**.

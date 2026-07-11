@@ -146,7 +146,7 @@ RUNS_DIR divergence (F1) is latent in prod but live under any custom `RUNS_DIR`.
 - **Fix (blast-radius-local, `public_wall.py`):** when `_load_run_json(run_id)` returns `None`, **skip the
   whole run** in `wall_cards` and return `None` from `wall_image_path` — do not proceed with empty
   metadata. Genuinely athlete-less cards (team/recap) whose snapshot *loads fine* are unaffected. The
-  shared `rendered_card_png` (used by share-links/newsletters/microsites, out of this feature's scope) was
+  shared `rendered_card_png` (used by share-links/newsletters, out of this feature's scope) was
   left untouched and its equivalent gap is logged in §8 for those features.
 - **Test:** `test_corrupt_run_json_fails_closed` — the corrupt run's card is absent from the wall and its
   PNG route 404s, while the public page still renders 200.
@@ -292,15 +292,14 @@ so cross-session merge risk is low, but flagged here for reconciliation):
 
 No changes to base templates, shared CSS/JS, config, `requirements.txt`, or `pyproject.toml`. The three
 web.py lines pass the pinned pre-commit (`ruff` v0.8.4 + `ruff-format`). The shared `rendered_card_png`
-(consumed by share-links/newsletters/microsites) was **deliberately not** modified — see §8.
+(consumed by share-links/newsletters) was **deliberately not** modified — see §8.
 
 ---
 
 ## 8. Residual risks / cross-feature work (not attempted here)
 
 - **Shared `rendered_card_png` photo-consent gap (out of scope):** the F3 fix was applied to the wall's own
-  `wall_image_path`, but the sibling `rendered_card_png` (used by 1.18 share-links, newsletters and 1.16
-  microsites) still gates only on `blocked`, not `photo_ok`. Those surfaces have the same
+  `wall_image_path`, but the sibling `rendered_card_png` (used by 1.18 share-links and newsletters) still gates only on `blocked`, not `photo_ok`. Those surfaces have the same
   tighten-after-render photo-leak for `no_photo`/`initials_only` athletes. Left for those features' own
   audits so this change stays inside the Public Wall's blast radius; recommend the same `photo_ok` gate there.
 - **F2 upstream durability:** the wall now fails closed on an *unloadable* snapshot; a belt-and-braces upstream
