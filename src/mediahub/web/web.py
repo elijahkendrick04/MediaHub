@@ -2463,15 +2463,22 @@ def _variant_jobs_dir() -> Path:
 
 
 def _variant_job_save(job: dict) -> None:
-    """Atomically persist a job snapshot (single writer: the job thread)."""
+    """Atomically persist a job snapshot.
+
+    Two threads save the same job (the worker and its ``_job_heartbeat``),
+    so the tmp name is unique per write — a shared ``.tmp`` path let their
+    writes interleave into a torn/absent job file for a poll cycle. The tmp
+    stays in the same directory, so ``os.replace`` remains atomic."""
     job["updated_at"] = time.time()
     path = _variant_jobs_dir() / f"{job['id']}.json"
-    tmp = path.with_suffix(".tmp")
+    tmp = path.with_suffix(f".{uuid.uuid4().hex[:8]}.tmp")
     try:
         tmp.write_text(json.dumps(job), encoding="utf-8")
         os.replace(tmp, path)
     except Exception:
         log.exception("variant job %s: persist failed", str(job.get("id", ""))[:8])
+        with contextlib.suppress(OSError):
+            tmp.unlink(missing_ok=True)
 
 
 def _variant_job_load(job_id: str) -> Optional[dict]:
@@ -4350,6 +4357,10 @@ function generateMotion(btn, motionUrl, cardId, fmt) {
     if (window.MH && MH.toast) MH.toast('A motion render is already in progress for this card — hold on…', 'info', 2500);
     return;
   }
+  // JS-4: claim the panel synchronously — a double-click used to pass the
+  // guard twice while the first 202 round-trip was in flight, starting two
+  // jobs. Every terminal path overwrites (watch) or clears (_mhJobFail).
+  panel.dataset.mhWatching = '1';
   panel.style.display = '';
   var origLabel = btn.textContent;
   btn.disabled = true;
@@ -4453,6 +4464,9 @@ function mhResumeMotionJobs() {
     if (!rec || !rec.poll_url || !rec.card) return;
     var panel = document.querySelector('.motion-panel[data-motion-url="' + motionUrl + '"]');
     if (!panel || panel.dataset.mhWatching) return;
+    // JS-4: claim the panel before the async poll resolves — a click racing
+    // this resume could otherwise start a duplicate job.
+    panel.dataset.mhWatching = '1';
     var fmt = rec.fmt || 'story';
     fetch(rec.poll_url)
       .then(function(r){ return r.json(); })
@@ -4464,13 +4478,14 @@ function mhResumeMotionJobs() {
           return;
         }
         mhJobForget('motion', motionUrl);
+        delete panel.dataset.mhWatching;
         if (j.status === 'done' && j.video_url) {
           panel.style.display = '';
           _motionCache[rec.card + ':' + fmt] = j.video_url;
           mhRenderMotion(panel, motionUrl, rec.card, fmt, j.video_url);
         }
       })
-      .catch(function(){});
+      .catch(function(){ delete panel.dataset.mhWatching; });
   });
 }
 if (document.readyState === 'loading') { document.addEventListener('DOMContentLoaded', mhResumeMotionJobs); }
@@ -4516,11 +4531,13 @@ function _loadMotionWhy(panel, motionUrl, fmt) {
   var mUrl = motionUrl + '/manifest' + (fmt !== 'story' ? '?format=' + encodeURIComponent(fmt) : '');
   fetch(mUrl).then(function(r){ return r.ok ? r.json() : null; }).then(function(m) {
     if (!m || !m.card) return;
+    // JS-5: manifest fields are engine-written, but they ride innerHTML —
+    // escape them like mhEngineNoteHtml already escapes notes.*.
     var bits = [];
-    if (m.card.archetype) bits.push('archetype <b>' + m.card.archetype + '</b>');
-    if (m.card.motion_intent) bits.push('motion <b>' + m.card.motion_intent + '</b>');
-    if (m.card.mood) bits.push('mood <b>' + m.card.mood + '</b>');
-    bits.push(m.card.colour_source === 'still-parity-roles' ? 'colours mirror the approved still' : 'colours from seed ' + (m.card.variation_seed || ''));
+    if (m.card.archetype) bits.push('archetype <b>' + window.safeText(m.card.archetype) + '</b>');
+    if (m.card.motion_intent) bits.push('motion <b>' + window.safeText(m.card.motion_intent) + '</b>');
+    if (m.card.mood) bits.push('mood <b>' + window.safeText(m.card.mood) + '</b>');
+    bits.push(m.card.colour_source === 'still-parity-roles' ? 'colours mirror the approved still' : 'colours from seed ' + window.safeText(m.card.variation_seed || ''));
     slot.innerHTML = 'Why this design: ' + bits.join(' &middot; ') + mhEngineNoteHtml(m);
   }).catch(function(){});
 }
@@ -5360,6 +5377,10 @@ function generateReel(btn, reelUrl, fmt) {
     if (window.MH && MH.toast) MH.toast('A reel render is already in progress — hold on…', 'info', 2500);
     return;
   }
+  // JS-4: claim the panel synchronously — a double-click used to pass the
+  // guard twice while the first 202 round-trip was in flight, starting two
+  // jobs. Every terminal path overwrites (watch) or clears (_mhJobFail).
+  panel.dataset.mhWatching = '1';
   panel.style.display = '';
   var origLabel = btn.textContent;
   btn.disabled = true;
@@ -5453,8 +5474,11 @@ function _mhReelWatch(reelUrl, fmt, pollUrl, ctx) {
 // (started in this tab or another; single-format or all-formats). A job that
 // finished while the user was away renders its video; dead records are
 // cleared. Returns true when the panel was claimed so the caller skips the
-// finished-file restore.
-function mhResumeReelJob(reelUrl) {
+// finished-file restore — JS-3: when the recalled record turns out stale
+// (poll unreachable / job gone / nothing restorable) it is forgotten and
+// onIdle (the caller's finished-file restore) runs, so a dead record can
+// never suppress the finished reel.
+function mhResumeReelJob(reelUrl, onIdle) {
   var panel = document.getElementById('reel-panel');
   if (!panel) return false;
   var claimed = false;
@@ -5463,7 +5487,17 @@ function mhResumeReelJob(reelUrl) {
     var rec = mhJobRecall(kind, reelUrl);
     if (!rec || !rec.poll_url) return;
     claimed = true;
+    // JS-4: claim the panel before the async poll resolves — a click racing
+    // this resume could otherwise start a duplicate job.
+    panel.dataset.mhWatching = '1';
     var fmt = rec.fmt || 'story';
+    var idle = function() {
+      // JS-3: stale/unusable record — forget it, release the panel and fall
+      // through to the restore the caller skipped when we claimed the panel.
+      mhJobForget(kind, reelUrl);
+      delete panel.dataset.mhWatching;
+      if (typeof onIdle === 'function') onIdle();
+    };
     fetch(rec.poll_url)
       .then(function(r){ return r.json(); })
       .then(function(j) {
@@ -5477,18 +5511,23 @@ function mhResumeReelJob(reelUrl) {
           else _mhReelBatchWatch(reelUrl, rec.poll_url, ctx);
           return;
         }
-        mhJobForget(kind, reelUrl);
-        if (j.status === 'done') {
-          if (kind === 'reel' && j.video_url) {
-            panel.style.display = '';
-            mhRenderReel(panel, reelUrl, fmt, j.video_url);
-          } else if (kind === 'reel-batch' && j.video_urls && Object.keys(j.video_urls).length) {
-            panel.style.display = '';
-            mhRenderReelBatch(panel, reelUrl, j.video_urls, j.formats_failed || {});
-          }
+        if (j.status === 'done' && kind === 'reel' && j.video_url) {
+          mhJobForget(kind, reelUrl);
+          delete panel.dataset.mhWatching;
+          panel.style.display = '';
+          mhRenderReel(panel, reelUrl, fmt, j.video_url);
+          return;
         }
+        if (j.status === 'done' && kind === 'reel-batch' && j.video_urls && Object.keys(j.video_urls).length) {
+          mhJobForget(kind, reelUrl);
+          delete panel.dataset.mhWatching;
+          panel.style.display = '';
+          mhRenderReelBatch(panel, reelUrl, j.video_urls, j.formats_failed || {});
+          return;
+        }
+        idle();
       })
-      .catch(function(){});
+      .catch(idle);
   });
   return claimed;
 }
@@ -5504,6 +5543,8 @@ function generateReelBatch(btn, reelUrl) {
     if (window.MH && MH.toast) MH.toast('A reel render is already in progress — hold on…', 'info', 2500);
     return;
   }
+  // JS-4: claim the panel synchronously (see generateReel).
+  panel.dataset.mhWatching = '1';
   panel.style.display = '';
   var origLabel = btn.textContent;
   btn.disabled = true;
@@ -5567,6 +5608,16 @@ function _mhReelBatchWatch(reelUrl, pollUrl, ctx) {
           return;
         }
         if (j.status === 'error' || (j.error && j.status !== 'running')) {
+          // CON-6: a busy renderer usually means another tab's batch job
+          // holds the slot — attach to the recalled record's live job (the
+          // motion/reel watches' idiom) instead of forgetting the record,
+          // which deleted the surviving job's pointer. Forget only when the
+          // recalled poll itself lands terminal.
+          var rec = (j.error === 'renderer_busy') ? mhJobRecall('reel-batch', reelUrl) : null;
+          if (rec && rec.poll_url && rec.poll_url !== pollUrl) {
+            _mhReelBatchWatch(reelUrl, rec.poll_url, ctx);
+            return;
+          }
           mhJobForget('reel-batch', reelUrl);
           _mhJobFail(ctx, j.user_message || j.error || 'render failed');
           return;
@@ -25228,7 +25279,12 @@ function applyFilters() {{
     if (match && wfOk) shown++;
   }});
   var countEl = document.getElementById('f-count');
-  if (countEl) countEl.textContent = shown + ' of ' + inTab + ' shown';
+  if (countEl) {{
+    // JS-1: on a paginated run these numbers are page-scoped while the tab
+    // badges are run-wide — say so, so "3 of 3 shown" can't read as the meet.
+    var pageScoped = !!document.querySelector('.mh-review-pager');
+    countEl.textContent = shown + ' of ' + inTab + ' shown' + (pageScoped ? ' on this page' : '');
+  }}
 }}
 function clearFilters() {{
   ['f-type','f-conf','f-swimmer','f-event','f-band','f-post'].forEach(function(id) {{
@@ -25262,7 +25318,17 @@ applyFilters();
       if (show) {{
         var t = document.getElementById('mh-wf-empty-title');
         var b = document.getElementById('mh-wf-empty-body');
-        if (wf === 'approved') {{
+        // JS-1: the DOM only holds this page's rows (J-3 pagination) while
+        // the tab badges are painted from run-wide counts (baseline + live
+        // delta). When the run still has cards in this tab, the truth is
+        // "not on this page" — "Queue clear" is reserved for a run-wide 0.
+        var badge = document.getElementById('mh-wf-tabcount-' + (wf || 'all'));
+        var runWide = badge ? (parseInt(badge.textContent, 10) || 0) : 0;
+        if (runWide > 0) {{
+          var noun = wf === 'approved' ? 'approved' : (wf === 'rejected' ? 'rejected' : 'queued');
+          if (t) t.textContent = 'None on this page';
+          if (b) b.textContent = 'The ' + noun + ' cards for this meet live on other pages \\u2014 use the pager above.';
+        }} else if (wf === 'approved') {{
           if (t) t.textContent = 'Nothing approved yet';
           if (b) b.textContent = 'Approve cards from the Queue and they move here.';
         }} else if (wf === 'rejected') {{
@@ -25287,7 +25353,12 @@ applyFilters();
     var val = tab.getAttribute('data-wf-filter-to') || '';
     list.setAttribute('data-wf-filter', val);
     try {{
-      history.replaceState(null, '', location.pathname + (val ? ('?wf=' + encodeURIComponent(val)) : ''));
+      // JS-1: keep ?page=N (J-3 pagination) when rewriting ?wf= — dropping
+      // it made a mid-run reload silently jump back to page 1.
+      var qs = new URLSearchParams(location.search);
+      if (val) qs.set('wf', val); else qs.delete('wf');
+      var q = qs.toString();
+      history.replaceState(null, '', location.pathname + (q ? ('?' + q) : ''));
     }} catch (e) {{}}
     window.mhWfTabsSync();
   }});
@@ -25485,6 +25556,17 @@ function copyWhyCard(btn, taId) {{
           return c ? c.value : '';
         }}).filter(Boolean);
       }}
+      // JS-2: the embedded list is a render-time snapshot — reconcile it with
+      // decisions made on this page since (per-card straps, bulk bar). Each
+      // row's live data-status is the source of truth, so approve-then-requeue
+      // is handled too; off-page ids can't change without a reload, so the
+      // snapshot stays truthful for them.
+      var decidedNow = {{}};
+      Array.prototype.slice.call(document.querySelectorAll('.ach-row[data-status]')).forEach(function(row){{
+        var chk = row.querySelector('.mh-row-check');
+        if (chk && chk.value && row.dataset.status !== 'queue') decidedNow[chk.value] = 1;
+      }});
+      ids = ids.filter(function(id){{ return !decidedNow[id]; }});
       if (!ids.length) {{
         if (window.MH) MH.toast('No cards in the queue to approve.', 'info');
         return;
@@ -47859,26 +47941,32 @@ function mhSetupMode(mode) {{
   var prerendered = {json.dumps(_reel_prerendered)};
   var panel = document.getElementById('reel-panel');
   if (!panel || typeof mhReelComments !== 'function') return;
+  // JS-3: the finished-file restore is shared — mhResumeReelJob falls back
+  // to it when its recalled job record turns out stale/unreachable, so a
+  // dead record can no longer suppress the finished reel.
+  var mhRestoreFinishedReel = function() {{
+    var fileUrl = reelUrl + '-file?n=3&format=story';
+    if (prerendered) {{
+      panel.style.display = '';
+      mhRenderReel(panel, reelUrl, 'story', fileUrl);
+      return;
+    }}
+    fetch(reelUrl + '/comments?target=reel', {{headers:{{'Accept':'application/json'}}}})
+      .then(function(r){{ return r.json(); }})
+      .then(function(j){{
+        var n = (j && j.comments && j.comments.length) || 0;
+        if (!n) return;
+        panel.style.display = '';
+        fetch(fileUrl, {{method:'HEAD'}})
+          .then(function(hr){{ if (hr.ok) mhRenderReel(panel, reelUrl, 'story', fileUrl); else mhRenderReelCommentsOnly(panel, reelUrl, n); }})
+          .catch(function(){{ mhRenderReelCommentsOnly(panel, reelUrl, n); }});
+      }})
+      .catch(function(){{}});
+  }};
   // D-13: a reel render still in flight from before navigation wins over
   // the finished-file restore — re-attach to it and keep polling.
-  if (typeof mhResumeReelJob === 'function' && mhResumeReelJob(reelUrl)) return;
-  var fileUrl = reelUrl + '-file?n=3&format=story';
-  if (prerendered) {{
-    panel.style.display = '';
-    mhRenderReel(panel, reelUrl, 'story', fileUrl);
-    return;
-  }}
-  fetch(reelUrl + '/comments?target=reel', {{headers:{{'Accept':'application/json'}}}})
-    .then(function(r){{ return r.json(); }})
-    .then(function(j){{
-      var n = (j && j.comments && j.comments.length) || 0;
-      if (!n) return;
-      panel.style.display = '';
-      fetch(fileUrl, {{method:'HEAD'}})
-        .then(function(hr){{ if (hr.ok) mhRenderReel(panel, reelUrl, 'story', fileUrl); else mhRenderReelCommentsOnly(panel, reelUrl, n); }})
-        .catch(function(){{ mhRenderReelCommentsOnly(panel, reelUrl, n); }});
-    }})
-    .catch(function(){{}});
+  if (typeof mhResumeReelJob === 'function' && mhResumeReelJob(reelUrl, mhRestoreFinishedReel)) return;
+  mhRestoreFinishedReel();
 }})();
 
 // M31 - initialise the reel composer readout (duration + max-5 rule).
@@ -54481,8 +54569,12 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                     # ---- 1. Sponsor-branded visual (render-engine bound) ----
                     if _v8_ok and _v8_create_visual_for_item is not None:
                         try:
+                            # A 202-accepted background job queues for the
+                            # slot (like the render-all batch worker) rather
+                            # than borrowing the request threads' fast-fail
+                            # budget.
                             with _render_slot(
-                                "graphic", f"sponsor:{card_id}", timeout=_RENDER_TRY_TIMEOUT
+                                "graphic", f"sponsor:{card_id}", timeout=_RENDER_QUEUE_TIMEOUT
                             ):
                                 res = _v8_create_visual_for_item(
                                     item,
@@ -54575,7 +54667,12 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                 if job["visual_id"]:
                     try:
                         sidecar.parent.mkdir(parents=True, exist_ok=True)
-                        sidecar.write_text(
+                        # A concurrent page GET must never read a torn sidecar
+                        # (torn read = cache miss = duplicate auto-start
+                        # render) — write via unique tmp + atomic os.replace,
+                        # the _variant_job_save idiom.
+                        _sc_tmp = sidecar.with_suffix(f".{uuid.uuid4().hex[:8]}.tmp")
+                        _sc_tmp.write_text(
                             json.dumps(
                                 {
                                     "visual_id": job["visual_id"],
@@ -54589,6 +54686,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                             ),
                             encoding="utf-8",
                         )
+                        os.replace(_sc_tmp, sidecar)
                     except Exception:
                         log.warning(
                             "sponsor variant %s/%s: sidecar write failed",
@@ -64155,11 +64253,20 @@ voice, and queues them for one-click approval.</p>
         colour_bar: bool,
         want_cmyk: bool,
         progress=None,
+        use_render_slot: bool = False,
     ) -> None:
         """Render one A4 certificate PDF per approved card into ``stream``
         as a ZIP. ``progress(i, total, swimmer_name)`` (optional) is called
         before each render so the D-12 background job can report
-        "Rendering certificate N of M" honestly."""
+        "Rendering certificate N of M" honestly.
+
+        ``use_render_slot=True`` (the D-12 background job) takes the shared
+        render slot per certificate with the queue timeout — like the
+        render-all batch worker — so a big meet's build queues politely and
+        other renders (thumbnails, motion) interleave between PDFs instead
+        of starving for minutes. The synchronous route keeps its historical
+        no-slot behaviour."""
+        import shutil as _shutil
         import zipfile as _zip
 
         from mediahub.graphic_renderer.print_export import (
@@ -64189,55 +64296,73 @@ voice, and queues them for one-click approval.</p>
             )
         out_dir = DATA_DIR / "print_exports" / run_id
         out_dir.mkdir(parents=True, exist_ok=True)
+        # Concurrent builds (background job + synchronous route) must never
+        # zip each other's half-written PDFs — intermediates render into a
+        # unique per-build subdirectory, removed when the build finishes.
+        # The final ZIP artifact path stays stable.
+        build_dir = out_dir / f"build-{uuid.uuid4().hex[:8]}"
+        build_dir.mkdir(parents=True, exist_ok=True)
         rgb_fallbacks: list = []  # certs where gs failed mid-run and RGB shipped
-        with _zip.ZipFile(stream, "w", _zip.ZIP_DEFLATED) as zf:
-            for i, item in enumerate(approved):
-                a = item.get("achievement") or {}
-                name = a.get("swimmer_name") or "Swimmer"
-                if progress is not None:
-                    progress(i, len(approved), name)
-                facts = a.get("raw_facts") or {}
-                time_str = facts.get("new_time") or facts.get("time") or facts.get("time_str") or ""
-                cert_kwargs = dict(
-                    swimmer_name=name,
-                    event_label=a.get("event", ""),
-                    time_str=str(time_str),
-                    achievement_headline=a.get("headline", "Achievement"),
-                    meet_name=meet_name,
-                    meet_date=meet_date,
-                    club_name=(prof.display_name if prof else pid or "Our club"),
-                    brand=brand,
-                    detail_line=a.get("angle_hint", ""),
-                )
-                safe_name = re.sub(r"[^A-Za-z0-9._-]+", "-", f"{name}-{a.get('event', '')}")
-                pdf_path = out_dir / f"cert-{i:02d}.pdf"
-                if print_mode:
-                    try:
-                        export_certificate_print_pdf(
-                            pdf_path,
-                            bleed_mm=bleed_mm,
-                            crop_marks=crop_marks,
-                            colour_bar=colour_bar,
-                            cmyk=do_cmyk,
-                            **cert_kwargs,
-                        )
-                    except CmykUnavailable as e:
-                        # Ghostscript failed mid-run: the RGB print PDF (bleed +
-                        # crop marks intact) is already rendered and print-ready
-                        # — ship it and say so, mirroring print_ready/engine.py.
-                        rgb_fallbacks.append(f"{i + 1:02d}-{safe_name}.pdf: {e}")
-                else:
-                    render_html_to_pdf(build_certificate_html(**cert_kwargs), pdf_path)
-                zf.writestr(f"certificates/{i + 1:02d}-{safe_name}.pdf", pdf_path.read_bytes())
-            if rgb_fallbacks:
-                cmyk_note = (cmyk_note or "") + (
-                    "CMYK conversion failed at run time for these certificates, so "
-                    "they are RGB (the bleed and crop marks are intact):\n"
-                    + "\n".join(rgb_fallbacks)
-                    + "\n"
-                )
-            if cmyk_note:
-                zf.writestr("certificates/CMYK-NOTE.txt", cmyk_note)
+        try:
+            with _zip.ZipFile(stream, "w", _zip.ZIP_DEFLATED) as zf:
+                for i, item in enumerate(approved):
+                    a = item.get("achievement") or {}
+                    name = a.get("swimmer_name") or "Swimmer"
+                    if progress is not None:
+                        progress(i, len(approved), name)
+                    facts = a.get("raw_facts") or {}
+                    time_str = (
+                        facts.get("new_time") or facts.get("time") or facts.get("time_str") or ""
+                    )
+                    cert_kwargs = dict(
+                        swimmer_name=name,
+                        event_label=a.get("event", ""),
+                        time_str=str(time_str),
+                        achievement_headline=a.get("headline", "Achievement"),
+                        meet_name=meet_name,
+                        meet_date=meet_date,
+                        club_name=(prof.display_name if prof else pid or "Our club"),
+                        brand=brand,
+                        detail_line=a.get("angle_hint", ""),
+                    )
+                    safe_name = re.sub(r"[^A-Za-z0-9._-]+", "-", f"{name}-{a.get('event', '')}")
+                    pdf_path = build_dir / f"cert-{i:02d}.pdf"
+                    slot = (
+                        _render_slot("certificates", run_id, timeout=_RENDER_QUEUE_TIMEOUT)
+                        if use_render_slot
+                        else contextlib.nullcontext()
+                    )
+                    with slot:
+                        if print_mode:
+                            try:
+                                export_certificate_print_pdf(
+                                    pdf_path,
+                                    bleed_mm=bleed_mm,
+                                    crop_marks=crop_marks,
+                                    colour_bar=colour_bar,
+                                    cmyk=do_cmyk,
+                                    **cert_kwargs,
+                                )
+                            except CmykUnavailable as e:
+                                # Ghostscript failed mid-run: the RGB print PDF
+                                # (bleed + crop marks intact) is already rendered
+                                # and print-ready — ship it and say so, mirroring
+                                # print_ready/engine.py.
+                                rgb_fallbacks.append(f"{i + 1:02d}-{safe_name}.pdf: {e}")
+                        else:
+                            render_html_to_pdf(build_certificate_html(**cert_kwargs), pdf_path)
+                    zf.writestr(f"certificates/{i + 1:02d}-{safe_name}.pdf", pdf_path.read_bytes())
+                if rgb_fallbacks:
+                    cmyk_note = (cmyk_note or "") + (
+                        "CMYK conversion failed at run time for these certificates, so "
+                        "they are RGB (the bleed and crop marks are intact):\n"
+                        + "\n".join(rgb_fallbacks)
+                        + "\n"
+                    )
+                if cmyk_note:
+                    zf.writestr("certificates/CMYK-NOTE.txt", cmyk_note)
+        finally:
+            _shutil.rmtree(build_dir, ignore_errors=True)
 
     @app.route("/pack/<run_id>/certificates.zip")
     def pack_certificates_zip(run_id: str):
@@ -64380,29 +64505,34 @@ voice, and queues them for one-click approval.</p>
         def _worker() -> None:
             try:
                 with _job_heartbeat(job):
-                    with _render_slot("certificates", run_id, timeout=_RENDER_TRY_TIMEOUT):
+                    # The render slot is taken per certificate inside
+                    # _write_certificates_zip (use_render_slot=True) with the
+                    # queue timeout — a 202-accepted job queues like the
+                    # render-all batch worker instead of fast-failing, and
+                    # never starves other renders for the whole ZIP build.
 
-                        def _progress(i: int, total: int, name: str) -> None:
-                            job["done"] = i
-                            job["total"] = total
-                            job["current"] = str(name or "")
-                            _variant_job_save(job)
+                    def _progress(i: int, total: int, name: str) -> None:
+                        job["done"] = i
+                        job["total"] = total
+                        job["current"] = str(name or "")
+                        _variant_job_save(job)
 
-                        with open(zip_path, "wb") as fh:
-                            _write_certificates_zip(
-                                fh,
-                                run_id,
-                                data,
-                                pid,
-                                prof,
-                                approved,
-                                print_mode=print_mode,
-                                bleed_mm=bleed_mm,
-                                crop_marks=crop_marks,
-                                colour_bar=colour_bar,
-                                want_cmyk=want_cmyk,
-                                progress=_progress,
-                            )
+                    with open(zip_path, "wb") as fh:
+                        _write_certificates_zip(
+                            fh,
+                            run_id,
+                            data,
+                            pid,
+                            prof,
+                            approved,
+                            print_mode=print_mode,
+                            bleed_mm=bleed_mm,
+                            crop_marks=crop_marks,
+                            colour_bar=colour_bar,
+                            want_cmyk=want_cmyk,
+                            progress=_progress,
+                            use_render_slot=True,
+                        )
                 job["status"] = "done"
                 job["done"] = int(job.get("total") or len(approved))
                 job["current"] = ""

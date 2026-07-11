@@ -265,6 +265,34 @@ def test_sync_certificates_route_unchanged_for_direct_use(env, monkeypatch):
     assert c.get(f"/pack/{env['run_id']}/certificates.zip").status_code == 404
 
 
+def test_certificates_builds_use_unique_intermediate_dirs_and_clean_up(env, monkeypatch):
+    """CON-1: overlapping builds must never zip each other's half-written
+    PDFs — each build renders into its own ``build-<uuid>`` subdirectory,
+    removed when the build finishes (the final ZIP path stays stable)."""
+    calls: list = []
+    _stub_pdf_renderer(monkeypatch, calls)
+    c = env["client"]
+    _pin(c, "org-alpha")
+    # Build once via the background job…
+    r = c.post(f"/api/runs/{env['run_id']}/certificates-job")
+    assert r.status_code == 202
+    done = _poll_until_done(c, r.get_json()["poll_url"])
+    assert done["status"] == "done", done
+    # …and once via the synchronous route.
+    assert c.get(f"/pack/{env['run_id']}/certificates.zip").status_code == 200
+    parents = {pathlib.Path(p).parent for p in calls}
+    assert len(calls) == 2 and len(parents) == 2, calls
+    export_dir = env["tmp"] / "print_exports" / env["run_id"]
+    for p in parents:
+        assert p.parent == export_dir
+        assert p.name.startswith("build-")
+        assert not p.exists(), "the finally-cleanup removed the build dir"
+    # No intermediate PDFs linger at the stable top level either.
+    assert not list(export_dir.glob("cert-*.pdf"))
+    # The job's finished ZIP artifact survives the cleanup.
+    assert list(export_dir.glob("certificates-*.zip"))
+
+
 # ---------------------------------------------------------------------------
 # Source-level: the builder page wires the job client
 # ---------------------------------------------------------------------------
@@ -283,3 +311,41 @@ def test_motion_client_js_is_shared_not_duplicated():
     # keeping a drifted copy of generateMotion.
     assert _SRC.count("function generateMotion(") == 1
     assert "_MOTION_CLIENT_JS" in _SRC
+
+
+def test_motion_why_manifest_fields_are_escaped():
+    """JS-5: _loadMotionWhy writes manifest fields into innerHTML — they are
+    engine-written (low exploitability), but they now ride window.safeText
+    exactly like mhEngineNoteHtml already escapes the notes.* fields."""
+    assert "window.safeText(m.card.archetype)" in _SRC
+    assert "window.safeText(m.card.motion_intent)" in _SRC
+    assert "window.safeText(m.card.mood)" in _SRC
+    assert "window.safeText(m.card.variation_seed || '')" in _SRC
+    # The raw interpolations are gone.
+    for f in ("archetype", "motion_intent", "mood"):
+        assert f"+ m.card.{f} +" not in _SRC, f
+    assert "+ (m.card.variation_seed || '')" not in _SRC
+
+
+def test_background_workers_queue_for_the_render_slot():
+    # CON-2: a 202-accepted background job queues for the shared render slot
+    # (_RENDER_QUEUE_TIMEOUT, like the render-all batch worker) instead of
+    # borrowing the request threads' 0.75s fast-fail budget.
+    assert '_render_slot("certificates", run_id, timeout=_RENDER_QUEUE_TIMEOUT)' in _SRC
+    assert '"graphic", f"sponsor:{card_id}", timeout=_RENDER_QUEUE_TIMEOUT' in _SRC
+    assert '_render_slot("certificates", run_id, timeout=_RENDER_TRY_TIMEOUT)' not in _SRC
+    assert 'f"sponsor:{card_id}", timeout=_RENDER_TRY_TIMEOUT' not in _SRC
+
+
+def test_certificates_slot_is_per_pdf_not_whole_build():
+    # CON-3: the certificates worker never holds the single global slot
+    # across the whole ZIP build — the slot is taken per certificate inside
+    # _write_certificates_zip (opt-in for the job; the synchronous route
+    # keeps its historical no-slot behaviour).
+    assert "use_render_slot: bool = False" in _SRC
+    assert "use_render_slot=True," in _SRC
+    # CON-1 mechanics: uuid build dir + finally cleanup.
+    assert 'build_dir = out_dir / f"build-{uuid.uuid4().hex[:8]}"' in _SRC
+    assert 'pdf_path = build_dir / f"cert-{i:02d}.pdf"' in _SRC
+    assert 'pdf_path = out_dir / f"cert-{i:02d}.pdf"' not in _SRC
+    assert "_shutil.rmtree(build_dir, ignore_errors=True)" in _SRC

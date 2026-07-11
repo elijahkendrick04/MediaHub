@@ -204,6 +204,10 @@ class TestStatBlock:
 
     def test_tab_sync_has_a_rejected_empty_hint(self):
         assert "No rejected cards" in _WEB_SRC
+        # JS-1: on a paginated run the "No rejected cards" hint only shows
+        # when the run-wide tab count is 0 — when rejected cards exist on
+        # other pages the honest hint is "None on this page" (guard first).
+        assert _WEB_SRC.index("runWide > 0") < _WEB_SRC.index("No rejected cards")
 
 
 # --------------------------------------------------------------------------- #

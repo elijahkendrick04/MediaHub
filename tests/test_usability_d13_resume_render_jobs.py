@@ -85,8 +85,9 @@ def test_terminal_states_forget_the_record():
 def test_page_load_resume_hooks_exist():
     assert "function mhResumeReelJob(" in _SRC
     assert "function mhResumeMotionJobs(" in _SRC
-    # The pack page's on-load restore consults the in-flight job first.
-    assert "mhResumeReelJob(reelUrl)) return;" in _SRC
+    # The pack page's on-load restore consults the in-flight job first —
+    # passing its finished-file restore as the stale-record fallback (JS-3).
+    assert "mhResumeReelJob(reelUrl, mhRestoreFinishedReel)) return;" in _SRC
     # The motion resume auto-runs on every page carrying the shared block.
     assert "document.addEventListener('DOMContentLoaded', mhResumeMotionJobs)" in _SRC
 
@@ -107,10 +108,52 @@ def test_click_resumes_running_job_instead_of_restarting():
 
 
 def test_renderer_busy_repolls_stored_job_not_error():
-    for watcher in ("_mhReelWatch", "_mhMotionWatch"):
+    # CON-6: the batch watcher now carries the same busy-recall attach idiom
+    # as the single watches — forgetting on busy deleted the surviving job's
+    # record when two tabs started batches simultaneously.
+    for watcher in ("_mhReelWatch", "_mhReelBatchWatch", "_mhMotionWatch"):
         body = _fn(watcher)
         assert "j.error === 'renderer_busy'" in body, watcher
         assert "rec.poll_url !== pollUrl" in body, watcher
+
+
+# ---------------------------------------------------------------------------
+# Start/resume races (JS-4, JS-3)
+# ---------------------------------------------------------------------------
+
+
+def test_start_claims_the_panel_synchronously_before_the_202():
+    """JS-4: the watching flag is set right after the guard passes — a
+    double-click used to pass the guard twice while the first POST round-trip
+    was still in flight, starting two jobs."""
+    for starter in ("generateReel", "generateReelBatch", "generateMotion"):
+        body = _fn(starter)
+        assert "panel.dataset.mhWatching = '1';" in body, starter
+        # The synchronous claim comes before any fetch leaves the function.
+        assert body.index("panel.dataset.mhWatching = '1';") < body.index("fetch("), starter
+
+
+def test_resume_paths_claim_and_release_the_panel():
+    """JS-4: the on-load resume claims the panel before its async poll
+    resolves, and releases it on every non-watching outcome."""
+    for name in ("mhResumeReelJob", "mhResumeMotionJobs"):
+        body = _fn(name)
+        assert "panel.dataset.mhWatching = '1';" in body, name
+        assert "delete panel.dataset.mhWatching;" in body, name
+
+
+def test_stale_reel_record_falls_through_to_the_finished_restore():
+    """JS-3: a stale/unreachable record is forgotten and the caller's
+    finished-file restore runs — it no longer leaves a claimed, blank panel
+    with the record stuck in localStorage forever."""
+    assert "function mhResumeReelJob(reelUrl, onIdle)" in _SRC
+    body = _fn("mhResumeReelJob")
+    assert "mhJobForget(kind, reelUrl);" in body
+    assert ".catch(idle);" in body
+    assert "typeof onIdle === 'function'" in body
+    # The pack page extracts the restore and runs it when nothing was claimed.
+    assert "var mhRestoreFinishedReel = function()" in _SRC
+    assert "mhRestoreFinishedReel();" in _SRC
 
 
 # ---------------------------------------------------------------------------

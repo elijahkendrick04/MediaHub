@@ -311,3 +311,14 @@ def test_reel_job_status_admits_sponsor_variant_kind_with_idor_gate(gated_app):
         assert r.get_json()["kind"] == "sponsor-variant"
         _pin(c, "rivals")
         assert c.get(f"/api/reel-jobs/{'b' * 32}").status_code == 404
+
+
+def test_sidecar_written_atomically_for_concurrent_page_gets():
+    """CON-5: a concurrent page GET must never read a torn result sidecar —
+    a torn read is a cache miss, and a cache miss auto-starts a duplicate
+    render job. The write goes through a unique tmp + atomic os.replace
+    (the _variant_job_save idiom), never a bare write_text."""
+    src = Path("src/mediahub/web/web.py").read_text(encoding="utf-8")
+    assert "sidecar.write_text(" not in src
+    assert '_sc_tmp = sidecar.with_suffix(f".{uuid.uuid4().hex[:8]}.tmp")' in src
+    assert "os.replace(_sc_tmp, sidecar)" in src
