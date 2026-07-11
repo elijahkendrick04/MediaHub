@@ -720,6 +720,66 @@ input[type=color]:hover { border-color: var(--lane); }
   border: 1px solid var(--hairline);
 }
 
+/* C-19: the Settings tiles render as four headed clusters (Your club /
+   Content & brand / Account & billing / System) instead of one flat wall.
+   The head is a small rule-led mono label; the gold lead-in uses --medal,
+   not --lane, for the same lightness reason as .mh-section-eyebrow-strip. */
+.mh-settings-cluster { margin-bottom: var(--sp-7); }
+.mh-settings-cluster .mh-template-grid { margin-bottom: 0; }
+.mh-settings-cluster-head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+  margin: 0 0 var(--sp-3);
+}
+.mh-settings-cluster-head::before {
+  content: '';
+  width: 28px;
+  height: 1px;
+  background: var(--medal);
+  flex-shrink: 0;
+}
+.mh-settings-cluster-head::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--hairline);
+}
+/* …and the two "Coming soon" placeholders (J-10) collapse into one muted
+   compact strip at the very bottom — row-layout items, badges kept. */
+.mh-settings-soon-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+}
+.mh-settings-soon-strip .mh-template {
+  flex: 1 1 300px;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+}
+.mh-settings-soon-strip .mh-template-icon {
+  width: 28px;
+  height: 28px;
+  margin-bottom: 0;
+}
+.mh-settings-soon-strip .mh-template-icon svg { width: 14px; height: 14px; }
+.mh-settings-soon-strip .mh-template h3 { font-size: 13px; }
+.mh-settings-soon-strip .mh-template > div { margin-bottom: 0 !important; }
+.mh-settings-soon-strip .mh-template p {
+  font-size: 12px;
+  margin: 0;
+  flex: 1 1 100%;
+}
+
 /* ---------------------------------------------------------------------
    RELATIVE-TIME utility — pairs with the JS in _layout that
    converts ISO timestamps to "5 min ago" / "Tuesday 15:24"

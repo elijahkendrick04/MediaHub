@@ -4,9 +4,11 @@
 Pins:
   1. /api/runs/<id>/newsletter returns each format with the right
      Content-Type and (for downloads) a Content-Disposition header.
-  2. The grouped content pack page surfaces the newsletter download
-     buttons and the per-card motion-video button — so the user
-     doesn't have to know the API exists.
+  2. The content builder (/pack) surfaces the newsletter download
+     buttons — so the user doesn't have to know the API exists — and
+     the grouped explore view no longer duplicates them (B-3: export
+     lives on the builder only). The grouped page keeps its per-card
+     motion-video button.
 """
 from __future__ import annotations
 
@@ -199,19 +201,33 @@ class TestNewsletterEndpoint:
 # ---------------------------------------------------------------------------
 
 class TestPackPageSurfacesExports:
-    def test_grouped_pack_has_newsletter_buttons(self, app_with_run):
+    def test_builder_has_newsletter_buttons(self, app_with_run):
+        """B-3 moved the single newsletter surfacing to the content builder
+        (export lives there); an approved card makes the builder render."""
+        c, run_id = app_with_run
+        import mediahub.web.web as wm
+        from mediahub.workflow.status import CardStatus
+
+        wm._get_wf_store().set_status(run_id, "swim-1", CardStatus.APPROVED)
+        resp = c.get(f"/pack/{run_id}")
+        assert resp.status_code == 200
+        body = resp.get_data(as_text=True)
+        assert "Parent newsletter" in body
+        assert f"/api/runs/{run_id}/newsletter" in body
+        assert "Download .html" in body
+        assert "Download .txt" in body
+        assert "Download .zip" in body
+
+    def test_grouped_pack_no_longer_duplicates_newsletter(self, app_with_run):
+        """B-3: the grouped explore view lost its duplicated newsletter card."""
         c, run_id = app_with_run
         resp = c.get(f"/pack/{run_id}/grouped")
         # Page may redirect to the classic pack when v7.3 isn't fully
-        # loaded in a test sandbox — accept either route, but if we
-        # land on /grouped, the buttons must be present.
+        # loaded in a test sandbox — only assert when /grouped rendered.
         if resp.status_code == 200:
             body = resp.get_data(as_text=True)
-            assert "Parent newsletter" in body
-            assert f"/api/runs/{run_id}/newsletter" in body
-            assert "Download .html" in body
-            assert "Download .txt" in body
-            assert "Download .zip" in body
+            assert "Parent newsletter" not in body
+            assert f"/api/runs/{run_id}/newsletter" not in body
 
     def test_grouped_pack_has_per_card_motion_button(self, app_with_run):
         c, run_id = app_with_run

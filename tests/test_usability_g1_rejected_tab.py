@@ -273,9 +273,11 @@ class TestMarketingMock:
         assert m, "the review scene's action strip must render"
         acts = m.group(1)
         # H-10 renamed the row's drawer button "Inspect" -> "Edit card"; the
-        # mock mirrors the real actions.
+        # mock mirrors the real actions. B-4 slimmed the QUEUED row (which is
+        # what the mock's review scene shows) to Approve + Edit card —
+        # Re-queue only appears once a card is decided.
         assert "Edit card" in acts
-        assert "Re-queue" in acts
+        assert "Re-queue" not in acts
         assert "Approve" in acts
         assert "Reject" not in acts
         assert ">Edit<" not in acts

@@ -231,7 +231,8 @@ def test_consent_settings_and_records_via_ui(client, tmp_path):
     with client.session_transaction() as sess:
         sess["active_profile_id"] = "clubx"
 
-    page = client.get("/organisation/consent")
+    # G-9: the registry lives on /athletes?tab=records; the old URL redirects.
+    page = client.get("/organisation/consent", follow_redirects=True)
     assert page.status_code == 200
     assert b"Lawful basis" in page.data
 
@@ -272,7 +273,7 @@ def test_consent_settings_and_records_via_ui(client, tmp_path):
     assert rec.parental is True
     assert rec.under_18 is True
 
-    page = client.get("/organisation/consent")
+    page = client.get("/organisation/consent", follow_redirects=True)
     assert b"Eira Hughes" in page.data
 
 

@@ -156,6 +156,57 @@ def set_consent(
     return True
 
 
+def set_consent_many(
+    profile_id: str,
+    athlete_ids: list[str],
+    level: str,
+    *,
+    actor: str = "",
+    note: str = "",
+    db_path: Optional[Path] = None,
+) -> int:
+    """All-or-nothing bulk upsert (CON2-4): ONE connection, ONE transaction.
+
+    A per-id ``set_consent`` loop commits each row separately, so a failure
+    mid-way leaves the roster half-updated while the UI reports a clean
+    failure. Here the whole batch commits together — on any failure the
+    transaction rolls back, nothing is written, and the error re-raises.
+    Returns the number of rows upserted.
+    """
+    if level not in LEVELS:
+        raise ValueError(f"unknown consent level: {level!r}")
+    ids = [str(a).strip() for a in athlete_ids if str(a).strip()]
+    if not profile_id or not ids:
+        return 0
+    ensure_schema(db_path)
+    conn = _connect(db_path)
+    try:
+        conn.execute("BEGIN")
+        for athlete_id in ids:
+            conn.execute(
+                "INSERT INTO athlete_consent (profile_id, athlete_id, level, note,"
+                " updated_at, updated_by) VALUES (?,?,?,?,?,?)"
+                " ON CONFLICT(profile_id, athlete_id) DO UPDATE SET"
+                " level = excluded.level, note = excluded.note,"
+                " updated_at = excluded.updated_at, updated_by = excluded.updated_by",
+                (profile_id, athlete_id, level, note or None, _now(), actor or None),
+            )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+    for athlete_id in ids:
+        _audit(
+            profile_id,
+            "consent_change",
+            {"athlete_id": athlete_id, "level": level, "actor": actor},
+            f"set {level}",
+        )
+    return len(ids)
+
+
 def get_consent(profile_id: str, athlete_id: str, db_path: Optional[Path] = None) -> Optional[str]:
     ensure_schema(db_path)
     conn = _connect(db_path)

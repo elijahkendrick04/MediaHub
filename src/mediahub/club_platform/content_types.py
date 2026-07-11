@@ -141,10 +141,12 @@ REGISTRY: dict[ContentType, ContentTypeMeta] = {
         title="Meet Recap",
         description="Turn a meet results file into ranked, source-grounded content cards.",
         input_contract=(
-            "Upload a Hytek Meet Manager file (.hy3) or a zip containing one. "
-            "Optional: a pre-meet PB snapshot will be fetched from a public PB "
-            "source (chosen automatically) for accurate PB claims. Requires a "
-            "configured club profile so the pipeline knows which swimmers are yours."
+            "Upload your meet results file — Hytek (.hy3 / .hyv), SDIF (.sd3 / "
+            ".sdif / .cl2), a .zip of results, a results PDF, HTML, CSV, TXT or "
+            "Excel (.xlsx). Optional: a pre-meet PB snapshot will be fetched from "
+            "a public PB source (chosen automatically) for accurate PB claims. "
+            "Requires a configured club profile so the pipeline knows which "
+            "swimmers are yours."
         ),
         is_implemented=True,
         icon_svg=_WAVES_SVG,
@@ -157,7 +159,8 @@ REGISTRY: dict[ContentType, ContentTypeMeta] = {
                 ("Your brand kit", "brand"),
             ),
             steps=(
-                "Upload your Hytek results file (.hy3) or a zip — we read every swim.",
+                "Upload your results file — Hytek (.hy3 / .hyv), SDIF/SD3/CL2, ZIP, "
+                "PDF, HTML, CSV, TXT or Excel (.xlsx) — we read every swim.",
                 "The engine detects PBs, medals, finals and first-times, then ranks "
                 "them by how content-worthy they are.",
                 "You get branded cards, captions and a reel to review, approve and export.",
