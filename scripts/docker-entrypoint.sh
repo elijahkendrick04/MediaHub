@@ -48,6 +48,15 @@ fi
 #                       second worker OOM-killed almost immediately.
 #                       Don't go higher on a single CPU: extra workers
 #                       only contend for the same core.
+#   --worker-class gthread  Gunicorn's default worker class is `sync`, which
+#                       ignores --threads entirely (one connection at a
+#                       time per worker process). Without this flag the
+#                       box only ever serves 2 concurrent requests total
+#                       (one per --workers process); a couple of in-flight
+#                       renders then starve every other route — including
+#                       /health — until Render's edge gives up and returns
+#                       502. gthread is what makes --threads below actually
+#                       take effect.
 #   --threads 4         gthread workers share memory across threads,
 #                       so 4 concurrent requests share one process.
 #   --timeout 300       Pipeline runs can take 60s+; cap at 5 min so a
@@ -124,6 +133,7 @@ fi
 exec gunicorn mediahub.web:app \
   --bind "0.0.0.0:${PORT}" \
   --workers 2 \
+  --worker-class gthread \
   --threads 4 \
   --timeout 300 \
   --graceful-timeout 30 \
