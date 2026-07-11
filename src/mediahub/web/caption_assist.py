@@ -107,8 +107,7 @@ def assist_caption(
     # bounded, and only paid when a tell is actually present.
     if revised and _contains_ai_tell(revised):
         retry = _write(
-            requirements
-            + "\n\nYour previous attempt used a banned filler cliché. Rewrite it "
+            requirements + "\n\nYour previous attempt used a banned filler cliché. Rewrite it "
             "without any such phrase, keeping every fact exactly."
         )
         if retry and not _contains_ai_tell(retry):
