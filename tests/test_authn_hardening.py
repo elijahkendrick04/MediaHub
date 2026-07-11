@@ -75,7 +75,7 @@ def test_legacy_bcrypt_verifies_and_upgrades_on_login(tmp_path, monkeypatch):
 
 def test_lockout_after_repeated_failures(client):
     _signup(client)
-    client.get("/logout")
+    client.post("/logout")
     for _ in range(5):
         r = client.post("/login", data={"email": "coach@club.org", "password": "wrong-pass"})
         assert r.status_code == 401
@@ -86,7 +86,7 @@ def test_lockout_after_repeated_failures(client):
 
 def test_lockout_recorded_in_security_log(client, tmp_path):
     _signup(client)
-    client.get("/logout")
+    client.post("/logout")
     for _ in range(5):
         client.post("/login", data={"email": "coach@club.org", "password": "wrong-pass"})
     events = [
@@ -99,12 +99,12 @@ def test_lockout_recorded_in_security_log(client, tmp_path):
 
 def test_successful_login_clears_failure_count(client):
     _signup(client)
-    client.get("/logout")
+    client.post("/logout")
     for _ in range(3):
         client.post("/login", data={"email": "coach@club.org", "password": "wrong-pass"})
     r = client.post("/login", data={"email": "coach@club.org", "password": "twelvechars1"})
     assert r.status_code == 302
-    client.get("/logout")
+    client.post("/logout")
     for _ in range(3):
         client.post("/login", data={"email": "coach@club.org", "password": "wrong-pass"})
     # 3+3 with a success between must NOT lock (counter reset)
@@ -133,7 +133,7 @@ def test_rotating_xff_first_hop_cannot_dodge_rate_limit(client):
 
 def test_session_rotated_on_login(client):
     _signup(client)
-    client.get("/logout")
+    client.post("/logout")
     with client.session_transaction() as sess:
         sess["pre_login_marker"] = "planted"
     r = client.post("/login", data={"email": "coach@club.org", "password": "twelvechars1"})
@@ -206,7 +206,7 @@ def test_2fa_enable_and_login_flow(client, tmp_path):
     assert "recovery" in r.get_data(as_text=True).lower()
 
     # fresh login now requires the second factor
-    client.get("/logout")
+    client.post("/logout")
     r = client.post("/login", data={"email": "coach@club.org", "password": "twelvechars1"})
     assert r.status_code == 302 and "/login/2fa" in r.headers["Location"]
     with client.session_transaction() as sess:
@@ -242,3 +242,109 @@ def test_2fa_disable_requires_valid_code(client):
         data={"action": "disable", "totp": _totp_code(secret, int(time.time() // 30) + 1)},
     )
     assert r.status_code == 302
+
+
+# ---------------------------------------- logout & revocation (org-access audit)
+
+
+def _seed_member_org(email="coach@club.org", pid="org-a"):
+    from mediahub.web.club_profile import ClubProfile, save_profile
+    from mediahub.web.tenancy import ROLE_OWNER, MembershipStore
+
+    save_profile(
+        ClubProfile(profile_id=pid, display_name="Org A", brand_voice_summary="Bold and warm.")
+    )
+    MembershipStore().add(email, pid, role=ROLE_OWNER)
+
+
+def test_login_lands_member_directly_on_their_org(client):
+    """A1: sign-in binds the member's own organisation into the session and
+    lands on the app — never on the organisation picker."""
+    _signup(client)
+    _seed_member_org()
+    client.post("/logout")
+    r = client.post("/login", data={"email": "coach@club.org", "password": "twelvechars1"})
+    assert r.status_code == 302
+    assert "/make" in r.headers["Location"]
+    with client.session_transaction() as sess:
+        assert sess.get("active_profile_id") == "org-a"
+
+
+def test_get_logout_is_inert_and_post_clears_everything(client):
+    """/logout: GET only renders a confirmation (a cross-site link can't end
+    a session); POST performs it and clears the WHOLE session — the org pin
+    must never outlive the account that earned it."""
+    _signup(client)
+    _seed_member_org()
+    with client.session_transaction() as sess:
+        sess["active_profile_id"] = "org-a"
+
+    r = client.get("/logout")
+    assert r.status_code == 200
+    with client.session_transaction() as sess:
+        assert sess.get("user_email") == "coach@club.org"
+        assert sess.get("active_profile_id") == "org-a"
+
+    r = client.post("/logout")
+    assert r.status_code == 302
+    with client.session_transaction() as sess:
+        assert sess.get("user_email") is None
+        assert sess.get("active_profile_id") is None
+
+
+def test_replayed_prelogout_cookie_is_dead(client):
+    """Logout revokes server-side (session epoch): a captured pre-logout
+    cookie must not restore the account — or its organisation access."""
+    _signup(client)
+    _seed_member_org()
+    stale = client.get_cookie("session")
+    assert stale is not None
+    stale_value = stale.value
+    client.post("/logout")
+
+    client.set_cookie("session", stale_value)
+    r = client.get("/account/2fa")
+    assert r.status_code == 302  # bounced to sign-in: identity refused
+    # the org-scoped set-active API also refuses the replayed identity
+    r = client.post("/api/organisation/active", data={"profile_id": "org-a"})
+    assert r.status_code == 404
+
+    # a fresh, real login still works (epoch re-synced at login)
+    r = client.post("/login", data={"email": "coach@club.org", "password": "twelvechars1"})
+    assert r.status_code == 302
+    r = client.get("/account/2fa")
+    assert r.status_code == 200
+
+
+def test_dev_logout_revokes_outstanding_dev_cookies(app, monkeypatch):
+    """Operator logout writes the dev-session watermark: a replayed
+    pre-logout operator cookie is refused at every operator gate."""
+    import argon2
+
+    monkeypatch.setenv("MEDIAHUB_DEV_USER", "op")
+    monkeypatch.setenv(
+        "MEDIAHUB_DEV_PASSWORD_HASH", argon2.PasswordHasher().hash("op-password-12")
+    )
+    client = app.test_client()
+    r = client.post("/developer", data={"dev_user": "op", "dev_password": "op-password-12"})
+    assert r.status_code == 302
+    stale_value = client.get_cookie("session").value
+    r = client.get("/operator/notify-users")
+    assert r.status_code == 200  # live operator session
+
+    client.post("/logout")
+    client.set_cookie("session", stale_value)
+    r = client.get("/operator/notify-users")
+    assert r.status_code == 302
+    assert "/developer" in r.headers["Location"]
+
+
+def test_signed_in_html_is_no_store_but_anonymous_is_not(client):
+    """Signed-in HTML carries Cache-Control: no-store so the back button on a
+    shared machine cannot resurrect a signed-out page; anonymous pages keep
+    normal caching."""
+    r = client.get("/login")
+    assert r.headers.get("Cache-Control") != "no-store"
+    _signup(client)
+    r = client.get("/")
+    assert r.headers.get("Cache-Control") == "no-store"

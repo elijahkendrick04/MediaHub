@@ -165,7 +165,7 @@ def test_login_logout_round_trip(client):
         "/signup", data={"email": "rt@club.org", "password": "twelvechars1", "accept_terms": "1"}
     )
     # Log out, then the create page should no longer treat us as the account.
-    client.get("/logout")
+    client.post("/logout")
     # Log back in.
     r = client.post("/login", data={"email": "rt@club.org", "password": "twelvechars1"})
     assert r.status_code == 302
@@ -176,7 +176,7 @@ def test_login_wrong_password_is_clean_error_not_500(client):
     client.post(
         "/signup", data={"email": "wp@club.org", "password": "twelvechars1", "accept_terms": "1"}
     )
-    client.get("/logout")
+    client.post("/logout")
     r = client.post("/login", data={"email": "wp@club.org", "password": "WRONGWRONG"})
     # A wrong password is a clean 401, never a 500.
     assert r.status_code == 401
@@ -275,7 +275,7 @@ def test_billing_does_not_leak_another_accounts_plan(billing_client):
     updated = store.set_plan(b_email, auth.PLAN_CLUB, stripe_customer_id=b_customer_id)
     assert updated is not None and updated.plan == auth.PLAN_CLUB
     # Log B out so the next request is a clean session for a different account.
-    billing_client.get("/logout")
+    billing_client.post("/logout")
 
     # --- Account A: a brand-new Free user. ---
     a_email = "viewer-a@grassroots.example"

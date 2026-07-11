@@ -75,7 +75,7 @@ def test_login_routes_stale_acceptance_through_reaccept(client, monkeypatch):
     from mediahub.web import legal
 
     _signup(client)
-    client.get("/logout")
+    client.post("/logout")
     # Simulate a Terms revision after this account accepted.
     monkeypatch.setattr(legal, "TERMS_VERSION", "2099-01-01")
     r = client.post("/login", data={"email": "officer@club.org", "password": "twelvechars1"})
@@ -87,7 +87,7 @@ def test_reaccept_page_and_post_record_new_version(client, monkeypatch):
     from mediahub.web import legal
 
     _signup(client)
-    client.get("/logout")
+    client.post("/logout")
     monkeypatch.setattr(legal, "TERMS_VERSION", "2099-01-01")
     client.post("/login", data={"email": "officer@club.org", "password": "twelvechars1"})
     page = client.get("/legal/accept")

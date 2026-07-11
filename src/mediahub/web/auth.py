@@ -37,7 +37,7 @@ from typing import Optional
 
 import bcrypt
 from argon2 import PasswordHasher as _Argon2Hasher
-from flask import session
+from flask import g, session
 
 # argon2id with argon2-cffi defaults (t=3, m=64MiB, p=4) — ASVS L2 V2.4.
 _ARGON2 = _Argon2Hasher()
@@ -87,6 +87,11 @@ class User:
     # passwords), never plaintext. Each hash is removed when its code is used.
     # Accounts written before this field existed simply load with [].
     recovery_codes: list[str] = field(default_factory=list)
+    # Server-side session revocation (org-access audit): every session
+    # cookie carries the epoch it was minted under; logout bumps the
+    # account's epoch so a replayed pre-logout cookie is dead even though
+    # Flask sessions are client-side. Legacy records coerce to 0.
+    session_epoch: int = 0
 
     def to_record(self) -> dict:
         return asdict(self)
@@ -94,6 +99,10 @@ class User:
     @classmethod
     def from_record(cls, d: dict) -> "User":
         raw_codes = d.get("recovery_codes")
+        try:
+            epoch = int(d.get("session_epoch") or 0)
+        except (TypeError, ValueError):
+            epoch = 0
         return cls(
             email=str(d.get("email", "")).strip().lower(),
             hashed_password=str(d.get("hashed_password", "")),
@@ -103,6 +112,7 @@ class User:
             email_verified_at=str(d.get("email_verified_at", "") or ""),
             totp_secret=str(d.get("totp_secret", "") or ""),
             recovery_codes=[str(c) for c in raw_codes if c] if isinstance(raw_codes, list) else [],
+            session_epoch=epoch,
         )
 
 
@@ -502,6 +512,23 @@ class UserStore:
             self._append(user)
             return user
 
+    def bump_session_epoch(self, email: str) -> Optional[User]:
+        """Invalidate every outstanding session cookie for this account.
+
+        Called on logout: sessions are client-side (signed cookies), so the
+        server can't delete them — instead the account's epoch moves on and
+        ``current_user`` refuses any cookie minted under an older one. This
+        deliberately signs the account out everywhere, not just the current
+        browser. Returns the user, or None for an unknown email.
+        """
+        with _LEDGER_LOCK:
+            user = self._read_all().get(normalize_email(email))
+            if user is None:
+                return None
+            user.session_epoch = int(user.session_epoch or 0) + 1
+            self._append(user)
+            return user
+
     def mark_email_verified(self, email: str) -> Optional[User]:
         """Stamp the account as having received our verification mail."""
         with _LEDGER_LOCK:
@@ -577,6 +604,10 @@ def _users_path() -> Path:
 # re-login.
 
 _SESSION_KEY = "user_email"
+# The session epoch the cookie was minted under — must match the account's
+# current ``session_epoch`` or the cookie is treated as revoked (see
+# ``UserStore.bump_session_epoch``).
+_SESSION_EPOCH_KEY = "sess_epoch"
 
 # ---- Operator / developer access ---------------------------------------
 # A username + password sign-in for the operator running the deployment. The
@@ -629,28 +660,144 @@ def verify_dev_credentials(username: object, password: object) -> bool:
     return bool(user_ok and pass_ok)
 
 
+# Dev sessions minted before this watermark are revoked (org-access audit).
+# Sessions are client-side cookies, so operator logout writes "now" here and
+# ``is_dev_operator`` refuses any cookie stamped earlier — a replayed
+# pre-logout operator cookie is dead across every worker. Cached per mtime so
+# the hot path stays a stat(), not a read.
+_DEV_SESSION_STAMP_KEY = "dev_operator_at"
+_dev_watermark_cache: dict = {"mtime": None, "value": 0.0}
+
+
+def _dev_watermark_path() -> Path:
+    return _data_dir() / ".dev_sessions_revoked_at"
+
+
+def _dev_sessions_revoked_at() -> float:
+    path = _dev_watermark_path()
+    try:
+        mtime = path.stat().st_mtime
+    except OSError:
+        return 0.0
+    if _dev_watermark_cache["mtime"] == mtime:
+        return _dev_watermark_cache["value"]
+    try:
+        value = float(path.read_text(encoding="utf-8").strip() or 0.0)
+    except (OSError, ValueError):
+        value = 0.0
+    _dev_watermark_cache["mtime"] = mtime
+    _dev_watermark_cache["value"] = value
+    return value
+
+
+def revoke_dev_sessions() -> None:
+    """Invalidate every outstanding operator session (operator logout)."""
+    path = _dev_watermark_path()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(str(time.time()), encoding="utf-8")
+        os.chmod(path, 0o600)
+    except OSError:
+        pass  # best-effort: the session cookie itself is still cleared
+
+
 def login_dev_operator() -> None:
     """Establish an unrestricted operator session (Flask signed cookie)."""
     session[_DEV_SESSION_KEY] = True
+    session[_DEV_SESSION_STAMP_KEY] = time.time()
 
 
 def is_dev_operator() -> bool:
-    """True when this session holds the unrestricted operator cookie."""
-    return bool(session.get(_DEV_SESSION_KEY))
+    """True when this session holds a live (non-revoked) operator cookie."""
+    if not session.get(_DEV_SESSION_KEY):
+        return False
+    revoked_at = _dev_sessions_revoked_at()
+    if not revoked_at:
+        return True
+    try:
+        minted_at = float(session.get(_DEV_SESSION_STAMP_KEY) or 0.0)
+    except (TypeError, ValueError):
+        minted_at = 0.0
+    return minted_at >= revoked_at
+
+
+def _drop_epoch_cache(email: str) -> None:
+    """Forget a per-request epoch verdict (the session just changed)."""
+    try:
+        cache = getattr(g, "_mh_epoch_ok", None)
+        if cache is not None:
+            cache.pop(normalize_email(email), None)
+    except Exception:
+        pass
 
 
 def login_user(user: User) -> None:
     session[_SESSION_KEY] = user.email
+    session[_SESSION_EPOCH_KEY] = int(user.session_epoch or 0)
+    _drop_epoch_cache(user.email)
 
 
 def logout_user() -> None:
+    email = session.get(_SESSION_KEY)
+    if email:
+        _drop_epoch_cache(str(email))
     session.pop(_SESSION_KEY, None)
+    session.pop(_SESSION_EPOCH_KEY, None)
     session.pop(_DEV_SESSION_KEY, None)
+    session.pop(_DEV_SESSION_STAMP_KEY, None)
+
+
+def _cookie_epoch_revoked(norm: str) -> bool:
+    """True when the account exists and this cookie's epoch no longer
+    matches it — i.e. a session that logout has revoked server-side.
+
+    Sessions with no matching ledger record are NOT treated as revoked
+    (there is no epoch to compare); ``current_user`` keeps handling those
+    as stale. Cached on ``flask.g`` so identity checks cost one ledger
+    read per request, not one per call.
+    """
+    try:
+        cache = getattr(g, "_mh_epoch_ok", None)
+    except Exception:
+        cache = None
+    if cache is not None and norm in cache:
+        return not cache[norm]
+    user = UserStore().get(norm)
+    if user is None:
+        ok = True
+    else:
+        try:
+            cookie_epoch = int(session.get(_SESSION_EPOCH_KEY) or 0)
+        except (TypeError, ValueError):
+            cookie_epoch = 0
+        ok = cookie_epoch == int(user.session_epoch or 0)
+    try:
+        if cache is None:
+            cache = {}
+            g._mh_epoch_ok = cache
+        cache[norm] = ok
+    except Exception:
+        pass
+    return not ok
 
 
 def current_user_email() -> Optional[str]:
+    """The signed-in account's email, or None — the identity choke point.
+
+    Every entitlement check (memberships, org pinning, account pages)
+    resolves the actor through here, so the logout-revocation epoch is
+    enforced here: a replayed pre-logout cookie reports signed-out
+    everywhere, not just on surfaces that load the full user record.
+    """
     email = session.get(_SESSION_KEY)
-    return normalize_email(email) if email else None
+    if not email:
+        return None
+    norm = normalize_email(email)
+    if _cookie_epoch_revoked(norm):
+        session.pop(_SESSION_KEY, None)
+        session.pop(_SESSION_EPOCH_KEY, None)
+        return None
+    return norm
 
 
 def current_user(store: Optional[UserStore] = None) -> Optional[User]:
