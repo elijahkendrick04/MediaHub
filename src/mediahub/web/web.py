@@ -9404,7 +9404,7 @@ p:last-child { margin-bottom: 0; }
   background: var(--lane); color: var(--lane-ink);
   border: 0; padding: 11px 22px;
   /* Touch-target minimum so .btn (and every inline-styled variant on
-     /pack, /sponsor-post, /upload, /make) clears the 44px tap-area
+     /pack, /upload, /make) clears the 44px tap-area
      guideline on every viewport, even when an inline `padding:6px`
      override tries to shrink it. */
   min-height: 44px;
@@ -10409,8 +10409,7 @@ a.card:hover, .card[data-interactive]:hover {
 /* Phone / tablet (≤860px): every interactive control needs the full
    44px tap area. Card-action utility buttons (Copy caption, etc.) and
    inline-styled .btn variants on /pack get their compact desktop sizing
-   overridden here so the touch flow on /pack and /sponsor-post is
-   usable on iPhone / iPad. */
+   overridden here so the touch flow on /pack is usable on iPhone / iPad. */
 @media (max-width: 860px) {
   .mh-card-actions button,
   .mh-card-actions .btn,
@@ -12234,11 +12233,12 @@ def _theme_seed_style_block() -> str:
 _VIDEO_STUDIO_HTML = """
 <section class="mh-hero" data-lane="" style="padding-top:var(--sp-8);padding-bottom:var(--sp-6)">
   <span class="mh-hero-eyebrow">Video &middot; the footage path</span>
-  <h1>Turn race footage into<br><em class="editorial">a branded reel.</em></h1>
+  <h1>Turn race footage into<br><em class="editorial">a footage reel.</em></h1>
   <p class="lede">Upload or record a clip; MediaHub finds the moment, crops it
   upright, puts the spoken words on screen, and brands it. You approve before
   anything is exported.</p>
   __ENGINE_NOTE__
+  __MEET_REEL_HINT__
 </section>
 
 <div class="vstudio-grid">
@@ -12298,10 +12298,10 @@ _VIDEO_STUDIO_HTML = """
 </div>
 
 <section class="vstudio-panel vstudio-reel" id="vs-reel-bar" style="margin-top:var(--sp-5)" hidden>
-  <h2 class="vstudio-h">&#10024; AI reel &middot; from <span id="vs-reel-count">0</span> selected clip(s)</h2>
+  <h2 class="vstudio-h">&#10024; Footage reel &middot; from <span id="vs-reel-count">0</span> selected clip(s)</h2>
   <p class="muted">Tick &ldquo;reel&rdquo; on two or more clips above, and the director will
   order the best moments, grade them, score them to music and write a hook &mdash; one
-  branded reel for you to approve.</p>
+  branded footage reel for you to approve.</p>
   <div class="vstudio-reel-row">
     <input type="text" id="vs-reel-brief" maxlength="200" placeholder="What's this reel about? (optional context for the director)">
     <button class="btn primary" id="vs-reel-make" type="button">Direct the reel &rarr;</button>
@@ -12532,7 +12532,7 @@ _VIDEO_STUDIO_HTML = """
           + (a.usable ? '&#10003; ' : '&#9888; ') + esc(permLabel(a.permission_status)) + '</span>';
         return '<figure class="vstudio-tile'+(a.id===selectedId?' sel':'')+'" data-id="'+esc(a.id)+'">'
           + media
-          + '<label class="vstudio-pick" title="Include in AI reel"><input type="checkbox" class="vs-reel-pick" data-id="'+esc(a.id)+'"'+(reelSet[a.id]?' checked':'')+'> reel</label>'
+          + '<label class="vstudio-pick" title="Include in the footage reel"><input type="checkbox" class="vs-reel-pick" data-id="'+esc(a.id)+'"'+(reelSet[a.id]?' checked':'')+'> reel</label>'
           + '<figcaption class="cap">'+esc(a.filename)+(a.duration_ms?(' &middot; '+fmtDur(a.duration_ms)):'')+'</figcaption>'
           + '<div class="vs-tile-meta">'+badge
           + '<select class="vs-perm" data-id="'+esc(a.id)+'" aria-label="Clip permission">'+permOpts+'</select>'
@@ -12617,7 +12617,7 @@ _VIDEO_STUDIO_HTML = """
     }, function(){ var s=$('vs-make-status'); if(s){ s.textContent = 'Clip created. Render it below.'; } loadProjects(); });
   });
 
-  // ---- AI reel (multi-clip) ----
+  // ---- Footage reel (multi-clip) ----
   function toggleReel(id, on){
     if(on){ reelSet[id] = true; } else { delete reelSet[id]; }
     var n = Object.keys(reelSet).length;
@@ -14158,6 +14158,11 @@ def _layout(
     dock: dict | None = None,
     chapters: list[tuple[str, str]] | None = None,
 ) -> str:
+    # G-7: the Video Studio passes active="video", which matches no top-bar
+    # item, so nothing highlighted. The studio is a Create tile — highlight
+    # Create in both navs.
+    if active == "video":
+        active = "create"
     # Compute whether the current request has an active organisation pinned
     # so the nav can render Sign-in vs Sign-out + Organisation-name correctly.
     try:
@@ -20753,6 +20758,18 @@ def create_app() -> Flask:
                 started_iso = started.replace(" ", "T") + "Z" if started else ""
                 search_haystack = (r["meet_name"] or r["file_name"] or r["id"] or "").lower()
                 dup_badge = _dup_badge_html(dup_map.get(r["id"]))
+                # C-10: processed meets get an explicit route into the athlete
+                # spotlight — otherwise its only entries are the Review view
+                # switch or a hand-typed URL. ?older=1 keeps the spotlight's
+                # meet picker consistent even for meets past its 31-day window.
+                spotlight_link = ""
+                if r["status"] == "done" and _club_platform_ok:
+                    _sp_href = url_for("spotlight_landing", run_id=r["id"], older=1)
+                    spotlight_link = (
+                        f'<a href="{_sp_href}" style="font-size:11px;'
+                        "color:var(--ink-muted);white-space:nowrap;"
+                        'margin-right:10px">Spotlight a swimmer &rarr;</a>'
+                    )
                 rows_html += (
                     f'<tr data-run-row="{_h(r["id"])}" data-status="{_h(r["status"])}" data-q="{_h(search_haystack)}">'
                     f'<td data-label="Input"><a href="{review_href}">{_h(r["meet_name"] or r["file_name"] or r["id"])}</a>{dup_badge}</td>'
@@ -20760,7 +20777,8 @@ def create_app() -> Flask:
                     f'<td data-label="Matched">{_h(r["our_swims"] or 0)}</td>'
                     f'<td data-label="Achievements">{_h(ach_by_id.get(r["id"], 0))}</td>'
                     f'<td data-label="Started"><time class="mh-rel" datetime="{_h(started_iso)}">{_h(started)}</time></td>'
-                    f'<td><form method="post" action="{delete_href}" '
+                    f"<td>{spotlight_link}"
+                    f'<form method="post" action="{delete_href}" '
                     f'class="mh-run-delete" data-run-id="{_h(r["id"])}" '
                     f'style="display:inline" data-no-loader="1">'
                     f'<input type="hidden" name="next" value="{_h(request.path)}">'
@@ -20951,19 +20969,26 @@ def create_app() -> Flask:
 
     # ---- ACTIVITY FEED — unified runs/approvals/exports stream (UI 1.16) ---
     def _activity_view_toggle(active_view: str) -> str:
-        """Segmented "Runs table | Feed" switch shared by both Activity views."""
-        table_cls = " is-active" if active_view == "table" else ""
-        feed_cls = " is-active" if active_view == "feed" else ""
+        """Segmented "Table | Feed | Season" switch shared by the three
+        history lenses (G-2: /activity, /activity/feed and /season all render
+        the same result history — one strip cross-links them with an active
+        state instead of each page hiding the others)."""
+        tabs = (
+            ("table", "Results table", url_for("activity_page")),
+            ("feed", "Feed", url_for("activity_feed_page")),
+            ("season", "Season", url_for("season_timeline_page")),
+        )
+        links = ""
+        for key, label, href in tabs:
+            active = active_view == key
+            links += (
+                f'<a class="{"is-active" if active else ""}" '
+                f'aria-current="{"page" if active else "false"}" '
+                f'href="{href}">{label}</a>'
+            )
         return (
             '<nav class="mh-segmented" aria-label="Activity view" '
-            'style="margin-bottom:var(--sp-4)">'
-            f'<a class="{table_cls.strip()}" '
-            f'aria-current="{"page" if active_view == "table" else "false"}" '
-            f'href="{url_for("activity_page")}">Results table</a>'
-            f'<a class="{feed_cls.strip()}" '
-            f'aria-current="{"page" if active_view == "feed" else "false"}" '
-            f'href="{url_for("activity_feed_page")}">Feed</a>'
-            "</nav>"
+            f'style="margin-bottom:var(--sp-4)">{links}</nav>'
         )
 
     def _render_activity_feed(events) -> str:
@@ -21658,8 +21683,8 @@ def create_app() -> Flask:
             f"{range_html}"
             f"<span>{n_meets:,} {'meet' if n_meets == 1 else 'meets'}</span>"
             '<span class="sep">&middot;</span>'
-            f'<span><a href="{url_for("activity_page")}">View as activity log &rarr;</a></span>'
-            '<span class="sep">&middot;</span>'
+            # (G-2: the "View as activity log →" link moved into the shared
+            # Table · Feed · Season strip below the hero.)
             # C-9 — a discoverable entry into Collections (folders grouping meets),
             # previously reachable only by typing the URL.
             f'<span><a href="{url_for("collections_page")}">Collections &rarr;</a></span>'
@@ -21675,7 +21700,14 @@ def create_app() -> Flask:
             "</div></div>"
         )
 
-        body = season_css + hero + summary_html + timeline_html + _RUN_DELETE_JS
+        body = (
+            season_css
+            + hero
+            + _activity_view_toggle("season")
+            + summary_html
+            + timeline_html
+            + _RUN_DELETE_JS
+        )
         return _layout("Season timeline", body, active="season")
 
     # ---- UPLOAD --------------------------------------------------------
@@ -30182,7 +30214,9 @@ self.addEventListener('fetch', function(e){
                 "System status",
                 "Whether the site is operational right now.",
                 "status",
-                url_for("settings_section", section="status"),
+                # G-2: straight to the canonical /status page — the settings
+                # sub-page was a byte-identical mirror of it.
+                url_for("status_page"),
             ),
         ]
         if is_dev:
@@ -30441,9 +30475,13 @@ self.addEventListener('fetch', function(e){
                 lambda prof: _render_settings_governance_section(prof),
             ),
             "account": ("Account", lambda prof: _render_settings_account_section()),
-            "status": ("System status", lambda prof: _render_settings_status_public_section()),
             "developer": ("Developer", lambda prof: _render_settings_developer_section()),
         }
+        # G-2: /settings/status used to render the exact same public
+        # status card as /status — one canonical page now; old links
+        # follow it there.
+        if section == "status":
+            return redirect(url_for("status_page"))
         entry = renderers.get(section)
         if entry is None:
             return redirect(url_for("settings_page"))
@@ -31405,120 +31443,37 @@ self.addEventListener('fetch', function(e){
         )
 
     def _render_settings_activity_section(prof: Optional[ClubProfile]) -> str:
-        """Activity section — recent runs for the pinned org.
+        """Activity section — a pointer to the canonical /activity page.
 
-        Mirrors the standalone /activity page but degrades gracefully
-        when no profile is pinned (Settings is reachable pre-org-setup).
-        The settings sub-page supplies its own hero title, so this section
-        carries no big header of its own.
+        G-2: this used to re-render its own copy of the results table
+        ("Mirrors /activity") — a fourth surface showing the same history.
+        The canonical Activity page carries everything the mirror had (and
+        more): per-row delete, the why-it-failed explainers, search, status
+        filters, bulk clear, and the Table · Feed · Season views. Settings
+        now links instead of duplicating. Degrades gracefully when no
+        profile is pinned (Settings is reachable pre-org-setup).
         """
-        section_header = ""
         if prof is None:
             return (
-                f"{section_header}"
                 '<p class="dim" style="margin-bottom:14px">'
-                "Choose an organisation to see its recent runs here. "
+                "Choose an organisation to see its recent results. "
                 "Activity is scoped per-organisation so the data never "
                 "leaks between profiles.</p>"
                 '<div class="card empty">No organisation pinned. '
                 f'<a href="{url_for("sign_in_page")}">Choose organisation &rarr;</a></div>'
             )
-
-        try:
-            conn = _db()
-            rows = conn.execute(
-                "SELECT id, created_at, finished_at, status, profile_id, "
-                "meet_name, our_swims, n_cards, n_queue, error, file_name "
-                "FROM runs WHERE profile_id = ? "
-                "ORDER BY created_at DESC LIMIT 100",
-                (prof.profile_id,),
-            ).fetchall()
-            conn.close()
-        except Exception:
-            rows = []
-
-        section_intro = (
-            f'<p class="dim" style="margin-bottom:14px">Recent runs for '
-            f"<b>{_h(prof.display_name)}</b>.</p>"
-        )
-
-        if not rows:
-            return (
-                f"{section_header}"
-                f"{section_intro}"
-                '<div class="card empty">No results yet for this organisation. '
-                f'<a href="{url_for("make_page")}">Create your first piece of content &rarr;</a>'
-                "</div>"
-            )
-
-        rows_html = ""
-        n_errored = 0
-        for r in rows:
-            badge = {"done": "good", "running": "info", "queued": "info", "error": "bad"}.get(
-                r["status"], ""
-            )
-            review_href = url_for("review", run_id=r["id"])
-            delete_href = url_for("privacy_delete_run", run_id=r["id"])
-            started = (r["created_at"] or "")[:19]
-            started_iso = started.replace(" ", "T") + "Z" if started else ""
-            rows_html += (
-                f'<tr data-run-row="{_h(r["id"])}"><td data-label="Input"><a href="{review_href}">{_h(r["meet_name"] or r["file_name"] or r["id"])}</a></td>'
-                f'<td data-label="Status"><span class="tag {badge}">{_h(r["status"])}</span></td>'
-                f'<td data-label="Matched">{_h(r["our_swims"] or 0)}</td>'
-                f'<td data-label="Queue / Total">{_h(r["n_queue"] or 0)} / {_h(r["n_cards"] or 0)}</td>'
-                f'<td data-label="Started"><time class="mh-rel" datetime="{_h(started_iso)}">{_h(started)}</time></td>'
-                f'<td><form method="post" action="{delete_href}" '
-                f'class="mh-run-delete" data-run-id="{_h(r["id"])}" '
-                f'style="display:inline" data-no-loader="1">'
-                f'<input type="hidden" name="next" value="{_h(request.path)}">'
-                f'<button class="btn danger" type="submit" '
-                f'style="font-size:11px;padding:4px 10px">Delete</button>'
-                f"</form></td></tr>"
-            )
-            if r["status"] == "error" and r["error"]:
-                n_errored += 1
-                err_text = str(r["error"])
-                truncated = err_text[:600] + ("…" if len(err_text) > 600 else "")
-                rows_html += (
-                    f'<tr class="run-error-row" data-run-err="{_h(r["id"])}">'
-                    '<td colspan="7" style="padding:6px 14px 14px 14px;'
-                    'background:rgba(255,93,108,0.06);border-left:3px solid var(--mh-prim-error-500)">'
-                    "<details>"
-                    '<summary style="cursor:pointer;font-size:13px;font-weight:600;'
-                    'color:var(--mh-prim-error-300)">Why did this run fail?</summary>'
-                    '<pre style="margin:8px 0 0;padding:10px 12px;'
-                    "background:rgba(0,0,0,0.25);border-radius:6px;"
-                    'font-size:12px;white-space:pre-wrap;word-break:break-word">'
-                    f"{_h(truncated)}</pre>"
-                    "</details>"
-                    "</td></tr>"
-                )
-
-        failure_callout = ""
-        if n_errored:
-            label = "1 run failed" if n_errored == 1 else f"{n_errored} runs failed"
-            failure_callout = (
-                '<div class="card" style="padding:12px 18px;margin-bottom:20px;'
-                'background:rgba(255,93,108,0.06);border-left:3px solid var(--mh-prim-error-500)">'
-                f"<b>{_h(label)}</b> in the last 100 runs. "
-                "Expand <i>Why did this run fail?</i> on each row below to "
-                "see the pipeline error.</div>"
-            )
-
-        # Delete in place + bulk clear: shared, delegated handler (mh-run-delete
-        # removes a row via fetch; mh-clear-all-runs confirms then reloads).
-        # No-JS falls back to the plain form POST (honours ``next``).
         return (
-            f"{section_header}"
-            f"{section_intro}"
-            f"{failure_callout}"
-            '<div class="card"><table class="mh-table-stack">'
-            "<thead><tr><th>Input</th><th>Status</th>"
-            "<th>Matched</th><th>Queue / Total</th>"
-            "<th>Started</th><th></th></tr></thead>"
-            f"<tbody>{rows_html}</tbody>"
-            "</table></div>"
-            f"{_RUN_DELETE_JS}"
+            f'<p class="dim" style="margin-bottom:14px">Results for '
+            f"<b>{_h(prof.display_name)}</b> live in one place &mdash; the "
+            "Activity page &mdash; rather than a second copy here.</p>"
+            '<div class="card" style="padding:22px 20px;max-width:640px">'
+            '<h2 style="margin:0 0 6px 0;font-size:18px">Activity</h2>'
+            '<p class="dim" style="margin:0 0 14px 0;line-height:1.55">'
+            "Every processed meet for this organisation &mdash; status, matched "
+            "swims, achievements, why a result failed, per-row delete and bulk "
+            "clear &mdash; with table, feed and season views.</p>"
+            f'<a class="btn" href="{url_for("activity_page")}">Open Activity &rarr;</a>'
+            "</div>"
         )
 
     def _render_settings_status_section() -> str:
@@ -31891,7 +31846,7 @@ self.addEventListener('fetch', function(e){
 
 <div class="card">
   <h3 style="margin-top:0">Delete runs</h3>
-  <p class="muted" style="margin-top:0">To delete an individual run, open <a href="{url_for("settings_section", section="activity")}">Activity</a> and use the Delete button on its row — it's removed from everywhere across the site, including the athlete spotlight.</p>
+  <p class="muted" style="margin-top:0">To delete an individual result, open <a href="{url_for("activity_page")}">Activity</a> and use the Delete button on its row — it's removed from everywhere across the site, including the athlete spotlight.</p>
 </div>
 """
 
@@ -34849,13 +34804,17 @@ function mhAnDigest(btn) {{
             '<path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>'
             "</svg>"
         )
+        # C-20: exactly ONE "start here" on this page — the first implemented
+        # tile's START HERE ribbon (Meet Recap, the audience's actual first
+        # step). The Plan hero is the strategic aid, not the starting point,
+        # so its label stays a plain "Plan".
         plan_entry_html = (
             f'<a href="{_h(url_for("content_type_intro", ct="plan"))}" class="mh-plan-tile">'
             f'<span class="mh-plan-tile-icon">{_plan_tile_icon}</span>'
             '<span class="mh-plan-tile-body">'
-            '<span class="mh-plan-tile-eyebrow">Plan &middot; Start here</span>'
+            '<span class="mh-plan-tile-eyebrow">Plan</span>'
             '<span class="mh-plan-tile-title">Not sure what to post? '
-            '<em class="editorial">Plan your next posts.</em></span>'
+            '<em class="editorial">Plan it.</em></span>'
             '<span class="mh-plan-tile-desc">MediaHub ranks what to post next from your '
             "results, the calendar and what you tell it &mdash; with the reasoning shown for "
             "every item. Describe what&rsquo;s coming up in your own words and it fills in the "
@@ -35255,34 +35214,41 @@ function mhAnDigest(btn) {{
         _active_pid = _active_profile_id()
         recent_runs: list = []
         db_failed = False
-        # Spotlight is a *fresh-moments* surface: it only offers meets from the
-        # last month of runs. created_at is a tz-aware isoformat() string, so the
-        # cutoff is computed the same way and compared lexically (ISO-8601 sorts
-        # lexically for a fixed shape) — never SQLite datetime(), whose space/no-
-        # offset format wouldn't compare cleanly against the stored "T…+00:00".
+        # Spotlight is a *fresh-moments* surface: by default it only offers
+        # meets from the last 31 days of runs. C-10: ?older=1 lifts that cutoff
+        # so an older meet stays reachable (the hint below links the toggle).
+        # created_at is a tz-aware isoformat() string, so the cutoff is computed
+        # the same way and compared lexically (ISO-8601 sorts lexically for a
+        # fixed shape) — never SQLite datetime(), whose space/no-offset format
+        # wouldn't compare cleanly against the stored "T…+00:00".
         from datetime import timedelta as _td
 
+        show_older = request.args.get("older") == "1"
         _spot_cutoff = (datetime.now(timezone.utc) - _td(days=31)).isoformat()
+        _where = ["status='done'"]
+        _params: list = []
+        if not show_older:
+            _where.append("created_at >= ?")
+            _params.append(_spot_cutoff)
+        if _active_pid:
+            # TENANT ISOLATION (see comment above); without an active org
+            # (pre-onboarding sandbox / tests) there's nothing to isolate
+            # against, so list everything in-window.
+            _where.append("(profile_id = ? OR profile_id IS NULL OR profile_id = '')")
+            _params.append(_active_pid)
+        # The recent view keeps its tight shortlist; the older view lists up
+        # to 100 (matching Activity) so lifting the cutoff actually surfaces
+        # older meets for busy clubs.
+        _spot_limit = 100 if show_older else 20
         try:
             conn = _db()
             try:
-                if _active_pid:
-                    recent_runs = conn.execute(
-                        "SELECT id, meet_name, file_name, created_at FROM runs "
-                        "WHERE status='done' AND created_at >= ? AND "
-                        "(profile_id = ? OR profile_id IS NULL OR profile_id = '') "
-                        "ORDER BY created_at DESC LIMIT 20",
-                        (_spot_cutoff, _active_pid),
-                    ).fetchall()
-                else:
-                    # No active org (pre-onboarding sandbox / tests):
-                    # nothing to isolate against, so list everything in-window.
-                    recent_runs = conn.execute(
-                        "SELECT id, meet_name, file_name, created_at FROM runs "
-                        "WHERE status='done' AND created_at >= ? "
-                        "ORDER BY created_at DESC LIMIT 20",
-                        (_spot_cutoff,),
-                    ).fetchall()
+                recent_runs = conn.execute(
+                    "SELECT id, meet_name, file_name, created_at FROM runs "
+                    "WHERE " + " AND ".join(_where) + " "
+                    f"ORDER BY created_at DESC LIMIT {_spot_limit}",
+                    tuple(_params),
+                ).fetchall()
             finally:
                 conn.close()
         except Exception as e:
@@ -35330,6 +35296,13 @@ function mhAnDigest(btn) {{
                     "</section>"
                 )
                 return _layout("Athlete Spotlight", empty_body, active="create")
+            # C-10: with the 31-day window on, a club whose meets are all
+            # older would otherwise hit this hero with no way to reach them.
+            _older_cta = (
+                ""
+                if show_older
+                else f'<a class="mh-cta-secondary" href="{url_for("spotlight_landing", older=1)}">Show older meets</a>'
+            )
             empty_body = (
                 '<section class="mh-hero" data-lane="01" style="padding-top:var(--sp-9);padding-bottom:var(--sp-8)">'
                 '<span class="mh-hero-eyebrow">Athlete spotlight</span>'
@@ -35341,6 +35314,7 @@ function mhAnDigest(btn) {{
                 '<div class="mh-hero-actions">'
                 f'<a class="mh-cta-primary" href="{url_for("upload")}">Upload a meet &rarr;</a>'
                 f'<a class="mh-cta-secondary" href="{url_for("make_page")}">All input types</a>'
+                f"{_older_cta}"
                 "</div>"
                 "</section>"
             )
@@ -35414,6 +35388,25 @@ function mhAnDigest(btn) {{
                     swimmers_html = '<div class="card"><p class="muted">No achievements found for this run. The recognition report may not be available.</p></div>'
 
         change_js = url_for("spotlight_landing")
+        # C-10: the window hint states the cutoff and links the toggle, so the
+        # 31-day filter is a choice rather than a silent limit. The toggle
+        # keeps the current meet selection; the hidden input keeps the mode
+        # across the picker's own GET submit.
+        _toggle_args = {"run_id": run_id_param} if run_id_param else {}
+        if show_older:
+            window_hint = (
+                "Showing all processed meets. "
+                f'<a href="{url_for("spotlight_landing", **_toggle_args)}">Show the last 31 days only</a>. '
+                "A meet deleted in Settings disappears from here too."
+            )
+            older_field = '<input type="hidden" name="older" value="1">'
+        else:
+            window_hint = (
+                "Showing meets from the last 31 days. "
+                f'<a href="{url_for("spotlight_landing", older=1, **_toggle_args)}">Show older meets</a>. '
+                "A meet deleted in Settings disappears from here too."
+            )
+            older_field = ""
         body = f"""
 <section class="mh-hero" data-lane="" style="padding-top:var(--sp-8);padding-bottom:var(--sp-7);margin-bottom:var(--sp-5)">
   <span class="mh-hero-eyebrow">Athlete spotlight</span>
@@ -35425,8 +35418,9 @@ function mhAnDigest(btn) {{
 
 <div class="card">
   <h2>Choose a meet</h2>
-  <p class="muted" style="margin-top:0;font-size:13px">Showing meets from the last month. Older runs roll off automatically, and a run deleted in Settings disappears from here too.</p>
+  <p class="muted" style="margin-top:0;font-size:13px">{window_hint}</p>
   <form method="get" action="{url_for("spotlight_landing")}">
+    {older_field}
     <select name="run_id" onchange="this.form.submit()" style="max-width:480px">
       {runs_opts}
     </select>
@@ -35708,9 +35702,22 @@ function copySpotlightCaption(btn, cardIdSafe) {{
     # ---- Stub routes (now functional with real LLM + fallback) ---------
     _STUB_TYPE_BY_CLASS = {
         "WeekendPreviewStub": "event_preview",
-        "SponsorPostStub": "sponsor_activation",
-        "SessionUpdateStub": "session_update",
         "FreeTextStub": "free_text",
+    }
+
+    # C-11: seed prompts for the retired Sponsor Post / Session Update forms.
+    # Their routes now redirect into the free-text landing with these seeds
+    # (the landing's textarea prefills from ?seed=), and old saved drafts of
+    # those types point their "start a new draft" link the same way.
+    _RETIRED_STUB_SEEDS = {
+        "sponsor_activation": (
+            "A sponsor thank-you post — name the sponsor, the event and the "
+            "moment to celebrate, in club colours."
+        ),
+        "session_update": (
+            "A mid-session update from poolside — the event, what has "
+            "happened so far, and who swims next."
+        ),
     }
 
     # Per-content-type hero copy. Centralised once so every stub form
@@ -35727,18 +35734,6 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             "Set the scene.",
             "preview it",
             "Give us the event name — add its website or meet pack and the AI works out what the event is. It can even read the entries and pick your ones to watch.",
-        ),
-        "Sponsor Post": (
-            "Sponsor post",
-            "Name the partner.",
-            "activate it",
-            "Lead with the moment. Tell us the sponsor, the event, the key achievement, and brand rules. We make the partnership feel natural in every caption.",
-        ),
-        "Session Update": (
-            "Session update",
-            "Mid-session.",
-            "live from poolside",
-            "Type the event, what's happened so far, and the current session. We draft short Stories and Twitter cards for mid-event sharing.",
         ),
         "Free Text (quick)": (
             "Free text — quick",
@@ -36175,13 +36170,22 @@ function copySpotlightCaption(btn, cardIdSafe) {{
     def stub_weekend_preview():
         return _render_stub("WeekendPreviewStub", "stub_weekend_preview", "Event Preview")
 
-    @app.route("/sponsor-post", methods=["GET", "POST"])
+    # C-11: Sponsor Post and Session Update are retired as standalone forms —
+    # Free Text interprets any such prompt, so there is ONE "describe it"
+    # story instead of two hidden form paths. The old URLs live on as
+    # redirects into the free-text landing carrying a seed prompt for the
+    # textarea, so bookmarks, old draft links and the content-type registry
+    # endpoints keep resolving. Nothing renders forms that POST here any
+    # more, so the POST methods are gone with the forms.
+    @app.route("/sponsor-post")
     def stub_sponsor_post():
-        return _render_stub("SponsorPostStub", "stub_sponsor_post", "Sponsor Post")
+        return redirect(
+            url_for("free_text_chat_page", seed=_RETIRED_STUB_SEEDS["sponsor_activation"])
+        )
 
-    @app.route("/session-update", methods=["GET", "POST"])
+    @app.route("/session-update")
     def stub_session_update():
-        return _render_stub("SessionUpdateStub", "stub_session_update", "Session Update")
+        return redirect(url_for("free_text_chat_page", seed=_RETIRED_STUB_SEEDS["session_update"]))
 
     @app.route("/free-text/quick", methods=["GET", "POST"])
     def stub_free_text_quick():
@@ -36301,12 +36305,6 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             )
         }
 </div>
-
-<p style="margin-top:18px;font-size:12px;color:var(--ink-muted)">
-  Prefer the one-shot form? <a href="{
-            url_for("stub_free_text_quick")
-        }">Use the legacy quick generator →</a>
-</p>
 """
         return _layout("Free text — chat", body, active="create")
 
@@ -36835,9 +36833,10 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 '<span class="mh-hero-eyebrow">Saved drafts</span>'
                 '<h1>Nothing <em class="editorial">drafted</em> yet.</h1>'
                 '<p class="lede">'
-                "Content packs you generate from Free Text, Event Preview, "
-                "Sponsor Post and Session Update are kept here so you can "
-                "come back, edit, and approve later."
+                "Content packs you generate are kept here so you can come "
+                "back, edit, and approve later. Describe any moment in Free "
+                "Text &mdash; a sponsor thank-you, a mid-session update, a "
+                "shout-out &mdash; or build an Event Preview."
                 "</p>"
                 '<div class="mh-hero-actions">'
                 f'<a class="mh-cta-primary" href="{url_for("make_page")}">Start creating &rarr;</a>'
@@ -36954,16 +36953,22 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         )
         # Replace the renderer's default footer to add export + regenerate.
         export_url = url_for("stub_pack_export", pack_id=pack_id)
-        regenerate_url = url_for(
-            {
-                # Endpoint names are implementation artifacts (kept across the
-                # ADR-0013 slug rename); keys are canonical post-type slugs.
-                "free_text": "free_text_chat_page",
-                "event_preview": "stub_weekend_preview",
-                "sponsor_activation": "stub_sponsor_post",
-                "session_update": "stub_session_update",
-            }.get(stub_type, "free_text_chat_page")
-        )
+        # C-11: sponsor / session drafts predate the retirement of their
+        # standalone forms — their "new draft" path is now the free-text
+        # landing, seeded with the retired type's ask so the prompt box
+        # starts in the right place. Other types keep their live form.
+        if stub_type in _RETIRED_STUB_SEEDS:
+            regenerate_url = url_for("free_text_chat_page", seed=_RETIRED_STUB_SEEDS[stub_type])
+        else:
+            regenerate_url = url_for(
+                {
+                    # Endpoint names are implementation artifacts (kept across
+                    # the ADR-0013 slug rename); keys are canonical post-type
+                    # slugs.
+                    "free_text": "free_text_chat_page",
+                    "event_preview": "stub_weekend_preview",
+                }.get(stub_type, "free_text_chat_page")
+            )
         regen_api = url_for("api_stub_pack_regenerate", pack_id=pack_id)
         footer = (
             f'<div style="margin-top:24px;display:flex;gap:10px;flex-wrap:wrap">'
@@ -46598,6 +46603,7 @@ function mhSetupMode(mode) {{
     <button class="btn secondary mh-reel-go" style="font-size:12px;padding:6px 14px"
             onclick="generateReelBatch(this, {repr(_reel_url)})">All 4 formats</button>
   </div>
+  {f'<div class="dim" style="font-size:11px;margin-top:8px">Working from race footage? <a href="{url_for("video_studio_page")}">Try the Video Studio &rarr;</a></div>' if _v8_ok else ""}
 </div>"""
 
         # ---- M30: Create-all-graphics + rendered-count + pack wall ------
@@ -49335,7 +49341,8 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
 {shared_banner}
 <div class="card">
   <h2>Upload photos</h2>
-  <p class="dim" style="margin-bottom:var(--sp-5)">Reusable photos for branded content cards. Pick several at once &mdash; each upload is parsed for athlete, venue, and event metadata so the engine can pull the right shot into the right moment. On a phone you can take a photo or share one straight from your camera roll into the library.</p>
+  <p class="dim" style="margin-bottom:var(--sp-5)">Reusable photos for branded content cards. Pick several at once &mdash; each upload is parsed for athlete, venue, and event metadata so the engine can pull the right shot into the right moment. On a phone you can take a photo or share one straight from your camera roll into the library.
+    No photos of your own yet? <a href="{url_for("stock_page")}">Find stock photos &rarr;</a> &mdash; licence-clean, saved straight into this library.</p>
   <form id="ml-upload-form" data-mh-capture-form method="POST" action="{
             url_for("api_media_library_upload")
         }" enctype="multipart/form-data" data-loader-text="Uploading photos">
@@ -52065,7 +52072,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         run_id = (_req.args.get("run_id") or "").strip()
         card_id = (_req.args.get("card_id") or "").strip()
         add_url = list_url = suggest_url = ""
-        card_label = ""
+        card_label = card_url = ""
         if run_id and card_id:
             run_data = _load_run(run_id)
             if run_data and _can_access_run(run_id, run_data, profile_id):
@@ -52073,6 +52080,9 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                 list_url = add_url
                 suggest_url = url_for("api_element_suggestions", run_id=run_id, card_id=card_id)
                 card_label = card_id
+                # C-12: the add-to-card toast links straight back to the
+                # card's review page so "Added" isn't a dead end.
+                card_url = url_for("review", run_id=run_id)
 
         body = _eb.render_browser_body(
             elements=seed,
@@ -52085,6 +52095,10 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             suggest_url=suggest_url,
             card_label=card_label,
             stock_url=url_for("stock_page"),
+            # C-12: browse-only visits get an explainer + a route into the
+            # card flow (Activity lists the processed meets).
+            activity_url=url_for("activity_page"),
+            card_url=card_url,
         )
         return _layout("Elements", body, active="elements")
 
@@ -59913,6 +59927,30 @@ voice, and queues them for one-click approval.</p>
         look_options = "".join(
             f'<option value="{_h(n)}">{_h(describe_look(n))}</option>' for n in look_names()
         )
+        # G-7: the OTHER reel — the Meet reel built from result cards on the
+        # pack page — gets a cross-link here so the two features stop being
+        # two unrelated things both called "reel". Link the latest processed
+        # meet's pack when there is one, else Activity.
+        _meet_reel_href = url_for("activity_page")
+        try:
+            conn = _db()
+            try:
+                _mr_row = conn.execute(
+                    "SELECT id FROM runs WHERE profile_id = ? AND status='done' "
+                    "ORDER BY created_at DESC LIMIT 1",
+                    (prof.profile_id,),
+                ).fetchone()
+            finally:
+                conn.close()
+            if _mr_row:
+                _meet_reel_href = url_for("content_pack", run_id=_mr_row["id"])
+        except Exception as e:  # noqa: BLE001 - hint only, never block the studio
+            log.warning("video studio: meet-reel hint lookup failed: %s", e)
+        meet_reel_hint = (
+            '<p class="muted" style="margin-top:6px">Want a highlights reel from '
+            "your result cards instead? "
+            f'<a href="{_h(_meet_reel_href)}">Build a Meet reel &rarr;</a></p>'
+        )
         body = (
             _VIDEO_STUDIO_HTML.replace("__CSRF__", _h(_csrf_token()))
             .replace("__FOOTAGE_URL__", url_for("api_video_footage_upload"))
@@ -59959,6 +59997,7 @@ voice, and queues them for one-click approval.</p>
             .replace("__LOOK_OPTIONS__", look_options)
             .replace("__VIDEO_MAX_MB__", str(_video_upload_max // (1024 * 1024)))
             .replace("__ENGINE_NOTE__", engine_note)
+            .replace("__MEET_REEL_HINT__", meet_reel_hint)
         )
         return _layout("Video studio", body, active="video")
 
@@ -60454,7 +60493,7 @@ voice, and queues them for one-click approval.</p>
 
         from mediahub.video.projects import VideoProject
 
-        name = (result.plan.hook or brief or "AI reel").strip()[:80] or "AI reel"
+        name = (result.plan.hook or brief or "Footage reel").strip()[:80] or "Footage reel"
         proj = VideoProject(
             id="",
             profile_id=profile_id,
@@ -60556,7 +60595,9 @@ voice, and queues them for one-click approval.</p>
                         brief_context=brief,
                         colours=colours,
                     )
-                    name = (result.plan.hook or brief or "AI reel").strip()[:80] or "AI reel"
+                    name = (result.plan.hook or brief or "Footage reel").strip()[
+                        :80
+                    ] or "Footage reel"
                     proj = VideoProject(
                         id="",
                         profile_id=profile_id,
