@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-07-11 · `783bcc13c` · Merge pull request #1171 from elijahkendrick04/claude/caption-generator-audit-j30c01
+**Last updated:** 2026-07-11 · `d38edda92` · Clarify the signed-out home page above the fold (#1170)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1229,6 +1229,7 @@ list and the auto table below, not here.
 | 2026-07-11 | `c47966be0` | style: satisfy ruff-format in caption_assist |
 | 2026-07-11 | `0d023dbf6` | Apply ruff-format normalization (quote style + line wrap) |
 | 2026-07-11 | `32682f562` | Strengthen and unify the caption-generator quality guardrails |
+| 2026-07-11 | `970777830` | Clarify the signed-out home page above the fold |
 | 2026-07-11 | `9793db3f2` | Align not-ready-panel test with new copy; refresh README test count |
 | 2026-07-11 | `ae2d61b09` | Audit and remove AI slop across content, copy, docs, and reel covers |
 | 2026-07-11 | `050c89f86` | fix(athletes,org): transactional bulk consent; kind-checked discard; analyse_voice fall-through (B-7 |
@@ -1236,5 +1237,4 @@ list and the auto table below, not here.
 | 2026-07-11 | `eb6560bf5` | fix(plan): calendar revert uses the true previous date; analytics delete honest on error bodies (D-2 |
 | 2026-07-11 | `f80edf89e` | fix(pack): export gates come alive after an in-page render (B-2 follow-up) |
 | 2026-07-11 | `45557dadb` | docs(audit): AUDIT COMPLETE — 159/159 live findings shipped |
-| 2026-07-11 | `4a19b75ef` | test(j9): the chooser's sibling pin accepts B-2's details disclosure |
 <!-- /ROADMAP:ACTIVITY -->
