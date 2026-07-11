@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-07-11 · `b116544ac` · [org-access] audit report: current behaviour, verification matrix, findings, verdict
+**Last updated:** 2026-07-11 · `dc93fe80d` · [org-access] record final merge status + green-gate result in audit report
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1226,6 +1226,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-07-11 | `dc93fe80d` | [org-access] record final merge status + green-gate result in audit report |
 | 2026-07-11 | `b116544ac` | [org-access] audit report: current behaviour, verification matrix, findings, verdict |
 | 2026-07-11 | `5b616e225` | [org-access] confine signed-in accounts to member orgs; land members on their club; real sign-out |
 | 2026-07-11 | `868292c97` | [org-access] fix cross-tenant IDOR on /api/visual/<vid>(/png) endpoints |
@@ -1237,5 +1238,4 @@ list and the auto table below, not here.
 | 2026-07-11 | `0c87f9618` | [team-members] record PR link + green-gate result in audit report |
 | 2026-07-11 | `612bd959c` | [team-members] render status badges as pills; show the invite signup link |
 | 2026-07-11 | `5b7aad2b3` | [team-members] audit report for Settings -> Team members |
-| 2026-07-11 | `ccb4ab9eb` | [team-members] keep a workspace manageable when its last owner is erased |
 <!-- /ROADMAP:ACTIVITY -->
