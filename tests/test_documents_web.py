@@ -388,6 +388,213 @@ def test_remote_landing(app_env):
 
 
 # ---------------------------------------------------------------------------
+# CSRF: the state-changing document controls must work under production CSRF
+# enforcement. The multipart uploads (import / merge / images-to-pdf) can't use
+# the JSON-content-type exemption, so they carry the token in an X-CSRF-Token
+# header; the empty delete POST uses the JSON content-type exemption. These
+# tests run with CSRF ENFORCED (the default TESTING mode disables it, which is
+# why the earlier tests didn't catch the controls 403ing in production).
+# ---------------------------------------------------------------------------
+
+
+def _csrf_from_home(client):
+    import re
+
+    html = client.get("/documents").get_data(as_text=True)
+    m = re.search(r'const CSRF = "([0-9a-f]+)"', html)
+    assert m, "documents home must embed the CSRF token for its multipart uploads"
+    return m.group(1)
+
+
+def test_home_embeds_csrf_token_for_uploads(app_env):
+    app, wm, _ = app_env
+    app.config["ENFORCE_CSRF"] = True
+    c = app.test_client()
+    _login(c)
+    html = c.get("/documents").get_data(as_text=True)
+    # the token is wired into the multipart fetches, not left as a placeholder
+    assert "__CSRF__" not in html
+    assert "X-CSRF-Token" in html
+
+
+def test_images_to_pdf_needs_csrf_token(app_env):
+    app, wm, tmp_path = app_env
+    app.config["ENFORCE_CSRF"] = True
+    c = app.test_client()
+    _login(c)
+    from PIL import Image
+    import io as _io
+
+    def _png():
+        b = _io.BytesIO()
+        Image.new("RGB", (40, 30), "red").save(b, "PNG")
+        b.seek(0)
+        return b
+
+    # no token -> blocked (guard intact)
+    r0 = c.post(
+        "/api/documents/tools/images-to-pdf",
+        data={"files": (_png(), "a.png")},
+        content_type="multipart/form-data",
+    )
+    assert r0.status_code == 403 and r0.get_json()["error"] == "csrf"
+
+    # with the page's token -> succeeds
+    tok = _csrf_from_home(c)
+    r1 = c.post(
+        "/api/documents/tools/images-to-pdf",
+        data={"files": (_png(), "a.png")},
+        content_type="multipart/form-data",
+        headers={"X-CSRF-Token": tok},
+    )
+    assert r1.status_code == 200 and r1.data[:4] == b"%PDF"
+
+
+def test_import_needs_csrf_token(app_env):
+    app, wm, tmp_path = app_env
+    app.config["ENFORCE_CSRF"] = True
+    c = app.test_client()
+    _login(c)
+    from mediahub.documents import export, models as mdl
+    from mediahub.documents.models import DocumentSpec, Section
+
+    src = DocumentSpec(title="I", sections=[Section(blocks=[mdl.heading("Hi", 1)])])
+    path = tmp_path / "x.docx"
+    export.document_docx(src, path)
+    data = path.read_bytes()
+
+    r0 = c.post(
+        "/api/documents/import",
+        data={"file": (io.BytesIO(data), "x.docx")},
+        content_type="multipart/form-data",
+    )
+    assert r0.status_code == 403 and r0.get_json()["error"] == "csrf"
+
+    tok = _csrf_from_home(c)
+    r1 = c.post(
+        "/api/documents/import",
+        data={"file": (io.BytesIO(data), "x.docx")},
+        content_type="multipart/form-data",
+        headers={"X-CSRF-Token": tok},
+    )
+    assert r1.get_json()["ok"]
+
+
+def test_delete_document_works_under_csrf(app_env):
+    app, wm, _ = app_env
+    app.config["ENFORCE_CSRF"] = True
+    c = app.test_client()
+    _login(c)
+    doc_id = c.post("/api/documents/generate", json={"format": "blank"}).get_json()["doc_id"]
+    # the delDoc() control posts with a JSON content-type (CSRF-exempt); a bare
+    # POST with neither token nor JSON content-type would 403 in production.
+    r_bad = c.post(f"/api/documents/{doc_id}/delete")
+    assert r_bad.status_code == 403
+    r_ok = c.post(f"/api/documents/{doc_id}/delete", headers={"Content-Type": "application/json"})
+    assert r_ok.get_json()["ok"]
+
+
+# ---------------------------------------------------------------------------
+# Robustness: malformed spec / leaked paths / double-submit / kiosk cadence
+# ---------------------------------------------------------------------------
+
+
+def test_save_malformed_spec_does_not_500_and_stays_viewable(app_env):
+    """A hand-edited spec (advanced JSON editor) with wrong-typed fields must not
+    500 on save or on the subsequent view — it loads with the bad fields defaulted."""
+    app, wm, _ = app_env
+    c = app.test_client()
+    _login(c)
+    doc_id = c.post("/api/documents/generate", json={"format": "blank"}).get_json()["doc_id"]
+    for bad in (
+        {"doc_id": doc_id, "title": "x", "meta": [1, 2], "sections": []},
+        {"doc_id": doc_id, "title": "x", "sections": 5},
+        {
+            "doc_id": doc_id,
+            "title": "x",
+            "sections": [{"blocks": [{"kind": "text", "props": [1]}]}],
+        },
+        {"doc_id": doc_id, "title": "x", "source_refs": 9},
+    ):
+        r = c.post(f"/api/documents/{doc_id}/save", json={"spec": bad})
+        assert r.status_code == 200 and r.get_json()["ok"], bad
+        assert c.get(f"/documents/{doc_id}").status_code == 200
+
+
+def test_tool_error_detail_does_not_leak_server_path(app_env):
+    """A failed PDF-tool op must not echo the server's internal temp path."""
+    app, wm, _ = app_env
+    c = app.test_client()
+    _login(c)
+    r = c.post(
+        "/api/documents/tools/images-to-pdf",
+        data={"files": (io.BytesIO(b"not an image"), "a.png")},
+        content_type="multipart/form-data",
+    )
+    assert r.status_code == 422
+    body = r.get_data(as_text=True)
+    # no absolute path, no temp-file naming scheme leaked to the client
+    assert "/tmp" not in body and "/img_" not in body and ".png'" not in body
+
+
+def test_home_generate_has_reentrancy_guard(app_env):
+    """The Generate control guards against a double-click making a duplicate doc
+    (and double-charging the metered AI quota)."""
+    app, wm, _ = app_env
+    c = app.test_client()
+    _login(c)
+    html = c.get("/documents").get_data(as_text=True)
+    assert "_genBusy" in html
+
+
+def test_audience_autoplay_honours_configured_cadence(app_env):
+    """The kiosk audience view advances at the session's autoplay_seconds, not a
+    hardcoded interval (regresses the dead autoplay_seconds field)."""
+    app, wm, _ = app_env
+    c = app.test_client()
+    _login(c)
+    spec = _save_deck()
+    from mediahub.documents import presenter as _pres
+
+    sess = _pres.create_session(spec.doc_id, len(spec.sections), owner="club-a")
+    body = c.get(f"/present/{sess.session_id}").get_data(as_text=True)
+    assert "autoplay_seconds" in body
+    assert ", 6000)" not in body  # no hardcoded 6s interval
+
+
+def test_home_file_inputs_have_accessible_labels(app_env):
+    """Each unlabelled file input carries an aria-label (accessible name)."""
+    app, wm, _ = app_env
+    c = app.test_client()
+    _login(c)
+    html = c.get("/documents").get_data(as_text=True)
+    assert html.count("aria-label=") >= 3  # import / merge / images inputs
+
+
+def test_document_view_iframe_has_title(app_env):
+    """The PDF-preview iframe has a title for screen readers."""
+    app, wm, _ = app_env
+    c = app.test_client()
+    _login(c)
+    doc_id = c.post("/api/documents/generate", json={"format": "blank"}).get_json()["doc_id"]
+    html = c.get(f"/documents/{doc_id}").get_data(as_text=True)
+    assert 'title="Document preview"' in html
+
+
+def test_present_console_reflects_toggle_state(app_env):
+    """The Blackout/Autoplay toggles expose their on/off state (aria-pressed +
+    a visible label) so the presenter can tell whether the room is blacked out
+    or auto-advancing."""
+    app, wm, _ = app_env
+    c = app.test_client()
+    _login(c)
+    spec = _save_deck()
+    html = c.get(f"/documents/{spec.doc_id}/present").get_data(as_text=True)
+    assert 'id="btn-blackout"' in html and 'id="btn-autoplay"' in html
+    assert "aria-pressed" in html and "toggleState(" in html
+
+
+# ---------------------------------------------------------------------------
 # Rendered outputs (need Chromium; skip cleanly otherwise)
 # ---------------------------------------------------------------------------
 

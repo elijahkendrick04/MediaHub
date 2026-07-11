@@ -109,9 +109,12 @@ the defect.
 | F4 | P2 | Composite reel skips the source + tenant guards | (a) a non-spotlight pack carrying `run_id`+`swimmer_key` gets a 202 from `reel-job` (no `source` check); (b) a pack owned by org B naming org A's run renders a reel off A's run (no `_can_access_run`) | `_assemble_spotlight_reel_inputs` / `reel-file` gated on presence of `run_id`+`swimmer_key` only, unlike the caption endpoints | **fixed** | ec3c955 |
 | F5 | P2 | Copy caption pastes literal `\n\n` | click Copy caption on a row with an angle hint → clipboard gets `headline\n\nangle` with literal backslash-n | `cap_text = f"{headline}\\n\\n{angle}"` in a normal f-string emits the two characters `\` `n`, not a newline | **fixed** | ec3c955 |
 | F6 | P2 | Tone-rewrite reports a misleading "AI couldn't finish" | build a draft, un-approve every moment, hit `caption?tone=…` → generic transient error though the real cause is zero approved moments | `api_stub_pack_caption` collapsed *all* `_compose_spotlight_caption` error branches into one transient JSON | **fixed** | ec3c955 |
-| F7 | P2 | Legacy dir-form meet selectable but opens blank | select a run stored only as `runs_v4/<id>/run.json` → the picker keeps it (self-heal accepts the dir form) but `_load_run` can't read it → blank page, no roster, no message | `_load_run` reads only the flat `<id>.json`; the shared limitation is app-wide, but spotlight's dead-end was silent | **fixed (message)** / root cause logged | ec3c955 |
+| F7 | P2 | Legacy dir-form meet selectable but opens blank | select a run stored only as `runs_v4/<id>/run.json` → the picker keeps it (self-heal accepts the dir form) but `_load_run` can't read it → blank page, no roster, no message | `_load_run` read only the flat `<id>.json` | **fixed (caveat round):** dir-form fallback centralised in `_load_run` so it opens; honest message retained for other unopenable cases | 2419686 |
 | F8 | P3 | Dead `QualityBand` map + one literal em dash | `band_labels`/`QualityBand` import unused (`athlete_spotlight.py`); literal `—` in the "Everything is approved" status line | dead code left after refactor; house style uses `&mdash;` | **fixed** | b806a11, ec3c955 |
-| F9 | P3 | `spotlight_build` mints a duplicate draft on re-submit | POST `/spotlight/<run>/<sw>/build` twice → two independent drafts | `save_pack` mints a fresh uuid each call; no `(run_id, swimmer_key)` dedupe | **logged** (behaviour is defensible; dedupe is a product decision) | — |
+| F9 | P3 | `spotlight_build` mints a duplicate draft on re-submit | POST `/spotlight/<run>/<sw>/build` twice → two independent drafts | `save_pack` mints a fresh uuid each call; no `(run_id, swimmer_key)` dedupe | **fixed (caveat round):** rebuild-in-place — same `(run_id, swimmer_key)` refreshes the existing draft, preserving approved status | 2419686 |
+| F10 | P2 | Unbounded roster render on the landing page | a meet with ~400 swimmers renders ~400 inline-styled cards → 1.3s / 820KB page | no cap/pagination on the swimmer grid | **fixed (caveat round):** capped at 120 (sorted by achievements) + a "see the rest in the full review" note | 2419686 |
+| F11 | P3 | Meet/tone `<select>` lacked a programmatic label | only an adjacent heading / `title` attribute; no `<label for>` for AT | a11y gap | **fixed (caveat round):** both selects carry `<label for>` + `aria-label` | 2419686 |
+| F12 | P1 | Path-traversal sink not hardened at source (defense-in-depth) | any future caller passing an unsanitised run_id to `_load_run` could traverse | the F3 fix was local to `spotlight_landing` only | **fixed (caveat round):** `_load_run` now rejects `/`, `\`, `..` for every caller | 2419686 |
 
 **Checked and PASSED (no defect):** empty/None guards in `build_spotlight_pack`/`list_swimmers_in_run`;
 mutation-safety (originals not mutated); tenant isolation on the landing picker and `spotlight_view` (tampered
@@ -138,7 +141,18 @@ entry_url-strip/dedupe/celebratory-tally logic.
     reworded one literal em dash.
 - **`tests/test_spotlight_audit.py`** (86acc1b): new regression module (see §6).
 
-Every fix stays inside the spotlight route bodies / core module; no shared helper signatures changed.
+**Caveat round (`2419686`), fixing the §8 residual items:**
+- **`src/mediahub/web/web.py` — `_load_run`:** centralised the legacy `runs_v4/<id>/run.json` dir-form fallback
+  (~15 routes hand-rolled it) so every run-scoped surface — including the spotlight picker — opens dir-form runs
+  (F7); added a path-separator/`..` guard so the traversal sink is closed for *every* caller, not just
+  `spotlight_landing` (F12, the F3 defense-in-depth residual).
+- **`spotlight_build`:** idempotent rebuild-in-place — a matching `(run_id, swimmer_key)` spotlight pack is updated
+  in place (same pack id, preserving an already-approved card's status and any planned date) instead of minting a
+  duplicate draft (F9).
+- **`spotlight_landing`:** caps the roster render at 120 swimmers (already sorted by achievement count) with an
+  honest "showing N, open the full meet review for the other M" note (F10); meet `<select>` gets `<label for>` +
+  `aria-label` (F11).
+- **`spotlight_view`:** caption-tone `<select>` gets `<label for>` + `aria-label` (F11).
 
 ---
 
@@ -157,49 +171,71 @@ Every fix stays inside the spotlight route bodies / core module; no shared helpe
 - `test_reel_enforces_run_tenant_isolation` — F4 tenant guard + a positive control (owner can still render).
 - `test_tone_rewrite_names_no_approved_cause` — F6.
 
+**Caveat round** (same module, `e462a3b`):
+- `test_spotlight_landing_opens_legacy_dir_form_run` — F7 (dir-form now loads + shows the roster; unit on
+  `_load_run` reading the nested form).
+- `test_load_run_rejects_path_traversal` — F12 (`/`, `\`, `..`, empty all → `None`).
+- `test_spotlight_landing_caps_large_roster` — F10 (200 swimmers → 120 links + the note + honest total).
+- `test_spotlight_selects_are_labelled` — F11 (both selects carry `<label for>`).
+- `test_spotlight_build_idempotent_rebuild_in_place` — F9 (3 builds → 1 pack, same redirect, approved status
+  preserved on rebuild).
+- `test_spotlight_landing_message_for_unopenable_run` updated to use a corrupt flat file now that the dir-form
+  legitimately loads.
+
 The existing `tests/test_spotlight_build_brand_grounding.py` and `tests/test_ui2_athlete_tooltips.py` still pass
-unchanged.
+unchanged, as do the run-loading routes that share `_load_run` (review, content pack, public wall, drafts, reel).
 
 ---
 
 ## 7. Cross-cutting changes
 
-**None applied.** All edits are inside the spotlight route bodies / spotlight helpers / the core spotlight module.
-No shared helper (`_load_run`, `_can_access_run`, `mhCreateGraphic`, `stub_pack_store`, the CSRF/CSP block) had its
-signature or behaviour changed; the traversal fix is a local guard in `spotlight_landing` rather than a change to
-the shared `_load_run` sink (see residual note).
+The first round (F1–F8) touched **no** shared helper signature or behaviour — every edit was inside the spotlight
+route bodies / helpers / core module.
+
+**The caveat round makes ONE shared-helper change, called out here for reconciliation:**
+
+- **`src/mediahub/web/web.py` — `_load_run(run_id)`** now (a) falls back to the legacy `runs_v4/<id>/run.json`
+  dir-form when the flat `<id>.json` is absent, and (b) returns `None` for any `run_id` containing `/`, `\`, or
+  `..`. This is a run-loading helper used by ~all run-scoped routes (`/review`, `/pack`, `/audit`, `/drafts`,
+  public wall, reel, …). The change is **strictly additive and backward-compatible**: the flat path is tried
+  first and unchanged; the dir-form is only consulted when the flat file is missing (the same fallback ~15 routes
+  already implemented locally); the guard only rejects values no legitimate uuid-hex run id ever contains.
+  Verified against the run-loading test modules (review body, content pack, public wall, drafts, reel, gen-v2
+  end-to-end, large-meet durability, phase-w web, caption assist — all green) plus the full suite. Other sessions
+  editing `_load_run` should reconcile against this.
 
 ---
 
 ## 8. Residual risks / cross-feature items (not fixed here)
 
-- **`_load_run` does not read the legacy `runs_v4/<id>/run.json` dir-form** (F7 root cause). This is a shared,
-  pre-existing limitation affecting `/review`, `/pack`, etc. equally; several other routes carry their own dir-form
-  fallback. Teaching `_load_run` the fallback (or dropping the dir-form entirely) is an app-wide decision — logged
-  for coordination, not changed here. Spotlight now degrades with a message instead of a blank page.
-- **Defense-in-depth on the `_load_run` sink.** The traversal is fully closed at the only unsanitised caller
-  (`spotlight_landing`'s query param); all other run-id sources use the slash-rejecting route converter. A
-  belt-and-braces guard *inside* `_load_run` would protect any future caller but is a shared-file change — logged.
-- **`spotlight_build` is not idempotent** (F9): repeated builds mint duplicate drafts. Dedupe on
-  `(run_id, swimmer_key)` is a product decision (rebuild vs new draft), left for the owner.
-- **Unbounded roster render** on the landing page for a meet with very many swimmers (no pagination). Fine for
-  realistic meets; flag if huge invitationals become common.
-- **Meet `<select>` lacks an explicit `<label for>`** (relies on the adjacent "Choose a meet" heading + a
-  `title`-less select). Minor a11y P3.
-- **Same-name swimmers with blank `swimmer_id`** are merged by name — a pre-existing data-model limitation
-  upstream of this module (they are indistinguishable everywhere), not a spotlight defect.
+- **Same-name swimmers with blank `swimmer_id`** are merged by name — a genuine data-model limitation *upstream*
+  of this module (the interpreter keys swimmers as `club:last,first`; two distinct people with identical names and
+  no member id are indistinguishable everywhere, not just in spotlight). Fixing it means an identity/disambiguation
+  change in the pipeline, outside this feature's blast radius.
+- **Idempotency dedupe scans the 200 most-recent drafts.** `spotlight_build`'s rebuild-in-place match uses
+  `list_packs(limit=200)`; an org with >200 drafts *and* an older matching spotlight beyond that window could still
+  mint a second draft. 200 is far beyond any realistic per-org draft count; raising it or adding a
+  `(run_id, swimmer_key)` index is a `stub_pack_store` change left for the owner if it ever bites.
+- **Roster cap hides the long tail.** The 120-swimmer cap is sorted by achievement count and links to the full
+  meet review for the rest, which suits the "feature your top swimmers" purpose; a searchable/paginated roster
+  would be the fuller answer if clubs routinely spotlight from 400-swimmer invitational uploads.
 
 ---
 
 ## 9. Feature verdict
 
-**WORKS-WITH-CAVEATS.** The happy path is correct and the intelligence layer (filter → rank → approve → compose)
-behaves as specified with correct data isolation. The audit found and fixed one reachable crash (null priority),
-two genuine security holes (a stored-XSS/JS-injection vector through swimmer names, and a path-traversal PII leak
-via `?run_id=`), and several correctness/robustness/UX gaps (reel tenant+type guards, literal-`\n` clipboard,
-misleading errors, dead-end UI, dead code). Post-fix, all reproductions are green and no regressions were seen.
-The remaining caveats are the pre-existing shared-loader dir-form limitation and minor a11y/idempotency polish,
-none of which block the feature.
+**WORKS.** The happy path is correct and the intelligence layer (filter → rank → approve → compose) behaves as
+specified with correct data isolation. The audit found and fixed one reachable crash (null priority), two genuine
+security holes (a stored-XSS/JS-injection vector through swimmer names, and a path-traversal PII leak via
+`?run_id=`), and several correctness/robustness/UX gaps (reel tenant+type guards, literal-`\n` clipboard,
+misleading errors, dead code). The **caveat round** then closed every actionable residual: the legacy dir-form
+now opens (F7), the traversal sink is hardened for all callers (F12), rebuilds are idempotent (F9), the roster
+render is bounded (F10), and both selects are labelled (F11). Post-fix all reproductions are green and no
+regressions were seen across the run-loading routes that share `_load_run`. The only items left open are a
+genuine upstream identity-model limitation (same-name/blank-id swimmers) and two deliberate design ceilings
+(200-draft dedupe window, top-120 roster) — none a defect in this feature.
+
+*(Verdict lifted from WORKS-WITH-CAVEATS to WORKS after the caveat round, 2026-07-10.)*
 
 ---
 
@@ -222,3 +258,25 @@ none of which block the feature.
   `test_live_watch`, `test_phase_w_web`) + a broad regression batch, since the deltas were confined to
   non-spotlight code and docs.
 - **Review the diff:** `git diff 220f381...651cf2b` (or `git show 9c37fe4 4f85925 cb253ae`).
+
+### Caveat round (2026-07-10) — residual items fixed, verdict lifted to WORKS
+
+- **Caveat commits on `main`:** `d5d2586` (fixes: dir-form loading, `_load_run` traversal guard, idempotent
+  build, roster cap, select labels), `d93a4ee` (regression tests), `208cea1` (this report update). All three are
+  SSH-signed (the earlier first-round commits were unsigned because the ephemeral signer was absent that session;
+  GitHub verifies these against the `claude` bot key — local `git %G?` still reads "N" only because the
+  environment ships no `allowedSignersFile` to verify against).
+- **Merge status: MERGED to `main`.** Full suite on the integrated tree at `origin/main` `9b7d0a7`:
+  **12553 passed, 10 skipped, 1 failed** — the single failure, `test_log_sentinel.py::test_boot_grace_blocks`, is
+  an order/timing flake unrelated to this feature (it asserts a since-boot grace window and trips on the 48-minute
+  full-run length; it **passes in isolation** in 0.25s and references none of the changed code). `main` then
+  advanced to `2a34d72` (a large batch of other audit sessions touching `web.py`, `public_wall.py`,
+  `documents/*`, `content_types.py`, …); the branch was rebased onto it (re-signing each commit) and re-gated with
+  a targeted feature + incoming-changed-area + run-loading regression run (**141 passed**), since the full run one
+  base prior covers the byte-identical spotlight code. Landed via the atomic-push protocol
+  (`git push origin HEAD:main`, fast-forward `2a34d72..208cea1`; the branch-protection PR rule bypassed under the
+  operator's push permission).
+- **Cross-cutting note (see §7):** this round changed the shared `_load_run` helper (dir-form fallback + traversal
+  guard) — additive and backward-compatible, verified green against the run-loading routes (`/review`, `/pack`,
+  public wall, drafts, reel, gen-v2 end-to-end, large-meet durability) both in the full run and the re-gate.
+- **Review the caveat diff:** `git show d5d2586 d93a4ee`.

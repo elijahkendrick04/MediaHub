@@ -2672,6 +2672,13 @@ _CYCLE_PH_ATTR_MOMENT = _cycle_ph_attr(_CYCLE_PH_MOMENT)
 _CYCLE_PH_ATTR_RESEARCH = _cycle_ph_attr(_CYCLE_PH_RESEARCH)
 _CYCLE_PH_ATTR_ASKDATA = _cycle_ph_attr(_CYCLE_PH_ASKDATA)
 
+# Upper bound on a single free-text prompt / chat reply before it reaches the
+# LLM. A describe-your-post prompt is a sentence or two; this is a generous
+# ceiling that still stops a several-hundred-KB paste from being forwarded to
+# the provider verbatim and billed as input tokens (the only other limit is the
+# 50 MB MAX_CONTENT_LENGTH, far too high to bound LLM cost).
+_FREE_TEXT_MAX_PROMPT_CHARS = 8000
+
 
 # UI2.6 — Vanish search. The /activity (global run) search uses the design-kit
 # Vanish input (.mh-vanish): a rotating overlay-placeholder element
@@ -3359,19 +3366,33 @@ def _persist_run(run: PipelineRunV4, file_name: str) -> None:
 
 
 def _load_run(run_id: str) -> Optional[dict]:
-    p = RUNS_DIR / f"{run_id}.json"
-    if not p.exists():
+    # Path-traversal guard: run ids are minted as uuid hex / slugs and never
+    # contain a path separator or "..", so any such value is hostile (e.g. a
+    # tampered ?run_id=../../<dir>/victim query param that would otherwise
+    # escape RUNS_DIR / DATA_DIR and reflect an arbitrary JSON file's contents).
+    # Refusing it here protects every caller, not just the slash-rejecting
+    # <run_id> route converter.
+    if not run_id or "/" in run_id or "\\" in run_id or ".." in run_id:
         return None
-    try:
-        return json.loads(p.read_text())
-    except (json.JSONDecodeError, OSError, UnicodeDecodeError) as e:
-        # A corrupted run JSON would otherwise 500 every route that
-        # reads it (/review, /pack, /audit, /drafts/<pack_id>). Surface
-        # "run not found" instead so the recovery_page renders cleanly;
-        # the operator can find the offending file in the log.
-        # UnicodeDecodeError covers files written in a non-UTF-8 encoding.
-        log.warning("run %s on disk but unreadable: %s", run_id, e)
-        return None
+    # Canonical flat layout first, then the legacy nested runs_v4/<id>/run.json
+    # form that ~15 other routes fall back to individually — centralised here so
+    # every run-scoped surface (spotlight included) reads both without its own
+    # fallback. A corrupt/unreadable flat file returns None immediately (matching
+    # the historical contract) rather than masking it with the nested form.
+    for p in (RUNS_DIR / f"{run_id}.json", RUNS_DIR / run_id / "run.json"):
+        if not p.exists():
+            continue
+        try:
+            return json.loads(p.read_text())
+        except (json.JSONDecodeError, OSError, UnicodeDecodeError) as e:
+            # A corrupted run JSON would otherwise 500 every route that
+            # reads it (/review, /pack, /audit, /drafts/<pack_id>). Surface
+            # "run not found" instead so the recovery_page renders cleanly;
+            # the operator can find the offending file in the log.
+            # UnicodeDecodeError covers files written in a non-UTF-8 encoding.
+            log.warning("run %s on disk but unreadable: %s", run_id, e)
+            return None
+    return None
 
 
 def _machine_readable_run(data: Optional[dict], run_id: str, *, max_achievements: int = 60) -> str:
@@ -7244,9 +7265,21 @@ def _sample_pack_cta(
     if not _SAMPLE_MEET_PDF.exists():
         return ""
     action = url_for("onboarding_sample")
+    # A sample pack kicks off a real 30-90s pipeline run, so an accidental
+    # double-click would queue two identical demo packs (and two worker jobs).
+    # Guard the submit: block a second submit synchronously, then disable the
+    # button just after the first one starts (setTimeout keeps the in-flight
+    # POST from being cancelled). Progressive enhancement — with JS off the
+    # form still posts, exactly as before.
+    guard = (
+        "if(this.dataset.mhSent)return false;this.dataset.mhSent='1';"
+        "var b=this.querySelector('button');"
+        "if(b){setTimeout(function(){b.disabled=true;},0);}return true;"
+    )
     if compact:
         return (
-            f'<form method="post" action="{action}" style="margin:0;display:inline">'
+            f'<form method="post" action="{action}" onsubmit="{guard}" '
+            'style="margin:0;display:inline">'
             f'<button type="submit" class="btn secondary">{_h(button_label)}</button>'
             "</form>"
         )
@@ -7258,7 +7291,7 @@ def _sample_pack_cta(
         f'<h3 style="margin:0 0 6px;font-size:15px">{_h(heading)}</h3>'
         f'<p class="dim" style="margin:0;font-size:13px;line-height:1.5">{_h(sub)}</p>'
         "</div>"
-        f'<form method="post" action="{action}" style="margin:0">'
+        f'<form method="post" action="{action}" onsubmit="{guard}" style="margin:0">'
         f'<button type="submit" class="btn">{_h(button_label)}</button>'
         "</form>"
         "</div>"
@@ -18509,6 +18542,7 @@ _DOCUMENTS_HOME_JS = (
     "<script>\n"
     + _EDITORIAL_GEN_HELPERS
     + r"""
+const CSRF = "__CSRF__";
 async function genDoc(btn, fmt, scope, runId){
   if(fmt==='meet_programme' && !runId){ _genToast('Pick a meet first.'); return; }
   _genBusy(btn, true);
@@ -18528,7 +18562,10 @@ async function importDoc(){
   const f=document.getElementById('imp-file').files[0];
   if(!f){ _genToast('Choose a file.'); return; }
   const fd=new FormData(); fd.append('file', f);
-  const r=await fetch('__IMPORT_URL__', {method:'POST', body:fd}); const j=await r.json();
+  // Multipart upload: the JSON-content-type CSRF exemption can't apply, so carry
+  // the token in a header (mirrors the app's other multipart writes) — without it
+  // the _csrf_protect guard 403s the POST in production.
+  const r=await fetch('__IMPORT_URL__', {method:'POST', headers:{'X-CSRF-Token':CSRF}, body:fd}); const j=await r.json();
   if(j.ok){ location.href=j.url; } else { _genToast(j.detail||j.message||j.error||'Import failed.'); }
 }
 async function mergePdfs(){
@@ -18544,7 +18581,7 @@ async function imagesToPdf(){
   await _download('__IMG_URL__', fd, 'images.pdf');
 }
 async function _download(url, fd, name){
-  const r=await fetch(url,{method:'POST',body:fd});
+  const r=await fetch(url,{method:'POST',headers:{'X-CSRF-Token':CSRF},body:fd});
   if(!r.ok){ const j=await r.json().catch(()=>({})); _genToast(j.detail||j.message||j.error||'Failed.'); return; }
   const blob=await r.blob(); const a=document.createElement('a');
   a.href=URL.createObjectURL(blob); a.download=name; a.click();
@@ -18565,7 +18602,9 @@ async function saveSpec(){
 }
 async function delDoc(){
   if(!confirm('Delete this document?')) return;
-  const r=await fetch('__DEL_URL__',{method:'POST'}); const j=await r.json();
+  // JSON content-type keeps this same-origin write CSRF-exempt (per the app's
+  // _csrf_protect guard); without it the empty POST is 403d in production.
+  const r=await fetch('__DEL_URL__',{method:'POST',headers:{'Content-Type':'application/json'}}); const j=await r.json();
   if(j.ok) location.href='__HOME_URL__'; else alert('Delete failed.');
 }
 </script>
@@ -18635,8 +18674,8 @@ _DOC_PRESENT_CONSOLE = r"""
     <div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
       <button class="btn" onclick="act('prev')">◀ Prev</button>
       <button class="btn" onclick="act('next')">Next ▶</button>
-      <button class="btn secondary" onclick="act('blackout')">Blackout</button>
-      <button class="btn secondary" onclick="act('autoplay')">Autoplay</button>
+      <button id="btn-blackout" class="btn secondary" aria-pressed="false" onclick="act('blackout')">Blackout</button>
+      <button id="btn-autoplay" class="btn secondary" aria-pressed="false" onclick="act('autoplay')">Autoplay</button>
       <button class="btn secondary" onclick="act('timer_reset')">Reset timer</button>
       <span id="pos" class="dim"></span>
       <span id="cstat" class="dim" role="status" aria-live="polite" style="color:var(--warn)"></span>
@@ -18674,6 +18713,12 @@ async function act(a){
   poll();
 }
 function fmtT(s){ const m=Math.floor(s/60), ss=s%60; return m+':'+String(ss).padStart(2,'0'); }
+function toggleState(id, on, onLabel, offLabel){
+  var el=document.getElementById(id); if(!el) return;
+  el.setAttribute('aria-pressed', on?'true':'false');
+  el.style.outline = on?'2px solid var(--accent)':'';
+  el.textContent = on?onLabel:offLabel;
+}
 // J-13: end the talk cleanly from the console (the remote had this; the driving
 // laptop did not), then return the presenter to the document.
 async function endPres(){
@@ -18694,6 +18739,10 @@ async function poll(){
       document.getElementById('next-title').textContent=(cur+1<TOTAL)?TITLES[nx]:'End of deck';
       document.getElementById('next-slide').src=BASE+'/'+nx+'.png?v='+v;
     }
+    // Reflect the toggle state so the presenter can see when the room is blacked
+    // out or the deck is auto-advancing (both are otherwise invisible feedback).
+    toggleState('btn-blackout', !!s.blackout, 'Blackout: on', 'Blackout');
+    toggleState('btn-autoplay', !!s.autoplay, 'Autoplay: on', 'Autoplay');
     document.getElementById('timer').textContent='⏱ '+fmtT(s.timer_elapsed||0);
   }catch(e){}
 }
@@ -21354,7 +21403,7 @@ def create_app() -> Flask:
                         meta_line = (
                             '<span class="tag bad" style="font-size:10px">Didn\'t finish</span>'
                             if failed
-                            else f'{n_swims} swim{"" if n_swims == 1 else "s"}'
+                            else f"{n_swims} swim{'' if n_swims == 1 else 's'}"
                         )
                         items_html += (
                             "<li>"
@@ -21366,7 +21415,7 @@ def create_app() -> Flask:
                             f'<time class="mh-rel" datetime="{_h(when_iso)}">{_h(when)}</time></span>'
                             "</div>"
                             f'<a class="go" href="{configure_href}">'
-                            f'{"Try again" if failed else "Re-configure"} &rarr;</a>'
+                            f"{'Try again' if failed else 'Re-configure'} &rarr;</a>"
                             "</li>"
                         )
                     recent_html = (
@@ -22097,9 +22146,12 @@ def create_app() -> Flask:
                 code=404,
             )
         file_bytes = _SAMPLE_MEET_PDF.read_bytes()
-        # Synthetic swimmers — there is nothing to web-verify, so PB fetch is
-        # off (faster, and no third-party calls for demo data). The hero club
-        # is pre-selected so the pack shows its best spread of cards.
+        # Synthetic swimmers — there is nothing to web-verify, so PB web
+        # verification is off (faster, and no PB-verification calls for demo
+        # data). Meet-identity research inside the recognition report still
+        # runs, but it is globally cached, so only the first uncached sample
+        # generation on a deployment can trigger an outbound lookup. The hero
+        # club is pre-selected so the pack shows its best spread of cards.
         run_id = _start_run(
             file_bytes,
             _SAMPLE_MEET_FILENAME,
@@ -27241,7 +27293,7 @@ Relay team broke club record"></textarea>
                 extra.append("under 18")
             if r.restricted:
                 extra.append(
-                    '<strong title="UK GDPR Art 18 — processing restricted">' "Paused</strong>"
+                    '<strong title="UK GDPR Art 18 — processing restricted">Paused</strong>'
                 )
             rows.append(
                 f"<tr><td>{_h(r.athlete_name)}</td><td>{status_tag}</td>"
@@ -27540,7 +27592,7 @@ Relay team broke club record"></textarea>
             if r.request_type == "access" and _dsr_export_path(pid, r.id).exists():
                 actions.append(
                     f'<a class="btn secondary" href="{url_for("org_dsr_export_download", request_id=r.id)}" '
-                    'download>Download export</a>'
+                    "download>Download export</a>"
                 )
             rows.append(
                 (
@@ -28683,7 +28735,11 @@ self.addEventListener('fetch', function(e){
             return "&mdash;"
         pct = float(stats.get("uptime_pct") or 0.0) * 100.0
         if pct >= 99.995:
-            return "100%"
+            # Never round a window that had real, counted downtime up to a bare
+            # "100%" — it reads as a contradiction beside the non-zero Downtime
+            # cell on the same row. Show the honest "99.99%" instead; "100%" is
+            # reserved for a genuinely gap-free window.
+            return "100%" if not stats.get("downtime_seconds") else "99.99%"
         if pct >= 99.9:
             return f"{pct:.3f}%"
         if pct >= 95.0:
@@ -28776,12 +28832,28 @@ self.addEventListener('fetch', function(e){
         from mediahub.observability import uptime as _uptime
 
         # Pull three windows so the page reads "24h / 7d / 30d uptime"
-        # straight off the database, with no aggregation in the view.
-        s24 = _uptime.uptime_stats(window_hours=24)
-        s7d = _uptime.uptime_stats(window_hours=24 * 7)
-        s30 = _uptime.uptime_stats(window_hours=24 * 30)
-        latest = _uptime.latest_heartbeat()
-        gaps = _uptime.recent_gaps(window_hours=24 * 30, limit=5)
+        # straight off the database, with no aggregation in the view. The
+        # uptime store is exception-safe by contract, but defend the operator
+        # page the same way _render_settings_status_section already does — an
+        # unexpected observability error degrades to the honest public view,
+        # never an unhandled 500.
+        try:
+            s24 = _uptime.uptime_stats(window_hours=24)
+            s7d = _uptime.uptime_stats(window_hours=24 * 7)
+            s30 = _uptime.uptime_stats(window_hours=24 * 30)
+            latest = _uptime.latest_heartbeat()
+            gaps = _uptime.recent_gaps(window_hours=24 * 30, limit=5)
+        except Exception:
+            body = (
+                '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-8);padding-bottom:var(--sp-6);margin-bottom:var(--sp-4)">'
+                '<span class="mh-hero-eyebrow">Status</span>'
+                '<h1>Service <em class="editorial">status</em></h1></section>'
+                + _render_settings_status_public_section()
+            )
+            resp = make_response(_layout("Status", body, active="status"))
+            resp.headers["Refresh"] = "60"
+            resp.headers["Cache-Control"] = "no-store"
+            return resp
 
         # Current pill — green if last heartbeat < 5 min ago AND ok.
         pill_class = "muted"
@@ -28918,11 +28990,21 @@ self.addEventListener('fetch', function(e){
         and dashboards that want the raw uptime numbers."""
         from mediahub.observability import uptime as _uptime
 
+        # /api/status is public and unauthenticated. The heartbeat's ``error``
+        # field carries the raw deep-/health failure string, which can include
+        # an internal filesystem path (e.g. "database: unable to open database
+        # file /srv/data/data.db") or an OS error. Drop it from this public
+        # surface — the ``ok`` flag already signals the failure honestly, with
+        # no internal text. The operator HTML views never rendered it.
+        latest = _uptime.latest_heartbeat()
+        if isinstance(latest, dict):
+            latest.pop("error", None)
+
         return jsonify(
             {
                 "ok": True,
                 "version": APP_VERSION,
-                "latest_heartbeat": _uptime.latest_heartbeat(),
+                "latest_heartbeat": latest,
                 "windows": {
                     "24h": _uptime.uptime_stats(window_hours=24),
                     "7d": _uptime.uptime_stats(window_hours=24 * 7),
@@ -29240,7 +29322,7 @@ self.addEventListener('fetch', function(e){
                 f'<div style="font-weight:600;margin-bottom:4px">'
                 f"Last LLM error &mdash; {_h(last_err.get('provider', 'unknown'))}</div>"
                 f'<div class="dim" style="font-size:12px;margin-bottom:6px">'
-                f"{_h(last_err.get('ts', '')[:19])} UTC"
+                f"{_h((last_err.get('ts') or '')[:19])} UTC"
                 + (
                     f" &middot; {_h(last_err.get('error_kind'))}"
                     if last_err.get("error_kind")
@@ -29248,7 +29330,7 @@ self.addEventListener('fetch', function(e){
                 )
                 + "</div>"
                 f'<code style="font-size:12px">'
-                f"{_h(last_err.get('error_message', '')[:300])}</code>"
+                f"{_h((last_err.get('error_message') or '')[:300])}</code>"
                 "</div>"
             )
         else:
@@ -29520,10 +29602,16 @@ self.addEventListener('fetch', function(e){
                 url_for("settings_section", section="account"),
             ),
             (
+                # Point at the org-gate-exempt public /status, not the gated
+                # /settings/status members surface, so this "is the site up?"
+                # tile resolves for signed-out / not-yet-onboarded visitors
+                # too (settings_section is not setup-exempt, so it would bounce
+                # them to org setup). Operators still get full detail via the
+                # Developer card below.
                 "System status",
                 "Whether the site is operational right now.",
                 "status",
-                url_for("settings_section", section="status"),
+                url_for("status_page"),
             ),
         ]
         if is_dev:
@@ -30503,7 +30591,7 @@ self.addEventListener('fetch', function(e){
                     'gap:12px;flex-wrap:wrap">'
                     f'<div style="flex:1;min-width:180px"><strong>{_h(rec.filename)}</strong>'
                     f'<div class="dim" style="font-size:12px">{lic}'
-                    f'{(" · " + when) if when else ""}</div></div>'
+                    f"{(' · ' + when) if when else ''}</div></div>"
                     f'<audio controls preload="none" src="{src}" style="height:34px"></audio>'
                     f'<form method="post" action="{del_url}" style="margin:0" '
                     "onsubmit=\"return confirm('Remove this uploaded track?')\">"
@@ -30647,23 +30735,44 @@ self.addEventListener('fetch', function(e){
                 f'<a href="{url_for("sign_in_page")}">Choose organisation &rarr;</a></div>'
             )
 
+        rows = []
+        ach_by_id: dict[str, int] = {}
+        total_runs = 0
+        db_failed = False
         try:
             conn = _db()
             rows = conn.execute(
                 "SELECT id, created_at, finished_at, status, profile_id, "
-                "meet_name, our_swims, n_cards, n_queue, error, file_name "
+                "meet_name, our_swims, n_cards, n_queue, n_achievements, error, file_name "
                 "FROM runs WHERE profile_id = ? "
                 "ORDER BY created_at DESC LIMIT 100",
                 (prof.profile_id,),
             ).fetchall()
+            # Surface the REAL engine output (V5 recognition achievements) — the
+            # legacy n_cards/n_queue are ~0 in the recognition-first pipeline and
+            # read as "nothing produced". Mirrors the standalone /activity page.
+            ach_by_id = _warm_run_achievements(conn, rows)
+            total_runs = conn.execute(
+                "SELECT COUNT(*) FROM runs WHERE profile_id = ?",
+                (prof.profile_id,),
+            ).fetchone()[0]
             conn.close()
         except Exception:
-            rows = []
+            db_failed = True
 
         section_intro = (
             f'<p class="dim" style="margin-bottom:14px">Recent runs for '
             f"<b>{_h(prof.display_name)}</b>.</p>"
         )
+
+        if db_failed:
+            return (
+                f"{section_header}"
+                f"{section_intro}"
+                '<div class="card" style="border-left:3px solid var(--mh-prim-error-500)">'
+                "<b>Couldn&rsquo;t reach the runs store just now.</b> This is usually "
+                "temporary. Reload the page to try again; your runs are safe.</div>"
+            )
 
         if not rows:
             return (
@@ -30684,27 +30793,33 @@ self.addEventListener('fetch', function(e){
             delete_href = url_for("privacy_delete_run", run_id=r["id"])
             started = (r["created_at"] or "")[:19]
             started_iso = started.replace(" ", "T") + "Z" if started else ""
+            label = r["meet_name"] or r["file_name"] or r["id"]
             rows_html += (
-                f'<tr data-run-row="{_h(r["id"])}"><td data-label="Input"><a href="{review_href}">{_h(r["meet_name"] or r["file_name"] or r["id"])}</a></td>'
+                f'<tr data-run-row="{_h(r["id"])}"><td data-label="Input"><a href="{review_href}">{_h(label)}</a></td>'
                 f'<td data-label="Status"><span class="tag {badge}">{_h(r["status"])}</span></td>'
                 f'<td data-label="Matched">{_h(r["our_swims"] or 0)}</td>'
-                f'<td data-label="Queue / Total">{_h(r["n_queue"] or 0)} / {_h(r["n_cards"] or 0)}</td>'
+                f'<td data-label="Achievements">{_h(ach_by_id.get(r["id"], 0))}</td>'
                 f'<td data-label="Started"><time class="mh-rel" datetime="{_h(started_iso)}">{_h(started)}</time></td>'
                 f'<td><form method="post" action="{delete_href}" '
                 f'class="mh-run-delete" data-run-id="{_h(r["id"])}" '
                 f'style="display:inline" data-no-loader="1">'
                 f'<input type="hidden" name="next" value="{_h(request.path)}">'
                 f'<button class="btn danger" type="submit" '
+                f'aria-label="Delete {_h(label)}" '
                 f'style="font-size:11px;padding:4px 10px">Delete</button>'
                 f"</form></td></tr>"
             )
-            if r["status"] == "error" and r["error"]:
+            # Count every errored run for the callout (a red "error" badge without
+            # a matching tally would confuse). The expander below stays gated on
+            # captured error text — we never invent a reason we don't have.
+            if r["status"] == "error":
                 n_errored += 1
+            if r["status"] == "error" and r["error"]:
                 err_text = str(r["error"])
                 truncated = err_text[:600] + ("…" if len(err_text) > 600 else "")
                 rows_html += (
                     f'<tr class="run-error-row" data-run-err="{_h(r["id"])}">'
-                    '<td colspan="7" style="padding:6px 14px 14px 14px;'
+                    '<td colspan="6" style="padding:6px 14px 14px 14px;'
                     'background:rgba(255,93,108,0.06);border-left:3px solid var(--mh-prim-error-500)">'
                     "<details>"
                     '<summary style="cursor:pointer;font-size:13px;font-weight:600;'
@@ -30719,13 +30834,23 @@ self.addEventListener('fetch', function(e){
 
         failure_callout = ""
         if n_errored:
-            label = "1 run failed" if n_errored == 1 else f"{n_errored} runs failed"
+            fail_label = "1 run failed" if n_errored == 1 else f"{n_errored} runs failed"
             failure_callout = (
                 '<div class="card" style="padding:12px 18px;margin-bottom:20px;'
                 'background:rgba(255,93,108,0.06);border-left:3px solid var(--mh-prim-error-500)">'
-                f"<b>{_h(label)}</b> in the last 100 runs. "
+                f"<b>{_h(fail_label)}</b> in the last 100 runs. "
                 "Expand <i>Why did this run fail?</i> on each row below to "
                 "see the pipeline error.</div>"
+            )
+
+        # Honest truncation notice — the tile promises "every run", but the table
+        # is capped at the 100 most recent. Only shown when older runs exist.
+        cap_note = ""
+        if total_runs > len(rows):
+            cap_note = (
+                '<p class="dim" style="margin-top:10px;font-size:12px">'
+                f"Showing the {len(rows)} most recent runs of {total_runs:,} total. "
+                "Older runs are kept but not listed here.</p>"
             )
 
         # Delete in place + bulk clear: shared, delegated handler (mh-run-delete
@@ -30737,10 +30862,11 @@ self.addEventListener('fetch', function(e){
             f"{failure_callout}"
             '<div class="card"><table class="mh-table-stack">'
             "<thead><tr><th>Input</th><th>Status</th>"
-            "<th>Matched</th><th>Queue / Total</th>"
+            "<th>Matched</th><th>Achievements</th>"
             "<th>Started</th><th></th></tr></thead>"
             f"<tbody>{rows_html}</tbody>"
             "</table></div>"
+            f"{cap_note}"
             f"{_RUN_DELETE_JS}"
         )
 
@@ -33494,7 +33620,10 @@ function mhAnDigest(btn) {{
             make_url=url_for("make_page"),
             palette=seed_palette,
         )
-        return _layout("Studio", body, active="studio")
+        # The studio is a sub-surface of Create (reached from the Create tile), so
+        # it highlights the Create nav item — active="studio" matched no nav key and
+        # left the top bar with nothing lit, orphaning the page in the IA.
+        return _layout("Studio", body, active="create")
 
     @app.route("/api/studio/render", methods=["POST"])
     def api_studio_render():
@@ -34324,7 +34453,12 @@ function mhAnDigest(btn) {{
         approving them first. Accepts an optional ``tone`` field (warm-club /
         hype / data-led) — empty means the organisation's brand voice."""
         try:
-            from mediahub.club_platform.stub_pack_store import save_pack
+            from mediahub.club_platform.stub_pack_store import (
+                list_packs,
+                load_pack,
+                save_pack,
+                update_pack,
+            )
         except ImportError:
             return _recovery_page(
                 "Spotlight unavailable",
@@ -34356,23 +34490,53 @@ function mhAnDigest(btn) {{
             ),
             "status": "queue",
         }
+        _active_pid = _active_profile_id()
+        _form_data = {
+            "free_text": f"Spotlight — {result['swimmer_name']}",
+            "source": "athlete_spotlight",
+            "swimmer_name": result["swimmer_name"],
+            "meet_name": result["meet_name"],
+            "run_id": run_id,
+            "swimmer_key": swimmer_key,
+            "n_approved": result["n_approved"],
+            "n_pbs": result["n_pbs"],
+            "n_medals": result["n_medals"],
+            "tone": tone,
+            "results_lines": result["results_lines"],
+        }
+
+        # Idempotency: re-building the same swimmer's spotlight refreshes the
+        # existing draft in place rather than minting a duplicate — a double-
+        # click or a deliberate rebuild would otherwise litter /drafts with
+        # clones keyed on the same (run_id, swimmer_key). Preserve the existing
+        # card's approval status (and update_pack leaves any planned_date
+        # untouched) so a rebuild never silently un-approves or unschedules a
+        # draft the reviewer already actioned.
+        existing = None
+        for _meta in list_packs(limit=200):
+            rec = load_pack(_meta["pack_id"])
+            if not rec or not _can_access_pack(rec, _active_pid):
+                continue
+            _fd = rec.get("form_data") or {}
+            if (
+                _fd.get("source") == "athlete_spotlight"
+                and str(_fd.get("run_id") or "") == str(run_id)
+                and str(_fd.get("swimmer_key") or "") == str(swimmer_key)
+            ):
+                existing = rec
+                break
+
+        if existing is not None:
+            _prev_card = (existing.get("cards") or [{}])[0]
+            card["status"] = _prev_card.get("status") or "queue"
+            update_pack(existing["pack_id"], cards=[card], form_data_updates=_form_data)
+            return redirect(url_for("stub_pack_view", pack_id=existing["pack_id"]))
+
         saved = save_pack(
             "free_text",  # reuses the stub-pack list; tagged in form_data
-            {
-                "free_text": f"Spotlight — {result['swimmer_name']}",
-                "source": "athlete_spotlight",
-                "swimmer_name": result["swimmer_name"],
-                "meet_name": result["meet_name"],
-                "run_id": run_id,
-                "swimmer_key": swimmer_key,
-                "n_approved": result["n_approved"],
-                "n_pbs": result["n_pbs"],
-                "n_medals": result["n_medals"],
-                "tone": tone,
-                "results_lines": result["results_lines"],
-            },
+            _form_data,
             [card],
-            profile_id=_active_profile_id(),
+            profile_id=_active_pid,
         )
         return redirect(url_for("stub_pack_view", pack_id=saved["pack_id"]))
 
@@ -34543,9 +34707,19 @@ function mhAnDigest(btn) {{
                     _sp_club = (
                         run_data.get("profile_display") or run_data.get("club_filter") or ""
                     ).strip()
-                    swimmers_html = f'<div style="margin-top:20px"><h2>Swimmers in this meet <span class="muted" style="font-weight:400;font-size:13px">({len(swimmers)})</span></h2>'
+                    # Bound the render: a big multi-club invitational can list
+                    # hundreds of swimmers (~1.6KB of card markup each -> an
+                    # 800KB+ page), so cap the grid to the most content-worthy
+                    # names (list_swimmers_in_run already sorts by achievement
+                    # count) and point to the full meet review for the rest.
+                    # Realistic single-club rosters sit well under the cap and
+                    # are never truncated.
+                    _ROSTER_CAP = 120
+                    _total_sw = len(swimmers)
+                    _shown_sw = swimmers[:_ROSTER_CAP]
+                    swimmers_html = f'<div style="margin-top:20px"><h2>Swimmers in this meet <span class="muted" style="font-weight:400;font-size:13px">({_total_sw})</span></h2>'
                     swimmers_html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px;margin-top:12px">'
-                    for sw in swimmers:
+                    for sw in _shown_sw:
                         sp_url = url_for(
                             "spotlight_view", run_id=run_id_param, swimmer_key=sw["swimmer_key"]
                         )
@@ -34569,16 +34743,23 @@ function mhAnDigest(btn) {{
     <div style="font-size:12px;color:var(--ink-dim)">{_ach_label}</div>
   </div>
 </a>"""
-                    swimmers_html += "</div></div>"
+                    swimmers_html += "</div>"
+                    if _total_sw > len(_shown_sw):
+                        swimmers_html += (
+                            '<p class="muted" style="margin-top:12px;font-size:13px">'
+                            f"Showing the {len(_shown_sw)} swimmers with the most "
+                            f'achievements. <a href="{_review_url}" style="color:var(--ink)">'
+                            "Open the full meet review</a> to reach the other "
+                            f"{_total_sw - len(_shown_sw)}.</p>"
+                        )
+                    swimmers_html += "</div>"
                 else:
                     swimmers_html = '<div class="card"><p class="muted">No achievements found for this run. The recognition report may not be available.</p></div>'
             elif run_id_param:
-                # A meet was selected but couldn't be opened — a run stored in
-                # the legacy nested layout (runs_v4/<id>/run.json, which the
-                # shared _load_run helper doesn't read), a run the active org
-                # can't access, or a corrupt file. Surface an honest message
-                # instead of a silent dead-end (the dropdown selected, no roster,
-                # no explanation).
+                # A meet was selected but couldn't be opened — a run the active
+                # org can't access, or a corrupt/unreadable data file. Surface an
+                # honest message instead of a silent dead-end (the dropdown
+                # selected, no roster, no explanation).
                 swimmers_html = (
                     '<div class="card"><p class="muted">We couldn&rsquo;t open that '
                     "meet. It may have been processed on an older version, be "
@@ -34600,7 +34781,8 @@ function mhAnDigest(btn) {{
   <h2>Choose a meet</h2>
   <p class="muted" style="margin-top:0;font-size:13px">Showing meets from the last month. Older runs roll off automatically, and a run deleted in Settings disappears from here too.</p>
   <form method="get" action="{url_for("spotlight_landing")}">
-    <select name="run_id" onchange="this.form.submit()" style="max-width:480px">
+    <label for="sp-meet-select" class="mh-sr-only">Choose a processed meet</label>
+    <select id="sp-meet-select" name="run_id" aria-label="Choose a processed meet" onchange="this.form.submit()" style="max-width:480px">
       {runs_opts}
     </select>
     <noscript><button class="btn" type="submit" style="margin-top:var(--sp-3)">Load swimmers &rarr;</button></noscript>
@@ -34851,7 +35033,8 @@ function mhAnDigest(btn) {{
   <div style="margin-top:14px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
     <form method="post" action="{url_for("spotlight_build", run_id=run_id, swimmer_key=swimmer_key)}" style="display:inline-flex;gap:8px;align-items:center;flex-wrap:wrap"
           data-loader-text="Composing the spotlight post">
-      <select name="tone" style="font-size:12px;max-width:220px" title="Caption tone for the spotlight post">{_sp_tone_opts}</select>
+      <label for="sp-tone-select" class="mh-sr-only">Caption tone for the spotlight post</label>
+      <select id="sp-tone-select" name="tone" aria-label="Caption tone for the spotlight post" style="font-size:12px;max-width:220px" title="Caption tone for the spotlight post">{_sp_tone_opts}</select>
       <button type="submit" class="btn"{_sp_build_attr} title="{_h(_sp_build_title)}" style="font-size:13px">Build spotlight post from approved cards &rarr;</button>
     </form>
     <a class="btn secondary" href="{_pack_url}" style="font-size:13px">Open content builder &rarr;</a>
@@ -35093,14 +35276,18 @@ function copySpotlightCaption(btn) {{
                     from mediahub.brand.guidelines import extract_text as _doc_text
                     from mediahub.web_research.safe_fetch import safe_fetch as _sfetch
 
+                    # Bound each fetch tightly: this runs synchronously inside
+                    # the request, and two links plus the LLM call must finish
+                    # well inside the worker timeout. A slow or hostile host
+                    # gets a short leash rather than stalling the worker.
                     _site_url = (form_data.get("event_website_url") or "").strip()
                     if _site_url:
-                        _site_text = _sfetch(_site_url, max_chars=8000)
+                        _site_text = _sfetch(_site_url, max_chars=8000, timeout=6.0, max_hops=2)
                         if _site_text:
                             form_data["event_site_text"] = _site_text
                     _entries_url = (form_data.get("entries_url") or "").strip()
                     if _entries_url:
-                        _etext = _sfetch(_entries_url, max_chars=20000)
+                        _etext = _sfetch(_entries_url, max_chars=20000, timeout=6.0, max_hops=2)
                         if _etext:
                             form_data["entries_text"] = _etext
                     for _field, _key, _cap in (
@@ -35170,6 +35357,22 @@ function copySpotlightCaption(btn) {{
                         form_data["club_name"] = _pv_prof.display_name
                 except Exception:
                     app.logger.exception("event preview enrichment failed")
+                # Reject an empty submission: with no event name, no readable
+                # website/pack/entries text, and no typed ones-to-watch, the
+                # model would have nothing to ground on and would guess. Ask
+                # for a real source instead of generating an ungrounded preview.
+                if not stub.has_meaningful_input(form_data):
+                    return _recovery_page(
+                        "Add something to preview",
+                        (
+                            "Give us at least the event name, or upload the "
+                            "entries file, or add the event's website or meet "
+                            "pack, so the preview has real facts to work from. "
+                            "It never guesses."
+                        ),
+                        primary_cta=("Back to Event Preview", url_for(route_endpoint)),
+                        code=400,
+                    )
             generation_error = None
             try:
                 cards_payload = stub.generate_cards(form_data)
@@ -35393,7 +35596,12 @@ function copySpotlightCaption(btn) {{
         sessions: list = []
         store_failed = False
         try:
-            sessions = list_sessions(limit=20)
+            # Tenant isolation: a chat title is the first line of another org's
+            # free-text brief (often an athlete name), so the landing list must
+            # be scoped to the active organisation — mirrors the /drafts index
+            # and _can_access_pack. Unstamped legacy chats stay visible, and the
+            # no-org sandbox (active pid None) keeps everything visible.
+            sessions = list_sessions(limit=20, profile_id=_active_profile_id())
         except Exception as e:
             log.warning("free-text: list_sessions failed: %s", e)
             store_failed = True
@@ -35448,7 +35656,8 @@ function copySpotlightCaption(btn) {{
       placeholder="e.g. A bold thank-you post for our sponsor Riverside Physio after a great gala weekend — upbeat, club colours."
       style="width:100%;font-size:14px;padding:10px 12px;border:1px solid var(--panel);border-radius:8px;background:var(--bg);color:var(--ink);resize:vertical">{_h(quick_prompt)}</textarea>
     <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:12px">
-      <label class="btn secondary" style="font-size:13px;cursor:pointer;margin:0">
+      <label class="btn secondary" style="font-size:13px;cursor:pointer;margin:0" tabindex="0" role="button"
+        onkeydown="if(event.key==='Enter'||event.key===' '){{event.preventDefault();this.querySelector('input[type=file]').click();}}">
         &#x1F4CE; Add photos
         <input type="file" name="photos" accept="image/*" multiple style="display:none"
           onchange="var n=this.files.length;var s=document.getElementById('ft-photo-count');if(s)s.textContent=n?(n+' photo'+(n===1?'':'s')+' attached'):'';">
@@ -35536,6 +35745,12 @@ function copySpotlightCaption(btn) {{
 
         prompt = (request.form.get("prompt") or "").strip()
         if not prompt:
+            return redirect(url_for("free_text_chat_page"))
+        if len(prompt) > _FREE_TEXT_MAX_PROMPT_CHARS:
+            session["free_text_quick_error"] = (
+                f"That prompt is very long ({len(prompt):,} characters). "
+                f"Please keep it under {_FREE_TEXT_MAX_PROMPT_CHARS:,} characters."
+            )
             return redirect(url_for("free_text_chat_page"))
         active_pid = _active_profile_id() or ""
 
@@ -35625,14 +35840,31 @@ function copySpotlightCaption(btn) {{
             return redirect(url_for("free_text_chat_page"))
         from mediahub.free_text_chat.session import create_session
 
-        s = create_session()
+        # Stamp the creating organisation so the chat is tenant-scoped from
+        # birth (mirrors runs/packs). Without this every web chat is ownerless
+        # and readable by any org via /free-text/chat/<id>.
+        s = create_session(profile_id=_active_profile_id() or "")
         return redirect(url_for("free_text_chat_view", chat_id=s.chat_id))
+
+    def _load_accessible_chat(chat_id):
+        """Load a chat only if the active organisation may access it.
+
+        Returns None both when the chat is missing AND when it belongs to a
+        different organisation — a foreign chat is indistinguishable from a
+        nonexistent one, the same anti-enumeration posture as the run/pack
+        guards (_can_access_run / _can_access_pack). Legacy ownerless chats
+        stay accessible so historical conversations aren't orphaned.
+        """
+        from mediahub.free_text_chat.session import load_session, can_access_session
+
+        s = load_session(chat_id)
+        if s is None or not can_access_session(s, _active_profile_id()):
+            return None
+        return s
 
     @app.route("/free-text/chat/<chat_id>", methods=["GET"])
     def free_text_chat_view(chat_id):
-        from mediahub.free_text_chat.session import load_session
-
-        s = load_session(chat_id)
+        s = _load_accessible_chat(chat_id)
         if not s:
             return _recovery_page(
                 "Chat not found",
@@ -35756,6 +35988,8 @@ function copySpotlightCaption(btn) {{
   </div>
 </section>
 
+{_llm_unavailable_banner()}
+
 <div id="chat-log">
   {msgs_html or '<p class="muted">Start by telling the assistant what you want to post. It will ask questions, research the web, and propose a brief.</p>'}
 </div>
@@ -35769,7 +36003,7 @@ function copySpotlightCaption(btn) {{
             {_CYCLE_PH_ATTR_MOMENT} style="min-height:110px" required></textarea>
   <div style="margin-top:var(--sp-3);display:flex;gap:var(--sp-3);align-items:center;flex-wrap:wrap">
     <button type="submit" class="btn">Send reply &rarr;</button>
-    <span class="strap" style="color:var(--ink-muted)">Assistant uses Claude · web research</span>
+    <span class="strap" style="color:var(--ink-muted)">AI assistant · web research</span>
   </div>
 </form>
 """
@@ -35811,10 +36045,10 @@ function copySpotlightCaption(btn) {{
 
     @app.route("/free-text/chat/<chat_id>/send", methods=["POST"])
     def free_text_chat_send(chat_id):
-        from mediahub.free_text_chat.session import load_session, save_session
+        from mediahub.free_text_chat.session import save_session
         from mediahub.free_text_chat.agent import next_assistant_turn
 
-        s = load_session(chat_id)
+        s = _load_accessible_chat(chat_id)
         if not s:
             return _recovery_page(
                 "Chat not found",
@@ -35823,6 +36057,14 @@ function copySpotlightCaption(btn) {{
                 secondary_cta=("Free-text home", url_for("free_text_chat_page")),
             )
         msg = (request.form.get("message") or "").strip()
+        if len(msg) > _FREE_TEXT_MAX_PROMPT_CHARS:
+            s.add_assistant_message(
+                f"That reply is very long ({len(msg):,} characters). Please shorten "
+                f"it to under {_FREE_TEXT_MAX_PROMPT_CHARS:,} characters and send again.",
+                meta={"error": True},
+            )
+            save_session(s)
+            return redirect(url_for("free_text_chat_view", chat_id=chat_id))
         if msg:
             s.add_user_message(msg)
             save_session(s)
@@ -35849,15 +36091,28 @@ function copySpotlightCaption(btn) {{
         brief = s.accepted_brief
         if not brief:
             return None
+        # The chat brief is the propose_brief tool input verbatim (unconstrained
+        # schema), so hashtags may arrive as a list, a string, or nothing. Reuse
+        # the quick path's normaliser so a stray string isn't iterated
+        # character-by-character into per-letter chips at render/export.
+        from mediahub.free_text_chat.agent import normalise_hashtags
+
+        hashtags = normalise_hashtags(brief.get("hashtags"))
+        # The chat brief is the propose_brief tool input verbatim (unconstrained
+        # schema), so headline/body/visual_concept may arrive as a non-string
+        # (a list of lines, a nested object, a number). Coerce to str before the
+        # caption join — a raw list headline used to raise a TypeError that 500'd
+        # accept/generate *and* bricked the chat (the brief was already frozen,
+        # so every retry hit the same crash).
+        _headline = str(brief.get("headline") or "").strip()
+        _body = str(brief.get("body") or "").strip()
         card = {
-            "platform": brief.get("platform") or "Instagram",
-            "caption": "\n\n".join(
-                [p for p in [brief.get("headline", ""), brief.get("body", "")] if p]
-            ).strip(),
-            "hashtags": brief.get("hashtags") or [],
+            "platform": str(brief.get("platform") or "Instagram").strip() or "Instagram",
+            "caption": "\n\n".join([p for p in [_headline, _body] if p]).strip(),
+            "hashtags": hashtags,
             # D-25: prompt-led chat draft — no fabricated confidence badge.
             "confidence": None,
-            "notes": brief.get("visual_concept", "") or "",
+            "notes": str(brief.get("visual_concept") or "").strip(),
             "status": "queue",
         }
         pack_form_data = {
@@ -35902,9 +36157,9 @@ function copySpotlightCaption(btn) {{
         # "Generate content from this brief" button and a third "Create graphic"
         # click. Accepting the brief and building the draft is a single POST that
         # ends on the rendered graphic (?autographic=1), like the quick path.
-        from mediahub.free_text_chat.session import load_session, save_session
+        from mediahub.free_text_chat.session import save_session
 
-        s = load_session(chat_id)
+        s = _load_accessible_chat(chat_id)
         if not s:
             return redirect(url_for("free_text_chat_page"))
         if s.pending_brief:
@@ -35918,17 +36173,22 @@ function copySpotlightCaption(btn) {{
                 }
             )
             save_session(s)
-        pack_url = _chat_brief_to_pack(s, chat_id, request.form.getlist("library_asset_id"))
-        if pack_url:
-            return redirect(pack_url)
+            # Build the draft exactly once, on the accepting POST. A stale or
+            # double-submitted re-POST (pending_brief already cleared) falls
+            # through to the chat view rather than minting another draft —
+            # deliberate regeneration is the explicit "Generate content from
+            # this brief" action (free_text_chat_generate).
+            pack_url = _chat_brief_to_pack(s, chat_id, request.form.getlist("library_asset_id"))
+            if pack_url:
+                return redirect(pack_url)
         return redirect(url_for("free_text_chat_view", chat_id=chat_id))
 
     @app.route("/free-text/chat/<chat_id>/decline", methods=["POST"])
     def free_text_chat_decline(chat_id):
-        from mediahub.free_text_chat.session import load_session, save_session
+        from mediahub.free_text_chat.session import save_session
         from mediahub.free_text_chat.agent import next_assistant_turn
 
-        s = load_session(chat_id)
+        s = _load_accessible_chat(chat_id)
         if not s:
             return redirect(url_for("free_text_chat_page"))
         if s.pending_brief:
@@ -35952,9 +36212,7 @@ function copySpotlightCaption(btn) {{
     def free_text_chat_generate(chat_id):
         """Turn an accepted brief into a saved stub-pack so the existing
         approval pills + export flow apply."""
-        from mediahub.free_text_chat.session import load_session
-
-        s = load_session(chat_id)
+        s = _load_accessible_chat(chat_id)
         if not s or not s.accepted_brief:
             return redirect(url_for("free_text_chat_view", chat_id=chat_id))
         # B-6: land on the draft with the graphic already rendering, like the
@@ -36333,7 +36591,14 @@ function copySpotlightCaption(btn) {{
         existing = load_pack(pack_id)
         if not _can_access_pack(existing, _active_profile_id()):
             return jsonify({"ok": False, "error": "invalid_request"}), 400
-        status = (request.form.get("status") or "").strip().lower()
+        # Read the status from a JSON body (the pill posts application/json so
+        # the write stays inside the CSRF layer's same-origin JSON exemption);
+        # fall back to a form field for any legacy caller.
+        _body = request.get_json(silent=True) if request.is_json else None
+        status = (
+            (_body or {}).get("status") if isinstance(_body, dict) else request.form.get("status")
+        ) or ""
+        status = status.strip().lower()
         rec = update_card_status(pack_id, card_idx, status)
         if not rec:
             return jsonify({"ok": False, "error": "invalid_request"}), 400
@@ -41537,8 +41802,8 @@ what you're doing, what they should do.</p>
                 remove_html = (
                     f'<form method="post" action="{url_for("organisation_members_page")}" '
                     'style="display:inline" '
-                    'onsubmit="return confirm(\'Remove this member from the organisation? '
-                    'They lose access immediately.\')">'
+                    "onsubmit=\"return confirm('Remove this member from the organisation? "
+                    "They lose access immediately.')\">"
                     '<input type="hidden" name="action" value="remove"/>'
                     f'<input type="hidden" name="email" value="{_h(m.email)}"/>'
                     '<button type="submit" class="btn secondary" '
@@ -41913,7 +42178,7 @@ what you're doing, what they should do.</p>
             )
         return chips or '<span style="color:var(--ink-muted);font-size:12px">No palette set</span>'
 
-    def _brand_kit_card_html(prof, kit, default_id: str) -> str:
+    def _brand_kit_card_html(prof, kit, default_id: str, can_admin: bool = True) -> str:
         from mediahub.brand.kits import LOCKABLE_TOKENS
 
         is_default = kit.kit_id == default_id
@@ -41987,16 +42252,34 @@ what you're doing, what they should do.</p>
         )
 
         def _kit_colour_slot(slot: str, label: str) -> str:
+            # A slot the kit never set must NOT be silently persisted from the
+            # picker's on-brand fallback: <input type=color> always submits a
+            # value, so an unset slot rendered at _pal_default would be read back
+            # by _form_palette() as a real user choice and fabricate a colour the
+            # club never picked (CLAUDE.md: palettes are evidence-grounded, never
+            # invented). Gate each picker behind a "set" checkbox: an unset slot
+            # renders its picker DISABLED (disabled inputs are not submitted), so
+            # a no-op save round-trips the palette unchanged. Ticking the box
+            # enables the picker so the slot can be set; unticking a set slot
+            # clears it.
             cur = pal.get(slot, "")
-            val = cur if str(cur).startswith("#") else _pal_default
+            is_set = str(cur).startswith("#")
+            val = cur if is_set else _pal_default
+            checked = " checked" if is_set else ""
+            disabled = "" if is_set else " disabled"
             return (
-                '<label style="display:flex;flex-direction:column;gap:3px;'
+                '<div style="display:flex;flex-direction:column;gap:3px;'
                 'font-size:11px;color:var(--ink-muted)">'
-                f"{label}"
-                f'<input type="color" name="{slot}" value="{_h(val)}" '
+                f"<span>{label}</span>"
+                '<span style="display:flex;align-items:center;gap:6px">'
+                f'<input type="checkbox"{checked} aria-label="Set {_h(label.lower())} colour" '
+                'onchange="this.nextElementSibling.disabled=!this.checked" '
+                'style="cursor:pointer"/>'
+                f'<input type="color" name="{slot}" value="{_h(val)}"{disabled} '
+                f'aria-label="{_h(label)} colour" '
                 'style="width:64px;height:40px;padding:0;border:1px solid var(--border);'
                 'border-radius:4px;background:var(--panel);cursor:pointer"/>'
-                "</label>"
+                "</span></div>"
             )
 
         palette_pickers = "".join(
@@ -42053,7 +42336,8 @@ what you're doing, what they should do.</p>
             f'<form method="post" action="{url_for("api_brand_kit_palette_import", kit_id=kit.kit_id)}" '
             'enctype="multipart/form-data" style="margin-top:12px;display:flex;gap:8px;'
             'align-items:center;flex-wrap:wrap">'
-            '<input type="file" name="palette_file" accept=".ase,.json,application/json" required />'
+            '<input type="file" name="palette_file" accept=".ase,.json,application/json" '
+            'aria-label="Palette file to import (Adobe .ase or Color JSON)" required />'
             '<button class="btn secondary" type="submit">Import palette file</button>'
             '<span style="font-size:12px;color:var(--ink-muted)">Adobe .ase or Color JSON</span>'
             "</form>"
@@ -42078,8 +42362,12 @@ what you're doing, what they should do.</p>
             + (f" · Font: {_h(kit.font_pairing)}" if kit.font_pairing else "")
             + (f" · Tone: {_h(kit.tone)}" if kit.tone else "")
             + "</p>"
-            f'<div style="margin-top:10px">{actions}</div>'
-            f"{edit_form}</div>"
+            # Mutating controls (make-default / delete / edit / import / resweep)
+            # only for an admin: a bound non-owner gets a read-only card instead
+            # of controls that would dead-end in a 404 (the POST routes gate on
+            # _brand_can_admin). See brand_home_page.
+            + (f'<div style="margin-top:10px">{actions}</div>{edit_form}' if can_admin else "")
+            + "</div>"
         )
 
     def _brand_identity_html(prof) -> str:
@@ -42135,7 +42423,7 @@ what you're doing, what they should do.</p>
                 )
         return "".join(bits)
 
-    def _render_brand_home(prof) -> str:
+    def _render_brand_home(prof, can_admin: bool = True) -> str:
         from mediahub.brand import kits as _kits
 
         default_id = _kits.default_kit_id(prof)
@@ -42150,36 +42438,74 @@ what you're doing, what they should do.</p>
                 '<div class="mh-notice" style="margin-bottom:14px;border-color:var(--bad);'
                 f'color:var(--bad)">{_h(err)}</div>'
             )
-        kit_cards = "".join(_brand_kit_card_html(prof, k, default_id) for k in all_kits)
+        kit_cards = "".join(_brand_kit_card_html(prof, k, default_id, can_admin) for k in all_kits)
         create_form = (
-            '<details style="margin-top:8px"><summary style="cursor:pointer;color:var(--accent)">'
-            "+ New kit</summary>"
-            f'<form method="post" action="{url_for("api_brand_kit_create")}" '
-            'style="display:flex;flex-direction:column;gap:8px;margin-top:12px;max-width:520px">'
-            '<input class="mh-input" name="name" placeholder="Kit name (e.g. Acme co-brand, Gala 2026)" required />'
-            '<select class="mh-input" name="role">'
-            '<option value="sponsor">Sponsor co-brand</option>'
-            '<option value="event">Event sub-brand</option>'
-            '<option value="section">Team / section</option>'
-            '<option value="personal">Personal</option>'
-            "</select>"
-            '<div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">'
-            + "".join(
-                '<label style="display:flex;flex-direction:column;gap:3px;'
-                'font-size:11px;color:var(--ink-muted)">'
-                f"{label}"
-                f'<input type="color" name="{slot}" value="{default}" '
-                'style="width:64px;height:40px;padding:0;border:1px solid var(--border);'
-                'border-radius:4px;background:var(--panel);cursor:pointer"/></label>'
-                for slot, label, default in (
-                    ("primary", "Primary", "#0a2540"),
-                    ("secondary", "Secondary", "#5b6b7a"),
-                    ("accent", "Accent", "#22d3ee"),
+            ""
+            if not can_admin
+            else (
+                '<details style="margin-top:8px"><summary style="cursor:pointer;color:var(--accent)">'
+                "+ New kit</summary>"
+                f'<form method="post" action="{url_for("api_brand_kit_create")}" '
+                'style="display:flex;flex-direction:column;gap:8px;margin-top:12px;max-width:520px">'
+                '<input class="mh-input" name="name" placeholder="Kit name (e.g. Acme co-brand, Gala 2026)" required />'
+                '<select class="mh-input" name="role">'
+                '<option value="sponsor">Sponsor co-brand</option>'
+                '<option value="event">Event sub-brand</option>'
+                '<option value="section">Team / section</option>'
+                '<option value="personal">Personal</option>'
+                "</select>"
+                '<div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">'
+                + "".join(
+                    '<label style="display:flex;flex-direction:column;gap:3px;'
+                    'font-size:11px;color:var(--ink-muted)">'
+                    f"{label}"
+                    f'<input type="color" name="{slot}" value="{default}" '
+                    'style="width:64px;height:40px;padding:0;border:1px solid var(--border);'
+                    'border-radius:4px;background:var(--panel);cursor:pointer"/></label>'
+                    for slot, label, default in (
+                        ("primary", "Primary", "#0a2540"),
+                        ("secondary", "Secondary", "#5b6b7a"),
+                        ("accent", "Accent", "#22d3ee"),
+                    )
                 )
+                + "</div>"
+                '<div><button class="btn" type="submit">Create kit</button></div>'
+                "</form></details>"
             )
-            + "</div>"
-            '<div><button class="btn" type="submit">Create kit</button></div>'
-            "</form></details>"
+        )
+        # Re-render sweep driver (admin-only). Both fetches send the session CSRF
+        # token via the X-CSRF-Token header so they pass _csrf_protect in
+        # production (the resweep POSTs carry no JSON body, so the content-type
+        # exemption would not cover them), and reject on !r.ok so a 403/404/500
+        # shows the .catch failure text instead of a misleading benign result.
+        resweep_js = (
+            "<script>(function(){"
+            f"var CSRF='{_csrf_token()}';"
+            "function jok(r){if(!r.ok){throw new Error('http '+r.status);}return r.json();}"
+            "document.querySelectorAll('.mh-resweep').forEach(function(box){"
+            "var prev=box.querySelector('.mh-resweep-preview'),"
+            "ap=box.querySelector('.mh-resweep-apply'),out=box.querySelector('.mh-resweep-out');"
+            "prev.addEventListener('click',function(){out.textContent='Checking…';"
+            "fetch(box.dataset.preview,{method:'POST',headers:{'X-CSRF-Token':CSRF}}).then(jok)"
+            ".then(function(d){var n=d.n_affected||0;"
+            "out.textContent=n?(n+' card(s) would change'):'No cards would change';"
+            "ap.style.display=n?'inline-block':'none';}).catch(function(){out.textContent='Preview failed.';});});"
+            # Chunked apply: each call renders at most a few cards (Playwright
+            # is seconds per card, and one big synchronous apply would blow the
+            # worker timeout), walking the offset cursor until remaining==0.
+            "ap.addEventListener('click',function(){"
+            "var total=0,off=0;ap.disabled=true;"
+            "function step(){out.textContent='Re-rendering…'+(total?(' ('+total+' done)'):'');"
+            "fetch(box.dataset.apply+'?limit=8&offset='+off,{method:'POST',headers:{'X-CSRF-Token':CSRF}})"
+            ".then(jok)"
+            ".then(function(d){total+=(d.n_rendered||0);"
+            "off=(typeof d.next_offset==='number')?d.next_offset:(off+8);"
+            "if(d.remaining){out.textContent='Re-rendered '+total+' card(s), '+d.remaining+' left…';step();return;}"
+            "out.textContent='Re-rendered '+total+' card(s) — re-queued for review.';"
+            "ap.disabled=false;}).catch(function(){"
+            "out.textContent='Apply failed'+(total?(' after '+total+' card(s)'):'')+'.';ap.disabled=false;});}"
+            "step();});"
+            "});})();</script>"
         )
         body = (
             '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-6);padding-bottom:var(--sp-4);margin-bottom:var(--sp-4)">'
@@ -42195,31 +42521,12 @@ what you're doing, what they should do.</p>
             '<p style="margin-top:24px"><a class="btn secondary" '
             f'href="{url_for("organisation_setup")}">Edit organisation &amp; brand DNA</a></p>'
             # Re-render sweep driver: preview the diff, then apply (re-queues for review).
-            "<script>(function(){"
-            "document.querySelectorAll('.mh-resweep').forEach(function(box){"
-            "var prev=box.querySelector('.mh-resweep-preview'),"
-            "ap=box.querySelector('.mh-resweep-apply'),out=box.querySelector('.mh-resweep-out');"
-            "prev.addEventListener('click',function(){out.textContent='Checking…';"
-            "fetch(box.dataset.preview,{method:'POST'}).then(function(r){return r.json();})"
-            ".then(function(d){var n=d.n_affected||0;"
-            "out.textContent=n?(n+' card(s) would change'):'No cards would change';"
-            "ap.style.display=n?'inline-block':'none';}).catch(function(){out.textContent='Preview failed.';});});"
-            # Chunked apply: each call renders at most a few cards (Playwright
-            # is seconds per card, and one big synchronous apply would blow the
-            # worker timeout), walking the offset cursor until remaining==0.
-            "ap.addEventListener('click',function(){"
-            "var total=0,off=0;ap.disabled=true;"
-            "function step(){out.textContent='Re-rendering…'+(total?(' ('+total+' done)'):'');"
-            "fetch(box.dataset.apply+'?limit=8&offset='+off,{method:'POST'})"
-            ".then(function(r){return r.json();})"
-            ".then(function(d){total+=(d.n_rendered||0);"
-            "off=(typeof d.next_offset==='number')?d.next_offset:(off+8);"
-            "if(d.remaining){out.textContent='Re-rendered '+total+' card(s), '+d.remaining+' left…';step();return;}"
-            "out.textContent='Re-rendered '+total+' card(s) — re-queued for review.';"
-            "ap.disabled=false;}).catch(function(){"
-            "out.textContent='Apply failed'+(total?(' after '+total+' card(s)'):'')+'.';ap.disabled=false;});}"
-            "step();});"
-            "});})();</script>"
+            # These are same-origin state-changing POSTs that carry no JSON body,
+            # so the app's CSRF layer (_csrf_protect) requires the X-CSRF-Token
+            # header — without it both fetches 403 in production. The .then also
+            # rejects on !r.ok so an error status surfaces as a visible failure
+            # instead of a false 'No cards would change' / '0 re-queued'.
+            + (resweep_js if can_admin else "")
         )
         return _layout("Brand platform", body, active="settings")
 
@@ -42231,7 +42538,10 @@ what you're doing, what they should do.</p>
         prof = _active_profile()
         if prof is None:
             return redirect(url_for("organisation_setup"))
-        return _render_brand_home(prof)
+        # A bound non-owner (Viewer/Reviewer/Editor) can view the brand home but
+        # not mutate kits — mirror the api_brand_kit_* POST gate so they see a
+        # read-only page rather than admin controls that dead-end in a 404.
+        return _render_brand_home(prof, can_admin=_brand_can_admin(pid))
 
     def _brand_redirect(msg: str = "", err: str = ""):
         from urllib.parse import urlencode
@@ -42262,10 +42572,18 @@ what you're doing, what they should do.</p>
         from mediahub.brand.kits import new_kit_id, upsert_kit, normalise_kit
 
         prof = _active_profile()
+        # A created kit is never the primary: an org has exactly one primary
+        # livery (synthesised or materialised), and a second role="primary" kit
+        # is undeletable (delete_kit protects every primary). Constrain to the
+        # four creatable roles so a hand-crafted/invalid role can't slip past
+        # normalise_kit's "unknown → primary" coercion and mint a duplicate.
+        role = (request.form.get("role") or "sponsor").strip().lower()
+        if role not in ("sponsor", "event", "section", "personal"):
+            role = "sponsor"
         raw = {
             "kit_id": new_kit_id(),
             "name": (request.form.get("name") or "").strip(),
-            "role": (request.form.get("role") or "sponsor").strip().lower(),
+            "role": role,
             "palette": _form_palette(),
         }
         kit = normalise_kit(raw)
@@ -42498,7 +42816,14 @@ what you're doing, what they should do.</p>
 
     def _brand_check_context(run_id: str, card_id: str):
         """Resolve (brief, kit, brand_kit) for a card, or an error response."""
-        run_data = _load_run(run_id)
+        # A run_id longer than the OS filename limit makes _load_run's p.exists()
+        # raise OSError(ENAMETOOLONG) (it stats outside its own try/except), which
+        # would 500 and log the internal RUNS_DIR path. Treat any such unusable
+        # id as a missing run — the anti-IDOR 404 the rest of this gate returns.
+        try:
+            run_data = _load_run(run_id)
+        except OSError:
+            return None, (jsonify({"error": "run_not_found"}), 404)
         if run_data is None:
             return None, (jsonify({"error": "run_not_found"}), 404)
         if not _can_access_run(run_id, run_data, _active_profile_id()):
@@ -42924,6 +43249,14 @@ what you're doing, what they should do.</p>
             ) -> str:
                 attr = "disabled" if disabled else ""
                 wrap_style = f"max-width:{max_width};" if max_width else ""
+                # The colour picker always needs a concrete value (it can't be
+                # empty), so it shows the effective colour (manual override, else
+                # the AI's pick). The hex TEXT field is the blankable control:
+                # pre-fill it ONLY with a real manual override, so an untouched
+                # slot posts blank and defers to the AI — exactly what the form
+                # copy promises. The AI's pick is shown as placeholder ghost text.
+                _mh = manual_pal.get(slot)
+                text_value = _mh if (isinstance(_mh, str) and _mh.startswith("#")) else ""
                 return (
                     f'<label style="display:flex;flex-direction:column;gap:4px;'
                     f'font-size:11.5px;color:var(--ink-dim);{wrap_style}">'
@@ -42935,7 +43268,8 @@ what you're doing, what they should do.</p>
                     f"border:1px solid var(--border);border-radius:4px;"
                     f'background:var(--panel);cursor:pointer;flex-shrink:0"/>'
                     f'<input type="text" name="palette_{slot}_hex" '
-                    f'id="palette-{slot}-hex" value="{_h(default_hex)}" '
+                    f'id="palette-{slot}-hex" value="{_h(text_value)}" '
+                    f'placeholder="{_h(default_hex)}" '
                     f'pattern="^#[0-9a-fA-F]{{6}}$" maxlength="7" '
                     f'data-palette-mirror="palette_{slot}" {attr} '
                     f'style="flex:1;min-width:0;padding:11px 10px;min-height:44px;'
@@ -43607,7 +43941,7 @@ what you're doing, what they should do.</p>
                 'style="margin-bottom:20px;border:1px solid rgba(255,180,84,0.5);'
                 'background:rgba(255,180,84,0.07)">'
                 '<h2 style="margin-top:0;font-size:18px;color:var(--ink)">'
-                f'Almost there &mdash; {_h(prof.display_name or "your organisation")} '
+                f"Almost there &mdash; {_h(prof.display_name or 'your organisation')} "
                 "isn&rsquo;t unlocked yet</h2>"
                 '<p style="font-size:14px;line-height:1.55;color:var(--ink);margin:0 0 12px">'
                 f"{_h(_lead)} Add <strong>any one</strong> of these and you&rsquo;re in:</p>"
@@ -44730,11 +45064,24 @@ function mhSetupMode(mode) {{
         )
         from mediahub.brand import palette as _palette
 
+        # The blankable ``palette_<slot>_hex`` text field is authoritative: the
+        # sibling ``<input type="color">`` can never submit an empty value, so
+        # reading it would make "leave a slot blank to fall back to the AI's
+        # pick" (promised on the form) impossible — every save would freeze the
+        # AI palette as a manual override. Prefer the hex mirror when the browser
+        # sent it; fall back to the colour input for non-browser callers (and the
+        # test corpus) that post only ``palette_<slot>``.
+        def _pal_slot(slot: str) -> str:
+            hexv = request.form.get(f"palette_{slot}_hex")
+            if hexv is not None:
+                return hexv.strip()
+            return (request.form.get(f"palette_{slot}") or "").strip()
+
         manual = _palette.sanitise_manual_palette(
-            primary=(request.form.get("palette_primary") or "").strip(),
-            secondary=(request.form.get("palette_secondary") or "").strip(),
-            accent=(request.form.get("palette_accent") or "").strip(),
-            fourth=(request.form.get("palette_fourth") or "").strip(),
+            primary=_pal_slot("primary"),
+            secondary=_pal_slot("secondary"),
+            accent=_pal_slot("accent"),
+            fourth=_pal_slot("fourth"),
             include_fourth=use_fourth,
         )
         prof.brand_palette_manual = manual
@@ -44913,7 +45260,9 @@ function mhSetupMode(mode) {{
             palette = kit.ensure_derived_palette()
         except Exception as e:
             log.warning("organisation_finalise: ensure_derived_palette failed: %s", e)
-            return jsonify({"error": "palette derivation failed", "detail": str(e)}), 500
+            # Log the exception server-side only; never echo str(e) back — it
+            # can carry the absolute DATA_DIR path / errno on a disk failure.
+            return jsonify({"error": "palette derivation failed"}), 500
         # Write the (possibly newly-cached) palette back to the profile
         # so subsequent requests see it. ensure_derived_palette mutated
         # kit in-place; we serialise that mutation through the profile
@@ -44923,7 +45272,9 @@ function mhSetupMode(mode) {{
             save_profile(prof)
         except Exception as e:
             log.warning("organisation_finalise: save_profile failed: %s", e)
-            return jsonify({"error": "profile save failed", "detail": str(e)}), 500
+            # As above — keep the raw exception (and any leaked path) in the
+            # server log, not in the client-visible JSON.
+            return jsonify({"error": "profile save failed"}), 500
         return jsonify(
             {
                 "seed_hex": (palette or {}).get("seed_hex", ""),
@@ -45154,7 +45505,7 @@ function mhSetupMode(mode) {{
                     "status": entry.get("status", "unknown"),
                     "playbook_age": entry.get("playbook_age", -1),
                     "regenerated": entry.get("regenerated", False),
-                    "voice_digest": (entry.get("dna") or {}).get("voice_summary", "")[:240],
+                    "voice_digest": ((entry.get("dna") or {}).get("voice_summary") or "")[:240],
                 }
                 prof.link_capture_state = state
                 save_profile(prof)
@@ -48011,22 +48362,36 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
 <tr class="mh-hp mh-asset-row" data-asset-id="{_h(ad.get("id", ""))}"
     data-desc="{_h(_meta_desc)}" data-athletes="{_h(athlete_names)}"
     data-venue="{_h(_meta_venue)}" data-event="{_h(_meta_event)}" data-tags="{_h(_meta_tags)}">
-  <td class="mh-bulk-cell"><input type="checkbox" class="mh-row-check" name="asset_ids" value="{_h(ad.get("id", ""))}" aria-label="Select photo"></td>
-  <td data-label="Preview"><span class=\"mh-lens\" style=\"display:inline-block;border-radius:4px;overflow:hidden;line-height:0\"><img src=\"{_file_url}\" style=\"max-height:60px;border-radius:4px;display:block\" /></span>{_hp_tpl}</td>
+  <td class="mh-bulk-cell"><input type="checkbox" class="mh-row-check" name="asset_ids" value="{
+                _h(ad.get("id", ""))
+            }" aria-label="Select photo"></td>
+  <td data-label="Preview"><span class=\"mh-lens\" style=\"display:inline-block;border-radius:4px;overflow:hidden;line-height:0\"><img src=\"{
+                _file_url
+            }\" style=\"max-height:60px;border-radius:4px;display:block\" /></span>{_hp_tpl}</td>
   <td data-label="Type">{_h(ad.get("type", ""))}</td>
   <td data-label="Athlete">{_h(athlete_names)}{_tag_badges}</td>
   <td data-label="Venue / Event">{_h(ad.get("linked_venue") or ad.get("linked_event") or "")}</td>
   <td data-label="Permission">{
                 _media_permission_select(ad.get("id", ""), ad.get("permission_status", ""))
                 if ad.get("type") not in _skip_tag_types
-                else _h(_MEDIA_PERMISSION_LABELS.get(ad.get("permission_status", ""), ad.get("permission_status", "")))
+                else _h(
+                    _MEDIA_PERMISSION_LABELS.get(
+                        ad.get("permission_status", ""), ad.get("permission_status", "")
+                    )
+                )
             }</td>
   <td data-label="Status">{_media_approval_badge(ad.get("approval_status", ""))}</td>
   <td data-label="ID"><code>{_h(ad.get("id", "")[:12])}</code></td>
   <td style="white-space:nowrap">
-    <a class="btn ghost" href="{_edit_url}" style="font-size:11px;padding:3px 9px;margin-right:6px" title="Filters, adjustments, crop, shapes, blur brush — non-destructive edits">&#9998; Edit</a>
-    <a class="btn ghost" href="{_studio_url}" style="font-size:11px;padding:3px 9px;margin-right:6px" title="Edit this photo with AI — fill, erase, expand, upscale, restyle">&#x2726; Studio</a>
-    <a class="btn ghost" href="{_cutout_url}" style="font-size:11px;padding:3px 9px;margin-right:6px" title="See exactly what background removal knocks out">Cut-out</a>
+    <a class="btn ghost" href="{
+                _edit_url
+            }" style="font-size:11px;padding:3px 9px;margin-right:6px" title="Filters, adjustments, crop, shapes, blur brush — non-destructive edits">&#9998; Edit</a>
+    <a class="btn ghost" href="{
+                _studio_url
+            }" style="font-size:11px;padding:3px 9px;margin-right:6px" title="Edit this photo with AI — fill, erase, expand, upscale, restyle">&#x2726; Studio</a>
+    <a class="btn ghost" href="{
+                _cutout_url
+            }" style="font-size:11px;padding:3px 9px;margin-right:6px" title="See exactly what background removal knocks out">Cut-out</a>
     <button class="btn ghost" type="button" data-mh-meta-open style="font-size:11px;padding:3px 9px;margin-right:6px" title="Edit the description, swimmer, venue and tags">&#x270E; Info</button>
     <button class="btn ghost mh-ml-qa" type="button" data-qa-url="{_qa_url}"
             aria-haspopup="menu" aria-expanded="false"
@@ -52243,8 +52608,8 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                 f'<td data-label="Window">{window}</td>'
                 f'<td data-label="State">{state}</td>'
                 f'<td><form method="post" action="{url_for("sponsors_delete")}" style="margin:0" '
-                'onsubmit="return confirm(\'Remove this sponsor? Their logo and details are '
-                'permanently deleted.\')">'
+                "onsubmit=\"return confirm('Remove this sponsor? Their logo and details are "
+                "permanently deleted.')\">"
                 f'<input type="hidden" name="sponsor_id" value="{_h(s["sponsor_id"])}">'
                 '<button type="submit" class="btn secondary" style="font-size:12px;padding:4px 10px">Remove</button>'
                 "</form></td></tr>"
@@ -52475,8 +52840,7 @@ workflow, and the publish log &mdash; deterministic and auditable.</p>
                 _lbl = _excluded_labels.get(key)
                 if _lbl:
                     _name_cell = (
-                        f"<td>{_h(_lbl['title'])}</td>"
-                        f"<td class='dim'>{_h(_lbl['meet_name'])}</td>"
+                        f"<td>{_h(_lbl['title'])}</td><td class='dim'>{_h(_lbl['meet_name'])}</td>"
                     )
                 else:
                     # The run no longer exists — fall back to the raw key.
@@ -52600,7 +52964,15 @@ ever appear; queued, edited and rejected cards never do.</p>
 
     def _wall_page_html(prof, cards, token: str, *, embed: bool) -> str:
         kit = prof.get_brand_kit()
-        primary = getattr(kit, "primary_colour", None) or "#0A2540"
+        # The brand colour is interpolated into a <style> block below, where _h
+        # (HTML escaping) does NOT neutralise CSS metacharacters ({ } ; :). A
+        # non-hex brand_primary (e.g. set via a raw form POST that bypasses the
+        # type=color widget) could otherwise break out of the header selector and
+        # inject arbitrary CSS onto this public page. Gate it to a hex colour and
+        # fall back to the default otherwise.
+        primary = getattr(kit, "primary_colour", None) or ""
+        if not re.fullmatch(r"#[0-9A-Fa-f]{3,8}", primary):
+            primary = "#0A2540"
         items = ""
         for c in cards:
             img = url_for(
@@ -52643,7 +53015,7 @@ ever appear; queued, edited and rejected cards never do.</p>
 </style></head><body>
 {header}
 <div class="grid">{items}</div>
-<span class="powered">Powered by <a href="{_h(badge_href)}" rel="noopener">MediaHub</a></span>
+<span class="powered">Powered by <a href="{_h(badge_href)}" target="_blank" rel="noopener noreferrer">MediaHub</a></span>
 </body></html>"""
 
     def _resolve_wall_or_404(token: str):
@@ -52798,7 +53170,11 @@ ever appear; queued, edited and rejected cards never do.</p>
         if not path:
             abort(404)
         resp = make_response(send_file(path, mimetype="image/png"))
-        resp.headers["Cache-Control"] = "public, max-age=3600"
+        # Match the page/feed TTL (max-age=300) and require revalidation. On a
+        # children's-data surface where consent can be withdrawn or a card hidden
+        # at any moment, a 1-hour public cache could keep serving a withdrawn
+        # child's card image long after it should be gone.
+        resp.headers["Cache-Control"] = "public, max-age=300, must-revalidate"
         return resp
 
     # ------------------------------------------------------------------
@@ -58121,7 +58497,7 @@ voice, and queues them for one-click approval.</p>
                 '<div class="card" style="padding:10px 14px;margin-bottom:8px;display:flex;'
                 'justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">'
                 f'<div><span class="tag" style="font-size:10px;margin-right:8px">'
-                f'{_h(it["item_type"])}</span>{label_html}</div>{remove_btn}</div>'
+                f"{_h(it['item_type'])}</span>{label_html}</div>{remove_btn}</div>"
             )
         rows = rows or (
             '<p class="dim" style="margin:var(--sp-4) 0">Nothing in this collection yet — '
@@ -60285,7 +60661,7 @@ voice, and queues them for one-click approval.</p>
             )
             msg = (
                 '<div class="card" style="border-color:var(--mh-success)">'
-                f'<p>{_h(request.args.get("msg"))}</p>{_review_link}</div>'
+                f"<p>{_h(request.args.get('msg'))}</p>{_review_link}</div>"
             )
         if request.args.get("err"):
             msg = f'<div class="card" style="border-color:var(--mh-error)"><p>{_h(request.args.get("err"))}</p></div>'
@@ -61742,6 +62118,16 @@ voice, and queues them for one-click approval.</p>
         slug = re.sub(r"[^A-Za-z0-9_-]+", "-", str(title or "document")).strip("-").lower()
         return f"{slug or 'document'}.{ext}"
 
+    def _doc_clean_detail(exc) -> str:
+        """A user-safe one-line failure reason for a document/PDF-tool error.
+
+        The document endpoints operate on server-side temp files, and library
+        errors (Pillow/pypdf/Playwright) embed the absolute path — leaking the
+        server's filesystem layout and the temp-naming scheme (CLAUDE.md: never
+        expose internal paths). Scrub any absolute path to a neutral token while
+        keeping the helpful validation text (e.g. page/size limits)."""
+        return re.sub(r"(?:/[^\s'\"]+)+", "a file", str(exc))[:200]
+
     def _doc_recent_runs(pid, limit=60):
         out = []
         try:
@@ -62501,15 +62887,18 @@ voice, and queues them for one-click approval.</p>
             '<div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px">'
             '<div class="card"><h3 style="margin-top:0">Import to edit</h3>'
             '<p class="dim" style="font-size:13px">Open a PDF, Word or PowerPoint file as an editable document (bounded fidelity).</p>'
-            '<input type="file" id="imp-file" accept=".pdf,.docx,.pptx" class="input">'
+            '<input type="file" id="imp-file" accept=".pdf,.docx,.pptx" class="input" '
+            'aria-label="Choose a PDF, Word or PowerPoint file to import">'
             '<button class="btn secondary" style="margin-top:8px" onclick="importDoc()">Import</button></div>'
             '<div class="card"><h3 style="margin-top:0">Merge PDFs</h3>'
             '<p class="dim" style="font-size:13px">Combine several PDFs into one, in order.</p>'
-            '<input type="file" id="merge-files" accept="application/pdf" multiple class="input">'
+            '<input type="file" id="merge-files" accept="application/pdf" multiple class="input" '
+            'aria-label="Choose PDF files to merge">'
             '<button class="btn secondary" style="margin-top:8px" onclick="mergePdfs()">Merge &amp; download</button></div>'
             '<div class="card"><h3 style="margin-top:0">Images → PDF</h3>'
             '<p class="dim" style="font-size:13px">Turn photos/screenshots into a single PDF.</p>'
-            '<input type="file" id="img-files" accept="image/*" multiple class="input">'
+            '<input type="file" id="img-files" accept="image/*" multiple class="input" '
+            'aria-label="Choose images to combine into a PDF">'
             '<button class="btn secondary" style="margin-top:8px" onclick="imagesToPdf()">Build &amp; download</button></div>'
             "</div>"
             + saved
@@ -62517,6 +62906,7 @@ voice, and queues them for one-click approval.</p>
             .replace("__IMPORT_URL__", url_for("api_documents_import"))
             .replace("__MERGE_URL__", url_for("api_documents_tool_merge"))
             .replace("__IMG_URL__", url_for("api_documents_tool_images_to_pdf"))
+            .replace("__CSRF__", _csrf_token())
         )
         return _layout("Documents", body, active="create")
 
@@ -62628,6 +63018,7 @@ voice, and queues them for one-click approval.</p>
             f'<a class="btn secondary" href="{url_for("api_document_docx", doc_id=doc_id)}">Word (.docx)</a>'
             "</div>"
             f'<iframe src="{url_for("api_document_pdf", doc_id=doc_id)}" '
+            'title="Document preview" '
             'style="width:100%;height:70vh;border:1px solid var(--panel);border-radius:8px;background:var(--panel)"></iframe>'
             + doc_structured
             + '<details style="margin-top:18px"><summary class="dim">Advanced — raw spec (JSON)</summary>'
@@ -62654,7 +63045,7 @@ voice, and queues them for one-click approval.</p>
             path = render_document_pdf(spec, brand_kit=_doc_brand_kit(pid))
         except Exception as e:
             log.warning("document pdf render failed", exc_info=True)
-            return jsonify({"error": "render_failed", "detail": str(e)[:200]}), 503
+            return jsonify({"error": "render_failed", "detail": _doc_clean_detail(e)}), 503
         dl = request.args.get("dl") == "1"
         return send_file(
             path,
@@ -62680,7 +63071,7 @@ voice, and queues them for one-click approval.</p>
             try:
                 document_pptx(spec, out, brand_kit=_doc_brand_kit(pid))
             except Exception as e:
-                return jsonify({"error": "export_failed", "detail": str(e)[:200]}), 503
+                return jsonify({"error": "export_failed", "detail": _doc_clean_detail(e)}), 503
             return send_file(
                 out,
                 as_attachment=True,
@@ -62709,7 +63100,7 @@ voice, and queues them for one-click approval.</p>
             try:
                 document_docx(spec, out, brand_kit=_doc_brand_kit(pid))
             except Exception as e:
-                return jsonify({"error": "export_failed", "detail": str(e)[:200]}), 503
+                return jsonify({"error": "export_failed", "detail": _doc_clean_detail(e)}), 503
             return send_file(
                 out,
                 as_attachment=True,
@@ -62738,7 +63129,7 @@ voice, and queues them for one-click approval.</p>
         try:
             path = deck_to_mp4(spec, brand_kit=_doc_brand_kit(pid))
         except Exception as e:
-            return jsonify({"error": "video_failed", "detail": str(e)[:200]}), 503
+            return jsonify({"error": "video_failed", "detail": _doc_clean_detail(e)}), 503
         return send_file(
             path,
             mimetype="video/mp4",
@@ -62761,8 +63152,14 @@ voice, and queues them for one-click approval.</p>
         from mediahub.documents import store as _docstore
 
         raw["doc_id"] = doc_id  # never let an edit reassign identity
-        new_spec = DocumentSpec.from_dict(raw)
-        _docstore.save_document(pid, new_spec)
+        # from_dict is total over wrong-typed fields, but a spec the editor sends
+        # can still be unparseable in other ways — answer with a clean 400, never
+        # an unhandled 500, since this is a user-editable payload.
+        try:
+            new_spec = DocumentSpec.from_dict(raw)
+            _docstore.save_document(pid, new_spec)
+        except (TypeError, ValueError):
+            return jsonify({"ok": False, "error": "bad_spec"}), 400
         return jsonify({"ok": True})
 
     @app.route("/api/documents/<doc_id>/content-edit", methods=["POST"])
@@ -62820,7 +63217,9 @@ voice, and queues them for one-click approval.</p>
         try:
             spec = import_file(tmp)
         except Exception as e:
-            return jsonify({"ok": False, "error": "import_failed", "detail": str(e)[:200]}), 422
+            return jsonify(
+                {"ok": False, "error": "import_failed", "detail": _doc_clean_detail(e)}
+            ), 422
         finally:
             try:
                 tmp.unlink()
@@ -62857,7 +63256,7 @@ voice, and queues them for one-click approval.</p>
             try:
                 merge_pdfs(paths, out)
             except Exception as e:
-                return jsonify({"error": "merge_failed", "detail": str(e)[:200]}), 422
+                return jsonify({"error": "merge_failed", "detail": _doc_clean_detail(e)}), 422
             finally:
                 for p in paths:
                     try:
@@ -62895,7 +63294,7 @@ voice, and queues them for one-click approval.</p>
             try:
                 images_to_pdf(paths, out)
             except Exception as e:
-                return jsonify({"error": "convert_failed", "detail": str(e)[:200]}), 422
+                return jsonify({"error": "convert_failed", "detail": _doc_clean_detail(e)}), 422
             finally:
                 for p in paths:
                     try:
@@ -63015,7 +63414,7 @@ voice, and queues them for one-click approval.</p>
         try:
             path = render_section_png(spec, i, brand_kit=_doc_brand_kit(session.owner))
         except Exception as e:
-            return jsonify({"error": "render_failed", "detail": str(e)[:160]}), 503
+            return jsonify({"error": "render_failed", "detail": _doc_clean_detail(e)}), 503
         return send_file(path, mimetype="image/png")
 
     @app.route("/api/present/<session_id>/state")

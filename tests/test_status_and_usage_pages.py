@@ -12,6 +12,7 @@ Pins:
 The harness pattern mirrors test_activity_schedule_summary.py — fresh
 DATA_DIR, module reload, run with the org gate enforced.
 """
+
 from __future__ import annotations
 
 import importlib
@@ -38,6 +39,7 @@ def fresh_app(tmp_path, monkeypatch):
     import mediahub.observability.uptime as upt
     import mediahub.observability.llm_usage as llmu
     import mediahub.web.web as wm
+
     importlib.reload(cp)
     importlib.reload(upt)
     importlib.reload(llmu)
@@ -68,9 +70,7 @@ class TestStatusPageReachableWithoutOrg:
         # is "Status unavailable" (not a green default), so accept any of the
         # three real states.
         assert (
-            "Website operational" in body
-            or "Website down" in body
-            or "Status unavailable" in body
+            "Website operational" in body or "Website down" in body or "Status unavailable" in body
         )
 
     def test_status_page_is_simple_operational_or_down(self, fresh_app):
@@ -84,9 +84,7 @@ class TestStatusPageReachableWithoutOrg:
         # No uptime-percentage claims, and the page reads one of the honest states.
         assert "uptime" not in body.lower()
         assert (
-            "Website operational" in body
-            or "Website down" in body
-            or "Status unavailable" in body
+            "Website operational" in body or "Website down" in body or "Status unavailable" in body
         )
 
 
@@ -108,6 +106,29 @@ class TestApiStatusJsonShape:
             assert "uptime_pct" in w
             assert "has_data" in w
 
+    def test_public_json_does_not_leak_heartbeat_error_text(self, fresh_app):
+        """AUDIT (system-status): /api/status is public and unauthenticated, so
+        it must NOT echo the raw deep-/health failure string — that text can
+        carry an internal filesystem path (e.g. a DB file path or an OS
+        permission error). The ``ok`` flag still signals the failure honestly.
+        """
+        c, _ = fresh_app
+        import mediahub.observability.uptime as upt
+
+        leaky = "database: unable to open database file /srv/data/data.db"
+        upt.record_heartbeat(ok=False, source="health", error=leaky)
+
+        resp = c.get("/api/status")
+        assert resp.status_code == 200
+        body = resp.get_json() or {}
+        latest = body.get("latest_heartbeat") or {}
+        # The raw error text (and the internal path inside it) is gone...
+        assert "error" not in latest
+        assert leaky not in resp.get_data(as_text=True)
+        assert "/srv/data/data.db" not in resp.get_data(as_text=True)
+        # ...but the failure is still visible via the honest ok flag.
+        assert latest.get("ok") is False
+
 
 class TestHealthzRecordsHeartbeat:
     def test_healthz_call_records_heartbeat_row(self, fresh_app):
@@ -119,9 +140,11 @@ class TestHealthzRecordsHeartbeat:
         # liveness probe never blocks on disk; flush the queue before
         # asserting the row landed.
         import mediahub.web.web as wm
+
         wm._HEARTBEAT_QUEUE.join()
         # The uptime log should now have one row.
         import mediahub.observability.uptime as upt
+
         latest = upt.latest_heartbeat()
         assert latest is not None
         assert latest["ok"] is True
@@ -138,8 +161,10 @@ class TestHealthzRecordsHeartbeat:
         expected_ok = bool(body.get("ok"))
         # Heartbeat write is async — flush before asserting (see above).
         import mediahub.web.web as wm
+
         wm._HEARTBEAT_QUEUE.join()
         import mediahub.observability.uptime as upt
+
         latest = upt.latest_heartbeat()
         assert latest is not None
         assert latest["source"] == "health"
@@ -196,8 +221,7 @@ class TestHeartbeatDrainResilience:
         flaky.put((True, "second", 1.0, None))
 
         assert done.wait(timeout=5.0), (
-            "drain thread died after task_done() ValueError — "
-            f"only recorded {recorded}"
+            f"drain thread died after task_done() ValueError — only recorded {recorded}"
         )
         assert recorded[:2] == ["first", "second"]
         assert t.is_alive()
@@ -218,6 +242,7 @@ class TestStatusPageWithSeededHeartbeats:
         # Seed dense, recent heartbeats so the page shows live data.
         import mediahub.observability.uptime as upt
         from datetime import datetime, timezone, timedelta
+
         now = datetime.now(timezone.utc)
         for i in range(120):
             upt.record_heartbeat(
@@ -236,6 +261,7 @@ class TestStatusPageWithSeededHeartbeats:
     def test_renders_pill_green_when_recent_heartbeat(self, fresh_app):
         c, _ = fresh_app
         import mediahub.observability.uptime as upt
+
         upt.record_heartbeat(ok=True)  # right now
         resp = c.get("/status")
         body = resp.get_data(as_text=True)
@@ -246,14 +272,80 @@ class TestStatusPageWithSeededHeartbeats:
     def test_renders_red_pill_when_only_stale_heartbeat(self, fresh_app):
         c, _ = fresh_app
         import mediahub.observability.uptime as upt
+
         # An hour-old heartbeat → "stale" or "unknown" depending on age.
         from datetime import datetime, timezone, timedelta
+
         ts = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
         upt.record_heartbeat(ok=True, ts=ts)
         resp = c.get("/status")
         body = resp.get_data(as_text=True)
         # The pill must NOT say "operational" — it should say stale/unknown.
         assert "operational" not in body or "unknown" in body or "stale" in body
+
+
+def _as_operator_session(c):
+    with c.session_transaction() as s:
+        s["dev_operator"] = True
+
+
+class TestOperatorStatusHonestyAndResilience:
+    """AUDIT (system-status): operator /status must not (a) round a window with
+    real downtime up to a bare "100%" beside its non-zero Downtime cell, nor
+    (b) 500 if the observability layer raises unexpectedly.
+    """
+
+    def test_window_with_downtime_never_renders_bare_100pct(self, fresh_app):
+        c, _ = fresh_app
+        _as_operator_session(c)
+        import mediahub.observability.uptime as upt
+        from datetime import datetime, timezone, timedelta
+        import re
+
+        now = datetime.now(timezone.utc)
+        # 30 days of 5-min heartbeats with exactly ONE failure → 60s counted
+        # downtime, uptime ≈ 99.9977% which would round up to "100%".
+        step = 5
+        for k in range(30 * 24 * 60 // step, -1, -1):
+            upt.record_heartbeat(
+                ok=(k != 100),
+                ts=(now - timedelta(minutes=k * step)).isoformat(),
+            )
+        body = c.get("/status").get_data(as_text=True)
+        m = re.search(r"30 days.*?</tr>", body, re.S)
+        assert m is not None
+        row = re.sub(r"<[^>]+>", " ", m.group(0))
+        # Real downtime is shown, and the uptime cell is NOT a bare "100%".
+        assert "min" in row  # a downtime figure is present
+        assert "100%" not in row, f"100% shown beside downtime: {row!r}"
+        assert "99.99%" in row
+
+    def test_operator_status_degrades_not_500_when_observability_raises(self, fresh_app):
+        c, _ = fresh_app
+        _as_operator_session(c)
+        import mediahub.observability.uptime as upt
+
+        def _boom(*a, **k):
+            raise RuntimeError("observability exploded /internal/secret/path")
+
+        orig = (upt.uptime_stats, upt.latest_heartbeat, upt.recent_gaps)
+        upt.uptime_stats = _boom
+        upt.latest_heartbeat = _boom
+        upt.recent_gaps = _boom
+        try:
+            resp = c.get("/status")
+        finally:
+            upt.uptime_stats, upt.latest_heartbeat, upt.recent_gaps = orig
+        assert resp.status_code == 200  # no unhandled 500
+        body = resp.get_data(as_text=True)
+        assert "/internal/secret/path" not in body
+        assert "Traceback" not in body
+        # Falls back to the honest public status section.
+        assert (
+            "Website operational" in body
+            or "Website down" in body
+            or "Status unavailable" in body
+        )
 
 
 class TestHealthzUsageReachableWithoutOrg:
@@ -286,11 +378,10 @@ class TestHealthzUsageWithSeededCalls:
         c, _ = fresh_app
         _as_operator(c)
         import mediahub.observability.llm_usage as llmu
+
         # Seed a recent gemini call + an anthropic call with tokens.
-        llmu.record_call(provider="gemini", ok=True,
-                          tokens_in=1000, tokens_out=500)
-        llmu.record_call(provider="anthropic", ok=True,
-                          tokens_in=1000, tokens_out=500)
+        llmu.record_call(provider="gemini", ok=True, tokens_in=1000, tokens_out=500)
+        llmu.record_call(provider="anthropic", ok=True, tokens_in=1000, tokens_out=500)
         resp = c.get("/healthz/usage")
         body = resp.get_data(as_text=True)
         # Both providers appear.
@@ -305,8 +396,10 @@ class TestHealthzUsageWithSeededCalls:
         c, _ = fresh_app
         _as_operator(c)
         import mediahub.observability.llm_usage as llmu
+
         llmu.record_call(
-            provider="gemini", ok=False,
+            provider="gemini",
+            ok=False,
             error_kind="rate_limited",
             error_message="HTTP 429 from Gemini",
         )
@@ -316,10 +409,29 @@ class TestHealthzUsageWithSeededCalls:
         assert "HTTP 429" in body
         assert "rate_limited" in body
 
+    def test_usage_page_survives_error_with_null_message(self, fresh_app):
+        """record_call permits error_message=None (a failure with a kind but
+        no message). The dashboard must render it, not 500 on ''[:300] against
+        a None value — .get(k, '') only defaults on an ABSENT key, so a stored
+        NULL slipped straight into the slice and crashed the page."""
+        c, _ = fresh_app
+        _as_operator(c)
+        import mediahub.observability.llm_usage as llmu
+
+        llmu.record_call(
+            provider="gemini", ok=False, error_kind="ProviderNotConfigured", error_message=None
+        )
+        resp = c.get("/healthz/usage")
+        assert resp.status_code == 200
+        body = resp.get_data(as_text=True)
+        assert "Last LLM error" in body
+        assert "ProviderNotConfigured" in body
+
     def test_usage_page_surfaces_gemini_headroom_bar(self, fresh_app):
         c, _ = fresh_app
         _as_operator(c)
         import mediahub.observability.llm_usage as llmu
+
         for _ in range(50):
             llmu.record_call(provider="gemini", ok=True)
         resp = c.get("/healthz/usage")
@@ -327,3 +439,37 @@ class TestHealthzUsageWithSeededCalls:
         assert "Gemini free-tier today" in body
         # 50 used, 1450 remaining.
         assert "1450 remaining" in body or "remaining" in body
+
+
+class TestSettingsSystemStatusCardReachable:
+    """AUDIT (system-status): the Settings landing 'System status' tile must
+    land on a status view for EVERY visitor — including signed-out / no-org
+    ones, the exact audience a public status signal is for. It used to point at
+    the org-gated /settings/status, which the org gate bounced to /organisation
+    setup; it now points at the public, gate-exempt /status.
+    """
+
+    def test_landing_card_points_at_public_status_and_resolves_without_org(self, fresh_app):
+        import re
+
+        c, _ = fresh_app  # ENFORCE_ORG_GATE=True, no org, signed out
+        landing = c.get("/settings")
+        assert landing.status_code == 200
+        html = landing.get_data(as_text=True)
+        m = re.search(
+            r'<a href="([^"]+)"[^>]*>(?:(?!</a>).)*?System status', html, re.S
+        )
+        assert m is not None, "System status card missing from Settings landing"
+        href = m.group(1)
+        # The card targets the public /status, not the gated members surface.
+        assert href.endswith("/status") and "settings" not in href, href
+        # ...and following it as a no-org visitor reaches a real status view,
+        # not a redirect into org setup.
+        followed = c.get(href)
+        assert followed.status_code == 200
+        body = followed.get_data(as_text=True)
+        assert (
+            "Website operational" in body
+            or "Website down" in body
+            or "Status unavailable" in body
+        )

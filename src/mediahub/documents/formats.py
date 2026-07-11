@@ -27,9 +27,9 @@ from .models import DocumentSpec, Section
 DEFAULT_PACKAGES = {
     "columns": ["Package", "Season fee", "What's included"],
     "rows": [
-        ["Bronze", "—", "Logo on the club website and season report"],
-        ["Silver", "—", "Bronze + logo on result cards and meet programmes"],
-        ["Gold", "—", "Silver + named kit/banner sponsor and social shout-outs"],
+        ["Bronze", "-", "Logo on the club website and season report"],
+        ["Silver", "-", "Bronze + logo on result cards and meet programmes"],
+        ["Gold", "-", "Silver + named kit/banner sponsor and social shout-outs"],
     ],
     "caption": "Partnership packages (set your own fees)",
 }

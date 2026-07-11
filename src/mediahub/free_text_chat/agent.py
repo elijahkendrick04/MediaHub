@@ -110,6 +110,22 @@ Rules:
 """
 
 
+def normalise_hashtags(raw) -> list:
+    """Coerce an LLM-supplied ``hashtags`` value into a clean ≤8-tag list.
+
+    The propose_brief tool schema is unconstrained, so the model may hand back
+    a list, a single "#a #b, #c" string, or something unexpected. Splitting a
+    string here (rather than iterating it) stops a bare string from exploding
+    into per-character tags. Shared by the one-shot quick path and the chat
+    path so both normalise identically.
+    """
+    if isinstance(raw, str):
+        raw = raw.replace(",", " ").split()
+    elif not isinstance(raw, (list, tuple)):
+        raw = []
+    return [str(h).lstrip("#").strip() for h in raw if str(h).strip()][:8]
+
+
 def _parse_brief_json(raw: str) -> dict:
     """Tolerant strict-JSON parse of a one-shot brief. Raises ProviderError
     (never returns a fabricated brief) when the model didn't return usable
@@ -136,9 +152,7 @@ def _parse_brief_json(raw: str) -> dict:
     out = {
         "headline": str(data.get("headline") or "").strip()[:120],
         "body": str(data.get("body") or "").strip(),
-        "hashtags": [
-            str(h).lstrip("#").strip() for h in (data.get("hashtags") or []) if str(h).strip()
-        ][:8],
+        "hashtags": normalise_hashtags(data.get("hashtags")),
         "platform": (str(data.get("platform") or "Instagram").strip() or "Instagram"),
         "visual_concept": str(data.get("visual_concept") or "").strip(),
         "tone": str(data.get("tone") or "").strip(),
@@ -268,6 +282,17 @@ def next_assistant_turn(
             return json.dumps({"ok": True})
         return json.dumps({"error": f"unknown tool: {name}"})
 
+    # propose_brief sets session.pending_brief as a side effect mid-loop. If a
+    # later round then errors, that half-finished brief must not survive as an
+    # approvable card — snapshot the pre-turn state and roll it back on any
+    # failure so an errored turn only leaves the error message.
+    _brief_before = session.pending_brief
+    _summary_before = getattr(session, "_chat_pending_summary", "")
+
+    def _rollback_brief() -> None:
+        session.pending_brief = _brief_before
+        session._chat_pending_summary = _summary_before  # type: ignore[attr-defined]
+
     try:
         convo = ask_with_tools(
             system=system,
@@ -278,15 +303,23 @@ def next_assistant_turn(
             max_rounds=max_rounds,
         )
     except ProviderNotConfigured as e:
+        _rollback_brief()
         msg = str(e)
         session.add_assistant_message(msg, meta={"error": "no_provider"})
         save_session(session)
         return {"kind": "error", "text": msg}
     except ProviderError as e:
+        _rollback_brief()
         msg = f"LLM provider error: {e}"
         session.add_assistant_message(msg, meta={"error": "provider_error"})
         save_session(session)
         return {"kind": "error", "text": msg}
+    except Exception:
+        # A non-provider exception (e.g. a malformed 200 body) propagates to the
+        # caller's handler, which saves the session — restore first so the
+        # errored turn's brief isn't persisted there either.
+        _rollback_brief()
+        raise
 
     if session.pending_brief is not None:
         summary = (getattr(session, "_chat_pending_summary", "") or "").strip()

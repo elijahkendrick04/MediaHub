@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import importlib
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -299,3 +300,175 @@ def test_card_brand_autofix_honest_error_without_provider(app_client):
     body = r.get_json()
     assert body["available"] is False
     assert body["changed"] is False
+
+
+# ---- audit regressions (brand platform, 2026-07) -----------------------
+
+
+def _make_kit(client, cp, name="Gala", role="event", pid="brandclub"):
+    """Create a kit via the route and return its id."""
+    client.post("/api/brand/kits", data={"name": name, "role": role})
+    from mediahub.brand.kits import list_kits
+
+    return next(k.kit_id for k in list_kits(cp.load_profile(pid)) if k.name == name)
+
+
+def test_resweep_js_carries_csrf_token_and_ok_guard(app_client):
+    """F1/F5: the resweep preview/apply fetches must send the CSRF token (or
+    they 403 in production) and reject on a non-ok status (or an error renders
+    as a benign 'No cards would change')."""
+    client, cp, _ = app_client
+    _seed_profile(cp)
+    _signin(client)
+    html = client.get("/brand").get_data(as_text=True)
+    assert "mh-resweep" in html
+    # the two fetches carry the token via the X-CSRF-Token header
+    assert "X-CSRF-Token" in html
+    assert "'X-CSRF-Token':CSRF" in html
+    # and reject on a non-2xx status instead of parsing an error body as data
+    assert "if(!r.ok)" in html
+
+
+def test_resweep_csrf_enforced_needs_token(app_client):
+    """F1: with CSRF enforced (production posture), a tokenless resweep POST is
+    blocked, but the header the fixed JS now sends passes."""
+    client, cp, _ = app_client
+    _seed_profile(cp)
+    _signin(client)
+    kid = _make_kit(client, cp)
+    client.application.config["ENFORCE_CSRF"] = True
+    client.get("/brand")  # mint the session CSRF token
+    with client.session_transaction() as s:
+        tok = s.get("_csrf")
+    # browser-style fetch WITHOUT the header (the old behaviour) is blocked
+    assert client.post(f"/api/brand/kits/{kid}/resweep/preview").status_code == 403
+    # with the X-CSRF-Token header (what the fixed JS sends) it is accepted
+    r = client.post(f"/api/brand/kits/{kid}/resweep/preview", headers={"X-CSRF-Token": tok})
+    assert r.status_code == 200
+    assert "n_affected" in r.get_json()
+
+
+def _primary_edit_form(html):
+    m = re.search(r'<form[^>]*action="[^"]*/api/brand/kits/primary"[^>]*>(.*?)</form>', html, re.S)
+    assert m, "primary kit edit form not found"
+    return m.group(0)
+
+
+def test_edit_form_unset_slots_disabled_and_noop_save_preserves_palette(app_client):
+    """F2: an unset colour slot must render its picker disabled (so the browser
+    won't submit the on-brand fallback) and a no-op save must round-trip the
+    palette unchanged — never fabricate an accent/fourth the club never chose."""
+    client, cp, _ = app_client
+    _seed_profile(cp)  # primary + secondary only
+    _signin(client)
+    from mediahub.brand.kits import list_kits, primary_kit
+
+    before = primary_kit(cp.load_profile("brandclub")).palette
+    assert set(before) == {"primary", "secondary"}
+    form = _primary_edit_form(client.get("/brand").get_data(as_text=True))
+    # simulate the browser: submit each colour input only when NOT disabled
+    submitted = {}
+    for im in re.finditer(
+        r'<input type="color" name="(primary|secondary|accent|fourth)" '
+        r'value="(#[0-9a-fA-F]{6})"([^>]*)>',
+        form,
+    ):
+        slot, val, rest = im.group(1), im.group(2), im.group(3)
+        if "disabled" not in rest:
+            submitted[slot] = val
+    # the two unset slots (accent/fourth) are disabled -> not submitted
+    assert set(submitted) == {"primary", "secondary"}
+    client.post("/api/brand/kits/primary", data={"name": "Primary brand", **submitted})
+    after = next(k for k in list_kits(cp.load_profile("brandclub")) if k.role == "primary").palette
+    assert after == before  # no fabricated accent/fourth
+
+
+def test_edit_form_can_still_set_a_new_colour(app_client):
+    """F2 guard: the fix must not stop a user from setting a slot explicitly."""
+    client, cp, _ = app_client
+    _seed_profile(cp)
+    _signin(client)
+    from mediahub.brand.kits import list_kits
+
+    client.post(
+        "/api/brand/kits/primary",
+        data={"name": "Primary brand", "primary": "#0e2a47", "accent": "#abcdef"},
+    )
+    kit = next(k for k in list_kits(cp.load_profile("brandclub")) if k.role == "primary")
+    assert kit.palette.get("accent") == "#abcdef"
+
+
+def _bind(cp, pid, owner_email="owner@x.com"):
+    from mediahub.web import tenancy as tn
+
+    tn.MembershipStore().add(owner_email, pid, role=tn.ROLE_OWNER, status=tn.STATUS_ACTIVE)
+
+
+def test_brand_home_read_only_for_non_owner_member(app_client):
+    """F3: a bound-org member who is not an owner sees a read-only /brand — no
+    create/edit/import/resweep controls that would dead-end in a 404 — while
+    still viewing the kits."""
+    client, cp, _ = app_client
+    _seed_profile(cp, pid="orgb")
+    _bind(cp, "orgb")
+    from mediahub.web import tenancy as tn
+
+    tn.MembershipStore().add("viewer@x.com", "orgb", role=tn.ROLE_VIEWER, status=tn.STATUS_ACTIVE)
+    with client.session_transaction() as s:
+        s["active_profile_id"] = "orgb"
+        s["user_email"] = "viewer@x.com"
+    html = client.get("/brand").get_data(as_text=True)
+    assert "Brand kits" in html  # read-only content still shown
+    for control in ("+ New kit", "Edit kit", "Import palette file", "Preview re-render impact"):
+        assert control not in html, control
+    # and the mutating route refuses the non-admin
+    assert client.post("/api/brand/kits", data={"name": "X", "role": "sponsor"}).status_code == 404
+
+
+def test_brand_home_shows_controls_for_owner(app_client):
+    """F3 guard: an owner of a bound org still sees the full admin surface."""
+    client, cp, _ = app_client
+    _seed_profile(cp, pid="orgc")
+    _bind(cp, "orgc", owner_email="boss@x.com")
+    with client.session_transaction() as s:
+        s["active_profile_id"] = "orgc"
+        s["user_email"] = "boss@x.com"
+    html = client.get("/brand").get_data(as_text=True)
+    assert "+ New kit" in html
+    assert "Preview re-render impact" in html
+
+
+def test_brand_check_overlong_run_id_is_404_not_500(app_client):
+    """F4: a run_id longer than the OS filename limit must not 500 (uncaught
+    OSError leaking the internal path) — it answers like a missing run."""
+    client, cp, _ = app_client
+    _seed_profile(cp)
+    _signin(client)
+    long_id = "a" * 3000
+    r = client.get(f"/api/runs/{long_id}/card/c1/brand-check")
+    assert r.status_code == 404
+    assert r.get_json()["error"] == "run_not_found"
+
+
+def test_create_kit_cannot_mint_second_primary(app_client):
+    """F6: a hand-crafted create with role=primary (or an invalid role) must not
+    become a second, undeletable primary kit."""
+    client, cp, _ = app_client
+    _seed_profile(cp)
+    _signin(client)
+    from mediahub.brand.kits import list_kits
+
+    for bad_role in ("primary", "wizard"):
+        client.post(
+            "/api/brand/kits",
+            data={"name": f"Kit {bad_role}", "role": bad_role, "primary": "#abcdef"},
+        )
+    kits = list_kits(cp.load_profile("brandclub"))
+    assert len([k for k in kits if k.role == "primary"]) == 1
+    # the created kits are deletable (not primary)
+    from mediahub.brand.kits import delete_kit
+
+    prof = cp.load_profile("brandclub")
+    for k in list_kits(prof):
+        if k.name.startswith("Kit "):
+            assert k.role != "primary"

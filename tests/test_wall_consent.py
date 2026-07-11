@@ -2,9 +2,11 @@
 
 A blocked athlete (do_not_feature, or no consent on file under an active
 regime) must be unreachable through every public wall exit: wall text,
-JSON/RSS feeds, and the card PNG route. An ``initials_only`` athlete is
-initialled even when the blanket toggle is off; consent can only tighten
-the wall, never loosen it.
+JSON/RSS feeds, and the card PNG route. An athlete whose consent forbids a
+photo (``no_photo`` / ``initials_only``) is held off the wall entirely,
+because the wall only serves the pre-rendered, photo-forward card graphic and
+has no photo-less variant to substitute; consent can only tighten the wall,
+never loosen it.
 """
 
 from __future__ import annotations
@@ -154,9 +156,18 @@ def test_unknown_athlete_blocked_under_active_regime(consent_wall):
     assert "no consent on file" in hidden[0]["reason"]
 
 
-def test_initials_only_level_binds_even_with_toggle_off(consent_wall):
+def test_photo_forbidding_consent_holds_card_off_the_wall(consent_wall):
+    """``initials_only`` (and ``no_photo``) set ``photo_ok=False``. The wall only
+    holds the pre-rendered, photo-forward card graphic, so such an athlete is
+    held off the wall ENTIRELY — page, feeds and the card-image route — and
+    recorded in ``consent_hidden``, exactly like a blocked athlete. This closes
+    the gap where consent tightened to initials-only/no-photo AFTER a card was
+    rendered at ``full`` would still leak the athlete's photo/full-name graphic
+    on the public wall image. A full-consent athlete is unaffected even with the
+    blanket initials toggle off.
+    """
     from mediahub.web.club_profile import load_profile, save_profile
-    from mediahub.web.public_wall import wall_cards
+    from mediahub.web.public_wall import wall_cards, wall_image_path
 
     prof = load_profile("org-a")
     prof.public_wall_initials_only = False
@@ -165,11 +176,41 @@ def test_initials_only_level_binds_even_with_toggle_off(consent_wall):
     _set_consent("org-a", "Alice Smith", "initials_only")
     _set_consent("org-a", "Bob Jones", "full")
 
-    cards = {c["card_id"]: c for c in wall_cards(load_profile("org-a"))}
-    assert "Alice" not in cards["swim-1"]["title"]
-    assert "A.S." in cards["swim-1"]["title"]
-    # Bob consented to full naming and the blanket toggle is off.
+    hidden: list = []
+    cards = {c["card_id"]: c for c in wall_cards(load_profile("org-a"), consent_hidden=hidden)}
+    # Alice (initials_only → no photo) is held off; Bob (full) stays, full-named
+    # because the blanket toggle is off.
+    assert "swim-1" not in cards
     assert "Bob Jones" in cards["swim-2"]["title"]
+    assert any(h["card_id"] == "swim-1" and h["level"] == "initials_only" for h in hidden)
+
+    # The image route withholds the photo-forward graphic for Alice, serves Bob's.
+    assert wall_image_path(load_profile("org-a"), "run-a-1", "swim-1") is None
+    assert wall_image_path(load_profile("org-a"), "run-a-1", "swim-2") is not None
+
+    c = consent_wall["app"].test_client()
+    assert c.get("/wall/token-org-a-secret/card/run-a-1/swim-1.png").status_code == 404
+    assert c.get("/wall/token-org-a-secret/card/run-a-1/swim-2.png").status_code == 200
+    html = c.get("/wall/token-org-a-secret").get_data(as_text=True)
+    # Held off entirely — not even initials appear.
+    assert "A.S." not in html and "Alice" not in html
+
+
+def test_no_photo_consent_also_held_off_wall(consent_wall):
+    """``no_photo`` (full name OK, but never a photo) is also held off the wall:
+    the served graphic is photo-forward and cannot be verified photo-less."""
+    from mediahub.web.club_profile import load_profile
+    from mediahub.web.public_wall import wall_cards, wall_image_path
+
+    _set_consent("org-a", "Alice Smith", "no_photo")
+    _set_consent("org-a", "Bob Jones", "full")
+
+    cards = {c["card_id"] for c in wall_cards(load_profile("org-a"))}
+    assert cards == {"swim-2"}
+    assert wall_image_path(load_profile("org-a"), "run-a-1", "swim-1") is None
+
+    c = consent_wall["app"].test_client()
+    assert c.get("/wall/token-org-a-secret/card/run-a-1/swim-1.png").status_code == 404
 
 
 def test_full_consent_cannot_loosen_blanket_toggle(consent_wall):

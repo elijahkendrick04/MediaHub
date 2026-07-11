@@ -62,14 +62,38 @@ def _chart_png(block: Block, brand_kit: Any, role_vars: Optional[dict]) -> Optio
 
 
 def _img_path(block: Block) -> Optional[Path]:
+    """Resolve a block image src to a real file to embed — locked to DATA_DIR.
+
+    Specs are tenant-editable (the advanced JSON editor), so this mirrors the
+    render path's ``documents.render._img_src`` guard: only a file that resolves
+    *inside* the app's own ``DATA_DIR`` is embedded. An absolute path to an
+    arbitrary server file — or another tenant's assets under ``DATA_DIR/<other>``
+    — must never be baked into an exported DOCX/PPTX (cross-tenant read / local
+    file disclosure). Remote URLs and ``data:`` URIs aren't embeddable via
+    python-docx/pptx here (bounded fidelity), so they're skipped, never fetched."""
+    import os
+
     src = str((block.props or {}).get("src", "")).strip()
     if not src:
         return None
+    low = src.lower()
+    if low.startswith(("http://", "https://", "data:")):
+        return None
+    if low.startswith("file:"):
+        from urllib.parse import unquote, urlparse
+
+        try:
+            src = unquote(urlparse(src).path)
+        except (OSError, ValueError):
+            return None
     try:
-        p = Path(src)
-        return p if p.exists() else None
+        rp = Path(src).resolve()
+        root = Path(os.environ.get("DATA_DIR", ".")).resolve()
+        if rp.is_file() and rp.is_relative_to(root):
+            return rp
     except (OSError, ValueError):
         return None
+    return None
 
 
 # ---------------------------------------------------------------------------
