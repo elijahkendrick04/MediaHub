@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-07-11 · `80718f478` · [developer-settings] report: record fourth-pass merge status + SHAs
+**Last updated:** 2026-07-11 · `f78026632` · [team-members] Fix logged caveats (#1156)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1226,6 +1226,8 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-07-11 | `06d40c8b4` | fix(inventory): don't count HTML numeric entities (&#NNNNN;) as hex colours |
+| 2026-07-11 | `6eb7eeeb6` | [team-members] fix logged caveats: atomic last-owner guard, snapshot reads, sole-owner controls, cop |
 | 2026-07-11 | `80718f478` | [developer-settings] report: record fourth-pass merge status + SHAs |
 | 2026-07-11 | `54b9db347` | [developer-settings] drop dead #FFB454 hex fallback to restore theme-token budget |
 | 2026-07-11 | `d94720c22` | [developer-settings] audit report: record F-4 fix (third pass) |
@@ -1234,7 +1236,4 @@ list and the auto table below, not here.
 | 2026-07-11 | `b116544ac` | [org-access] audit report: current behaviour, verification matrix, findings, verdict |
 | 2026-07-11 | `5b616e225` | [org-access] confine signed-in accounts to member orgs; land members on their club; real sign-out |
 | 2026-07-11 | `868292c97` | [org-access] fix cross-tenant IDOR on /api/visual/<vid>(/png) endpoints |
-| 2026-07-11 | `c9ea9f3c6` | [elements] add a per-card "Elements" entry point in the builder toolbar |
-| 2026-07-11 | `562809d2f` | Sync main + scrub microsite refs from new audit doc |
-| 2026-07-11 | `f4af5a5de` | [team-members] record final green-gate result + CI status in audit report |
 <!-- /ROADMAP:ACTIVITY -->
