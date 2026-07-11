@@ -25116,7 +25116,12 @@ function applyFilters() {{
     if (match && wfOk) shown++;
   }});
   var countEl = document.getElementById('f-count');
-  if (countEl) countEl.textContent = shown + ' of ' + inTab + ' shown';
+  if (countEl) {{
+    // JS-1: on a paginated run these numbers are page-scoped while the tab
+    // badges are run-wide — say so, so "3 of 3 shown" can't read as the meet.
+    var pageScoped = !!document.querySelector('.mh-review-pager');
+    countEl.textContent = shown + ' of ' + inTab + ' shown' + (pageScoped ? ' on this page' : '');
+  }}
 }}
 function clearFilters() {{
   ['f-type','f-conf','f-swimmer','f-event','f-band','f-post'].forEach(function(id) {{
@@ -25150,7 +25155,17 @@ applyFilters();
       if (show) {{
         var t = document.getElementById('mh-wf-empty-title');
         var b = document.getElementById('mh-wf-empty-body');
-        if (wf === 'approved') {{
+        // JS-1: the DOM only holds this page's rows (J-3 pagination) while
+        // the tab badges are painted from run-wide counts (baseline + live
+        // delta). When the run still has cards in this tab, the truth is
+        // "not on this page" — "Queue clear" is reserved for a run-wide 0.
+        var badge = document.getElementById('mh-wf-tabcount-' + (wf || 'all'));
+        var runWide = badge ? (parseInt(badge.textContent, 10) || 0) : 0;
+        if (runWide > 0) {{
+          var noun = wf === 'approved' ? 'approved' : (wf === 'rejected' ? 'rejected' : 'queued');
+          if (t) t.textContent = 'None on this page';
+          if (b) b.textContent = 'The ' + noun + ' cards for this meet live on other pages \\u2014 use the pager above.';
+        }} else if (wf === 'approved') {{
           if (t) t.textContent = 'Nothing approved yet';
           if (b) b.textContent = 'Approve cards from the Queue and they move here.';
         }} else if (wf === 'rejected') {{
@@ -25175,7 +25190,12 @@ applyFilters();
     var val = tab.getAttribute('data-wf-filter-to') || '';
     list.setAttribute('data-wf-filter', val);
     try {{
-      history.replaceState(null, '', location.pathname + (val ? ('?wf=' + encodeURIComponent(val)) : ''));
+      // JS-1: keep ?page=N (J-3 pagination) when rewriting ?wf= — dropping
+      // it made a mid-run reload silently jump back to page 1.
+      var qs = new URLSearchParams(location.search);
+      if (val) qs.set('wf', val); else qs.delete('wf');
+      var q = qs.toString();
+      history.replaceState(null, '', location.pathname + (q ? ('?' + q) : ''));
     }} catch (e) {{}}
     window.mhWfTabsSync();
   }});
@@ -25373,6 +25393,17 @@ function copyWhyCard(btn, taId) {{
           return c ? c.value : '';
         }}).filter(Boolean);
       }}
+      // JS-2: the embedded list is a render-time snapshot — reconcile it with
+      // decisions made on this page since (per-card straps, bulk bar). Each
+      // row's live data-status is the source of truth, so approve-then-requeue
+      // is handled too; off-page ids can't change without a reload, so the
+      // snapshot stays truthful for them.
+      var decidedNow = {{}};
+      Array.prototype.slice.call(document.querySelectorAll('.ach-row[data-status]')).forEach(function(row){{
+        var chk = row.querySelector('.mh-row-check');
+        if (chk && chk.value && row.dataset.status !== 'queue') decidedNow[chk.value] = 1;
+      }});
+      ids = ids.filter(function(id){{ return !decidedNow[id]; }});
       if (!ids.length) {{
         if (window.MH) MH.toast('No cards in the queue to approve.', 'info');
         return;

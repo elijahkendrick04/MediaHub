@@ -131,7 +131,10 @@ class TestSmallRunUnchanged:
         pid = _save_org(world)
         _seed_run(world, "j3small001", profile_id=pid, n_cards=25)
         html = _review(world, "j3small001", pid)
-        assert "mh-review-pager" not in html
+        # No pager ELEMENT renders (the page JS always ships a
+        # '.mh-review-pager' selector so f-count can detect page scope, so
+        # match the <nav>, not the bare class name).
+        assert _pagers(html) == []
         for i in (0, 12, 24):
             assert f"Swimmer {i:03d}" in html
 
@@ -289,3 +292,44 @@ class TestApproveAllFullQueue:
         ids = json.loads(m.group(1))
         assert len(ids) == 58
         assert "sw010" not in ids and "sw040" not in ids
+
+    def test_approve_all_reconciles_in_page_decisions(self):
+        """JS-2 (source-level): the embedded queued-id list is a render-time
+        snapshot — cards approved/rejected on this page since render must be
+        subtracted before the confirm message and the POST, or the button
+        over-counts. Each row's live data-status is the source of truth."""
+        assert "var decidedNow = {{}};" in _WEB_SRC
+        assert "if (chk && chk.value && row.dataset.status !== 'queue') decidedNow[chk.value] = 1;" in _WEB_SRC
+        assert "ids = ids.filter(function(id){{ return !decidedNow[id]; }});" in _WEB_SRC
+        # The reconciliation happens BEFORE the "nothing to approve" guard and
+        # the confirm-message maths.
+        assert _WEB_SRC.index("decidedNow[chk.value] = 1") < _WEB_SRC.index(
+            "No cards in the queue to approve."
+        )
+
+
+# --------------------------------------------------------------------------- #
+# 6. Client JS stays honest about page scope (JS-1)
+# --------------------------------------------------------------------------- #
+class TestPaginatedClientHonesty:
+    def test_tab_empty_state_consults_the_run_wide_count(self):
+        """With only this page's rows in the DOM, a tab whose rows are all on
+        other pages must say "None on this page" (the run-wide badge is
+        non-zero) — "Queue clear" is reserved for a run-wide count of 0."""
+        assert "mh-wf-tabcount-' + (wf || 'all')" in _WEB_SRC
+        assert "None on this page" in _WEB_SRC
+        assert "live on other pages" in _WEB_SRC
+        # The celebratory copy survives, but only behind the run-wide guard.
+        assert "Queue clear" in _WEB_SRC
+        assert _WEB_SRC.index("runWide > 0") < _WEB_SRC.index("t.textContent = 'Queue clear'")
+
+    def test_f_count_says_on_this_page_when_paginated(self):
+        assert "var pageScoped = !!document.querySelector('.mh-review-pager');" in _WEB_SRC
+        assert "(pageScoped ? ' on this page' : '')" in _WEB_SRC
+
+    def test_tab_click_preserves_the_page_param(self):
+        """Rewriting ?wf= must not drop ?page=N — a reload jumped to page 1."""
+        assert "var qs = new URLSearchParams(location.search);" in _WEB_SRC
+        assert "qs.set('wf', val)" in _WEB_SRC
+        # The old pathname-only rewrite (which dropped every other param) is gone.
+        assert "location.pathname + (val ? ('?wf='" not in _WEB_SRC
