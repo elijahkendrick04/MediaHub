@@ -14828,8 +14828,9 @@ def _layout(
        account menu (the dropdown on the far right) for signed-in users. Signed-
        out visitors keep a plain Settings + Pricing link here. Pricing is a
        top-bar item only for signed-out visitors (prospects) — once signed into
-       a club profile it lives in Settings ("Pricing & plans") so the signed-in
-       chrome stays operations-focused, not sales-focused. #}
+       a club profile it is linked from Settings → Billing & plan ("See plans
+       & pricing") so the signed-in chrome stays operations-focused, not
+       sales-focused. #}
     {% if not signed_in %}
     <a href="{{ url_for('settings_page') }}" class="{{ 'active' if active=='settings' else '' }}">{{ t('nav.settings') }}</a>
     <a href="{{ url_for('pricing_page') }}" class="{{ 'active' if active=='pricing' else '' }}">{{ t('nav.pricing') }}</a>
@@ -30722,7 +30723,6 @@ self.addEventListener('fetch', function(e){
         "clubdata": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="28" height="28"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/></svg>',
         "privacy": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="28" height="28"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>',
         "billing": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="28" height="28"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>',
-        "pricing": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="28" height="28"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>',
         "sponsors": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="28" height="28"><polygon points="12 2 15 8.5 22 9.3 17 14 18.2 21 12 17.7 5.8 21 7 14 2 9.3 9 8.5"/></svg>',
         "account": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="28" height="28"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>',
         "status": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="28" height="28"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>',
@@ -30731,27 +30731,64 @@ self.addEventListener('fetch', function(e){
         "brand": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="28" height="28"><circle cx="13.5" cy="6.5" r="2.5"/><circle cx="8" cy="12" r="2.5"/><circle cx="13.5" cy="17.5" r="2.5"/><path d="M16 7.5 19 9M16 16.5 19 15M9.5 10.5 12 8M9.5 13.5 12 16"/></svg>',
     }
 
-    def _settings_card_specs(is_dev: bool, signed_in: bool) -> list[tuple[str, str, str, str]]:
-        """(title, description, icon_key, href) for the settings tiles.
+    def _settings_card_specs(is_dev: bool) -> list[tuple[str, str, str, str, str]]:
+        """(title, description, icon_key, href, group) for the settings tiles.
 
-        12 cards for everyone, a 13th (Developer) only when an operator is
-        signed in. A "Pricing & plans" tile is added when signed into a club
-        profile, because Pricing leaves the top bar for signed-in users and
-        lives here instead (grouped with Billing & plan).
+        C-19: ``group`` places each tile in one of four headed clusters —
+        ``club`` (Your club), ``content`` (Content & brand), ``account``
+        (Account & billing), ``system`` (System) — rendered in that order,
+        plus ``soon`` for the two "Coming soon" placeholders, which collapse
+        into a muted compact strip at the very bottom. A Developer tile joins
+        the System cluster only when an operator is signed in.
+
+        Pricing has no tile of its own: for signed-in users the pricing page
+        is linked from inside Billing & plan ("See plans & pricing"), and
+        signed-out visitors keep the top-bar Pricing item.
         """
-        cards: list[tuple[str, str, str, str]] = [
+        cards: list[tuple[str, str, str, str, str]] = [
+            # --- Your club — the organisation itself and its data ---
             (
                 "Organisation & brand",
-                "Logos, palette, tone and the brand the engine applies to every card.",
+                "Your club's identity — name, colours, logos and voice, applied to every card.",
                 "org",
                 url_for("organisation_setup"),
+                "club",
             ),
             (
+                "Team members",
+                "Invite teammates and manage who can see and approve content.",
+                "members",
+                url_for("organisation_members_page"),
+                "club",
+            ),
+            (
+                "Sponsors",
+                "Manage sponsors and the sponsor-safe content they appear in.",
+                "sponsors",
+                url_for("sponsors_page"),
+                "club",
+            ),
+            (
+                "Club data",
+                "Club records and asking questions of your own processed results.",
+                "clubdata",
+                url_for("settings_section", section="clubdata"),
+                "club",
+            ),
+            (
+                "Activity",
+                "Every run for this organisation — status, matches, and one-click delete.",
+                "activity",
+                url_for("settings_section", section="activity"),
+                "club",
+            ),
+            # --- Content & brand — how the output looks and sounds ---
+            (
                 "Brand platform",
-                "Multiple kits (sponsor / event / team co-brands), token locks, "
-                "brand check and palette import — one home for your identity.",
+                "Brand kits & governance — alternate liveries, token locks and approvers.",
                 "brand",
                 url_for("brand_home_page"),
+                "content",
             ),
             (
                 "Templates",
@@ -30759,6 +30796,7 @@ self.addEventListener('fetch', function(e){
                 "picks the right one per moment.",
                 "templates",
                 url_for("template_gallery"),
+                "content",
             ),
             (
                 "Typography & fonts",
@@ -30766,6 +30804,7 @@ self.addEventListener('fetch', function(e){
                 "club's own brand typeface.",
                 "typography",
                 url_for("settings_section", section="typography"),
+                "content",
             ),
             (
                 "Audio & voiceover",
@@ -30773,81 +30812,24 @@ self.addEventListener('fetch', function(e){
                 "your own audio, and consent settings.",
                 "audio",
                 url_for("settings_section", section="audio"),
+                "content",
             ),
+            # --- Account & billing ---
             (
-                "Team members",
-                "Invite teammates and manage who can see and approve content.",
-                "members",
-                url_for("organisation_members_page"),
-            ),
-            (
-                "Activity",
-                "Every run for this organisation — status, matches, and one-click delete.",
-                "activity",
-                url_for("settings_section", section="activity"),
-            ),
-            (
-                "Auto scheduling",
-                "Queueing approved cards straight onto your social channels — coming soon.",
-                "schedule",
-                url_for("settings_section", section="scheduling"),
-            ),
-            (
-                "Autonomy",
-                "Per-content-type publishing levels — what may post without a human — coming soon.",
-                "autonomy",
-                url_for("settings_section", section="autonomy"),
-            ),
-            (
-                "Club data",
-                "Club records and asking questions of your own processed results.",
-                "clubdata",
-                url_for("settings_section", section="clubdata"),
-            ),
-            (
-                "Privacy & data",
-                "What this system stores, athletes & consent, cache clearing, and run deletion.",
-                "privacy",
-                url_for("settings_section", section="privacy"),
+                "Account",
+                "Two-factor security, data export, and account deletion.",
+                "account",
+                url_for("settings_section", section="account"),
+                "account",
             ),
             (
                 "Billing & plan",
                 "Your plan, invoices and upgrades.",
                 "billing",
                 url_for("billing_page"),
-            ),
-        ]
-        # Pricing leaves the top bar once signed into a club profile — surface
-        # it here, right after Billing & plan, so signed-in users keep a
-        # one-click route to compare plans. Signed-out visitors use the top nav.
-        if signed_in:
-            cards.append(
-                (
-                    "Pricing & plans",
-                    "Compare plans and what each tier unlocks.",
-                    "pricing",
-                    url_for("pricing_page"),
-                )
-            )
-        cards += [
-            (
-                "Sponsors",
-                "Manage sponsors and the sponsor-safe content they appear in.",
-                "sponsors",
-                url_for("sponsors_page"),
-            ),
-            (
-                "AI governance",
-                "AI usage and quota headroom, who can use which AI feature, and provenance.",
-                "privacy",
-                url_for("settings_section", section="governance"),
-            ),
-            (
-                "Account",
-                "Two-factor security, data export, and account deletion.",
                 "account",
-                url_for("settings_section", section="account"),
             ),
+            # --- System ---
             (
                 # Point at the org-gate-exempt public /status, not the gated
                 # /settings/status members surface, so this "is the site up?"
@@ -30861,6 +30843,36 @@ self.addEventListener('fetch', function(e){
                 # G-2: straight to the canonical /status page — the settings
                 # sub-page was a byte-identical mirror of it.
                 url_for("status_page"),
+                "system",
+            ),
+            (
+                "AI governance",
+                "AI usage and quota headroom, who can use which AI feature, and provenance.",
+                "privacy",
+                url_for("settings_section", section="governance"),
+                "system",
+            ),
+            (
+                "Privacy & data",
+                "What this system stores, athletes & consent, cache clearing, and run deletion.",
+                "privacy",
+                url_for("settings_section", section="privacy"),
+                "system",
+            ),
+            # --- Coming soon — muted strip at the very bottom (J-10 badges kept) ---
+            (
+                "Auto scheduling",
+                "Queueing approved cards straight onto your social channels.",
+                "schedule",
+                url_for("settings_section", section="scheduling"),
+                "soon",
+            ),
+            (
+                "Autonomy",
+                "Per-content-type publishing levels — what may post without a human.",
+                "autonomy",
+                url_for("settings_section", section="autonomy"),
+                "soon",
             ),
         ]
         if is_dev:
@@ -30870,46 +30882,67 @@ self.addEventListener('fetch', function(e){
                     "Deployment health, operator dashboards, and uptime detail.",
                     "dev",
                     url_for("settings_section", section="developer"),
+                    "system",
                 )
             )
         return cards
 
     def _render_settings_page() -> str:
-        """Render the Settings landing — a grid of heading cards."""
+        """Render the Settings landing — four headed clusters of heading cards
+        (C-19), with the two "Coming soon" placeholders collapsed into a muted
+        compact strip at the very bottom (J-10 badges kept)."""
         is_dev = _auth.is_dev_operator()
-        signed_in = bool(_active_profile_id())
-        # J-10: these two tiles lead only to a "Coming soon" placeholder — badge
-        # them and mute the CTA so the state reads before the click, instead of
-        # the same "Open →" weight as a working feature.
-        soon_sections = {
-            url_for("settings_section", section="scheduling"),
-            url_for("settings_section", section="autonomy"),
-        }
-        tiles = ""
-        for title, desc, icon_key, href in _settings_card_specs(is_dev, signed_in):
+        grouped: dict[str, str] = {}
+        for title, desc, icon_key, href, group in _settings_card_specs(is_dev):
             icon = _SETTINGS_ICONS.get(icon_key, "")
-            soon = href in soon_sections
+            soon = group == "soon"
+            # J-10: the two placeholder tiles carry a visible badge (and, in
+            # the strip, no "Open" CTA) so the state reads before the click.
             badge = '<span class="mh-template-soon-badge">Coming soon</span>' if soon else ""
-            cta = "Coming soon" if soon else "Open"
-            tiles += (
+            cta = "" if soon else '<span class="mh-template-cta">Open</span>'
+            grouped[group] = grouped.get(group, "") + (
                 f'<a href="{href}" class="mh-template mh-glow-border{" mh-template-soon" if soon else ""}">'
                 f'<div class="mh-template-icon">{icon}</div>'
                 '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:var(--sp-1)">'
-                f'<h2 style="margin:0">{_h(title)}</h2>'
+                f'<h3 style="margin:0">{_h(title)}</h3>'
                 f"{badge}"
                 "</div>"
                 f"<p>{_h(desc)}</p>"
-                f'<span class="mh-template-cta">{cta}</span>'
+                f"{cta}"
                 "</a>"
+            )
+        sections = ""
+        for key, heading in (
+            ("club", "Your club"),
+            ("content", "Content & brand"),
+            ("account", "Account & billing"),
+            ("system", "System"),
+        ):
+            tiles = grouped.pop(key, "")
+            if not tiles:
+                continue
+            sections += (
+                f'<section class="mh-settings-cluster" aria-labelledby="mh-settings-{key}">'
+                f'<h2 class="mh-settings-cluster-head" id="mh-settings-{key}">{_h(heading)}</h2>'
+                f'<div class="mh-template-grid mh-reveal-group">{tiles}</div>'
+                "</section>"
+            )
+        soon_tiles = grouped.pop("soon", "")
+        if soon_tiles:
+            sections += (
+                '<section class="mh-settings-cluster" aria-labelledby="mh-settings-soon">'
+                '<h2 class="mh-settings-cluster-head" id="mh-settings-soon">Coming soon</h2>'
+                f'<div class="mh-settings-soon-strip">{soon_tiles}</div>'
+                "</section>"
             )
         body = (
             '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-5);margin-bottom:var(--sp-5)">'
             '<span class="mh-hero-eyebrow">Settings</span>'
-            '<h1>Operations &amp; <em class="editorial">data</em></h1>'
-            '<p class="lede">Pick a heading to manage it. Each card opens its own '
-            "page so nothing is buried in one long scroll.</p>"
+            "<h1>Settings</h1>"
+            '<p class="lede">Your club, content, account and system controls '
+            "&mdash; grouped so each one is easy to find.</p>"
             "</section>"
-            f'<div class="mh-template-grid mh-reveal-group">{tiles}</div>'
+            f"{sections}"
         )
         # C-16 — a deliberate interface-language control (distinct from the org's
         # caption-output language), shown only when more than English ships.
@@ -42513,7 +42546,10 @@ what you're doing, what they should do.</p>
                 "You&rsquo;re on the Free plan with full access to the core "
                 "features. There&rsquo;s nothing to manage here on this deployment."
                 "</p>"
+                '<div style="display:flex;gap:10px;flex-wrap:wrap">'
                 f'<a class="btn secondary" href="{url_for("home")}">Back to home</a>'
+                f'<a class="btn secondary" href="{url_for("pricing_page")}">See plans &amp; pricing &rarr;</a>'
+                "</div>"
                 "</div>"
             )
             return _layout("Billing", body, active="signin")
@@ -42533,16 +42569,21 @@ what you're doing, what they should do.</p>
                 "<strong>Invoices &amp; receipts:</strong> every payment's invoice "
                 "is in the portal too — download the PDF for the club's expense "
                 "records.</div>"
+                '<div class="dim" style="font-size:12px;margin-top:6px">'
+                f'<a href="{url_for("pricing_page")}">See plans &amp; pricing &rarr;</a> '
+                "&mdash; compare tiers before switching.</div>"
             )
         elif _auth.is_premium(user.plan):
             manage_html = (
                 '<div class="dim" style="font-size:13px">'
                 "Your plan is active. A management link will appear here once "
                 "your first payment is processed.</div>"
+                '<div class="dim" style="font-size:12px;margin-top:6px">'
+                f'<a href="{url_for("pricing_page")}">See plans &amp; pricing &rarr;</a></div>'
             )
         else:
             manage_html = (
-                f'<a class="btn" href="{url_for("pricing_page")}">See plans &rarr;</a>'
+                f'<a class="btn" href="{url_for("pricing_page")}">See plans &amp; pricing &rarr;</a>'
                 '<div class="dim" style="font-size:12px;margin-top:10px">'
                 "Upgrade to unlock unlimited runs and more brand profiles.</div>"
             )
