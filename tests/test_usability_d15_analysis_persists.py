@@ -232,6 +232,57 @@ def test_discard_restores_previous_brand_values(env, monkeypatch):
     assert prof.brand_palette_extracted == {}
 
 
+def test_discard_with_mismatched_kind_noops_honestly(env, monkeypatch):
+    """CON2-2 (D-15 follow-up) — with two tabs open, a newer analysis of the
+    OTHER kind owns the stash; a stale Discard button (posting its own kind)
+    must not restore that snapshot, and must not consume it either."""
+    app, cp = env
+    import mediahub.brand.voice_imitation as vi
+
+    monkeypatch.setattr(
+        vi, "analyse_examples", lambda examples, **kw: {"sentence_length_avg": 9.0}
+    )
+    with app.test_client() as c:
+        _analyse_post(c)  # the stash now belongs to kind == "voice"
+        r = c.post("/organisation/analysis/discard", data={"kind": "brand"})
+        assert r.status_code == 302
+        with c.session_transaction() as s:
+            assert "superseded" in (s.get("mh_toast") or {}).get("msg", "")
+        # Nothing restored…
+        assert cp.load_profile("otters").voice_profile == {"sentence_length_avg": 9.0}
+        # …and the stash still answers to the button it belongs to.
+        r2 = c.post("/organisation/analysis/discard", data={"kind": "voice"})
+        assert r2.status_code == 302
+        assert cp.load_profile("otters").voice_profile == _OLD_VOICE_PROFILE
+
+
+def test_discard_buttons_post_their_own_kind(env, monkeypatch):
+    """Each rendered Discard button names the analysis it belongs to."""
+    app, _cp = env
+    import mediahub.brand.social_dna as sd
+    import mediahub.brand.voice_imitation as vi
+
+    monkeypatch.setattr(
+        vi, "analyse_examples", lambda examples, **kw: {"sentence_length_avg": 9.0}
+    )
+    with app.test_client() as c:
+        html = _analyse_post(c).get_data(as_text=True)
+        assert 'name="kind" value="voice"' in html
+
+    monkeypatch.setattr(sd, "capture_from_socials", lambda **kw: dict(_SOCIALS_RESULT))
+    with app.test_client() as c:
+        html = c.post(
+            "/organisation",
+            data={
+                "action": "capture_socials",
+                "profile_id": "otters",
+                "display_name": "Otters SC",
+                "brand_source_url": "https://otters.example",
+            },
+        ).get_data(as_text=True)
+        assert 'name="kind" value="brand"' in html
+
+
 # ---------------------------------------------------------------------------
 # The in-memory-only plumbing is gone
 # ---------------------------------------------------------------------------

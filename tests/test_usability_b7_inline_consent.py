@@ -167,3 +167,93 @@ def test_form_post_fallback_still_works(client):
     from mediahub.safeguarding import list_consent
 
     assert list_consent(ORG)[maya.athlete_id]["level"] == "full"
+
+
+# ------------------------------------------------------- CON2-4 (follow-up)
+
+
+def test_set_consent_many_is_all_or_nothing(tmp_path, monkeypatch):
+    """CON2-4 — one connection, one transaction: a failure on the Nth upsert
+    rolls back every earlier row and re-raises; a clean run lands everything
+    and returns the count."""
+    import sqlite3
+
+    import mediahub.safeguarding.consent as consent
+
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    db = tmp_path / "consent.db"
+    consent.set_consent("org", "a1", "full", db_path=db)
+
+    calls = {"n": 0}
+    real_now = consent._now
+
+    def _flaky_now():
+        calls["n"] += 1
+        if calls["n"] >= 2:
+            raise sqlite3.OperationalError("disk I/O error")
+        return real_now()
+
+    monkeypatch.setattr(consent, "_now", _flaky_now)
+    with pytest.raises(sqlite3.OperationalError):
+        consent.set_consent_many("org", ["a1", "a2", "a3"], "no_photo", db_path=db)
+    monkeypatch.setattr(consent, "_now", real_now)
+
+    rows = consent.list_consent("org", db_path=db)
+    assert rows["a1"]["level"] == "full"  # the already-executed upsert rolled back
+    assert "a2" not in rows and "a3" not in rows
+
+    assert consent.set_consent_many("org", ["a1", "a2"], "initials_only", db_path=db) == 2
+    rows = consent.list_consent("org", db_path=db)
+    assert rows["a1"]["level"] == "initials_only"
+    assert rows["a2"]["level"] == "initials_only"
+
+
+def test_bulk_failure_mid_way_writes_nothing(client, monkeypatch):
+    """CON2-4 — the bulk endpoint is transactional: a mid-batch failure
+    returns an honest error and leaves every row exactly as it was."""
+    import sqlite3
+
+    import mediahub.safeguarding.consent as consent
+
+    roster = _seed_roster(ORG, ["Maya Patel", "Joe Bloggs", "Eira Hughes"])
+    ids = [a.athlete_id for a in roster]
+    assert client.post(
+        "/api/athletes/consent", json={"athlete_ids": ids, "level": "full"}
+    ).get_json()["updated"] == 3
+
+    calls = {"n": 0}
+    real_now = consent._now
+
+    def _flaky_now():
+        calls["n"] += 1
+        if calls["n"] >= 3:
+            raise sqlite3.OperationalError("disk I/O error")
+        return real_now()
+
+    monkeypatch.setattr(consent, "_now", _flaky_now)
+    r = client.post("/api/athletes/consent", json={"athlete_ids": ids, "level": "no_photo"})
+    assert r.status_code == 500
+    assert "nothing was changed" in (r.get_json().get("error") or "").lower()
+    monkeypatch.setattr(consent, "_now", real_now)
+
+    from mediahub.safeguarding import list_consent
+
+    rows = list_consent(ORG)
+    assert all(rows[aid]["level"] == "full" for aid in ids)
+
+
+def test_single_save_path_keeps_set_consent(client, monkeypatch):
+    """The one-row save still goes through set_consent (same audit shape)."""
+    import mediahub.safeguarding as safeguarding
+
+    (maya,) = _seed_roster(ORG, ["Maya Patel"])
+
+    def _no_bulk(*a, **kw):
+        raise AssertionError("single saves must not use set_consent_many")
+
+    # The route imports from the package namespace, so patch it there.
+    monkeypatch.setattr(safeguarding, "set_consent_many", _no_bulk)
+    r = client.post(
+        "/api/athletes/consent", json={"athlete_id": maya.athlete_id, "level": "no_photo"}
+    )
+    assert r.status_code == 200 and r.get_json()["updated"] == 1

@@ -111,3 +111,38 @@ def test_in_form_analyse_still_analyses_and_saves(env, monkeypatch):
     assert r.status_code == 200
     prof = cp.load_profile("otters")
     assert prof.voice_profile.get("sentence_length_avg") == 9.5
+
+
+# ---------------------------------------------------------------------------
+# SRV2-2 (follow-up): the legacy action=analyse_voice POST is a guarded no-op
+# ---------------------------------------------------------------------------
+
+
+def test_legacy_analyse_voice_action_saves_nothing_and_redirects(env, tmp_path):
+    """Pre-deploy tabs still post action=analyse_voice; after the G-5 removal
+    that value must not fall through to the full save branch (which clears
+    every absent field). It redirects with a flash and changes nothing on
+    disk."""
+    app, cp = env
+    profile_file = tmp_path / "club_profiles" / "otters.json"
+    assert profile_file.exists()
+    before = profile_file.read_bytes()
+    with app.test_client() as c:
+        with c.session_transaction() as s:
+            s["active_profile_id"] = "otters"
+        r = c.post(
+            "/organisation",
+            data={
+                "action": "analyse_voice",
+                "profile_id": "otters",
+                "voice_examples": "Only the voice fields ride this legacy post",
+            },
+        )
+        assert r.status_code == 302
+        assert r.headers["Location"].endswith("/organisation")
+        with c.session_transaction() as s:
+            assert "Voice analysis moved" in (s.get("mh_toast") or {}).get("msg", "")
+    assert profile_file.read_bytes() == before
+    prof = cp.load_profile("otters")
+    assert prof.display_name == "Otters SC"
+    assert prof.voice_examples == ["Great swim from the squad tonight", "PB city at the gala"]

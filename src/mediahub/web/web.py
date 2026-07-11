@@ -40154,6 +40154,17 @@ function copySpotlightCaption(btn) {{
                         )
                 profile = existing
 
+            elif action == "analyse_voice":
+                # SRV2-2 — pre-G-5 tabs posted analyse_voice as the ACTION
+                # with only the voice fields in the form; letting it fall
+                # through to the full save would clear every absent field.
+                # The G-5 handler is gone for good — redirect, save nothing.
+                _flash_toast(
+                    "Voice analysis moved — use the Analyse voice button in the form below.",
+                    "info",
+                )
+                return redirect(url_for("organisation_page"))
+
             else:
                 # ---- Save organisation ----
                 existing.display_name = (
@@ -40433,12 +40444,15 @@ function copySpotlightCaption(btn) {{
             "signing out or another analysis."
         )
         _discard_label = "Discard this analysis — restore previous"
+        # CON2-2 — each Discard button posts its own kind, so a second tab's
+        # newer analysis of the OTHER kind can never be restored by this one.
         brand_discard_html = ""
         if _stash_kind == "brand":
             brand_discard_html = (
                 f'<form method="POST" action="{url_for("organisation_analysis_discard")}" '
                 f'style="margin-top:12px">'
-                f'<button type="submit" class="btn secondary" title="{_h(_discard_title)}">'
+                f'<button type="submit" name="kind" value="brand" class="btn secondary" '
+                f'title="{_h(_discard_title)}">'
                 f"{_h(_discard_label)}</button></form>"
             )
         voice_discard_html = ""
@@ -40447,6 +40461,7 @@ function copySpotlightCaption(btn) {{
             # formaction routes this submit to the discard endpoint instead.
             voice_discard_html = (
                 f'<button type="submit" formaction="{url_for("organisation_analysis_discard")}" '
+                f'name="kind" value="voice" '
                 f'class="btn secondary" style="margin-left:8px" title="{_h(_discard_title)}">'
                 f"{_h(_discard_label)}</button>"
             )
@@ -40946,9 +40961,19 @@ function copySpotlightCaption(btn) {{
         values onto the profile, and bounces back to the editor. Best-effort
         by design: a missing stash (expired session, already used) is a
         friendly no-op, never an error page."""
-        stash = session.pop(_ORG_ANALYSIS_STASH_KEY, None)
+        stash = session.get(_ORG_ANALYSIS_STASH_KEY)
         if not isinstance(stash, dict) or not stash.get("profile_id"):
+            session.pop(_ORG_ANALYSIS_STASH_KEY, None)
             _flash_toast("Nothing to discard — no analysis is waiting.", "error")
+            return redirect(url_for("organisation_page"))
+        # CON2-2 — with two tabs open, a newer analysis of the OTHER kind
+        # overwrites the stash; a stale Discard button must not restore that
+        # snapshot. Each button posts its kind; a mismatch no-ops honestly
+        # (and leaves the stash for the button it actually belongs to). An
+        # absent kind (pre-deploy tab) keeps the legacy behaviour.
+        posted_kind = str(request.form.get("kind") or "").strip()
+        if posted_kind and posted_kind != str(stash.get("kind") or ""):
+            _flash_toast("That analysis was superseded by a newer one — nothing restored.", "error")
             return redirect(url_for("organisation_page"))
         pid = str(stash.get("profile_id"))
         if not _session_can_use_profile(pid):
@@ -40957,6 +40982,8 @@ function copySpotlightCaption(btn) {{
         prof = load_profile(pid)
         if prof is None:
             abort(404)
+        # One-shot: the stash is consumed by the restore it belongs to.
+        session.pop(_ORG_ANALYSIS_STASH_KEY, None)
         fields = stash.get("fields")
         if isinstance(fields, dict) and fields:
             for name, value in fields.items():
@@ -65062,7 +65089,7 @@ and your lawful basis &mdash; live under
         if not pid:
             return jsonify({"error": "Not signed in."}), 403
         from mediahub.athletes import list_athletes
-        from mediahub.safeguarding import set_consent
+        from mediahub.safeguarding import set_consent, set_consent_many
         from mediahub.safeguarding.consent import LEVEL_LABELS as _CONSENT_LABELS
         from mediahub.safeguarding.consent import LEVELS as _CONSENT_LEVELS
 
@@ -65083,7 +65110,25 @@ and your lawful basis &mdash; live under
         if any(a not in roster_ids for a in ids):
             return jsonify({"error": "No such athlete on this organisation's roster."}), 404
         actor = (session.get("user_email") or "web").strip()
-        updated = sum(1 for athlete_id in ids if set_consent(pid, athlete_id, level, actor=actor))
+        # CON2-4 — a bulk save is all-or-nothing: one transaction, so a
+        # failure mid-way writes nothing rather than half the roster. The
+        # single save keeps set_consent (same row shape, same audit).
+        if len(ids) == 1:
+            updated = 1 if set_consent(pid, ids[0], level, actor=actor) else 0
+        else:
+            try:
+                updated = set_consent_many(pid, ids, level, actor=actor)
+            except sqlite3.Error:
+                log.warning("bulk consent save failed; rolled back", exc_info=True)
+                return (
+                    jsonify(
+                        {
+                            "error": "Could not save those permissions — "
+                            "nothing was changed. Try again."
+                        }
+                    ),
+                    500,
+                )
         return jsonify(
             {
                 "ok": True,
