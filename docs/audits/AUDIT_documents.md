@@ -200,6 +200,19 @@ CSRF-token wiring reuses the existing `_csrf_token()` / `_csrf_protect` guard �
 the guard itself). One `ruff format` line-wrap was applied to the single import-route line I
 lengthened; no unrelated lines in `web.py` were reformatted.
 
+**One shared-file line (caveat-closure PR, done on explicit user approval).** The
+caveat-closure follow-up was blocked by a pre-existing, repo-wide, **non-required**
+brand-hygiene failure on `main` itself — `test_theme_tokens.py::test_inline_hex_count_within_budget`
+at **21 hardcoded hexes vs a budget of 20**, offenders spread across *other* features'
+`web.py` templates (my diff touched zero `web.py` hexes). It blocked every open PR. With the
+user's explicit go-ahead, I migrated the single safest offender — a media-library thumbnail's
+`background:#0a0a0a` → `background:var(--bg)` (`web.py:36535`). `--bg` is `var(--mh-surface)` =
+`#0A0B11` ("pit-wall black"), so this is the test's intended "migrate a hex to a brand var"
+fix with **zero perceptible visual change** (0A0A0A→0A0B11, behind a `cover`-fit photo). Count
+is now 20; the test passes. This is a one-line de-hardcode in the media-library feature,
+flagged here for that feature's owner. The **root cause is upstream** (whoever pushed the 21st
+hex should have migrated one or lifted the budget) and remains worth addressing at the source.
+
 **Shared-file hygiene fixes (recorded for reconciliation).** The `Hygiene hooks (pre-commit)`
 CI check runs `--all-files`, so it fails on *every* open PR whenever any file in the repo has a
 hygiene violation. Two other sessions' already-merged audit reports —
