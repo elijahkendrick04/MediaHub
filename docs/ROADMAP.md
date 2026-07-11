@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-07-11 · `af5ee1c2b` · Merge pull request #1162 from elijahkendrick04/claude/video-studio-audit-bkhvvu
+**Last updated:** 2026-07-11 · `5e38a6244` · Usability audit — the owner-decision batch completes all 159 findings (#1164)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1226,16 +1226,16 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
-| 2026-07-11 | `c59da68d3` | [video-studio] ruff-format the F-14 _shape tuple (CI hygiene hook) |
-| 2026-07-11 | `4f0ad506b` | [video-studio] fix logged audit caveats (F-08..F-11, F-13..F-15) |
-| 2026-07-11 | `c82dd1030` | fix(review,configure,audio): server-correctness review findings (SRV-1..4) |
-| 2026-07-11 | `b00803d69` | [documents] unblock CI: migrate one hardcoded hex to var(--bg) (brand-budget) |
-| 2026-07-11 | `94c90c383` | [documents] close audit caveats: autoplay hand-off, data: image export, plain-hyphen copy |
-| 2026-07-11 | `14a280df4` | fix(theme): migrate video-letterbox #000 to a token (unblock hex budget) |
-| 2026-07-11 | `232e23838` | test: align main's new pins with the batch's intentional behaviour changes |
-| 2026-07-11 | `392ac8a9e` | test: align main's new pins with the batch's intentional behaviour changes |
-| 2026-07-11 | `06d40c8b4` | fix(inventory): don't count HTML numeric entities (&#NNNNN;) as hex colours |
-| 2026-07-11 | `6eb7eeeb6` | [team-members] fix logged caveats: atomic last-owner guard, snapshot reads, sole-owner controls, cop |
-| 2026-07-11 | `5d75efef7` | fix(pack): escape the motion-manifest fields in _loadMotionWhy (JS-5) |
-| 2026-07-11 | `b75d3e652` | fix(pack): job start/resume races in the reel + motion client (JS-4, JS-3, CON-6) |
+| 2026-07-11 | `050c89f86` | fix(athletes,org): transactional bulk consent; kind-checked discard; analyse_voice fall-through (B-7 |
+| 2026-07-11 | `b8439e35d` | fix(jobs,intro): batch busy-token parity, longer batch poll budget, atomic intro sidecar (B-5/B-1 fo |
+| 2026-07-11 | `eb6560bf5` | fix(plan): calendar revert uses the true previous date; analytics delete honest on error bodies (D-2 |
+| 2026-07-11 | `f80edf89e` | fix(pack): export gates come alive after an in-page render (B-2 follow-up) |
+| 2026-07-11 | `45557dadb` | docs(audit): AUDIT COMPLETE — 159/159 live findings shipped |
+| 2026-07-11 | `4a19b75ef` | test(j9): the chooser's sibling pin accepts B-2's details disclosure |
+| 2026-07-11 | `8784584a6` | feat(motion): render all four motion cuts of a card as one background batch job (B-5) |
+| 2026-07-11 | `9a1e4c08b` | feat(review): slim the default review row to Approve + Edit card (B-4) |
+| 2026-07-11 | `5b47b9bba` | feat(organisation): analysis persists immediately, with a one-shot Discard undo (D-15) |
+| 2026-07-11 | `badac3b01` | feat(athletes): consolidate the two consent stores under /athletes (G-9) |
+| 2026-07-11 | `448863a51` | feat(plan): planner mutations update the DOM in place — no page reloads (D-26) |
+| 2026-07-11 | `67c0f0901` | feat(pack): collapse twelve export affordances to one per-card primary + one pack disclosure (B-2) |
 <!-- /ROADMAP:ACTIVITY -->
