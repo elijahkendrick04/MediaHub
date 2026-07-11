@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-07-11 · `f78026632` · [team-members] Fix logged caveats (#1156)
+**Last updated:** 2026-07-11 · `0973b44b1` · Merge pull request #1149 from elijahkendrick04/claude/audit-free-text-bb9chy
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1226,6 +1226,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-07-11 | `14a280df4` | fix(theme): migrate video-letterbox #000 to a token (unblock hex budget) |
 | 2026-07-11 | `06d40c8b4` | fix(inventory): don't count HTML numeric entities (&#NNNNN;) as hex colours |
 | 2026-07-11 | `6eb7eeeb6` | [team-members] fix logged caveats: atomic last-owner guard, snapshot reads, sole-owner controls, cop |
 | 2026-07-11 | `80718f478` | [developer-settings] report: record fourth-pass merge status + SHAs |
@@ -1236,4 +1237,5 @@ list and the auto table below, not here.
 | 2026-07-11 | `b116544ac` | [org-access] audit report: current behaviour, verification matrix, findings, verdict |
 | 2026-07-11 | `5b616e225` | [org-access] confine signed-in accounts to member orgs; land members on their club; real sign-out |
 | 2026-07-11 | `868292c97` | [org-access] fix cross-tenant IDOR on /api/visual/<vid>(/png) endpoints |
+| 2026-07-11 | `105f4d6dc` | perf(free-text): bound list_sessions to ~limit parses (FT-PERF-1) |
 <!-- /ROADMAP:ACTIVITY -->
