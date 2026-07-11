@@ -82,7 +82,11 @@ class TestUploadRejectStatus:
         c, _ = env
         r = c.post("/upload", data={}, content_type="multipart/form-data")
         assert r.status_code == 400
-        assert "No file selected" in r.get_data(as_text=True)
+        # H-18: rejections re-render the full upload page with an inline error
+        # (same 400), not a dead-end card.
+        body = r.get_data(as_text=True)
+        assert "Please choose a results file first." in body
+        assert "dropzone" in body.lower() or "upload" in body.lower()
 
     def test_empty_file_is_400(self, env):
         c, _ = env

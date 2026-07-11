@@ -104,6 +104,14 @@ class TestUseInCaptionButtonRender:
             view_func=lambda run_id, swim_id: "",
             methods=["POST"],
         )
+        # H-11: the button also carries the workflow save URL ("Save to
+        # card"), so the stub app needs that route registered too.
+        app.add_url_rule(
+            "/api/workflow/<run_id>/<card_id>",
+            endpoint="api_workflow_set",
+            view_func=lambda run_id, card_id: "",
+            methods=["POST"],
+        )
         with app.test_request_context("/"):
             return _render_why_this_card(
                 _ranked_achievement(),

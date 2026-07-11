@@ -163,8 +163,15 @@ def persist_brand_kit(
     secondary: str,
     accent: str,
     source: str = "upload",
+    brand_kit_id: str = "",
 ) -> Path:
-    """Persist a per-run brand kit JSON. Returns the path written."""
+    """Persist a per-run brand kit JSON. Returns the path written.
+
+    ``brand_kit_id`` (H-13) records which of the org's saved brand kits the
+    user chose for this run on the configure step; ``""`` means "use the
+    org's default kit" (also the shape of every pre-H-13 file, so old runs
+    resolve exactly as before).
+    """
     kits_dir = _brand_kits_dir()
     kits_dir.mkdir(parents=True, exist_ok=True)
     payload = {
@@ -174,6 +181,7 @@ def persist_brand_kit(
         "secondary_colour": secondary,
         "accent_colour": accent,
         "source": source,
+        "brand_kit_id": brand_kit_id or "",
     }
     out = kits_dir / f"{run_id}.json"
     out.write_text(json.dumps(payload, indent=2), encoding="utf-8")
@@ -193,6 +201,7 @@ def process_upload(
     fallback_primary: str = "#0A2540",
     fallback_secondary: str = "#101820",
     fallback_accent: str = "#FFD86E",
+    brand_kit_id: str = "",
 ) -> dict:
     """Save the logo + persist a brand kit. Returns the persisted dict."""
     logo_path: Optional[Path] = None
@@ -221,6 +230,7 @@ def process_upload(
         primary=primary,
         secondary=secondary,
         accent=accent,
+        brand_kit_id=brand_kit_id,
     )
     return {
         "display_name": display_name,
@@ -229,6 +239,7 @@ def process_upload(
         "secondary_colour": secondary,
         "accent_colour": accent,
         "source": "upload",
+        "brand_kit_id": brand_kit_id or "",
     }
 
 

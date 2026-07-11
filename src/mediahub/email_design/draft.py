@@ -139,9 +139,13 @@ def generate_newsletter(
     brand_profile_id: Optional[str] = None,
     card_image_url=None,
     asset_url=None,
+    run_id: Optional[str] = None,
 ) -> NewsletterSpec:
     """Gather the period's approved content → (optionally) draft the AI editorial
     → assemble the newsletter for ``newsletter_format``.
+
+    ``run_id`` (H-12) pins the facts to one owned run — the meet digest's
+    "which meet?" chooser; ``None`` keeps the date-range behaviour.
 
     With ``with_ai=True`` and no provider, this raises ``ClaudeUnavailableError``
     (the operator's honest signal to configure a key, or to re-run with
@@ -156,6 +160,7 @@ def generate_newsletter(
         tone=tone,
         card_image_url=card_image_url,
         asset_url=asset_url,
+        run_id=run_id,
     )
     prose = None
     if with_ai:

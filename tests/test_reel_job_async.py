@@ -237,3 +237,53 @@ class TestReelJob:
             resp = c.get("/api/runs/r1/reel-file")
             assert resp.status_code == 200
             assert "video/mp4" in (resp.headers.get("Content-Type") or "")
+
+
+class TestVariantJobStoreAtomicity:
+    def test_variant_job_save_survives_concurrent_writers(self, app_env):
+        """CON-4: the worker thread and its heartbeat both save the same job.
+        A shared ``.tmp`` path let their writes interleave into a torn/absent
+        job JSON for a poll cycle — the tmp name is now unique per write, so
+        the loader always sees a complete snapshot and never a torn file."""
+        import threading
+
+        _app, wm, _tmp = app_env
+        job_id = "c" * 32
+        wm._variant_job_save({"id": job_id, "kind": "reel", "status": "running"})
+
+        failures: list = []
+        stop = threading.Event()
+
+        def _writer(tag: str) -> None:
+            for i in range(200):
+                wm._variant_job_save(
+                    {"id": job_id, "kind": "reel", "status": "running", tag: i}
+                )
+
+        def _reader() -> None:
+            path = wm._variant_jobs_dir() / f"{job_id}.json"
+            while not stop.is_set():
+                # Loader must never see a torn/absent file once the job exists.
+                if wm._variant_job_load(job_id) is None:
+                    failures.append("load returned None")
+                # And the raw bytes on disk always parse (loader masks parse
+                # errors as None, so check the file directly too).
+                try:
+                    json.loads(path.read_text(encoding="utf-8"))
+                except Exception as e:  # noqa: BLE001
+                    failures.append(f"torn file: {e!r}")
+
+        threads = [threading.Thread(target=_writer, args=(t,)) for t in ("a", "b")]
+        reader = threading.Thread(target=_reader)
+        reader.start()
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        stop.set()
+        reader.join()
+        assert not failures, failures[:5]
+        final = wm._variant_job_load(job_id)
+        assert final and final["id"] == job_id and final["kind"] == "reel"
+        # Successful writes leave no stray tmp files behind.
+        assert not list(wm._variant_jobs_dir().glob("*.tmp"))

@@ -254,6 +254,8 @@ def test_mobile_bottom_nav_localises_available_terms(client):
     assert "Hafan" in nav  # nav.home
     assert "Creu" in nav  # nav.create
     assert "Gosodiadau" in nav  # nav.settings
-    # Terms with no verified Welsh stay English (no fabricated translations).
-    assert "Media" in nav
-    assert "Activity" in nav
+    # G-10 later added verified Welsh for the remaining nav terms — they now
+    # render in Welsh (the no-fabricated-translations rule still holds: every
+    # cy label here comes from the hand-written _CY catalogue).
+    assert "Cyfryngau" in nav  # nav.media
+    assert "Gweithgarwch" in nav  # nav.activity

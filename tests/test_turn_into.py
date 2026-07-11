@@ -347,7 +347,8 @@ class TestWebRoutes(unittest.TestCase):
             r2 = client.get(data["pack_url"])
             self.assertEqual(r2.status_code, 200)
             body = r2.get_data(as_text=True)
-            self.assertIn("Turn-Into pack", body)
+            # J-4: the one user-facing name for the feature is "Repurpose pack".
+            self.assertIn("Repurpose pack", body)
             self.assertIn("DRAFT", body)
             self.assertIn("X thread", body)
 

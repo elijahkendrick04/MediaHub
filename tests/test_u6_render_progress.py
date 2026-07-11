@@ -61,7 +61,6 @@ _RENDER_FUNCS = {
     "generateReelBatch": "function generateReelBatch(",
     "regenerateGraphic": "function regenerateGraphic(",
     "mhGen (draft panel)": "function mhGen(panel)",
-    "generateReelGrouped": "function generateReelGrouped(",
     # J-1: the Video Studio's shared background-job helper (render / make-clip /
     # direct-reel / stabilise all drive the same branded controller through it).
     "runVideoJob (video studio)": "function runVideoJob(",
@@ -153,18 +152,38 @@ def test_generic_panel_spinner_removed_from_render_panels():
     assert src.count("width:24px;height:24px;border:2px solid") == 0
     # Each upgraded panel now drives the shared controller and gates its result.
     # Original six U.6 panels + R1.15's generateReelBatch + J-1's runVideoJob
-    # (the Video Studio's shared render/analysis/stabilise progress helper).
-    assert src.count("MH.renderProgress(panel") == len(_RENDER_FUNCS)
+    # (the Video Studio's shared render/analysis/stabilise progress helper)
+    # + D-13's two on-load resume mounts (mhResumeReelJob / mhResumeMotionJobs)
+    # that re-attach the controller to a render still running server-side.
+    assert src.count("MH.renderProgress(panel") == len(_RENDER_FUNCS) + 2
+
+
+# D-13 restructured the reel/motion starters around persistent job watchers:
+# the starter mounts the controller, the paired watcher owns the terminal
+# states (complete on done, _mhJobFail -> prog.stop on error/timeout).
+_JOB_WATCHERS = {
+    "generateMotion": "function _mhMotionWatch(",
+    "generateReel": "function _mhReelWatch(",
+    "generateReelBatch": "function _mhReelBatchWatch(",
+}
 
 
 @pytest.mark.parametrize("name,marker", list(_RENDER_FUNCS.items()))
 def test_each_render_function_drives_the_controller(name, marker):
-    body = _func_body(_src(), marker)
+    src = _src()
+    body = _func_body(src, marker)
     assert "MH.renderProgress(" in body, f"{name} does not use the controller"
     assert "animation:spin 600ms" not in body, f"{name} still has the old spinner"
     # Honest terminal states: the loop is always either completed or stopped.
-    assert "prog.complete(" in body, f"{name} never completes the controller"
-    assert "prog.stop(" in body, f"{name} never stops on error"
+    if name in _JOB_WATCHERS:
+        watcher = _func_body(src, _JOB_WATCHERS[name])
+        assert "ctx.prog.complete(" in watcher, f"{name}'s watcher never completes"
+        assert "_mhJobFail(" in watcher, f"{name}'s watcher never fails honestly"
+        fail_helper = _func_body(src, "function _mhJobFail(")
+        assert "ctx.prog.stop()" in fail_helper, "_mhJobFail never stops the controller"
+    else:
+        assert "prog.complete(" in body, f"{name} never completes the controller"
+        assert "prog.stop(" in body, f"{name} never stops on error"
 
 
 def test_variant_batch_feeds_real_progress():
@@ -250,10 +269,13 @@ def test_every_render_page_ships_the_controller(page_html):
 
 
 def test_grouped_pack_wires_reel_through_controller(page_html):
-    # The grouped builder renders the meet-reel surface for this run — it must
-    # kick the controller, not a bare spinner.
+    # G-8: the grouped page's drifted copy of the reel generator is gone — the
+    # meet-reel card links to the shared composer on the Content builder, and
+    # the page's remaining render surface (per-card motion, via the shared
+    # _MOTION_CLIENT_JS block) still drives the controller, not a bare spinner.
     grouped = page_html["/pack/r1/grouped"]
-    assert "function generateReelGrouped(" in grouped
+    assert "function generateReelGrouped(" not in grouped
+    assert "#mh-reel-composer" in grouped
     assert "MH.renderProgress(panel" in grouped
     # No page in the flow paints the old 24px in-panel spinner any more.
     for url, html in page_html.items():

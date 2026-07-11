@@ -462,7 +462,9 @@ def test_studio_page_has_ai_editing_controls(app):
         r = c.get("/video")
         assert r.status_code == 200
         body = r.data
-        assert b"AI reel" in body  # the director surface
+        # G-7: the director surface is user-labelled "Footage reel" so it stops
+        # colliding with the pack page's card-built "Meet reel".
+        assert b"Footage reel" in body  # the director surface
         assert b"Look" in body and b"Vivid" in body  # the grade picker
         assert b"Clean &amp; level the audio" in body  # the soundtrack option
         assert b"Remove silences" in body  # the tighten option

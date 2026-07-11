@@ -50,6 +50,11 @@ dependencies = [
   # Sport-profile config loader (mediahub.sport_profiles) parses the
   # human-authored data/sport_profiles/*.yaml files. MIT-licensed, free.
   "PyYAML>=6.0.3",
+  # 2FA enrolment QR (mediahub.web.qr, usability H-20): deterministic
+  # in-process QR matrix for the otpauth:// provisioning URI. Tiny,
+  # pure-Python, MIT-licensed. (Reinstated after the sites feature removal
+  # took the previous consumer with it.)
+  "segno>=1.6.1",
   # G1.10 club custom-font upload pipeline (mediahub.typography.font_intake):
   # validate → subset → re-pack an uploaded brand typeface as a first-party
   # self-hosted WOFF2. The [woff] extra adds brotli/zopfli for WOFF2. MIT-licensed.
