@@ -109,7 +109,7 @@ fonttools[woff]>=4.63.0
 # Scheduler (mediahub.scheduler / mediahub.workflow.schedule) uses croniter to
 # compute cron / daily / weekly / monthly fire-times. croniter is MIT-licensed,
 # maintained under the Pallets-Eco (Flask) org; deps python-dateutil + pytz.
-croniter>=6.2.3
+croniter>=6.2.4
 
 # Phase C commercial layer (web/auth.py + web/billing.py). bcrypt (Apache-2.0)
 # hashes account passwords — used directly because passlib 1.7.x cannot load a
