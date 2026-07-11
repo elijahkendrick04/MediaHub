@@ -4,7 +4,7 @@
 
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/)
 [![Flask](https://img.shields.io/badge/flask-3.x-green.svg)](https://flask.palletsprojects.com/)
-[![Tests](https://img.shields.io/badge/tests-8374%20passing-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-13k%20passing-brightgreen.svg)](tests/)
 [![Docker](https://img.shields.io/badge/docker-ready-blue.svg)](Dockerfile)
 
 > **New here and not a coder?** Start with **[START_HERE.md](START_HERE.md)** — a
@@ -154,7 +154,7 @@ sport_profiles/     sport config + per-post-type autonomy levels
 ```
 legacy/   read-only historical packages (V1–V5 + early V6) — newer code still borrows from here
 data/     ontology, voices, brand kits, sport profiles, standards, discovered-PB cache
-tests/    pytest suite — 8,450 tests (8,374 pass; rest skip without Playwright/Chromium or optional corpora)
+tests/    pytest suite — ~13,100 tests (the large majority pass; the rest skip without Playwright/Chromium, Node/Remotion, or optional corpora)
 docs/     long-form documentation (see the table above)
 samples/ + sample_data/   tiny representative meet corpus
 scripts/  build + maintenance scripts
