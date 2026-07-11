@@ -382,7 +382,7 @@ class TestStubPickPersistence:
         # need a real provider just to verify the persistence behaviour.
         import mediahub.club_platform.stubs as _stubs
 
-        def _stub_generate(brief_prose, extra_context=""):
+        def _stub_generate(*args, **kwargs):
             return {"cards": [{
                 "platform": "Instagram",
                 "caption": "Test caption",
@@ -424,7 +424,7 @@ class TestStubPickPersistence:
     def test_foreign_id_dropped_silently(self, two_org_app, monkeypatch):
         import mediahub.club_platform.stubs as _stubs
 
-        def _stub_generate(brief_prose, extra_context=""):
+        def _stub_generate(*args, **kwargs):
             return {"cards": [{
                 "platform": "Instagram",
                 "caption": "Test",
