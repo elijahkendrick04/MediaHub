@@ -231,6 +231,20 @@ def _build_system_prompt(
         "lines, ~280 characters. Hashtags: 2-6. After your last card write "
         "nothing — the tool calls are the answer."
     )
+    # Cliché guardrail parity with the achievement caption path. The brief-led
+    # card writer builds its own prompt (it never touches _compose_caption_prompt),
+    # so the shared AI-tell ban list and opener bans never reached it. Inject
+    # them here so Event Preview / Sponsor Post / Session Update / Free Text
+    # cards are held to the same "no machine-written filler" bar.
+    try:
+        from mediahub.web.ai_caption import (
+            _AI_TELL_SYSTEM_INSTRUCTION,
+            _SHARED_TONE_BANS,
+        )
+
+        base += "\n\n" + _AI_TELL_SYSTEM_INSTRUCTION + " " + _SHARED_TONE_BANS
+    except Exception:
+        pass
     if brand_prose:
         base += "\n\nBrand voice:\n" + brand_prose
 

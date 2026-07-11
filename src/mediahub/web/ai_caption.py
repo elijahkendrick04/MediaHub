@@ -107,23 +107,73 @@ KNOWN_AI_TONES: frozenset[str] = frozenset(_TONE_DESCRIPTORS.keys())
 # AI-tell ban list
 # ---------------------------------------------------------------------------
 
-AI_TELL_BAN_LIST: frozenset[str] = frozenset(
-    {
-        "delve",
-        "delves",
-        "delving",
-        "elevate",
-        "elevates",
-        "elevated",
-        "elevating",
-        "in the world of",
-    }
+# Canonical list of overworked AI-tell / hollow-filler phrases a real club
+# caption never needs. Matched case-insensitively as substrings, so a root
+# like "unleash" also catches "unleashing"/"unleashed"; morphological variants
+# that are NOT substrings of their root ("elevate" does not contain
+# "elevating") are listed explicitly. Curated to be domain-safe — we
+# deliberately do NOT ban legitimate swim vocabulary (e.g. "showcase" is a real
+# meet type; "dive"/"making waves" are honest swim language), only phrases that
+# read as machine-written filler regardless of context. This is the single
+# source of truth for both the prompt instruction (tell the model up front) and
+# the post-generation filter (strip it if the model slips), so the two can
+# never drift — guarded by tests/test_caption_ai_tell_guardrail.py.
+_AI_TELL_PHRASES: tuple[str, ...] = (
+    "delve",
+    "delves",
+    "delving",
+    "elevate",
+    "elevates",
+    "elevated",
+    "elevating",
+    "in the world of",
+    "testament to",
+    "when it comes to",
+    "needless to say",
+    "it's worth noting",
+    "it is worth noting",
+    "at the end of the day",
+    "the epitome of",
+    "a shining example",
+    "speaks volumes",
+    "goes to show",
+    "look no further",
+    "leave no stone unturned",
+    "in the realm of",
+    "unleash",
+    "nestled",
+    "fast-paced world",
+)
+
+AI_TELL_BAN_LIST: frozenset[str] = frozenset(_AI_TELL_PHRASES)
+
+# The subset named explicitly in the system prompt — the most common tells,
+# each a whole phrase (not a bare morphological variant). Every entry MUST be
+# in AI_TELL_BAN_LIST so the model is told exactly what the post-filter also
+# strips; the alignment is test-enforced.
+_AI_TELL_NAMED: tuple[str, ...] = (
+    "delve",
+    "elevate",
+    "in the world of",
+    "testament to",
+    "when it comes to",
+    "needless to say",
+    "it's worth noting",
+    "at the end of the day",
+    "the epitome of",
+    "a shining example",
+    "speaks volumes",
+    "goes to show",
+    "look no further",
+    "leave no stone unturned",
+    "unleash",
 )
 
 _AI_TELL_SYSTEM_INSTRUCTION: str = (
-    "Never use these overworked AI phrases: "
-    '"delve", "elevate", "in the world of". '
-    "Avoid reflexive exclamation marks — use '!' only when the moment "
+    "Write like a real club member, not an AI. Never use these overworked "
+    "filler phrases — they read as machine-written: "
+    + ", ".join(f'"{p}"' for p in _AI_TELL_NAMED)
+    + ". Avoid reflexive exclamation marks — use '!' only when the moment "
     "genuinely warrants it, not as empty emphasis."
 )
 
@@ -233,6 +283,58 @@ def _contains_ai_tell(text: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Source-fact grounding check
+# ---------------------------------------------------------------------------
+#
+# Recipe #232 of docs/research/generation-engine-competitor-evaluation.md: a
+# final "does this caption contain a specific fact from the source data?"
+# check. A caption that names no concrete detail — no swimmer, no event, no
+# time, no placing — is generic filler ("What a night for the whole club!"),
+# the exact failure mode the review UI is meant to catch. This is a pure
+# deterministic *detector* (it validates generated text, it never writes it),
+# so it sits on the maths side of the AI/maths split alongside the AI-tell and
+# near-duplicate checks.
+
+
+def _caption_grounding_facts(achievement: Optional[dict]) -> list[str]:
+    """Return the lower-cased concrete facts a grounded caption should mention.
+
+    Pulls the swimmer's name parts, the recorded time, and the distinctive
+    tokens of the event (distance + stroke) from the source achievement. Empty
+    when the source carries no concrete fact (e.g. an aggregate meet-recap
+    payload) — grounding then no-ops rather than penalising legitimately
+    fact-light copy.
+    """
+    if not isinstance(achievement, dict):
+        return []
+    facts: set[str] = set()
+    name = str(achievement.get("swimmer_name") or "")
+    for part in re.split(r"[^\w']+", name):
+        if len(part) >= 3:
+            facts.add(part.lower())
+    time = str(achievement.get("time") or "").strip().lower()
+    if time:
+        facts.add(time)
+    event = _strip_course_suffix(str(achievement.get("event") or "")).lower()
+    for tok in re.split(r"[^\w]+", event):
+        # A token grounds the caption if it carries the distance ("100m") or is
+        # a stroke word ("freestyle"); 1–2 char tokens ("m", "im") are too
+        # ambiguous to match on.
+        if tok and (any(c.isdigit() for c in tok) or len(tok) >= 3):
+            facts.add(tok)
+    return [f for f in facts if f]
+
+
+def _is_grounded(caption: str, facts: list[str]) -> bool:
+    """True if the caption mentions at least one source fact, or there are no
+    facts to check against (grounding is skipped, never fail-closed)."""
+    if not facts:
+        return True
+    low = caption.lower()
+    return any(f in low for f in facts)
+
+
+# ---------------------------------------------------------------------------
 # N-gram similarity helpers (no external deps)
 # ---------------------------------------------------------------------------
 
@@ -266,6 +368,7 @@ def filter_caption_variants(
     recent_captions: Optional[list[str]] = None,
     *,
     dedupe_threshold: float = 0.55,
+    achievement: Optional[dict] = None,
 ) -> list[str]:
     """Shared post-filter for multi-variant caption surfaces.
 
@@ -274,18 +377,24 @@ def filter_caption_variants(
     contain ban-list AI-tells — the same quality gates
     :func:`generate_caption_candidates` applies during generation, packaged
     for callers that already hold a produced list (the live caption route's
-    variants). Fail-open: if filtering would empty a non-empty input, the
-    first original variant is returned — a slightly stale caption beats none.
+    variants). When ``achievement`` is supplied and carries concrete facts,
+    ungrounded candidates (those naming no swimmer/event/time from the source)
+    are also dropped, so a grounded sibling is preferred over generic filler.
+    Fail-open: if filtering would empty a non-empty input, the first original
+    variant is returned — a slightly stale caption beats none.
     """
     cleaned = [v.strip() for v in (variants or []) if v and v.strip()]
     if not cleaned:
         return []
     recents = [r for r in (recent_captions or []) if r and r.strip()]
+    facts = _caption_grounding_facts(achievement)
     kept: list[str] = []
     for v in cleaned:
         if v in kept:
             continue
         if _contains_ai_tell(v):
+            continue
+        if not _is_grounded(v, facts):
             continue
         if _is_near_duplicate(v, recents + kept, threshold=dedupe_threshold):
             continue

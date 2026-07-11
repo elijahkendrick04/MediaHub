@@ -26946,7 +26946,14 @@ function copyWhyCard(btn, taId) {{
                     filter_caption_variants as _filter_variants,
                 )
 
-                variants = _filter_variants(variants, recent_captions=_recent_captions)
+                # Passing ach_dict activates the source-fact grounding check
+                # (recipe #232): a variant that names no swimmer/event/time
+                # from this swim is generic filler and drops in favour of a
+                # grounded sibling. Fail-open, so the single-variant default
+                # path is never left empty.
+                variants = _filter_variants(
+                    variants, recent_captions=_recent_captions, achievement=ach_dict
+                )
 
                 caption_text = variants[0] if variants else ""
                 # If every variant failed (e.g. provider rate-limited),
