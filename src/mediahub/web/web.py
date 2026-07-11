@@ -49772,7 +49772,13 @@ function tiRegenerate(btn) {{
 
     @app.route("/pack/<run_id>/grouped")
     def content_pack_grouped(run_id):
-        """Grouped content pack page &mdash; 8 buckets."""
+        """Read-only "explore all recommendations" view &mdash; 8 buckets.
+
+        B-3: single-purpose pages. Triage (approve / re-queue) lives on
+        /review, creation + export on the content builder (/pack); this
+        page keeps no approval strap or export row of its own &mdash; each
+        card deep-links to its spot in the builder instead.
+        """
         state = _run_state(run_id)
         if state == "in_progress":
             return _layout(
@@ -49799,25 +49805,10 @@ function tiRegenerate(btn) {{
         )
         _review_url = url_for("review", run_id=run_id)
         _pack_url = url_for("content_pack", run_id=run_id)
-        _newsletter_html_url = url_for("api_run_newsletter", run_id=run_id)
-        _newsletter_text_url = _newsletter_html_url + "?format=text"
-        _newsletter_zip_url = _newsletter_html_url + "?format=zip"
 
         if not _v73_ok or _build_grouped_pack is None:
             return redirect(_pack_url)
 
-        # Round-8: load the per-card workflow sidecar so the new
-        # Approve / Reject / Re-queue strap below each card can stamp
-        # the current state (queue|approved|rejected|posted|edited).
-        # Falls back to an empty dict so the loop below stays
-        # crash-safe when the workflow store can't be reached.
-        _wf_states: dict = {}
-        try:
-            _ws = _get_wf_store()
-            if _ws is not None:
-                _wf_states = _ws.load(run_id) or {}
-        except Exception:
-            _wf_states = {}
         # UI 1.25 — per-card reaction tallies for this run, in one query.
         _react_counts = _reaction_counts_for_run(run_id)
 
@@ -49828,8 +49819,6 @@ function tiRegenerate(btn) {{
             import traceback
 
             traceback.print_exc()
-
-        counts = grouped.get("_counts", {})
 
         def _section_html(title, items, icon="", empty_msg="None in this category."):
             n = len(items) if isinstance(items, list) else (1 if items else 0)
@@ -49861,15 +49850,21 @@ function tiRegenerate(btn) {{
                 band = _h(item.get("quality_band") or "")
                 prio = item.get("priority", 0)
                 n_ach = item.get("n_achievements", 0)
-                # Pull the per-card workflow status so the approve/reject row
-                # below can render the current state strap. Sidecar workflow
-                # state lives in _wf_states (loaded once at the top of the
-                # route), falling back to whatever the item itself carries.
-                _card_wf = _wf_states.get(card_id_raw) if isinstance(_wf_states, dict) else None
-                if _card_wf is not None and hasattr(_card_wf, "status"):
-                    wf_status = _card_wf.status.value
-                else:
-                    wf_status = str((item.get("workflow") or {}).get("status") or "queue").lower()
+                # B-3 — this page is a read-only explorer: approval lives on
+                # /review and creation on the content builder, so instead of
+                # its own approve strap each card deep-links to its builder
+                # spot (the builder's per-card anchor is `pc-<card id>`).
+                builder_link = ""
+                if card_id_raw:
+                    from urllib.parse import quote as _quote  # noqa: PLC0415
+
+                    builder_link = (
+                        f'<a class="btn secondary" style="font-size:12px;padding:4px 10px" '
+                        f'href="{_h(_pack_url)}#pc-{_h(_quote(str(card_id_raw), safe=""))}" '
+                        f'title="Open this card in the content builder — approved cards are '
+                        f'captioned, rendered and downloaded there.">'
+                        f"Open in content builder &rarr;</a>"
+                    )
                 schedule_btn = _schedule_button_html(run_id, card_id_raw, f"g-{card_uuid}")
                 # Per-card motion render — D-12: the same background job +
                 # poll + progress UI the Content builder uses (the shared
@@ -49960,7 +49955,7 @@ function tiRegenerate(btn) {{
   </div>
   {why_html}
   <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-    {_render_wf_actions(run_id, str(card_id_raw), wf_status) if card_id_raw else ""}
+    {builder_link}
     {_render_reactions(run_id, str(card_id_raw), _react_counts) if card_id_raw else ""}
     <span style="flex:1"></span>
     <button class="btn secondary" style="font-size:12px;padding:4px 10px" onclick="copyText(this,'cap-{card_id}-1')">Copy caption</button>
@@ -50080,6 +50075,9 @@ function tiRegenerate(btn) {{
 <section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">
   <span class="mh-hero-eyebrow">All recommendations</span>
   <h1><span class="mh-shiny-text">{meet_name}</span></h1>
+  <p class="lede" style="max-width:60ch">Every ranked recommendation for this meet, in one read-only view.
+  Approve cards on the <a href="{_review_url}">review page</a>; captions, graphics, video and downloads
+  live in the <a href="{_pack_url}">content builder</a>.</p>
   <div class="strap" style="margin-top:var(--sp-3)">
     <a href="{_review_url}" style="color:var(--ink-muted);text-decoration:none">← Back to review</a><span class="sep">/</span>
     <a href="{_pack_url}" style="color:var(--ink-muted);text-decoration:none">Content builder &rarr;</a>
@@ -50093,19 +50091,6 @@ function tiRegenerate(btn) {{
   </div>
   <a class="btn" style="font-size:12px;padding:6px 14px;background:var(--medal);color:var(--medal-ink);border:none"
      href="{_pack_url}#mh-reel-composer">&#x25B6; Open the reel composer</a>
-</div>
-
-<div class="card" style="margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
-  <div>
-    <div style="font-size:13px;font-weight:700">Parent newsletter</div>
-    <div style="font-size:12px;color:var(--ink-dim);margin-top:2px">Branded HTML email + plaintext fallback, ready to paste into Mailchimp / ConvertKit / your email client.</div>
-  </div>
-  <div style="display:flex;gap:6px;flex-wrap:wrap">
-    <a class="btn secondary" style="font-size:12px;padding:6px 12px" href="{_h(_newsletter_html_url)}" target="_blank" rel="noopener">Preview HTML &rarr;</a>
-    <a class="btn secondary" style="font-size:12px;padding:6px 12px" href="{_h(_newsletter_html_url)}?download=1">Download .html</a>
-    <a class="btn secondary" style="font-size:12px;padding:6px 12px" href="{_h(_newsletter_text_url)}&download=1">Download .txt</a>
-    <a class="btn" style="font-size:12px;padding:6px 12px" href="{_h(_newsletter_zip_url)}">Download .zip</a>
-  </div>
 </div>
 
 {visuals_strip}
