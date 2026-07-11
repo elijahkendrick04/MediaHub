@@ -235,7 +235,10 @@ def _design_spec_system_prompt(archetypes: list[str], token_roles: list[str]) ->
         '  "crop_intent": "tight_portrait|rule_of_thirds_action|centered|full_bleed|original",\n'
         '  "hero_stat": "final_time|pb_delta|placing|relay_split|event|points",\n'
         '  "secondary_stats": [<stat>, ...],\n'
-        '  "headline_hook": <<=80 chars, punchy, no emoji, no cliché ("delve","elevate")>,\n'
+        '  "headline_hook": <<=80 chars, no emoji; ground it in THIS result '
+        "(a name, time, event or placing); avoid generic sports hype "
+        "(\"what a performance\", \"on fire\", \"smashing it\") and AI cliché "
+        '("delve","elevate")>,\n'
         '  "accent_treatment": "brackets|stripe|badge|frame|minimal|ribbon|underline|'
         "diagonal_underline|thick_stripe|thin_stripe|double_stripe|side_rail|"
         'large_brackets|small_brackets|bracket_frame|corner_tabs|offset_badge",\n'

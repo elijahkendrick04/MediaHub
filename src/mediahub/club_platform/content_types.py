@@ -209,7 +209,7 @@ REGISTRY: dict[ContentType, ContentTypeMeta] = {
         icon_svg=_CALENDAR_SVG,
         primary_route_endpoint="stub_weekend_preview",
         how_it_works=HowItWorks(
-            tagline="Build the hype before the first whistle.",
+            tagline="Tease your ones-to-watch before the entries close.",
             inputs=(
                 ("Event name or entries file", "event"),
                 ("Ones to watch (AI or typed)", "swimmer"),

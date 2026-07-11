@@ -98,8 +98,10 @@ _ARTEFACT_INTENTS: dict[str, str] = {
         "achievement facts given. Mark clearly that it is a draft."
     ),
     "next_meet_preview": (
-        "Write a short teaser caption (~200 chars) hyping the upcoming "
-        "meet. Mention the meet name and date if given. No invented data."
+        "Write a short teaser (~200 chars) for the upcoming meet. Lead with "
+        "the meet name and date if given, and build anticipation with "
+        "specifics (who's competing, what's at stake) — not generic hype, "
+        "and no invented data."
     ),
 }
 

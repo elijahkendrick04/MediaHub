@@ -231,6 +231,18 @@ def _build_system_prompt(
         "lines, ~280 characters. Hashtags: 2-6. After your last card write "
         "nothing — the tool calls are the answer."
     )
+    # Inherit the same anti-slop guards the achievement caption path uses, so
+    # the brief-led writer can't quietly reopen "What a…"/"elevate" clichés
+    # (one shared source of truth in ai_core.prompt_guard).
+    try:
+        from mediahub.ai_core.prompt_guard import (
+            CAPTION_AI_TELL_INSTRUCTION,
+            CAPTION_SHARED_TONE_BANS,
+        )
+
+        base += "\n\n" + CAPTION_AI_TELL_INSTRUCTION + "\n\n" + CAPTION_SHARED_TONE_BANS
+    except Exception:
+        pass
     if brand_prose:
         base += "\n\nBrand voice:\n" + brand_prose
 

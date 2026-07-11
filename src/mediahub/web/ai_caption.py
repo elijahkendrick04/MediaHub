@@ -34,6 +34,11 @@ import sys
 from pathlib import Path
 from typing import Optional
 
+from mediahub.ai_core.prompt_guard import (
+    CAPTION_AI_TELL_INSTRUCTION,
+    CAPTION_CONCRETE_FACT_RULE,
+    CAPTION_SHARED_TONE_BANS,
+)
 from mediahub.web.languages import (
     caption_language_instruction,
     get_language,
@@ -109,6 +114,10 @@ KNOWN_AI_TONES: frozenset[str] = frozenset(_TONE_DESCRIPTORS.keys())
 
 AI_TELL_BAN_LIST: frozenset[str] = frozenset(
     {
+        # Overworked AI verbs / nouns. These are vanishingly rare in a
+        # genuine, specific swim caption written by a human, so dropping a
+        # candidate that uses one costs nothing and removes an obvious
+        # "written by a bot" tell.
         "delve",
         "delves",
         "delving",
@@ -116,16 +125,40 @@ AI_TELL_BAN_LIST: frozenset[str] = frozenset(
         "elevates",
         "elevated",
         "elevating",
+        "unleash",
+        "unleashed",
+        "unleashing",
+        "underscore",
+        "underscores",
+        "underscoring",
+        "boasts",
+        "myriad",
+        "plethora",
+        # Filler phrases that pad a caption without adding a fact.
         "in the world of",
+        "testament to",
+        "a testament",
+        "when it comes to",
+        "at the end of the day",
+        "needless to say",
+        "it's worth noting",
+        "it is worth noting",
+        "goes to show",
+        "speaks volumes",
+        "the epitome of",
+        "second to none",
+        "a shining example",
+        "leave no stone unturned",
+        "nothing short of",
+        "a force to be reckoned with",
+        "when all is said and done",
     }
 )
 
-_AI_TELL_SYSTEM_INSTRUCTION: str = (
-    "Never use these overworked AI phrases: "
-    '"delve", "elevate", "in the world of". '
-    "Avoid reflexive exclamation marks — use '!' only when the moment "
-    "genuinely warrants it, not as empty emphasis."
-)
+# Canonical anti-slop guidance now lives in ai_core.prompt_guard so every
+# caption surface shares one source of truth (see that module). Aliased to the
+# existing private names to keep this file's call sites unchanged.
+_AI_TELL_SYSTEM_INSTRUCTION: str = CAPTION_AI_TELL_INSTRUCTION
 
 
 _COURSE_SUFFIX_RE = re.compile(r"\s*\(\s*(SC|LC)\s*\)\s*$", re.IGNORECASE)
@@ -138,9 +171,7 @@ _NO_COURSE_ABBREV_INSTRUCTION: str = (
     "omit it."
 )
 
-_SHARED_TONE_BANS: str = (
-    'Do not open with "Another …" or "What a …"; never use the phrase "testament to".'
-)
+_SHARED_TONE_BANS: str = CAPTION_SHARED_TONE_BANS
 
 
 def _strip_course_suffix(event: str) -> str:
@@ -297,25 +328,31 @@ def filter_caption_variants(
 # Platform format specifications for generate_platform_variants
 # ---------------------------------------------------------------------------
 
+# Structural, not vibe-based: these are platform product rules (length,
+# hashtag conventions, where to open) — not "punchy/snappy/emoji welcome"
+# hype cues that produce interchangeable copy. Emoji is left to the club's
+# learned voice (injected separately), not forced on by platform.
 _PLATFORM_SPECS: dict[str, dict] = {
     "feed": {
         "label": "Instagram/Facebook feed",
         "max_chars": 280,
         "guidance": (
-            "casual and warm, emoji welcome, 1–3 hashtags, reads naturally in a feed scroll"
+            "warm and natural; open on the swimmer or the result, not a "
+            "generic hook; up to 3 hashtags; reads naturally in a scroll"
         ),
     },
     "story": {
         "label": "Instagram/TikTok story",
         "max_chars": 100,
         "guidance": (
-            "punchy single sentence, no hashtags, fits on a visual card, immediate impact"
+            "one sentence; lead with the swimmer or the number; no hashtags; "
+            "fits on a visual card"
         ),
     },
     "x": {
         "label": "X (Twitter)",
         "max_chars": 280,
-        "guidance": "snappy, 1–2 hashtags only, link-friendly, punchy opener",
+        "guidance": "open on the concrete result; 1–2 hashtags only; link-friendly",
     },
     "linkedin": {
         "label": "LinkedIn",
@@ -588,6 +625,8 @@ def _compose_caption_prompt(
         _AI_TELL_SYSTEM_INSTRUCTION,
         _NO_COURSE_ABBREV_INSTRUCTION,
         _SHARED_TONE_BANS,
+        # Every tone must stand on a real fact, not just the "ai" default.
+        CAPTION_CONCRETE_FACT_RULE,
         # Force genuine variety. The model has a strong attractor toward
         # the same opener / same closer wording on identical inputs;
         # this instruction nudges it off the attractor.
@@ -1023,6 +1062,7 @@ def generate_platform_variants(
             "no markdown.",
             _AI_TELL_SYSTEM_INSTRUCTION,
             _NO_COURSE_ABBREV_INSTRUCTION,
+            _SHARED_TONE_BANS,
         ]
         if language_line:
             system_parts.append(language_line)
