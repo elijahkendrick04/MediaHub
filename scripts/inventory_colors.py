@@ -21,11 +21,14 @@ from collections import Counter
 from pathlib import Path
 
 
+# The ``(?<!&)`` lookbehind excludes HTML numeric character references such as
+# ``&#127912;`` (the 🎨 emoji): those are entities, not CSS colours, but their
+# digits (``#127912``) otherwise match ``hex6`` and inflate the hardcode count.
 COLOUR_PATTERNS = [
-    ("hex8", re.compile(r"#[0-9a-fA-F]{8}\b")),
-    ("hex6", re.compile(r"#[0-9a-fA-F]{6}\b")),
-    ("hex4", re.compile(r"#[0-9a-fA-F]{4}\b(?![0-9a-fA-F])")),
-    ("hex3", re.compile(r"#[0-9a-fA-F]{3}\b(?![0-9a-fA-F])")),
+    ("hex8", re.compile(r"(?<!&)#[0-9a-fA-F]{8}\b")),
+    ("hex6", re.compile(r"(?<!&)#[0-9a-fA-F]{6}\b")),
+    ("hex4", re.compile(r"(?<!&)#[0-9a-fA-F]{4}\b(?![0-9a-fA-F])")),
+    ("hex3", re.compile(r"(?<!&)#[0-9a-fA-F]{3}\b(?![0-9a-fA-F])")),
     ("rgba", re.compile(r"rgba\([^)]+\)")),
     ("rgb",  re.compile(r"rgb\([^)]+\)")),
     ("hsla", re.compile(r"hsla\([^)]+\)")),
