@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-07-11 · `c737505b0` · [documents] close audit caveats: autoplay hand-off, data: image export, plain-hyphen copy (#1148)
+**Last updated:** 2026-07-11 · `7c5dce753` · Usability audit — the buildable Section-A tail (42 findings) (#1143)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1226,16 +1226,16 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-07-11 | `c82dd1030` | fix(review,configure,audio): server-correctness review findings (SRV-1..4) |
 | 2026-07-11 | `b00803d69` | [documents] unblock CI: migrate one hardcoded hex to var(--bg) (brand-budget) |
 | 2026-07-11 | `94c90c383` | [documents] close audit caveats: autoplay hand-off, data: image export, plain-hyphen copy |
 | 2026-07-11 | `14a280df4` | fix(theme): migrate video-letterbox #000 to a token (unblock hex budget) |
+| 2026-07-11 | `232e23838` | test: align main's new pins with the batch's intentional behaviour changes |
+| 2026-07-11 | `392ac8a9e` | test: align main's new pins with the batch's intentional behaviour changes |
 | 2026-07-11 | `06d40c8b4` | fix(inventory): don't count HTML numeric entities (&#NNNNN;) as hex colours |
 | 2026-07-11 | `6eb7eeeb6` | [team-members] fix logged caveats: atomic last-owner guard, snapshot reads, sole-owner controls, cop |
-| 2026-07-11 | `80718f478` | [developer-settings] report: record fourth-pass merge status + SHAs |
-| 2026-07-11 | `54b9db347` | [developer-settings] drop dead #FFB454 hex fallback to restore theme-token budget |
-| 2026-07-11 | `d94720c22` | [developer-settings] audit report: record F-4 fix (third pass) |
-| 2026-07-11 | `447bfce21` | [developer-settings] redact absolute server paths from public /healthz/deps |
-| 2026-07-11 | `976bb5bc8` | [event-preview] migrate a library-picker placeholder hex to var(--bg) |
-| 2026-07-11 | `b1b7f47b2` | [event-preview] record second-pass caveat fixes; verdict now WORKS |
-| 2026-07-11 | `53282a301` | [event-preview] lock the caveat fixes with tests |
+| 2026-07-11 | `5d75efef7` | fix(pack): escape the motion-manifest fields in _loadMotionWhy (JS-5) |
+| 2026-07-11 | `b75d3e652` | fix(pack): job start/resume races in the reel + motion client (JS-4, JS-3, CON-6) |
+| 2026-07-11 | `e9a5ad34e` | fix(review): paginated review page stops asserting falsehoods (JS-1, JS-2) |
+| 2026-07-11 | `9609e5b8e` | fix(jobs): torn-write races in the job store and the sponsor-variant sidecar (CON-4, CON-5) |
 <!-- /ROADMAP:ACTIVITY -->
