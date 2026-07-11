@@ -227,7 +227,7 @@ class TestApprovalPillCsrf:
             status_api_base="/api/drafts/abc123/card",
         )
         assert "application/json" in html
-        assert "JSON.stringify({status: status})" in html
+        assert "JSON.stringify({status: next})" in html  # G-6 renamed the cycled var
         # Regression guard: must not revert to a token-less multipart post.
         assert "new FormData(); fd.append('status'" not in html
         assert "__CSRF_TOKEN__" not in html
