@@ -74,7 +74,7 @@ The 15 highest-leverage items: all three severe first-run breakages, the high-se
 
 ## Implementation status
 
-**145 of 159 live findings shipped** (plus I-4 assessed as already satisfied). The audit produced 161 findings; two already-shipped ones (D-8 site passwords, H-6 site JSON editor) were retired along with the club-microsites feature (PR #1109), leaving 159 live. Delivered across five merged/merging PRs, each finding as its own commit with a dedicated regression test:
+**AUDIT COMPLETE — 159 of 159 live findings shipped** (plus I-4 assessed as already satisfied). The audit produced 161 findings; two already-shipped ones (D-8 site passwords, H-6 site JSON editor) were retired along with the club-microsites feature (PR #1109), leaving 159 live. Delivered across six merged/merging PRs, each finding as its own commit with a dedicated regression test:
 
 - **PR #1082** (merged) — all of Theme A + the 15-item fix-first shortlist and adjacent high-severity data-safety/discoverability items (23 findings).
 - **PR #1085** (merged) — Theme F complete, Theme I complete (bar the I-4 no-op), and the bulk of Theme D feedback/error states (47 findings).
@@ -83,20 +83,22 @@ The 15 highest-leverage items: all three severe first-run breakages, the high-se
 
 - **PR #1143** (this branch) — the entire buildable Section-A tail (42 findings), implemented in parallel across nine surface-cluster worktree branches and merged, each finding its own commit with a dedicated regression test. Review: G-1 (rejected cards get a first-class tab, live count and filter), J-3 (server-side pagination, 25 rank-ordered cards per page, full-queue bulk approve preserved), H-10 (caption editing surfaced: "Edit card", row caption, honest save errors, one-step restore), H-11 ("Use in next caption" saves to the card; standard no-key copy), E-13 (every translated slot renders before approval — approval-bypass closed). Pack/export: D-12 (grouped motion + certificates ZIP become background jobs with progress), D-13 (in-flight renders survive navigation and resume), G-8 (drifted grouped reel generator deleted), C-17 (reel dub-language picker with styled errors), J-4 (repurpose-pack copy/download, styled dialogs, one name), J-8 (/print lists your meets; "Print this page" disambiguated), E-5 (share links: copy button, visible expiry, run-wide token list + revoke). Drafts/plan: G-6 (labelled Approve/Re-queue buttons replace the click-to-cycle pill), H-9 (inline caption editing on draft cards), E-11 (Regenerate confirm + Previous versions), J-6 (Plan "Create" seeds free-text), H-14 (performance log records platform + draft), C-15 (shared planner sub-nav). Settings/forms: H-15 (audio forms confirm or explain), H-16 (AI font pairing applies to the brand), G-11 (caption language decoupled from interface language), E-10 (photo-editor reset confirm + unsaved-edit guard + undo). Auth: H-20 (2FA QR + single-use hashed recovery codes), J-16 (inline 2FA errors + back-to-login). Privacy/wall: H-17 (privacy forms fail loudly, values preserved), E-14 (erase scope preview; sponsor-overwrite notice), E-12 (wall switch-off consequence confirm), D-32 (sponsor variant renders via background job). Discoverability: C-10 (spotlight older-meets toggle + Activity link), C-11 (retired sponsor/session forms seed free-text), C-12 (Elements explains itself; stock reachable from the library), C-20 (exactly one "Start here"), G-2 (activity/status mirrors consolidated; shared Table·Feed·Season strip), G-7 ("Footage reel" naming + cross-links + nav highlight). Upload/configure: H-18 (inline upload rejections; client format check mirrors the server allowlist), H-13 (per-run brand-kit choice), H-12 (meet-digest meet picker). Cross-cutting: J-14 (valid pairing codes always connect; per-(IP, code) throttle with retry-after), J-15 (live "Talk to us about pricing" CTA), G-10 (Welsh covers the chrome + review verbs), D-11 (user-initiated mutations no longer fail silently; intentional-silence allowlist), G-14 (mechanical busy buttons standardised on MH.btnState).
 
-Themes **A**, **E**, **F**, **H** and **I** are complete. Everything left needs an owner decision (per the standing "ask first" list): the whole of **B** (too-many-steps), **C-19** (Settings IA grouping), **D-15** / **D-26** (organisation-page persistence semantics, planner reactivity), **G-5** (duplicate voice UI removal), **G-9** (two consent stores), and **J-9** (publish vocabulary unification).
+- **PR #1164** (this branch) — the owner-decision batch that completes the audit (13 findings). Owner decisions: build Theme B in full; Settings grouped under four clusters; /athletes is the consent record of truth; apply G-5, D-15, D-26, J-9. B-1 (Create interstitial shows once per type, persisted per profile, with a permanent "How it works" pill), B-2 (one primary download per card + one gated "Export pack" disclosure), B-3 (/pack/grouped demoted to read-only explore), B-4 (review rows slim to Approve + Edit card + Why; Re-queue only on decided cards; reactions inside the evidence disclosure; opt-in select mode), B-5 (per-card all-formats motion batch job with per-cut progress), B-7 (inline + bulk roster consent saves, tenant-gated JSON endpoint), B-8 (presenter QR deep-linking /remote/<code>), G-9 (/athletes two-tab consolidation: roster permissions + the GDPR consent registry as its audit trail; old URL redirects), C-19 (Settings under Your club / Content & brand / Account & billing / System with the Pricing tile folded into Billing), G-5 (single voice-analysis surface), D-15 (analysis persists immediately with one-shot Discard), D-26 (planner mutates in place with revert-on-failure), J-9 (Publish/Unpublish everywhere + a Share-publicly chooser).
+
+Every theme is complete. Nothing in this audit remains open.
 
 | Theme | Done | Remaining |
 |-------|------|-----------|
 | A — First-run & onboarding | 7/7 ✅ | — none — |
-| B — Too-many-steps | 1/8 | B-1, B-2, B-3, B-4, B-5, B-7, B-8 (all owner-decision) |
-| C — Discoverability / IA | 19/20 | C-19 (owner-decision) |
-| D — Feedback & error states | 32/34 | D-15, D-26 (owner-decision) — D-8 retired with sites (#1109) |
+| B — Too-many-steps | 8/8 ✅ | — none — |
+| C — Discoverability / IA | 20/20 ✅ | — none — |
+| D — Feedback & error states | 34/34 ✅ | — none — (D-8 retired with sites, #1109) |
 | E — Destructive / data-safety | 14/14 ✅ | — none — |
 | F — Jargon & labels | 14/14 ✅ | — none — |
-| G — Consistency | 13/15 | G-5, G-9 (owner-decision) |
+| G — Consistency | 15/15 ✅ | — none — |
 | H — Forms | 22/22 ✅ | — none — (H-6 retired with sites, #1109) |
 | I — Mobile & a11y | 8/9 (+1 N/A) ✅ | — none — |
-| J — Dead-ends | 15/16 | J-9 (owner-decision) |
+| J — Dead-ends | 16/16 ✅ | — none — |
 
 Done findings are marked **✅ DONE (PR #…)** inline on each block below. Everything unmarked is still open.
 
@@ -156,31 +158,31 @@ Fix: Persist the chosen setup mode (query param or `sessionStorage`) so redirect
 
 ### B. Too many steps / too many buttons (feature sprawl)
 
-**[B-1] Mandatory "how it works" interstitial on every Create flow, every visit — with wrong format guidance** — `medium` / `quick-win` (confirmed live)
+**[B-1] ✅ DONE (PR #1164) — Mandatory "how it works" interstitial on every Create flow, every visit — with wrong format guidance** — `medium` / `quick-win` (confirmed live)
 Affects: `/make`, `/make/<ct>` (all Create tiles; Plan pays it twice) — merges the home-nav, upload-flow, make-hub and live-walkthrough reports
 What the user hits: Every implemented Create tile links to an explainer slide whose only forward action is "Start <type>"; there is no skip, no "don't show again", and no direct path. A volunteer who uploads results every week re-reads the slide on every visit, turning the nav→upload journey into 7 clicks across 5 pages vs 4 from `/upload`. The Meet Recap slide's step 1 even says "Upload your Hytek results file (.hy3) or a zip" while `/upload` accepts PDF, CSV, Excel, SDIF and HTML — a volunteer holding a PDF may conclude at the interstitial that MediaHub can't help them.
 Evidence: `web.py:31737` sets every live tile's href to `content_type_intro` unconditionally; `content_intro.py:460-463,510` render only a "Start"/"Back to Create" CTA with no skip; the `content_type_intro` route (`web.py:32092-32138`) has no seen/skip check; the Plan slug also routes through the intro (`web.py:32104-32112`), duplicating the "Open Plan" CTA; observed live — Meet Recap intro lists only `.hy3`/zip.
 Fix: Link tiles directly to `meta.primary_route_endpoint` (show the intro only until the org has completed one run of that type, remembered in session/profile), keep a small "How it works" affordance on the tile and destination page, and fix the intro copy to list every accepted format.
 
-**[B-2] Content builder / pack: six-plus overlapping export & download actions with no clear primary** — `medium` / `moderate` (confirmed live)
+**[B-2] ✅ DONE (PR #1164) — Content builder / pack: six-plus overlapping export & download actions with no clear primary** — `medium` / `moderate` (confirmed live)
 Affects: `/pack/<run_id>` — merges the pack-export "five-button row" finding and the live-walkthrough "six export actions" finding
 What the user hits: For a single approved card the page shows a per-card "⬇ Download .zip", "Download every format + manifest (.zip)", "Download all visuals (.zip)", "Bulk export & convert…", "Print & merch…" and "Print / Export PDF" — plus four newsletter links and two certificate links: ~12 download affordances on one screen. The first two ZIPs differ only in internal folder layout and a `metadata.json` ("manifest" is engineering vocabulary). A volunteer who just wants "the Instagram post" cannot tell which is right; the per-card ZIP even downloads a 622-byte empty file when nothing is rendered.
 Evidence: `web.py:43342-43353` — the five-button row; `web.py:56586` docstring has to explain how `export.zip` is "Distinct from content_pack_zip"; `_export_disabled_attr` applied only to the two ZIP links, not the live "Bulk export…" link; observed live at `/pack/72e6f888f1e5` — 6 export actions + 4 newsletter + 2 certificate links for one card.
 Fix: Collapse to one primary "Download post (graphic + caption)" per card and a single "Export pack (N approved cards)…" disclosure holding all-formats/convert/print/certificates/newsletter; disable the per-card ZIP until it contains a rendered asset; put every pack-level export under the same rendered-count gate.
 
-**[B-3] `/pack`, `/pack/grouped` and `/review` are three overlapping views with duplicated controls** — `medium` / `large`
+**[B-3] ✅ DONE (PR #1164) — `/pack`, `/pack/grouped` and `/review` are three overlapping views with duplicated controls** — `medium` / `large`
 Affects: `/pack/<run_id>/grouped`
 What the user hits: The grouped "All recommendations" page repeats the builder's newsletter card verbatim (4 buttons), carries its own second reel UI without the builder's composer, and re-renders approve/reject straps that also live on `/review`. A volunteer bounces between "Back to review", "Content builder →" and "All recommendations" with no clear model of which page does what, and every duplicated control is another button to misunderstand.
 Evidence: `web.py:45042-45053` duplicates the newsletter block from `43293-43312`; `web.py:45032-45039` is a second reel UI without the composer at `43074-43100`; `_render_wf_actions` at `44907` duplicates the review queue's role.
 Fix: Make each page single-purpose — review = triage only, `/pack` = create + export; demote `/pack/grouped` to a read-only "explore all recommendations" view (remove its newsletter/reel/approve duplicates; link to the builder).
 
-**[B-4] Each review card row carries ~9–13 interactive controls around the one decision that matters** — `medium` / `moderate`
+**[B-4] ✅ DONE (PR #1164) — Each review card row carries ~9–13 interactive controls around the one decision that matters** — `medium` / `moderate`
 Affects: `/review/<run_id>`
 What the user hits: A single row renders a checkbox, Approve, Re-queue (always rendered, dimmed-not-hidden even when it does nothing), Inspect, three emoji reactions, a "Why this card?" disclosure (Copy reasoning + Use in next caption), and a "ranking & evidence" disclosure (View full trace JSON) — plus Download once approved. The owner's "too many buttons" instinct is measurably true on the money screen.
 Evidence: `web.py:22532-22582` — the row template; Re-queue always rendered via `_disabled_attrs` (`3566-3571`); reaction buttons always rendered (`3690-3701`, only the count span is hidden).
 Fix: Slim the default row to Approve + Inspect + the Why disclosure; render Re-queue only on approved/rejected/edited cards; fold reactions and the trace link behind the evidence disclosure (or drop reactions from triage); show the checkbox only in a select/hover mode.
 
-**[B-5] Getting all four motion cuts of one card takes four separate renders — the reel has a one-click batch, per-card motion doesn't** — `medium` / `moderate`
+**[B-5] ✅ DONE (PR #1164) — Getting all four motion cuts of one card takes four separate renders — the reel has a one-click batch, per-card motion doesn't** — `medium` / `moderate`
 Affects: `/pack/<run_id>`
 What the user hits: The reel composer offers "All 4 formats" (one click, one job). A single card's motion only offers per-format chips: to hand a volunteer story + portrait + square + landscape they click Story, wait up to 90s, then click each remaining chip and wait again — ~4 clicks and 4–6 minutes of babysitting per card, multiplied across a pack.
 Evidence: `web.py:4853-4866` — `_motionFmtChips` emits one `generateMotion` button per format, no batch; `web.py:53215-53230` — the reel-batch route exists but no motion-batch equivalent (repo grep for "motion-batch" is empty).
@@ -192,13 +194,13 @@ What the user hits: After refining a brief in chat the user clicks "Accept & gen
 Evidence: `web.py:33701` button "Accept & generate"; `free_text_chat_accept` (`33817-33835`) only sets `accepted_brief` and redirects; `free_text_chat_generate` (`33914`) redirects to the pack with NO `?autographic=1`, unlike the quick path (`33589`).
 Fix: Make "Accept & generate" actually run generation (merge accept+generate into one POST) and redirect with `?autographic=1` so the chat path ends with a rendered graphic; if two steps must stay, relabel the first "Accept brief".
 
-**[B-7] Setting consent is one athlete at a time with a full page reload each save** — `medium` / `moderate`
+**[B-7] ✅ DONE (PR #1164) — Setting consent is one athlete at a time with a full page reload each save** — `medium` / `moderate`
 Affects: `/athletes`
 What the user hits: Each roster row is its own mini-form (permission dropdown + Save) that POSTs and reloads the whole page, losing scroll. For a 200-swimmer club there is no in-roster bulk edit — reviewing consent means up to 200 individual submits and reloads, or falling back to a single opaque CSV textarea. This makes ongoing consent maintenance impractical for exactly the clubs the feature targets.
 Evidence: `web.py:57919-57924` per-row `<form method="POST">`; `58016-58021` handles a single `set_consent`; `58052` redirects back to the full page (no AJAX).
 Fix: Save consent changes inline via `fetch` (like the run-delete rows already do), or add a "save all changed rows" / "apply to selected" control so a club can process the roster in one pass.
 
-**[B-8] Pairing a presenter phone requires hand-typing a URL + 6-char code — no QR to scan** — `medium` / `moderate`
+**[B-8] ✅ DONE (PR #1164) — Pairing a presenter phone requires hand-typing a URL + 6-char code — no QR to scan** — `medium` / `moderate`
 Affects: `/documents/<id>/present`
 What the user hits: The console tells the presenter to read out the pairing details, but the remote URL is shown as static bold text (not even a link) and there is no QR. A poolside volunteer must type the full host URL, tap Go, type the 6-character code and tap Connect across two screens (~30 hand-typed characters).
 Evidence: `web.py:17679` renders "Open **__REMOTE_URL__**" as bold text (not an `<a>`); no QR anywhere in `_DOC_PRESENT_CONSOLE` (`17662-17716`).
@@ -316,7 +318,7 @@ What the user hits: Neither the presenter surface nor the slide remote appears i
 Evidence: `web.py:60056` defines `/remote` wrapped with `active='create'` but no nav item links it; the only Present entry is a button on the document page (`59636`).
 Fix: Add a "Slide remote" / "Present" shortcut to the account/tools menu so a phone user can reach the pairing screen without knowing the URL.
 
-**[C-19] Settings landing is a flat wall of 17 undifferentiated tiles with overlapping twins** — `medium` / `moderate` (confirmed live)
+**[C-19] ✅ DONE (PR #1164) — Settings landing is a flat wall of 17 undifferentiated tiles with overlapping twins** — `medium` / `moderate` (confirmed live)
 Affects: `/settings` — merges the settings-status and live-walkthrough findings
 What the user hits: A signed-in user sees 17 equal-weight tiles (18 for operators) in one flat grid with no grouping or ordering: "Organisation & brand" sits apart from "Brand platform"; "Billing & plan" next to "Pricing & plans". Reaching the right one of ~5 settings that matter takes 3 clicks when guessed right and 5+ when the wrong twin opens first. The hero even titles the page "Operations & data".
 Evidence: `web.py:27924-28057` — `_settings_card_specs` emits 17/18 tiles while its docstring still claims 12; overlapping tiles at `27933-27945` and `28003-28020`; hero H1 "Operations & data" (`28079`); observed live — 17 tiles listed.
@@ -410,7 +412,7 @@ What the user hits: The audio upload is a plain form POST; picking an unsupporte
 Evidence: `web.py:28610-28612`/`28629` return `jsonify(...)` 415/413 instead of routing through `_audio_back_or_json`; `38353-38354`/`38434-38435`/`38474-38475` return `_billing_unconfigured_response()` (503 JSON) to browser navigations.
 Fix: For non-JSON / `Accept: text/html` requests, return the same styled `_layout` error card the graceful pages use, keeping the JSON body only for `Accept: application/json` callers; state the 25 MB / file-type limits next to the audio input.
 
-**[D-15] 10–30s brand analysis on `/organisation` is discarded unless the user scrolls down and clicks "Save organisation"** — `medium` / `moderate`
+**[D-15] ✅ DONE (PR #1164) — 10–30s brand analysis on `/organisation` is discarded unless the user scrolls down and clicks "Save organisation"** — `medium` / `moderate`
 Affects: `/organisation`
 What the user hits: "Re-analyse brand" and "Analyse voice" run 10–30s of AI work then hold the result only in memory (a small tag says "click Save organisation to persist"), riding through hidden inputs in a separate form whose submit sits at the very bottom of a ~10-card page. A volunteer who glances at the preview and navigates away silently loses everything. The setup wizard, by contrast, persists immediately — same action, opposite semantics.
 Evidence: `web.py:35256-35257` comment "kept in-memory only"; info tags at `35331-35332`, `35407-35408`, `35463-35464`; results survive only via hidden inputs (`35870-35883`); the setup wizard saves immediately (`42086`).
@@ -476,7 +478,7 @@ What the user hits: Draft cards display a badge titled "Model confidence" (e.g. 
 Evidence: `web.py:33556` (0.9 quick), `33876` (0.85 chat), `32393` (0.9 spotlight), rendered as "<pct>% conf" titled "Model confidence" at `stubs.py:591-594` — directly under a comment (`588-589`) saying brief-led cards deliberately carry no confidence because "the engine refuses to fabricate one".
 Fix: Set `confidence` to `None` for prompt-led packs so the badge (already conditional on a real value) doesn't render, or replace it with "AI draft — review before posting".
 
-**[D-26] Every planner micro-interaction forces a full page reload, making batch work slow and lossy** — `medium` / `moderate`
+**[D-26] ✅ DONE (PR #1164) — Every planner micro-interaction forces a full page reload, making batch work slow and lossy** — `medium` / `moderate`
 Affects: `/plan/board`, `/plan/calendar`, `/plan/analytics`
 What the user hits: Each calendar drag, board add/move/delete/promote, and analytics log/remove ends in `window.location.reload()`. A committee member triaging ten ideas eats a full reload per action and loses scroll each time; the analytics form resets to defaults after every entry, so post type and date must be re-picked for each log.
 Evidence: `web.py:30446-30447`, `30867-30872`, `31113-31117`/`31119-31123` all reload on success, and the reload resets the log form.
@@ -740,7 +742,7 @@ What the user hits: The legacy page offers Primary/Secondary colour pickers and 
 Evidence: `web.py:36066-36080` (colour inputs + the "flows into every graphic" claim); save writes them straight to `brand_primary/secondary` (`35493-35497`) and flashes "Organisation saved." (`35584`); `club_profile.py:347-355` — `get_brand_kit()` resolves `effective_palette(manual, extracted)` first and only falls back to `brand_primary/secondary` when both are empty.
 Fix: Make these inputs write to `brand_palette_manual` (the slot that wins), or replace them with a read-only swatch row + an "Edit brand colours" link to the setup palette section. Never show an editable control whose value is known to be overridden.
 
-**[G-5] Duplicated voice-training UI on `/organisation`: two "Analyse voice" buttons, two identical caption textareas, and the same preview card rendered twice** — `medium` / `moderate`
+**[G-5] ✅ DONE (PR #1164) — Duplicated voice-training UI on `/organisation`: two "Analyse voice" buttons, two identical caption textareas, and the same preview card rendered twice** — `medium` / `moderate`
 Affects: `/organisation`
 What the user hits: The page has a standalone "Analyse voice from past posts" card (analyses without saving) AND a second "Voice examples" card inside the save form with its own textarea (also named `voice_examples`) and its own "Analyse voice" button (analyses AND saves). The same "Voice profile preview" panel is injected after both, so the identical block appears twice; the first-built variant is dead code. A volunteer has no way to know which same-labelled button to use or why results differ.
 Evidence: `web.py:36008-36017` vs `36134-36144` (two `voice_examples` textareas + two analyse buttons); `{voice_profile_html}` interpolated at both `36020` and `36146`; the panel built at `35710-35749` is overwritten at `35886` before render (dead code).
@@ -764,7 +766,7 @@ What the user hits: The grouped page has its own "Generate reel from this meet":
 Evidence: `web.py:45035` ("15-second") vs `5258-5260` (≈16.5s); `45092` `dims` has no "portrait" key while the chips iterate it (`45109`), so `dims['portrait']` is undefined (`45124`).
 Fix: Reuse the shared `generateReel`/`mhRenderReel` functions and `_MOTION_FMT_DIMS` on the grouped page, or link the grouped reel card to the pack composer.
 
-**[G-9] Two parallel, differently-named consent stores with no signpost to the authoritative one** — `medium` / `large`
+**[G-9] ✅ DONE (PR #1164) — Two parallel, differently-named consent stores with no signpost to the authoritative one** — `medium` / `large`
 Affects: Settings → Athletes & consent (`/athletes`) vs `/organisation/consent`
 What the user hits: Settings' "Athletes & consent" links to `/athletes`, which sets per-athlete "permission levels" via the safeguarding module. The orphaned `/organisation/consent` records granted/refused/revoked decisions with lawful basis via a separate compliance registry. An officer who finds one has no way of knowing the other exists or which is legally authoritative — a real compliance-integrity risk, not just a UX wrinkle.
 Evidence: `web.py:29321` links to `athletes_page` (imports `mediahub.safeguarding`, `57885`); `/organisation/consent` uses `mediahub.compliance.consent.ConsentRegistry` (`25929`).
@@ -1052,7 +1054,7 @@ What the user hits: The Print & merch reference page lists product chips and say
 Evidence: `web.py:52101-52113` (catalogue is chips only); `print_run_tool_page` linked only from the run page (`42988`, rendered at `43350`); `18890` the sole inbound link is the Help strip; `43350-43352` the two adjacent Print controls.
 Fix: On `/print`, list the user's recent meets with "Open print tool" links; on the run page rename "Print / Export PDF" to "Print this page" or move it out of the export row.
 
-**[J-9] Three overlapping ways to publish the same cards, each with different verbs and homes — plus two separate newsletter systems** — `medium` / `large`
+**[J-9] ✅ DONE (PR #1164) — Three overlapping ways to publish the same cards, each with different verbs and homes — plus two separate newsletter systems** — `medium` / `large`
 Affects: `/public-wall`, `/newsletters`
 What the user hits: The public wall and a published newsletter both produce a token-URL public page of the club's approved cards, but they live in different places and name the same action different ways: the wall "Switch[es] on"/"Switch[es] off & revoke[s]", newsletters "Publish"/"Take offline". On top, the app has two unrelated newsletter features (the run page's `/api/runs/<run_id>/newsletter` export and the standalone `/newsletters` composer). A volunteer asking "how do I share results with parents?" faces several near-equivalent answers.
 Evidence: `web.py:49750`/`49725` (wall) vs `web.py:59215/59226` (Take offline/Publish); a second run-scoped generator at `44364-44365` alongside `newsletters_home` (`59009`).
