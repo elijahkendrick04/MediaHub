@@ -19050,17 +19050,22 @@ _NEWSLETTERS_HOME_JS = (
 async function genNl(btn, fmt){
   var rangeEl=document.getElementById('nl-range');
   var range=rangeEl?rangeEl.value:'';
+  // H-12: the meet digest names its meet; '' keeps "latest meet in range".
+  var runEl=document.getElementById('nl-digest-run');
+  var runId=(fmt==='meet_digest'&&runEl)?runEl.value:'';
   _genBusy(btn, true);
   try{
-    const j = await _genNl(fmt, range, _aiChecked(btn));
+    const j = await _genNl(fmt, range, _aiChecked(btn), runId);
     if(j.ok){ location.href=j.url; return; }
     _genToast(_genMsg(j));
   }catch(e){ _genToast('Network error — nothing was created.'); }
   finally{ _genBusy(btn, false); }
 }
-async function _genNl(fmt, range, withAi){
+async function _genNl(fmt, range, withAi, runId){
+  const payload={format:fmt, range:range, with_ai:withAi};
+  if(runId) payload.run_id=runId;
   const r = await fetch('__GEN_URL__', {method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({format:fmt, range:range, with_ai:withAi})});
+    body: JSON.stringify(payload)});
   return r.json();
 }
 </script>
@@ -21716,14 +21721,16 @@ def create_app() -> Flask:
         # V8.2 issue 3: every upload now goes through /upload/configure.
         # The upload form has only the file input + submit. Branding is
         # collected on the configure step, after we've parsed the file.
+        #
+        # H-18: rejections never dead-end on a bare error card — they fall
+        # through to the full upload page (form, dropzone, recent meets)
+        # with the error rendered inline above the dropzone, so the
+        # volunteer can fix the problem and try again in place.
+        # upload_error values are fixed server-controlled literals (never
+        # user input — no filename/extension echo), rendered un-escaped.
+        upload_error = ""
         if request.method == "POST":
             f = request.files.get("file")
-            if not f or not f.filename:
-                return _layout(
-                    "Upload",
-                    '<div class="card"><p class="tag bad">No file selected.</p></div>',
-                    active="create",
-                )
             # Extension allowlist (THREAT_MODEL §1): results files only. The
             # file is stored as opaque bytes under a random run id and parsed
             # by deterministic parsers — but rejecting junk up front shrinks
@@ -21742,22 +21749,22 @@ def create_app() -> Flask:
                 ".txt",
                 ".xlsx",
             }
-            ext = os.path.splitext(f.filename)[1].lower()
-            if ext not in _ALLOWED_UPLOAD_EXTS:
-                return _layout(
-                    "Upload",
-                    '<div class="card"><p class="tag bad">That file type isn\'t supported. '
-                    "Upload meet results as HY3, SDIF/SD3/CL2, ZIP, PDF, HTML, CSV or Excel (.xlsx).</p></div>",
-                    active="create",
-                ), 400
-            data = f.read()
-            if not data:
-                return _layout(
-                    "Upload",
-                    '<div class="card"><p class="tag bad">Uploaded file was empty.</p></div>',
-                    active="create",
+            data = b""
+            ext = os.path.splitext(f.filename)[1].lower() if f and f.filename else ""
+            if not f or not f.filename:
+                upload_error = "Please choose a results file first."
+            elif ext not in _ALLOWED_UPLOAD_EXTS:
+                upload_error = (
+                    "That file type isn't supported. Upload meet results as "
+                    "HY3, SDIF/SD3/CL2, ZIP, PDF, HTML, CSV, TXT or Excel (.xlsx)."
                 )
-
+            else:
+                data = f.read()
+                if not data:
+                    upload_error = (
+                        "That file is empty. Export the results file again and re-upload it."
+                    )
+        if request.method == "POST" and not upload_error:
             temp_run_id = uuid.uuid4().hex[:12]
             tmp_dir = RUNS_DIR / temp_run_id
             tmp_dir.mkdir(parents=True, exist_ok=True)
@@ -22049,12 +22056,17 @@ def create_app() -> Flask:
                 .replace("__CSRF__", _csrf_token())
             )
 
+        # H-18: a rejected POST re-renders this same page with the error
+        # inline — same region and look the client-side showError() uses.
+        _upload_err_hidden = "" if upload_error else " hidden"
+        _upload_dz_invalid = ' style="border-color:var(--bad)"' if upload_error else ""
+
         body = f"""
 <div class="mh-fx mh-aurora" style="overflow:hidden;border-radius:var(--radius-lg);margin-bottom:var(--sp-4)">
 <section class="mh-hero" data-lane="01" style="padding-top:var(--sp-8);padding-bottom:var(--sp-6)">
   <span class="mh-hero-eyebrow">Upload meet file</span>
   <h1>Drop the results.<br><em class="editorial">We'll do the rest.</em></h1>
-  <p class="lede">Upload your meet results file — Hytek&nbsp;<code>.hy3</code>&hairsp;/&hairsp;<code>.zip</code>, SDIF&hairsp;/&hairsp;SD3, PDF, CSV, Excel&nbsp;<code>.xlsx</code> or HTML. You'll pick your club, upload your logo, and add photos on the next step.</p>
+  <p class="lede">Upload your meet results file — Hytek&nbsp;<code>.hy3</code>&hairsp;/&hairsp;<code>.hyv</code>&hairsp;/&hairsp;<code>.zip</code>, SDIF&hairsp;/&hairsp;SD3&hairsp;/&hairsp;CL2, PDF, CSV, TXT, Excel&nbsp;<code>.xlsx</code> or HTML. You'll pick your club, upload your logo, and add photos on the next step.</p>
 </section>
 </div>
 
@@ -22073,7 +22085,8 @@ def create_app() -> Flask:
 <div class="card">
   <form id="mh-upload-form" method="post" enctype="multipart/form-data" data-loader-text="Reading your meet file">
     <label class="req" for="upload-file">Meet results file</label>
-    <label class="mh-dropzone" for="upload-file">
+    <div id="mh-upload-error" class="mh-field-error" role="alert"{_upload_err_hidden} style="margin-bottom:var(--sp-3)">{upload_error}</div>
+    <label class="mh-dropzone" for="upload-file"{_upload_dz_invalid}>
       <svg class="mh-dropzone-icon" viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
         <path d="M24 32V12"/>
         <polyline points="16 19 24 11 32 19"/>
@@ -22082,14 +22095,13 @@ def create_app() -> Flask:
       <div class="mh-dropzone-headline">Drop your results file</div>
       <div class="mh-dropzone-sub">or click to browse</div>
       <input id="upload-file" type="file" name="file" accept=".hy3,.hyv,.sd3,.sdif,.cl2,.zip,.pdf,.htm,.html,.csv,.txt,.xlsx" required />
-      <div class="mh-dropzone-fineprint">HY3 · SDIF/SD3/CL2 · ZIP · PDF · CSV · HTML</div>
+      <div class="mh-dropzone-fineprint">HY3 · SDIF/SD3/CL2 · ZIP · PDF · CSV · TXT · HTML · Excel (.xlsx)</div>
       <div class="mh-dropzone-preview" aria-live="polite"></div>
     </label>
     <div id="mh-parse-preview" class="mh-parse-preview" role="status" aria-live="polite">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
       <div class="label"><b>—</b><span></span></div>
     </div>
-    <div id="mh-upload-error" class="mh-field-error" role="alert" hidden style="margin-top:var(--sp-3)"></div>
     <div style="margin-top:var(--sp-5);display:flex;gap:var(--sp-3);flex-wrap:wrap">
       <button id="mh-upload-submit" class="btn mh-cta-motion" type="submit">
         <span class="mh-btn-label">Continue &rarr;</span>
@@ -22140,6 +22152,8 @@ def create_app() -> Flask:
     if (n < 1024 * 1024 * 1024) return (n / (1024 * 1024)).toFixed(1) + ' MB';
     return (n / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
   }}
+  // Mirrors the server's upload extension allowlist exactly — a file the
+  // preview calls good is a file the server will accept, and vice versa.
   function inferFormat(name) {{
     var n = (name || '').toLowerCase();
     if (n.endsWith('.hy3'))  return {{kind: 'good', label: 'Hytek Meet Manager (.hy3)',  note: 'looks good'}};
@@ -22152,16 +22166,31 @@ def create_app() -> Flask:
     if (n.endsWith('.csv'))  return {{kind: 'good', label: 'CSV results file',           note: 'we\\u2019ll read every row'}};
     if (n.endsWith('.htm') || n.endsWith('.html')) return {{kind: 'good', label: 'HTML results page', note: 'we\\u2019ll extract the result tables'}};
     if (n.endsWith('.txt'))  return {{kind: 'good', label: 'Text results file',          note: 'we\\u2019ll try every adapter'}};
-    return {{kind: 'warn', label: 'Unknown extension', note: 'we\\u2019ll try every adapter; results may be partial'}};
+    if (n.endsWith('.xlsx')) return {{kind: 'good', label: 'Excel workbook (.xlsx)',     note: 'we\\u2019ll read every sheet'}};
+    if (n.endsWith('.xls'))  return {{kind: 'bad',  label: 'Old Excel format (.xls)',    note: 'save it as .xlsx and upload that instead'}};
+    var dot = n.lastIndexOf('.');
+    var ext = dot > 0 ? n.slice(dot) : '';
+    return {{kind: 'bad',
+             label: ext ? 'MediaHub can\\u2019t read ' + ext + ' files' : 'MediaHub can\\u2019t read this file',
+             note: 'upload HY3, SDIF/SD3/CL2, ZIP, PDF, HTML, CSV, TXT or Excel (.xlsx)'}};
   }}
   function refresh() {{
     var f = input.files && input.files[0];
     var has = !!f;
-    if (has) clearError();
-    if (!has) {{ if (preview) preview.removeAttribute('data-shown'); return; }}
-    if (!preview) return;
+    if (!has) {{ if (preview) preview.removeAttribute('data-shown'); btn.disabled = false; return; }}
     var info = inferFormat(f.name);
-    preview.className = 'mh-parse-preview' + (info.kind === 'warn' ? ' warn' : '');
+    // Honest blocker: the drag-and-drop path bypasses the picker's accept
+    // filter, so an unsupported file is stopped here instead of 400ing
+    // after the upload.
+    if (info.kind === 'bad') {{
+      btn.disabled = true;
+      showError(info.label + ' \\u2014 ' + info.note + '.');
+    }} else {{
+      btn.disabled = false;
+      clearError();
+    }}
+    if (!preview) return;
+    preview.className = 'mh-parse-preview' + (info.kind === 'warn' ? ' warn' : (info.kind === 'bad' ? ' bad' : ''));
     var labelEl = preview.querySelector('.label');
     labelEl.querySelector('b').textContent = info.label + ' \\u00b7 ' + fmtBytes(f.size);
     labelEl.querySelector('span').textContent = info.note;
@@ -22181,7 +22210,8 @@ def create_app() -> Flask:
 }})();
 </script>
 """
-        return _layout("Upload", body, active="create")
+        page = _layout("Upload", body, active="create")
+        return (page, 400) if upload_error else page
 
     # ---- UPLOAD CONFIGURE (V8.1 issue 6: two-step; V8.2 issue 6: photos) ---
     def _render_configure(
@@ -22424,6 +22454,59 @@ def create_app() -> Flask:
                     "so it flows through to every graphic.</p>"
                 )
 
+        # H-13: brand-kit chooser. Only rendered when the org actually has two
+        # or more kits — a single-kit org has nothing to choose, so the control
+        # is hidden entirely. Defaults to the org's current default kit; the
+        # choice applies to this run only (the org-wide default is untouched).
+        # Swatch colours come from each kit's own palette data (inheriting the
+        # org palette where a kit slot is blank) — never hardcoded here.
+        kit_select_html = ""
+        if active_prof is not None:
+            try:
+                from mediahub.brand import kits as _bkits
+
+                _org_kits = _bkits.list_kits(active_prof)
+                if len(_org_kits) >= 2:
+                    _default_kid = _bkits.default_kit_id(active_prof)
+                    _opts = ""
+                    _sel_name, _sel_cols = "", (prof_primary, prof_secondary, prof_accent)
+                    for _k in _org_kits:
+                        _kp = _k.palette or {}
+                        _o_cols = (
+                            _kp.get("primary") or prof_primary,
+                            _kp.get("secondary") or prof_secondary,
+                            _kp.get("accent") or prof_accent,
+                        )
+                        _is_def = _k.kit_id == _default_kid
+                        if _is_def or not _sel_name:
+                            _sel_name, _sel_cols = _k.name, _o_cols
+                        _opts += (
+                            f'<option value="{_h(_k.kit_id)}"{" selected" if _is_def else ""} '
+                            f'data-name="{_h(_k.name)}" data-primary="{_h(_o_cols[0])}" '
+                            f'data-secondary="{_h(_o_cols[1])}" data-accent="{_h(_o_cols[2])}">'
+                            f"{_h(_k.name)}{' (default)' if _is_def else ''}</option>"
+                        )
+                    _sw_spans = "".join(
+                        '<span style="width:14px;height:14px;border-radius:4px;'
+                        f'border:1px solid var(--border);background-color:{_h(_c)}"></span>'
+                        for _c in _sel_cols
+                    )
+                    kit_select_html = (
+                        '<div style="margin-top:14px">'
+                        '<label for="run-config-kit">Brand kit for these results</label>'
+                        f'<select name="brand_kit_id" id="run-config-kit">{_opts}</select>'
+                        '<div style="display:flex;align-items:center;gap:8px;margin-top:6px">'
+                        f'<span id="mh-kit-choice-sw" style="display:inline-flex;gap:4px" aria-hidden="true">{_sw_spans}</span>'
+                        f'<span id="mh-kit-choice-name" class="dim" style="font-size:var(--fs-sm)">{_h(_sel_name)}</span>'
+                        "</div>"
+                        '<p class="dim" style="margin-top:4px;font-size:var(--fs-sm)">'
+                        "Applies to these results only &mdash; your organisation&rsquo;s "
+                        "default kit stays unchanged for future meets.</p>"
+                        "</div>"
+                    )
+            except Exception:
+                kit_select_html = ""
+
         body = f"""
 <section class="mh-hero" data-lane="02" style="padding-top:var(--sp-7);padding-bottom:var(--sp-5);margin-bottom:var(--sp-4)">
   <span class="mh-hero-eyebrow">Configure this run</span>
@@ -22457,6 +22540,7 @@ def create_app() -> Flask:
         Tweak below for a one-off override; the preview on the right updates as you move the picker.
       </p>
       {prof_logo_html}
+      {kit_select_html}
 
       <div style="display:flex;gap:14px;align-items:flex-end;margin-top:12px;flex-wrap:wrap">
         <div style="flex:1;min-width:120px"><label for="run-config-primary">Primary</label><input id="run-config-primary" type="color" name="primary_colour" value="{_h(prof_primary)}" /></div>
@@ -22524,6 +22608,26 @@ def create_app() -> Flask:
     if (acc) acc.addEventListener(evt, paint);
   }});
   paint();
+
+  // H-13: brand-kit chooser — mirror the selected kit's name + palette
+  // swatches beside the select so the volunteer sees what the kit means
+  // before running. Colours ride on each <option>'s data attributes.
+  var kitSel  = document.getElementById('run-config-kit');
+  var kitName = document.getElementById('mh-kit-choice-name');
+  var kitSw   = document.getElementById('mh-kit-choice-sw');
+  function kitPaint() {{
+    if (!kitSel || !kitSel.options.length) return;
+    var o = kitSel.options[kitSel.selectedIndex];
+    if (!o) return;
+    if (kitName) kitName.textContent = o.getAttribute('data-name') || o.textContent;
+    if (kitSw) {{
+      var cols = [o.getAttribute('data-primary'), o.getAttribute('data-secondary'), o.getAttribute('data-accent')];
+      for (var i = 0; i < kitSw.children.length && i < 3; i++) {{
+        if (cols[i]) kitSw.children[i].style.backgroundColor = cols[i];
+      }}
+    }}
+  }}
+  if (kitSel) {{ kitSel.addEventListener('change', kitPaint); kitPaint(); }}
 
   // Colour-order tools — same idea as "Cycle colours" on organisation
   // setup, but scoped to this one run. Reset restores the official
@@ -22817,6 +22921,21 @@ def create_app() -> Flask:
             accent_form = (request.form.get("accent_colour") or "").strip() or None
             use_logo_colours = False
             display_name_form = (request.form.get("display_name") or club_filter or "").strip()
+            # H-13: which of the org's saved brand kits these results run
+            # under. Validated against the org's kit list — an unknown or
+            # foreign id degrades to "" (= the org's default kit), so a
+            # tampered form can never pin a kit the org doesn't own.
+            brand_kit_choice = (request.form.get("brand_kit_id") or "").strip()
+            if brand_kit_choice:
+                try:
+                    from mediahub.brand import kits as _bkits
+
+                    if active_prof_for_run is None or (
+                        _bkits.get_kit(active_prof_for_run, brand_kit_choice) is None
+                    ):
+                        brand_kit_choice = ""
+                except Exception:
+                    brand_kit_choice = ""
             # We always have branding now (the profile guarantees it), so
             # the old "branding required" gate is removed. If somehow
             # neither the profile nor the form supplies colours, the
@@ -22923,6 +23042,7 @@ def create_app() -> Flask:
                     accent_form=accent_form,
                     use_logo_colours=False,
                     display_name=display_name_form,
+                    brand_kit_id=brand_kit_choice,
                 )
             except Exception:
                 pass
@@ -42687,7 +42807,13 @@ what you're doing, what they should do.</p>
         return not _tenancy.MembershipStore().is_bound(pid) and _session_can_use_profile(pid)
 
     def _resolved_kit_for_run(run_id: str, run_data=None):
-        """The brand kit the pipeline applies to this run (default kit today).
+        """The brand kit the pipeline applies to this run.
+
+        H-13: prefers the kit the user chose on the configure step
+        (``brand_kit_id`` persisted with the run's brand-kit config in
+        ``data/brand_kits/<run_id>.json``). An absent, empty, or since-deleted
+        id falls back to the org's default kit via ``resolve_kit_for``, so
+        runs recorded before the chooser existed behave exactly as before.
 
         Returns (profile, kit) or (None, None) when no profile resolves.
         """
@@ -42698,7 +42824,17 @@ what you're doing, what they should do.</p>
             return None, None
         from mediahub.brand import kits as _kits
 
-        return prof, _kits.resolve_kit_for(prof)
+        chosen_kit_id = ""
+        try:
+            _kit_path = DATA_DIR / "data" / "brand_kits" / f"{run_id}.json"
+            if _kit_path.exists():
+                chosen_kit_id = str(
+                    (json.loads(_kit_path.read_text()) or {}).get("brand_kit_id") or ""
+                ).strip()
+        except Exception:
+            chosen_kit_id = ""
+
+        return prof, _kits.resolve_kit_for(prof, kit_id=chosen_kit_id or None)
 
     def _card_content_type(run_id: str, card_id: str, run_data=None) -> str:
         """Best-effort content-type key for per-type approver rules (1.18).
@@ -43507,16 +43643,16 @@ what you're doing, what they should do.</p>
         brief_dict = _latest_brief_for_card(run_id, card_id)
         if not brief_dict:
             return None, (jsonify({"error": "no_brief"}), 404)
-        from mediahub.brand import kits as _kits
         from mediahub.creative_brief.generator import CreativeBrief
 
-        profile_id = run_data.get("profile_id", "")
-        prof = load_profile(profile_id) if profile_id else _active_profile()
+        # H-13: one resolver — the check must judge the card against the same
+        # kit the approval gate (_brand_lock_block_reason) enforces, i.e. the
+        # kit chosen for this run, not unconditionally the org default.
+        prof, kit = _resolved_kit_for_run(run_id, run_data)
         if prof is None:
             return None, (jsonify({"error": "no_profile"}), 404)
         brief = CreativeBrief.from_dict(brief_dict)
-        kit = _kits.resolve_kit_for(prof)
-        brand_kit = _resolve_run_brand_kit(profile_id, run_id, run_data)
+        brand_kit = _resolve_run_brand_kit(run_data.get("profile_id", ""), run_id, run_data)
         return (brief, kit, brand_kit, prof), None
 
     @app.route("/api/runs/<run_id>/card/<card_id>/brand-check", methods=["GET"])
@@ -64416,16 +64552,32 @@ voice, and queues them for one-click approval.</p>
                 f'gap:12px">{"".join(rows)}</div>'
             )
 
-        def _tile(fmt, name, desc):
+        def _tile(fmt, name, desc, extra=""):
             return (
                 '<div class="card"><h3 style="margin-top:0">' + name + "</h3>"
-                '<p class="dim" style="font-size:13px">' + desc + "</p>"
-                '<label class="mh-ai-opt" style="display:flex;align-items:center;gap:6px;'
+                '<p class="dim" style="font-size:13px">'
+                + desc
+                + "</p>"
+                + extra
+                + '<label class="mh-ai-opt" style="display:flex;align-items:center;gap:6px;'
                 'font-size:12px;margin-top:8px;color:var(--ink-muted)">'
                 '<input type="checkbox" class="mh-ai-toggle" checked> Write the intro with AI</label>'
                 '<button class="btn" style="margin-top:8px" onclick="genNl(this,\'' + fmt + "')\">"
                 "Generate</button></div>"
             )
+
+        # H-12: the meet digest names which meet it covers. Same recent-meets
+        # query the Documents "Meet programme" tile uses; the default option
+        # keeps the pick-the-latest-in-range behaviour for one-click use.
+        digest_run_opts = '<option value="">Latest meet in range</option>' + "".join(
+            f'<option value="{_h(rid)}">{_h(name)} ({n} cards)</option>'
+            for rid, name, n in _doc_recent_runs(pid)
+        )
+        digest_meet_select = (
+            '<label class="dim" for="nl-digest-run" style="font-size:12px;display:block;'
+            'margin-top:8px">Meet</label>'
+            f'<select id="nl-digest-run" class="input">{digest_run_opts}</select>'
+        )
 
         body = (
             '<section class="mh-hero"><h1>Newsletters</h1>'
@@ -64446,6 +64598,7 @@ voice, and queues them for one-click approval.</p>
                 "meet_digest",
                 "Meet digest",
                 "One meet: the standout swims, athletes to watch and what's next.",
+                extra=digest_meet_select,
             )
             + _tile(
                 "season_highlights",
@@ -64519,6 +64672,14 @@ voice, and queues them for one-click approval.</p>
             return jsonify({"ok": False, "error": "bad_format"}), 400
         preset = (body.get("range") or "this_month").strip()
         with_ai = bool(body.get("with_ai", True))
+        # H-12: the meet digest can pin exactly one meet. Only the digest
+        # takes a run_id; ownership is tenant-gated the same way as every
+        # other per-run endpoint (a foreign run answers like a missing one).
+        run_id = (body.get("run_id") or "").strip()
+        if run_id and fmt != "meet_digest":
+            run_id = ""
+        if run_id and not _can_access_run(run_id, _load_run(run_id), pid):
+            return jsonify({"ok": False, "error": "run_not_found"}), 404
         if with_ai:  # AI drafting is metered spend — permission + quota first
             denied = _editorial_ai_gate(pid)
             if denied is not None:
@@ -64539,6 +64700,7 @@ voice, and queues them for one-click approval.</p>
                 with_ai=with_ai,
                 profile=prof,
                 runs_dir=RUNS_DIR,
+                run_id=run_id or None,
             )
         except Exception as e:  # honest AI-unavailable signal — offer a data-only build
             from mediahub.media_ai.llm import ClaudeUnavailableError
