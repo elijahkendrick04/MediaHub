@@ -19361,7 +19361,7 @@ async function nlDelete(){
   if(j.ok) location.href='__HOME_URL__'; else alert('Delete failed.');
 }
 async function nlPublish(pub){
-  const msg=document.getElementById('nl-msg'); msg.textContent=pub?'Publishing…':'Taking offline…';
+  const msg=document.getElementById('nl-msg'); msg.textContent=pub?'Publishing…':'Unpublishing…';
   const r=await fetch(pub?'__PUB_URL__':'__UNPUB_URL__',{method:'POST',headers:{'Content-Type':'application/json'}}); const j=await r.json();
   if(j.ok){ setTimeout(()=>location.reload(), 500); } else { msg.textContent=j.error||'Failed.'; }
 }
@@ -35352,7 +35352,7 @@ function mhAnDigest(btn) {{
             "</div>"
             "<p>A free public celebration page of your approved cards &mdash; share the "
             "link, embed it on your club website, or offer an RSS/JSON feed. One "
-            "shared URL you can switch on and off.</p>"
+            "shared URL you can publish and unpublish.</p>"
             '<div class="mh-template-formats">'
             '<span class="mh-template-fmt">Public page</span>'
             '<span class="mh-template-fmt">Website embed</span>'
@@ -48087,6 +48087,43 @@ function mhSetupMode(mode) {{
             else ""
         )
 
+        # J-9 — one "Share publicly" chooser: the two token-URL surfaces where
+        # approved cards can go live, each with a one-line explanation. Links
+        # only — nothing here publishes anything; each destination has its own
+        # explicit Publish step. Kept as its own card, outside the export row.
+        _share_newsletter_row = (
+            (
+                '<div style="font-size:13px;margin-top:6px">'
+                f'<a href="{_h(url_for("newsletters_home"))}">Newsletter</a>'
+                " &mdash; a digest you publish or email.</div>"
+            )
+            if _email_design_ok
+            else ""
+        )
+        _share_publicly_html = (
+            '<div class="card no-print" id="mh-share-publicly" style="margin-top:14px">'
+            '<div style="font-size:13px;font-weight:700">Share publicly</div>'
+            '<div style="font-size:12px;color:var(--ink-dim);margin:2px 0 8px">'
+            "Where approved cards can go beyond downloads. Nothing goes public until "
+            "you press Publish there.</div>"
+            '<div style="font-size:13px">'
+            f'<a href="{_h(url_for("public_wall_settings"))}">Public wall</a>'
+            " &mdash; a live page of your approved cards.</div>"
+            f"{_share_newsletter_row}"
+            "</div>"
+        )
+        # J-9 — the one-off meet email above vs the recurring composer: one
+        # clarifying line so the two newsletter systems stop reading as one.
+        _nl_composer_hint = (
+            (
+                '<div style="font-size:12px;color:var(--ink-dim);margin-top:4px">'
+                "Building a recurring email? Use "
+                f'<a href="{_h(url_for("newsletters_home"))}">Newsletters</a>.</div>'
+            )
+            if _email_design_ok
+            else ""
+        )
+
         body = f"""
 <style>
 @media print {{
@@ -48135,6 +48172,7 @@ function mhSetupMode(mode) {{
   <div>
     <div style="font-size:13px;font-weight:700">Parent newsletter</div>
     <div style="font-size:12px;color:var(--ink-dim);margin-top:2px">Branded HTML email + plaintext fallback, ready to paste into Mailchimp / ConvertKit / your email client.</div>
+    {_nl_composer_hint}
   </div>
   <div style="display:flex;gap:6px;flex-wrap:wrap">
     <a class="btn secondary" style="font-size:12px;padding:6px 12px" href="{
@@ -48197,6 +48235,8 @@ function mhSetupMode(mode) {{
             title="Use the browser print dialog on this page as it stands — for a press-ready file use Print &amp; merch instead">Print this page</button>
   </div>
 </div>
+
+{_share_publicly_html}
 
 <style>{_CARD_TOOLBAR_CSS}</style>
 {_CARD_TOOLBAR_JS}
@@ -49806,6 +49846,18 @@ function tiRegenerate(btn) {{
         _newsletter_html_url = url_for("api_run_newsletter", run_id=run_id)
         _newsletter_text_url = _newsletter_html_url + "?format=text"
         _newsletter_zip_url = _newsletter_html_url + "?format=zip"
+        # J-9 — same clarifying line as the Content builder's newsletter block:
+        # this card is the one-off meet email; recurring digests live in the
+        # Newsletters composer.
+        _nl_composer_hint = (
+            (
+                '<div style="font-size:12px;color:var(--ink-dim);margin-top:4px">'
+                "Building a recurring email? Use "
+                f'<a href="{_h(url_for("newsletters_home"))}">Newsletters</a>.</div>'
+            )
+            if _email_design_ok
+            else ""
+        )
 
         if not _v73_ok or _build_grouped_pack is None:
             return redirect(_pack_url)
@@ -50103,6 +50155,7 @@ function tiRegenerate(btn) {{
   <div>
     <div style="font-size:13px;font-weight:700">Parent newsletter</div>
     <div style="font-size:12px;color:var(--ink-dim);margin-top:2px">Branded HTML email + plaintext fallback, ready to paste into Mailchimp / ConvertKit / your email client.</div>
+    {_nl_composer_hint}
   </div>
   <div style="display:flex;gap:6px;flex-wrap:wrap">
     <a class="btn secondary" style="font-size:12px;padding:6px 12px" href="{_h(_newsletter_html_url)}" target="_blank" rel="noopener">Preview HTML &rarr;</a>
@@ -55319,7 +55372,7 @@ workflow, and the publish log &mdash; deterministic and auditable.</p>
   <form method="post" action="{url_for("public_wall_update")}" style="margin-top:14px"
         onsubmit="return mhWallOffConfirm(this)">
     <input type="hidden" name="action" value="disable">
-    <button type="submit" class="btn secondary">Switch off &amp; revoke the link</button>
+    <button type="submit" class="btn secondary">Unpublish &amp; revoke link</button>
   </form>
 </div>
 <div class="card" style="margin-bottom:20px">
@@ -55363,13 +55416,13 @@ function mhWallOffConfirm(f) {
         else:
             status_block = f"""
 <div class="card empty">
-  <p><b>Your public wall is off.</b> Switching it on creates an unguessable public link
+  <p><b>Your public wall is not published.</b> Publishing it creates an unguessable public link
   showing only your <i>approved</i> cards — a celebration page you can share or embed in
-  the club website. Names display as initials by default. Switching it off later revokes
+  the club website. Names display as initials by default. Unpublishing later revokes
   the link immediately.</p>
   <form method="post" action="{url_for("public_wall_update")}">
     <input type="hidden" name="action" value="enable">
-    <button type="submit" class="btn">Switch on the public wall</button>
+    <button type="submit" class="btn">Publish wall</button>
   </form>
 </div>"""
 
@@ -65368,7 +65421,7 @@ voice, and queues them for one-click approval.</p>
                 "<strong>Hosted web version is live.</strong> "
                 f'<a href="{_h(hosted)}" target="_blank">{_h(hosted)}</a>'
                 '<div style="margin-top:8px">'
-                '<button class="btn secondary" onclick="nlPublish(false)">Take offline</button> '
+                '<button class="btn secondary" onclick="nlPublish(false)">Unpublish</button> '
                 '<button class="btn secondary" onclick="nlPublish(true)">Re-publish latest</button>'
                 "</div></div>"
             )
