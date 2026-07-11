@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-07-11 · `00df1a978` · Merge pull request #1150 from elijahkendrick04/claude/event-preview-audit-vhr4xq
+**Last updated:** 2026-07-11 · `c737505b0` · [documents] close audit caveats: autoplay hand-off, data: image export, plain-hyphen copy (#1148)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1226,6 +1226,8 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-07-11 | `b00803d69` | [documents] unblock CI: migrate one hardcoded hex to var(--bg) (brand-budget) |
+| 2026-07-11 | `94c90c383` | [documents] close audit caveats: autoplay hand-off, data: image export, plain-hyphen copy |
 | 2026-07-11 | `14a280df4` | fix(theme): migrate video-letterbox #000 to a token (unblock hex budget) |
 | 2026-07-11 | `06d40c8b4` | fix(inventory): don't count HTML numeric entities (&#NNNNN;) as hex colours |
 | 2026-07-11 | `6eb7eeeb6` | [team-members] fix logged caveats: atomic last-owner guard, snapshot reads, sole-owner controls, cop |
@@ -1236,6 +1238,4 @@ list and the auto table below, not here.
 | 2026-07-11 | `976bb5bc8` | [event-preview] migrate a library-picker placeholder hex to var(--bg) |
 | 2026-07-11 | `b1b7f47b2` | [event-preview] record second-pass caveat fixes; verdict now WORKS |
 | 2026-07-11 | `53282a301` | [event-preview] lock the caveat fixes with tests |
-| 2026-07-11 | `c7d23b842` | [event-preview] fix the nine logged caveats (F7-F15) |
-| 2026-07-11 | `1a9733f17` | [event-preview] add SSRF-safe document-fetch helpers |
 <!-- /ROADMAP:ACTIVITY -->
