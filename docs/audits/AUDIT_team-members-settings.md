@@ -128,23 +128,32 @@ Severity: P0 broken/dataloss/security-hole · P1 wrong behaviour or lying contro
 
 *(Commit column uses the commit subject-tag rather than a SHA — hashes churn on each rebase onto the moving `main`. Map to SHAs with `git log origin/main..HEAD`.)*
 
-### Logged (not fixed — with rationale)
+### Caveat round — now fixed (follow-up after #1131 merged)
+
+The items below were logged in the first pass and fixed in a follow-up change on
+request. Each is locked by a test in `tests/test_audit_team_members_settings.py`.
+
+| ID | Sev | Title | Fix |
+|----|-----|-------|-----|
+| L4 | P3 | Last-owner demotion guard was a non-atomic route check (TOCTOU) | The last-owner invariant now lives inside `MembershipStore.add`, enforced under `_LEDGER_LOCK` (the same lock the write takes), so a concurrent double-demotion can't leave a workspace ownerless. The route pre-check stays as a friendly early message. |
+| L5 | P2 | Members route re-parsed the ledger ~4x/GET (~6-7x/POST) | The render now derives `can_admin`, the viewer row, `is_bound` and the roster from a single `flask.g` membership snapshot (`_memberships_snapshot`), collapsing the GET to one ledger read. |
+| L7 | P3 | `_active_profile_id()` / profile disk read ran multiple times | The route resolves the profile once (`load_profile(pid)`) for the render instead of via `_active_profile()` (which re-resolves). |
+| L8 | P3 | Role picker + Remove rendered live for the sole owner (actions that always fail) | The sole active owner's row now shows a static role label with a "· sole owner" hint and a **disabled** Remove button with a `title` explaining why — no live control that can only error. |
+| L9 | P2 | Stale `can_admin` for one render after a self-demotion/removal | `can_admin` is recomputed from the post-write snapshot before rendering, so an owner who demotes/removes themselves loses the admin surface in the same response. |
+| L10 | P3 | Tenant named several ways on one screen | The page `<h1>` and title are now "Team members" (matching the Settings tile the user clicked); body copy uses "workspace" consistently. |
+| L11 | P3 | Open-workspace copy leaked jargon ("the pre-multi-tenant behaviour") | Rewritten in plain English: what "open" means and that adding the first member makes it members-only. |
+| L3 | P2 | "Log in as a workspace owner" was a dead-end CTA on an open workspace (no owner exists) | Reworded: "Only an owner or the deployment operator can add members. Sign in if that's you." |
+| L12 | P3 | Update/Remove buttons shared identical accessible names across rows | Each now carries a per-member `aria-label` ("Update role for <email>", "Remove <email>"). |
+| — | P2 | Global `.pill` had no base CSS rule → status/token/webhook pills rendered as plain text | Added a base `.pill` rule to `theme-components.css` (shape only; existing inline colour overrides layer on top). Cross-cutting — see §7. |
+
+### Logged (kept by design / needs coordination — with rationale)
 
 | ID | Sev | Title | Disposition |
 |----|-----|-------|-------------|
-| L1 | P2 | Add-member response is a registered-account enumeration oracle ("added" vs "invited") | By-design: owner-privileged, and the invite-vs-add distinction is necessary UX. Reveals only "does this email have an account". Accept. |
-| L2 | P2 | No Post/Redirect/Get: reload re-submits (false "No such membership" after Remove) | App-wide convention — the sibling `/organisation/api` route also renders inline on POST. Browser resubmit-warning mitigates. Needs a repo-wide PRG pass, not a members-only change (footprint discipline). |
-| L3 | P2 | "Log in to manage members" is a dead-end CTA on an open workspace | Copy/UX: an open (unbound) workspace has no owners to log in as; only the operator seeds the first membership. Reword recommended. |
-| L4 | P3 | Last-owner demotion guard is a non-atomic route check (TOCTOU) | Two owners demoting each other concurrently could both pass. Recommend moving the invariant into `MembershipStore.add` under `_LEDGER_LOCK` (as `remove` does) — but that affects every `add` caller, so coordinate. Window is tiny; operator-recoverable. |
-| L5 | P2 | Members route re-parses the ledger ~4x/GET, ~6-7x/POST instead of the `flask.g` snapshot | Perf: the small members ledger (dozens of rows for a real club) makes this non-pathological; scales with member count, not results volume. Recommend routing reads through `_memberships_snapshot`. |
-| L6 | P2 | Append-only ledger never compacted on normal writes | By-design (crash-safe audit trail); compaction happens on erase. Grows with the number of edits, not unbounded per request. |
-| L7 | P3 | `_active_profile_id()` (a profile disk read) runs ~3x per request | Minor perf; memoise on `flask.g`. |
-| L8 | P3 | Role picker + Remove render enabled for the sole/last owner (actions that always fail) | Minor UX; the server guard + clear error message is the safety net. Consider disabling with a tooltip. |
-| L9 | P3 | Stale `can_admin` for one render after an owner demotes/removes themselves | Self-heals on the next request (the resolver drops the pin). Cosmetic. |
-| L10 | P3 | The tenant is named four ways on one screen (Team / Workspace / organisation / club) | Consistency/copy. The tile says "Team members", the page `<h1>` "Workspace members". |
-| L11 | P3 | Open-workspace explanation leaks jargon ("the pre-multi-tenant behaviour") | Copy: meaningless to a coach; only shown on unbound/pilot workspaces. |
-| L12 | P3 | Update/Remove buttons share identical accessible names across all rows | A11y minor — the role `<select>` was given a per-member name (fixed); the buttons still read "Update"/"Remove" for every row (adjacent email cell gives row context). |
-| L13 | P3 | Bound workspace could revert to open if its last active member were removed | Largely unreachable via the UI (the last owner is remove-guarded); the genuine gap was the erase path (F8), now fixed. |
+| L1 | P2 | Add-member response distinguishes "added" (active) vs "invited" (no account) | **Kept by design.** It is not a fixable leak without breaking essential UX: an owner adding a teammate must be told whether that person has access now or must sign up first — which is exactly the account-existence signal. It is owner-privileged (the actor is already a trusted admin of their own workspace) and only concerns emails the owner themselves chose to add. Documented, accepted. |
+| L2 | P2 | No Post/Redirect/Get on the members POST | **Kept — needs a repo-wide pass.** The whole settings surface (and the sibling `/organisation/api` route) renders inline on POST; a members-only PRG would diverge from the app convention *and* break existing tests that assert `200`+notice on the direct POST. The correct fix is an app-wide PRG pass with the shared toast flash, out of this feature's scope. |
+| L6 | P2 | Append-only ledger not compacted on normal writes | **By design.** The append-only, last-write-wins ledger is a deliberate crash-safe audit trail (pinned by `test_tenancy.py::test_ledger_is_append_only_last_write_wins`); compaction only happens on erasure. It grows with the number of edits, not per request, and is trivially bounded for a committee-sized workspace. Changing it would trade away the audit trail for no real gain here. |
+| L13 | P3 | A bound workspace unbinds if its last active member is removed | **By design (ADR-0014 zero-member model)** and largely unreachable via the UI (the last owner is remove-guarded). The genuine gap was the erase path (F8), already fixed. |
 
 ## 5. Fixes applied
 
@@ -152,6 +161,14 @@ Severity: P0 broken/dataloss/security-hole · P1 wrong behaviour or lying contro
 - **`src/mediahub/web/tenancy.py`** — `MembershipStore.erase_email` now performs ownership succession: if erasing an owner would leave a still-populated workspace without an owner, the longest-standing remaining active member is promoted. The erased email's rows are still removed in full.
 - **`src/mediahub/web/web.py` (F9)** — both status badges are given self-contained inline pill styling (`display:inline-block`, `border-radius`, padding, border, the app's `--good`/`--warn` colours) so "Active"/"Invited" render as pills. The bare `.pill` class has no base rule here, so this is deliberately feature-scoped (no shared-CSS change — see §7).
 - **`src/mediahub/web/web.py` (F10)** — when the email seam is unconfigured, the invite notice now renders the real `signup_page` URL instead of referring to a "signup link" the page never showed.
+
+### Caveat-round fixes (follow-up)
+
+- **`src/mediahub/web/tenancy.py` (L4)** — `MembershipStore.add` now enforces the last-owner invariant atomically under `_LEDGER_LOCK`, closing the demote-two-owners-concurrently TOCTOU.
+- **`src/mediahub/web/web.py` (L5/L7/L9)** — `organisation_members_page` render now reads from one `flask.g` membership snapshot (roster, `is_bound`, viewer, `can_admin`) and resolves the profile once; `can_admin` is recomputed from the post-write snapshot so a self-demotion drops the admin surface immediately.
+- **`src/mediahub/web/web.py` (L8)** — the sole active owner's row shows a static role label + hint and a disabled Remove (with `title`), instead of live controls that could only fail.
+- **`src/mediahub/web/web.py` (L10/L11/L3/L12)** — heading/title unified to "Team members"; open-workspace copy rewritten in plain English; the open-workspace CTA no longer promises a non-existent owner to log in as; per-row Update/Remove carry per-member `aria-label`s.
+- **`src/mediahub/web/static/theme/theme-components.css`** — added a base `.pill` rule so status/token/webhook pills render as pills app-wide (cross-cutting — §7).
 
 ## 6. Tests added / extended
 
@@ -167,7 +184,16 @@ Severity: P0 broken/dataloss/security-hole · P1 wrong behaviour or lying contro
 - `test_status_badges_are_self_styled` — F9 (both badges carry pill shape).
 - `test_invite_notice_shows_the_signup_link_when_mail_unconfigured` — F10 (mocks the mail seam off, asserts the signup URL is rendered).
 
-14 tests total, all green (`python -m pytest tests/test_audit_team_members_settings.py -q` → 14 passed).
+Caveat round:
+- `test_store_add_refuses_last_owner_demotion`, `test_store_add_still_allows_promotion_and_creation` — L4 (atomic guard + no false positives).
+- `test_sole_owner_controls_are_disabled`, `test_second_owner_reenables_the_role_picker` — L8.
+- `test_row_buttons_have_per_member_accessible_names` — L12.
+- `test_self_demotion_drops_admin_controls_immediately` — L9.
+- `test_heading_matches_the_team_members_tile` — L10.
+- `test_open_workspace_copy_is_plain_english` — L3/L11.
+- `test_pill_has_a_global_base_rule` — the shared `.pill` base rule.
+
+23 tests total, all green (`python -m pytest tests/test_audit_team_members_settings.py -q` → 23 passed).
 
 ## 7. Cross-cutting changes (for reconciliation)
 
@@ -175,19 +201,18 @@ Two edits reach beyond `/organisation/members`; both are minimal and additive:
 
 1. **`_layout` shared submit-loader JS (web.py, F1)** — added a single guard `if (e && e.defaultPrevented) return;` in `bindForms`. Strictly improves every `onsubmit="return confirm(...)"` form across the app (it only *skips* the loader when the submit was already cancelled). No behaviour change on normal submits.
 2. **`MembershipStore.erase_email` succession (tenancy.py, F8)** — changes GDPR-erasure behaviour: a workspace that would be left ownerless now promotes a remaining member. Reached through **Settings → Account → delete account** (`privacy.erase_account`), which may be another audit's territory. The membership invariant and fix belong to the store, but flagging for coordination. **Maintainer review of the succession policy is recommended** (promote longest-standing member vs. notify vs. other) — auto-succession was chosen because a GDPR erasure cannot be refused, so keeping the workspace manageable is the only legally-consistent option.
-3. **Pre-existing EOF hygiene fix (docs only, not this feature).** The PR's `Hygiene hooks (pre-commit)` check went red on `end-of-file-fixer` — but on two *already-merged, unrelated* audit reports (`docs/audits/AUDIT_meet-recap.md`, `docs/audits/AUDIT_season-wraps.md`), each committed to `main` with a stray trailing blank line. `pre-commit run --all-files` scans the whole repo, so every open PR inherits this red. My own files pass all hooks. I applied the hook's own one-line EOF normalisation to both files to unbreak the shared hygiene gate (zero-risk, docs-only, on merged audits — no active session to conflict with). Flagging loudly since they are outside this feature.
+3. **Pre-existing EOF hygiene fix (docs only, not this feature).** The first PR's `Hygiene hooks (pre-commit)` check went red on `end-of-file-fixer` — but on two *already-merged, unrelated* audit reports (`docs/audits/AUDIT_meet-recap.md`, `docs/audits/AUDIT_season-wraps.md`) committed to `main` with a stray trailing blank line. `pre-commit run --all-files` scans the whole repo, so every open PR inherited this red. I applied the hook's own one-line EOF normalisation. (First round only; not re-touched here.)
+4. **Global `.pill` base CSS rule (caveat round).** `src/mediahub/web/static/theme/theme-components.css` gains a bare `.pill { … }` rule (shape only: inline-block, radius, padding, border, muted colours). Previously the only `.pill` rule was scoped to `.mh-profile-card .meta-line`, so `.pill` chips on the Team-members, API-tokens and webhooks pages rendered as plain text. Existing inline `background`/`border-color`/`color` overrides at those call sites layer on top, and the higher-specificity profile-card rule still wins where it applies — so this styles the previously-unstyled pills without altering the profile-card ones. Verified the tokens/webhooks pages still render cleanly. Flagged because it touches shared theme CSS used app-wide.
 
 ## 8. Residual risks / cross-feature work (not attempted here)
 
-- **L4 (concurrency):** the last-owner invariant is enforced in the route, not atomically in `MembershipStore.add`. Hardening it under `_LEDGER_LOCK` touches every `add` caller and should be done deliberately.
-- **L2 (PRG):** the whole settings surface renders inline on POST; a repo-wide Post/Redirect/Get pass (with `_flash_toast`) is the right fix, not a members-only divergence.
-- **L5/L6/L7 (perf):** routing members-page reads through the existing `flask.g` membership snapshot and memoising `_active_profile_id()` would cut redundant ledger/profile reads. Non-urgent at realistic club sizes.
-- The membership model is an append-only JSONL ledger (no SQL); all of the above ultimately point at a future move to indexed multi-tenant storage (already noted in `docs/TECHNICAL_DEBT.md`).
-- **Global `.pill` CSS gap (cross-feature):** the `.pill` class has no base rule in the shared cascade (static CSS defines `.mh-badge`; the only `.pill` rule is scoped to `.mh-profile-card .meta-line`). Every `.pill` badge across the app (this page, `/organisation/api` tokens & webhooks, etc.) is therefore unstyled. This audit fixed only its own badges inline (F9, footprint discipline); a proper repo-wide fix is a single base `.pill` rule in `theme-components.css`, which should be reconciled centrally rather than per-feature.
+- **L2 (PRG):** the whole settings surface (and the sibling `/organisation/api` route) renders inline on POST; a repo-wide Post/Redirect/Get pass (with the shared toast flash) is the right fix, not a members-only divergence that would also break existing `assert 200`+notice tests. Left for an app-wide pass.
+- **L1 (invite-vs-active signal):** kept by design (essential owner UX; see §4). Only a broader identity/notification redesign could change it, and it would cost more than it saves.
+- The membership model is an append-only JSONL ledger (no SQL); the ledger-read perf and L6 compaction ultimately point at a future move to indexed multi-tenant storage (already noted in `docs/TECHNICAL_DEBT.md`). The caveat round routed the members render through the existing snapshot, which is the right shape until that migration.
 
 ## 9. Feature verdict
 
-**WORKS-WITH-CAVEATS.** The Team-members page is functionally correct, secure (authz, CSRF, anti-enumeration, PII-gated, XSS-safe, tenant-isolated), and now hardened against the invite-email resend, the silent role downgrade, the a11y gaps, and the malformed-address data-loss found in the audit. The one P1 — a bound workspace bricked ownerless when its last owner deleted their account — is fixed via ownership succession, but its trigger lives in the account-deletion feature and the succession policy is flagged for maintainer review. Remaining items are P2/P3 usability, perf, and copy polish, logged with rationale.
+**WORKS.** The Team-members page is functionally correct and secure (authz, CSRF, anti-enumeration, PII-gated, XSS-safe, tenant-isolated). The first round fixed the invite-email resend, the silent role downgrade, the malformed-address data-loss and the a11y gaps, and closed the one P1 (a bound workspace bricked ownerless when its last owner deleted their account) via ownership succession. The follow-up caveat round then hardened the last-owner invariant atomically, disabled the sole-owner's dead controls, tightened self-demotion re-render, consolidated the ledger reads, and cleaned up the copy/a11y/`.pill` gaps. The remaining logged items (L1 invite signal, L2 PRG, L6 compaction) are kept deliberately with rationale — none is a defect. The F8 GDPR-erasure succession policy remains flagged for maintainer review.
 
 ## 10. Handover & merge status
 
