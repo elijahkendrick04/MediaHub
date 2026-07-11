@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-07-11 · `dc93fe80d` · [org-access] record final merge status + green-gate result in audit report
+**Last updated:** 2026-07-11 · `54b9db347` · [developer-settings] drop dead #FFB454 hex fallback to restore theme-token budget
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1226,6 +1226,9 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-07-11 | `54b9db347` | [developer-settings] drop dead #FFB454 hex fallback to restore theme-token budget |
+| 2026-07-11 | `d94720c22` | [developer-settings] audit report: record F-4 fix (third pass) |
+| 2026-07-11 | `447bfce21` | [developer-settings] redact absolute server paths from public /healthz/deps |
 | 2026-07-11 | `dc93fe80d` | [org-access] record final merge status + green-gate result in audit report |
 | 2026-07-11 | `b116544ac` | [org-access] audit report: current behaviour, verification matrix, findings, verdict |
 | 2026-07-11 | `5b616e225` | [org-access] confine signed-in accounts to member orgs; land members on their club; real sign-out |
@@ -1235,7 +1238,4 @@ list and the auto table below, not here.
 | 2026-07-11 | `f4af5a5de` | [team-members] record final green-gate result + CI status in audit report |
 | 2026-07-11 | `0c154fbd8` | [team-members] keep the pre-existing invite-copy phrase when adding the link |
 | 2026-07-11 | `3fab2b2ab` | [team-members] fix pre-existing EOF hygiene break on two merged audit docs |
-| 2026-07-11 | `0c87f9618` | [team-members] record PR link + green-gate result in audit report |
-| 2026-07-11 | `612bd959c` | [team-members] render status badges as pills; show the invite signup link |
-| 2026-07-11 | `5b7aad2b3` | [team-members] audit report for Settings -> Team members |
 <!-- /ROADMAP:ACTIVITY -->
