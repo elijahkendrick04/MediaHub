@@ -4445,47 +4445,157 @@ function _mhMotionWatch(motionUrl, cardId, fmt, pollUrl, ctx) {
   setTimeout(poll, 3000);
 }
 
-// D-13 — on page load, re-attach to any motion render still running for a
-// card on THIS page (the record's motion URL must match a mounted panel, so
-// another run's jobs are left alone). Finished-while-away jobs render their
-// video; dead records are cleared.
-function mhResumeMotionJobs() {
-  var prefix = 'mh-job:motion:';
-  var keys = [];
-  try {
-    for (var i = 0; i < localStorage.length; i++) {
-      var k = localStorage.key(i);
-      if (k && k.indexOf(prefix) === 0) keys.push(k);
-    }
-  } catch (e) { return; }
-  keys.forEach(function(k) {
-    var motionUrl = k.slice(prefix.length);
-    var rec = mhJobRecall('motion', motionUrl);
-    if (!rec || !rec.poll_url || !rec.card) return;
-    var panel = document.querySelector('.motion-panel[data-motion-url="' + motionUrl + '"]');
-    if (!panel || panel.dataset.mhWatching) return;
-    // JS-4: claim the panel before the async poll resolves — a click racing
-    // this resume could otherwise start a duplicate job.
-    panel.dataset.mhWatching = '1';
-    var fmt = rec.fmt || 'story';
+// B-5 — render all four motion cuts of one card in a single background job.
+// Mirrors generateReelBatch over the motion job store: one POST to the
+// motion-batch-job route, per-cut progress from the job's total/done/current
+// fields, a labelled download per produced cut, and honest formats_failed
+// notes for any cut that could not render.
+function generateMotionBatch(btn, motionUrl, cardId) {
+  var panel = document.querySelector('.motion-panel[data-card="' + cardId + '"]');
+  if (!panel) return;
+  if (panel.dataset.mhWatching) {
+    if (window.MH && MH.toast) MH.toast('A motion render is already in progress for this card — hold on…', 'info', 2500);
+    return;
+  }
+  // JS-4: claim the panel synchronously — every terminal path overwrites
+  // (watch) or clears (_mhJobFail).
+  panel.dataset.mhWatching = '1';
+  panel.style.display = '';
+  var origLabel = btn ? btn.textContent : '';
+  if (btn) { btn.disabled = true; btn.textContent = 'Rendering all formats…'; }
+  var prog = MH.renderProgress(panel, {label: 'Rendering every motion format', sub: 'Story, portrait, square & landscape — up to a few minutes the first time', expectedMs: 150000, accent: 'medal'});
+  var ctx = {panel: panel, prog: prog, btn: btn, origLabel: origLabel};
+  var startNew = function() {
+    mhJobForget('motion-batch', motionUrl);
+    fetch(motionUrl + '-batch-job', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'})
+      .then(function(r) { return r.json().then(function(j){ return {status: r.status, body: j}; }); })
+      .then(function(res) {
+        if (res.status !== 202 || !res.body || !res.body.poll_url) {
+          _mhJobFail(ctx, (res.body && (res.body.user_message || res.body.detail || res.body.error)) || 'could not start the render');
+          return;
+        }
+        mhJobRemember('motion-batch', motionUrl, {poll_url: res.body.poll_url, job_id: res.body.job_id || '', card: cardId});
+        _mhMotionBatchWatch(motionUrl, cardId, res.body.poll_url, ctx);
+      })
+      .catch(function(err) { _mhJobFail(ctx, 'Network error: ' + err); });
+  };
+  // D-13: an all-formats render already in flight for this card is resumed,
+  // not restarted — a restart would just hit the busy renderer.
+  var rec = mhJobRecall('motion-batch', motionUrl);
+  if (rec && rec.poll_url) {
     fetch(rec.poll_url)
       .then(function(r){ return r.json(); })
       .then(function(j) {
-        if (j.status === 'running') {
-          panel.style.display = '';
-          var prog = MH.renderProgress(panel, {label: 'Rendering ' + fmt + ' motion', sub: 'Resumed — this render kept going while you were away', expectedMs: 45000, accent: 'medal'});
-          _mhMotionWatch(motionUrl, rec.card, fmt, rec.poll_url, {panel: panel, prog: prog, btn: null, origLabel: ''});
+        if (j.status === 'running') { _mhMotionBatchWatch(motionUrl, cardId, rec.poll_url, ctx); }
+        else { startNew(); }
+      })
+      .catch(function() { startNew(); });
+    return;
+  }
+  startNew();
+}
+
+// B-5 / D-13 — poll one all-formats motion job to a terminal state (600s
+// budget), narrating per-cut progress from the job's total/done/current.
+function _mhMotionBatchWatch(motionUrl, cardId, pollUrl, ctx) {
+  ctx.panel.dataset.mhWatching = pollUrl;
+  var tries = 0;
+  var poll = function() {
+    tries++;
+    if (tries > 200) {
+      mhJobForget('motion-batch', motionUrl);
+      _mhJobFail(ctx, 'timed out waiting for the render — try again');
+      return;
+    }
+    fetch(pollUrl)
+      .then(function(r){ return r.json(); })
+      .then(function(j) {
+        if (j.status === 'done' && j.video_urls && Object.keys(j.video_urls).length) {
+          mhJobForget('motion-batch', motionUrl);
+          delete ctx.panel.dataset.mhWatching;
+          ctx.prog.complete(function(){
+            if (ctx.btn) { ctx.btn.disabled = false; ctx.btn.textContent = ctx.origLabel; }
+            mhRenderMotionBatch(ctx.panel, motionUrl, cardId, j.video_urls, j.formats_failed || {});
+          });
           return;
         }
-        mhJobForget('motion', motionUrl);
-        delete panel.dataset.mhWatching;
-        if (j.status === 'done' && j.video_url) {
-          panel.style.display = '';
-          _motionCache[rec.card + ':' + fmt] = j.video_url;
-          mhRenderMotion(panel, motionUrl, rec.card, fmt, j.video_url);
+        if (j.status === 'error' || (j.error && j.status !== 'running')) {
+          // A busy renderer usually means another tab's batch still holds
+          // the slot — attach to the recalled record's live job instead of
+          // surfacing the error (the motion/reel watches' idiom).
+          var rec = (j.error === 'renderer_busy') ? mhJobRecall('motion-batch', motionUrl) : null;
+          if (rec && rec.poll_url && rec.poll_url !== pollUrl) {
+            _mhMotionBatchWatch(motionUrl, cardId, rec.poll_url, ctx);
+            return;
+          }
+          mhJobForget('motion-batch', motionUrl);
+          _mhJobFail(ctx, j.user_message || j.error || 'render failed');
+          return;
         }
+        if (j.total) {
+          var next = Math.min((j.done || 0) + 1, j.total);
+          ctx.prog.setPhase('Rendering ' + (j.current || 'motion') + ' cut (' + next + ' of ' + j.total + ')', (j.done || 0) + ' of ' + j.total + ' finished');
+          ctx.prog.setProgress(Math.round(((j.done || 0) / j.total) * 100));
+        }
+        setTimeout(poll, 3000);
       })
-      .catch(function(){ delete panel.dataset.mhWatching; });
+      .catch(function() { setTimeout(poll, 3000); });
+  };
+  setTimeout(poll, 3000);
+}
+
+// D-13 — on page load, re-attach to any motion render (single-cut or B-5
+// all-formats batch) still running for a card on THIS page (the record's
+// motion URL must match a mounted panel, so another run's jobs are left
+// alone). Finished-while-away jobs render their video; dead records are
+// cleared.
+function mhResumeMotionJobs() {
+  ['motion', 'motion-batch'].forEach(function(kind) {
+    var prefix = 'mh-job:' + kind + ':';
+    var keys = [];
+    try {
+      for (var i = 0; i < localStorage.length; i++) {
+        var k = localStorage.key(i);
+        if (k && k.indexOf(prefix) === 0) keys.push(k);
+      }
+    } catch (e) { return; }
+    keys.forEach(function(k) {
+      var motionUrl = k.slice(prefix.length);
+      var rec = mhJobRecall(kind, motionUrl);
+      if (!rec || !rec.poll_url || !rec.card) return;
+      var panel = document.querySelector('.motion-panel[data-motion-url="' + motionUrl + '"]');
+      if (!panel || panel.dataset.mhWatching) return;
+      // JS-4: claim the panel before the async poll resolves — a click racing
+      // this resume could otherwise start a duplicate job.
+      panel.dataset.mhWatching = '1';
+      var fmt = rec.fmt || 'story';
+      fetch(rec.poll_url)
+        .then(function(r){ return r.json(); })
+        .then(function(j) {
+          if (j.status === 'running') {
+            panel.style.display = '';
+            var opts = (kind === 'motion')
+              ? {label: 'Rendering ' + fmt + ' motion', sub: 'Resumed — this render kept going while you were away', expectedMs: 45000, accent: 'medal'}
+              : {label: 'Rendering every motion format', sub: 'Resumed — this render kept going while you were away', expectedMs: 150000, accent: 'medal'};
+            var ctx = {panel: panel, prog: MH.renderProgress(panel, opts), btn: null, origLabel: ''};
+            if (kind === 'motion') _mhMotionWatch(motionUrl, rec.card, fmt, rec.poll_url, ctx);
+            else _mhMotionBatchWatch(motionUrl, rec.card, rec.poll_url, ctx);
+            return;
+          }
+          mhJobForget(kind, motionUrl);
+          delete panel.dataset.mhWatching;
+          if (j.status === 'done' && kind === 'motion' && j.video_url) {
+            panel.style.display = '';
+            _motionCache[rec.card + ':' + fmt] = j.video_url;
+            mhRenderMotion(panel, motionUrl, rec.card, fmt, j.video_url);
+          }
+          if (j.status === 'done' && kind === 'motion-batch' && j.video_urls && Object.keys(j.video_urls).length) {
+            panel.style.display = '';
+            mhRenderMotionBatch(panel, motionUrl, rec.card, j.video_urls, j.formats_failed || {});
+          }
+        })
+        .catch(function(){ delete panel.dataset.mhWatching; });
+    });
   });
 }
 if (document.readyState === 'loading') { document.addEventListener('DOMContentLoaded', mhResumeMotionJobs); }
@@ -4505,7 +4615,11 @@ function mhRenderMotion(panel, motionUrl, cardId, fmt, videoUrl) {
       '<div style="flex:1;min-width:min(200px,100%)">' +
         '<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:4px">Motion &middot; ' + (_MOTION_FMT_DIMS[fmt] || '') + ' &middot; 6s</div>' +
         '<div style="font-size:12px;color:var(--ink);margin-bottom:8px;line-height:1.4">Branded MP4. Same archetype, colours, and seed as the static card &mdash; including your Inspector accent and photo on/off choices. An Inspector crop applies to stills only for now.</div>' +
-        '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px">' + _motionFmtChips(motionUrl, cardId, fmt) + '</div>' +
+        '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px">' + _motionFmtChips(motionUrl, cardId, fmt) +
+          '<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick=' +
+            _attrEsc('generateMotionBatch(this, ' + JSON.stringify(motionUrl) + ', ' + JSON.stringify(cardId) + ')') +
+          '>All 4 formats</button>' +
+        '</div>' +
         '<div style="display:flex;gap:6px;flex-wrap:wrap">' +
           '<a class="btn secondary" href="' + videoUrl + '" download="motion-' + cardId + '-' + fmt + '.mp4" style="font-size:11px;padding:4px 10px">Download MP4</a>' +
         '</div>' +
@@ -4516,6 +4630,55 @@ function mhRenderMotion(panel, motionUrl, cardId, fmt, videoUrl) {
   _loadMotionWhy(panel, motionUrl, fmt);
   // UI 1.8 - pin timestamp comments to this card's motion clip too. The
   // run-level comments endpoint sits at the path before '/card/'.
+  var _cmRoot = motionUrl.split('/card/')[0];
+  var _cmMount = panel.querySelector('.mh-reel-comments');
+  if (_cmMount && typeof mhReelComments === 'function') {
+    mhReelComments({mount: _cmMount, video: panel.querySelector('video.mh-motion-video'), baseUrl: _cmRoot + '/reel/comments', target: 'card:' + cardId});
+  }
+}
+
+// B-5 — the finished all-formats motion panel: the story cut (or first
+// produced) as the scrubbable preview plus a labelled download per cut, the
+// single-format chips for an inline re-view, and an honest note for any cut
+// that failed to render.
+function mhRenderMotionBatch(panel, motionUrl, cardId, videoUrls, failed) {
+  var order = ['story', 'portrait', 'square', 'landscape'];
+  var primary = videoUrls.story || '';
+  var primaryFmt = 'story';
+  if (!primary) { for (var i = 0; i < order.length; i++) { if (videoUrls[order[i]]) { primary = videoUrls[order[i]]; primaryFmt = order[i]; break; } } }
+  var dl = '';
+  order.forEach(function(f) {
+    if (videoUrls[f]) {
+      dl += '<a class="btn secondary" href="' + videoUrls[f] + '" download="motion-' + cardId + '-' + f + '.mp4" style="font-size:11px;padding:4px 10px">' +
+        f.charAt(0).toUpperCase() + f.slice(1) + ' &middot; ' + (_MOTION_FMT_DIMS[f] || '') + '</a>';
+    }
+  });
+  var failNote = '';
+  var failedKeys = failed ? Object.keys(failed) : [];
+  if (failedKeys.length) {
+    // The API's honest per-cut reason — escaped, it can carry node stderr.
+    var rows = failedKeys.map(function(f){
+      var fmt = f.charAt(0).toUpperCase() + f.slice(1);
+      var reason = (failed[f] == null ? '' : String(failed[f])) || 'render failed';
+      return '<div style="margin-top:2px">' + window.safeText(fmt) + ' — ' + window.safeText(reason) + '</div>';
+    }).join('');
+    failNote = '<div style="font-size:11px;color:var(--ink-muted);margin-top:8px">These cuts failed to render:' + rows + '</div>';
+  }
+  var poster = primary ? primary + (primary.indexOf('?') === -1 ? '?' : '&') + 'poster=1' : '';
+  panel.innerHTML =
+    '<div style="display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap">' +
+      '<div style="flex:0 0 min(200px,100%);max-width:220px">' +
+        (primary ? '<video class="mh-motion-video" src="' + primary + '" poster="' + poster + '" controls playsinline preload="metadata" style="width:100%;border-radius:6px;border:1px solid var(--border);background:var(--video-letterbox)"></video>' : '') +
+      '</div>' +
+      '<div style="flex:1;min-width:min(200px,100%)">' +
+        '<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:4px">Motion &middot; every format</div>' +
+        '<div style="font-size:12px;color:var(--ink);margin-bottom:8px;line-height:1.4">All cuts rendered in one pass from the same card &mdash; download the size each channel wants.</div>' +
+        '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px">' + _motionFmtChips(motionUrl, cardId, primaryFmt) + '</div>' +
+        '<div style="display:flex;gap:6px;flex-wrap:wrap">' + dl + '</div>' +
+        failNote +
+      '</div>' +
+    '</div>' +
+    '<div class="mh-reel-comments" style="margin-top:12px"></div>';
   var _cmRoot = motionUrl.split('/card/')[0];
   var _cmMount = panel.querySelector('.mh-reel-comments');
   if (_cmMount && typeof mhReelComments === 'function') {
@@ -48219,6 +48382,19 @@ function mhSetupMode(mode) {{
             card_id_raw = card.get("_card_id") or ach.get("swim_id", "")
             card_uuid = str(card_id_raw).replace(":", "_").replace(",", "_")
             _dl_url = url_for("api_card_download", run_id=run_id, card_id=card_id_raw)
+            # B-2 — ONE primary export per card. The ZIP link only goes live
+            # once this card has a rendered graphic; before that it is
+            # honestly disabled instead of shipping a caption-only ZIP.
+            _dl_ready = str(card_id_raw) in _rendered
+            _dl_style = "font-size:11px;padding:4px 10px" + (
+                "" if _dl_ready else ";pointer-events:none;opacity:0.45"
+            )
+            _dl_gate = "" if _dl_ready else ' aria-disabled="true" onclick="return false"'
+            _dl_title = (
+                "The graphic plus the caption text in one .zip, ready to post manually"
+                if _dl_ready
+                else "No graphic yet — use Create graphic first, then download the post"
+            )
             # M30/M32 — persisted renders show on page load, no re-render.
             _initial_visual = _prefilled_visual_panel_html(
                 run_id, card_id_raw, _rendered.get(str(card_id_raw))
@@ -48245,8 +48421,8 @@ function mhSetupMode(mode) {{
             }
   {_render_stored_translations(card)}
   <div class="no-print" style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-    <a class="btn secondary" style="font-size:11px;padding:4px 10px" href="{_h(_dl_url)}"
-       title="Download caption + visual as a .zip for manual posting">&#x2B07; Download .zip</a>
+    <a class="btn" style="{_dl_style}" href="{_h(_dl_url)}"{_dl_gate}
+       title="{_dl_title}">Download post (graphic + caption)</a>
     <span class="muted" style="font-size:11px">Pick a tone, then create a graphic or motion and download.</span>
   </div>
 </div>"""
@@ -48555,6 +48731,29 @@ function mhSetupMode(mode) {{
             if rendered_n == 0
             else ""
         )
+        # B-2 — every pack-level export sits under the same render gate. Two
+        # variants for controls where the standard attr would double up an
+        # attribute: the certificate anchors carry their own onclick
+        # (mhCertificatesJob refuses aria-disabled anchors), and the
+        # browser-print button takes a real ``disabled``.
+        _export_disabled_plain = (
+            ' aria-disabled="true" style="pointer-events:none;opacity:0.45" '
+            'title="No graphics rendered yet — use Create all graphics first"'
+            if rendered_n == 0
+            else ""
+        )
+        _export_disabled_btn = (
+            ' disabled style="opacity:0.45" '
+            'title="No graphics rendered yet — use Create all graphics first"'
+            if rendered_n == 0
+            else ""
+        )
+        # B-2 — the single pack-level export disclosure's label carries the
+        # live approved count.
+        _export_summary_label = (
+            f"Export pack ({len(approved)} approved "
+            f"card{'s' if len(approved) != 1 else ''})&hellip;"
+        )
 
         # J-9 — one "Share publicly" chooser: the two token-URL surfaces where
         # approved cards can go live, each with a one-line explanation. Links
@@ -48637,47 +48836,7 @@ function mhSetupMode(mode) {{
             else ""
         }
 
-<div class="card no-print" style="margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
-  <div>
-    <div style="font-size:13px;font-weight:700">Parent newsletter</div>
-    <div style="font-size:12px;color:var(--ink-dim);margin-top:2px">Branded HTML email + plaintext fallback, ready to paste into Mailchimp / ConvertKit / your email client.</div>
-    {_nl_composer_hint}
-  </div>
-  <div style="display:flex;gap:6px;flex-wrap:wrap">
-    <a class="btn secondary" style="font-size:12px;padding:6px 12px" href="{
-            _h(_newsletter_html_url)
-        }" target="_blank" rel="noopener">Preview HTML &rarr;</a>
-    <a class="btn secondary" style="font-size:12px;padding:6px 12px" href="{
-            _h(_newsletter_html_url)
-        }?download=1">Download .html</a>
-    <a class="btn secondary" style="font-size:12px;padding:6px 12px" href="{
-            _h(_newsletter_text_url)
-        }&download=1">Download .txt</a>
-    <a class="btn" style="font-size:12px;padding:6px 12px" href="{
-            _h(_newsletter_zip_url)
-        }">Download .zip</a>
-  </div>
-</div>
-
 {_prefs_html}
-
-<div class="card no-print" style="margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
-  <div>
-    <div style="font-size:13px;font-weight:700">Print for the noticeboard</div>
-    <div style="font-size:12px;color:var(--ink-dim);margin-top:2px">A branded A4 certificate for every approved achievement — the thing families frame. Photo/name consent is honoured automatically.</div>
-    <div id="mh-certs-status" class="dim" role="status" aria-live="polite" style="font-size:12px;margin-top:4px;min-height:1.2em"></div>
-  </div>
-  <div style="display:flex;gap:8px;flex-wrap:wrap">
-    <a class="btn secondary mh-certs-go" style="font-size:12px;padding:6px 12px" href="{
-            _h(_certs_url)
-        }" data-certs-job="{_h(_certs_job_url)}" onclick="return mhCertificatesJob(this)">Download certificates (.zip of PDFs)</a>
-    <a class="btn secondary mh-certs-go" style="font-size:12px;padding:6px 12px" href="{
-            _h(_certs_print_url)
-        }" data-certs-job="{
-            _h(_certs_print_job_url)
-        }" onclick="return mhCertificatesJob(this)" title="A4 + 3mm bleed and crop marks, ready for a professional print shop">Print-shop pack (bleed + crop marks)</a>
-  </div>
-</div>
 
 <div class="no-print">{_turn_into_html}</div>
 
@@ -48686,24 +48845,61 @@ function mhSetupMode(mode) {{
         }</span></h2>
 {cards_html}
 
-<div class="no-print" style="margin-top:16px">
-  <div id="mh-export-note" style="font-size:12px;color:var(--ink-dim);margin-bottom:8px">{
+<details class="card no-print" id="mh-export-pack" style="margin-top:16px">
+  <summary style="cursor:pointer;font-size:13px;font-weight:700">{_export_summary_label}
+    <span class="muted" style="font-weight:400;font-size:12px;margin-left:6px">ZIPs, bulk convert, print, certificates &amp; newsletter</span>
+  </summary>
+  <div id="mh-export-note" style="font-size:12px;color:var(--ink-dim);margin:10px 0 12px">{
             _export_note
         }</div>
-  <div style="display:flex;gap:10px;flex-wrap:wrap">
+
+  <div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:6px">Social posting</div>
+  <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px">
     <a class="btn" href="{_export_zip_url}"{_export_disabled_attr}
-       title="Every rendered card at every size (square, portrait, story), grouped per card, plus a metadata.json manifest">Download every format + manifest (.zip)</a>
-    <a class="btn secondary" href="{_zip_url}"{
-            _export_disabled_attr
-        }>Download all visuals (.zip)</a>
-    <a class="btn secondary" href="{_bulk_export_url}"
+       title="Every rendered card at every size (square, portrait, story), grouped per card and ready to post">Every format, organised for posting (.zip)</a>
+    <a class="btn secondary" href="{_zip_url}"{_export_disabled_attr}
+       title="One folder with just the rendered images — no captions, no grouping">Just the images (.zip)</a>
+    <a class="btn secondary" href="{_bulk_export_url}"{_export_disabled_attr}
        title="Convert this pack to JPG / WebP / AVIF / PNG with quality options, bundled into one ZIP">Bulk export &amp; convert&hellip;</a>
-    <a class="btn secondary" href="{_print_tool_url}"
+  </div>
+
+  <div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:6px">Print &amp; certificates</div>
+  <div style="font-size:12px;color:var(--ink-dim);margin-bottom:6px">A branded A4 certificate for every approved achievement &mdash; the thing families frame. Photo/name consent is honoured automatically.</div>
+  <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+    <a class="btn secondary" href="{_print_tool_url}"{_export_disabled_attr}
        title="Proof and export a print-ready PDF (posters, flyers, banners, merch) from this meet's cards — pre-flight checked before you send it to a printer">Print &amp; merch&hellip;</a>
-    <button class="btn secondary" onclick="window.print()"
+    <a class="btn secondary mh-certs-go" href="{_h(_certs_url)}" data-certs-job="{
+            _h(_certs_job_url)
+        }" onclick="return mhCertificatesJob(this)"{
+            _export_disabled_plain
+        }>Download certificates (.zip of PDFs)</a>
+    <a class="btn secondary mh-certs-go" href="{_h(_certs_print_url)}" data-certs-job="{
+            _h(_certs_print_job_url)
+        }" onclick="return mhCertificatesJob(this)"{_export_disabled_plain}
+       title="A4 + 3mm bleed and crop marks, ready for a professional print shop">Print-shop pack (bleed + crop marks)</a>
+    <button class="btn secondary" onclick="window.print()"{_export_disabled_btn}
             title="Use the browser print dialog on this page as it stands — for a press-ready file use Print &amp; merch instead">Print this page</button>
   </div>
-</div>
+  <div id="mh-certs-status" class="dim" role="status" aria-live="polite" style="font-size:12px;margin:4px 0 14px;min-height:1.2em"></div>
+
+  <div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:6px">Parent newsletter</div>
+  <div style="font-size:12px;color:var(--ink-dim);margin-bottom:6px">Branded HTML email + plaintext fallback, ready to paste into Mailchimp / ConvertKit / your email client.</div>
+  {_nl_composer_hint}
+  <div style="display:flex;gap:10px;flex-wrap:wrap">
+    <a class="btn secondary" href="{_h(_newsletter_html_url)}" target="_blank" rel="noopener"{
+            _export_disabled_attr
+        }>Preview HTML &rarr;</a>
+    <a class="btn secondary" href="{_h(_newsletter_html_url)}?download=1"{
+            _export_disabled_attr
+        }>Download .html</a>
+    <a class="btn secondary" href="{_h(_newsletter_text_url)}&download=1"{
+            _export_disabled_attr
+        }>Download .txt</a>
+    <a class="btn secondary" href="{_h(_newsletter_zip_url)}"{
+            _export_disabled_attr
+        }>Download .zip</a>
+  </div>
+</details>
 
 {_share_publicly_html}
 
@@ -57419,6 +57615,161 @@ voice, and queues them for one-click approval.</p>
             202,
         )
 
+    @app.route("/api/runs/<run_id>/card/<card_id>/motion-batch-job", methods=["POST"])
+    def api_card_motion_batch_job(run_id: str, card_id: str):
+        """Render every motion cut of one card in one background job (B-5);
+        ``202`` + ``{job_id, poll_url}``.
+
+        The reel already had an all-formats batch; per-card motion made the
+        user click four separate renders. This mirrors ``api_run_reel_batch``
+        over the motion job store: one job, kind ``motion-batch``, rendering
+        story / portrait / square / landscape sequentially — each cut under
+        its OWN render-slot acquire/release (never holding the gate across
+        the batch, so a foreground render can interleave) — with per-cut
+        progress in the job's ``total``/``done``/``current`` fields. On
+        ``done``, ``video_urls`` maps each produced cut to its persistent
+        ``motion-file`` URL and ``formats_failed`` carries the honest reason
+        for any cut that could not render. The motion cache makes re-runs
+        cheap: cuts already rendered complete near-instantly.
+        """
+        try:
+            from mediahub.visual import motion as _motion
+        except Exception as e:
+            return jsonify({"error": f"motion_module_unavailable: {e}"}), 503
+
+        # Fail-fast gates (tenant / card / mix validation) stay synchronous.
+        inputs, err = _assemble_card_motion_inputs(run_id, card_id)
+        if err is not None:
+            return err
+
+        out_dir = Path(inputs["out_path"]).parent
+        # url_for needs the request context — resolve every cut's file URL
+        # now, before the worker thread (which has none).
+        file_urls: dict[str, str] = {}
+        for fmt in _motion.MOTION_FORMATS:
+            _file_kwargs = {"run_id": run_id, "card_id": card_id}
+            if fmt != _motion.DEFAULT_MOTION_FORMAT:
+                _file_kwargs["format"] = fmt
+            file_urls[fmt] = url_for("api_card_motion_file", **_file_kwargs)
+
+        job_id = uuid.uuid4().hex
+        job: dict = {
+            "id": job_id,
+            "kind": "motion-batch",
+            "status": "running",
+            "error": "",
+            "user_message": "",
+            "video_url": "",
+            "video_urls": {},
+            "formats_failed": {},
+            "total": len(_motion.MOTION_FORMATS),
+            "done": 0,
+            "current": "",
+            "errors": {},
+            "created_at": time.time(),
+            "owner_pid": _active_profile_id() or "",
+        }
+        _variant_jobs_gc()
+        _variant_job_save(job)
+
+        def _worker() -> None:
+            rendered: dict[str, str] = {}
+            failed: dict[str, str] = {}
+            try:
+                with _job_heartbeat(job):
+                    for fmt in _motion.MOTION_FORMATS:
+                        job["current"] = fmt
+                        _variant_job_save(job)
+                        out_name = (
+                            f"{card_id}.mp4"
+                            if fmt == _motion.DEFAULT_MOTION_FORMAT
+                            else f"{card_id}_{fmt}.mp4"
+                        )
+                        try:
+                            # Per-cut slot with the queue timeout (like the
+                            # reel batch): wait a turn per item rather than
+                            # hogging the render gate for the whole batch.
+                            with _render_slot(
+                                "motion", f"{card_id}:{fmt}", timeout=_RENDER_QUEUE_TIMEOUT
+                            ):
+                                mp4 = _motion.render_story_card(
+                                    inputs["card"],
+                                    inputs["brand_kit"],
+                                    out_dir / out_name,
+                                    variation_seed=inputs["variation_seed"],
+                                    brief=inputs["brief"],
+                                    format_name=fmt,
+                                )
+                            if not Path(mp4).exists():
+                                raise RuntimeError("mp4 missing after render")
+                            rendered[fmt] = file_urls[fmt]
+                        except _RenderBusy:
+                            failed[fmt] = (
+                                "Another video is rendering right now — " "try again in a minute."
+                            )
+                        except Exception as e:
+                            # The honest per-cut reason (reel-batch parity):
+                            # detail carries the real error; the generic
+                            # user_message would hide which cut broke and why.
+                            _payload = _motion_error_payload(e)
+                            failed[fmt] = str(
+                                _payload.get("detail") or _payload.get("user_message") or e
+                            )
+                        job["done"] = int(job.get("done") or 0) + 1
+                        job["video_urls"] = dict(rendered)
+                        job["formats_failed"] = dict(failed)
+                        job["errors"] = dict(failed)
+                        _variant_job_save(job)
+                job["current"] = ""
+                if not rendered:
+                    # Not one cut produced — surface an honest reason rather
+                    # than reporting a successful job with no video.
+                    reason = next(iter(failed.values()), "no motion formats could be rendered")
+                    raise RuntimeError(reason)
+                job["status"] = "done"
+                # Keep the legacy single field on the story cut (or the first
+                # produced) so a single-format poller still gets a video_url.
+                job["video_url"] = rendered.get(_motion.DEFAULT_MOTION_FORMAT) or next(
+                    iter(rendered.values()), ""
+                )
+                try:
+                    from mediahub.notify import inbox as _inbox
+
+                    _inbox.record_render_complete(
+                        job.get("owner_pid") or "", run_id=run_id, label="motion (all formats)"
+                    )
+                except Exception:
+                    pass
+            except Exception as e:
+                _payload = _motion_error_payload(e)
+                job["status"] = "error"
+                job["error"] = str(_payload.get("detail") or e)
+                job["user_message"] = str(_payload.get("user_message") or "")
+                try:
+                    from mediahub.notify import inbox as _inbox
+
+                    _inbox.record_error(
+                        job.get("owner_pid") or "",
+                        "Motion batch render failed",
+                        job["user_message"] or job["error"],
+                        run_id=run_id,
+                    )
+                except Exception:
+                    pass
+            _variant_job_save(job)
+
+        threading.Thread(target=_worker, name=f"motionbatch-{job_id[:8]}", daemon=True).start()
+        return (
+            jsonify(
+                {
+                    "ok": True,
+                    "job_id": job_id,
+                    "poll_url": url_for("api_reel_job_status", job_id=job_id),
+                }
+            ),
+            202,
+        )
+
     @app.route("/api/runs/<run_id>/card/<card_id>/motion-file", methods=["GET"])
     def api_card_motion_file(run_id: str, card_id: str):
         """Serve an already-rendered per-card MP4 — never triggers a render.
@@ -59565,6 +59916,8 @@ voice, and queues them for one-click approval.</p>
             "reel",
             "reel-batch",
             "motion",
+            # B-5: the per-card all-formats motion batch (4 cuts, one job).
+            "motion-batch",
             "render-all",
             "describe",
             # J-1: the Video Studio's async operations poll this same route.

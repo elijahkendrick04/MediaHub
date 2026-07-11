@@ -57,6 +57,9 @@ requires_node = pytest.mark.skipif(_NODE is None, reason="node not on PATH")
 _RENDER_FUNCS = {
     "createGraphic": "function createGraphic(",
     "generateMotion": "function generateMotion(",
+    # B-5: the per-card all-formats motion batch panel joins the same
+    # shared-controller contract as the reel batch.
+    "generateMotionBatch": "function generateMotionBatch(",
     "generateReel": "function generateReel(",
     "generateReelBatch": "function generateReelBatch(",
     "regenerateGraphic": "function regenerateGraphic(",
@@ -151,10 +154,11 @@ def test_generic_panel_spinner_removed_from_render_panels():
     # The 24px in-panel spinner markup is gone everywhere (all render panels).
     assert src.count("width:24px;height:24px;border:2px solid") == 0
     # Each upgraded panel now drives the shared controller and gates its result.
-    # Original six U.6 panels + R1.15's generateReelBatch + J-1's runVideoJob
-    # (the Video Studio's shared render/analysis/stabilise progress helper)
-    # + D-13's two on-load resume mounts (mhResumeReelJob / mhResumeMotionJobs)
-    # that re-attach the controller to a render still running server-side.
+    # Original six U.6 panels + R1.15's generateReelBatch + B-5's
+    # generateMotionBatch + J-1's runVideoJob (the Video Studio's shared
+    # render/analysis/stabilise progress helper) + D-13's two on-load resume
+    # mounts (mhResumeReelJob / mhResumeMotionJobs) that re-attach the
+    # controller to a render still running server-side.
     assert src.count("MH.renderProgress(panel") == len(_RENDER_FUNCS) + 2
 
 
@@ -163,6 +167,7 @@ def test_generic_panel_spinner_removed_from_render_panels():
 # states (complete on done, _mhJobFail -> prog.stop on error/timeout).
 _JOB_WATCHERS = {
     "generateMotion": "function _mhMotionWatch(",
+    "generateMotionBatch": "function _mhMotionBatchWatch(",
     "generateReel": "function _mhReelWatch(",
     "generateReelBatch": "function _mhReelBatchWatch(",
 }
