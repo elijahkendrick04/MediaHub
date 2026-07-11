@@ -218,13 +218,16 @@ def apply_action(session_id: str, action: str, value=None) -> Optional[Presenter
         return None
     if action == "next":
         s.current = min(s.current + 1, s.total_slides - 1)
+        s.autoplay = False  # a manual move hands control to the presenter (D-11)
     elif action == "prev":
         s.current = max(s.current - 1, 0)
+        s.autoplay = False  # ...so the audience follows the driver, not the kiosk loop
     elif action == "goto":
         try:
             s.current = max(0, min(int(value), s.total_slides - 1))
         except (TypeError, ValueError):
             return s
+        s.autoplay = False
     elif action == "blackout":
         s.blackout = (not s.blackout) if value is None else bool(value)
     elif action == "timer_reset":

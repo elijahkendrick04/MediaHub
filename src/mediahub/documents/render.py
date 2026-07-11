@@ -204,7 +204,7 @@ def _b_kpi_row(p: dict) -> str:
 
 def _b_quote(p: dict) -> str:
     who = p.get("attribution")
-    who_html = f'<span class="who">— {_h(who)}</span>' if who else ""
+    who_html = f'<span class="who">- {_h(who)}</span>' if who else ""
     return f'<blockquote class="doc-quote">{_inline(p.get("text", ""))}{who_html}</blockquote>'
 
 

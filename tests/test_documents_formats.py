@@ -105,6 +105,17 @@ def test_facts_from_runs_merges_season():
     assert "pb_makers" in f.tables
 
 
+def test_generated_copy_uses_plain_hyphens():
+    """British-copy convention: generated highlights and the season title carry
+    plain hyphens, never em/en dashes."""
+    meet = facts_from_run(_run(), club_name="Otters SC", run_id="r1")
+    season = facts_from_runs([_run()], club_name="Otters SC", period="2025/26")
+    blobs = [*meet.highlights, *season.highlights, season.title, meet.title]
+    assert meet.highlights and season.title  # actually exercised generated copy
+    joined = " ".join(blobs)
+    assert "—" not in joined and "–" not in joined  # no em/en dash in generated copy
+
+
 # ---------------------------------------------------------------------------
 # Format builders (deterministic — no AI)
 # ---------------------------------------------------------------------------

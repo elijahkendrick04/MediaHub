@@ -124,13 +124,13 @@ def _highlights(agg: MeetAggregates) -> list[str]:
     out: list[str] = []
     if agg.most_pbs:
         name, n = agg.most_pbs
-        out.append(f"{name} set {n} personal best{'s' if n != 1 else ''} — the most of the meet.")
+        out.append(f"{name} set {n} personal best{'s' if n != 1 else ''} - the most of the meet.")
     if agg.biggest_drop:
         d = agg.biggest_drop
         secs = round(float(d.get("seconds", 0.0)), 2)
         if d.get("swimmer") and secs > 0:
             ev = f" in the {d['event']}" if d.get("event") else ""
-            out.append(f"{d['swimmer']} took {secs}s off a previous best{ev} — the biggest drop.")
+            out.append(f"{d['swimmer']} took {secs}s off a previous best{ev} - the biggest drop.")
     if agg.n_club_records:
         out.append(
             f"The club set {agg.n_club_records} new club record"
@@ -232,7 +232,7 @@ def facts_from_runs(
         )
 
     facts = DocFacts(
-        title=f"{club_name or 'Club'} — {period or 'Season'} report".strip(),
+        title=f"{club_name or 'Club'} - {period or 'Season'} report".strip(),
         club_name=club_name,
         period=period,
         scope="season",

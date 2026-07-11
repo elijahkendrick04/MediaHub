@@ -163,12 +163,54 @@ def test_export_refuses_remote_and_traversal_srcs(tmp_path, monkeypatch):
     data_dir = tmp_path / "data"
     data_dir.mkdir()
     monkeypatch.setenv("DATA_DIR", str(data_dir))
-    # http(s) (no SSRF), data: URIs, and ../ traversal all resolve to nothing.
+    # http(s) (no SSRF), a non-image data: URI, and ../ traversal all resolve to nothing.
     for bad in (
         "https://evil.example/x.png",
         "http://169.254.169.254/latest",
-        "data:image/png;base64,AAAA",
+        "data:text/html;base64,PHNjcmlwdD4=",  # non-image data: — refused
+        "data:image/png;notbase64,zzz",  # not a base64 payload — refused
         "../secret_outside.png",
         str(tmp_path / ".." / "etc" / "hostname"),
     ):
-        assert export._img_path(m.media(bad)) is None
+        assert export._img_source(m.media(bad)) is None
+
+
+def _tiny_png_bytes(colour="green"):
+    import io
+
+    from PIL import Image
+
+    buf = io.BytesIO()
+    Image.new("RGB", (24, 16), colour).save(buf, "PNG")
+    return buf.getvalue()
+
+
+def test_export_embeds_data_uri_image(tmp_path, monkeypatch):
+    """A ``data:image`` URI (hand-authored / imported) is decoded and embedded in
+    both DOCX and PPTX — export fidelity parity with the render path."""
+    import base64
+
+    monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))
+    (tmp_path / "data").mkdir()
+    raw = _tiny_png_bytes("blue")
+    uri = "data:image/png;base64," + base64.b64encode(raw).decode("ascii")
+
+    dx = export.document_docx(_media_doc(uri), tmp_path / "d.docx")
+    assert raw in _docx_media_bytes(dx)
+
+    px = export.document_pptx(_media_doc(uri), tmp_path / "d.pptx")
+    assert raw in _pptx_media_bytes(px)
+
+
+def test_export_oversized_data_uri_is_skipped(tmp_path, monkeypatch):
+    """A data: image over the embed cap is skipped (never OOMs the export)."""
+    import base64
+
+    monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))
+    (tmp_path / "data").mkdir()
+    huge = b"\x89PNG\r\n" + b"\x00" * (export._MAX_EMBED_BYTES + 1)
+    uri = "data:image/png;base64," + base64.b64encode(huge).decode("ascii")
+    assert export._img_source(m.media(uri)) is None
+    # and the document still exports (the image is simply skipped)
+    out = export.document_docx(_media_doc(uri), tmp_path / "d.docx")
+    assert not _docx_media_bytes(out)
