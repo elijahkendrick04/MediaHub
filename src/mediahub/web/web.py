@@ -8784,6 +8784,20 @@ header.topnav nav a.live::before {
   padding: 9px 12px; border-radius: 4px;
 }
 .mh-js .mh-orgmenu-item:hover { background: rgba(245,242,232,0.05); color: var(--ink); }
+/* POST-form nav actions (Log out / Leave organisation) — the state change
+   rides POST + CSRF; the button reads exactly like the sibling links. */
+header.topnav nav form.mh-nav-form { display: inline-flex; margin: 0; }
+button.mh-nav-linkbtn {
+  position: relative; display: inline-flex; align-items: center;
+  font-family: var(--font-mono); color: var(--ink-muted);
+  padding: 0 var(--sp-4); font-size: 11px; font-weight: 500;
+  letter-spacing: 0.14em; text-transform: uppercase;
+  transition: color var(--transition); white-space: nowrap;
+  background: none; border: 0; cursor: pointer;
+}
+button.mh-nav-linkbtn:hover { color: var(--ink); }
+button.mh-orgmenu-item { background: none; border: 0; cursor: pointer; }
+.mh-orgmenu-panel form { display: contents; }
 
 /* MAIN */
 main.wrap { max-width: 1200px; margin: 0 auto; padding: 36px 28px 96px; }
@@ -13821,12 +13835,41 @@ def _layout(
         signed_in_pid = (_sess.get("active_profile_id") or "").strip()
         # Account-level identity (PC.1) — separate from the org pin above.
         account_email = (_sess.get("user_email") or "").strip().lower()
-        # Operator developer session (public, passwordless sign-in).
+        # Operator developer session (username + password sign-in, ADR-0019).
         dev_operator = _auth.is_dev_operator()
     except Exception:
         signed_in_pid = ""
         account_email = ""
         dev_operator = False
+    # Who may switch organisations from the nav (org-access audit): the dev
+    # operator always; an anonymous pilot session (picker is its only door);
+    # a member only when they actually belong to 2+ workspaces. A single-org
+    # member never sees a picker entry — their club IS their session. Reuses
+    # the per-request g._mh_memberships snapshot (one ledger read a request,
+    # same cache _session_can_use_profile fills).
+    can_switch_org = False
+    if dev_operator:
+        can_switch_org = True
+    elif account_email:
+        try:
+            from flask import g as _g
+
+            snap = getattr(_g, "_mh_memberships", None)
+            if snap is None:
+                snap = _tenancy.MembershipStore()._read_all()
+                _g._mh_memberships = snap
+            can_switch_org = (
+                sum(
+                    1
+                    for (e, _pid), m in snap.items()
+                    if e == account_email and m.status == _tenancy.STATUS_ACTIVE
+                )
+                >= 2
+            )
+        except Exception:
+            can_switch_org = False
+    elif signed_in_pid:
+        can_switch_org = True
     signed_in_name = ""
     signed_in_primary = ""
     signed_in_secondary = ""
@@ -14271,10 +14314,16 @@ def _layout(
     {% endif %}
     {% endif %}
     {% if dev_operator %}
-      <a href="{{ url_for('logout') }}" title="Operator mode — unrestricted, no paywall">Developer &check;</a>
+      {# Logout is a state change: POST + CSRF (the response hook injects the
+         token into every POST form), never a GET link. #}
+      <form method="post" action="{{ url_for('logout') }}" class="mh-nav-form">
+        <button type="submit" class="mh-nav-linkbtn" title="Operator mode — unrestricted, no paywall">Developer &check;</button>
+      </form>
     {% elif account_email %}
       <a href="{{ url_for('billing_page') }}" title="{{ account_email }}">Billing</a>
-      <a href="{{ url_for('logout') }}">Log out</a>
+      <form method="post" action="{{ url_for('logout') }}" class="mh-nav-form">
+        <button type="submit" class="mh-nav-linkbtn">Log out</button>
+      </form>
     {% elif signed_in %}
       {# A-5: a workspace is active but there is no account yet. Don't show the
          prospect's "Sign up + Log in" pair (which reads as "you're not signed
@@ -14377,9 +14426,21 @@ def _layout(
            /remote); give a phone user a menu shortcut to the pairing screen. #}
         <a href="{{ url_for('remote_landing') }}" role="menuitem"
            class="mh-orgmenu-item">Slide remote</a>
+        {# Org-access audit: switching / leaving an organisation is only
+           offered to sessions that can actually do it — the dev operator,
+           anonymous pilot sessions, and the rare multi-org member. A
+           single-org member's access is bound to their account, so their
+           only exit is "Log out"; showing them a picker entry or a
+           leave-org control would be a dead (or looping) button. #}
+        {% if can_switch_org %}
         <a href="{{ url_for('sign_in_page') }}" role="menuitem"
            class="mh-orgmenu-item {{ 'active' if active=='signin' else '' }}">{{ t('nav.switch_org') }}</a>
-        <a href="{{ url_for('sign_out') }}" role="menuitem" class="mh-orgmenu-item">{{ t('nav.sign_out') }}</a>
+        {% endif %}
+        {% if dev_operator or not account_email %}
+        <form method="post" action="{{ url_for('sign_out') }}">
+          <button type="submit" role="menuitem" class="mh-orgmenu-item">{{ t('nav.sign_out') }}</button>
+        </form>
+        {% endif %}
       </div>
     </div>
     {% endif %}
@@ -16648,6 +16709,7 @@ def _layout(
         signed_in=bool(signed_in_pid),
         account_email=account_email,
         dev_operator=dev_operator,
+        can_switch_org=can_switch_org,
         signed_in_name=signed_in_name,
         signed_in_primary=signed_in_primary,
         signed_in_secondary=signed_in_secondary,
@@ -19041,6 +19103,24 @@ def create_app() -> Flask:
         # request, or Render's edge) — never teach a plain-HTTP dev setup to pin.
         if app.config.get("SESSION_COOKIE_SECURE") or request.is_secure or os.environ.get("RENDER"):
             h.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+        # Signed-in HTML must not be restorable from cache after sign-out
+        # (back button on a shared machine — org-access audit P3). no-store
+        # also opts these pages out of the bfcache in the major engines.
+        # setdefault keeps route-specific Cache-Control; static assets are
+        # untouched (they set their own or ride SEND_FILE_MAX_AGE_DEFAULT).
+        try:
+            if (
+                resp.content_type
+                and resp.content_type.startswith("text/html")
+                and (
+                    session.get("user_email")
+                    or session.get("dev_operator")
+                    or session.get("active_profile_id")
+                )
+            ):
+                h.setdefault("Cache-Control", "no-store")
+        except Exception:
+            pass
         return resp
 
     # Persistent SECRET_KEY &mdash; survives restarts and redeploys.
@@ -19404,15 +19484,26 @@ def create_app() -> Flask:
         return snap.get((_auth.normalize_email(email), (pid or "").strip()))
 
     def _session_can_use_profile(pid: str) -> bool:
-        """May the CURRENT session pin / read-as-active / edit this org?"""
-        snap = _memberships_snapshot()
-        if not _snap_is_bound(snap, pid):
-            return True
+        """May the CURRENT session pin / read-as-active / edit this org?
+
+        Access model (org-access audit, extending ADR-0014):
+          - the signed-in dev operator may use ANY org — cross-org roaming
+            is exclusively the operator's capability;
+          - a signed-in account is confined to the orgs it is an ACTIVE
+            member of, bound or not (previously it could roam any unbound
+            org — the same blast-radius rule ADR-0014 applied to ownerless
+            runs now applies at the pinning choke point);
+          - an anonymous session keeps the unbound (pilot/standalone) orgs
+            open and is refused every bound org, exactly as before.
+        """
         if _auth.is_dev_operator():
             return True
+        snap = _memberships_snapshot()
         email = _auth.current_user_email()
-        m = _snap_membership(snap, email, pid)
-        return bool(m and m.status == _tenancy.STATUS_ACTIVE)
+        if email:
+            m = _snap_membership(snap, email, pid)
+            return bool(m and m.status == _tenancy.STATUS_ACTIVE)
+        return not _snap_is_bound(snap, pid)
 
     def _session_owns_profile(pid: str) -> bool:
         """Operator, or an ACTIVE owner of a bound org (delete/member-admin)."""
@@ -19465,6 +19556,34 @@ def create_app() -> Flask:
             invited_via_profile_id=pid,
         )
         _invalidate_memberships_snapshot()
+
+    def _auto_pin_member_org() -> Optional[str]:
+        """Pin the signed-in account's own organisation (A1, org-access audit).
+
+        Members land straight on their club after sign-in — never on the
+        picker. Keeps an already-pinned org when it is one of theirs;
+        otherwise pins the alphabetically-first member org (deterministic
+        landing for the rare multi-org account). Returns the pinned id, or
+        None when the session is anonymous / the operator / memberless.
+        The membership row alone is not enough — the profile JSON must
+        still exist on disk, or the pin would 404 everywhere downstream.
+        """
+        if _auth.is_dev_operator():
+            return None
+        email = _auth.current_user_email()
+        if not email:
+            return None
+        snap = _memberships_snapshot()
+        pids = sorted(
+            pid for (e, pid), m in snap.items() if e == email and m.status == _tenancy.STATUS_ACTIVE
+        )
+        pids = [pid for pid in pids if load_profile(pid) is not None]
+        if not pids:
+            return None
+        current = (session.get("active_profile_id") or "").strip()
+        chosen = current if current in pids else pids[0]
+        _pin_active_profile(chosen)
+        return chosen
 
     def _active_profile_id() -> Optional[str]:
         """Return the signed-in organisation id, or ``None``.
@@ -38812,14 +38931,14 @@ function copySpotlightCaption(btn) {{
             f"{err_html}"
             '<div class="card" style="padding:24px 28px;max-width:440px">'
             f'<form method="post" action="{action_url}" data-loader-text="Working&hellip;">'
-            '<label style="display:block;font-size:12px;text-transform:uppercase;'
+            '<label for="auth_email" style="display:block;font-size:12px;text-transform:uppercase;'
             'letter-spacing:0.06em;color:var(--ink-muted);margin-bottom:6px">Email</label>'
-            f'<input type="email" name="email" autocomplete="email" required '
+            f'<input type="email" id="auth_email" name="email" autocomplete="email" required '
             f'value="{_h(prefill_email)}" '
             'style="width:100%;margin-bottom:16px" placeholder="you@club.org" />'
-            '<label style="display:block;font-size:12px;text-transform:uppercase;'
+            '<label for="auth_password" style="display:block;font-size:12px;text-transform:uppercase;'
             'letter-spacing:0.06em;color:var(--ink-muted);margin-bottom:6px">Password</label>'
-            '<input type="password" name="password" required '
+            '<input type="password" id="auth_password" name="password" required '
             + (
                 'autocomplete="new-password" minlength="8" '
                 if min_password
@@ -39048,15 +39167,13 @@ function copySpotlightCaption(btn) {{
                 record_referred_signup(ref_code, user.email)
             except Exception:
                 log.warning("referral signup recording failed", exc_info=True)
-        # First-run routing (A-4): a brand-new account has no workspace yet,
-        # so sending it to /make just trips the org-ready gate, which bounces
-        # to /sign-in and — on a shared deployment — falsely reads "no
-        # organisations exist". Route straight to setup instead. An account
-        # that signed up via an invite already has an accessible workspace, so
-        # send it to the picker to choose/enter it.
-        accessible = [p for p in list_profiles() if _session_can_use_profile(p.profile_id)]
-        if accessible:
-            return redirect(url_for("sign_in_page"))
+        # First-run routing (A-4 + A1, org-access audit): an account that
+        # signed up via an invite already belongs to a workspace — pin it and
+        # land straight in the app, never on the picker. A brand-new account
+        # with no membership goes straight to setup to create its own club
+        # (sending it to /make would just trip the org-ready gate).
+        if _auto_pin_member_org():
+            return redirect(url_for("make_page"))
         return redirect(url_for("organisation_setup"))
 
     @app.route("/login", methods=["GET"])
@@ -39145,6 +39262,10 @@ function copySpotlightCaption(btn) {{
         session.clear()
         _auth.login_user(user)
         _sec_event("login", actor=user.email)
+        # A1 (org-access audit): bind the member's own organisation into the
+        # session at sign-in so they land straight on their club — the picker
+        # is never part of a member's sign-in flow.
+        _auto_pin_member_org()
         nxt = _safe_next(request.args.get("next") or request.form.get("next"))
         # Re-acceptance check: accounts whose recorded Terms acceptance
         # predates TERMS_VERSION (or legacy accounts with no record) are
@@ -39200,6 +39321,8 @@ function copySpotlightCaption(btn) {{
         session.clear()
         _auth.login_user(user)
         _sec_event("login", actor=user.email, detail="2fa")
+        # A1: same direct-to-their-club landing as the password-only path.
+        _auto_pin_member_org()
         return redirect(url_for("make_page"))
 
     @app.route("/account/2fa", methods=["GET", "POST"])
@@ -39274,8 +39397,40 @@ function copySpotlightCaption(btn) {{
 
     @app.route("/logout", methods=["GET", "POST"])
     def logout():
-        _auth.logout_user()
-        session.pop("terms_ok_version", None)
+        """End the account (or operator) session.
+
+        POST performs the logout — the state change rides the app-wide CSRF
+        token like every other form (P3, org-access audit). GET only renders
+        a confirmation page, so a cross-site link can no longer end (or
+        probe) a session. Logout also revokes server-side: the account's
+        session epoch moves on (dev sessions: the revocation watermark), so
+        a replayed pre-logout cookie is dead, and the WHOLE session is
+        cleared — the org pin must never outlive the identity that earned it.
+        """
+        if request.method == "GET":
+            body = (
+                '<div class="card" style="max-width:420px;margin:40px auto;padding:24px 28px">'
+                "<h2>Sign out?</h2>"
+                '<p class="dim" style="font-size:13px">This ends your session on every '
+                "device you are signed in on.</p>"
+                f'<form method="post" action="{url_for("logout")}">'
+                '<button type="submit" class="btn" style="margin-top:12px;width:100%">'
+                "Sign out</button></form>"
+                f'<div class="dim" style="font-size:13px;margin-top:14px;text-align:center">'
+                f'<a href="{url_for("home")}" style="color:var(--accent)">Cancel</a></div>'
+                "</div>"
+            )
+            return _layout("Sign out", body, active="")
+        from mediahub.compliance.security_log import record_event as _sec_event
+
+        email = _auth.current_user_email()
+        if email:
+            _user_store().bump_session_epoch(email)
+            _sec_event("logout", actor=email)
+        if _auth.is_dev_operator():
+            _auth.revoke_dev_sessions()
+            _sec_event("logout", actor="dev_operator")
+        session.clear()
         return redirect(url_for("home"))
 
     # ---- PC.14 — password reset + email verification --------------------
@@ -39651,7 +39806,7 @@ function copySpotlightCaption(btn) {{
 
     # ---- /operator/commercial — Phase C sell-side console (PC.4 + PC.6) ----
     # Operator-only, exactly like /developer: non-operator sessions are sent to
-    # the (public, passwordless) developer sign-in. It holds commercially
+    # the username+password developer sign-in (ADR-0019). It holds commercially
     # sensitive data (quotes, pipeline) so it must never render for org users.
 
     def _require_operator():
@@ -41085,6 +41240,22 @@ what you're doing, what they should do.</p>
         # signing in resumes the page the user was heading to.
         _next_val = _safe_next(request.args.get("next"))
 
+        # A1 (org-access audit): a signed-in member with exactly one
+        # organisation never routes through the picker — /sign-in IS their
+        # club, so pin it and continue to the app (or the threaded next).
+        # A pending error flash still renders the page so the message isn't
+        # lost; the rare multi-org account keeps a picker that the server
+        # filter above confines to its own workspaces; the dev operator
+        # keeps the full picker (cross-org roaming is operator-only).
+        if (
+            len(profiles) == 1
+            and _auth.current_user_email()
+            and not _auth.is_dev_operator()
+            and not session.get("sign_in_error")
+        ):
+            _pin_active_profile(profiles[0].profile_id)
+            return redirect(_next_val or url_for("make_page"))
+
         # Surface any error flashed by sign_in_post / a delete bounce / a
         # signed-out share-target (silent failures fixed). Computed up here so it
         # renders on BOTH the empty state and the picker.
@@ -41323,8 +41494,29 @@ what you're doing, what they should do.</p>
 
     @app.route("/sign-out", methods=["GET", "POST"])
     def sign_out():
-        """Clear the active profile pin and return to the sign-in picker."""
+        """Clear the active profile pin and return to the sign-in picker.
+
+        POST-only for the state change (same CSRF rationale as /logout);
+        GET renders a confirmation. Only anonymous pilot sessions and the
+        dev operator see this control — a member's org access is bound to
+        their account, so their exit is /logout.
+        """
+        if request.method == "GET":
+            body = (
+                '<div class="card" style="max-width:420px;margin:40px auto;padding:24px 28px">'
+                "<h2>Leave this organisation?</h2>"
+                '<p class="dim" style="font-size:13px">Your work is kept — you can '
+                "re-enter the organisation from the picker at any time.</p>"
+                f'<form method="post" action="{url_for("sign_out")}">'
+                '<button type="submit" class="btn" style="margin-top:12px;width:100%">'
+                "Leave organisation</button></form>"
+                f'<div class="dim" style="font-size:13px;margin-top:14px;text-align:center">'
+                f'<a href="{url_for("home")}" style="color:var(--accent)">Cancel</a></div>'
+                "</div>"
+            )
+            return _layout("Leave organisation", body, active="")
         session.pop("active_profile_id", None)
+        session.pop("login_seen_at", None)
         session.pop("sign_in_error", None)
         return redirect(url_for("sign_in_page"))
 
@@ -43906,12 +44098,12 @@ what you're doing, what they should do.</p>
             chip = _chip_html_for(key, val)
             social_inputs += (
                 f'<div style="margin-bottom:10px">'
-                f'<label style="display:flex;align-items:center;flex-wrap:wrap;'
+                f'<label for="os-social-{_h(key)}" style="display:flex;align-items:center;flex-wrap:wrap;'
                 f'font-size:13px;color:var(--ink-dim);margin-bottom:4px">'
                 f'<span>{_h(label)} <span class="muted" style="font-size:11px">(optional)</span></span>'
                 f"{chip}"
                 f"</label>"
-                f'<input type="url" name="social_{key}" value="{_h(val)}" '
+                f'<input type="url" id="os-social-{_h(key)}" name="social_{key}" value="{_h(val)}" '
                 f'placeholder="{_h(placeholder)}" style="{_input_style}"/>'
                 f"</div>"
             )
@@ -44127,10 +44319,10 @@ what you're doing, what they should do.</p>
       <ul id="country-options" role="listbox" class="mh-combobox-options" hidden></ul>
     </div>
     <div>
-      <label>
+      <label for="os-governing-body">
         Governing body <span class="muted" style="font-size:11px">(optional)</span>
       </label>
-      <input type="text" name="governing_body" value="{_h(governing_body)}"
+      <input id="os-governing-body" type="text" name="governing_body" value="{_h(governing_body)}"
              placeholder="e.g. Swim England, UKA, BUCS"
              style="{_input_style}"/>
     </div>
@@ -44162,14 +44354,12 @@ what you're doing, what they should do.</p>
     &mdash; so you never have to explain &ldquo;this is how we sound&rdquo;.
   </p>
   <div style="margin-bottom:14px">
-    <label>
-      Club website
-    <label style="display:flex;align-items:center;flex-wrap:wrap;
+    <label for="os-website-url" style="display:flex;align-items:center;flex-wrap:wrap;
                   font-size:13px;color:var(--ink-dim);margin-bottom:4px">
       <span>Club website <span class="muted" style="font-size:11px">(optional)</span></span>
       {_website_chip}
     </label>
-    <input type="url" name="website_url" value="{_h(website_url)}"
+    <input id="os-website-url" type="url" name="website_url" value="{_h(website_url)}"
            placeholder="https://your-club.example"
            style="{_input_style}"/>
   </div>
@@ -44253,8 +44443,8 @@ what you're doing, what they should do.</p>
              autocomplete="off" style="{_input_style}"/>
     </div>
     <div>
-      <label>Governing body <span class="muted" style="font-size:11px">(optional)</span></label>
-      <input type="text" name="governing_body" value="{_h(governing_body)}"
+      <label for="ms-governing-body">Governing body <span class="muted" style="font-size:11px">(optional)</span></label>
+      <input id="ms-governing-body" type="text" name="governing_body" value="{_h(governing_body)}"
              placeholder="e.g. Swim England, UKA, BUCS" style="{_input_style}"/>
     </div>
   </div>
@@ -44264,17 +44454,18 @@ what you're doing, what they should do.</p>
   <h2 style="margin-top:0;font-size:18px">Voice &amp; platforms</h2>
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px 18px">
     <div>
-      <label>Caption tone</label>
-      <select name="caption_tone" style="{_input_style}">{_tone_opts}</select>
+      <label for="ms-caption-tone">Caption tone</label>
+      <select id="ms-caption-tone" name="caption_tone" style="{_input_style}">{_tone_opts}</select>
     </div>
     <div>
-      <label>Platforms you post to</label>
-      <div style="display:flex;flex-wrap:wrap;gap:12px;margin-top:8px">{_platform_checks}</div>
+      <label id="ms-platforms-label">Platforms you post to</label>
+      <div role="group" aria-labelledby="ms-platforms-label"
+           style="display:flex;flex-wrap:wrap;gap:12px;margin-top:8px">{_platform_checks}</div>
     </div>
   </div>
   <div style="margin-top:14px">
-    <label>How do you sound? <span class="muted" style="font-size:11px">(optional)</span></label>
-    <textarea name="tone_notes" rows="3"
+    <label for="ms-tone-notes">How do you sound? <span class="muted" style="font-size:11px">(optional)</span></label>
+    <textarea id="ms-tone-notes" name="tone_notes" rows="3"
               placeholder="e.g. Friendly and proud, first names only, never use exclamation marks, always thank the officials."
               style="{_input_style};resize:vertical">{_h(_m_tone_notes)}</textarea>
   </div>
