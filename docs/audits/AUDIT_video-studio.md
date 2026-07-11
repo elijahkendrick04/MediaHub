@@ -211,11 +211,15 @@ config, `requirements.txt`) was modified.
 
 ## 9. Feature verdict
 
-**WORKS-WITH-CAVEATS.** The core flow (upload → clip-maker/reel → edit → render →
-approve → export) is correct, deterministic, tenant-isolated, and consent-gated;
-the one P0 (source injection) and both P2 unhandled-500s are fixed and locked with
-tests. Remaining caveats are accessibility gaps and two edge-case engine
-behaviours (F-13/F-14), all logged, none blocking normal use.
+**WORKS-WITH-CAVEATS** (original pass) → **WORKS** (after the 2026-07-11 follow-up
+in §11). The core flow (upload → clip-maker/reel → edit → render → approve →
+export) is correct, deterministic, tenant-isolated, and consent-gated; the one P0
+(source injection) and both P2 unhandled-500s are fixed and locked with tests. The
+logged caveats — accessibility gaps (F-08..F-11), the two edge-case engine
+behaviours (F-13/F-14) and the undecodable-clip 500 (F-15) — have since been fixed
+and locked with tests (see §11). The two remaining items are deliberate deferrals,
+not defects: F-12 (em-dash house style, a monolith-wide decision) and the `_run_`
+project-access bypass (shared run→reel path).
 
 ---
 
@@ -240,3 +244,41 @@ behaviours (F-13/F-14), all logged, none blocking normal use.
 - **Review the diff:** `git diff origin/main...claude/video-studio-audit-bkhvvu`
   (6 files, +506/-8: `web.py` video routes, `video/captions.py`, three test files,
   this report).
+- **Merged.** This branch was merged into `main`; the follow-up in §11 is fresh
+  work on a branch restarted from the latest `main`.
+
+---
+
+## 11. Follow-up — logged caveats fixed (2026-07-11)
+
+A second pass cleared the deferred caveats. All fixes stay feature-local
+(`web.py` studio JS/template + `/api/video/*`, `video/render.py`,
+`video/clip_maker.py`, `video/captions.py`) and deterministic — no AI on any
+engine surface, no shared-infra change.
+
+| ID | Sev | Was | Fix | Locked by |
+| --- | --- | --- | --- | --- |
+| F-08 | P2 | Modal editor had no focus management | The timeline-editor modal now traps Tab, closes on Escape and backdrop click, carries `role="dialog"` + `aria-modal` + `aria-labelledby`, and restores focus to the trigger on close (`showEditor`/`closeEditor`). | `test_editor_modal_has_focus_management` |
+| F-09 | P3 | Reel brief labelled by placeholder only | Added an `aria-label`. | `test_reel_brief_has_accessible_label` |
+| F-10 | P3 | Editor trim/speed inputs + icon buttons named by glyph/adjacent text | Every per-clip input, reorder/remove icon button, join select and caption-line input carries an explicit, clip-numbered `aria-label`. | `test_editor_inputs_and_icon_buttons_have_accessible_names` |
+| F-11 | P3 | Reel reused the Clip-Maker's format select (hidden unless a clip was picked) | The reel bar has its own `#vs-reel-format` select; the reel submit reads it. | `test_reel_has_independent_format_control` |
+| F-13 | P3 | Render truncated a timeline mixing an open-ended clip with resolved clips | `_render_duration_ms` resolves the true length against the probes whenever any clip is open-ended; an all-resolved timeline keeps the identical `total_timeline_ms()` path (byte-identical). | `test_render_duration_resolves_open_ended_mixed_clip`, `test_render_duration_all_resolved_is_total_timeline` |
+| F-14 | P3 | Burned captions drifted when clips were reordered/trimmed/deleted | New pure `captions.retime_track_for_edit` re-times cues (and karaoke word stamps) to follow their source clip — bucketing on the old timeline, re-placing on the new, shifting by any head-trim, and honestly dropping a cue whose clip was deleted or whose word was trimmed away. Wired into the project-save route; only fires when the clip structure actually changed, so a text/grade-only edit stays byte-identical. Captioned clips always run at ~1× (slow-mo skips captions), so the frame mapping is exact. | 6 `test_retime_*` unit tests + `test_edl_edit_retimes_captions_on_reorder` / `test_edl_text_only_edit_leaves_caption_timing_untouched` (route) |
+| F-15 | P3 | Clip-Maker built a doomed 0-duration project from an undecodable clip (500 at render) | `clip_maker` raises `UndecodableClip` when FFmpeg probes to nothing (no video, no audio, zero duration); both clip-maker routes map it to a clean **422 `undecodable_clip`**. The FFmpeg-absent path is unaffected (it raises `ProbeUnavailable` first); an audio-only clip is still accepted. | `test_clip_maker_rejects_undecodable_clip`, `test_clip_maker_accepts_audio_only_clip`, `test_clip_maker_undecodable_clip_is_422_not_500` (route) |
+
+**Deliberately not changed (deferrals, not defects):**
+
+- **F-12 (em-dash copy):** the whole `web.py` monolith uses em dashes as house
+  style; sweeping only the studio would make it inconsistent with every other
+  surface. This is a codebase-wide copy decision, not a single-feature edit — left
+  for a maintainer call.
+- **`_run_`-prefixed project-access bypass** (§8): shared with the run→reel path,
+  not the studio's own creation flow (studio projects always carry a real
+  profile). Left as-is to avoid changing the shared run path; still flagged for a
+  cross-feature review.
+
+**Verification:** the video feature suite is green (`test_video_*` +
+`test_usability_j*_video_*`); the live studio flow was driven end-to-end with the
+bundled FFmpeg — `/video` renders with the new markup, a real clip-maker → render →
+edit(trim)-save → re-render cycle succeeds, and an undecodable upload returns 422.
+ruff lint + `ruff format --check` clean on all changed files.

@@ -315,7 +315,7 @@ def render_edl(edl: EDL, out_path: Path | str, *, timeout: int = 600) -> Path:
 
     probes, audio = _probe_sources(edl)
     compiled = compile_with_probes(edl, probes, audio)
-    duration_ms = edl.total_timeline_ms() or _compiled_duration_from_probes(edl, probes)
+    duration_ms = _render_duration_ms(edl, probes)
 
     with tempfile.TemporaryDirectory(prefix="mh_video_render_") as td:
         ass_paths: list[str] = []
@@ -388,6 +388,21 @@ def compile_with_probes(
 ) -> CompiledGraph:
     """Compile, threading probe durations + audio presence (text is burned via ASS)."""
     return _edl.compile_filtergraph(edl, probes=probes, audio=audio)
+
+
+def _render_duration_ms(edl: EDL, probes: dict[str, int]) -> int:
+    """The ``-t`` timeline cap for a render, resolving open-ended clips.
+
+    An open-ended clip (``out_ms == 0``, "to the end") contributes 0 to
+    :meth:`EDL.total_timeline_ms`, so a timeline that mixes one with resolved
+    clips under-counts and the cap would truncate the open-ended clip mid-render.
+    Resolve the true length against the probes whenever any clip is open-ended;
+    an all-resolved timeline takes the identical ``total_timeline_ms()`` path and
+    stays byte-identical.
+    """
+    if any(c.out_ms == 0 for c in edl.clips):
+        return _compiled_duration_from_probes(edl, probes)
+    return edl.total_timeline_ms() or _compiled_duration_from_probes(edl, probes)
 
 
 def _compiled_duration_from_probes(edl: EDL, probes: dict[str, int]) -> int:

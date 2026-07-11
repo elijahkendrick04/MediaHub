@@ -16,6 +16,7 @@ from mediahub.video.captions import (
     offset_track,
     restyle,
     retime_cue,
+    retime_track_for_edit,
     shift_track,
     windowed_caption_track,
 )
@@ -280,3 +281,101 @@ def test_windowed_karaoke_falls_back_to_static_without_word_timing(monkeypatch, 
     monkeypatch.setattr(_captions, "windowed_caption_track", fake_static)
     track = _captions.windowed_karaoke_track(src, in_ms=0, out_ms=2000)
     assert called.get("yes") and track.get("style") != "karaoke"
+
+
+# --- F-14: re-time captions when clips are reordered / trimmed / deleted -------
+
+
+def _desc(source, offset_ms, in_ms, out_ms):
+    return {"source": source, "offset_ms": offset_ms, "in_ms": in_ms, "out_ms": out_ms}
+
+
+def _two_clip_track():
+    # 30fps; clip A [a.mp4] at timeline 0 (frames 0..89), clip B [b.mp4] at 3000ms
+    # (frame 90..179). One cue sits in each clip.
+    return {
+        "color": "#FFFFFF",
+        "scrim": "#0A2540",
+        "cues": [
+            {"from": 10, "dur": 20, "text": "clip A line"},
+            {"from": 100, "dur": 20, "text": "clip B line"},  # local frame 10 of B
+        ],
+    }
+
+
+def _AB_old():
+    return [_desc("a.mp4", 0, 0, 3000), _desc("b.mp4", 3000, 0, 3000)]
+
+
+def test_retime_unchanged_structure_is_noop():
+    track = _two_clip_track()
+    out = retime_track_for_edit(track, _AB_old(), _AB_old(), fps=30)
+    assert out["cues"] == track["cues"]  # identity mapping → byte-identical cues
+
+
+def test_retime_follows_reordered_clips():
+    # Swap the order: B first (timeline 0), A second (timeline 3000).
+    new = [_desc("b.mp4", 0, 0, 3000), _desc("a.mp4", 3000, 0, 3000)]
+    out = retime_track_for_edit(_two_clip_track(), _AB_old(), new, fps=30)
+    by_text = {c["text"]: c["from"] for c in out["cues"]}
+    assert by_text["clip B line"] == 10  # B now at the front
+    assert by_text["clip A line"] == 100  # A now second (offset 90 + local 10)
+
+
+def test_retime_drops_cues_of_deleted_clip():
+    # Delete clip A; only B survives, now at timeline 0.
+    new = [_desc("b.mp4", 0, 0, 3000)]
+    out = retime_track_for_edit(_two_clip_track(), _AB_old(), new, fps=30)
+    assert [c["text"] for c in out["cues"]] == ["clip B line"]
+    assert out["cues"][0]["from"] == 10  # re-based to B's new front position
+
+
+def test_retime_shifts_on_head_trim_and_drops_trimmed_words():
+    # Trim clip A's head forward by 500ms (15 frames @30fps). The cue at local
+    # frame 10 is now before the kept content → dropped; a later cue survives shifted.
+    track = {
+        "color": "#FFF",
+        "scrim": "#000",
+        "cues": [
+            {"from": 10, "dur": 10, "text": "trimmed away"},  # local 10 < 15 → gone
+            {"from": 40, "dur": 10, "text": "kept"},  # local 40 → new local 25
+        ],
+    }
+    old = [_desc("a.mp4", 0, 0, 3000)]
+    new = [_desc("a.mp4", 0, 500, 3000)]
+    out = retime_track_for_edit(track, old, new, fps=30)
+    assert [c["text"] for c in out["cues"]] == ["kept"]
+    assert out["cues"][0]["from"] == 25  # 40 - 15 head-trim frames
+
+
+def test_retime_karaoke_words_ride_the_shift():
+    track = {
+        "color": "#FFF",
+        "scrim": "#000",
+        "style": "karaoke",
+        "cues": [
+            {
+                "from": 100,
+                "dur": 30,
+                "text": "go team",
+                "words": [
+                    {"from": 100, "dur": 15, "text": "go"},
+                    {"from": 115, "dur": 15, "text": "team"},
+                ],
+            }
+        ],
+    }
+    old = [_desc("a.mp4", 0, 0, 3000), _desc("b.mp4", 3000, 0, 3000)]
+    new = [_desc("b.mp4", 0, 0, 3000), _desc("a.mp4", 3000, 0, 3000)]  # B to front
+    out = retime_track_for_edit(track, old, new, fps=30)
+    cue = out["cues"][0]
+    assert cue["from"] == 10  # B moved to timeline 0, cue local 10
+    assert [w["from"] for w in cue["words"]] == [10, 25]  # words re-based too
+
+
+def test_retime_returns_none_when_all_cues_drop():
+    # The only cue's clip was deleted and nothing else carries captions.
+    track = {"color": "#FFF", "scrim": "#000", "cues": [{"from": 100, "dur": 10, "text": "gone"}]}
+    old = [_desc("a.mp4", 0, 0, 3000), _desc("b.mp4", 3000, 0, 3000)]
+    new = [_desc("a.mp4", 0, 0, 3000)]  # dropped B, whose window held the cue
+    assert retime_track_for_edit(track, old, new, fps=30) is None
