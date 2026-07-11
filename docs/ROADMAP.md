@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-07-11 · `0973b44b1` · Merge pull request #1149 from elijahkendrick04/claude/audit-free-text-bb9chy
+**Last updated:** 2026-07-11 · `00df1a978` · Merge pull request #1150 from elijahkendrick04/claude/event-preview-audit-vhr4xq
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1233,9 +1233,9 @@ list and the auto table below, not here.
 | 2026-07-11 | `54b9db347` | [developer-settings] drop dead #FFB454 hex fallback to restore theme-token budget |
 | 2026-07-11 | `d94720c22` | [developer-settings] audit report: record F-4 fix (third pass) |
 | 2026-07-11 | `447bfce21` | [developer-settings] redact absolute server paths from public /healthz/deps |
-| 2026-07-11 | `dc93fe80d` | [org-access] record final merge status + green-gate result in audit report |
-| 2026-07-11 | `b116544ac` | [org-access] audit report: current behaviour, verification matrix, findings, verdict |
-| 2026-07-11 | `5b616e225` | [org-access] confine signed-in accounts to member orgs; land members on their club; real sign-out |
-| 2026-07-11 | `868292c97` | [org-access] fix cross-tenant IDOR on /api/visual/<vid>(/png) endpoints |
-| 2026-07-11 | `105f4d6dc` | perf(free-text): bound list_sessions to ~limit parses (FT-PERF-1) |
+| 2026-07-11 | `976bb5bc8` | [event-preview] migrate a library-picker placeholder hex to var(--bg) |
+| 2026-07-11 | `b1b7f47b2` | [event-preview] record second-pass caveat fixes; verdict now WORKS |
+| 2026-07-11 | `53282a301` | [event-preview] lock the caveat fixes with tests |
+| 2026-07-11 | `c7d23b842` | [event-preview] fix the nine logged caveats (F7-F15) |
+| 2026-07-11 | `1a9733f17` | [event-preview] add SSRF-safe document-fetch helpers |
 <!-- /ROADMAP:ACTIVITY -->
