@@ -102,7 +102,8 @@ Return STRICT JSON ONLY (no prose, no markdown fences) with this shape:
 Rules:
 - Do NOT invent specific facts about real people, clubs, results, dates or
   scores the user didn't give you. If the request is vague, keep the copy
-  general and evocative rather than fabricating details.
+  short and concrete about what you DO know, and use `title` to name the
+  missing detail — do not pad with generic evocative filler.
 - Honour the club's brand voice when provided.
 - platform is one of Instagram, Facebook, X, TikTok, LinkedIn.
 - wants_reel is true ONLY if the user explicitly asks for a video / reel /

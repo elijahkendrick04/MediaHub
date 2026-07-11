@@ -57,9 +57,9 @@ def test_not_ready_org_shows_unlock_panel(gated_env):
         page = c.get("/organisation/setup")
         assert page.status_code == 200
         body = page.data.decode()
-        assert "isn’t unlocked yet" in body or "isn&rsquo;t unlocked yet" in page.data.decode("latin-1"), (
-            "not-ready org must show the unlock explanation panel (A-2)"
-        )
+        assert "can’t make content yet" in body or "can&rsquo;t make content yet" in page.data.decode(
+            "latin-1"
+        ), "not-ready org must show the not-ready explanation panel (A-2)"
         assert "Pick your colours now" in body, "panel must offer the manual-finish shortcut"
         assert 'id="mh-setup-not-ready"' in body
 

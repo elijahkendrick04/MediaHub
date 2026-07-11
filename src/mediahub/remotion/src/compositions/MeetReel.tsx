@@ -438,6 +438,23 @@ export function coverVariantFor(
   return pool[seed % pool.length];
 }
 
+// Honest cover eyebrows — a small closed vocabulary so a club's season of
+// reels doesn't open with the identical word on every single cover. Every
+// option is a truthful label for a meet-results recap (no invented framing).
+// The per-meet seed picks one, so the SAME meet always draws the same eyebrow
+// and different meets vary. Reads the HIGH bits of the seed to stay
+// independent of the cover-variant pick, which reads the low bits.
+export const COVER_EYEBROWS = [
+  "Meet Recap",
+  "Weekend Report",
+  "The Highlights",
+  "Results",
+] as const;
+
+export function coverEyebrowFor(seed: number): string {
+  return COVER_EYEBROWS[(seed >>> 5) % COVER_EYEBROWS.length];
+}
+
 // The values every cover variant shares: the honest stat-chip count-up
 // (opacity + progress) and the scene's exit fade into the first card. The
 // chips count up and the cover fades out identically everywhere; the rest of
@@ -466,6 +483,7 @@ type CoverEnv = ReturnType<typeof useCoverEnv>;
 type CoverVariantProps = {
   brand: Props["brand"];
   meetName: string;
+  eyebrow: string;
   chips: ReelStat[];
   counts: { swims: number; pbs: number; medals: number };
   env: CoverEnv;
@@ -477,9 +495,9 @@ type CoverVariantProps = {
 };
 
 // Variant 1 — STACK: the classic centred emblem lockup. Logo scales in, the
-// meet name springs up under a "Meet Recap" eyebrow, a brand-secondary rule
+// meet name springs up under the seed-picked eyebrow, a brand-secondary rule
 // grows out, club name and honest chips settle beneath.
-const StackCover: React.FC<CoverVariantProps> = ({ brand, meetName, chips, env, roles }) => {
+const StackCover: React.FC<CoverVariantProps> = ({ brand, meetName, eyebrow, chips, env, roles }) => {
   const { frame, fps, width, ts, chipsOpacity, chipsProgress } = env;
   const accent = roles.onGround || brand.accent || "#FFFFFF";
   const intro = spring({ frame, fps, config: { damping: 16, stiffness: 100, mass: 0.6 } });
@@ -547,7 +565,7 @@ const StackCover: React.FC<CoverVariantProps> = ({ brand, meetName, chips, env, 
           fontWeight: 700,
         }}
       >
-        Meet Recap
+        {eyebrow}
       </div>
       <div
         style={{
@@ -606,7 +624,7 @@ const StackCover: React.FC<CoverVariantProps> = ({ brand, meetName, chips, env, 
 // down the left of a huge left-set headline that slides in from the left out
 // of a defocus; the club + honest chips settle as a centred footer. The mix
 // of a left hero and a centred footer is a deliberate editorial contrast.
-const MastheadCover: React.FC<CoverVariantProps> = ({ brand, meetName, chips, env, roles }) => {
+const MastheadCover: React.FC<CoverVariantProps> = ({ brand, meetName, eyebrow, chips, env, roles }) => {
   const { frame, fps, width, height, ts, chipsOpacity, chipsProgress } = env;
   const accent = roles.onGround || brand.accent || "#FFFFFF";
   const barH = interpolate(frame, [3, fps * 0.65], [0, Math.round(height * 0.46)], {
@@ -695,7 +713,7 @@ const MastheadCover: React.FC<CoverVariantProps> = ({ brand, meetName, chips, en
             transform: `translateX(${eyebrowX}px)`,
           }}
         >
-          Meet Recap
+          {eyebrow}
         </div>
         <div
           style={{
@@ -880,7 +898,7 @@ const SpotlightCover: React.FC<CoverVariantProps> = ({ brand, meetName, counts, 
 // up top, a full-width brand-secondary band wipes across the middle carrying
 // the club logo, and the club name + honest chips rise in beneath it. Text
 // stays accent-on-primary; only the logo (an image) ever sits on the band.
-const BannerCover: React.FC<CoverVariantProps> = ({ brand, meetName, chips, env, roles }) => {
+const BannerCover: React.FC<CoverVariantProps> = ({ brand, meetName, eyebrow, chips, env, roles }) => {
   const { frame, fps, height, ts, chipsOpacity, chipsProgress } = env;
   const accent = roles.onGround || brand.accent || "#FFFFFF";
   const titleY = interpolate(
@@ -936,7 +954,7 @@ const BannerCover: React.FC<CoverVariantProps> = ({ brand, meetName, chips, env,
             fontWeight: 700,
           }}
         >
-          Meet Recap
+          {eyebrow}
         </div>
         <div
           style={{
@@ -1023,6 +1041,7 @@ const BannerCover: React.FC<CoverVariantProps> = ({ brand, meetName, chips, env,
 const PhotoCover: React.FC<CoverVariantProps> = ({
   brand,
   meetName,
+  eyebrow,
   chips,
   env,
   roles,
@@ -1114,7 +1133,7 @@ const PhotoCover: React.FC<CoverVariantProps> = ({
             fontWeight: 700,
           }}
         >
-          Meet Recap
+          {eyebrow}
         </div>
         <div
           style={{
@@ -1190,11 +1209,9 @@ const CoverScreen: React.FC<{
   // Data-driven: the variant is a pure function of the meet's identity and its
   // honest stats, so it is stable per meet and varied across meets. The
   // full-bleed photo cover is pool-gated on a photo actually existing (M18).
-  const variant = coverVariantFor(
-    reelSeed(`${meetName}|${counts.swims}|${counts.pbs}|${counts.medals}`),
-    counts,
-    Boolean(photoSrc),
-  );
+  const seed = reelSeed(`${meetName}|${counts.swims}|${counts.pbs}|${counts.medals}`);
+  const variant = coverVariantFor(seed, counts, Boolean(photoSrc));
+  const eyebrow = coverEyebrowFor(seed);
   const Body =
     variant === "photo"
       ? PhotoCover
@@ -1216,6 +1233,7 @@ const CoverScreen: React.FC<{
       <Body
         brand={brand}
         meetName={meetName}
+        eyebrow={eyebrow}
         chips={chips}
         counts={counts}
         env={env}

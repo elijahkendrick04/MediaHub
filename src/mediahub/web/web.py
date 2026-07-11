@@ -32760,8 +32760,9 @@ self.addEventListener('fetch', function(e){
                 '<span style="display:inline-block;width:12px;height:12px;border-radius:50%;'
                 'background:#ff5d6c;box-shadow:0 0 0 4px rgba(255,93,108,0.18)"></span>'
                 '<span style="font-size:18px;font-weight:600">Website down</span></div>'
-                '<p class="dim" style="margin:10px 0 0 0;font-size:13px">We are working on getting '
-                "things back up and running. Please check back shortly.</p></div>"
+                '<p class="dim" style="margin:10px 0 0 0;font-size:13px">The site isn&rsquo;t '
+                "responding right now. Your runs, profiles and data are safe. Try again in a "
+                "few minutes.</p></div>"
             )
         # unknown — we can't confirm either way.
         return (
@@ -32772,7 +32773,7 @@ self.addEventListener('fetch', function(e){
             '<span style="font-size:18px;font-weight:600">Status unavailable</span></div>'
             '<p class="dim" style="margin:10px 0 0 0;font-size:13px">We can&rsquo;t confirm the '
             "system&rsquo;s health right now. This usually means the monitoring signal is missing, "
-            "not that anything is broken &mdash; please check back shortly.</p></div>"
+            "not that anything is broken. If a page fails to load, reload it in a minute.</p></div>"
         )
 
     def _render_settings_developer_section() -> str:
@@ -43330,7 +43331,7 @@ what you're doing, what they should do.</p>
             manage_html = (
                 f'<a class="btn" href="{url_for("pricing_page")}">See plans &amp; pricing &rarr;</a>'
                 '<div class="dim" style="font-size:12px;margin-top:10px">'
-                "Upgrade to unlock unlimited runs and more brand profiles.</div>"
+                "Upgrade for unlimited runs and more brand profiles.</div>"
             )
 
         body = (
@@ -46706,8 +46707,8 @@ what you're doing, what they should do.</p>
                 'style="margin-bottom:20px;border:1px solid rgba(255,180,84,0.5);'
                 'background:rgba(255,180,84,0.07)">'
                 '<h2 style="margin-top:0;font-size:18px;color:var(--ink)">'
-                f"Almost there &mdash; {_h(prof.display_name or 'your organisation')} "
-                "isn&rsquo;t unlocked yet</h2>"
+                f"{_h(prof.display_name or 'Your organisation')} "
+                "can&rsquo;t make content yet</h2>"
                 '<p style="font-size:14px;line-height:1.55;color:var(--ink);margin:0 0 12px">'
                 f"{_h(_lead)} Add <strong>any one</strong> of these and you&rsquo;re in:</p>"
                 '<ul style="font-size:13px;line-height:1.7;color:var(--ink-dim);'
@@ -56324,7 +56325,9 @@ ever appear; queued, edited and rejected cards never do.</p>
                 "</figure>"
             )
         if not items:
-            items = '<p class="empty">No achievements published yet — check back soon.</p>'
+            items = (
+                '<p class="empty">No achievements published yet. Approved cards appear here.</p>'
+            )
         header = (
             ""
             if embed

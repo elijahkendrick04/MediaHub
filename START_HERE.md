@@ -1,4 +1,4 @@
-# Start Here 👋
+# Start Here
 
 **New to MediaHub? Read this first. No coding needed.**
 
@@ -59,7 +59,7 @@ Open that folder's `README.md` first — it explains the folder in plain English
 
 ## If you're joining the team
 
-1. Read this page (you're here! ✅).
+1. Read this page.
 2. Read the plan in plain English: the top of **[`docs/ROADMAP.md`](docs/ROADMAP.md)**
    — it says where we are now and what's next. Everything already shipped is
    recorded in **[`docs/ROADMAP_BUILT.md`](docs/ROADMAP_BUILT.md)**.
@@ -67,4 +67,4 @@ Open that folder's `README.md` first — it explains the folder in plain English
 4. Want the deep technical version? See **[`README.md`](README.md)** and
    **[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)**.
 
-Welcome aboard! 🏊
+Welcome to the team.

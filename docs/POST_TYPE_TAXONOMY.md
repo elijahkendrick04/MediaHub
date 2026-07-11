@@ -1,9 +1,9 @@
 # Post-Type Taxonomy
 
-> **In plain words.** MediaHub doesn't just turn results into posts. It decides
-> *what kinds of posts* a team should make at all — match previews, score recaps,
-> player spotlights, birthdays, sponsor thank-yous, "this day in history," and so
-> on. This page is the master list of those post types. Most of them are the same
+> **In plain words.** MediaHub decides *what kinds of posts* a team should make
+> at all — match previews, score recaps, player spotlights, birthdays, sponsor
+> thank-yous, "this day in history," and so on. This page is the master list of
+> those post types. Most of them are the same
 > for **every** sport (a fixture announcement is a fixture announcement whether
 > it's swimming or football). A few are special to one sport (swimming has
 > "relay splits"; football has "matchday XI"). A **sport profile** then picks which

@@ -1,7 +1,7 @@
 # The Cross-Source Planner (the strategy brain)
 
-> **In plain words.** MediaHub doesn't just turn a results file into posts —
-> it works out *what a club should post next*. The planner looks at three
+> **In plain words.** MediaHub works out *what a club should post next* — not
+> only how to turn one results file into posts. The planner looks at three
 > kinds of evidence: what's already in MediaHub (your processed results and
 > drafts), what's happening in the world (discovered meet context, the
 > calendar), and what you've told it (upcoming events, goals, blackout
