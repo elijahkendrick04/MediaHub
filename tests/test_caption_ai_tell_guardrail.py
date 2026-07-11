@@ -59,14 +59,17 @@ class TestExpandedBanList:
         assert _contains_ai_tell("Alex smashed his 100m PB with a 58.12.") is False
         assert _contains_ai_tell("Gold for Eira in the 200 free — 2:08.41!") is False
 
-    def test_named_phrases_are_all_in_ban_list(self):
-        # The prompt names a subset of tells; every named phrase MUST be a
-        # ban-list entry so the model is told exactly what the filter strips.
-        from mediahub.web.ai_caption import AI_TELL_BAN_LIST, _AI_TELL_NAMED
+    def test_prompt_and_filter_agree(self):
+        # The shared anti-slop instruction (ai_core.prompt_guard) and the
+        # post-generation filter must not drift: phrases the model is warned
+        # about are also the ones the filter strips.
+        from mediahub.web.ai_caption import _contains_ai_tell
 
-        assert set(_AI_TELL_NAMED) <= AI_TELL_BAN_LIST
+        for phrase in ("delve", "unleash", "testament to", "when it comes to", "the epitome of"):
+            assert _contains_ai_tell(f"a caption that says {phrase} in it") is True, phrase
 
     def test_instruction_names_representative_tells(self):
+        # The instruction is sourced from ai_core.prompt_guard and aliased.
         from mediahub.web.ai_caption import _AI_TELL_SYSTEM_INSTRUCTION
 
         low = _AI_TELL_SYSTEM_INSTRUCTION.lower()

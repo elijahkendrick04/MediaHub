@@ -145,7 +145,7 @@ dev = [
   # no-5xx smoke needs no extra dep. Pinned to the 3.x line whose API the test targets
   # (from_dict / get_all_operations / call_wsgi); the test also skips cleanly on any
   # API drift, so a future bump can't redden CI — only a real 5xx fails it.
-  "schemathesis>=4.22.3,<5",
+  "schemathesis>=4.22.4,<5",
   # D1: re-run a failing test on demand (opt-in via --reruns) to tell a flake from a
   # real failure. Inert unless --reruns is passed, so the gating suite is unaffected.
   "pytest-rerunfailures>=16.4",

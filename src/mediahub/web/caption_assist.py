@@ -20,7 +20,7 @@ from __future__ import annotations
 PRESETS = {
     "shorter": "Make it shorter and punchier — keep only the essentials.",
     "fuller": "Add a little more warmth and detail, without padding.",
-    "punchier": "Make it more energetic and celebratory.",
+    "punchier": "Tighten it and lead with the strongest concrete beat — the time, the placing, the moment.",
     "calmer": "Make it warmer and more understated.",
     "add_time": "Make sure the swimmer's time is mentioned naturally.",
     "tidy": "Tidy the grammar and flow without changing the meaning.",

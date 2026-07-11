@@ -231,18 +231,16 @@ def _build_system_prompt(
         "lines, ~280 characters. Hashtags: 2-6. After your last card write "
         "nothing — the tool calls are the answer."
     )
-    # Cliché guardrail parity with the achievement caption path. The brief-led
-    # card writer builds its own prompt (it never touches _compose_caption_prompt),
-    # so the shared AI-tell ban list and opener bans never reached it. Inject
-    # them here so Event Preview / Sponsor Post / Session Update / Free Text
-    # cards are held to the same "no machine-written filler" bar.
+    # Inherit the same anti-slop guards the achievement caption path uses, so
+    # the brief-led writer can't quietly reopen "What a…"/"elevate" clichés
+    # (one shared source of truth in ai_core.prompt_guard).
     try:
-        from mediahub.web.ai_caption import (
-            _AI_TELL_SYSTEM_INSTRUCTION,
-            _SHARED_TONE_BANS,
+        from mediahub.ai_core.prompt_guard import (
+            CAPTION_AI_TELL_INSTRUCTION,
+            CAPTION_SHARED_TONE_BANS,
         )
 
-        base += "\n\n" + _AI_TELL_SYSTEM_INSTRUCTION + " " + _SHARED_TONE_BANS
+        base += "\n\n" + CAPTION_AI_TELL_INSTRUCTION + "\n\n" + CAPTION_SHARED_TONE_BANS
     except Exception:
         pass
     if brand_prose:
