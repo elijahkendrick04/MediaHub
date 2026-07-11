@@ -39205,9 +39205,7 @@ function copySpotlightCaption(btn) {{
         saved_msg = ""
         capture_preview = ""  # rendered preview HTML when a capture has just run
         capture_error = ""  # rendered error banner when capture failed
-        voice_preview = ""  # rendered preview HTML after voice analysis
-        voice_error = ""  # rendered error banner when voice analysis failed
-        # The capture/voice previews are kept in-memory only &mdash; the user must
+        # The capture previews are kept in-memory only &mdash; the user must
         # click "Save organisation" to persist them (no silent writes).
         if request.method == "POST":
             action = (request.form.get("action") or "save").strip().lower()
@@ -39380,44 +39378,6 @@ function copySpotlightCaption(btn) {{
                             f'<p class="tag bad" style="margin-bottom:20px">{_h(reason)}</p>'
                         )
                 profile = existing
-
-            elif action == "analyse_voice":
-                # ---- Voice imitation analysis ----
-                raw_examples = (request.form.get("voice_examples") or "").strip()
-                if not raw_examples:
-                    voice_error = (
-                        '<p class="tag bad" style="margin-bottom:20px">'
-                        "Paste at least 3 captions (one per line) to analyse voice.</p>"
-                    )
-                    profile = existing
-                else:
-                    examples = [e.strip() for e in raw_examples.split("\n") if e.strip()]
-                    if len(examples) < 2:
-                        voice_error = (
-                            '<p class="tag bad" style="margin-bottom:20px">'
-                            "Paste at least 3 captions to get meaningful results.</p>"
-                        )
-                        profile = existing
-                    else:
-                        try:
-                            from mediahub.brand.voice_imitation import analyse_examples as _analyse
-
-                            vp = _analyse(examples)
-                        except Exception as exc:
-                            vp = {}
-                            voice_error = (
-                                f'<p class="tag bad" style="margin-bottom:20px">'
-                                f"Analysis failed: {_h(str(exc))}</p>"
-                            )
-                        if vp:
-                            existing.voice_examples = examples[:20]
-                            existing.voice_profile = vp
-                            voice_preview = (
-                                '<p class="tag info" style="margin-bottom:20px">'
-                                "Voice profile analysed &mdash; review below and click "
-                                "Save organisation to persist.</p>"
-                            )
-                    profile = existing
 
             else:
                 # ---- Save organisation ----
@@ -39698,49 +39658,6 @@ function copySpotlightCaption(btn) {{
                 "<code>data/standards/README.md</code>.</p>"
             )
 
-        # Build the voice-profile summary panel so the user can see what
-        # the engine learned the last time they ran "Analyse voice".
-        vp = profile.voice_profile or {}
-        if vp:
-
-            def _list_chips(items):
-                items = items or []
-                if not items:
-                    return '<span class="muted" style="font-size:12px">&mdash;</span>'
-                return "".join(
-                    f'<span style="display:inline-block;padding:2px 8px;'
-                    f"margin:2px 4px 2px 0;border:1px solid var(--border);"
-                    f'border-radius:999px;font-size:12px">{_h(s)}</span>'
-                    for s in items
-                )
-
-            voice_profile_html = (
-                f'<div style="margin-top:12px;padding:10px 12px;border:1px solid var(--border);'
-                f'border-radius:8px;background:var(--panel)">'
-                f'<div style="font-size:12px;color:var(--ink-dim);margin-bottom:6px">'
-                f"Voice profile (from {len(profile.voice_examples or [])} examples)</div>"
-                f'<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 16px;font-size:13px;margin-bottom:8px">'
-                f"<div>Avg sentence length: <b>{_h(vp.get('sentence_length_avg', '—'))}</b> words</div>"
-                f"<div>P90 sentence length: <b>{_h(vp.get('sentence_length_p90', '—'))}</b> words</div>"
-                f"<div>Emojis / caption: <b>{_h(vp.get('emoji_rate_per_caption', '—'))}</b></div>"
-                f"<div>Hashtags / caption: <b>{_h(vp.get('hashtag_count_avg', '—'))}</b></div>"
-                f"<div>Swimmer address: <b>{_h(vp.get('preferred_swimmer_address', 'first_name'))}</b></div>"
-                f"</div>"
-                f'<div style="font-size:12px;color:var(--ink-dim);margin-top:6px">Openers</div>'
-                f"<div>{_list_chips(vp.get('characteristic_openers'))}</div>"
-                f'<div style="font-size:12px;color:var(--ink-dim);margin-top:6px">Closers</div>'
-                f"<div>{_list_chips(vp.get('characteristic_closers'))}</div>"
-                f'<div style="font-size:12px;color:var(--ink-dim);margin-top:6px">Phrases to avoid</div>'
-                f"<div>{_list_chips(vp.get('forbidden_phrases'))}</div>"
-                f"</div>"
-            )
-        else:
-            voice_profile_html = (
-                '<p class="muted" style="font-size:12px;margin-top:8px">'
-                "No voice profile yet &mdash; paste 5-20 past captions and click "
-                "<b>Analyse voice</b>.</p>"
-            )
-
         # Empty constants — round-7 cleanup. The organisation form used to
         # apply its own inline input styles that overrode the global
         # `input[type=text]` rule, which is why /organisation looked
@@ -39930,8 +39847,6 @@ function copySpotlightCaption(btn) {{
 </div>
 """
 
-        voice_examples_text = "\n".join(profile.voice_examples or [])
-
         # Hoist brand-colour fallbacks into locals so the swatch markup and
         # the colour inputs share one literal each (keeps the inline-hex
         # budget in test_theme_tokens green — the literals live in plain
@@ -39950,7 +39865,7 @@ function copySpotlightCaption(btn) {{
         _org_sec = _org_eff.get("secondary") or profile.brand_secondary or "#000000"
 
         body = f"""
-{saved_msg}{capture_preview}{capture_error}{voice_preview}{voice_error}
+{saved_msg}{capture_preview}{capture_error}
 <section class="mh-hero" data-lane="" style="padding-top:var(--sp-8);padding-bottom:var(--sp-7);margin-bottom:var(--sp-5)">
   <span class="mh-hero-eyebrow">Organisation profile</span>
   <h1>{_h(profile.display_name) if profile.display_name else "Your organisation"}</h1>
@@ -40013,23 +39928,6 @@ function copySpotlightCaption(btn) {{
 </div>
 
 {brand_preview_html}
-
-<div class="card" style="margin-bottom:20px;border:1px solid rgba(167,139,250,0.4);background:rgba(167,139,250,0.04)">
-  <h2 style="margin-top:0">Analyse voice from past posts</h2>
-  <p class="dim" style="margin-bottom:12px;font-size:13px">Paste 5&ndash;20 recent captions (one per line). MediaHub measures sentence length, emoji density, hashtag style, and extracts opening/closing phrase patterns so generated captions sound like you.</p>
-  <form method="POST" data-loader-text="Analysing voice">
-    <input type="hidden" name="action" value="analyse_voice"/>
-    <input type="hidden" name="profile_id" value="{_h(profile.profile_id)}"/>
-    <input type="hidden" name="display_name" value="{_h(profile.display_name)}"/>
-    <label for="org-voice-examples">Past captions (one per line)</label>
-    <textarea id="org-voice-examples" name="voice_examples" rows="8"
-              placeholder="Paste one caption per line&#10;e.g.&#10;Huge PB for the squad this weekend &mdash; 200 free goes sub-2 for the first time &#127946;&#10;What a meet! Five PBs and a county standard from our junior group. #swimming #clublife"
-              style="max-width:640px">{_h(voice_examples_text)}</textarea>
-    <div style="margin-top:var(--sp-3)"><button type="submit" class="btn">Analyse voice &rarr;</button></div>
-  </form>
-</div>
-
-{voice_profile_html}
 
 <form method="POST">
 <input type="hidden" name="action" value="save"/>
