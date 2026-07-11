@@ -279,7 +279,23 @@ and locked with tests.
   end-to-end and Playwright checks re-run). The free-text chat routes the
   route sweep first flagged were false positives — that other session had
   already added the `_load_accessible_chat` guard now present in the base.
-- Merge: pending Phase 5 (integrate latest `origin/main`, re-run the green
-  gate on the integrated result, land via the atomic-push protocol). Merge SHA
-  recorded here once landed.
-- Review the diff: `git diff origin/main...claude/mediahub-org-access-control-b1zm6z`.
+- Merge: **landed on `main`** via a fast-forward atomic push (Phase 5).
+  Rebased onto `origin/main` BASE `db8de26` (clean, no conflicts — the
+  concurrent website-builder removal #1109 and team-members audit #1131
+  auto-merged), re-ran the green gate on the integrated result, freshness-
+  checked `origin/main` still == `db8de26`, then `git push origin HEAD:main`
+  (non-force). Tip commit on `main`: `b116544`. My three commits:
+  `868292c` (F1 visual IDOR), `5b616e2` (member confinement + landing +
+  sign-out), `b116544` (this report).
+- Green gate on the integrated result: full `tests/` run — **12,425 passed,
+  135 skipped, 5 failed**. All 5 failures are pre-existing / environmental,
+  NOT introduced by this branch: 4 are Playwright render tests that need
+  `chrome-headless-shell` (absent in this sandbox — they call
+  `p.chromium.launch()` with no explicit path), and 1 is
+  `test_theme_tokens.py::...::test_inline_hex_count_within_budget`, which is
+  over budget (21 vs 20) on `origin/main` itself — the same 21 literals, none
+  added here (my diff adds zero hex). Proven by running exactly those 5 on a
+  clean `origin/main` worktree: all 5 fail identically there. Every auth /
+  org / tenancy / sign-in test passes.
+- Review the diff: `git diff db8de26...b116544` (or
+  `git show 868292c 5b616e2`).
