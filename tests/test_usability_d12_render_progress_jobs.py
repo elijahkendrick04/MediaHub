@@ -313,6 +313,20 @@ def test_motion_client_js_is_shared_not_duplicated():
     assert "_MOTION_CLIENT_JS" in _SRC
 
 
+def test_motion_why_manifest_fields_are_escaped():
+    """JS-5: _loadMotionWhy writes manifest fields into innerHTML — they are
+    engine-written (low exploitability), but they now ride window.safeText
+    exactly like mhEngineNoteHtml already escapes the notes.* fields."""
+    assert "window.safeText(m.card.archetype)" in _SRC
+    assert "window.safeText(m.card.motion_intent)" in _SRC
+    assert "window.safeText(m.card.mood)" in _SRC
+    assert "window.safeText(m.card.variation_seed || '')" in _SRC
+    # The raw interpolations are gone.
+    for f in ("archetype", "motion_intent", "mood"):
+        assert f"+ m.card.{f} +" not in _SRC, f
+    assert "+ (m.card.variation_seed || '')" not in _SRC
+
+
 def test_background_workers_queue_for_the_render_slot():
     # CON-2: a 202-accepted background job queues for the shared render slot
     # (_RENDER_QUEUE_TIMEOUT, like the render-all batch worker) instead of

@@ -4531,11 +4531,13 @@ function _loadMotionWhy(panel, motionUrl, fmt) {
   var mUrl = motionUrl + '/manifest' + (fmt !== 'story' ? '?format=' + encodeURIComponent(fmt) : '');
   fetch(mUrl).then(function(r){ return r.ok ? r.json() : null; }).then(function(m) {
     if (!m || !m.card) return;
+    // JS-5: manifest fields are engine-written, but they ride innerHTML —
+    // escape them like mhEngineNoteHtml already escapes notes.*.
     var bits = [];
-    if (m.card.archetype) bits.push('archetype <b>' + m.card.archetype + '</b>');
-    if (m.card.motion_intent) bits.push('motion <b>' + m.card.motion_intent + '</b>');
-    if (m.card.mood) bits.push('mood <b>' + m.card.mood + '</b>');
-    bits.push(m.card.colour_source === 'still-parity-roles' ? 'colours mirror the approved still' : 'colours from seed ' + (m.card.variation_seed || ''));
+    if (m.card.archetype) bits.push('archetype <b>' + window.safeText(m.card.archetype) + '</b>');
+    if (m.card.motion_intent) bits.push('motion <b>' + window.safeText(m.card.motion_intent) + '</b>');
+    if (m.card.mood) bits.push('mood <b>' + window.safeText(m.card.mood) + '</b>');
+    bits.push(m.card.colour_source === 'still-parity-roles' ? 'colours mirror the approved still' : 'colours from seed ' + window.safeText(m.card.variation_seed || ''));
     slot.innerHTML = 'Why this design: ' + bits.join(' &middot; ') + mhEngineNoteHtml(m);
   }).catch(function(){});
 }
