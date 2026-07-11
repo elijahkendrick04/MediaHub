@@ -146,7 +146,13 @@ def can_access_session(s: Optional[ChatSession], active_pid: Optional[str]) -> b
 
 def save_session(s: ChatSession) -> None:
     path = _sessions_dir() / f"{s.chat_id}.json"
-    path.write_text(json.dumps(s.to_dict(), indent=2, ensure_ascii=False), encoding="utf-8")
+    # Write atomically (same-dir temp + os.replace) so a crash or an
+    # overlapping write mid-serialisation can't truncate the file and lose
+    # the whole conversation — the chat is the only record of the brief.
+    # Mirrors stub_pack_store._atomic_write.
+    tmp = path.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(s.to_dict(), indent=2, ensure_ascii=False), encoding="utf-8")
+    os.replace(tmp, path)
 
 
 def load_session(chat_id: str) -> Optional[ChatSession]:
