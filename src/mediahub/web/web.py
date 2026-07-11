@@ -6597,6 +6597,13 @@ def _render_card_creative_toolbar(
         )
 
     # M35: the overflow menu — collaboration/power features behind one trigger.
+    # Elements browser in add-to-card mode for THIS card (roadmap 1.10). Opens the
+    # curated, on-brand sticker / pictogram / chip / divider / frame library scoped
+    # to this run + card, so a chosen placement lands straight on the card's brief
+    # and the next render paints it. This is the intended "add-to-card context from
+    # the card editor" — the browse-only /elements page carries no top-bar slot.
+    _elements_url = url_for("elements_page", run_id=run_id, card_id=card_id_raw)
+
     # The unresolved-comments badge (.comments-count) rides the More trigger so
     # a pending task stays visible without thirteen equal-weight buttons.
     _more_menu = (
@@ -6609,6 +6616,7 @@ def _render_card_creative_toolbar(
         f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="commentsToggle(this, \'{card_uuid}\')" title="Comments, @mentions and tasks. A task must be resolved before this card can be approved.">&#x1F4AC; Comments</button>'
         f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="historyToggle(this, \'{card_uuid}\')" title="Version history — see every design version of this card, compare them, and roll back.">&#x21BA; History</button>'
         f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="locksToggle(this, \'{card_uuid}\')" title="Lock elements (e.g. the sponsor strip) so a later edit — even the copilot — can\'t change them.">&#x1F512; Locks</button>'
+        f'<a class="btn secondary" href="{_h(_elements_url)}" target="_blank" rel="noopener" style="font-size:11px;padding:4px 10px;text-decoration:none" title="Add on-brand stickers to this card — sport pictograms, PB and stat chips, dividers, frames — all painted in your club colours. Opens the element library scoped to this card; re-render the graphic to see them.">&#127912; Elements&hellip;</a>'
         f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="shareToggle(this, \'{card_uuid}\')" title="Create an expiring link so someone outside the club (e.g. a parent) can view — or comment on — this card without an account.">&#x1F517; Share</button>'
         f"{schedule_btn}"
         f"{_voiceover_btn}"
