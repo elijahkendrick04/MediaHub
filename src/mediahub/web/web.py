@@ -4742,10 +4742,12 @@ function _fetchCaption(captionUrl, tone, panel, cacheKey, isAi, cardId) {
           var altEl = captionDiv.querySelector('.alt-text-input');
           if (altEl && altEl.value) { bodyObj.alt_text = altEl.value; }
           trBtn.disabled = true; trBtn.textContent = 'Translating…';
+          if (window.MH && MH.btnState) MH.btnState(trBtn, 'loading');
           fetch(trUrl, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(bodyObj)})
             .then(function(r){ return r.json().then(function(jj){ return {ok:r.ok, j:jj}; }); })
             .then(function(res){
               trBtn.disabled = false; trBtn.textContent = 'Translate';
+              if (window.MH && MH.btnState) MH.btnState(trBtn, 'idle');
               var jj = res.j || {};
               if (!res.ok || jj.error) {
                 trOut.innerHTML = '<div style="font-size:10px;color:var(--warn);margin-top:4px">' + safeText(jj.message || 'Translation unavailable.') + '</div>';
@@ -4773,7 +4775,7 @@ function _fetchCaption(captionUrl, tone, panel, cacheKey, isAi, cardId) {
                 + '<div style="font-size:10px;color:var(--ink-muted);text-transform:uppercase;letter-spacing:0.5px">' + safeText(lbl) + ' · saved with this card</div>'
                 + slotsHtml + warnHtml + '</div>';
             })
-            .catch(function(){ trBtn.disabled = false; trBtn.textContent = 'Translate'; trOut.innerHTML = '<div style="font-size:10px;color:var(--warn);margin-top:4px">Translation failed — try again.</div>'; });
+            .catch(function(){ trBtn.disabled = false; trBtn.textContent = 'Translate'; if (window.MH && MH.btnState) MH.btnState(trBtn, 'idle'); trOut.innerHTML = '<div style="font-size:10px;color:var(--warn);margin-top:4px">Translation failed — try again.</div>'; });
         });
       }
       // W.11: result-grounded alt text — editable, saved with the card so
@@ -6144,6 +6146,7 @@ function _runReformat(panel, btn, url, label) {
   var result = panel.querySelector('.rf-result');
   var orig = btn.textContent;
   btn.disabled = true; btn.textContent = '…';
+  if (window.MH && MH.btnState) MH.btnState(btn, 'loading');
   if (result) result.innerHTML = '<div style="font-size:12px;color:var(--ink-muted)">Reformatting to ' + label + '… (5–20s)</div>';
   fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'})
     .then(function(r){
@@ -6153,6 +6156,7 @@ function _runReformat(panel, btn, url, label) {
     })
     .then(function(res){
       btn.disabled = false; btn.textContent = orig;
+      if (window.MH && MH.btnState) MH.btnState(btn, 'idle');
       if (res.err) { if (result) result.innerHTML = '<div style="font-size:12px;color:var(--bad)">' + res.err + '</div>'; return; }
       if (result) result.innerHTML =
         '<div style="font-size:11px;color:var(--ink-muted);margin-bottom:4px">' + label + '</div>' +
@@ -6161,6 +6165,7 @@ function _runReformat(panel, btn, url, label) {
     })
     .catch(function(e){
       btn.disabled = false; btn.textContent = orig;
+      if (window.MH && MH.btnState) MH.btnState(btn, 'idle');
       if (result) result.innerHTML = '<div style="font-size:12px;color:var(--bad)">Network error: ' + e + '</div>';
     });
 }
@@ -6253,15 +6258,17 @@ function copilotSend(btn, cardId) {
 
 function copilotPreview(btn, url) {
   var orig = btn.textContent; btn.disabled=true; btn.textContent='Rendering…';
+  if (window.MH && MH.btnState) MH.btnState(btn, 'loading');
   fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'})
     .then(function(r){ var ct=r.headers.get('Content-Type')||''; if (r.ok && ct.indexOf('image')===0) return r.blob().then(function(b){return {img:URL.createObjectURL(b)};}); return r.json().then(function(j){return {err:(j&&j.user_message)||'preview failed'};}); })
     .then(function(res){ btn.disabled=false; btn.textContent=orig;
+      if (window.MH && MH.btnState) MH.btnState(btn, 'idle');
       var holder=document.createElement('div'); holder.style.marginTop='6px';
       if (res.err) holder.innerHTML='<div style="font-size:11px;color:var(--bad)">'+window.safeText(res.err)+'</div>';
       else holder.innerHTML='<img src="'+res.img+'" alt="Edited design" style="max-width:100%;border-radius:6px;border:1px solid var(--border)" />';
       btn.parentNode.appendChild(holder);
     })
-    .catch(function(e){ btn.disabled=false; btn.textContent=orig; });
+    .catch(function(e){ btn.disabled=false; btn.textContent=orig; if (window.MH && MH.btnState) MH.btnState(btn, 'idle'); });
 }
 
 function copilotRemember(btn) {
@@ -12492,7 +12499,7 @@ _VIDEO_STUDIO_HTML = """
   // ---- footage upload ----
   function uploadFile(file){
     if(!file) return;
-    var status = $('vs-rec-status'); status.textContent = 'Uploading '+file.name+'...';
+    var status = $('vs-rec-status'); status.textContent = 'Uploading '+file.name+'…';
     if(file.size > VIDEO_MAX_MB*1024*1024){ status.textContent = 'That clip is over '+VIDEO_MAX_MB+' MB. Trim it shorter and try again.'; return; }
     var fd = new FormData(); fd.append('file', file, file.name);
     fetch(FOOTAGE_URL, {method:'POST', headers:{'X-CSRF-Token':CSRF,'Accept':'application/json'}, body:fd})
@@ -12529,7 +12536,7 @@ _VIDEO_STUDIO_HTML = """
       };
       mediaRecorder.start();
       $('vs-rec-stop').hidden = false;
-      status.textContent = 'Recording...';
+      status.textContent = 'Recording…';
     }).catch(function(err){ status.textContent = 'Recorder unavailable: '+(err && err.message || err); });
   }
   $('vs-rec-cam').addEventListener('click', function(){ startRec('camera'); });
@@ -12720,7 +12727,7 @@ _VIDEO_STUDIO_HTML = """
     }
     var st = document.querySelector('.vs-enh-status[data-id="'+id+'"]');
     if(btn){ btn.disabled = true; }
-    if(st){ st.textContent = 'Applying...'; }
+    if(st){ st.textContent = 'Applying…'; }
     jpost(url(ENHANCE_TMPL, id), body).then(function(j){
       if(btn){ btn.disabled = false; }
       if(j.ok){ if(st){ st.textContent = 'Applied — re-render to see it.'; } loadProjects(); }
@@ -13065,7 +13072,7 @@ _VIDEO_STUDIO_HTML = """
     if(!editorEdl.clips || !editorEdl.clips.length){ $('vs-ed-status').textContent = 'A timeline needs at least one clip.'; return; }
     // The first clip can never carry a transition (the validator enforces this).
     editorEdl.clips[0].transition_in = {kind:'cut', duration_ms:0};
-    $('vs-ed-status').textContent = 'Saving...';
+    $('vs-ed-status').textContent = 'Saving…';
     jpost(url(PROJECT_TMPL, editorPid), {edl: editorEdl}).then(function(j){
       if(j.ok){ $('vs-ed-status').textContent = 'Saved — re-render to see it.'; $('vs-editor').hidden = true; loadProjects(); }
       else { $('vs-ed-status').textContent = 'Failed: '+(j.message||j.error||'invalid timeline'); }
@@ -13313,6 +13320,7 @@ function mhRegenerateDraft(btn, url, nCards){
   function run(){
     var orig = btn.innerHTML;
     btn.disabled = true; btn.innerHTML = '\\u21BA Regenerating\\u2026';
+    if(window.MH && MH.btnState){ MH.btnState(btn, 'loading'); }
     fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}', credentials:'same-origin'})
       .then(function(r){ return r.json().then(function(j){ return {ok:r.ok, body:j}; }); })
       .then(function(res){
@@ -13321,12 +13329,14 @@ function mhRegenerateDraft(btn, url, nCards){
           location.href = (res.body && res.body.redirect) || location.href;
         } else {
           btn.disabled = false; btn.innerHTML = orig;
+          if(window.MH && MH.btnState){ MH.btnState(btn, 'idle'); }
           var msg = (res.body && (res.body.message || res.body.error)) || 'Could not regenerate';
           if(window.MH && MH.toast){ MH.toast(msg, 'error'); } else { alert(msg); }
         }
       })
       .catch(function(){
         btn.disabled = false; btn.innerHTML = orig;
+        if(window.MH && MH.btnState){ MH.btnState(btn, 'idle'); }
         if(window.MH && MH.toast){ MH.toast('Network error', 'error'); } else { alert('Network error'); }
       });
   }
@@ -15369,6 +15379,7 @@ def _layout(
     var panel = document.getElementById(panelId);
     var origLabel = btn.textContent;
     btn.disabled = true; btn.textContent = 'Generating…';
+    if (window.MH && MH.btnState) MH.btnState(btn, 'loading');
     if (panel) {
       panel.style.display = 'block';
       panel.textContent = 'Asking the AI to weave the reasoning into a fresh caption…';
@@ -15378,6 +15389,7 @@ def _layout(
       return r.json().then(function(j){ return {status: r.status, body: j}; });
     }).then(function(o){
       btn.disabled = false; btn.textContent = origLabel;
+      if (window.MH && MH.btnState) MH.btnState(btn, 'idle');
       if (!panel) return;
       var caption = (o.body && o.body.caption) || '';
       if (o.body && o.body.error === 'no_key') {
@@ -15478,6 +15490,7 @@ def _layout(
       }
     }).catch(function(e){
       btn.disabled = false; btn.textContent = origLabel;
+      if (window.MH && MH.btnState) MH.btnState(btn, 'idle');
       if (panel) panel.innerHTML = '<strong style="color:var(--bad)">Network error.</strong> '
         + (e && e.message || e);
     });
@@ -18993,6 +19006,7 @@ function _aiChecked(btn){
 }
 function _genBusy(btn, on){
   if(!btn) return;
+  if(window.MH && MH.btnState){ MH.btnState(btn, on ? 'loading' : 'idle'); }
   if(on){ if(!btn.dataset.label) btn.dataset.label = btn.textContent; btn.disabled = true; btn.textContent = 'Generating…'; }
   else { btn.disabled = false; if(btn.dataset.label) btn.textContent = btn.dataset.label; }
 }
@@ -23680,14 +23694,14 @@ def create_app() -> Flask:
     var u='__STATUS_BASE__'.replace('JOBID',jobId);
     (function tick(){
       fetch(u,{headers:{'Accept':'application/json'}}).then(function(r){return r.json();}).then(function(j){
-        if(j.status==='done'&&j.redirect){ show('Done - opening configure...'); window.location.href=j.redirect; return; }
+        if(j.status==='done'&&j.redirect){ show('Done - opening configure…'); window.location.href=j.redirect; return; }
         if(j.status==='error'){ b.disabled=false; show(j.error||'The re-fetch failed.'); return; }
-        show(j.progress||'Reading the site...'); setTimeout(tick,1500);
+        show(j.progress||'Reading the site…'); setTimeout(tick,1500);
       }).catch(function(){ setTimeout(tick,2500); });
     })();
   }
   b.addEventListener('click',function(){
-    b.disabled=true; show('Starting...');
+    b.disabled=true; show('Starting…');
     fetch('__REFETCH_URL__',{method:'POST',headers:{'X-CSRF-Token':'__CSRF__','Accept':'application/json'}})
       .then(function(r){return r.text().then(function(t){var j=null;try{j=JSON.parse(t);}catch(e){}return {ok:r.ok,status:r.status,j:j};});})
       .then(function(res){ if(!res.j){throw new Error('The server returned an unexpected response ('+res.status+'). You may need to sign in again, or the deployment is briefly restarting - reload and try again.');} if(!res.ok||res.j.error){throw new Error(res.j.error||res.j.message||'Could not start the re-fetch.');} poll(res.j.job_id); })
