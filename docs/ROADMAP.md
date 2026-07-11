@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-07-11 · `5e38a6244` · Usability audit — the owner-decision batch completes all 159 findings (#1164)
+**Last updated:** 2026-07-11 · `f629fcc70` · Merge pull request #1083 from elijahkendrick04/autotest/fix-bfff9fa5d517
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
