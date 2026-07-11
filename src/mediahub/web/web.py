@@ -36777,7 +36777,7 @@ function copySpotlightCaption(btn) {{
                 f'gap:4px;width:90px">'
                 f'<img src="{_h(file_url)}" alt="" loading="lazy" '
                 f'style="width:90px;height:90px;object-fit:cover;border-radius:6px;'
-                f'border:1px solid var(--border);background:#0a0a0a"/>'
+                f'border:1px solid var(--border);background:var(--bg)"/>'
                 f'<div style="font-size:10px;color:var(--ink-muted);text-align:center;'
                 f'width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'
                 f"{label}</div></div>"
