@@ -349,9 +349,13 @@ class TestOrganisationRoute:
         body = r.get_data(as_text=True)
         assert "Could not reach" in body or "Capture failed" in body
 
-    def test_capture_then_save_persists(self, isolated_data_dir, no_llm_env, monkeypatch):
-        """End-to-end: capture from a stubbed website, then submit the save
-        form and confirm the captured fields land in the on-disk JSON."""
+    def test_capture_persists_and_save_keeps_it(self, isolated_data_dir, no_llm_env, monkeypatch):
+        """End-to-end: capture from a stubbed website and confirm the
+        captured fields land in the on-disk JSON.
+
+        D-15 update, intent preserved: capture now persists immediately on
+        success (no hidden-input riding, no separate Save step needed), and
+        a later plain Save must leave the captured DNA intact."""
         from mediahub.web.web import create_app
         from mediahub.brand import dna_capture
 
@@ -375,37 +379,7 @@ class TestOrganisationRoute:
         # Logo or palette swatch visible in preview
         assert "Brand DNA preview" in body1
 
-        # Now submit Save with the hidden brand fields that the rendered
-        # preview emits. We replay them by extracting from the response.
-        import re as _re
-        def find_hidden(name):
-            m = _re.search(rf'name="{name}"\s+value="([^"]*)"', body1)
-            return m.group(1) if m else ""
-
-        save_form = {
-            "action": "save",
-            "profile_id": "lakeside",
-            "display_name": "Lakeside SC",
-            "short_name": "Lakeside",
-            "brand_primary": "#0d4d92",
-            "brand_secondary": "#000000",
-            "tone": "warm-club",
-            "brand_voice_summary": find_hidden("brand_voice_summary"),
-            "brand_logo_url": find_hidden("brand_logo_url"),
-            "brand_typography_hint": find_hidden("brand_typography_hint"),
-            "brand_source_url_saved": find_hidden("brand_source_url_saved"),
-            "brand_captured_at": find_hidden("brand_captured_at"),
-            "brand_capture_status": find_hidden("brand_capture_status"),
-            "brand_keywords_json": find_hidden("brand_keywords_json").replace("&#34;", '"').replace("&quot;", '"'),
-            "brand_phrases_to_use_json": find_hidden("brand_phrases_to_use_json").replace("&#34;", '"').replace("&quot;", '"'),
-            "brand_phrases_to_avoid_json": find_hidden("brand_phrases_to_avoid_json").replace("&#34;", '"').replace("&quot;", '"'),
-            "brand_palette_extracted_json": find_hidden("brand_palette_extracted_json").replace("&#34;", '"').replace("&quot;", '"'),
-        }
-        r2 = client.post("/organisation", data=save_form)
-        assert r2.status_code == 200
-        assert "Organisation saved" in r2.get_data(as_text=True)
-
-        # Confirm the JSON file now contains the captured fields
+        # The captured fields are on disk immediately — no Save step.
         profile_path = isolated_data_dir / "club_profiles" / "lakeside.json"
         assert profile_path.exists()
         saved = json.loads(profile_path.read_text())
@@ -413,6 +387,24 @@ class TestOrganisationRoute:
         assert saved["brand_palette_extracted"]
         assert saved["brand_source_url"].startswith("https://lakeside.example")
         assert saved["brand_capture_status"] in ("ok", "no_provider")
+
+        # A later plain Save must not wipe the captured DNA (the profile on
+        # disk is the source of truth; no hidden inputs carry it any more).
+        r2 = client.post("/organisation", data={
+            "action": "save",
+            "profile_id": "lakeside",
+            "display_name": "Lakeside SC",
+            "short_name": "Lakeside",
+            "brand_primary": "#0d4d92",
+            "brand_secondary": "#000000",
+            "tone": "warm-club",
+        })
+        assert r2.status_code == 200
+        assert "Organisation saved" in r2.get_data(as_text=True)
+        saved2 = json.loads(profile_path.read_text())
+        assert saved2["brand_logo_url"].endswith("/static/logo.png")
+        assert saved2["brand_palette_extracted"]
+        assert saved2["brand_source_url"].startswith("https://lakeside.example")
 
 
 # ---------------------------------------------------------------------------
