@@ -1,10 +1,11 @@
-"""D-24 — the blackout-date warning must not flash for 1.2s then be wiped by the
-reload.
+"""D-24 — the blackout-date warning must not flash for 1.2s then be wiped.
 
 Dropping a draft on a blackout date is the soft gate's one moment to warn, but
-the warning rendered in 12.5px status text for exactly 1200ms before the page
-reloaded and erased it. The warning is now persisted across the reload and shown
-as a dismissible toast.
+the warning used to render in 12.5px status text for exactly 1200ms before a
+full page reload erased it. D-26 then removed the reload from the schedule path
+entirely, so the warning no longer needs to survive one: the server's copy now
+lands in a dismissible inline banner (#mh-cal-warn) that stays on screen until
+the volunteer closes it, and the affected chip carries the blackout flag.
 """
 
 from __future__ import annotations
@@ -36,13 +37,21 @@ def page_html(tmp_path, monkeypatch):
     return c.get("/plan/calendar").get_data(as_text=True)
 
 
-def test_warning_persisted_across_reload(page_html):
-    assert "sessionStorage.setItem('mhCalWarn'" in page_html
-    assert "sessionStorage.getItem('mhCalWarn')" in page_html
-    assert "MH.toast(w, 'error', 8000)" in page_html
+def test_warning_lands_in_a_staying_inline_banner(page_html):
+    # The banner element ships in the markup, announced to screen readers,
+    # with a manual dismiss — nothing else clears it.
+    assert 'id="mh-cal-warn"' in page_html
+    assert 'role="alert"' in page_html
+    assert 'aria-label="Dismiss this warning"' in page_html
+    # The schedule handler routes the server's warning copy into the banner.
+    assert "mhCalWarnBanner(j.warning)" in page_html
+    assert "function mhCalWarnBanner(msg)" in page_html
 
 
 def test_old_flash_then_reload_pattern_gone(page_html):
-    # The 1.2s flash-then-reload that erased the warning is gone.
+    # The 1.2s flash-then-reload that erased the warning is gone — and so is
+    # the reload itself, so no sessionStorage carry-over is needed either.
     assert "window.location.reload(); }}, 1200)" not in page_html
     assert "reload(); }, 1200)" not in page_html
+    assert "location.reload" not in page_html
+    assert "sessionStorage.setItem('mhCalWarn'" not in page_html

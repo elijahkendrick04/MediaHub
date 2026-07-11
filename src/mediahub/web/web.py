@@ -33485,11 +33485,12 @@ function mhPlanGenerate(btn) {{
             if e.kind == "planned_draft":
                 ch = e.meta.get("channel") or ""
                 ch_html = f'<span style="opacity:.7"> · {_h(ch)}</span>' if ch else ""
+                # D-26: the flag is always in the markup (hidden off-blackout) so an
+                # in-place move onto/off a blackout day can toggle it without a reload.
                 warn = (
-                    '<span title="On a blackout date you set" '
-                    'style="color:var(--bad);font-weight:700"> ⚠</span>'
-                    if e.meta.get("on_blackout")
-                    else ""
+                    '<span class="mh-cal-warnflag" title="On a blackout date you set" '
+                    'style="color:var(--bad);font-weight:700"'
+                    f'{"" if e.meta.get("on_blackout") else " hidden"}> ⚠</span>'
                 )
                 draft_url = url_for("stub_pack_view", pack_id=e.ref)
                 # I-1 parity: HTML5 drag never fires from touch and the chip isn't
@@ -33570,6 +33571,22 @@ function mhPlanGenerate(btn) {{
                 "border:1px solid var(--border);border-radius:6px;background:var(--panel);"
                 'color:inherit">'
             )
+            # D-26: hidden blackout flag + unschedule control ship in the markup, so
+            # when this card is scheduled in place (no reload) it gains the same
+            # affordances a server-rendered planned chip has.
+            warn_flag = (
+                '<span class="mh-cal-warnflag" title="On a blackout date you set" '
+                'style="color:var(--bad);font-weight:700" hidden> ⚠</span>'
+            )
+            unplan = (
+                f'<button type="button" class="mh-cal-unplan" data-pack="{_h(d["pack_id"])}" '
+                f'aria-label="Unschedule {_h(d["title"])}" '
+                'title="Unschedule — send back to the side rail" '
+                'onclick="mhCalUnplan(event, this)" hidden '
+                'style="margin-top:3px;font-size:10.5px;background:none;border:none;'
+                'color:var(--ink-muted);text-decoration:underline;cursor:pointer;padding:0">'
+                "unschedule</button>"
+            )
             return (
                 f'<div class="mh-cal-draft mh-cal-rail-card" draggable="true" '
                 f'data-pack="{_h(d["pack_id"])}" '
@@ -33578,13 +33595,15 @@ function mhPlanGenerate(btn) {{
                 f'<span class="mh-cal-draft-dot"></span>'
                 f'<span class="mh-cal-draft-t">{_h(d["title"])}'
                 f'<span style="opacity:.6"> · {int(d["n_cards"])} card'
-                f"{'s' if int(d['n_cards']) != 1 else ''}</span></span>{plan_input}</div>"
+                f"{'s' if int(d['n_cards']) != 1 else ''}</span>{warn_flag}</span>"
+                f"{plan_input}{unplan}</div>"
             )
 
         rail = "".join(_rail_card(d) for d in model.unscheduled_drafts)
         if not rail:
             rail = (
-                '<p class="dim" style="font-size:12px;margin:6px 2px">No unscheduled drafts. '
+                '<p class="dim" id="mh-cal-rail-empty" style="font-size:12px;margin:6px 2px">'
+                "No unscheduled drafts. "
                 f'<a href="{url_for("make_page")}" style="text-decoration:underline">Make content</a>, '
                 "then drag it onto a day to plan when to post.</p>"
             )
@@ -33628,6 +33647,11 @@ function mhPlanGenerate(btn) {{
 
 <span class="dim" id="mh-cal-status" style="font-size:12.5px;display:block;min-height:18px;margin:2px 2px 8px"></span>
 
+<div id="mh-cal-warn" role="alert" style="display:none;gap:10px;align-items:flex-start;justify-content:space-between;margin:0 0 10px;padding:10px 14px;border:1px solid var(--bad);border-radius:10px;background:color-mix(in oklab, var(--bad) 10%, var(--panel));font-size:13px">
+  <span id="mh-cal-warn-text"></span>
+  <button type="button" onclick="mhCalWarnBanner('')" aria-label="Dismiss this warning" style="background:none;border:none;color:inherit;cursor:pointer;font-size:16px;line-height:1;padding:0">&times;</button>
+</div>
+
 <div class="mh-cal-wrap">
   <div class="mh-cal-grid-wrap">
     <div class="mh-cal-dows">{dow_head}</div>
@@ -33665,29 +33689,84 @@ function mhCalUnplan(e, btn) {{
   if (e) e.stopPropagation();
   if (btn) mhCalSchedule(btn.getAttribute('data-pack'), '');
 }}
+// D-24 (kept by D-26): the blackout warning is an inline banner that stays
+// until the volunteer dismisses it — no reload ever erases it.
+function mhCalWarnBanner(msg) {{
+  var box = document.getElementById('mh-cal-warn');
+  var txt = document.getElementById('mh-cal-warn-text');
+  if (!box || !txt) return;
+  txt.textContent = msg || '';
+  box.style.display = msg ? 'flex' : 'none';
+}}
+// D-26: keep a moved chip's controls truthful (date field, unschedule,
+// blackout flag, rail styling) without re-rendering the page.
+function mhCalChipSync(chip, date, warned) {{
+  var input = chip.querySelector('.mh-cal-plan-date');
+  if (input) input.value = date || '';
+  var un = chip.querySelector('.mh-cal-unplan');
+  if (un) un.hidden = !date;
+  var flag = chip.querySelector('.mh-cal-warnflag');
+  if (flag) flag.hidden = !warned;
+  chip.classList.toggle('mh-cal-rail-card', !date);
+}}
+// D-26: a drop / "Plan for…" / unschedule moves the chip in place at once
+// (optimistically); a failed POST puts it back and MH.toasts the reason.
 function mhCalSchedule(packId, date) {{
   if (!packId) return;
+  var chip = document.querySelector('.mh-cal-draft[data-pack="' + packId + '"]');
+  var undo = null;
+  if (chip) {{
+    var parent = chip.parentNode, next = chip.nextSibling;
+    var prevInput = chip.querySelector('.mh-cal-plan-date');
+    var prevDate = prevInput ? (prevInput.value || '') : '';
+    var prevFlag = chip.querySelector('.mh-cal-warnflag');
+    var prevWarned = !!(prevFlag && !prevFlag.hidden);
+    var railEmpty = document.getElementById('mh-cal-rail-empty');
+    var target = null;
+    if (date) {{
+      var cell = document.querySelector('.mh-cal-cell[data-date="' + date + '"]');
+      target = cell ? cell.querySelector('.mh-cal-stack') : null;
+    }} else {{
+      target = document.querySelector('.mh-cal-rail');
+    }}
+    undo = function () {{
+      if (parent) parent.insertBefore(chip, next);
+      chip.style.display = '';
+      mhCalChipSync(chip, prevDate, prevWarned);
+      if (railEmpty) railEmpty.style.display = '';
+    }};
+    if (target) {{ target.appendChild(chip); }} else {{ chip.style.display = 'none'; }}
+    mhCalChipSync(chip, date, false);
+    if (railEmpty && !date) railEmpty.style.display = 'none';
+  }}
   mhCalStatus(date ? 'Scheduling…' : 'Unscheduling…', false);
   fetch(MH_CAL_SCHEDULE_URL, {{
     method: 'POST', headers: {{'Content-Type': 'application/json'}},
     body: JSON.stringify({{ pack_id: packId, date: date || '' }})
   }}).then(function (r) {{ return r.json(); }}).then(function (j) {{
-    if (!j.ok) {{ mhCalStatus(j.error || 'Could not update.', true); return; }}
+    if (!j.ok) {{
+      if (undo) undo();
+      mhCalStatus(j.error || 'Could not update.', true);
+      if (window.MH && MH.toast) MH.toast(j.error || 'Could not update the plan.', 'error');
+      return;
+    }}
+    if (chip && date && !document.querySelector('.mh-cal-cell[data-date="' + date + '"]')) {{
+      chip.remove(); // planned onto a day outside this month's grid
+      mhCalStatus('Planned for ' + date + ' — see that month for the chip.', false);
+    }} else {{
+      mhCalStatus(date ? ('Planned for ' + date + '.') : 'Unscheduled — back in the side rail.', false);
+    }}
     if (j.warning) {{
-      // D-24: the reload used to wipe the blackout warning after 1.2s — the
-      // soft gate's one chance to warn. Persist it across the reload so it
-      // shows as a dismissible toast the volunteer actually reads.
-      try {{ sessionStorage.setItem('mhCalWarn', j.warning); }} catch (e) {{}}
-      window.location.reload();
-    }} else {{ window.location.reload(); }}
-  }}).catch(function () {{ mhCalStatus('Could not update.', true); }});
+      mhCalWarnBanner(j.warning);
+      var flag = chip ? chip.querySelector('.mh-cal-warnflag') : null;
+      if (flag) flag.hidden = false;
+    }}
+  }}).catch(function () {{
+    if (undo) undo();
+    mhCalStatus('Could not update.', true);
+    if (window.MH && MH.toast) MH.toast('Could not update the plan — check your connection and try again.', 'error');
+  }});
 }}
-// D-24: surface a blackout warning carried across the reload.
-(function () {{
-  var w = null;
-  try {{ w = sessionStorage.getItem('mhCalWarn'); sessionStorage.removeItem('mhCalWarn'); }} catch (e) {{}}
-  if (w && window.MH && MH.toast) MH.toast(w, 'error', 8000);
-}})();
 document.addEventListener('dragstart', function (e) {{
   var card = e.target.closest ? e.target.closest('.mh-cal-draft') : null;
   if (!card) return;
@@ -34126,18 +34205,84 @@ var MH_BD = {{
   add: {json.dumps(url_for("api_plan_board_add"))},
   move: {json.dumps(url_for("api_plan_board_move"))},
   del: {json.dumps(url_for("api_plan_board_delete"))},
-  promote: {json.dumps(url_for("api_plan_board_promote"))}
+  promote: {json.dumps(url_for("api_plan_board_promote"))},
+  draft: {json.dumps(url_for("stub_pack_view", pack_id="__PACK__"))},
+  preview: {json.dumps(url_for("plan_preview_page", pack_id="__PACK__"))},
+  cols: {json.dumps(list(COLUMNS))},
+  labels: {json.dumps(COLUMN_LABELS)}
 }};
 function mhBoardStatus(m, warn) {{
   var s = document.getElementById('mh-bd-status');
   if (s) {{ s.textContent = m || ''; s.style.color = warn ? 'var(--bad)' : 'var(--ink-muted)'; }}
 }}
-function mhBoardPost(url, payload, ok) {{
+function mhBoardFail(msg) {{
+  mhBoardStatus(msg, true);
+  if (window.MH && MH.toast) MH.toast(msg, 'error');
+}}
+// D-26: every board mutation updates the DOM in place — the POST stays, the
+// reload goes. `fail` reverts the optimistic change when the server says no.
+function mhBoardPost(url, payload, ok, fail) {{
   fetch(url, {{method:'POST', headers:{{'Content-Type':'application/json'}}, body: JSON.stringify(payload)}})
     .then(function(r){{return r.json();}}).then(function(j){{
-      if (j.ok === false || j.error) {{ mhBoardStatus(j.error || 'Could not update.', true); return; }}
-      ok ? ok(j) : window.location.reload();
-    }}).catch(function(){{ mhBoardStatus('Could not update.', true); }});
+      if (j.ok === false || j.error) {{ if (fail) fail(); mhBoardFail(j.error || 'Could not update.'); return; }}
+      if (ok) ok(j);
+    }}).catch(function(){{ if (fail) fail(); mhBoardFail('Could not update — check your connection and try again.'); }});
+}}
+function mhBoardCards(col) {{
+  return document.querySelector('.mh-bd-col[data-col="' + col + '"] .mh-bd-cards');
+}}
+function mhBoardRecount() {{
+  document.querySelectorAll('.mh-bd-col').forEach(function (col) {{
+    var badge = col.querySelector('.mh-bd-count');
+    if (badge) badge.textContent = col.querySelectorAll('.mh-bd-card').length;
+  }});
+}}
+function mhBoardMoveOpts(card, column) {{
+  var sel = card.querySelector('.mh-bd-move');
+  if (!sel) return;
+  sel.innerHTML = '';
+  var first = document.createElement('option');
+  first.value = ''; first.innerHTML = 'Move to&hellip;';
+  sel.appendChild(first);
+  MH_BD.cols.forEach(function (c) {{
+    if (c === column) return;
+    var o = document.createElement('option');
+    o.value = c; o.textContent = MH_BD.labels[c] || c;
+    sel.appendChild(o);
+  }});
+  sel.value = '';
+}}
+// Build a fresh idea card element (textContent for the title/note — never HTML).
+function mhBoardCardEl(card) {{
+  var el = document.createElement('div');
+  el.className = 'mh-bd-card'; el.draggable = true; el.dataset.card = card.id;
+  var head = document.createElement('div'); head.className = 'mh-bd-card-head';
+  var strong = document.createElement('strong'); strong.textContent = card.title;
+  var del = document.createElement('button');
+  del.type = 'button'; del.className = 'mh-bd-del'; del.dataset.card = card.id;
+  del.title = 'Delete'; del.innerHTML = '&times;';
+  del.addEventListener('click', function () {{ mhBoardDelete(del); }});
+  head.appendChild(strong); head.appendChild(del);
+  el.appendChild(head);
+  if (card.note) {{
+    var note = document.createElement('p'); note.className = 'mh-bd-note';
+    note.textContent = card.note; el.appendChild(note);
+  }}
+  var actions = document.createElement('div'); actions.className = 'mh-bd-actions';
+  var promote = document.createElement('button');
+  promote.type = 'button'; promote.className = 'mh-bd-act'; promote.dataset.card = card.id;
+  promote.title = 'Turn this idea into a free-text draft';
+  promote.textContent = 'Promote to draft';
+  promote.addEventListener('click', function () {{ mhBoardPromote(promote); }});
+  actions.appendChild(promote);
+  var sel = document.createElement('select');
+  sel.className = 'mh-bd-move'; sel.dataset.card = card.id;
+  sel.setAttribute('aria-label', 'Move ' + card.title + ' to a column');
+  sel.addEventListener('change', function () {{ mhBoardMove(sel); }});
+  actions.appendChild(sel);
+  el.appendChild(actions);
+  mhBoardMoveOpts(el, card.column || 'idea');
+  return el;
 }}
 function mhBoardAdd(el) {{
   // H-21: called from the input (Enter) or the Add button — resolve the input
@@ -34146,12 +34291,52 @@ function mhBoardAdd(el) {{
   var inp = box ? box.querySelector('.mh-bd-add-title') : el;
   var t = (inp && inp.value ? inp.value : '').trim();
   if (!t) {{ mhBoardStatus('Type an idea first, then press Add.', true); if (inp) inp.focus(); return; }}
-  mhBoardPost(MH_BD.add, {{title: t}});
+  if (inp) {{ inp.value = ''; inp.focus(); }}
+  mhBoardStatus('Adding…');
+  mhBoardPost(MH_BD.add, {{title: t}}, function (j) {{
+    var cards = mhBoardCards((j.card && j.card.column) || 'idea');
+    if (cards && j.card) cards.insertBefore(mhBoardCardEl(j.card), cards.firstChild);
+    mhBoardRecount();
+    mhBoardStatus('Added to Ideas.');
+  }}, function () {{ if (inp) {{ inp.value = t; inp.focus(); }} }});
 }}
-function mhBoardDelete(btn) {{ mhBoardPost(MH_BD.del, {{card_id: btn.dataset.card}}); }}
+function mhBoardDelete(btn) {{
+  var card = btn.closest ? btn.closest('.mh-bd-card') : null;
+  if (!card) return;
+  var parent = card.parentNode, next = card.nextSibling;
+  card.remove(); mhBoardRecount();
+  mhBoardPost(MH_BD.del, {{card_id: btn.dataset.card}}, function () {{
+    mhBoardStatus('Deleted.');
+  }}, function () {{ if (parent) parent.insertBefore(card, next); mhBoardRecount(); }});
+}}
 function mhBoardPromote(btn) {{
   btn.disabled = true; mhBoardStatus('Creating a draft from this idea…');
-  mhBoardPost(MH_BD.promote, {{card_id: btn.dataset.card}});
+  mhBoardPost(MH_BD.promote, {{card_id: btn.dataset.card}}, function (j) {{
+    var card = btn.closest ? btn.closest('.mh-bd-card') : null;
+    var column = (j.card && j.card.column) || 'drafted';
+    if (card && j.pack_id) {{
+      var actions = card.querySelector('.mh-bd-actions');
+      var sel = card.querySelector('.mh-bd-move');
+      if (actions && !card.querySelector('a.mh-bd-act')) {{
+        var open = document.createElement('a');
+        open.className = 'mh-bd-act';
+        open.href = MH_BD.draft.replace('__PACK__', encodeURIComponent(j.pack_id));
+        open.innerHTML = 'Open draft &rarr;';
+        var prev = document.createElement('a');
+        prev.className = 'mh-bd-act';
+        prev.href = MH_BD.preview.replace('__PACK__', encodeURIComponent(j.pack_id));
+        prev.textContent = 'Preview';
+        actions.insertBefore(prev, sel || null);
+        actions.insertBefore(open, prev);
+      }}
+      btn.remove();
+      var target = mhBoardCards(column);
+      if (target) target.insertBefore(card, target.firstChild);
+      mhBoardMoveOpts(card, column);
+      mhBoardRecount();
+    }}
+    mhBoardStatus('Promoted — the draft is ready to open and edit.');
+  }}, function () {{ btn.disabled = false; }});
 }}
 document.addEventListener('dragstart', function(e) {{
   var card = e.target.closest ? e.target.closest('.mh-bd-card') : null;
@@ -34161,16 +34346,37 @@ document.addEventListener('dragstart', function(e) {{
 }});
 function mhBoardOver(e) {{ e.preventDefault(); var c = e.currentTarget; if (c) c.classList.add('mh-bd-drop'); }}
 function mhBoardLeave(e) {{ var c = e.currentTarget; if (c) c.classList.remove('mh-bd-drop'); }}
+// D-26: a move (drag-drop or the I-1 select) lifts the card into its new
+// column at once; a failed POST puts it back where it was.
+function mhBoardMoveTo(cardId, column) {{
+  if (!cardId || !column) return;
+  var card = document.querySelector('.mh-bd-card[data-card="' + cardId + '"]');
+  var target = mhBoardCards(column);
+  if (!card || !target) return;
+  var parent = card.parentNode, next = card.nextSibling;
+  var fromCol = card.closest('.mh-bd-col');
+  var fromKey = fromCol ? fromCol.dataset.col : '';
+  target.insertBefore(card, target.firstChild);
+  mhBoardMoveOpts(card, column);
+  mhBoardRecount();
+  mhBoardPost(MH_BD.move, {{card_id: cardId, column: column}}, function () {{
+    mhBoardStatus('Moved to ' + (MH_BD.labels[column] || column) + '.');
+  }}, function () {{
+    if (parent) parent.insertBefore(card, next);
+    mhBoardMoveOpts(card, fromKey);
+    mhBoardRecount();
+  }});
+}}
 function mhBoardDrop(e) {{
   e.preventDefault();
   var col = e.currentTarget; if (col) col.classList.remove('mh-bd-drop');
   var id = e.dataTransfer.getData('text/plain');
-  if (id && col) mhBoardPost(MH_BD.move, {{card_id: id, column: col.dataset.col}});
+  if (id && col) mhBoardMoveTo(id, col.dataset.col);
 }}
 // I-1: non-drag move (touch / keyboard) via the per-card "Move to" select.
 function mhBoardMove(sel) {{
   if (!sel || !sel.value) return;
-  mhBoardPost(MH_BD.move, {{card_id: sel.getAttribute('data-card'), column: sel.value}});
+  mhBoardMoveTo(sel.getAttribute('data-card'), sel.value);
 }}
 </script>
 """
@@ -34183,7 +34389,7 @@ function mhBoardMove(sel) {{
         pid = _active_profile_id()
         if not pid:
             return jsonify({"error": "No organisation active."}), 403
-        from mediahub.analytics.store import METRIC_KEYS, record_metric
+        from mediahub.analytics.store import METRIC_KEYS, engagement_score, record_metric
 
         body = request.get_json(silent=True) or {}
         metrics = {k: body.get(k, 0) for k in METRIC_KEYS}
@@ -34223,7 +34429,11 @@ function mhBoardMove(sel) {{
             return jsonify(
                 {"error": "Pick a post type and a valid date (and at least one metric)."}
             ), 400
-        return jsonify({"ok": True, "metric": rec.to_dict()})
+        # D-26: the page appends the logged row in place — hand it the same
+        # deterministic engagement number the server-rendered rows show.
+        return jsonify(
+            {"ok": True, "metric": rec.to_dict(), "engagement": engagement_score(rec.metrics)}
+        )
 
     @app.route("/api/plan/analytics/delete", methods=["POST"])
     def api_plan_analytics_delete():
@@ -34436,11 +34646,38 @@ var MH_AN = {{
   record: {json.dumps(url_for("api_plan_analytics_record"))},
   del: {json.dumps(url_for("api_plan_analytics_delete"))},
   digest: {json.dumps(url_for("api_plan_analytics_digest"))},
-  keys: {json.dumps(list(METRIC_KEYS))}
+  keys: {json.dumps(list(METRIC_KEYS))},
+  titles: {json.dumps(type_titles)},
+  platforms: {json.dumps(_platform_labels)}
 }};
 function mhAnStatus(m, warn) {{
   var s = document.getElementById('mh-an-status');
   if (s) {{ s.textContent = m || ''; s.style.color = warn ? 'var(--bad)' : 'var(--ink-muted)'; }}
+}}
+// D-26: a logged post appears in the recent list at once — same shape as the
+// server-rendered rows (textContent only, never HTML from data).
+function mhAnAppendRow(m, eng) {{
+  var list = document.getElementById('mh-an-recent'); if (!list) return;
+  var row = document.createElement('div');
+  row.className = 'mh-an-row'; row.dataset.id = m.id || '';
+  var title = MH_AN.titles[m.post_type] || String(m.post_type || '').replace(/_/g, ' ');
+  var plat = m.platform ? (' · ' + (MH_AN.platforms[m.platform] || m.platform)) : '';
+  var left = document.createElement('span'); left.style.flex = '1';
+  left.textContent = title + ' ';
+  var dim = document.createElement('span'); dim.className = 'dim';
+  dim.textContent = '· ' + (m.posted_date || '') + plat;
+  left.appendChild(dim);
+  var engEl = document.createElement('span'); engEl.className = 'dim';
+  engEl.style.fontVariantNumeric = 'tabular-nums';
+  engEl.textContent = eng + ' eng';
+  var del = document.createElement('button');
+  del.type = 'button'; del.className = 'btn';
+  del.style.fontSize = '11px'; del.style.padding = '2px 8px';
+  del.textContent = 'remove';
+  del.addEventListener('click', function () {{ mhAnDelete(del); }});
+  row.appendChild(left); row.appendChild(engEl); row.appendChild(del);
+  list.insertBefore(row, list.firstChild);
+  while (list.children.length > 12) list.removeChild(list.lastChild);
 }}
 function mhAnRecord(btn) {{
   var metrics = {{}};
@@ -34457,14 +34694,42 @@ function mhAnRecord(btn) {{
   mhAnStatus('Saving…');
   fetch(MH_AN.record, {{method:'POST', headers:{{'Content-Type':'application/json'}}, body: JSON.stringify(payload)}})
     .then(function(r){{return r.json();}}).then(function(j){{
-      if (!j.ok) {{ mhAnStatus(j.error || 'Could not save.', true); return; }}
-      window.location.reload();
-    }}).catch(function(){{ mhAnStatus('Could not save.', true); }});
+      if (!j.ok) {{
+        mhAnStatus(j.error || 'Could not save.', true);
+        if (window.MH && MH.toast) MH.toast(j.error || 'Could not save.', 'error');
+        return;
+      }}
+      // D-26: no reload — the row appears in place and the form keeps its post
+      // type, platform, draft and date, so logging a run of posts is painless.
+      // Only the metric counts reset (they belong to the post just logged).
+      mhAnAppendRow(j.metric || {{}}, j.engagement || 0);
+      MH_AN.keys.forEach(function(k){{ var el = document.getElementById('mh-an-'+k); if (el) el.value = '0'; }});
+      mhAnStatus('Logged — added to your recent posts. The averages above refresh next visit.');
+    }}).catch(function(){{
+      mhAnStatus('Could not save.', true);
+      if (window.MH && MH.toast) MH.toast('Could not save — check your connection and try again.', 'error');
+    }});
 }}
+// D-26: remove deletes the row in place (optimistically); a failed POST puts
+// it back and MH.toasts the reason.
 function mhAnDelete(btn) {{
   var row = btn.closest('.mh-an-row'); if (!row) return;
+  var parent = row.parentNode, next = row.nextSibling;
+  row.remove();
   fetch(MH_AN.del, {{method:'POST', headers:{{'Content-Type':'application/json'}}, body: JSON.stringify({{id: row.dataset.id}})}})
-    .then(function(r){{return r.json();}}).then(function(){{ window.location.reload(); }});
+    .then(function(r){{return r.json();}}).then(function(j){{
+      if (!j || j.ok === false) {{
+        if (parent) parent.insertBefore(row, next);
+        mhAnStatus('Could not remove that row.', true);
+        if (window.MH && MH.toast) MH.toast('Could not remove that row.', 'error');
+        return;
+      }}
+      mhAnStatus('Removed.');
+    }}).catch(function(){{
+      if (parent) parent.insertBefore(row, next);
+      mhAnStatus('Could not remove that row.', true);
+      if (window.MH && MH.toast) MH.toast('Could not remove that row — check your connection and try again.', 'error');
+    }});
 }}
 function mhAnDigest(btn) {{
   var box = document.getElementById('mh-an-digest');
