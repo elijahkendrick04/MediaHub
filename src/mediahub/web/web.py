@@ -28846,6 +28846,22 @@ self.addEventListener('fetch', function(e){
             _motion_ok = bool(_re_status.get("ffmpeg_available"))
         ok = deps["playwright"].get("chromium") and _motion_ok
         payload = {"ok": bool(ok), "deps": deps}
+        # Absolute filesystem paths (the Chromium executable, the node binary and
+        # the Remotion install dir) disclose the deployment's internal layout, so
+        # they are operator-only. This endpoint stays public for uptime monitors —
+        # they still get every availability boolean and version they need — but an
+        # anonymous caller no longer learns where anything lives on disk. Mirrors
+        # /healthz/sentinel, which likewise hands its raw audit tail to the
+        # signed-in operator alone.
+        if not _auth.is_dev_operator():
+            for _dep_key, _path_field in (
+                ("playwright", "executable"),
+                ("node", "path"),
+                ("remotion", "dir"),
+            ):
+                section = deps.get(_dep_key)
+                if isinstance(section, dict):
+                    section.pop(_path_field, None)
         return jsonify(payload)
 
     # ---- /status -------------------------------------------------------
