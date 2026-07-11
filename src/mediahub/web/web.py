@@ -56325,7 +56325,9 @@ ever appear; queued, edited and rejected cards never do.</p>
                 "</figure>"
             )
         if not items:
-            items = '<p class="empty">No achievements published yet. Approved cards appear here.</p>'
+            items = (
+                '<p class="empty">No achievements published yet. Approved cards appear here.</p>'
+            )
         header = (
             ""
             if embed

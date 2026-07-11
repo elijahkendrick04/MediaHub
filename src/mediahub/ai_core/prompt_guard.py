@@ -101,7 +101,7 @@ CAPTION_SHARED_TONE_BANS: str = (
     'something about …"; never use the phrases "testament to", "goes to '
     'show", or "speaks for itself". Do not close on a hollow motivational '
     'sign-off ("onwards and upwards", "the sky\'s the limit", "watch this '
-    'space") unless it genuinely fits the club\'s voice.'
+    "space\") unless it genuinely fits the club's voice."
 )
 
 CAPTION_CONCRETE_FACT_RULE: str = (

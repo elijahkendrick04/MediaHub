@@ -237,7 +237,7 @@ def _design_spec_system_prompt(archetypes: list[str], token_roles: list[str]) ->
         '  "secondary_stats": [<stat>, ...],\n'
         '  "headline_hook": <<=80 chars, no emoji; ground it in THIS result '
         "(a name, time, event or placing); avoid generic sports hype "
-        "(\"what a performance\", \"on fire\", \"smashing it\") and AI cliché "
+        '("what a performance", "on fire", "smashing it") and AI cliché '
         '("delve","elevate")>,\n'
         '  "accent_treatment": "brackets|stripe|badge|frame|minimal|ribbon|underline|'
         "diagonal_underline|thick_stripe|thin_stripe|double_stripe|side_rail|"
