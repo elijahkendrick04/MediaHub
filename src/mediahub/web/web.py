@@ -4357,6 +4357,10 @@ function generateMotion(btn, motionUrl, cardId, fmt) {
     if (window.MH && MH.toast) MH.toast('A motion render is already in progress for this card — hold on…', 'info', 2500);
     return;
   }
+  // JS-4: claim the panel synchronously — a double-click used to pass the
+  // guard twice while the first 202 round-trip was in flight, starting two
+  // jobs. Every terminal path overwrites (watch) or clears (_mhJobFail).
+  panel.dataset.mhWatching = '1';
   panel.style.display = '';
   var origLabel = btn.textContent;
   btn.disabled = true;
@@ -4460,6 +4464,9 @@ function mhResumeMotionJobs() {
     if (!rec || !rec.poll_url || !rec.card) return;
     var panel = document.querySelector('.motion-panel[data-motion-url="' + motionUrl + '"]');
     if (!panel || panel.dataset.mhWatching) return;
+    // JS-4: claim the panel before the async poll resolves — a click racing
+    // this resume could otherwise start a duplicate job.
+    panel.dataset.mhWatching = '1';
     var fmt = rec.fmt || 'story';
     fetch(rec.poll_url)
       .then(function(r){ return r.json(); })
@@ -4471,13 +4478,14 @@ function mhResumeMotionJobs() {
           return;
         }
         mhJobForget('motion', motionUrl);
+        delete panel.dataset.mhWatching;
         if (j.status === 'done' && j.video_url) {
           panel.style.display = '';
           _motionCache[rec.card + ':' + fmt] = j.video_url;
           mhRenderMotion(panel, motionUrl, rec.card, fmt, j.video_url);
         }
       })
-      .catch(function(){});
+      .catch(function(){ delete panel.dataset.mhWatching; });
   });
 }
 if (document.readyState === 'loading') { document.addEventListener('DOMContentLoaded', mhResumeMotionJobs); }
@@ -5367,6 +5375,10 @@ function generateReel(btn, reelUrl, fmt) {
     if (window.MH && MH.toast) MH.toast('A reel render is already in progress — hold on…', 'info', 2500);
     return;
   }
+  // JS-4: claim the panel synchronously — a double-click used to pass the
+  // guard twice while the first 202 round-trip was in flight, starting two
+  // jobs. Every terminal path overwrites (watch) or clears (_mhJobFail).
+  panel.dataset.mhWatching = '1';
   panel.style.display = '';
   var origLabel = btn.textContent;
   btn.disabled = true;
@@ -5460,8 +5472,11 @@ function _mhReelWatch(reelUrl, fmt, pollUrl, ctx) {
 // (started in this tab or another; single-format or all-formats). A job that
 // finished while the user was away renders its video; dead records are
 // cleared. Returns true when the panel was claimed so the caller skips the
-// finished-file restore.
-function mhResumeReelJob(reelUrl) {
+// finished-file restore — JS-3: when the recalled record turns out stale
+// (poll unreachable / job gone / nothing restorable) it is forgotten and
+// onIdle (the caller's finished-file restore) runs, so a dead record can
+// never suppress the finished reel.
+function mhResumeReelJob(reelUrl, onIdle) {
   var panel = document.getElementById('reel-panel');
   if (!panel) return false;
   var claimed = false;
@@ -5470,7 +5485,17 @@ function mhResumeReelJob(reelUrl) {
     var rec = mhJobRecall(kind, reelUrl);
     if (!rec || !rec.poll_url) return;
     claimed = true;
+    // JS-4: claim the panel before the async poll resolves — a click racing
+    // this resume could otherwise start a duplicate job.
+    panel.dataset.mhWatching = '1';
     var fmt = rec.fmt || 'story';
+    var idle = function() {
+      // JS-3: stale/unusable record — forget it, release the panel and fall
+      // through to the restore the caller skipped when we claimed the panel.
+      mhJobForget(kind, reelUrl);
+      delete panel.dataset.mhWatching;
+      if (typeof onIdle === 'function') onIdle();
+    };
     fetch(rec.poll_url)
       .then(function(r){ return r.json(); })
       .then(function(j) {
@@ -5484,18 +5509,23 @@ function mhResumeReelJob(reelUrl) {
           else _mhReelBatchWatch(reelUrl, rec.poll_url, ctx);
           return;
         }
-        mhJobForget(kind, reelUrl);
-        if (j.status === 'done') {
-          if (kind === 'reel' && j.video_url) {
-            panel.style.display = '';
-            mhRenderReel(panel, reelUrl, fmt, j.video_url);
-          } else if (kind === 'reel-batch' && j.video_urls && Object.keys(j.video_urls).length) {
-            panel.style.display = '';
-            mhRenderReelBatch(panel, reelUrl, j.video_urls, j.formats_failed || {});
-          }
+        if (j.status === 'done' && kind === 'reel' && j.video_url) {
+          mhJobForget(kind, reelUrl);
+          delete panel.dataset.mhWatching;
+          panel.style.display = '';
+          mhRenderReel(panel, reelUrl, fmt, j.video_url);
+          return;
         }
+        if (j.status === 'done' && kind === 'reel-batch' && j.video_urls && Object.keys(j.video_urls).length) {
+          mhJobForget(kind, reelUrl);
+          delete panel.dataset.mhWatching;
+          panel.style.display = '';
+          mhRenderReelBatch(panel, reelUrl, j.video_urls, j.formats_failed || {});
+          return;
+        }
+        idle();
       })
-      .catch(function(){});
+      .catch(idle);
   });
   return claimed;
 }
@@ -5511,6 +5541,8 @@ function generateReelBatch(btn, reelUrl) {
     if (window.MH && MH.toast) MH.toast('A reel render is already in progress — hold on…', 'info', 2500);
     return;
   }
+  // JS-4: claim the panel synchronously (see generateReel).
+  panel.dataset.mhWatching = '1';
   panel.style.display = '';
   var origLabel = btn.textContent;
   btn.disabled = true;
@@ -5574,6 +5606,16 @@ function _mhReelBatchWatch(reelUrl, pollUrl, ctx) {
           return;
         }
         if (j.status === 'error' || (j.error && j.status !== 'running')) {
+          // CON-6: a busy renderer usually means another tab's batch job
+          // holds the slot — attach to the recalled record's live job (the
+          // motion/reel watches' idiom) instead of forgetting the record,
+          // which deleted the surviving job's pointer. Forget only when the
+          // recalled poll itself lands terminal.
+          var rec = (j.error === 'renderer_busy') ? mhJobRecall('reel-batch', reelUrl) : null;
+          if (rec && rec.poll_url && rec.poll_url !== pollUrl) {
+            _mhReelBatchWatch(reelUrl, rec.poll_url, ctx);
+            return;
+          }
           mhJobForget('reel-batch', reelUrl);
           _mhJobFail(ctx, j.user_message || j.error || 'render failed');
           return;
@@ -47706,26 +47748,32 @@ function mhSetupMode(mode) {{
   var prerendered = {json.dumps(_reel_prerendered)};
   var panel = document.getElementById('reel-panel');
   if (!panel || typeof mhReelComments !== 'function') return;
+  // JS-3: the finished-file restore is shared — mhResumeReelJob falls back
+  // to it when its recalled job record turns out stale/unreachable, so a
+  // dead record can no longer suppress the finished reel.
+  var mhRestoreFinishedReel = function() {{
+    var fileUrl = reelUrl + '-file?n=3&format=story';
+    if (prerendered) {{
+      panel.style.display = '';
+      mhRenderReel(panel, reelUrl, 'story', fileUrl);
+      return;
+    }}
+    fetch(reelUrl + '/comments?target=reel', {{headers:{{'Accept':'application/json'}}}})
+      .then(function(r){{ return r.json(); }})
+      .then(function(j){{
+        var n = (j && j.comments && j.comments.length) || 0;
+        if (!n) return;
+        panel.style.display = '';
+        fetch(fileUrl, {{method:'HEAD'}})
+          .then(function(hr){{ if (hr.ok) mhRenderReel(panel, reelUrl, 'story', fileUrl); else mhRenderReelCommentsOnly(panel, reelUrl, n); }})
+          .catch(function(){{ mhRenderReelCommentsOnly(panel, reelUrl, n); }});
+      }})
+      .catch(function(){{}});
+  }};
   // D-13: a reel render still in flight from before navigation wins over
   // the finished-file restore — re-attach to it and keep polling.
-  if (typeof mhResumeReelJob === 'function' && mhResumeReelJob(reelUrl)) return;
-  var fileUrl = reelUrl + '-file?n=3&format=story';
-  if (prerendered) {{
-    panel.style.display = '';
-    mhRenderReel(panel, reelUrl, 'story', fileUrl);
-    return;
-  }}
-  fetch(reelUrl + '/comments?target=reel', {{headers:{{'Accept':'application/json'}}}})
-    .then(function(r){{ return r.json(); }})
-    .then(function(j){{
-      var n = (j && j.comments && j.comments.length) || 0;
-      if (!n) return;
-      panel.style.display = '';
-      fetch(fileUrl, {{method:'HEAD'}})
-        .then(function(hr){{ if (hr.ok) mhRenderReel(panel, reelUrl, 'story', fileUrl); else mhRenderReelCommentsOnly(panel, reelUrl, n); }})
-        .catch(function(){{ mhRenderReelCommentsOnly(panel, reelUrl, n); }});
-    }})
-    .catch(function(){{}});
+  if (typeof mhResumeReelJob === 'function' && mhResumeReelJob(reelUrl, mhRestoreFinishedReel)) return;
+  mhRestoreFinishedReel();
 }})();
 
 // M31 - initialise the reel composer readout (duration + max-5 rule).
