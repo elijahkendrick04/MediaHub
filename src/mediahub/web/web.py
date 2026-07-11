@@ -60269,6 +60269,7 @@ voice, and queues them for one-click approval.</p>
     def api_visual_get(vid: str):
         if not _v8_ok:
             return jsonify({"error": "v8_unavailable"}), 503
+        active_pid = _active_profile_id()
         for run_dir in RUNS_DIR.iterdir():
             if not run_dir.is_dir():
                 continue
@@ -60287,6 +60288,15 @@ voice, and queues them for one-click approval.</p>
                     continue
                 ids_map = payload.get("visual_ids") or {}
                 if payload.get("id") == vid or vid in ids_map:
+                    # Tenant isolation (org-access audit): a visual belongs to
+                    # the run that produced it, so a foreign org must not read
+                    # its payload (caption, alt text, athlete names). Mirrors
+                    # the sibling /api/runs/<id>/venue-search guard; a run this
+                    # session can't access is skipped, so a foreign visual is
+                    # indistinguishable from a nonexistent one (anti-enumeration).
+                    run_id = run_dir.name
+                    if not _can_access_run(run_id, _load_run(run_id), active_pid):
+                        continue
                     return jsonify(payload)
         return jsonify({"error": "not_found"}), 404
 
@@ -60310,6 +60320,7 @@ voice, and queues them for one-click approval.</p>
             return "", 503
         from flask import send_file
 
+        active_pid = _active_profile_id()
         for run_dir in RUNS_DIR.iterdir():
             if not run_dir.is_dir():
                 continue
@@ -60329,6 +60340,12 @@ voice, and queues them for one-click approval.</p>
                 # Match either the primary id or any id in the visual_ids map
                 ids_map = payload.get("visual_ids") or {}
                 if payload.get("id") != vid and vid not in ids_map:
+                    continue
+                # Tenant isolation (org-access audit): the rendered PNG carries
+                # the same org data as the sidecar above, so gate it the same
+                # way — a run this session can't access is skipped, never served.
+                run_id = run_dir.name
+                if not _can_access_run(run_id, _load_run(run_id), active_pid):
                     continue
                 # Determine which format to serve. If vid matches a specific format-id, use that format; else use requested format_name.
                 if vid in ids_map:
