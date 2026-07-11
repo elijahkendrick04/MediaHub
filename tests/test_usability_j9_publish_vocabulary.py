@@ -93,7 +93,9 @@ class TestChooserSource:
         # not inside the export button flex row.
         i = _SRC.index("{_share_publicly_html}")
         before = _SRC[:i]
-        assert before.rstrip().endswith("</div>"), (
+        # B-2 turned the export row into a <details> disclosure — either
+        # closing tag proves the chooser is a sibling, not nested inside it.
+        assert before.rstrip().endswith(("</div>", "</details>")), (
             "the chooser placeholder must follow a closed block, not sit " "inside the export row"
         )
 
