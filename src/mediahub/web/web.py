@@ -47746,6 +47746,19 @@ function mhSetupMode(mode) {{
             card_id_raw = card.get("_card_id") or ach.get("swim_id", "")
             card_uuid = str(card_id_raw).replace(":", "_").replace(",", "_")
             _dl_url = url_for("api_card_download", run_id=run_id, card_id=card_id_raw)
+            # B-2 — ONE primary export per card. The ZIP link only goes live
+            # once this card has a rendered graphic; before that it is
+            # honestly disabled instead of shipping a caption-only ZIP.
+            _dl_ready = str(card_id_raw) in _rendered
+            _dl_style = "font-size:11px;padding:4px 10px" + (
+                "" if _dl_ready else ";pointer-events:none;opacity:0.45"
+            )
+            _dl_gate = "" if _dl_ready else ' aria-disabled="true" onclick="return false"'
+            _dl_title = (
+                "The graphic plus the caption text in one .zip, ready to post manually"
+                if _dl_ready
+                else "No graphic yet — use Create graphic first, then download the post"
+            )
             # M30/M32 — persisted renders show on page load, no re-render.
             _initial_visual = _prefilled_visual_panel_html(
                 run_id, card_id_raw, _rendered.get(str(card_id_raw))
@@ -47772,8 +47785,8 @@ function mhSetupMode(mode) {{
             }
   {_render_stored_translations(card)}
   <div class="no-print" style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-    <a class="btn secondary" style="font-size:11px;padding:4px 10px" href="{_h(_dl_url)}"
-       title="Download caption + visual as a .zip for manual posting">&#x2B07; Download .zip</a>
+    <a class="btn" style="{_dl_style}" href="{_h(_dl_url)}"{_dl_gate}
+       title="{_dl_title}">Download post (graphic + caption)</a>
     <span class="muted" style="font-size:11px">Pick a tone, then create a graphic or motion and download.</span>
   </div>
 </div>"""
@@ -48082,6 +48095,29 @@ function mhSetupMode(mode) {{
             if rendered_n == 0
             else ""
         )
+        # B-2 — every pack-level export sits under the same render gate. Two
+        # variants for controls where the standard attr would double up an
+        # attribute: the certificate anchors carry their own onclick
+        # (mhCertificatesJob refuses aria-disabled anchors), and the
+        # browser-print button takes a real ``disabled``.
+        _export_disabled_plain = (
+            ' aria-disabled="true" style="pointer-events:none;opacity:0.45" '
+            'title="No graphics rendered yet — use Create all graphics first"'
+            if rendered_n == 0
+            else ""
+        )
+        _export_disabled_btn = (
+            ' disabled style="opacity:0.45" '
+            'title="No graphics rendered yet — use Create all graphics first"'
+            if rendered_n == 0
+            else ""
+        )
+        # B-2 — the single pack-level export disclosure's label carries the
+        # live approved count.
+        _export_summary_label = (
+            f"Export pack ({len(approved)} approved "
+            f"card{'s' if len(approved) != 1 else ''})&hellip;"
+        )
 
         body = f"""
 <style>
@@ -48127,46 +48163,7 @@ function mhSetupMode(mode) {{
             else ""
         }
 
-<div class="card no-print" style="margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
-  <div>
-    <div style="font-size:13px;font-weight:700">Parent newsletter</div>
-    <div style="font-size:12px;color:var(--ink-dim);margin-top:2px">Branded HTML email + plaintext fallback, ready to paste into Mailchimp / ConvertKit / your email client.</div>
-  </div>
-  <div style="display:flex;gap:6px;flex-wrap:wrap">
-    <a class="btn secondary" style="font-size:12px;padding:6px 12px" href="{
-            _h(_newsletter_html_url)
-        }" target="_blank" rel="noopener">Preview HTML &rarr;</a>
-    <a class="btn secondary" style="font-size:12px;padding:6px 12px" href="{
-            _h(_newsletter_html_url)
-        }?download=1">Download .html</a>
-    <a class="btn secondary" style="font-size:12px;padding:6px 12px" href="{
-            _h(_newsletter_text_url)
-        }&download=1">Download .txt</a>
-    <a class="btn" style="font-size:12px;padding:6px 12px" href="{
-            _h(_newsletter_zip_url)
-        }">Download .zip</a>
-  </div>
-</div>
-
 {_prefs_html}
-
-<div class="card no-print" style="margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
-  <div>
-    <div style="font-size:13px;font-weight:700">Print for the noticeboard</div>
-    <div style="font-size:12px;color:var(--ink-dim);margin-top:2px">A branded A4 certificate for every approved achievement — the thing families frame. Photo/name consent is honoured automatically.</div>
-    <div id="mh-certs-status" class="dim" role="status" aria-live="polite" style="font-size:12px;margin-top:4px;min-height:1.2em"></div>
-  </div>
-  <div style="display:flex;gap:8px;flex-wrap:wrap">
-    <a class="btn secondary mh-certs-go" style="font-size:12px;padding:6px 12px" href="{
-            _h(_certs_url)
-        }" data-certs-job="{_h(_certs_job_url)}" onclick="return mhCertificatesJob(this)">Download certificates (.zip of PDFs)</a>
-    <a class="btn secondary mh-certs-go" style="font-size:12px;padding:6px 12px" href="{
-            _h(_certs_print_url)
-        }" data-certs-job="{
-            _h(_certs_print_job_url)
-        }" onclick="return mhCertificatesJob(this)" title="A4 + 3mm bleed and crop marks, ready for a professional print shop">Print-shop pack (bleed + crop marks)</a>
-  </div>
-</div>
 
 <div class="no-print">{_turn_into_html}</div>
 
@@ -48175,24 +48172,60 @@ function mhSetupMode(mode) {{
         }</span></h2>
 {cards_html}
 
-<div class="no-print" style="margin-top:16px">
-  <div id="mh-export-note" style="font-size:12px;color:var(--ink-dim);margin-bottom:8px">{
+<details class="card no-print" id="mh-export-pack" style="margin-top:16px">
+  <summary style="cursor:pointer;font-size:13px;font-weight:700">{_export_summary_label}
+    <span class="muted" style="font-weight:400;font-size:12px;margin-left:6px">ZIPs, bulk convert, print, certificates &amp; newsletter</span>
+  </summary>
+  <div id="mh-export-note" style="font-size:12px;color:var(--ink-dim);margin:10px 0 12px">{
             _export_note
         }</div>
-  <div style="display:flex;gap:10px;flex-wrap:wrap">
+
+  <div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:6px">Social posting</div>
+  <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px">
     <a class="btn" href="{_export_zip_url}"{_export_disabled_attr}
-       title="Every rendered card at every size (square, portrait, story), grouped per card, plus a metadata.json manifest">Download every format + manifest (.zip)</a>
-    <a class="btn secondary" href="{_zip_url}"{
-            _export_disabled_attr
-        }>Download all visuals (.zip)</a>
-    <a class="btn secondary" href="{_bulk_export_url}"
+       title="Every rendered card at every size (square, portrait, story), grouped per card and ready to post">Every format, organised for posting (.zip)</a>
+    <a class="btn secondary" href="{_zip_url}"{_export_disabled_attr}
+       title="One folder with just the rendered images — no captions, no grouping">Just the images (.zip)</a>
+    <a class="btn secondary" href="{_bulk_export_url}"{_export_disabled_attr}
        title="Convert this pack to JPG / WebP / AVIF / PNG with quality options, bundled into one ZIP">Bulk export &amp; convert&hellip;</a>
-    <a class="btn secondary" href="{_print_tool_url}"
+  </div>
+
+  <div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:6px">Print &amp; certificates</div>
+  <div style="font-size:12px;color:var(--ink-dim);margin-bottom:6px">A branded A4 certificate for every approved achievement &mdash; the thing families frame. Photo/name consent is honoured automatically.</div>
+  <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+    <a class="btn secondary" href="{_print_tool_url}"{_export_disabled_attr}
        title="Proof and export a print-ready PDF (posters, flyers, banners, merch) from this meet's cards — pre-flight checked before you send it to a printer">Print &amp; merch&hellip;</a>
-    <button class="btn secondary" onclick="window.print()"
+    <a class="btn secondary mh-certs-go" href="{_h(_certs_url)}" data-certs-job="{
+            _h(_certs_job_url)
+        }" onclick="return mhCertificatesJob(this)"{
+            _export_disabled_plain
+        }>Download certificates (.zip of PDFs)</a>
+    <a class="btn secondary mh-certs-go" href="{_h(_certs_print_url)}" data-certs-job="{
+            _h(_certs_print_job_url)
+        }" onclick="return mhCertificatesJob(this)"{_export_disabled_plain}
+       title="A4 + 3mm bleed and crop marks, ready for a professional print shop">Print-shop pack (bleed + crop marks)</a>
+    <button class="btn secondary" onclick="window.print()"{_export_disabled_btn}
             title="Use the browser print dialog on this page as it stands — for a press-ready file use Print &amp; merch instead">Print this page</button>
   </div>
-</div>
+  <div id="mh-certs-status" class="dim" role="status" aria-live="polite" style="font-size:12px;margin:4px 0 14px;min-height:1.2em"></div>
+
+  <div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:6px">Parent newsletter</div>
+  <div style="font-size:12px;color:var(--ink-dim);margin-bottom:6px">Branded HTML email + plaintext fallback, ready to paste into Mailchimp / ConvertKit / your email client.</div>
+  <div style="display:flex;gap:10px;flex-wrap:wrap">
+    <a class="btn secondary" href="{_h(_newsletter_html_url)}" target="_blank" rel="noopener"{
+            _export_disabled_attr
+        }>Preview HTML &rarr;</a>
+    <a class="btn secondary" href="{_h(_newsletter_html_url)}?download=1"{
+            _export_disabled_attr
+        }>Download .html</a>
+    <a class="btn secondary" href="{_h(_newsletter_text_url)}&download=1"{
+            _export_disabled_attr
+        }>Download .txt</a>
+    <a class="btn secondary" href="{_h(_newsletter_zip_url)}"{
+            _export_disabled_attr
+        }>Download .zip</a>
+  </div>
+</details>
 
 <style>{_CARD_TOOLBAR_CSS}</style>
 {_CARD_TOOLBAR_JS}
