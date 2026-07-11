@@ -736,4 +736,44 @@ CONTENT_INTRO_CSS = """
   .mh-plan-tile { padding: 18px; }
   .mh-plan-tile-cta { width: 100%; text-align: center; }
 }
+
+/* B-1 — the "How it works" pill. The intro slide is mandatory only the FIRST
+   time an organisation meets a heading; after that its Create tile links
+   straight into the flow, and this pill keeps the explainer reachable forever
+   (on the tile itself and on each flow's landing page). A tile is itself an
+   <a>, so on tiles the pill is a positioned sibling inside a relative wrapper
+   — never a nested anchor. */
+.mh-how-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+  padding: 4px 10px;
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  background: var(--surface);
+  text-decoration: none;
+  white-space: nowrap;
+}
+.mh-how-pill:hover,
+.mh-how-pill:focus-visible {
+  color: var(--lane);
+  border-color: var(--lane);
+  text-decoration: none;
+}
+.mh-template-cell { position: relative; display: flex; }
+.mh-template-cell > .mh-template { flex: 1 1 auto; width: 100%; }
+.mh-plan-tile-wrap { position: relative; margin-bottom: var(--sp-5); }
+.mh-plan-tile-wrap > .mh-plan-tile { margin-bottom: 0; }
+.mh-template-cell > .mh-how-pill,
+.mh-plan-tile-wrap > .mh-how-pill {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  z-index: 2;
+}
 """

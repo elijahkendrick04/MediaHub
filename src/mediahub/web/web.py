@@ -22419,6 +22419,7 @@ def create_app() -> Flask:
   <span class="mh-hero-eyebrow">Upload meet file</span>
   <h1>Drop the results.<br><em class="editorial">We'll do the rest.</em></h1>
   <p class="lede">Upload your meet results file — Hytek&nbsp;<code>.hy3</code>&hairsp;/&hairsp;<code>.hyv</code>&hairsp;/&hairsp;<code>.zip</code>, SDIF&hairsp;/&hairsp;SD3&hairsp;/&hairsp;CL2, PDF, CSV, TXT, Excel&nbsp;<code>.xlsx</code> or HTML. You'll pick your club, upload your logo, and add photos on the next step.</p>
+  <a class="mh-how-pill" href="{url_for("content_type_intro", ct="meet_recap")}" style="margin-top:var(--sp-3)">How it works</a>
 </section>
 </div>
 
@@ -33086,6 +33087,7 @@ self.addEventListener('fetch', function(e){
   recent results, the calendar, and anything you tell it below. Each item explains
   why it ranks where it does, and the ones marked <strong>Ready to create</strong>
   jump straight into the matching tool. Nothing publishes from here.</p>
+  <a class="mh-how-pill" href="{url_for("content_type_intro", ct="plan")}" style="margin-top:var(--sp-3)">How it works</a>
 </section>
 
 {_plan_subnav("plan")}
@@ -35080,6 +35082,47 @@ function mhAnDigest(btn) {{
         _studio_render_cache[sig] = out
         return jsonify(out)
 
+    # ---- B-1: per-organisation "how it works" seen-set ----------------------
+    # The Create tiles open each heading's intro slide (/make/<type>) only the
+    # FIRST time an organisation meets that heading. Viewing the intro retires
+    # it: from then on the tile links straight into the real flow, and the
+    # explainer stays reachable via the "How it works" pill on the tile and on
+    # the flow's landing page. Persisted as a small per-profile DATA_DIR
+    # sidecar (not session-only) so it survives sign-out and redeploys, and is
+    # tenant-scoped by construction.
+    def _intro_seen_path(pid: str) -> Path:
+        safe = re.sub(r"[^a-zA-Z0-9_-]", "_", str(pid))[:120] or "unknown"
+        return DATA_DIR / "intro_seen" / f"{safe}.json"
+
+    def _intro_seen_slugs(pid: Optional[str]) -> set:
+        if not pid:
+            return set()
+        try:
+            p = _intro_seen_path(pid)
+            if not p.exists():
+                return set()
+            raw = json.loads(p.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            # Missing/corrupt sidecar loads as "nothing seen" — the only cost
+            # is the user meeting the explainer again.
+            return set()
+        return {str(s) for s in raw} if isinstance(raw, list) else set()
+
+    def _intro_mark_seen(pid: Optional[str], slug: str) -> None:
+        if not pid or not slug:
+            return
+        try:
+            seen = _intro_seen_slugs(pid)
+            if slug in seen:
+                return
+            seen.add(slug)
+            p = _intro_seen_path(pid)
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(json.dumps(sorted(seen)), encoding="utf-8")
+        except OSError:
+            # A failed sidecar write must never break the intro page.
+            log.debug("intro_seen: could not persist %r for %r", slug, pid)
+
     # ---- /make &mdash; the Create tab (single entry point) -------------------
     @app.route("/make")
     def make_page():
@@ -35109,6 +35152,11 @@ function mhAnDigest(btn) {{
         # and back-compat; it's just not surfaced as a separate Create card.
         _hidden_cts = {"session_update", "sponsor_activation", "athlete_spotlight"}
 
+        # B-1: once this organisation has met a heading's intro slide, its tile
+        # links straight into the flow (nav → upload drops from 7 clicks to 4);
+        # first-timers still get the explainer. Per-profile, persisted.
+        _seen_intros = _intro_seen_slugs(_active_profile_id())
+
         tiles_html = ""
         # First implemented tile gets the "Start here" lane-yellow ribbon so
         # users have a clear primary path instead of six equal-weight options.
@@ -35135,7 +35183,14 @@ function mhAnDigest(btn) {{
                 href_ok = False
             if meta.is_implemented and href_ok:
                 badge = '<span class="tag live">Ready</span>'
-                action = f'href="{url_for("content_type_intro", ct=ct_val)}"'
+                # B-1: the intro is first-visit-only per organisation — once
+                # seen, the tile opens the real flow directly. The "How it
+                # works" pill (added on the tile below) keeps the explainer
+                # reachable forever.
+                if ct_val in _seen_intros:
+                    action = f'href="{url_for(meta.primary_route_endpoint)}"'
+                else:
+                    action = f'href="{url_for("content_type_intro", ct=ct_val)}"'
                 disabled_cls = ""
                 if not primary_marked:
                     disabled_cls = " mh-template-primary"
@@ -35189,7 +35244,18 @@ function mhAnDigest(btn) {{
                     "</div></template>"
                 )
 
+            # B-1: a tile is itself an <a>, so its always-available "How it
+            # works" link is a positioned sibling in a relative wrapper (a
+            # nested anchor would be invalid HTML). Live tiles only — a
+            # coming-soon tile has no intro to reach.
+            how_html = ""
+            if _is_live:
+                how_html = (
+                    f'<a class="mh-how-pill" href="{url_for("content_type_intro", ct=ct_val)}" '
+                    f'aria-label="How {_h(meta.title)} works">How it works</a>'
+                )
             tiles_html += (
+                '<div class="mh-template-cell">'
                 f'<a {action} class="mh-template{glow_cls}{disabled_cls}{hp_cls}">'
                 f'<div class="mh-template-icon">{meta.icon_svg}</div>'
                 '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:var(--sp-1)">'
@@ -35201,6 +35267,8 @@ function mhAnDigest(btn) {{
                 '<span class="mh-template-cta">Start</span>'
                 f"{hp_tpl}"
                 "</a>"
+                f"{how_html}"
+                "</div>"
             )
 
         # Design studio — a full, first-class Create tile, not the old slim
@@ -35487,8 +35555,18 @@ function mhAnDigest(btn) {{
         # tile's START HERE ribbon (Meet Recap, the audience's actual first
         # step). The Plan hero is the strategic aid, not the starting point,
         # so its label stays a plain "Plan".
+        # B-1: Plan stops double-paying the interstitial — once its intro has
+        # been seen, the tile opens the planner directly; the "How it works"
+        # pill keeps the slide reachable.
+        _plan_intro_url = url_for("content_type_intro", ct="plan")
+        try:
+            _plan_direct_url = url_for("plan_page")
+        except Exception:
+            _plan_direct_url = _plan_intro_url
+        _plan_href = _plan_direct_url if "plan" in _seen_intros else _plan_intro_url
         plan_entry_html = (
-            f'<a href="{_h(url_for("content_type_intro", ct="plan"))}" class="mh-plan-tile">'
+            '<div class="mh-plan-tile-wrap">'
+            f'<a href="{_h(_plan_href)}" class="mh-plan-tile">'
             f'<span class="mh-plan-tile-icon">{_plan_tile_icon}</span>'
             '<span class="mh-plan-tile-body">'
             '<span class="mh-plan-tile-eyebrow">Plan</span>'
@@ -35501,6 +35579,9 @@ function mhAnDigest(btn) {{
             "</span>"
             '<span class="mh-plan-tile-cta">Open Plan &rarr;</span>'
             "</a>"
+            f'<a class="mh-how-pill" href="{_h(_plan_intro_url)}" '
+            'aria-label="How Plan works">How it works</a>'
+            "</div>"
         )
 
         # C-3: everything you make (free text, spotlights, previews, event
@@ -35548,6 +35629,9 @@ function mhAnDigest(btn) {{
         # Plan is the predominant non-content-type entry. It gets the same
         # how-it-works first slide, but its "Open Plan" CTA opens the planner.
         if canonical_slug(ct) == "plan":
+            # B-1: viewing the intro retires it — the Create tile links
+            # straight to the planner from now on (per organisation).
+            _intro_mark_seen(_active_profile_id(), "plan")
             try:
                 plan_start = url_for("plan_page")
             except Exception:
@@ -35560,6 +35644,12 @@ function mhAnDigest(btn) {{
             # Unknown / planning-only slug — send them back to the chooser.
             return redirect(url_for("make_page"))
         meta = REGISTRY[ctype]
+
+        # B-1: viewing the intro retires it — this organisation's Create tile
+        # for the heading links straight into the flow from now on (the slide
+        # stays reachable via the "How it works" pills). Keyed on the
+        # canonical value so legacy slug aliases mark the same heading.
+        _intro_mark_seen(_active_profile_id(), ctype.value)
 
         formats, effort = _ct_presentation_for(ctype.value)
         # Start → the real flow. Degrade gracefully (a missing endpoint sends the
@@ -36566,9 +36656,18 @@ function copySpotlightCaption(btn) {{
         )
 
     def _render_stub(
-        stub_cls_name: str, route_endpoint: str, title: str, active_tab: str = "create"
+        stub_cls_name: str,
+        route_endpoint: str,
+        title: str,
+        active_tab: str = "create",
+        intro_ct: str = "",
     ):
-        """Shared handler for stub routes. GET renders form, POST renders cards."""
+        """Shared handler for stub routes. GET renders form, POST renders cards.
+
+        ``intro_ct`` — the content-type slug of this flow's "how it works"
+        slide (B-1): when set, the GET form keeps a small link back to the
+        explainer, since the Create tile skips it after the first visit.
+        """
         try:
             from mediahub.club_platform import stubs as _stubs_mod
         except Exception as exc:
@@ -36992,7 +37091,14 @@ function copySpotlightCaption(btn) {{
                 body += _VISUAL_PANEL_JS
             return _layout(title, body, active=active_tab)
         # GET &mdash; render hero + form
-        body = _stub_hero(title) + _llm_unavailable_banner() + stub.render_stub_html()
+        _how_html = ""
+        if intro_ct:
+            _how_html = (
+                '<p style="margin:0 0 var(--sp-4)">'
+                f'<a class="mh-how-pill" href="{url_for("content_type_intro", ct=intro_ct)}">'
+                "How it works</a></p>"
+            )
+        body = _stub_hero(title) + _how_html + _llm_unavailable_banner() + stub.render_stub_html()
         # Inject the "Pick from your library" widget. The form-level photo
         # upload (stubs._PHOTO_INPUT_HTML) handles one-off uploads; this
         # picker pulls from the active organisation's library so the user
@@ -37089,7 +37195,12 @@ function copySpotlightCaption(btn) {{
 
     @app.route("/weekend-preview", methods=["GET", "POST"])
     def stub_weekend_preview():
-        return _render_stub("WeekendPreviewStub", "stub_weekend_preview", "Event Preview")
+        return _render_stub(
+            "WeekendPreviewStub",
+            "stub_weekend_preview",
+            "Event Preview",
+            intro_ct="event_preview",
+        )
 
     # C-11: Sponsor Post and Session Update are retired as standalone forms —
     # Free Text interprets any such prompt, so there is ONE "describe it"
@@ -37112,7 +37223,9 @@ function copySpotlightCaption(btn) {{
     def stub_free_text_quick():
         # One-shot single-textarea form (legacy). Kept under /quick because
         # the primary /free-text experience is now the iterative chat.
-        return _render_stub("FreeTextStub", "stub_free_text_quick", "Free Text (quick)")
+        return _render_stub(
+            "FreeTextStub", "stub_free_text_quick", "Free Text (quick)", intro_ct="free_text"
+        )
 
     # ---- /free-text — Claude-driven chat brief builder -----------------------
     @app.route("/free-text", methods=["GET"])
@@ -37175,6 +37288,7 @@ function copySpotlightCaption(btn) {{
   builds a branded graphic from it. Add your own photos and it places them in.
   No forms, no templates: the prompt carries the context.
   </p>
+  <a class="mh-how-pill" href="{url_for("content_type_intro", ct="free_text")}" style="margin-top:var(--sp-3)">How it works</a>
 </section>
 
 {_llm_unavailable_banner()}
