@@ -794,6 +794,28 @@ def _typography_overrides_css(pair: str) -> str:
     return _TYPOGRAPHY_OVERRIDES.get((pair or "").lower(), "")
 
 
+# Display/headline face per typography_pair for the v2 archetypes. Mirrors the
+# motion renderer's fontStackFor (remotion StoryCard.tsx) so the posted still
+# and the reel show the SAME headline face for a given pair — closing the
+# still↔motion typography gap where the still always rendered Anton regardless
+# of the director's pick. Only the pairs whose face differs from the Anton
+# default appear here; anton/druk/oswald all resolve to Anton on both surfaces,
+# so they return "" and each archetype's own `var(--mh-font-display, 'Anton'…)`
+# fallback stands — keeping those renders byte-identical.
+_PAIR_DISPLAY_FONT: dict[str, str] = {
+    "bebas-grotesk": "'Bebas Neue','Oswald','Impact','Arial Narrow',sans-serif",
+    "bowlby-inter": "'Bowlby One','Anton','Impact',sans-serif",
+    "archivo-inter": "'Space Grotesk','Archivo','Inter','Helvetica Neue',Arial,sans-serif",
+}
+
+
+def _display_font_stack_for_pair(pair: str) -> str:
+    """CSS font stack for the display/headline role for this typography_pair,
+    or "" when it resolves to the Anton default. Parity contract: matches
+    fontStackFor in the motion renderer."""
+    return _PAIR_DISPLAY_FONT.get((pair or "").lower(), "")
+
+
 # ---------------------------------------------------------------------------
 # Accent decorations — small extra HTML elements layered on top of the
 # canvas to give the brand accent a fresh visual signature without
@@ -4554,6 +4576,15 @@ def _fill_v2_archetype(
     effects = getattr(brief, "text_effects", None) or {}
     if effects:
         _apply_text_effects_to_repl(repl, effects, root_vars)
+
+    # Typography pair → display/headline face (still↔motion parity). The v2
+    # archetypes read the headline font as `var(--mh-font-display, 'Anton'…)`,
+    # so setting this var swaps every headline to the pair's face at once;
+    # anton/druk/oswald resolve to "" and leave the Anton fallback in place,
+    # keeping those (and every brief-less) render byte-identical.
+    _disp = _display_font_stack_for_pair(getattr(brief, "typography_pair", "") or "")
+    if _disp:
+        root_vars["--mh-font-display"] = _disp
 
     root_block = "\n:root{" + "".join(f"{k}:{v};" for k, v in root_vars.items()) + "}\n"
     repl["BASE_CSS"] = base_repl.get("BASE_CSS", "") + root_block + extra_css
