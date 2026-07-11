@@ -17738,6 +17738,40 @@ def _flash_toast(message: str, kind: str = "success") -> None:
         pass
 
 
+# D-15 — the /organisation analyse actions persist their results immediately;
+# the values they overwrite ride the session as a one-shot "Discard this
+# analysis" undo (per-session best-effort, consumed by the discard route).
+_ORG_ANALYSIS_STASH_KEY = "org_analysis_stash"
+# The default Flask session is a ~4 KB cookie: refuse an oversized stash
+# rather than risk the browser dropping the whole session cookie.
+_ORG_ANALYSIS_STASH_MAX_BYTES = 3000
+
+
+def _org_analysis_stash_previous(profile_id: str, kind: str, fields: dict) -> None:
+    """Stash the pre-analysis values in *fields* as a one-shot undo.
+
+    ``kind`` is ``"brand"`` or ``"voice"`` and decides which preview the
+    Discard button renders beside. Best-effort by design: an unserialisable
+    or oversized payload drops the stash (so a stale undo can never restore
+    the wrong thing) and never raises into the request handler."""
+    try:
+        payload = {"profile_id": str(profile_id), "kind": kind, "fields": fields}
+        if len(json.dumps(payload)) > _ORG_ANALYSIS_STASH_MAX_BYTES:
+            session.pop(_ORG_ANALYSIS_STASH_KEY, None)
+            return
+        session[_ORG_ANALYSIS_STASH_KEY] = payload
+    except Exception:  # noqa: BLE001
+        session.pop(_ORG_ANALYSIS_STASH_KEY, None)
+
+
+def _org_analysis_stash_for(profile_id: str) -> dict:
+    """The pending analysis-undo stash for *profile_id* ({} when none)."""
+    stash = session.get(_ORG_ANALYSIS_STASH_KEY)
+    if isinstance(stash, dict) and stash.get("profile_id") == profile_id:
+        return stash
+    return {}
+
+
 # --------------------------------------------------------------------------- #
 # UI 1.9 — Multi-select + bulk actions (Media library + review queue).
 #
@@ -39205,8 +39239,11 @@ function copySpotlightCaption(btn) {{
         saved_msg = ""
         capture_preview = ""  # rendered preview HTML when a capture has just run
         capture_error = ""  # rendered error banner when capture failed
-        # The capture previews are kept in-memory only &mdash; the user must
-        # click "Save organisation" to persist them (no silent writes).
+        voice_error = ""  # rendered error banner when voice analysis failed
+        # D-15: the analyse actions persist their results immediately on
+        # success; the values they overwrite are stashed in the session as a
+        # one-shot undo behind the "Discard this analysis" button. Failures
+        # surface an honest error and persist nothing.
         if request.method == "POST":
             action = (request.form.get("action") or "save").strip().lower()
             raw_id = (request.form.get("profile_id") or "default").strip().lower()
@@ -39228,6 +39265,16 @@ function copySpotlightCaption(btn) {{
                 child_exclude_photos=False,
             )
 
+            def _persist_profile(prof: ClubProfile) -> None:
+                """Write the profile and run the PC.3 tenancy tail — shared
+                by Save and the analyse actions (D-15): a newly created
+                workspace is born bound to its creator (ADR-0014), and the
+                session pins the org either way."""
+                save_profile(prof)
+                if _is_new_profile:
+                    _bind_creator_if_signed_in(prof.profile_id)
+                _pin_active_profile(prof.profile_id)
+
             if action == "capture":
                 # ---- Brand DNA capture from website URL ----
                 target_url = (request.form.get("brand_source_url") or "").strip()
@@ -39246,10 +39293,12 @@ function copySpotlightCaption(btn) {{
                         result = {"brand_capture_status": f"error: {e}"}
                     status = (result or {}).get("brand_capture_status", "")
                     if status in ("ok", "no_provider", "ok_heuristic"):
-                        # Merge captured fields into the in-memory profile so
-                        # the preview shows them, but DON'T save until the user
-                        # clicks "Save organisation".
-                        for k in (
+                        # D-15: a successful capture persists immediately
+                        # (like the setup wizard) — 10-30s of analysis no
+                        # longer evaporates unless the user scrolls down and
+                        # clicks Save. The values it overwrites ride the
+                        # session as a one-shot Discard undo.
+                        _capture_fields = (
                             "brand_voice_summary",
                             "brand_keywords",
                             "brand_palette_extracted",
@@ -39262,7 +39311,20 @@ function copySpotlightCaption(btn) {{
                             "brand_capture_status",
                             "brand_palette_sources",
                             "brand_palette_reasoning",
-                        ):
+                        )
+                        _org_analysis_stash_previous(
+                            existing.profile_id,
+                            "brand",
+                            {
+                                k: getattr(existing, k, None)
+                                for k in (
+                                    *_capture_fields,
+                                    "brand_primary",
+                                    "brand_secondary",
+                                )
+                            },
+                        )
+                        for k in _capture_fields:
                             if k in result:
                                 setattr(existing, k, result[k])
                         # Adopt extracted palette into primary/secondary if
@@ -39279,13 +39341,15 @@ function copySpotlightCaption(btn) {{
                             "#000000",
                         ):
                             existing.brand_secondary = pal["secondary"]
+                        _persist_profile(existing)
                         note = (
-                            "Captured from website &mdash; review below and click "
-                            "Save organisation to persist."
+                            "Captured from website and saved to your organisation "
+                            "— Discard beside the preview restores the previous "
+                            "values."
                             if status == "ok"
-                            else "Captured from website (palette and logo only; "
-                            "AI provider not configured, so the voice "
-                            "summary and keywords are empty). Edit and save."
+                            else "Captured from website and saved (palette and "
+                            "logo only; AI provider not configured, so the voice "
+                            "summary and keywords are empty)."
                         )
                         capture_preview = (
                             f'<p class="tag info" style="margin-bottom:20px">{_h(note)}</p>'
@@ -39328,7 +39392,9 @@ function copySpotlightCaption(btn) {{
                         result = {"brand_capture_status": f"error: {e}"}
                     status = (result or {}).get("brand_capture_status", "")
                     if status in ("ok", "ok_heuristic"):
-                        for k in (
+                        # D-15: persist immediately on success, stashing the
+                        # overwritten values for the one-shot Discard undo.
+                        _capture_fields = (
                             "brand_voice_summary",
                             "brand_keywords",
                             "brand_palette_extracted",
@@ -39339,7 +39405,22 @@ function copySpotlightCaption(btn) {{
                             "brand_source_url",
                             "brand_captured_at",
                             "brand_capture_status",
-                        ):
+                        )
+                        _org_analysis_stash_previous(
+                            existing.profile_id,
+                            "brand",
+                            {
+                                k: getattr(existing, k, None)
+                                for k in (
+                                    *_capture_fields,
+                                    "voice_profile",
+                                    "social_links",
+                                    "brand_primary",
+                                    "brand_secondary",
+                                )
+                            },
+                        )
+                        for k in _capture_fields:
                             if k in result:
                                 setattr(existing, k, result[k])
                         vp = result.get("voice_profile") or {}
@@ -39355,12 +39436,14 @@ function copySpotlightCaption(btn) {{
                             existing.brand_primary = pal["primary"]
                         if pal.get("secondary") and existing.brand_secondary in ("", "#000000"):
                             existing.brand_secondary = pal["secondary"]
+                        _persist_profile(existing)
                         note = (
-                            "Re-analysed from website + socials &mdash; review below "
-                            "and click Save organisation to persist."
+                            "Re-analysed from website + socials and saved to your "
+                            "organisation — Discard beside the preview restores "
+                            "the previous values."
                             if status == "ok"
-                            else "Re-analysed (no live signal from the sources we tried). "
-                            "Edit and save."
+                            else "Re-analysed and saved (no live signal from the "
+                            "sources we tried)."
                         )
                         capture_preview = (
                             f'<p class="tag info" style="margin-bottom:20px">{_h(note)}</p>'
@@ -39454,53 +39537,21 @@ function copySpotlightCaption(btn) {{
                 existing.sponsor_name = (request.form.get("sponsor_name") or "").strip()
                 existing.sponsor_guidelines = (request.form.get("sponsor_guidelines") or "").strip()
 
-                def _hidden_list(name: str) -> list[str]:
-                    raw = (request.form.get(name) or "").strip()
-                    if not raw:
-                        return []
-                    try:
-                        v = json.loads(raw)
-                        if isinstance(v, list):
-                            return [str(x) for x in v]
-                    except Exception:
-                        return []
-                    return []
-
-                def _hidden_dict(name: str) -> dict:
-                    raw = (request.form.get(name) or "").strip()
-                    if not raw:
-                        return {}
-                    try:
-                        v = json.loads(raw)
-                        if isinstance(v, dict):
-                            return v
-                    except Exception:
-                        return {}
-                    return {}
-
-                existing.brand_voice_summary = (
-                    request.form.get("brand_voice_summary") or ""
-                ).strip()
-                existing.brand_logo_url = (request.form.get("brand_logo_url") or "").strip()
-                existing.brand_typography_hint = (
-                    request.form.get("brand_typography_hint") or ""
-                ).strip()
-                existing.brand_source_url = (
-                    request.form.get("brand_source_url_saved") or ""
-                ).strip()
-                existing.brand_captured_at = (request.form.get("brand_captured_at") or "").strip()
-                existing.brand_capture_status = (
-                    request.form.get("brand_capture_status") or ""
-                ).strip()
-                existing.brand_keywords = _hidden_list("brand_keywords_json")
-                existing.brand_phrases_to_use = _hidden_list("brand_phrases_to_use_json")
-                existing.brand_phrases_to_avoid = _hidden_list("brand_phrases_to_avoid_json")
-                existing.brand_palette_extracted = _hidden_dict("brand_palette_extracted_json")
+                # D-15: captured brand DNA persists the moment its analysis
+                # succeeds, so the save form no longer carries it through
+                # hidden inputs — the loaded profile already holds it and a
+                # plain save leaves it untouched.
                 from mediahub.brand.voice_imitation import (
                     analyse_examples as _analyse_voice,
                     redact_pii as _redact_pii,
                 )
 
+                # Snapshot the voice fields BEFORE they are overwritten so a
+                # successful analysis can stash them as the one-shot undo.
+                _prev_voice = {
+                    "voice_examples": existing.voice_examples or [],
+                    "voice_profile": existing.voice_profile or {},
+                }
                 raw_voice_examples = (request.form.get("voice_examples") or "").strip()
                 if raw_voice_examples:
                     voice_lines = [
@@ -39511,21 +39562,7 @@ function copySpotlightCaption(btn) {{
                     existing.voice_examples = voice_lines[:20]
                 else:
                     existing.voice_examples = []
-                vp_from_hidden = _hidden_dict("voice_profile_json")
-                if vp_from_hidden:
-                    existing.voice_profile = vp_from_hidden
-                elif not existing.voice_examples:
                     existing.voice_profile = {}
-                if request.form.get("analyse_voice") and existing.voice_examples:
-                    existing.voice_profile = _analyse_voice(existing.voice_examples)
-                    saved_msg = (
-                        '<p class="tag good" style="margin-bottom:20px">'
-                        "Voice profile analysed and saved.</p>"
-                    )
-                else:
-                    saved_msg = (
-                        '<p class="tag good" style="margin-bottom:20px">Organisation saved.</p>'
-                    )
                 # Persist any social-link edits made on the full form.
                 social_edits: dict[str, str] = {}
                 for key in ("instagram", "facebook", "twitter", "tiktok", "linkedin"):
@@ -39534,38 +39571,65 @@ function copySpotlightCaption(btn) {{
                         social_edits[key] = v
                 if social_edits or (request.form.get("social_links_edited") == "1"):
                     existing.social_links = social_edits
-                # Re-derive the AI operating profile whenever the user
-                # edits the org. Single LLM call; consumers cache-read.
-                try:
-                    from mediahub.brand.derived import derive_operating_profile
-
-                    existing.brand_operating_profile = derive_operating_profile(existing)
-                except Exception:
-                    existing.brand_operating_profile = {
-                        "tone_prose": {},
-                        "achievement_priorities": {},
-                        "type_phrases": {},
-                        "artefact_voice": {},
-                        "status": "error",
-                    }
-                # G-4: if the brand colours actually changed, force-recompute
-                # the derived theme so the chrome + still/motion renderers pick
-                # up the new primary (mirrors the palette-reorder handler).
-                if _palette_changed:
+                # D-15: the analysis persists immediately on success; a
+                # failed or unusable analysis is an honest error and this
+                # request persists NOTHING (no half-saved form, and never a
+                # fabricated voice profile).
+                _voice_problem = ""
+                if request.form.get("analyse_voice"):
+                    if len(existing.voice_examples) < 2:
+                        _voice_problem = (
+                            "Paste at least 3 captions (one per line) to analyse voice."
+                        )
+                    else:
+                        try:
+                            _new_vp = _analyse_voice(existing.voice_examples)
+                        except Exception as exc:
+                            _voice_problem = f"Voice analysis failed: {exc}."
+                        else:
+                            existing.voice_profile = _new_vp
+                            _org_analysis_stash_previous(existing.profile_id, "voice", _prev_voice)
+                            saved_msg = (
+                                '<p class="tag good" style="margin-bottom:20px">'
+                                "Voice profile analysed and saved.</p>"
+                            )
+                else:
+                    saved_msg = (
+                        '<p class="tag good" style="margin-bottom:20px">Organisation saved.</p>'
+                    )
+                if _voice_problem:
+                    voice_error = (
+                        f'<p class="tag bad" style="margin-bottom:20px">'
+                        f"{_h(_voice_problem)} Nothing was saved.</p>"
+                    )
+                else:
+                    # Re-derive the AI operating profile whenever the user
+                    # edits the org. Single LLM call; consumers cache-read.
                     try:
-                        _kit = existing.get_brand_kit()
-                        _kit.ensure_derived_palette(force=True)
-                        existing.brand_kit = _kit.to_dict()
-                    except Exception as e:
-                        log.warning("organisation save: derived palette recompute failed: %s", e)
-                save_profile(existing)
-                if _is_new_profile:
-                    # PC.3: a workspace created by a signed-in user is born
-                    # bound to its creator (ADR-0014).
-                    _bind_creator_if_signed_in(existing.profile_id)
-                # Pin into session so the routing gate unlocks and so
-                # the next session lands on the same org.
-                _pin_active_profile(existing.profile_id)
+                        from mediahub.brand.derived import derive_operating_profile
+
+                        existing.brand_operating_profile = derive_operating_profile(existing)
+                    except Exception:
+                        existing.brand_operating_profile = {
+                            "tone_prose": {},
+                            "achievement_priorities": {},
+                            "type_phrases": {},
+                            "artefact_voice": {},
+                            "status": "error",
+                        }
+                    # G-4: if the brand colours actually changed, force-recompute
+                    # the derived theme so the chrome + still/motion renderers pick
+                    # up the new primary (mirrors the palette-reorder handler).
+                    if _palette_changed:
+                        try:
+                            _kit = existing.get_brand_kit()
+                            _kit.ensure_derived_palette(force=True)
+                            existing.brand_kit = _kit.to_dict()
+                        except Exception as e:
+                            log.warning(
+                                "organisation save: derived palette recompute failed: %s", e
+                            )
+                    _persist_profile(existing)
                 profile = existing
         else:
             # GET: prefer the session-pinned profile; fall back to the
@@ -39666,6 +39730,34 @@ function copySpotlightCaption(btn) {{
         # the rare wide-form input.
         _input_style = "max-width:480px"
         _ta_style = "max-width:600px"
+
+        # D-15: a just-persisted analysis can be undone — the previous values
+        # ride the session as a one-shot stash, and the Discard button
+        # renders beside whichever preview the stash belongs to.
+        _stash_kind = str(_org_analysis_stash_for(profile.profile_id).get("kind") or "")
+        _discard_title = (
+            "Restores the values from before this analysis. Best-effort undo "
+            "held in your session — it survives one navigation, but not "
+            "signing out or another analysis."
+        )
+        _discard_label = "Discard this analysis — restore previous"
+        brand_discard_html = ""
+        if _stash_kind == "brand":
+            brand_discard_html = (
+                f'<form method="POST" action="{url_for("organisation_analysis_discard")}" '
+                f'style="margin-top:12px">'
+                f'<button type="submit" class="btn secondary" title="{_h(_discard_title)}">'
+                f"{_h(_discard_label)}</button></form>"
+            )
+        voice_discard_html = ""
+        if _stash_kind == "voice":
+            # Inside the main save form, so a nested <form> is illegal —
+            # formaction routes this submit to the discard endpoint instead.
+            voice_discard_html = (
+                f'<button type="submit" formaction="{url_for("organisation_analysis_discard")}" '
+                f'class="btn secondary" style="margin-left:8px" title="{_h(_discard_title)}">'
+                f"{_h(_discard_label)}</button>"
+            )
 
         # ---- Brand DNA preview block (rendered when fields are populated) ----
         def _swatch(hexv: str) -> str:
@@ -39772,25 +39864,9 @@ function copySpotlightCaption(btn) {{
     </div>
   </div>
   {captured_meta}
+  {brand_discard_html}
 </div>
 """
-
-        # Hidden inputs that carry the captured brand fields through the
-        # next form submission so a click on Save persists them.
-        brand_hidden_inputs = (
-            f'<input type="hidden" name="brand_voice_summary" value="{_h(profile.brand_voice_summary or "")}"/>'
-            f'<input type="hidden" name="brand_logo_url" value="{_h(profile.brand_logo_url or "")}"/>'
-            f'<input type="hidden" name="brand_typography_hint" value="{_h(profile.brand_typography_hint or "")}"/>'
-            f'<input type="hidden" name="brand_source_url_saved" value="{_h(profile.brand_source_url or "")}"/>'
-            f'<input type="hidden" name="brand_captured_at" value="{_h(profile.brand_captured_at or "")}"/>'
-            f'<input type="hidden" name="brand_capture_status" value="{_h(profile.brand_capture_status or "")}"/>'
-            f'<input type="hidden" name="brand_keywords_json" value="{_h(json.dumps(profile.brand_keywords or []))}"/>'
-            f'<input type="hidden" name="brand_phrases_to_use_json" value="{_h(json.dumps(profile.brand_phrases_to_use or []))}"/>'
-            f'<input type="hidden" name="brand_phrases_to_avoid_json" value="{_h(json.dumps(profile.brand_phrases_to_avoid or []))}"/>'
-            f'<input type="hidden" name="brand_palette_extracted_json" value="{_h(json.dumps(profile.brand_palette_extracted or {}))}"/>'
-            f'<input type="hidden" name="voice_profile_json" value="{_h(json.dumps(profile.voice_profile or {}))}"/>'
-            f'<input type="hidden" name="voice_examples_json" value="{_h(json.dumps(profile.voice_examples or []))}"/>'
-        )
 
         # ---- Voice profile preview block ----
         voice_profile_html = ""
@@ -39865,7 +39941,7 @@ function copySpotlightCaption(btn) {{
         _org_sec = _org_eff.get("secondary") or profile.brand_secondary or "#000000"
 
         body = f"""
-{saved_msg}{capture_preview}{capture_error}
+{saved_msg}{capture_preview}{capture_error}{voice_error}
 <section class="mh-hero" data-lane="" style="padding-top:var(--sp-8);padding-bottom:var(--sp-7);margin-bottom:var(--sp-5)">
   <span class="mh-hero-eyebrow">Organisation profile</span>
   <h1>{_h(profile.display_name) if profile.display_name else "Your organisation"}</h1>
@@ -39932,7 +40008,6 @@ function copySpotlightCaption(btn) {{
 <form method="POST">
 <input type="hidden" name="action" value="save"/>
 <input type="hidden" name="profile_id" value="{_h(profile.profile_id)}"/>
-{brand_hidden_inputs}
 
 <div class="card" style="margin-bottom:20px">
   <h2 style="margin-top:0">Identity</h2>
@@ -40052,7 +40127,8 @@ function copySpotlightCaption(btn) {{
   </div>
   <div style="margin-top:12px">
     <button type="submit" name="analyse_voice" value="1" class="btn">Analyse voice</button>
-    <span class="muted" style="font-size:12px;margin-left:8px">Re-runs the analyser on the captions above.</span>
+    {voice_discard_html}
+    <span class="muted" style="font-size:12px;margin-left:8px">Analyses and saves in one step.</span>
   </div>
   {voice_profile_html}
 </div>
@@ -40168,6 +40244,36 @@ function copySpotlightCaption(btn) {{
   </form>
 </div>"""
         return _layout("Organisation", body, active="settings")
+
+    @app.route("/organisation/analysis/discard", methods=["POST"])
+    def organisation_analysis_discard():
+        """D-15: one-shot undo for a just-persisted /organisation analysis.
+
+        Consumes the session stash written when "Re-analyse brand" or
+        "Analyse voice" saved its result, restores the stashed previous
+        values onto the profile, and bounces back to the editor. Best-effort
+        by design: a missing stash (expired session, already used) is a
+        friendly no-op, never an error page."""
+        stash = session.pop(_ORG_ANALYSIS_STASH_KEY, None)
+        if not isinstance(stash, dict) or not stash.get("profile_id"):
+            _flash_toast("Nothing to discard — no analysis is waiting.", "error")
+            return redirect(url_for("organisation_page"))
+        pid = str(stash.get("profile_id"))
+        if not _session_can_use_profile(pid):
+            # PC.3: a bound org answers like a nonexistent one to outsiders.
+            abort(404)
+        prof = load_profile(pid)
+        if prof is None:
+            abort(404)
+        fields = stash.get("fields")
+        if isinstance(fields, dict) and fields:
+            for name, value in fields.items():
+                if hasattr(prof, name):
+                    setattr(prof, name, value)
+            save_profile(prof)
+        kind_label = "brand" if stash.get("kind") == "brand" else "voice"
+        _flash_toast(f"Analysis discarded — the previous {kind_label} values are back.")
+        return redirect(url_for("organisation_page"))
 
     # ---- /organisation/setup &mdash; first-run AI brand-DNA flow -----------
     #
