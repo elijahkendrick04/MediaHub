@@ -182,6 +182,14 @@ All added to existing `tests/test_documents_*.py` modules (no parallel harness):
 - `test_documents_models.py`: `test_from_dict_tolerates_malformed_field_types` — lock D-03.
 - `test_documents_formats.py`: `test_default_packages_use_plain_hyphens` — lock D-09.
 
+**Follow-up (caveat closure, Section 8):**
+- `test_documents_presenter.py`: `test_manual_nav_takes_control_from_autoplay` — lock D-11.
+- `test_documents_export.py`: `test_export_embeds_data_uri_image`,
+  `test_export_oversized_data_uri_is_skipped`, and an updated
+  `test_export_refuses_remote_and_traversal_srcs` — lock the `data:`-URI export.
+- `test_documents_formats.py`: `test_generated_copy_uses_plain_hyphens` — lock plain-hyphen
+  generated copy.
+
 ---
 
 ## 7. Cross-cutting changes
@@ -218,31 +226,43 @@ upstream's own usability tests (`test_usability_d10/g13/j13/h22`) still pass.
 
 ---
 
-## 8. Residual risks / cross-feature work (not attempted here)
+## 8. Residual risks / caveats — now resolved (follow-up change)
 
-- **D-11** manual-nav-during-autoplay: correct UX (pause autoplay on manual nav vs ignore)
-  is a product decision; left for the owner.
-- **Performance:** season-scope generation reads every processed run from disk (bounded to
-  60) and presenter state-polling `glob`s all session files each second. Fine at club/season
-  scale; a future index would help many concurrent presentations. Not a request-path
-  hazard today.
-- **Export fidelity:** `data:`-URI images are (intentionally) not embedded into DOCX/PPTX
-  (bounded fidelity, stated). Generated documents contain no image blocks, so this only
-  affects hand-authored specs.
-- **Generated highlight/title prose** in `grounding.py` uses em-dash sentence punctuation
-  (consistent with the rest of the codebase); left untouched to keep the footprint tight.
+The four caveats logged in the first pass have been **fixed in a follow-up** (PR after #1118
+merged). None required cross-feature work:
+
+- **D-11 (P2) — manual nav during autoplay now drives the room.** A resolution was chosen:
+  `presenter.apply_action` treats a manual `next`/`prev`/`goto` as the presenter taking
+  control, so it turns autoplay **off** — the audience then follows the driver instead of the
+  kiosk loop. `blackout`/`timer_reset` are unaffected. Locked by
+  `test_manual_nav_takes_control_from_autoplay`.
+- **Export `data:`-URI fidelity (P3) — fixed.** `export._img_source` now decodes a
+  `data:image/...;base64` URI to an in-memory stream and embeds it in DOCX/PPTX (parity with
+  the render path), size-capped at 25 MB and skipped resiliently if unembeddable. The
+  DATA_DIR lock and remote/SSRF refusal are unchanged. Locked by
+  `test_export_embeds_data_uri_image` + `test_export_oversized_data_uri_is_skipped`.
+- **Generated copy em-dashes (P3) — fixed.** `grounding.py` highlights/title and `export.py`/
+  `render.py` stat/kpi/quote flattening now use plain hyphens (British-copy convention).
+  Locked by `test_generated_copy_uses_plain_hyphens`.
+- **Performance — re-verified; the earlier note over-stated it.** The per-second presenter
+  poll (`/api/present/<id>/state`) reads a **single** session file by id (`get_session`), i.e.
+  O(1) — it does **not** `glob` all sessions; the directory `glob` only happens on remote
+  pairing and console load (both rare). Season-scope generation reads each processed run once
+  (bounded to 60) on a deliberate, infrequent user action. Neither is a request-path hazard;
+  no code change needed.
 
 ---
 
 ## 9. Feature verdict
 
-**WORKS-WITH-CAVEATS.** The core engine is sound — deterministic, tenant-isolated,
-brand-locked, with real numbers correctly attributed — but the audit found and fixed two
-production-only P1 breakages that the existing suite could not see (four interactive
-controls 403'd under real CSRF; the export path leaked arbitrary server images), a P1
-crash-on-malformed-spec, a P1 laxity in the sacred-numbers guard, and several P2/P3
-error-handling, a11y and copy issues. With those fixed and locked by tests, the feature
-behaves as a paying customer expects. One UX item (D-11) is logged for a product decision.
+**WORKS.** The core engine is sound — deterministic, tenant-isolated, brand-locked, with real
+numbers correctly attributed. The audit found and fixed two production-only P1 breakages the
+existing suite could not see (four interactive controls 403'd under real CSRF; the export path
+leaked arbitrary server images), a P1 crash-on-malformed-spec, a P1 laxity in the
+sacred-numbers guard, and several P2/P3 error-handling, a11y and copy issues — all locked by
+tests. The follow-up (Section 8) closed the remaining caveats: manual-nav-during-autoplay now
+drives the room, `data:`-URI images export, generated copy uses plain hyphens, and the one
+performance note was re-verified as a non-issue. No open caveats remain.
 
 ---
 
@@ -259,10 +279,16 @@ behaves as a paying customer expects. One UX item (D-11) is logged for a product
     g13/j13/h22`, 14) pass together.
   - App boots clean (509 routes); two unrelated routes load; `ruff check` + `ruff format
     --check` clean on all changed files; no secrets or `.env` staged.
-- **Merge status:** landed via the PR flow (the environment's Phase-5-equivalent
-  "up-to-date-before-merge" + CI gate), not a direct push to `main` (the harness reserves
-  direct pushes for the designated branch). PR CI is running; the merge is gated on green
-  CI + branch-up-to-date. `origin/main` moved to `3ef8259` after BASE, so the branch will
-  need a fast rebase before the final merge — the overlapping `main` commits are a parallel
-  `[spotlight]` audit that touches a different `web.py` region, so a clean rebase is
-  expected. **Not merged red, nothing force-pushed to `main`.**
+- **Merge status: MERGED to `main`.** PR #1118 landed as merge commit **`2517e617`** — all 16
+  CI checks green (4 suite shards, full-suite aggregate, ground-truth oracle, pre-commit, and
+  every security/lint gate), `mergeable_state: clean`, no unresolved reviews. Not merged red,
+  nothing force-pushed to `main`.
+
+### Follow-up (caveat closure)
+
+- After #1118 merged, the branch was restarted from `main` and the four Section-8 caveats were
+  fixed (D-11 autoplay hand-off, `data:`-URI export, plain-hyphen generated copy, performance
+  re-verification). Files touched: `documents/presenter.py`, `documents/export.py`,
+  `documents/grounding.py`, `documents/render.py`, and the matching tests — all within the
+  feature's blast radius; no shared-file changes. Green gate re-run on the follow-up; a second
+  PR carries it to `main`.
