@@ -242,11 +242,20 @@ def cue_count(track: Optional[dict]) -> int:
 
 
 def edit_cue_text(track: dict, index: int, text: str) -> dict:
-    """Replace cue ``index``'s text (the verbatim transcript can be corrected)."""
+    """Replace cue ``index``'s text (the verbatim transcript can be corrected).
+
+    On an animated (karaoke) cue the burned words come from the per-word ``words``
+    stamps, not the line ``text`` — so a text edit that left those stamps in place
+    would silently show the *old* words on screen. The edited cue drops its stale
+    ``words``; ``caption_render`` renders a word-less cue as a still line of the new
+    text, so the correction actually appears. A static cue has no ``words`` and is
+    unchanged.
+    """
     out = copy.deepcopy(track)
     cues = out.get("cues") or []
     if 0 <= index < len(cues):
-        cues[index] = {**cues[index], "text": str(text)}
+        cues[index] = {k: v for k, v in cues[index].items() if k != "words"}
+        cues[index]["text"] = str(text)
     return out
 
 

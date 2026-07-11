@@ -298,6 +298,23 @@ def test_api_docs_documents_real_endpoints(client):
         assert path in body, f"docs must mention {path}"
 
 
+def test_api_docs_reel_defaults_match_the_engine(client):
+    """The documented reel cover/outro defaults must track the real engine
+    constants, not a stale literal.
+
+    Regression: the outro default was documented as 1.0s long after the engine
+    default was extended to 2.5s (REEL_OUTRO_SEC), so a developer setting
+    ?outro=1.0 to "match the default" would silently shorten the outro.
+    """
+    from mediahub.visual.motion import REEL_COVER_SEC, REEL_OUTRO_SEC
+
+    body = client.get("/developer/api").get_data(as_text=True)
+    expected = f"Default {REEL_COVER_SEC} / {REEL_OUTRO_SEC}."
+    assert expected in body, f"docs must state the live reel defaults ({expected!r})"
+    # The specific stale value must be gone.
+    assert "Default 2.0 / 1.0." not in body
+
+
 def test_api_docs_no_cdn_or_external_highlighter(client):
     html = client.get("/developer/api").get_data(as_text=True).lower()
     for bad in (

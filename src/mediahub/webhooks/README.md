@@ -13,7 +13,7 @@ happened.
 
 | File | Role |
 |---|---|
-| `events.py` | The event catalogue (`run.finished`, `card.approved`, `pack.exported`, `form.submitted`) + whitelisted payload builders — one source of truth |
+| `events.py` | The event catalogue (`run.finished`, `card.approved`, `pack.exported`) + whitelisted payload builders — one source of truth |
 | `registry.py` | Per-org endpoint registry (URL, subscribed events, signing secret) — tenant-scoped CRUD |
 | `signing.py` | HMAC-SHA256 signing (`X-MediaHub-Signature: t=…,v1=…`, Stripe-style) + a `verify()` for receivers/tests |
 | `delivery.py` | `emit()` fan-out, immediate attempt, durable retry with backoff, the delivery log, and the scheduler retry handler |
@@ -34,12 +34,11 @@ engine event ──▶ webhooks.emit(event, profile_id, payload)
 
 ## Where it's wired
 
-`web.py` calls `webhooks.emit(...)` at four chokepoints:
+`web.py` calls `webhooks.emit(...)` at three chokepoints:
 - run finished — beside `notify_pack_ready`
 - card approved — inside `_phase_w_after_status_change` (the single point both the
   web route and the public API pass through)
 - pack exported — inside `_build_run_pack_zip` (shared by the route and the API)
-- form submitted — in `site_form_submit`
 
 The retry sweep is registered as the scheduler task type `webhook_delivery`.
 

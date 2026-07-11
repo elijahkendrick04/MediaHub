@@ -246,16 +246,26 @@ def _score_item(
             n_ach = int(best.payload.get("n_achievements", 0) or 0)
             if queued:
                 apply(
-                    30, f"fresh results with {queued} cards awaiting review — {best.summary}", best
+                    30,
+                    f"fresh results with {queued} card{'s' if queued != 1 else ''} "
+                    f"awaiting review — {best.summary}",
+                    best,
                 )
             elif n_ach:
                 apply(
-                    22, f"fresh results with {n_ach} detected achievements — {best.summary}", best
+                    22,
+                    f"fresh results with {n_ach} detected "
+                    f"achievement{'s' if n_ach != 1 else ''} — {best.summary}",
+                    best,
                 )
             else:
                 apply(10, f"fresh results ingested — {best.summary}", best)
             if approved and slug in {"meet_recap", "result_recap"}:
-                apply(8, f"{approved} approved cards not yet posted", best)
+                apply(
+                    8,
+                    f"{approved} approved card{'s' if approved != 1 else ''} not yet posted",
+                    best,
+                )
             if slug == "pb_spotlight" and n_ach:
                 apply(8, "achievement detections available for a PB-led spotlight", best)
         elif sport_runs:

@@ -12,6 +12,7 @@
   caption actions docked under the tone panel;
 * the export routes' stale "recognition page" copy now points at the builder.
 """
+
 from __future__ import annotations
 
 import importlib
@@ -283,6 +284,10 @@ class TestBuilderPageSurfaces:
         more = html.split('class="mh-card-more"', 1)[1].split("</details>", 1)[0]
         for label in ("Reformat", "Copilot", "Comments", "History", "Locks", "Share"):
             assert label in more, label
+        # …and the per-card Elements (add-to-card) entry point lives there too,
+        # scoped to this run + card so a placement lands on this card's brief.
+        assert "Elements" in more
+        assert "/elements?" in more and "card_id=swim-1" in more
         # …with the unresolved-comments badge on the More trigger.
         assert '<summary class="btn secondary"' in more
         assert 'class="comments-count"' in more.split("mh-card-more-menu")[0]

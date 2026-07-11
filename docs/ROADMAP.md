@@ -45,7 +45,7 @@ marked 🔒 throughout.
 
 - **Phase 1 — Product** · MediaHub's own first-party creative suite **and the
   local-AI foundation that powers it** — imagery, photo/video/audio editing,
-  charts, documents, templates, planner, collaboration, microsites… plus the
+  charts, documents, templates, planner, collaboration… plus the
   zero-cost local backends, each sequenced **in front of** the feature that needs
   it (the local image model before the imagery edit-family, local ASR before
   video captions, local TTS before the voice layer).
@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-07-09 · `b1b2d6508` · Usability audit — quick-win tail + both large highs (J-1, H-5) + tail (#1097)
+**Last updated:** 2026-07-11 · `c2918c138` · Merge pull request #1144 from elijahkendrick04/claude/video-studio-audit-bkhvvu
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -734,7 +734,7 @@ in-house local path the default), platform-publish APIs, print fulfilment, and
 music rights.
 
 **Exit criterion.** A club can run its **entire content life inside
-MediaHub** — social, print, email, microsite, video, documents — without
+MediaHub** — social, print, email, video, documents — without
 reaching for Canva/Express; measured per-item (each P6 item carries its own
 exit in the companion doc) and in aggregate by wedge clubs actually
 cancelling their Canva habit.
@@ -1066,7 +1066,6 @@ the old ids — use this map to bridge them.
 | **1.13** | P6.15 | Data hub + bulk personalisation |
 | **1.14** | P6.16 | Planner calendar/board |
 | **1.15** | P6.12 | Document engine |
-| **1.16** | P6.13 | Club microsites + forms + widgets |
 | **1.17** | P6.14 | Email & newsletter composer |
 | **1.18** | P6.17 | Collaboration & review |
 | **1.19** | P6.18 | Export & conversion engine |
@@ -1227,16 +1226,16 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
-| 2026-07-09 | `a62fcb542` | docs: session hand-off for the next usability-audit session |
-| 2026-07-09 | `fdb24ad3e` | docs(audit): J-11 shipped — 105/161 |
-| 2026-07-09 | `8a69697f3` | feat(pwa): tell the user when a signed-out shared photo isn't kept (J-11) |
-| 2026-07-09 | `5c117d28b` | docs(audit): J-12 + H-8 + E-8 shipped — 104/161 |
-| 2026-07-09 | `38c762f38` | feat(auth): plain-spoken org-delete confirm + non-owner feedback (E-8) |
-| 2026-07-09 | `eec492725` | feat(pwa,free-text): offline retry + preserve failed prompt (J-12, H-8) |
-| 2026-07-09 | `6c0d753dd` | docs(audit): H-5 shipped — 101/161 (both large highs done) |
-| 2026-07-09 | `e705a4825` | feat(editorial): structured content editor for newsletters + documents (H-5 pt.2) |
-| 2026-07-09 | `b12c7f5b5` | feat(sites): structured content editor for microsites (H-5 pt.1) |
-| 2026-07-09 | `b5a282253` | fix(web): top-bar dropdowns open off-screen on iPhone |
-| 2026-07-09 | `96aafc9ed` | test(i5): write the review-filter test's run.json to the real RUNS_DIR |
-| 2026-07-08 | `3e71918a7` | fix(elements): use approved single-colour silhouette swim pictograms |
+| 2026-07-11 | `c9ea9f3c6` | [elements] add a per-card "Elements" entry point in the builder toolbar |
+| 2026-07-11 | `562809d2f` | Sync main + scrub microsite refs from new audit doc |
+| 2026-07-11 | `f4af5a5de` | [team-members] record final green-gate result + CI status in audit report |
+| 2026-07-11 | `0c154fbd8` | [team-members] keep the pre-existing invite-copy phrase when adding the link |
+| 2026-07-11 | `3fab2b2ab` | [team-members] fix pre-existing EOF hygiene break on two merged audit docs |
+| 2026-07-11 | `0c87f9618` | [team-members] record PR link + green-gate result in audit report |
+| 2026-07-11 | `612bd959c` | [team-members] render status badges as pills; show the invite signup link |
+| 2026-07-11 | `5b7aad2b3` | [team-members] audit report for Settings -> Team members |
+| 2026-07-11 | `ccb4ab9eb` | [team-members] keep a workspace manageable when its last owner is erased |
+| 2026-07-11 | `7c5898dd8` | [team-members] stop invite-email resend on role edits; harden the add path |
+| 2026-07-11 | `5e33b57e8` | [team-members] fix invite-email validation, a11y, and stuck loader on cancel |
+| 2026-07-10 | `c30b7042d` | [free-text] Harden chat brief->draft build and chat persistence |
 <!-- /ROADMAP:ACTIVITY -->

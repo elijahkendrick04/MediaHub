@@ -13,9 +13,43 @@ No LLM, no randomness (this is presentation maths, not a judgement call).
 
 from __future__ import annotations
 
+import re
 from typing import Optional
 
 from .models import Element
+
+# Deterministic, dependency-free SVG hardening. The bundled library SVGs are
+# first-party and never carry active content, so a clean element is returned
+# byte-identical; the strip only bites a hostile *org-custom* pack SVG (build 4)
+# whose markup would otherwise execute when it is injected into the browse grid
+# (elements_browser) or into the card render HTML (sprint_hooks/elements). This
+# is the single chokepoint every element SVG passes through on its way to a DOM.
+_SVG_SCRIPT_RE = re.compile(r"<script\b[^>]*>.*?</script\s*>", re.IGNORECASE | re.DOTALL)
+_SVG_SCRIPT_SELF_RE = re.compile(r"<script\b[^>]*/\s*>", re.IGNORECASE)
+_SVG_FOREIGN_RE = re.compile(
+    r"<foreignObject\b[^>]*>.*?</foreignObject\s*>", re.IGNORECASE | re.DOTALL
+)
+_SVG_FOREIGN_SELF_RE = re.compile(r"<foreignObject\b[^>]*/\s*>", re.IGNORECASE)
+_SVG_ON_ATTR_RE = re.compile(r"""\s+on[a-zA-Z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)""", re.IGNORECASE)
+_SVG_JS_URI_RE = re.compile(
+    r"""(\b(?:href|xlink:href|src)\s*=\s*)("|')?\s*javascript:[^"'>\s]*""", re.IGNORECASE
+)
+
+
+def _sanitise_svg(svg: str) -> str:
+    """Strip active content from an element SVG (script / on*= / foreignObject / javascript:).
+
+    Conservative and idempotent. First-party library SVGs contain none of these,
+    so their output is unchanged; the guard is for org-uploaded custom packs.
+    """
+    svg = _SVG_SCRIPT_RE.sub("", svg)
+    svg = _SVG_SCRIPT_SELF_RE.sub("", svg)
+    svg = _SVG_FOREIGN_RE.sub("", svg)
+    svg = _SVG_FOREIGN_SELF_RE.sub("", svg)
+    svg = _SVG_ON_ATTR_RE.sub("", svg)
+    svg = _SVG_JS_URI_RE.sub(lambda m: f'{m.group(1)}{m.group(2) or ""}#', svg)
+    return svg
+
 
 # Element SLOT  →  renderer role var. Single mapping; everything else derives.
 _SLOT_TO_ROLE: dict[str, str] = {
@@ -90,7 +124,7 @@ def recolour_svg(svg_text: str, role_vars: dict[str, str], *, uid: str = "el") -
     for slot, role in _SLOT_TO_ROLE.items():
         colour = role_vars.get(role) or _ROLE_FALLBACK[role]
         out = out.replace(f"__{slot}__", colour)
-    return out
+    return _sanitise_svg(out)
 
 
 def element_is_legible(element: Element, role_vars: dict[str, str]) -> bool:

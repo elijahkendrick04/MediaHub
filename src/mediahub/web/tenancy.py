@@ -312,6 +312,18 @@ class MembershipStore:
         where the email must leave the ledger entirely even if the
         workspace becomes unbound (the documented zero-member model).
         Compacting rewrite; returns rows removed.
+
+        An erasure cannot be refused, so :meth:`remove`'s last-owner guard
+        can't apply here — but a bare erase would strand a still-populated
+        workspace the erased email *owned* with active members yet no owner
+        (``is_bound`` stays true while ``is_active_owner`` is false for
+        everyone), permanently locking every remaining member out of member
+        admin, role changes, and org deletion. To keep such a workspace
+        manageable, ownership passes to its longest-standing remaining active
+        member. The erased person's own rows are still removed in full, so
+        this is GDPR-consistent; only a *different*, already-trusted member is
+        promoted. A workspace left with zero active members still unbinds (the
+        documented zero-member model).
         """
         norm = normalize_email(email)
         with _LEDGER_LOCK:
@@ -323,6 +335,13 @@ class MembershipStore:
                 text = self._path.read_text(encoding="utf-8")
             except OSError:
                 return 0
+            # Orgs the erased email actively OWNED (pre-erasure, last-write-wins).
+            pre = self._read_all()
+            owned_orgs = {
+                pid
+                for (e, pid), m in pre.items()
+                if e == norm and m.status == STATUS_ACTIVE and m.role == ROLE_OWNER
+            }
             for line in text.splitlines():
                 line = line.strip()
                 if not line:
@@ -335,10 +354,42 @@ class MembershipStore:
                     removed += 1
                     continue
                 kept.append(rec)
+            # Ownership succession: for each org the erased email owned that still
+            # has active members but no active owner, promote the earliest-joined
+            # remaining active member so the workspace does not become ownerless.
+            promotions: list[dict] = []
+            if owned_orgs:
+                post: dict[tuple[str, str], Membership] = {}
+                for rec in kept:
+                    if not isinstance(rec, dict):
+                        continue
+                    m = Membership.from_record(rec)
+                    if m.email and m.profile_id:
+                        post[(m.email, m.profile_id)] = m
+                for pid in owned_orgs:
+                    actives = [
+                        m for (e, p), m in post.items() if p == pid and m.status == STATUS_ACTIVE
+                    ]
+                    if not actives or any(m.role == ROLE_OWNER for m in actives):
+                        continue
+                    heir = min(actives, key=lambda m: (m.created_at or "~", m.email))
+                    now = _utc_now_iso()
+                    promotions.append(
+                        Membership(
+                            email=heir.email,
+                            profile_id=pid,
+                            role=ROLE_OWNER,
+                            status=STATUS_ACTIVE,
+                            invited_by=heir.invited_by,
+                            invited_via_profile_id=heir.invited_via_profile_id,
+                            created_at=heir.created_at or now,
+                            updated_at=now,
+                        ).to_record()
+                    )
             if removed:
                 tmp = self._path.with_suffix(".tmp")
                 with tmp.open("w", encoding="utf-8") as fh:
-                    for rec in kept:
+                    for rec in kept + promotions:
                         fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
                 try:
                     os.chmod(tmp, 0o600)

@@ -161,7 +161,9 @@ def test_remove_index(app_env):
     run_id, card_id, _ = _seed_run_with_brief(tmp_path)
     with app.test_client() as c:
         c.post(f"/api/runs/{run_id}/card/{card_id}/elements", json={"element_id": "chip.pb"})
-        c.post(f"/api/runs/{run_id}/card/{card_id}/elements", json={"element_id": "pictogram.trophy"})
+        c.post(
+            f"/api/runs/{run_id}/card/{card_id}/elements", json={"element_id": "pictogram.trophy"}
+        )
         out = c.post(
             f"/api/runs/{run_id}/card/{card_id}/elements", json={"remove_index": 0}
         ).get_json()
@@ -201,3 +203,20 @@ def test_elements_page_card_context_has_add_buttons(app_env):
         resp = c.get(f"/elements?run_id={run_id}&card_id={card_id}")
     assert resp.status_code == 200
     assert b"Add to card" in resp.data or b"inCard" in resp.data
+
+
+def test_browser_card_builder_is_dom_safe(app_env):
+    """The browse grid must not concatenate catalog metadata into innerHTML —
+    org-custom name/kind/id are user-controlled, so a raw concat is stored XSS.
+    Regression lock: the card builder uses textContent / setAttribute instead."""
+    app, _wm, _ = app_env
+    with app.test_client() as c:
+        html = c.get("/elements").get_data(as_text=True)
+    # safe construction present
+    assert "textContent = el.name" in html
+    assert "textContent = el.kind" in html
+    assert "setAttribute('data-id', el.id" in html
+    # the old unsafe innerHTML concatenation of user-controlled fields is gone
+    assert "+ (el.name" not in html
+    assert "+ (el.kind" not in html
+    assert "data-id=\"' + el.id" not in html

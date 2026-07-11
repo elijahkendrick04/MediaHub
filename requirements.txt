@@ -29,11 +29,6 @@ pillow>=12.3.0
 # need no system libs. Decode-only at upload time; the code honest-errors on a
 # HEIC upload if it's ever absent.
 pillow-heif>=1.4.0
-# 1.16 microsite QR generator (mediahub.sites.qr): segno is a tiny, pure-Python,
-# MIT-licensed QR encoder (no deps, no external service, no per-call cost). The
-# brand-colour/contrast-guard/logo/PNG-SVG-PDF layer is MediaHub's own; segno only
-# supplies the matrix. The module honest-errors (QRUnavailable) if it's absent.
-segno>=1.6.6
 rembg>=2.0.76
 onnxruntime>=1.27.0
 anthropic>=0.116.0
@@ -98,6 +93,10 @@ numpy>=2.4.6
 # data/sport_profiles/*.yaml files. PyYAML is MIT-licensed and free; the loader is
 # inert scaffolding (not yet wired into the runtime pipeline).
 PyYAML>=6.0.3
+# 2FA enrolment QR (mediahub.web.qr, usability H-20): deterministic in-process
+# QR matrix for the otpauth:// URI. Tiny, pure-Python, MIT-licensed. Reinstated
+# after the sites-feature removal took the previous consumer with it.
+segno>=1.6.1
 
 # G1.10 club custom-font upload pipeline (mediahub.typography.font_intake):
 # validates, subsets to MediaHub's Latin set, and re-packs an uploaded brand

@@ -52,8 +52,57 @@ def test_render_for_palette_thumbnail():
 def test_render_unknown_file_returns_none():
     from mediahub.elements.models import Element
 
-    ghost = Element(id="x.ghost", name="Ghost", kind="pictogram", sport="general", svg_file="does_not_exist.svg")
+    ghost = Element(
+        id="x.ghost", name="Ghost", kind="pictogram", sport="general", svg_file="does_not_exist.svg"
+    )
     assert render.render_element_markup(ghost, {"--mh-accent": "#fff"}) is None
+
+
+# ---- audit/elements: org-custom SVGs resolve (profile_id) and are sanitised --
+def test_org_custom_element_svg_resolves_and_is_sanitised(tmp_path, monkeypatch):
+    """An org-custom element's SVG lives under the org pack dir, so profile_id must
+    flow through render_element_markup or it renders blank; and any active content
+    in that user-supplied SVG must be stripped before it reaches a DOM."""
+    import json as _json
+
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    catalog.reload_bundled_cache()
+    profile = "club-xyz"
+    pack = tmp_path / "element_packs" / profile
+    (pack / "svg").mkdir(parents=True)
+    (pack / "svg" / "mark.svg").write_text(
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10">'
+        '<rect fill="__ACCENT__" width="10" height="10"/>'
+        "<script>alert(1)</script></svg>",
+        encoding="utf-8",
+    )
+    (pack / "catalog.json").write_text(
+        _json.dumps(
+            {
+                "pack": "club-xyz-custom",
+                "elements": [
+                    {
+                        "id": "sticker.mark",
+                        "name": "Club mark",
+                        "kind": "sticker",
+                        "sport": "swimming",
+                        "svg_file": "mark.svg",
+                        "slots": ["ACCENT"],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    el = catalog.get_element("sticker.mark", profile)
+    rv = {"--mh-accent": "#FFB81C"}
+    # WITHOUT profile_id the org SVG can't be found -> blank (the bug we fixed).
+    assert render.render_element_markup(el, rv, uid="m") is None
+    # WITH profile_id it renders, recolours, and is stripped of active content.
+    out = render.render_element_markup(el, rv, uid="m", profile_id=profile)
+    assert out and "<rect" in out and "#FFB81C" in out
+    assert "<script" not in out
+    catalog.reload_bundled_cache()
 
 
 def test_placement_box_css_centres_and_scales():
@@ -100,7 +149,12 @@ def test_gradient_presets_nonempty_and_unique():
 
 
 def test_gradient_css_linear_and_radial():
-    rv = {"--mh-primary": "#0A2540", "--mh-surface": "#051433", "--mh-accent": "#FFB81C", "--mh-secondary": "#1B3D5C"}
+    rv = {
+        "--mh-primary": "#0A2540",
+        "--mh-surface": "#051433",
+        "--mh-accent": "#FFB81C",
+        "--mh-secondary": "#1B3D5C",
+    }
     linear = gradients.gradient_css(gradients.get_preset("grad.brand_descent"), rv)
     assert linear.startswith("linear-gradient(")
     assert "#0A2540" in linear and "#051433" in linear
@@ -111,7 +165,9 @@ def test_gradient_css_linear_and_radial():
 
 
 def test_gradient_css_for_palette():
-    css = gradients.gradient_css_for_palette("grad.duotone", palette={"primary": "#111111", "secondary": "#222222"})
+    css = gradients.gradient_css_for_palette(
+        "grad.duotone", palette={"primary": "#111111", "secondary": "#222222"}
+    )
     assert css and "#111111" in css
 
 

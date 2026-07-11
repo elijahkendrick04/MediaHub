@@ -106,6 +106,22 @@ def test_board_routes_require_org(app_with_org):
         assert client.post("/api/plan/board/add", json={"title": "x"}).status_code == 403
 
 
+def test_board_survives_non_utf8_file(app_with_org, tmp_path):
+    """Audit (QA-016 class): a non-UTF-8 board file must load empty, not 500
+    /plan/board and every board API with an unhandled UnicodeDecodeError."""
+    (tmp_path / "plan_board").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "plan_board" / "org-test.json").write_bytes(
+        b'{"cards": [{"id": "c1", "title": "caf\xe9\xff", "column": "idea"}]}'
+    )
+    # Module-level: the corrupt board degrades to empty rather than raising.
+    assert load_board("org-test") == []
+    with app_with_org.test_client() as client:
+        _with_org(client, "org-test")
+        assert client.get("/plan/board").status_code == 200
+        assert client.get("/api/plan/board").status_code == 200
+        assert client.post("/api/plan/board/add", json={"title": "fresh"}).status_code == 200
+
+
 def test_board_page_and_apis(app_with_org):
     with app_with_org.test_client() as client:
         _with_org(client, "org-test")

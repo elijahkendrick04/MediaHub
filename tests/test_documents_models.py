@@ -40,6 +40,24 @@ def test_kpi_row_drops_invalid_entries():
     assert blk.props["stats"][0]["value"] == "5"
 
 
+def test_from_dict_tolerates_malformed_field_types():
+    """A persisted/edited spec with wrong-typed fields must load (defaulting the
+    bad field), never raise — the load contract the web save route relies on so
+    a hand-edited spec can't 500 the view. Regresses api_document_save 500s."""
+    # meta as a list (was: dict([...]) -> TypeError); sections / source_refs as a
+    # scalar (was: iterate an int -> TypeError).
+    spec = DocumentSpec.from_dict({"title": "x", "meta": [1, 2], "source_refs": 42, "sections": 5})
+    assert spec.meta == {} and spec.source_refs == [] and spec.sections == []
+
+    spec2 = DocumentSpec.from_dict({"title": "y", "sections": [{"blocks": 7}]})
+    assert spec2.sections[0].blocks == []  # blocks not a list -> empty, no crash
+
+    blk = Block.from_dict({"kind": "text", "props": [1, 2]})  # props not a dict
+    assert blk.props == {}
+
+    assert DocumentSpec.from_dict("nope").title == "Untitled"  # non-dict payload
+
+
 def test_columns_nest_blocks_as_dicts():
     blk = m.columns([m.heading("L")], [m.text("R")])
     assert len(blk.props["columns"]) == 2

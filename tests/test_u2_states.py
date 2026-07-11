@@ -144,11 +144,25 @@ def _failed_run(run_id="failed1"):
 
 
 def test_review_surfaces_pipeline_error_honestly(client):
+    # The failure is surfaced honestly (not a misleading empty state), but the
+    # RAW exception string (which can carry absolute server paths / exception
+    # internals) is operator-only — a customer gets the honest headline + a
+    # generic reason. Mirrors the is_dev gate run_status() already applies
+    # (audit finding UISE-01).
     body = _review_body(client, _failed_run())
     assert "finish processing this run" in body          # the honest headline
     assert "Processing failed" in body                   # eyebrow
-    assert "HY3 decode failed" in body                   # the actual reason, shown
+    assert "HY3 decode failed" not in body               # raw reason is NOT leaked
+    assert "couldn" in body.lower()                      # a generic honest reason
     assert "Try another file" in body                    # a way forward
+
+
+def test_review_error_detail_shown_to_operator(client):
+    # The signed-in operator DOES see the verbatim reason for debugging.
+    with client.session_transaction() as s:
+        s["dev_operator"] = True
+    body = _review_body(client, _failed_run("failed_op"))
+    assert "HY3 decode failed" in body
 
 
 def test_failed_run_does_not_show_misleading_empty_state(client):
@@ -160,14 +174,30 @@ def test_failed_run_does_not_show_misleading_empty_state(client):
 
 
 def test_failed_run_error_text_is_escaped(client):
+    # The raw reason is operator-only now, and wherever it IS rendered it must be
+    # HTML-escaped (XSS-safe). Check on the operator view, where the detail lives.
     _write_run("xss1", {
         "file_name": "x.hy3",
         "error": "<script>alert(1)</script> boom",
         "meet": {}, "cards": [], "recognition_report": {}, "parse_warnings": [],
     })
+    with client.session_transaction() as s:
+        s["dev_operator"] = True
     body = _review_body(client, "xss1")
     assert "<script>alert(1)</script>" not in body       # never raw
     assert "&lt;script&gt;" in body                       # escaped
+
+
+def test_failed_run_error_text_not_leaked_to_customer(client):
+    # And a customer never sees it at all — raw or escaped.
+    _write_run("xss2", {
+        "file_name": "x.hy3",
+        "error": "<script>alert(1)</script> boom",
+        "meet": {}, "cards": [], "recognition_report": {}, "parse_warnings": [],
+    })
+    body = _review_body(client, "xss2")
+    assert "<script>alert(1)</script>" not in body       # never raw
+    assert "alert(1)" not in body                         # not even escaped-visible
 
 
 def test_content_pack_redirects_failed_run_to_review(client):

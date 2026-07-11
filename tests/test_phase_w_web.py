@@ -478,3 +478,262 @@ class TestOrganisationFormFields:
         assert 'value="zh"' in html and "中文" in html
         # The legacy non-registry value is no longer offered as an option.
         assert 'value="bilingual"' not in html
+
+
+# ---------------------------------------------------------------------------
+# W.7 — Live meet page + action (audit/live-meet)
+# ---------------------------------------------------------------------------
+
+
+def _lenex_two_swims() -> bytes:
+    """A minimal LENEX .lef the interpreter parses natively (2 timed swims)."""
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?><LENEX version="3.0">'
+        '<CONSTRUCTOR name="t" registration="t" version="1.0">'
+        '<CONTACT email="t@t.t"/></CONSTRUCTOR>'
+        '<MEETS><MEET name="Live Test Gala 2026" city="Swansea" nation="GBR" course="LCM">'
+        '<SESSIONS><SESSION number="1" date="2026-06-13"><EVENTS>'
+        '<EVENT eventid="1" number="1" gender="M">'
+        '<SWIMSTYLE distance="100" relaycount="1" stroke="FREE"/>'
+        '<AGEGROUPS><AGEGROUP agegroupid="1" agemin="-1" agemax="-1"><RANKINGS>'
+        '<RANKING place="1" resultid="101"/></RANKINGS></AGEGROUP></AGEGROUPS></EVENT>'
+        '<EVENT eventid="2" number="2" gender="F">'
+        '<SWIMSTYLE distance="50" relaycount="1" stroke="BREAST"/>'
+        '<AGEGROUPS><AGEGROUP agegroupid="2" agemin="-1" agemax="-1"><RANKINGS>'
+        '<RANKING place="1" resultid="201"/></RANKINGS></AGEGROUP></AGEGROUPS></EVENT>'
+        "</EVENTS></SESSION></SESSIONS><CLUBS>"
+        '<CLUB name="Test SC" code="TEST" nation="GBR"><ATHLETES>'
+        '<ATHLETE athleteid="a101" firstname="Calum" lastname="Reid" gender="M" birthdate="2008-01-01">'
+        '<RESULTS><RESULT resultid="101" eventid="1" swimtime="00:00:55.43"/></RESULTS></ATHLETE>'
+        '<ATHLETE athleteid="a201" firstname="Mhairi" lastname="Watt" gender="M" birthdate="2008-01-01">'
+        '<RESULTS><RESULT resultid="201" eventid="2" swimtime="00:00:41.07"/></RESULTS></ATHLETE>'
+        "</ATHLETES></CLUB></CLUBS></MEET></MEETS></LENEX>"
+    ).encode("utf-8")
+
+
+class TestLiveMeet:
+    _URL = "https://results.example.org.uk/live/index.htm"
+
+    def _create(self, c, **over):
+        data = {
+            "action": "create",
+            "url": self._URL,
+            "label": "Test gala",
+            "interval_minutes": "5",
+            "hours": "12",
+        }
+        data.update(over)
+        return c.post("/live/action", data=data)
+
+    def test_real_runner_cards_a_poll(self, env, monkeypatch):
+        """P0 regression (LM-RUNNER-DEAD): the production runner registered on
+        the scheduler must actually run the pipeline and persist a run. Before
+        the fix _live_watch_runner imported a non-existent module and called
+        run_pipeline_v4 positionally against a keyword-only signature, so every
+        real poll raised, no run was ever persisted, and no card ever queued."""
+        import mediahub.scheduler as scheduler
+        from mediahub.results_fetch import live_watch as lw
+
+        c, tmp, wm = env["client"], env["tmp"], env["wm"]
+        _pin(c, "org-alpha")
+        assert self._create(c).status_code == 302
+        watches = lw.list_watches("org-alpha")
+        assert len(watches) == 1
+        w = watches[0]
+
+        # Feed the poller our fixture instead of hitting the network; the real
+        # _live_watch_runner is baked into the scheduler handler by create_app.
+        monkeypatch.setattr(lw, "_default_fetcher", lambda url: _lenex_two_swims())
+        assert lw.TASK_TYPE in scheduler.registered_task_types()
+        scheduler._REGISTRY[lw.TASK_TYPE]({})
+
+        got = lw.get_watch(w.id)
+        assert got.last_error == "", got.last_error  # runner did NOT fail
+        assert got.new_swims_total == 2  # both timed swims carded
+        # The pipeline persisted a run at the watch's run_id, so "Review cards"
+        # resolves instead of dead-ending on "Run not found".
+        assert (tmp / "runs_v4" / f"{w.run_id}.json").exists()
+        assert wm._load_run(w.run_id) is not None
+
+    def test_prohibited_url_shows_error_banner_not_success(self, env):
+        """LM-BANNER-ALWAYS-GREEN: a rejected create must surface as an amber
+        error (?err=), never a green success (?msg=)."""
+        c = env["client"]
+        _pin(c, "org-alpha")
+        r = self._create(c, url="https://www.swimrankings.net/x")
+        assert r.status_code == 302
+        assert "err=" in r.headers["Location"] and "msg=" not in r.headers["Location"]
+        page = c.get(r.headers["Location"]).data.decode("utf-8")
+        assert "Could not start the watch" in page
+        assert 'class="tag warn"' in page  # amber, not green "tag good"
+
+    def test_non_numeric_interval_defaults_no_leak(self, env):
+        """The interval parse must not leak a raw Python ValueError string; a
+        bad value cleanly defaults and the watch is created."""
+        from mediahub.results_fetch import live_watch as lw
+
+        c = env["client"]
+        _pin(c, "org-alpha")
+        r = self._create(c, interval_minutes="abc")
+        assert r.status_code == 302
+        assert "invalid literal for int" not in r.headers["Location"]
+        assert "msg=" in r.headers["Location"]
+        watches = lw.list_watches("org-alpha")
+        assert len(watches) == 1 and watches[0].interval_minutes == 5
+
+    def test_huge_interval_no_500(self, env):
+        """LM-INTERVAL-OVERFLOW-500: an absurd interval must not 500 (SQLite
+        OverflowError); it is clamped to the ceiling."""
+        from mediahub.results_fetch import live_watch as lw
+
+        c = env["client"]
+        _pin(c, "org-alpha")
+        r = self._create(c, interval_minutes="99999999999999999999")
+        assert r.status_code == 302  # not a 500
+        watches = lw.list_watches("org-alpha")
+        assert len(watches) == 1
+        assert watches[0].interval_minutes == lw.MAX_INTERVAL_MINUTES
+
+    def test_duplicate_url_reuses_watch(self, env):
+        """LM-DUP-WATCH-POLITENESS: a repeat of the same URL for one org must
+        not spawn a second active watch doubling the poll rate."""
+        from mediahub.results_fetch import live_watch as lw
+
+        c = env["client"]
+        _pin(c, "org-alpha")
+        assert self._create(c).status_code == 302
+        r2 = self._create(c)
+        assert r2.status_code == 302
+        assert (
+            "Already+watching" in r2.headers["Location"]
+            or "Already watching" in r2.headers["Location"]
+        )
+        assert len(lw.list_watches("org-alpha")) == 1
+
+    def test_review_link_hidden_until_carded(self, env):
+        """LM-REVIEW-LINK-NO-RUN: a watch with no cards yet shows "No cards yet",
+        not an active Review link that dead-ends on "Run not found"."""
+        c = env["client"]
+        _pin(c, "org-alpha")
+        self._create(c)
+        page = c.get("/live").data.decode("utf-8")
+        assert "No cards yet" in page
+        assert "Review cards" not in page
+
+    def test_form_labels_are_associated(self, env):
+        """LM-LABEL-NOT-ASSOCIATED: every create-form control has a for/id pair."""
+        c = env["client"]
+        _pin(c, "org-alpha")
+        page = c.get("/live").data.decode("utf-8")
+        for cid in ("lm-url", "lm-label", "lm-interval", "lm-hours"):
+            assert f'for="{cid}"' in page and f'id="{cid}"' in page
+
+    def test_stop_unknown_watch_is_amber_error(self, env):
+        c = env["client"]
+        _pin(c, "org-alpha")
+        r = c.post("/live/action", data={"action": "stop", "watch_id": "nope"})
+        assert r.status_code == 302
+        assert "err=" in r.headers["Location"]
+        assert (
+            "Watch+not+found" in r.headers["Location"] or "Watch not found" in r.headers["Location"]
+        )
+
+    def test_action_requires_org(self, env):
+        c = env["client"]
+        assert self._create(c).status_code == 403
+# W.8 — Season wraps surface (audit regressions)
+# ---------------------------------------------------------------------------
+
+
+class TestSeasonWrapsSurface:
+    def _draft_june(self, env, ranked=None):
+        """Seed a June-2026 run whose headline does NOT contain the swimmer
+        name, then build + persist its monthly draft. A populated Swimmer cell
+        can then only come from the swimmer field itself, not the headline."""
+        from mediahub.season_wrap import build_monthly_draft, save_draft
+
+        runs = env["tmp"] / "runs_v4"
+        run = {
+            "run_id": "wrap-src",
+            "profile_id": "org-alpha",
+            "meet": {"name": "June Gala", "start_date": "2026-06-06"},
+            "recognition_report": {
+                "ranked_achievements": ranked
+                or [
+                    {
+                        "achievement": {
+                            "type": "club_record",
+                            "swimmer_name": "Dylan Rhys",
+                            "event": "50m Butterfly (LC)",
+                            "headline": "New club record set",
+                            "raw_facts": {"time": "25.99"},
+                        },
+                        "priority": 0.99,
+                        "rank": 1,
+                    }
+                ]
+            },
+        }
+        (runs / "wrap-src.json").write_text(json.dumps(run))
+        draft = build_monthly_draft("org-alpha", runs, year=2026, month=6)
+        save_draft("org-alpha", draft)
+        return draft["id"]
+
+    def test_view_shows_swimmer_name_in_its_own_column(self, env):
+        """Regression: the highlights table's Swimmer column was always blank
+        (route read 'swimmer_name'; the draft stores 'swimmer')."""
+        c = env["client"]
+        _pin(c, "org-alpha")
+        did = self._draft_june(env)
+        r = c.get(f"/wraps/{did}")
+        assert r.status_code == 200
+        html = r.get_data(as_text=True)
+        assert "<td>Dylan Rhys</td>" in html  # first cell = swimmer, not blank
+
+    def test_poster_html_shows_swimmer_time_and_sanitises_brand(self, env, monkeypatch):
+        """Regression: poster Swimmer + Time columns render, and a malicious
+        brand colour cannot break out of the poster <style> (audit F1 + F7)."""
+        c = env["client"]
+        _pin(c, "org-alpha")
+        from mediahub.web.club_profile import load_profile, save_profile
+
+        prof = load_profile("org-alpha")
+        prof.brand_primary = "#000;}</style><img src=x onerror=alert(1)><style>{"
+        save_profile(prof)
+
+        did = self._draft_june(env)
+
+        import mediahub.graphic_renderer.print_export as pe
+
+        captured = {}
+
+        def fake_render(html, output_path, **kw):
+            from pathlib import Path as _P
+
+            captured["html"] = html
+            _P(output_path).write_bytes(b"%PDF-1.4 fake")
+            return output_path
+
+        monkeypatch.setattr(pe, "render_html_to_pdf", fake_render)
+
+        r = c.get(f"/wraps/{did}/poster.pdf")
+        assert r.status_code == 200
+        assert r.content_type == "application/pdf"
+        html = captured["html"]
+        assert "Dylan Rhys" in html  # swimmer no longer blank on the poster
+        assert "25.99" in html  # display time flows through to the poster
+        assert "onerror" not in html and "</style><img" not in html  # sanitised
+
+    def test_action_draft_failure_is_graceful_not_500(self, env, monkeypatch):
+        """Regression: a failing draft build returns an honest message, not a
+        raw 500 stack trace (audit F3)."""
+        c = env["client"]
+        _pin(c, "org-alpha")
+
+        def _boom(*a, **k):
+            raise RuntimeError("boom")
+
+        monkeypatch.setattr("mediahub.season_wrap.build_monthly_draft", _boom)
+        r = c.post("/wraps/action", data={"action": "month"}, follow_redirects=True)
+        assert r.status_code == 200
+        assert b"Could not draft" in r.data

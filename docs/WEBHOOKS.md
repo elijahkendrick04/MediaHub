@@ -33,7 +33,6 @@ webhooks needs the `webhooks:manage` scope; listing needs `webhooks:read`.
 | `run.finished` | A pipeline run completes and cards are ready | `run_id`, `card_count`, `meet_name` |
 | `card.approved` | A card is approved (UI **or** API) | `run_id`, `card_id`, `via` |
 | `pack.exported` | A content pack ZIP is built | `run_id`, `format` |
-| `form.submitted` | A published-site form is submitted | `form_id`, `submission_id`, `site_id` |
 
 ## Payload
 

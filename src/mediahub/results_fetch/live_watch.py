@@ -79,6 +79,7 @@ __all__ = [
     "TASK_TYPE",
     "MIN_INTERVAL_MINUTES",
     "DEFAULT_INTERVAL_MINUTES",
+    "MAX_INTERVAL_MINUTES",
     "DEFAULT_EXPIRE_HOURS",
     "MAX_EXPIRE_HOURS",
     "create_watch",
@@ -98,6 +99,10 @@ MIN_INTERVAL_MINUTES = 2  # politeness floor — never hammer a host club's site
 DEFAULT_INTERVAL_MINUTES = 5
 DEFAULT_EXPIRE_HOURS = 12  # a long gala day; watches ALWAYS auto-expire
 MAX_EXPIRE_HOURS = 48
+# Ceiling on the poll interval. A watch lives at most MAX_EXPIRE_HOURS, so an
+# interval beyond that would never poll; clamping here also stops an absurd or
+# malformed value overflowing the SQLite INTEGER column on insert.
+MAX_INTERVAL_MINUTES = MAX_EXPIRE_HOURS * 60
 
 # ADR-0012 posture: Meet Mobile (an Active Network app) and rankings
 # scraping are prohibited. Matched against the URL host, suffix-wise.
@@ -306,7 +311,10 @@ def create_watch(
     if not (profile_id or "").strip():
         raise ValueError("A live watch must belong to a workspace (profile_id).")
     url = _validate_url(url)
-    interval = max(MIN_INTERVAL_MINUTES, int(interval_minutes or DEFAULT_INTERVAL_MINUTES))
+    interval = min(
+        MAX_INTERVAL_MINUTES,
+        max(MIN_INTERVAL_MINUTES, int(interval_minutes or DEFAULT_INTERVAL_MINUTES)),
+    )
 
     now = _now_utc()
     if expires_at is None:
@@ -607,7 +615,10 @@ def poll_watch(
         data = fetcher(watch.url)
     except Exception as e:
         data = None
-        fetch_err = f"fetch failed: {e}"
+        # Log the raw reason for the operator; keep the persisted/displayed
+        # last_error a short, stable phrase (no internal exception text).
+        log.warning("live watch %s fetch error: %s", watch.id, e)
+        fetch_err = "fetch failed: could not reach the page"
     else:
         fetch_err = "fetch failed: no content"
     if not data:
@@ -631,7 +642,10 @@ def poll_watch(
     else:
         parse_detail = ""
     if meet is None or meet.overall_confidence <= 0.0:
-        err = "parse failed; will retry" + (f" ({parse_detail})" if parse_detail else "")
+        if parse_detail:
+            log.warning("live watch %s parse error: %s", watch.id, parse_detail)
+        # Stable, internal-detail-free phrase for the operator-facing field.
+        err = "parse failed; will retry"
         _update_watch(
             watch.id,
             db_path,
@@ -666,8 +680,9 @@ def poll_watch(
         except Exception as e:
             # Key set + digest deliberately NOT advanced: next poll retries
             # the exact same diff. (Exactly-once carding = idempotent runner.)
-            err = f"runner failed: {e}"
-            log.warning("live watch %s %s", watch.id, err)
+            # Log the raw reason; keep last_error a short, stable phrase.
+            log.warning("live watch %s runner failed: %s", watch.id, e)
+            err = "runner failed; will retry"
             _update_watch(
                 watch.id,
                 db_path,

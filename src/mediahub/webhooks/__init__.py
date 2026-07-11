@@ -1,8 +1,8 @@
 """mediahub.webhooks — outbound signed webhooks (roadmap 1.21).
 
 MediaHub's own webhooks: a club or federation registers a URL, picks the events
-it cares about (`run.finished`, `card.approved`, `pack.exported`,
-`form.submitted`), and MediaHub POSTs a signed JSON payload when they happen.
+it cares about (`run.finished`, `card.approved`, `pack.exported`), and MediaHub
+POSTs a signed JSON payload when they happen.
 This is how clubs wire MediaHub into anything — including, via *their* own
 Zapier/Make accounts, the long tail (we publish recipes; we don't embed their
 runtimes).

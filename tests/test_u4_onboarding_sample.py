@@ -248,3 +248,62 @@ def test_upload_page_omits_cta_when_sample_missing(world, monkeypatch):
     r = c.get("/upload")
     assert r.status_code == 200
     assert "/onboarding/sample" not in r.get_data(as_text=True)
+
+
+# ---------------------------------------------------------------------------
+# End-to-end: the bundled demo PDF must ACTUALLY run through the real pipeline.
+# Every test above monkeypatches _start_run, so none of them prove the sample
+# file still parses, detects and ranks. This is the feature's whole promise —
+# "watch the whole engine run" — so lock it against a silent regression (a
+# corrupt/regenerated PDF, or a parser/detector/ranker change that empties the
+# sample pack) with a real run. Web research is stubbed so no third-party call
+# fires and the run stays deterministic and offline.
+# ---------------------------------------------------------------------------
+
+
+def test_sample_cta_has_double_submit_guard(world):
+    """The CTA button starts a real 30-90s pipeline run, so an accidental
+    double-click must not queue two identical demo packs. Both CTA variants
+    carry an onsubmit guard that blocks the second submit; with JS off the
+    form still posts to /onboarding/sample."""
+    with world.app.test_request_context("/"):
+        full = world.wm._sample_pack_cta()
+        compact = world.wm._sample_pack_cta(compact=True)
+    for html in (full, compact):
+        assert 'onsubmit="' in html
+        assert "this.dataset.mhSent" in html  # blocks the 2nd submit
+        assert 'action="/onboarding/sample"' in html  # still posts with JS off
+
+
+def test_bundled_demo_pdf_produces_a_real_content_pack(world, monkeypatch):
+    pytest.importorskip("pdfplumber")
+    pdf = world.wm._SAMPLE_MEET_PDF
+    if not pdf.exists():
+        pytest.skip("bundled demo PDF absent on this checkout")
+
+    # Stub the web-research boundary: meet-identity discovery calls
+    # WebResearcher.search, and we must never make an outbound call for a demo.
+    import mediahub.web_research.search as _search
+
+    monkeypatch.setattr(_search.WebResearcher, "search", lambda self, q, num=5: [])
+
+    pid = _save_ready_org(world, pid="riverbend", name=world.wm._SAMPLE_MEET_CLUB)
+    run = world.wm.run_pipeline_v4(
+        file_bytes=pdf.read_bytes(),
+        filename=world.wm._SAMPLE_MEET_FILENAME,
+        profile_id=pid,
+        use_pb_cache=True,
+        fetch_pbs=False,
+        progress_cb=lambda _m: None,
+        run_id="e2esampledemo",
+        club_filter=world.wm._SAMPLE_MEET_CLUB,
+    )
+
+    # The core promise: an error-free, non-empty pack in the user's org.
+    assert run.error is None, f"sample pipeline errored: {run.error}"
+    assert run.cards or [], "sample pack produced zero cards"
+    rr = run.recognition_report or {}
+    assert rr.get("ranked_achievements") or [], "no ranked achievements"
+    assert int(rr.get("n_achievements") or 0) > 0
+    # Filtered to the hero club, so the pack is about Riverbend swimmers.
+    assert world.wm._SAMPLE_MEET_CLUB.split()[0].lower() in (rr.get("meet_name") or "").lower()

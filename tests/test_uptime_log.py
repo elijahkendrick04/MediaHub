@@ -227,6 +227,36 @@ class TestUptimeStatsYoungStore:
         assert stats["tracking_since"] is None
         assert stats["window_clamped"] is False
 
+    def test_ongoing_outage_not_hidden_as_no_data_in_short_window(self, fresh_uptime):
+        """AUDIT (system-status): a total ongoing outage must not read as
+        "no data yet" on a short window while a longer window shows it.
+
+        When the store is NON-empty but a window has zero heartbeats in it (the
+        service went silent for the whole window), that is a live outage — 100%
+        downtime — not "no data". The 24h window used to early-return
+        has_data=False (rendering "&mdash;") while the 7d window over the same
+        store correctly showed the downtime. Now the short window reports the
+        outage honestly, and only a genuinely empty store reads "no data".
+        """
+        now = datetime.now(timezone.utc)
+        # Dense heartbeats that STOP 48h ago — the last 24h is total silence.
+        for i in range(200):
+            fresh_uptime.record_heartbeat(
+                ok=True,
+                ts=(now - timedelta(hours=48) - timedelta(minutes=i)).isoformat(),
+            )
+        s24 = fresh_uptime.uptime_stats(window_hours=24)
+        # The window with no in-window heartbeats now honestly reports the outage.
+        assert s24["has_data"] is True, s24
+        assert s24["samples"] == 0
+        assert s24["uptime_pct"] < 0.05, s24
+        assert s24["downtime_seconds"] > 80_000  # ~24h minus the 5-min grace
+        assert s24["tracking_since"] is not None
+        # A longer window that DOES contain heartbeats is unchanged and consistent.
+        s7 = fresh_uptime.uptime_stats(window_hours=24 * 7)
+        assert s7["has_data"] is True
+        assert s7["uptime_pct"] < 0.20
+
 
 class TestRecentGaps:
     def test_returns_empty_when_under_two_heartbeats(self, fresh_uptime):

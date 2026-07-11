@@ -330,6 +330,128 @@ def test_update_rejects_invalid_edl(app):
         assert r.status_code == 400
 
 
+def test_update_rejects_malformed_edl_types_without_500(app):
+    """A wrong-typed EDL field ("width": "abc", null fps, a non-list clips) fails
+    EDL.from_dict's int/float coercion with a plain ValueError/TypeError/
+    AttributeError, not EDLError. The route must catch those and answer an honest
+    400 invalid_edl, never let them escape to an unhandled 500 with a Python trace.
+    """
+    application, _ = app
+    from mediahub.video.edl import EDL, Clip
+    from mediahub.video.projects import VideoProject, get_store
+
+    store = get_store()
+    proj = store.save(
+        VideoProject(id="", profile_id="alpha", edl=EDL(clips=[Clip(source="a.mp4", out_ms=3000)]))
+    )
+    base = {
+        "width": 1080,
+        "height": 1920,
+        "fps": 30,
+        "clips": [
+            {"source": "a.mp4", "in_ms": 0, "out_ms": 3000, "transition_in": {"kind": "cut"}}
+        ],
+    }
+    malformed = [
+        {**base, "width": "abc"},  # int() cast fails
+        {**base, "fps": None},  # int(None) → TypeError
+        {**base, "clips": "notalist"},  # iterating a str → Clip.from_dict('n') AttributeError
+        {**base, "clips": [{"source": "a.mp4", "speed": "fast"}]},  # float() cast fails
+    ]
+    with application.test_client() as c:
+        _pin(c, "alpha")
+        for edl in malformed:
+            r = c.post(f"/api/video/projects/{proj.id}", json={"edl": edl})
+            assert r.status_code == 400, f"expected 400, got {r.status_code} for {edl}"
+            assert r.get_json()["error"] == "invalid_edl"
+
+
+def test_edl_update_rejects_foreign_clip_source(app, tmp_path):
+    """Security: the EDL validator only checks a source is non-empty, so without a
+    source-binding guard a caller could point a clip at ANY file on the box (another
+    tenant's footage, any readable media) and have the render/waveform/export engine
+    read it back. An edit may reorder/trim/grade the clips it was given, but must not
+    introduce a NEW source path — new footage only enters via Clip-Maker/the reel.
+    """
+    application, _ = app
+    from mediahub.video.edl import EDL, Clip
+    from mediahub.video.projects import VideoProject, get_store
+
+    # A file that is NOT one of the project's own footage clips.
+    victim = tmp_path / "someone_elses.mp4"
+    victim.write_bytes(b"\x00\x00\x00\x18ftypmp42")
+
+    store = get_store()
+    proj = store.save(
+        VideoProject(
+            id="", profile_id="alpha", edl=EDL(clips=[Clip(source="own.mp4", out_ms=3000)])
+        )
+    )
+    with application.test_client() as c:
+        _pin(c, "alpha")
+        evil = {
+            "width": 1080,
+            "height": 1920,
+            "fps": 30,
+            "clips": [
+                {
+                    "source": str(victim),
+                    "in_ms": 0,
+                    "out_ms": 1000,
+                    "transition_in": {"kind": "cut"},
+                }
+            ],
+        }
+        r = c.post(f"/api/video/projects/{proj.id}", json={"edl": evil})
+        assert r.status_code == 400
+        assert r.get_json()["error"] == "invalid_edl"
+        # The injected source must NOT have been persisted onto the timeline.
+        after = c.get(f"/api/video/projects/{proj.id}").get_json()["project"]
+        assert after["edl"]["clips"][0]["source"] == "own.mp4"
+        # A legitimate edit that keeps the project's own source still succeeds.
+        ok = c.post(
+            f"/api/video/projects/{proj.id}",
+            json={"edl": EDL(clips=[Clip(source="own.mp4", out_ms=2000)]).to_dict()},
+        )
+        assert ok.status_code == 200
+        assert ok.get_json()["project"]["edl"]["clips"][0]["out_ms"] == 2000
+
+
+def test_export_download_name_with_newline_does_not_500(app, tmp_path):
+    """Regression: send_file writes the project name into the Content-Disposition
+    header; werkzeug raises on a header value containing a newline, so a project
+    named with one used to 500 on export. The name is sanitised for the header now.
+    """
+    from mediahub.video.edl import EDL, Clip
+    from mediahub.video.projects import VideoProject, get_store
+
+    application, data_dir = app
+    store = get_store()
+    proj = store.save(
+        VideoProject(
+            id="",
+            profile_id="alpha",
+            name='evil"\r\nX-Injected: 1 clip',
+            status="approved",
+            format_name="story",
+            edl=EDL(clips=[Clip(source="a.mp4", out_ms=3000)]),
+        )
+    )
+    # Place a rendered file so the export gate reaches send_file (no FFmpeg needed).
+    render_dir = data_dir / "video_projects" / proj.id
+    render_dir.mkdir(parents=True, exist_ok=True)
+    (render_dir / "story.mp4").write_bytes(b"\x00" * 2048)
+
+    with application.test_client() as c:
+        _pin(c, "alpha")
+        r = c.get(f"/api/video/projects/{proj.id}/file?download=1")
+        assert r.status_code == 200, "export must not 500 on a newline in the project name"
+        cd = r.headers.get("Content-Disposition", "")
+        assert "\n" not in cd and "\r" not in cd
+        # The header-injection attempt does not create a real header.
+        assert "X-Injected" not in r.headers
+
+
 # --- AI editing surfaces: looks, reel director, enhance --------------------
 
 
@@ -687,6 +809,35 @@ def test_caption_edit_route_no_captions_is_400(app):
             f"/api/video/projects/{proj.id}/caption", json={"op": "edit", "index": 0, "text": "x"}
         )
         assert r.status_code == 400
+
+
+def test_caption_bad_params_message_is_clean(app):
+    """A missing/non-numeric index fails an int() cast inside the caption op. The
+    route answers 400 bad_params with an actionable message — never the raw
+    "int() argument must be ... not 'NoneType'" Python cast error leaked verbatim.
+    """
+    application, _ = app
+    from mediahub.video.edl import EDL, Clip
+    from mediahub.video.projects import VideoProject, get_store
+
+    store = get_store()
+    track = {"color": "#FFF", "scrim": "#000", "cues": [{"from": 0, "dur": 30, "text": "Maria"}]}
+    proj = store.save(
+        VideoProject(
+            id="",
+            profile_id="alpha",
+            edl=EDL(clips=[Clip(source="a.mp4", out_ms=3000)], captions=track),
+        )
+    )
+    with application.test_client() as c:
+        _pin(c, "alpha")
+        r = c.post(f"/api/video/projects/{proj.id}/caption", json={"op": "edit", "text": "x"})
+        assert r.status_code == 400
+        body = r.get_json()
+        assert body["error"] == "bad_params"
+        # No Python-internals cast error leaked to the API caller.
+        assert "int()" not in body["message"]
+        assert "argument must be" not in body["message"]
 
 
 def test_enhance_stabilize_honest_error_without_vidstab(app, monkeypatch):

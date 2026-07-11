@@ -130,3 +130,50 @@ def test_generate_document_with_ai_injects_prose(monkeypatch):
     spec = draft.generate_document(_facts(), "season_report", with_ai=True)
     texts = [b.props.get("text", "") for s in spec.sections for b in s.blocks if b.kind == "text"]
     assert any("great season" in t.lower() for t in texts)
+
+
+def test_numbers_grounded_rejects_misstated_and_fabricated_numbers():
+    """The sacred-numbers guard must reject a number that is not a fact — even
+    one *close* to a fact (a misstated swim time) — while still allowing genuine
+    rounding of a real fact. Regresses the old 0.6 window / int()==int() slop."""
+    allowed = {1.0, 2.0, 3.0, 2.30, 5.0, 49.7, 2026.0}
+    reject = [
+        "took 2.8s off",  # misstates the real 2.30s drop (old 0.6 window let it pass)
+        "2.9 medals",  # not 2 (old int()==int() let it pass)
+        "5.5 golds",  # near 5 but not 5
+        "the club won 99 medals",  # pure fabrication
+    ]
+    keep = [
+        "took 2.30s off",  # exact fact
+        "took 2.3s off",  # one-decimal rounding of 2.30
+        "won 5 medals",  # exact integer fact
+        "50% of swimmers",  # 49.7 rounded to a whole number
+        "our 2 standout swimmers",  # small ordinal
+        "a strong season for the club",  # no numbers at all
+        "the 2026 season",  # period year
+    ]
+    for txt in reject:
+        assert draft._numbers_grounded(txt, allowed) is False, txt
+    for txt in keep:
+        assert draft._numbers_grounded(txt, allowed) is True, txt
+
+
+def test_misstated_swim_time_is_dropped_from_prose(monkeypatch):
+    """End-to-end: a paragraph that misstates a real drop time is dropped."""
+    from mediahub.media_ai import llm as _llm
+
+    facts = _facts()
+
+    # The real biggest drop in _run() is 2.6s (Jess Smith). A misstated 2.9s must
+    # not survive; a grounded, number-free line must.
+    def fake_json(prompt, *, system, max_tokens, fallback):
+        return {
+            "highlights": "The biggest drop of the day was a huge 2.9s.",  # misstated
+            "intro": "A season the whole club can be proud of.",  # no number -> kept
+        }
+
+    monkeypatch.setattr(_llm, "is_available", lambda: True)
+    monkeypatch.setattr(_llm, "generate_json", fake_json)
+    prose = draft.draft_prose(facts, "season_report")
+    assert "highlights" not in prose
+    assert "intro" in prose

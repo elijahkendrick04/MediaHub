@@ -99,10 +99,15 @@ def build_spotlight_pack(
     if not swimmer_achs:
         return None
 
-    # Re-rank within the spotlight scope (just re-number; priority already set)
+    # Re-rank within the spotlight scope (just re-number; priority already set).
+    # ``or 0.0`` coerces a present-but-null priority (JSON null -> None) to a
+    # number: the ``.get`` default only guards a missing key, so a persisted
+    # achievement carrying ``"priority": null`` would otherwise make ``-None``
+    # raise TypeError and abort the whole spotlight. Mirrors the defensive
+    # ``float(ra.get("priority") or 0.0)`` used elsewhere in the codebase.
     swimmer_achs_sorted = sorted(
         swimmer_achs,
-        key=lambda ra: -ra.get("priority", 0.0),
+        key=lambda ra: -(ra.get("priority") or 0.0),
     )
     for i, ra in enumerate(swimmer_achs_sorted):
         ra = dict(ra)  # shallow copy so we don't mutate the original
@@ -116,14 +121,8 @@ def build_spotlight_pack(
             swimmer_achs_sorted[0].get("achievement", {}).get("swimmer_name", swimmer_key)
         )
 
-    # Band counts
-    from swim_content_v5.schema import QualityBand
-
-    band_labels = {
-        QualityBand.ELITE.value: "elite",
-        QualityBand.STRONG.value: "strong",
-        QualityBand.STORY.value: "story",
-    }
+    # Band counts. The quality_band values are the QualityBand enum's
+    # string values ("elite"/"strong"/"story"), compared as literals here.
     n_elite = sum(1 for ra in swimmer_achs_sorted if ra.get("quality_band") == "elite")
     n_strong = sum(1 for ra in swimmer_achs_sorted if ra.get("quality_band") == "strong")
     n_story = sum(1 for ra in swimmer_achs_sorted if ra.get("quality_band") == "story")

@@ -146,12 +146,6 @@ _charts_ok = _importlib_util.find_spec("mediahub.charts") is not None
 # module import light; PDF/video rendering honest-errors at call time if absent.
 _documents_ok = _importlib_util.find_spec("mediahub.documents") is not None
 
-# Roadmap 1.16 — Club microsites + link-in-bio + forms + QR + vetted widgets.
-# Static-first render (no Playwright/Node needed for the page itself); the QR
-# layer honest-errors only where its backend (segno) is genuinely absent.
-_sites_ok = _importlib_util.find_spec("mediahub.sites") is not None
-_forms_ok = _importlib_util.find_spec("mediahub.forms") is not None
-
 # Roadmap 1.17 — Email & newsletter composer. Email-safe HTML auto-assembled from
 # the period's approved content; export-first (download / copy / hosted view),
 # no direct send (that waits on a provider adapter behind the publish gate).
@@ -2698,6 +2692,13 @@ _CYCLE_PH_ATTR_MOMENT = _cycle_ph_attr(_CYCLE_PH_MOMENT)
 _CYCLE_PH_ATTR_RESEARCH = _cycle_ph_attr(_CYCLE_PH_RESEARCH)
 _CYCLE_PH_ATTR_ASKDATA = _cycle_ph_attr(_CYCLE_PH_ASKDATA)
 
+# Upper bound on a single free-text prompt / chat reply before it reaches the
+# LLM. A describe-your-post prompt is a sentence or two; this is a generous
+# ceiling that still stops a several-hundred-KB paste from being forwarded to
+# the provider verbatim and billed as input tokens (the only other limit is the
+# 50 MB MAX_CONTENT_LENGTH, far too high to bound LLM cost).
+_FREE_TEXT_MAX_PROMPT_CHARS = 8000
+
 
 # UI2.6 — Vanish search. The /activity (global run) search uses the design-kit
 # Vanish input (.mh-vanish): a rotating overlay-placeholder element
@@ -3282,6 +3283,11 @@ def _persist_run(run: PipelineRunV4, file_name: str) -> None:
         "our_swim_count": run.our_swim_count,
         "other_swim_count": run.other_swim_count,
         "n_swimmers_ours": run.n_swimmers_ours,
+        # Persist the club the run was filtered to, so the review empty-state can
+        # tell "no club was selected" from "a club was selected but matched 0
+        # swimmers" (the latter branch is otherwise unreachable — the pipeline's
+        # run.club_filter was dropped at persist time).
+        "club_filter": getattr(run, "club_filter", "") or "",
         "pb_fetch_ok": run.pb_fetch_ok,
         "pb_fetch_failed": run.pb_fetch_failed,
         "pb_fetch_errors": run.pb_fetch_errors,
@@ -3380,19 +3386,33 @@ def _persist_run(run: PipelineRunV4, file_name: str) -> None:
 
 
 def _load_run(run_id: str) -> Optional[dict]:
-    p = RUNS_DIR / f"{run_id}.json"
-    if not p.exists():
+    # Path-traversal guard: run ids are minted as uuid hex / slugs and never
+    # contain a path separator or "..", so any such value is hostile (e.g. a
+    # tampered ?run_id=../../<dir>/victim query param that would otherwise
+    # escape RUNS_DIR / DATA_DIR and reflect an arbitrary JSON file's contents).
+    # Refusing it here protects every caller, not just the slash-rejecting
+    # <run_id> route converter.
+    if not run_id or "/" in run_id or "\\" in run_id or ".." in run_id:
         return None
-    try:
-        return json.loads(p.read_text())
-    except (json.JSONDecodeError, OSError, UnicodeDecodeError) as e:
-        # A corrupted run JSON would otherwise 500 every route that
-        # reads it (/review, /pack, /audit, /drafts/<pack_id>). Surface
-        # "run not found" instead so the recovery_page renders cleanly;
-        # the operator can find the offending file in the log.
-        # UnicodeDecodeError covers files written in a non-UTF-8 encoding.
-        log.warning("run %s on disk but unreadable: %s", run_id, e)
-        return None
+    # Canonical flat layout first, then the legacy nested runs_v4/<id>/run.json
+    # form that ~15 other routes fall back to individually — centralised here so
+    # every run-scoped surface (spotlight included) reads both without its own
+    # fallback. A corrupt/unreadable flat file returns None immediately (matching
+    # the historical contract) rather than masking it with the nested form.
+    for p in (RUNS_DIR / f"{run_id}.json", RUNS_DIR / run_id / "run.json"):
+        if not p.exists():
+            continue
+        try:
+            return json.loads(p.read_text())
+        except (json.JSONDecodeError, OSError, UnicodeDecodeError) as e:
+            # A corrupted run JSON would otherwise 500 every route that
+            # reads it (/review, /pack, /audit, /drafts/<pack_id>). Surface
+            # "run not found" instead so the recovery_page renders cleanly;
+            # the operator can find the offending file in the log.
+            # UnicodeDecodeError covers files written in a non-UTF-8 encoding.
+            log.warning("run %s on disk but unreadable: %s", run_id, e)
+            return None
+    return None
 
 
 def _machine_readable_run(data: Optional[dict], run_id: str, *, max_achievements: int = 60) -> str:
@@ -6976,6 +6996,13 @@ def _render_card_creative_toolbar(
         )
 
     # M35: the overflow menu — collaboration/power features behind one trigger.
+    # Elements browser in add-to-card mode for THIS card (roadmap 1.10). Opens the
+    # curated, on-brand sticker / pictogram / chip / divider / frame library scoped
+    # to this run + card, so a chosen placement lands straight on the card's brief
+    # and the next render paints it. This is the intended "add-to-card context from
+    # the card editor" — the browse-only /elements page carries no top-bar slot.
+    _elements_url = url_for("elements_page", run_id=run_id, card_id=card_id_raw)
+
     # The unresolved-comments badge (.comments-count) rides the More trigger so
     # a pending task stays visible without thirteen equal-weight buttons.
     _more_menu = (
@@ -6988,6 +7015,7 @@ def _render_card_creative_toolbar(
         f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="commentsToggle(this, \'{card_uuid}\')" title="Comments, @mentions and tasks. A task must be resolved before this card can be approved.">&#x1F4AC; Comments</button>'
         f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="historyToggle(this, \'{card_uuid}\')" title="Version history — see every design version of this card, compare them, and roll back.">&#x21BA; History</button>'
         f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="locksToggle(this, \'{card_uuid}\')" title="Lock elements (e.g. the sponsor strip) so a later edit — even the copilot — can\'t change them.">&#x1F512; Locks</button>'
+        f'<a class="btn secondary" href="{_h(_elements_url)}" target="_blank" rel="noopener" style="font-size:11px;padding:4px 10px;text-decoration:none" title="Add on-brand stickers to this card — sport pictograms, PB and stat chips, dividers, frames — all painted in your club colours. Opens the element library scoped to this card; re-render the graphic to see them.">&#127912; Elements&hellip;</a>'
         f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="shareToggle(this, \'{card_uuid}\')" title="Create an expiring link so someone outside the club (e.g. a parent) can view — or comment on — this card without an account.">&#x1F517; Share</button>'
         f"{schedule_btn}"
         f"{_voiceover_btn}"
@@ -7703,9 +7731,21 @@ def _sample_pack_cta(
     if not _SAMPLE_MEET_PDF.exists():
         return ""
     action = url_for("onboarding_sample")
+    # A sample pack kicks off a real 30-90s pipeline run, so an accidental
+    # double-click would queue two identical demo packs (and two worker jobs).
+    # Guard the submit: block a second submit synchronously, then disable the
+    # button just after the first one starts (setTimeout keeps the in-flight
+    # POST from being cancelled). Progressive enhancement — with JS off the
+    # form still posts, exactly as before.
+    guard = (
+        "if(this.dataset.mhSent)return false;this.dataset.mhSent='1';"
+        "var b=this.querySelector('button');"
+        "if(b){setTimeout(function(){b.disabled=true;},0);}return true;"
+    )
     if compact:
         return (
-            f'<form method="post" action="{action}" style="margin:0;display:inline">'
+            f'<form method="post" action="{action}" onsubmit="{guard}" '
+            'style="margin:0;display:inline">'
             f'<button type="submit" class="btn secondary">{_h(button_label)}</button>'
             "</form>"
         )
@@ -7717,7 +7757,7 @@ def _sample_pack_cta(
         f'<h3 style="margin:0 0 6px;font-size:15px">{_h(heading)}</h3>'
         f'<p class="dim" style="margin:0;font-size:13px;line-height:1.5">{_h(sub)}</p>'
         "</div>"
-        f'<form method="post" action="{action}" style="margin:0">'
+        f'<form method="post" action="{action}" onsubmit="{guard}" style="margin:0">'
         f'<button type="submit" class="btn">{_h(button_label)}</button>'
         "</form>"
         "</div>"
@@ -7878,6 +7918,54 @@ def _load_run_input(run_id: str) -> Optional[tuple[bytes, dict]]:
 def _resume_input_exists(run_id: str) -> bool:
     d = _run_input_dir(run_id)
     return (d / "input.bin").exists() and (d / "resume.json").exists()
+
+
+def _rebuild_staged_meta(run_dir: Path, input_path: Path) -> dict:
+    """Rebuild the configure-step metadata for an already-persisted run.
+
+    The staged ``upload_meta.json`` only exists for a brand-new upload, but a
+    finished/failed run keeps ``input.bin`` + ``resume.json`` on disk. When the
+    user re-opens the configure step for such a run (the "Re-run a recent meet"
+    card), rebuild the same metadata shape ``upload()`` writes — a fresh light
+    club-parse of the saved bytes plus the launch flags from ``resume.json`` — so
+    the run can be re-configured and re-run without re-uploading. Mirrors the
+    light parse in ``upload()``; a parse failure degrades to an empty club list
+    with a ``parse_error`` note exactly as the first upload does."""
+    resume: dict = {}
+    try:
+        resume = json.loads((run_dir / "resume.json").read_text(encoding="utf-8"))
+    except Exception:
+        resume = {}
+    meta: dict = {
+        "filename": resume.get("file_name") or "upload.bin",
+        "profile_id": resume.get("profile_id"),
+        "use_cache": bool(resume.get("use_pb_cache", True)),
+        "fetch_pbs": bool(resume.get("fetch_pbs", True)),
+        "source_url": resume.get("source_url"),
+        "display_name": "",
+    }
+    try:
+        data = input_path.read_bytes()
+        meta["file_byte_size"] = len(data)
+        from mediahub.interpreter import interpret_document
+
+        interpreted = interpret_document(data, hint=None)
+        clubs: list[str] = []
+        seen: set[str] = set()
+        for ev in interpreted.events:
+            for sw in ev.swims:
+                c = (sw.club or "").strip()
+                if c and c.lower() not in seen:
+                    seen.add(c.lower())
+                    clubs.append(c)
+        meta["clubs"] = sorted(clubs, key=str.lower)
+        meta["meet_name"] = interpreted.meet_name or ""
+        meta["meet_date"] = (interpreted.dates[0] if interpreted.dates else "") or ""
+        meta["n_events"] = len(interpreted.events)
+    except Exception as exc:  # noqa: BLE001 — mirror upload()'s degrade path
+        meta.setdefault("clubs", [])
+        meta["parse_error"] = str(exc)
+    return meta
 
 
 def _cleanup_run_input(run_id: str) -> None:
@@ -13076,7 +13164,7 @@ _VIDEO_STUDIO_HTML = """
     jpost(url(PROJECT_TMPL, editorPid), {edl: editorEdl}).then(function(j){
       if(j.ok){ $('vs-ed-status').textContent = 'Saved — re-render to see it.'; $('vs-editor').hidden = true; loadProjects(); }
       else { $('vs-ed-status').textContent = 'Failed: '+(j.message||j.error||'invalid timeline'); }
-    });
+    }).catch(function(){ $('vs-ed-status').textContent = 'Network error. The timeline may not have saved; reload to check.'; });
   });
 
   loadFootage();
@@ -15329,7 +15417,13 @@ def _layout(
       if (form.dataset.mhBound === '1') return;
       form.dataset.mhBound = '1';
       if (form.dataset.noLoader === '1') return;
-      form.addEventListener('submit', function(){
+      form.addEventListener('submit', function(e){
+        // If an earlier handler already cancelled the submit — e.g. an inline
+        // onsubmit="return confirm(...)" the user dismissed, or client-side
+        // validation — the form will not navigate, so the full-screen loader
+        // must NOT be raised. Without this guard it would stick on screen until
+        // the 20s safety timeout (e.g. cancelling a member "Remove" confirm).
+        if (e && e.defaultPrevented) return;
         var method = (form.getAttribute('method') || 'get').toLowerCase();
         if (method === 'get') return;
         var btn = form.querySelector('button[type=submit], input[type=submit]');
@@ -19023,6 +19117,7 @@ _DOCUMENTS_HOME_JS = (
     "<script>\n"
     + _EDITORIAL_GEN_HELPERS
     + r"""
+const CSRF = "__CSRF__";
 async function genDoc(btn, fmt, scope, runId){
   if(fmt==='meet_programme' && !runId){ _genToast('Pick a meet first.'); return; }
   _genBusy(btn, true);
@@ -19042,7 +19137,10 @@ async function importDoc(){
   const f=document.getElementById('imp-file').files[0];
   if(!f){ _genToast('Choose a file.'); return; }
   const fd=new FormData(); fd.append('file', f);
-  const r=await fetch('__IMPORT_URL__', {method:'POST', body:fd}); const j=await r.json();
+  // Multipart upload: the JSON-content-type CSRF exemption can't apply, so carry
+  // the token in a header (mirrors the app's other multipart writes) — without it
+  // the _csrf_protect guard 403s the POST in production.
+  const r=await fetch('__IMPORT_URL__', {method:'POST', headers:{'X-CSRF-Token':CSRF}, body:fd}); const j=await r.json();
   if(j.ok){ location.href=j.url; } else { _genToast(j.detail||j.message||j.error||'Import failed.'); }
 }
 async function mergePdfs(){
@@ -19058,7 +19156,7 @@ async function imagesToPdf(){
   await _download('__IMG_URL__', fd, 'images.pdf');
 }
 async function _download(url, fd, name){
-  const r=await fetch(url,{method:'POST',body:fd});
+  const r=await fetch(url,{method:'POST',headers:{'X-CSRF-Token':CSRF},body:fd});
   if(!r.ok){ const j=await r.json().catch(()=>({})); _genToast(j.detail||j.message||j.error||'Failed.'); return; }
   const blob=await r.blob(); const a=document.createElement('a');
   a.href=URL.createObjectURL(blob); a.download=name; a.click();
@@ -19079,7 +19177,9 @@ async function saveSpec(){
 }
 async function delDoc(){
   if(!confirm('Delete this document?')) return;
-  const r=await fetch('__DEL_URL__',{method:'POST'}); const j=await r.json();
+  // JSON content-type keeps this same-origin write CSRF-exempt (per the app's
+  // _csrf_protect guard); without it the empty POST is 403d in production.
+  const r=await fetch('__DEL_URL__',{method:'POST',headers:{'Content-Type':'application/json'}}); const j=await r.json();
   if(j.ok) location.href='__HOME_URL__'; else alert('Delete failed.');
 }
 </script>
@@ -19154,8 +19254,8 @@ _DOC_PRESENT_CONSOLE = r"""
     <div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
       <button class="btn" onclick="act('prev')">◀ Prev</button>
       <button class="btn" onclick="act('next')">Next ▶</button>
-      <button class="btn secondary" onclick="act('blackout')">Blackout</button>
-      <button class="btn secondary" onclick="act('autoplay')">Autoplay</button>
+      <button id="btn-blackout" class="btn secondary" aria-pressed="false" onclick="act('blackout')">Blackout</button>
+      <button id="btn-autoplay" class="btn secondary" aria-pressed="false" onclick="act('autoplay')">Autoplay</button>
       <button class="btn secondary" onclick="act('timer_reset')">Reset timer</button>
       <span id="pos" class="dim"></span>
       <span id="cstat" class="dim" role="status" aria-live="polite" style="color:var(--warn)"></span>
@@ -19193,6 +19293,12 @@ async function act(a){
   poll();
 }
 function fmtT(s){ const m=Math.floor(s/60), ss=s%60; return m+':'+String(ss).padStart(2,'0'); }
+function toggleState(id, on, onLabel, offLabel){
+  var el=document.getElementById(id); if(!el) return;
+  el.setAttribute('aria-pressed', on?'true':'false');
+  el.style.outline = on?'2px solid var(--accent)':'';
+  el.textContent = on?onLabel:offLabel;
+}
 // J-13: end the talk cleanly from the console (the remote had this; the driving
 // laptop did not), then return the presenter to the document.
 async function endPres(){
@@ -19213,6 +19319,10 @@ async function poll(){
       document.getElementById('next-title').textContent=(cur+1<TOTAL)?TITLES[nx]:'End of deck';
       document.getElementById('next-slide').src=BASE+'/'+nx+'.png?v='+v;
     }
+    // Reflect the toggle state so the presenter can see when the room is blacked
+    // out or the deck is auto-advancing (both are otherwise invisible feedback).
+    toggleState('btn-blackout', !!s.blackout, 'Blackout: on', 'Blackout');
+    toggleState('btn-autoplay', !!s.autoplay, 'Autoplay: on', 'Autoplay');
     document.getElementById('timer').textContent='⏱ '+fmtT(s.timer_elapsed||0);
   }catch(e){}
 }
@@ -19477,14 +19587,8 @@ def create_app() -> Flask:
         _embeddable = (request.endpoint or "") == "public_wall_embed" or (
             request.path.startswith("/wall/") and request.path.endswith("/embed")
         )
-        # The 1.16 microsite editor frames its own draft-preview route in a
-        # same-origin iframe (device preview), so that route allows 'self'
-        # framing only — everything else still refuses framing (clickjacking).
-        _self_frame = (request.endpoint or "") in ("site_preview_home", "site_preview_page")
         if _embeddable:
             _frame_ancestors = "frame-ancestors *"
-        elif _self_frame:
-            _frame_ancestors = "frame-ancestors 'self'"
         else:
             _frame_ancestors = "frame-ancestors 'none'"
         h.setdefault(
@@ -19495,9 +19599,7 @@ def create_app() -> Flask:
             "object-src 'none'; base-uri 'self'; form-action 'self'; " + _frame_ancestors,
         )
         h.setdefault("X-Content-Type-Options", "nosniff")
-        if _self_frame:
-            h.setdefault("X-Frame-Options", "SAMEORIGIN")
-        elif not _embeddable:
+        if not _embeddable:
             h.setdefault("X-Frame-Options", "DENY")
         h.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
         h.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
@@ -19696,11 +19798,29 @@ def create_app() -> Flask:
             # crawls the app's own pages in a hidden frame), so it bypasses
             # the org gate exactly like the operator console above.
             "mobile_parity_tool",
+            # Site-wide cache purge — the "Clear all caches" action on the
+            # developer settings page (now reachable without an org, above).
+            # Operator-only and org-independent: the handler re-checks
+            # _require_operator(), so exempting it from the org-setup wall is
+            # not an auth grant — same pattern as the operator_commercial POSTs.
+            # Without it a no-org operator's purge click 302s to org setup and
+            # silently never runs.
+            "operator_cache_purge",
             # /settings now redirects to / so doesn't actually need exempting,
             # but we keep the endpoint name in the allow-list so a directly-
             # hit /settings URL doesn't get caught by the gate before reaching
             # the redirect.
             "settings_page",
+            # C-16 — the interface-language switcher renders in the footer of
+            # every page (including the signed-out home, pricing and legal pages
+            # that are exempt above), so its POST target must be reachable
+            # without a ready org too. It only sets session["ui_lang"] (a UI
+            # preference) after validating the locale — no org-scoped data
+            # access — so exempting it does not weaken access control. Without
+            # this a signed-out visitor's language choice is intercepted by the
+            # gate and 302'd to /organisation/setup, and the language never
+            # changes (the visible control silently fails).
+            "set_interface_language",
             "healthz",
             "healthz_deps",
             "healthz_memory",
@@ -19722,6 +19842,14 @@ def create_app() -> Flask:
             "status_page",
             "api_status_json",
             "healthz_usage",
+            # /healthz/governance is the operator "AI governance — usage"
+            # dashboard, the twin of /healthz/usage above and linked from the
+            # developer settings page. It enforces its own is_dev_operator()
+            # gate inside the handler, so like its sibling it only needs to get
+            # past the org-setup wall — an operator checking a fresh deployment
+            # has no organisation yet. (Its docstring already assumed this
+            # exemption existed.)
+            "healthz_governance",
             "healthz_ping",
             # Installable-PWA endpoints — the browser fetches the manifest,
             # service-worker script, and icon on every page load (including
@@ -19749,16 +19877,6 @@ def create_app() -> Flask:
             "public_wall_card_png",
             # 1.21 — oEmbed discovery for the public wall (read-only, public).
             "oembed",
-            # 1.16 — published club microsites: token-keyed public surfaces (the
-            # token is the access control; a per-site password may gate pages).
-            "site_public_home",
-            "site_public_page",
-            "site_card_png",
-            "site_form_submit",
-            "site_widget_vote",
-            "site_sitemap",
-            "site_robots",
-            "site_unlock",
             # 1.19 — a shared bulk-export ZIP download: a token-keyed public
             # surface (a 1.18 share token is the access control), so a
             # recipient can fetch it without an active organisation. The route
@@ -20019,6 +20137,20 @@ def create_app() -> Flask:
         # Always allow static, the home page, settings, health, and the
         # organisation routes themselves.
         if ep in _SETUP_EXEMPT_ENDPOINTS:
+            return None
+        # The operator-only "Developer" settings section is a deployment
+        # surface (health, deployment status, site-wide cache purge, links to
+        # the operator dashboards), org-independent exactly like the operator
+        # console and mobile-parity tool exempted above — an operator on a
+        # fresh deployment has no organisation yet. Its endpoint (settings_section)
+        # also serves the org-scoped sections, so it can't be a flat exemption;
+        # carve out only the developer section for a signed-in operator (the
+        # handler re-checks is_dev_operator, so this is not an auth grant).
+        if (
+            ep == "settings_section"
+            and (request.view_args or {}).get("section") == "developer"
+            and _auth.is_dev_operator()
+        ):
             return None
         path = request.path or ""
         # Any /static/ asset (fonts.css, woff2, theme CSS, …) must load for
@@ -21880,7 +22012,7 @@ def create_app() -> Flask:
                         meta_line = (
                             '<span class="tag bad" style="font-size:10px">Didn\'t finish</span>'
                             if failed
-                            else f'{n_swims} swim{"" if n_swims == 1 else "s"}'
+                            else f"{n_swims} swim{'' if n_swims == 1 else 's'}"
                         )
                         items_html += (
                             "<li>"
@@ -21892,7 +22024,7 @@ def create_app() -> Flask:
                             f'<time class="mh-rel" datetime="{_h(when_iso)}">{_h(when)}</time></span>'
                             "</div>"
                             f'<a class="go" href="{configure_href}">'
-                            f'{"Try again" if failed else "Re-configure"} &rarr;</a>'
+                            f"{'Try again' if failed else 'Re-configure'} &rarr;</a>"
                             "</li>"
                         )
                     recent_html = (
@@ -22720,9 +22852,12 @@ def create_app() -> Flask:
                 code=404,
             )
         file_bytes = _SAMPLE_MEET_PDF.read_bytes()
-        # Synthetic swimmers — there is nothing to web-verify, so PB fetch is
-        # off (faster, and no third-party calls for demo data). The hero club
-        # is pre-selected so the pack shows its best spread of cards.
+        # Synthetic swimmers — there is nothing to web-verify, so PB web
+        # verification is off (faster, and no PB-verification calls for demo
+        # data). Meet-identity research inside the recognition report still
+        # runs, but it is globally cached, so only the first uncached sample
+        # generation on a deployment can trigger an outbound lookup. The hero
+        # club is pre-selected so the pack shows its best spread of cards.
         run_id = _start_run(
             file_bytes,
             _SAMPLE_MEET_FILENAME,
@@ -22914,7 +23049,7 @@ def create_app() -> Flask:
         tmp_dir = RUNS_DIR / run_id
         meta_path = tmp_dir / "upload_meta.json"
         input_path = tmp_dir / "input.bin"
-        if not (meta_path.exists() and input_path.exists()):
+        if not input_path.exists():
             return _recovery_page(
                 "Upload session expired",
                 "The staged upload only lives for a few minutes before it's swept. Start a new upload — the file picker is one click away.",
@@ -22922,10 +23057,19 @@ def create_app() -> Flask:
                 primary_cta=("Start a new upload", url_for("upload")),
                 secondary_cta=("Recent runs", url_for("activity_page")),
             )
-        try:
-            meta = json.loads(meta_path.read_text())
-        except Exception:
-            meta = {}
+        if meta_path.exists():
+            try:
+                meta = json.loads(meta_path.read_text())
+            except Exception:
+                meta = {}
+        else:
+            # Re-configuring an already-processed (or failed) run from the
+            # "Re-run a recent meet" card: the staged upload_meta.json only ever
+            # exists for a brand-new upload, but the run's saved input.bin +
+            # resume.json survive on disk, so rebuild the configure metadata here
+            # (a fresh light club-parse) instead of 404ing. Without this the card's
+            # "Try again"/"Re-configure" links always hit "Upload session expired".
+            meta = _rebuild_staged_meta(tmp_dir, input_path)
 
         if request.method == "POST":
             club_filter = (request.form.get("club_filter") or "").strip() or None
@@ -23608,6 +23752,23 @@ def create_app() -> Flask:
                 or (data.get("dispatch_log") or {}).get("chosen_filename")
                 or "your file"
             )
+            # The persisted run.error is a raw str(e) that can carry absolute
+            # server paths and exception internals. Only the signed-in operator
+            # sees it verbatim; a customer gets an honest generic reason (the
+            # "Common causes" note below stays for everyone). Mirrors the
+            # is_dev gate run_status() already applies to the same detail.
+            if _auth.is_dev_operator():
+                _err_detail_html = (
+                    '<p style="font-family:var(--font-mono);font-size:13px;color:var(--ink);'
+                    "background:var(--bad-bg);padding:12px 14px;border-radius:var(--radius-sm);"
+                    'white-space:pre-wrap;word-break:break-word">' + _h(_run_err) + "</p>"
+                )
+            else:
+                _err_detail_html = (
+                    '<p style="font-size:13px;color:var(--ink);margin-top:0">The file couldn&rsquo;t '
+                    "be read into cards. This is almost always the results file itself &mdash; the "
+                    "common causes are below.</p>"
+                )
             _err_body = f"""
 <section class="mh-hero" data-lane="failed" style="padding-top:var(--sp-9);padding-bottom:var(--sp-8)">
   <span class="mh-hero-eyebrow">Processing failed</span>
@@ -23622,8 +23783,7 @@ def create_app() -> Flask:
 </section>
 <div class="card" style="border-color:rgba(255,107,107,0.35);border-left:3px solid var(--bad)">
   <h2 style="margin-top:0">What went wrong</h2>
-  <p style="font-family:var(--font-mono);font-size:13px;color:var(--ink);background:var(--bad-bg);
-            padding:12px 14px;border-radius:var(--radius-sm);white-space:pre-wrap;word-break:break-word">{_h(_run_err)}</p>
+  {_err_detail_html}
   <p class="dim" style="font-size:13px;margin-bottom:0">Common causes: the file wasn&rsquo;t a
     readable results export, it was an entry list or heat sheet with no times, or no club was
     matched. Re-upload and check the file and the club you selected.</p>
@@ -27386,7 +27546,7 @@ Relay team broke club record"></textarea>
                         "cover / outro",
                         "no",
                         "Custom cover / outro scene length in seconds (clamped to a "
-                        "readable, render-safe range). Default 2.0 / 1.0.",
+                        "readable, render-safe range). Default 2.0 / 2.5.",
                     ),
                     (
                         "weights",
@@ -28083,7 +28243,7 @@ function mhEraseAthleteConfirm(f) {
                 extra.append("under 18")
             if r.restricted:
                 extra.append(
-                    '<strong title="UK GDPR Art 18 — processing restricted">' "Paused</strong>"
+                    '<strong title="UK GDPR Art 18 — processing restricted">Paused</strong>'
                 )
             rows.append(
                 f"<tr><td>{_h(r.athlete_name)}</td><td>{status_tag}</td>"
@@ -28382,7 +28542,7 @@ function mhEraseAthleteConfirm(f) {
             if r.request_type == "access" and _dsr_export_path(pid, r.id).exists():
                 actions.append(
                     f'<a class="btn secondary" href="{url_for("org_dsr_export_download", request_id=r.id)}" '
-                    'download>Download export</a>'
+                    "download>Download export</a>"
                 )
             rows.append(
                 (
@@ -29555,7 +29715,11 @@ self.addEventListener('fetch', function(e){
             return "&mdash;"
         pct = float(stats.get("uptime_pct") or 0.0) * 100.0
         if pct >= 99.995:
-            return "100%"
+            # Never round a window that had real, counted downtime up to a bare
+            # "100%" — it reads as a contradiction beside the non-zero Downtime
+            # cell on the same row. Show the honest "99.99%" instead; "100%" is
+            # reserved for a genuinely gap-free window.
+            return "100%" if not stats.get("downtime_seconds") else "99.99%"
         if pct >= 99.9:
             return f"{pct:.3f}%"
         if pct >= 95.0:
@@ -29648,12 +29812,28 @@ self.addEventListener('fetch', function(e){
         from mediahub.observability import uptime as _uptime
 
         # Pull three windows so the page reads "24h / 7d / 30d uptime"
-        # straight off the database, with no aggregation in the view.
-        s24 = _uptime.uptime_stats(window_hours=24)
-        s7d = _uptime.uptime_stats(window_hours=24 * 7)
-        s30 = _uptime.uptime_stats(window_hours=24 * 30)
-        latest = _uptime.latest_heartbeat()
-        gaps = _uptime.recent_gaps(window_hours=24 * 30, limit=5)
+        # straight off the database, with no aggregation in the view. The
+        # uptime store is exception-safe by contract, but defend the operator
+        # page the same way _render_settings_status_section already does — an
+        # unexpected observability error degrades to the honest public view,
+        # never an unhandled 500.
+        try:
+            s24 = _uptime.uptime_stats(window_hours=24)
+            s7d = _uptime.uptime_stats(window_hours=24 * 7)
+            s30 = _uptime.uptime_stats(window_hours=24 * 30)
+            latest = _uptime.latest_heartbeat()
+            gaps = _uptime.recent_gaps(window_hours=24 * 30, limit=5)
+        except Exception:
+            body = (
+                '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-8);padding-bottom:var(--sp-6);margin-bottom:var(--sp-4)">'
+                '<span class="mh-hero-eyebrow">Status</span>'
+                '<h1>Service <em class="editorial">status</em></h1></section>'
+                + _render_settings_status_public_section()
+            )
+            resp = make_response(_layout("Status", body, active="status"))
+            resp.headers["Refresh"] = "60"
+            resp.headers["Cache-Control"] = "no-store"
+            return resp
 
         # Current pill — green if last heartbeat < 5 min ago AND ok.
         pill_class = "muted"
@@ -29790,11 +29970,21 @@ self.addEventListener('fetch', function(e){
         and dashboards that want the raw uptime numbers."""
         from mediahub.observability import uptime as _uptime
 
+        # /api/status is public and unauthenticated. The heartbeat's ``error``
+        # field carries the raw deep-/health failure string, which can include
+        # an internal filesystem path (e.g. "database: unable to open database
+        # file /srv/data/data.db") or an OS error. Drop it from this public
+        # surface — the ``ok`` flag already signals the failure honestly, with
+        # no internal text. The operator HTML views never rendered it.
+        latest = _uptime.latest_heartbeat()
+        if isinstance(latest, dict):
+            latest.pop("error", None)
+
         return jsonify(
             {
                 "ok": True,
                 "version": APP_VERSION,
-                "latest_heartbeat": _uptime.latest_heartbeat(),
+                "latest_heartbeat": latest,
                 "windows": {
                     "24h": _uptime.uptime_stats(window_hours=24),
                     "7d": _uptime.uptime_stats(window_hours=24 * 7),
@@ -30112,7 +30302,7 @@ self.addEventListener('fetch', function(e){
                 f'<div style="font-weight:600;margin-bottom:4px">'
                 f"Last LLM error &mdash; {_h(last_err.get('provider', 'unknown'))}</div>"
                 f'<div class="dim" style="font-size:12px;margin-bottom:6px">'
-                f"{_h(last_err.get('ts', '')[:19])} UTC"
+                f"{_h((last_err.get('ts') or '')[:19])} UTC"
                 + (
                     f" &middot; {_h(last_err.get('error_kind'))}"
                     if last_err.get("error_kind")
@@ -30120,7 +30310,7 @@ self.addEventListener('fetch', function(e){
                 )
                 + "</div>"
                 f'<code style="font-size:12px">'
-                f"{_h(last_err.get('error_message', '')[:300])}</code>"
+                f"{_h((last_err.get('error_message') or '')[:300])}</code>"
                 "</div>"
             )
         else:
@@ -30222,7 +30412,7 @@ self.addEventListener('fetch', function(e){
         ref = request.referrer or ""
         if ref:
             try:
-                from urllib.parse import urlsplit
+                from urllib.parse import parse_qsl, urlencode, urlsplit
 
                 parts = urlsplit(ref)
                 path = parts.path or ""
@@ -30232,7 +30422,20 @@ self.addEventListener('fetch', function(e){
                 same_origin = not parts.netloc or parts.netloc == request.host
                 safe_path = path.startswith("/") and not path.startswith(("//", "/\\"))
                 if same_origin and safe_path:
-                    dest = path + (("?" + parts.query) if parts.query else "")
+                    # Drop any ``?lang=`` from the referring URL. This POST is the
+                    # user's deliberate choice; _ui_locale gives ?lang= top
+                    # precedence and re-pins the session from it, so a stale
+                    # ?lang=cy in the Referer (e.g. they arrived on a shared
+                    # /pricing?lang=cy link, then picked English) would silently
+                    # revert the switch on the very next request. Preserve every
+                    # other query param.
+                    kept = [
+                        (k, v)
+                        for k, v in parse_qsl(parts.query, keep_blank_values=True)
+                        if k != "lang"
+                    ]
+                    query = urlencode(kept)
+                    dest = path + (("?" + query) if query else "")
             except Exception:
                 dest = url_for("settings_page")
         return redirect(dest)
@@ -30379,6 +30582,12 @@ self.addEventListener('fetch', function(e){
                 url_for("settings_section", section="account"),
             ),
             (
+                # Point at the org-gate-exempt public /status, not the gated
+                # /settings/status members surface, so this "is the site up?"
+                # tile resolves for signed-out / not-yet-onboarded visitors
+                # too (settings_section is not setup-exempt, so it would bounce
+                # them to org setup). Operators still get full detail via the
+                # Developer card below.
                 "System status",
                 "Whether the site is operational right now.",
                 "status",
@@ -31495,7 +31704,7 @@ self.addEventListener('fetch', function(e){
                     'gap:12px;flex-wrap:wrap">'
                     f'<div style="flex:1;min-width:180px"><strong>{_h(rec.filename)}</strong>'
                     f'<div class="dim" style="font-size:12px">{lic}'
-                    f'{(" · " + when) if when else ""}</div></div>'
+                    f"{(' · ' + when) if when else ''}</div></div>"
                     f'<audio controls preload="none" src="{src}" style="height:34px"></audio>'
                     f'<form method="post" action="{del_url}" style="margin:0" '
                     "onsubmit=\"return confirm('Remove this uploaded track?')\">"
@@ -32583,8 +32792,8 @@ self.addEventListener('fetch', function(e){
         if goal_opts:
             goals_add_html = (
                 '<div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">'
-                f'<select id="mh-plan-goal-type" style="flex:0 0 auto;min-width:180px">{goal_opts}</select>'
-                '<input type="text" id="mh-plan-goal-note" placeholder="why — e.g. push our new sponsor" style="flex:1;min-width:160px"/>'
+                f'<select id="mh-plan-goal-type" aria-label="Post type to push" style="flex:0 0 auto;min-width:180px">{goal_opts}</select>'
+                '<input type="text" id="mh-plan-goal-note" aria-label="Why you want to push this type" placeholder="why — e.g. push our new sponsor" style="flex:1;min-width:160px"/>'
                 '<button type="button" class="btn" onclick="mhPlanAddGoal()">Add goal</button>'
                 "</div>"
             )
@@ -32646,9 +32855,9 @@ self.addEventListener('fetch', function(e){
       <label style="font-weight:600">Upcoming events</label>
       <div id="mh-plan-events">{events_rows}</div>
       <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">
-        <input type="date" id="mh-plan-ev-date" style="flex:0 0 auto"/>
-        <input type="text" id="mh-plan-ev-name" placeholder="e.g. County Championships" style="flex:1;min-width:140px"/>
-        <input type="text" id="mh-plan-ev-venue" placeholder="venue (optional)" style="flex:1;min-width:120px"/>
+        <input type="date" id="mh-plan-ev-date" aria-label="Event date" style="flex:0 0 auto"/>
+        <input type="text" id="mh-plan-ev-name" aria-label="Event name" placeholder="e.g. County Championships" style="flex:1;min-width:140px"/>
+        <input type="text" id="mh-plan-ev-venue" aria-label="Event venue (optional)" placeholder="venue (optional)" style="flex:1;min-width:120px"/>
         <button type="button" class="btn" onclick="mhPlanAddEvent()">Add</button>
       </div>
     </div>
@@ -33010,12 +33219,37 @@ function mhPlanGenerate(btn) {{
                     else ""
                 )
                 draft_url = url_for("stub_pack_view", pack_id=e.ref)
+                # I-1 parity: HTML5 drag never fires from touch and the chip isn't
+                # focusable, so a planned chip also carries a non-drag date field
+                # (reschedule) + an unschedule control — the same affordance
+                # _rail_card gives unscheduled drafts. mhCalPlanInput / mhCalUnplan →
+                # mhCalSchedule + the schedule endpoint already handle move + clear;
+                # only this UI was missing on planned chips, so touch/keyboard users
+                # could schedule but never reschedule or unschedule.
+                reschedule = (
+                    f'<input type="date" class="mh-cal-plan-date" data-pack="{_h(e.ref)}" '
+                    f'value="{_h(e.date)}" aria-label="Move {_h(e.title)} to another day" '
+                    'onchange="mhCalPlanInput(this)" onclick="event.stopPropagation()" '
+                    'style="margin-top:5px;width:100%;font-size:11px;padding:2px 5px;'
+                    "border:1px solid var(--border);border-radius:6px;background:var(--panel);"
+                    'color:inherit">'
+                )
+                unplan = (
+                    f'<button type="button" class="mh-cal-unplan" data-pack="{_h(e.ref)}" '
+                    f'aria-label="Unschedule {_h(e.title)}" '
+                    'title="Unschedule — send back to the side rail" '
+                    'onclick="mhCalUnplan(event, this)" '
+                    'style="margin-top:3px;font-size:10.5px;background:none;border:none;'
+                    'color:var(--ink-muted);text-decoration:underline;cursor:pointer;padding:0">'
+                    "unschedule</button>"
+                )
                 return (
                     f'<div class="mh-cal-draft" draggable="true" data-pack="{_h(e.ref)}" '
                     f'data-href="{_h(draft_url)}" '
-                    f'title="{_h(e.title)} — drag to a day to move, or to the side rail to unschedule">'
+                    f'title="{_h(e.title)} — drag to a day to move, or use the date field to reschedule">'
                     f'<span class="mh-cal-draft-dot"></span>'
-                    f'<span class="mh-cal-draft-t">{_h(e.title)}{ch_html}{warn}</span></div>'
+                    f'<span class="mh-cal-draft-t">{_h(e.title)}{ch_html}{warn}</span>'
+                    f"{reschedule}{unplan}</div>"
                 )
             fg, bg = _kind_style.get(e.kind, ("var(--ink-dim)", "rgba(182,178,166,.10)"))
             note = e.meta.get("note") or e.meta.get("venue") or ""
@@ -33152,6 +33386,12 @@ function mhCalStatus(msg, warn) {{
 function mhCalPlanInput(el) {{
   if (el && el.value) mhCalSchedule(el.getAttribute('data-pack'), el.value);
 }}
+// I-1 parity: unschedule a planned chip (touch / keyboard) without dragging it
+// back to the rail. stopPropagation so the chip's open-draft click never fires.
+function mhCalUnplan(e, btn) {{
+  if (e) e.stopPropagation();
+  if (btn) mhCalSchedule(btn.getAttribute('data-pack'), '');
+}}
 function mhCalSchedule(packId, date) {{
   if (!packId) return;
   mhCalStatus(date ? 'Scheduling…' : 'Unscheduling…', false);
@@ -33271,9 +33511,13 @@ document.addEventListener('click', function (e) {{
         from mediahub.channel_preview import preview_card
 
         body = request.get_json(silent=True) or {}
+        # Coerce hashtags to a real list: a truthy non-list (a number/bool) would
+        # otherwise reach preview_card's ``len([h for h in hashtags ...])`` and raise
+        # a TypeError that 500s the endpoint. Only a genuine list carries hashtags.
+        raw_tags = body.get("hashtags")
         card = {
             "caption": str(body.get("caption") or ""),
-            "hashtags": body.get("hashtags") or [],
+            "hashtags": raw_tags if isinstance(raw_tags, list) else [],
             "platform": body.get("platform_label") or "",
         }
         pv = preview_card(
@@ -33573,7 +33817,7 @@ document.addEventListener('click', function (e) {{
             cards_html = "".join(_card_html(c) for c in cards)
             add_form = (
                 '<div class="mh-bd-add">'
-                f'<input type="text" class="mh-bd-add-title" placeholder="New idea…" '
+                f'<input type="text" class="mh-bd-add-title" aria-label="New idea" placeholder="New idea…" '
                 f"onkeydown=\"if(event.key==='Enter')mhBoardAdd(this)\"/>"
                 '<button type="button" class="mh-bd-add-btn" onclick="mhBoardAdd(this)">Add</button>'
                 '<span class="mh-bd-add-hint">or press Enter to add</span>'
@@ -33671,7 +33915,28 @@ function mhBoardMove(sel) {{
         body = request.get_json(silent=True) or {}
         metrics = {k: body.get(k, 0) for k in METRIC_KEYS}
         if not any(metrics.values()):
-            metrics = {k: (body.get("metrics") or {}).get(k, 0) for k in METRIC_KEYS}
+            # Fall back to a nested {"metrics": {...}} object (what the page posts).
+            # Guard the type: a truthy non-dict (a number/string/list) made the old
+            # ``(... or {}).get`` raise AttributeError and 500 the route.
+            nested = body.get("metrics")
+            nested = nested if isinstance(nested, dict) else {}
+            metrics = {k: nested.get(k, 0) for k in METRIC_KEYS}
+
+        # Honour the "…and at least one metric" the error message promises: a
+        # submission with no metric > 0 (the form's all-zero default, or a
+        # negative-only value) carries no measurable performance. Reject it here
+        # so a data-free row never enters the store, is never counted toward
+        # MIN_SAMPLES, and never fabricates a "% below your average" planner signal.
+        def _positive(v: object) -> bool:
+            try:
+                return int(v) > 0
+            except (TypeError, ValueError):
+                return False
+
+        if not any(_positive(v) for v in metrics.values()):
+            return jsonify(
+                {"error": "Pick a post type and a valid date (and at least one metric)."}
+            ), 400
         rec = record_metric(
             pid,
             str(body.get("post_type") or ""),
@@ -34436,7 +34701,10 @@ function mhAnDigest(btn) {{
             make_url=url_for("make_page"),
             palette=seed_palette,
         )
-        return _layout("Studio", body, active="studio")
+        # The studio is a sub-surface of Create (reached from the Create tile), so
+        # it highlights the Create nav item — active="studio" matched no nav key and
+        # left the top bar with nothing lit, orphaning the page in the IA.
+        return _layout("Studio", body, active="create")
 
     @app.route("/api/studio/render", methods=["POST"])
     def api_studio_render():
@@ -34755,36 +35023,6 @@ function mhAnDigest(btn) {{
                 '<span class="mh-template-fmt">Present</span>'
                 "</div>"
                 '<span class="mh-template-cta">Open documents</span>'
-                "</a>"
-            )
-
-        # Sites — the 1.16 microsite engine (club home / link-in-bio / meet
-        # microsite / event page + forms, widgets, QR). A first-class Create
-        # tile; gated on _sites_ok so it only shows where it works.
-        if _sites_ok:
-            _site_svg = (
-                '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" '
-                'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" width="28" height="28">'
-                '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18"/>'
-                '<circle cx="6.2" cy="6.5" r="0.6" fill="currentColor"/>'
-                '<circle cx="8.4" cy="6.5" r="0.6" fill="currentColor"/></svg>'
-            )
-            tiles_html += (
-                f'<a href="{_h(url_for("sites_home"))}" class="mh-template mh-glow-border">'
-                f'<div class="mh-template-icon">{_site_svg}</div>'
-                '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:var(--sp-1)">'
-                '<h3 style="margin:0">Sites</h3>'
-                '<span class="tag live">Ready</span>'
-                "</div>"
-                "<p>Build a club home, a link-in-bio page, a meet microsite or an event "
-                "page from your data &mdash; with forms, countdowns, a medal tally and a "
-                "brand QR code &mdash; then publish it when you approve it.</p>"
-                '<div class="mh-template-formats">'
-                '<span class="mh-template-fmt">Microsite</span>'
-                '<span class="mh-template-fmt">Forms</span>'
-                '<span class="mh-template-fmt">QR</span>'
-                "</div>"
-                '<span class="mh-template-cta">Open sites</span>'
                 "</a>"
             )
 
@@ -35300,7 +35538,12 @@ function mhAnDigest(btn) {{
         approving them first. Accepts an optional ``tone`` field (warm-club /
         hype / data-led) — empty means the organisation's brand voice."""
         try:
-            from mediahub.club_platform.stub_pack_store import save_pack
+            from mediahub.club_platform.stub_pack_store import (
+                list_packs,
+                load_pack,
+                save_pack,
+                update_pack,
+            )
         except ImportError:
             return _recovery_page(
                 "Spotlight unavailable",
@@ -35332,23 +35575,53 @@ function mhAnDigest(btn) {{
             ),
             "status": "queue",
         }
+        _active_pid = _active_profile_id()
+        _form_data = {
+            "free_text": f"Spotlight — {result['swimmer_name']}",
+            "source": "athlete_spotlight",
+            "swimmer_name": result["swimmer_name"],
+            "meet_name": result["meet_name"],
+            "run_id": run_id,
+            "swimmer_key": swimmer_key,
+            "n_approved": result["n_approved"],
+            "n_pbs": result["n_pbs"],
+            "n_medals": result["n_medals"],
+            "tone": tone,
+            "results_lines": result["results_lines"],
+        }
+
+        # Idempotency: re-building the same swimmer's spotlight refreshes the
+        # existing draft in place rather than minting a duplicate — a double-
+        # click or a deliberate rebuild would otherwise litter /drafts with
+        # clones keyed on the same (run_id, swimmer_key). Preserve the existing
+        # card's approval status (and update_pack leaves any planned_date
+        # untouched) so a rebuild never silently un-approves or unschedules a
+        # draft the reviewer already actioned.
+        existing = None
+        for _meta in list_packs(limit=200):
+            rec = load_pack(_meta["pack_id"])
+            if not rec or not _can_access_pack(rec, _active_pid):
+                continue
+            _fd = rec.get("form_data") or {}
+            if (
+                _fd.get("source") == "athlete_spotlight"
+                and str(_fd.get("run_id") or "") == str(run_id)
+                and str(_fd.get("swimmer_key") or "") == str(swimmer_key)
+            ):
+                existing = rec
+                break
+
+        if existing is not None:
+            _prev_card = (existing.get("cards") or [{}])[0]
+            card["status"] = _prev_card.get("status") or "queue"
+            update_pack(existing["pack_id"], cards=[card], form_data_updates=_form_data)
+            return redirect(url_for("stub_pack_view", pack_id=existing["pack_id"]))
+
         saved = save_pack(
             "free_text",  # reuses the stub-pack list; tagged in form_data
-            {
-                "free_text": f"Spotlight — {result['swimmer_name']}",
-                "source": "athlete_spotlight",
-                "swimmer_name": result["swimmer_name"],
-                "meet_name": result["meet_name"],
-                "run_id": run_id,
-                "swimmer_key": swimmer_key,
-                "n_approved": result["n_approved"],
-                "n_pbs": result["n_pbs"],
-                "n_medals": result["n_medals"],
-                "tone": tone,
-                "results_lines": result["results_lines"],
-            },
+            _form_data,
             [card],
-            profile_id=_active_profile_id(),
+            profile_id=_active_pid,
         )
         return redirect(url_for("stub_pack_view", pack_id=saved["pack_id"]))
 
@@ -35444,6 +35717,15 @@ function mhAnDigest(btn) {{
             recent_runs = [r for r in recent_runs if r["id"] not in _stale_set]
 
         run_id_param = request.args.get("run_id", "")
+        # Path-traversal guard: unlike the <run_id> route converter (which
+        # rejects slashes), this query param reaches the shared _load_run
+        # helper — which builds RUNS_DIR / f"{run_id}.json" — completely
+        # unfiltered. A tampered ?run_id=../../<dir>/victim would otherwise
+        # escape DATA_DIR and reflect an arbitrary JSON file's swimmer roster
+        # (PII) onto the page. Real run ids are uuid hex, so any separator or
+        # ".." means the value is hostile: treat it as "no meet selected".
+        if run_id_param and ("/" in run_id_param or "\\" in run_id_param or ".." in run_id_param):
+            run_id_param = ""
 
         # Empty state when no meets have been processed yet
         if not recent_runs:
@@ -35525,9 +35807,19 @@ function mhAnDigest(btn) {{
                     _sp_club = (
                         run_data.get("profile_display") or run_data.get("club_filter") or ""
                     ).strip()
-                    swimmers_html = f'<div style="margin-top:20px"><h2>Swimmers in this meet <span class="muted" style="font-weight:400;font-size:13px">({len(swimmers)})</span></h2>'
+                    # Bound the render: a big multi-club invitational can list
+                    # hundreds of swimmers (~1.6KB of card markup each -> an
+                    # 800KB+ page), so cap the grid to the most content-worthy
+                    # names (list_swimmers_in_run already sorts by achievement
+                    # count) and point to the full meet review for the rest.
+                    # Realistic single-club rosters sit well under the cap and
+                    # are never truncated.
+                    _ROSTER_CAP = 120
+                    _total_sw = len(swimmers)
+                    _shown_sw = swimmers[:_ROSTER_CAP]
+                    swimmers_html = f'<div style="margin-top:20px"><h2>Swimmers in this meet <span class="muted" style="font-weight:400;font-size:13px">({_total_sw})</span></h2>'
                     swimmers_html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px;margin-top:12px">'
-                    for sw in swimmers:
+                    for sw in _shown_sw:
                         sp_url = url_for(
                             "spotlight_view", run_id=run_id_param, swimmer_key=sw["swimmer_key"]
                         )
@@ -35551,9 +35843,29 @@ function mhAnDigest(btn) {{
     <div style="font-size:12px;color:var(--ink-dim)">{_ach_label}</div>
   </div>
 </a>"""
-                    swimmers_html += "</div></div>"
+                    swimmers_html += "</div>"
+                    if _total_sw > len(_shown_sw):
+                        swimmers_html += (
+                            '<p class="muted" style="margin-top:12px;font-size:13px">'
+                            f"Showing the {len(_shown_sw)} swimmers with the most "
+                            f'achievements. <a href="{_review_url}" style="color:var(--ink)">'
+                            "Open the full meet review</a> to reach the other "
+                            f"{_total_sw - len(_shown_sw)}.</p>"
+                        )
+                    swimmers_html += "</div>"
                 else:
                     swimmers_html = '<div class="card"><p class="muted">No achievements found for this run. The recognition report may not be available.</p></div>'
+            elif run_id_param:
+                # A meet was selected but couldn't be opened — a run the active
+                # org can't access, or a corrupt/unreadable data file. Surface an
+                # honest message instead of a silent dead-end (the dropdown
+                # selected, no roster, no explanation).
+                swimmers_html = (
+                    '<div class="card"><p class="muted">We couldn&rsquo;t open that '
+                    "meet. It may have been processed on an older version, be "
+                    "owned by another organisation, or its data file may be "
+                    "unreadable. Pick another meet above.</p></div>"
+                )
 
         change_js = url_for("spotlight_landing")
         # C-10: the window hint states the cutoff and links the toggle, so the
@@ -35589,7 +35901,8 @@ function mhAnDigest(btn) {{
   <p class="muted" style="margin-top:0;font-size:13px">{window_hint}</p>
   <form method="get" action="{url_for("spotlight_landing")}">
     {older_field}
-    <select name="run_id" onchange="this.form.submit()" style="max-width:480px">
+    <label for="sp-meet-select" class="mh-sr-only">Choose a processed meet</label>
+    <select id="sp-meet-select" name="run_id" aria-label="Choose a processed meet" onchange="this.form.submit()" style="max-width:480px">
       {runs_opts}
     </select>
     <noscript><button class="btn" type="submit" style="margin-top:var(--sp-3)">Load swimmers &rarr;</button></noscript>
@@ -35695,7 +36008,11 @@ function mhAnDigest(btn) {{
 
             cap_text = headline
             if angle:
-                cap_text = f"{headline}\\n\\n{angle}"
+                # Real newlines (not the literal backslash-n a normal f-string's
+                # "\\n" would emit) so the hidden span's textContent — which
+                # copySpotlightCaption copies verbatim to the clipboard — carries
+                # actual line breaks between the headline and the angle.
+                cap_text = f"{headline}\n\n{angle}"
 
             # "Create graphic" — only for achievements with a real swim_id,
             # which api_create_graphic can resolve in the run's recognition
@@ -35706,9 +36023,20 @@ function mhAnDigest(btn) {{
             sp_visual_panel = ""
             if _sp_swim_id:
                 _sp_g_url = url_for("api_create_graphic", run_id=run_id, card_id=_sp_swim_id)
+                # JS-context safety: the card id derives from swim_id, which
+                # carries the swimmer key (e.g. a surname like O'Brien) verbatim,
+                # so it can contain an apostrophe or other JS-breaking chars.
+                # _h() (HTML-escape) is the WRONG escaping here — the browser
+                # decodes &#39; back to ' before the JS string is compiled, so an
+                # apostrophe would break out of the literal (a broken control,
+                # and a stored-XSS vector from a crafted results file). Encode
+                # for the JS context first (json.dumps) then the HTML-attribute
+                # context (_h), the standard two-layer safe pattern.
+                _g_url_js = _h(json.dumps(str(_sp_g_url)))
+                _card_id_js = _h(json.dumps(card_id_raw))
                 sp_graphic_btn = (
                     f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" '
-                    f"onclick=\"mhCreateGraphic(this, '{_h(_sp_g_url)}', '{card_id_safe}')\">"
+                    f'onclick="mhCreateGraphic(this, {_g_url_js}, {_card_id_js})">'
                     f"&#x2726; Create graphic</button>"
                 )
                 sp_visual_panel = (
@@ -35731,11 +36059,11 @@ function mhAnDigest(btn) {{
     <div style="font-size:13px;color:var(--ink-dim);margin-top:2px">{headline}</div>
     <div style="display:flex;gap:8px;margin-top:8px;align-items:center;flex-wrap:wrap">
       {_render_wf_actions(run_id, card_id_raw, wf_status)}
-      <button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="copySpotlightCaption(this, '{card_id_safe}')">Copy caption</button>
+      <button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="copySpotlightCaption(this)">Copy caption</button>
       {sp_graphic_btn}
       <span style="flex:1;min-width:8px"></span>
       {_render_reactions(run_id, card_id_raw, _react_counts)}
-      <span id="sp-cap-{card_id_safe}" style="display:none">{cap_text}</span>
+      <span class="sp-cap-src" style="display:none">{cap_text}</span>
     </div>
     {sp_visual_panel}
   </div>
@@ -35825,7 +36153,8 @@ function mhAnDigest(btn) {{
   <div style="margin-top:14px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
     <form method="post" action="{url_for("spotlight_build", run_id=run_id, swimmer_key=swimmer_key)}" style="display:inline-flex;gap:8px;align-items:center;flex-wrap:wrap"
           data-loader-text="Composing the spotlight post">
-      <select name="tone" style="font-size:12px;max-width:220px" title="Caption tone for the spotlight post">{_sp_tone_opts}</select>
+      <label for="sp-tone-select" class="mh-sr-only">Caption tone for the spotlight post</label>
+      <select id="sp-tone-select" name="tone" aria-label="Caption tone for the spotlight post" style="font-size:12px;max-width:220px" title="Caption tone for the spotlight post">{_sp_tone_opts}</select>
       <button type="submit" class="btn"{_sp_build_attr} title="{_h(_sp_build_title)}" style="font-size:13px">Build spotlight post from approved cards &rarr;</button>
     </form>
     <a class="btn secondary" href="{_pack_url}" style="font-size:13px">Open content builder &rarr;</a>
@@ -35837,12 +36166,17 @@ function mhAnDigest(btn) {{
 
 <div class="card">
   <h2>{"More achievements" if _approved_ras else "Achievements"}</h2>
-  {other_rows or '<p class="muted">Everything is approved — build the post above.</p>' if _approved_ras else (other_rows or '<p class="muted">No achievements.</p>')}
+  {other_rows or '<p class="muted">Everything is approved. Build the post above.</p>' if _approved_ras else (other_rows or '<p class="muted">No achievements.</p>')}
 </div>
 
 <script>
-function copySpotlightCaption(btn, cardIdSafe) {{
-  var span = document.getElementById('sp-cap-' + cardIdSafe);
+function copySpotlightCaption(btn) {{
+  // Locate the caption span relative to the clicked button (both live in the
+  // same .sp-row) rather than by an id built from user data — the card id can
+  // carry an apostrophe (e.g. a surname like O'Brien) which would break an
+  // interpolated selector.
+  var row = btn.closest('.sp-row');
+  var span = row ? row.querySelector('.sp-cap-src') : null;
   if (!span) {{ btn.textContent = 'Error'; return; }}
   var text = span.textContent.trim();
   var done = function(ok) {{
@@ -36063,14 +36397,18 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                     from mediahub.brand.guidelines import extract_text as _doc_text
                     from mediahub.web_research.safe_fetch import safe_fetch as _sfetch
 
+                    # Bound each fetch tightly: this runs synchronously inside
+                    # the request, and two links plus the LLM call must finish
+                    # well inside the worker timeout. A slow or hostile host
+                    # gets a short leash rather than stalling the worker.
                     _site_url = (form_data.get("event_website_url") or "").strip()
                     if _site_url:
-                        _site_text = _sfetch(_site_url, max_chars=8000)
+                        _site_text = _sfetch(_site_url, max_chars=8000, timeout=6.0, max_hops=2)
                         if _site_text:
                             form_data["event_site_text"] = _site_text
                     _entries_url = (form_data.get("entries_url") or "").strip()
                     if _entries_url:
-                        _etext = _sfetch(_entries_url, max_chars=20000)
+                        _etext = _sfetch(_entries_url, max_chars=20000, timeout=6.0, max_hops=2)
                         if _etext:
                             form_data["entries_text"] = _etext
                     for _field, _key, _cap in (
@@ -36140,6 +36478,22 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                         form_data["club_name"] = _pv_prof.display_name
                 except Exception:
                     app.logger.exception("event preview enrichment failed")
+                # Reject an empty submission: with no event name, no readable
+                # website/pack/entries text, and no typed ones-to-watch, the
+                # model would have nothing to ground on and would guess. Ask
+                # for a real source instead of generating an ungrounded preview.
+                if not stub.has_meaningful_input(form_data):
+                    return _recovery_page(
+                        "Add something to preview",
+                        (
+                            "Give us at least the event name, or upload the "
+                            "entries file, or add the event's website or meet "
+                            "pack, so the preview has real facts to work from. "
+                            "It never guesses."
+                        ),
+                        primary_cta=("Back to Event Preview", url_for(route_endpoint)),
+                        code=400,
+                    )
             generation_error = None
             try:
                 cards_payload = stub.generate_cards(form_data)
@@ -36372,7 +36726,12 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         sessions: list = []
         store_failed = False
         try:
-            sessions = list_sessions(limit=20)
+            # Tenant isolation: a chat title is the first line of another org's
+            # free-text brief (often an athlete name), so the landing list must
+            # be scoped to the active organisation — mirrors the /drafts index
+            # and _can_access_pack. Unstamped legacy chats stay visible, and the
+            # no-org sandbox (active pid None) keeps everything visible.
+            sessions = list_sessions(limit=20, profile_id=_active_profile_id())
         except Exception as e:
             log.warning("free-text: list_sessions failed: %s", e)
             store_failed = True
@@ -36431,7 +36790,8 @@ function copySpotlightCaption(btn, cardIdSafe) {{
       placeholder="e.g. A bold thank-you post for our sponsor Riverside Physio after a great gala weekend — upbeat, club colours."
       style="width:100%;font-size:14px;padding:10px 12px;border:1px solid var(--panel);border-radius:8px;background:var(--bg);color:var(--ink);resize:vertical">{_h(quick_prompt)}</textarea>
     <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:12px">
-      <label class="btn secondary" style="font-size:13px;cursor:pointer;margin:0">
+      <label class="btn secondary" style="font-size:13px;cursor:pointer;margin:0" tabindex="0" role="button"
+        onkeydown="if(event.key==='Enter'||event.key===' '){{event.preventDefault();this.querySelector('input[type=file]').click();}}">
         &#x1F4CE; Add photos
         <input type="file" name="photos" accept="image/*" multiple style="display:none"
           onchange="var n=this.files.length;var s=document.getElementById('ft-photo-count');if(s)s.textContent=n?(n+' photo'+(n===1?'':'s')+' attached'):'';">
@@ -36513,6 +36873,12 @@ function copySpotlightCaption(btn, cardIdSafe) {{
 
         prompt = (request.form.get("prompt") or "").strip()
         if not prompt:
+            return redirect(url_for("free_text_chat_page"))
+        if len(prompt) > _FREE_TEXT_MAX_PROMPT_CHARS:
+            session["free_text_quick_error"] = (
+                f"That prompt is very long ({len(prompt):,} characters). "
+                f"Please keep it under {_FREE_TEXT_MAX_PROMPT_CHARS:,} characters."
+            )
             return redirect(url_for("free_text_chat_page"))
         active_pid = _active_profile_id() or ""
 
@@ -36602,14 +36968,31 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             return redirect(url_for("free_text_chat_page"))
         from mediahub.free_text_chat.session import create_session
 
-        s = create_session()
+        # Stamp the creating organisation so the chat is tenant-scoped from
+        # birth (mirrors runs/packs). Without this every web chat is ownerless
+        # and readable by any org via /free-text/chat/<id>.
+        s = create_session(profile_id=_active_profile_id() or "")
         return redirect(url_for("free_text_chat_view", chat_id=s.chat_id))
+
+    def _load_accessible_chat(chat_id):
+        """Load a chat only if the active organisation may access it.
+
+        Returns None both when the chat is missing AND when it belongs to a
+        different organisation — a foreign chat is indistinguishable from a
+        nonexistent one, the same anti-enumeration posture as the run/pack
+        guards (_can_access_run / _can_access_pack). Legacy ownerless chats
+        stay accessible so historical conversations aren't orphaned.
+        """
+        from mediahub.free_text_chat.session import load_session, can_access_session
+
+        s = load_session(chat_id)
+        if s is None or not can_access_session(s, _active_profile_id()):
+            return None
+        return s
 
     @app.route("/free-text/chat/<chat_id>", methods=["GET"])
     def free_text_chat_view(chat_id):
-        from mediahub.free_text_chat.session import load_session
-
-        s = load_session(chat_id)
+        s = _load_accessible_chat(chat_id)
         if not s:
             return _recovery_page(
                 "Chat not found",
@@ -36733,6 +37116,8 @@ function copySpotlightCaption(btn, cardIdSafe) {{
   </div>
 </section>
 
+{_llm_unavailable_banner()}
+
 <div id="chat-log">
   {msgs_html or '<p class="muted">Start by telling the assistant what you want to post. It will ask questions, research the web, and propose a brief.</p>'}
 </div>
@@ -36746,7 +37131,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             {_CYCLE_PH_ATTR_MOMENT} style="min-height:110px" required></textarea>
   <div style="margin-top:var(--sp-3);display:flex;gap:var(--sp-3);align-items:center;flex-wrap:wrap">
     <button type="submit" class="btn">Send reply &rarr;</button>
-    <span class="strap" style="color:var(--ink-muted)">Assistant uses Claude · web research</span>
+    <span class="strap" style="color:var(--ink-muted)">AI assistant · web research</span>
   </div>
 </form>
 """
@@ -36788,10 +37173,10 @@ function copySpotlightCaption(btn, cardIdSafe) {{
 
     @app.route("/free-text/chat/<chat_id>/send", methods=["POST"])
     def free_text_chat_send(chat_id):
-        from mediahub.free_text_chat.session import load_session, save_session
+        from mediahub.free_text_chat.session import save_session
         from mediahub.free_text_chat.agent import next_assistant_turn
 
-        s = load_session(chat_id)
+        s = _load_accessible_chat(chat_id)
         if not s:
             return _recovery_page(
                 "Chat not found",
@@ -36800,6 +37185,14 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 secondary_cta=("Free-text home", url_for("free_text_chat_page")),
             )
         msg = (request.form.get("message") or "").strip()
+        if len(msg) > _FREE_TEXT_MAX_PROMPT_CHARS:
+            s.add_assistant_message(
+                f"That reply is very long ({len(msg):,} characters). Please shorten "
+                f"it to under {_FREE_TEXT_MAX_PROMPT_CHARS:,} characters and send again.",
+                meta={"error": True},
+            )
+            save_session(s)
+            return redirect(url_for("free_text_chat_view", chat_id=chat_id))
         if msg:
             s.add_user_message(msg)
             save_session(s)
@@ -36826,15 +37219,28 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         brief = s.accepted_brief
         if not brief:
             return None
+        # The chat brief is the propose_brief tool input verbatim (unconstrained
+        # schema), so hashtags may arrive as a list, a string, or nothing. Reuse
+        # the quick path's normaliser so a stray string isn't iterated
+        # character-by-character into per-letter chips at render/export.
+        from mediahub.free_text_chat.agent import normalise_hashtags
+
+        hashtags = normalise_hashtags(brief.get("hashtags"))
+        # The chat brief is the propose_brief tool input verbatim (unconstrained
+        # schema), so headline/body/visual_concept may arrive as a non-string
+        # (a list of lines, a nested object, a number). Coerce to str before the
+        # caption join — a raw list headline used to raise a TypeError that 500'd
+        # accept/generate *and* bricked the chat (the brief was already frozen,
+        # so every retry hit the same crash).
+        _headline = str(brief.get("headline") or "").strip()
+        _body = str(brief.get("body") or "").strip()
         card = {
-            "platform": brief.get("platform") or "Instagram",
-            "caption": "\n\n".join(
-                [p for p in [brief.get("headline", ""), brief.get("body", "")] if p]
-            ).strip(),
-            "hashtags": brief.get("hashtags") or [],
+            "platform": str(brief.get("platform") or "Instagram").strip() or "Instagram",
+            "caption": "\n\n".join([p for p in [_headline, _body] if p]).strip(),
+            "hashtags": hashtags,
             # D-25: prompt-led chat draft — no fabricated confidence badge.
             "confidence": None,
-            "notes": brief.get("visual_concept", "") or "",
+            "notes": str(brief.get("visual_concept") or "").strip(),
             "status": "queue",
         }
         pack_form_data = {
@@ -36879,9 +37285,9 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         # "Generate content from this brief" button and a third "Create graphic"
         # click. Accepting the brief and building the draft is a single POST that
         # ends on the rendered graphic (?autographic=1), like the quick path.
-        from mediahub.free_text_chat.session import load_session, save_session
+        from mediahub.free_text_chat.session import save_session
 
-        s = load_session(chat_id)
+        s = _load_accessible_chat(chat_id)
         if not s:
             return redirect(url_for("free_text_chat_page"))
         if s.pending_brief:
@@ -36895,17 +37301,22 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 }
             )
             save_session(s)
-        pack_url = _chat_brief_to_pack(s, chat_id, request.form.getlist("library_asset_id"))
-        if pack_url:
-            return redirect(pack_url)
+            # Build the draft exactly once, on the accepting POST. A stale or
+            # double-submitted re-POST (pending_brief already cleared) falls
+            # through to the chat view rather than minting another draft —
+            # deliberate regeneration is the explicit "Generate content from
+            # this brief" action (free_text_chat_generate).
+            pack_url = _chat_brief_to_pack(s, chat_id, request.form.getlist("library_asset_id"))
+            if pack_url:
+                return redirect(pack_url)
         return redirect(url_for("free_text_chat_view", chat_id=chat_id))
 
     @app.route("/free-text/chat/<chat_id>/decline", methods=["POST"])
     def free_text_chat_decline(chat_id):
-        from mediahub.free_text_chat.session import load_session, save_session
+        from mediahub.free_text_chat.session import save_session
         from mediahub.free_text_chat.agent import next_assistant_turn
 
-        s = load_session(chat_id)
+        s = _load_accessible_chat(chat_id)
         if not s:
             return redirect(url_for("free_text_chat_page"))
         if s.pending_brief:
@@ -36929,9 +37340,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
     def free_text_chat_generate(chat_id):
         """Turn an accepted brief into a saved stub-pack so the existing
         approval pills + export flow apply."""
-        from mediahub.free_text_chat.session import load_session
-
-        s = load_session(chat_id)
+        s = _load_accessible_chat(chat_id)
         if not s or not s.accepted_brief:
             return redirect(url_for("free_text_chat_view", chat_id=chat_id))
         # B-6: land on the draft with the graphic already rendering, like the
@@ -37358,7 +37767,14 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         existing = load_pack(pack_id)
         if not _can_access_pack(existing, _active_profile_id()):
             return jsonify({"ok": False, "error": "invalid_request"}), 400
-        status = (request.form.get("status") or "").strip().lower()
+        # Read the status from a JSON body (the pill posts application/json so
+        # the write stays inside the CSRF layer's same-origin JSON exemption);
+        # fall back to a form field for any legacy caller.
+        _body = request.get_json(silent=True) if request.is_json else None
+        status = (
+            (_body or {}).get("status") if isinstance(_body, dict) else request.form.get("status")
+        ) or ""
+        status = status.strip().lower()
         rec = update_card_status(pack_id, card_idx, status)
         if not rec:
             return jsonify({"ok": False, "error": "invalid_request"}), 400
@@ -37606,6 +38022,25 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         swimmer_key = str(fd.get("swimmer_key") or "")
         result, err = _compose_spotlight_caption(run_id, swimmer_key, tone=tone)
         if err is not None or not result:
+            _err_status = err[1] if (isinstance(err, tuple) and len(err) == 2) else None
+            if _err_status == 400:
+                # _compose_spotlight_caption returns a 400 only for the
+                # "no achievements approved yet" case — the reviewer un-approved
+                # every moment after building the draft. Name the real cause
+                # instead of the generic AI-transient message.
+                return jsonify(
+                    {
+                        "caption": "",
+                        "tone": _tone_in,
+                        "live": True,
+                        "generated_at": now_iso,
+                        "error": "no_approved",
+                        "message": (
+                            "No moments are approved for this spotlight. Approve at "
+                            "least one on the spotlight page, then regenerate."
+                        ),
+                    }
+                ), 200
             # _compose_spotlight_caption returns a rendered HTML error page on
             # provider failure; a fetch caller wants JSON, so translate it.
             return jsonify(
@@ -37782,12 +38217,24 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         from mediahub.club_platform.athlete_spotlight import build_spotlight_pack
 
         fd = (rec or {}).get("form_data") or {}
+        # Type guard, mirroring api_stub_pack_caption / _caption_assist: only a
+        # genuine athlete-spotlight pack drives this reel. A non-spotlight pack
+        # that happened to carry run_id + swimmer_key would otherwise slip
+        # through on presence alone.
+        if fd.get("source") != "athlete_spotlight":
+            return None, (jsonify({"error": "unsupported_type"}), 400)
         run_id = str(fd.get("run_id") or "")
         swimmer_key = str(fd.get("swimmer_key") or "")
         if not run_id or not swimmer_key:
             return None, (jsonify({"error": "spotlight_context_missing"}), 400)
         run_data = _load_run(run_id)
         if run_data is None:
+            return None, (jsonify({"error": "run_not_found"}), 404)
+        # Tenant isolation, mirroring _compose_spotlight_caption: the pack owns
+        # the access check for its own row, but the run it names is a separate
+        # object — never render another org's run just because the pack points
+        # at it.
+        if not _can_access_run(run_id, run_data, _active_profile_id()):
             return None, (jsonify({"error": "run_not_found"}), 404)
         try:
             pack = build_spotlight_pack(run_data, swimmer_key)
@@ -37989,6 +38436,8 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         if not _can_access_pack(rec, _active_profile_id()):
             return jsonify({"error": "pack_not_found"}), 404
         fd = (rec or {}).get("form_data") or {}
+        if fd.get("source") != "athlete_spotlight":
+            return jsonify({"error": "unsupported_type"}), 400
         run_id = str(fd.get("run_id") or "")
         swimmer_key = str(fd.get("swimmer_key") or "")
         if not run_id or not swimmer_key:
@@ -39989,7 +40438,7 @@ document.addEventListener('click', function (ev) {
 
     def _twofa_setup_body(email: str, error: str = "") -> str:
         """The enrolment page: QR of the otpauth URI + copyable secret."""
-        from mediahub.sites import qr as _qr
+        from mediahub.web import qr as _qr
 
         secret = session.get("totp_setup_secret") or _auth.totp_generate_secret()
         session["totp_setup_secret"] = secret
@@ -42595,31 +43044,71 @@ what you're doing, what they should do.</p>
             try:
                 if action == "add":
                     role = (request.form.get("role") or _tenancy.ROLE_MEMBER).strip().lower()
+                    # Two forms POST action=add: the "Add a member" form (which
+                    # carries via=add_form) and the per-row change-role picker
+                    # (which does not). Read the prior row once so we can tell a
+                    # brand-new invite from an edit of an existing membership and
+                    # behave correctly — and safely — for each.
+                    prior = store.get(target, pid)
+                    is_edit = prior is not None and prior.status != _tenancy.STATUS_REMOVED
+                    # Validate the address only when creating a NEW membership.
+                    # Reject one that can never activate (e.g. "coach@club" with no
+                    # TLD — the store only checks for an "@", so it would sit
+                    # "invited" forever) or that hides a control / line-separator
+                    # character (U+2028/U+2029/U+0085 split the JSON-lines ledger
+                    # on read-back, silently losing the row after a "success").
+                    # An edit targets a row that already exists, so re-validating
+                    # would wedge the role picker of a legacy dotless address.
+                    if not is_edit:
+                        if not _auth._looks_like_email(target) or any(
+                            (ord(ch) < 0x20 or ch in "\u2028\u2029\u0085") for ch in target
+                        ):
+                            raise _tenancy.TenancyError(
+                                "Enter a valid email address (like coach@club.org)."
+                            )
+                        if len(target) > 254:  # RFC 5321 address ceiling
+                            raise _tenancy.TenancyError("That email address is too long.")
+                    # The "Add a member" form adds someone new — it must never be a
+                    # silent role change. If the address is already an active
+                    # member, say so instead of demoting them to the form's default
+                    # seat; role changes go through the per-row picker.
+                    if (
+                        (request.form.get("via") or "").strip() == "add_form"
+                        and prior
+                        and prior.status == _tenancy.STATUS_ACTIVE
+                    ):
+                        raise _tenancy.TenancyError(
+                            f"{prior.email} is already a member — use the role "
+                            "selector in their row to change their role."
+                        )
                     # Don't let the upsert demote the last active owner to a
                     # non-owner seat — that would leave the workspace with no
                     # admin (the same invariant ``remove`` protects).
-                    if role != _tenancy.ROLE_OWNER:
-                        cur = store.get(target, pid)
-                        if (
-                            cur
-                            and cur.status == _tenancy.STATUS_ACTIVE
-                            and cur.role == _tenancy.ROLE_OWNER
-                        ):
-                            norm_target = _tenancy.normalize_email(target)
-                            others = [
-                                x
-                                for x in store.list_for_profile(pid)
-                                if x.role == _tenancy.ROLE_OWNER
-                                and x.status == _tenancy.STATUS_ACTIVE
-                                and x.email != norm_target
-                            ]
-                            if not others:
-                                raise _tenancy.TenancyError(
-                                    "Make another member an owner before changing "
-                                    "the last owner's role."
-                                )
+                    if (
+                        role != _tenancy.ROLE_OWNER
+                        and prior
+                        and prior.status == _tenancy.STATUS_ACTIVE
+                        and prior.role == _tenancy.ROLE_OWNER
+                    ):
+                        norm_target = _tenancy.normalize_email(target)
+                        others = [
+                            x
+                            for x in store.list_for_profile(pid)
+                            if x.role == _tenancy.ROLE_OWNER
+                            and x.status == _tenancy.STATUS_ACTIVE
+                            and x.email != norm_target
+                        ]
+                        if not others:
+                            raise _tenancy.TenancyError(
+                                "Make another member an owner before changing "
+                                "the last owner's role."
+                            )
                     has_account = _user_store().get(target) is not None
-                    inviter = user_email or _auth._dev_operator_email()
+                    # Stamp the inviter only on a NEW row. On an edit pass "" so
+                    # the store carries the original inviter forward — the column
+                    # must show who actually invited them, not whoever last
+                    # touched their role.
+                    inviter = "" if is_edit else (user_email or _auth._dev_operator_email())
                     m = store.add(
                         target,
                         pid,
@@ -42630,7 +43119,20 @@ what you're doing, what they should do.</p>
                     )
                     _invalidate_memberships_snapshot()
                     if m.status == _tenancy.STATUS_ACTIVE:
-                        notice = f"{m.email} added as {m.role}."
+                        notice = (
+                            f"{m.email} role updated to {m.role}."
+                            if is_edit
+                            else f"{m.email} added as {m.role}."
+                        )
+                    elif is_edit:
+                        # Editing a still-invited member's seat: update the role
+                        # but do NOT re-send the invite (that would email them
+                        # again on every tweak) and make no fresh "on its way"
+                        # claim — the original invite still stands.
+                        notice = (
+                            f"{m.email} is now {m.role} — still invited, activates "
+                            "when they sign up with that email."
+                        )
                     else:
                         # PC.14: deliver the invite when the email seam is
                         # configured; otherwise say honestly that the link
@@ -42640,12 +43142,17 @@ what you're doing, what they should do.</p>
                             "activates when they sign up with that email."
                         )
                         delivered = _send_invite_email(m.email, pid)
-                        notice += (
-                            " An invite email is on its way."
-                            if delivered
-                            else " Email delivery isn't configured here, so share "
-                            "the signup link with them yourself."
-                        )
+                        if delivered:
+                            notice += " An invite email is on its way."
+                        else:
+                            # No mail seam configured: the owner has to pass the
+                            # link on themselves, so actually SHOW it rather than
+                            # referring to a "signup link" that appears nowhere on
+                            # the page.
+                            notice += (
+                                " Email delivery isn't configured here, so share the "
+                                f"signup link with them: {url_for('signup_page', _external=True)}"
+                            )
                 elif action == "remove":
                     store.remove(target, pid)
                     _invalidate_memberships_snapshot()
@@ -42684,18 +43191,29 @@ what you're doing, what they should do.</p>
                 'style="display:flex;gap:6px;align-items:center;margin:0">'
                 '<input type="hidden" name="action" value="add"/>'
                 f'<input type="hidden" name="email" value="{_h(m.email)}"/>'
-                f'<select name="role" style="padding:3px 6px;font-size:12px">{opts}</select>'
+                f'<select name="role" aria-label="Change role for {_h(m.email)}" '
+                f'style="padding:3px 6px;font-size:12px">{opts}</select>'
                 '<button type="submit" class="btn secondary" '
                 'style="padding:3px 9px;font-size:11px">Update</button></form>'
             )
 
         def _row_html(m):
             role_badge = _role_cell_html(m)
+            # The bare ``.pill`` class has no base rule outside a profile card,
+            # so give both status badges self-contained pill styling here — else
+            # "Active" renders as plain text and "Invited" loses its shape.
+            _pill_base = (
+                "display:inline-block;padding:2px 9px;border-radius:999px;"
+                "font-size:11px;font-weight:600;border:1px solid "
+            )
             status_badge = {
-                _tenancy.STATUS_ACTIVE: '<span class="pill">Active</span>',
+                _tenancy.STATUS_ACTIVE: (
+                    f'<span class="pill" style="{_pill_base}rgba(16,185,129,0.30);'
+                    'background:rgba(16,185,129,0.10);color:var(--good)">Active</span>'
+                ),
                 _tenancy.STATUS_INVITED: (
-                    '<span class="pill" style="background:rgba(245,158,11,0.10);'
-                    'border-color:rgba(245,158,11,0.30);color:var(--warn)">'
+                    f'<span class="pill" style="{_pill_base}rgba(245,158,11,0.30);'
+                    'background:rgba(245,158,11,0.10);color:var(--warn)">'
                     "Invited — activates at signup</span>"
                 ),
             }.get(m.status, "")
@@ -42704,8 +43222,8 @@ what you're doing, what they should do.</p>
                 remove_html = (
                     f'<form method="post" action="{url_for("organisation_members_page")}" '
                     'style="display:inline" '
-                    'onsubmit="return confirm(\'Remove this member from the organisation? '
-                    'They lose access immediately.\')">'
+                    "onsubmit=\"return confirm('Remove this member from the organisation? "
+                    "They lose access immediately.')\">"
                     '<input type="hidden" name="action" value="remove"/>'
                     f'<input type="hidden" name="email" value="{_h(m.email)}"/>'
                     '<button type="submit" class="btn secondary" '
@@ -42750,11 +43268,13 @@ what you're doing, what they should do.</p>
                 f'<form method="post" action="{url_for("organisation_members_page")}" '
                 'style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">'
                 '<input type="hidden" name="action" value="add"/>'
-                "<div><label>Email</label><br/>"
-                '<input type="email" name="email" required placeholder="coach@club.org" '
+                '<input type="hidden" name="via" value="add_form"/>'
+                '<div><label for="mh-member-email">Email</label><br/>'
+                '<input type="email" id="mh-member-email" name="email" required '
+                'autocomplete="email" placeholder="coach@club.org" '
                 'style="padding:8px 10px;min-width:min(260px,100%)"/></div>'
-                "<div><label>Role</label><br/>"
-                '<select name="role" style="padding:8px 10px">'
+                '<div><label for="mh-member-role">Role</label><br/>'
+                '<select id="mh-member-role" name="role" style="padding:8px 10px">'
                 + "".join(
                     f'<option value="{r}"{" selected" if r == _tenancy.ROLE_MEMBER else ""}>'
                     f"{_h(_perms.role_label(r))} — {_h(_perms.role_description(r))}</option>"
@@ -42786,11 +43306,12 @@ what you're doing, what they should do.</p>
                 '<table class="mh-table-stack" style="width:100%;border-collapse:collapse;font-size:13px">'
                 '<thead><tr style="text-align:left;border-bottom:1px solid '
                 'rgba(255,255,255,0.08)">'
-                '<th style="padding:10px 12px">Email</th>'
-                '<th style="padding:10px 12px">Role</th>'
-                '<th style="padding:10px 12px">Status</th>'
-                '<th style="padding:10px 12px">Invited by</th>'
-                "<th></th></tr></thead>"
+                '<th scope="col" style="padding:10px 12px">Email</th>'
+                '<th scope="col" style="padding:10px 12px">Role</th>'
+                '<th scope="col" style="padding:10px 12px">Status</th>'
+                '<th scope="col" style="padding:10px 12px">Invited by</th>'
+                '<th scope="col" aria-label="Actions"></th>'
+                "</tr></thead>"
                 f"<tbody>{rows_html}</tbody></table></div>"
             )
         else:
@@ -43096,7 +43617,7 @@ what you're doing, what they should do.</p>
             )
         return chips or '<span style="color:var(--ink-muted);font-size:12px">No palette set</span>'
 
-    def _brand_kit_card_html(prof, kit, default_id: str) -> str:
+    def _brand_kit_card_html(prof, kit, default_id: str, can_admin: bool = True) -> str:
         from mediahub.brand.kits import LOCKABLE_TOKENS
 
         is_default = kit.kit_id == default_id
@@ -43170,16 +43691,34 @@ what you're doing, what they should do.</p>
         )
 
         def _kit_colour_slot(slot: str, label: str) -> str:
+            # A slot the kit never set must NOT be silently persisted from the
+            # picker's on-brand fallback: <input type=color> always submits a
+            # value, so an unset slot rendered at _pal_default would be read back
+            # by _form_palette() as a real user choice and fabricate a colour the
+            # club never picked (CLAUDE.md: palettes are evidence-grounded, never
+            # invented). Gate each picker behind a "set" checkbox: an unset slot
+            # renders its picker DISABLED (disabled inputs are not submitted), so
+            # a no-op save round-trips the palette unchanged. Ticking the box
+            # enables the picker so the slot can be set; unticking a set slot
+            # clears it.
             cur = pal.get(slot, "")
-            val = cur if str(cur).startswith("#") else _pal_default
+            is_set = str(cur).startswith("#")
+            val = cur if is_set else _pal_default
+            checked = " checked" if is_set else ""
+            disabled = "" if is_set else " disabled"
             return (
-                '<label style="display:flex;flex-direction:column;gap:3px;'
+                '<div style="display:flex;flex-direction:column;gap:3px;'
                 'font-size:11px;color:var(--ink-muted)">'
-                f"{label}"
-                f'<input type="color" name="{slot}" value="{_h(val)}" '
+                f"<span>{label}</span>"
+                '<span style="display:flex;align-items:center;gap:6px">'
+                f'<input type="checkbox"{checked} aria-label="Set {_h(label.lower())} colour" '
+                'onchange="this.nextElementSibling.disabled=!this.checked" '
+                'style="cursor:pointer"/>'
+                f'<input type="color" name="{slot}" value="{_h(val)}"{disabled} '
+                f'aria-label="{_h(label)} colour" '
                 'style="width:64px;height:40px;padding:0;border:1px solid var(--border);'
                 'border-radius:4px;background:var(--panel);cursor:pointer"/>'
-                "</label>"
+                "</span></div>"
             )
 
         palette_pickers = "".join(
@@ -43236,7 +43775,8 @@ what you're doing, what they should do.</p>
             f'<form method="post" action="{url_for("api_brand_kit_palette_import", kit_id=kit.kit_id)}" '
             'enctype="multipart/form-data" style="margin-top:12px;display:flex;gap:8px;'
             'align-items:center;flex-wrap:wrap">'
-            '<input type="file" name="palette_file" accept=".ase,.json,application/json" required />'
+            '<input type="file" name="palette_file" accept=".ase,.json,application/json" '
+            'aria-label="Palette file to import (Adobe .ase or Color JSON)" required />'
             '<button class="btn secondary" type="submit">Import palette file</button>'
             '<span style="font-size:12px;color:var(--ink-muted)">Adobe .ase or Color JSON</span>'
             "</form>"
@@ -43261,8 +43801,12 @@ what you're doing, what they should do.</p>
             + (f" · Font: {_h(kit.font_pairing)}" if kit.font_pairing else "")
             + (f" · Tone: {_h(kit.tone)}" if kit.tone else "")
             + "</p>"
-            f'<div style="margin-top:10px">{actions}</div>'
-            f"{edit_form}</div>"
+            # Mutating controls (make-default / delete / edit / import / resweep)
+            # only for an admin: a bound non-owner gets a read-only card instead
+            # of controls that would dead-end in a 404 (the POST routes gate on
+            # _brand_can_admin). See brand_home_page.
+            + (f'<div style="margin-top:10px">{actions}</div>{edit_form}' if can_admin else "")
+            + "</div>"
         )
 
     def _brand_identity_html(prof) -> str:
@@ -43318,7 +43862,7 @@ what you're doing, what they should do.</p>
                 )
         return "".join(bits)
 
-    def _render_brand_home(prof) -> str:
+    def _render_brand_home(prof, can_admin: bool = True) -> str:
         from mediahub.brand import kits as _kits
 
         default_id = _kits.default_kit_id(prof)
@@ -43333,36 +43877,74 @@ what you're doing, what they should do.</p>
                 '<div class="mh-notice" style="margin-bottom:14px;border-color:var(--bad);'
                 f'color:var(--bad)">{_h(err)}</div>'
             )
-        kit_cards = "".join(_brand_kit_card_html(prof, k, default_id) for k in all_kits)
+        kit_cards = "".join(_brand_kit_card_html(prof, k, default_id, can_admin) for k in all_kits)
         create_form = (
-            '<details style="margin-top:8px"><summary style="cursor:pointer;color:var(--accent)">'
-            "+ New kit</summary>"
-            f'<form method="post" action="{url_for("api_brand_kit_create")}" '
-            'style="display:flex;flex-direction:column;gap:8px;margin-top:12px;max-width:520px">'
-            '<input class="mh-input" name="name" placeholder="Kit name (e.g. Acme co-brand, Gala 2026)" required />'
-            '<select class="mh-input" name="role">'
-            '<option value="sponsor">Sponsor co-brand</option>'
-            '<option value="event">Event sub-brand</option>'
-            '<option value="section">Team / section</option>'
-            '<option value="personal">Personal</option>'
-            "</select>"
-            '<div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">'
-            + "".join(
-                '<label style="display:flex;flex-direction:column;gap:3px;'
-                'font-size:11px;color:var(--ink-muted)">'
-                f"{label}"
-                f'<input type="color" name="{slot}" value="{default}" '
-                'style="width:64px;height:40px;padding:0;border:1px solid var(--border);'
-                'border-radius:4px;background:var(--panel);cursor:pointer"/></label>'
-                for slot, label, default in (
-                    ("primary", "Primary", "#0a2540"),
-                    ("secondary", "Secondary", "#5b6b7a"),
-                    ("accent", "Accent", "#22d3ee"),
+            ""
+            if not can_admin
+            else (
+                '<details style="margin-top:8px"><summary style="cursor:pointer;color:var(--accent)">'
+                "+ New kit</summary>"
+                f'<form method="post" action="{url_for("api_brand_kit_create")}" '
+                'style="display:flex;flex-direction:column;gap:8px;margin-top:12px;max-width:520px">'
+                '<input class="mh-input" name="name" placeholder="Kit name (e.g. Acme co-brand, Gala 2026)" required />'
+                '<select class="mh-input" name="role">'
+                '<option value="sponsor">Sponsor co-brand</option>'
+                '<option value="event">Event sub-brand</option>'
+                '<option value="section">Team / section</option>'
+                '<option value="personal">Personal</option>'
+                "</select>"
+                '<div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">'
+                + "".join(
+                    '<label style="display:flex;flex-direction:column;gap:3px;'
+                    'font-size:11px;color:var(--ink-muted)">'
+                    f"{label}"
+                    f'<input type="color" name="{slot}" value="{default}" '
+                    'style="width:64px;height:40px;padding:0;border:1px solid var(--border);'
+                    'border-radius:4px;background:var(--panel);cursor:pointer"/></label>'
+                    for slot, label, default in (
+                        ("primary", "Primary", "#0a2540"),
+                        ("secondary", "Secondary", "#5b6b7a"),
+                        ("accent", "Accent", "#22d3ee"),
+                    )
                 )
+                + "</div>"
+                '<div><button class="btn" type="submit">Create kit</button></div>'
+                "</form></details>"
             )
-            + "</div>"
-            '<div><button class="btn" type="submit">Create kit</button></div>'
-            "</form></details>"
+        )
+        # Re-render sweep driver (admin-only). Both fetches send the session CSRF
+        # token via the X-CSRF-Token header so they pass _csrf_protect in
+        # production (the resweep POSTs carry no JSON body, so the content-type
+        # exemption would not cover them), and reject on !r.ok so a 403/404/500
+        # shows the .catch failure text instead of a misleading benign result.
+        resweep_js = (
+            "<script>(function(){"
+            f"var CSRF='{_csrf_token()}';"
+            "function jok(r){if(!r.ok){throw new Error('http '+r.status);}return r.json();}"
+            "document.querySelectorAll('.mh-resweep').forEach(function(box){"
+            "var prev=box.querySelector('.mh-resweep-preview'),"
+            "ap=box.querySelector('.mh-resweep-apply'),out=box.querySelector('.mh-resweep-out');"
+            "prev.addEventListener('click',function(){out.textContent='Checking…';"
+            "fetch(box.dataset.preview,{method:'POST',headers:{'X-CSRF-Token':CSRF}}).then(jok)"
+            ".then(function(d){var n=d.n_affected||0;"
+            "out.textContent=n?(n+' card(s) would change'):'No cards would change';"
+            "ap.style.display=n?'inline-block':'none';}).catch(function(){out.textContent='Preview failed.';});});"
+            # Chunked apply: each call renders at most a few cards (Playwright
+            # is seconds per card, and one big synchronous apply would blow the
+            # worker timeout), walking the offset cursor until remaining==0.
+            "ap.addEventListener('click',function(){"
+            "var total=0,off=0;ap.disabled=true;"
+            "function step(){out.textContent='Re-rendering…'+(total?(' ('+total+' done)'):'');"
+            "fetch(box.dataset.apply+'?limit=8&offset='+off,{method:'POST',headers:{'X-CSRF-Token':CSRF}})"
+            ".then(jok)"
+            ".then(function(d){total+=(d.n_rendered||0);"
+            "off=(typeof d.next_offset==='number')?d.next_offset:(off+8);"
+            "if(d.remaining){out.textContent='Re-rendered '+total+' card(s), '+d.remaining+' left…';step();return;}"
+            "out.textContent='Re-rendered '+total+' card(s) — re-queued for review.';"
+            "ap.disabled=false;}).catch(function(){"
+            "out.textContent='Apply failed'+(total?(' after '+total+' card(s)'):'')+'.';ap.disabled=false;});}"
+            "step();});"
+            "});})();</script>"
         )
         body = (
             '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-6);padding-bottom:var(--sp-4);margin-bottom:var(--sp-4)">'
@@ -43378,31 +43960,12 @@ what you're doing, what they should do.</p>
             '<p style="margin-top:24px"><a class="btn secondary" '
             f'href="{url_for("organisation_setup")}">Edit organisation &amp; brand DNA</a></p>'
             # Re-render sweep driver: preview the diff, then apply (re-queues for review).
-            "<script>(function(){"
-            "document.querySelectorAll('.mh-resweep').forEach(function(box){"
-            "var prev=box.querySelector('.mh-resweep-preview'),"
-            "ap=box.querySelector('.mh-resweep-apply'),out=box.querySelector('.mh-resweep-out');"
-            "prev.addEventListener('click',function(){out.textContent='Checking…';"
-            "fetch(box.dataset.preview,{method:'POST'}).then(function(r){return r.json();})"
-            ".then(function(d){var n=d.n_affected||0;"
-            "out.textContent=n?(n+' card(s) would change'):'No cards would change';"
-            "ap.style.display=n?'inline-block':'none';}).catch(function(){out.textContent='Preview failed.';});});"
-            # Chunked apply: each call renders at most a few cards (Playwright
-            # is seconds per card, and one big synchronous apply would blow the
-            # worker timeout), walking the offset cursor until remaining==0.
-            "ap.addEventListener('click',function(){"
-            "var total=0,off=0;ap.disabled=true;"
-            "function step(){out.textContent='Re-rendering…'+(total?(' ('+total+' done)'):'');"
-            "fetch(box.dataset.apply+'?limit=8&offset='+off,{method:'POST'})"
-            ".then(function(r){return r.json();})"
-            ".then(function(d){total+=(d.n_rendered||0);"
-            "off=(typeof d.next_offset==='number')?d.next_offset:(off+8);"
-            "if(d.remaining){out.textContent='Re-rendered '+total+' card(s), '+d.remaining+' left…';step();return;}"
-            "out.textContent='Re-rendered '+total+' card(s) — re-queued for review.';"
-            "ap.disabled=false;}).catch(function(){"
-            "out.textContent='Apply failed'+(total?(' after '+total+' card(s)'):'')+'.';ap.disabled=false;});}"
-            "step();});"
-            "});})();</script>"
+            # These are same-origin state-changing POSTs that carry no JSON body,
+            # so the app's CSRF layer (_csrf_protect) requires the X-CSRF-Token
+            # header — without it both fetches 403 in production. The .then also
+            # rejects on !r.ok so an error status surfaces as a visible failure
+            # instead of a false 'No cards would change' / '0 re-queued'.
+            + (resweep_js if can_admin else "")
         )
         return _layout("Brand platform", body, active="settings")
 
@@ -43414,7 +43977,10 @@ what you're doing, what they should do.</p>
         prof = _active_profile()
         if prof is None:
             return redirect(url_for("organisation_setup"))
-        return _render_brand_home(prof)
+        # A bound non-owner (Viewer/Reviewer/Editor) can view the brand home but
+        # not mutate kits — mirror the api_brand_kit_* POST gate so they see a
+        # read-only page rather than admin controls that dead-end in a 404.
+        return _render_brand_home(prof, can_admin=_brand_can_admin(pid))
 
     def _brand_redirect(msg: str = "", err: str = ""):
         from urllib.parse import urlencode
@@ -43445,10 +44011,18 @@ what you're doing, what they should do.</p>
         from mediahub.brand.kits import new_kit_id, upsert_kit, normalise_kit
 
         prof = _active_profile()
+        # A created kit is never the primary: an org has exactly one primary
+        # livery (synthesised or materialised), and a second role="primary" kit
+        # is undeletable (delete_kit protects every primary). Constrain to the
+        # four creatable roles so a hand-crafted/invalid role can't slip past
+        # normalise_kit's "unknown → primary" coercion and mint a duplicate.
+        role = (request.form.get("role") or "sponsor").strip().lower()
+        if role not in ("sponsor", "event", "section", "personal"):
+            role = "sponsor"
         raw = {
             "kit_id": new_kit_id(),
             "name": (request.form.get("name") or "").strip(),
-            "role": (request.form.get("role") or "sponsor").strip().lower(),
+            "role": role,
             "palette": _form_palette(),
         }
         kit = normalise_kit(raw)
@@ -43681,7 +44255,14 @@ what you're doing, what they should do.</p>
 
     def _brand_check_context(run_id: str, card_id: str):
         """Resolve (brief, kit, brand_kit) for a card, or an error response."""
-        run_data = _load_run(run_id)
+        # A run_id longer than the OS filename limit makes _load_run's p.exists()
+        # raise OSError(ENAMETOOLONG) (it stats outside its own try/except), which
+        # would 500 and log the internal RUNS_DIR path. Treat any such unusable
+        # id as a missing run — the anti-IDOR 404 the rest of this gate returns.
+        try:
+            run_data = _load_run(run_id)
+        except OSError:
+            return None, (jsonify({"error": "run_not_found"}), 404)
         if run_data is None:
             return None, (jsonify({"error": "run_not_found"}), 404)
         if not _can_access_run(run_id, run_data, _active_profile_id()):
@@ -44107,6 +44688,14 @@ what you're doing, what they should do.</p>
             ) -> str:
                 attr = "disabled" if disabled else ""
                 wrap_style = f"max-width:{max_width};" if max_width else ""
+                # The colour picker always needs a concrete value (it can't be
+                # empty), so it shows the effective colour (manual override, else
+                # the AI's pick). The hex TEXT field is the blankable control:
+                # pre-fill it ONLY with a real manual override, so an untouched
+                # slot posts blank and defers to the AI — exactly what the form
+                # copy promises. The AI's pick is shown as placeholder ghost text.
+                _mh = manual_pal.get(slot)
+                text_value = _mh if (isinstance(_mh, str) and _mh.startswith("#")) else ""
                 return (
                     f'<label style="display:flex;flex-direction:column;gap:4px;'
                     f'font-size:11.5px;color:var(--ink-dim);{wrap_style}">'
@@ -44118,7 +44707,8 @@ what you're doing, what they should do.</p>
                     f"border:1px solid var(--border);border-radius:4px;"
                     f'background:var(--panel);cursor:pointer;flex-shrink:0"/>'
                     f'<input type="text" name="palette_{slot}_hex" '
-                    f'id="palette-{slot}-hex" value="{_h(default_hex)}" '
+                    f'id="palette-{slot}-hex" value="{_h(text_value)}" '
+                    f'placeholder="{_h(default_hex)}" '
                     f'pattern="^#[0-9a-fA-F]{{6}}$" maxlength="7" '
                     f'data-palette-mirror="palette_{slot}" {attr} '
                     f'style="flex:1;min-width:0;padding:11px 10px;min-height:44px;'
@@ -44790,7 +45380,7 @@ what you're doing, what they should do.</p>
                 'style="margin-bottom:20px;border:1px solid rgba(255,180,84,0.5);'
                 'background:rgba(255,180,84,0.07)">'
                 '<h2 style="margin-top:0;font-size:18px;color:var(--ink)">'
-                f'Almost there &mdash; {_h(prof.display_name or "your organisation")} '
+                f"Almost there &mdash; {_h(prof.display_name or 'your organisation')} "
                 "isn&rsquo;t unlocked yet</h2>"
                 '<p style="font-size:14px;line-height:1.55;color:var(--ink);margin:0 0 12px">'
                 f"{_h(_lead)} Add <strong>any one</strong> of these and you&rsquo;re in:</p>"
@@ -45913,11 +46503,24 @@ function mhSetupMode(mode) {{
         )
         from mediahub.brand import palette as _palette
 
+        # The blankable ``palette_<slot>_hex`` text field is authoritative: the
+        # sibling ``<input type="color">`` can never submit an empty value, so
+        # reading it would make "leave a slot blank to fall back to the AI's
+        # pick" (promised on the form) impossible — every save would freeze the
+        # AI palette as a manual override. Prefer the hex mirror when the browser
+        # sent it; fall back to the colour input for non-browser callers (and the
+        # test corpus) that post only ``palette_<slot>``.
+        def _pal_slot(slot: str) -> str:
+            hexv = request.form.get(f"palette_{slot}_hex")
+            if hexv is not None:
+                return hexv.strip()
+            return (request.form.get(f"palette_{slot}") or "").strip()
+
         manual = _palette.sanitise_manual_palette(
-            primary=(request.form.get("palette_primary") or "").strip(),
-            secondary=(request.form.get("palette_secondary") or "").strip(),
-            accent=(request.form.get("palette_accent") or "").strip(),
-            fourth=(request.form.get("palette_fourth") or "").strip(),
+            primary=_pal_slot("primary"),
+            secondary=_pal_slot("secondary"),
+            accent=_pal_slot("accent"),
+            fourth=_pal_slot("fourth"),
             include_fourth=use_fourth,
         )
         prof.brand_palette_manual = manual
@@ -46096,7 +46699,9 @@ function mhSetupMode(mode) {{
             palette = kit.ensure_derived_palette()
         except Exception as e:
             log.warning("organisation_finalise: ensure_derived_palette failed: %s", e)
-            return jsonify({"error": "palette derivation failed", "detail": str(e)}), 500
+            # Log the exception server-side only; never echo str(e) back — it
+            # can carry the absolute DATA_DIR path / errno on a disk failure.
+            return jsonify({"error": "palette derivation failed"}), 500
         # Write the (possibly newly-cached) palette back to the profile
         # so subsequent requests see it. ensure_derived_palette mutated
         # kit in-place; we serialise that mutation through the profile
@@ -46106,7 +46711,9 @@ function mhSetupMode(mode) {{
             save_profile(prof)
         except Exception as e:
             log.warning("organisation_finalise: save_profile failed: %s", e)
-            return jsonify({"error": "profile save failed", "detail": str(e)}), 500
+            # As above — keep the raw exception (and any leaked path) in the
+            # server log, not in the client-visible JSON.
+            return jsonify({"error": "profile save failed"}), 500
         return jsonify(
             {
                 "seed_hex": (palette or {}).get("seed_hex", ""),
@@ -46337,7 +46944,7 @@ function mhSetupMode(mode) {{
                     "status": entry.get("status", "unknown"),
                     "playbook_age": entry.get("playbook_age", -1),
                     "regenerated": entry.get("regenerated", False),
-                    "voice_digest": (entry.get("dna") or {}).get("voice_summary", "")[:240],
+                    "voice_digest": ((entry.get("dna") or {}).get("voice_summary") or "")[:240],
                 }
                 prof.link_capture_state = state
                 save_profile(prof)
@@ -49305,22 +49912,36 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
 <tr class="mh-hp mh-asset-row" data-asset-id="{_h(ad.get("id", ""))}"
     data-desc="{_h(_meta_desc)}" data-athletes="{_h(athlete_names)}"
     data-venue="{_h(_meta_venue)}" data-event="{_h(_meta_event)}" data-tags="{_h(_meta_tags)}">
-  <td class="mh-bulk-cell"><input type="checkbox" class="mh-row-check" name="asset_ids" value="{_h(ad.get("id", ""))}" aria-label="Select photo"></td>
-  <td data-label="Preview"><span class=\"mh-lens\" style=\"display:inline-block;border-radius:4px;overflow:hidden;line-height:0\"><img src=\"{_file_url}\" style=\"max-height:60px;border-radius:4px;display:block\" /></span>{_hp_tpl}</td>
+  <td class="mh-bulk-cell"><input type="checkbox" class="mh-row-check" name="asset_ids" value="{
+                _h(ad.get("id", ""))
+            }" aria-label="Select photo"></td>
+  <td data-label="Preview"><span class=\"mh-lens\" style=\"display:inline-block;border-radius:4px;overflow:hidden;line-height:0\"><img src=\"{
+                _file_url
+            }\" style=\"max-height:60px;border-radius:4px;display:block\" /></span>{_hp_tpl}</td>
   <td data-label="Type">{_h(ad.get("type", ""))}</td>
   <td data-label="Athlete">{_h(athlete_names)}{_tag_badges}</td>
   <td data-label="Venue / Event">{_h(ad.get("linked_venue") or ad.get("linked_event") or "")}</td>
   <td data-label="Permission">{
                 _media_permission_select(ad.get("id", ""), ad.get("permission_status", ""))
                 if ad.get("type") not in _skip_tag_types
-                else _h(_MEDIA_PERMISSION_LABELS.get(ad.get("permission_status", ""), ad.get("permission_status", "")))
+                else _h(
+                    _MEDIA_PERMISSION_LABELS.get(
+                        ad.get("permission_status", ""), ad.get("permission_status", "")
+                    )
+                )
             }</td>
   <td data-label="Status">{_media_approval_badge(ad.get("approval_status", ""))}</td>
   <td data-label="ID"><code>{_h(ad.get("id", "")[:12])}</code></td>
   <td style="white-space:nowrap">
-    <a class="btn ghost" href="{_edit_url}" style="font-size:11px;padding:3px 9px;margin-right:6px" title="Filters, adjustments, crop, shapes, blur brush — non-destructive edits">&#9998; Edit</a>
-    <a class="btn ghost" href="{_studio_url}" style="font-size:11px;padding:3px 9px;margin-right:6px" title="Edit this photo with AI — fill, erase, expand, upscale, restyle">&#x2726; Studio</a>
-    <a class="btn ghost" href="{_cutout_url}" style="font-size:11px;padding:3px 9px;margin-right:6px" title="See exactly what background removal knocks out">Cut-out</a>
+    <a class="btn ghost" href="{
+                _edit_url
+            }" style="font-size:11px;padding:3px 9px;margin-right:6px" title="Filters, adjustments, crop, shapes, blur brush — non-destructive edits">&#9998; Edit</a>
+    <a class="btn ghost" href="{
+                _studio_url
+            }" style="font-size:11px;padding:3px 9px;margin-right:6px" title="Edit this photo with AI — fill, erase, expand, upscale, restyle">&#x2726; Studio</a>
+    <a class="btn ghost" href="{
+                _cutout_url
+            }" style="font-size:11px;padding:3px 9px;margin-right:6px" title="See exactly what background removal knocks out">Cut-out</a>
     <button class="btn ghost" type="button" data-mh-meta-open style="font-size:11px;padding:3px 9px;margin-right:6px" title="Edit the description, swimmer, venue and tags">&#x270E; Info</button>
     <button class="btn ghost mh-ml-qa" type="button" data-qa-url="{_qa_url}"
             aria-haspopup="menu" aria-expanded="false"
@@ -52082,10 +52703,15 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                 brand_kit = None
         return _el_recolour.role_vars_from_palette(None, brand_kit)
 
-    def _element_to_payload(el, role_vars) -> dict:
+    def _element_to_payload(el, role_vars, profile_id=None) -> dict:
         from mediahub.elements import render as _el_render
 
-        svg = _el_render.render_element_markup(el, role_vars, uid=el.id.replace(".", "_"))
+        # profile_id must flow through so an org-custom element's SVG (which lives
+        # under the org's pack dir, not the bundled dir) actually resolves — else
+        # custom stickers render blank. The markup is sanitised inside recolour.
+        svg = _el_render.render_element_markup(
+            el, role_vars, uid=el.id.replace(".", "_"), profile_id=profile_id
+        )
         return {
             "id": el.id,
             "name": el.name,
@@ -52110,7 +52736,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         role_vars = _elements_role_vars(profile_id)
 
         hits = _el_search.search(q, profile_id=profile_id, kind=kind, sport=sport, limit=60)
-        payload = [_element_to_payload(h.element, role_vars) for h in hits]
+        payload = [_element_to_payload(h.element, role_vars, profile_id) for h in hits]
         return jsonify(
             {
                 "elements": payload,
@@ -52167,7 +52793,10 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         role_vars = _elements_role_vars(profile_id)
         suggested = _el_search.suggest_for_context(facts, profile_id=profile_id, limit=12)
         return jsonify(
-            {"elements": [_element_to_payload(el, role_vars) for el in suggested], "context": facts}
+            {
+                "elements": [_element_to_payload(el, role_vars, profile_id) for el in suggested],
+                "context": facts,
+            }
         )
 
     @app.route("/api/runs/<run_id>/card/<card_id>/elements", methods=["GET", "POST"])
@@ -52247,7 +52876,10 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
 
         profile_id = _active_profile_id()
         role_vars = _elements_role_vars(profile_id)
-        seed = [_element_to_payload(el, role_vars) for el in _el_catalog.load_catalog(profile_id)]
+        seed = [
+            _element_to_payload(el, role_vars, profile_id)
+            for el in _el_catalog.load_catalog(profile_id)
+        ]
         grad = [
             {"name": p.name, "css": _el_grad.gradient_css(p, role_vars)}
             for p in _el_grad.list_presets()
@@ -53832,8 +54464,8 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                 f'<td data-label="Window">{window}</td>'
                 f'<td data-label="State">{state}</td>'
                 f'<td><form method="post" action="{url_for("sponsors_delete")}" style="margin:0" '
-                'onsubmit="return confirm(\'Remove this sponsor? Their logo and details are '
-                'permanently deleted.\')">'
+                "onsubmit=\"return confirm('Remove this sponsor? Their logo and details are "
+                "permanently deleted.')\">"
                 f'<input type="hidden" name="sponsor_id" value="{_h(s["sponsor_id"])}">'
                 '<button type="submit" class="btn secondary" style="font-size:12px;padding:4px 10px">Remove</button>'
                 "</form></td></tr>"
@@ -54075,8 +54707,7 @@ workflow, and the publish log &mdash; deterministic and auditable.</p>
                 _lbl = _excluded_labels.get(key)
                 if _lbl:
                     _name_cell = (
-                        f"<td>{_h(_lbl['title'])}</td>"
-                        f"<td class='dim'>{_h(_lbl['meet_name'])}</td>"
+                        f"<td>{_h(_lbl['title'])}</td><td class='dim'>{_h(_lbl['meet_name'])}</td>"
                     )
                 else:
                     # The run no longer exists — fall back to the raw key.
@@ -54226,7 +54857,15 @@ ever appear; queued, edited and rejected cards never do.</p>
 
     def _wall_page_html(prof, cards, token: str, *, embed: bool) -> str:
         kit = prof.get_brand_kit()
-        primary = getattr(kit, "primary_colour", None) or "#0A2540"
+        # The brand colour is interpolated into a <style> block below, where _h
+        # (HTML escaping) does NOT neutralise CSS metacharacters ({ } ; :). A
+        # non-hex brand_primary (e.g. set via a raw form POST that bypasses the
+        # type=color widget) could otherwise break out of the header selector and
+        # inject arbitrary CSS onto this public page. Gate it to a hex colour and
+        # fall back to the default otherwise.
+        primary = getattr(kit, "primary_colour", None) or ""
+        if not re.fullmatch(r"#[0-9A-Fa-f]{3,8}", primary):
+            primary = "#0A2540"
         items = ""
         for c in cards:
             img = url_for(
@@ -54269,7 +54908,7 @@ ever appear; queued, edited and rejected cards never do.</p>
 </style></head><body>
 {header}
 <div class="grid">{items}</div>
-<span class="powered">Powered by <a href="{_h(badge_href)}" rel="noopener">MediaHub</a></span>
+<span class="powered">Powered by <a href="{_h(badge_href)}" target="_blank" rel="noopener noreferrer">MediaHub</a></span>
 </body></html>"""
 
     def _resolve_wall_or_404(token: str):
@@ -54424,7 +55063,11 @@ ever appear; queued, edited and rejected cards never do.</p>
         if not path:
             abort(404)
         resp = make_response(send_file(path, mimetype="image/png"))
-        resp.headers["Cache-Control"] = "public, max-age=3600"
+        # Match the page/feed TTL (max-age=300) and require revalidation. On a
+        # children's-data surface where consent can be withdrawn or a card hidden
+        # at any moment, a 1-hour public cache could keep serving a withdrawn
+        # child's card image long after it should be gone.
+        resp.headers["Cache-Control"] = "public, max-age=300, must-revalidate"
         return resp
 
     # ------------------------------------------------------------------
@@ -59821,7 +60464,7 @@ voice, and queues them for one-click approval.</p>
                 '<div class="card" style="padding:10px 14px;margin-bottom:8px;display:flex;'
                 'justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">'
                 f'<div><span class="tag" style="font-size:10px;margin-right:8px">'
-                f'{_h(it["item_type"])}</span>{label_html}</div>{remove_btn}</div>'
+                f"{_h(it['item_type'])}</span>{label_html}</div>{remove_btn}</div>"
             )
         rows = rows or (
             '<p class="dim" style="margin:var(--sp-4) 0">Nothing in this collection yet — '
@@ -59963,6 +60606,13 @@ voice, and queues them for one-click approval.</p>
 
         name = str(raw or "none").strip().lower()
         return name if name in LOOKS else "none"
+
+    def _video_norm_source(src) -> str:
+        """Normalise a clip source path for identity comparison (resolve ./..)."""
+        try:
+            return str(Path(str(src or "")).resolve())
+        except Exception:
+            return str(src or "")
 
     def _footage_permission_error(asset) -> Optional[dict]:
         """Plain-language block reason when a clip may not be used (M26), or None.
@@ -61024,8 +61674,15 @@ voice, and queues them for one-click approval.</p>
                 return jsonify(
                     {"error": "bad_op", "message": "op must be edit|delete|retime|shift"}
                 ), 400
-        except (TypeError, ValueError) as e:
-            return jsonify({"error": "bad_params", "message": str(e)}), 400
+        except (TypeError, ValueError):
+            # A missing/non-numeric index or frame value fails an int() cast;
+            # surface an actionable message, never the raw Python cast error.
+            return jsonify(
+                {
+                    "error": "bad_params",
+                    "message": "A caption edit needs a whole-number index (and frame values).",
+                }
+            ), 400
         edl.captions = track
         proj.edl = edl
         proj.status = "draft"  # an edit reopens approval (rule 6)
@@ -61083,6 +61740,39 @@ voice, and queues them for one-click approval.</p>
                 validate(new_edl)
             except EDLError as e:
                 return jsonify({"error": "invalid_edl", "message": str(e)}), 400
+            except (ValueError, TypeError, AttributeError):
+                # EDL.from_dict coerces fields (int/float casts, per-clip dicts),
+                # so a wrong-typed field ("width": "abc", "clips": "x", a null
+                # fps) raises a plain ValueError/TypeError/AttributeError rather
+                # than EDLError. Catch those too so a malformed timeline is an
+                # honest 400, never an unhandled 500 with a Python-internals trace.
+                return jsonify(
+                    {
+                        "error": "invalid_edl",
+                        "message": "The timeline is malformed. Reload the studio and try again.",
+                    }
+                ), 400
+            # Bind every clip source to one already on this project's saved
+            # timeline. The EDL validator only checks a source is non-empty, so
+            # without this a caller could point a clip at ANY file on the box
+            # (another tenant's footage, any readable media) and have the
+            # render / waveform / export engine read it back. A legitimate edit
+            # only ever reorders / trims / grades / drops the clips it was given
+            # — new footage enters solely via Clip-Maker / the reel (new
+            # projects), never by rewriting an existing timeline's sources.
+            allowed = {_video_norm_source(c.source) for c in (proj.edl.clips or [])}
+            foreign = next(
+                (c.source for c in new_edl.clips if _video_norm_source(c.source) not in allowed),
+                None,
+            )
+            if foreign is not None:
+                return jsonify(
+                    {
+                        "error": "invalid_edl",
+                        "message": "A clip points at a source that isn't part of "
+                        "this project's footage. Reload the studio and try again.",
+                    }
+                ), 400
             proj.edl = new_edl
             proj.status = "draft"  # an edit reopens approval (rule 6)
         store.save(proj)
@@ -61325,11 +62015,16 @@ voice, and queues them for one-click approval.</p>
             _blocked = _project_blocked_source(proj)
             if _blocked:
                 return jsonify(_blocked), 403
+        # Strip control characters (newlines especially) from the download name:
+        # send_file writes it into the Content-Disposition header, and werkzeug
+        # raises on a header value with a newline — an unhandled 500 on export
+        # for a project whose name contains one.
+        safe_name = re.sub(r"[\x00-\x1f\x7f]+", " ", proj.name[:48]).strip() or "clip"
         return send_file(
             str(path),
             mimetype="video/mp4",
             as_attachment=download,
-            download_name=f"{proj.name[:48] or 'clip'}.mp4",
+            download_name=f"{safe_name}.mp4",
         )
 
     @app.route("/api/runs/<run_id>/card/<card_id>/voiceover", methods=["POST", "GET"])
@@ -62013,7 +62708,7 @@ voice, and queues them for one-click approval.</p>
             )
             msg = (
                 '<div class="card" style="border-color:var(--mh-success)">'
-                f'<p>{_h(request.args.get("msg"))}</p>{_review_link}</div>'
+                f"<p>{_h(request.args.get('msg'))}</p>{_review_link}</div>"
             )
         if request.args.get("err"):
             msg = f'<div class="card" style="border-color:var(--mh-error)"><p>{_h(request.args.get("err"))}</p></div>'
@@ -62388,832 +63083,6 @@ voice, and queues them for one-click approval.</p>
             return jsonify({"error": "Job not found."}), 404
         return jsonify(job.to_dict())
 
-    # ---- 1.16: Club microsites + link-in-bio + forms + QR + widgets -------
-    #
-    # Club pages generated from club data, hosted under an unguessable token
-    # URL, approval-gated (a site is a draft until the operator Publishes it,
-    # which freezes a snapshot). Mirrors the public-wall security model:
-    # constant-time token lookup, org-scoped, escaped output. Forms feed the
-    # 1.13 data hub; widgets/QR are the vetted interactive layer.
-
-    def _sites_unavailable_page():
-        return _layout(
-            "Sites",
-            '<div class="card"><h2>Sites unavailable</h2>'
-            '<p class="dim">This feature isn\'t enabled on this deployment.</p></div>',
-            active="create",
-        )
-
-    def _site_brand_kit(pid):
-        """The org's brand kit, or None (render falls back to a neutral brand)."""
-        try:
-            return _v8_brand_kit_for(pid)
-        except Exception:
-            return None
-
-    def _site_facts_for(pid, run_id=""):
-        """Build a SiteFacts from the org's profile + approved cards (+ a run)."""
-        from mediahub.sites.grounding import SiteFacts, site_facts_with_performance
-
-        prof = load_profile(pid)
-        bk = _site_brand_kit(pid)
-        name = (
-            getattr(bk, "display_name", "")
-            or getattr(prof, "display_name", "")
-            or getattr(prof, "name", "")
-            or "Our club"
-        )
-        facts = SiteFacts(
-            club_name=name,
-            tagline=getattr(prof, "tagline", "") or "",
-            location=getattr(prof, "location", "") or "",
-            contact_email=getattr(prof, "contact_email", "") or "",
-        )
-        try:
-            from mediahub.web import public_wall as _pw
-
-            for c in _pw.wall_cards(prof)[:9]:
-                facts.cards.append(
-                    {
-                        "src": f"card:{c['run_id']}/{c['card_id']}",
-                        "alt": c.get("alt_text", ""),
-                        "caption": c.get("title", ""),
-                    }
-                )
-        except Exception:
-            pass
-        if run_id:
-            try:
-                df = _doc_facts_for(pid, bk, scope="meet", run_id=run_id)
-                if df is not None:
-                    facts.event_name = getattr(df, "title", "") or facts.event_name
-                    facts.period = getattr(df, "period", "") or facts.period
-                    site_facts_with_performance(facts, df)
-            except Exception:
-                pass
-        return facts
-
-    def _site_render(pid, site_id, spec, page, *, token="", preview=False):
-        """Render one page of a site, wiring the public/preview resolvers."""
-        from mediahub.sites.render import render_page_html
-        from mediahub.sites.theme import resolve_role_vars
-
-        bk = _site_brand_kit(pid)
-        rv = resolve_role_vars(bk)
-
-        if preview:
-
-            def page_url(slug):
-                return (
-                    url_for("site_preview_page", site_id=site_id, slug=slug)
-                    if slug
-                    else url_for("site_preview_home", site_id=site_id)
-                )
-
-            def card_url(run_id, card_id):
-                return url_for(
-                    "site_preview_card_png", site_id=site_id, run_id=run_id, card_id=card_id
-                )
-
-            def form_action(_form_id):
-                return "#"
-
-            canonical = ""
-        else:
-
-            def page_url(slug):
-                return (
-                    url_for("site_public_page", token=token, slug=slug)
-                    if slug
-                    else url_for("site_public_home", token=token)
-                )
-
-            def card_url(run_id, card_id):
-                return url_for("site_card_png", token=token, run_id=run_id, card_id=card_id)
-
-            def form_action(form_id):
-                return url_for("site_form_submit", token=token, form_id=form_id)
-
-            canonical = (
-                url_for("site_public_home", token=token, _external=True)
-                if page.is_home
-                else url_for("site_public_page", token=token, slug=page.slug, _external=True)
-            )
-
-        def asset_url(src):
-            s = str(src or "")
-            if s.startswith("card:"):
-                run_id, _, card_id = s[5:].partition("/")
-                return card_url(run_id, card_id)
-            return s
-
-        def render_form(form_id, nonce):
-            from mediahub.forms import render as _fr
-            from mediahub.forms import store as _fs
-
-            form = _fs.load_form(pid, form_id)
-            if form is None:
-                return ""
-            return _fr.render_form_html(
-                form, action_url=form_action(form_id), nonce=nonce, interactive=not preview
-            )
-
-        def render_widget(props, nonce):
-            from mediahub.sites import widget_state as _ws
-            from mediahub.sites import widgets as _w
-
-            vote_url = ""
-            counts = None
-            if (props or {}).get("widget_type") == "poll" and not preview:
-                wid = str(props.get("widget_id") or "")
-                vote_url = url_for("site_widget_vote", token=token, widget_id=wid)
-                counts = _ws.vote_counts(pid, site_id, wid)
-            return _w.render_widget(
-                props, nonce=nonce, role_vars=rv, vote_url=vote_url, counts=counts
-            )
-
-        return render_page_html(
-            spec,
-            page,
-            brand_kit=bk,
-            role_vars=rv,
-            canonical=canonical,
-            page_url=page_url,
-            asset_url=asset_url,
-            render_form=render_form,
-            render_widget=render_widget,
-        )
-
-    def _site_has_form(spec, form_id) -> bool:
-        for p in spec.pages:
-            for s in p.sections:
-                for b in s.blocks:
-                    if b.kind == "form_embed" and str(b.props.get("form_id")) == str(form_id):
-                        return True
-        return False
-
-    def _site_find_poll(spec, widget_id):
-        for p in spec.pages:
-            for s in p.sections:
-                for b in s.blocks:
-                    if (
-                        b.kind == "widget_embed"
-                        and b.props.get("widget_type") == "poll"
-                        and str(b.props.get("widget_id")) == str(widget_id)
-                    ):
-                        return b
-        return None
-
-    # -- operator surface (signed-in) --------------------------------------
-
-    @app.route("/sites")
-    def sites_home():
-        if not _sites_ok:
-            return _sites_unavailable_page()
-        pid = _phase_w_org()
-        if not pid:
-            return _layout("Sites", _PW_NO_ORG, active="create")
-        from mediahub.forms import store as _fs
-        from mediahub.sites import store as _ss
-        from mediahub.web import sites_ui as _ui
-
-        sites = _ss.list_sites(pid)
-        forms = _fs.list_forms(pid) if _forms_ok else []
-        try:
-            runs = _doc_recent_runs(pid)
-        except Exception:
-            runs = []
-        flash = ""
-        if request.args.get("msg"):
-            flash = (
-                '<div class="card" style="border-color:var(--mh-success)">'
-                f"<p>{_h(request.args.get('msg'))}</p></div>"
-            )
-        return _layout("Sites", flash + _ui.render_index(sites, forms, runs), active="create")
-
-    @app.route("/api/sites/generate", methods=["POST"])
-    def api_sites_generate():
-        if not _sites_ok:
-            return jsonify({"error": "Sites unavailable."}), 404
-        pid = _active_profile_id()
-        if not pid:
-            return redirect(url_for("sites_home"))
-        from mediahub.sites import store as _ss
-        from mediahub.sites.archetypes import build_site
-
-        body = request.get_json(silent=True) if request.is_json else None
-        archetype = (body or request.form).get("archetype") or "club_home"
-        run_id = (body or request.form).get("run_id") or ""
-        with_ai = bool((body or request.form).get("with_ai"))
-        facts = _site_facts_for(pid, run_id)
-        note = ""
-        prose = None
-        if with_ai:
-            try:
-                from mediahub.sites.draft import draft_copy
-
-                prose = draft_copy(facts, archetype)
-            except Exception:
-                note = "AI copy isn't configured, so the site was built from your data alone."
-        spec = build_site(archetype, facts, prose=prose)
-        _ss.save_site(pid, spec)
-        if request.is_json:
-            return jsonify({"ok": True, "site_id": spec.site_id})
-        return redirect(url_for("site_editor", site_id=spec.site_id, msg=note or None))
-
-    @app.route("/sites/<site_id>")
-    def site_editor(site_id):
-        if not _sites_ok:
-            return _sites_unavailable_page()
-        pid = _phase_w_org()
-        if not pid:
-            return _layout("Sites", _PW_NO_ORG, active="create")
-        from mediahub.forms import store as _fs
-        from mediahub.sites import insights as _ins
-        from mediahub.sites import store as _ss
-        from mediahub.web import sites_ui as _ui
-
-        spec = _ss.load_site(pid, site_id)
-        rec = _ss.site_record(pid, site_id)
-        if spec is None or rec is None:
-            return (
-                _layout(
-                    "Sites",
-                    '<div class="card"><h2>Site not found</h2>'
-                    f'<p><a href="{url_for("sites_home")}">Back to sites</a></p></div>',
-                    active="create",
-                ),
-                404,
-            )
-        forms = _fs.list_forms(pid) if _forms_ok else []
-        insights = _ins.view_counts(pid, site_id)
-        body = _ui.render_editor(
-            rec, spec, forms=forms, insights=insights, flash=request.args.get("msg", "")
-        )
-        return _layout(f"Sites — {spec.title}", body, active="create")
-
-    @app.route("/api/sites/<site_id>/save", methods=["POST"])
-    def api_site_save(site_id):
-        if not _sites_ok:
-            return jsonify({"error": "unavailable"}), 404
-        pid = _active_profile_id()
-        if not pid:
-            return jsonify({"error": "not signed in"}), 403
-        from mediahub.sites import store as _ss
-        from mediahub.sites.models import SiteSpec
-
-        if _ss.load_site(pid, site_id) is None:
-            abort(404)
-        raw = request.form.get("spec")
-        if raw is None and request.is_json:
-            jb = request.get_json(silent=True) or {}
-            raw = json.dumps(jb.get("spec") or jb)
-        try:
-            data = json.loads(raw or "{}")
-        except ValueError:
-            if request.is_json:
-                return jsonify({"ok": False, "error": "invalid_json"}), 400
-            # H-6: re-render the editor with the user's SUBMITTED text and an
-            # error-styled message, instead of redirecting — the redirect
-            # reloaded the stored spec and silently threw away every edit.
-            from mediahub.forms import store as _fs
-            from mediahub.sites import insights as _ins
-            from mediahub.web import sites_ui as _ui
-
-            rec = _ss.site_record(pid, site_id)
-            spec = _ss.load_site(pid, site_id)
-            forms = _fs.list_forms(pid) if _forms_ok else []
-            insights = _ins.view_counts(pid, site_id)
-            body = _ui.render_editor(
-                rec,
-                spec,
-                forms=forms,
-                insights=insights,
-                flash="That wasn't valid JSON — nothing saved. Your text is kept below; fix it and save again.",
-                flash_is_error=True,
-                spec_override=raw or "",
-            )
-            return _layout(f"Sites — {spec.title}", body, active="create"), 400
-        if not isinstance(data, dict):
-            data = {}
-        data["site_id"] = site_id  # the id is never editable from the body
-        _ss.save_site(pid, SiteSpec.from_dict(data))
-        if request.is_json:
-            return jsonify({"ok": True})
-        return redirect(url_for("site_editor", site_id=site_id, msg="Saved."))
-
-    @app.route("/api/sites/<site_id>/content-edit", methods=["POST"])
-    def api_site_content_edit(site_id):
-        """H-5: apply the structured content editor's form onto the site draft —
-        the non-technical path that replaces hand-editing the raw spec JSON.
-
-        Mirrors api_site_page_protection exactly: load → to_dict → apply the
-        whitelisted (block_id, prop) edits by id → from_dict → save. The JSON
-        hatch (api_site_save) and its H-6 fail-safe are untouched; every field the
-        structured form doesn't expose survives byte-for-byte.
-        """
-        if not _sites_ok:
-            return jsonify({"error": "unavailable"}), 404
-        pid = _active_profile_id()
-        if not pid:
-            return jsonify({"error": "not signed in"}), 403
-        from mediahub.sites import store as _ss
-        from mediahub.sites.models import SiteSpec
-        from mediahub.web import spec_editor as _se
-
-        spec = _ss.load_site(pid, site_id)
-        if spec is None:
-            abort(404)
-        data = spec.to_dict()
-        _se.apply_structured(data, request.form, "site")
-        data["site_id"] = site_id  # identity is never editable from the body
-        _ss.save_site(pid, SiteSpec.from_dict(data))
-        if request.is_json:
-            return jsonify({"ok": True})
-        return redirect(url_for("site_editor", site_id=site_id, msg="Saved."))
-
-    @app.route("/api/sites/<site_id>/publish", methods=["POST"])
-    def api_site_publish(site_id):
-        if not _sites_ok:
-            return jsonify({"error": "unavailable"}), 404
-        pid = _active_profile_id()
-        if not pid:
-            return jsonify({"error": "not signed in"}), 403
-        from mediahub.sites import store as _ss
-
-        if _ss.load_site(pid, site_id) is None:
-            abort(404)
-        token = _ss.publish_site(pid, site_id)
-        if request.is_json:
-            url = url_for("site_public_home", token=token, _external=True) if token else ""
-            return jsonify({"ok": bool(token), "token": token, "url": url})
-        return redirect(url_for("site_editor", site_id=site_id, msg="Published."))
-
-    @app.route("/api/sites/<site_id>/unpublish", methods=["POST"])
-    def api_site_unpublish(site_id):
-        if not _sites_ok:
-            return jsonify({"error": "unavailable"}), 404
-        pid = _active_profile_id()
-        if not pid:
-            return jsonify({"error": "not signed in"}), 403
-        from mediahub.sites import store as _ss
-
-        if _ss.load_site(pid, site_id) is None:
-            abort(404)
-        _ss.unpublish_site(pid, site_id)
-        if request.is_json:
-            return jsonify({"ok": True})
-        return redirect(url_for("site_editor", site_id=site_id, msg="Taken offline."))
-
-    @app.route("/api/sites/<site_id>/delete", methods=["POST"])
-    def api_site_delete(site_id):
-        if not _sites_ok:
-            return jsonify({"error": "unavailable"}), 404
-        pid = _active_profile_id()
-        if not pid:
-            return jsonify({"error": "not signed in"}), 403
-        from mediahub.sites import store as _ss
-
-        _ss.delete_site(pid, site_id)
-        if request.is_json:
-            return jsonify({"ok": True})
-        return redirect(url_for("sites_home", msg="Site deleted."))
-
-    @app.route("/api/sites/<site_id>/password", methods=["POST"])
-    def api_site_password(site_id):
-        if not _sites_ok:
-            return jsonify({"error": "unavailable"}), 404
-        pid = _active_profile_id()
-        if not pid:
-            return jsonify({"error": "not signed in"}), 403
-        from mediahub.sites import store as _ss
-
-        if _ss.load_site(pid, site_id) is None:
-            abort(404)
-        pw = (
-            request.form.get("password")
-            if not request.is_json
-            else (request.get_json(silent=True) or {}).get("password")
-        ) or ""
-        _ss.set_site_password(pid, site_id, pw)
-        if request.is_json:
-            return jsonify({"ok": True})
-        # D-8: a password only does anything if at least one page is marked
-        # members-only. Setting one while no page is protected changes nothing
-        # public-facing, so say so honestly instead of "Password updated."
-        spec = _ss.load_site(pid, site_id)
-        any_protected = bool(spec and any(p.protected for p in spec.pages))
-        if pw and not any_protected:
-            msg = (
-                "Password saved, but no page is set to members-only yet — the site is "
-                "still fully public. Tick a page under Members-only pages to protect it."
-            )
-        elif pw:
-            msg = "Password updated."
-        else:
-            msg = "Password cleared."
-        return redirect(url_for("site_editor", site_id=site_id, msg=msg))
-
-    @app.route("/api/sites/<site_id>/page-protection", methods=["POST"])
-    def api_site_page_protection(site_id):
-        """D-8: set which pages are members-only (require the site password).
-        Replaces the previous raw-JSON-only ``protected`` flag with a real
-        editor control."""
-        if not _sites_ok:
-            return jsonify({"error": "unavailable"}), 404
-        pid = _active_profile_id()
-        if not pid:
-            return jsonify({"error": "not signed in"}), 403
-        from mediahub.sites import store as _ss
-        from mediahub.sites.models import SiteSpec
-
-        spec = _ss.load_site(pid, site_id)
-        if spec is None:
-            abort(404)
-        protected_slugs = set(request.form.getlist("protected"))
-        data = spec.to_dict()
-        for pg in data.get("pages", []):
-            pg["protected"] = pg.get("slug", "") in protected_slugs
-        _ss.save_site(pid, SiteSpec.from_dict(data))
-        n_prot = len(protected_slugs)
-        if request.is_json:
-            return jsonify({"ok": True, "protected": n_prot})
-        if n_prot and not _ss.has_password(pid, site_id):
-            msg = (
-                f"{n_prot} page(s) marked members-only — but no password is set yet, so "
-                "they're still open. Set a page password above to lock them."
-            )
-        elif n_prot:
-            msg = f"{n_prot} page(s) are now members-only."
-        else:
-            msg = "All pages are public."
-        return redirect(url_for("site_editor", site_id=site_id, msg=msg))
-
-    @app.route("/sites/<site_id>/preview")
-    def site_preview_home(site_id):
-        return _site_preview(site_id, "")
-
-    @app.route("/sites/<site_id>/preview/<slug>")
-    def site_preview_page(site_id, slug):
-        return _site_preview(site_id, slug)
-
-    def _site_preview(site_id, slug):
-        if not _sites_ok:
-            abort(404)
-        pid = _active_profile_id()
-        if not pid:
-            abort(403)
-        from mediahub.sites import store as _ss
-
-        spec = _ss.load_site(pid, site_id)
-        if spec is None:
-            abort(404)
-        page = spec.page_by_slug(slug)
-        if page is None:
-            abort(404)
-        return make_response(_site_render(pid, site_id, spec, page, preview=True))
-
-    @app.route("/sites/<site_id>/card/<run_id>/<card_id>.png")
-    def site_preview_card_png(site_id, run_id, card_id):
-        from flask import send_file
-
-        from mediahub.sites import store as _ss
-        from mediahub.web import public_wall as _pw
-
-        pid = _active_profile_id()
-        if not pid:
-            abort(403)
-        if _ss.load_site(pid, site_id) is None:
-            abort(404)
-        # the run must belong to this org (IDOR guard — run-route isolation invariant)
-        run_data = _load_run(run_id)
-        if run_data is None or not _can_access_run(run_id, run_data, pid):
-            abort(404)
-        prof = load_profile(pid)
-        path = _pw.wall_image_path(prof, run_id, card_id) if prof else None
-        if not path:
-            abort(404)
-        return send_file(path, mimetype="image/png")
-
-    @app.route("/sites/<site_id>/qr.<fmt>")
-    def api_site_qr(site_id, fmt):
-        if not _sites_ok:
-            abort(404)
-        pid = _active_profile_id()
-        if not pid:
-            abort(403)
-        from mediahub.sites import qr as _qr
-        from mediahub.sites import store as _ss
-        from mediahub.sites.theme import resolve_role_vars
-
-        rec = _ss.site_record(pid, site_id)
-        if rec is None:
-            abort(404)
-        if not rec.get("published") or not rec.get("public_token"):
-            return (
-                _layout(
-                    "Sites",
-                    '<div class="card"><p>Publish the site first to get its QR code.</p>'
-                    f'<p><a href="{url_for("site_editor", site_id=site_id)}">Back</a></p></div>',
-                    active="create",
-                ),
-                409,
-            )
-        url = url_for("site_public_home", token=rec["public_token"], _external=True)
-        rv = resolve_role_vars(_site_brand_kit(pid))
-        try:
-            payload, mime = _qr.export_qr(url, fmt, role_vars=rv)
-        except _qr.QRUnavailable:
-            abort(503)
-        resp = make_response(payload)
-        resp.headers["Content-Type"] = mime
-        ext = fmt if fmt in _qr.QR_FORMATS else "png"
-        resp.headers["Content-Disposition"] = f'inline; filename="site-qr.{ext}"'
-        return resp
-
-    @app.route("/api/sites/<site_id>/insights")
-    def api_site_insights(site_id):
-        if not _sites_ok:
-            return jsonify({"error": "unavailable"}), 404
-        pid = _active_profile_id()
-        if not pid:
-            return jsonify({"error": "not signed in"}), 403
-        from mediahub.sites import insights as _ins
-        from mediahub.sites import store as _ss
-
-        if _ss.site_record(pid, site_id) is None:
-            return jsonify({"error": "not found"}), 404
-        return jsonify(_ins.view_counts(pid, site_id))
-
-    # -- forms (operator) --------------------------------------------------
-
-    @app.route("/api/forms", methods=["POST"])
-    def api_forms_create():
-        if not _forms_ok:
-            return jsonify({"error": "unavailable"}), 404
-        pid = _active_profile_id()
-        if not pid:
-            return redirect(url_for("sites_home"))
-        from mediahub.forms import store as _fs
-        from mediahub.forms.models import new_form, rsvp_fields, trial_signup_fields
-
-        title = (request.form.get("title") or "Form").strip()
-        template = request.form.get("template", "blank")
-        if template == "trial_signup":
-            form = new_form(title, trial_signup_fields(), collects_minor_data=True)
-        elif template == "rsvp":
-            form = new_form(title, rsvp_fields())
-        else:
-            form = new_form(title, [])
-        _fs.save_form(pid, form)
-        return redirect(url_for("sites_home", msg=f"Created form — embed id {form.form_id}"))
-
-    @app.route("/api/forms/<form_id>/save", methods=["POST"])
-    def api_form_save(form_id):
-        if not _forms_ok:
-            return jsonify({"error": "unavailable"}), 404
-        pid = _active_profile_id()
-        if not pid:
-            return jsonify({"error": "not signed in"}), 403
-        from mediahub.forms import store as _fs
-        from mediahub.forms.models import FormSpec
-
-        if _fs.load_form(pid, form_id) is None:
-            abort(404)
-        body = request.get_json(silent=True) or {}
-        body["form_id"] = form_id
-        _fs.save_form(pid, FormSpec.from_dict(body))
-        return jsonify({"ok": True})
-
-    @app.route("/api/forms/<form_id>/delete", methods=["POST"])
-    def api_form_delete(form_id):
-        if not _forms_ok:
-            return jsonify({"error": "unavailable"}), 404
-        pid = _active_profile_id()
-        if not pid:
-            return redirect(url_for("sites_home"))
-        from mediahub.forms import store as _fs
-
-        _fs.delete_form(pid, form_id)
-        return redirect(url_for("sites_home", msg="Form deleted."))
-
-    # -- public surface (no login; token is the access control) ------------
-
-    def _site_password_prompt(token, slug, error=""):
-        err = f'<p style="color:var(--mh-error)">{_h(error)}</p>' if error else ""
-        body = (
-            '<div class="card" style="max-width:420px;margin:60px auto">'
-            "<h2>This page is protected</h2>"
-            f"{err}"
-            f'<form method="post" action="{url_for("site_unlock", token=token)}">'
-            f'<input type="hidden" name="next" value="{_h(slug)}">'
-            '<input name="site_password" type="password" placeholder="Password" required '
-            'style="width:100%;padding:10px;margin:8px 0">'
-            '<button class="btn" type="submit">Unlock</button></form></div>'
-        )
-        # Protected pages must never be indexed: the slug is excluded from the
-        # sitemap and the prompt itself carries an explicit noindex directive so
-        # a members-only page can't be advertised in search.
-        resp = make_response(_layout("Protected", body, active=""))
-        resp.headers["X-Robots-Tag"] = "noindex"
-        return resp
-
-    def _serve_public_site(token, slug):
-        from mediahub.sites import insights as _ins
-        from mediahub.sites import store as _ss
-
-        ref = _ss.resolve_token(token)
-        if not ref:
-            abort(404)
-        pid, site_id = ref
-        spec = _ss.load_published(pid, site_id)
-        if spec is None:
-            abort(404)
-        page = spec.page_by_slug(slug)
-        if page is None:
-            abort(404)
-        if (
-            page.protected
-            and _ss.has_password(pid, site_id)
-            and token not in (session.get("site_unlocked") or [])
-        ):
-            return _site_password_prompt(token, page.slug)
-        _ins.record_view(pid, site_id, page.slug)
-        resp = make_response(_site_render(pid, site_id, spec, page, token=token, preview=False))
-        if page.protected:
-            resp.headers["Cache-Control"] = "private, no-store"
-        else:
-            resp.headers["Cache-Control"] = "public, max-age=300"
-        return resp
-
-    @app.route("/site/<token>")
-    def site_public_home(token):
-        return _serve_public_site(token, "")
-
-    @app.route("/site/<token>/<slug>")
-    def site_public_page(token, slug):
-        return _serve_public_site(token, slug)
-
-    @app.route("/site/<token>/unlock", methods=["POST"])
-    def site_unlock(token):
-        from mediahub.sites import store as _ss
-
-        ref = _ss.resolve_token(token)
-        if not ref:
-            abort(404)
-        pid, site_id = ref
-        pw = request.form.get("site_password", "")
-        nxt = request.form.get("next", "")
-        # Same per-IP throttle as the sibling public form/vote routes — a page
-        # password must not be brute-forceable. HTML response (form post), not
-        # the JSON limiter body.
-        if _auth_rate_limited("site_unlock"):
-            return (
-                _site_password_prompt(
-                    token, nxt, error="Too many attempts — wait a few minutes and try again."
-                ),
-                429,
-            )
-        if _ss.check_site_password(pid, site_id, pw):
-            unlocked = list(session.get("site_unlocked") or [])
-            if token not in unlocked:
-                unlocked.append(token)
-                session["site_unlocked"] = unlocked
-            return redirect(
-                url_for("site_public_page", token=token, slug=nxt)
-                if nxt
-                else url_for("site_public_home", token=token)
-            )
-        return _site_password_prompt(token, nxt, error="Wrong password — try again.")
-
-    @app.route("/site/<token>/card/<run_id>/<card_id>.png")
-    def site_card_png(token, run_id, card_id):
-        from flask import send_file
-
-        from mediahub.sites import store as _ss
-        from mediahub.web import public_wall as _pw
-
-        ref = _ss.resolve_token(token)
-        if not ref:
-            abort(404)
-        pid, _site_id = ref
-        # the run must belong to the token's org (IDOR guard) before any image
-        run_data = _load_run(run_id)
-        if run_data is None or not _can_access_run(run_id, run_data, pid):
-            abort(404)
-        prof = load_profile(pid)
-        path = _pw.wall_image_path(prof, run_id, card_id) if prof else None
-        if not path:
-            abort(404)
-        resp = make_response(send_file(path, mimetype="image/png"))
-        resp.headers["Cache-Control"] = "public, max-age=3600"
-        return resp
-
-    @app.route("/site/<token>/form/<form_id>", methods=["POST"])
-    def site_form_submit(token, form_id):
-        from mediahub.forms import store as _fs
-        from mediahub.forms import submit as _fsub
-        from mediahub.sites import store as _ss
-
-        ref = _ss.resolve_token(token)
-        if not ref:
-            abort(404)
-        pid, site_id = ref
-        spec = _ss.load_published(pid, site_id)
-        if spec is None or not _site_has_form(spec, form_id):
-            abort(404)  # only forms embedded in the published site accept submissions
-        if _auth_rate_limited("site_form"):
-            return (
-                jsonify(
-                    {"ok": False, "error": "rate", "message": "Too many submissions — please wait."}
-                ),
-                429,
-            )
-        form = _fs.load_form(pid, form_id)
-        if form is None:
-            abort(404)
-        data = request.get_json(silent=True) or {}
-        result = _fsub.record_submission(pid, form, data, source=f"site:{site_id}")
-        if (
-            result.get("ok")
-            and result.get("form") is not None
-            and result["form"].table_id != form.table_id
-        ):
-            _fs.save_form(pid, result["form"])  # persist the freshly-created response table id
-        if result.get("ok"):
-            # Outbound webhook (1.21): a form was submitted. Best-effort.
-            try:
-                from mediahub import webhooks as _webhooks
-                from mediahub.webhooks import events as _wh_events
-
-                _webhooks.emit(
-                    _wh_events.EVENT_FORM_SUBMITTED,
-                    pid,
-                    _wh_events.form_submitted(
-                        pid,
-                        form_id,
-                        submission_id=str(result.get("submission_id") or ""),
-                        site_id=site_id,
-                    ),
-                )
-            except Exception:
-                pass
-            return jsonify({"ok": True, "message": result.get("message", "Thanks!")})
-        return jsonify({"ok": False, "errors": result.get("errors", {})}), 400
-
-    @app.route("/site/<token>/widget/<widget_id>/vote", methods=["POST"])
-    def site_widget_vote(token, widget_id):
-        from mediahub.sites import store as _ss
-        from mediahub.sites import widget_state as _ws
-
-        ref = _ss.resolve_token(token)
-        if not ref:
-            abort(404)
-        pid, site_id = ref
-        spec = _ss.load_published(pid, site_id)
-        poll = _site_find_poll(spec, widget_id) if spec else None
-        if poll is None:
-            abort(404)
-        if _auth_rate_limited("site_vote"):
-            return jsonify({"ok": False, "error": "rate"}), 429
-        data = request.get_json(silent=True) or {}
-        option = str(data.get("option", "")).strip()
-        options = [str(o) for o in ((poll.props.get("config") or {}).get("options") or [])]
-        if option not in options:
-            return jsonify({"ok": False, "error": "bad_option"}), 400
-        counts = _ws.record_vote(pid, site_id, widget_id, option)
-        return jsonify({"ok": True, "counts": counts})
-
-    @app.route("/site/<token>/sitemap.xml")
-    def site_sitemap(token):
-        from mediahub.sites import seo as _seo
-        from mediahub.sites import store as _ss
-
-        ref = _ss.resolve_token(token)
-        if not ref:
-            abort(404)
-        pid, site_id = ref
-        spec = _ss.load_published(pid, site_id)
-        if spec is None:
-            abort(404)
-        base = url_for("site_public_home", token=token, _external=True)
-        resp = make_response(_seo.sitemap_xml(spec, base))
-        resp.headers["Content-Type"] = "application/xml"
-        resp.headers["Cache-Control"] = "public, max-age=3600"
-        return resp
-
-    @app.route("/site/<token>/robots.txt")
-    def site_robots(token):
-        from mediahub.sites import seo as _seo
-        from mediahub.sites import store as _ss
-
-        if _ss.resolve_token(token) is None:
-            abort(404)
-        base = url_for("site_public_home", token=token, _external=True)
-        resp = make_response(_seo.robots_txt(base))
-        resp.headers["Content-Type"] = "text/plain"
-        return resp
-
     # ---- W.1 + W.2: athletes roster, merge, consent ----------------------
 
     @app.route("/athletes")
@@ -63536,11 +63405,9 @@ voice, and queues them for one-click approval.</p>
         far) is a separate file and survives. Cards land in QUEUE — the
         autonomy posture is structural, nothing here can publish.
         """
-        from mediahub.web.pipeline_v4 import run_pipeline_v4
-
         run = run_pipeline_v4(
-            data,
-            f"live-{watch.id}.html",
+            file_bytes=data,
+            filename=f"live-{watch.id}.html",
             profile_id=watch.profile_id,
             run_id=watch.run_id or watch.id,
         )
@@ -63553,9 +63420,30 @@ voice, and queues them for one-click approval.</p>
             return _layout("Live meet", _PW_NO_ORG, active="create")
         from mediahub.results_fetch.live_watch import list_watches
 
+        # Success feedback rides ?msg=, failures ride ?err= so the banner can
+        # style them honestly (green success vs amber warning) instead of
+        # painting every message — including "could not start the watch" — green.
         msg = (request.args.get("msg") or "").strip()
-        msg_html = f'<p class="tag good" style="margin-bottom:14px">{_h(msg)}</p>' if msg else ""
+        err = (request.args.get("err") or "").strip()
+        if err:
+            msg_html = f'<p class="tag warn" style="margin-bottom:14px">{_h(err)}</p>'
+        elif msg:
+            msg_html = f'<p class="tag good" style="margin-bottom:14px">{_h(msg)}</p>'
+        else:
+            msg_html = ""
         watches = list_watches(pid)
+
+        def _review_cell(w) -> str:
+            # A run only exists on disk once a poll has actually carded new
+            # swims. Until then the review link would dead-end on "Run not
+            # found", so show an honest "No cards yet" placeholder instead.
+            if w.new_swims_total > 0:
+                return (
+                    "<a class='btn secondary' style='font-size:12px;padding:4px 10px' "
+                    f'href="{url_for("review", run_id=w.run_id or w.id)}">Review cards</a>'
+                )
+            return "<span class='muted' style='font-size:12px'>No cards yet</span>"
+
         rows = (
             "".join(
                 "<tr>"
@@ -63564,8 +63452,7 @@ voice, and queues them for one-click approval.</p>
                 f"<td>every {w.interval_minutes} min</td>"
                 f"<td>{w.polls} polls &middot; {w.new_swims_total} new swims</td>"
                 f"<td>{_h((w.last_error or '')[:80])}</td>"
-                f"<td><a class='btn secondary' style='font-size:12px;padding:4px 10px' "
-                f'href="{url_for("review", run_id=w.run_id or w.id)}">Review cards</a></td>'
+                f"<td>{_review_cell(w)}</td>"
                 f'<td><form method="POST" action="{url_for("live_meet_action")}">'
                 f'<input type="hidden" name="action" value="stop"/>'
                 f'<input type="hidden" name="watch_id" value="{_h(w.id)}"/>'
@@ -63593,15 +63480,15 @@ voice, and queues them for one-click approval.</p>
   are not supported — they don&rsquo;t allow it.</p>
   <form method="POST" action="{url_for("live_meet_action")}" style="display:grid;gap:8px;max-width:640px">
     <input type="hidden" name="action" value="create"/>
-    <label>Live results page URL</label>
-    <input type="url" name="url" required placeholder="https://hostclub.org.uk/gala/live-results.htm"/>
-    <label>Name (so you recognise it)</label>
-    <input type="text" name="label" placeholder="Swansea Spring Open — Sunday"/>
+    <label for="lm-url">Live results page URL</label>
+    <input id="lm-url" type="url" name="url" required placeholder="https://hostclub.org.uk/gala/live-results.htm"/>
+    <label for="lm-label">Name (so you recognise it)</label>
+    <input id="lm-label" type="text" name="label" placeholder="Swansea Spring Open — Sunday"/>
     <div style="display:flex;gap:14px;flex-wrap:wrap">
-      <div><label>Check every</label>
-        <select name="interval_minutes"><option value="3">3 min</option><option value="5" selected>5 min</option><option value="10">10 min</option></select></div>
-      <div><label>Stop after</label>
-        <select name="hours"><option value="6">6 hours</option><option value="12" selected>12 hours</option><option value="24">24 hours</option></select></div>
+      <div><label for="lm-interval">Check every</label>
+        <select id="lm-interval" name="interval_minutes"><option value="3">3 min</option><option value="5" selected>5 min</option><option value="10">10 min</option></select></div>
+      <div><label for="lm-hours">Stop after</label>
+        <select id="lm-hours" name="hours"><option value="6">6 hours</option><option value="12" selected>12 hours</option><option value="24">24 hours</option></select></div>
     </div>
     <div><button type="submit" class="btn">Start watching</button></div>
   </form>
@@ -63609,7 +63496,7 @@ voice, and queues them for one-click approval.</p>
 <div class="card">
   <h2 style="margin-top:0">Watches</h2>
   <table class="mh-table" style="width:100%">
-    <thead><tr><th>Meet</th><th>Status</th><th>Interval</th><th>Activity</th><th>Last issue</th><th></th><th></th></tr></thead>
+    <thead><tr><th>Meet</th><th>Status</th><th>Interval</th><th>Activity</th><th>Last issue</th><th><span class="mh-sr-only">Review</span></th><th><span class="mh-sr-only">Actions</span></th></tr></thead>
     <tbody>{rows}</tbody>
   </table>
 </div>
@@ -63623,37 +63510,77 @@ voice, and queues them for one-click approval.</p>
             abort(403)
         from datetime import timedelta as _td
 
-        from mediahub.results_fetch.live_watch import create_watch, stop_watch
+        from mediahub.results_fetch.live_watch import create_watch, list_watches, stop_watch
 
         action = (request.form.get("action") or "").strip()
         msg = ""
+        err = ""
         if action == "create":
             try:
                 hours = max(1, min(48, int(request.form.get("hours") or 12)))
             except (TypeError, ValueError):
                 hours = 12
-            rid = uuid.uuid4().hex[:12]
+            # interval_minutes comes from a <select> (3/5/10), but a hand-crafted
+            # POST can send anything. Parse defensively so a bad value is a clean
+            # default rather than a leaked ValueError; create_watch clamps range.
             try:
-                watch = create_watch(
-                    pid,
-                    (request.form.get("url") or "").strip(),
-                    interval_minutes=int(request.form.get("interval_minutes") or 5),
-                    expires_at=datetime.now(timezone.utc) + _td(hours=hours),
-                    label=(request.form.get("label") or "").strip(),
-                    run_id=rid,
-                    review_url=url_for("review", run_id=rid, _external=True),
-                )
-                _ensure_live_watch_schedule()
-                msg = f"Watching. Cards will queue under Review as results land ({watch.interval_minutes}-min checks)."
-            except ValueError as e:
-                msg = f"Could not start the watch: {e}"
+                interval = int(request.form.get("interval_minutes") or 5)
+            except (TypeError, ValueError):
+                interval = 5
+            url = (request.form.get("url") or "").strip()
+            # Politeness: at most one active watch per (org, url). A repeat
+            # submission reuses the existing watch instead of doubling the poll
+            # rate against the host club's site.
+            existing = next(
+                (w for w in list_watches(pid) if w.status == "active" and w.url == url),
+                None,
+            )
+            if existing is not None:
+                msg = f"Already watching that page ({existing.interval_minutes}-min checks)."
+            else:
+                rid = uuid.uuid4().hex[:12]
+                try:
+                    watch = create_watch(
+                        pid,
+                        url,
+                        interval_minutes=interval,
+                        expires_at=datetime.now(timezone.utc) + _td(hours=hours),
+                        label=(request.form.get("label") or "").strip(),
+                        run_id=rid,
+                        review_url=url_for("review", run_id=rid, _external=True),
+                    )
+                except ValueError as e:
+                    err = f"Could not start the watch: {e}"
+                except Exception:
+                    log.warning("live watch create failed", exc_info=True)
+                    err = "Could not start the watch: something went wrong. Please try again."
+                else:
+                    if _ensure_live_watch_schedule():
+                        msg = f"Watching. Cards will queue under Review as results land ({watch.interval_minutes}-min checks)."
+                    else:
+                        err = "Watch saved, but polling could not be scheduled. Please try again shortly."
         elif action == "stop":
-            ok = stop_watch(pid, (request.form.get("watch_id") or "").strip())
-            msg = "Watch stopped." if ok else "Watch not found."
+            try:
+                ok = stop_watch(pid, (request.form.get("watch_id") or "").strip())
+            except Exception:
+                log.warning("live watch stop failed", exc_info=True)
+                err = "Could not stop the watch: something went wrong. Please try again."
+            else:
+                msg = "Watch stopped." if ok else ""
+                if not ok:
+                    err = "Watch not found."
+        if err:
+            return redirect(url_for("live_meet_page", err=err))
         return redirect(url_for("live_meet_page", msg=msg))
 
-    def _ensure_live_watch_schedule() -> None:
-        """One global poll task drives every org's due watches (idempotent)."""
+    def _ensure_live_watch_schedule() -> bool:
+        """One global poll task drives every org's due watches (idempotent).
+
+        Returns True when the poll task is present (already existed or was just
+        created), False if it could not be ensured — so the caller reports the
+        outcome honestly instead of claiming success on a watch that will never
+        be polled.
+        """
         try:
             from mediahub.workflow.schedule import create_task as _ct
             from mediahub.workflow.schedule import list_tasks as _lt
@@ -63665,8 +63592,10 @@ voice, and queues them for one-click approval.</p>
                     schedule_kind="cron",
                     schedule_expr="*/2 * * * *",
                 )
+            return True
         except Exception:
             log.warning("could not ensure live watch schedule", exc_info=True)
+            return False
 
     # ---- W.8: season wraps -------------------------------------------------
 
@@ -63750,17 +63679,27 @@ voice, and queues them for one-click approval.</p>
         now = datetime.now(timezone.utc)
         msg = ""
         if action == "month":
-            year, month = (now.year, now.month - 1) if now.month > 1 else (now.year - 1, 12)
-            draft = build_monthly_draft(pid, RUNS_DIR, year=year, month=month)
-            save_draft(pid, draft)
-            msg = f"Drafted: {draft.get('title', '')}"
+            # Drafting reads every stored run; a single malformed one must not
+            # 500 with a stack trace — fail with an honest message instead.
+            try:
+                year, month = (now.year, now.month - 1) if now.month > 1 else (now.year - 1, 12)
+                draft = build_monthly_draft(pid, RUNS_DIR, year=year, month=month)
+                save_draft(pid, draft)
+                msg = f"Drafted: {draft.get('title', '')}"
+            except Exception:
+                log.warning("season wrap month draft failed", exc_info=True)
+                msg = "Could not draft this wrap - please check your stored runs."
         elif action == "season":
-            season_start = f"{now.year}-09-01" if now.month >= 9 else f"{now.year - 1}-09-01"
-            draft = build_season_draft(
-                pid, RUNS_DIR, season_start=season_start, season_end=now.date().isoformat()
-            )
-            save_draft(pid, draft)
-            msg = f"Drafted: {draft.get('title', '')}"
+            try:
+                season_start = f"{now.year}-09-01" if now.month >= 9 else f"{now.year - 1}-09-01"
+                draft = build_season_draft(
+                    pid, RUNS_DIR, season_start=season_start, season_end=now.date().isoformat()
+                )
+                save_draft(pid, draft)
+                msg = f"Drafted: {draft.get('title', '')}"
+            except Exception:
+                log.warning("season wrap season draft failed", exc_info=True)
+                msg = "Could not draft this wrap - please check your stored runs."
         elif action == "monthly_on":
             try:
                 from mediahub.workflow.schedule import create_task as _ct
@@ -63815,7 +63754,7 @@ voice, and queues them for one-click approval.</p>
         highlights = (
             "".join(
                 "<tr>"
-                f"<td>{_h(h.get('swimmer_name', ''))}</td><td>{_h(h.get('event', ''))}</td>"
+                f"<td>{_h(h.get('swimmer', ''))}</td><td>{_h(h.get('event', ''))}</td>"
                 f"<td>{_h(h.get('headline', ''))}</td>"
                 "</tr>"
                 for h in (draft.get("highlights") or [])
@@ -63860,17 +63799,24 @@ voice, and queues them for one-click approval.</p>
         if not draft:
             abort(404)
         prof = load_profile(pid)
+
+        def _safe_hex(value, default: str) -> str:
+            # Defence in depth: brand colours are substituted raw into the
+            # poster's <style> block by the shared print renderer, so a non-hex
+            # stored value could break out of the CSS and inject markup into the
+            # server-side PDF render. Only let a strict hex literal through.
+            v = str(value or "").strip()
+            return v if re.fullmatch(r"#[0-9A-Fa-f]{3,8}", v) else default
+
         brand = {
-            "primary": getattr(prof, "brand_primary", "#0A2540") if prof else "#0A2540",
-            "secondary": getattr(prof, "brand_secondary", "#000000") if prof else "#000000",
+            "primary": _safe_hex(getattr(prof, "brand_primary", "") if prof else "", "#0A2540"),
+            "secondary": _safe_hex(getattr(prof, "brand_secondary", "") if prof else "", "#000000"),
         }
         highlight_rows = [
             {
-                "swimmer": h.get("swimmer_name", ""),
+                "swimmer": h.get("swimmer", ""),
                 "event": h.get("event", ""),
-                "time": (h.get("raw_facts") or {}).get("time", "")
-                if isinstance(h.get("raw_facts"), dict)
-                else "",
+                "time": h.get("time", ""),
                 "note": h.get("headline", ""),
             }
             for h in (draft.get("highlights") or [])[:10]
@@ -64411,6 +64357,16 @@ voice, and queues them for one-click approval.</p>
     def _safe_filename(title: str, ext: str) -> str:
         slug = re.sub(r"[^A-Za-z0-9_-]+", "-", str(title or "document")).strip("-").lower()
         return f"{slug or 'document'}.{ext}"
+
+    def _doc_clean_detail(exc) -> str:
+        """A user-safe one-line failure reason for a document/PDF-tool error.
+
+        The document endpoints operate on server-side temp files, and library
+        errors (Pillow/pypdf/Playwright) embed the absolute path — leaking the
+        server's filesystem layout and the temp-naming scheme (CLAUDE.md: never
+        expose internal paths). Scrub any absolute path to a neutral token while
+        keeping the helpful validation text (e.g. page/size limits)."""
+        return re.sub(r"(?:/[^\s'\"]+)+", "a file", str(exc))[:200]
 
     def _doc_recent_runs(pid, limit=60):
         out = []
@@ -65197,15 +65153,18 @@ voice, and queues them for one-click approval.</p>
             '<div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px">'
             '<div class="card"><h3 style="margin-top:0">Import to edit</h3>'
             '<p class="dim" style="font-size:13px">Open a PDF, Word or PowerPoint file as an editable document (bounded fidelity).</p>'
-            '<input type="file" id="imp-file" accept=".pdf,.docx,.pptx" class="input">'
+            '<input type="file" id="imp-file" accept=".pdf,.docx,.pptx" class="input" '
+            'aria-label="Choose a PDF, Word or PowerPoint file to import">'
             '<button class="btn secondary" style="margin-top:8px" onclick="importDoc()">Import</button></div>'
             '<div class="card"><h3 style="margin-top:0">Merge PDFs</h3>'
             '<p class="dim" style="font-size:13px">Combine several PDFs into one, in order.</p>'
-            '<input type="file" id="merge-files" accept="application/pdf" multiple class="input">'
+            '<input type="file" id="merge-files" accept="application/pdf" multiple class="input" '
+            'aria-label="Choose PDF files to merge">'
             '<button class="btn secondary" style="margin-top:8px" onclick="mergePdfs()">Merge &amp; download</button></div>'
             '<div class="card"><h3 style="margin-top:0">Images → PDF</h3>'
             '<p class="dim" style="font-size:13px">Turn photos/screenshots into a single PDF.</p>'
-            '<input type="file" id="img-files" accept="image/*" multiple class="input">'
+            '<input type="file" id="img-files" accept="image/*" multiple class="input" '
+            'aria-label="Choose images to combine into a PDF">'
             '<button class="btn secondary" style="margin-top:8px" onclick="imagesToPdf()">Build &amp; download</button></div>'
             "</div>"
             + saved
@@ -65213,6 +65172,7 @@ voice, and queues them for one-click approval.</p>
             .replace("__IMPORT_URL__", url_for("api_documents_import"))
             .replace("__MERGE_URL__", url_for("api_documents_tool_merge"))
             .replace("__IMG_URL__", url_for("api_documents_tool_images_to_pdf"))
+            .replace("__CSRF__", _csrf_token())
         )
         return _layout("Documents", body, active="create")
 
@@ -65324,6 +65284,7 @@ voice, and queues them for one-click approval.</p>
             f'<a class="btn secondary" href="{url_for("api_document_docx", doc_id=doc_id)}">Word (.docx)</a>'
             "</div>"
             f'<iframe src="{url_for("api_document_pdf", doc_id=doc_id)}" '
+            'title="Document preview" '
             'style="width:100%;height:70vh;border:1px solid var(--panel);border-radius:8px;background:var(--panel)"></iframe>'
             + doc_structured
             + '<details style="margin-top:18px"><summary class="dim">Advanced — raw spec (JSON)</summary>'
@@ -65350,7 +65311,7 @@ voice, and queues them for one-click approval.</p>
             path = render_document_pdf(spec, brand_kit=_doc_brand_kit(pid))
         except Exception as e:
             log.warning("document pdf render failed", exc_info=True)
-            return jsonify({"error": "render_failed", "detail": str(e)[:200]}), 503
+            return jsonify({"error": "render_failed", "detail": _doc_clean_detail(e)}), 503
         dl = request.args.get("dl") == "1"
         return send_file(
             path,
@@ -65376,7 +65337,7 @@ voice, and queues them for one-click approval.</p>
             try:
                 document_pptx(spec, out, brand_kit=_doc_brand_kit(pid))
             except Exception as e:
-                return jsonify({"error": "export_failed", "detail": str(e)[:200]}), 503
+                return jsonify({"error": "export_failed", "detail": _doc_clean_detail(e)}), 503
             return send_file(
                 out,
                 as_attachment=True,
@@ -65405,7 +65366,7 @@ voice, and queues them for one-click approval.</p>
             try:
                 document_docx(spec, out, brand_kit=_doc_brand_kit(pid))
             except Exception as e:
-                return jsonify({"error": "export_failed", "detail": str(e)[:200]}), 503
+                return jsonify({"error": "export_failed", "detail": _doc_clean_detail(e)}), 503
             return send_file(
                 out,
                 as_attachment=True,
@@ -65434,7 +65395,7 @@ voice, and queues them for one-click approval.</p>
         try:
             path = deck_to_mp4(spec, brand_kit=_doc_brand_kit(pid))
         except Exception as e:
-            return jsonify({"error": "video_failed", "detail": str(e)[:200]}), 503
+            return jsonify({"error": "video_failed", "detail": _doc_clean_detail(e)}), 503
         return send_file(
             path,
             mimetype="video/mp4",
@@ -65457,8 +65418,14 @@ voice, and queues them for one-click approval.</p>
         from mediahub.documents import store as _docstore
 
         raw["doc_id"] = doc_id  # never let an edit reassign identity
-        new_spec = DocumentSpec.from_dict(raw)
-        _docstore.save_document(pid, new_spec)
+        # from_dict is total over wrong-typed fields, but a spec the editor sends
+        # can still be unparseable in other ways — answer with a clean 400, never
+        # an unhandled 500, since this is a user-editable payload.
+        try:
+            new_spec = DocumentSpec.from_dict(raw)
+            _docstore.save_document(pid, new_spec)
+        except (TypeError, ValueError):
+            return jsonify({"ok": False, "error": "bad_spec"}), 400
         return jsonify({"ok": True})
 
     @app.route("/api/documents/<doc_id>/content-edit", methods=["POST"])
@@ -65516,7 +65483,9 @@ voice, and queues them for one-click approval.</p>
         try:
             spec = import_file(tmp)
         except Exception as e:
-            return jsonify({"ok": False, "error": "import_failed", "detail": str(e)[:200]}), 422
+            return jsonify(
+                {"ok": False, "error": "import_failed", "detail": _doc_clean_detail(e)}
+            ), 422
         finally:
             try:
                 tmp.unlink()
@@ -65553,7 +65522,7 @@ voice, and queues them for one-click approval.</p>
             try:
                 merge_pdfs(paths, out)
             except Exception as e:
-                return jsonify({"error": "merge_failed", "detail": str(e)[:200]}), 422
+                return jsonify({"error": "merge_failed", "detail": _doc_clean_detail(e)}), 422
             finally:
                 for p in paths:
                     try:
@@ -65591,7 +65560,7 @@ voice, and queues them for one-click approval.</p>
             try:
                 images_to_pdf(paths, out)
             except Exception as e:
-                return jsonify({"error": "convert_failed", "detail": str(e)[:200]}), 422
+                return jsonify({"error": "convert_failed", "detail": _doc_clean_detail(e)}), 422
             finally:
                 for p in paths:
                     try:
@@ -65711,7 +65680,7 @@ voice, and queues them for one-click approval.</p>
         try:
             path = render_section_png(spec, i, brand_kit=_doc_brand_kit(session.owner))
         except Exception as e:
-            return jsonify({"error": "render_failed", "detail": str(e)[:160]}), 503
+            return jsonify({"error": "render_failed", "detail": _doc_clean_detail(e)}), 503
         return send_file(path, mimetype="image/png")
 
     @app.route("/api/present/<session_id>/state")

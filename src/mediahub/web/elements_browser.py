@@ -207,14 +207,24 @@ def render_browser_body(
   }}
 
   function card(el) {{
+    // Build with DOM APIs, not innerHTML string concat: el.name / el.kind / el.id
+    // come from the (org-custom) catalog and must never be parsed as HTML. Only
+    // el.svg is injected as markup, and it is sanitised server-side
+    // (elements.recolour._sanitise_svg) before it reaches here.
     var d = document.createElement('div'); d.className = 'eb-card';
-    var add = BOOT.inCard
-      ? '<button type="button" class="eb-add" data-id="' + el.id + '">Add to card</button>'
-      : '';
-    d.innerHTML =
-      '<div class="eb-thumb">' + (el.svg || '') + '</div>' +
-      '<div class="eb-meta"><div class="eb-name">' + (el.name || '') + '</div>' +
-      '<div class="eb-kind">' + (el.kind || '') + '</div>' + add + '</div>';
+    var thumb = document.createElement('div'); thumb.className = 'eb-thumb';
+    thumb.innerHTML = el.svg || '';
+    var meta = document.createElement('div'); meta.className = 'eb-meta';
+    var nm = document.createElement('div'); nm.className = 'eb-name'; nm.textContent = el.name || '';
+    var kd = document.createElement('div'); kd.className = 'eb-kind'; kd.textContent = el.kind || '';
+    meta.appendChild(nm); meta.appendChild(kd);
+    if (BOOT.inCard) {{
+      var btn = document.createElement('button');
+      btn.type = 'button'; btn.className = 'eb-add';
+      btn.setAttribute('data-id', el.id || ''); btn.textContent = 'Add to card';
+      meta.appendChild(btn);
+    }}
+    d.appendChild(thumb); d.appendChild(meta);
     return d;
   }}
 

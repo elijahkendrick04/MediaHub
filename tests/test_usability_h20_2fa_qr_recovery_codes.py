@@ -93,7 +93,7 @@ def _ledger_record(tmp_path, email=EMAIL):
 
 
 def test_setup_page_has_qr_copy_button_and_no_store(client):
-    from mediahub.sites import qr as qr_mod
+    from mediahub.web import qr as qr_mod
 
     _signup(client)
     r = client.get("/account/2fa")
