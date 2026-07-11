@@ -87,6 +87,7 @@ returns with a success toast). Non-operators are redirected away and never see a
 **Security detail (dimension 7):**
 - **Authorisation.** `/settings/developer` and `/operator/cache/purge` both require `is_dev_operator()`; a non-operator is redirected away and never receives operator HTML (verified: no "Deployment status" in the redirect body). `/healthz/usage` and `/healthz/governance` redirect non-operators to `/settings`; `/tools/mobile-parity` 404s for non-operators (doesn't even confirm existence). The `/developer` passwordless concern flagged in the brief is **stale** — closed by ADR-0019; `/developer` is username + password (argon2id, constant-time, rate-limited).
 - **Secrets.** No `ANTHROPIC_API_KEY`/`GEMINI_API_KEY`/token/hash appears in any response, page source, or error. The baked-in operator credential is an argon2id hash, never plaintext (locked by `tests/test_dev_login.py`).
+- **Information disclosure.** `/healthz/deps` (a public probe linked from the developer page) previously returned absolute server paths to anonymous callers (F-4); now redacted to operator-only, monitoring booleans preserved (locked by `tests/test_healthz_deps_path_disclosure.py`). The other linked probes disclose no paths.
 - **CSRF.** State-changing POSTs (`/developer`, `/operator/cache/purge`) are covered by the global `_csrf_protect` before_request; an unauth POST with no token -> 403. Tokens auto-injected into rendered forms.
 - **Injection / XSS.** The developer section interpolates only server-controlled values (version constant, health-check names/details, uptime numbers), all through `_h()`. No user-controlled text reaches the page. The login error is a fixed string; the submitted password is never rendered back.
 
@@ -99,7 +100,7 @@ returns with a success toast). Non-operators are redirected away and never see a
 | F-1 | P1 | Developer settings section unreachable for a no-org operator | Sign in at `/developer`, then (with no organisation created) open Settings -> click "Developer". You land on `/organisation/setup`, not the developer console. | `settings_section` is not in `_SETUP_EXEMPT_ENDPOINTS`, so the first-run org gate (`_gate_until_org_ready`) intercepts the developer section before its handler runs — even though the section is operator-only and org-independent (like the exempted `operator_commercial` / `mobile_parity_tool`). | Fixed | see section 8 |
 | F-2 | P2 | "AI governance — usage" dashboard link dead for a no-org operator | On the developer page, click "AI governance — usage" (`/healthz/governance`) with no org set up -> 302 to `/organisation/setup`. Its sibling "LLM usage dashboard" (`/healthz/usage`) works. | `healthz_governance` missing from `_SETUP_EXEMPT_ENDPOINTS` while its twin `healthz_usage` is present. The handler's own docstring assumed the exemption existed. | Fixed | see section 8 |
 | F-3 | P2 | "Clear all caches" action silently no-ops for a no-org operator | On the developer page (once reachable), click "Clear all caches" with no org -> 302 to `/organisation/setup`; the purge never runs. | `operator_cache_purge` (POST) missing from `_SETUP_EXEMPT_ENDPOINTS`. The org gate swallows the POST before the handler's `_require_operator()` runs. Uncovered only after F-1's fix made the page reachable, exposing its primary action as dead. | Fixed | see section 8 |
-| F-4 | P3 | `/healthz/deps` publicly discloses binary paths | `curl /healthz/deps` (no auth) returns `/opt/node22/bin/node`, the Chromium executable path, and `/home/.../remotion`. | The deps probe is public (deliberate deployment health signal) and reports absolute binary locations. Minor info disclosure. | Logged (out of blast radius) | — |
+| F-4 | P2 | `/healthz/deps` publicly discloses absolute server paths | `curl /healthz/deps` (no auth) returns `/opt/node22/bin/node`, the Chromium executable path, and `/home/.../remotion`. | The deps probe is public (deliberate deployment health signal) and reported absolute binary/install locations to anonymous callers, disclosing the deployment's internal layout. | Fixed | see section 8 |
 | F-5 | P3 | "Clear all caches" under-delivers — `export_cache` + `charts_cache` survive the purge | On a mature deployment, click "Clear all caches" to reclaim disk; up to ~2 GB of `DATA_DIR/export_cache` and the unbounded `DATA_DIR/charts_cache` are left on disk, and the success toast's "MB reclaimed" excludes them. | `cache_roots()` (`privacy/cache_purge.py`) omitted two genuine, content-addressed, re-derivable `DATA_DIR` caches, so `purge_all_caches()` skipped them and `_cache_tally()` under-counted — despite the card promising "every re-derivable cache". Same bug class the file already fixed once for `render_cache`. Found by the adversarial re-audit workflow; under-deletion only (never touches source data). | Fixed | see section 8 |
 | F-6 | P3 | `/developer/api` docs state the reel outro default as 1.0s; the real default is 2.5s | Read `GET /developer/api`; the `POST /api/runs/{id}/reel` "cover / outro" row said "Default 2.0 / 1.0". Real outro default is `REEL_OUTRO_SEC = 2.5`. | Stale copy in `_render_api_docs_body`: the outro default was extended 1.0s -> 2.5s in the engine but the public docs weren't updated, so a developer setting `?outro=1.0` to "match the default" silently shortens the outro. Found by the adversarial re-audit workflow. | Fixed | see section 8 |
 
@@ -110,10 +111,12 @@ to org setup. This is exactly the "control that doesn't do what it claims" class
 found first; fixing it surfaced F-3 (the page's main action was still dead), which is why
 all three are fixed together.
 
-**F-4** is on a shared health route owned by the observability/health feature, not the
-developer-settings feature, and the disclosure (container binary paths) is low-severity and
-plausibly intentional operator-debug output. Left for the owning feature/session; not fixed
-here to keep the footprint tight.
+**F-4** is on a shared health route (`/healthz/deps`) that the developer-settings deployment
+section links to. It was first logged as out-of-blast-radius, then fixed on a follow-up pass
+(the operator explicitly asked for the remaining caveats to be closed): the absolute paths
+are now operator-only, while the endpoint stays public and keeps every availability boolean
+and version, so uptime monitoring is unaffected. This mirrors the established
+`/healthz/sentinel` pattern, where the raw audit tail is operator-only.
 
 ---
 
@@ -138,6 +141,10 @@ without altering any other section's behaviour.
 
 4. **F-5:** added `export_cache` and `charts_cache` to `cache_roots()` in `src/mediahub/privacy/cache_purge.py` (resolved through each module's own resolver, `export_engine.cache.cache_dir` / `charts.export._cache_dir`, with a `DATA_DIR` fallback — exactly the pattern the sibling roots use). Both are content-addressed, re-derivable caches; adding them makes the site-wide purge honour its "every re-derivable cache" promise. Under-deletion only, so no data-integrity risk. **This is a shared file — see Cross-cutting changes.**
 5. **F-6:** corrected the reel `outro` default in `_render_api_docs_body` (`/developer/api`) from `1.0` to `2.5` to match the engine constant `REEL_OUTRO_SEC`. One-line copy fix, wholly inside the developer feature surface.
+
+**Third pass (F-4)** — closing the last caveat at the operator's request:
+
+6. **F-4:** in `healthz_deps` (`src/mediahub/web/web.py`), the three absolute-path fields (`playwright.executable`, `node.path`, `remotion.dir`) are now stripped from the payload for any caller that is not `is_dev_operator()`. The endpoint stays public and every availability boolean, version and the top-level `ok` flag are unchanged, so uptime monitors are unaffected; only the on-disk locations are gated. Mirrors `/healthz/sentinel` (operator-only audit tail). Verified against the other linked probes (`/health`, `/healthz/memory`, `/api/status`, `/healthz`, `/healthz/breaker`, `/healthz/sentinel`, `/healthz/search`) — none of them disclose paths to anonymous callers, so `/healthz/deps` was the whole surface. **Shared file — see Cross-cutting changes.**
 
 ---
 
@@ -166,6 +173,9 @@ tests genuinely pin the fix and are not tautologies.
 
 Both fail with the source fixes stashed and pass with them applied.
 
+**Third pass:**
+- `tests/test_healthz_deps_path_disclosure.py` (new; 3 tests) — an anonymous `/healthz/deps` payload contains no absolute path (`test_anonymous_deps_leaks_no_absolute_paths`, a recursive walk of the whole JSON), still reports `ok` + the availability booleans so monitoring is intact (`test_anonymous_deps_still_reports_health`), and a signed-in operator still sees the diagnostic paths (`test_operator_deps_keeps_paths`) (F-4). Fails with the redaction removed, passes with it applied.
+
 ---
 
 ## 7. Cross-cutting changes
@@ -187,13 +197,20 @@ removes or narrows), so it cannot over-delete or touch source data. Reconcilers:
 additions to the `roots` list; if another session edits `cache_roots()`, keeping both sets of
 entries is the correct resolution.
 
+**Third shared surface (F-4):** `src/mediahub/web/web.py` `healthz_deps` — a single additive
+guard that pops three absolute-path fields for non-operators before the payload is returned.
+It only *removes* data from the anonymous response (never adds or changes the availability
+booleans), so it cannot break a monitor and has no interaction with any other route.
+Reconcilers: the change is localised to the tail of the `healthz_deps` handler.
+
 No changes to `requirements.txt`, `pyproject.toml`, base templates, shared CSS/JS, or config.
 
 ---
 
 ## 8. Residual risks / cross-feature items
 
-- **F-4 (`/healthz/deps` path disclosure)** — a shared health route; owner should decide whether to operator-gate it or redact absolute paths. Low severity.
+- **F-4 (`/healthz/deps` path disclosure) — now fixed** (third pass): absolute paths are operator-only; the endpoint stays public for monitors. The other health probes the developer page links to were checked and disclose no paths, so the surface is closed.
+- **Pre-existing `main` breakage, NOT from this diff — `test_theme_tokens.py::test_inline_hex_count_within_budget`.** The third-pass full-suite run (12,546 passed, 10 skipped, 5 failed) includes this deterministic theming-hygiene failure: `web.py` now carries 21 inline hex hardcodes against a budget of 20. My diff adds **zero** hex (`git diff` on the change confirms it), so it cannot affect the count — and a clean `origin/main` (BASE `2349a41`) worktree fails this test identically (21 vs 20, same `#ff5d6c` literal). It is a parallel-merge accumulation artifact: independent sessions each added an inline hex that individually passed but together crossed 20. All 21 offenders live in **other features'** code (video studio, `status_page`, `healthz_usage`), none in this feature's owned functions, so migrating one to a `var(--mh-*)` token would mean reaching outside this blast radius into theming (a sensitive colour surface) — logged for the theming owner rather than fixed here. Lifting the budget in the test is off-limits (never weaken a test to pass a gate).
 - **Operator-with-an-org path was already correct** — the three fixes only affect the no-org state; an operator with a ready organisation always reached the console. No regression risk there.
 - **Whole-file formatting drift in `web.py`** — the newest `ruff` reports quote-style deviations across pre-existing, untouched parts of `web.py`, but under the CI-pinned `ruff==0.8.4` the file is already clean and my edits pass. I deliberately did **not** run a whole-file reformat (it would churn dozens of unrelated lines and collide with parallel sessions).
 - **Pre-existing sandbox-flaky/environmental test failures (not caused by this change)** — the full-suite green-gate run (12,491 passed, 10 skipped) surfaced 5 failures, all outside this feature and all passing in isolation:
@@ -221,3 +238,6 @@ operator would try.
 - **Green gate:** app boots clean; full suite on the prior integration = 12,491 passed / 10 skipped / 5 pre-existing flaky-or-environmental failures also present (differently) on a clean `origin/main` baseline; a 175-test gate+feature+auth+language-switcher regression subset passed on the final integration; ruff (pinned v0.8.4) lint + format clean; no secrets or `.env` staged.
 - **Review the diff:** `git diff 33602c5..1a1b232` (or `git show 494f6dd` for the code fix alone).
 - **Second pass (F-5, F-6) — MERGED to `main`.** After re-running the adversarial verification workflow, the two P3 fixes landed in a follow-up: code+tests `ec66e8b`, report `22fefbb`, integrated onto `origin/main` BASE `9b7d0a7` (rebased cleanly past parallel `[season-wraps]`/`[plan]` web.py edits), green gate re-run (126-test cache-purge + api-docs + developer + gate + operator subset passed; ruff v0.8.4 clean; app boots), freshness re-checked, landed via non-force push. Review: `git show ec66e8b`.
+- **Third pass (F-4) — the operator asked for the remaining caveats to be closed.** The one actionable caveat (F-4, `/healthz/deps` path disclosure) is now fixed: absolute paths are operator-only, monitoring booleans preserved. Code+test commit (the redaction) + report commit; new test `tests/test_healthz_deps_path_disclosure.py`. Branch restarted from the latest `origin/main` (the earlier developer-settings branch was already merged, so this pass is a fresh change on top of current `main`), rebased onto BASE `2349a41`.
+  - **Green gate:** app boots clean (483 routes); the feature+affected subset (189 tests: healthz-deps-disclosure, developer-org-gate, dev-login, cache-purge, health-title, org-setup-gate, operator-commercial, api-docs, authn-hardening, …) all pass; full `tests/` suite = **12,546 passed / 10 skipped / 5 failed**, where all 5 are pre-existing and unrelated: 4× `test_spotlight_build_brand_grounding` (flaky under parallel xdist — pass in isolation) and 1× `test_theme_tokens::test_inline_hex_count_within_budget` (deterministic, but fails identically on a clean `origin/main` `2349a41` worktree; my diff adds zero hex). ruff (pinned v0.8.4) lint + format clean on both changed files; no secrets or `.env` staged.
+  - **Merge line appended below once pushed.**
