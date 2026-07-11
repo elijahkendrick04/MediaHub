@@ -98,7 +98,8 @@ def test_old_sponsor_pack_new_draft_link_seeds_free_text(env):
         profile_id=ORG,
     )
     html = env["client"].get(f"/drafts/{rec['pack_id']}").get_data(as_text=True)
-    assert "Generate new draft" in html
+    # E-11 renamed the blank-form link; the C-11 guarantee is its destination.
+    assert "Start a new draft from the form" in html
     # The link lands on free-text with a seed, not the retired form.
     assert "/free-text?seed=" in html
     assert "/sponsor-post" not in html
