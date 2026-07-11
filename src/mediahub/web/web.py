@@ -2463,15 +2463,22 @@ def _variant_jobs_dir() -> Path:
 
 
 def _variant_job_save(job: dict) -> None:
-    """Atomically persist a job snapshot (single writer: the job thread)."""
+    """Atomically persist a job snapshot.
+
+    Two threads save the same job (the worker and its ``_job_heartbeat``),
+    so the tmp name is unique per write — a shared ``.tmp`` path let their
+    writes interleave into a torn/absent job file for a poll cycle. The tmp
+    stays in the same directory, so ``os.replace`` remains atomic."""
     job["updated_at"] = time.time()
     path = _variant_jobs_dir() / f"{job['id']}.json"
-    tmp = path.with_suffix(".tmp")
+    tmp = path.with_suffix(f".{uuid.uuid4().hex[:8]}.tmp")
     try:
         tmp.write_text(json.dumps(job), encoding="utf-8")
         os.replace(tmp, path)
     except Exception:
         log.exception("variant job %s: persist failed", str(job.get("id", ""))[:8])
+        with contextlib.suppress(OSError):
+            tmp.unlink(missing_ok=True)
 
 
 def _variant_job_load(job_id: str) -> Optional[dict]:
@@ -54388,7 +54395,12 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                 if job["visual_id"]:
                     try:
                         sidecar.parent.mkdir(parents=True, exist_ok=True)
-                        sidecar.write_text(
+                        # A concurrent page GET must never read a torn sidecar
+                        # (torn read = cache miss = duplicate auto-start
+                        # render) — write via unique tmp + atomic os.replace,
+                        # the _variant_job_save idiom.
+                        _sc_tmp = sidecar.with_suffix(f".{uuid.uuid4().hex[:8]}.tmp")
+                        _sc_tmp.write_text(
                             json.dumps(
                                 {
                                     "visual_id": job["visual_id"],
@@ -54402,6 +54414,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                             ),
                             encoding="utf-8",
                         )
+                        os.replace(_sc_tmp, sidecar)
                     except Exception:
                         log.warning(
                             "sponsor variant %s/%s: sidecar write failed",
