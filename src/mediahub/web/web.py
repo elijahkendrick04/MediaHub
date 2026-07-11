@@ -20954,11 +20954,18 @@ def create_app() -> Flask:
             # and crossfades through stories / reels / graphics / captions.
             hero_h1 = "Results in.<br>On-brand " + _hero_word_cycle_html() + " out."
             word_cycle_js = _HERO_WORD_CYCLE_JS
+            # Lede leads with the ONE concrete thing MediaHub does, in plain
+            # words, so a visitor who has never heard of it understands the
+            # mechanic in a single read: upload a results file → the engine
+            # finds the moments → it drafts branded content → you approve.
+            # (The old lede opened on brand-reading — the setup step — which
+            # buried the actual value under the secondary detail.)
             hero_lede = (
-                "MediaHub reads your club website, social profiles, and brand "
-                "guidelines, then writes captions, builds graphics, and renders "
-                "motion videos in your voice. Set up once. Reuse forever. "
-                "Nothing posts without you."
+                "Upload your meet results — HY3, PDF or a spreadsheet. MediaHub "
+                "finds every personal best, medal and club record, writes the "
+                "caption, and builds branded story cards, feed graphics and "
+                "reels — ready to post in your club's colours and voice. You "
+                "approve each one; nothing posts without you."
             )
             # Sign up is the unambiguous entry point for a first-time visitor.
             # The secondary CTA is the ACCOUNT log-in for returning users
@@ -20971,7 +20978,7 @@ def create_app() -> Flask:
                 f'<a class="mh-cta-secondary" href="{url_for("login_page")}">'
                 "Log in</a>"
             )
-            eyebrow = "The content engine for sports clubs"
+            eyebrow = "Turn meet results into ready-to-post content"
             lane_no = "01"
 
         # Meta line under the CTAs — bracketed mono strap, scoreboard voice.
@@ -21020,11 +21027,34 @@ def create_app() -> Flask:
                 "</p>"
             )
 
-        # U.10 — framed, looping product demo. Relocated out of the hero into
-        # its own "See it work" section just below the engine diagram, so the
-        # diagram (the read -> engine -> write map) is the hero's first visual.
-        # Fresh / signed-out visitors only; a pinned org gets the utilitarian
-        # "Ready to file" hero with no marketing demo.
+        # Three-step "how it works" strip, sits under the lede so the core
+        # mechanic (upload → review → post) is glanceable ABOVE THE FOLD — the
+        # one screen every visitor sees — instead of only in the scroll-down
+        # explainer. Fresh / signed-out visitors only; a pinned org already
+        # knows the flow and gets the lean "Ready to file" hero.
+        steps_html = ""
+        if not (prof and prof.is_ready()):
+            _steps = (
+                ("01", "Upload results"),
+                ("02", "Review the drafts"),
+                ("03", "Approve &amp; post"),
+            )
+            steps_html = (
+                '<ol class="mh-hero-steps" '
+                'aria-label="How MediaHub works, in three steps">'
+                + "".join(
+                    f'<li><span class="i" aria-hidden="true">{i}</span>'
+                    f'<span class="t">{t}</span></li>'
+                    for i, t in _steps
+                )
+                + "</ol>"
+            )
+
+        # U.10 — framed, looping product demo in its own "See it work" section.
+        # It is now the FIRST section after the hero (ahead of the read ->
+        # engine -> write diagram), so the concrete product proof lands before
+        # the conceptual explainer. Fresh / signed-out visitors only; a pinned
+        # org gets the utilitarian "Ready to file" hero with no marketing demo.
         demo_html = "" if (prof and prof.is_ready()) else _hero_product_demo()
         demo_section_html = ""
         if demo_html:
@@ -21044,6 +21074,7 @@ def create_app() -> Flask:
             f'<span class="mh-hero-eyebrow">{_h(eyebrow)}</span>'
             f"<h1>{hero_h1}</h1>"
             f'<p class="lede">{_h(hero_lede)}</p>'
+            f"{steps_html}"
             f'<div class="mh-hero-actions">{hero_actions}</div>'
             f"{demo_line_html}"
             f"{meta_html}"
@@ -21140,8 +21171,13 @@ def create_app() -> Flask:
             '<div class="mh-fx mh-spotlight">'
             + hero_html
             + "</div>"
-            + _pipeline_diagram_section_html()
+            # Concrete product proof FIRST: the framed generate → review →
+            # approve demo shows the actual thing (a results file becoming a
+            # branded card + caption you approve) right after the hero, before
+            # the conceptual read → engine → write diagram explains how. Cold
+            # visitors decide in seconds, so "show" precedes "explain".
             + demo_section_html
+            + _pipeline_diagram_section_html()
             + _home_io_headline_html()
             + _home_engine_bento_html()
             + _home_audience_html()
