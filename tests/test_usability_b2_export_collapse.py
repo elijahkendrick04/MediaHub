@@ -24,6 +24,7 @@ from __future__ import annotations
 import importlib
 import json
 import pathlib
+import re
 import sys
 from pathlib import Path
 
@@ -251,3 +252,99 @@ def test_certificates_job_client_still_wired_inside_disclosure():
     body = _SRC.split('id="mh-export-pack"', 1)[1].split("</details>", 1)[0]
     assert 'onclick="return mhCertificatesJob(this)"' in body
     assert 'id="mh-certs-status"' in body
+
+
+# ---------------------------------------------------------------------------
+# JS2-3 / SRV2-1 follow-up: the gates come alive after an in-page render
+# ---------------------------------------------------------------------------
+
+
+class TestInPageUnGate:
+    def test_enable_helper_exists_and_lifts_both_gate_levels(self):
+        assert "window.mhExportGatesEnable = function(cardId)" in _SRC
+        helper = _SRC.split("window.mhExportGatesEnable = function(cardId)", 1)[1].split(
+            "</script>", 1
+        )[0]
+        # Per-card gate: this card's marked controls.
+        assert "getElementById('pc-' + cardId)" in helper
+        # Pack-level gates + the gate note.
+        assert "#mh-export-pack a[data-mh-export-gate]" in helper
+        assert "#mh-export-note[data-mh-export-note-gated]" in helper
+        # It removes exactly what the gate stamped and restores the real title.
+        assert "removeAttribute('aria-disabled')" in helper
+        assert "data-mh-title-ready" in helper
+
+    def test_create_graphic_success_path_calls_the_helper(self):
+        body = _SRC.split("function createGraphic(btn, createUrl", 1)[1].split(
+            "\nfunction ", 1
+        )[0]
+        assert "if (window.mhExportGatesEnable) window.mhExportGatesEnable(cardId);" in body
+        # Guarded call — never a bare invocation that breaks the grouped page.
+        assert body.count("window.mhExportGatesEnable(") == body.count(
+            "if (window.mhExportGatesEnable) window.mhExportGatesEnable("
+        )
+
+    def test_pack_page_ships_the_helper_script(self):
+        assert "_PACK_EXPORT_GATE_JS = " in _SRC
+        assert "{_PACK_EXPORT_GATE_JS}" in _SRC
+
+    def test_gated_controls_carry_the_gate_marker(self, app_env, tmp_path):
+        app, wm, _ = app_env
+        _approve(tmp_path, "swim-1")
+        page = _page(app)
+        # Per-card download anchor.
+        assert 'data-mh-export-gate="card"' in page
+        # Pack-level: the three gate variants all stamp their marker.
+        body = _disclosure(page)
+        assert body.count('data-mh-export-gate="attr"') == 8
+        assert body.count('data-mh-export-gate="plain"') == 2
+        assert body.count('data-mh-export-gate="btn"') == 1
+        assert 'data-mh-export-note-gated="1"' in body
+
+    def test_markers_absent_once_rendered(self, app_env, tmp_path):
+        app, wm, _ = app_env
+        _approve(tmp_path, "swim-1")
+        _seed_visual(wm, "swim-1", "cb_a")
+        page = _page(app)
+        assert "data-mh-export-gate=" not in _disclosure(page)
+        assert 'data-mh-export-note-gated="1"' not in page
+
+
+# ---------------------------------------------------------------------------
+# JS2-5 / SRV2-3 follow-up: exactly one title attribute per control
+# ---------------------------------------------------------------------------
+
+
+def _control_tags(page: str) -> list[str]:
+    start = page.index('id="mh-export-pack"')
+    end = page.index("</details>", start)
+    return re.findall(r"<(?:a|button)\b[^>]*>", page[start:end])
+
+
+class TestSingleTitleAttribute:
+    def test_no_duplicate_titles_when_gated(self, app_env, tmp_path):
+        app, wm, _ = app_env
+        _approve(tmp_path, "swim-1")
+        tags = _control_tags(_page(app))
+        assert tags
+        for tag in tags:
+            assert tag.count(' title="') <= 1, tag
+        # Every gated control still shows the gate tooltip.
+        gated = [t for t in tags if "data-mh-export-gate" in t]
+        assert len(gated) == 11
+        for tag in gated:
+            assert "No graphics rendered yet" in tag, tag
+
+    def test_no_duplicate_titles_once_rendered(self, app_env, tmp_path):
+        app, wm, _ = app_env
+        _approve(tmp_path, "swim-1")
+        _seed_visual(wm, "swim-1", "cb_a")
+        tags = _control_tags(_page(app))
+        assert tags
+        for tag in tags:
+            assert tag.count(' title="') <= 1, tag
+        # The controls' own tooltips render directly in the live state.
+        joined = "".join(tags)
+        assert "grouped per card and ready to post" in joined
+        assert "ready for a professional print shop" in joined
+        assert "data-mh-title-ready" not in joined

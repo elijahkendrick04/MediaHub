@@ -5166,6 +5166,10 @@ function createGraphic(btn, createUrl, cardId, fmt, assetId, noPhoto) {
       prog.complete(function(){
         btn.disabled = false; btn.textContent = origLabel;
         _renderVisualPanel(panel, res.body, cardId, createUrl);
+        // JS2-3 (B-2 follow-up): this render just landed on disk, so the
+        // export gates are stale — lift them in place on pages that gate
+        // (the pack page defines the helper; elsewhere it is undefined).
+        if (window.mhExportGatesEnable) window.mhExportGatesEnable(cardId);
       });
     })
     .catch(function(err) {
@@ -7073,6 +7077,40 @@ document.addEventListener('keydown', function(e){
     document.querySelectorAll('details.mh-card-more[open]').forEach(function(d){ d.open = false; });
   }
 });
+</script>
+"""
+
+# JS2-3 (B-2 follow-up) — pack-page-only helper: after an in-page graphic
+# render, lift the server-stamped export gates without a reload. It removes
+# exactly the attributes the gate variants stamped (marked with
+# data-mh-export-gate) and restores each control's own tooltip from
+# data-mh-title-ready. Pages without the gates (e.g. the grouped page) never
+# define it; createGraphic calls it guardedly via window.
+_PACK_EXPORT_GATE_JS = """
+<script>
+window.mhExportGatesEnable = function(cardId) {
+  function unGate(el) {
+    el.removeAttribute('aria-disabled');
+    if (el.getAttribute('onclick') === 'return false') el.removeAttribute('onclick');
+    if (el.disabled) el.disabled = false;
+    el.style.pointerEvents = '';
+    el.style.opacity = '';
+    var ready = el.getAttribute('data-mh-title-ready');
+    if (ready) el.setAttribute('title', ready); else el.removeAttribute('title');
+    el.removeAttribute('data-mh-title-ready');
+    el.removeAttribute('data-mh-export-gate');
+  }
+  var card = document.getElementById('pc-' + cardId);
+  if (card) card.querySelectorAll('[data-mh-export-gate]').forEach(unGate);
+  // This card just went 0 -> 1 rendered graphics for the pack, so every
+  // pack-level gate lifts too.
+  document.querySelectorAll('#mh-export-pack a[data-mh-export-gate], #mh-export-pack button[data-mh-export-gate]').forEach(unGate);
+  var note = document.querySelector('#mh-export-note[data-mh-export-note-gated]');
+  if (note) {
+    note.textContent = 'The ZIPs include each card that has a graphic \\u2014 use \\u201cCreate all graphics\\u201d to build the rest.';
+    note.removeAttribute('data-mh-export-note-gated');
+  }
+};
 </script>
 """
 
@@ -48389,9 +48427,23 @@ function mhSetupMode(mode) {{
             _dl_style = "font-size:11px;padding:4px 10px" + (
                 "" if _dl_ready else ";pointer-events:none;opacity:0.45"
             )
-            _dl_gate = "" if _dl_ready else ' aria-disabled="true" onclick="return false"'
-            _dl_title = (
+            # JS2-3 — the gate marker + the ready tooltip ride on the anchor
+            # so mhExportGatesEnable can lift this card's gate in place after
+            # an in-page render (no reload).
+            _dl_ready_title = (
                 "The graphic plus the caption text in one .zip, ready to post manually"
+            )
+            _dl_gate = (
+                ""
+                if _dl_ready
+                else (
+                    ' aria-disabled="true" onclick="return false" '
+                    'data-mh-export-gate="card" '
+                    f'data-mh-title-ready="{_h(_dl_ready_title)}"'
+                )
+            )
+            _dl_title = (
+                _dl_ready_title
                 if _dl_ready
                 else "No graphic yet — use Create graphic first, then download the post"
             )
@@ -48724,9 +48776,12 @@ function mhSetupMode(mode) {{
             )
         else:
             _export_note = f"All {len(approved)} approved cards are rendered and ready to export."
+        # JS2-3 — data-mh-export-gate marks exactly what the gate stamped so
+        # mhExportGatesEnable can lift it client-side after the first in-page
+        # render (no reload). The marker value names the gate variant.
         _export_disabled_attr = (
             ' aria-disabled="true" onclick="return false" '
-            'style="pointer-events:none;opacity:0.45" '
+            'style="pointer-events:none;opacity:0.45" data-mh-export-gate="attr" '
             'title="No graphics rendered yet — use Create all graphics first"'
             if rendered_n == 0
             else ""
@@ -48738,16 +48793,28 @@ function mhSetupMode(mode) {{
         # browser-print button takes a real ``disabled``.
         _export_disabled_plain = (
             ' aria-disabled="true" style="pointer-events:none;opacity:0.45" '
+            'data-mh-export-gate="plain" '
             'title="No graphics rendered yet — use Create all graphics first"'
             if rendered_n == 0
             else ""
         )
         _export_disabled_btn = (
-            ' disabled style="opacity:0.45" '
+            ' disabled style="opacity:0.45" data-mh-export-gate="btn" '
             'title="No graphics rendered yet — use Create all graphics first"'
             if rendered_n == 0
             else ""
         )
+
+        # JS2-5 — exactly one title attribute per gated control in either
+        # state: when the render gate is on, the gate string above supplies
+        # the title and the control's own tooltip rides along in
+        # data-mh-title-ready (restored by mhExportGatesEnable); once
+        # rendered, the control's own title renders directly.
+        def _export_title_attr(ready_title: str) -> str:
+            if rendered_n == 0:
+                return f' data-mh-title-ready="{_h(ready_title)}"'
+            return f' title="{_h(ready_title)}"'
+
         # B-2 — the single pack-level export disclosure's label carries the
         # live approved count.
         _export_summary_label = (
@@ -48849,25 +48916,36 @@ function mhSetupMode(mode) {{
   <summary style="cursor:pointer;font-size:13px;font-weight:700">{_export_summary_label}
     <span class="muted" style="font-weight:400;font-size:12px;margin-left:6px">ZIPs, bulk convert, print, certificates &amp; newsletter</span>
   </summary>
-  <div id="mh-export-note" style="font-size:12px;color:var(--ink-dim);margin:10px 0 12px">{
+  <div id="mh-export-note"{' data-mh-export-note-gated="1"' if rendered_n == 0 else ""} style="font-size:12px;color:var(--ink-dim);margin:10px 0 12px">{
             _export_note
         }</div>
 
   <div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:6px">Social posting</div>
   <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px">
-    <a class="btn" href="{_export_zip_url}"{_export_disabled_attr}
-       title="Every rendered card at every size (square, portrait, story), grouped per card and ready to post">Every format, organised for posting (.zip)</a>
-    <a class="btn secondary" href="{_zip_url}"{_export_disabled_attr}
-       title="One folder with just the rendered images — no captions, no grouping">Just the images (.zip)</a>
-    <a class="btn secondary" href="{_bulk_export_url}"{_export_disabled_attr}
-       title="Convert this pack to JPG / WebP / AVIF / PNG with quality options, bundled into one ZIP">Bulk export &amp; convert&hellip;</a>
+    <a class="btn" href="{_export_zip_url}"{_export_disabled_attr}{
+            _export_title_attr(
+                "Every rendered card at every size (square, portrait, story), grouped per card and ready to post"
+            )
+        }>Every format, organised for posting (.zip)</a>
+    <a class="btn secondary" href="{_zip_url}"{_export_disabled_attr}{
+            _export_title_attr("One folder with just the rendered images — no captions, no grouping")
+        }>Just the images (.zip)</a>
+    <a class="btn secondary" href="{_bulk_export_url}"{_export_disabled_attr}{
+            _export_title_attr(
+                "Convert this pack to JPG / WebP / AVIF / PNG with quality options, bundled into one ZIP"
+            )
+        }>Bulk export &amp; convert&hellip;</a>
   </div>
 
   <div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:6px">Print &amp; certificates</div>
   <div style="font-size:12px;color:var(--ink-dim);margin-bottom:6px">A branded A4 certificate for every approved achievement &mdash; the thing families frame. Photo/name consent is honoured automatically.</div>
   <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
-    <a class="btn secondary" href="{_print_tool_url}"{_export_disabled_attr}
-       title="Proof and export a print-ready PDF (posters, flyers, banners, merch) from this meet's cards — pre-flight checked before you send it to a printer">Print &amp; merch&hellip;</a>
+    <a class="btn secondary" href="{_print_tool_url}"{_export_disabled_attr}{
+            _export_title_attr(
+                "Proof and export a print-ready PDF (posters, flyers, banners, merch) "
+                "from this meet's cards — pre-flight checked before you send it to a printer"
+            )
+        }>Print &amp; merch&hellip;</a>
     <a class="btn secondary mh-certs-go" href="{_h(_certs_url)}" data-certs-job="{
             _h(_certs_job_url)
         }" onclick="return mhCertificatesJob(this)"{
@@ -48875,10 +48953,15 @@ function mhSetupMode(mode) {{
         }>Download certificates (.zip of PDFs)</a>
     <a class="btn secondary mh-certs-go" href="{_h(_certs_print_url)}" data-certs-job="{
             _h(_certs_print_job_url)
-        }" onclick="return mhCertificatesJob(this)"{_export_disabled_plain}
-       title="A4 + 3mm bleed and crop marks, ready for a professional print shop">Print-shop pack (bleed + crop marks)</a>
-    <button class="btn secondary" onclick="window.print()"{_export_disabled_btn}
-            title="Use the browser print dialog on this page as it stands — for a press-ready file use Print &amp; merch instead">Print this page</button>
+        }" onclick="return mhCertificatesJob(this)"{_export_disabled_plain}{
+            _export_title_attr("A4 + 3mm bleed and crop marks, ready for a professional print shop")
+        }>Print-shop pack (bleed + crop marks)</a>
+    <button class="btn secondary" onclick="window.print()"{_export_disabled_btn}{
+            _export_title_attr(
+                "Use the browser print dialog on this page as it stands — "
+                "for a press-ready file use Print & merch instead"
+            )
+        }>Print this page</button>
   </div>
   <div id="mh-certs-status" class="dim" role="status" aria-live="polite" style="font-size:12px;margin:4px 0 14px;min-height:1.2em"></div>
 
@@ -48905,6 +48988,7 @@ function mhSetupMode(mode) {{
 
 <style>{_CARD_TOOLBAR_CSS}</style>
 {_CARD_TOOLBAR_JS}
+{_PACK_EXPORT_GATE_JS}
 <script>var WF_API_BASE = {json.dumps(_wf_api_base)};</script>
 {_card_creative_js()}
 <script>
