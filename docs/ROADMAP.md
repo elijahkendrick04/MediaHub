@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-07-11 · `03f30c13b` · [audit] Free Text (create): harden chat brief→draft build + atomic chat persistence (#1104)
+**Last updated:** 2026-07-11 · `c9ea9f3c6` · [elements] add a per-card "Elements" entry point in the builder toolbar
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1227,6 +1227,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-07-11 | `c9ea9f3c6` | [elements] add a per-card "Elements" entry point in the builder toolbar |
 | 2026-07-10 | `c30b7042d` | [free-text] Harden chat brief->draft build and chat persistence |
 | 2026-07-10 | `4e8afd1d3` | [spotlight] record caveat-round merge status in audit report |
 | 2026-07-10 | `208cea1df` | [spotlight] update audit report: caveats fixed, verdict -> WORKS |
@@ -1235,6 +1236,4 @@ list and the auto table below, not here.
 | 2026-07-10 | `46bce47a4` | [activity] docs: record cross-cutting hygiene fix and merge status in report |
 | 2026-07-10 | `4888aa4bb` | [activity] Add Settings Activity feature audit report |
 | 2026-07-10 | `189a94529` | [activity] Settings Activity: show real achievements, not legacy 0/0 counts |
-| 2026-07-10 | `5dfb118a1` | [sample-pack] fix pre-existing trailing-newline hygiene failures on main |
-| 2026-07-10 | `16741d443` | [sample-pack] add feature audit report |
 <!-- /ROADMAP:ACTIVITY -->
