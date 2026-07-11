@@ -314,7 +314,8 @@ def pipeline_diagram_section_html() -> str:
         '<div class="mh-section-eyebrow-strip"><span class="label">How it works</span></div>'
         '<h2 class="mh-section-title" id="mh-pl-title">'
         'Reads what your club already has. <em class="editorial">Writes</em> what you need.</h2>'
-        '<p class="mh-pl-lede">MediaHub reads the sources you already have: your '
+        '<p class="mh-pl-lede">Give it your results file and MediaHub reads it '
+        "alongside the sources you already have: your "
         "club site, social profiles and brand kit (your logo, colours and fonts). "
         "It works out what matters, ranks it, then writes captions, builds graphics "
         "and renders reels. In your colours, in your voice. Nothing leaves without "

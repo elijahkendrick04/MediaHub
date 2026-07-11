@@ -3936,6 +3936,60 @@ kbd {
   text-decoration: none;
 }
 
+/* HERO "3-STEP" STRIP — the core mechanic (upload → review → post) made
+   glanceable directly under the lede, so a first-time visitor learns what
+   MediaHub does before deciding to sign up. Set in the same mono-uppercase
+   scoreboard voice as the eyebrow strap and the tally meta line, so it
+   BOOKENDS the editorial H1/lede rather than reading as a generic
+   number-bubble SaaS step list. A lane-tinted "→" carries the flow between
+   beats; on mobile the row stacks and the arrows stand down. No entrance
+   motion of its own — it rides the page-level `main.wrap` fade-in, keeping
+   the "instant hero + live accents" cohesion the word-cycle/odometer set. */
+.mh-hero-steps {
+  list-style: none;
+  margin: var(--sp-6) auto 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 10px 0;
+  font-family: var(--font-mono);
+  font-size: var(--fs-10);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.mh-hero-steps li {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.mh-hero-steps .i {
+  color: var(--lane);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.mh-hero-steps .i::before { content: "["; color: var(--ink-faint); }
+.mh-hero-steps .i::after { content: "]"; color: var(--ink-faint); }
+.mh-hero-steps .t { color: var(--ink-dim); }
+/* Flow connector between beats — lane-tinted, sits centred between items on
+   the horizontal (desktop) layout. Decorative, so it stays out of the a11y
+   tree and stands down when the strip stacks on mobile. */
+.mh-hero-steps li:not(:last-child)::after {
+  content: "\2192";
+  margin: 0 var(--sp-4);
+  color: color-mix(in oklab, var(--lane) 55%, var(--ink-faint));
+  font-weight: 400;
+}
+@media (max-width: 620px) {
+  .mh-hero-steps {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+  }
+  .mh-hero-steps li:not(:last-child)::after { content: none; }
+}
+
 /* =====================================================================
    U.14 — CURSOR-FOLLOWING HOVER PREVIEW
    =====================================================================
