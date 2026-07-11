@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-07-11 · `b8522c892` · Merge pull request #1128 from elijahkendrick04/dependabot/pip/python-deps-0e03a6bf35
+**Last updated:** 2026-07-11 · `4ed4e35db` · Audit and remove AI slop across content, copy, docs, and reel covers (#1169)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1226,6 +1226,9 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-07-11 | `0d023dbf6` | Apply ruff-format normalization (quote style + line wrap) |
+| 2026-07-11 | `9793db3f2` | Align not-ready-panel test with new copy; refresh README test count |
+| 2026-07-11 | `ae2d61b09` | Audit and remove AI slop across content, copy, docs, and reel covers |
 | 2026-07-11 | `050c89f86` | fix(athletes,org): transactional bulk consent; kind-checked discard; analyse_voice fall-through (B-7 |
 | 2026-07-11 | `b8439e35d` | fix(jobs,intro): batch busy-token parity, longer batch poll budget, atomic intro sidecar (B-5/B-1 fo |
 | 2026-07-11 | `eb6560bf5` | fix(plan): calendar revert uses the true previous date; analytics delete honest on error bodies (D-2 |
@@ -1235,7 +1238,4 @@ list and the auto table below, not here.
 | 2026-07-11 | `8784584a6` | feat(motion): render all four motion cuts of a card as one background batch job (B-5) |
 | 2026-07-11 | `9a1e4c08b` | feat(review): slim the default review row to Approve + Edit card (B-4) |
 | 2026-07-11 | `5b47b9bba` | feat(organisation): analysis persists immediately, with a one-shot Discard undo (D-15) |
-| 2026-07-11 | `badac3b01` | feat(athletes): consolidate the two consent stores under /athletes (G-9) |
-| 2026-07-11 | `448863a51` | feat(plan): planner mutations update the DOM in place — no page reloads (D-26) |
-| 2026-07-11 | `67c0f0901` | feat(pack): collapse twelve export affordances to one per-card primary + one pack disclosure (B-2) |
 <!-- /ROADMAP:ACTIVITY -->
