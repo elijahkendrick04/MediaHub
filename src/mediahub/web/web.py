@@ -33818,9 +33818,13 @@ function mhPlanGenerate(btn) {{
                 # mhCalSchedule + the schedule endpoint already handle move + clear;
                 # only this UI was missing on planned chips, so touch/keyboard users
                 # could schedule but never reschedule or unschedule.
+                # JS2-1: data-prev carries the last date the SERVER confirmed —
+                # the change event fires after input.value already mutated, so a
+                # failed move must revert to data-prev, never to input.value.
                 reschedule = (
                     f'<input type="date" class="mh-cal-plan-date" data-pack="{_h(e.ref)}" '
-                    f'value="{_h(e.date)}" aria-label="Move {_h(e.title)} to another day" '
+                    f'value="{_h(e.date)}" data-prev="{_h(e.date)}" '
+                    f'aria-label="Move {_h(e.title)} to another day" '
                     'onchange="mhCalPlanInput(this)" onclick="event.stopPropagation()" '
                     'style="margin-top:5px;width:100%;font-size:11px;padding:2px 5px;'
                     "border:1px solid var(--border);border-radius:6px;background:var(--panel);"
@@ -33883,6 +33887,7 @@ function mhPlanGenerate(btn) {{
             # a day stays as the desktop enhancement.
             plan_input = (
                 f'<input type="date" class="mh-cal-plan-date" data-pack="{_h(d["pack_id"])}" '
+                'data-prev="" '
                 f'aria-label="Plan a date to post {_h(d["title"])}" '
                 f'onchange="mhCalPlanInput(this)" onclick="event.stopPropagation()" '
                 'style="margin-top:6px;width:100%;font-size:11px;padding:3px 6px;'
@@ -34036,7 +34041,11 @@ function mhCalSchedule(packId, date) {{
   if (chip) {{
     var parent = chip.parentNode, next = chip.nextSibling;
     var prevInput = chip.querySelector('.mh-cal-plan-date');
-    var prevDate = prevInput ? (prevInput.value || '') : '';
+    // JS2-1: the change event fires AFTER input.value already holds the new
+    // date, so the last server-confirmed date lives in data-prev (stamped
+    // server-side, advanced only on a successful POST). Drag drops route
+    // through the same bookkeeping so the two paths cannot drift.
+    var prevDate = prevInput ? (prevInput.dataset.prev || '') : '';
     var prevFlag = chip.querySelector('.mh-cal-warnflag');
     var prevWarned = !!(prevFlag && !prevFlag.hidden);
     var railEmpty = document.getElementById('mh-cal-rail-empty');
@@ -34050,6 +34059,8 @@ function mhCalSchedule(packId, date) {{
     undo = function () {{
       if (parent) parent.insertBefore(chip, next);
       chip.style.display = '';
+      // mhCalChipSync restores input.value from prevDate (= data-prev), so a
+      // failed POST never leaves the chip claiming the date that failed.
       mhCalChipSync(chip, prevDate, prevWarned);
       if (railEmpty) railEmpty.style.display = '';
     }};
@@ -34068,6 +34079,9 @@ function mhCalSchedule(packId, date) {{
       if (window.MH && MH.toast) MH.toast(j.error || 'Could not update the plan.', 'error');
       return;
     }}
+    // JS2-1: the server confirmed the move — data-prev advances to the new
+    // date so the NEXT failed move reverts here, not to a stale value.
+    if (prevInput) prevInput.dataset.prev = date || '';
     if (chip && date && !document.querySelector('.mh-cal-cell[data-date="' + date + '"]')) {{
       chip.remove(); // planned onto a day outside this month's grid
       mhCalStatus('Planned for ' + date + ' — see that month for the chip.', false);
@@ -35036,7 +35050,9 @@ function mhAnDelete(btn) {{
   row.remove();
   fetch(MH_AN.del, {{method:'POST', headers:{{'Content-Type':'application/json'}}, body: JSON.stringify({{id: row.dataset.id}})}})
     .then(function(r){{return r.json();}}).then(function(j){{
-      if (!j || j.ok === false) {{
+      // JS2-2: error bodies like {{"error": "No organisation active."}} carry
+      // no ok key — treat them as failures too (match the sibling handlers).
+      if (!j || j.ok === false || j.error) {{
         if (parent) parent.insertBefore(row, next);
         mhAnStatus('Could not remove that row.', true);
         if (window.MH && MH.toast) MH.toast('Could not remove that row.', 'error');

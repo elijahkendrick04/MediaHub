@@ -89,6 +89,37 @@ def test_calendar_rail_cards_ship_the_planned_chip_affordances(client):
     assert "hidden" in card_chunk
 
 
+def test_calendar_revert_uses_the_server_confirmed_prev_date(client):
+    """JS2-1 (D-26 follow-up) — mhCalPlanInput fires on change, when the input
+    already holds the NEW date, so the revert snapshot must come from
+    data-prev (stamped server-side, advanced only on a successful POST),
+    never from input.value."""
+    from mediahub.club_platform.stub_pack_store import save_pack, set_planned_date
+
+    save_pack("free_text", {"free_text": "hi"}, [{"caption": "Hi"}], profile_id="club-a")
+    planned = save_pack(
+        "free_text", {"free_text": "yo"}, [{"caption": "Yo"}], profile_id="club-a"
+    )
+    set_planned_date(planned["pack_id"], "2026-06-10")
+
+    html = client.get("/plan/calendar?m=2026-06").get_data(as_text=True)
+    # Server stamps the truth: the planned chip's input carries its confirmed
+    # date; the unscheduled rail card's carries the empty string.
+    assert 'value="2026-06-10" data-prev="2026-06-10"' in html
+    assert 'data-prev=""' in html
+
+    block = _js_block(html, "var MH_CAL_SCHEDULE_URL")
+    # The snapshot reads data-prev — the pre-mutation input.value read is gone.
+    assert "prevInput.dataset.prev || ''" in block
+    assert "prevInput ? (prevInput.value || '')" not in block
+    # data-prev only advances once the server confirms the move, and the
+    # failure path reverts through mhCalChipSync (which restores input.value).
+    assert "prevInput.dataset.prev = date || '';" in block
+    assert block.index("if (!j.ok)") < block.index("prevInput.dataset.prev = date || '';")
+    # Drag drops route through the same mhCalSchedule bookkeeping.
+    assert "mhCalSchedule(packId, date)" in block
+
+
 def test_calendar_schedule_endpoint_unchanged(client):
     from mediahub.club_platform.stub_pack_store import save_pack
 
@@ -182,6 +213,17 @@ def test_analytics_record_response_carries_engagement(client):
     # likes + 2×comments (the store's fixed deterministic weights) = 14.
     assert body["engagement"] == 14
     assert body["metric"]["id"]
+
+
+def test_analytics_delete_treats_error_bodies_as_failures(client):
+    """JS2-2 (D-26 follow-up) — bodies like {"error": "No organisation
+    active."} carry no ok key; mhAnDelete must restore the removed row for
+    them too, matching the sibling handlers."""
+    html = client.get("/plan/analytics").get_data(as_text=True)
+    block = _js_block(html, "var MH_AN = ")
+    assert "if (!j || j.ok === false || j.error)" in block
+    # The lax check that let {error:...} fall through to success is gone.
+    assert "if (!j || j.ok === false) {" not in block
 
 
 def test_analytics_delete_endpoint_unchanged(client):
