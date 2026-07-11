@@ -5057,7 +5057,7 @@ function mhRenderMotion(panel, motionUrl, cardId, fmt, videoUrl) {
   panel.innerHTML =
     '<div style="display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap">' +
       '<div style="' + vidCol + '">' +
-        '<video class="mh-motion-video" src="' + videoUrl + '" poster="' + poster + '" controls playsinline preload="metadata" style="width:100%;border-radius:6px;border:1px solid var(--border);background:#000"></video>' +
+        '<video class="mh-motion-video" src="' + videoUrl + '" poster="' + poster + '" controls playsinline preload="metadata" style="width:100%;border-radius:6px;border:1px solid var(--border);background:var(--video-letterbox)"></video>' +
       '</div>' +
       '<div style="flex:1;min-width:min(200px,100%)">' +
         '<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:4px">Motion &middot; ' + (_MOTION_FMT_DIMS[fmt] || '') + ' &middot; 6s</div>' +
@@ -5342,7 +5342,7 @@ function mhRenderReel(panel, reelUrl, fmt, videoUrl) {
   panel.innerHTML =
     '<div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap">' +
       '<div style="' + vidCol + '">' +
-        '<video class="mh-reel-video" src="' + videoUrl + '" poster="' + poster + '" controls playsinline preload="metadata" style="width:100%;border-radius:6px;border:1px solid var(--border);background:#000"></video>' +
+        '<video class="mh-reel-video" src="' + videoUrl + '" poster="' + poster + '" controls playsinline preload="metadata" style="width:100%;border-radius:6px;border:1px solid var(--border);background:var(--video-letterbox)"></video>' +
       '</div>' +
       '<div style="flex:1;min-width:min(240px,100%)">' +
         '<div style="font-size:11px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:4px">Meet reel &middot; ' + (_MOTION_FMT_DIMS[fmt] || '') + '</div>' +
@@ -8429,6 +8429,7 @@ BASE_CSS = """
   --border:    var(--mh-outline-variant);
   --border-h:  var(--mh-outline);
   --bg-soft:   var(--mh-surface-variant);
+  --video-letterbox: #000;   /* true black letterbox behind embedded video — theme-independent */
 
   /* Typography stacks — every face here is intentional */
   --font-display: 'Big Shoulders Display', 'Impact', 'Oswald', sans-serif;
@@ -48373,7 +48374,7 @@ function generateReelGrouped(btn, reelUrl, fmt) {{
     panel.innerHTML =
       '<div style="display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap">' +
         '<div style="' + (fmt === 'landscape' ? 'flex:0 0 min(320px,100%);max-width:340px' : 'flex:0 0 min(220px,100%);max-width:240px') + '">' +
-          '<video src="' + videoUrl + '" controls playsinline style="width:100%;border-radius:6px;border:1px solid var(--border);background:#000"></video>' +
+          '<video src="' + videoUrl + '" controls playsinline style="width:100%;border-radius:6px;border:1px solid var(--border);background:var(--video-letterbox)"></video>' +
         '</div>' +
         '<div style="flex:1;min-width:min(200px,100%)">' +
           '<div style="font-size:11px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:6px">Meet reel &middot; ' + (dims[fmt] || '') + '</div>' +
