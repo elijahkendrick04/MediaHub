@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-07-11 · `2349a41e3` · Remove club microsites + forms website-builder feature (#1109)
+**Last updated:** 2026-07-11 · `c2918c138` · Merge pull request #1144 from elijahkendrick04/claude/video-studio-audit-bkhvvu
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
