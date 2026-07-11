@@ -11978,7 +11978,17 @@ _VIDEO_STUDIO_HTML = """
   order the best moments, grade them, score them to music and write a hook &mdash; one
   branded reel for you to approve.</p>
   <div class="vstudio-reel-row">
-    <input type="text" id="vs-reel-brief" maxlength="200" placeholder="What's this reel about? (optional context for the director)">
+    <input type="text" id="vs-reel-brief" maxlength="200"
+      aria-label="What this reel is about (optional context for the director)"
+      placeholder="What's this reel about? (optional context for the director)">
+    <label class="vs-reel-fmt">Format
+      <select id="vs-reel-format" aria-label="Reel format">
+        <option value="story">Story (9:16)</option>
+        <option value="portrait">Portrait (4:5)</option>
+        <option value="square">Square (1:1)</option>
+        <option value="landscape">Landscape (16:9)</option>
+      </select>
+    </label>
     <button class="btn primary" id="vs-reel-make" type="button">Direct the reel &rarr;</button>
     <span id="vs-reel-status" class="muted" aria-live="polite"></span>
   </div>
@@ -11993,9 +12003,9 @@ _VIDEO_STUDIO_HTML = """
 </section>
 
 <div id="vs-editor" class="vstudio-modal" hidden>
-  <div class="vstudio-sheet" role="dialog" aria-label="Edit timeline">
+  <div class="vstudio-sheet" role="dialog" aria-modal="true" aria-labelledby="vs-ed-title">
     <div class="vstudio-sheet-head">
-      <strong>Edit timeline &middot; <span id="vs-ed-name"></span></strong>
+      <strong id="vs-ed-title">Edit timeline &middot; <span id="vs-ed-name"></span></strong>
       <button class="btn ghost" id="vs-ed-close" type="button">Close</button>
     </div>
     <div class="vstudio-sheet-body">
@@ -12052,6 +12062,8 @@ _VIDEO_STUDIO_HTML = """
   .vstudio-pick input{margin:0;cursor:pointer}
   .vstudio-reel-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
   .vstudio-reel-row input[type=text]{flex:1 1 220px;background:#0a0a0c;border:1px solid var(--border,#33333a);border-radius:6px;color:var(--ink,#f0f0f2);padding:8px 10px;font-size:14px}
+  .vs-reel-fmt{display:flex;gap:6px;align-items:center;font-size:12px;color:var(--ink-muted,#9a9aa3)}
+  .vs-reel-fmt select{background:#0a0a0c;border:1px solid var(--border,#33333a);border-radius:6px;color:var(--ink,#f0f0f2);padding:7px 8px;font-size:13px}
   .vstudio-enh{align-items:center}
   .vstudio-enh select{background:#0a0a0c;border:1px solid var(--border,#33333a);border-radius:6px;color:var(--ink,#f0f0f2);padding:5px 7px;font-size:12px}
   .vstudio-modal{position:fixed;inset:0;background:rgba(0,0,0,.66);display:flex;align-items:center;justify-content:center;z-index:90;padding:20px}
@@ -12108,6 +12120,8 @@ _VIDEO_STUDIO_HTML = """
   var wfFailed = {};     // clip source -> true when its waveform couldn't be measured
   var wfDrag = null;     // active waveform trim drag {i, edge}
   var reorderFrom = null; // index being drag-reordered
+  var editorPrevFocus = null;  // element focused before the editor opened (for restore)
+  var editorKeyHandler = null; // installed keydown trap while the editor is open
 
   function $(id){ return document.getElementById(id); }
   function esc(s){ var d=document.createElement('div'); d.textContent=(s==null?'':String(s)); return d.innerHTML; }
@@ -12306,7 +12320,7 @@ _VIDEO_STUDIO_HTML = """
     // J-1: the director's ASR + moment analysis runs as a polled background job.
     runVideoJob(btn, REEL_URL + '-job', {
       asset_ids: ids,
-      format: $('vs-format').value,
+      format: $('vs-reel-format').value,
       brief_context: $('vs-reel-brief').value,
       with_captions: true, with_reframe: true, with_music: true, enhance_audio: true
     }, $('vs-reel-panel'), {
@@ -12487,8 +12501,43 @@ _VIDEO_STUDIO_HTML = """
       $('vs-ed-status').textContent = '';
       renderEditorRows();
       prefetchWaveforms();
-      $('vs-editor').hidden = false;
+      showEditor();
     }).catch(function(){ vsToast('Network error — could not load this clip. Reload to try again.'); });
+  }
+  // Reveal the editor modal with full a11y affordances: remember what had focus,
+  // move focus into the dialog, trap Tab within it, and close on Escape (F-08).
+  function showEditor(){
+    // Never stack two traps if the editor is somehow re-opened without closing.
+    if(editorKeyHandler){ document.removeEventListener('keydown', editorKeyHandler, true); editorKeyHandler = null; }
+    editorPrevFocus = document.activeElement;
+    var modal = $('vs-editor');
+    modal.hidden = false;
+    var sheet = modal.querySelector('.vstudio-sheet');
+    function focusable(){
+      return Array.prototype.slice.call(sheet.querySelectorAll(
+        'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]),'
+        + 'textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+      )).filter(function(el){ return el.offsetParent !== null; });
+    }
+    var first = focusable()[0];
+    if(first && first.focus){ first.focus(); }
+    editorKeyHandler = function(e){
+      if(e.key === 'Escape'){ e.preventDefault(); closeEditor(); return; }
+      if(e.key === 'Tab'){
+        var ns = focusable(); if(!ns.length){ return; }
+        var f = ns[0], l = ns[ns.length-1];
+        if(e.shiftKey && document.activeElement === f){ e.preventDefault(); l.focus(); }
+        else if(!e.shiftKey && document.activeElement === l){ e.preventDefault(); f.focus(); }
+      }
+    };
+    document.addEventListener('keydown', editorKeyHandler, true);
+  }
+  // Hide the editor, tear down the trap, and restore focus to the trigger.
+  function closeEditor(){
+    $('vs-editor').hidden = true;
+    if(editorKeyHandler){ document.removeEventListener('keydown', editorKeyHandler, true); editorKeyHandler = null; }
+    if(editorPrevFocus && editorPrevFocus.focus){ editorPrevFocus.focus(); }
+    editorPrevFocus = null;
   }
   // Fetch each clip's audio waveform ONCE at open, while the client order still
   // matches the server's (the route is keyed by clip index). Cache by source so
@@ -12586,18 +12635,19 @@ _VIDEO_STUDIO_HTML = """
       var a = c.adjust || {};
       var gb = (a.brightness!=null?a.brightness:0), gc = (a.contrast!=null?a.contrast:1);
       var gs = (a.saturation!=null?a.saturation:1), gw = (a.warmth!=null?a.warmth:0);
+      var cn = i+1;  // human clip number for accessible names
       return '<div class="vs-ed-clip" data-i="'+i+'">'
-        + '<span class="vs-ed-grip" draggable="true" data-i="'+i+'" title="Drag to reorder">&#x2630;</span>'
-        + '<span class="vs-ed-num">'+(i+1)+'</span>'
-        + 'in <input type="number" class="vs-ed-in" min="0" step="100" value="'+(c.in_ms||0)+'">'
-        + 'out <input type="number" class="vs-ed-out" min="0" step="100" value="'+(c.out_ms||0)+'">'
-        + 'speed <input type="number" class="vs-ed-speed" min="0.25" max="4" step="0.05" value="'+(c.speed||1)+'">'
+        + '<span class="vs-ed-grip" draggable="true" data-i="'+i+'" role="button" aria-label="Clip '+cn+' — drag to reorder" title="Drag to reorder">&#x2630;</span>'
+        + '<span class="vs-ed-num">'+cn+'</span>'
+        + 'in <input type="number" class="vs-ed-in" min="0" step="100" aria-label="Clip '+cn+' trim start (ms)" value="'+(c.in_ms||0)+'">'
+        + 'out <input type="number" class="vs-ed-out" min="0" step="100" aria-label="Clip '+cn+' trim end (ms)" value="'+(c.out_ms||0)+'">'
+        + 'speed <input type="number" class="vs-ed-speed" min="0.25" max="4" step="0.05" aria-label="Clip '+cn+' playback speed" value="'+(c.speed||1)+'">'
         + '<label><input type="checkbox" class="vs-ed-smooth"'+(c.smooth?' checked':'')+'>smooth</label>'
         + '<label><input type="checkbox" class="vs-ed-mute"'+(c.mute?' checked':'')+'>mute</label>'
-        + (i>0 ? 'join <select class="vs-ed-trans">'+transOpts(tr)+'</select>' : '')
-        + '<button class="btn ghost vs-ed-up" data-i="'+i+'" title="move up">&uarr;</button>'
-        + '<button class="btn ghost vs-ed-down" data-i="'+i+'" title="move down">&darr;</button>'
-        + '<button class="btn ghost vs-ed-del" data-i="'+i+'" title="remove">&times;</button>'
+        + (i>0 ? 'join <select class="vs-ed-trans" aria-label="Clip '+cn+' join transition">'+transOpts(tr)+'</select>' : '')
+        + '<button class="btn ghost vs-ed-up" data-i="'+i+'" aria-label="Move clip '+cn+' up" title="move up">&uarr;</button>'
+        + '<button class="btn ghost vs-ed-down" data-i="'+i+'" aria-label="Move clip '+cn+' down" title="move down">&darr;</button>'
+        + '<button class="btn ghost vs-ed-del" data-i="'+i+'" aria-label="Remove clip '+cn+'" title="remove">&times;</button>'
         + '<div class="vs-ed-wave" data-i="'+i+'" data-dur="0" title="Audio waveform — click or drag an edge to trim">'
         +   '<canvas class="vs-ed-wave-cv" width="600" height="46"></canvas></div>'
         + '<div class="vs-ed-grade" title="Per-clip colour grade (deterministic; an untouched grade renders identically)">'
@@ -12611,7 +12661,7 @@ _VIDEO_STUDIO_HTML = """
     for(var k=0;k<clips.length;k++){ drawWaveFor(k); }
     var cues = (editorEdl.captions && editorEdl.captions.cues) || [];
     $('vs-ed-caps').innerHTML = cues.length
-      ? cues.map(function(q,i){ return '<div class="vs-ed-cue" data-i="'+i+'"><input type="text" class="vs-ed-cuetext" value="'+esc(q.text||'')+'"></div>'; }).join('')
+      ? cues.map(function(q,i){ return '<div class="vs-ed-cue" data-i="'+i+'"><input type="text" class="vs-ed-cuetext" aria-label="Caption line '+(i+1)+' text" value="'+esc(q.text||'')+'"></div>'; }).join('')
       : '<p class="muted">No captions on this clip.</p>';
   }
   function syncEditorFromDom(){
@@ -12710,7 +12760,9 @@ _VIDEO_STUDIO_HTML = """
     reorderFrom = null;
     var d = $('vs-ed-clips').querySelector('.vs-ed-dragging'); if(d) d.classList.remove('vs-ed-dragging');
   });
-  $('vs-ed-close').addEventListener('click', function(){ $('vs-editor').hidden = true; });
+  $('vs-ed-close').addEventListener('click', function(){ closeEditor(); });
+  // Backdrop click (on the overlay, never the sheet within it) closes too.
+  $('vs-editor').addEventListener('click', function(e){ if(e.target === this){ closeEditor(); } });
   $('vs-ed-save').addEventListener('click', function(){
     syncEditorFromDom();
     if(!editorEdl.clips || !editorEdl.clips.length){ $('vs-ed-status').textContent = 'A timeline needs at least one clip.'; return; }
@@ -12718,7 +12770,7 @@ _VIDEO_STUDIO_HTML = """
     editorEdl.clips[0].transition_in = {kind:'cut', duration_ms:0};
     $('vs-ed-status').textContent = 'Saving...';
     jpost(url(PROJECT_TMPL, editorPid), {edl: editorEdl}).then(function(j){
-      if(j.ok){ $('vs-ed-status').textContent = 'Saved — re-render to see it.'; $('vs-editor').hidden = true; loadProjects(); }
+      if(j.ok){ $('vs-ed-status').textContent = 'Saved — re-render to see it.'; closeEditor(); loadProjects(); }
       else { $('vs-ed-status').textContent = 'Failed: '+(j.message||j.error||'invalid timeline'); }
     }).catch(function(){ $('vs-ed-status').textContent = 'Network error. The timeline may not have saved; reload to check.'; });
   });
@@ -59365,7 +59417,7 @@ voice, and queues them for one-click approval.</p>
         caption_style = "karaoke" if payload.get("animated_captions") else "static"
         slow_mo = 0.5 if payload.get("slow_mo") else 1.0
 
-        from mediahub.video.clip_maker import clip_maker
+        from mediahub.video.clip_maker import UndecodableClip, clip_maker
         from mediahub.video.probe import ProbeUnavailable
 
         try:
@@ -59394,6 +59446,11 @@ voice, and queues them for one-click approval.</p>
                     "this clip on this deployment.",
                 }
             ), 503
+        except UndecodableClip as e:
+            # The upload probes to nothing (corrupt / not a video). Reject it
+            # cleanly here rather than building a doomed timeline that 500s at
+            # render.
+            return jsonify({"error": "undecodable_clip", "message": str(e)[:200]}), 422
         except Exception as e:  # honest surface; never a fabricated clip
             log.warning("clip-maker failed for %s: %s", asset_id, e)
             return jsonify({"error": "clip_maker_failed", "message": str(e)[:200]}), 500
@@ -59484,7 +59541,7 @@ voice, and queues them for one-click approval.</p>
         _variant_job_save(job)
 
         def _worker() -> None:
-            from mediahub.video.clip_maker import clip_maker
+            from mediahub.video.clip_maker import UndecodableClip, clip_maker
             from mediahub.video.probe import ProbeUnavailable
             from mediahub.video.projects import VideoProject
 
@@ -59525,6 +59582,10 @@ voice, and queues them for one-click approval.</p>
                     "The video engine (FFmpeg) isn't available to analyse this clip "
                     "on this deployment."
                 )
+            except UndecodableClip as e:
+                job["status"] = "error"
+                job["error"] = "undecodable_clip"
+                job["user_message"] = str(e)[:200]
             except Exception as e:  # honest surface; never a fabricated clip
                 job["status"] = "error"
                 job["error"] = str(e)[:200]
@@ -60072,6 +60133,43 @@ voice, and queues them for one-click approval.</p>
                         "this project's footage. Reload the studio and try again.",
                     }
                 ), 400
+            # F-14 — burned caption cues are frame-indexed to the timeline they
+            # were built on. When an edit reorders / trims / deletes clips the
+            # timeline shifts, so re-time the cues to follow their clip instead of
+            # drifting onto the wrong moment. Only fires when the clip structure
+            # actually changed (a text / grade-only edit leaves the track exactly
+            # as sent, so the render stays byte-identical).
+            if new_edl.captions and (new_edl.captions.get("cues")):
+                # A structural change is any edit that moves a clip's placement on
+                # the timeline: its source, trim window, or the transition that
+                # shifts everything after it. Grade / caption-text edits don't.
+                def _shape(clips):
+                    return [
+                        (c.source, c.in_ms, c.out_ms, c.transition_in.kind, c.transition_in.duration_ms)
+                        for c in clips
+                    ]
+
+                if _shape(proj.edl.clips or []) != _shape(new_edl.clips or []):
+                    from mediahub.video.captions import retime_track_for_edit
+
+                    def _clip_descs(edl_obj):
+                        offs = edl_obj.clip_start_offsets_ms()
+                        return [
+                            {
+                                "source": c.source,
+                                "offset_ms": o,
+                                "in_ms": c.in_ms,
+                                "out_ms": c.out_ms,
+                            }
+                            for c, o in zip(edl_obj.clips, offs)
+                        ]
+
+                    new_edl.captions = retime_track_for_edit(
+                        new_edl.captions,
+                        _clip_descs(proj.edl),
+                        _clip_descs(new_edl),
+                        fps=new_edl.fps,
+                    )
             proj.edl = new_edl
             proj.status = "draft"  # an edit reopens approval (rule 6)
         store.save(proj)

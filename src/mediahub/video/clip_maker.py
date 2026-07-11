@@ -48,6 +48,17 @@ DEFAULT_FORMAT = "story"
 DEFAULT_BACKGROUND = "#0A0A0A"
 
 
+class UndecodableClip(ValueError):
+    """Raised when a footage clip can't be decoded (corrupt / not a video).
+
+    Distinct from :class:`~mediahub.video.probe.ProbeUnavailable` (no FFmpeg on
+    the box): here FFmpeg *is* present and simply found nothing — no video
+    stream, no audio, no duration. Clip-Maker refuses to assemble a doomed
+    0-duration timeline that would only 500 at render; the caller surfaces an
+    honest, actionable message instead.
+    """
+
+
 @dataclass(frozen=True)
 class BrandColours:
     """The colours Clip-Maker styles captions + padding with (caller-resolved)."""
@@ -204,6 +215,19 @@ def clip_maker(
 
     probe = (probe_fn or _default_probe)(source)
     duration_ms = probe.duration_ms
+
+    # An undecodable upload (junk bytes with a video extension, a corrupt or
+    # unsupported file) probes to nothing: no video, no audio, zero duration.
+    # Building a degenerate fallback timeline from it only defers the failure to
+    # a 500 at render — refuse it here with an honest reason. The FFmpeg-absent
+    # case never reaches this: probe_clip raises ProbeUnavailable first, so a
+    # zero probe here means FFmpeg ran and genuinely found no media.
+    if duration_ms <= 0 and not probe.has_video and not probe.has_audio:
+        raise UndecodableClip(
+            "This clip couldn't be decoded — it may be corrupt, an unsupported "
+            "format, or not a video file. Try re-exporting it or uploading a "
+            "different clip."
+        )
 
     silence_note = "off"
     tighten = remove_silence or remove_fillers
@@ -432,6 +456,7 @@ __all__ = [
     "BrandColours",
     "ClipMakerResult",
     "DEFAULT_FORMAT",
+    "UndecodableClip",
     "canvas_for",
     "build_clip_edl",
     "clip_maker",
