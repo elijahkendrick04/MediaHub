@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-07-11 · `c9ea9f3c6` · [elements] add a per-card "Elements" entry point in the builder toolbar
+**Last updated:** 2026-07-11 · `2349a41e3` · Remove club microsites + forms website-builder feature (#1109)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1227,12 +1227,15 @@ list and the auto table below, not here.
 | Date | Commit | Summary |
 |---|---|---|
 | 2026-07-11 | `c9ea9f3c6` | [elements] add a per-card "Elements" entry point in the builder toolbar |
+| 2026-07-11 | `562809d2f` | Sync main + scrub microsite refs from new audit doc |
+| 2026-07-11 | `f4af5a5de` | [team-members] record final green-gate result + CI status in audit report |
+| 2026-07-11 | `0c154fbd8` | [team-members] keep the pre-existing invite-copy phrase when adding the link |
+| 2026-07-11 | `3fab2b2ab` | [team-members] fix pre-existing EOF hygiene break on two merged audit docs |
+| 2026-07-11 | `0c87f9618` | [team-members] record PR link + green-gate result in audit report |
+| 2026-07-11 | `612bd959c` | [team-members] render status badges as pills; show the invite signup link |
+| 2026-07-11 | `5b7aad2b3` | [team-members] audit report for Settings -> Team members |
+| 2026-07-11 | `ccb4ab9eb` | [team-members] keep a workspace manageable when its last owner is erased |
+| 2026-07-11 | `7c5898dd8` | [team-members] stop invite-email resend on role edits; harden the add path |
+| 2026-07-11 | `5e33b57e8` | [team-members] fix invite-email validation, a11y, and stuck loader on cancel |
 | 2026-07-10 | `c30b7042d` | [free-text] Harden chat brief->draft build and chat persistence |
-| 2026-07-10 | `4e8afd1d3` | [spotlight] record caveat-round merge status in audit report |
-| 2026-07-10 | `208cea1df` | [spotlight] update audit report: caveats fixed, verdict -> WORKS |
-| 2026-07-10 | `d93a4eead` | [spotlight] regression tests for the caveat fixes |
-| 2026-07-10 | `d5d25865b` | [spotlight] fix residual caveats: dir-form runs, traversal guard, idempotent build, roster cap, sele |
-| 2026-07-10 | `46bce47a4` | [activity] docs: record cross-cutting hygiene fix and merge status in report |
-| 2026-07-10 | `4888aa4bb` | [activity] Add Settings Activity feature audit report |
-| 2026-07-10 | `189a94529` | [activity] Settings Activity: show real achievements, not legacy 0/0 counts |
 <!-- /ROADMAP:ACTIVITY -->
