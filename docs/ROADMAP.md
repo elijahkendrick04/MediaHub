@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-07-11 · `54b9db347` · [developer-settings] drop dead #FFB454 hex fallback to restore theme-token budget
+**Last updated:** 2026-07-11 · `80718f478` · [developer-settings] report: record fourth-pass merge status + SHAs
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1226,6 +1226,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-07-11 | `80718f478` | [developer-settings] report: record fourth-pass merge status + SHAs |
 | 2026-07-11 | `54b9db347` | [developer-settings] drop dead #FFB454 hex fallback to restore theme-token budget |
 | 2026-07-11 | `d94720c22` | [developer-settings] audit report: record F-4 fix (third pass) |
 | 2026-07-11 | `447bfce21` | [developer-settings] redact absolute server paths from public /healthz/deps |
@@ -1236,6 +1237,4 @@ list and the auto table below, not here.
 | 2026-07-11 | `c9ea9f3c6` | [elements] add a per-card "Elements" entry point in the builder toolbar |
 | 2026-07-11 | `562809d2f` | Sync main + scrub microsite refs from new audit doc |
 | 2026-07-11 | `f4af5a5de` | [team-members] record final green-gate result + CI status in audit report |
-| 2026-07-11 | `0c154fbd8` | [team-members] keep the pre-existing invite-copy phrase when adding the link |
-| 2026-07-11 | `3fab2b2ab` | [team-members] fix pre-existing EOF hygiene break on two merged audit docs |
 <!-- /ROADMAP:ACTIVITY -->
