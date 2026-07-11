@@ -71,9 +71,12 @@
   opacity: 0.18; pointer-events: none; user-select: none;
 }
 .ql__col { position: relative; z-index: 1; padding-top: 120px; padding-right: 120px; }
+/* Sentence case is the register for this archetype: it's a pull-quote, so the
+   pulled subject (first name + event) reads as humane speech, not signage —
+   the bold Anton surname stays the one caps display anchor. */
 .ql__first {
   font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 700;
-  font-size: 50px; letter-spacing: 0.05em; text-transform: uppercase;
+  font-size: 50px; letter-spacing: -0.005em; text-transform: none;
   color: var(--mh-accent); margin-bottom: 4px;
 }
 .ql__surname {
@@ -84,7 +87,7 @@
 }
 .ql__event {
   font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 600;
-  font-size: 34px; letter-spacing: 0.02em; text-transform: uppercase;
+  font-size: 34px; letter-spacing: 0; text-transform: none;
   color: var(--mh-on-surface); opacity: 0.78; margin-top: 30px;
   overflow-wrap: anywhere;
 }
