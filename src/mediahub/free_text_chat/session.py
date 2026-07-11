@@ -175,27 +175,55 @@ def list_sessions(limit: int = 50, profile_id: Optional[str] = None) -> list[dic
     organisation's chats — plus legacy ownerless ones, mirroring
     :func:`can_access_session` — are returned; transcripts can carry
     athlete names and briefs, so they must not list across workspaces.
+
+    Candidate files are ordered by mtime (a cheap ``stat``, no file read)
+    and parsed lazily, stopping once ``limit`` matching rows are collected.
+    Because :func:`save_session` rewrites the file on every change, mtime
+    tracks ``updated_at``, so a cold landing-page load parses ~``limit``
+    files instead of the whole (ever-growing) chat corpus — the store is
+    never pruned, so the old "parse every file to show 20 rows" scan grew
+    without bound (FT-PERF-1).
     """
-    rows: list[dict] = []
-    for p in _sessions_dir().glob("*.json"):
+    if limit <= 0:
+        return []
+    try:
+        entries = list(os.scandir(_sessions_dir()))
+    except OSError:
+        return []
+    # Newest first by file mtime — no file contents read yet.
+    candidates: list[tuple[float, str, str]] = []
+    for e in entries:
+        if not e.name.endswith(".json"):
+            continue
         try:
-            d = json.loads(p.read_text(encoding="utf-8"))
-            owner = (d.get("profile_id") or "").strip()
-            if profile_id is not None and owner and owner != profile_id:
-                continue
-            rows.append(
-                {
-                    "chat_id": d.get("chat_id", p.stem),
-                    "title": d.get("title", "") or "Untitled",
-                    "created_at": d.get("created_at", ""),
-                    "updated_at": d.get("updated_at", ""),
-                    "profile_id": owner,
-                    "n_messages": len(d.get("messages") or []),
-                    "accepted": bool(d.get("accepted_brief")),
-                }
-            )
+            mtime = e.stat().st_mtime
+        except OSError:
+            mtime = 0.0
+        candidates.append((mtime, e.path, e.name[:-5]))
+    candidates.sort(key=lambda t: t[0], reverse=True)
+
+    rows: list[dict] = []
+    for _mtime, path, stem in candidates:
+        if len(rows) >= limit:
+            break
+        try:
+            d = json.loads(Path(path).read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             continue
+        owner = (d.get("profile_id") or "").strip()
+        if profile_id is not None and owner and owner != profile_id:
+            continue
+        rows.append(
+            {
+                "chat_id": d.get("chat_id", stem),
+                "title": d.get("title", "") or "Untitled",
+                "created_at": d.get("created_at", ""),
+                "updated_at": d.get("updated_at", ""),
+                "profile_id": owner,
+                "n_messages": len(d.get("messages") or []),
+                "accepted": bool(d.get("accepted_brief")),
+            }
+        )
     rows.sort(key=lambda r: r.get("updated_at", ""), reverse=True)
     return rows[:limit]
 

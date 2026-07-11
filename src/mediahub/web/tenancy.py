@@ -233,6 +233,11 @@ class MembershipStore:
 
         Re-adding an existing pair updates role/status while preserving the
         original ``created_at`` (the superseding line carries it forward).
+
+        Refuses, under the ledger lock, to demote the **last active owner** of a
+        workspace to a non-owner seat — the same invariant :meth:`remove`
+        protects, enforced here so a concurrent double-demotion can't slip past
+        a caller's non-atomic pre-check and leave the workspace ownerless.
         """
         norm = normalize_email(email)
         pid = (profile_id or "").strip()
@@ -243,7 +248,31 @@ class MembershipStore:
         role = _coerce_role(role)
         status = _coerce_status(status)
         with _LEDGER_LOCK:
-            prior = self._read_all().get((norm, pid))
+            rows = self._read_all()
+            prior = rows.get((norm, pid))
+            # Atomic last-owner invariant (matches :meth:`remove`). A demotion
+            # runs as an upsert (``add`` with a lower role), so the route's
+            # pre-check is a time-of-check/time-of-use window: two owners
+            # demoting each other concurrently could both pass it and leave the
+            # workspace ownerless. Enforce it here, under the same lock the write
+            # takes, so the second demotion loses the race cleanly.
+            demotes_owner = (
+                prior is not None
+                and prior.status == STATUS_ACTIVE
+                and prior.role == ROLE_OWNER
+                and not (status == STATUS_ACTIVE and role == ROLE_OWNER)
+            )
+            if demotes_owner:
+                other_active_owners = [
+                    r
+                    for (e, p), r in rows.items()
+                    if p == pid and e != norm and r.status == STATUS_ACTIVE and r.role == ROLE_OWNER
+                ]
+                if not other_active_owners:
+                    raise TenancyError(
+                        "Cannot demote the last owner of a workspace — "
+                        "make another member an owner first."
+                    )
             now = _utc_now_iso()
             m = Membership(
                 email=norm,

@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-07-11 · `dc93fe80d` · [org-access] record final merge status + green-gate result in audit report
+**Last updated:** 2026-07-11 · `00df1a978` · Merge pull request #1150 from elijahkendrick04/claude/event-preview-audit-vhr4xq
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1226,16 +1226,16 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
-| 2026-07-11 | `dc93fe80d` | [org-access] record final merge status + green-gate result in audit report |
-| 2026-07-11 | `b116544ac` | [org-access] audit report: current behaviour, verification matrix, findings, verdict |
-| 2026-07-11 | `5b616e225` | [org-access] confine signed-in accounts to member orgs; land members on their club; real sign-out |
-| 2026-07-11 | `868292c97` | [org-access] fix cross-tenant IDOR on /api/visual/<vid>(/png) endpoints |
-| 2026-07-11 | `c9ea9f3c6` | [elements] add a per-card "Elements" entry point in the builder toolbar |
-| 2026-07-11 | `562809d2f` | Sync main + scrub microsite refs from new audit doc |
-| 2026-07-11 | `f4af5a5de` | [team-members] record final green-gate result + CI status in audit report |
-| 2026-07-11 | `0c154fbd8` | [team-members] keep the pre-existing invite-copy phrase when adding the link |
-| 2026-07-11 | `3fab2b2ab` | [team-members] fix pre-existing EOF hygiene break on two merged audit docs |
-| 2026-07-11 | `0c87f9618` | [team-members] record PR link + green-gate result in audit report |
-| 2026-07-11 | `612bd959c` | [team-members] render status badges as pills; show the invite signup link |
-| 2026-07-11 | `5b7aad2b3` | [team-members] audit report for Settings -> Team members |
+| 2026-07-11 | `14a280df4` | fix(theme): migrate video-letterbox #000 to a token (unblock hex budget) |
+| 2026-07-11 | `06d40c8b4` | fix(inventory): don't count HTML numeric entities (&#NNNNN;) as hex colours |
+| 2026-07-11 | `6eb7eeeb6` | [team-members] fix logged caveats: atomic last-owner guard, snapshot reads, sole-owner controls, cop |
+| 2026-07-11 | `80718f478` | [developer-settings] report: record fourth-pass merge status + SHAs |
+| 2026-07-11 | `54b9db347` | [developer-settings] drop dead #FFB454 hex fallback to restore theme-token budget |
+| 2026-07-11 | `d94720c22` | [developer-settings] audit report: record F-4 fix (third pass) |
+| 2026-07-11 | `447bfce21` | [developer-settings] redact absolute server paths from public /healthz/deps |
+| 2026-07-11 | `976bb5bc8` | [event-preview] migrate a library-picker placeholder hex to var(--bg) |
+| 2026-07-11 | `b1b7f47b2` | [event-preview] record second-pass caveat fixes; verdict now WORKS |
+| 2026-07-11 | `53282a301` | [event-preview] lock the caveat fixes with tests |
+| 2026-07-11 | `c7d23b842` | [event-preview] fix the nine logged caveats (F7-F15) |
+| 2026-07-11 | `1a9733f17` | [event-preview] add SSRF-safe document-fetch helpers |
 <!-- /ROADMAP:ACTIVITY -->

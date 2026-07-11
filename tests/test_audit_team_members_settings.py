@@ -56,6 +56,8 @@ def members_world(tmp_path, monkeypatch):
     from mediahub.web import tenancy as t
 
     save_profile(ClubProfile(profile_id="club-a", display_name="Club A"))
+    # An unbound (open) workspace for the open-state copy tests — no members.
+    save_profile(ClubProfile(profile_id="open-club", display_name="Open Club"))
     UserStore().create(OWNER, PASSWORD)
     t.MembershipStore().add(OWNER, "club-a", role=t.ROLE_OWNER)  # bound workspace
 
@@ -73,6 +75,22 @@ def _owner_client(app):
         303,
     )
     return c
+
+
+def _anon_open_client(app):
+    """Anonymous session pinned to the open (unbound) workspace."""
+    c = app.test_client()
+    c.post("/api/organisation/active", data={"profile_id": "open-club"})
+    return c
+
+
+def _seed_owner(email: str):
+    """Add a second signed-up active OWNER to the bound club-a workspace."""
+    from mediahub.web.auth import UserStore
+    from mediahub.web import tenancy as t
+
+    UserStore().create(email, PASSWORD)
+    t.MembershipStore().add(email, "club-a", role=t.ROLE_OWNER)
 
 
 # ---- F2 / F3 — accessibility of the members admin markup -------------------
@@ -138,6 +156,9 @@ def test_submit_loader_bails_when_default_prevented(members_world):
     validation) already prevented the submit — otherwise the "Working on it"
     overlay sticks until the 20s safety timeout. Behaviour is proven in the
     browser during the audit; this guards the guard against removal."""
+    # A removable (non-sole-owner) member must exist for a confirm-guarded
+    # Remove form to render — the sole owner's Remove is disabled (L8).
+    _seed_second_active_member("removable@club.org")
     html = _owner_client(members_world["app"]).get("/organisation/members").get_data(as_text=True)
     assert "e.defaultPrevented" in html
     # The Remove control still guards with a confirm the user can cancel.
@@ -353,3 +374,132 @@ def test_invite_notice_shows_the_signup_link_when_mail_unconfigured(members_worl
     # URL, it must not change the phrase other tests pin.
     assert "share the signup link" in body
     assert "/signup" in body  # the actual url_for('signup_page') target is rendered
+
+
+# ======================================================================
+# Caveat round — the logged P2/P3 items, now fixed.
+# ======================================================================
+
+
+# ---- L4 (P3) — last-owner demotion is refused atomically in the store -------
+
+
+def test_store_add_refuses_last_owner_demotion(tmp_path):
+    """The route pre-checks the last-owner invariant, but a demotion is an
+    upsert (``add`` with a lower role) — two owners demoting each other could
+    both pass a non-atomic pre-check and leave the org ownerless. The store now
+    enforces it under the ledger lock, so a lone owner can never be demoted."""
+    from mediahub.web import tenancy as t
+
+    s = t.MembershipStore(path=tmp_path / "memberships.jsonl")
+    s.add("owner@club.org", "club-z", role=t.ROLE_OWNER)
+    s.add("editor@club.org", "club-z", role=t.ROLE_EDITOR)
+    with pytest.raises(t.TenancyError):
+        s.add("owner@club.org", "club-z", role=t.ROLE_EDITOR)  # demote the only owner
+    assert s.is_active_owner("owner@club.org", "club-z") is True
+    # With a second owner present the demotion is allowed.
+    s.add("editor@club.org", "club-z", role=t.ROLE_OWNER)
+    s.add("owner@club.org", "club-z", role=t.ROLE_EDITOR)
+    assert s.is_active_owner("editor@club.org", "club-z") is True
+    assert s.is_active_owner("owner@club.org", "club-z") is False
+
+
+def test_store_add_still_allows_promotion_and_creation(tmp_path):
+    """The guard must only bite a *demotion of the last owner* — never a
+    creation, an invite, or a promotion."""
+    from mediahub.web import tenancy as t
+
+    s = t.MembershipStore(path=tmp_path / "memberships.jsonl")
+    s.add("owner@club.org", "club-z", role=t.ROLE_OWNER)  # first owner (creation)
+    s.add("vol@club.org", "club-z", role=t.ROLE_MEMBER)  # add a member
+    s.add("vol@club.org", "club-z", role=t.ROLE_OWNER)  # promote to owner
+    assert s.is_active_owner("vol@club.org", "club-z") is True
+
+
+# ---- L8 (P3) — the sole owner's controls are disabled, not live-and-doomed --
+
+
+def test_sole_owner_controls_are_disabled(members_world):
+    html = _owner_client(members_world["app"]).get("/organisation/members").get_data(as_text=True)
+    # Role picker replaced by a static label + hint for the sole owner.
+    assert "· sole owner" in html
+    # Remove is a disabled button with the reason, not a live form.
+    assert "Make another member an owner before removing" in html
+    assert 'disabled' in html
+    # No live Update/Remove control targets the sole owner.
+    assert f"Update role for {OWNER}" not in html
+
+
+def test_second_owner_reenables_the_role_picker(members_world):
+    _seed_owner("owner2@club-a.org")
+    html = _owner_client(members_world["app"]).get("/organisation/members").get_data(as_text=True)
+    # With two owners neither is the sole owner, so both get a live picker.
+    assert "· sole owner" not in html
+    assert f"Change role for {OWNER}" in html
+    assert "Change role for owner2@club-a.org" in html
+
+
+# ---- L12 (P3) — per-row Update/Remove carry an accessible name --------------
+
+
+def test_row_buttons_have_per_member_accessible_names(members_world):
+    _seed_second_active_member("vol@club-a.org")
+    html = _owner_client(members_world["app"]).get("/organisation/members").get_data(as_text=True)
+    assert "Update role for vol@club-a.org" in html
+    assert "Remove vol@club-a.org" in html
+
+
+# ---- L9 (P2) — self-demotion drops admin controls in the same render --------
+
+
+def test_self_demotion_drops_admin_controls_immediately(members_world):
+    """An owner who hands off ownership and demotes themselves must not see the
+    admin surface linger for one render (stale ``can_admin``)."""
+    _seed_owner("owner2@club-a.org")
+    c = _owner_client(members_world["app"])
+    # OWNER demotes THEMSELVES to viewer (owner2 remains, so it's allowed).
+    r = c.post(
+        "/organisation/members",
+        data={"action": "add", "email": OWNER, "role": "viewer"},
+        follow_redirects=True,
+    )
+    body = r.get_data(as_text=True)
+    assert "role updated to viewer" in body
+    # The same response must already reflect the lost admin rights: no add-member
+    # form (viewers can't manage members).
+    assert 'name="via" value="add_form"' not in body
+
+
+# ---- L10 / L11 (P3) — consistent heading + plain-English open-state copy -----
+
+
+def test_heading_matches_the_team_members_tile(members_world):
+    html = _owner_client(members_world["app"]).get("/organisation/members").get_data(as_text=True)
+    assert "<h1>Team members</h1>" in html
+
+
+def test_open_workspace_copy_is_plain_english(members_world):
+    html = _anon_open_client(members_world["app"]).get("/organisation/members").get_data(as_text=True)
+    assert "pre-multi-tenant" not in html  # jargon gone (L11)
+    assert "it has no members yet" in html
+    # The CTA no longer promises a non-existent owner to "log in as" (L3).
+    assert "Only an owner or the deployment operator can add members" in html
+    assert "as a workspace owner to manage members" not in html
+
+
+# ---- residual — the global .pill base rule exists in the shared cascade ------
+
+
+def test_pill_has_a_global_base_rule():
+    from pathlib import Path
+
+    css = (
+        Path(__file__).resolve().parents[1]
+        / "src/mediahub/web/static/theme/theme-components.css"
+    ).read_text(encoding="utf-8")
+    # A bare `.pill { ... }` base rule now exists (previously only the scoped
+    # `.mh-profile-card .meta-line .pill` did), so status/token/webhook pills
+    # render as pills everywhere, not plain text.
+    import re
+
+    assert re.search(r"(?m)^\.pill\s*\{", css), "no base .pill rule in the cascade"

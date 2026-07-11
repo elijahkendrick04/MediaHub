@@ -4500,7 +4500,7 @@ function mhRenderMotion(panel, motionUrl, cardId, fmt, videoUrl) {
   panel.innerHTML =
     '<div style="display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap">' +
       '<div style="' + vidCol + '">' +
-        '<video class="mh-motion-video" src="' + videoUrl + '" poster="' + poster + '" controls playsinline preload="metadata" style="width:100%;border-radius:6px;border:1px solid var(--border);background:#000"></video>' +
+        '<video class="mh-motion-video" src="' + videoUrl + '" poster="' + poster + '" controls playsinline preload="metadata" style="width:100%;border-radius:6px;border:1px solid var(--border);background:var(--video-letterbox)"></video>' +
       '</div>' +
       '<div style="flex:1;min-width:min(200px,100%)">' +
         '<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:4px">Motion &middot; ' + (_MOTION_FMT_DIMS[fmt] || '') + ' &middot; 6s</div>' +
@@ -5684,7 +5684,7 @@ function mhRenderReel(panel, reelUrl, fmt, videoUrl) {
   panel.innerHTML =
     '<div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap">' +
       '<div style="' + vidCol + '">' +
-        '<video class="mh-reel-video" src="' + videoUrl + '" poster="' + poster + '" controls playsinline preload="metadata" style="width:100%;border-radius:6px;border:1px solid var(--border);background:#000"></video>' +
+        '<video class="mh-reel-video" src="' + videoUrl + '" poster="' + poster + '" controls playsinline preload="metadata" style="width:100%;border-radius:6px;border:1px solid var(--border);background:var(--video-letterbox)"></video>' +
       '</div>' +
       '<div style="flex:1;min-width:min(240px,100%)">' +
         '<div style="font-size:11px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:4px">Meet reel &middot; ' + (_MOTION_FMT_DIMS[fmt] || '') + '</div>' +
@@ -8938,6 +8938,7 @@ BASE_CSS = """
   --border:    var(--mh-outline-variant);
   --border-h:  var(--mh-outline);
   --bg-soft:   var(--mh-surface-variant);
+  --video-letterbox: #000;   /* true black letterbox behind embedded video — theme-independent */
 
   /* Typography stacks — every face here is intentional */
   --font-display: 'Big Shoulders Display', 'Impact', 'Oswald', sans-serif;
@@ -29943,6 +29944,22 @@ self.addEventListener('fetch', function(e){
             _motion_ok = bool(_re_status.get("ffmpeg_available"))
         ok = deps["playwright"].get("chromium") and _motion_ok
         payload = {"ok": bool(ok), "deps": deps}
+        # Absolute filesystem paths (the Chromium executable, the node binary and
+        # the Remotion install dir) disclose the deployment's internal layout, so
+        # they are operator-only. This endpoint stays public for uptime monitors —
+        # they still get every availability boolean and version they need — but an
+        # anonymous caller no longer learns where anything lives on disk. Mirrors
+        # /healthz/sentinel, which likewise hands its raw audit tail to the
+        # signed-in operator alone.
+        if not _auth.is_dev_operator():
+            for _dep_key, _path_field in (
+                ("playwright", "executable"),
+                ("node", "path"),
+                ("remotion", "dir"),
+            ):
+                section = deps.get(_dep_key)
+                if isinstance(section, dict):
+                    section.pop(_path_field, None)
         return jsonify(payload)
 
     # ---- /status -------------------------------------------------------
@@ -36537,7 +36554,7 @@ function copySpotlightCaption(btn) {{
             "border:1px solid rgba(255,180,84,0.45);border-radius:8px;"
             "background:rgba(255,180,84,0.08);font-size:13px;"
             'color:var(--ink);line-height:1.5">'
-            '<strong style="color:var(--warn,#FFB454)">AI features unavailable.</strong> '
+            '<strong style="color:var(--warn)">AI features unavailable.</strong> '
             "No cloud LLM provider is configured on this deployment. "
             "Submitting this form will surface an AI-unavailable error. "
             "Ask your administrator to set "
@@ -36585,15 +36602,31 @@ function copySpotlightCaption(btn) {{
                 ext = Path(photo.filename).suffix.lower() or ".jpg"
                 if ext not in (".jpg", ".jpeg", ".png", ".webp", ".gif"):
                     ext = ".jpg"
-                att_dir = UPLOADS_DIR / "stub_attachments"
-                att_dir.mkdir(parents=True, exist_ok=True)
-                dest = att_dir / f"{_uuid.uuid4().hex[:16]}{ext}"
+                # Validate the bytes decode as a real image before storing —
+                # an extension whitelist alone would let arbitrary content land
+                # on disk as a .jpg and reach the downstream visual generator.
+                _photo_bytes = photo.read() or b""
+                _photo_ok = False
                 try:
-                    photo.save(str(dest))
-                    form_data["attached_photo_path"] = str(dest)
-                    form_data["attached_photo_filename"] = Path(photo.filename).name
+                    import io as _io_img
+
+                    from PIL import Image as _PILImg
+
+                    with _PILImg.open(_io_img.BytesIO(_photo_bytes)) as _im:
+                        _im.verify()
+                    _photo_ok = True
                 except Exception:
-                    app.logger.exception("stub photo upload failed")
+                    app.logger.warning("stub photo upload rejected: not a decodable image")
+                if _photo_ok:
+                    att_dir = UPLOADS_DIR / "stub_attachments"
+                    att_dir.mkdir(parents=True, exist_ok=True)
+                    dest = att_dir / f"{_uuid.uuid4().hex[:16]}{ext}"
+                    try:
+                        dest.write_bytes(_photo_bytes)
+                        form_data["attached_photo_path"] = str(dest)
+                        form_data["attached_photo_filename"] = Path(photo.filename).name
+                    except Exception:
+                        app.logger.exception("stub photo upload failed")
 
             # Media-library picks — strictly profile-scoped. Resolve each
             # selected asset id against the active profile only; foreign ids
@@ -36647,26 +36680,77 @@ function copySpotlightCaption(btn) {{
             # uploaded meet pack, and the entries source so the AI can work
             # out what the event IS and pick ones-to-watch from REAL
             # entries. All best-effort — a dead link or unreadable file
-            # just means that source contributes nothing.
+            # is noted in _pv_unread so the results page can say so rather
+            # than silently dropping it.
+            _pv_unread: list[str] = []
             if stub_cls_name == "WeekendPreviewStub":
+                # Resolve the active club up front so the LENEX path can order
+                # THIS club's entries first — they must survive truncation on a
+                # big multi-club meet.
+                _pv_club = ""
+                try:
+                    _pv_prof = _active_profile()
+                    if _pv_prof is not None:
+                        _pv_club = (_pv_prof.display_name or "").strip()
+                        form_data["club_name"] = _pv_prof.display_name
+                except Exception:
+                    app.logger.exception("event preview: active profile lookup failed")
                 try:
                     from mediahub.brand.guidelines import extract_text as _doc_text
-                    from mediahub.web_research.safe_fetch import safe_fetch as _sfetch
 
-                    # Bound each fetch tightly: this runs synchronously inside
-                    # the request, and two links plus the LLM call must finish
-                    # well inside the worker timeout. A slow or hostile host
-                    # gets a short leash rather than stalling the worker.
+                    def _pv_url_text(_u: str, _cap: int) -> str:
+                        """Extract text from a URL, handling BOTH HTML pages and
+                        document downloads (PDF / Word / RTF). A psych-sheet or
+                        entries link is usually a PDF, which the plain HTML text
+                        path reduces to noise — route those through the document
+                        extractor instead. SSRF-safe (safe_fetch_bytes pins the
+                        validated IP and re-checks every redirect hop)."""
+                        from mediahub.web_research.safe_fetch import (
+                            html_bytes_to_text as _h2t,
+                            safe_fetch_bytes as _sfb,
+                        )
+
+                        _got = _sfb(_u, max_bytes=4 * 1024 * 1024, timeout=6.0, max_hops=2)
+                        if not _got:
+                            return ""
+                        _ct, _body = _got
+                        _is_pdf = _ct == "application/pdf" or _body[:5] == b"%PDF-"
+                        _is_doc = (
+                            _is_pdf
+                            or "officedocument" in _ct
+                            or _ct
+                            in (
+                                "application/msword",
+                                "application/rtf",
+                                "text/rtf",
+                            )
+                        )
+                        if _is_doc:
+                            from pathlib import Path as _P
+                            from urllib.parse import urlparse as _urlp
+
+                            _fn = _P(_urlp(_u).path).name or "download"
+                            if _is_pdf and not _fn.lower().endswith(".pdf"):
+                                _fn = (_fn or "download") + ".pdf"
+                            try:
+                                _r = _doc_text(_fn, _body)
+                                if _r.get("status") == "ok" and (_r.get("text") or "").strip():
+                                    return _r["text"][:_cap]
+                            except Exception:
+                                app.logger.exception("event preview: URL document extract failed")
+                            return ""  # a document we could not read
+                        return _h2t(_body, _ct, _cap)
+
                     _site_url = (form_data.get("event_website_url") or "").strip()
                     if _site_url:
-                        _site_text = _sfetch(_site_url, max_chars=8000, timeout=6.0, max_hops=2)
-                        if _site_text:
-                            form_data["event_site_text"] = _site_text
+                        _t = _pv_url_text(_site_url, 8000)
+                        if _t:
+                            form_data["event_site_text"] = _t
                     _entries_url = (form_data.get("entries_url") or "").strip()
                     if _entries_url:
-                        _etext = _sfetch(_entries_url, max_chars=20000, timeout=6.0, max_hops=2)
-                        if _etext:
-                            form_data["entries_text"] = _etext
+                        _t = _pv_url_text(_entries_url, 20000)
+                        if _t:
+                            form_data["entries_text"] = _t
                     for _field, _key, _cap in (
                         ("event_pack", "event_pack_text", 8000),
                         ("entries_file", "entries_text", 20000),
@@ -36703,6 +36787,17 @@ function copySpotlightCaption(btn) {{
                                                 form_data["meet_name"] = _ln_meet.meet_name
                                         except Exception:
                                             pass
+                                    # F8: order the active club's entries first so
+                                    # the club we are previewing survives the
+                                    # brief's truncation on a big multi-club meet.
+                                    if _pv_club and _rows:
+                                        _cl = _pv_club.lower()
+                                        _rows = sorted(
+                                            _rows,
+                                            key=lambda _r: 0
+                                            if _cl in (_r.get("club") or "").lower()
+                                            else 1,
+                                        )
                                     _lines = []
                                     for _r in _rows:
                                         _bits = [
@@ -36729,11 +36824,28 @@ function copySpotlightCaption(btn) {{
                                 continue
                             if _res.get("status") == "ok" and (_res.get("text") or "").strip():
                                 form_data[_key] = _res["text"][:_cap]
-                    _pv_prof = _active_profile()
-                    if _pv_prof is not None:
-                        form_data["club_name"] = _pv_prof.display_name
                 except Exception:
                     app.logger.exception("event preview enrichment failed")
+                # F9: note any source the user PROVIDED but we could not read,
+                # so the results page can say so instead of silently dropping it.
+                if (form_data.get("event_website_url") or "").strip() and not (
+                    form_data.get("event_site_text") or ""
+                ).strip():
+                    _pv_unread.append("the event website link")
+                _ef = request.files.get("entries_file")
+                _entries_given = bool(
+                    (form_data.get("entries_url") or "").strip()
+                    or (_ef and getattr(_ef, "filename", ""))
+                )
+                if _entries_given and not (form_data.get("entries_text") or "").strip():
+                    _pv_unread.append("the entries source")
+                _pf = request.files.get("event_pack")
+                if (
+                    _pf
+                    and getattr(_pf, "filename", "")
+                    and not (form_data.get("event_pack_text") or "").strip()
+                ):
+                    _pv_unread.append("the meet pack")
                 # Reject an empty submission: with no event name, no readable
                 # website/pack/entries text, and no typed ones-to-watch, the
                 # model would have nothing to ground on and would guess. Ask
@@ -36750,14 +36862,13 @@ function copySpotlightCaption(btn) {{
                         primary_cta=("Back to Event Preview", url_for(route_endpoint)),
                         code=400,
                     )
-            generation_error = None
             try:
                 cards_payload = stub.generate_cards(form_data)
             except Exception as e:
                 app.logger.exception("stub generate_cards failed")
-                cards_payload = {"cards": []}
-                generation_error = str(e)
-                # Show the actual error to the user — no silent fake card.
+                # Show the actual error to the user — no silent fake card, and
+                # do NOT fall through to persist an empty pack + a misleading
+                # "success" shell with HTTP 200.
                 from mediahub.ai_core import (
                     ProviderNotConfigured,
                     ProviderError,
@@ -36788,6 +36899,19 @@ function copySpotlightCaption(btn) {{
                         secondary_cta=("Back to Create", url_for("make_page")),
                         code=502,
                     )
+                # Any other engine failure (e.g. malformed model JSON): honest
+                # error, no empty pack persisted.
+                return _recovery_page(
+                    "Couldn't generate your draft",
+                    (
+                        "Something went wrong while writing the cards. This is "
+                        "usually temporary — try again in a moment, or simplify "
+                        "the input."
+                    ),
+                    primary_cta=("Try again", url_for(route_endpoint)),
+                    secondary_cta=("Back to Create", url_for("make_page")),
+                    code=502,
+                )
             # Persist this pack so it survives refresh + is exportable.
             saved = None
             try:
@@ -36845,6 +36969,25 @@ function copySpotlightCaption(btn) {{
                         "markup drifted; View-&-export actions were not injected"
                     )
                 body = _new_body
+            # F9: if the user provided a source we could not read, say so on
+            # the results page rather than silently building the preview
+            # without it. Only shown when cards were actually generated.
+            if _pv_unread and (cards_payload.get("cards") or []):
+                if len(_pv_unread) == 1:
+                    _srcs, _it = _pv_unread[0], "it"
+                else:
+                    _srcs = ", ".join(_pv_unread[:-1]) + " and " + _pv_unread[-1]
+                    _it = "them"
+                _notice = (
+                    '<div role="status" style="margin-bottom:16px;padding:12px 14px;'
+                    "border:1px solid rgba(255,180,84,0.45);border-radius:8px;"
+                    "background:rgba(255,180,84,0.08);font-size:13px;line-height:1.5;"
+                    'color:var(--ink)">'
+                    f"We couldn&rsquo;t read {_h(_srcs)}, so the preview was built without "
+                    f"{_it}. For entries, the organiser&rsquo;s LENEX (.lef / .lxf) export "
+                    "or a pasted list reads most reliably.</div>"
+                )
+                body = _notice + body
             if _graphic_api_base:
                 body += _VISUAL_PANEL_JS
             return _layout(title, body, active=active_tab)
@@ -37950,7 +38093,7 @@ function copySpotlightCaption(btn) {{
                 f'gap:4px;width:90px">'
                 f'<img src="{_h(file_url)}" alt="" loading="lazy" '
                 f'style="width:90px;height:90px;object-fit:cover;border-radius:6px;'
-                f'border:1px solid var(--border);background:#0a0a0a"/>'
+                f'border:1px solid var(--border);background:var(--bg)"/>'
                 f'<div style="font-size:10px;color:var(--ink-muted);text-align:center;'
                 f'width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'
                 f"{label}</div></div>"
@@ -43362,7 +43505,17 @@ what you're doing, what they should do.</p>
         store = _tenancy.MembershipStore()
         user_email = _auth.current_user_email()
         is_operator = _auth.is_dev_operator()
-        can_admin = is_operator or bool(user_email and store.is_active_owner(user_email, pid))
+
+        def _is_admin() -> bool:
+            """Owner-or-operator, resolved from the per-request membership
+            snapshot (one ledger read, shared with the rest of the render)
+            instead of a fresh ``store`` read each time."""
+            if is_operator:
+                return True
+            m = _snap_membership(_memberships_snapshot(), user_email, pid)
+            return bool(m and m.status == _tenancy.STATUS_ACTIVE and m.role == _tenancy.ROLE_OWNER)
+
+        can_admin = _is_admin()
 
         notice, error = "", ""
         if request.method == "POST":
@@ -43491,25 +43644,60 @@ what you're doing, what they should do.</p>
             except _tenancy.TenancyError as exc:
                 error = str(exc)
 
+        # Re-resolve admin/membership from a FRESH snapshot for the render: a
+        # POST invalidated the per-request cache, so this reflects the just-
+        # written state. In particular, an owner who demoted or removed
+        # themselves is no longer an admin here, so the stale admin controls
+        # don't linger for one render.
+        snap = _memberships_snapshot()
+        can_admin = _is_admin()
         # PII gate (ADR-0014 anti-enumeration): an unbound (open) workspace is
         # pinnable by ANY anonymous visitor, so member/invite emails must only
         # render for the operator, an active owner, or an active member —
         # never for a stranger who merely pinned the open org.
-        _viewer_row = store.get(user_email, pid) if user_email else None
+        _viewer_row = _snap_membership(snap, user_email, pid) if user_email else None
         viewer_is_member = bool(_viewer_row and _viewer_row.status == _tenancy.STATUS_ACTIVE)
         can_view_members = can_admin or viewer_is_member
-        rows = store.list_for_profile(pid) if can_view_members else []
-        bound = store.is_bound(pid)
-        prof = _active_profile()
+        # Derive the roster from the same snapshot (matches
+        # ``list_for_profile``: profile match, drop tombstones, sort by
+        # status then email) rather than a second full ledger parse.
+        rows = (
+            sorted(
+                (
+                    m
+                    for (e, p), m in snap.items()
+                    if p == pid and m.status != _tenancy.STATUS_REMOVED
+                ),
+                key=lambda m: (m.status, m.email),
+            )
+            if can_view_members
+            else []
+        )
+        bound = _snap_is_bound(snap, pid)
+        # The sole active owner can't be demoted or removed (server-guarded), so
+        # the row's controls are disabled with an explanation rather than
+        # rendered live only to fail (L8).
+        _active_owners = [
+            m for m in rows if m.status == _tenancy.STATUS_ACTIVE and m.role == _tenancy.ROLE_OWNER
+        ]
+        sole_owner_email = _active_owners[0].email if len(_active_owners) == 1 else None
+        prof = load_profile(pid)
         org_name = _h(prof.display_name if prof else pid)
 
         def _role_cell_html(m):
             """The role column: a label, plus an inline change-role picker for
-            admins (re-uses the upsert ``add`` action). The last active owner
-            can't be demoted here — the route guards it server-side too."""
+            admins (re-uses the upsert ``add`` action). The sole active owner
+            can't be demoted (the store guards it), so their row shows a static
+            label with a hint rather than a picker that could only fail."""
             label = _h(_perms.role_label(m.role))
             if not can_admin or m.status == _tenancy.STATUS_REMOVED:
                 return label
+            if m.email == sole_owner_email:
+                return (
+                    f'{label} <span class="dim" style="font-size:11px" '
+                    'title="Make another member an owner before changing the sole '
+                    'owner&#39;s role.">· sole owner</span>'
+                )
             opts = "".join(
                 f'<option value="{r}"{" selected" if r == m.role else ""}>'
                 f"{_h(_perms.role_label(r))}</option>"
@@ -43523,14 +43711,17 @@ what you're doing, what they should do.</p>
                 f'<select name="role" aria-label="Change role for {_h(m.email)}" '
                 f'style="padding:3px 6px;font-size:12px">{opts}</select>'
                 '<button type="submit" class="btn secondary" '
+                f'aria-label="Update role for {_h(m.email)}" '
                 'style="padding:3px 9px;font-size:11px">Update</button></form>'
             )
 
         def _row_html(m):
             role_badge = _role_cell_html(m)
-            # The bare ``.pill`` class has no base rule outside a profile card,
-            # so give both status badges self-contained pill styling here — else
-            # "Active" renders as plain text and "Invited" loses its shape.
+            # These two status badges keep self-contained inline styling (shape +
+            # colour) even though a base ``.pill`` rule now exists in the shared
+            # cascade: it makes the exact colour role explicit and keeps the badge
+            # asserted directly in the rendered HTML (test_status_badges_are_self_styled),
+            # not dependent on the external stylesheet loading.
             _pill_base = (
                 "display:inline-block;padding:2px 9px;border-radius:999px;"
                 "font-size:11px;font-weight:600;border:1px solid "
@@ -43548,16 +43739,30 @@ what you're doing, what they should do.</p>
             }.get(m.status, "")
             remove_html = ""
             if can_admin:
-                remove_html = (
-                    f'<form method="post" action="{url_for("organisation_members_page")}" '
-                    'style="display:inline" '
-                    "onsubmit=\"return confirm('Remove this member from the organisation? "
-                    "They lose access immediately.')\">"
-                    '<input type="hidden" name="action" value="remove"/>'
-                    f'<input type="hidden" name="email" value="{_h(m.email)}"/>'
-                    '<button type="submit" class="btn secondary" '
-                    'style="padding:4px 10px;font-size:12px">Remove</button></form>'
-                )
+                if m.email == sole_owner_email:
+                    # The sole active owner can't be removed (the store refuses
+                    # it), so show a disabled control with the reason instead of
+                    # a live button that would only error.
+                    remove_html = (
+                        '<button type="button" class="btn secondary" disabled '
+                        f'aria-label="Remove {_h(m.email)} — unavailable: make another '
+                        'member an owner before removing the sole owner" '
+                        'title="Make another member an owner before removing the sole owner." '
+                        'style="padding:4px 10px;font-size:12px;opacity:0.5;'
+                        'cursor:not-allowed">Remove</button>'
+                    )
+                else:
+                    remove_html = (
+                        f'<form method="post" action="{url_for("organisation_members_page")}" '
+                        'style="display:inline" '
+                        "onsubmit=\"return confirm('Remove this member from the organisation? "
+                        "They lose access immediately.')\">"
+                        '<input type="hidden" name="action" value="remove"/>'
+                        f'<input type="hidden" name="email" value="{_h(m.email)}"/>'
+                        '<button type="submit" class="btn secondary" '
+                        f'aria-label="Remove {_h(m.email)}" '
+                        'style="padding:4px 10px;font-size:12px">Remove</button></form>'
+                    )
             return (
                 "<tr>"
                 f'<td data-label="Email" style="padding:8px 12px">{_h(m.email)}</td>'
@@ -43584,9 +43789,10 @@ what you're doing, what they should do.</p>
             state_html = (
                 '<p class="lede" style="margin-bottom:var(--sp-6)">'
                 f"<strong>{org_name}</strong> is currently an <strong>open</strong> "
-                "workspace (no active members), so any session on this deployment "
-                "can use it — the pre-multi-tenant behaviour. It becomes "
-                "members-only the moment its first membership activates."
+                "workspace — it has no members yet, so anyone using this site can "
+                "open it. Add the first member below and it becomes members-only: "
+                "from then on, only the people you add (and the deployment "
+                "operator) can sign in."
                 "</p>"
             )
         add_form_html = ""
@@ -43618,10 +43824,15 @@ what you're doing, what they should do.</p>
                 "</p></div>"
             )
         elif not is_operator and not user_email:
+            # Reached only on an OPEN workspace (a members-only one bounces an
+            # anonymous visitor before here). There is no owner to "log in as"
+            # yet, so say what's actually true: an owner or the operator manages
+            # members, and signing in is how you get there.
             add_form_html = (
                 '<p class="dim" style="font-size:13px;margin-top:14px">'
-                f'<a href="{url_for("login_page")}" style="color:var(--accent)">Log in</a> '
-                "as a workspace owner to manage members."
+                "Only an owner or the deployment operator can add members. "
+                f'<a href="{url_for("login_page")}" style="color:var(--accent)">Sign in</a> '
+                "if that's you."
                 "</p>"
             )
         flash_html = ""
@@ -43651,7 +43862,7 @@ what you're doing, what they should do.</p>
                 "access.</p></div>"
             )
         body = (
-            "<h1>Workspace members</h1>"
+            "<h1>Team members</h1>"
             + state_html
             + flash_html
             + members_html
@@ -43659,7 +43870,7 @@ what you're doing, what they should do.</p>
             + f'<p style="margin-top:18px"><a class="btn secondary" '
             f'href="{url_for("organisation_page")}">&larr; Back to organisation</a></p>'
         )
-        return _layout("Workspace members", body, active="settings")
+        return _layout("Team members", body, active="settings")
 
     # ---- PC.13 — whole-org takeout + deletion (UK GDPR Arts. 15/17/20) ----
 
@@ -44862,7 +45073,7 @@ what you're doing, what they should do.</p>
                 "border:1px solid rgba(255,180,84,0.45);border-radius:8px;"
                 "background:rgba(255,180,84,0.08);font-size:13px;"
                 'color:var(--ink);line-height:1.5">'
-                '<strong style="color:var(--warn,#FFB454)">AI features unavailable.</strong> '
+                '<strong style="color:var(--warn)">AI features unavailable.</strong> '
                 "No cloud LLM provider is configured on this deployment, so the "
                 "engine cannot infer your brand voice, palette, or operating "
                 "profile. You can still complete setup, but generated content "
@@ -45547,7 +45758,7 @@ what you're doing, what they should do.</p>
             if hint:
                 hint_html = (
                     f'<span class="muted" style="display:block;margin-top:4px;'
-                    f'font-size:11px;line-height:1.4;color:var(--warn,#FFB454)">'
+                    f'font-size:11px;line-height:1.4;color:var(--warn)">'
                     f"{_h(hint)}</span>"
                 )
             # When a link is populated, allow a per-link "re-read now"
@@ -64700,14 +64911,17 @@ voice, and queues them for one-click approval.</p>
                 entries_text = "\n".join(lines)
                 n_rows = len(rows)
             else:
-                text = data.decode("utf-8", errors="replace")
+                # Bound the intermediate work: decode at most ~2 MB (well beyond
+                # any real entries list) so a large text upload — allowed up to
+                # the 50 MB request cap — can't build a giant line list in RAM.
+                text = data[:2_000_000].decode("utf-8", errors="replace")
                 cleaned = [ln.strip() for ln in text.splitlines() if ln.strip()]
                 if not cleaned:
                     return jsonify(
                         {"ok": False, "error": "Couldn't read any entries from that file."}
                     ), 422
-                entries_text = "\n".join(cleaned[:400])
                 n_rows = len(cleaned)
+                entries_text = "\n".join(cleaned[:400])[:20000]
         except Exception:
             log.warning("entry-file parse failed", exc_info=True)
             return jsonify(

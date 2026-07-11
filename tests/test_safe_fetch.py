@@ -5,6 +5,7 @@ real DNS or network happens. The security guarantees (internal IPs refused,
 redirects re-validated at each hop, the connection pinned to the validated IP,
 content sanitised + byte- and char-capped) are the whole point.
 """
+
 from __future__ import annotations
 
 import socket
@@ -86,8 +87,16 @@ def _must_not_connect(monkeypatch):
 
 @pytest.mark.parametrize(
     "ip",
-    ["10.0.0.5", "127.0.0.1", "169.254.169.254", "192.168.1.1",
-     "172.16.0.1", "0.0.0.0", "::1", "fe80::1"],
+    [
+        "10.0.0.5",
+        "127.0.0.1",
+        "169.254.169.254",
+        "192.168.1.1",
+        "172.16.0.1",
+        "0.0.0.0",
+        "::1",
+        "fe80::1",
+    ],
 )
 def test_blocks_internal_ips(monkeypatch, ip):
     monkeypatch.setattr(socket, "getaddrinfo", _resolver({"evil.test": ip}))
@@ -99,7 +108,8 @@ def test_blocks_internal_ips(monkeypatch, ip):
 def test_blocks_when_any_resolved_ip_is_internal(monkeypatch):
     # Rebinding-style answer: one public IP and one internal IP => refuse all.
     monkeypatch.setattr(
-        socket, "getaddrinfo",
+        socket,
+        "getaddrinfo",
         _resolver({"dual.test": ["93.184.216.34", "10.0.0.9"]}),
     )
     _must_not_connect(monkeypatch)
@@ -173,7 +183,8 @@ def test_body_read_is_byte_capped(monkeypatch):
 
 def test_redirect_to_internal_is_blocked(monkeypatch):
     monkeypatch.setattr(
-        socket, "getaddrinfo",
+        socket,
+        "getaddrinfo",
         _resolver({"good.test": "93.184.216.34", "internal.test": "10.0.0.9"}),
     )
     pools = _FakePools(
@@ -186,7 +197,8 @@ def test_redirect_to_internal_is_blocked(monkeypatch):
 
 def test_redirect_to_public_is_followed(monkeypatch):
     monkeypatch.setattr(
-        socket, "getaddrinfo",
+        socket,
+        "getaddrinfo",
         _resolver({"a.test": "93.184.216.34", "b.test": "93.184.216.35"}),
     )
     pools = _FakePools(
@@ -219,3 +231,55 @@ def test_unresolvable_host_blocked(monkeypatch):
     monkeypatch.setattr(socket, "getaddrinfo", _resolver({}))
     _must_not_connect(monkeypatch)
     assert sf.safe_fetch("https://nope.test/x") is None
+
+
+# ---------------------------------------------------------------------------
+# safe_fetch_bytes / html_bytes_to_text — the document-aware fetch path
+# (Event Preview reads entry/psych-sheet PDFs behind a URL through these).
+# ---------------------------------------------------------------------------
+def test_safe_fetch_bytes_returns_content_type_and_bytes(monkeypatch):
+    monkeypatch.setattr(socket, "getaddrinfo", _resolver({"e.test": "93.184.216.34"}))
+    pools = _FakePools(
+        {
+            ("93.184.216.34", "/f.pdf"): _Resp(
+                200, b"%PDF-1.4 data", {"Content-Type": "application/pdf"}
+            )
+        }
+    )
+    pools.install(monkeypatch)
+    got = sf.safe_fetch_bytes("https://e.test/f.pdf")
+    assert got is not None
+    ctype, body = got
+    assert ctype == "application/pdf"
+    assert body == b"%PDF-1.4 data"
+
+
+def test_safe_fetch_bytes_blocks_internal_ip(monkeypatch):
+    # SSRF safety must hold for the bytes path too.
+    monkeypatch.setattr(socket, "getaddrinfo", _resolver({"evil.test": "169.254.169.254"}))
+    _must_not_connect(monkeypatch)
+    assert sf.safe_fetch_bytes("http://evil.test/meta") is None
+
+
+def test_safe_fetch_bytes_non_200_returns_none(monkeypatch):
+    monkeypatch.setattr(socket, "getaddrinfo", _resolver({"e.test": "93.184.216.34"}))
+    pools = _FakePools({("93.184.216.34", "/x"): _Resp(500, b"err")})
+    pools.install(monkeypatch)
+    assert sf.safe_fetch_bytes("https://e.test/x") is None
+
+
+def test_safe_fetch_bytes_caps_body(monkeypatch):
+    monkeypatch.setattr(socket, "getaddrinfo", _resolver({"e.test": "93.184.216.34"}))
+    pools = _FakePools({("93.184.216.34", "/big"): _Resp(200, b"A" * 100000)})
+    pools.install(monkeypatch)
+    got = sf.safe_fetch_bytes("https://e.test/big", max_bytes=1000)
+    assert got is not None
+    assert len(got[1]) == 1000
+
+
+def test_html_bytes_to_text_strips_and_caps():
+    body = b"<html><body>Eira Hughes 100 Free<script>evil()</script></body></html>"
+    text = sf.html_bytes_to_text(body, "text/html; charset=utf-8", 4000)
+    assert "Eira Hughes 100 Free" in text
+    assert "evil" not in text and "<script>" not in text
+    assert len(sf.html_bytes_to_text(b"x" * 50, "text/plain", 10)) == 10

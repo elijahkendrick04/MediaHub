@@ -119,6 +119,34 @@ labels associated) is the ground truth.
 
 ---
 
+## 4b. Second pass — every logged caveat now fixed
+
+A follow-up pass fixed all nine caveats (F7-F15) that the first pass had logged. Each
+is locked with a test.
+
+| id | sev | fix | test |
+|----|-----|-----|------|
+| F7 | P1 | New SSRF-safe `safe_fetch_bytes` + `html_bytes_to_text` in `web_research/safe_fetch.py`; the enrichment routes an entries/website **URL** that is a PDF/Word download through `extract_text`, and an HTML page through the sanitiser — a psych-sheet PDF link now yields real entries. | `test_entries_url_pdf_routed_through_extractor`, `test_entries_url_html_sanitized`, 5 `safe_fetch_bytes`/`html_bytes_to_text` tests (incl. internal-IP refusal) |
+| F8 | P2 | The enrichment orders the **active club's** LENEX entries first (deterministic, stable sort) so they survive truncation; the brief cap is raised 6000 → 9000. | `test_active_club_entries_ordered_first`, `test_brief_entries_cap_is_generous` |
+| F9 | P2 | A provided source that could not be read (`event_website_url` / `entries_url` / `entries_file` / `event_pack`) is called out in a notice on the results page instead of being silently dropped. | `test_unread_source_notice` |
+| F10 | P2 | `render_stub_html` no longer emits its own `<h1>` + description — the editorial hero already carries the page's single `<h1>`. Fixes all four stub pages. | `test_no_duplicate_h1_on_form` |
+| F11 | P3 | A non-provider `generate_cards` exception now returns an honest 502 recovery page and persists **no** empty pack (was: empty pack + HTTP 200; dead `generation_error` removed). | `test_generic_engine_error_returns_502_and_saves_no_pack` |
+| F12 | P3 | The ones-to-watch toggle is pure CSS (`:has()`), so it works with JavaScript disabled; where `:has()` is unsupported both panels stay usable. JS handler removed. | `test_watch_toggle_is_css_and_degrades_without_js` |
+| F13 | P3 | The photo attachment is decode-validated (PIL `verify()`) before it is stored; arbitrary bytes named `.jpg` are rejected. Fixes all four stub photo uploads. | `test_photo_upload_rejects_non_image`, `test_photo_upload_accepts_real_image` |
+| F14 | P3 | `/api/event-preview/parse-entries` bounds its plaintext branch (decode ≤ 2 MB, entries text ≤ 20 000 chars) so a large upload can't build a giant intermediate. | `test_parse_entries_bounds_large_text` |
+| F15 | P3 | Em dashes removed from the Event Preview form copy and the hero lede — plain hyphens, British English. | `test_form_copy_uses_plain_hyphens` |
+
+Cross-cutting note: F10, F11 and F13 sit in code shared by all four "create" stubs
+(`render_stub_html`, the `_render_stub` generic-except, the photo-upload gate), so the
+fixes repair the Sponsor / Session / Free-Text surfaces too. One sibling test
+(`test_media_library_profile_isolation.py::TestStubPickPersistence`) had a stale mock
+whose wrong signature was previously masked by the F11 bug (its `TypeError` was
+swallowed into the empty-pack-200 path); its mock signature was corrected so it now
+exercises the real success path. `safe_fetch.py`'s additions are purely additive and
+preserve every existing SSRF guard (they build on `pinned_stream_get`).
+
+---
+
 ## 5. Fixes applied
 
 All fixes are inside the feature's blast radius.
@@ -214,12 +242,12 @@ Two edits touch shared files, both minimal and feature-driven:
 
 ## 9. Feature verdict
 
-**WORKS-WITH-CAVEATS.** The happy path is correct, source-grounded, and secure (SSRF,
-XSS, traversal, IDOR all defended), and the two defects a paying customer would hit
-first — approvals silently lost in production (F1) and an empty form quietly producing a
-guessed preview (F2) — are fixed and locked with tests. The remaining open items (chiefly
-F7: entries-by-URL to a PDF) degrade a secondary path rather than break the core, and are
-documented for coordinated follow-up.
+**WORKS.** The happy path is correct, source-grounded, and secure (SSRF, XSS, traversal,
+IDOR all defended). The first pass fixed the two defects a paying customer hits first —
+approvals silently lost in production (F1) and an empty form quietly producing a guessed
+preview (F2). The second pass then fixed **every** remaining logged caveat (F7-F15),
+including the P1 entries-by-URL-to-a-PDF path, each locked with a test. No open findings
+remain in this feature's blast radius.
 
 ---
 
