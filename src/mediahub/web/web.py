@@ -5880,7 +5880,7 @@ function mhReelComments(opts) {
     jget(baseUrl + '?target=' + encodeURIComponent(target)).then(function(j) {
       state.comments = (j && j.comments) || [];
       renderMarkers(); renderList(); syncHead();
-    }).catch(function(){});
+    }).catch(function(){ showErr('Could not load comments — check your connection.'); });
   }
   function mutate(id, body) {
     jpost(baseUrl + '/' + encodeURIComponent(id), body).then(function(res) {
@@ -6029,7 +6029,9 @@ function pickVariant(btn, cardId, createUrl) {
   var imgUrl = apiBase + '/api/visual/' + encodeURIComponent(vid) + '/png/' + encodeURIComponent(fmt);
   // Persist the choice in workflow sidecar
   var url = WF_API_BASE + encodeURIComponent(cardId);
-  fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({action:'set_edits', edits:{picked_visual_id: vid, picked_variation_seed: seed}})}).catch(function(){});
+  fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({action:'set_edits', edits:{picked_visual_id: vid, picked_variation_seed: seed}})})
+    .then(function(r){ if (!r.ok && window.MH && MH.toast) MH.toast('Could not save your pick — it may not stick after a reload.', 'error', 3500); })
+    .catch(function(){ if (window.MH && MH.toast) MH.toast('Could not save your pick — check your connection.', 'error', 3500); });
   // Promote to primary view
   var panel = document.querySelector('.visual-panel[data-card="' + cardId + '"]');
   var fakeData = {
@@ -6271,7 +6273,7 @@ function copilotRemember(btn) {
   fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({text: txt})})
     .then(function(r){return r.json();})
     .then(function(j){ if (window.MH && MH.toast) MH.toast(j.ok ? 'Saved — the copilot will remember that.' : (j.user_message||'Could not save'), j.ok?'success':'error', 3000); })
-    .catch(function(){});
+    .catch(function(){ if (window.MH && MH.toast) MH.toast('Could not save the preference — check your connection.', 'error', 3000); });
 }
 
 function copilotMic(btn, cardId) {
@@ -6328,7 +6330,7 @@ function commentsLoad(cardId) {
     commentsRender(panel, cardId, j.comments||[]);
     var badge = document.querySelector('.comments-count[data-card="' + cardId + '"]');
     if (badge) { var n=(j.comments||[]).length; var t=j.open_tasks||0; badge.textContent = n? (' '+n+(t?(' · '+t+'☑'):'')) : ''; }
-  }).catch(function(){});
+  }).catch(function(){ var st = panel.querySelector('.cm-status'); if (st) st.textContent = 'Could not load comments — check your connection.'; });
 }
 
 function commentsRender(panel, cardId, comments) {
@@ -6431,15 +6433,27 @@ function commentsSend(btn, cardId) {
 function commentsMutate(cardId, commentId, action) {
   var panel = document.querySelector('.comments-panel[data-card="' + cardId + '"]');
   if (!panel) return;
+  var status = panel.querySelector('.cm-status');
   fetch(panel.dataset.commentsUrl + '/' + encodeURIComponent(commentId), {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({action: action})})
-    .then(function(r){return r.json();}).then(function(){ commentsLoad(cardId); }).catch(function(){});
+    .then(function(r){ return r.json().then(function(j){ return {ok:r.ok, j:j}; }); })
+    .then(function(res){
+      if (!res.ok || res.j.error) { if (status) status.textContent = res.j.reason || res.j.detail || res.j.error || 'Could not update the comment'; return; }
+      if (status) status.textContent='';
+      commentsLoad(cardId);
+    }).catch(function(){ if (status) status.textContent='Network error'; });
 }
 
 function commentsReact(cardId, commentId, emoji) {
   var panel = document.querySelector('.comments-panel[data-card="' + cardId + '"]');
   if (!panel) return;
+  var status = panel.querySelector('.cm-status');
   fetch(panel.dataset.commentsUrl + '/' + encodeURIComponent(commentId), {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({action:'react', emoji: emoji})})
-    .then(function(r){return r.json();}).then(function(){ commentsLoad(cardId); }).catch(function(){});
+    .then(function(r){ return r.json().then(function(j){ return {ok:r.ok, j:j}; }); })
+    .then(function(res){
+      if (!res.ok || res.j.error) { if (status) status.textContent = res.j.reason || res.j.detail || res.j.error || 'Could not add the reaction'; return; }
+      if (status) status.textContent='';
+      commentsLoad(cardId);
+    }).catch(function(){ if (status) status.textContent='Network error'; });
 }
 
 /* ---- Version history: diff + restore (roadmap 1.18) ---- */
@@ -6470,7 +6484,7 @@ function historyLoad(cardId) {
         rb.onclick=function(ev){ ev.preventDefault(); historyRestore(cardId, rev.brief_id); }; row.appendChild(rb); }
       list.appendChild(row);
     });
-  }).catch(function(){});
+  }).catch(function(){ var list = panel.querySelector('.hist-list'); if (list) list.textContent = 'Could not load version history — check your connection.'; });
 }
 
 function historyDiff(cardId, a, b) {
@@ -6488,7 +6502,7 @@ function historyDiff(cardId, a, b) {
       t.appendChild(r);
     });
     box.appendChild(t);
-  }).catch(function(){});
+  }).catch(function(){ var box = panel.querySelector('.hist-diff'); if (box) { box.style.cssText='font-size:12px;color:var(--bad)'; box.textContent = 'Could not load the diff — check your connection.'; } });
 }
 
 function historyRestore(cardId, briefId) {
@@ -6499,7 +6513,7 @@ function historyRestore(cardId, briefId) {
     .then(function(r){return r.json();}).then(function(j){
       if (j.ok) { if (window.MH && MH.toast) MH.toast('Version restored — regenerate the graphic to see it.', 'success', 3500); historyLoad(cardId); }
       else if (window.MH && MH.toast) MH.toast(j.reason || 'Could not restore', 'error', 3000);
-    }).catch(function(){});
+    }).catch(function(){ if (window.MH && MH.toast) MH.toast('Could not restore — check your connection.', 'error', 3000); });
 }
 
 /* ---- Element locks (roadmap 1.18) ---- */
@@ -6527,7 +6541,7 @@ function locksLoad(cardId) {
       b.onclick=function(){ locksSet(cardId, el, !on); };
       list.appendChild(b);
     });
-  }).catch(function(){});
+  }).catch(function(){ var list = panel.querySelector('.locks-list'); if (list) list.textContent = 'Could not load the locks — check your connection.'; });
 }
 
 function locksSet(cardId, element, locked) {
@@ -6537,7 +6551,7 @@ function locksSet(cardId, element, locked) {
     .then(function(r){return r.json().then(function(j){return {ok:r.ok,j:j};});}).then(function(res){
       if (!res.ok) { if (window.MH && MH.toast) MH.toast(res.j.reason || 'Could not change lock', 'error', 3000); return; }
       locksLoad(cardId);
-    }).catch(function(){});
+    }).catch(function(){ if (window.MH && MH.toast) MH.toast('Could not change the lock — check your connection.', 'error', 3000); });
 }
 
 /* ---- Share for review: expiring external links (roadmap 1.18) ---- */
@@ -15124,7 +15138,7 @@ def _layout(
       fetch(READALL_URL, {method:'POST', headers:{'Accept':'application/json'}})
         .then(function(r){ return r.json(); })
         .then(function(){ paintBadge(0); poll(); })
-        .catch(function(){});
+        .catch(function(){ if (window.MH && MH.toast) MH.toast('Could not mark notifications read — check your connection.', 'error', 3000); });
     });
   }
   document.addEventListener('visibilitychange', function(){ if (!document.hidden) poll(); });
@@ -59710,13 +59724,17 @@ voice, and queues them for one-click approval.</p>
             "headers:{'Content-Type':'application/json'},body:JSON.stringify({name:n.value.trim()})})"
             ".then(function(r){return r.json();}).then(function(j){if(j.ok)location.reload();"
             "else if(window.MH&&MH.toast)MH.toast(j.reason||j.detail||'Could not create','error',3000);})"
-            ".catch(function(){});}\n"
+            ".catch(function(){if(window.MH&&MH.toast)"
+            "MH.toast('Network error — the collection was not created.','error',3000);});}\n"
             "function mhDeleteCollection(id){"
             "var go=function(){fetch('"
             + url_for("api_collections")
             + "/'+encodeURIComponent(id),{method:'POST',"
             "headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'delete'})})"
-            ".then(function(r){return r.json();}).then(function(){location.reload();}).catch(function(){});};"
+            ".then(function(r){return r.json();}).then(function(j){if(j.ok)location.reload();"
+            "else if(window.MH&&MH.toast)MH.toast(j.reason||j.detail||'Could not delete','error',3000);})"
+            ".catch(function(){if(window.MH&&MH.toast)"
+            "MH.toast('Network error — the collection was not deleted.','error',3000);});};"
             "if(window.MH&&MH.confirm){MH.confirm({title:'Delete this collection?',"
             "body:'The folder is removed. The meets and packs inside it are kept.',"
             "confirmText:'Delete',onConfirm:go});}"

@@ -536,7 +536,9 @@ _JS = r"""
     fetch(cfg.enhanceUrl,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'})
       .then(function(r){return r.json();}).then(function(j){ if(j&&j.recipe&&j.recipe.steps){ snapshot();
         j.recipe.steps.forEach(function(s){ ops[s.op]=s.params; }); schedulePreview();
-        flash('Enhanced — review & save'); }}).catch(function(){});
+        flash('Enhanced — review & save'); }
+        else { flash('Enhance failed — try again'); }
+      }).catch(function(){flash('Enhance failed — check your connection');});
   });
   // E-10: Reset is confirmed and two-staged — discarding unsaved tweaks
   // (client-side only) is a different act from deleting the saved edit (the
