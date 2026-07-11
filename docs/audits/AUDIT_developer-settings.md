@@ -203,6 +203,16 @@ It only *removes* data from the anonymous response (never adds or changes the av
 booleans), so it cannot break a monitor and has no interaction with any other route.
 Reconcilers: the change is localised to the tail of the `healthz_deps` handler.
 
+**Fourth shared surface (unblock the pre-existing `test_theme_tokens` red):** three inline
+`color:var(--warn,#FFB454)` occurrences in `web.py` (the shared AI-unavailable banner, twice,
+and `_chip_html_for`) had their **dead** `#FFB454` fallback dropped (`→ var(--warn)`). `--warn`
+is globally defined in the base `:root` theme, so the fallback was never reached — the change
+is provably zero-visual-change on every theme and touches no behaviour; it only lowers the
+inline-hex-hardcode count (21 → 18) so the CI-gating `test_inline_hex_count_within_budget`
+passes. This was done at the operator's explicit direction to fix the blocker and merge on
+green. Reconcilers: three one-token deletions of a dead fallback; if a parallel session edits
+the same lines, keeping `var(--warn)` (no hex fallback) is the correct resolution.
+
 No changes to `requirements.txt`, `pyproject.toml`, base templates, shared CSS/JS, or config.
 
 ---
@@ -210,7 +220,7 @@ No changes to `requirements.txt`, `pyproject.toml`, base templates, shared CSS/J
 ## 8. Residual risks / cross-feature items
 
 - **F-4 (`/healthz/deps` path disclosure) — now fixed** (third pass): absolute paths are operator-only; the endpoint stays public for monitors. The other health probes the developer page links to were checked and disclose no paths, so the surface is closed.
-- **Pre-existing `main` breakage, NOT from this diff — `test_theme_tokens.py::test_inline_hex_count_within_budget`.** The third-pass full-suite run (12,546 passed, 10 skipped, 5 failed) includes this deterministic theming-hygiene failure: `web.py` now carries 21 inline hex hardcodes against a budget of 20. My diff adds **zero** hex (`git diff` on the change confirms it), so it cannot affect the count — and a clean `origin/main` (BASE `2349a41`) worktree fails this test identically (21 vs 20, same `#ff5d6c` literal). It is a parallel-merge accumulation artifact: independent sessions each added an inline hex that individually passed but together crossed 20. All 21 offenders live in **other features'** code (video studio, `status_page`, `healthz_usage`), none in this feature's owned functions, so migrating one to a `var(--mh-*)` token would mean reaching outside this blast radius into theming (a sensitive colour surface) — logged for the theming owner rather than fixed here. Lifting the budget in the test is off-limits (never weaken a test to pass a gate).
+- **`test_theme_tokens.py::test_inline_hex_count_within_budget` — pre-existing `main` breakage, now FIXED (operator-authorised, fourth pass).** The third-pass full-suite run (12,546 passed, 10 skipped, 5 failed) surfaced this deterministic theming-hygiene failure: `web.py` carried **21** inline hex hardcodes against a budget of 20. My F-4 diff adds **zero** hex (confirmed), and a clean `origin/main` worktree failed it identically (21 vs 20) — a parallel-merge accumulation artifact where independent sessions each added an inline hex that individually passed but together crossed 20. It blocked a clean merge (`main` was red on the CI-gating suite), so — the operator explicitly directed *"find out why it's not green, fix the issue then merge on green"* — I brought the count back under budget with the **safest possible** change: the three inline `color:var(--warn,#FFB454)` uses (the AI-unavailable banner and a chip helper) carried a **dead hex fallback** — `--warn` is defined globally in the base `:root` theme (web.py, `--warn: var(--mh-warning)`), so the `#FFB454` fallback is never reached. Dropping it (`→ var(--warn)`) is **provably zero-visual-change on every theme** (default and brand) and removes 3 offenders → **count 18** (2 under budget). This is a cross-cutting change touching shared components — see Cross-cutting changes. Lifting the budget in the test was **not** done (never weaken a test to pass a gate); the real hex count was reduced instead.
 - **Operator-with-an-org path was already correct** — the three fixes only affect the no-org state; an operator with a ready organisation always reached the console. No regression risk there.
 - **Whole-file formatting drift in `web.py`** — the newest `ruff` reports quote-style deviations across pre-existing, untouched parts of `web.py`, but under the CI-pinned `ruff==0.8.4` the file is already clean and my edits pass. I deliberately did **not** run a whole-file reformat (it would churn dozens of unrelated lines and collide with parallel sessions).
 - **Pre-existing sandbox-flaky/environmental test failures (not caused by this change)** — the full-suite green-gate run (12,491 passed, 10 skipped) surfaced 5 failures, all outside this feature and all passing in isolation:

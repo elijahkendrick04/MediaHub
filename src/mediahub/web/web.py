@@ -35309,7 +35309,7 @@ function copySpotlightCaption(btn) {{
             "border:1px solid rgba(255,180,84,0.45);border-radius:8px;"
             "background:rgba(255,180,84,0.08);font-size:13px;"
             'color:var(--ink);line-height:1.5">'
-            '<strong style="color:var(--warn,#FFB454)">AI features unavailable.</strong> '
+            '<strong style="color:var(--warn)">AI features unavailable.</strong> '
             "No cloud LLM provider is configured on this deployment. "
             "Submitting this form will surface an AI-unavailable error. "
             "Ask your administrator to set "
@@ -43388,7 +43388,7 @@ what you're doing, what they should do.</p>
                 "border:1px solid rgba(255,180,84,0.45);border-radius:8px;"
                 "background:rgba(255,180,84,0.08);font-size:13px;"
                 'color:var(--ink);line-height:1.5">'
-                '<strong style="color:var(--warn,#FFB454)">AI features unavailable.</strong> '
+                '<strong style="color:var(--warn)">AI features unavailable.</strong> '
                 "No cloud LLM provider is configured on this deployment, so the "
                 "engine cannot infer your brand voice, palette, or operating "
                 "profile. You can still complete setup, but generated content "
@@ -44073,7 +44073,7 @@ what you're doing, what they should do.</p>
             if hint:
                 hint_html = (
                     f'<span class="muted" style="display:block;margin-top:4px;'
-                    f'font-size:11px;line-height:1.4;color:var(--warn,#FFB454)">'
+                    f'font-size:11px;line-height:1.4;color:var(--warn)">'
                     f"{_h(hint)}</span>"
                 )
             # When a link is populated, allow a per-link "re-read now"
