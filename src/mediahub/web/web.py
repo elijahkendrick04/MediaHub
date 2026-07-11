@@ -3627,6 +3627,15 @@ def _render_wf_actions(run_id: str, card_id: str, wf_status: str) -> str:
         status_key, status_key.replace("_", " ").capitalize() or "In queue"
     )
     is_approved = status_key == "approved"
+    # G-10 — the primary review verbs come from the UI catalogue so Welsh
+    # mode shows Welsh verbs, falling back to English for other locales.
+    from mediahub.localize.ui_catalogue import t as _t
+
+    _loc = _ui_locale()
+    verb_approve = _t("action.approve", _loc)
+    verb_approved = _t("action.approved", _loc) + " ✓"
+    verb_requeue = _t("action.requeue", _loc)
+    verb_download = _t("action.download", _loc)
 
     # Visually de-emphasise the action that matches the current state
     # so the user sees "I'm already in this state".
@@ -3638,7 +3647,7 @@ def _render_wf_actions(run_id: str, card_id: str, wf_status: str) -> str:
         )
 
     approve_cls = "btn mh-wf-approve is-on" if is_approved else "btn secondary mh-wf-approve"
-    approve_label = "Approved ✓" if is_approved else "Approve"
+    approve_label = _h(verb_approved if is_approved else verb_approve)
     approve_pressed = ' aria-pressed="true"' if is_approved else ""
     _dl_link = ""
     if is_approved:
@@ -3647,7 +3656,7 @@ def _render_wf_actions(run_id: str, card_id: str, wf_status: str) -> str:
             f'<a class="btn secondary" href="{_h(_dl_url)}"'
             f' style="font-size:12px;padding:4px 10px"'
             f' title="Download caption + visual as a .zip for manual posting">'
-            f"&#x2B07; Download</a>"
+            f"&#x2B07; {_h(verb_download)}</a>"
         )
     return (
         f'<span class="strap" data-mh-wf-target="{_h(card_id)}" '
@@ -3655,12 +3664,13 @@ def _render_wf_actions(run_id: str, card_id: str, wf_status: str) -> str:
         f"<span data-mh-wf-label>{_h(label)}</span></span>"
         f'<button class="{approve_cls}" type="button" style="font-size:12px;padding:4px 10px"'
         f' data-mh-wf="approved" data-mh-run-id="{_h(run_id)}" data-mh-card-id="{_h(card_id)}"'
+        f' data-mh-label-approve="{_h(verb_approve)}" data-mh-label-approved="{_h(verb_approved)}"'
         f"{approve_pressed}"
         f' title="Mark this card approved — it moves into the content builder for captioning, graphics and scheduling.">{approve_label}</button>'
         f'<button class="btn secondary" type="button" style="font-size:12px;padding:4px 10px"'
         f' data-mh-wf="queue" data-mh-run-id="{_h(run_id)}" data-mh-card-id="{_h(card_id)}"'
         f"{_disabled_attrs('queue')}"
-        f' title="Send back to the queue — undoes the approval.">Re-queue</button>'
+        f' title="Send back to the queue — undoes the approval.">{_h(verb_requeue)}</button>'
         f"{_dl_link}"
     )
 
@@ -14596,14 +14606,14 @@ def _layout(
        grid) and both studios are full Create tiles (the live design editor and
        the footage→reel video studio). Keeping them off the top bar leaves the
        signed-in chrome focused on the core workflow. #}
-    <a href="{{ url_for('media_library_page') }}" class="{{ 'active' if active=='media' else '' }}">Media library</a>
+    <a href="{{ url_for('media_library_page') }}" class="{{ 'active' if active=='media' else '' }}">{{ t('nav.media_library') }}</a>
     {# C-1/C-2 — Activity (where a volunteer resumes approving a pack) takes the
        primary slot that browse-only "Elements" held, so desktop matches the
        mobile bottom nav. Elements stays reachable in its add-to-card context
        from the card editor; it no longer holds a top-bar slot it can't act in. #}
-    <a href="{{ url_for('activity_page') }}" class="{{ 'active' if active=='activity' else '' }}">Activity</a>
-    <a href="{{ url_for('season_timeline_page') }}" class="{{ 'active' if active=='season' else '' }}">My Season</a>
-    {% if research_enabled %}<a href="{{ url_for('web_research_console') }}" class="{{ 'active' if active=='research' else '' }}">Research</a>{% endif %}
+    <a href="{{ url_for('activity_page') }}" class="{{ 'active' if active=='activity' else '' }}">{{ t('nav.activity') }}</a>
+    <a href="{{ url_for('season_timeline_page') }}" class="{{ 'active' if active=='season' else '' }}">{{ t('nav.my_season') }}</a>
+    {% if research_enabled %}<a href="{{ url_for('web_research_console') }}" class="{{ 'active' if active=='research' else '' }}">{{ t('nav.research') }}</a>{% endif %}
     {# Spacer — pushes the utility / account cluster to the right edge (it used
        to be the backend "online" pill's margin-left:auto; the pill is gone). #}
     <span class="mh-nav-spacer" aria-hidden="true"></span>
@@ -14615,7 +14625,7 @@ def _layout(
        chrome stays operations-focused, not sales-focused. #}
     {% if not signed_in %}
     <a href="{{ url_for('settings_page') }}" class="{{ 'active' if active=='settings' else '' }}">{{ t('nav.settings') }}</a>
-    <a href="{{ url_for('pricing_page') }}" class="{{ 'active' if active=='pricing' else '' }}">Pricing</a>
+    <a href="{{ url_for('pricing_page') }}" class="{{ 'active' if active=='pricing' else '' }}">{{ t('nav.pricing') }}</a>
     {% if account_email %}
     <a href="{{ url_for('sign_in_page') }}" class="{{ 'active' if active=='signin' else '' }}">{{ t('nav.sign_in') }}</a>
     {% endif %}
@@ -14623,16 +14633,16 @@ def _layout(
     {% if dev_operator %}
       <a href="{{ url_for('logout') }}" title="Operator mode — unrestricted, no paywall">Developer &check;</a>
     {% elif account_email %}
-      <a href="{{ url_for('billing_page') }}" title="{{ account_email }}">Billing</a>
-      <a href="{{ url_for('logout') }}">Log out</a>
+      <a href="{{ url_for('billing_page') }}" title="{{ account_email }}">{{ t('nav.billing') }}</a>
+      <a href="{{ url_for('logout') }}">{{ t('nav.log_out') }}</a>
     {% elif signed_in %}
       {# A-5: a workspace is active but there is no account yet. Don't show the
          prospect's "Sign up + Log in" pair (which reads as "you're not signed
          in"); offer a single, honest CTA to persist the work. #}
-      <a href="{{ url_for('signup_page') }}" class="mh-nav-signup">Save your workspace</a>
+      <a href="{{ url_for('signup_page') }}" class="mh-nav-signup">{{ t('nav.save_workspace') }}</a>
     {% else %}
-      <a href="{{ url_for('signup_page') }}" class="mh-nav-signup">Sign up</a>
-      <a href="{{ url_for('login_page') }}">Log in</a>
+      <a href="{{ url_for('signup_page') }}" class="mh-nav-signup">{{ t('nav.sign_up') }}</a>
+      <a href="{{ url_for('login_page') }}">{{ t('nav.log_in') }}</a>
       {# "Developer" sign-in link removed from the top bar — operator sign-in
          lives in the footer ("Developer access") on the home page. The header
          "online" status pill was removed too; reachability now lives only in
@@ -14646,7 +14656,7 @@ def _layout(
        scrollable / hamburger nav can never clip it. #}
     <div id="mh-notif" class="mh-notif">
       <button id="mh-notif-btn" class="mh-notif-btn" type="button"
-              aria-label="Notifications" aria-haspopup="dialog" aria-expanded="false"
+              aria-label="{{ t('nav.notifications') }}" aria-haspopup="dialog" aria-expanded="false"
               aria-controls="mh-notif-panel"
               data-list-url="{{ url_for('api_notifications') }}"
               data-readall-url="{{ url_for('api_notifications_read_all') }}">
@@ -14658,9 +14668,9 @@ def _layout(
         <span id="mh-notif-badge" class="mh-notif-badge" hidden>0</span>
       </button>
       <div id="mh-notif-panel" class="mh-notif-panel" role="dialog"
-           aria-label="Notifications" hidden>
+           aria-label="{{ t('nav.notifications') }}" hidden>
         <div class="mh-notif-head">
-          <span class="mh-notif-h-title">Notifications</span>
+          <span class="mh-notif-h-title">{{ t('nav.notifications') }}</span>
           <button id="mh-notif-readall" class="mh-notif-readall" type="button">Mark all read</button>
         </div>
         <div id="mh-notif-list" class="mh-notif-list" role="list" aria-live="polite"></div>
@@ -14713,20 +14723,20 @@ def _layout(
            lands) is now reachable from any page, not just a footer link on
            the compose surfaces. #}
         <a href="{{ url_for('stub_packs_list') }}" role="menuitem"
-           class="mh-orgmenu-item {{ 'active' if active=='drafts' else '' }}">Drafts</a>
+           class="mh-orgmenu-item {{ 'active' if active=='drafts' else '' }}">{{ t('nav.drafts') }}</a>
         {# C-4: the club-data tools (records, ask-the-data, data hub) were
            filed 3–4 clicks deep under Settings and absent from the nav.
            Surface them from every page. #}
         <a href="{{ url_for('settings_section', section='clubdata') }}" role="menuitem"
-           class="mh-orgmenu-item">Club data</a>
+           class="mh-orgmenu-item">{{ t('nav.club_data') }}</a>
         <a href="{{ url_for('settings_page') }}" role="menuitem"
            class="mh-orgmenu-item {{ 'active' if active=='settings' else '' }}">{{ t('nav.settings') }}</a>
         <a href="{{ url_for('help_page') }}" role="menuitem"
-           class="mh-orgmenu-item {{ 'active' if active=='help' else '' }}">Help</a>
+           class="mh-orgmenu-item {{ 'active' if active=='help' else '' }}">{{ t('nav.help') }}</a>
         {# C-18 — the slide remote had no in-app path (reachable only by typing
            /remote); give a phone user a menu shortcut to the pairing screen. #}
         <a href="{{ url_for('remote_landing') }}" role="menuitem"
-           class="mh-orgmenu-item">Slide remote</a>
+           class="mh-orgmenu-item">{{ t('nav.slide_remote') }}</a>
         <a href="{{ url_for('sign_in_page') }}" role="menuitem"
            class="mh-orgmenu-item {{ 'active' if active=='signin' else '' }}">{{ t('nav.switch_org') }}</a>
         <a href="{{ url_for('sign_out') }}" role="menuitem" class="mh-orgmenu-item">{{ t('nav.sign_out') }}</a>
@@ -14813,28 +14823,28 @@ def _layout(
   </div>
 </footer>
 <nav class="mh-bottomnav" aria-label="Primary (mobile)">
-  <a href="{{ url_for('home') }}" class="{{ 'is-active' if active=='home' else '' }}" aria-label="Home">
+  <a href="{{ url_for('home') }}" class="{{ 'is-active' if active=='home' else '' }}" aria-label="{{ t('nav.home') }}">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11l9-8 9 8"/><path d="M5 10v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V10"/></svg>
-    Home
+    {{ t('nav.home') }}
   </a>
-  <a href="{{ url_for('make_page') }}" class="{{ 'is-active' if active=='create' else '' }}" aria-label="Create">
+  <a href="{{ url_for('make_page') }}" class="{{ 'is-active' if active=='create' else '' }}" aria-label="{{ t('nav.create') }}">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
-    Create
+    {{ t('nav.create') }}
   </a>
   {# C-13 — the media library is the surface built for phones (camera capture,
      the PWA share-target, "share a photo straight from your camera roll"), so it
      earns a mobile bottom-nav slot instead of being hidden behind the hamburger. #}
-  <a href="{{ url_for('media_library_page') }}" class="{{ 'is-active' if active=='media' else '' }}" aria-label="Media library">
+  <a href="{{ url_for('media_library_page') }}" class="{{ 'is-active' if active=='media' else '' }}" aria-label="{{ t('nav.media_library') }}">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
-    Media
+    {{ t('nav.media') }}
   </a>
-  <a href="{{ url_for('activity_page') }}" class="{{ 'is-active' if active=='activity' else '' }}" aria-label="Activity">
+  <a href="{{ url_for('activity_page') }}" class="{{ 'is-active' if active=='activity' else '' }}" aria-label="{{ t('nav.activity') }}">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h4l2 7 4-16 2 9h6"/></svg>
-    Activity
+    {{ t('nav.activity') }}
   </a>
-  <a href="{{ url_for('settings_page') }}" class="{{ 'is-active' if active=='settings' else '' }}" aria-label="Settings">
+  <a href="{{ url_for('settings_page') }}" class="{{ 'is-active' if active=='settings' else '' }}" aria-label="{{ t('nav.settings') }}">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-    Settings
+    {{ t('nav.settings') }}
   </a>
 </nav>
 {# UI 1.28 — Global keyboard-shortcuts overlay (GitHub-style). Press ? on any
@@ -16372,9 +16382,12 @@ def _layout(
         if (b.classList.contains('mh-wf-approve')) {
           // Approve flips between outline ("Approve") and filled
           // ("Approved ✓") — the fill is the confirmation, never the default.
+          // G-10: the server renders the localized labels into data attributes
+          // so the optimistic repaint keeps the page's language.
           b.classList.toggle('is-on', on);
           b.classList.toggle('secondary', !on);
-          b.textContent = on ? 'Approved ✓' : 'Approve';
+          b.textContent = on ? (b.dataset.mhLabelApproved || 'Approved ✓')
+                             : (b.dataset.mhLabelApprove || 'Approve');
           if (on) b.setAttribute('aria-pressed', 'true');
           else b.removeAttribute('aria-pressed');
         } else if (on) {
@@ -17654,7 +17667,8 @@ _BULK_ACTIONS_JS = r"""
           if (b.classList.contains('mh-wf-approve')){
             b.classList.toggle('is-on', on);
             b.classList.toggle('secondary', !on);
-            b.textContent = on ? 'Approved ✓' : 'Approve';
+            b.textContent = on ? (b.dataset.mhLabelApproved || 'Approved ✓')
+                               : (b.dataset.mhLabelApprove || 'Approve');
             if (on) b.setAttribute('aria-pressed', 'true'); else b.removeAttribute('aria-pressed');
           } else if (on){
             b.setAttribute('aria-pressed', 'true'); b.style.opacity = '0.55'; b.style.cursor = 'default';
@@ -23545,6 +23559,12 @@ def create_app() -> Flask:
         rr = data.get("recognition_report") or {}
         recognition_error = data.get("recognition_error") or ""
 
+        # G-10 — the bulk-bar review verbs come from the UI catalogue so
+        # Welsh mode shows Welsh verbs (English for everything else).
+        from mediahub.localize.ui_catalogue import t as _rv_t
+
+        _rv_loc = _ui_locale()
+
         # --- Hard pipeline failure (U.2 error state).
         # A run that failed terminally persists a top-level ``error`` and
         # usually has no meet/cards/recognition_report. Rendering the normal
@@ -24746,20 +24766,20 @@ details.why-card[open] > summary .why-peek {{ display: none; }}
       <span class="mh-bulkbar-count" id="mh-rv-count">0 selected</span>
       <div class="mh-bulkbar-actions">
         <button type="submit" class="btn" data-mh-bulk="approve" name="op" value="approved"
-                formaction="{url_for("api_cards_bulk_status", run_id=run_id)}">Approve</button>
+                formaction="{url_for("api_cards_bulk_status", run_id=run_id)}">{_h(_rv_t("action.approve", _rv_loc))}</button>
         <button type="submit" class="btn secondary" data-mh-bulk="reject" name="op" value="rejected"
                 formaction="{url_for("api_cards_bulk_status", run_id=run_id)}"
-                data-confirm="Reject {{n}} selected card(s)? They move out of the queue; you can re-queue them later.">Reject</button>
+                data-confirm="Reject {{n}} selected card(s)? They move out of the queue; you can re-queue them later.">{_h(_rv_t("action.reject", _rv_loc))}</button>
         <button type="submit" class="btn secondary" data-mh-bulk="requeue" name="op" value="queue"
                 formaction="{url_for("api_cards_bulk_status", run_id=run_id)}"
-                title="Send the selected cards back to the queue — undoes an approval or rejection">Re-queue</button>
+                title="Send the selected cards back to the queue — undoes an approval or rejection">{_h(_rv_t("action.requeue", _rv_loc))}</button>
         <button type="submit" class="btn secondary" data-mh-bulk="download"
                 formaction="{url_for("api_cards_bulk_download", run_id=run_id)}"
                 title="Download the selected cards' captions + visuals as a ZIP, ready to post">Download content (.zip)</button>
         <button type="submit" class="btn ghost" data-mh-bulk="export"
                 style="font-size:12px;padding:6px 12px"
                 formaction="{url_for("api_cards_bulk_export", run_id=run_id)}"
-                title="Developer export: the selected cards' data (rank, scores, status) as JSON">Export data (JSON)</button>
+                title="Developer export: the selected cards' data (rank, scores, status) as JSON">{_h(_rv_t("action.export", _rv_loc))} data (JSON)</button>
       </div>
     </div>
     <div id="ach-list" data-wf-filter="{_h(_wf_filter)}">{ach_rows_html_wf}</div>
@@ -41434,22 +41454,22 @@ what you're doing, what they should do.</p>
                     else '<div class="dim mh-cta-note">Included</div>'
                 )
             else:
-                if not configured:
+                if not _billing.plan_purchasable(tier.plan):
+                    # J-15: a tier that can't be bought here (billing not
+                    # configured, or no price wired for it) gets a live route
+                    # to a human — never a dead "Not yet available" pill that
+                    # leaves a treasurer with nothing to click.
                     cta = (
-                        '<div class="btn secondary mh-cta" '
-                        'style="pointer-events:none;opacity:0.6" '
-                        'title="' + _billing.NOT_CONFIGURED_MESSAGE + '">Unavailable</div>'
+                        '<a class="btn secondary mh-cta" '
+                        f'href="mailto:{_legal.CONTACT_EMAIL}'
+                        '?subject=MediaHub%20club%20pricing">'
+                        "Talk to us about pricing</a>"
                     )
                 elif not signed_in:
                     cta = (
                         f'<a class="btn mh-cta" '
                         f'href="{url_for("login_page", next=url_for("pricing_page"))}">'
                         "Log in to upgrade</a>"
-                    )
-                elif not _billing.plan_purchasable(tier.plan):
-                    cta = (
-                        '<div class="btn secondary mh-cta" '
-                        'style="pointer-events:none;opacity:0.6">Not yet available</div>'
                     )
                 else:
                     # CCR 2013: route through the pre-contract information
@@ -41548,7 +41568,7 @@ what you're doing, what they should do.</p>
             '<span class="mh-hero-eyebrow">Pricing</span>'
             '<h1>Simple <em class="editorial">plans</em> for every club.</h1>'
             '<p class="lede">Start free. Upgrade when your club is posting in earnest. '
-            "Annual prepay keeps it cheaper.</p>"
+            "Simple annual pricing.</p>"
             "</section>"
             '<div id="mh-pricing" class="mh-pricing" data-period="annual">'
             f"{toggle}"
@@ -65689,32 +65709,52 @@ voice, and queues them for one-click approval.</p>
         updated = _pres.apply_action(session_id, str(body.get("action", "")), body.get("value"))
         return jsonify({"ok": True, "state": updated.public_state() if updated else None})
 
-    # Per-IP budget on FAILED pairing-code lookups: the 6-char code drives a
-    # live presentation, so wrong-code guesses are throttled (presenter.py's
-    # documented guard). Successful lookups never count, so a presenter
-    # clicking through slides with the right code is unaffected.
-    _remote_code_attempts: dict = {}
+    # Budget on FAILED pairing-code lookups (J-14): the code is looked up
+    # BEFORE any limit check, so a correct code always connects — a venue
+    # full of phones behind one NAT can never be locked out of a live talk
+    # by someone else's typos. Confirmed-wrong guesses are throttled per
+    # (client IP, submitted code) so one member hammering their own typo
+    # doesn't burn the venue's budget, with a generous per-IP ceiling as
+    # the code-enumeration backstop.
+    _remote_code_attempts: dict = {}  # client IP -> [(ts, submitted code), ...]
     _remote_code_lock = threading.Lock()
-    _REMOTE_CODE_MAX_FAILURES = 20
+    _REMOTE_CODE_MAX_FAILURES = 20  # per (IP, code)
+    _REMOTE_CODE_IP_CEILING = 100  # per IP across all codes
     _REMOTE_CODE_WINDOW_S = 300
 
-    def _remote_code_limited() -> bool:
-        """True when this IP has exhausted its failed pairing-code budget."""
+    def _remote_code_limited(code: str) -> int:
+        """Seconds until this IP may retry ``code``; 0 when not limited.
+
+        Limited when this IP has exhausted its failed budget for this exact
+        code, or tripped the per-IP ceiling across all codes.
+        """
         now = time.time()
         key = _client_ip()
+        code = (code or "").strip().upper()
         with _remote_code_lock:
             window = [
-                t for t in _remote_code_attempts.get(key, []) if now - t < _REMOTE_CODE_WINDOW_S
+                e for e in _remote_code_attempts.get(key, []) if now - e[0] < _REMOTE_CODE_WINDOW_S
             ]
             _remote_code_attempts[key] = window
             if len(_remote_code_attempts) > 4096:  # opportunistic cleanup
                 for k in [k for k, v in _remote_code_attempts.items() if not v]:
                     _remote_code_attempts.pop(k, None)
-            return len(window) >= _REMOTE_CODE_MAX_FAILURES
+            frees_at = 0.0
+            same_code = [t for t, c in window if c == code]
+            if len(same_code) >= _REMOTE_CODE_MAX_FAILURES:
+                # Clears when enough same-code failures age out of the window.
+                frees_at = same_code[len(same_code) - _REMOTE_CODE_MAX_FAILURES]
+            if len(window) >= _REMOTE_CODE_IP_CEILING:
+                frees_at = max(frees_at, window[len(window) - _REMOTE_CODE_IP_CEILING][0])
+            if not frees_at:
+                return 0
+            return max(1, int(frees_at + _REMOTE_CODE_WINDOW_S - now) + 1)
 
-    def _remote_code_failed() -> None:
+    def _remote_code_failed(code: str) -> None:
         with _remote_code_lock:
-            _remote_code_attempts.setdefault(_client_ip(), []).append(time.time())
+            _remote_code_attempts.setdefault(_client_ip(), []).append(
+                (time.time(), (code or "").strip().upper())
+            )
 
     @app.route("/remote")
     def remote_landing():
@@ -65763,15 +65803,26 @@ voice, and queues them for one-click approval.</p>
             )
         from mediahub.documents import presenter as _pres
 
-        if _remote_code_limited():
-            return _recovery_page(
-                "Too many attempts",
-                "Too many code attempts from your network — wait a few minutes.",
-                primary_cta=("Try again", url_for("remote_landing")),
-            )
+        # A correct code always connects — the lookup runs before any
+        # throttle check, so a shared venue NAT can never lock out someone
+        # holding the real code (J-14).
         session = _pres.get_by_pairing_code(code, include_ended=True)
         if session is None:
-            _remote_code_failed()
+            wait_s = _remote_code_limited(code)
+            if wait_s:
+                mins = max(1, (wait_s + 59) // 60)
+                return _recovery_page(
+                    "Too many attempts",
+                    "Too many wrong code attempts — wait about "
+                    f"{mins} minute{'s' if mins != 1 else ''}, then check again. "
+                    "If you have the correct code from the presenter screen, it will still connect.",
+                    primary_cta=(
+                        f"Check again in about {mins} minute{'s' if mins != 1 else ''}",
+                        url_for("remote_control", code=code),
+                    ),
+                    code=429,
+                )
+            _remote_code_failed(code)
             return _recovery_page(
                 "Code not found",
                 "That code doesn't match a live presentation — check the code on the presenter screen.",
@@ -65799,11 +65850,15 @@ voice, and queues them for one-click approval.</p>
             return jsonify({"ok": False, "error": "unavailable"}), 503
         from mediahub.documents import presenter as _pres
 
-        if _remote_code_limited():
-            return jsonify({"ok": False, "error": "rate_limited"}), 429
+        # Lookup before throttle: a correct code is never rate limited (J-14).
         session = _pres.get_by_pairing_code(code, include_ended=True)
         if session is None:
-            _remote_code_failed()
+            wait_s = _remote_code_limited(code)
+            if wait_s:
+                resp = jsonify({"ok": False, "error": "rate_limited", "retry_after_s": wait_s})
+                resp.headers["Retry-After"] = str(wait_s)
+                return resp, 429
+            _remote_code_failed(code)
             return jsonify({"ok": False, "error": "no_session"}), 404
         if session.ended:
             # Valid code, but the talk is over — let the remote flip to its
