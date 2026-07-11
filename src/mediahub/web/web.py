@@ -19559,6 +19559,117 @@ function athEnforceConfirm(f){
 </script>
 """
 
+# B-7: inline + bulk permission saves on /athletes. Plain string (not an
+# f-string) so the JS braces stay single; __CONSENT_URL__ is substituted at
+# render time. The per-row form POST stays as the no-JS fallback — this
+# script upgrades it to a fetch save (no reload, scroll preserved) and
+# reveals the bulk "apply permission to selected" bar.
+_ATHLETES_CONSENT_JS = r"""
+<script>
+(function(){
+  var URL = '__CONSENT_URL__';
+  function toast(m, t){ if (window.MH && MH.toast) MH.toast(m, t || 'info'); }
+  function save(ids, level, done, fail){
+    fetch(URL, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json', 'Accept': 'application/json'},
+      body: JSON.stringify({athlete_ids: ids, level: level})
+    }).then(function(r){
+      return r.json().then(function(j){ j.__ok = r.ok; return j; });
+    }).then(function(j){
+      if (j.__ok && j.ok) done(j);
+      else fail(j.error || 'Could not save — reload and try again.');
+    }).catch(function(){
+      fail('Could not save — check your connection and try again.');
+    });
+  }
+  function tickRow(form){
+    var tick = form.querySelector('.mh-consent-tick');
+    if (!tick) return;
+    tick.hidden = false;
+    clearTimeout(tick._t);
+    tick._t = setTimeout(function(){ tick.hidden = true; }, 2200);
+  }
+  var forms = Array.prototype.slice.call(document.querySelectorAll('form.mh-consent-form'));
+  if (!forms.length) return;
+  forms.forEach(function(form){
+    var sel = form.querySelector('select[name=level]');
+    var btn = form.querySelector('.mh-consent-save');
+    if (btn) btn.hidden = true; // auto-save on change replaces the per-row Save
+    form.addEventListener('submit', function(e){ e.preventDefault(); });
+    if (!sel) return;
+    sel.dataset.saved = sel.value;
+    sel.addEventListener('change', function(){
+      var level = sel.value;
+      if (!level) {
+        sel.value = sel.dataset.saved;
+        toast('Pick a permission level first.', 'info');
+        return;
+      }
+      sel.disabled = true;
+      save([form.dataset.athleteId], level, function(){
+        sel.disabled = false;
+        sel.dataset.saved = level;
+        tickRow(form);
+      }, function(msg){
+        sel.disabled = false;
+        sel.value = sel.dataset.saved; // never show a level that didn't save
+        toast(msg, 'error');
+      });
+    });
+  });
+  var bulk = document.getElementById('mh-consent-bulk');
+  if (!bulk) return;
+  bulk.style.display = 'flex';
+  Array.prototype.forEach.call(document.querySelectorAll('.mh-consent-selcell'), function(c){
+    c.hidden = false;
+  });
+  var countEl = document.getElementById('mh-consent-selcount');
+  var allBox = document.getElementById('mh-consent-check-all');
+  function checks(){ return Array.prototype.slice.call(document.querySelectorAll('.mh-consent-check')); }
+  function recount(){
+    var n = checks().filter(function(c){ return c.checked; }).length;
+    if (countEl) countEl.textContent = String(n);
+  }
+  document.addEventListener('change', function(e){
+    var t = e.target;
+    if (allBox && t === allBox) {
+      checks().forEach(function(c){ c.checked = allBox.checked; });
+      recount();
+    } else if (t && t.classList && t.classList.contains('mh-consent-check')) {
+      recount();
+    }
+  });
+  var applyBtn = document.getElementById('mh-consent-bulk-apply');
+  var levelSel = document.getElementById('mh-consent-bulk-level');
+  if (!applyBtn || !levelSel) return;
+  applyBtn.addEventListener('click', function(){
+    var ids = checks().filter(function(c){ return c.checked; }).map(function(c){ return c.value; });
+    if (!ids.length) { toast('Tick at least one swimmer first.', 'info'); return; }
+    var level = levelSel.value;
+    if (!level) { toast('Pick a permission level first.', 'info'); return; }
+    applyBtn.disabled = true;
+    save(ids, level, function(j){
+      applyBtn.disabled = false;
+      ids.forEach(function(id){
+        var esc = (window.CSS && CSS.escape) ? CSS.escape(id) : id;
+        var form = document.querySelector('form.mh-consent-form[data-athlete-id="' + esc + '"]');
+        if (!form) return;
+        var sel = form.querySelector('select[name=level]');
+        if (sel) { sel.value = level; sel.dataset.saved = level; }
+        tickRow(form);
+      });
+      var n = (typeof j.updated === 'number') ? j.updated : ids.length;
+      toast('Updated ' + n + (n === 1 ? ' swimmer.' : ' swimmers.'), 'success');
+    }, function(msg){
+      applyBtn.disabled = false;
+      toast(msg, 'error');
+    });
+  });
+})();
+</script>
+"""
+
 
 def create_app() -> Flask:
     # Fail-fast env validation (security/secrets-and-config): production
@@ -63690,6 +63801,11 @@ voice, and queues them for one-click approval.</p>
             aliases = ", ".join(a for a in rec.aliases if a != rec.canonical_name.casefold())
             rows.append(
                 "<tr>"
+                # B-7: bulk-select checkbox — hidden until the enhancement
+                # script reveals it (it does nothing without JS).
+                f'<td data-label="Select" class="mh-consent-selcell" hidden>'
+                f'<input type="checkbox" class="mh-consent-check" value="{_h(rec.athlete_id)}"'
+                f' aria-label="Select {_h(rec.canonical_name)}"/></td>'
                 f'<td data-label="Athlete"><strong>{_h(rec.canonical_name)}</strong>'
                 + (
                     f'<br/><span class="muted" style="font-size:11px">also seen as: {_h(aliases)}</span>'
@@ -63699,20 +63815,44 @@ voice, and queues them for one-click approval.</p>
                 + "</td>"
                 f'<td data-label="Races">{rec.race_count}</td>'
                 f'<td data-label="Born">{_h(str(rec.birth_year or ""))}</td>'
-                f'<td data-label="Permission"><form method="POST" action="{url_for("athletes_action")}" style="display:flex;gap:6px;align-items:center">'
+                # B-7: the form POST stays as the no-JS fallback; with JS the
+                # dropdown auto-saves via fetch (no reload, scroll preserved).
+                f'<td data-label="Permission"><form method="POST" action="{url_for("athletes_action")}"'
+                f' class="mh-consent-form" data-athlete-id="{_h(rec.athlete_id)}" data-no-loader="1"'
+                f' style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">'
                 f'<input type="hidden" name="action" value="set_consent"/>'
                 f'<input type="hidden" name="athlete_id" value="{_h(rec.athlete_id)}"/>'
                 f'<select name="level" style="font-size:12px">{unknown_opt}{opts}</select>'
-                f'<button type="submit" class="btn secondary" style="font-size:12px;padding:4px 10px">Save</button>'
+                f'<button type="submit" class="btn secondary mh-consent-save" style="font-size:12px;padding:4px 10px">Save</button>'
+                f'<span class="mh-consent-tick" role="status" hidden'
+                f' style="font-size:12px;font-weight:600;color:var(--mh-success)">Saved &#10003;</span>'
                 f"</form></td>"
                 "</tr>"
             )
         rows_html = (
             "".join(rows)
             if rows
-            else '<tr><td colspan="4" class="muted">No athletes yet — run a meet '
+            else '<tr><td colspan="5" class="muted">No athletes yet — run a meet '
             "through the pipeline, or click &ldquo;Build from past runs&rdquo; below.</td></tr>"
         )
+        # B-7: the bulk bar (one select + Apply) posts once for every ticked
+        # swimmer and updates the rows in place. JS-only — revealed by the
+        # enhancement script below.
+        bulk_opts = "".join(
+            f'<option value="{_h(val)}">{_h(label)}</option>'
+            for val, label in level_options
+            if val != "unknown"
+        )
+        bulk_bar = f"""
+  <div id="mh-consent-bulk" style="display:none;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
+    <label class="muted" for="mh-consent-bulk-level" style="font-size:12px">Apply permission to selected&hellip;</label>
+    <select id="mh-consent-bulk-level" style="font-size:12px">
+      <option value="">Pick a permission</option>
+      {bulk_opts}
+    </select>
+    <button type="button" id="mh-consent-bulk-apply" class="btn secondary" style="font-size:12px;padding:4px 10px">Apply</button>
+    <span class="muted" style="font-size:12px"><span id="mh-consent-selcount">0</span> selected</span>
+  </div>"""
 
         merge_opts = "".join(
             f'<option value="{_h(r.athlete_id)}">{_h(r.canonical_name)} ({r.race_count} races)</option>'
@@ -63767,9 +63907,9 @@ voice, and queues them for one-click approval.</p>
   </div>
 </div>
 <div class="card" style="margin-bottom:16px">
-  <h2 style="margin-top:0">Roster</h2>
+  <h2 style="margin-top:0">Roster</h2>{bulk_bar}
   <table class="mh-table mh-table-stack" style="width:100%">
-    <thead><tr><th>Athlete</th><th>Races logged</th><th>Born</th><th>Photo &amp; name permission</th></tr></thead>
+    <thead><tr><th class="mh-consent-selcell" hidden style="width:28px"><input type="checkbox" id="mh-consent-check-all" aria-label="Select every athlete"/></th><th>Athlete</th><th>Races logged</th><th>Born</th><th>Photo &amp; name permission</th></tr></thead>
     <tbody>{rows_html}</tbody>
   </table>
 </div>
@@ -63784,7 +63924,7 @@ voice, and queues them for one-click approval.</p>
     <label>absorbs</label><select name="merge_id">{merge_opts}</select>
     <button type="submit" class="btn">Merge</button>
   </form>
-</div>{_ATHLETES_CONFIRM_JS}
+</div>{_ATHLETES_CONFIRM_JS}{_ATHLETES_CONSENT_JS.replace("__CONSENT_URL__", url_for("api_athletes_consent"))}
 <div class="card">
   <h2 style="margin-top:0">Import the consent register (.csv)</h2>
   <p class="dim" style="font-size:13px">One row per athlete:
@@ -63854,6 +63994,52 @@ voice, and queues them for one-click approval.</p>
                 "into the roster."
             )
         return redirect(url_for("athletes_page", msg=msg))
+
+    @app.route("/api/athletes/consent", methods=["POST"])
+    def api_athletes_consent():
+        """B-7: inline single + bulk permission saves from the roster.
+
+        JSON body: ``{"athlete_ids": [...], "level": "<level>"}`` (a single
+        ``"athlete_id"`` is accepted too). Tenant-gated exactly like the
+        /athletes/action form post — active workspace only — and any id that
+        isn't on THIS organisation's roster 404s the whole request, so one
+        club can never write consent rows against another club's athletes.
+        The form post stays as the no-JS fallback.
+        """
+        pid = _phase_w_org()
+        if not pid:
+            return jsonify({"error": "Not signed in."}), 403
+        from mediahub.athletes import list_athletes
+        from mediahub.safeguarding import set_consent
+        from mediahub.safeguarding.consent import LEVEL_LABELS as _CONSENT_LABELS
+        from mediahub.safeguarding.consent import LEVELS as _CONSENT_LEVELS
+
+        body = request.get_json(silent=True) or {}
+        ids = body.get("athlete_ids")
+        if ids is None:
+            single = str(body.get("athlete_id") or "").strip()
+            ids = [single] if single else []
+        if not isinstance(ids, list):
+            return jsonify({"error": "athlete_ids must be a list."}), 400
+        ids = list(dict.fromkeys(str(a).strip() for a in ids if str(a).strip()))
+        if not ids:
+            return jsonify({"error": "Pick at least one athlete."}), 400
+        level = str(body.get("level") or "").strip()
+        if level not in _CONSENT_LEVELS:
+            return jsonify({"error": "Pick a permission level first."}), 400
+        roster_ids = {r.athlete_id for r in list_athletes(pid)}
+        if any(a not in roster_ids for a in ids):
+            return jsonify({"error": "No such athlete on this organisation's roster."}), 404
+        actor = (session.get("user_email") or "web").strip()
+        updated = sum(1 for athlete_id in ids if set_consent(pid, athlete_id, level, actor=actor))
+        return jsonify(
+            {
+                "ok": True,
+                "updated": updated,
+                "level": level,
+                "label": _CONSENT_LABELS.get(level, level),
+            }
+        )
 
     @app.route("/athletes/consent.csv")
     def athletes_consent_export():
