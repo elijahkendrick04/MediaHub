@@ -3637,10 +3637,9 @@ _WF_STATUS_LABEL = {
 def _render_wf_actions(run_id: str, card_id: str, wf_status: str) -> str:
     """Render the per-card Approve / Re-queue action strip.
 
-    Round-8: shared between /pack/<id>/grouped (where the audit found
-    no approval primitive at all) and any other page that wants the
-    same workflow control surface. The "Status" strap shows the
-    current state and is updated optimistically by the global
+    Shared between the review queue and the athlete spotlight — any page
+    that wants the same workflow control surface. The "Status" strap shows
+    the current state and is updated optimistically by the global
     `[data-mh-wf]` click handler in _layout.
 
     Approve-only flow: a card is either in the queue or approved — there
@@ -3648,6 +3647,15 @@ def _render_wf_actions(run_id: str, card_id: str, wf_status: str) -> str:
     approve button reads as an action still to take (outline) until the
     card is actually approved, then flips to a filled confirmation; the
     old always-green fill made every card look already approved.
+
+    B-4 (slim rows): Re-queue only renders on DECIDED cards (approved /
+    rejected / edited / posted) — on a queued row there is nothing to
+    undo, so the button ships with the `hidden` attribute instead of the
+    old dimmed-but-rendered state. The optimistic painters (paintState in
+    _layout, applyReviewDom in _BULK_ACTIONS_JS) flip `hidden` with the
+    card's status so undo appears the moment a card is decided, without a
+    reload; `.btn[data-mh-wf][hidden]` CSS makes `hidden` win over the
+    `.btn` flex display.
     """
     status_key = (wf_status or "queue").lower()
     label = _WF_STATUS_LABEL.get(
@@ -3664,15 +3672,7 @@ def _render_wf_actions(run_id: str, card_id: str, wf_status: str) -> str:
     verb_requeue = _t("action.requeue", _loc)
     verb_download = _t("action.download", _loc)
 
-    # Visually de-emphasise the action that matches the current state
-    # so the user sees "I'm already in this state".
-    def _disabled_attrs(target: str) -> str:
-        return (
-            ' aria-pressed="true" style="opacity:0.55;cursor:default"'
-            if status_key == target
-            else ""
-        )
-
+    requeue_hidden = " hidden" if status_key == "queue" else ""
     approve_cls = "btn mh-wf-approve is-on" if is_approved else "btn secondary mh-wf-approve"
     approve_label = _h(verb_approved if is_approved else verb_approve)
     approve_pressed = ' aria-pressed="true"' if is_approved else ""
@@ -3696,7 +3696,7 @@ def _render_wf_actions(run_id: str, card_id: str, wf_status: str) -> str:
         f' title="Mark this card approved — it moves into the content builder for captioning, graphics and scheduling.">{approve_label}</button>'
         f'<button class="btn secondary" type="button" style="font-size:12px;padding:4px 10px"'
         f' data-mh-wf="queue" data-mh-run-id="{_h(run_id)}" data-mh-card-id="{_h(card_id)}"'
-        f"{_disabled_attrs('queue')}"
+        f"{requeue_hidden}"
         f' title="Send back to the queue — undoes the approval.">{_h(verb_requeue)}</button>'
         f"{_dl_link}"
     )
@@ -9613,6 +9613,10 @@ p:last-child { margin-bottom: 0; }
   outline: 2px solid var(--lane);
   outline-offset: 3px;
 }
+/* B-4 — the per-card Re-queue button ships `hidden` while the card is in
+   the queue (nothing to undo yet); `hidden` must win over the .btn flex
+   display so the workflow painters can toggle it with the card's status. */
+.btn[data-mh-wf][hidden] { display: none; }
 .btn.secondary { background: transparent; color: var(--ink); border: 1px solid var(--chrome); }
 .btn.secondary:hover {
   background: rgba(245,242,232,0.04);
@@ -16621,6 +16625,9 @@ def _layout(
       });
       document.querySelectorAll('[data-mh-card-id="' + esc + '"][data-mh-wf]').forEach(function(b){
         var on = b.getAttribute('data-mh-wf') === st;
+        // B-4: Re-queue only shows on decided cards — while the card sits in
+        // the queue there is nothing to undo, so the button stays hidden.
+        if (b.getAttribute('data-mh-wf') === 'queue') b.hidden = (st === 'queue');
         if (b.classList.contains('mh-wf-approve')) {
           // Approve flips between outline ("Approve") and filled
           // ("Approved ✓") — the fill is the confirmation, never the default.
@@ -17941,6 +17948,8 @@ _BULK_ACTIONS_JS = r"""
         });
         document.querySelectorAll('[data-mh-card-id="' + esc + '"][data-mh-wf]').forEach(function(b){
           var on = b.getAttribute('data-mh-wf') === status;
+          // B-4: Re-queue only shows on decided cards — hidden while queued.
+          if (b.getAttribute('data-mh-wf') === 'queue') b.hidden = (status === 'queue');
           if (b.classList.contains('mh-wf-approve')){
             b.classList.toggle('is-on', on);
             b.classList.toggle('secondary', !on);
@@ -18657,11 +18666,12 @@ def _hero_product_demo() -> str:
         '<p class="mh-demo-caption">A lifetime best for <mark>Tom Davies</mark>. '
         "<mark>52.41</mark> in the <mark>100m freestyle</mark>, a clean "
         "<mark>0.74s</mark> off his old mark.</p>"
-        # G-1/H-10: mirror the REAL review-row actions (Approve / Re-queue /
-        # Edit card) — the mock previously promised Edit/Reject buttons the
-        # per-card flow doesn't have.
+        # G-1/H-10/B-4: mirror the REAL review-row actions on a QUEUED card
+        # (Approve + Edit card; Re-queue only appears once a card is
+        # decided) — the mock previously promised buttons the per-card
+        # flow doesn't have.
         '<div class="mh-demo-acts"><span>&#9998; Edit card</span>'
-        '<span class="ghost">Re-queue</span><span class="go">Approve</span></div>'
+        '<span class="go">Approve</span></div>'
         "</div>"
         "</div>"
         "</div>"
@@ -25069,7 +25079,8 @@ def create_app() -> Flask:
       {_row_caption_html}
       {_row_translations_html}
       {why_html}
-      <!-- Approve / Reject triage. Captions, graphics, motion + scheduling
+      <!-- B-4: the slim triage row — Approve + Edit card (+ Re-queue /
+           Download once decided). Captions, graphics, motion + scheduling
            all happen later in the Content builder (approved cards only). -->
       <div class="wf-actions" style="margin-top:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
         {_render_wf_actions(run_id, card_id_raw, wf_status)}
@@ -25081,8 +25092,6 @@ def create_app() -> Flask:
                 title="Edit this card before approval — caption, palette, elements, crop">
           &#9998; Edit card
         </button>
-        <span style="flex:1;min-width:8px"></span>
-        {_render_reactions(run_id, card_id_raw, _react_counts)}
       </div>
       <details style="margin-top:10px">
         <summary style="cursor:pointer;font-size:12px;color:var(--ink-dim);user-select:none">How the ranking added up &amp; evidence</summary>
@@ -25092,6 +25101,12 @@ def create_app() -> Flask:
           <div style="margin:12px 0 4px"><strong>Evidence:</strong></div>
           <ul style="margin:0;padding-left:18px">{ev_html or '<li class="muted">No evidence items</li>'}</ul>
           <div style="margin-top:8px"><a href="{_trace_url}" target="_blank" rel="noopener" style="font-size:12px">View full trace JSON &rarr;</a></div>
+          <!-- B-4: the quick reactions live with the evidence, not in the
+               decision row — they annotate a card, they don't decide it. -->
+          <div style="margin-top:10px;display:flex;align-items:center;gap:10px">
+            <span class="muted" style="font-size:11px">Reactions</span>
+            {_render_reactions(run_id, card_id_raw, _react_counts)}
+          </div>
         </div>
       </details>
     </div>
@@ -25259,6 +25274,18 @@ details.why-card[open] > summary .why-peek {{ display: none; }}
     font-size: 14px !important;
   }}
 }}
+/* B-4 — slim rows: the per-row checkboxes are opt-in. The bulk bar always
+   shows its Select toggle; the select-all box, the count and the bulk
+   actions only appear once select mode is on (the toggle stamps
+   .mh-select-on onto #ach-list — revealing the row checkboxes — and onto
+   the bar itself). Every rule keys on html.mh-js so a no-JS page keeps
+   the always-visible checkboxes and bar. */
+html.mh-js #ach-list:not(.mh-select-on) .mh-row-check-wrap {{ display: none; }}
+html.mh-js #mh-rv-bulkbar.is-empty {{ display: flex; }}
+html.mh-js #mh-rv-bulkbar:not(.mh-select-on) .mh-bulkbar-all,
+html.mh-js #mh-rv-bulkbar:not(.mh-select-on) .mh-bulkbar-count,
+html.mh-js #mh-rv-bulkbar:not(.mh-select-on) .mh-bulkbar-actions {{ display: none; }}
+html:not(.mh-js) #mh-rv-select-toggle {{ display: none; }}
 </style>
 
 {_ai_banner_html}
@@ -25312,6 +25339,8 @@ details.why-card[open] > summary .why-peek {{ display: none; }}
     <div class="mh-bulkbar is-empty" id="mh-rv-bulkbar" role="group" aria-label="Bulk card actions"
          data-mh-bulkbar="review" data-form="mh-review-bulk" data-count="mh-rv-count"
          data-select-all="mh-rv-all" data-check="mh-row-check" data-row=".ach-row">
+      <button type="button" class="btn secondary" id="mh-rv-select-toggle" aria-pressed="false"
+              title="Pick several cards, then approve, reject, re-queue or download them together">Select</button>
       <label class="mh-bulkbar-all"><input type="checkbox" id="mh-rv-all" class="mh-check-all" aria-label="Select all shown cards"> Select all shown</label>
       <span class="mh-bulkbar-count" id="mh-rv-count">0 selected</span>
       <div class="mh-bulkbar-actions">
@@ -25838,6 +25867,36 @@ function copyWhyCard(btn, taId) {{
         .forEach(function(d){{ d.open = next; }});
       expandBtn.setAttribute('aria-pressed', next ? 'true' : 'false');
       expandBtn.textContent = next ? 'Collapse all reasoning' : 'Expand all reasoning';
+    }});
+  }}
+
+  // ----- B-4: select mode -----
+  // The per-row checkboxes are hidden until the volunteer asks for them; the
+  // Select toggle stamps .mh-select-on onto #ach-list (revealing the boxes)
+  // and onto the bulk bar (revealing select-all, the count and the actions).
+  // Leaving select mode clears the selection — nothing stays checked
+  // invisibly — via a bubbled change event so the shared bulk-bar JS
+  // refreshes its count, is-empty state and row highlights.
+  var selToggle = document.getElementById('mh-rv-select-toggle');
+  if (selToggle) {{
+    selToggle.addEventListener('click', function(){{
+      var list = document.getElementById('ach-list');
+      var bar = document.getElementById('mh-rv-bulkbar');
+      var on = selToggle.getAttribute('aria-pressed') !== 'true';
+      if (list) list.classList.toggle('mh-select-on', on);
+      if (bar) bar.classList.toggle('mh-select-on', on);
+      selToggle.setAttribute('aria-pressed', on ? 'true' : 'false');
+      selToggle.textContent = on ? 'Done' : 'Select';
+      if (!on) {{
+        var all = document.getElementById('mh-rv-all');
+        if (all) {{ all.checked = false; all.indeterminate = false; }}
+        var lastChecked = null;
+        Array.prototype.forEach.call(
+          document.querySelectorAll('#mh-review-bulk .mh-row-check'),
+          function(c){{ if (c.checked) {{ c.checked = false; lastChecked = c; }} }}
+        );
+        if (lastChecked) lastChecked.dispatchEvent(new Event('change', {{bubbles: true}}));
+      }}
     }});
   }}
 }})();
@@ -50226,7 +50285,13 @@ function tiRegenerate(btn) {{
 
     @app.route("/pack/<run_id>/grouped")
     def content_pack_grouped(run_id):
-        """Grouped content pack page &mdash; 8 buckets."""
+        """Read-only "explore all recommendations" view &mdash; 8 buckets.
+
+        B-3: single-purpose pages. Triage (approve / re-queue) lives on
+        /review, creation + export on the content builder (/pack); this
+        page keeps no approval strap or export row of its own &mdash; each
+        card deep-links to its spot in the builder instead.
+        """
         state = _run_state(run_id)
         if state == "in_progress":
             return _layout(
@@ -50253,37 +50318,10 @@ function tiRegenerate(btn) {{
         )
         _review_url = url_for("review", run_id=run_id)
         _pack_url = url_for("content_pack", run_id=run_id)
-        _newsletter_html_url = url_for("api_run_newsletter", run_id=run_id)
-        _newsletter_text_url = _newsletter_html_url + "?format=text"
-        _newsletter_zip_url = _newsletter_html_url + "?format=zip"
-        # J-9 — same clarifying line as the Content builder's newsletter block:
-        # this card is the one-off meet email; recurring digests live in the
-        # Newsletters composer.
-        _nl_composer_hint = (
-            (
-                '<div style="font-size:12px;color:var(--ink-dim);margin-top:4px">'
-                "Building a recurring email? Use "
-                f'<a href="{_h(url_for("newsletters_home"))}">Newsletters</a>.</div>'
-            )
-            if _email_design_ok
-            else ""
-        )
 
         if not _v73_ok or _build_grouped_pack is None:
             return redirect(_pack_url)
 
-        # Round-8: load the per-card workflow sidecar so the new
-        # Approve / Reject / Re-queue strap below each card can stamp
-        # the current state (queue|approved|rejected|posted|edited).
-        # Falls back to an empty dict so the loop below stays
-        # crash-safe when the workflow store can't be reached.
-        _wf_states: dict = {}
-        try:
-            _ws = _get_wf_store()
-            if _ws is not None:
-                _wf_states = _ws.load(run_id) or {}
-        except Exception:
-            _wf_states = {}
         # UI 1.25 — per-card reaction tallies for this run, in one query.
         _react_counts = _reaction_counts_for_run(run_id)
 
@@ -50294,8 +50332,6 @@ function tiRegenerate(btn) {{
             import traceback
 
             traceback.print_exc()
-
-        counts = grouped.get("_counts", {})
 
         def _section_html(title, items, icon="", empty_msg="None in this category."):
             n = len(items) if isinstance(items, list) else (1 if items else 0)
@@ -50327,15 +50363,21 @@ function tiRegenerate(btn) {{
                 band = _h(item.get("quality_band") or "")
                 prio = item.get("priority", 0)
                 n_ach = item.get("n_achievements", 0)
-                # Pull the per-card workflow status so the approve/reject row
-                # below can render the current state strap. Sidecar workflow
-                # state lives in _wf_states (loaded once at the top of the
-                # route), falling back to whatever the item itself carries.
-                _card_wf = _wf_states.get(card_id_raw) if isinstance(_wf_states, dict) else None
-                if _card_wf is not None and hasattr(_card_wf, "status"):
-                    wf_status = _card_wf.status.value
-                else:
-                    wf_status = str((item.get("workflow") or {}).get("status") or "queue").lower()
+                # B-3 — this page is a read-only explorer: approval lives on
+                # /review and creation on the content builder, so instead of
+                # its own approve strap each card deep-links to its builder
+                # spot (the builder's per-card anchor is `pc-<card id>`).
+                builder_link = ""
+                if card_id_raw:
+                    from urllib.parse import quote as _quote  # noqa: PLC0415
+
+                    builder_link = (
+                        f'<a class="btn secondary" style="font-size:12px;padding:4px 10px" '
+                        f'href="{_h(_pack_url)}#pc-{_h(_quote(str(card_id_raw), safe=""))}" '
+                        f'title="Open this card in the content builder — approved cards are '
+                        f'captioned, rendered and downloaded there.">'
+                        f"Open in content builder &rarr;</a>"
+                    )
                 schedule_btn = _schedule_button_html(run_id, card_id_raw, f"g-{card_uuid}")
                 # Per-card motion render — D-12: the same background job +
                 # poll + progress UI the Content builder uses (the shared
@@ -50426,7 +50468,7 @@ function tiRegenerate(btn) {{
   </div>
   {why_html}
   <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-    {_render_wf_actions(run_id, str(card_id_raw), wf_status) if card_id_raw else ""}
+    {builder_link}
     {_render_reactions(run_id, str(card_id_raw), _react_counts) if card_id_raw else ""}
     <span style="flex:1"></span>
     <button class="btn secondary" style="font-size:12px;padding:4px 10px" onclick="copyText(this,'cap-{card_id}-1')">Copy caption</button>
@@ -50546,6 +50588,9 @@ function tiRegenerate(btn) {{
 <section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">
   <span class="mh-hero-eyebrow">All recommendations</span>
   <h1><span class="mh-shiny-text">{meet_name}</span></h1>
+  <p class="lede" style="max-width:60ch">Every ranked recommendation for this meet, in one read-only view.
+  Approve cards on the <a href="{_review_url}">review page</a>; captions, graphics, video and downloads
+  live in the <a href="{_pack_url}">content builder</a>.</p>
   <div class="strap" style="margin-top:var(--sp-3)">
     <a href="{_review_url}" style="color:var(--ink-muted);text-decoration:none">← Back to review</a><span class="sep">/</span>
     <a href="{_pack_url}" style="color:var(--ink-muted);text-decoration:none">Content builder &rarr;</a>
@@ -50559,20 +50604,6 @@ function tiRegenerate(btn) {{
   </div>
   <a class="btn" style="font-size:12px;padding:6px 14px;background:var(--medal);color:var(--medal-ink);border:none"
      href="{_pack_url}#mh-reel-composer">&#x25B6; Open the reel composer</a>
-</div>
-
-<div class="card" style="margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
-  <div>
-    <div style="font-size:13px;font-weight:700">Parent newsletter</div>
-    <div style="font-size:12px;color:var(--ink-dim);margin-top:2px">Branded HTML email + plaintext fallback, ready to paste into Mailchimp / ConvertKit / your email client.</div>
-    {_nl_composer_hint}
-  </div>
-  <div style="display:flex;gap:6px;flex-wrap:wrap">
-    <a class="btn secondary" style="font-size:12px;padding:6px 12px" href="{_h(_newsletter_html_url)}" target="_blank" rel="noopener">Preview HTML &rarr;</a>
-    <a class="btn secondary" style="font-size:12px;padding:6px 12px" href="{_h(_newsletter_html_url)}?download=1">Download .html</a>
-    <a class="btn secondary" style="font-size:12px;padding:6px 12px" href="{_h(_newsletter_text_url)}&download=1">Download .txt</a>
-    <a class="btn" style="font-size:12px;padding:6px 12px" href="{_h(_newsletter_zip_url)}">Download .zip</a>
-  </div>
 </div>
 
 {visuals_strip}

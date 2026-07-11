@@ -98,8 +98,9 @@ class TestChooserSource:
         )
 
     def test_run_page_newsletter_block_links_the_composer(self):
-        # Both pack surfaces (Content builder + grouped) carry the hint.
-        assert _SRC.count("Building a recurring email? Use ") == 2
+        # B-3 removed the grouped page's duplicated newsletter card, so the
+        # hint lives on the one surviving newsletter block (Content builder).
+        assert _SRC.count("Building a recurring email? Use ") == 1
         first = _SRC.index("Building a recurring email? Use ")
         frag = _SRC[first : first + 220]
         assert 'url_for("newsletters_home")' in frag
@@ -239,11 +240,13 @@ class TestContentBuilderChooser:
         assert "Building a recurring email? Use " in html
         assert 'href="/newsletters"' in html
 
-    def test_grouped_page_carries_the_composer_hint_too(self, world):
-        if not world["wm"]._email_design_ok:
-            pytest.skip("email_design not available")
+    def test_grouped_page_has_no_newsletter_card(self, world):
+        # B-3: the grouped page is a read-only explore view — its duplicated
+        # newsletter card (and therefore the composer hint) is gone.
         run_id = _seed_approved_run(world)
         resp = world["client"].get(f"/pack/{run_id}/grouped")
         # Redirects to the classic pack when v7.3 isn't loaded in the sandbox.
         if resp.status_code == 200:
-            assert "Building a recurring email? Use " in resp.get_data(as_text=True)
+            body = resp.get_data(as_text=True)
+            assert "Parent newsletter" not in body
+            assert "Building a recurring email? Use " not in body
