@@ -19123,9 +19123,10 @@ def _home_io_headline_html() -> str:
         + _inline_thumb("reel.svg", "reel", "Match-day highlights, 15-second cut")
         + "."
         "</h2>"
-        '<p class="mh-pipeline-sub">One upload, four posting-ready formats. '
-        "Every name, time and place comes straight from the file you "
-        "uploaded. Nothing is invented, and nothing posts without you.</p>"
+        '<p class="mh-pipeline-sub">One upload &mdash; HY3, PDF, CSV or Excel '
+        "&mdash; four posting-ready formats out. Every name, time and place "
+        "comes straight from the file you uploaded. Nothing is invented, "
+        "and nothing posts without you.</p>"
         "</section>"
     )
 
