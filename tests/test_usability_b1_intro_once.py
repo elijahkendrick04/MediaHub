@@ -196,3 +196,38 @@ def test_meet_recap_registry_copy_mirrors_the_upload_allowlist():
         ".xlsx",
     ):
         assert token in meta.input_contract, f"input_contract must mention {token}"
+
+
+# --------------------------------------------------------------------------- #
+# CON2-1 (B-1 follow-up) — the seen-sidecar write is atomic
+# --------------------------------------------------------------------------- #
+def test_intro_mark_seen_writes_the_sidecar_atomically():
+    """Unique-tmp + os.replace (the _variant_job_save idiom): two concurrent
+    marks must never interleave into a torn sidecar that drops every
+    previously-seen slug. The reader already fails soft — this pins the
+    writer."""
+    import pathlib
+
+    src = pathlib.Path("src/mediahub/web/web.py").read_text(encoding="utf-8")
+    body = src.split("def _intro_mark_seen(", 1)[1].split("\n    @app.route", 1)[0]
+    assert 'tmp = p.with_suffix(f".{uuid.uuid4().hex[:8]}.tmp")' in body
+    assert "os.replace(tmp, p)" in body
+    # Best-effort tmp cleanup on failure, and no straight write_text on the
+    # real path remains.
+    assert "tmp.unlink(missing_ok=True)" in body
+    assert not re.search(r"(?<![\w.])p\.write_text\(", body)
+
+
+def test_intro_mark_seen_still_persists_and_dedupes(env):
+    """Behavioural: the atomic rewrite still lands the slug once."""
+    app, tmp_path = env
+    c = _client(app)
+    for _ in range(2):
+        assert c.get("/make/meet_recap").status_code == 200
+    seen_dir = tmp_path / "intro_seen"
+    files = list(seen_dir.glob("*.json"))
+    assert len(files) == 1
+    data = json.loads(files[0].read_text(encoding="utf-8"))
+    assert data.count("meet_recap") == 1
+    # No orphaned tmp files left behind by the atomic write.
+    assert not list(seen_dir.glob("*.tmp"))

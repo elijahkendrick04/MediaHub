@@ -4495,14 +4495,17 @@ function generateMotionBatch(btn, motionUrl, cardId) {
   startNew();
 }
 
-// B-5 / D-13 — poll one all-formats motion job to a terminal state (600s
-// budget), narrating per-cut progress from the job's total/done/current.
+// B-5 / D-13 — poll one all-formats motion job to a terminal state,
+// narrating per-cut progress from the job's total/done/current.
+// JS2-4: the batch budget is 400 tries (~1200s), double the single-cut
+// watchers' 200 — four cuts each queue for a slot AND render, so the
+// worst case can honestly exceed the single-cut 600s budget.
 function _mhMotionBatchWatch(motionUrl, cardId, pollUrl, ctx) {
   ctx.panel.dataset.mhWatching = pollUrl;
   var tries = 0;
   var poll = function() {
     tries++;
-    if (tries > 200) {
+    if (tries > 400) {
       mhJobForget('motion-batch', motionUrl);
       _mhJobFail(ctx, 'timed out waiting for the render — try again');
       return;
@@ -35715,7 +35718,18 @@ function mhAnDigest(btn) {{
             seen.add(slug)
             p = _intro_seen_path(pid)
             p.parent.mkdir(parents=True, exist_ok=True)
-            p.write_text(json.dumps(sorted(seen)), encoding="utf-8")
+            # CON2-1 — unique-tmp + os.replace (the _variant_job_save idiom):
+            # two concurrent marks must never interleave into a torn sidecar.
+            # The reader already fails soft on a corrupt file, but a torn
+            # write would silently drop every previously-seen slug.
+            tmp = p.with_suffix(f".{uuid.uuid4().hex[:8]}.tmp")
+            try:
+                tmp.write_text(json.dumps(sorted(seen)), encoding="utf-8")
+                os.replace(tmp, p)
+            except OSError:
+                with contextlib.suppress(OSError):
+                    tmp.unlink(missing_ok=True)
+                raise
         except OSError:
             # A failed sidecar write must never break the intro page.
             log.debug("intro_seen: could not persist %r for %r", slug, pid)
@@ -57775,6 +57789,7 @@ voice, and queues them for one-click approval.</p>
         def _worker() -> None:
             rendered: dict[str, str] = {}
             failed: dict[str, str] = {}
+            busy_cuts: set[str] = set()
             try:
                 with _job_heartbeat(job):
                     for fmt in _motion.MOTION_FORMATS:
@@ -57804,6 +57819,7 @@ voice, and queues them for one-click approval.</p>
                                 raise RuntimeError("mp4 missing after render")
                             rendered[fmt] = file_urls[fmt]
                         except _RenderBusy:
+                            busy_cuts.add(fmt)
                             failed[fmt] = (
                                 "Another video is rendering right now — " "try again in a minute."
                             )
@@ -57822,6 +57838,11 @@ voice, and queues them for one-click approval.</p>
                         _variant_job_save(job)
                 job["current"] = ""
                 if not rendered:
+                    # CON2-3 — every cut hit a busy renderer: surface the
+                    # machine token the JS reattach branch keys on (reel-batch
+                    # parity), not the human copy as job["error"].
+                    if failed and set(failed) == busy_cuts:
+                        raise _RenderBusy()
                     # Not one cut produced — surface an honest reason rather
                     # than reporting a successful job with no video.
                     reason = next(iter(failed.values()), "no motion formats could be rendered")
@@ -57840,6 +57861,14 @@ voice, and queues them for one-click approval.</p>
                     )
                 except Exception:
                     pass
+            except _RenderBusy:
+                # CON2-3 — the token in error (for the JS reattach branch),
+                # the human copy in user_message: reel-batch parity.
+                job["status"] = "error"
+                job["error"] = "renderer_busy"
+                job["user_message"] = (
+                    "Another video is rendering right now — try again in a minute."
+                )
             except Exception as e:
                 _payload = _motion_error_payload(e)
                 job["status"] = "error"

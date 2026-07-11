@@ -206,6 +206,59 @@ class TestMotionBatchJob:
         assert j["status"] == "error"
         assert j["error"]
 
+    def test_all_cuts_busy_surfaces_the_renderer_busy_token(self, app_env, monkeypatch):
+        """CON2-3 (B-5 follow-up) — when zero cuts rendered and every per-cut
+        failure was a busy renderer, job["error"] must be the machine token
+        the JS reattach branch keys on, with the human copy in user_message
+        (reel-batch parity)."""
+        app, wm, _ = app_env
+        import mediahub.visual.motion as motion
+
+        @contextlib.contextmanager
+        def _busy_slot(kind, label="", *, timeout):
+            raise wm._RenderBusy()
+            yield  # pragma: no cover
+
+        monkeypatch.setattr(wm, "_render_slot", _busy_slot)
+        with app.test_client() as c:
+            c.post("/api/organisation/active", data={"profile_id": "alpha"})
+            with mock.patch.object(motion, "render_story_card", _fake_render_ok):
+                resp = c.post("/api/runs/r1/card/swim-1/motion-batch-job")
+                assert resp.status_code == 202
+                j = _poll_until_settled(c, resp.get_json()["poll_url"])
+        assert j["status"] == "error"
+        assert j["error"] == "renderer_busy"
+        assert "try again in a minute" in j["user_message"]
+        # The per-cut notes stay honest too.
+        assert sorted(j["formats_failed"]) == sorted(ALL_FORMATS)
+
+    def test_mixed_busy_and_real_failures_keep_the_real_reason(self, app_env, monkeypatch):
+        """Only ALL-busy earns the reattach token — a batch that also broke
+        for a real reason must not invite the client to reattach."""
+        app, wm, _ = app_env
+        import mediahub.visual.motion as motion
+
+        real_slot = wm._render_slot
+
+        @contextlib.contextmanager
+        def _slot(kind, label="", *, timeout):
+            if label.endswith((":story", ":portrait")):
+                raise wm._RenderBusy()
+            with real_slot(kind, label, timeout=timeout):
+                yield
+
+        monkeypatch.setattr(wm, "_render_slot", _slot)
+        with app.test_client() as c:
+            c.post("/api/organisation/active", data={"profile_id": "alpha"})
+            with mock.patch.object(
+                motion, "render_story_card", side_effect=RuntimeError("boom")
+            ):
+                resp = c.post("/api/runs/r1/card/swim-1/motion-batch-job")
+                j = _poll_until_settled(c, resp.get_json()["poll_url"])
+        assert j["status"] == "error"
+        assert j["error"] != "renderer_busy"
+        assert "boom" in (j["formats_failed"].get("square") or "")
+
     def test_foreign_org_cannot_start_or_poll(self, app_env):
         app, wm, _ = app_env
         import mediahub.visual.motion as motion
@@ -286,6 +339,17 @@ def test_batch_watch_narrates_per_cut_progress_and_clears_records():
     # The renderer-busy recall idiom (CON-6) rides along.
     assert "j.error === 'renderer_busy'" in body
     assert "rec.poll_url !== pollUrl" in body
+
+
+def test_batch_watch_budget_covers_four_queued_cuts():
+    """JS2-4 — four cuts x (queue wait + render) can honestly exceed the
+    single-cut 600s budget, so the batch watcher polls up to 400 tries
+    (~1200s) while single-cut watchers keep 200."""
+    batch = _fn("_mhMotionBatchWatch")
+    assert "tries > 400" in batch
+    assert "tries > 200" not in batch
+    single = _fn("_mhMotionWatch")
+    assert "tries > 200" in single
 
 
 def test_resume_on_load_covers_the_batch_kind():
