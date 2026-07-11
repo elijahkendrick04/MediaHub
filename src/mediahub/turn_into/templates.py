@@ -434,6 +434,16 @@ def _gen_longform(
         "placing or a quote. Output only the finished copy — no headings, "
         "no markdown, no preamble.",
     ]
+    # Same cliché guardrail the caption path applies — the long-form artefacts
+    # (club report, newsletter) build their own prompt and never went through
+    # _compose_caption_prompt, so name the banned AI tells explicitly here too.
+    # One shared source of truth in ai_core.prompt_guard.
+    try:
+        from mediahub.ai_core.prompt_guard import CAPTION_AI_TELL_INSTRUCTION
+
+        system_parts.append(CAPTION_AI_TELL_INSTRUCTION)
+    except Exception:
+        pass
     if profile is not None:
         try:
             from mediahub.brand.context import brand_context_for_llm

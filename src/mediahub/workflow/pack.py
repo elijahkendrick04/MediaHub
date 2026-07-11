@@ -141,29 +141,39 @@ def build_content_pack(
             # into pack building. The embed call itself is HTTP-blocking, so
             # captures are queued here and run on a daemon thread after the
             # pack is assembled — never on the render path.
-            try:
-                from mediahub.memory import learning as _mem
+            _bc = card.get("brand_captions") or {}
+            _active = _bc.get(tone) if isinstance(_bc, dict) else None
+            _cap = ""
+            if isinstance(_active, dict):
+                _cap = " ".join(
+                    str(v).strip() for v in _active.values() if isinstance(v, str) and v.strip()
+                )
 
-                _bc = card.get("brand_captions") or {}
-                _active = _bc.get(tone) if isinstance(_bc, dict) else None
-                if isinstance(_active, dict):
-                    _cap = " ".join(
-                        str(v).strip() for v in _active.values() if isinstance(v, str) and v.strip()
-                    )
-                    if _cap:
-                        if _mem.is_enabled():
-                            capture_jobs.append((profile_id, ach, _cap, card_id, run_id))
-                        # PAR-1 approval loop: the plain few-shot voice store
-                        # works for EVERY club (no embedding backend, no corpus
-                        # floor) — the approved caption becomes a voice example
-                        # injected into future generation. Idempotent per
-                        # caption, a cheap local write, best-effort.
-                        if profile_id:
-                            from mediahub.web.ai_caption import record_approved_caption
+            # PAR-1 approval loop: the plain few-shot voice store works for
+            # EVERY club (no embedding backend, no corpus floor) — the approved
+            # caption becomes a voice example injected into future generation.
+            # Decoupled from the semantic-memory block below so a memory import
+            # failure can never silently skip this cheap, universal local write.
+            # Idempotent per caption, best-effort.
+            if _cap and profile_id:
+                try:
+                    from mediahub.web.ai_caption import record_approved_caption
 
-                            record_approved_caption(str(profile_id), _cap)
-            except Exception:
-                pass
+                    record_approved_caption(str(profile_id), _cap)
+                except Exception:
+                    pass
+
+            # Cap 2b semantic recall: queue the embed capture only when an
+            # embedding backend is configured. Off-by-default, best-effort, and
+            # independent of the PAR-1 write above.
+            if _cap:
+                try:
+                    from mediahub.memory import learning as _mem
+
+                    if _mem.is_enabled():
+                        capture_jobs.append((profile_id, ach, _cap, card_id, run_id))
+                except Exception:
+                    pass
 
             approved.append((ra.get("priority", 0.0), card))
 
