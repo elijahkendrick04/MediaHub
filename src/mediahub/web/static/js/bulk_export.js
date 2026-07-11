@@ -98,13 +98,44 @@
         .then(function (j) {
           shareBtn.disabled = false;
           if (!j.ok) { setStatus("Could not create a share link."); return; }
+          // E-5: the link used to render as a bare readonly input — no copy
+          // affordance and no sign that it expires (the API always said when).
+          var wrap = document.createElement("div");
+          wrap.style.cssText =
+            "display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px;max-width:640px";
           var inp = document.createElement("input");
           inp.type = "text";
           inp.readOnly = true;
           inp.value = window.location.origin + j.url;
-          inp.style.cssText = "display:block;margin-top:8px;width:100%;max-width:520px";
+          inp.style.cssText = "flex:1;min-width:220px";
           inp.onclick = function () { inp.select(); };
-          resultEl.appendChild(inp);
+          var cp = document.createElement("button");
+          cp.className = "btn secondary";
+          cp.textContent = "Copy";
+          cp.onclick = function () {
+            var done = function (ok) {
+              cp.textContent = ok ? "Copied!" : "Copy failed";
+              setTimeout(function () { cp.textContent = "Copy"; }, 1600);
+            };
+            var legacy = function () {
+              inp.focus(); inp.select();
+              try { done(document.execCommand("copy")); } catch (e) { done(false); }
+            };
+            if (navigator.clipboard && window.isSecureContext) {
+              navigator.clipboard.writeText(inp.value).then(function () { done(true); }).catch(legacy);
+            } else { legacy(); }
+          };
+          var exp = document.createElement("span");
+          exp.className = "muted";
+          exp.style.fontSize = "12px";
+          if (j.expires_at) {
+            exp.textContent = "expires " + new Date(j.expires_at * 1000).toLocaleDateString();
+          }
+          exp.title = "Revoke it any time from a card's Share panel on the Content builder.";
+          wrap.appendChild(inp);
+          wrap.appendChild(cp);
+          wrap.appendChild(exp);
+          resultEl.appendChild(wrap);
         })
         .catch(function () { shareBtn.disabled = false; setStatus("Share link failed."); });
     };

@@ -36,12 +36,30 @@ _EN: dict[str, str] = {
     "nav.sign_out": "Leave organisation",
     "nav.switch_org": "Switch organisation",
     "nav.notifications": "Notifications",
+    # G-10 — the rest of the chrome: top nav, mobile bottom nav, account menu.
+    "nav.media_library": "Media library",
+    "nav.media": "Media",  # short mobile bottom-nav label
+    "nav.activity": "Activity",
+    "nav.my_season": "My Season",
+    "nav.research": "Research",
+    "nav.help": "Help",
+    "nav.pricing": "Pricing",
+    "nav.billing": "Billing",
+    "nav.drafts": "Drafts",
+    "nav.club_data": "Club data",
+    "nav.slide_remote": "Slide remote",
+    "nav.log_in": "Log in",
+    "nav.log_out": "Log out",
+    "nav.sign_up": "Sign up",
+    "nav.save_workspace": "Save your workspace",
     "action.approve": "Approve",
+    "action.approved": "Approved",  # G-10 — the strap's post-approval state
     "action.reject": "Reject",
     "action.export": "Export",
     "action.download": "Download",
     "action.save": "Save",
     "action.cancel": "Cancel",
+    "action.requeue": "Re-queue",
 }
 
 # Verified Welsh (cy) — the flagship locale. Only terms confident enough to ship;
@@ -55,12 +73,30 @@ _CY: dict[str, str] = {
     "nav.sign_out": "Gadael sefydliad",
     "nav.switch_org": "Newid sefydliad",
     "nav.notifications": "Hysbysiadau",
+    # G-10 — standard UI Welsh (gov.wales / established software conventions).
+    "nav.media_library": "Llyfrgell cyfryngau",
+    "nav.media": "Cyfryngau",
+    "nav.activity": "Gweithgarwch",
+    "nav.my_season": "Fy Nhymor",
+    "nav.research": "Ymchwil",
+    "nav.help": "Cymorth",
+    "nav.pricing": "Prisiau",
+    "nav.billing": "Bilio",
+    "nav.drafts": "Drafftiau",
+    "nav.club_data": "Data'r clwb",
+    "nav.slide_remote": "Rheolydd sleidiau",
+    "nav.log_in": "Mewngofnodi",
+    "nav.log_out": "Allgofnodi",
+    "nav.sign_up": "Cofrestru",
+    "nav.save_workspace": "Cadw eich gweithle",
     "action.approve": "Cymeradwyo",
+    "action.approved": "Cymeradwywyd",
     "action.reject": "Gwrthod",
     "action.export": "Allforio",
     "action.download": "Lawrlwytho",
     "action.save": "Cadw",
     "action.cancel": "Canslo",
+    "action.requeue": "Yn ôl i'r ciw",
 }
 
 UI_STRINGS: dict[str, dict[str, str]] = {

@@ -11,6 +11,7 @@ import pytest
 from mediahub.video.edl import EDL, Clip, CompiledGraph, compile_filtergraph
 from mediahub.video.render import (
     VideoEngineUnavailable,
+    _render_duration_ms,
     build_ffmpeg_args,
     cache_key,
     render_edl,
@@ -57,6 +58,29 @@ def test_build_ffmpeg_args_clamps_duration():
     args = build_ffmpeg_args(g, fps=30, out_path="out.mp4", duration_ms=5000)
     assert "-t" in args
     assert "5.000" in args
+
+
+def test_render_duration_resolves_open_ended_mixed_clip():
+    # F-13: an open-ended clip (out_ms == 0) mixed with a resolved one used to be
+    # counted as 0 by total_timeline_ms(), so the -t cap truncated it. The
+    # duration must now resolve the open-ended clip's real length from its probe.
+    edl = EDL(
+        clips=[
+            Clip(source="a.mp4", in_ms=0, out_ms=5000),  # resolved 5s
+            Clip(source="b.mp4", in_ms=0, out_ms=0),  # open-ended → probe says 3s
+        ]
+    )
+    assert edl.total_timeline_ms() == 5000  # the under-count that caused the bug
+    probes = {"a.mp4": 5000, "b.mp4": 3000}
+    # Full timeline is 5s + 3s = 8s, not the truncated 5s.
+    assert _render_duration_ms(edl, probes) == 8000
+
+
+def test_render_duration_all_resolved_is_total_timeline():
+    # An all-resolved timeline keeps the identical total_timeline_ms() path
+    # (byte-identical renders — the fix only changes the open-ended case).
+    edl = EDL(clips=[Clip(source="a.mp4", in_ms=0, out_ms=4000)])
+    assert _render_duration_ms(edl, {"a.mp4": 9999}) == edl.total_timeline_ms() == 4000
 
 
 def test_cache_key_is_stable_and_sensitive(tmp_path, monkeypatch):

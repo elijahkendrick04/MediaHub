@@ -166,12 +166,15 @@ class TestUploadFlow:
 # --------------------------------------------------------------------------- #
 class TestPairing:
     def test_pair_without_provider_is_honest(self, app_env):
+        # H-16: the honest no-provider error is the standard plain wording —
+        # raw exception text goes to the server log only, never the page.
         app, _ = app_env
         with app.test_client() as c:
             _signin(c)
             resp = c.post("/settings/typography/pair", data={"mood": "bold"})
             body = resp.get_data(as_text=True)
-        assert resp.status_code == 200 and "AI pairing is unavailable" in body
+        assert resp.status_code == 200
+        assert "AI suggestions are unavailable on this deployment." in body
 
     def test_pair_renders_suggestion_when_provider_present(self, app_env, monkeypatch):
         app, _ = app_env

@@ -45,7 +45,7 @@ marked 🔒 throughout.
 
 - **Phase 1 — Product** · MediaHub's own first-party creative suite **and the
   local-AI foundation that powers it** — imagery, photo/video/audio editing,
-  charts, documents, templates, planner, collaboration, microsites… plus the
+  charts, documents, templates, planner, collaboration… plus the
   zero-cost local backends, each sequenced **in front of** the feature that needs
   it (the local image model before the imagery edit-family, local ASR before
   video captions, local TTS before the voice layer).
@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-07-10 · `1f49c3faa` · [developer-settings] record final merge status in audit report
+**Last updated:** 2026-07-11 · `f629fcc70` · Merge pull request #1083 from elijahkendrick04/autotest/fix-bfff9fa5d517
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -734,7 +734,7 @@ in-house local path the default), platform-publish APIs, print fulfilment, and
 music rights.
 
 **Exit criterion.** A club can run its **entire content life inside
-MediaHub** — social, print, email, microsite, video, documents — without
+MediaHub** — social, print, email, video, documents — without
 reaching for Canva/Express; measured per-item (each P6 item carries its own
 exit in the companion doc) and in aggregate by wedge clubs actually
 cancelling their Canva habit.
@@ -1066,7 +1066,6 @@ the old ids — use this map to bridge them.
 | **1.13** | P6.15 | Data hub + bulk personalisation |
 | **1.14** | P6.16 | Planner calendar/board |
 | **1.15** | P6.12 | Document engine |
-| **1.16** | P6.13 | Club microsites + forms + widgets |
 | **1.17** | P6.14 | Email & newsletter composer |
 | **1.18** | P6.17 | Collaboration & review |
 | **1.19** | P6.18 | Export & conversion engine |
@@ -1227,16 +1226,16 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
-| 2026-07-10 | `1f49c3faa` | [developer-settings] record final merge status in audit report |
-| 2026-07-10 | `1a1b232a8` | [developer-settings] report: baseline comparison confirms flakes are pre-existing |
-| 2026-07-10 | `f03993d28` | [developer-settings] report: record green-gate result + pre-existing flakes |
-| 2026-07-10 | `06a3fc2f1` | [developer-settings] audit report |
-| 2026-07-10 | `494f6ddf6` | [developer-settings] reach operator dashboards on a fresh deployment |
-| 2026-07-10 | `fe2605d66` | [meet-recap] record merge status in audit report |
-| 2026-07-10 | `ca6f02514` | [meet-recap] add end-to-end audit report |
-| 2026-07-10 | `56a04395c` | [meet-recap] lock audit fixes with tests |
-| 2026-07-10 | `b24525282` | [meet-recap] fix recap "by the numbers" swimmer undercount |
-| 2026-07-10 | `b9d8eb2e1` | [meet-recap] fix re-run link 404, review error leak, upload status, club_filter persistence |
-| 2026-07-10 | `3ef825947` | [spotlight] record final merge status in audit report |
-| 2026-07-10 | `651cf2bc3` | [spotlight] audit report for the athlete-spotlight (meet recap) feature |
+| 2026-07-11 | `050c89f86` | fix(athletes,org): transactional bulk consent; kind-checked discard; analyse_voice fall-through (B-7 |
+| 2026-07-11 | `b8439e35d` | fix(jobs,intro): batch busy-token parity, longer batch poll budget, atomic intro sidecar (B-5/B-1 fo |
+| 2026-07-11 | `eb6560bf5` | fix(plan): calendar revert uses the true previous date; analytics delete honest on error bodies (D-2 |
+| 2026-07-11 | `f80edf89e` | fix(pack): export gates come alive after an in-page render (B-2 follow-up) |
+| 2026-07-11 | `45557dadb` | docs(audit): AUDIT COMPLETE — 159/159 live findings shipped |
+| 2026-07-11 | `4a19b75ef` | test(j9): the chooser's sibling pin accepts B-2's details disclosure |
+| 2026-07-11 | `8784584a6` | feat(motion): render all four motion cuts of a card as one background batch job (B-5) |
+| 2026-07-11 | `9a1e4c08b` | feat(review): slim the default review row to Approve + Edit card (B-4) |
+| 2026-07-11 | `5b47b9bba` | feat(organisation): analysis persists immediately, with a one-shot Discard undo (D-15) |
+| 2026-07-11 | `badac3b01` | feat(athletes): consolidate the two consent stores under /athletes (G-9) |
+| 2026-07-11 | `448863a51` | feat(plan): planner mutations update the DOM in place — no page reloads (D-26) |
+| 2026-07-11 | `67c0f0901` | feat(pack): collapse twelve export affordances to one per-card primary + one pack disclosure (B-2) |
 <!-- /ROADMAP:ACTIVITY -->

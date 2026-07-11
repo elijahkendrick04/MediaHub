@@ -100,9 +100,11 @@ class TestCopilotEscaperIsGlobal:
     def test_motion_and_reel_error_paths_escape_server_detail(self, caption_js):
         # generateMotion / generateReel / generateReelBatch fall back to a raw
         # str(e) `detail` (meet names, node stderr) — escape before innerHTML.
-        assert "Reel render error: ' + window.safeText(msg)" in caption_js
-        # The motion error path escapes its msg too.
-        assert "font-size:13px\">' + window.safeText(msg) + '</div>';" in caption_js
+        # D-13 moved the failure surface into the shared _mhJobFail helper;
+        # the escape must still be unconditional there, and the reel paths
+        # must still carry their "Reel render error: " prefix into it.
+        assert "(ctx.prefix || '') + window.safeText(msg)" in caption_js
+        assert "prefix: 'Reel render error: '" in caption_js
 
     def test_visual_panel_escapes_why_layout_and_errors(self, caption_js):
         # _renderVisualPanel: why_this_design is LLM output; layout + errors are

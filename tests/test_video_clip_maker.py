@@ -6,8 +6,11 @@ fakes so it never touches FFmpeg/ASR.
 
 from __future__ import annotations
 
+import pytest
+
 from mediahub.video.clip_maker import (
     BrandColours,
+    UndecodableClip,
     build_clip_edl,
     canvas_for,
     clip_maker,
@@ -151,6 +154,30 @@ def test_clip_maker_skips_captions_for_multimoment():
     assert res.manifest["captions"] == "skipped-multimoment"
     assert res.edl.captions is None
     assert len(res.edl.clips) == 3
+
+
+def test_clip_maker_rejects_undecodable_clip():
+    # F-15: FFmpeg present but the clip probes to nothing (no video, no audio,
+    # zero duration) — a corrupt / non-video upload. Clip-Maker must refuse it
+    # with a clear error rather than build a 0-duration timeline that 500s at
+    # render.
+    undecodable = ClipProbe()  # all defaults: duration 0, no streams
+    with pytest.raises(UndecodableClip):
+        clip_maker("junk.mp4", probe_fn=lambda s: undecodable)
+
+
+def test_clip_maker_accepts_audio_only_clip():
+    # A silent-video guard must not reject a legitimate audio-only clip (it has a
+    # real duration and an audio stream — only pure junk probes to nothing).
+    audio_only = ClipProbe(duration_ms=8000, has_audio=True, audio_codec="aac")
+    res = clip_maker(
+        "voice.mp4",
+        probe_fn=lambda s: audio_only,
+        detect_fn=lambda *a, **k: [_moment(0, 4000)],
+        reframe_fn=lambda *a, **k: None,
+        caption_fn=lambda *a, **k: None,
+    )
+    assert res.edl.clips  # built a timeline, not rejected
 
 
 def test_clip_maker_manifest_is_explainable():

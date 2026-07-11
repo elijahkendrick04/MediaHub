@@ -232,8 +232,9 @@ def test_draft_view_footer_replaces_default_anchor(app_org, monkeypatch, caplog)
         loc = r.headers["Location"]
         with caplog.at_level(logging.WARNING, logger="mediahub.web.web"):
             view = c.get(loc).get_data(as_text=True)
-    # Footer injected, default lone anchor row replaced.
-    assert "Generate new draft" in view
+    # Footer injected, default lone anchor row replaced. (E-11 renamed the
+    # blank-form link from "Generate new draft" to the unambiguous label.)
+    assert "Start a new draft from the form" in view
     assert "All drafts" in view
     assert "← Start over" not in view
     assert "markup drifted" not in caplog.text

@@ -242,11 +242,20 @@ def cue_count(track: Optional[dict]) -> int:
 
 
 def edit_cue_text(track: dict, index: int, text: str) -> dict:
-    """Replace cue ``index``'s text (the verbatim transcript can be corrected)."""
+    """Replace cue ``index``'s text (the verbatim transcript can be corrected).
+
+    On an animated (karaoke) cue the burned words come from the per-word ``words``
+    stamps, not the line ``text`` — so a text edit that left those stamps in place
+    would silently show the *old* words on screen. The edited cue drops its stale
+    ``words``; ``caption_render`` renders a word-less cue as a still line of the new
+    text, so the correction actually appears. A static cue has no ``words`` and is
+    unchanged.
+    """
     out = copy.deepcopy(track)
     cues = out.get("cues") or []
     if 0 <= index < len(cues):
-        cues[index] = {**cues[index], "text": str(text)}
+        cues[index] = {k: v for k, v in cues[index].items() if k != "words"}
+        cues[index]["text"] = str(text)
     return out
 
 
@@ -342,6 +351,113 @@ def merge_tracks(tracks: list[Optional[dict]]) -> Optional[dict]:
     return {**base, "cues": cues}
 
 
+def _frame(ms: int, fps: int) -> int:
+    return int(round(int(ms) / 1000 * max(1, int(fps))))
+
+
+def retime_track_for_edit(
+    track: Optional[dict],
+    old_clips: list[dict],
+    new_clips: list[dict],
+    *,
+    fps: int,
+) -> Optional[dict]:
+    """Re-time a burned caption track after the timeline's clips were
+    reordered / trimmed / deleted in the editor.
+
+    ``old_clips`` / ``new_clips`` are ordered, one dict per clip, each
+    ``{"source", "offset_ms", "in_ms", "out_ms"}`` where ``offset_ms`` is the
+    clip's dominant start on the assembled timeline
+    (:meth:`~mediahub.video.edl.EDL.clip_start_offsets_ms`). A captioned clip
+    always runs at ~1× (slow-mo skips captions), so a timeline frame maps 1:1 to
+    a source frame and a head-trim shift is exact.
+
+    Each cue (and its karaoke ``words``) is bucketed into the old clip whose
+    window holds it, matched to the new clip carrying the same source (the k-th
+    occurrence of a source maps to the k-th occurrence), and re-placed at the new
+    offset — shifted by any head-trim and clamped to the new window. A cue whose
+    clip was deleted, or whose word was trimmed away, is dropped rather than left
+    to drift onto the wrong moment. Pure; returns a new track, or ``None`` when
+    nothing survives. Callers should only invoke this when the clip structure
+    actually changed — an identity mapping re-emits the track unchanged.
+    """
+    cues = _cues(track)
+    if not cues or not old_clips:
+        return track
+    fps = max(1, int(fps))
+    # An open-ended window (out ≤ in) can't be placed in frames without a probe;
+    # leave the track untouched rather than guess (no worse than before).
+    if any(int(c.get("out_ms", 0)) <= int(c.get("in_ms", 0)) for c in old_clips + new_clips):
+        return track
+
+    old_starts = [_frame(c["offset_ms"], fps) for c in old_clips]
+
+    # Map each old clip to the new clip carrying the same source, matching k-th
+    # occurrence to k-th occurrence so a repeated source stays in order.
+    new_by_source: dict[str, list[int]] = {}
+    for j, c in enumerate(new_clips):
+        new_by_source.setdefault(str(c["source"]), []).append(j)
+    seen: dict[str, int] = {}
+    old_to_new: dict[int, Optional[int]] = {}
+    for i, c in enumerate(old_clips):
+        src = str(c["source"])
+        k = seen.get(src, 0)
+        seen[src] = k + 1
+        lst = new_by_source.get(src, [])
+        old_to_new[i] = lst[k] if k < len(lst) else None
+
+    def _owning_old_clip(frame: int) -> int:
+        # The last clip that starts at/before this frame owns it (an xfade lets a
+        # cue sit in the incoming clip's lead-in; nearest start is the right home).
+        idx = 0
+        for i, s in enumerate(old_starts):
+            if s <= frame:
+                idx = i
+            else:
+                break
+        return idx
+
+    out_cues: list[dict] = []
+    for cue in cues:
+        oi = _owning_old_clip(int(cue.get("from", 0)))
+        nj = old_to_new.get(oi)
+        if nj is None:
+            continue  # the owning clip was deleted
+        old_c, new_c = old_clips[oi], new_clips[nj]
+        head_shift = _frame(int(new_c["in_ms"]) - int(old_c["in_ms"]), fps)
+        new_start = _frame(new_c["offset_ms"], fps)
+        new_len = max(1, _frame(int(new_c["out_ms"]) - int(new_c["in_ms"]), fps))
+
+        def _place(frame: int) -> Optional[int]:
+            local = frame - old_starts[oi] - head_shift
+            if local < 0 or local >= new_len:
+                return None
+            return new_start + local
+
+        nf = _place(int(cue.get("from", 0)))
+        if nf is None:
+            continue  # trimmed off this clip's head or tail
+        local = nf - new_start
+        new_cue = {**cue, "from": nf, "dur": max(1, min(int(cue.get("dur", 1)), new_len - local))}
+        if cue.get("words"):
+            words: list[dict] = []
+            for w in cue["words"]:
+                wf = _place(int(w.get("from", 0)))
+                if wf is None:
+                    continue
+                wl = wf - new_start
+                words.append(
+                    {**w, "from": wf, "dur": max(1, min(int(w.get("dur", 1)), new_len - wl))}
+                )
+            new_cue["words"] = words
+        out_cues.append(new_cue)
+
+    if not out_cues:
+        return None
+    out_cues.sort(key=lambda c: int(c.get("from", 0)))
+    return {**{k: v for k, v in track.items() if k != "cues"}, "cues": out_cues}
+
+
 def clamp_to_frames(track: dict, total_frames: int) -> dict:
     """Drop/clip cues that fall outside ``[0, total_frames)`` (timeline trim).
 
@@ -374,5 +490,6 @@ __all__ = [
     "offset_track",
     "merge_tracks",
     "restyle",
+    "retime_track_for_edit",
     "clamp_to_frames",
 ]

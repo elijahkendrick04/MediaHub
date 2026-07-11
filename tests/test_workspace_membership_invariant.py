@@ -57,10 +57,6 @@ _ARG_FILL = {
     # refused by _can_access_run before any chart (which embeds athlete names)
     # is ever rendered, so sweeping it with a junk id pins that guarantee.
     "chart_id": "no-such-chart",
-    # 1.16: the microsite draft-preview card route carries a site id. A junk id
-    # is right — a foreign account is refused (the site load returns nothing, and
-    # the run is _can_access_run-guarded) before any card image is served.
-    "site_id": "no-such-site",
     # 1.17: the newsletter editor-preview card route carries a newsletter id. A
     # junk id is right — a foreign account is refused (the newsletter isn't
     # theirs and the run is _can_access_run-guarded) before any image is served.
@@ -315,8 +311,15 @@ class TestMembershipReadCaching:
 
         monkeypatch.setattr(MembershipStore, "_read_all", counting, raising=True)
 
+        # A single-org member is auto-routed past the picker (A1), so give
+        # the owner a second seat — the picker only renders for multi-org
+        # members now, and that render is what this read-count pins.
+        from mediahub.web.tenancy import ROLE_MEMBER
+
+        shared_instance["memberships"].add(OWNER_EMAIL, "org-gamma", role=ROLE_MEMBER)
+
         with shared_instance["app"].test_client() as c:
-            _login(c, OWNER_EMAIL)  # a member of one bound org, sees several
+            _login(c, OWNER_EMAIL)  # a member of two bound orgs — picker renders
             reads["n"] = 0  # only count the /sign-in render
             r = c.get("/sign-in")
             assert r.status_code == 200
@@ -338,7 +341,9 @@ class TestBoundOrgPinning:
             _login(c, STRANGER_EMAIL)
             r = _pin(c, "org-alpha")
             assert r.status_code == 404  # indistinguishable from nonexistent
-            assert _active_pid(c) is None
+            # Sign-in auto-pins the stranger's OWN org (A1); the refused pin
+            # must leave that untouched — never org-alpha.
+            assert _active_pid(c) == "org-gamma"
 
     def test_member_and_operator_can_pin_a_bound_org(self, shared_instance):
         app = shared_instance["app"]
@@ -350,20 +355,29 @@ class TestBoundOrgPinning:
             _login_operator(c)
             assert _pin(c, "org-alpha").status_code == 200
 
-    def test_anyone_can_still_pin_an_unbound_org(self, shared_instance):
-        # Step-14 standalone semantics: org-beta has no members and stays open.
+    def test_unbound_org_open_to_anonymous_only(self, shared_instance):
+        # Step-14 standalone semantics: org-beta has no members and stays open
+        # to ANONYMOUS pilot sessions. A signed-in account is confined to its
+        # own memberships (org-access audit) — the roaming that used to let
+        # any account walk into an unbound org is now operator-only.
         app = shared_instance["app"]
         with app.test_client() as c:
-            assert _pin(c, "org-beta").status_code == 200  # anonymous
+            assert _pin(c, "org-beta").status_code == 200  # anonymous pilot
         with app.test_client() as c:
             _login(c, STRANGER_EMAIL)
-            assert _pin(c, "org-beta").status_code == 200  # foreign signed-in
+            assert _pin(c, "org-beta").status_code == 404  # foreign signed-in
+            assert _active_pid(c) == "org-gamma"  # still their own org
+        with app.test_client() as c:
+            _login_operator(c)
+            assert _pin(c, "org-beta").status_code == 200  # operator roams
 
     def test_sign_in_post_refuses_bound_org_for_non_members(self, shared_instance):
         with shared_instance["app"].test_client() as c:
             _login(c, STRANGER_EMAIL)
             c.post("/sign-in", data={"profile_id": "org-alpha"})
-            assert _active_pid(c) is None
+            # The refused pick must never land on org-alpha — the session
+            # keeps the stranger's own auto-pinned org.
+            assert _active_pid(c) == "org-gamma"
 
     def test_resolver_unpins_when_membership_is_removed(self, shared_instance):
         ms = shared_instance["memberships"]
@@ -386,13 +400,28 @@ class TestPickerScoping:
             assert "Org Alpha" not in body
             assert "Org Gamma" not in body
 
-    def test_member_picker_shows_their_org_not_foreign_bound_orgs(self, shared_instance):
+    def test_single_org_member_skips_the_picker_entirely(self, shared_instance):
+        # A1 (org-access audit): a member of exactly one org is never shown
+        # the picker — /sign-in pins their club and sends them into the app.
+        with shared_instance["app"].test_client() as c:
+            _login(c, STRANGER_EMAIL)
+            r = c.get("/sign-in")
+            assert r.status_code == 302
+            assert "/make" in r.headers["Location"]
+            assert _active_pid(c) == "org-gamma"
+
+    def test_multi_org_member_picker_lists_only_their_orgs(self, shared_instance):
+        # The rare multi-org member keeps a switcher — confined server-side
+        # to their own workspaces: no foreign bound org, no unbound org.
+        from mediahub.web.tenancy import ROLE_MEMBER
+
+        shared_instance["memberships"].add(STRANGER_EMAIL, "org-alpha", role=ROLE_MEMBER)
         with shared_instance["app"].test_client() as c:
             _login(c, STRANGER_EMAIL)
             body = c.get("/sign-in").get_data(as_text=True)
             assert "Org Gamma" in body
-            assert "Org Beta" in body  # unbound stays visible
-            assert "Org Alpha" not in body
+            assert "Org Alpha" in body  # their second seat
+            assert "Org Beta" not in body  # unbound ≠ theirs — hidden now
 
     def test_operator_picker_shows_everything(self, shared_instance):
         with shared_instance["app"].test_client() as c:
@@ -490,16 +519,21 @@ class TestCreationBinding:
 
     def test_editing_an_unbound_org_does_not_grab_it(self, shared_instance):
         # The Council's grab-risk: a signed-in stranger editing an EXISTING
-        # unbound org must not become its owner as a side effect.
+        # unbound org must not become its owner as a side effect. Under the
+        # org-access audit's member confinement the edit is refused outright
+        # (strictly stronger than the old allowed-but-not-grabbed rule).
         ms = shared_instance["memberships"]
+        from mediahub.web.club_profile import load_profile
+
         with shared_instance["app"].test_client() as c:
             _login(c, STRANGER_EMAIL)
             r = c.post(
                 "/organisation",
-                data={"profile_id": "org-beta", "display_name": "Org Beta", "action": "save"},
+                data={"profile_id": "org-beta", "display_name": "GRABBED", "action": "save"},
             )
-            assert r.status_code == 200
+            assert r.status_code == 404
         assert ms.is_bound("org-beta") is False
+        assert load_profile("org-beta").display_name == "Org Beta"
 
 
 class TestInviteFirstClaimPath:
@@ -523,9 +557,14 @@ class TestInviteFirstClaimPath:
             assert _pin(c, "org-beta").status_code == 200
 
         # The pilot signs up — no operator involved — and the org binds.
+        # A1 (org-access audit): the invited signup lands DIRECTLY on their
+        # freshly-bound club, never on the picker.
         with app.test_client() as c:
             r = c.post("/signup", data={"email": PILOT_EMAIL, "password": PASSWORD, "accept_terms": "1"})
             assert r.status_code in (302, 303)
+            assert "/make" in r.headers["Location"]
+            with c.session_transaction() as s:
+                assert s.get("active_profile_id") == "org-beta"
         assert ms.is_bound("org-beta") is True
         assert ms.is_active_owner(PILOT_EMAIL, "org-beta") is True
 
@@ -692,10 +731,13 @@ class TestMembersPage:
         )
         with shared_instance["app"].test_client() as c:
             _login(c, STRANGER_EMAIL)  # a real account, but no org-beta seat
-            assert _pin(c, "org-beta").status_code == 200
-            body = c.get("/organisation/members").get_data(as_text=True)
+            # Member confinement (org-access audit): the stranger can no
+            # longer even enter the open org — and however they arrive at the
+            # members page, the pilot's contact email must never render.
+            assert _pin(c, "org-beta").status_code == 404
+            body = c.get("/organisation/members", follow_redirects=True).get_data(as_text=True)
         assert "pilot-contact@clubb.org" not in body
-        assert "Member details are hidden" in body
+        assert "operator@host" not in body
 
     def test_owner_still_sees_member_emails(self, shared_instance):
         with shared_instance["app"].test_client() as c:

@@ -14,10 +14,21 @@ clear error (the PDF path still works).
 
 from __future__ import annotations
 
+import io
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, Union
 
 from .models import Block, DocumentSpec
+
+# Cap on a decoded ``data:`` image before embedding — a hand-authored spec could
+# carry a huge base64 blob, and python-docx/pptx would hold the whole thing in
+# memory. Generous for a real photo, bounded against an OOM (mirrors the intent
+# of import_doc's zip-bomb caps).
+_MAX_EMBED_BYTES = 25 * 1024 * 1024
+
+# An embeddable image source for python-docx/pptx: a filesystem path (str) or an
+# in-memory stream (a decoded ``data:`` image).
+ImageSource = Union[str, io.BytesIO]
 
 # ---------------------------------------------------------------------------
 # Shared helpers
@@ -39,11 +50,11 @@ def _text_lines(block: Block) -> list[str]:
     if block.kind == "quote":
         who = p.get("attribution")
         line = f"“{p.get('text', '')}”"
-        return [line + (f" — {who}" if who else "")]
+        return [line + (f" - {who}" if who else "")]
     if block.kind == "stat":
-        return [f"{p.get('value', '')} — {p.get('label', '')}"]
+        return [f"{p.get('value', '')} - {p.get('label', '')}"]
     if block.kind == "kpi_row":
-        return [f"{s.get('value', '')} — {s.get('label', '')}" for s in (p.get("stats") or [])]
+        return [f"{s.get('value', '')} - {s.get('label', '')}" for s in (p.get("stats") or [])]
     return []
 
 
@@ -61,15 +72,56 @@ def _chart_png(block: Block, brand_kit: Any, role_vars: Optional[dict]) -> Optio
         return None  # bounded fidelity: skip the image, keep the document
 
 
-def _img_path(block: Block) -> Optional[Path]:
+def _img_source(block: Block) -> Optional[ImageSource]:
+    """Resolve a block image src to something python-docx/pptx can embed.
+
+    - A ``data:image/...;base64,...`` URI is decoded to an in-memory stream
+      (size-capped), so a hand-authored or imported image survives the export —
+      matching the render path, which also embeds ``data:`` images.
+    - A file path is honoured only when it resolves *inside* ``DATA_DIR``. Specs
+      are tenant-editable (the advanced JSON editor), so an absolute path to an
+      arbitrary server file — or another tenant's assets under
+      ``DATA_DIR/<other>`` — must never be baked into a DOCX/PPTX (cross-tenant
+      read / local file disclosure); this mirrors ``render._img_src``.
+    - Remote URLs are never fetched (no server-side SSRF).
+
+    Returns a str path or a ``BytesIO``, or ``None`` to skip the image."""
+    import base64
+    import binascii
+    import os
+
     src = str((block.props or {}).get("src", "")).strip()
     if not src:
         return None
+    low = src.lower()
+    if low.startswith("data:image/"):
+        header, _, payload = src.partition(",")
+        if "base64" not in header.lower() or not payload:
+            return None  # only base64 image payloads are embeddable here
+        try:
+            raw = base64.b64decode(payload, validate=False)
+        except (ValueError, binascii.Error):
+            return None
+        if not raw or len(raw) > _MAX_EMBED_BYTES:
+            return None
+        return io.BytesIO(raw)
+    if low.startswith(("http://", "https://", "data:")):
+        return None  # remote (SSRF) or a non-image data: URI — skip, never fetch
+    if low.startswith("file:"):
+        from urllib.parse import unquote, urlparse
+
+        try:
+            src = unquote(urlparse(src).path)
+        except (OSError, ValueError):
+            return None
     try:
-        p = Path(src)
-        return p if p.exists() else None
+        rp = Path(src).resolve()
+        root = Path(os.environ.get("DATA_DIR", ".")).resolve()
+        if rp.is_file() and rp.is_relative_to(root):
+            return str(rp)
     except (OSError, ValueError):
         return None
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -147,7 +199,7 @@ def _docx_block(doc, block: Block, brand_kit, role_vars, Inches, Pt) -> None:
         run = para.add_run(f"“{p.get('text', '')}”")
         run.italic = True
         if p.get("attribution"):
-            doc.add_paragraph(f"— {p['attribution']}")
+            doc.add_paragraph(f"- {p['attribution']}")
     elif kind in ("stat", "kpi_row"):
         for line in _text_lines(block):
             doc.add_paragraph(line)
@@ -158,9 +210,12 @@ def _docx_block(doc, block: Block, brand_kit, role_vars, Inches, Pt) -> None:
         if png:
             doc.add_picture(str(png), width=Inches(6.0))
     elif kind in ("card", "media"):
-        img = _img_path(block)
-        if img:
-            doc.add_picture(str(img), width=Inches(5.0))
+        img = _img_source(block)
+        if img is not None:
+            try:
+                doc.add_picture(img, width=Inches(5.0))
+            except Exception:
+                pass  # bounded fidelity: skip an unembeddable image, keep the doc
         if p.get("caption"):
             doc.add_paragraph(str(p["caption"]))
     elif kind == "columns":
@@ -270,14 +325,17 @@ def document_pptx(
             y = _pptx_table(slide, tprops, margin, y, content_w, Inches, Pt, Emu)
 
         for block in media:
-            png = (
-                _chart_png(block, brand_kit, role_vars)
-                if block.kind == "chart"
-                else _img_path(block)
-            )
-            if png and y < prs.slide_height - Inches(1):
-                slide.shapes.add_picture(str(png), margin, y, width=content_w)
-                y = y + Inches(3.0)
+            if block.kind == "chart":
+                cp = _chart_png(block, brand_kit, role_vars)
+                src = str(cp) if cp else None
+            else:
+                src = _img_source(block)
+            if src is not None and y < prs.slide_height - Inches(1):
+                try:
+                    slide.shapes.add_picture(src, margin, y, width=content_w)
+                    y = y + Inches(3.0)
+                except Exception:
+                    pass  # bounded fidelity: skip an unembeddable image, keep the slide
 
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)

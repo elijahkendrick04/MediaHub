@@ -330,6 +330,234 @@ def test_update_rejects_invalid_edl(app):
         assert r.status_code == 400
 
 
+def test_update_rejects_malformed_edl_types_without_500(app):
+    """A wrong-typed EDL field ("width": "abc", null fps, a non-list clips) fails
+    EDL.from_dict's int/float coercion with a plain ValueError/TypeError/
+    AttributeError, not EDLError. The route must catch those and answer an honest
+    400 invalid_edl, never let them escape to an unhandled 500 with a Python trace.
+    """
+    application, _ = app
+    from mediahub.video.edl import EDL, Clip
+    from mediahub.video.projects import VideoProject, get_store
+
+    store = get_store()
+    proj = store.save(
+        VideoProject(id="", profile_id="alpha", edl=EDL(clips=[Clip(source="a.mp4", out_ms=3000)]))
+    )
+    base = {
+        "width": 1080,
+        "height": 1920,
+        "fps": 30,
+        "clips": [
+            {"source": "a.mp4", "in_ms": 0, "out_ms": 3000, "transition_in": {"kind": "cut"}}
+        ],
+    }
+    malformed = [
+        {**base, "width": "abc"},  # int() cast fails
+        {**base, "fps": None},  # int(None) → TypeError
+        {**base, "clips": "notalist"},  # iterating a str → Clip.from_dict('n') AttributeError
+        {**base, "clips": [{"source": "a.mp4", "speed": "fast"}]},  # float() cast fails
+    ]
+    with application.test_client() as c:
+        _pin(c, "alpha")
+        for edl in malformed:
+            r = c.post(f"/api/video/projects/{proj.id}", json={"edl": edl})
+            assert r.status_code == 400, f"expected 400, got {r.status_code} for {edl}"
+            assert r.get_json()["error"] == "invalid_edl"
+
+
+def test_edl_update_rejects_foreign_clip_source(app, tmp_path):
+    """Security: the EDL validator only checks a source is non-empty, so without a
+    source-binding guard a caller could point a clip at ANY file on the box (another
+    tenant's footage, any readable media) and have the render/waveform/export engine
+    read it back. An edit may reorder/trim/grade the clips it was given, but must not
+    introduce a NEW source path — new footage only enters via Clip-Maker/the reel.
+    """
+    application, _ = app
+    from mediahub.video.edl import EDL, Clip
+    from mediahub.video.projects import VideoProject, get_store
+
+    # A file that is NOT one of the project's own footage clips.
+    victim = tmp_path / "someone_elses.mp4"
+    victim.write_bytes(b"\x00\x00\x00\x18ftypmp42")
+
+    store = get_store()
+    proj = store.save(
+        VideoProject(
+            id="", profile_id="alpha", edl=EDL(clips=[Clip(source="own.mp4", out_ms=3000)])
+        )
+    )
+    with application.test_client() as c:
+        _pin(c, "alpha")
+        evil = {
+            "width": 1080,
+            "height": 1920,
+            "fps": 30,
+            "clips": [
+                {
+                    "source": str(victim),
+                    "in_ms": 0,
+                    "out_ms": 1000,
+                    "transition_in": {"kind": "cut"},
+                }
+            ],
+        }
+        r = c.post(f"/api/video/projects/{proj.id}", json={"edl": evil})
+        assert r.status_code == 400
+        assert r.get_json()["error"] == "invalid_edl"
+        # The injected source must NOT have been persisted onto the timeline.
+        after = c.get(f"/api/video/projects/{proj.id}").get_json()["project"]
+        assert after["edl"]["clips"][0]["source"] == "own.mp4"
+        # A legitimate edit that keeps the project's own source still succeeds.
+        ok = c.post(
+            f"/api/video/projects/{proj.id}",
+            json={"edl": EDL(clips=[Clip(source="own.mp4", out_ms=2000)]).to_dict()},
+        )
+        assert ok.status_code == 200
+        assert ok.get_json()["project"]["edl"]["clips"][0]["out_ms"] == 2000
+
+
+def test_edl_edit_retimes_captions_on_reorder(app):
+    """F-14: burned caption cues are frame-indexed to the timeline they were built
+    on, so a reorder used to leave them drifting onto the wrong clip. On save the
+    cues must follow their source clip to its new place on the timeline.
+    """
+    from mediahub.video.edl import EDL, Clip, Transition
+    from mediahub.video.projects import VideoProject, get_store
+
+    application, _ = app
+    cut = Transition("cut", 0)
+    track = {
+        "color": "#FFFFFF",
+        "scrim": "#0A2540",
+        "cues": [
+            {"from": 10, "dur": 20, "text": "A line"},  # in clip A (timeline 0)
+            {"from": 100, "dur": 20, "text": "B line"},  # in clip B (offset 90f @30fps)
+        ],
+    }
+    old = EDL(
+        fps=30,
+        clips=[
+            Clip(source="a.mp4", in_ms=0, out_ms=3000, transition_in=cut),
+            Clip(source="b.mp4", in_ms=0, out_ms=3000, transition_in=cut),
+        ],
+        captions=track,
+    )
+    store = get_store()
+    proj = store.save(VideoProject(id="", profile_id="alpha", edl=old))
+
+    # Reorder: B first, A second (same sources → passes the source-binding guard).
+    reordered = EDL(
+        fps=30,
+        clips=[
+            Clip(source="b.mp4", in_ms=0, out_ms=3000, transition_in=cut),
+            Clip(source="a.mp4", in_ms=0, out_ms=3000, transition_in=cut),
+        ],
+        captions=track,
+    )
+    with application.test_client() as c:
+        _pin(c, "alpha")
+        r = c.post(f"/api/video/projects/{proj.id}", json={"edl": reordered.to_dict()})
+        assert r.status_code == 200
+        cues = c.get(f"/api/video/projects/{proj.id}").get_json()["project"]["edl"]["captions"][
+            "cues"
+        ]
+        by_text = {cue["text"]: cue["from"] for cue in cues}
+        assert by_text["B line"] == 10  # B moved to the front
+        assert by_text["A line"] == 100  # A moved to second (offset 90 + local 10)
+
+
+def test_edl_text_only_edit_leaves_caption_timing_untouched(app):
+    """A caption text/grade edit that doesn't change the clip structure must not
+    perturb cue timing — the render stays byte-identical.
+    """
+    from mediahub.video.edl import EDL, Clip, Transition
+    from mediahub.video.projects import VideoProject, get_store
+
+    application, _ = app
+    cut = Transition("cut", 0)
+    track = {"color": "#FFF", "scrim": "#000", "cues": [{"from": 42, "dur": 20, "text": "old"}]}
+    edl = EDL(
+        fps=30,
+        clips=[Clip(source="a.mp4", in_ms=0, out_ms=3000, transition_in=cut)],
+        captions=track,
+    )
+    store = get_store()
+    proj = store.save(VideoProject(id="", profile_id="alpha", edl=edl))
+
+    edited = {"color": "#FFF", "scrim": "#000", "cues": [{"from": 42, "dur": 20, "text": "new"}]}
+    new_edl = EDL(
+        fps=30,
+        clips=[Clip(source="a.mp4", in_ms=0, out_ms=3000, transition_in=cut)],
+        captions=edited,
+    )
+    with application.test_client() as c:
+        _pin(c, "alpha")
+        r = c.post(f"/api/video/projects/{proj.id}", json={"edl": new_edl.to_dict()})
+        assert r.status_code == 200
+        cue = c.get(f"/api/video/projects/{proj.id}").get_json()["project"]["edl"]["captions"][
+            "cues"
+        ][0]
+        assert cue["from"] == 42 and cue["text"] == "new"  # timing intact, text updated
+
+
+def test_clip_maker_undecodable_clip_is_422_not_500(app, tmp_path):
+    """F-15: an undecodable upload (junk bytes with a video extension) probes to
+    nothing. Clip-Maker must reject it with a clean 422 instead of building a
+    0-duration timeline that 500s at render. Needs a real FFmpeg to probe.
+    """
+    if not _ffmpeg_exe():
+        pytest.skip("undecodable-clip guard needs a real FFmpeg to probe")
+    application, _ = app
+    with application.test_client() as c:
+        _pin(c, "alpha")
+        up = c.post(
+            "/api/video/footage",
+            data={"file": (Path(__file__).open("rb"), "junk.mp4")},
+            content_type="multipart/form-data",
+        )
+        assert up.status_code == 200, up.get_json()
+        asset_id = up.get_json()["asset"]["id"]
+        r = c.post("/api/video/clip-maker", json={"asset_id": asset_id, "format": "story"})
+        assert r.status_code == 422, r.get_json()
+        assert r.get_json()["error"] == "undecodable_clip"
+
+
+def test_export_download_name_with_newline_does_not_500(app, tmp_path):
+    """Regression: send_file writes the project name into the Content-Disposition
+    header; werkzeug raises on a header value containing a newline, so a project
+    named with one used to 500 on export. The name is sanitised for the header now.
+    """
+    from mediahub.video.edl import EDL, Clip
+    from mediahub.video.projects import VideoProject, get_store
+
+    application, data_dir = app
+    store = get_store()
+    proj = store.save(
+        VideoProject(
+            id="",
+            profile_id="alpha",
+            name='evil"\r\nX-Injected: 1 clip',
+            status="approved",
+            format_name="story",
+            edl=EDL(clips=[Clip(source="a.mp4", out_ms=3000)]),
+        )
+    )
+    # Place a rendered file so the export gate reaches send_file (no FFmpeg needed).
+    render_dir = data_dir / "video_projects" / proj.id
+    render_dir.mkdir(parents=True, exist_ok=True)
+    (render_dir / "story.mp4").write_bytes(b"\x00" * 2048)
+
+    with application.test_client() as c:
+        _pin(c, "alpha")
+        r = c.get(f"/api/video/projects/{proj.id}/file?download=1")
+        assert r.status_code == 200, "export must not 500 on a newline in the project name"
+        cd = r.headers.get("Content-Disposition", "")
+        assert "\n" not in cd and "\r" not in cd
+        # The header-injection attempt does not create a real header.
+        assert "X-Injected" not in r.headers
+
+
 # --- AI editing surfaces: looks, reel director, enhance --------------------
 
 
@@ -340,7 +568,9 @@ def test_studio_page_has_ai_editing_controls(app):
         r = c.get("/video")
         assert r.status_code == 200
         body = r.data
-        assert b"AI reel" in body  # the director surface
+        # G-7: the director surface is user-labelled "Footage reel" so it stops
+        # colliding with the pack page's card-built "Meet reel".
+        assert b"Footage reel" in body  # the director surface
         assert b"Look" in body and b"Vivid" in body  # the grade picker
         assert b"Clean &amp; level the audio" in body  # the soundtrack option
         assert b"Remove silences" in body  # the tighten option
@@ -685,6 +915,35 @@ def test_caption_edit_route_no_captions_is_400(app):
             f"/api/video/projects/{proj.id}/caption", json={"op": "edit", "index": 0, "text": "x"}
         )
         assert r.status_code == 400
+
+
+def test_caption_bad_params_message_is_clean(app):
+    """A missing/non-numeric index fails an int() cast inside the caption op. The
+    route answers 400 bad_params with an actionable message — never the raw
+    "int() argument must be ... not 'NoneType'" Python cast error leaked verbatim.
+    """
+    application, _ = app
+    from mediahub.video.edl import EDL, Clip
+    from mediahub.video.projects import VideoProject, get_store
+
+    store = get_store()
+    track = {"color": "#FFF", "scrim": "#000", "cues": [{"from": 0, "dur": 30, "text": "Maria"}]}
+    proj = store.save(
+        VideoProject(
+            id="",
+            profile_id="alpha",
+            edl=EDL(clips=[Clip(source="a.mp4", out_ms=3000)], captions=track),
+        )
+    )
+    with application.test_client() as c:
+        _pin(c, "alpha")
+        r = c.post(f"/api/video/projects/{proj.id}/caption", json={"op": "edit", "text": "x"})
+        assert r.status_code == 400
+        body = r.get_json()
+        assert body["error"] == "bad_params"
+        # No Python-internals cast error leaked to the API caller.
+        assert "int()" not in body["message"]
+        assert "argument must be" not in body["message"]
 
 
 def test_enhance_stabilize_honest_error_without_vidstab(app, monkeypatch):

@@ -22,6 +22,7 @@ from .consent import (
     list_consent,
     regime_active,
     set_consent,
+    set_consent_many,
     set_enforce,
 )
 
@@ -36,5 +37,6 @@ __all__ = [
     "list_consent",
     "regime_active",
     "set_consent",
+    "set_consent_many",
     "set_enforce",
 ]

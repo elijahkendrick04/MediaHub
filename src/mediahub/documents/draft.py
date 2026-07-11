@@ -72,13 +72,23 @@ def default_outline(doc_format: str) -> list[dict]:
 
 
 def _numbers_grounded(text: str, allowed: set[float]) -> bool:
-    """True iff every numeric token in ``text`` matches an allowed fact number."""
+    """True iff every numeric token in ``text`` matches an allowed fact number.
+
+    Numbers are sacred (CLAUDE.md): a token is grounded only when it *is* a fact
+    number, allowing genuine rounding of that fact but not a misstatement of it.
+    A token matches an allowed value ``a`` when it equals ``a`` (float epsilon),
+    or is ``a`` rounded to a whole number (e.g. 49.7% -> "50%"), or agrees with
+    ``a`` to one decimal place (2.30s -> "2.3s"). The old wide 0.6 window and the
+    ``int(a) == int(n)`` rule were too loose — they let the AI write "2.8s" for a
+    real 2.30s drop, or "2.9" for a fact of 2 — so they are gone."""
     for tok in re.findall(r"\d+(?:\.\d+)?", text):
         try:
             n = float(tok)
         except ValueError:
             return False
-        if not any(abs(n - a) < 0.6 or round(a) == n or int(a) == int(n) for a in allowed):
+        if not any(
+            abs(n - a) < 0.05 or round(a) == n or round(a, 1) == round(n, 1) for a in allowed
+        ):
             return False
     return True
 

@@ -104,13 +104,32 @@ class WorkflowStore:
         Persist user caption overrides for a card.
         Keys are '{tone_str}_{slot}', e.g. 'warm-club_headline'.
         Status is set to EDITED if currently QUEUE.
+
+        H-10: overwriting a caption slot stashes the value it replaces under
+        a reserved ``prev.<key>`` slot in the same bag, so the review drawer
+        can offer a one-step "Restore previous caption" (a restore save swaps
+        the pair back). ``insp.*`` inspector overrides and the ``prev.*``
+        slots themselves are never stashed. The dotted ``prev.`` prefix keeps
+        the pack builder's ``tone_slot`` caption parser skipping these cleanly,
+        exactly like ``insp.*``.
         """
         now = datetime.now(timezone.utc).isoformat()
         with self._lock:
             states = self.load(run_id)
             existing = states.get(card_id, CardWorkflowState(card_id=card_id))
 
-            existing.edited_captions = {**(existing.edited_captions or {}), **edits}
+            merged = {**(existing.edited_captions or {})}
+            for key, val in edits.items():
+                old = merged.get(key)
+                if (
+                    not key.startswith(("insp.", "prev."))
+                    and isinstance(old, str)
+                    and old
+                    and old != val
+                ):
+                    merged["prev." + key] = old
+                merged[key] = val
+            existing.edited_captions = merged
             existing.last_changed_at = now
             if existing.status == CardStatus.QUEUE:
                 existing.status = CardStatus.EDITED

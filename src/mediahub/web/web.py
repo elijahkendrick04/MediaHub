@@ -146,12 +146,6 @@ _charts_ok = _importlib_util.find_spec("mediahub.charts") is not None
 # module import light; PDF/video rendering honest-errors at call time if absent.
 _documents_ok = _importlib_util.find_spec("mediahub.documents") is not None
 
-# Roadmap 1.16 — Club microsites + link-in-bio + forms + QR + vetted widgets.
-# Static-first render (no Playwright/Node needed for the page itself); the QR
-# layer honest-errors only where its backend (segno) is genuinely absent.
-_sites_ok = _importlib_util.find_spec("mediahub.sites") is not None
-_forms_ok = _importlib_util.find_spec("mediahub.forms") is not None
-
 # Roadmap 1.17 — Email & newsletter composer. Email-safe HTML auto-assembled from
 # the period's approved content; export-first (download / copy / hosted view),
 # no direct send (that waits on a provider adapter behind the publish gate).
@@ -201,6 +195,17 @@ _ORG_TYPE_TO_SPORT: dict[str, str] = {
     "football": "football",
     "athletics": "athletics",
 }
+
+# The social platforms an organisation posts to — (slug, display label).
+# Shared by the organisation-DNA form and the performance-log platform select
+# (H-14) so both surfaces speak the same platform vocabulary.
+_ORG_PLATFORMS: list[tuple[str, str]] = [
+    ("instagram", "Instagram"),
+    ("tiktok", "TikTok"),
+    ("twitter", "Twitter / X"),
+    ("facebook", "Facebook"),
+    ("linkedin", "LinkedIn"),
+]
 
 # A sport slug is only ever fed to ``load_sport_profile`` (which joins it into a
 # ``sport_profiles/<slug>.yaml`` path). Sport profile slugs are always
@@ -1077,11 +1082,15 @@ def _use_in_caption_html(run_id: str, swim_id: str, card_uuid: str) -> tuple[str
     # JSON-encode the URLs so Jinja-style interpolation can't be
     # tricked by a card_id containing quotes — defence-in-depth.
     cap_url = url_for("api_live_caption", run_id=run_id, swim_id=swim_id)
+    # H-11: the result panel gets a "Save to card" beside Copy — persisted via
+    # the same workflow set_edits route the edit drawer's Save uses.
+    save_url = url_for("api_workflow_set", run_id=run_id, card_id=swim_id)
     btn = (
         f'<button class="btn secondary" type="button" '
         f'style="font-size:11px;padding:4px 10px;'
         f'background:color-mix(in oklab, var(--lane) 15%, transparent);border-color:color-mix(in oklab, var(--lane) 40%, transparent);color:var(--lane)" '
-        f'onclick="mhUseWhyInCaption(this, {json.dumps(cap_url)}, {json.dumps(panel_id)})">'
+        f'onclick="mhUseWhyInCaption(this, {json.dumps(cap_url)}, {json.dumps(panel_id)}, '
+        f'{json.dumps(save_url)}, {json.dumps(str(swim_id))})">'
         f"Use in next caption</button>"
     )
     panel = (
@@ -2077,6 +2086,11 @@ def _inspector_state_attrs(wf_state) -> str:
     caption = str(edits.get("warm-club_headline") or "").strip()
     if caption:
         parts.append(f'data-insp-caption="{_h(caption)}"')
+    # H-10: the caption this one overwrote (stashed by WorkflowStore.set_edits)
+    # feeds the drawer's one-step "Restore previous caption".
+    prev_caption = str(edits.get("prev.warm-club_headline") or "").strip()
+    if prev_caption and prev_caption != caption:
+        parts.append(f'data-insp-caption-prev="{_h(prev_caption)}"')
     return (" " + " ".join(parts)) if parts else ""
 
 
@@ -2449,15 +2463,22 @@ def _variant_jobs_dir() -> Path:
 
 
 def _variant_job_save(job: dict) -> None:
-    """Atomically persist a job snapshot (single writer: the job thread)."""
+    """Atomically persist a job snapshot.
+
+    Two threads save the same job (the worker and its ``_job_heartbeat``),
+    so the tmp name is unique per write — a shared ``.tmp`` path let their
+    writes interleave into a torn/absent job file for a poll cycle. The tmp
+    stays in the same directory, so ``os.replace`` remains atomic."""
     job["updated_at"] = time.time()
     path = _variant_jobs_dir() / f"{job['id']}.json"
-    tmp = path.with_suffix(".tmp")
+    tmp = path.with_suffix(f".{uuid.uuid4().hex[:8]}.tmp")
     try:
         tmp.write_text(json.dumps(job), encoding="utf-8")
         os.replace(tmp, path)
     except Exception:
         log.exception("variant job %s: persist failed", str(job.get("id", ""))[:8])
+        with contextlib.suppress(OSError):
+            tmp.unlink(missing_ok=True)
 
 
 def _variant_job_load(job_id: str) -> Optional[dict]:
@@ -2677,6 +2698,13 @@ def _cycle_ph_attr(phrases) -> str:
 _CYCLE_PH_ATTR_MOMENT = _cycle_ph_attr(_CYCLE_PH_MOMENT)
 _CYCLE_PH_ATTR_RESEARCH = _cycle_ph_attr(_CYCLE_PH_RESEARCH)
 _CYCLE_PH_ATTR_ASKDATA = _cycle_ph_attr(_CYCLE_PH_ASKDATA)
+
+# Upper bound on a single free-text prompt / chat reply before it reaches the
+# LLM. A describe-your-post prompt is a sentence or two; this is a generous
+# ceiling that still stops a several-hundred-KB paste from being forwarded to
+# the provider verbatim and billed as input tokens (the only other limit is the
+# 50 MB MAX_CONTENT_LENGTH, far too high to bound LLM cost).
+_FREE_TEXT_MAX_PROMPT_CHARS = 8000
 
 
 # UI2.6 — Vanish search. The /activity (global run) search uses the design-kit
@@ -3365,19 +3393,33 @@ def _persist_run(run: PipelineRunV4, file_name: str) -> None:
 
 
 def _load_run(run_id: str) -> Optional[dict]:
-    p = RUNS_DIR / f"{run_id}.json"
-    if not p.exists():
+    # Path-traversal guard: run ids are minted as uuid hex / slugs and never
+    # contain a path separator or "..", so any such value is hostile (e.g. a
+    # tampered ?run_id=../../<dir>/victim query param that would otherwise
+    # escape RUNS_DIR / DATA_DIR and reflect an arbitrary JSON file's contents).
+    # Refusing it here protects every caller, not just the slash-rejecting
+    # <run_id> route converter.
+    if not run_id or "/" in run_id or "\\" in run_id or ".." in run_id:
         return None
-    try:
-        return json.loads(p.read_text())
-    except (json.JSONDecodeError, OSError, UnicodeDecodeError) as e:
-        # A corrupted run JSON would otherwise 500 every route that
-        # reads it (/review, /pack, /audit, /drafts/<pack_id>). Surface
-        # "run not found" instead so the recovery_page renders cleanly;
-        # the operator can find the offending file in the log.
-        # UnicodeDecodeError covers files written in a non-UTF-8 encoding.
-        log.warning("run %s on disk but unreadable: %s", run_id, e)
-        return None
+    # Canonical flat layout first, then the legacy nested runs_v4/<id>/run.json
+    # form that ~15 other routes fall back to individually — centralised here so
+    # every run-scoped surface (spotlight included) reads both without its own
+    # fallback. A corrupt/unreadable flat file returns None immediately (matching
+    # the historical contract) rather than masking it with the nested form.
+    for p in (RUNS_DIR / f"{run_id}.json", RUNS_DIR / run_id / "run.json"):
+        if not p.exists():
+            continue
+        try:
+            return json.loads(p.read_text())
+        except (json.JSONDecodeError, OSError, UnicodeDecodeError) as e:
+            # A corrupted run JSON would otherwise 500 every route that
+            # reads it (/review, /pack, /audit, /drafts/<pack_id>). Surface
+            # "run not found" instead so the recovery_page renders cleanly;
+            # the operator can find the offending file in the log.
+            # UnicodeDecodeError covers files written in a non-UTF-8 encoding.
+            log.warning("run %s on disk but unreadable: %s", run_id, e)
+            return None
+    return None
 
 
 def _machine_readable_run(data: Optional[dict], run_id: str, *, max_achievements: int = 60) -> str:
@@ -3595,10 +3637,9 @@ _WF_STATUS_LABEL = {
 def _render_wf_actions(run_id: str, card_id: str, wf_status: str) -> str:
     """Render the per-card Approve / Re-queue action strip.
 
-    Round-8: shared between /pack/<id>/grouped (where the audit found
-    no approval primitive at all) and any other page that wants the
-    same workflow control surface. The "Status" strap shows the
-    current state and is updated optimistically by the global
+    Shared between the review queue and the athlete spotlight — any page
+    that wants the same workflow control surface. The "Status" strap shows
+    the current state and is updated optimistically by the global
     `[data-mh-wf]` click handler in _layout.
 
     Approve-only flow: a card is either in the queue or approved — there
@@ -3606,24 +3647,34 @@ def _render_wf_actions(run_id: str, card_id: str, wf_status: str) -> str:
     approve button reads as an action still to take (outline) until the
     card is actually approved, then flips to a filled confirmation; the
     old always-green fill made every card look already approved.
+
+    B-4 (slim rows): Re-queue only renders on DECIDED cards (approved /
+    rejected / edited / posted) — on a queued row there is nothing to
+    undo, so the button ships with the `hidden` attribute instead of the
+    old dimmed-but-rendered state. The optimistic painters (paintState in
+    _layout, applyReviewDom in _BULK_ACTIONS_JS) flip `hidden` with the
+    card's status so undo appears the moment a card is decided, without a
+    reload; `.btn[data-mh-wf][hidden]` CSS makes `hidden` win over the
+    `.btn` flex display.
     """
     status_key = (wf_status or "queue").lower()
     label = _WF_STATUS_LABEL.get(
         status_key, status_key.replace("_", " ").capitalize() or "In queue"
     )
     is_approved = status_key == "approved"
+    # G-10 — the primary review verbs come from the UI catalogue so Welsh
+    # mode shows Welsh verbs, falling back to English for other locales.
+    from mediahub.localize.ui_catalogue import t as _t
 
-    # Visually de-emphasise the action that matches the current state
-    # so the user sees "I'm already in this state".
-    def _disabled_attrs(target: str) -> str:
-        return (
-            ' aria-pressed="true" style="opacity:0.55;cursor:default"'
-            if status_key == target
-            else ""
-        )
+    _loc = _ui_locale()
+    verb_approve = _t("action.approve", _loc)
+    verb_approved = _t("action.approved", _loc) + " ✓"
+    verb_requeue = _t("action.requeue", _loc)
+    verb_download = _t("action.download", _loc)
 
+    requeue_hidden = " hidden" if status_key == "queue" else ""
     approve_cls = "btn mh-wf-approve is-on" if is_approved else "btn secondary mh-wf-approve"
-    approve_label = "Approved ✓" if is_approved else "Approve"
+    approve_label = _h(verb_approved if is_approved else verb_approve)
     approve_pressed = ' aria-pressed="true"' if is_approved else ""
     _dl_link = ""
     if is_approved:
@@ -3632,7 +3683,7 @@ def _render_wf_actions(run_id: str, card_id: str, wf_status: str) -> str:
             f'<a class="btn secondary" href="{_h(_dl_url)}"'
             f' style="font-size:12px;padding:4px 10px"'
             f' title="Download caption + visual as a .zip for manual posting">'
-            f"&#x2B07; Download</a>"
+            f"&#x2B07; {_h(verb_download)}</a>"
         )
     return (
         f'<span class="strap" data-mh-wf-target="{_h(card_id)}" '
@@ -3640,12 +3691,13 @@ def _render_wf_actions(run_id: str, card_id: str, wf_status: str) -> str:
         f"<span data-mh-wf-label>{_h(label)}</span></span>"
         f'<button class="{approve_cls}" type="button" style="font-size:12px;padding:4px 10px"'
         f' data-mh-wf="approved" data-mh-run-id="{_h(run_id)}" data-mh-card-id="{_h(card_id)}"'
+        f' data-mh-label-approve="{_h(verb_approve)}" data-mh-label-approved="{_h(verb_approved)}"'
         f"{approve_pressed}"
         f' title="Mark this card approved — it moves into the content builder for captioning, graphics and scheduling.">{approve_label}</button>'
         f'<button class="btn secondary" type="button" style="font-size:12px;padding:4px 10px"'
         f' data-mh-wf="queue" data-mh-run-id="{_h(run_id)}" data-mh-card-id="{_h(card_id)}"'
-        f"{_disabled_attrs('queue')}"
-        f' title="Send back to the queue — undoes the approval.">Re-queue</button>'
+        f"{requeue_hidden}"
+        f' title="Send back to the queue — undoes the approval.">{_h(verb_requeue)}</button>'
         f"{_dl_link}"
     )
 
@@ -4234,14 +4286,458 @@ def _translatable_langs_js() -> str:
     return "<script>window.MH_TR_LANGS = " + json.dumps(langs) + ";</script>\n"
 
 
+# ---------------------------------------------------------------------------
+# D-12 — shared motion-render client JS: async job + poll + finished panel.
+#
+# ONE copy serves every page with a per-card "Motion video" action: the
+# Content builder (appended by `_card_creative_js()`) and the grouped
+# recommendations page, which previously exposed the synchronous motion GET
+# as a plain link with no progress UI. Plain string — single braces are
+# literal JS, embed verbatim via {_MOTION_CLIENT_JS}.
+# ---------------------------------------------------------------------------
+_MOTION_CLIENT_JS = """
+<script>
+// Escapers shared with the host page (guarded — a host page's own
+// declaration, e.g. the creative-toolbar JS, takes precedence).
+window.safeText = window.safeText || function(t){ return String(t==null?'':t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); };
+window._attrEsc = window._attrEsc || function(jsExpr) {
+  return '"' + jsExpr.replace(/&/g, '&amp;').replace(/"/g, '&quot;') + '"';
+};
+
+// Motion-graphic generation: async job + poll, cached server-side. fmt picks
+// the output cut (story 9:16 default, portrait 4:5, square 1:1, landscape
+// 16:9) — same card facts, same brand, re-laid-out per platform.
+var _motionCache = {};
+var _MOTION_FMT_DIMS = {story: '1080&times;1920', portrait: '1080&times;1350', square: '1080&times;1080', landscape: '1920&times;1080'};
+function _motionFmtChips(motionUrl, cardId, active) {
+  var out = '';
+  ['story', 'portrait', 'square', 'landscape'].forEach(function(f) {
+    var label = f.charAt(0).toUpperCase() + f.slice(1);
+    if (f === active) {
+      out += '<span class="btn secondary" style="font-size:11px;padding:4px 10px;opacity:0.55;pointer-events:none">' + label + ' &#x2713;</span>';
+    } else {
+      out += '<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick=' +
+        _attrEsc('generateMotion(this, ' + JSON.stringify(motionUrl) + ', ' + JSON.stringify(cardId) + ', ' + JSON.stringify(f) + ')') +
+        '>' + label + '</button>';
+    }
+  });
+  return out;
+}
+// D-13 — an in-flight render survives navigation: the active job's
+// {poll_url, fmt, …} is remembered per (kind, url) in localStorage when a
+// job starts, re-attached on page load (or on a repeat click, instead of
+// starting a doomed second job that errors "Another video is rendering"),
+// and cleared on every terminal state.
+function _mhJobKey(kind, url) { return 'mh-job:' + kind + ':' + url; }
+function mhJobRemember(kind, url, rec) { try { localStorage.setItem(_mhJobKey(kind, url), JSON.stringify(rec)); } catch (e) {} }
+function mhJobRecall(kind, url) { try { return JSON.parse(localStorage.getItem(_mhJobKey(kind, url)) || 'null'); } catch (e) { return null; } }
+function mhJobForget(kind, url) { try { localStorage.removeItem(_mhJobKey(kind, url)); } catch (e) {} }
+
+// Shared failure surface for the job watchers (btn is null on a resumed
+// watch — the page was reloaded, so there is no button state to restore).
+function _mhJobFail(ctx, msg) {
+  if (ctx.prog) ctx.prog.stop();
+  if (ctx.btn) { ctx.btn.disabled = false; ctx.btn.textContent = ctx.origLabel; }
+  if (ctx.panel) delete ctx.panel.dataset.mhWatching;
+  // msg can be a raw str(e) detail (meet names, node stderr) — escape
+  // before it touches innerHTML.
+  ctx.panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">' + (ctx.prefix || '') + window.safeText(msg) + '</div>';
+}
+
+// M32 (UX-4): per-card motion now uses the same async job + poll pattern the
+// reel adopted — a cold Remotion render (30-90s) on a held connection gets
+// killed by front-line proxies as a bogus "Network error". The button kicks
+// a background job, polls, then streams the finished MP4 from the motion-file
+// route (a real URL that survives navigation, with a ?poster=1 sidecar).
+function generateMotion(btn, motionUrl, cardId, fmt) {
+  fmt = fmt || 'story';
+  var panel = document.querySelector('.motion-panel[data-card="' + cardId + '"]');
+  if (!panel) return;
+  if (panel.dataset.mhWatching) {
+    if (window.MH && MH.toast) MH.toast('A motion render is already in progress for this card — hold on…', 'info', 2500);
+    return;
+  }
+  // JS-4: claim the panel synchronously — a double-click used to pass the
+  // guard twice while the first 202 round-trip was in flight, starting two
+  // jobs. Every terminal path overwrites (watch) or clears (_mhJobFail).
+  panel.dataset.mhWatching = '1';
+  panel.style.display = '';
+  var origLabel = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Rendering motion…';
+  var prog = MH.renderProgress(panel, {label: 'Rendering ' + fmt + ' motion', sub: 'First render can take up to 90 seconds — repeats are instant', expectedMs: 45000, accent: 'medal'});
+  var ctx = {panel: panel, prog: prog, btn: btn, origLabel: origLabel};
+  var startNew = function() {
+    mhJobForget('motion', motionUrl);
+    var jobUrl = motionUrl + '-job' + (fmt !== 'story' ? '?format=' + encodeURIComponent(fmt) : '');
+    // JSON content-type: the CSRF layer exempts application/json fetches
+    // (a cross-site page can't send them without a CORS preflight).
+    fetch(jobUrl, {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'})
+      .then(function(r) { return r.json().then(function(j){ return {status: r.status, body: j}; }); })
+      .then(function(res) {
+        if (res.status !== 202 || !res.body || !res.body.poll_url) {
+          _mhJobFail(ctx, (res.body && (res.body.user_message || res.body.detail || res.body.error)) || 'could not start the render');
+          return;
+        }
+        mhJobRemember('motion', motionUrl, {poll_url: res.body.poll_url, job_id: res.body.job_id || '', card: cardId, fmt: fmt});
+        _mhMotionWatch(motionUrl, cardId, fmt, res.body.poll_url, ctx);
+      })
+      .catch(function(err) { _mhJobFail(ctx, 'Network error: ' + err); });
+  };
+  // D-13: a render already in flight for this card (this tab or another) is
+  // resumed rather than restarted — a restart just hit the busy renderer.
+  var rec = mhJobRecall('motion', motionUrl);
+  if (rec && rec.poll_url) {
+    fetch(rec.poll_url)
+      .then(function(r){ return r.json(); })
+      .then(function(j) {
+        if (j.status === 'running') { _mhMotionWatch(motionUrl, cardId, rec.fmt || fmt, rec.poll_url, ctx); }
+        else { startNew(); }
+      })
+      .catch(function() { startNew(); });
+    return;
+  }
+  startNew();
+}
+
+// D-13 — poll one motion job to a terminal state. Polls every 3s up to the
+// server's 600s render budget (the old 240s cap abandoned healthy renders
+// the server-side heartbeat was still keeping alive).
+function _mhMotionWatch(motionUrl, cardId, fmt, pollUrl, ctx) {
+  ctx.panel.dataset.mhWatching = pollUrl;
+  var tries = 0;
+  var poll = function() {
+    tries++;
+    if (tries > 200) {
+      mhJobForget('motion', motionUrl);
+      _mhJobFail(ctx, 'timed out waiting for the render — try again');
+      return;
+    }
+    fetch(pollUrl)
+      .then(function(r){ return r.json(); })
+      .then(function(j) {
+        if (j.status === 'done' && j.video_url) {
+          mhJobForget('motion', motionUrl);
+          delete ctx.panel.dataset.mhWatching;
+          ctx.prog.complete(function(){
+            if (ctx.btn) { ctx.btn.disabled = false; ctx.btn.textContent = ctx.origLabel; }
+            _motionCache[cardId + ':' + fmt] = j.video_url;
+            mhRenderMotion(ctx.panel, motionUrl, cardId, fmt, j.video_url);
+          });
+          return;
+        }
+        if (j.status === 'error' || (j.error && j.status !== 'running')) {
+          // A busy renderer usually means an earlier job for this card still
+          // holds the slot — resume that one instead of surfacing the error.
+          var rec = (j.error === 'renderer_busy') ? mhJobRecall('motion', motionUrl) : null;
+          if (rec && rec.poll_url && rec.poll_url !== pollUrl) {
+            _mhMotionWatch(motionUrl, cardId, rec.fmt || fmt, rec.poll_url, ctx);
+            return;
+          }
+          mhJobForget('motion', motionUrl);
+          _mhJobFail(ctx, j.user_message || j.error || 'render failed');
+          return;
+        }
+        setTimeout(poll, 3000);
+      })
+      .catch(function() { setTimeout(poll, 3000); });
+  };
+  setTimeout(poll, 3000);
+}
+
+// B-5 — render all four motion cuts of one card in a single background job.
+// Mirrors generateReelBatch over the motion job store: one POST to the
+// motion-batch-job route, per-cut progress from the job's total/done/current
+// fields, a labelled download per produced cut, and honest formats_failed
+// notes for any cut that could not render.
+function generateMotionBatch(btn, motionUrl, cardId) {
+  var panel = document.querySelector('.motion-panel[data-card="' + cardId + '"]');
+  if (!panel) return;
+  if (panel.dataset.mhWatching) {
+    if (window.MH && MH.toast) MH.toast('A motion render is already in progress for this card — hold on…', 'info', 2500);
+    return;
+  }
+  // JS-4: claim the panel synchronously — every terminal path overwrites
+  // (watch) or clears (_mhJobFail).
+  panel.dataset.mhWatching = '1';
+  panel.style.display = '';
+  var origLabel = btn ? btn.textContent : '';
+  if (btn) { btn.disabled = true; btn.textContent = 'Rendering all formats…'; }
+  var prog = MH.renderProgress(panel, {label: 'Rendering every motion format', sub: 'Story, portrait, square & landscape — up to a few minutes the first time', expectedMs: 150000, accent: 'medal'});
+  var ctx = {panel: panel, prog: prog, btn: btn, origLabel: origLabel};
+  var startNew = function() {
+    mhJobForget('motion-batch', motionUrl);
+    fetch(motionUrl + '-batch-job', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'})
+      .then(function(r) { return r.json().then(function(j){ return {status: r.status, body: j}; }); })
+      .then(function(res) {
+        if (res.status !== 202 || !res.body || !res.body.poll_url) {
+          _mhJobFail(ctx, (res.body && (res.body.user_message || res.body.detail || res.body.error)) || 'could not start the render');
+          return;
+        }
+        mhJobRemember('motion-batch', motionUrl, {poll_url: res.body.poll_url, job_id: res.body.job_id || '', card: cardId});
+        _mhMotionBatchWatch(motionUrl, cardId, res.body.poll_url, ctx);
+      })
+      .catch(function(err) { _mhJobFail(ctx, 'Network error: ' + err); });
+  };
+  // D-13: an all-formats render already in flight for this card is resumed,
+  // not restarted — a restart would just hit the busy renderer.
+  var rec = mhJobRecall('motion-batch', motionUrl);
+  if (rec && rec.poll_url) {
+    fetch(rec.poll_url)
+      .then(function(r){ return r.json(); })
+      .then(function(j) {
+        if (j.status === 'running') { _mhMotionBatchWatch(motionUrl, cardId, rec.poll_url, ctx); }
+        else { startNew(); }
+      })
+      .catch(function() { startNew(); });
+    return;
+  }
+  startNew();
+}
+
+// B-5 / D-13 — poll one all-formats motion job to a terminal state,
+// narrating per-cut progress from the job's total/done/current.
+// JS2-4: the batch budget is 400 tries (~1200s), double the single-cut
+// watchers' 200 — four cuts each queue for a slot AND render, so the
+// worst case can honestly exceed the single-cut 600s budget.
+function _mhMotionBatchWatch(motionUrl, cardId, pollUrl, ctx) {
+  ctx.panel.dataset.mhWatching = pollUrl;
+  var tries = 0;
+  var poll = function() {
+    tries++;
+    if (tries > 400) {
+      mhJobForget('motion-batch', motionUrl);
+      _mhJobFail(ctx, 'timed out waiting for the render — try again');
+      return;
+    }
+    fetch(pollUrl)
+      .then(function(r){ return r.json(); })
+      .then(function(j) {
+        if (j.status === 'done' && j.video_urls && Object.keys(j.video_urls).length) {
+          mhJobForget('motion-batch', motionUrl);
+          delete ctx.panel.dataset.mhWatching;
+          ctx.prog.complete(function(){
+            if (ctx.btn) { ctx.btn.disabled = false; ctx.btn.textContent = ctx.origLabel; }
+            mhRenderMotionBatch(ctx.panel, motionUrl, cardId, j.video_urls, j.formats_failed || {});
+          });
+          return;
+        }
+        if (j.status === 'error' || (j.error && j.status !== 'running')) {
+          // A busy renderer usually means another tab's batch still holds
+          // the slot — attach to the recalled record's live job instead of
+          // surfacing the error (the motion/reel watches' idiom).
+          var rec = (j.error === 'renderer_busy') ? mhJobRecall('motion-batch', motionUrl) : null;
+          if (rec && rec.poll_url && rec.poll_url !== pollUrl) {
+            _mhMotionBatchWatch(motionUrl, cardId, rec.poll_url, ctx);
+            return;
+          }
+          mhJobForget('motion-batch', motionUrl);
+          _mhJobFail(ctx, j.user_message || j.error || 'render failed');
+          return;
+        }
+        if (j.total) {
+          var next = Math.min((j.done || 0) + 1, j.total);
+          ctx.prog.setPhase('Rendering ' + (j.current || 'motion') + ' cut (' + next + ' of ' + j.total + ')', (j.done || 0) + ' of ' + j.total + ' finished');
+          ctx.prog.setProgress(Math.round(((j.done || 0) / j.total) * 100));
+        }
+        setTimeout(poll, 3000);
+      })
+      .catch(function() { setTimeout(poll, 3000); });
+  };
+  setTimeout(poll, 3000);
+}
+
+// D-13 — on page load, re-attach to any motion render (single-cut or B-5
+// all-formats batch) still running for a card on THIS page (the record's
+// motion URL must match a mounted panel, so another run's jobs are left
+// alone). Finished-while-away jobs render their video; dead records are
+// cleared.
+function mhResumeMotionJobs() {
+  ['motion', 'motion-batch'].forEach(function(kind) {
+    var prefix = 'mh-job:' + kind + ':';
+    var keys = [];
+    try {
+      for (var i = 0; i < localStorage.length; i++) {
+        var k = localStorage.key(i);
+        if (k && k.indexOf(prefix) === 0) keys.push(k);
+      }
+    } catch (e) { return; }
+    keys.forEach(function(k) {
+      var motionUrl = k.slice(prefix.length);
+      var rec = mhJobRecall(kind, motionUrl);
+      if (!rec || !rec.poll_url || !rec.card) return;
+      var panel = document.querySelector('.motion-panel[data-motion-url="' + motionUrl + '"]');
+      if (!panel || panel.dataset.mhWatching) return;
+      // JS-4: claim the panel before the async poll resolves — a click racing
+      // this resume could otherwise start a duplicate job.
+      panel.dataset.mhWatching = '1';
+      var fmt = rec.fmt || 'story';
+      fetch(rec.poll_url)
+        .then(function(r){ return r.json(); })
+        .then(function(j) {
+          if (j.status === 'running') {
+            panel.style.display = '';
+            var opts = (kind === 'motion')
+              ? {label: 'Rendering ' + fmt + ' motion', sub: 'Resumed — this render kept going while you were away', expectedMs: 45000, accent: 'medal'}
+              : {label: 'Rendering every motion format', sub: 'Resumed — this render kept going while you were away', expectedMs: 150000, accent: 'medal'};
+            var ctx = {panel: panel, prog: MH.renderProgress(panel, opts), btn: null, origLabel: ''};
+            if (kind === 'motion') _mhMotionWatch(motionUrl, rec.card, fmt, rec.poll_url, ctx);
+            else _mhMotionBatchWatch(motionUrl, rec.card, rec.poll_url, ctx);
+            return;
+          }
+          mhJobForget(kind, motionUrl);
+          delete panel.dataset.mhWatching;
+          if (j.status === 'done' && kind === 'motion' && j.video_url) {
+            panel.style.display = '';
+            _motionCache[rec.card + ':' + fmt] = j.video_url;
+            mhRenderMotion(panel, motionUrl, rec.card, fmt, j.video_url);
+          }
+          if (j.status === 'done' && kind === 'motion-batch' && j.video_urls && Object.keys(j.video_urls).length) {
+            panel.style.display = '';
+            mhRenderMotionBatch(panel, motionUrl, rec.card, j.video_urls, j.formats_failed || {});
+          }
+        })
+        .catch(function(){ delete panel.dataset.mhWatching; });
+    });
+  });
+}
+if (document.readyState === 'loading') { document.addEventListener('DOMContentLoaded', mhResumeMotionJobs); }
+else { mhResumeMotionJobs(); }
+
+// The finished per-card motion panel — used by generateMotion's success path
+// and the on-load "Rendered videos" restore. videoUrl is the persistent
+// motion-file route; its ?poster=1 sidecar becomes the <video> poster.
+function mhRenderMotion(panel, motionUrl, cardId, fmt, videoUrl) {
+  var poster = videoUrl + (videoUrl.indexOf('?') === -1 ? '?' : '&') + 'poster=1';
+  var vidCol = fmt === 'landscape' ? 'flex:0 0 min(300px,100%);max-width:320px' : 'flex:0 0 min(200px,100%);max-width:220px';
+  panel.innerHTML =
+    '<div style="display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap">' +
+      '<div style="' + vidCol + '">' +
+        '<video class="mh-motion-video" src="' + videoUrl + '" poster="' + poster + '" controls playsinline preload="metadata" style="width:100%;border-radius:6px;border:1px solid var(--border);background:var(--video-letterbox)"></video>' +
+      '</div>' +
+      '<div style="flex:1;min-width:min(200px,100%)">' +
+        '<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:4px">Motion &middot; ' + (_MOTION_FMT_DIMS[fmt] || '') + ' &middot; 6s</div>' +
+        '<div style="font-size:12px;color:var(--ink);margin-bottom:8px;line-height:1.4">Branded MP4. Same archetype, colours, and seed as the static card &mdash; including your Inspector accent and photo on/off choices. An Inspector crop applies to stills only for now.</div>' +
+        '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px">' + _motionFmtChips(motionUrl, cardId, fmt) +
+          '<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick=' +
+            _attrEsc('generateMotionBatch(this, ' + JSON.stringify(motionUrl) + ', ' + JSON.stringify(cardId) + ')') +
+          '>All 4 formats</button>' +
+        '</div>' +
+        '<div style="display:flex;gap:6px;flex-wrap:wrap">' +
+          '<a class="btn secondary" href="' + videoUrl + '" download="motion-' + cardId + '-' + fmt + '.mp4" style="font-size:11px;padding:4px 10px">Download MP4</a>' +
+        '</div>' +
+        '<div class="mh-motion-why" style="font-size:11px;color:var(--ink-muted);margin-top:8px"></div>' +
+      '</div>' +
+    '</div>' +
+    '<div class="mh-reel-comments" style="margin-top:12px"></div>';
+  _loadMotionWhy(panel, motionUrl, fmt);
+  // UI 1.8 - pin timestamp comments to this card's motion clip too. The
+  // run-level comments endpoint sits at the path before '/card/'.
+  var _cmRoot = motionUrl.split('/card/')[0];
+  var _cmMount = panel.querySelector('.mh-reel-comments');
+  if (_cmMount && typeof mhReelComments === 'function') {
+    mhReelComments({mount: _cmMount, video: panel.querySelector('video.mh-motion-video'), baseUrl: _cmRoot + '/reel/comments', target: 'card:' + cardId});
+  }
+}
+
+// B-5 — the finished all-formats motion panel: the story cut (or first
+// produced) as the scrubbable preview plus a labelled download per cut, the
+// single-format chips for an inline re-view, and an honest note for any cut
+// that failed to render.
+function mhRenderMotionBatch(panel, motionUrl, cardId, videoUrls, failed) {
+  var order = ['story', 'portrait', 'square', 'landscape'];
+  var primary = videoUrls.story || '';
+  var primaryFmt = 'story';
+  if (!primary) { for (var i = 0; i < order.length; i++) { if (videoUrls[order[i]]) { primary = videoUrls[order[i]]; primaryFmt = order[i]; break; } } }
+  var dl = '';
+  order.forEach(function(f) {
+    if (videoUrls[f]) {
+      dl += '<a class="btn secondary" href="' + videoUrls[f] + '" download="motion-' + cardId + '-' + f + '.mp4" style="font-size:11px;padding:4px 10px">' +
+        f.charAt(0).toUpperCase() + f.slice(1) + ' &middot; ' + (_MOTION_FMT_DIMS[f] || '') + '</a>';
+    }
+  });
+  var failNote = '';
+  var failedKeys = failed ? Object.keys(failed) : [];
+  if (failedKeys.length) {
+    // The API's honest per-cut reason — escaped, it can carry node stderr.
+    var rows = failedKeys.map(function(f){
+      var fmt = f.charAt(0).toUpperCase() + f.slice(1);
+      var reason = (failed[f] == null ? '' : String(failed[f])) || 'render failed';
+      return '<div style="margin-top:2px">' + window.safeText(fmt) + ' — ' + window.safeText(reason) + '</div>';
+    }).join('');
+    failNote = '<div style="font-size:11px;color:var(--ink-muted);margin-top:8px">These cuts failed to render:' + rows + '</div>';
+  }
+  var poster = primary ? primary + (primary.indexOf('?') === -1 ? '?' : '&') + 'poster=1' : '';
+  panel.innerHTML =
+    '<div style="display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap">' +
+      '<div style="flex:0 0 min(200px,100%);max-width:220px">' +
+        (primary ? '<video class="mh-motion-video" src="' + primary + '" poster="' + poster + '" controls playsinline preload="metadata" style="width:100%;border-radius:6px;border:1px solid var(--border);background:var(--video-letterbox)"></video>' : '') +
+      '</div>' +
+      '<div style="flex:1;min-width:min(200px,100%)">' +
+        '<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:4px">Motion &middot; every format</div>' +
+        '<div style="font-size:12px;color:var(--ink);margin-bottom:8px;line-height:1.4">All cuts rendered in one pass from the same card &mdash; download the size each channel wants.</div>' +
+        '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px">' + _motionFmtChips(motionUrl, cardId, primaryFmt) + '</div>' +
+        '<div style="display:flex;gap:6px;flex-wrap:wrap">' + dl + '</div>' +
+        failNote +
+      '</div>' +
+    '</div>' +
+    '<div class="mh-reel-comments" style="margin-top:12px"></div>';
+  var _cmRoot = motionUrl.split('/card/')[0];
+  var _cmMount = panel.querySelector('.mh-reel-comments');
+  if (_cmMount && typeof mhReelComments === 'function') {
+    mhReelComments({mount: _cmMount, video: panel.querySelector('video.mh-motion-video'), baseUrl: _cmRoot + '/reel/comments', target: 'card:' + cardId});
+  }
+}
+
+// "Why this motion design" — the render's explainability sidecar, fetched
+// after the MP4 lands. Absence is fine (legacy renders predate manifests).
+function _loadMotionWhy(panel, motionUrl, fmt) {
+  var slot = panel.querySelector('.mh-motion-why');
+  if (!slot) return;
+  var mUrl = motionUrl + '/manifest' + (fmt !== 'story' ? '?format=' + encodeURIComponent(fmt) : '');
+  fetch(mUrl).then(function(r){ return r.ok ? r.json() : null; }).then(function(m) {
+    if (!m || !m.card) return;
+    // JS-5: manifest fields are engine-written, but they ride innerHTML —
+    // escape them like mhEngineNoteHtml already escapes notes.*.
+    var bits = [];
+    if (m.card.archetype) bits.push('archetype <b>' + window.safeText(m.card.archetype) + '</b>');
+    if (m.card.motion_intent) bits.push('motion <b>' + window.safeText(m.card.motion_intent) + '</b>');
+    if (m.card.mood) bits.push('mood <b>' + window.safeText(m.card.mood) + '</b>');
+    bits.push(m.card.colour_source === 'still-parity-roles' ? 'colours mirror the approved still' : 'colours from seed ' + window.safeText(m.card.variation_seed || ''));
+    slot.innerHTML = 'Why this design: ' + bits.join(' &middot; ') + mhEngineNoteHtml(m);
+  }).catch(function(){});
+}
+
+// M22 handoff — honest engine disclosure. The manifest names the engine that
+// produced this video; the reduced-motion FFmpeg fallback writes plain-language
+// capability notes (no text choreography / count-up, static cover chips) that
+// the user deserves to see instead of silently wondering why the video looks
+// simpler. Manifest fields are engine-written but escaped anyway.
+function mhEngineNoteHtml(m) {
+  if (!m || m.engine !== 'ffmpeg') return '';
+  var notes = m.notes || {};
+  var line = notes.engine_note || 'Rendered by the reduced-motion FFmpeg engine.';
+  var extra = [];
+  if (notes.captions === 'unsupported-on-engine') extra.push('burned captions are unavailable on this engine');
+  if (notes.stat_chips === 'static-cover') extra.push('cover stats are static (no count-up)');
+  return '<div style="margin-top:4px;color:var(--ink-muted)">' + window.safeText(line) +
+    (extra.length ? ' (' + window.safeText(extra.join('; ')) + ')' : '') + '</div>';
+}
+</script>
+"""
+
+
 def _card_creative_js() -> str:
     """Shared client JS for the per-card creative toolbar: live caption
     tone tabs, create-graphic, motion render, and the 3-variant graphic
     picker. Lives on the Content builder page (post-approval). The host
     page must define `WF_API_BASE` and `window._API_BASE` before this
-    block so caption edits and visual picks can persist."""
+    block so caption edits and visual picks can persist. The motion
+    render functions ship in the shared `_MOTION_CLIENT_JS` block (D-12)
+    so the grouped page can reuse them without a drifted copy."""
     return (
         _translatable_langs_js()
+        + _MOTION_CLIENT_JS
         + """
 <script>
 // V8: Live caption tone toggle + regenerate
@@ -4449,23 +4945,40 @@ function _fetchCaption(captionUrl, tone, panel, cacheKey, isAi, cardId) {
           var altEl = captionDiv.querySelector('.alt-text-input');
           if (altEl && altEl.value) { bodyObj.alt_text = altEl.value; }
           trBtn.disabled = true; trBtn.textContent = 'Translating…';
+          if (window.MH && MH.btnState) MH.btnState(trBtn, 'loading');
           fetch(trUrl, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(bodyObj)})
             .then(function(r){ return r.json().then(function(jj){ return {ok:r.ok, j:jj}; }); })
             .then(function(res){
               trBtn.disabled = false; trBtn.textContent = 'Translate';
+              if (window.MH && MH.btnState) MH.btnState(trBtn, 'idle');
               var jj = res.j || {};
               if (!res.ok || jj.error) {
                 trOut.innerHTML = '<div style="font-size:10px;color:var(--warn);margin-top:4px">' + safeText(jj.message || 'Translation unavailable.') + '</div>';
                 return;
               }
-              var s = (jj.slots && jj.slots.caption) || '';
+              // E-13: the route translated + SAVED every slot it was sent
+              // (caption, alt text, headline, subhead) — render them all,
+              // each labelled plainly and carrying its own dir attribute, so
+              // no saved slot rides into approval/export unreviewed.
               var lbl = jj.language_label || lang;
+              var trDir = (jj.rtl ? 'rtl' : 'auto');
+              var slotNames = {caption:'Caption', alt_text:'Alt text', headline:'Headline', subhead:'Subhead'};
+              var slotKeys = ['caption','alt_text','headline','subhead'];
+              Object.keys(jj.slots || {}).forEach(function(k){ if (slotKeys.indexOf(k) === -1) slotKeys.push(k); });
+              var slotsHtml = '';
+              slotKeys.forEach(function(k){
+                var v = (jj.slots || {})[k];
+                if (typeof v !== 'string' || !v.trim()) return;
+                var name = slotNames[k] || (k.charAt(0).toUpperCase() + k.slice(1).replace(/_/g, ' '));
+                slotsHtml += '<div style="font-size:10px;color:var(--ink-muted);text-transform:uppercase;letter-spacing:0.5px;margin-top:6px">' + safeText(name) + '</div>'
+                  + '<span style="white-space:pre-wrap;display:block" dir="' + trDir + '">' + safeText(v) + '</span>';
+              });
               var warnHtml = (jj.warnings && jj.warnings.length) ? '<div style="font-size:10px;color:var(--warn);margin-top:4px">⚠ ' + safeText(jj.warnings.join('; ')) + '</div>' : '';
               trOut.innerHTML = '<div style="margin-top:8px;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:color-mix(in oklab, var(--lane) 3%, transparent)">'
-                + '<div style="font-size:10px;color:var(--ink-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px">' + safeText(lbl) + ' · saved with this card</div>'
-                + '<span style="white-space:pre-wrap" dir="' + (jj.rtl ? 'rtl' : 'auto') + '">' + safeText(s) + '</span>' + warnHtml + '</div>';
+                + '<div style="font-size:10px;color:var(--ink-muted);text-transform:uppercase;letter-spacing:0.5px">' + safeText(lbl) + ' · saved with this card</div>'
+                + slotsHtml + warnHtml + '</div>';
             })
-            .catch(function(){ trBtn.disabled = false; trBtn.textContent = 'Translate'; trOut.innerHTML = '<div style="font-size:10px;color:var(--warn);margin-top:4px">Translation failed — try again.</div>'; });
+            .catch(function(){ trBtn.disabled = false; trBtn.textContent = 'Translate'; if (window.MH && MH.btnState) MH.btnState(trBtn, 'idle'); trOut.innerHTML = '<div style="font-size:10px;color:var(--warn);margin-top:4px">Translation failed — try again.</div>'; });
         });
       }
       // W.11: result-grounded alt text — editable, saved with the card so
@@ -4656,6 +5169,10 @@ function createGraphic(btn, createUrl, cardId, fmt, assetId, noPhoto) {
       prog.complete(function(){
         btn.disabled = false; btn.textContent = origLabel;
         _renderVisualPanel(panel, res.body, cardId, createUrl);
+        // JS2-3 (B-2 follow-up): this render just landed on disk, so the
+        // export gates are stale — lift them in place on pages that gate
+        // (the pack page defines the helper; elsewhere it is undefined).
+        if (window.mhExportGatesEnable) window.mhExportGatesEnable(cardId);
       });
     })
     .catch(function(err) {
@@ -4956,148 +5473,6 @@ function _renderVisualPanel(panel, data, cardId, createUrl) {
     '</div>';
 }
 
-// Motion-graphic generation: async job + poll, cached server-side. fmt picks
-// the output cut (story 9:16 default, portrait 4:5, square 1:1, landscape
-// 16:9) \u2014 same card facts, same brand, re-laid-out per platform.
-var _motionCache = {};
-var _MOTION_FMT_DIMS = {story: '1080&times;1920', portrait: '1080&times;1350', square: '1080&times;1080', landscape: '1920&times;1080'};
-function _motionFmtChips(motionUrl, cardId, active) {
-  var out = '';
-  ['story', 'portrait', 'square', 'landscape'].forEach(function(f) {
-    var label = f.charAt(0).toUpperCase() + f.slice(1);
-    if (f === active) {
-      out += '<span class="btn secondary" style="font-size:11px;padding:4px 10px;opacity:0.55;pointer-events:none">' + label + ' &#x2713;</span>';
-    } else {
-      out += '<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick=' +
-        _attrEsc('generateMotion(this, ' + JSON.stringify(motionUrl) + ', ' + JSON.stringify(cardId) + ', ' + JSON.stringify(f) + ')') +
-        '>' + label + '</button>';
-    }
-  });
-  return out;
-}
-// M32 (UX-4): per-card motion now uses the same async job + poll pattern the
-// reel adopted — a cold Remotion render (30-90s) on a held connection gets
-// killed by front-line proxies as a bogus "Network error". The button kicks
-// a background job, polls, then streams the finished MP4 from the motion-file
-// route (a real URL that survives navigation, with a ?poster=1 sidecar).
-function generateMotion(btn, motionUrl, cardId, fmt) {
-  fmt = fmt || 'story';
-  var panel = document.querySelector('.motion-panel[data-card="' + cardId + '"]');
-  if (!panel) return;
-  panel.style.display = '';
-  var origLabel = btn.textContent;
-  btn.disabled = true;
-  btn.textContent = 'Rendering motion…';
-  var prog = MH.renderProgress(panel, {label: 'Rendering ' + fmt + ' motion', sub: 'First render can take up to 90 seconds — repeats are instant', expectedMs: 45000, accent: 'medal'});
-  var fail = function(msg) {
-    prog.stop();
-    btn.disabled = false; btn.textContent = origLabel;
-    // msg can be a raw str(e) detail (meet names, node stderr) — escape
-    // before it touches innerHTML.
-    panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">' + window.safeText(msg) + '</div>';
-  };
-  var jobUrl = motionUrl + '-job' + (fmt !== 'story' ? '?format=' + encodeURIComponent(fmt) : '');
-  // JSON content-type: the CSRF layer exempts application/json fetches
-  // (a cross-site page can't send them without a CORS preflight).
-  fetch(jobUrl, {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'})
-    .then(function(r) { return r.json().then(function(j){ return {status: r.status, body: j}; }); })
-    .then(function(res) {
-      if (res.status !== 202 || !res.body || !res.body.poll_url) {
-        fail((res.body && (res.body.user_message || res.body.detail || res.body.error)) || 'could not start the render');
-        return;
-      }
-      var tries = 0;
-      var poll = function() {
-        tries++;
-        if (tries > 80) { fail('timed out waiting for the render — try again'); return; }
-        fetch(res.body.poll_url)
-          .then(function(r){ return r.json(); })
-          .then(function(j) {
-            if (j.status === 'done' && j.video_url) {
-              prog.complete(function(){
-                btn.disabled = false; btn.textContent = origLabel;
-                _motionCache[cardId + ':' + fmt] = j.video_url;
-                mhRenderMotion(panel, motionUrl, cardId, fmt, j.video_url);
-              });
-              return;
-            }
-            if (j.status === 'error' || (j.error && j.status !== 'running')) {
-              fail(j.user_message || j.error || 'render failed'); return;
-            }
-            setTimeout(poll, 3000);
-          })
-          .catch(function() { setTimeout(poll, 3000); });
-      };
-      setTimeout(poll, 3000);
-    })
-    .catch(function(err) { fail('Network error: ' + err); });
-}
-
-// The finished per-card motion panel — used by generateMotion's success path
-// and the on-load "Rendered videos" restore. videoUrl is the persistent
-// motion-file route; its ?poster=1 sidecar becomes the <video> poster.
-function mhRenderMotion(panel, motionUrl, cardId, fmt, videoUrl) {
-  var poster = videoUrl + (videoUrl.indexOf('?') === -1 ? '?' : '&') + 'poster=1';
-  var vidCol = fmt === 'landscape' ? 'flex:0 0 min(300px,100%);max-width:320px' : 'flex:0 0 min(200px,100%);max-width:220px';
-  panel.innerHTML =
-    '<div style="display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap">' +
-      '<div style="' + vidCol + '">' +
-        '<video class="mh-motion-video" src="' + videoUrl + '" poster="' + poster + '" controls playsinline preload="metadata" style="width:100%;border-radius:6px;border:1px solid var(--border);background:#000"></video>' +
-      '</div>' +
-      '<div style="flex:1;min-width:min(200px,100%)">' +
-        '<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:4px">Motion &middot; ' + (_MOTION_FMT_DIMS[fmt] || '') + ' &middot; 6s</div>' +
-        '<div style="font-size:12px;color:var(--ink);margin-bottom:8px;line-height:1.4">Branded MP4. Same archetype, colours, and seed as the static card &mdash; including your Inspector accent and photo on/off choices. An Inspector crop applies to stills only for now.</div>' +
-        '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px">' + _motionFmtChips(motionUrl, cardId, fmt) + '</div>' +
-        '<div style="display:flex;gap:6px;flex-wrap:wrap">' +
-          '<a class="btn secondary" href="' + videoUrl + '" download="motion-' + cardId + '-' + fmt + '.mp4" style="font-size:11px;padding:4px 10px">Download MP4</a>' +
-        '</div>' +
-        '<div class="mh-motion-why" style="font-size:11px;color:var(--ink-muted);margin-top:8px"></div>' +
-      '</div>' +
-    '</div>' +
-    '<div class="mh-reel-comments" style="margin-top:12px"></div>';
-  _loadMotionWhy(panel, motionUrl, fmt);
-  // UI 1.8 - pin timestamp comments to this card's motion clip too. The
-  // run-level comments endpoint sits at the path before '/card/'.
-  var _cmRoot = motionUrl.split('/card/')[0];
-  var _cmMount = panel.querySelector('.mh-reel-comments');
-  if (_cmMount && typeof mhReelComments === 'function') {
-    mhReelComments({mount: _cmMount, video: panel.querySelector('video.mh-motion-video'), baseUrl: _cmRoot + '/reel/comments', target: 'card:' + cardId});
-  }
-}
-
-// "Why this motion design" \u2014 the render's explainability sidecar, fetched
-// after the MP4 lands. Absence is fine (legacy renders predate manifests).
-function _loadMotionWhy(panel, motionUrl, fmt) {
-  var slot = panel.querySelector('.mh-motion-why');
-  if (!slot) return;
-  var mUrl = motionUrl + '/manifest' + (fmt !== 'story' ? '?format=' + encodeURIComponent(fmt) : '');
-  fetch(mUrl).then(function(r){ return r.ok ? r.json() : null; }).then(function(m) {
-    if (!m || !m.card) return;
-    var bits = [];
-    if (m.card.archetype) bits.push('archetype <b>' + m.card.archetype + '</b>');
-    if (m.card.motion_intent) bits.push('motion <b>' + m.card.motion_intent + '</b>');
-    if (m.card.mood) bits.push('mood <b>' + m.card.mood + '</b>');
-    bits.push(m.card.colour_source === 'still-parity-roles' ? 'colours mirror the approved still' : 'colours from seed ' + (m.card.variation_seed || ''));
-    slot.innerHTML = 'Why this design: ' + bits.join(' &middot; ') + mhEngineNoteHtml(m);
-  }).catch(function(){});
-}
-
-// M22 handoff — honest engine disclosure. The manifest names the engine that
-// produced this video; the reduced-motion FFmpeg fallback writes plain-language
-// capability notes (no text choreography / count-up, static cover chips) that
-// the user deserves to see instead of silently wondering why the video looks
-// simpler. Manifest fields are engine-written but escaped anyway.
-function mhEngineNoteHtml(m) {
-  if (!m || m.engine !== 'ffmpeg') return '';
-  var notes = m.notes || {};
-  var line = notes.engine_note || 'Rendered by the reduced-motion FFmpeg engine.';
-  var extra = [];
-  if (notes.captions === 'unsupported-on-engine') extra.push('burned captions are unavailable on this engine');
-  if (notes.stat_chips === 'static-cover') extra.push('cover stats are static (no count-up)');
-  return '<div style="margin-top:4px;color:var(--ink-muted)">' + window.safeText(line) +
-    (extra.length ? ' (' + window.safeText(extra.join('; ')) + ')' : '') + '</div>';
-}
-
 // Voiceover (opt-in, MEDIAHUB_VOICEOVER=1): speak the human-approved caption.
 // The route is the audio approval gate — a 409 means "approve first", a 429
 // means the render slot is busy, a 503 means the speech backend is off/missing.
@@ -5168,56 +5543,163 @@ function generateReel(btn, reelUrl, fmt) {
   fmt = fmt || 'story';
   var panel = document.getElementById('reel-panel');
   if (!panel) return;
+  if (panel.dataset.mhWatching) {
+    if (window.MH && MH.toast) MH.toast('A reel render is already in progress — hold on…', 'info', 2500);
+    return;
+  }
+  // JS-4: claim the panel synchronously — a double-click used to pass the
+  // guard twice while the first 202 round-trip was in flight, starting two
+  // jobs. Every terminal path overwrites (watch) or clears (_mhJobFail).
+  panel.dataset.mhWatching = '1';
   panel.style.display = '';
   var origLabel = btn.textContent;
   btn.disabled = true;
-  btn.textContent = 'Rendering reel\u2026';
-  var prog = MH.renderProgress(panel, {label: 'Producing your ' + fmt + ' reel', sub: 'Top ranked moments \u2014 up to 90 seconds the first time', expectedMs: 60000, accent: 'medal'});
-  var fail = function(msg) {
-    prog.stop();
-    btn.disabled = false; btn.textContent = origLabel;
-    // msg can fall back to a raw str(e) detail (meet names, node stderr) —
-    // escape before it touches innerHTML.
-    panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">Reel render error: ' + window.safeText(msg) + '</div>';
+  btn.textContent = 'Rendering reel…';
+  var prog = MH.renderProgress(panel, {label: 'Producing your ' + fmt + ' reel', sub: 'Top ranked moments — up to 90 seconds the first time', expectedMs: 60000, accent: 'medal'});
+  var ctx = {panel: panel, prog: prog, btn: btn, origLabel: origLabel, prefix: 'Reel render error: '};
+  var startNew = function() {
+    mhJobForget('reel', reelUrl);
+    // M31: the reel composer's picks (cards / rhythm / mix) ride the job
+    // request. An untouched composer contributes NOTHING, so the default
+    // request — and therefore the default top-3 reel — stays byte-identical.
+    var _q = [];
+    if (fmt !== 'story') _q.push('format=' + encodeURIComponent(fmt));
+    var _extra = (typeof mhReelComposerQuery === 'function') ? mhReelComposerQuery() : '';
+    if (_extra) _q.push(_extra);
+    fetch(reelUrl + '-job' + (_q.length ? '?' + _q.join('&') : ''), {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'})
+      .then(function(r) { return r.json().then(function(j){ return {status: r.status, body: j}; }); })
+      .then(function(res) {
+        if (res.status !== 202 || !res.body || !res.body.poll_url) {
+          // C-17: an unsupported ?lang= answers {error:'bad_language', message}
+          // — surface the plain-English message, never the raw enum.
+          _mhJobFail(ctx, (res.body && (res.body.user_message || res.body.message || res.body.detail || res.body.error)) || 'could not start the render');
+          return;
+        }
+        mhJobRemember('reel', reelUrl, {poll_url: res.body.poll_url, job_id: res.body.job_id || '', fmt: fmt});
+        _mhReelWatch(reelUrl, fmt, res.body.poll_url, ctx);
+      })
+      .catch(function(err) { _mhJobFail(ctx, 'Network error: ' + err); });
   };
-  var success = function(videoUrl) {
-    prog.complete(function(){
-      btn.disabled = false; btn.textContent = origLabel;
-      mhRenderReel(panel, reelUrl, fmt, videoUrl);
-    });
+  // D-13: a reel render already in flight (this tab or another) is resumed
+  // rather than restarted — a restart just hit the busy renderer.
+  var rec = mhJobRecall('reel', reelUrl);
+  if (rec && rec.poll_url) {
+    fetch(rec.poll_url)
+      .then(function(r){ return r.json(); })
+      .then(function(j) {
+        if (j.status === 'running') { _mhReelWatch(reelUrl, rec.fmt || fmt, rec.poll_url, ctx); }
+        else { startNew(); }
+      })
+      .catch(function() { startNew(); });
+    return;
+  }
+  startNew();
+}
+
+// D-13 — poll one reel job to a terminal state. Polls every 3s up to the
+// server's 600s render budget (the old 240s cap abandoned healthy renders
+// the server-side heartbeat was still keeping alive).
+function _mhReelWatch(reelUrl, fmt, pollUrl, ctx) {
+  ctx.panel.dataset.mhWatching = pollUrl;
+  var tries = 0;
+  var poll = function() {
+    tries++;
+    if (tries > 200) {
+      mhJobForget('reel', reelUrl);
+      _mhJobFail(ctx, 'timed out waiting for the render — try again');
+      return;
+    }
+    fetch(pollUrl)
+      .then(function(r){ return r.json(); })
+      .then(function(j) {
+        if (j.status === 'done' && j.video_url) {
+          mhJobForget('reel', reelUrl);
+          delete ctx.panel.dataset.mhWatching;
+          ctx.prog.complete(function(){
+            if (ctx.btn) { ctx.btn.disabled = false; ctx.btn.textContent = ctx.origLabel; }
+            mhRenderReel(ctx.panel, reelUrl, fmt, j.video_url);
+          });
+          return;
+        }
+        if (j.status === 'error' || (j.error && j.status !== 'running')) {
+          // A busy renderer usually means an earlier reel job still holds
+          // the slot — resume that one instead of surfacing the error.
+          var rec = (j.error === 'renderer_busy') ? mhJobRecall('reel', reelUrl) : null;
+          if (rec && rec.poll_url && rec.poll_url !== pollUrl) {
+            _mhReelWatch(reelUrl, rec.fmt || fmt, rec.poll_url, ctx);
+            return;
+          }
+          mhJobForget('reel', reelUrl);
+          _mhJobFail(ctx, j.user_message || j.error || 'render failed');
+          return;
+        }
+        setTimeout(poll, 3000);
+      })
+      .catch(function() { setTimeout(poll, 3000); });
   };
-  // M31: the reel composer's picks (cards / rhythm / mix) ride the job
-  // request. An untouched composer contributes NOTHING, so the default
-  // request — and therefore the default top-3 reel — stays byte-identical.
-  var _q = [];
-  if (fmt !== 'story') _q.push('format=' + encodeURIComponent(fmt));
-  var _extra = (typeof mhReelComposerQuery === 'function') ? mhReelComposerQuery() : '';
-  if (_extra) _q.push(_extra);
-  fetch(reelUrl + '-job' + (_q.length ? '?' + _q.join('&') : ''), {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'})
-    .then(function(r) { return r.json().then(function(j){ return {status: r.status, body: j}; }); })
-    .then(function(res) {
-      if (res.status !== 202 || !res.body || !res.body.poll_url) {
-        fail((res.body && (res.body.user_message || res.body.detail || res.body.error)) || 'could not start the render');
-        return;
-      }
-      var tries = 0;
-      var poll = function() {
-        tries++;
-        if (tries > 80) { fail('timed out waiting for the render \u2014 try again'); return; }
-        fetch(res.body.poll_url)
-          .then(function(r){ return r.json(); })
-          .then(function(j) {
-            if (j.status === 'done' && j.video_url) { success(j.video_url); return; }
-            if (j.status === 'error' || (j.error && j.status !== 'running')) {
-              fail(j.user_message || j.error || 'render failed'); return;
-            }
-            setTimeout(poll, 3000);
-          })
-          .catch(function() { setTimeout(poll, 3000); });
-      };
-      setTimeout(poll, 3000);
-    })
-    .catch(function(err) { fail('Network error: ' + err); });
+  setTimeout(poll, 3000);
+}
+
+// D-13 — on page load, re-attach to a reel render still running server-side
+// (started in this tab or another; single-format or all-formats). A job that
+// finished while the user was away renders its video; dead records are
+// cleared. Returns true when the panel was claimed so the caller skips the
+// finished-file restore — JS-3: when the recalled record turns out stale
+// (poll unreachable / job gone / nothing restorable) it is forgotten and
+// onIdle (the caller's finished-file restore) runs, so a dead record can
+// never suppress the finished reel.
+function mhResumeReelJob(reelUrl, onIdle) {
+  var panel = document.getElementById('reel-panel');
+  if (!panel) return false;
+  var claimed = false;
+  ['reel', 'reel-batch'].forEach(function(kind) {
+    if (claimed) return;
+    var rec = mhJobRecall(kind, reelUrl);
+    if (!rec || !rec.poll_url) return;
+    claimed = true;
+    // JS-4: claim the panel before the async poll resolves — a click racing
+    // this resume could otherwise start a duplicate job.
+    panel.dataset.mhWatching = '1';
+    var fmt = rec.fmt || 'story';
+    var idle = function() {
+      // JS-3: stale/unusable record — forget it, release the panel and fall
+      // through to the restore the caller skipped when we claimed the panel.
+      mhJobForget(kind, reelUrl);
+      delete panel.dataset.mhWatching;
+      if (typeof onIdle === 'function') onIdle();
+    };
+    fetch(rec.poll_url)
+      .then(function(r){ return r.json(); })
+      .then(function(j) {
+        if (j.status === 'running') {
+          panel.style.display = '';
+          var opts = (kind === 'reel')
+            ? {label: 'Producing your ' + fmt + ' reel', sub: 'Resumed — this render kept going while you were away', expectedMs: 60000, accent: 'medal'}
+            : {label: 'Producing every reel format', sub: 'Resumed — this render kept going while you were away', expectedMs: 150000, accent: 'medal'};
+          var ctx = {panel: panel, prog: MH.renderProgress(panel, opts), btn: null, origLabel: '', prefix: 'Reel render error: '};
+          if (kind === 'reel') _mhReelWatch(reelUrl, fmt, rec.poll_url, ctx);
+          else _mhReelBatchWatch(reelUrl, rec.poll_url, ctx);
+          return;
+        }
+        if (j.status === 'done' && kind === 'reel' && j.video_url) {
+          mhJobForget(kind, reelUrl);
+          delete panel.dataset.mhWatching;
+          panel.style.display = '';
+          mhRenderReel(panel, reelUrl, fmt, j.video_url);
+          return;
+        }
+        if (j.status === 'done' && kind === 'reel-batch' && j.video_urls && Object.keys(j.video_urls).length) {
+          mhJobForget(kind, reelUrl);
+          delete panel.dataset.mhWatching;
+          panel.style.display = '';
+          mhRenderReelBatch(panel, reelUrl, j.video_urls, j.formats_failed || {});
+          return;
+        }
+        idle();
+      })
+      .catch(idle);
+  });
+  return claimed;
 }
 
 // R1.15 - render every reel cut (story/portrait/square/landscape) in one
@@ -5227,49 +5709,94 @@ function generateReel(btn, reelUrl, fmt) {
 function generateReelBatch(btn, reelUrl) {
   var panel = document.getElementById('reel-panel');
   if (!panel) return;
+  if (panel.dataset.mhWatching) {
+    if (window.MH && MH.toast) MH.toast('A reel render is already in progress — hold on…', 'info', 2500);
+    return;
+  }
+  // JS-4: claim the panel synchronously (see generateReel).
+  panel.dataset.mhWatching = '1';
   panel.style.display = '';
   var origLabel = btn.textContent;
   btn.disabled = true;
   btn.textContent = 'Rendering all formats…';
   var prog = MH.renderProgress(panel, {label: 'Producing every reel format', sub: 'Story, portrait, square & landscape — up to a few minutes the first time', expectedMs: 150000, accent: 'medal'});
-  var fail = function(msg) {
-    prog.stop();
-    btn.disabled = false; btn.textContent = origLabel;
-    panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">Reel render error: ' + window.safeText(msg) + '</div>';
+  var ctx = {panel: panel, prog: prog, btn: btn, origLabel: origLabel, prefix: 'Reel render error: '};
+  var startNew = function() {
+    mhJobForget('reel-batch', reelUrl);
+    // M31: the composer's picks apply to the all-formats batch too.
+    var _extraB = (typeof mhReelComposerQuery === 'function') ? mhReelComposerQuery() : '';
+    fetch(reelUrl + '-batch' + (_extraB ? '?' + _extraB : ''), {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'})
+      .then(function(r) { return r.json().then(function(j){ return {status: r.status, body: j}; }); })
+      .then(function(res) {
+        if (res.status !== 202 || !res.body || !res.body.poll_url) {
+          // C-17: surface bad_language's plain-English message here too.
+          _mhJobFail(ctx, (res.body && (res.body.user_message || res.body.message || res.body.detail || res.body.error)) || 'could not start the render');
+          return;
+        }
+        mhJobRemember('reel-batch', reelUrl, {poll_url: res.body.poll_url, job_id: res.body.job_id || ''});
+        _mhReelBatchWatch(reelUrl, res.body.poll_url, ctx);
+      })
+      .catch(function(err) { _mhJobFail(ctx, 'Network error: ' + err); });
   };
-  var success = function(videoUrls, failed) {
-    prog.complete(function(){
-      btn.disabled = false; btn.textContent = origLabel;
-      mhRenderReelBatch(panel, reelUrl, videoUrls, failed);
-    });
+  // D-13: an all-formats render already in flight is resumed, not restarted.
+  var rec = mhJobRecall('reel-batch', reelUrl);
+  if (rec && rec.poll_url) {
+    fetch(rec.poll_url)
+      .then(function(r){ return r.json(); })
+      .then(function(j) {
+        if (j.status === 'running') { _mhReelBatchWatch(reelUrl, rec.poll_url, ctx); }
+        else { startNew(); }
+      })
+      .catch(function() { startNew(); });
+    return;
+  }
+  startNew();
+}
+
+// D-13 — poll one all-formats batch job to a terminal state (600s budget,
+// matching the server's render timeout).
+function _mhReelBatchWatch(reelUrl, pollUrl, ctx) {
+  ctx.panel.dataset.mhWatching = pollUrl;
+  var tries = 0;
+  var poll = function() {
+    tries++;
+    if (tries > 200) {
+      mhJobForget('reel-batch', reelUrl);
+      _mhJobFail(ctx, 'timed out waiting for the render — try again');
+      return;
+    }
+    fetch(pollUrl)
+      .then(function(r){ return r.json(); })
+      .then(function(j) {
+        if (j.status === 'done' && j.video_urls && Object.keys(j.video_urls).length) {
+          mhJobForget('reel-batch', reelUrl);
+          delete ctx.panel.dataset.mhWatching;
+          ctx.prog.complete(function(){
+            if (ctx.btn) { ctx.btn.disabled = false; ctx.btn.textContent = ctx.origLabel; }
+            mhRenderReelBatch(ctx.panel, reelUrl, j.video_urls, j.formats_failed || {});
+          });
+          return;
+        }
+        if (j.status === 'error' || (j.error && j.status !== 'running')) {
+          // CON-6: a busy renderer usually means another tab's batch job
+          // holds the slot — attach to the recalled record's live job (the
+          // motion/reel watches' idiom) instead of forgetting the record,
+          // which deleted the surviving job's pointer. Forget only when the
+          // recalled poll itself lands terminal.
+          var rec = (j.error === 'renderer_busy') ? mhJobRecall('reel-batch', reelUrl) : null;
+          if (rec && rec.poll_url && rec.poll_url !== pollUrl) {
+            _mhReelBatchWatch(reelUrl, rec.poll_url, ctx);
+            return;
+          }
+          mhJobForget('reel-batch', reelUrl);
+          _mhJobFail(ctx, j.user_message || j.error || 'render failed');
+          return;
+        }
+        setTimeout(poll, 3000);
+      })
+      .catch(function() { setTimeout(poll, 3000); });
   };
-  // M31: the composer's picks apply to the all-formats batch too.
-  var _extraB = (typeof mhReelComposerQuery === 'function') ? mhReelComposerQuery() : '';
-  fetch(reelUrl + '-batch' + (_extraB ? '?' + _extraB : ''), {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'})
-    .then(function(r) { return r.json().then(function(j){ return {status: r.status, body: j}; }); })
-    .then(function(res) {
-      if (res.status !== 202 || !res.body || !res.body.poll_url) {
-        fail((res.body && (res.body.user_message || res.body.detail || res.body.error)) || 'could not start the render');
-        return;
-      }
-      var tries = 0;
-      var poll = function() {
-        tries++;
-        if (tries > 120) { fail('timed out waiting for the render — try again'); return; }
-        fetch(res.body.poll_url)
-          .then(function(r){ return r.json(); })
-          .then(function(j) {
-            if (j.status === 'done' && j.video_urls && Object.keys(j.video_urls).length) { success(j.video_urls, j.formats_failed || {}); return; }
-            if (j.status === 'error' || (j.error && j.status !== 'running')) {
-              fail(j.user_message || j.error || 'render failed'); return;
-            }
-            setTimeout(poll, 3000);
-          })
-          .catch(function() { setTimeout(poll, 3000); });
-      };
-      setTimeout(poll, 3000);
-    })
-    .catch(function(err) { fail('Network error: ' + err); });
+  setTimeout(poll, 3000);
 }
 
 // R1.15 - the finished multi-format panel: the story cut (or first produced)
@@ -5327,7 +5854,7 @@ function mhRenderReel(panel, reelUrl, fmt, videoUrl) {
   panel.innerHTML =
     '<div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap">' +
       '<div style="' + vidCol + '">' +
-        '<video class="mh-reel-video" src="' + videoUrl + '" poster="' + poster + '" controls playsinline preload="metadata" style="width:100%;border-radius:6px;border:1px solid var(--border);background:#000"></video>' +
+        '<video class="mh-reel-video" src="' + videoUrl + '" poster="' + poster + '" controls playsinline preload="metadata" style="width:100%;border-radius:6px;border:1px solid var(--border);background:var(--video-letterbox)"></video>' +
       '</div>' +
       '<div style="flex:1;min-width:min(240px,100%)">' +
         '<div style="font-size:11px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:4px">Meet reel &middot; ' + (_MOTION_FMT_DIMS[fmt] || '') + '</div>' +
@@ -5377,12 +5904,14 @@ function mhReelComposerState() {
   var defaults = (comp.getAttribute('data-default-cards') || '').split(',').filter(Boolean);
   var rhythmSel = document.getElementById('mh-reel-rhythm');
   var mixSel = document.getElementById('mh-reel-mix');
+  var dubSel = document.getElementById('mh-reel-dub');
   return {
     comp: comp,
     picks: picks,
     defaults: defaults,
     rhythm: rhythmSel ? rhythmSel.value : 'steady',
-    mix: mixSel ? mixSel.value : ''
+    mix: mixSel ? mixSel.value : '',
+    dub: dubSel ? dubSel.value : ''
   };
 }
 function mhReelComposerQuery() {
@@ -5403,6 +5932,9 @@ function mhReelComposerQuery() {
     params.push('outro=' + MH_REEL_MATHS.showcaseOutro);
   }
   if (st.mix) params.push('mix=' + encodeURIComponent(st.mix));
+  // C-17: the AI-dub language rides the same request; "" (no dub) adds
+  // nothing, keeping the default request byte-identical.
+  if (st.dub) params.push('lang=' + encodeURIComponent(st.dub));
   return params.join('&');
 }
 // Keep the readout + max-5 rule live as the user ticks moments.
@@ -5591,7 +6123,7 @@ function mhReelComments(opts) {
     jget(baseUrl + '?target=' + encodeURIComponent(target)).then(function(j) {
       state.comments = (j && j.comments) || [];
       renderMarkers(); renderList(); syncHead();
-    }).catch(function(){});
+    }).catch(function(){ showErr('Could not load comments — check your connection.'); });
   }
   function mutate(id, body) {
     jpost(baseUrl + '/' + encodeURIComponent(id), body).then(function(res) {
@@ -5740,7 +6272,9 @@ function pickVariant(btn, cardId, createUrl) {
   var imgUrl = apiBase + '/api/visual/' + encodeURIComponent(vid) + '/png/' + encodeURIComponent(fmt);
   // Persist the choice in workflow sidecar
   var url = WF_API_BASE + encodeURIComponent(cardId);
-  fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({action:'set_edits', edits:{picked_visual_id: vid, picked_variation_seed: seed}})}).catch(function(){});
+  fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({action:'set_edits', edits:{picked_visual_id: vid, picked_variation_seed: seed}})})
+    .then(function(r){ if (!r.ok && window.MH && MH.toast) MH.toast('Could not save your pick — it may not stick after a reload.', 'error', 3500); })
+    .catch(function(){ if (window.MH && MH.toast) MH.toast('Could not save your pick — check your connection.', 'error', 3500); });
   // Promote to primary view
   var panel = document.querySelector('.visual-panel[data-card="' + cardId + '"]');
   var fakeData = {
@@ -5853,6 +6387,7 @@ function _runReformat(panel, btn, url, label) {
   var result = panel.querySelector('.rf-result');
   var orig = btn.textContent;
   btn.disabled = true; btn.textContent = '…';
+  if (window.MH && MH.btnState) MH.btnState(btn, 'loading');
   if (result) result.innerHTML = '<div style="font-size:12px;color:var(--ink-muted)">Reformatting to ' + label + '… (5–20s)</div>';
   fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'})
     .then(function(r){
@@ -5862,6 +6397,7 @@ function _runReformat(panel, btn, url, label) {
     })
     .then(function(res){
       btn.disabled = false; btn.textContent = orig;
+      if (window.MH && MH.btnState) MH.btnState(btn, 'idle');
       if (res.err) { if (result) result.innerHTML = '<div style="font-size:12px;color:var(--bad)">' + res.err + '</div>'; return; }
       if (result) result.innerHTML =
         '<div style="font-size:11px;color:var(--ink-muted);margin-bottom:4px">' + label + '</div>' +
@@ -5870,6 +6406,7 @@ function _runReformat(panel, btn, url, label) {
     })
     .catch(function(e){
       btn.disabled = false; btn.textContent = orig;
+      if (window.MH && MH.btnState) MH.btnState(btn, 'idle');
       if (result) result.innerHTML = '<div style="font-size:12px;color:var(--bad)">Network error: ' + e + '</div>';
     });
 }
@@ -5962,15 +6499,17 @@ function copilotSend(btn, cardId) {
 
 function copilotPreview(btn, url) {
   var orig = btn.textContent; btn.disabled=true; btn.textContent='Rendering…';
+  if (window.MH && MH.btnState) MH.btnState(btn, 'loading');
   fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'})
     .then(function(r){ var ct=r.headers.get('Content-Type')||''; if (r.ok && ct.indexOf('image')===0) return r.blob().then(function(b){return {img:URL.createObjectURL(b)};}); return r.json().then(function(j){return {err:(j&&j.user_message)||'preview failed'};}); })
     .then(function(res){ btn.disabled=false; btn.textContent=orig;
+      if (window.MH && MH.btnState) MH.btnState(btn, 'idle');
       var holder=document.createElement('div'); holder.style.marginTop='6px';
       if (res.err) holder.innerHTML='<div style="font-size:11px;color:var(--bad)">'+window.safeText(res.err)+'</div>';
       else holder.innerHTML='<img src="'+res.img+'" alt="Edited design" style="max-width:100%;border-radius:6px;border:1px solid var(--border)" />';
       btn.parentNode.appendChild(holder);
     })
-    .catch(function(e){ btn.disabled=false; btn.textContent=orig; });
+    .catch(function(e){ btn.disabled=false; btn.textContent=orig; if (window.MH && MH.btnState) MH.btnState(btn, 'idle'); });
 }
 
 function copilotRemember(btn) {
@@ -5982,7 +6521,7 @@ function copilotRemember(btn) {
   fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({text: txt})})
     .then(function(r){return r.json();})
     .then(function(j){ if (window.MH && MH.toast) MH.toast(j.ok ? 'Saved — the copilot will remember that.' : (j.user_message||'Could not save'), j.ok?'success':'error', 3000); })
-    .catch(function(){});
+    .catch(function(){ if (window.MH && MH.toast) MH.toast('Could not save the preference — check your connection.', 'error', 3000); });
 }
 
 function copilotMic(btn, cardId) {
@@ -6039,7 +6578,7 @@ function commentsLoad(cardId) {
     commentsRender(panel, cardId, j.comments||[]);
     var badge = document.querySelector('.comments-count[data-card="' + cardId + '"]');
     if (badge) { var n=(j.comments||[]).length; var t=j.open_tasks||0; badge.textContent = n? (' '+n+(t?(' · '+t+'☑'):'')) : ''; }
-  }).catch(function(){});
+  }).catch(function(){ var st = panel.querySelector('.cm-status'); if (st) st.textContent = 'Could not load comments — check your connection.'; });
 }
 
 function commentsRender(panel, cardId, comments) {
@@ -6142,15 +6681,27 @@ function commentsSend(btn, cardId) {
 function commentsMutate(cardId, commentId, action) {
   var panel = document.querySelector('.comments-panel[data-card="' + cardId + '"]');
   if (!panel) return;
+  var status = panel.querySelector('.cm-status');
   fetch(panel.dataset.commentsUrl + '/' + encodeURIComponent(commentId), {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({action: action})})
-    .then(function(r){return r.json();}).then(function(){ commentsLoad(cardId); }).catch(function(){});
+    .then(function(r){ return r.json().then(function(j){ return {ok:r.ok, j:j}; }); })
+    .then(function(res){
+      if (!res.ok || res.j.error) { if (status) status.textContent = res.j.reason || res.j.detail || res.j.error || 'Could not update the comment'; return; }
+      if (status) status.textContent='';
+      commentsLoad(cardId);
+    }).catch(function(){ if (status) status.textContent='Network error'; });
 }
 
 function commentsReact(cardId, commentId, emoji) {
   var panel = document.querySelector('.comments-panel[data-card="' + cardId + '"]');
   if (!panel) return;
+  var status = panel.querySelector('.cm-status');
   fetch(panel.dataset.commentsUrl + '/' + encodeURIComponent(commentId), {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({action:'react', emoji: emoji})})
-    .then(function(r){return r.json();}).then(function(){ commentsLoad(cardId); }).catch(function(){});
+    .then(function(r){ return r.json().then(function(j){ return {ok:r.ok, j:j}; }); })
+    .then(function(res){
+      if (!res.ok || res.j.error) { if (status) status.textContent = res.j.reason || res.j.detail || res.j.error || 'Could not add the reaction'; return; }
+      if (status) status.textContent='';
+      commentsLoad(cardId);
+    }).catch(function(){ if (status) status.textContent='Network error'; });
 }
 
 /* ---- Version history: diff + restore (roadmap 1.18) ---- */
@@ -6181,7 +6732,7 @@ function historyLoad(cardId) {
         rb.onclick=function(ev){ ev.preventDefault(); historyRestore(cardId, rev.brief_id); }; row.appendChild(rb); }
       list.appendChild(row);
     });
-  }).catch(function(){});
+  }).catch(function(){ var list = panel.querySelector('.hist-list'); if (list) list.textContent = 'Could not load version history — check your connection.'; });
 }
 
 function historyDiff(cardId, a, b) {
@@ -6199,7 +6750,7 @@ function historyDiff(cardId, a, b) {
       t.appendChild(r);
     });
     box.appendChild(t);
-  }).catch(function(){});
+  }).catch(function(){ var box = panel.querySelector('.hist-diff'); if (box) { box.style.cssText='font-size:12px;color:var(--bad)'; box.textContent = 'Could not load the diff — check your connection.'; } });
 }
 
 function historyRestore(cardId, briefId) {
@@ -6210,7 +6761,7 @@ function historyRestore(cardId, briefId) {
     .then(function(r){return r.json();}).then(function(j){
       if (j.ok) { if (window.MH && MH.toast) MH.toast('Version restored — regenerate the graphic to see it.', 'success', 3500); historyLoad(cardId); }
       else if (window.MH && MH.toast) MH.toast(j.reason || 'Could not restore', 'error', 3000);
-    }).catch(function(){});
+    }).catch(function(){ if (window.MH && MH.toast) MH.toast('Could not restore — check your connection.', 'error', 3000); });
 }
 
 /* ---- Element locks (roadmap 1.18) ---- */
@@ -6238,7 +6789,7 @@ function locksLoad(cardId) {
       b.onclick=function(){ locksSet(cardId, el, !on); };
       list.appendChild(b);
     });
-  }).catch(function(){});
+  }).catch(function(){ var list = panel.querySelector('.locks-list'); if (list) list.textContent = 'Could not load the locks — check your connection.'; });
 }
 
 function locksSet(cardId, element, locked) {
@@ -6248,7 +6799,7 @@ function locksSet(cardId, element, locked) {
     .then(function(r){return r.json().then(function(j){return {ok:r.ok,j:j};});}).then(function(res){
       if (!res.ok) { if (window.MH && MH.toast) MH.toast(res.j.reason || 'Could not change lock', 'error', 3000); return; }
       locksLoad(cardId);
-    }).catch(function(){});
+    }).catch(function(){ if (window.MH && MH.toast) MH.toast('Could not change the lock — check your connection.', 'error', 3000); });
 }
 
 /* ---- Share for review: expiring external links (roadmap 1.18) ---- */
@@ -6272,6 +6823,32 @@ function shareToggle(btn, cardId) {
   shareLoad(cardId);
 }
 
+// E-5: one share row — link input, Copy button, permission, an explicit
+// "expires <date>" label (the API always returned expires_at; the UI never
+// showed it), and Revoke.
+function shareRowEl(cardId, s) {
+  var row=document.createElement('div'); row.style.cssText='display:flex;gap:8px;align-items:center;padding:5px 0;border-top:1px solid var(--border);flex-wrap:wrap';
+  var inp=document.createElement('input'); inp.type='text'; inp.readOnly=true;
+  inp.value = (s.url && s.url.indexOf('http') === 0) ? s.url : (window.location.origin + s.url);
+  inp.style.cssText='flex:1;min-width:160px;font-size:11px;padding:4px 6px;border:1px solid var(--border);border-radius:6px;background:rgba(255,255,255,0.04);color:inherit';
+  inp.onclick=function(){ inp.select(); };
+  var cp=document.createElement('button'); cp.className='btn secondary'; cp.style.cssText='font-size:11px;padding:3px 9px'; cp.textContent='Copy';
+  cp.onclick=function(){
+    var done=function(ok){ cp.textContent = ok ? 'Copied!' : 'Copy failed'; setTimeout(function(){ cp.textContent='Copy'; }, 1600); };
+    var legacy=function(){ inp.focus(); inp.select(); try { done(document.execCommand('copy')); } catch(e) { done(false); } };
+    if (navigator.clipboard && window.isSecureContext) { navigator.clipboard.writeText(inp.value).then(function(){ done(true); }).catch(legacy); }
+    else { legacy(); }
+  };
+  var tag=document.createElement('span'); tag.style.cssText='font-size:11px;color:var(--ink-muted)'; tag.textContent = (s.perm==='comment'?'can comment':'view only');
+  var exp=document.createElement('span'); exp.style.cssText='font-size:11px;color:var(--ink-muted)';
+  if (s.expired) { exp.textContent='expired'; exp.style.color='var(--bad)'; }
+  else if (s.expires_at) { exp.textContent='expires ' + new Date(s.expires_at * 1000).toLocaleDateString(); }
+  var rev=document.createElement('a'); rev.href='#'; rev.style.cssText='font-size:11px;color:var(--bad)'; rev.textContent='Revoke';
+  rev.onclick=function(ev){ ev.preventDefault(); shareRevoke(cardId, s.token); };
+  row.appendChild(inp); row.appendChild(cp); row.appendChild(tag); row.appendChild(exp); row.appendChild(rev);
+  return row;
+}
+
 function shareLoad(cardId) {
   var panel = document.querySelector('.share-panel[data-card="' + cardId + '"]');
   if (!panel) return;
@@ -6279,19 +6856,24 @@ function shareLoad(cardId) {
   fetch(panel.dataset.sharesUrl).then(function(r){return r.json().then(function(j){return {ok:r.ok,j:j};});}).then(function(res){
     var list = panel.querySelector('.sh-list'); list.textContent='';
     if (!res.ok) { list.textContent = res.j.reason || 'Only an owner can manage share links.'; return; }
-    var mine = (res.j.shares||[]).filter(function(s){ return s.card_id === realCard; });
-    if (!mine.length) { list.textContent = 'No active links for this card.'; return; }
-    mine.forEach(function(s){
-      var row=document.createElement('div'); row.style.cssText='display:flex;gap:8px;align-items:center;padding:5px 0;border-top:1px solid var(--border);flex-wrap:wrap';
-      var inp=document.createElement('input'); inp.type='text'; inp.readOnly=true; inp.value=s.url;
-      inp.style.cssText='flex:1;min-width:160px;font-size:11px;padding:4px 6px;border:1px solid var(--border);border-radius:6px;background:rgba(255,255,255,0.04);color:inherit';
-      inp.onclick=function(){ inp.select(); };
-      var tag=document.createElement('span'); tag.style.cssText='font-size:11px;color:var(--ink-muted)'; tag.textContent = (s.perm==='comment'?'can comment':'view only');
-      var rev=document.createElement('a'); rev.href='#'; rev.style.cssText='font-size:11px;color:var(--bad)'; rev.textContent='Revoke';
-      rev.onclick=function(ev){ ev.preventDefault(); shareRevoke(cardId, s.token); };
-      row.appendChild(inp); row.appendChild(tag); row.appendChild(rev); list.appendChild(row);
-    });
-  }).catch(function(){});
+    var shares = res.j.shares || [];
+    var mine = shares.filter(function(s){ return s.card_id === realCard; });
+    if (!mine.length) { var none=document.createElement('div'); none.textContent='No active links for this card.'; list.appendChild(none); }
+    mine.forEach(function(s){ list.appendChild(shareRowEl(cardId, s)); });
+    // E-5: whole-meet links (minted by the bulk-export share button) appeared
+    // in no list at all, so they could never be revoked. Manage them here.
+    var wholeMeet = shares.filter(function(s){ return !s.card_id; });
+    if (wholeMeet.length) {
+      var hd=document.createElement('div');
+      hd.style.cssText='font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-top:10px';
+      hd.textContent='Whole-meet links (from bulk export)';
+      list.appendChild(hd);
+      wholeMeet.forEach(function(s){ list.appendChild(shareRowEl(cardId, s)); });
+    }
+  }).catch(function(){
+    var list = panel.querySelector('.sh-list');
+    if (list) list.textContent = 'Could not load share links — check your connection and reopen this panel.';
+  });
 }
 
 function shareCreate(btn, cardId) {
@@ -6313,8 +6895,20 @@ function shareRevoke(cardId, token) {
   if (!confirm('Revoke this link? Anyone holding it loses access immediately.')) return;
   var panel = document.querySelector('.share-panel[data-card="' + cardId + '"]');
   if (!panel) return;
+  // E-5: the revoke used to ignore the response and swallow every error, so
+  // a failed revoke looked identical to a successful one. Read the outcome
+  // and say so.
   fetch(panel.dataset.sharesUrl + '/' + encodeURIComponent(token) + '/revoke', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'})
-    .then(function(r){return r.json();}).then(function(){ shareLoad(cardId); }).catch(function(){});
+    .then(function(r){return r.json().then(function(j){return {ok:r.ok,j:j};});}).then(function(res){
+      if (!res.ok || !res.j.ok || res.j.revoked === false) {
+        if (window.MH && MH.toast) MH.toast((res.j && (res.j.reason || res.j.detail)) || 'Could not revoke that link — it may already be gone.', 'error', 3500);
+      } else if (window.MH && MH.toast) {
+        MH.toast('Link revoked — anyone holding it has lost access.', 'success', 2500);
+      }
+      shareLoad(cardId);
+    }).catch(function(){
+      if (window.MH && MH.toast) MH.toast('Could not revoke the link — network error. Try again.', 'error', 3500);
+    });
 }
 </script>
 """
@@ -6337,6 +6931,50 @@ def _schedule_button_html(run_id: str, card_id_raw, el_id: str) -> str:
     )
 
 
+# E-13: the text slots a saved translation variant can carry, in display
+# order, with the plain labels the approver sees. The /translate route accepts
+# exactly these four; a slot key outside this list still renders (labelled
+# from the key, below) so no translated text can ride into export unseen.
+_TRANSLATION_SLOT_LABELS: tuple[tuple[str, str], ...] = (
+    ("caption", "Caption"),
+    ("alt_text", "Alt text"),
+    ("headline", "Headline"),
+    ("subhead", "Subhead"),
+)
+
+
+def _translation_slot_rows_html(slots: dict, direction: str) -> str:
+    """Render EVERY text slot of a translation variant (E-13).
+
+    Each slot gets a plain label ("Caption", "Alt text", "Headline",
+    "Subhead") and its own ``dir`` attribute; unknown string slots still
+    render with a label derived from the key. All values are ``_h``-escaped
+    (provider output is untrusted). Empty string when nothing renders."""
+    if not isinstance(slots, dict):
+        return ""
+    ordered: list[tuple[str, str]] = [
+        (key, label) for key, label in _TRANSLATION_SLOT_LABELS if key in slots
+    ]
+    known = {key for key, _ in _TRANSLATION_SLOT_LABELS}
+    ordered += [
+        (str(key), str(key).replace("_", " ").strip().capitalize() or "Text")
+        for key in slots
+        if key not in known
+    ]
+    rows: list[str] = []
+    for key, label in ordered:
+        val = slots.get(key)
+        if not isinstance(val, str) or not val.strip():
+            continue
+        rows.append(
+            '<div style="font-size:10px;color:var(--ink-muted);text-transform:uppercase;'
+            f'letter-spacing:0.5px;margin-top:6px">{_h(label)}</div>'
+            f'<span style="white-space:pre-wrap;display:block" dir="{direction}">'
+            f"{_h(val.strip())}</span>"
+        )
+    return "".join(rows)
+
+
 def _render_stored_translations(card: dict) -> str:
     """Server-side render of a card's SAVED translations (1.24 bilingual pairs).
 
@@ -6346,8 +6984,11 @@ def _render_stored_translations(card: dict) -> str:
     variant from ``card["workflow"]["translations"]`` so the bilingual approval
     pair survives a page refresh — server-side and ``_h``-escaped (the persisted
     text came from a provider, so it is treated as untrusted and never injected
-    raw). Empty string when the card has no saved translations (byte-identical
-    to before for the common case)."""
+    raw). E-13: every slot the variant carries renders — caption, alt text,
+    headline, subhead — each labelled, each with its own ``dir`` attribute, so
+    no translated slot rides into approval/export unreviewed. Empty string when
+    the card has no saved translations (byte-identical to before for the
+    common case)."""
     wf = card.get("workflow") if isinstance(card, dict) else None
     translations = (wf or {}).get("translations") if isinstance(wf, dict) else None
     if not isinstance(translations, dict) or not translations:
@@ -6356,18 +6997,18 @@ def _render_stored_translations(card: dict) -> str:
     for _lang, variant in translations.items():
         if not isinstance(variant, dict):
             continue
-        caption = str((variant.get("slots") or {}).get("caption") or "").strip()
-        if not caption:
+        direction = "rtl" if variant.get("rtl") else "auto"
+        slot_rows = _translation_slot_rows_html(variant.get("slots") or {}, direction)
+        if not slot_rows:
             continue
         label = str(variant.get("language_label") or _lang or "Translation")
-        direction = "rtl" if variant.get("rtl") else "auto"
         rows.append(
             '<div style="margin-top:6px;padding:8px 10px;border:1px solid var(--border);'
             'border-radius:6px;background:color-mix(in oklab, var(--lane) 3%, transparent)">'
             '<div style="font-size:10px;color:var(--ink-muted);text-transform:uppercase;'
-            f'letter-spacing:0.5px;margin-bottom:4px">{_h(label)} &middot; saved with this card</div>'
-            f'<span style="white-space:pre-wrap" dir="{direction}">{_h(caption)}</span>'
-            "</div>"
+            f'letter-spacing:0.5px">{_h(label)} &middot; saved with this card</div>'
+            + slot_rows
+            + "</div>"
         )
     if not rows:
         return ""
@@ -6439,6 +7080,40 @@ document.addEventListener('keydown', function(e){
     document.querySelectorAll('details.mh-card-more[open]').forEach(function(d){ d.open = false; });
   }
 });
+</script>
+"""
+
+# JS2-3 (B-2 follow-up) — pack-page-only helper: after an in-page graphic
+# render, lift the server-stamped export gates without a reload. It removes
+# exactly the attributes the gate variants stamped (marked with
+# data-mh-export-gate) and restores each control's own tooltip from
+# data-mh-title-ready. Pages without the gates (e.g. the grouped page) never
+# define it; createGraphic calls it guardedly via window.
+_PACK_EXPORT_GATE_JS = """
+<script>
+window.mhExportGatesEnable = function(cardId) {
+  function unGate(el) {
+    el.removeAttribute('aria-disabled');
+    if (el.getAttribute('onclick') === 'return false') el.removeAttribute('onclick');
+    if (el.disabled) el.disabled = false;
+    el.style.pointerEvents = '';
+    el.style.opacity = '';
+    var ready = el.getAttribute('data-mh-title-ready');
+    if (ready) el.setAttribute('title', ready); else el.removeAttribute('title');
+    el.removeAttribute('data-mh-title-ready');
+    el.removeAttribute('data-mh-export-gate');
+  }
+  var card = document.getElementById('pc-' + cardId);
+  if (card) card.querySelectorAll('[data-mh-export-gate]').forEach(unGate);
+  // This card just went 0 -> 1 rendered graphics for the pack, so every
+  // pack-level gate lifts too.
+  document.querySelectorAll('#mh-export-pack a[data-mh-export-gate], #mh-export-pack button[data-mh-export-gate]').forEach(unGate);
+  var note = document.querySelector('#mh-export-note[data-mh-export-note-gated]');
+  if (note) {
+    note.textContent = 'The ZIPs include each card that has a graphic \\u2014 use \\u201cCreate all graphics\\u201d to build the rest.';
+    note.removeAttribute('data-mh-export-note-gated');
+  }
+};
 </script>
 """
 
@@ -6576,6 +7251,13 @@ def _render_card_creative_toolbar(
         )
 
     # M35: the overflow menu — collaboration/power features behind one trigger.
+    # Elements browser in add-to-card mode for THIS card (roadmap 1.10). Opens the
+    # curated, on-brand sticker / pictogram / chip / divider / frame library scoped
+    # to this run + card, so a chosen placement lands straight on the card's brief
+    # and the next render paints it. This is the intended "add-to-card context from
+    # the card editor" — the browse-only /elements page carries no top-bar slot.
+    _elements_url = url_for("elements_page", run_id=run_id, card_id=card_id_raw)
+
     # The unresolved-comments badge (.comments-count) rides the More trigger so
     # a pending task stays visible without thirteen equal-weight buttons.
     _more_menu = (
@@ -6588,6 +7270,7 @@ def _render_card_creative_toolbar(
         f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="commentsToggle(this, \'{card_uuid}\')" title="Comments, @mentions and tasks. A task must be resolved before this card can be approved.">&#x1F4AC; Comments</button>'
         f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="historyToggle(this, \'{card_uuid}\')" title="Version history — see every design version of this card, compare them, and roll back.">&#x21BA; History</button>'
         f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="locksToggle(this, \'{card_uuid}\')" title="Lock elements (e.g. the sponsor strip) so a later edit — even the copilot — can\'t change them.">&#x1F512; Locks</button>'
+        f'<a class="btn secondary" href="{_h(_elements_url)}" target="_blank" rel="noopener" style="font-size:11px;padding:4px 10px;text-decoration:none" title="Add on-brand stickers to this card — sport pictograms, PB and stat chips, dividers, frames — all painted in your club colours. Opens the element library scoped to this card; re-render the graphic to see them.">&#127912; Elements&hellip;</a>'
         f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="shareToggle(this, \'{card_uuid}\')" title="Create an expiring link so someone outside the club (e.g. a parent) can view — or comment on — this card without an account.">&#x1F517; Share</button>'
         f"{schedule_btn}"
         f"{_voiceover_btn}"
@@ -6723,6 +7406,10 @@ def _render_inspector_panel(swatches: list[dict]) -> str:
                 style="font-size:11px;padding:4px 10px">&#10024; Generate with AI</button>
         <button type="button" class="btn secondary" id="mh-insp-caption-save"
                 style="font-size:11px;padding:4px 10px">Save caption</button>
+        <button type="button" class="btn ghost" id="mh-insp-caption-restore" hidden
+                style="font-size:11px;padding:4px 10px"
+                title="Bring back the caption the last save replaced">
+          Restore previous caption</button>
         <span class="mh-insp-mini" id="mh-insp-caption-status"></span>
       </div>
     </section>
@@ -6819,6 +7506,11 @@ def _inspector_js() -> str:
     var titleEl = $('mh-insp-title'); if (titleEl) titleEl.textContent = ctx.title;
     var capEl = $('mh-insp-caption');
     if (capEl) capEl.value = btn.getAttribute('data-insp-caption') || '';
+    // H-10: the saved caption + the one the last save replaced (server-stashed)
+    // drive the one-step "Restore previous caption".
+    ctx.savedCaption = btn.getAttribute('data-insp-caption') || '';
+    ctx.prevCaption = btn.getAttribute('data-insp-caption-prev') || '';
+    syncRestoreBtn();
     var capStatus = $('mh-insp-caption-status'); if (capStatus) capStatus.textContent = '';
     // M29: seed the preview with the card's current design (the same cached
     // thumbnail the review row shows) so tweaks start from what exists. The
@@ -6973,6 +7665,23 @@ def _inspector_js() -> str:
       }).catch(function(){ if (btn) btn.disabled = false; if (cs) cs.textContent = 'Generation failed'; });
   }
 
+  function syncRestoreBtn(){
+    var rb = $('mh-insp-caption-restore');
+    if (rb) rb.hidden = !(ctx && ctx.prevCaption);
+  }
+
+  // H-10: a saved caption also shows on the review row (truncated), so the
+  // approver sees what they're signing off without opening the drawer.
+  function updateRowCaption(cardId, text){
+    var esc = (window.CSS && CSS.escape) ? CSS.escape(cardId) : cardId;
+    document.querySelectorAll('[data-mh-row-caption="' + esc + '"]').forEach(function(el){
+      var t = el.querySelector('[data-mh-row-caption-text]');
+      var disp = text.length > 140 ? text.slice(0, 140) + '…' : text;
+      if (t) t.textContent = disp;
+      el.hidden = !disp;
+    });
+  }
+
   function saveCaption(){
     if (!ctx) return;
     var ta = $('mh-insp-caption'); var cs = $('mh-insp-caption-status');
@@ -6984,14 +7693,39 @@ def _inspector_js() -> str:
     };
     if (cs) cs.textContent = 'Saving…';
     persistEdits(extra).then(function(o){
-      if (cs) cs.textContent = (o && o.ok) ? 'Caption saved' : 'Save failed';
-      if (o && o.ok) {
-        var esc = (window.CSS && CSS.escape) ? CSS.escape(ctx.cardId) : ctx.cardId;
-        document.querySelectorAll('[data-card-id="' + esc + '"][data-mh-inspect]').forEach(function(b){
-          b.setAttribute('data-insp-caption', text);
-        });
+      var ok = o && o.ok && o.body && o.body.ok !== false;
+      if (!ok) {
+        // H-10: name the reason — a bare "Save failed" left volunteers blind
+        // to role gates, locks and expired sessions.
+        var why = (o && o.body && (o.body.reason || o.body.error || o.body.message)) || 'server error';
+        if (cs) cs.textContent = 'Save failed — ' + why;
+        return;
       }
-    }).catch(function(){ if (cs) cs.textContent = 'Save failed'; });
+      if (cs) cs.textContent = 'Caption saved';
+      // Mirror the server's prev-stash: the caption this save replaced becomes
+      // the restorable "previous" (so Restore can toggle the pair).
+      if (ctx.savedCaption && ctx.savedCaption !== text) ctx.prevCaption = ctx.savedCaption;
+      ctx.savedCaption = text;
+      syncRestoreBtn();
+      var esc = (window.CSS && CSS.escape) ? CSS.escape(ctx.cardId) : ctx.cardId;
+      document.querySelectorAll('[data-card-id="' + esc + '"][data-mh-inspect]').forEach(function(b){
+        b.setAttribute('data-insp-caption', text);
+        if (ctx.prevCaption) b.setAttribute('data-insp-caption-prev', ctx.prevCaption);
+      });
+      updateRowCaption(ctx.cardId, text);
+    }).catch(function(e){
+      if (cs) cs.textContent = 'Save failed — ' + ((e && e.message) || 'network error');
+    });
+  }
+
+  // H-10: one-step restore — put the replaced caption back and save it. The
+  // save swaps the pair server-side, so Restore toggles between the two most
+  // recent captions.
+  function restoreCaption(){
+    if (!ctx || !ctx.prevCaption) return;
+    var ta = $('mh-insp-caption');
+    if (ta) ta.value = ctx.prevCaption;
+    saveCaption();
   }
 
   // --- Wiring -------------------------------------------------------------
@@ -7028,6 +7762,8 @@ def _inspector_js() -> str:
   });
   $('mh-insp-caption-ai').addEventListener('click', generateCaption);
   $('mh-insp-caption-save').addEventListener('click', saveCaption);
+  var restoreEl = $('mh-insp-caption-restore');
+  if (restoreEl) restoreEl.addEventListener('click', restoreCaption);
 })();
 </script>
 """
@@ -7061,7 +7797,7 @@ def _render_turn_into_card(run_id: str) -> str:
             rows.append(
                 f'<li style="font-size:12px;margin-bottom:4px">'
                 f'<a href="{_view}">{_h(_gen)}</a> '
-                f'<span class="muted">&mdash; {_n} artefacts'
+                f'<span class="muted">&mdash; {_n} {"piece" if _n == 1 else "pieces"}'
                 + (f", {_skipped} skipped" if _skipped else "")
                 + "</span></li>"
             )
@@ -7091,7 +7827,7 @@ def _render_turn_into_card(run_id: str) -> str:
 <div class="card" id="turn-into-card" style="border-left:3px solid var(--accent)">
   <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap">
     <div style="flex:1;min-width:min(240px,100%)">
-      <h2 style="margin-bottom:6px">Turn this meet into more</h2>
+      <h2 style="margin-bottom:6px">Repurpose pack</h2>
       <p class="dim" style="margin:0 0 10px 0;font-size:13px;max-width:540px">
         One click re-uses everything this meet already produced &mdash; the
         results, the approved cards, your brand voice &mdash; and drafts a
@@ -7129,11 +7865,11 @@ function turnMeetIntoPack() {{
   setState('loading');
   status.style.display = '';
   status.innerHTML = '<span style="display:inline-block;width:14px;height:14px;border:2px solid color-mix(in oklab, var(--lane) 30%, transparent);border-top-color:var(--lane);border-radius:50%;vertical-align:-2px;margin-right:8px;animation:spin 600ms linear infinite"></span>' +
-    '<span id="ti-status-text">Drafting every artefact with live AI&hellip;</span>';
+    '<span id="ti-status-text">Drafting every piece with live AI&hellip;</span>';
   var statusText = document.getElementById('ti-status-text');
   var ticker = setInterval(function() {{
     secs++;
-    if (statusText) statusText.textContent = 'Drafting every artefact with live AI — ' + secs + 's. Usually under a minute.';
+    if (statusText) statusText.textContent = 'Drafting every piece with live AI — ' + secs + 's. Usually under a minute.';
   }}, 1000);
   function _fail(msg) {{
     clearInterval(ticker);
@@ -7250,9 +7986,21 @@ def _sample_pack_cta(
     if not _SAMPLE_MEET_PDF.exists():
         return ""
     action = url_for("onboarding_sample")
+    # A sample pack kicks off a real 30-90s pipeline run, so an accidental
+    # double-click would queue two identical demo packs (and two worker jobs).
+    # Guard the submit: block a second submit synchronously, then disable the
+    # button just after the first one starts (setTimeout keeps the in-flight
+    # POST from being cancelled). Progressive enhancement — with JS off the
+    # form still posts, exactly as before.
+    guard = (
+        "if(this.dataset.mhSent)return false;this.dataset.mhSent='1';"
+        "var b=this.querySelector('button');"
+        "if(b){setTimeout(function(){b.disabled=true;},0);}return true;"
+    )
     if compact:
         return (
-            f'<form method="post" action="{action}" style="margin:0;display:inline">'
+            f'<form method="post" action="{action}" onsubmit="{guard}" '
+            'style="margin:0;display:inline">'
             f'<button type="submit" class="btn secondary">{_h(button_label)}</button>'
             "</form>"
         )
@@ -7264,7 +8012,7 @@ def _sample_pack_cta(
         f'<h3 style="margin:0 0 6px;font-size:15px">{_h(heading)}</h3>'
         f'<p class="dim" style="margin:0;font-size:13px;line-height:1.5">{_h(sub)}</p>'
         "</div>"
-        f'<form method="post" action="{action}" style="margin:0">'
+        f'<form method="post" action="{action}" onsubmit="{guard}" style="margin:0">'
         f'<button type="submit" class="btn">{_h(button_label)}</button>'
         "</form>"
         "</div>"
@@ -8394,6 +9142,7 @@ BASE_CSS = """
   --border:    var(--mh-outline-variant);
   --border-h:  var(--mh-outline);
   --bg-soft:   var(--mh-surface-variant);
+  --video-letterbox: #000;   /* true black letterbox behind embedded video — theme-independent */
 
   /* Typography stacks — every face here is intentional */
   --font-display: 'Big Shoulders Display', 'Impact', 'Oswald', sans-serif;
@@ -8749,6 +9498,20 @@ header.topnav nav a.live::before {
   padding: 9px 12px; border-radius: 4px;
 }
 .mh-js .mh-orgmenu-item:hover { background: rgba(245,242,232,0.05); color: var(--ink); }
+/* POST-form nav actions (Log out / Leave organisation) — the state change
+   rides POST + CSRF; the button reads exactly like the sibling links. */
+header.topnav nav form.mh-nav-form { display: inline-flex; margin: 0; }
+button.mh-nav-linkbtn {
+  position: relative; display: inline-flex; align-items: center;
+  font-family: var(--font-mono); color: var(--ink-muted);
+  padding: 0 var(--sp-4); font-size: 11px; font-weight: 500;
+  letter-spacing: 0.14em; text-transform: uppercase;
+  transition: color var(--transition); white-space: nowrap;
+  background: none; border: 0; cursor: pointer;
+}
+button.mh-nav-linkbtn:hover { color: var(--ink); }
+button.mh-orgmenu-item { background: none; border: 0; cursor: pointer; }
+.mh-orgmenu-panel form { display: contents; }
 
 /* MAIN */
 main.wrap { max-width: 1200px; margin: 0 auto; padding: 36px 28px 96px; }
@@ -9030,7 +9793,7 @@ p:last-child { margin-bottom: 0; }
   background: var(--lane); color: var(--lane-ink);
   border: 0; padding: 11px 22px;
   /* Touch-target minimum so .btn (and every inline-styled variant on
-     /pack, /sponsor-post, /upload, /make) clears the 44px tap-area
+     /pack, /upload, /make) clears the 44px tap-area
      guideline on every viewport, even when an inline `padding:6px`
      override tries to shrink it. */
   min-height: 44px;
@@ -9054,6 +9817,10 @@ p:last-child { margin-bottom: 0; }
   outline: 2px solid var(--lane);
   outline-offset: 3px;
 }
+/* B-4 — the per-card Re-queue button ships `hidden` while the card is in
+   the queue (nothing to undo yet); `hidden` must win over the .btn flex
+   display so the workflow painters can toggle it with the card's status. */
+.btn[data-mh-wf][hidden] { display: none; }
 .btn.secondary { background: transparent; color: var(--ink); border: 1px solid var(--chrome); }
 .btn.secondary:hover {
   background: rgba(245,242,232,0.04);
@@ -10035,8 +10802,7 @@ a.card:hover, .card[data-interactive]:hover {
 /* Phone / tablet (≤860px): every interactive control needs the full
    44px tap area. Card-action utility buttons (Copy caption, etc.) and
    inline-styled .btn variants on /pack get their compact desktop sizing
-   overridden here so the touch flow on /pack and /sponsor-post is
-   usable on iPhone / iPad. */
+   overridden here so the touch flow on /pack is usable on iPhone / iPad. */
 @media (max-width: 860px) {
   .mh-card-actions button,
   .mh-card-actions .btn,
@@ -11860,11 +12626,12 @@ def _theme_seed_style_block() -> str:
 _VIDEO_STUDIO_HTML = """
 <section class="mh-hero" data-lane="" style="padding-top:var(--sp-8);padding-bottom:var(--sp-6)">
   <span class="mh-hero-eyebrow">Video &middot; the footage path</span>
-  <h1>Turn race footage into<br><em class="editorial">a branded reel.</em></h1>
+  <h1>Turn race footage into<br><em class="editorial">a footage reel.</em></h1>
   <p class="lede">Upload or record a clip; MediaHub finds the moment, crops it
   upright, puts the spoken words on screen, and brands it. You approve before
   anything is exported.</p>
   __ENGINE_NOTE__
+  __MEET_REEL_HINT__
 </section>
 
 <div class="vstudio-grid">
@@ -11924,12 +12691,22 @@ _VIDEO_STUDIO_HTML = """
 </div>
 
 <section class="vstudio-panel vstudio-reel" id="vs-reel-bar" style="margin-top:var(--sp-5)" hidden>
-  <h2 class="vstudio-h">&#10024; AI reel &middot; from <span id="vs-reel-count">0</span> selected clip(s)</h2>
+  <h2 class="vstudio-h">&#10024; Footage reel &middot; from <span id="vs-reel-count">0</span> selected clip(s)</h2>
   <p class="muted">Tick &ldquo;reel&rdquo; on two or more clips above, and the director will
   order the best moments, grade them, score them to music and write a hook &mdash; one
-  branded reel for you to approve.</p>
+  branded footage reel for you to approve.</p>
   <div class="vstudio-reel-row">
-    <input type="text" id="vs-reel-brief" maxlength="200" placeholder="What's this reel about? (optional context for the director)">
+    <input type="text" id="vs-reel-brief" maxlength="200"
+      aria-label="What this reel is about (optional context for the director)"
+      placeholder="What's this reel about? (optional context for the director)">
+    <label class="vs-reel-fmt">Format
+      <select id="vs-reel-format" aria-label="Reel format">
+        <option value="story">Story (9:16)</option>
+        <option value="portrait">Portrait (4:5)</option>
+        <option value="square">Square (1:1)</option>
+        <option value="landscape">Landscape (16:9)</option>
+      </select>
+    </label>
     <button class="btn primary" id="vs-reel-make" type="button">Direct the reel &rarr;</button>
     <span id="vs-reel-status" class="muted" aria-live="polite"></span>
   </div>
@@ -11944,9 +12721,9 @@ _VIDEO_STUDIO_HTML = """
 </section>
 
 <div id="vs-editor" class="vstudio-modal" hidden>
-  <div class="vstudio-sheet" role="dialog" aria-label="Edit timeline">
+  <div class="vstudio-sheet" role="dialog" aria-modal="true" aria-labelledby="vs-ed-title">
     <div class="vstudio-sheet-head">
-      <strong>Edit timeline &middot; <span id="vs-ed-name"></span></strong>
+      <strong id="vs-ed-title">Edit timeline &middot; <span id="vs-ed-name"></span></strong>
       <button class="btn ghost" id="vs-ed-close" type="button">Close</button>
     </div>
     <div class="vstudio-sheet-body">
@@ -12003,6 +12780,8 @@ _VIDEO_STUDIO_HTML = """
   .vstudio-pick input{margin:0;cursor:pointer}
   .vstudio-reel-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
   .vstudio-reel-row input[type=text]{flex:1 1 220px;background:#0a0a0c;border:1px solid var(--border,#33333a);border-radius:6px;color:var(--ink,#f0f0f2);padding:8px 10px;font-size:14px}
+  .vs-reel-fmt{display:flex;gap:6px;align-items:center;font-size:12px;color:var(--ink-muted,#9a9aa3)}
+  .vs-reel-fmt select{background:#0a0a0c;border:1px solid var(--border,#33333a);border-radius:6px;color:var(--ink,#f0f0f2);padding:7px 8px;font-size:13px}
   .vstudio-enh{align-items:center}
   .vstudio-enh select{background:#0a0a0c;border:1px solid var(--border,#33333a);border-radius:6px;color:var(--ink,#f0f0f2);padding:5px 7px;font-size:12px}
   .vstudio-modal{position:fixed;inset:0;background:rgba(0,0,0,.66);display:flex;align-items:center;justify-content:center;z-index:90;padding:20px}
@@ -12059,6 +12838,8 @@ _VIDEO_STUDIO_HTML = """
   var wfFailed = {};     // clip source -> true when its waveform couldn't be measured
   var wfDrag = null;     // active waveform trim drag {i, edge}
   var reorderFrom = null; // index being drag-reordered
+  var editorPrevFocus = null;  // element focused before the editor opened (for restore)
+  var editorKeyHandler = null; // installed keydown trap while the editor is open
 
   function $(id){ return document.getElementById(id); }
   function esc(s){ var d=document.createElement('div'); d.textContent=(s==null?'':String(s)); return d.innerHTML; }
@@ -12094,7 +12875,7 @@ _VIDEO_STUDIO_HTML = """
   // ---- footage upload ----
   function uploadFile(file){
     if(!file) return;
-    var status = $('vs-rec-status'); status.textContent = 'Uploading '+file.name+'...';
+    var status = $('vs-rec-status'); status.textContent = 'Uploading '+file.name+'…';
     if(file.size > VIDEO_MAX_MB*1024*1024){ status.textContent = 'That clip is over '+VIDEO_MAX_MB+' MB. Trim it shorter and try again.'; return; }
     var fd = new FormData(); fd.append('file', file, file.name);
     fetch(FOOTAGE_URL, {method:'POST', headers:{'X-CSRF-Token':CSRF,'Accept':'application/json'}, body:fd})
@@ -12131,7 +12912,7 @@ _VIDEO_STUDIO_HTML = """
       };
       mediaRecorder.start();
       $('vs-rec-stop').hidden = false;
-      status.textContent = 'Recording...';
+      status.textContent = 'Recording…';
     }).catch(function(err){ status.textContent = 'Recorder unavailable: '+(err && err.message || err); });
   }
   $('vs-rec-cam').addEventListener('click', function(){ startRec('camera'); });
@@ -12158,7 +12939,7 @@ _VIDEO_STUDIO_HTML = """
           + (a.usable ? '&#10003; ' : '&#9888; ') + esc(permLabel(a.permission_status)) + '</span>';
         return '<figure class="vstudio-tile'+(a.id===selectedId?' sel':'')+'" data-id="'+esc(a.id)+'">'
           + media
-          + '<label class="vstudio-pick" title="Include in AI reel"><input type="checkbox" class="vs-reel-pick" data-id="'+esc(a.id)+'"'+(reelSet[a.id]?' checked':'')+'> reel</label>'
+          + '<label class="vstudio-pick" title="Include in the footage reel"><input type="checkbox" class="vs-reel-pick" data-id="'+esc(a.id)+'"'+(reelSet[a.id]?' checked':'')+'> reel</label>'
           + '<figcaption class="cap">'+esc(a.filename)+(a.duration_ms?(' &middot; '+fmtDur(a.duration_ms)):'')+'</figcaption>'
           + '<div class="vs-tile-meta">'+badge
           + '<select class="vs-perm" data-id="'+esc(a.id)+'" aria-label="Clip permission">'+permOpts+'</select>'
@@ -12243,7 +13024,7 @@ _VIDEO_STUDIO_HTML = """
     }, function(){ var s=$('vs-make-status'); if(s){ s.textContent = 'Clip created. Render it below.'; } loadProjects(); });
   });
 
-  // ---- AI reel (multi-clip) ----
+  // ---- Footage reel (multi-clip) ----
   function toggleReel(id, on){
     if(on){ reelSet[id] = true; } else { delete reelSet[id]; }
     var n = Object.keys(reelSet).length;
@@ -12257,7 +13038,7 @@ _VIDEO_STUDIO_HTML = """
     // J-1: the director's ASR + moment analysis runs as a polled background job.
     runVideoJob(btn, REEL_URL + '-job', {
       asset_ids: ids,
-      format: $('vs-format').value,
+      format: $('vs-reel-format').value,
       brief_context: $('vs-reel-brief').value,
       with_captions: true, with_reframe: true, with_music: true, enhance_audio: true
     }, $('vs-reel-panel'), {
@@ -12322,7 +13103,7 @@ _VIDEO_STUDIO_HTML = """
     }
     var st = document.querySelector('.vs-enh-status[data-id="'+id+'"]');
     if(btn){ btn.disabled = true; }
-    if(st){ st.textContent = 'Applying...'; }
+    if(st){ st.textContent = 'Applying…'; }
     jpost(url(ENHANCE_TMPL, id), body).then(function(j){
       if(btn){ btn.disabled = false; }
       if(j.ok){ if(st){ st.textContent = 'Applied — re-render to see it.'; } loadProjects(); }
@@ -12438,8 +13219,43 @@ _VIDEO_STUDIO_HTML = """
       $('vs-ed-status').textContent = '';
       renderEditorRows();
       prefetchWaveforms();
-      $('vs-editor').hidden = false;
+      showEditor();
     }).catch(function(){ vsToast('Network error — could not load this clip. Reload to try again.'); });
+  }
+  // Reveal the editor modal with full a11y affordances: remember what had focus,
+  // move focus into the dialog, trap Tab within it, and close on Escape (F-08).
+  function showEditor(){
+    // Never stack two traps if the editor is somehow re-opened without closing.
+    if(editorKeyHandler){ document.removeEventListener('keydown', editorKeyHandler, true); editorKeyHandler = null; }
+    editorPrevFocus = document.activeElement;
+    var modal = $('vs-editor');
+    modal.hidden = false;
+    var sheet = modal.querySelector('.vstudio-sheet');
+    function focusable(){
+      return Array.prototype.slice.call(sheet.querySelectorAll(
+        'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]),'
+        + 'textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+      )).filter(function(el){ return el.offsetParent !== null; });
+    }
+    var first = focusable()[0];
+    if(first && first.focus){ first.focus(); }
+    editorKeyHandler = function(e){
+      if(e.key === 'Escape'){ e.preventDefault(); closeEditor(); return; }
+      if(e.key === 'Tab'){
+        var ns = focusable(); if(!ns.length){ return; }
+        var f = ns[0], l = ns[ns.length-1];
+        if(e.shiftKey && document.activeElement === f){ e.preventDefault(); l.focus(); }
+        else if(!e.shiftKey && document.activeElement === l){ e.preventDefault(); f.focus(); }
+      }
+    };
+    document.addEventListener('keydown', editorKeyHandler, true);
+  }
+  // Hide the editor, tear down the trap, and restore focus to the trigger.
+  function closeEditor(){
+    $('vs-editor').hidden = true;
+    if(editorKeyHandler){ document.removeEventListener('keydown', editorKeyHandler, true); editorKeyHandler = null; }
+    if(editorPrevFocus && editorPrevFocus.focus){ editorPrevFocus.focus(); }
+    editorPrevFocus = null;
   }
   // Fetch each clip's audio waveform ONCE at open, while the client order still
   // matches the server's (the route is keyed by clip index). Cache by source so
@@ -12537,18 +13353,19 @@ _VIDEO_STUDIO_HTML = """
       var a = c.adjust || {};
       var gb = (a.brightness!=null?a.brightness:0), gc = (a.contrast!=null?a.contrast:1);
       var gs = (a.saturation!=null?a.saturation:1), gw = (a.warmth!=null?a.warmth:0);
+      var cn = i+1;  // human clip number for accessible names
       return '<div class="vs-ed-clip" data-i="'+i+'">'
-        + '<span class="vs-ed-grip" draggable="true" data-i="'+i+'" title="Drag to reorder">&#x2630;</span>'
-        + '<span class="vs-ed-num">'+(i+1)+'</span>'
-        + 'in <input type="number" class="vs-ed-in" min="0" step="100" value="'+(c.in_ms||0)+'">'
-        + 'out <input type="number" class="vs-ed-out" min="0" step="100" value="'+(c.out_ms||0)+'">'
-        + 'speed <input type="number" class="vs-ed-speed" min="0.25" max="4" step="0.05" value="'+(c.speed||1)+'">'
+        + '<span class="vs-ed-grip" draggable="true" data-i="'+i+'" role="button" aria-label="Clip '+cn+' — drag to reorder" title="Drag to reorder">&#x2630;</span>'
+        + '<span class="vs-ed-num">'+cn+'</span>'
+        + 'in <input type="number" class="vs-ed-in" min="0" step="100" aria-label="Clip '+cn+' trim start (ms)" value="'+(c.in_ms||0)+'">'
+        + 'out <input type="number" class="vs-ed-out" min="0" step="100" aria-label="Clip '+cn+' trim end (ms)" value="'+(c.out_ms||0)+'">'
+        + 'speed <input type="number" class="vs-ed-speed" min="0.25" max="4" step="0.05" aria-label="Clip '+cn+' playback speed" value="'+(c.speed||1)+'">'
         + '<label><input type="checkbox" class="vs-ed-smooth"'+(c.smooth?' checked':'')+'>smooth</label>'
         + '<label><input type="checkbox" class="vs-ed-mute"'+(c.mute?' checked':'')+'>mute</label>'
-        + (i>0 ? 'join <select class="vs-ed-trans">'+transOpts(tr)+'</select>' : '')
-        + '<button class="btn ghost vs-ed-up" data-i="'+i+'" title="move up">&uarr;</button>'
-        + '<button class="btn ghost vs-ed-down" data-i="'+i+'" title="move down">&darr;</button>'
-        + '<button class="btn ghost vs-ed-del" data-i="'+i+'" title="remove">&times;</button>'
+        + (i>0 ? 'join <select class="vs-ed-trans" aria-label="Clip '+cn+' join transition">'+transOpts(tr)+'</select>' : '')
+        + '<button class="btn ghost vs-ed-up" data-i="'+i+'" aria-label="Move clip '+cn+' up" title="move up">&uarr;</button>'
+        + '<button class="btn ghost vs-ed-down" data-i="'+i+'" aria-label="Move clip '+cn+' down" title="move down">&darr;</button>'
+        + '<button class="btn ghost vs-ed-del" data-i="'+i+'" aria-label="Remove clip '+cn+'" title="remove">&times;</button>'
         + '<div class="vs-ed-wave" data-i="'+i+'" data-dur="0" title="Audio waveform — click or drag an edge to trim">'
         +   '<canvas class="vs-ed-wave-cv" width="600" height="46"></canvas></div>'
         + '<div class="vs-ed-grade" title="Per-clip colour grade (deterministic; an untouched grade renders identically)">'
@@ -12562,7 +13379,7 @@ _VIDEO_STUDIO_HTML = """
     for(var k=0;k<clips.length;k++){ drawWaveFor(k); }
     var cues = (editorEdl.captions && editorEdl.captions.cues) || [];
     $('vs-ed-caps').innerHTML = cues.length
-      ? cues.map(function(q,i){ return '<div class="vs-ed-cue" data-i="'+i+'"><input type="text" class="vs-ed-cuetext" value="'+esc(q.text||'')+'"></div>'; }).join('')
+      ? cues.map(function(q,i){ return '<div class="vs-ed-cue" data-i="'+i+'"><input type="text" class="vs-ed-cuetext" aria-label="Caption line '+(i+1)+' text" value="'+esc(q.text||'')+'"></div>'; }).join('')
       : '<p class="muted">No captions on this clip.</p>';
   }
   function syncEditorFromDom(){
@@ -12661,17 +13478,19 @@ _VIDEO_STUDIO_HTML = """
     reorderFrom = null;
     var d = $('vs-ed-clips').querySelector('.vs-ed-dragging'); if(d) d.classList.remove('vs-ed-dragging');
   });
-  $('vs-ed-close').addEventListener('click', function(){ $('vs-editor').hidden = true; });
+  $('vs-ed-close').addEventListener('click', function(){ closeEditor(); });
+  // Backdrop click (on the overlay, never the sheet within it) closes too.
+  $('vs-editor').addEventListener('click', function(e){ if(e.target === this){ closeEditor(); } });
   $('vs-ed-save').addEventListener('click', function(){
     syncEditorFromDom();
     if(!editorEdl.clips || !editorEdl.clips.length){ $('vs-ed-status').textContent = 'A timeline needs at least one clip.'; return; }
     // The first clip can never carry a transition (the validator enforces this).
     editorEdl.clips[0].transition_in = {kind:'cut', duration_ms:0};
-    $('vs-ed-status').textContent = 'Saving...';
+    $('vs-ed-status').textContent = 'Saving…';
     jpost(url(PROJECT_TMPL, editorPid), {edl: editorEdl}).then(function(j){
-      if(j.ok){ $('vs-ed-status').textContent = 'Saved — re-render to see it.'; $('vs-editor').hidden = true; loadProjects(); }
+      if(j.ok){ $('vs-ed-status').textContent = 'Saved — re-render to see it.'; closeEditor(); loadProjects(); }
       else { $('vs-ed-status').textContent = 'Failed: '+(j.message||j.error||'invalid timeline'); }
-    });
+    }).catch(function(){ $('vs-ed-status').textContent = 'Network error. The timeline may not have saved; reload to check.'; });
   });
 
   loadFootage();
@@ -12907,28 +13726,43 @@ _VISUAL_PANEL_JS = """<script>
 </script>"""
 
 
-# "Regenerate (fresh angles)" handler for the saved-draft pages. POSTs to the
+# "Regenerate (fresh angles)" handler for the saved-draft pages. Confirms
+# first (E-11 — it replaces every card and clears approval), then POSTs to the
 # content-engine regenerate route and reloads to the freshly-written set.
 _DRAFT_REGEN_JS = """<script>
-function mhRegenerateDraft(btn, url){
-  var orig = btn.innerHTML;
-  btn.disabled = true; btn.innerHTML = '\\u21BA Regenerating\\u2026';
-  fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}', credentials:'same-origin'})
-    .then(function(r){ return r.json().then(function(j){ return {ok:r.ok, body:j}; }); })
-    .then(function(res){
-      if(res.ok && res.body && res.body.ok){
-        if(window.MH && MH.toast){ MH.toast('Fresh draft generated', 'success'); }
-        location.href = (res.body && res.body.redirect) || location.href;
-      } else {
+function mhRegenerateDraft(btn, url, nCards){
+  function run(){
+    var orig = btn.innerHTML;
+    btn.disabled = true; btn.innerHTML = '\\u21BA Regenerating\\u2026';
+    if(window.MH && MH.btnState){ MH.btnState(btn, 'loading'); }
+    fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}', credentials:'same-origin'})
+      .then(function(r){ return r.json().then(function(j){ return {ok:r.ok, body:j}; }); })
+      .then(function(res){
+        if(res.ok && res.body && res.body.ok){
+          if(window.MH && MH.toast){ MH.toast('Fresh draft generated', 'success'); }
+          location.href = (res.body && res.body.redirect) || location.href;
+        } else {
+          btn.disabled = false; btn.innerHTML = orig;
+          if(window.MH && MH.btnState){ MH.btnState(btn, 'idle'); }
+          var msg = (res.body && (res.body.message || res.body.error)) || 'Could not regenerate';
+          if(window.MH && MH.toast){ MH.toast(msg, 'error'); } else { alert(msg); }
+        }
+      })
+      .catch(function(){
         btn.disabled = false; btn.innerHTML = orig;
-        var msg = (res.body && (res.body.message || res.body.error)) || 'Could not regenerate';
-        if(window.MH && MH.toast){ MH.toast(msg, 'error'); } else { alert(msg); }
-      }
-    })
-    .catch(function(){
-      btn.disabled = false; btn.innerHTML = orig;
-      if(window.MH && MH.toast){ MH.toast('Network error', 'error'); } else { alert('Network error'); }
-    });
+        if(window.MH && MH.btnState){ MH.btnState(btn, 'idle'); }
+        if(window.MH && MH.toast){ MH.toast('Network error', 'error'); } else { alert('Network error'); }
+      });
+  }
+  var what = (nCards === 1) ? 'the card' : (nCards ? 'all ' + nCards + ' cards' : 'all cards');
+  var body = 'This replaces ' + what +
+    ' and clears their approval status. Previous captions stay in Previous versions below.';
+  if (window.MH && MH.confirm){
+    MH.confirm({title: 'Regenerate this draft?', body: body,
+      confirmText: 'Regenerate', danger: false, onConfirm: run});
+  } else if (window.confirm(body)) {
+    run();
+  }
 }
 </script>"""
 
@@ -13669,10 +14503,14 @@ def _render_content_builder(pack_id: str, rec: dict, mode: str = "spotlight") ->
 def _ui_locale() -> str:
     """Resolve the UI-chrome language for this request (1.24 localisation).
 
-    Order: a ``?lang=`` override → a ``ui_lang`` session pin → the signed-in
-    org's primary caption language when we ship that UI locale → English. Only
+    Order: a ``?lang=`` override → a ``ui_lang`` session pin → English. Only
     locales that actually have a UI catalogue are honoured, so the chrome is
     never half-translated into a locale we don't have — it degrades to English.
+
+    G-11: deliberately NO fallback to the org's caption language — choosing
+    "Cymraeg (Welsh)" as the *caption* language must not silently flip the
+    whole interface. The interface language is driven only by the explicit
+    controls (the C-16 switcher / ``?lang=``).
     """
     from mediahub.localize.ui_catalogue import DEFAULT_UI_LOCALE, has_ui_locale
 
@@ -13697,16 +14535,6 @@ def _ui_locale() -> str:
         s = (session.get("ui_lang") or "").strip().lower()
         if s and has_ui_locale(s):
             return s.split("-", 1)[0]
-    except Exception:
-        pass
-    try:
-        pid = (session.get("active_profile_id") or "").strip()
-        if pid:
-            from mediahub.web.languages import primary_language_for
-
-            prim = primary_language_for(load_profile(pid))
-            if has_ui_locale(prim):
-                return prim
     except Exception:
         pass
     return DEFAULT_UI_LOCALE
@@ -13778,6 +14606,11 @@ def _layout(
     dock: dict | None = None,
     chapters: list[tuple[str, str]] | None = None,
 ) -> str:
+    # G-7: the Video Studio passes active="video", which matches no top-bar
+    # item, so nothing highlighted. The studio is a Create tile — highlight
+    # Create in both navs.
+    if active == "video":
+        active = "create"
     # Compute whether the current request has an active organisation pinned
     # so the nav can render Sign-in vs Sign-out + Organisation-name correctly.
     try:
@@ -13786,12 +14619,41 @@ def _layout(
         signed_in_pid = (_sess.get("active_profile_id") or "").strip()
         # Account-level identity (PC.1) — separate from the org pin above.
         account_email = (_sess.get("user_email") or "").strip().lower()
-        # Operator developer session (public, passwordless sign-in).
+        # Operator developer session (username + password sign-in, ADR-0019).
         dev_operator = _auth.is_dev_operator()
     except Exception:
         signed_in_pid = ""
         account_email = ""
         dev_operator = False
+    # Who may switch organisations from the nav (org-access audit): the dev
+    # operator always; an anonymous pilot session (picker is its only door);
+    # a member only when they actually belong to 2+ workspaces. A single-org
+    # member never sees a picker entry — their club IS their session. Reuses
+    # the per-request g._mh_memberships snapshot (one ledger read a request,
+    # same cache _session_can_use_profile fills).
+    can_switch_org = False
+    if dev_operator:
+        can_switch_org = True
+    elif account_email:
+        try:
+            from flask import g as _g
+
+            snap = getattr(_g, "_mh_memberships", None)
+            if snap is None:
+                snap = _tenancy.MembershipStore()._read_all()
+                _g._mh_memberships = snap
+            can_switch_org = (
+                sum(
+                    1
+                    for (e, _pid), m in snap.items()
+                    if e == account_email and m.status == _tenancy.STATUS_ACTIVE
+                )
+                >= 2
+            )
+        except Exception:
+            can_switch_org = False
+    elif signed_in_pid:
+        can_switch_org = True
     signed_in_name = ""
     signed_in_primary = ""
     signed_in_secondary = ""
@@ -14211,14 +15073,14 @@ def _layout(
        grid) and both studios are full Create tiles (the live design editor and
        the footage→reel video studio). Keeping them off the top bar leaves the
        signed-in chrome focused on the core workflow. #}
-    <a href="{{ url_for('media_library_page') }}" class="{{ 'active' if active=='media' else '' }}">Media library</a>
+    <a href="{{ url_for('media_library_page') }}" class="{{ 'active' if active=='media' else '' }}">{{ t('nav.media_library') }}</a>
     {# C-1/C-2 — Activity (where a volunteer resumes approving a pack) takes the
        primary slot that browse-only "Elements" held, so desktop matches the
        mobile bottom nav. Elements stays reachable in its add-to-card context
        from the card editor; it no longer holds a top-bar slot it can't act in. #}
-    <a href="{{ url_for('activity_page') }}" class="{{ 'active' if active=='activity' else '' }}">Activity</a>
-    <a href="{{ url_for('season_timeline_page') }}" class="{{ 'active' if active=='season' else '' }}">My Season</a>
-    {% if research_enabled %}<a href="{{ url_for('web_research_console') }}" class="{{ 'active' if active=='research' else '' }}">Research</a>{% endif %}
+    <a href="{{ url_for('activity_page') }}" class="{{ 'active' if active=='activity' else '' }}">{{ t('nav.activity') }}</a>
+    <a href="{{ url_for('season_timeline_page') }}" class="{{ 'active' if active=='season' else '' }}">{{ t('nav.my_season') }}</a>
+    {% if research_enabled %}<a href="{{ url_for('web_research_console') }}" class="{{ 'active' if active=='research' else '' }}">{{ t('nav.research') }}</a>{% endif %}
     {# Spacer — pushes the utility / account cluster to the right edge (it used
        to be the backend "online" pill's margin-left:auto; the pill is gone). #}
     <span class="mh-nav-spacer" aria-hidden="true"></span>
@@ -14226,28 +15088,35 @@ def _layout(
        account menu (the dropdown on the far right) for signed-in users. Signed-
        out visitors keep a plain Settings + Pricing link here. Pricing is a
        top-bar item only for signed-out visitors (prospects) — once signed into
-       a club profile it lives in Settings ("Pricing & plans") so the signed-in
-       chrome stays operations-focused, not sales-focused. #}
+       a club profile it is linked from Settings → Billing & plan ("See plans
+       & pricing") so the signed-in chrome stays operations-focused, not
+       sales-focused. #}
     {% if not signed_in %}
     <a href="{{ url_for('settings_page') }}" class="{{ 'active' if active=='settings' else '' }}">{{ t('nav.settings') }}</a>
-    <a href="{{ url_for('pricing_page') }}" class="{{ 'active' if active=='pricing' else '' }}">Pricing</a>
+    <a href="{{ url_for('pricing_page') }}" class="{{ 'active' if active=='pricing' else '' }}">{{ t('nav.pricing') }}</a>
     {% if account_email %}
     <a href="{{ url_for('sign_in_page') }}" class="{{ 'active' if active=='signin' else '' }}">{{ t('nav.sign_in') }}</a>
     {% endif %}
     {% endif %}
     {% if dev_operator %}
-      <a href="{{ url_for('logout') }}" title="Operator mode — unrestricted, no paywall">Developer &check;</a>
+      {# Logout is a state change: POST + CSRF (the response hook injects the
+         token into every POST form), never a GET link. #}
+      <form method="post" action="{{ url_for('logout') }}" class="mh-nav-form">
+        <button type="submit" class="mh-nav-linkbtn" title="Operator mode — unrestricted, no paywall">Developer &check;</button>
+      </form>
     {% elif account_email %}
-      <a href="{{ url_for('billing_page') }}" title="{{ account_email }}">Billing</a>
-      <a href="{{ url_for('logout') }}">Log out</a>
+      <a href="{{ url_for('billing_page') }}" title="{{ account_email }}">{{ t('nav.billing') }}</a>
+      <form method="post" action="{{ url_for('logout') }}" class="mh-nav-form">
+        <button type="submit" class="mh-nav-linkbtn">{{ t('nav.log_out') }}</button>
+      </form>
     {% elif signed_in %}
       {# A-5: a workspace is active but there is no account yet. Don't show the
          prospect's "Sign up + Log in" pair (which reads as "you're not signed
          in"); offer a single, honest CTA to persist the work. #}
-      <a href="{{ url_for('signup_page') }}" class="mh-nav-signup">Save your workspace</a>
+      <a href="{{ url_for('signup_page') }}" class="mh-nav-signup">{{ t('nav.save_workspace') }}</a>
     {% else %}
-      <a href="{{ url_for('signup_page') }}" class="mh-nav-signup">Sign up</a>
-      <a href="{{ url_for('login_page') }}">Log in</a>
+      <a href="{{ url_for('signup_page') }}" class="mh-nav-signup">{{ t('nav.sign_up') }}</a>
+      <a href="{{ url_for('login_page') }}">{{ t('nav.log_in') }}</a>
       {# "Developer" sign-in link removed from the top bar — operator sign-in
          lives in the footer ("Developer access") on the home page. The header
          "online" status pill was removed too; reachability now lives only in
@@ -14261,7 +15130,7 @@ def _layout(
        scrollable / hamburger nav can never clip it. #}
     <div id="mh-notif" class="mh-notif">
       <button id="mh-notif-btn" class="mh-notif-btn" type="button"
-              aria-label="Notifications" aria-haspopup="dialog" aria-expanded="false"
+              aria-label="{{ t('nav.notifications') }}" aria-haspopup="dialog" aria-expanded="false"
               aria-controls="mh-notif-panel"
               data-list-url="{{ url_for('api_notifications') }}"
               data-readall-url="{{ url_for('api_notifications_read_all') }}">
@@ -14273,9 +15142,9 @@ def _layout(
         <span id="mh-notif-badge" class="mh-notif-badge" hidden>0</span>
       </button>
       <div id="mh-notif-panel" class="mh-notif-panel" role="dialog"
-           aria-label="Notifications" hidden>
+           aria-label="{{ t('nav.notifications') }}" hidden>
         <div class="mh-notif-head">
-          <span class="mh-notif-h-title">Notifications</span>
+          <span class="mh-notif-h-title">{{ t('nav.notifications') }}</span>
           <button id="mh-notif-readall" class="mh-notif-readall" type="button">Mark all read</button>
         </div>
         <div id="mh-notif-list" class="mh-notif-list" role="list" aria-live="polite"></div>
@@ -14328,23 +15197,35 @@ def _layout(
            lands) is now reachable from any page, not just a footer link on
            the compose surfaces. #}
         <a href="{{ url_for('stub_packs_list') }}" role="menuitem"
-           class="mh-orgmenu-item {{ 'active' if active=='drafts' else '' }}">Drafts</a>
+           class="mh-orgmenu-item {{ 'active' if active=='drafts' else '' }}">{{ t('nav.drafts') }}</a>
         {# C-4: the club-data tools (records, ask-the-data, data hub) were
            filed 3–4 clicks deep under Settings and absent from the nav.
            Surface them from every page. #}
         <a href="{{ url_for('settings_section', section='clubdata') }}" role="menuitem"
-           class="mh-orgmenu-item">Club data</a>
+           class="mh-orgmenu-item">{{ t('nav.club_data') }}</a>
         <a href="{{ url_for('settings_page') }}" role="menuitem"
            class="mh-orgmenu-item {{ 'active' if active=='settings' else '' }}">{{ t('nav.settings') }}</a>
         <a href="{{ url_for('help_page') }}" role="menuitem"
-           class="mh-orgmenu-item {{ 'active' if active=='help' else '' }}">Help</a>
+           class="mh-orgmenu-item {{ 'active' if active=='help' else '' }}">{{ t('nav.help') }}</a>
         {# C-18 — the slide remote had no in-app path (reachable only by typing
            /remote); give a phone user a menu shortcut to the pairing screen. #}
         <a href="{{ url_for('remote_landing') }}" role="menuitem"
-           class="mh-orgmenu-item">Slide remote</a>
+           class="mh-orgmenu-item">{{ t('nav.slide_remote') }}</a>
+        {# Org-access audit: switching / leaving an organisation is only
+           offered to sessions that can actually do it — the dev operator,
+           anonymous pilot sessions, and the rare multi-org member. A
+           single-org member's access is bound to their account, so their
+           only exit is "Log out"; showing them a picker entry or a
+           leave-org control would be a dead (or looping) button. #}
+        {% if can_switch_org %}
         <a href="{{ url_for('sign_in_page') }}" role="menuitem"
            class="mh-orgmenu-item {{ 'active' if active=='signin' else '' }}">{{ t('nav.switch_org') }}</a>
-        <a href="{{ url_for('sign_out') }}" role="menuitem" class="mh-orgmenu-item">{{ t('nav.sign_out') }}</a>
+        {% endif %}
+        {% if dev_operator or not account_email %}
+        <form method="post" action="{{ url_for('sign_out') }}">
+          <button type="submit" role="menuitem" class="mh-orgmenu-item">{{ t('nav.sign_out') }}</button>
+        </form>
+        {% endif %}
       </div>
     </div>
     {% endif %}
@@ -14439,13 +15320,13 @@ def _layout(
   {# C-13 — the media library is the surface built for phones (camera capture,
      the PWA share-target, "share a photo straight from your camera roll"), so it
      earns a mobile bottom-nav slot instead of being hidden behind the hamburger. #}
-  <a href="{{ url_for('media_library_page') }}" class="{{ 'is-active' if active=='media' else '' }}" aria-label="Media library">
+  <a href="{{ url_for('media_library_page') }}" class="{{ 'is-active' if active=='media' else '' }}" aria-label="{{ t('nav.media_library') }}">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
-    Media
+    {{ t('nav.media') }}
   </a>
-  <a href="{{ url_for('activity_page') }}" class="{{ 'is-active' if active=='activity' else '' }}" aria-label="Activity">
+  <a href="{{ url_for('activity_page') }}" class="{{ 'is-active' if active=='activity' else '' }}" aria-label="{{ t('nav.activity') }}">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h4l2 7 4-16 2 9h6"/></svg>
-    Activity
+    {{ t('nav.activity') }}
   </a>
   <a href="{{ url_for('settings_page') }}" class="{{ 'is-active' if active=='settings' else '' }}" aria-label="{{ t('nav.settings') }}">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
@@ -14729,7 +15610,7 @@ def _layout(
       fetch(READALL_URL, {method:'POST', headers:{'Accept':'application/json'}})
         .then(function(r){ return r.json(); })
         .then(function(){ paintBadge(0); poll(); })
-        .catch(function(){});
+        .catch(function(){ if (window.MH && MH.toast) MH.toast('Could not mark notifications read — check your connection.', 'error', 3000); });
     });
   }
   document.addEventListener('visibilitychange', function(){ if (!document.hidden) poll(); });
@@ -14910,7 +15791,13 @@ def _layout(
       if (form.dataset.mhBound === '1') return;
       form.dataset.mhBound = '1';
       if (form.dataset.noLoader === '1') return;
-      form.addEventListener('submit', function(){
+      form.addEventListener('submit', function(e){
+        // If an earlier handler already cancelled the submit — e.g. an inline
+        // onsubmit="return confirm(...)" the user dismissed, or client-side
+        // validation — the form will not navigate, so the full-screen loader
+        // must NOT be raised. Without this guard it would stick on screen until
+        // the 20s safety timeout (e.g. cancelling a member "Remove" confirm).
+        if (e && e.defaultPrevented) return;
         var method = (form.getAttribute('method') || 'get').toLowerCase();
         if (method === 'get') return;
         var btn = form.querySelector('button[type=submit], input[type=submit]');
@@ -14956,10 +15843,11 @@ def _layout(
   // instruction. The result lands in a small panel below the
   // explainer (panel_id), preserving the user's reading flow rather
   // than dumping into a modal.
-  window.mhUseWhyInCaption = function(btn, captionUrl, panelId) {
+  window.mhUseWhyInCaption = function(btn, captionUrl, panelId, saveUrl, cardId) {
     var panel = document.getElementById(panelId);
     var origLabel = btn.textContent;
     btn.disabled = true; btn.textContent = 'Generating…';
+    if (window.MH && MH.btnState) MH.btnState(btn, 'loading');
     if (panel) {
       panel.style.display = 'block';
       panel.textContent = 'Asking the AI to weave the reasoning into a fresh caption…';
@@ -14969,11 +15857,18 @@ def _layout(
       return r.json().then(function(j){ return {status: r.status, body: j}; });
     }).then(function(o){
       btn.disabled = false; btn.textContent = origLabel;
+      if (window.MH && MH.btnState) MH.btnState(btn, 'idle');
       if (!panel) return;
       var caption = (o.body && o.body.caption) || '';
       if (o.body && o.body.error === 'no_key') {
-        panel.innerHTML = '<strong style="color:var(--warn)">AI is in heuristic mode.</strong> '
-          + '<span>Contact your administrator to enable AI.</span>';
+        // H-11: the standard honest-error wording, same as every other
+        // caption surface (the server sends it in `message`).
+        panel.innerHTML = '';
+        var warn = document.createElement('strong');
+        warn.style.color = 'var(--warn)';
+        warn.textContent = (o.body && o.body.message) ||
+          'AI captions are unavailable on this deployment. Contact your administrator to enable them.';
+        panel.appendChild(warn);
         return;
       }
       if (caption) {
@@ -15002,12 +15897,68 @@ def _layout(
           catch(e) { copyBtn.textContent = 'Copy failed'; }
         });
         panel.appendChild(copyBtn);
+        // H-11: persist the result — before this, the woven caption could only
+        // be copied; nothing saved it to the card. Same set_edits route (and
+        // slots) as the edit drawer's Save, so pack build honours it.
+        if (saveUrl) {
+          var saveBtn = document.createElement('button');
+          saveBtn.type = 'button';
+          saveBtn.className = 'btn secondary';
+          saveBtn.style.cssText = 'font-size:11px;padding:4px 10px;margin-left:6px';
+          saveBtn.textContent = 'Save to card';
+          saveBtn.addEventListener('click', function(){
+            var text = capDiv.textContent || '';
+            saveBtn.disabled = true;
+            fetch((window._API_BASE || '') + saveUrl, {
+              method: 'POST',
+              headers: {'Content-Type': 'application/json'},
+              body: JSON.stringify({action: 'set_edits', edits: {
+                'warm-club_headline': text, 'hype_headline': text, 'data-led_headline': text
+              }})
+            }).then(function(r){
+              return r.json().then(
+                function(j){ return {ok: r.ok, body: j}; },
+                function(){ return {ok: r.ok, body: null}; }
+              );
+            }).then(function(sv){
+              saveBtn.disabled = false;
+              var ok = sv && sv.ok && sv.body && sv.body.ok !== false;
+              if (!ok) {
+                var m = (sv && sv.body && (sv.body.reason || sv.body.error || sv.body.message)) || 'server error';
+                if (window.MH && MH.toast) MH.toast('Could not save the caption — ' + m, 'error', 4000);
+                return;
+              }
+              saveBtn.textContent = 'Saved \\u2009\\u2713';
+              if (window.MH && MH.toast) MH.toast('Caption saved to the card', 'success', 2200);
+              // Keep the row caption + the edit drawer's seed in sync.
+              try {
+                var esc = (window.CSS && CSS.escape) ? CSS.escape(cardId || '') : (cardId || '');
+                document.querySelectorAll('[data-card-id="' + esc + '"][data-mh-inspect]').forEach(function(b){
+                  var old = b.getAttribute('data-insp-caption') || '';
+                  if (old && old !== text) b.setAttribute('data-insp-caption-prev', old);
+                  b.setAttribute('data-insp-caption', text);
+                });
+                document.querySelectorAll('[data-mh-row-caption="' + esc + '"]').forEach(function(el){
+                  var t = el.querySelector('[data-mh-row-caption-text]');
+                  var disp = text.length > 140 ? text.slice(0, 140) + '…' : text;
+                  if (t) t.textContent = disp;
+                  el.hidden = !disp;
+                });
+              } catch(e) {}
+            }).catch(function(e){
+              saveBtn.disabled = false;
+              if (window.MH && MH.toast) MH.toast('Could not save the caption — ' + ((e && e.message) || 'network error'), 'error', 4000);
+            });
+          });
+          panel.appendChild(saveBtn);
+        }
       } else {
         panel.innerHTML = '<strong style="color:var(--bad)">Generation failed.</strong> '
           + ((o.body && (o.body.message || o.body.error)) || ('HTTP ' + o.status));
       }
     }).catch(function(e){
       btn.disabled = false; btn.textContent = origLabel;
+      if (window.MH && MH.btnState) MH.btnState(btn, 'idle');
       if (panel) panel.innerHTML = '<strong style="color:var(--bad)">Network error.</strong> '
         + (e && e.message || e);
     });
@@ -15808,14 +16759,35 @@ def _layout(
     var strip = document.getElementById('mh-review-progress');
     if (!strip) return;
     var rows = document.querySelectorAll('.ach-row[data-status]');
-    var total = rows.length || parseInt(strip.getAttribute('data-wf-total'), 10) || 0;
-    var nApproved = 0, nRejected = 0, nQueue = 0;
+    // J-3: the review list is paginated server-side, so the DOM may hold only
+    // the current page's rows — absolute DOM counts would shrink the run to
+    // one page. Start from the server-rendered full-run baseline
+    // (data-wf-base-*) and apply the delta of status changes made on THIS
+    // page (each row remembers its rendered status in data-status-initial).
+    var total = parseInt(strip.getAttribute('data-wf-total'), 10) || rows.length || 0;
+    // SRV-2: the server baselines (data-wf-base-*) count EXACT statuses, so
+    // the deltas must too. A card rendered as 'edited'/'posted' (set from the
+    // builder) is outside the three tracked piles — folding it into 'queue'
+    // here made approving it decrement a queue baseline that never held it.
+    function pile(s){ return (s === 'approved' || s === 'rejected' || s === 'queue') ? s : null; }
+    var dom = {queue: 0, approved: 0, rejected: 0};
+    var delta = {queue: 0, approved: 0, rejected: 0};
     rows.forEach(function(r){
-      var st = r.dataset.status;
-      if (st === 'approved') nApproved++;
-      else if (st === 'rejected') nRejected++;
-      else nQueue++;
+      var st = pile(r.dataset.status);
+      if (st) dom[st]++;
+      var init = pile(r.dataset.statusInitial || r.dataset.status);
+      if (init !== st) {
+        if (init) delta[init]--;
+        if (st) delta[st]++;
+      }
     });
+    function base(name, fallback){
+      var v = parseInt(strip.getAttribute('data-wf-base-' + name), 10);
+      return isNaN(v) ? fallback : v;
+    }
+    var nQueue = Math.max(0, base('queue', dom.queue) + delta.queue);
+    var nApproved = Math.max(0, base('approved', dom.approved) + delta.approved);
+    var nRejected = Math.max(0, base('rejected', dom.rejected) + delta.rejected);
     var reviewed = nApproved + nRejected;
     var pct = total ? Math.round(100 * reviewed / total) : 0;
     var set = function(id, val){ var el = document.getElementById(id); if (el) el.textContent = val; };
@@ -15833,6 +16805,7 @@ def _layout(
     set('mh-wf-tabcount-all', total);
     set('mh-wf-tabcount-queue', nQueue);
     set('mh-wf-tabcount-approved', nApproved);
+    set('mh-wf-tabcount-rejected', nRejected);
     if (window.mhWfTabsSync) window.mhWfTabsSync();
   };
 
@@ -15908,12 +16881,18 @@ def _layout(
       });
       document.querySelectorAll('[data-mh-card-id="' + esc + '"][data-mh-wf]').forEach(function(b){
         var on = b.getAttribute('data-mh-wf') === st;
+        // B-4: Re-queue only shows on decided cards — while the card sits in
+        // the queue there is nothing to undo, so the button stays hidden.
+        if (b.getAttribute('data-mh-wf') === 'queue') b.hidden = (st === 'queue');
         if (b.classList.contains('mh-wf-approve')) {
           // Approve flips between outline ("Approve") and filled
           // ("Approved ✓") — the fill is the confirmation, never the default.
+          // G-10: the server renders the localized labels into data attributes
+          // so the optimistic repaint keeps the page's language.
           b.classList.toggle('is-on', on);
           b.classList.toggle('secondary', !on);
-          b.textContent = on ? 'Approved ✓' : 'Approve';
+          b.textContent = on ? (b.dataset.mhLabelApproved || 'Approved ✓')
+                             : (b.dataset.mhLabelApprove || 'Approve');
           if (on) b.setAttribute('aria-pressed', 'true');
           else b.removeAttribute('aria-pressed');
         } else if (on) {
@@ -16607,6 +17586,7 @@ def _layout(
         signed_in=bool(signed_in_pid),
         account_email=account_email,
         dev_operator=dev_operator,
+        can_switch_org=can_switch_org,
         signed_in_name=signed_in_name,
         signed_in_primary=signed_in_primary,
         signed_in_secondary=signed_in_secondary,
@@ -17022,6 +18002,40 @@ def _flash_toast(message: str, kind: str = "success") -> None:
         pass
 
 
+# D-15 — the /organisation analyse actions persist their results immediately;
+# the values they overwrite ride the session as a one-shot "Discard this
+# analysis" undo (per-session best-effort, consumed by the discard route).
+_ORG_ANALYSIS_STASH_KEY = "org_analysis_stash"
+# The default Flask session is a ~4 KB cookie: refuse an oversized stash
+# rather than risk the browser dropping the whole session cookie.
+_ORG_ANALYSIS_STASH_MAX_BYTES = 3000
+
+
+def _org_analysis_stash_previous(profile_id: str, kind: str, fields: dict) -> None:
+    """Stash the pre-analysis values in *fields* as a one-shot undo.
+
+    ``kind`` is ``"brand"`` or ``"voice"`` and decides which preview the
+    Discard button renders beside. Best-effort by design: an unserialisable
+    or oversized payload drops the stash (so a stale undo can never restore
+    the wrong thing) and never raises into the request handler."""
+    try:
+        payload = {"profile_id": str(profile_id), "kind": kind, "fields": fields}
+        if len(json.dumps(payload)) > _ORG_ANALYSIS_STASH_MAX_BYTES:
+            session.pop(_ORG_ANALYSIS_STASH_KEY, None)
+            return
+        session[_ORG_ANALYSIS_STASH_KEY] = payload
+    except Exception:  # noqa: BLE001
+        session.pop(_ORG_ANALYSIS_STASH_KEY, None)
+
+
+def _org_analysis_stash_for(profile_id: str) -> dict:
+    """The pending analysis-undo stash for *profile_id* ({} when none)."""
+    stash = session.get(_ORG_ANALYSIS_STASH_KEY)
+    if isinstance(stash, dict) and stash.get("profile_id") == profile_id:
+        return stash
+    return {}
+
+
 # --------------------------------------------------------------------------- #
 # UI 1.9 — Multi-select + bulk actions (Media library + review queue).
 #
@@ -17190,10 +18204,13 @@ _BULK_ACTIONS_JS = r"""
         });
         document.querySelectorAll('[data-mh-card-id="' + esc + '"][data-mh-wf]').forEach(function(b){
           var on = b.getAttribute('data-mh-wf') === status;
+          // B-4: Re-queue only shows on decided cards — hidden while queued.
+          if (b.getAttribute('data-mh-wf') === 'queue') b.hidden = (status === 'queue');
           if (b.classList.contains('mh-wf-approve')){
             b.classList.toggle('is-on', on);
             b.classList.toggle('secondary', !on);
-            b.textContent = on ? 'Approved ✓' : 'Approve';
+            b.textContent = on ? (b.dataset.mhLabelApproved || 'Approved ✓')
+                               : (b.dataset.mhLabelApprove || 'Approve');
             if (on) b.setAttribute('aria-pressed', 'true'); else b.removeAttribute('aria-pressed');
           } else if (on){
             b.setAttribute('aria-pressed', 'true'); b.style.opacity = '0.55'; b.style.cursor = 'default';
@@ -17266,7 +18283,8 @@ _BULK_ACTIONS_JS = r"""
       }
     }
     function afterReview(action, body, ids){
-      var status = action === 'approve' ? 'approved' : (action === 'reject' ? 'rejected' : action);
+      var status = action === 'approve' ? 'approved'
+        : (action === 'reject' ? 'rejected' : (action === 'requeue' ? 'queue' : action));
       var results = (body && body.results) || null;
       if (results){
         // Paint each card by its ACTUAL server status: a group-approval-held
@@ -17287,7 +18305,8 @@ _BULK_ACTIONS_JS = r"""
       var okIds = results ? results.filter(function(r){ return r.ok && (r.status || status) === status; }).map(function(r){ return r.id; }) : ids;
       var held = results ? results.filter(function(r){ return r.ok && r.status && r.status !== status; }).length : 0;
       var nb = (body && body.n_blocked) || 0;
-      var verb = action === 'approve' ? 'Approved' : 'Rejected';
+      var verb = action === 'approve' ? 'Approved'
+        : (action === 'requeue' ? 'Re-queued' : 'Rejected');
       var msg = verb + ' ' + okIds.length + ' card' + (okIds.length === 1 ? '' : 's') + '.';
       if (held){
         msg += ' ' + held + ' held for another approver.';
@@ -17903,8 +18922,12 @@ def _hero_product_demo() -> str:
         '<p class="mh-demo-caption">A lifetime best for <mark>Tom Davies</mark>. '
         "<mark>52.41</mark> in the <mark>100m freestyle</mark>, a clean "
         "<mark>0.74s</mark> off his old mark.</p>"
-        '<div class="mh-demo-acts"><span>Edit</span>'
-        '<span class="ghost">Reject</span><span class="go">Approve</span></div>'
+        # G-1/H-10/B-4: mirror the REAL review-row actions on a QUEUED card
+        # (Approve + Edit card; Re-queue only appears once a card is
+        # decided) — the mock previously promised buttons the per-card
+        # flow doesn't have.
+        '<div class="mh-demo-acts"><span>&#9998; Edit card</span>'
+        '<span class="go">Approve</span></div>'
         "</div>"
         "</div>"
         "</div>"
@@ -18100,9 +19123,10 @@ def _home_io_headline_html() -> str:
         + _inline_thumb("reel.svg", "reel", "Match-day highlights, 15-second cut")
         + "."
         "</h2>"
-        '<p class="mh-pipeline-sub">One upload, four posting-ready formats. '
-        "Every name, time and place comes straight from the file you "
-        "uploaded. Nothing is invented, and nothing posts without you.</p>"
+        '<p class="mh-pipeline-sub">One upload &mdash; HY3, PDF, CSV or Excel '
+        "&mdash; four posting-ready formats out. Every name, time and place "
+        "comes straight from the file you uploaded. Nothing is invented, "
+        "and nothing posts without you.</p>"
         "</section>"
     )
 
@@ -18499,6 +19523,7 @@ function _aiChecked(btn){
 }
 function _genBusy(btn, on){
   if(!btn) return;
+  if(window.MH && MH.btnState){ MH.btnState(btn, on ? 'loading' : 'idle'); }
   if(on){ if(!btn.dataset.label) btn.dataset.label = btn.textContent; btn.disabled = true; btn.textContent = 'Generating…'; }
   else { btn.disabled = false; if(btn.dataset.label) btn.textContent = btn.dataset.label; }
 }
@@ -18515,6 +19540,7 @@ _DOCUMENTS_HOME_JS = (
     "<script>\n"
     + _EDITORIAL_GEN_HELPERS
     + r"""
+const CSRF = "__CSRF__";
 async function genDoc(btn, fmt, scope, runId){
   if(fmt==='meet_programme' && !runId){ _genToast('Pick a meet first.'); return; }
   _genBusy(btn, true);
@@ -18534,7 +19560,10 @@ async function importDoc(){
   const f=document.getElementById('imp-file').files[0];
   if(!f){ _genToast('Choose a file.'); return; }
   const fd=new FormData(); fd.append('file', f);
-  const r=await fetch('__IMPORT_URL__', {method:'POST', body:fd}); const j=await r.json();
+  // Multipart upload: the JSON-content-type CSRF exemption can't apply, so carry
+  // the token in a header (mirrors the app's other multipart writes) — without it
+  // the _csrf_protect guard 403s the POST in production.
+  const r=await fetch('__IMPORT_URL__', {method:'POST', headers:{'X-CSRF-Token':CSRF}, body:fd}); const j=await r.json();
   if(j.ok){ location.href=j.url; } else { _genToast(j.detail||j.message||j.error||'Import failed.'); }
 }
 async function mergePdfs(){
@@ -18550,7 +19579,7 @@ async function imagesToPdf(){
   await _download('__IMG_URL__', fd, 'images.pdf');
 }
 async function _download(url, fd, name){
-  const r=await fetch(url,{method:'POST',body:fd});
+  const r=await fetch(url,{method:'POST',headers:{'X-CSRF-Token':CSRF},body:fd});
   if(!r.ok){ const j=await r.json().catch(()=>({})); _genToast(j.detail||j.message||j.error||'Failed.'); return; }
   const blob=await r.blob(); const a=document.createElement('a');
   a.href=URL.createObjectURL(blob); a.download=name; a.click();
@@ -18571,7 +19600,9 @@ async function saveSpec(){
 }
 async function delDoc(){
   if(!confirm('Delete this document?')) return;
-  const r=await fetch('__DEL_URL__',{method:'POST'}); const j=await r.json();
+  // JSON content-type keeps this same-origin write CSRF-exempt (per the app's
+  // _csrf_protect guard); without it the empty POST is 403d in production.
+  const r=await fetch('__DEL_URL__',{method:'POST',headers:{'Content-Type':'application/json'}}); const j=await r.json();
   if(j.ok) location.href='__HOME_URL__'; else alert('Delete failed.');
 }
 </script>
@@ -18584,17 +19615,22 @@ _NEWSLETTERS_HOME_JS = (
 async function genNl(btn, fmt){
   var rangeEl=document.getElementById('nl-range');
   var range=rangeEl?rangeEl.value:'';
+  // H-12: the meet digest names its meet; '' keeps "latest meet in range".
+  var runEl=document.getElementById('nl-digest-run');
+  var runId=(fmt==='meet_digest'&&runEl)?runEl.value:'';
   _genBusy(btn, true);
   try{
-    const j = await _genNl(fmt, range, _aiChecked(btn));
+    const j = await _genNl(fmt, range, _aiChecked(btn), runId);
     if(j.ok){ location.href=j.url; return; }
     _genToast(_genMsg(j));
   }catch(e){ _genToast('Network error — nothing was created.'); }
   finally{ _genBusy(btn, false); }
 }
-async function _genNl(fmt, range, withAi){
+async function _genNl(fmt, range, withAi, runId){
+  const payload={format:fmt, range:range, with_ai:withAi};
+  if(runId) payload.run_id=runId;
   const r = await fetch('__GEN_URL__', {method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({format:fmt, range:range, with_ai:withAi})});
+    body: JSON.stringify(payload)});
   return r.json();
 }
 </script>
@@ -18627,7 +19663,7 @@ async function nlDelete(){
   if(j.ok) location.href='__HOME_URL__'; else alert('Delete failed.');
 }
 async function nlPublish(pub){
-  const msg=document.getElementById('nl-msg'); msg.textContent=pub?'Publishing…':'Taking offline…';
+  const msg=document.getElementById('nl-msg'); msg.textContent=pub?'Publishing…':'Unpublishing…';
   const r=await fetch(pub?'__PUB_URL__':'__UNPUB_URL__',{method:'POST',headers:{'Content-Type':'application/json'}}); const j=await r.json();
   if(j.ok){ setTimeout(()=>location.reload(), 500); } else { msg.textContent=j.error||'Failed.'; }
 }
@@ -18641,8 +19677,8 @@ _DOC_PRESENT_CONSOLE = r"""
     <div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
       <button class="btn" onclick="act('prev')">◀ Prev</button>
       <button class="btn" onclick="act('next')">Next ▶</button>
-      <button class="btn secondary" onclick="act('blackout')">Blackout</button>
-      <button class="btn secondary" onclick="act('autoplay')">Autoplay</button>
+      <button id="btn-blackout" class="btn secondary" aria-pressed="false" onclick="act('blackout')">Blackout</button>
+      <button id="btn-autoplay" class="btn secondary" aria-pressed="false" onclick="act('autoplay')">Autoplay</button>
       <button class="btn secondary" onclick="act('timer_reset')">Reset timer</button>
       <span id="pos" class="dim"></span>
       <span id="cstat" class="dim" role="status" aria-live="polite" style="color:var(--warn)"></span>
@@ -18655,6 +19691,10 @@ _DOC_PRESENT_CONSOLE = r"""
   </div>
   <div>
     <div class="card"><strong>Phone remote</strong>
+      <!-- B-8: QR of the /remote/<code> deep link — scan and the phone is
+           connected, no hand-typing. Empty when the QR backend is absent, so
+           the text-only pairing info below stands on its own. -->
+      __REMOTE_QR_SVG__
       <p class="dim" style="font-size:13px;margin:6px 0">Open <b>__REMOTE_URL__</b> and enter:</p>
       <div style="font-size:32px;letter-spacing:6px;font-weight:700;text-align:center">__CODE__</div>
       <p style="font-size:12px;margin-top:10px"><a href="__AUDIENCE_URL__" target="_blank">Open audience view ↗</a></p>
@@ -18680,6 +19720,12 @@ async function act(a){
   poll();
 }
 function fmtT(s){ const m=Math.floor(s/60), ss=s%60; return m+':'+String(ss).padStart(2,'0'); }
+function toggleState(id, on, onLabel, offLabel){
+  var el=document.getElementById(id); if(!el) return;
+  el.setAttribute('aria-pressed', on?'true':'false');
+  el.style.outline = on?'2px solid var(--accent)':'';
+  el.textContent = on?onLabel:offLabel;
+}
 // J-13: end the talk cleanly from the console (the remote had this; the driving
 // laptop did not), then return the presenter to the document.
 async function endPres(){
@@ -18700,6 +19746,10 @@ async function poll(){
       document.getElementById('next-title').textContent=(cur+1<TOTAL)?TITLES[nx]:'End of deck';
       document.getElementById('next-slide').src=BASE+'/'+nx+'.png?v='+v;
     }
+    // Reflect the toggle state so the presenter can see when the room is blacked
+    // out or the deck is auto-advancing (both are otherwise invisible feedback).
+    toggleState('btn-blackout', !!s.blackout, 'Blackout: on', 'Blackout');
+    toggleState('btn-autoplay', !!s.autoplay, 'Autoplay: on', 'Autoplay');
     document.getElementById('timer').textContent='⏱ '+fmtT(s.timer_elapsed||0);
   }catch(e){}
 }
@@ -18812,6 +19862,117 @@ function athEnforceConfirm(f){
   if(f.getAttribute('data-enforcing')!=='1'){ return true; }
   return confirm(f.getAttribute('data-msg')||'Turn consent enforcement on?');
 }
+</script>
+"""
+
+# B-7: inline + bulk permission saves on /athletes. Plain string (not an
+# f-string) so the JS braces stay single; __CONSENT_URL__ is substituted at
+# render time. The per-row form POST stays as the no-JS fallback — this
+# script upgrades it to a fetch save (no reload, scroll preserved) and
+# reveals the bulk "apply permission to selected" bar.
+_ATHLETES_CONSENT_JS = r"""
+<script>
+(function(){
+  var URL = '__CONSENT_URL__';
+  function toast(m, t){ if (window.MH && MH.toast) MH.toast(m, t || 'info'); }
+  function save(ids, level, done, fail){
+    fetch(URL, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json', 'Accept': 'application/json'},
+      body: JSON.stringify({athlete_ids: ids, level: level})
+    }).then(function(r){
+      return r.json().then(function(j){ j.__ok = r.ok; return j; });
+    }).then(function(j){
+      if (j.__ok && j.ok) done(j);
+      else fail(j.error || 'Could not save — reload and try again.');
+    }).catch(function(){
+      fail('Could not save — check your connection and try again.');
+    });
+  }
+  function tickRow(form){
+    var tick = form.querySelector('.mh-consent-tick');
+    if (!tick) return;
+    tick.hidden = false;
+    clearTimeout(tick._t);
+    tick._t = setTimeout(function(){ tick.hidden = true; }, 2200);
+  }
+  var forms = Array.prototype.slice.call(document.querySelectorAll('form.mh-consent-form'));
+  if (!forms.length) return;
+  forms.forEach(function(form){
+    var sel = form.querySelector('select[name=level]');
+    var btn = form.querySelector('.mh-consent-save');
+    if (btn) btn.hidden = true; // auto-save on change replaces the per-row Save
+    form.addEventListener('submit', function(e){ e.preventDefault(); });
+    if (!sel) return;
+    sel.dataset.saved = sel.value;
+    sel.addEventListener('change', function(){
+      var level = sel.value;
+      if (!level) {
+        sel.value = sel.dataset.saved;
+        toast('Pick a permission level first.', 'info');
+        return;
+      }
+      sel.disabled = true;
+      save([form.dataset.athleteId], level, function(){
+        sel.disabled = false;
+        sel.dataset.saved = level;
+        tickRow(form);
+      }, function(msg){
+        sel.disabled = false;
+        sel.value = sel.dataset.saved; // never show a level that didn't save
+        toast(msg, 'error');
+      });
+    });
+  });
+  var bulk = document.getElementById('mh-consent-bulk');
+  if (!bulk) return;
+  bulk.style.display = 'flex';
+  Array.prototype.forEach.call(document.querySelectorAll('.mh-consent-selcell'), function(c){
+    c.hidden = false;
+  });
+  var countEl = document.getElementById('mh-consent-selcount');
+  var allBox = document.getElementById('mh-consent-check-all');
+  function checks(){ return Array.prototype.slice.call(document.querySelectorAll('.mh-consent-check')); }
+  function recount(){
+    var n = checks().filter(function(c){ return c.checked; }).length;
+    if (countEl) countEl.textContent = String(n);
+  }
+  document.addEventListener('change', function(e){
+    var t = e.target;
+    if (allBox && t === allBox) {
+      checks().forEach(function(c){ c.checked = allBox.checked; });
+      recount();
+    } else if (t && t.classList && t.classList.contains('mh-consent-check')) {
+      recount();
+    }
+  });
+  var applyBtn = document.getElementById('mh-consent-bulk-apply');
+  var levelSel = document.getElementById('mh-consent-bulk-level');
+  if (!applyBtn || !levelSel) return;
+  applyBtn.addEventListener('click', function(){
+    var ids = checks().filter(function(c){ return c.checked; }).map(function(c){ return c.value; });
+    if (!ids.length) { toast('Tick at least one swimmer first.', 'info'); return; }
+    var level = levelSel.value;
+    if (!level) { toast('Pick a permission level first.', 'info'); return; }
+    applyBtn.disabled = true;
+    save(ids, level, function(j){
+      applyBtn.disabled = false;
+      ids.forEach(function(id){
+        var esc = (window.CSS && CSS.escape) ? CSS.escape(id) : id;
+        var form = document.querySelector('form.mh-consent-form[data-athlete-id="' + esc + '"]');
+        if (!form) return;
+        var sel = form.querySelector('select[name=level]');
+        if (sel) { sel.value = level; sel.dataset.saved = level; }
+        tickRow(form);
+      });
+      var n = (typeof j.updated === 'number') ? j.updated : ids.length;
+      toast('Updated ' + n + (n === 1 ? ' swimmer.' : ' swimmers.'), 'success');
+    }, function(msg){
+      applyBtn.disabled = false;
+      toast(msg, 'error');
+    });
+  });
+})();
 </script>
 """
 
@@ -18964,14 +20125,8 @@ def create_app() -> Flask:
         _embeddable = (request.endpoint or "") == "public_wall_embed" or (
             request.path.startswith("/wall/") and request.path.endswith("/embed")
         )
-        # The 1.16 microsite editor frames its own draft-preview route in a
-        # same-origin iframe (device preview), so that route allows 'self'
-        # framing only — everything else still refuses framing (clickjacking).
-        _self_frame = (request.endpoint or "") in ("site_preview_home", "site_preview_page")
         if _embeddable:
             _frame_ancestors = "frame-ancestors *"
-        elif _self_frame:
-            _frame_ancestors = "frame-ancestors 'self'"
         else:
             _frame_ancestors = "frame-ancestors 'none'"
         h.setdefault(
@@ -18982,9 +20137,7 @@ def create_app() -> Flask:
             "object-src 'none'; base-uri 'self'; form-action 'self'; " + _frame_ancestors,
         )
         h.setdefault("X-Content-Type-Options", "nosniff")
-        if _self_frame:
-            h.setdefault("X-Frame-Options", "SAMEORIGIN")
-        elif not _embeddable:
+        if not _embeddable:
             h.setdefault("X-Frame-Options", "DENY")
         h.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
         h.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
@@ -18992,6 +20145,24 @@ def create_app() -> Flask:
         # request, or Render's edge) — never teach a plain-HTTP dev setup to pin.
         if app.config.get("SESSION_COOKIE_SECURE") or request.is_secure or os.environ.get("RENDER"):
             h.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+        # Signed-in HTML must not be restorable from cache after sign-out
+        # (back button on a shared machine — org-access audit P3). no-store
+        # also opts these pages out of the bfcache in the major engines.
+        # setdefault keeps route-specific Cache-Control; static assets are
+        # untouched (they set their own or ride SEND_FILE_MAX_AGE_DEFAULT).
+        try:
+            if (
+                resp.content_type
+                and resp.content_type.startswith("text/html")
+                and (
+                    session.get("user_email")
+                    or session.get("dev_operator")
+                    or session.get("active_profile_id")
+                )
+            ):
+                h.setdefault("Cache-Control", "no-store")
+        except Exception:
+            pass
         return resp
 
     # Persistent SECRET_KEY &mdash; survives restarts and redeploys.
@@ -19262,16 +20433,6 @@ def create_app() -> Flask:
             "public_wall_card_png",
             # 1.21 — oEmbed discovery for the public wall (read-only, public).
             "oembed",
-            # 1.16 — published club microsites: token-keyed public surfaces (the
-            # token is the access control; a per-site password may gate pages).
-            "site_public_home",
-            "site_public_page",
-            "site_card_png",
-            "site_form_submit",
-            "site_widget_vote",
-            "site_sitemap",
-            "site_robots",
-            "site_unlock",
             # 1.19 — a shared bulk-export ZIP download: a token-keyed public
             # surface (a 1.18 share token is the access control), so a
             # recipient can fetch it without an active organisation. The route
@@ -19365,15 +20526,26 @@ def create_app() -> Flask:
         return snap.get((_auth.normalize_email(email), (pid or "").strip()))
 
     def _session_can_use_profile(pid: str) -> bool:
-        """May the CURRENT session pin / read-as-active / edit this org?"""
-        snap = _memberships_snapshot()
-        if not _snap_is_bound(snap, pid):
-            return True
+        """May the CURRENT session pin / read-as-active / edit this org?
+
+        Access model (org-access audit, extending ADR-0014):
+          - the signed-in dev operator may use ANY org — cross-org roaming
+            is exclusively the operator's capability;
+          - a signed-in account is confined to the orgs it is an ACTIVE
+            member of, bound or not (previously it could roam any unbound
+            org — the same blast-radius rule ADR-0014 applied to ownerless
+            runs now applies at the pinning choke point);
+          - an anonymous session keeps the unbound (pilot/standalone) orgs
+            open and is refused every bound org, exactly as before.
+        """
         if _auth.is_dev_operator():
             return True
+        snap = _memberships_snapshot()
         email = _auth.current_user_email()
-        m = _snap_membership(snap, email, pid)
-        return bool(m and m.status == _tenancy.STATUS_ACTIVE)
+        if email:
+            m = _snap_membership(snap, email, pid)
+            return bool(m and m.status == _tenancy.STATUS_ACTIVE)
+        return not _snap_is_bound(snap, pid)
 
     def _session_owns_profile(pid: str) -> bool:
         """Operator, or an ACTIVE owner of a bound org (delete/member-admin)."""
@@ -19426,6 +20598,34 @@ def create_app() -> Flask:
             invited_via_profile_id=pid,
         )
         _invalidate_memberships_snapshot()
+
+    def _auto_pin_member_org() -> Optional[str]:
+        """Pin the signed-in account's own organisation (A1, org-access audit).
+
+        Members land straight on their club after sign-in — never on the
+        picker. Keeps an already-pinned org when it is one of theirs;
+        otherwise pins the alphabetically-first member org (deterministic
+        landing for the rare multi-org account). Returns the pinned id, or
+        None when the session is anonymous / the operator / memberless.
+        The membership row alone is not enough — the profile JSON must
+        still exist on disk, or the pin would 404 everywhere downstream.
+        """
+        if _auth.is_dev_operator():
+            return None
+        email = _auth.current_user_email()
+        if not email:
+            return None
+        snap = _memberships_snapshot()
+        pids = sorted(
+            pid for (e, pid), m in snap.items() if e == email and m.status == _tenancy.STATUS_ACTIVE
+        )
+        pids = [pid for pid in pids if load_profile(pid) is not None]
+        if not pids:
+            return None
+        current = (session.get("active_profile_id") or "").strip()
+        chosen = current if current in pids else pids[0]
+        _pin_active_profile(chosen)
+        return chosen
 
     def _active_profile_id() -> Optional[str]:
         """Return the signed-in organisation id, or ``None``.
@@ -20332,6 +21532,18 @@ def create_app() -> Flask:
                 started_iso = started.replace(" ", "T") + "Z" if started else ""
                 search_haystack = (r["meet_name"] or r["file_name"] or r["id"] or "").lower()
                 dup_badge = _dup_badge_html(dup_map.get(r["id"]))
+                # C-10: processed meets get an explicit route into the athlete
+                # spotlight — otherwise its only entries are the Review view
+                # switch or a hand-typed URL. ?older=1 keeps the spotlight's
+                # meet picker consistent even for meets past its 31-day window.
+                spotlight_link = ""
+                if r["status"] == "done" and _club_platform_ok:
+                    _sp_href = url_for("spotlight_landing", run_id=r["id"], older=1)
+                    spotlight_link = (
+                        f'<a href="{_sp_href}" style="font-size:11px;'
+                        "color:var(--ink-muted);white-space:nowrap;"
+                        'margin-right:10px">Spotlight a swimmer &rarr;</a>'
+                    )
                 rows_html += (
                     f'<tr data-run-row="{_h(r["id"])}" data-status="{_h(r["status"])}" data-q="{_h(search_haystack)}">'
                     f'<td data-label="Input"><a href="{review_href}">{_h(r["meet_name"] or r["file_name"] or r["id"])}</a>{dup_badge}</td>'
@@ -20339,7 +21551,8 @@ def create_app() -> Flask:
                     f'<td data-label="Matched">{_h(r["our_swims"] or 0)}</td>'
                     f'<td data-label="Achievements">{_h(ach_by_id.get(r["id"], 0))}</td>'
                     f'<td data-label="Started"><time class="mh-rel" datetime="{_h(started_iso)}">{_h(started)}</time></td>'
-                    f'<td><form method="post" action="{delete_href}" '
+                    f"<td>{spotlight_link}"
+                    f'<form method="post" action="{delete_href}" '
                     f'class="mh-run-delete" data-run-id="{_h(r["id"])}" '
                     f'style="display:inline" data-no-loader="1">'
                     f'<input type="hidden" name="next" value="{_h(request.path)}">'
@@ -20530,19 +21743,26 @@ def create_app() -> Flask:
 
     # ---- ACTIVITY FEED — unified runs/approvals/exports stream (UI 1.16) ---
     def _activity_view_toggle(active_view: str) -> str:
-        """Segmented "Runs table | Feed" switch shared by both Activity views."""
-        table_cls = " is-active" if active_view == "table" else ""
-        feed_cls = " is-active" if active_view == "feed" else ""
+        """Segmented "Table | Feed | Season" switch shared by the three
+        history lenses (G-2: /activity, /activity/feed and /season all render
+        the same result history — one strip cross-links them with an active
+        state instead of each page hiding the others)."""
+        tabs = (
+            ("table", "Results table", url_for("activity_page")),
+            ("feed", "Feed", url_for("activity_feed_page")),
+            ("season", "Season", url_for("season_timeline_page")),
+        )
+        links = ""
+        for key, label, href in tabs:
+            active = active_view == key
+            links += (
+                f'<a class="{"is-active" if active else ""}" '
+                f'aria-current="{"page" if active else "false"}" '
+                f'href="{href}">{label}</a>'
+            )
         return (
             '<nav class="mh-segmented" aria-label="Activity view" '
-            'style="margin-bottom:var(--sp-4)">'
-            f'<a class="{table_cls.strip()}" '
-            f'aria-current="{"page" if active_view == "table" else "false"}" '
-            f'href="{url_for("activity_page")}">Results table</a>'
-            f'<a class="{feed_cls.strip()}" '
-            f'aria-current="{"page" if active_view == "feed" else "false"}" '
-            f'href="{url_for("activity_feed_page")}">Feed</a>'
-            "</nav>"
+            f'style="margin-bottom:var(--sp-4)">{links}</nav>'
         )
 
     def _render_activity_feed(events) -> str:
@@ -21237,8 +22457,8 @@ def create_app() -> Flask:
             f"{range_html}"
             f"<span>{n_meets:,} {'meet' if n_meets == 1 else 'meets'}</span>"
             '<span class="sep">&middot;</span>'
-            f'<span><a href="{url_for("activity_page")}">View as activity log &rarr;</a></span>'
-            '<span class="sep">&middot;</span>'
+            # (G-2: the "View as activity log →" link moved into the shared
+            # Table · Feed · Season strip below the hero.)
             # C-9 — a discoverable entry into Collections (folders grouping meets),
             # previously reachable only by typing the URL.
             f'<span><a href="{url_for("collections_page")}">Collections &rarr;</a></span>'
@@ -21254,7 +22474,14 @@ def create_app() -> Flask:
             "</div></div>"
         )
 
-        body = season_css + hero + summary_html + timeline_html + _RUN_DELETE_JS
+        body = (
+            season_css
+            + hero
+            + _activity_view_toggle("season")
+            + summary_html
+            + timeline_html
+            + _RUN_DELETE_JS
+        )
         return _layout("Season timeline", body, active="season")
 
     # ---- UPLOAD --------------------------------------------------------
@@ -21263,14 +22490,16 @@ def create_app() -> Flask:
         # V8.2 issue 3: every upload now goes through /upload/configure.
         # The upload form has only the file input + submit. Branding is
         # collected on the configure step, after we've parsed the file.
+        #
+        # H-18: rejections never dead-end on a bare error card — they fall
+        # through to the full upload page (form, dropzone, recent meets)
+        # with the error rendered inline above the dropzone, so the
+        # volunteer can fix the problem and try again in place.
+        # upload_error values are fixed server-controlled literals (never
+        # user input — no filename/extension echo), rendered un-escaped.
+        upload_error = ""
         if request.method == "POST":
             f = request.files.get("file")
-            if not f or not f.filename:
-                return _layout(
-                    "Upload",
-                    '<div class="card"><p class="tag bad">No file selected.</p></div>',
-                    active="create",
-                ), 400
             # Extension allowlist (THREAT_MODEL §1): results files only. The
             # file is stored as opaque bytes under a random run id and parsed
             # by deterministic parsers — but rejecting junk up front shrinks
@@ -21289,22 +22518,22 @@ def create_app() -> Flask:
                 ".txt",
                 ".xlsx",
             }
-            ext = os.path.splitext(f.filename)[1].lower()
-            if ext not in _ALLOWED_UPLOAD_EXTS:
-                return _layout(
-                    "Upload",
-                    '<div class="card"><p class="tag bad">That file type isn\'t supported. '
-                    "Upload meet results as HY3, SDIF/SD3/CL2, ZIP, PDF, HTML, CSV or Excel (.xlsx).</p></div>",
-                    active="create",
-                ), 400
-            data = f.read()
-            if not data:
-                return _layout(
-                    "Upload",
-                    '<div class="card"><p class="tag bad">Uploaded file was empty.</p></div>',
-                    active="create",
-                ), 400
-
+            data = b""
+            ext = os.path.splitext(f.filename)[1].lower() if f and f.filename else ""
+            if not f or not f.filename:
+                upload_error = "Please choose a results file first."
+            elif ext not in _ALLOWED_UPLOAD_EXTS:
+                upload_error = (
+                    "That file type isn't supported. Upload meet results as "
+                    "HY3, SDIF/SD3/CL2, ZIP, PDF, HTML, CSV, TXT or Excel (.xlsx)."
+                )
+            else:
+                data = f.read()
+                if not data:
+                    upload_error = (
+                        "That file is empty. Export the results file again and re-upload it."
+                    )
+        if request.method == "POST" and not upload_error:
             temp_run_id = uuid.uuid4().hex[:12]
             tmp_dir = RUNS_DIR / temp_run_id
             tmp_dir.mkdir(parents=True, exist_ok=True)
@@ -21378,7 +22607,7 @@ def create_app() -> Flask:
                         meta_line = (
                             '<span class="tag bad" style="font-size:10px">Didn\'t finish</span>'
                             if failed
-                            else f'{n_swims} swim{"" if n_swims == 1 else "s"}'
+                            else f"{n_swims} swim{'' if n_swims == 1 else 's'}"
                         )
                         items_html += (
                             "<li>"
@@ -21390,7 +22619,7 @@ def create_app() -> Flask:
                             f'<time class="mh-rel" datetime="{_h(when_iso)}">{_h(when)}</time></span>'
                             "</div>"
                             f'<a class="go" href="{configure_href}">'
-                            f'{"Try again" if failed else "Re-configure"} &rarr;</a>'
+                            f"{'Try again' if failed else 'Re-configure'} &rarr;</a>"
                             "</li>"
                         )
                     recent_html = (
@@ -21596,12 +22825,18 @@ def create_app() -> Flask:
                 .replace("__CSRF__", _csrf_token())
             )
 
+        # H-18: a rejected POST re-renders this same page with the error
+        # inline — same region and look the client-side showError() uses.
+        _upload_err_hidden = "" if upload_error else " hidden"
+        _upload_dz_invalid = ' style="border-color:var(--bad)"' if upload_error else ""
+
         body = f"""
 <div class="mh-fx mh-aurora" style="overflow:hidden;border-radius:var(--radius-lg);margin-bottom:var(--sp-4)">
 <section class="mh-hero" data-lane="01" style="padding-top:var(--sp-8);padding-bottom:var(--sp-6)">
   <span class="mh-hero-eyebrow">Upload meet file</span>
   <h1>Drop the results.<br><em class="editorial">We'll do the rest.</em></h1>
-  <p class="lede">Upload your meet results file — Hytek&nbsp;<code>.hy3</code>&hairsp;/&hairsp;<code>.zip</code>, SDIF&hairsp;/&hairsp;SD3, PDF, CSV, Excel&nbsp;<code>.xlsx</code> or HTML. You'll pick your club, upload your logo, and add photos on the next step.</p>
+  <p class="lede">Upload your meet results file — Hytek&nbsp;<code>.hy3</code>&hairsp;/&hairsp;<code>.hyv</code>&hairsp;/&hairsp;<code>.zip</code>, SDIF&hairsp;/&hairsp;SD3&hairsp;/&hairsp;CL2, PDF, CSV, TXT, Excel&nbsp;<code>.xlsx</code> or HTML. You'll pick your club, upload your logo, and add photos on the next step.</p>
+  <a class="mh-how-pill" href="{url_for("content_type_intro", ct="meet_recap")}" style="margin-top:var(--sp-3)">How it works</a>
 </section>
 </div>
 
@@ -21620,7 +22855,8 @@ def create_app() -> Flask:
 <div class="card">
   <form id="mh-upload-form" method="post" enctype="multipart/form-data" data-loader-text="Reading your meet file">
     <label class="req" for="upload-file">Meet results file</label>
-    <label class="mh-dropzone" for="upload-file">
+    <div id="mh-upload-error" class="mh-field-error" role="alert"{_upload_err_hidden} style="margin-bottom:var(--sp-3)">{upload_error}</div>
+    <label class="mh-dropzone" for="upload-file"{_upload_dz_invalid}>
       <svg class="mh-dropzone-icon" viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
         <path d="M24 32V12"/>
         <polyline points="16 19 24 11 32 19"/>
@@ -21629,14 +22865,13 @@ def create_app() -> Flask:
       <div class="mh-dropzone-headline">Drop your results file</div>
       <div class="mh-dropzone-sub">or click to browse</div>
       <input id="upload-file" type="file" name="file" accept=".hy3,.hyv,.sd3,.sdif,.cl2,.zip,.pdf,.htm,.html,.csv,.txt,.xlsx" required />
-      <div class="mh-dropzone-fineprint">HY3 · SDIF/SD3/CL2 · ZIP · PDF · CSV · HTML</div>
+      <div class="mh-dropzone-fineprint">HY3 · SDIF/SD3/CL2 · ZIP · PDF · CSV · TXT · HTML · Excel (.xlsx)</div>
       <div class="mh-dropzone-preview" aria-live="polite"></div>
     </label>
     <div id="mh-parse-preview" class="mh-parse-preview" role="status" aria-live="polite">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
       <div class="label"><b>—</b><span></span></div>
     </div>
-    <div id="mh-upload-error" class="mh-field-error" role="alert" hidden style="margin-top:var(--sp-3)"></div>
     <div style="margin-top:var(--sp-5);display:flex;gap:var(--sp-3);flex-wrap:wrap">
       <button id="mh-upload-submit" class="btn mh-cta-motion" type="submit">
         <span class="mh-btn-label">Continue &rarr;</span>
@@ -21687,6 +22922,8 @@ def create_app() -> Flask:
     if (n < 1024 * 1024 * 1024) return (n / (1024 * 1024)).toFixed(1) + ' MB';
     return (n / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
   }}
+  // Mirrors the server's upload extension allowlist exactly — a file the
+  // preview calls good is a file the server will accept, and vice versa.
   function inferFormat(name) {{
     var n = (name || '').toLowerCase();
     if (n.endsWith('.hy3'))  return {{kind: 'good', label: 'Hytek Meet Manager (.hy3)',  note: 'looks good'}};
@@ -21699,16 +22936,31 @@ def create_app() -> Flask:
     if (n.endsWith('.csv'))  return {{kind: 'good', label: 'CSV results file',           note: 'we\\u2019ll read every row'}};
     if (n.endsWith('.htm') || n.endsWith('.html')) return {{kind: 'good', label: 'HTML results page', note: 'we\\u2019ll extract the result tables'}};
     if (n.endsWith('.txt'))  return {{kind: 'good', label: 'Text results file',          note: 'we\\u2019ll try every adapter'}};
-    return {{kind: 'warn', label: 'Unknown extension', note: 'we\\u2019ll try every adapter; results may be partial'}};
+    if (n.endsWith('.xlsx')) return {{kind: 'good', label: 'Excel workbook (.xlsx)',     note: 'we\\u2019ll read every sheet'}};
+    if (n.endsWith('.xls'))  return {{kind: 'bad',  label: 'Old Excel format (.xls)',    note: 'save it as .xlsx and upload that instead'}};
+    var dot = n.lastIndexOf('.');
+    var ext = dot > 0 ? n.slice(dot) : '';
+    return {{kind: 'bad',
+             label: ext ? 'MediaHub can\\u2019t read ' + ext + ' files' : 'MediaHub can\\u2019t read this file',
+             note: 'upload HY3, SDIF/SD3/CL2, ZIP, PDF, HTML, CSV, TXT or Excel (.xlsx)'}};
   }}
   function refresh() {{
     var f = input.files && input.files[0];
     var has = !!f;
-    if (has) clearError();
-    if (!has) {{ if (preview) preview.removeAttribute('data-shown'); return; }}
-    if (!preview) return;
+    if (!has) {{ if (preview) preview.removeAttribute('data-shown'); btn.disabled = false; return; }}
     var info = inferFormat(f.name);
-    preview.className = 'mh-parse-preview' + (info.kind === 'warn' ? ' warn' : '');
+    // Honest blocker: the drag-and-drop path bypasses the picker's accept
+    // filter, so an unsupported file is stopped here instead of 400ing
+    // after the upload.
+    if (info.kind === 'bad') {{
+      btn.disabled = true;
+      showError(info.label + ' \\u2014 ' + info.note + '.');
+    }} else {{
+      btn.disabled = false;
+      clearError();
+    }}
+    if (!preview) return;
+    preview.className = 'mh-parse-preview' + (info.kind === 'warn' ? ' warn' : (info.kind === 'bad' ? ' bad' : ''));
     var labelEl = preview.querySelector('.label');
     labelEl.querySelector('b').textContent = info.label + ' \\u00b7 ' + fmtBytes(f.size);
     labelEl.querySelector('span').textContent = info.note;
@@ -21728,7 +22980,8 @@ def create_app() -> Flask:
 }})();
 </script>
 """
-        return _layout("Upload", body, active="create")
+        page = _layout("Upload", body, active="create")
+        return (page, 400) if upload_error else page
 
     # ---- UPLOAD CONFIGURE (V8.1 issue 6: two-step; V8.2 issue 6: photos) ---
     def _render_configure(
@@ -21971,6 +23224,59 @@ def create_app() -> Flask:
                     "so it flows through to every graphic.</p>"
                 )
 
+        # H-13: brand-kit chooser. Only rendered when the org actually has two
+        # or more kits — a single-kit org has nothing to choose, so the control
+        # is hidden entirely. Defaults to the org's current default kit; the
+        # choice applies to this run only (the org-wide default is untouched).
+        # Swatch colours come from each kit's own palette data (inheriting the
+        # org palette where a kit slot is blank) — never hardcoded here.
+        kit_select_html = ""
+        if active_prof is not None:
+            try:
+                from mediahub.brand import kits as _bkits
+
+                _org_kits = _bkits.list_kits(active_prof)
+                if len(_org_kits) >= 2:
+                    _default_kid = _bkits.default_kit_id(active_prof)
+                    _opts = ""
+                    _sel_name, _sel_cols = "", (prof_primary, prof_secondary, prof_accent)
+                    for _k in _org_kits:
+                        _kp = _k.palette or {}
+                        _o_cols = (
+                            _kp.get("primary") or prof_primary,
+                            _kp.get("secondary") or prof_secondary,
+                            _kp.get("accent") or prof_accent,
+                        )
+                        _is_def = _k.kit_id == _default_kid
+                        if _is_def or not _sel_name:
+                            _sel_name, _sel_cols = _k.name, _o_cols
+                        _opts += (
+                            f'<option value="{_h(_k.kit_id)}"{" selected" if _is_def else ""} '
+                            f'data-name="{_h(_k.name)}" data-primary="{_h(_o_cols[0])}" '
+                            f'data-secondary="{_h(_o_cols[1])}" data-accent="{_h(_o_cols[2])}">'
+                            f"{_h(_k.name)}{' (default)' if _is_def else ''}</option>"
+                        )
+                    _sw_spans = "".join(
+                        '<span style="width:14px;height:14px;border-radius:4px;'
+                        f'border:1px solid var(--border);background-color:{_h(_c)}"></span>'
+                        for _c in _sel_cols
+                    )
+                    kit_select_html = (
+                        '<div style="margin-top:14px">'
+                        '<label for="run-config-kit">Brand kit for these results</label>'
+                        f'<select name="brand_kit_id" id="run-config-kit">{_opts}</select>'
+                        '<div style="display:flex;align-items:center;gap:8px;margin-top:6px">'
+                        f'<span id="mh-kit-choice-sw" style="display:inline-flex;gap:4px" aria-hidden="true">{_sw_spans}</span>'
+                        f'<span id="mh-kit-choice-name" class="dim" style="font-size:var(--fs-sm)">{_h(_sel_name)}</span>'
+                        "</div>"
+                        '<p class="dim" style="margin-top:4px;font-size:var(--fs-sm)">'
+                        "Applies to these results only &mdash; your organisation&rsquo;s "
+                        "default kit stays unchanged for future meets.</p>"
+                        "</div>"
+                    )
+            except Exception:
+                kit_select_html = ""
+
         body = f"""
 <section class="mh-hero" data-lane="02" style="padding-top:var(--sp-7);padding-bottom:var(--sp-5);margin-bottom:var(--sp-4)">
   <span class="mh-hero-eyebrow">Configure this run</span>
@@ -22004,6 +23310,7 @@ def create_app() -> Flask:
         Tweak below for a one-off override; the preview on the right updates as you move the picker.
       </p>
       {prof_logo_html}
+      {kit_select_html}
 
       <div style="display:flex;gap:14px;align-items:flex-end;margin-top:12px;flex-wrap:wrap">
         <div style="flex:1;min-width:120px"><label for="run-config-primary">Primary</label><input id="run-config-primary" type="color" name="primary_colour" value="{_h(prof_primary)}" /></div>
@@ -22072,6 +23379,39 @@ def create_app() -> Flask:
   }});
   paint();
 
+  // H-13: brand-kit chooser — mirror the selected kit's name + palette
+  // swatches beside the select so the volunteer sees what the kit means
+  // before running. Colours ride on each <option>'s data attributes.
+  var kitSel  = document.getElementById('run-config-kit');
+  var kitName = document.getElementById('mh-kit-choice-name');
+  var kitSw   = document.getElementById('mh-kit-choice-sw');
+  function kitPaint(fromUser) {{
+    if (!kitSel || !kitSel.options.length) return;
+    var o = kitSel.options[kitSel.selectedIndex];
+    if (!o) return;
+    if (kitName) kitName.textContent = o.getAttribute('data-name') || o.textContent;
+    var cols = [o.getAttribute('data-primary'), o.getAttribute('data-secondary'), o.getAttribute('data-accent')];
+    if (kitSw) {{
+      for (var i = 0; i < kitSw.children.length && i < 3; i++) {{
+        if (cols[i]) kitSw.children[i].style.backgroundColor = cols[i];
+      }}
+    }}
+    // SRV-3: picking a kit must drive what the form actually SUBMITS — the
+    // run renders from these three colour inputs, while the kit id feeds
+    // the governance gates. Without this, "Away kit" rendered in the
+    // default kit's colours and the brand-lock then judged every card
+    // against the away kit's tokens. Only on a user change (never the
+    // initial paint, which would clobber a re-configured run's stored
+    // colours); the volunteer can still override the pickers afterwards.
+    if (fromUser) {{
+      if (pri && cols[0]) pri.value = cols[0];
+      if (sec && cols[1]) sec.value = cols[1];
+      if (acc && cols[2]) acc.value = cols[2];
+      paint();
+    }}
+  }}
+  if (kitSel) {{ kitSel.addEventListener('change', function(){{ kitPaint(true); }}); kitPaint(); }}
+
   // Colour-order tools — same idea as "Cycle colours" on organisation
   // setup, but scoped to this one run. Reset restores the official
   // organisation palette the pickers were seeded from.
@@ -22121,9 +23461,12 @@ def create_app() -> Flask:
                 code=404,
             )
         file_bytes = _SAMPLE_MEET_PDF.read_bytes()
-        # Synthetic swimmers — there is nothing to web-verify, so PB fetch is
-        # off (faster, and no third-party calls for demo data). The hero club
-        # is pre-selected so the pack shows its best spread of cards.
+        # Synthetic swimmers — there is nothing to web-verify, so PB web
+        # verification is off (faster, and no PB-verification calls for demo
+        # data). Meet-identity research inside the recognition report still
+        # runs, but it is globally cached, so only the first uncached sample
+        # generation on a deployment can trigger an outbound lookup. The hero
+        # club is pre-selected so the pack shows its best spread of cards.
         run_id = _start_run(
             file_bytes,
             _SAMPLE_MEET_FILENAME,
@@ -22373,6 +23716,21 @@ def create_app() -> Flask:
             accent_form = (request.form.get("accent_colour") or "").strip() or None
             use_logo_colours = False
             display_name_form = (request.form.get("display_name") or club_filter or "").strip()
+            # H-13: which of the org's saved brand kits these results run
+            # under. Validated against the org's kit list — an unknown or
+            # foreign id degrades to "" (= the org's default kit), so a
+            # tampered form can never pin a kit the org doesn't own.
+            brand_kit_choice = (request.form.get("brand_kit_id") or "").strip()
+            if brand_kit_choice:
+                try:
+                    from mediahub.brand import kits as _bkits
+
+                    if active_prof_for_run is None or (
+                        _bkits.get_kit(active_prof_for_run, brand_kit_choice) is None
+                    ):
+                        brand_kit_choice = ""
+                except Exception:
+                    brand_kit_choice = ""
             # We always have branding now (the profile guarantees it), so
             # the old "branding required" gate is removed. If somehow
             # neither the profile nor the form supplies colours, the
@@ -22479,6 +23837,7 @@ def create_app() -> Flask:
                     accent_form=accent_form,
                     use_logo_colours=False,
                     display_name=display_name_form,
+                    brand_kit_id=brand_kit_choice,
                 )
             except Exception:
                 pass
@@ -22981,6 +24340,12 @@ def create_app() -> Flask:
         rr = data.get("recognition_report") or {}
         recognition_error = data.get("recognition_error") or ""
 
+        # G-10 — the bulk-bar review verbs come from the UI catalogue so
+        # Welsh mode shows Welsh verbs (English for everything else).
+        from mediahub.localize.ui_catalogue import t as _rv_t
+
+        _rv_loc = _ui_locale()
+
         # --- Hard pipeline failure (U.2 error state).
         # A run that failed terminally persists a top-level ``error`` and
         # usually has no meet/cards/recognition_report. Rendering the normal
@@ -23098,14 +24463,14 @@ def create_app() -> Flask:
     var u='__STATUS_BASE__'.replace('JOBID',jobId);
     (function tick(){
       fetch(u,{headers:{'Accept':'application/json'}}).then(function(r){return r.json();}).then(function(j){
-        if(j.status==='done'&&j.redirect){ show('Done - opening configure...'); window.location.href=j.redirect; return; }
+        if(j.status==='done'&&j.redirect){ show('Done - opening configure…'); window.location.href=j.redirect; return; }
         if(j.status==='error'){ b.disabled=false; show(j.error||'The re-fetch failed.'); return; }
-        show(j.progress||'Reading the site...'); setTimeout(tick,1500);
+        show(j.progress||'Reading the site…'); setTimeout(tick,1500);
       }).catch(function(){ setTimeout(tick,2500); });
     })();
   }
   b.addEventListener('click',function(){
-    b.disabled=true; show('Starting...');
+    b.disabled=true; show('Starting…');
     fetch('__REFETCH_URL__',{method:'POST',headers:{'X-CSRF-Token':'__CSRF__','Accept':'application/json'}})
       .then(function(r){return r.text().then(function(t){var j=null;try{j=JSON.parse(t);}catch(e){}return {ok:r.ok,status:r.status,j:j};});})
       .then(function(res){ if(!res.j){throw new Error('The server returned an unexpected response ('+res.status+'). You may need to sign in again, or the deployment is briefly restarting - reload and try again.');} if(!res.ok||res.j.error){throw new Error(res.j.error||res.j.message||'Could not start the re-fetch.');} poll(res.j.job_id); })
@@ -23161,10 +24526,11 @@ def create_app() -> Flask:
             _review_swatches = []
 
         # Workflow filter from query param. Triage states only — a malformed
-        # or retired (`posted` / `rejected`) ``?wf=`` value falls back to
-        # "show all". Reject was removed from the review flow entirely.
+        # or retired (`posted`) ``?wf=`` value falls back to "show all".
+        # G-1: `rejected` is a first-class filter — bulk Reject puts cards in
+        # that state, so the reviewer must be able to see (and re-queue) them.
         _wf_filter = (request.args.get("wf", "") or "").strip().lower()
-        if _wf_filter not in ("", "queue", "approved"):
+        if _wf_filter not in ("", "queue", "approved", "rejected"):
             _wf_filter = ""
 
         # --- Recognition summary band
@@ -23631,13 +24997,20 @@ def create_app() -> Flask:
         # own store-summary "decided / ranked-total" maths — a separate concept
         # with its own regression guard.)
         _wf_card_counts: dict[str, int] = {}
+        # J-3: the FULL queued-id list, embedded in the page for "Approve all
+        # in queue" — with server-side pagination the DOM only holds one page
+        # of rows, so the bulk approve must not scrape it.
+        _queued_card_ids: list[str] = []
         for _ra in ranked_achs:
             _cid = (_ra.get("achievement") or {}).get("swim_id", "")
             _cst = _wf_states.get(_cid)
             _cst_val = _cst.status.value if _cst else "queue"
             _wf_card_counts[_cst_val] = _wf_card_counts.get(_cst_val, 0) + 1
+            if _cst_val == "queue" and _cid:
+                _queued_card_ids.append(str(_cid))
         _n_queue_cards = _wf_card_counts.get("queue", 0)
         _n_approved_cards = _wf_card_counts.get("approved", 0)
+        _n_rejected_cards = _wf_card_counts.get("rejected", 0)
 
         # Only show workflow card if there's any state or any achievements
         if _wf_summary or ranked_achs:
@@ -23647,6 +25020,7 @@ def create_app() -> Flask:
                 "": len(ranked_achs) or _wf_n_total,
                 "queue": _n_queue_cards,
                 "approved": _n_approved_cards,
+                "rejected": _n_rejected_cards,
             }
             # UI2.4 — the filter is a client-side tab control (kit `.mh-tabs`
             # sliding indicator): switching shows/hides cards in place with no
@@ -23658,11 +25032,13 @@ def create_app() -> Flask:
                 "": "mh-wf-tabcount-all",
                 "queue": "mh-wf-tabcount-queue",
                 "approved": "mh-wf-tabcount-approved",
+                "rejected": "mh-wf-tabcount-rejected",
             }
             for _wf_opt in [
                 ("", "All"),
                 ("queue", "Queue"),
                 ("approved", "Approved"),
+                ("rejected", "Rejected"),
             ]:
                 _wf_is_on = _wf_filter == _wf_opt[0]
                 _wf_opt_url = _review_base + (f"?wf={_wf_opt[0]}" if _wf_opt[0] else "")
@@ -23705,7 +25081,7 @@ def create_app() -> Flask:
     </p>
   </div>
 </div>
-<div class="mh-progress-strip" role="group" aria-label="Review progress" id="mh-review-progress" data-wf-total="{_wf_grand_total}">
+<div class="mh-progress-strip" role="group" aria-label="Review progress" id="mh-review-progress" data-wf-total="{_wf_grand_total}" data-wf-base-queue="{_n_queue_cards}" data-wf-base-approved="{_n_approved_cards}" data-wf-base-rejected="{_n_rejected_cards}">
   <span class="mh-progress-strip-label">Reviewed</span>
   <span class="mh-progress-strip-value" id="mh-wf-value">{_wf_decided}<span class="total">/ {_wf_grand_total}</span></span>
   <span class="mh-progress-strip-bar"><span id="mh-wf-bar" style="width:{_wf_pct}%"></span></span>
@@ -23718,6 +25094,7 @@ def create_app() -> Flask:
       <div class="stat-block">
         <div class="stat"><div class="l">Queue</div><div class="v" id="mh-wf-n-queue">{_n_queue_cards}</div></div>
         <div class="stat good"><div class="l">Approved</div><div class="v" id="mh-wf-n-approved">{_n_approved_cards}</div></div>
+        <div class="stat bad"><div class="l">Rejected</div><div class="v" id="mh-wf-n-rejected">{_n_rejected_cards}</div></div>
       </div>
     </div>
     <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
@@ -23746,8 +25123,86 @@ def create_app() -> Flask:
         # UI 1.25 — tally every card's emoji reactions in one indexed query so
         # the per-card strips render server-side without a round-trip each.
         _react_counts = _reaction_counts_for_run(run_id)
+
+        # J-3: server-side pagination, 25 rank-ordered cards per page. A
+        # 249-card meet used to render every row into one ~70,000px page and
+        # the thumbnail loader (2 concurrent, 6 retries) permanently gave up
+        # on deep rows with "Renderer busy". Tab counts, the stat block and
+        # the progress strip above are all computed from the FULL run state;
+        # only the rendered rows are sliced. Runs of 25 cards or fewer render
+        # exactly as before (single page, no pager).
+        _REVIEW_PAGE_SIZE = 25
+        # SRV-1: pages are sliced from the cards MATCHING the active workflow
+        # filter (tab badges stay full-run counts). Slicing the unfiltered
+        # list meant a filtered multi-page run rendered mostly-empty pages
+        # whose matching cards lived elsewhere. Each entry keeps its full-list
+        # index so the lazy why-card URLs stay stable under filtering.
+        _indexed_achs = list(enumerate(ranked_achs))
+        if _wf_filter:
+
+            def _row_wf_status(_ra: dict) -> str:
+                _cid = (_ra.get("achievement") or {}).get("swim_id", "")
+                _cst = _wf_states.get(_cid)
+                return _cst.status.value if _cst else "queue"
+
+            _indexed_achs = [
+                (_i, _ra) for _i, _ra in _indexed_achs if _row_wf_status(_ra) == _wf_filter
+            ]
+        try:
+            _pg = int(request.args.get("page", "1") or "1")
+        except (TypeError, ValueError):
+            _pg = 1
+        _n_pages = max(1, -(-len(_indexed_achs) // _REVIEW_PAGE_SIZE))
+        _pg = min(max(1, _pg), _n_pages)
+        _pg_start = (_pg - 1) * _REVIEW_PAGE_SIZE
+
+        def _review_page_url(p: int) -> str:
+            _q: dict = {}
+            if _wf_filter:
+                _q["wf"] = _wf_filter
+            if p > 1:
+                _q["page"] = p
+            return url_for("review", run_id=run_id, **_q)
+
+        _pager_html = ""
+        if _n_pages > 1:
+            _pg_btn_css = "font-size:12px;padding:6px 14px"
+            _prev_html = (
+                f'<a class="btn secondary" href="{_review_page_url(_pg - 1)}" '
+                f'rel="prev" style="{_pg_btn_css}">&larr; Prev</a>'
+                if _pg > 1
+                else f'<span class="btn secondary" aria-disabled="true" '
+                f'style="{_pg_btn_css};opacity:0.4;pointer-events:none">&larr; Prev</span>'
+            )
+            _next_html = (
+                f'<a class="btn secondary" href="{_review_page_url(_pg + 1)}" '
+                f'rel="next" style="{_pg_btn_css}">Next &rarr;</a>'
+                if _pg < _n_pages
+                else f'<span class="btn secondary" aria-disabled="true" '
+                f'style="{_pg_btn_css};opacity:0.4;pointer-events:none">Next &rarr;</span>'
+            )
+            _pg_lo = _pg_start + 1
+            _pg_hi = min(_pg_start + _REVIEW_PAGE_SIZE, len(_indexed_achs))
+            # Say what the count counts when a filter narrows the pages.
+            _pg_noun = {
+                "queue": " in the queue",
+                "approved": " approved",
+                "rejected": " rejected",
+            }.get(_wf_filter, "")
+            _pager_html = (
+                '<nav class="mh-review-pager" aria-label="Review pages" '
+                'style="display:flex;align-items:center;justify-content:center;'
+                'gap:14px;flex-wrap:wrap;margin:14px 0">'
+                f"{_prev_html}"
+                f'<span class="muted" style="font-size:12px;font-family:var(--font-mono)">'
+                f"Page {_pg} of {_n_pages} &middot; cards {_pg_lo}&ndash;{_pg_hi} "
+                f"of {len(_indexed_achs)}{_pg_noun}</span>"
+                f"{_next_html}"
+                "</nav>"
+            )
+
         ach_rows_html_wf = ""
-        for _why_idx, ra in enumerate(ranked_achs):
+        for _why_idx, ra in _indexed_achs[_pg_start : _pg_start + _REVIEW_PAGE_SIZE]:
             a = ra.get("achievement", {})
             band = ra.get("quality_band", "nice")
             prio = ra.get("priority", 0.0)
@@ -23822,8 +25277,42 @@ def create_app() -> Flask:
                 size=30,
             )
 
+            # H-10: a saved caption is part of what the approver signs off, so
+            # it shows on the row (truncated, escaped) — not only inside the
+            # edit drawer. The container always ships (hidden when empty) so
+            # the drawer's save can fill it live without a reload.
+            _row_caption = ""
+            if wf_state is not None:
+                _row_caption = str(
+                    (getattr(wf_state, "edited_captions", None) or {}).get("warm-club_headline")
+                    or ""
+                ).strip()
+            _row_caption_disp = (
+                (_row_caption[:140] + "…") if len(_row_caption) > 140 else _row_caption
+            )
+            _row_caption_html = (
+                f'<div class="mh-row-caption" data-mh-row-caption="{_h(card_id_raw)}"'
+                f"{'' if _row_caption else ' hidden'}"
+                ' style="margin-top:4px;font-size:12px;color:var(--ink-dim)">'
+                '<span style="font-family:var(--font-mono);font-size:10px;'
+                'letter-spacing:0.14em;text-transform:uppercase;color:var(--ink-muted)">'
+                "Caption</span> "
+                f"<em data-mh-row-caption-text>{_h(_row_caption_disp)}</em></div>"
+            )
+
+            # E-13: translations saved on the card (via /translate or a
+            # bilingual caption bundle) are part of what the approver signs
+            # off — every saved slot (caption, alt text, headline, subhead)
+            # renders on the row BEFORE approval, labelled, each with its own
+            # dir attribute. Empty string for the common untranslated card.
+            _row_translations_html = ""
+            if wf_state is not None and getattr(wf_state, "translations", None):
+                _row_translations_html = _render_stored_translations(
+                    {"workflow": wf_state.to_dict()}
+                )
+
             ach_rows_html_wf += f"""
-<div class="ach-row" data-type="{a.get("type", "")}" data-conf="{conf_label}" data-swimmer="{_h(a.get("swimmer_name", ""))}" data-event="{_h(a.get("event", ""))}" data-band="{band}" data-post="{ra.get("suggested_post_type", "")}" data-status="{wf_status}">
+<div class="ach-row" data-type="{a.get("type", "")}" data-conf="{conf_label}" data-swimmer="{_h(a.get("swimmer_name", ""))}" data-event="{_h(a.get("event", ""))}" data-band="{band}" data-post="{ra.get("suggested_post_type", "")}" data-status="{wf_status}" data-status-initial="{wf_status}">
   <div style="display:flex;align-items:flex-start;gap:14px;padding:14px 0;border-bottom:1px solid var(--border)">
     <label class="mh-row-check-wrap" title="Select card"><input type="checkbox" class="mh-row-check" name="card_ids" value="{_h(card_id_raw)}" aria-label="Select this card"></label>
     <div style="min-width:28px;text-align:center;color:var(--ink-muted);font-size:13px;padding-top:2px">#{rank}</div>
@@ -23844,8 +25333,11 @@ def create_app() -> Flask:
         <div style="font-size:13px;font-weight:600">{swimmer} &middot; {event}</div>
       </div>
       <div style="font-size:13px;color:var(--ink-dim)">{headline}</div>
+      {_row_caption_html}
+      {_row_translations_html}
       {why_html}
-      <!-- Approve / Reject triage. Captions, graphics, motion + scheduling
+      <!-- B-4: the slim triage row — Approve + Edit card (+ Re-queue /
+           Download once decided). Captions, graphics, motion + scheduling
            all happen later in the Content builder (approved cards only). -->
       <div class="wf-actions" style="margin-top:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
         {_render_wf_actions(run_id, card_id_raw, wf_status)}
@@ -23854,11 +25346,9 @@ def create_app() -> Flask:
                 data-card-uuid="{_h(card_uuid)}" data-graphic-url="{_h(_insp_graphic_url)}"
                 data-caption-url="{_h(_insp_caption_url)}" data-thumb-url="{_h(_thumb_url)}" data-card-title="{swimmer} &middot; {event}"{_inspector_state_attrs(wf_state)}
                 aria-haspopup="dialog" aria-controls="mh-inspector"
-                title="Tweak this card before approval — caption, palette, elements, crop">
-          &#9881; Inspect
+                title="Edit this card before approval — caption, palette, elements, crop">
+          &#9998; Edit card
         </button>
-        <span style="flex:1;min-width:8px"></span>
-        {_render_reactions(run_id, card_id_raw, _react_counts)}
       </div>
       <details style="margin-top:10px">
         <summary style="cursor:pointer;font-size:12px;color:var(--ink-dim);user-select:none">How the ranking added up &amp; evidence</summary>
@@ -23868,6 +25358,12 @@ def create_app() -> Flask:
           <div style="margin:12px 0 4px"><strong>Evidence:</strong></div>
           <ul style="margin:0;padding-left:18px">{ev_html or '<li class="muted">No evidence items</li>'}</ul>
           <div style="margin-top:8px"><a href="{_trace_url}" target="_blank" rel="noopener" style="font-size:12px">View full trace JSON &rarr;</a></div>
+          <!-- B-4: the quick reactions live with the evidence, not in the
+               decision row — they annotate a card, they don't decide it. -->
+          <div style="margin-top:10px;display:flex;align-items:center;gap:10px">
+            <span class="muted" style="font-size:11px">Reactions</span>
+            {_render_reactions(run_id, card_id_raw, _react_counts)}
+          </div>
         </div>
       </details>
     </div>
@@ -23947,6 +25443,11 @@ def create_app() -> Flask:
         # one shared honest-error helper (U.2), so the copy can't drift again.
         _ai_banner_html = _ai_unavailable_banner()
 
+        # J-3: the full queued-id list for "Approve all in queue" — the DOM
+        # only holds the current page's rows. \\u003c-escaped so an id can
+        # never close the <script type="application/json"> tag it rides in.
+        _queued_ids_all_json = json.dumps(_queued_card_ids).replace("<", "\\u003c")
+
         # U.4 — sample-run banner. A sample pack carries the user's brand but
         # fictional swimmers, so say so plainly (never let a demo masquerade as
         # the club's own data) and point at the real upload when they're ready.
@@ -23992,6 +25493,7 @@ def create_app() -> Flask:
    filters above): a row hidden by either axis stays hidden. */
 #ach-list[data-wf-filter="queue"] .ach-row:not([data-status="queue"]) {{ display:none; }}
 #ach-list[data-wf-filter="approved"] .ach-row:not([data-status="approved"]) {{ display:none; }}
+#ach-list[data-wf-filter="rejected"] .ach-row:not([data-status="rejected"]) {{ display:none; }}
 #mh-wf-empty {{ margin-top: var(--sp-2); }}
 /* Council UI verdict (2026-05-31) — the review list collapses each card's
    reasoning by default for scroll relief (a 249-card meet was a ~70,000px
@@ -24029,6 +25531,18 @@ details.why-card[open] > summary .why-peek {{ display: none; }}
     font-size: 14px !important;
   }}
 }}
+/* B-4 — slim rows: the per-row checkboxes are opt-in. The bulk bar always
+   shows its Select toggle; the select-all box, the count and the bulk
+   actions only appear once select mode is on (the toggle stamps
+   .mh-select-on onto #ach-list — revealing the row checkboxes — and onto
+   the bar itself). Every rule keys on html.mh-js so a no-JS page keeps
+   the always-visible checkboxes and bar. */
+html.mh-js #ach-list:not(.mh-select-on) .mh-row-check-wrap {{ display: none; }}
+html.mh-js #mh-rv-bulkbar.is-empty {{ display: flex; }}
+html.mh-js #mh-rv-bulkbar:not(.mh-select-on) .mh-bulkbar-all,
+html.mh-js #mh-rv-bulkbar:not(.mh-select-on) .mh-bulkbar-count,
+html.mh-js #mh-rv-bulkbar:not(.mh-select-on) .mh-bulkbar-actions {{ display: none; }}
+html:not(.mh-js) #mh-rv-select-toggle {{ display: none; }}
 </style>
 
 {_ai_banner_html}
@@ -24077,25 +25591,31 @@ details.why-card[open] > summary .why-peek {{ display: none; }}
             style="margin-left:auto;font-size:12px;padding:6px 12px"
             title="Show or hide every card's reasoning at once">Expand all reasoning</button>
   </div>
+  {_pager_html}
   <form id="mh-review-bulk" method="post">
     <div class="mh-bulkbar is-empty" id="mh-rv-bulkbar" role="group" aria-label="Bulk card actions"
          data-mh-bulkbar="review" data-form="mh-review-bulk" data-count="mh-rv-count"
          data-select-all="mh-rv-all" data-check="mh-row-check" data-row=".ach-row">
+      <button type="button" class="btn secondary" id="mh-rv-select-toggle" aria-pressed="false"
+              title="Pick several cards, then approve, reject, re-queue or download them together">Select</button>
       <label class="mh-bulkbar-all"><input type="checkbox" id="mh-rv-all" class="mh-check-all" aria-label="Select all shown cards"> Select all shown</label>
       <span class="mh-bulkbar-count" id="mh-rv-count">0 selected</span>
       <div class="mh-bulkbar-actions">
         <button type="submit" class="btn" data-mh-bulk="approve" name="op" value="approved"
-                formaction="{url_for("api_cards_bulk_status", run_id=run_id)}">Approve</button>
+                formaction="{url_for("api_cards_bulk_status", run_id=run_id)}">{_h(_rv_t("action.approve", _rv_loc))}</button>
         <button type="submit" class="btn secondary" data-mh-bulk="reject" name="op" value="rejected"
                 formaction="{url_for("api_cards_bulk_status", run_id=run_id)}"
-                data-confirm="Reject {{n}} selected card(s)? They move out of the queue; you can re-queue them later.">Reject</button>
+                data-confirm="Reject {{n}} selected card(s)? They move out of the queue; you can re-queue them later.">{_h(_rv_t("action.reject", _rv_loc))}</button>
+        <button type="submit" class="btn secondary" data-mh-bulk="requeue" name="op" value="queue"
+                formaction="{url_for("api_cards_bulk_status", run_id=run_id)}"
+                title="Send the selected cards back to the queue — undoes an approval or rejection">{_h(_rv_t("action.requeue", _rv_loc))}</button>
         <button type="submit" class="btn secondary" data-mh-bulk="download"
                 formaction="{url_for("api_cards_bulk_download", run_id=run_id)}"
                 title="Download the selected cards' captions + visuals as a ZIP, ready to post">Download content (.zip)</button>
         <button type="submit" class="btn ghost" data-mh-bulk="export"
                 style="font-size:12px;padding:6px 12px"
                 formaction="{url_for("api_cards_bulk_export", run_id=run_id)}"
-                title="Developer export: the selected cards' data (rank, scores, status) as JSON">Export data (JSON)</button>
+                title="Developer export: the selected cards' data (rank, scores, status) as JSON">{_h(_rv_t("action.export", _rv_loc))} data (JSON)</button>
       </div>
     </div>
     <div id="ach-list" data-wf-filter="{_h(_wf_filter)}">{ach_rows_html_wf}</div>
@@ -24104,7 +25624,9 @@ details.why-card[open] > summary .why-peek {{ display: none; }}
       <span id="mh-wf-empty-body">Switch the filter to see the rest of the queue.</span>
     </div>
   </form>
+  {_pager_html}
 </div>
+<script type="application/json" id="mh-queued-ids">{_queued_ids_all_json}</script>
 
 <style>{_BULK_ACTIONS_CSS}</style>
 <script>{_BULK_ACTIONS_JS}</script>
@@ -24235,7 +25757,12 @@ function applyFilters() {{
     if (match && wfOk) shown++;
   }});
   var countEl = document.getElementById('f-count');
-  if (countEl) countEl.textContent = shown + ' of ' + inTab + ' shown';
+  if (countEl) {{
+    // JS-1: on a paginated run these numbers are page-scoped while the tab
+    // badges are run-wide — say so, so "3 of 3 shown" can't read as the meet.
+    var pageScoped = !!document.querySelector('.mh-review-pager');
+    countEl.textContent = shown + ' of ' + inTab + ' shown' + (pageScoped ? ' on this page' : '');
+  }}
 }}
 function clearFilters() {{
   ['f-type','f-conf','f-swimmer','f-event','f-band','f-post'].forEach(function(id) {{
@@ -24269,9 +25796,22 @@ applyFilters();
       if (show) {{
         var t = document.getElementById('mh-wf-empty-title');
         var b = document.getElementById('mh-wf-empty-body');
-        if (wf === 'approved') {{
+        // JS-1: the DOM only holds this page's rows (J-3 pagination) while
+        // the tab badges are painted from run-wide counts (baseline + live
+        // delta). When the run still has cards in this tab, the truth is
+        // "not on this page" — "Queue clear" is reserved for a run-wide 0.
+        var badge = document.getElementById('mh-wf-tabcount-' + (wf || 'all'));
+        var runWide = badge ? (parseInt(badge.textContent, 10) || 0) : 0;
+        if (runWide > 0) {{
+          var noun = wf === 'approved' ? 'approved' : (wf === 'rejected' ? 'rejected' : 'queued');
+          if (t) t.textContent = 'None on this page';
+          if (b) b.textContent = 'The ' + noun + ' cards for this meet live on other pages \\u2014 use the pager above.';
+        }} else if (wf === 'approved') {{
           if (t) t.textContent = 'Nothing approved yet';
           if (b) b.textContent = 'Approve cards from the Queue and they move here.';
+        }} else if (wf === 'rejected') {{
+          if (t) t.textContent = 'No rejected cards';
+          if (b) b.textContent = 'Cards you reject move here \\u2014 you can re-queue them any time.';
         }} else if (wf === 'queue') {{
           if (t) t.textContent = 'Queue clear';
           if (b) b.textContent = 'Every card has been reviewed \\u2014 nice work.';
@@ -24287,11 +25827,25 @@ applyFilters();
   nav.addEventListener('click', function(ev) {{
     var tab = ev.target.closest('[data-wf-filter-to]');
     if (!tab || !nav.contains(tab)) return;
-    ev.preventDefault();           // no full reload — the kit moves the indicator
+    ev.preventDefault();
     var val = tab.getAttribute('data-wf-filter-to') || '';
+    // SRV-1: on a paginated run the pages are sliced server-side from the
+    // cards matching the active filter, so switching tabs needs the server
+    // to re-filter and re-paginate (page resets to 1). Single-page runs
+    // keep the instant client-side toggle — the kit just moves the
+    // indicator.
+    if (document.querySelector('.mh-review-pager')) {{
+      location.assign(location.pathname + (val ? ('?wf=' + encodeURIComponent(val)) : ''));
+      return;
+    }}
     list.setAttribute('data-wf-filter', val);
     try {{
-      history.replaceState(null, '', location.pathname + (val ? ('?wf=' + encodeURIComponent(val)) : ''));
+      // JS-1: keep ?page=N (J-3 pagination) when rewriting ?wf= — dropping
+      // it made a mid-run reload silently jump back to page 1.
+      var qs = new URLSearchParams(location.search);
+      if (val) qs.set('wf', val); else qs.delete('wf');
+      var q = qs.toString();
+      history.replaceState(null, '', location.pathname + (q ? ('?' + q) : ''));
     }} catch (e) {{}}
     window.mhWfTabsSync();
   }});
@@ -24464,48 +26018,97 @@ function copyWhyCard(btn, taId) {{
 <script>
 (function(){{
   // ----- Bulk approve -----
+  // D-2: every queued card approves in ONE request — per-card gate results,
+  // held-vote handling and a single summary toast — never 150+ fetches.
+  // J-3: the review list is paginated server-side, so the DOM only holds the
+  // current page's rows. The FULL queued-id list is embedded by the server
+  // (#mh-queued-ids), so the approve-all button operates on the whole queue,
+  // not just the visible page.
   var bulkBtn = document.getElementById('mh-bulk-approve');
   if (bulkBtn) {{
     bulkBtn.addEventListener('click', function(){{
-      var queued = Array.prototype.slice.call(
+      var ids = [];
+      try {{
+        var idsEl = document.getElementById('mh-queued-ids');
+        if (idsEl) ids = JSON.parse(idsEl.textContent || '[]') || [];
+      }} catch (e) {{ ids = []; }}
+      var pageQueued = Array.prototype.slice.call(
         document.querySelectorAll('.ach-row[data-status="queue"]')
-      ).filter(function(el){{ return el.offsetParent !== null; }});
-      if (!queued.length) {{
+      );
+      if (!ids.length) {{
+        // Defensive fallback (embedded list absent): approve what this page
+        // can see rather than doing nothing.
+        ids = pageQueued.map(function(row){{
+          var c = row.querySelector('.mh-row-check');
+          return c ? c.value : '';
+        }}).filter(Boolean);
+      }}
+      // JS-2: the embedded list is a render-time snapshot — reconcile it with
+      // decisions made on this page since (per-card straps, bulk bar). Each
+      // row's live data-status is the source of truth, so approve-then-requeue
+      // is handled too; off-page ids can't change without a reload, so the
+      // snapshot stays truthful for them.
+      var decidedNow = {{}};
+      Array.prototype.slice.call(document.querySelectorAll('.ach-row[data-status]')).forEach(function(row){{
+        var chk = row.querySelector('.mh-row-check');
+        if (chk && chk.value && row.dataset.status !== 'queue') decidedNow[chk.value] = 1;
+      }});
+      ids = ids.filter(function(id){{ return !decidedNow[id]; }});
+      if (!ids.length) {{
         if (window.MH) MH.toast('No cards in the queue to approve.', 'info');
         return;
       }}
-      var unseen = queued.filter(function(el){{ return !el.getAttribute('data-why-seen'); }}).length;
-      var msg = 'Approve all ' + queued.length + ' queued card' + (queued.length === 1 ? '' : 's') + '?';
+      var unseen = pageQueued.filter(function(el){{ return !el.getAttribute('data-why-seen'); }}).length;
+      var offPage = ids.length - pageQueued.length;
+      var msg = 'Approve all ' + ids.length + ' queued card' + (ids.length === 1 ? '' : 's') + '?';
+      if (offPage > 0) {{
+        msg += '  (' + offPage + ' of them ' + (offPage === 1 ? 'is' : 'are') + ' on other pages.)';
+      }}
       if (unseen > 0) {{
-        msg += '  (' + unseen + " not yet opened — you haven't read their reasoning; approving accepts them as-is.)";
+        msg += '  (' + unseen + " on this page not yet opened — you haven't read their reasoning; approving accepts them as-is.)";
       }}
       if (!window.confirm(msg)) return;
-      // D-2: route every queued card through the shared bulk bar so they
-      // approve in ONE request — per-card gate results, held-vote handling and
-      // a single summary toast ("Approved 148, 2 blocked (consent)") — instead
-      // of firing 150+ fetches and stacking 150 success toasts. Tick every
-      // queued row's checkbox, then trigger the bulk "Approve".
-      var bulkForm = document.getElementById('mh-review-bulk');
-      var approveBtn = bulkForm && bulkForm.querySelector('[data-mh-bulk="approve"]');
-      if (bulkForm && approveBtn) {{
-        Array.prototype.slice.call(bulkForm.querySelectorAll('.mh-row-check'))
-          .forEach(function(c){{ c.checked = false; }});
-        queued.forEach(function(row){{
-          var c = row.querySelector('.mh-row-check');
-          if (c) c.checked = true;
+      bulkBtn.disabled = true;
+      fetch((window._API_BASE || '') + '{url_for("api_cards_bulk_status", run_id=run_id)}', {{
+        method: 'POST',
+        headers: {{'Content-Type': 'application/json', 'Accept': 'application/json'}},
+        body: JSON.stringify({{ids: ids, status: 'approved'}})
+      }}).then(function(r){{ return r.json().then(function(j){{ return {{ok: r.ok, body: j}}; }}); }})
+        .then(function(o){{
+          if (!o.ok || !o.body || o.body.ok === false) {{
+            bulkBtn.disabled = false;
+            var m = (o.body && (o.body.reason || o.body.error || o.body.message)) || 'failed';
+            if (window.MH) MH.toast('Bulk approve failed: ' + m, 'error', 4000);
+            return;
+          }}
+          var results = o.body.results || [];
+          var okN = results.filter(function(r){{ return r.ok && (r.status || 'approved') === 'approved'; }}).length;
+          var held = results.filter(function(r){{ return r.ok && r.status && r.status !== 'approved'; }}).length;
+          var blocked = o.body.n_blocked || 0;
+          var m2 = 'Approved ' + okN + ' card' + (okN === 1 ? '' : 's') + '.';
+          if (held) m2 += ' ' + held + ' held for another approver.';
+          if (blocked) {{
+            var gateNames = {{consent_blocked: 'consent', brand_locked: 'brand lock', tasks_open: 'open task'}};
+            var byGate = {{}};
+            results.forEach(function(r){{
+              if (!r.ok && gateNames[r.error]) {{
+                var g = gateNames[r.error];
+                byGate[g] = (byGate[g] || 0) + 1;
+              }}
+            }});
+            var parts = Object.keys(byGate).map(function(g){{ return byGate[g] + ' ' + g; }});
+            m2 += ' ' + blocked + ' blocked' + (parts.length ? ' (' + parts.join(', ') + ').' : ' by review gates.');
+          }}
+          if (window.MH) MH.toast(m2, okN ? 'success' : 'info', 3500);
+          // The whole queue (other pages included) changed server-side —
+          // re-render so rows, tabs and counts reflect the new state. Leave
+          // the toast readable a beat longer when something was held/blocked.
+          setTimeout(function(){{ window.location.reload(); }}, (held || blocked) ? 2600 : 1200);
+        }})
+        .catch(function(err){{
+          bulkBtn.disabled = false;
+          if (window.MH) MH.toast('Bulk approve failed: ' + ((err && err.message) || err), 'error', 4000);
         }});
-        // The bulk handler reads the checked set fresh on click, then clears
-        // the boxes and refreshes counts once the request returns.
-        approveBtn.click();
-        return;
-      }}
-      // Defensive fallback (bulk bar absent): the legacy per-card path.
-      var n = 0;
-      queued.forEach(function(row){{
-        var btn = row.querySelector('[data-mh-wf="approved"]');
-        if (btn) {{ btn.click(); n++; }}
-      }});
-      if (window.MH) MH.toast('Approving ' + n + ' card' + (n === 1 ? '' : 's') + '…', 'success');
     }});
   }}
 
@@ -24521,6 +26124,36 @@ function copyWhyCard(btn, taId) {{
         .forEach(function(d){{ d.open = next; }});
       expandBtn.setAttribute('aria-pressed', next ? 'true' : 'false');
       expandBtn.textContent = next ? 'Collapse all reasoning' : 'Expand all reasoning';
+    }});
+  }}
+
+  // ----- B-4: select mode -----
+  // The per-row checkboxes are hidden until the volunteer asks for them; the
+  // Select toggle stamps .mh-select-on onto #ach-list (revealing the boxes)
+  // and onto the bulk bar (revealing select-all, the count and the actions).
+  // Leaving select mode clears the selection — nothing stays checked
+  // invisibly — via a bubbled change event so the shared bulk-bar JS
+  // refreshes its count, is-empty state and row highlights.
+  var selToggle = document.getElementById('mh-rv-select-toggle');
+  if (selToggle) {{
+    selToggle.addEventListener('click', function(){{
+      var list = document.getElementById('ach-list');
+      var bar = document.getElementById('mh-rv-bulkbar');
+      var on = selToggle.getAttribute('aria-pressed') !== 'true';
+      if (list) list.classList.toggle('mh-select-on', on);
+      if (bar) bar.classList.toggle('mh-select-on', on);
+      selToggle.setAttribute('aria-pressed', on ? 'true' : 'false');
+      selToggle.textContent = on ? 'Done' : 'Select';
+      if (!on) {{
+        var all = document.getElementById('mh-rv-all');
+        if (all) {{ all.checked = false; all.indeterminate = false; }}
+        var lastChecked = null;
+        Array.prototype.forEach.call(
+          document.querySelectorAll('#mh-review-bulk .mh-row-check'),
+          function(c){{ if (c.checked) {{ c.checked = false; lastChecked = c; }} }}
+        );
+        if (lastChecked) lastChecked.dispatchEvent(new Event('change', {{bubbles: true}}));
+      }}
     }});
   }}
 }})();
@@ -26631,7 +28264,7 @@ Relay team broke club record"></textarea>
                         "cover / outro",
                         "no",
                         "Custom cover / outro scene length in seconds (clamped to a "
-                        "readable, render-safe range). Default 2.0 / 1.0.",
+                        "readable, render-safe range). Default 2.0 / 2.5.",
                     ),
                     (
                         "weights",
@@ -26722,8 +28355,21 @@ Relay team broke club record"></textarea>
         return hero + intro + auth + quickstart + endpoints_html
 
     # ---- PRIVACY -------------------------------------------------------
-    @app.route("/privacy")
-    def privacy_page():
+    def _privacy_page_render(
+        *,
+        correction_error: str = "",
+        correction_values: Optional[dict] = None,
+        erase_error: str = "",
+        erase_values: Optional[dict] = None,
+        status: int = 200,
+    ):
+        """Render the /privacy page, optionally with an inline form error.
+
+        H-17: the correction / erase POST routes used to redirect back here
+        on a validation failure with no message, silently discarding what
+        the user typed. They now re-render this page with a styled error
+        beside the failing form and every submitted value preserved.
+        """
         # Every inventory probe is fail-soft so a corrupted DB or missing
         # directory falls through to a "0" count instead of 500ing this
         # page — the user came here precisely BECAUSE they want to know
@@ -26768,21 +28414,56 @@ Relay team broke club record"></textarea>
         )
         _rights_tools_html = ""
         if active_org:
+            _ev = erase_values or {}
+            _ev_name = _h(str(_ev.get("athlete_name", "")))
+            _ev_club = _h(str(_ev.get("athlete_club", "")))
+            _erase_error_html = (
+                f'<p class="tag bad" role="alert" style="margin-bottom:10px">'
+                f"{_h(erase_error)}</p>"
+                if erase_error
+                else ""
+            )
             _rights_tools_html += f"""
 <div class="card">
   <h2>Erase an athlete</h2>
   <p class="muted">Removes a named athlete from this organisation's runs, rendered
   files, caches, caption memory and posting-log excerpts. Irreversible.</p>
+  {_erase_error_html}
   <form method="post" action="{url_for("privacy_athlete_erase")}"
-        onsubmit="return confirm('Erase this athlete from all stored data? This cannot be undone.')"
+        onsubmit="return mhEraseAthleteConfirm(this)"
         style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
     <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--ink-muted)">Full name
-      <input type="text" name="athlete_name" required placeholder="e.g. Jane Smith" /></label>
+      <input type="text" name="athlete_name" required placeholder="e.g. Jane Smith" value="{_ev_name}" /></label>
     <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--ink-muted)">Club (optional)
-      <input type="text" name="athlete_club" placeholder="for exact cache match" /></label>
-    <button class="btn secondary" type="submit">Erase athlete</button>
+      <input type="text" name="athlete_club" placeholder="for exact cache match" value="{_ev_club}" /></label>
+    <button class="btn danger" type="submit">Erase athlete</button>
   </form>
 </div>"""
+            # E-14: erasing a person is irreversible and wide-reaching, so the
+            # confirm spells out exactly what it wipes — via the styled
+            # MH.confirm where loaded, with a native confirm fallback. Plain
+            # string (not an f-string) so the JS braces stay single.
+            _rights_tools_html += """
+<script>
+function mhEraseAthleteConfirm(f) {
+  if (f.dataset.mhConfirmed === '1') { f.dataset.mhConfirmed = ''; return true; }
+  var name = (f.athlete_name && f.athlete_name.value ? f.athlete_name.value.trim() : '') || 'this athlete';
+  var scope = 'Erasing ' + name + ' removes them from every meet\\u2019s results, rendered graphics, caches, caption memory and posting logs \\u2014 this cannot be undone.';
+  if (window.MH && MH.confirm) {
+    MH.confirm({
+      title: 'Erase ' + name + ' from everything?',
+      body: scope,
+      confirmText: 'Erase athlete',
+      onConfirm: function() {
+        f.dataset.mhConfirmed = '1';
+        if (f.requestSubmit) f.requestSubmit(); else f.submit();
+      }
+    });
+    return false;
+  }
+  return confirm(scope);
+}
+</script>"""
             from mediahub.privacy import list_corrections
 
             open_corrections = list_corrections(active_org, status="open")
@@ -26800,20 +28481,31 @@ Relay team broke club record"></textarea>
                 if rows_html
                 else "<p class='muted' style='margin-top:10px'>No open corrections.</p>"
             )
+            _cv = correction_values or {}
+            _cv_run = _h(str(_cv.get("run_id", "")))
+            _cv_card = _h(str(_cv.get("card_id", "")))
+            _cv_reason = _h(str(_cv.get("reason", "")))
+            _correction_error_html = (
+                f'<p class="tag bad" role="alert" style="margin-bottom:10px">'
+                f"{_h(correction_error)}</p>"
+                if correction_error
+                else ""
+            )
             _rights_tools_html += f"""
 <div class="card">
   <h2>Correct a published card</h2>
   <p class="muted">A published card was wrong (wrong result, wrong athlete)? Open a
   correction: it's recorded, the card is pulled from the public wall, and you get the
   takedown checklist for the social platforms.</p>
+  {_correction_error_html}
   <form method="post" action="{url_for("privacy_correction_open")}"
         style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
     <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--ink-muted)">Run id
-      <input type="text" name="run_id" required /></label>
+      <input type="text" name="run_id" required value="{_cv_run}" /></label>
     <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--ink-muted)">Card id
-      <input type="text" name="card_id" required /></label>
+      <input type="text" name="card_id" required value="{_cv_card}" /></label>
     <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--ink-muted);flex:1;min-width:min(220px,100%)">What's wrong?
-      <input type="text" name="reason" required placeholder="e.g. wrong time — was 58.21 not 56.21" /></label>
+      <input type="text" name="reason" required placeholder="e.g. wrong time — was 58.21 not 56.21" value="{_cv_reason}" /></label>
     <button class="btn secondary" type="submit">Open correction</button>
   </form>
   {open_list}
@@ -26862,7 +28554,11 @@ Relay team broke club record"></textarea>
             dpa_url=url_for("dpa_page"),
             deployment_inventory_html=inventory_html if signed_in else "",
         )
-        return _layout("Privacy Notice", body, active="privacy")
+        return _layout("Privacy Notice", body, active="privacy"), status
+
+    @app.route("/privacy")
+    def privacy_page():
+        return _privacy_page_render()
 
     @app.route("/terms")
     def terms_page():
@@ -27238,145 +28934,19 @@ Relay team broke club record"></textarea>
 
     @app.route("/organisation/consent")
     def org_consent_page():
+        # G-9: the consent registry now lives on /athletes as the "Consent
+        # records" tab, beside the roster permissions it underpins. This
+        # endpoint (and its 404-without-an-organisation gate) is kept so old
+        # links, bookmarks and url_for callers still resolve — signed-in
+        # officers land on the new tab.
         pid = _active_profile_id() or ""
-        profile = load_profile(pid) if pid else None
-        if profile is None:
+        if not pid or load_profile(pid) is None:
             return _layout(
                 "Consent",
                 '<div class="card"><p class="tag bad">Set up your organisation first.</p></div>',
                 active="settings",
             ), 404
-        from mediahub.compliance.consent import ConsentRegistry
-
-        from mediahub.compliance.retention import global_days as _ret_global
-
-        records = ConsentRegistry(pid).all()
-        rows = []
-        for r in records:
-            status_tag = {
-                "granted": '<span class="tag ok">granted</span>',
-                "refused": '<span class="tag bad">refused</span>',
-                "revoked": '<span class="tag bad">revoked</span>',
-            }.get(r.status, _h(r.status))
-            extra = []
-            if r.parental:
-                extra.append("parental")
-            if r.under_18 is True:
-                extra.append("under 18")
-            if r.restricted:
-                extra.append(
-                    '<strong title="UK GDPR Art 18 — processing restricted">' "Paused</strong>"
-                )
-            rows.append(
-                f"<tr><td>{_h(r.athlete_name)}</td><td>{status_tag}</td>"
-                f"<td>{', '.join(extra) or '—'}</td><td class='muted'>{_h(r.note[:160])}</td>"
-                f"<td class='muted'>{_h(r.recorded_at[:10])}</td></tr>"
-            )
-        table = (
-            # I-3: scroll wrapper so the multi-column registry doesn't overflow
-            # a phone (volunteers act on consent from poolside).
-            '<div class="mh-table-scroll"><table><thead><tr><th>Athlete</th><th>Status</th><th>Flags</th><th>Note</th><th>Recorded</th></tr></thead><tbody>'
-            + (
-                "".join(rows)
-                or '<tr><td colspan="5" class="muted">No consent records yet.</td></tr>'
-            )
-            + "</tbody></table></div>"
-        )
-        mode = (profile.consent_mode or "").strip()
-
-        def _sel(value, current):
-            return " selected" if value == current else ""
-
-        body = f"""
-<section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">
-  <span class="mh-hero-eyebrow">Privacy &amp; data</span>
-  <h1>Consent &amp; <em class="editorial">lawful basis.</em></h1>
-  <p class="lede">Record why you're allowed to post about your athletes, and who has said yes or no. A refused, revoked or restricted athlete can never be approved, packed, or published — on any setting.</p>
-</section>
-
-<div class="card">
-  <h2>Lawful basis &amp; gating mode</h2>
-  <form method="post" action="{url_for("org_consent_settings")}">
-    <label>Why you're allowed to post about your athletes<br>
-      <select name="lawful_basis_publication">
-        <option value=""{_sel("", profile.lawful_basis_publication)}>— not recorded —</option>
-        <option value="consent"{_sel("consent", profile.lawful_basis_publication)}>They (or a parent) said yes</option>
-        <option value="legitimate_interests"{_sel("legitimate_interests", profile.lawful_basis_publication)}>We have a good reason to (reporting club results)</option>
-        <option value="other"{_sel("other", profile.lawful_basis_publication)}>Other — explain in notes below</option>
-      </select>
-    </label>
-    <small class="muted" style="display:block;margin:-4px 0 10px">In legal terms: "said yes" = consent (UK GDPR Art&nbsp;6(1)(a)); "good reason" = legitimate interests (Art&nbsp;6(1)(f)).</small>
-    <label>Why you're allowed to look up their PB history<br>
-      <select name="lawful_basis_enrichment">
-        <option value=""{_sel("", profile.lawful_basis_enrichment)}>— not recorded —</option>
-        <option value="consent"{_sel("consent", profile.lawful_basis_enrichment)}>They (or a parent) said yes</option>
-        <option value="legitimate_interests"{_sel("legitimate_interests", profile.lawful_basis_enrichment)}>We have a good reason to (reporting club results)</option>
-        <option value="other"{_sel("other", profile.lawful_basis_enrichment)}>Other — explain in notes below</option>
-      </select>
-    </label><br>
-    <label><input type="checkbox" name="pb_enrichment_enabled" value="1"{" checked" if profile.pb_enrichment_enabled else ""}> Fetch PB history from public rankings (requires telling athletes/parents — Art 14 notice template in docs/compliance/templates/)</label><br>
-    <label>Consent gating mode<br>
-      <select name="consent_mode">
-        <option value=""{_sel("", mode)}>Opt-out (default) — block only recorded refusals</option>
-        <option value="opt_out"{_sel("opt_out", mode)}>Opt-out — block only recorded refusals</option>
-        <option value="opt_in"{_sel("opt_in", mode)}>Opt-in — publish ONLY athletes with recorded consent (recommended for youth squads)</option>
-      </select>
-    </label><br>
-    <label><input type="checkbox" name="parental_minors" value="1"{" checked" if profile.consent_require_parental_for_minors else ""}> Under-18s need parent/guardian consent (opt-in mode)</label><br>
-    <label>Notes (e.g. your balancing-test reference)<br><input type="text" name="lawful_basis_notes" maxlength="500" value="{_h(profile.lawful_basis_notes)}"></label><br>
-    <button class="btn" type="submit">Save settings</button>
-  </form>
-</div>
-
-<div class="card">
-  <h2>Under-18 content controls</h2>
-  <p class="muted">How identifiable under-18 athletes are in generated content (ICO Children's Code). New organisations start with the identity controls on.</p>
-  <form method="post" action="{url_for("org_child_policy_settings")}">
-    <label><input type="checkbox" name="child_surname_initial" value="1"{" checked" if profile.child_surname_initial else ""}> Show under-18s as first name + initial ("Eira H.")</label><br>
-    <label><input type="checkbox" name="child_suppress_age" value="1"{" checked" if profile.child_suppress_age else ""}> Don't show ages or age groups on content</label><br>
-    <label><input type="checkbox" name="child_exclude_photos" value="1"{" checked" if profile.child_exclude_photos else ""}> Never use athlete photos on under-18 posts (text-led cards instead)</label><br>
-    <button class="btn" type="submit">Save content controls</button>
-  </form>
-</div>
-
-<div class="card">
-  <h2>Retention</h2>
-  <p class="muted">How long this club's data lives before the nightly purge removes it. You can tighten the deployment-wide window, never extend it. Blank = use the deployment default. 0 = keep forever (deployment setting only).</p>
-  <form method="post" action="{url_for("org_retention_settings")}">
-    <label>Raw uploaded results files (days, default {_h(str(_ret_global("raw_uploads")))})<br>
-      <input type="number" min="0" name="raw_uploads" value="{_h(str((profile.retention_overrides or {}).get("raw_uploads", "")))}"></label><br>
-    <label>Runs, cards &amp; packs (days, default {_h(str(_ret_global("runs")))})<br>
-      <input type="number" min="0" name="runs" value="{_h(str((profile.retention_overrides or {}).get("runs", "")))}"></label><br>
-    <button class="btn" type="submit">Save retention</button>
-  </form>
-</div>
-
-<div class="card">
-  <h2>Record a consent decision</h2>
-  <form method="post" action="{url_for("org_consent_record")}">
-    <label>Athlete name<br><input type="text" name="athlete_name" maxlength="200" required></label><br>
-    <label>Decision<br>
-      <select name="status">
-        <option value="granted">Consent granted</option>
-        <option value="refused">Refused — never publish</option>
-        <option value="revoked">Revoked — was granted, now withdrawn</option>
-      </select>
-    </label><br>
-    <label><input type="checkbox" name="parental" value="1"> Given by a parent/guardian</label>
-    <label><input type="checkbox" name="under_18" value="1"> Athlete is under 18</label>
-    <label title="UK GDPR Art 18 — restriction of processing"><input type="checkbox" name="restricted" value="1"> Pause all use of their data <span class="muted">(Art&nbsp;18)</span></label><br>
-    <label>Note (how/when consent was collected)<br><input type="text" name="note" maxlength="1000"></label><br>
-    <button class="btn" type="submit">Save record</button>
-  </form>
-</div>
-
-<div class="card">
-  <h2>Registry</h2>
-  {table}
-  <p class="muted">Records are append-only: every change keeps its history (accountability). Revoking consent takes effect immediately for all future approvals, packs and publishes; already-published posts must be handled on the platform itself.</p>
-</div>
-"""
-        return _layout("Consent & lawful basis", body, active="settings")
+        return redirect(url_for("athletes_page", tab="records"))
 
     @app.route("/organisation/consent/settings", methods=["POST"])
     def org_consent_settings():
@@ -27398,7 +28968,7 @@ Relay team broke club record"></textarea>
         profile.pb_enrichment_enabled = bool(request.form.get("pb_enrichment_enabled"))
         profile.lawful_basis_notes = (request.form.get("lawful_basis_notes") or "").strip()[:500]
         save_profile(profile)
-        return redirect(url_for("org_consent_page"))
+        return redirect(url_for("athletes_page", tab="records"))
 
     @app.route("/organisation/consent/child-policy", methods=["POST"])
     def org_child_policy_settings():
@@ -27410,7 +28980,7 @@ Relay team broke club record"></textarea>
         profile.child_suppress_age = bool(request.form.get("child_suppress_age"))
         profile.child_exclude_photos = bool(request.form.get("child_exclude_photos"))
         save_profile(profile)
-        return redirect(url_for("org_consent_page"))
+        return redirect(url_for("athletes_page", tab="records"))
 
     @app.route("/organisation/consent/retention", methods=["POST"])
     def org_retention_settings():
@@ -27430,7 +29000,7 @@ Relay team broke club record"></textarea>
                 continue
         profile.retention_overrides = overrides
         save_profile(profile)
-        return redirect(url_for("org_consent_page"))
+        return redirect(url_for("athletes_page", tab="records"))
 
     @app.route("/organisation/consent/record", methods=["POST"])
     def org_consent_record():
@@ -27461,7 +29031,7 @@ Relay team broke club record"></textarea>
             note=request.form.get("note") or "",
             recorded_by=recorded_by,
         )
-        return redirect(url_for("org_consent_page"))
+        return redirect(url_for("athletes_page", tab="records"))
 
     # ---- DATA SUBJECT RIGHTS (per tenant) --------------------------------
     # SAR export / rectification / erasure / restriction, with the Art 12A
@@ -27564,7 +29134,7 @@ Relay team broke club record"></textarea>
             if r.request_type == "access" and _dsr_export_path(pid, r.id).exists():
                 actions.append(
                     f'<a class="btn secondary" href="{url_for("org_dsr_export_download", request_id=r.id)}" '
-                    'download>Download export</a>'
+                    "download>Download export</a>"
                 )
             rows.append(
                 (
@@ -27777,7 +29347,16 @@ Relay team broke club record"></textarea>
         name = (request.form.get("athlete_name") or "").strip()
         club = (request.form.get("athlete_club") or "").strip()
         if not name:
-            return redirect(url_for("privacy_page"))
+            # H-17: re-render with an inline error instead of a silent
+            # redirect that discarded what the user typed.
+            return _privacy_page_render(
+                erase_error=(
+                    "Enter the athlete's full name — nothing was erased. "
+                    "The name must match how it appears in the results."
+                ),
+                erase_values={"athlete_name": name, "athlete_club": club},
+                status=400,
+            )
         # ONE erasure engine: compliance.dsr delegates to the privacy
         # cascade and adds the media-library / profile-text / suppression
         # extras, so this quick action and the Art 12A DSR workflow
@@ -27820,12 +29399,33 @@ Relay team broke club record"></textarea>
         run_id = (request.form.get("run_id") or "").strip()
         card_id = (request.form.get("card_id") or "").strip()
         reason = (request.form.get("reason") or "").strip()
-        if not (
+        _ids_ok = bool(
             re.fullmatch(r"[A-Za-z0-9_-]{1,64}", run_id)
             and re.fullmatch(r"[A-Za-z0-9_.:-]{1,128}", card_id)
-            and reason
-        ):
-            return redirect(url_for("privacy_page"))
+        )
+        if not (_ids_ok and reason):
+            # H-17: re-render with an inline error next to the form and the
+            # typed values preserved, instead of a silent redirect that
+            # discarded them.
+            if not _ids_ok:
+                _msg = (
+                    "That meet or card id doesn't look right — copy both from "
+                    "the meet's page and try again. Nothing was recorded."
+                )
+            else:
+                _msg = (
+                    "Say what's wrong with the card — the reason is recorded "
+                    "with the correction. Nothing was recorded yet."
+                )
+            return _privacy_page_render(
+                correction_error=_msg,
+                correction_values={
+                    "run_id": run_id,
+                    "card_id": card_id,
+                    "reason": reason,
+                },
+                status=400,
+            )
         from mediahub.privacy import TAKEDOWN_CHECKLIST, open_correction
 
         cid = open_correction(profile_id=active, run_id=run_id, card_id=card_id, reason=reason)
@@ -28685,6 +30285,22 @@ self.addEventListener('fetch', function(e){
             _motion_ok = bool(_re_status.get("ffmpeg_available"))
         ok = deps["playwright"].get("chromium") and _motion_ok
         payload = {"ok": bool(ok), "deps": deps}
+        # Absolute filesystem paths (the Chromium executable, the node binary and
+        # the Remotion install dir) disclose the deployment's internal layout, so
+        # they are operator-only. This endpoint stays public for uptime monitors —
+        # they still get every availability boolean and version they need — but an
+        # anonymous caller no longer learns where anything lives on disk. Mirrors
+        # /healthz/sentinel, which likewise hands its raw audit tail to the
+        # signed-in operator alone.
+        if not _auth.is_dev_operator():
+            for _dep_key, _path_field in (
+                ("playwright", "executable"),
+                ("node", "path"),
+                ("remotion", "dir"),
+            ):
+                section = deps.get(_dep_key)
+                if isinstance(section, dict):
+                    section.pop(_path_field, None)
         return jsonify(payload)
 
     # ---- /status -------------------------------------------------------
@@ -28707,7 +30323,11 @@ self.addEventListener('fetch', function(e){
             return "&mdash;"
         pct = float(stats.get("uptime_pct") or 0.0) * 100.0
         if pct >= 99.995:
-            return "100%"
+            # Never round a window that had real, counted downtime up to a bare
+            # "100%" — it reads as a contradiction beside the non-zero Downtime
+            # cell on the same row. Show the honest "99.99%" instead; "100%" is
+            # reserved for a genuinely gap-free window.
+            return "100%" if not stats.get("downtime_seconds") else "99.99%"
         if pct >= 99.9:
             return f"{pct:.3f}%"
         if pct >= 95.0:
@@ -28800,12 +30420,28 @@ self.addEventListener('fetch', function(e){
         from mediahub.observability import uptime as _uptime
 
         # Pull three windows so the page reads "24h / 7d / 30d uptime"
-        # straight off the database, with no aggregation in the view.
-        s24 = _uptime.uptime_stats(window_hours=24)
-        s7d = _uptime.uptime_stats(window_hours=24 * 7)
-        s30 = _uptime.uptime_stats(window_hours=24 * 30)
-        latest = _uptime.latest_heartbeat()
-        gaps = _uptime.recent_gaps(window_hours=24 * 30, limit=5)
+        # straight off the database, with no aggregation in the view. The
+        # uptime store is exception-safe by contract, but defend the operator
+        # page the same way _render_settings_status_section already does — an
+        # unexpected observability error degrades to the honest public view,
+        # never an unhandled 500.
+        try:
+            s24 = _uptime.uptime_stats(window_hours=24)
+            s7d = _uptime.uptime_stats(window_hours=24 * 7)
+            s30 = _uptime.uptime_stats(window_hours=24 * 30)
+            latest = _uptime.latest_heartbeat()
+            gaps = _uptime.recent_gaps(window_hours=24 * 30, limit=5)
+        except Exception:
+            body = (
+                '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-8);padding-bottom:var(--sp-6);margin-bottom:var(--sp-4)">'
+                '<span class="mh-hero-eyebrow">Status</span>'
+                '<h1>Service <em class="editorial">status</em></h1></section>'
+                + _render_settings_status_public_section()
+            )
+            resp = make_response(_layout("Status", body, active="status"))
+            resp.headers["Refresh"] = "60"
+            resp.headers["Cache-Control"] = "no-store"
+            return resp
 
         # Current pill — green if last heartbeat < 5 min ago AND ok.
         pill_class = "muted"
@@ -28942,11 +30578,21 @@ self.addEventListener('fetch', function(e){
         and dashboards that want the raw uptime numbers."""
         from mediahub.observability import uptime as _uptime
 
+        # /api/status is public and unauthenticated. The heartbeat's ``error``
+        # field carries the raw deep-/health failure string, which can include
+        # an internal filesystem path (e.g. "database: unable to open database
+        # file /srv/data/data.db") or an OS error. Drop it from this public
+        # surface — the ``ok`` flag already signals the failure honestly, with
+        # no internal text. The operator HTML views never rendered it.
+        latest = _uptime.latest_heartbeat()
+        if isinstance(latest, dict):
+            latest.pop("error", None)
+
         return jsonify(
             {
                 "ok": True,
                 "version": APP_VERSION,
-                "latest_heartbeat": _uptime.latest_heartbeat(),
+                "latest_heartbeat": latest,
                 "windows": {
                     "24h": _uptime.uptime_stats(window_hours=24),
                     "7d": _uptime.uptime_stats(window_hours=24 * 7),
@@ -29264,7 +30910,7 @@ self.addEventListener('fetch', function(e){
                 f'<div style="font-weight:600;margin-bottom:4px">'
                 f"Last LLM error &mdash; {_h(last_err.get('provider', 'unknown'))}</div>"
                 f'<div class="dim" style="font-size:12px;margin-bottom:6px">'
-                f"{_h(last_err.get('ts', '')[:19])} UTC"
+                f"{_h((last_err.get('ts') or '')[:19])} UTC"
                 + (
                     f" &middot; {_h(last_err.get('error_kind'))}"
                     if last_err.get("error_kind")
@@ -29272,7 +30918,7 @@ self.addEventListener('fetch', function(e){
                 )
                 + "</div>"
                 f'<code style="font-size:12px">'
-                f"{_h(last_err.get('error_message', '')[:300])}</code>"
+                f"{_h((last_err.get('error_message') or '')[:300])}</code>"
                 "</div>"
             )
         else:
@@ -29417,7 +31063,6 @@ self.addEventListener('fetch', function(e){
         "clubdata": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="28" height="28"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/></svg>',
         "privacy": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="28" height="28"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>',
         "billing": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="28" height="28"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>',
-        "pricing": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="28" height="28"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>',
         "sponsors": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="28" height="28"><polygon points="12 2 15 8.5 22 9.3 17 14 18.2 21 12 17.7 5.8 21 7 14 2 9.3 9 8.5"/></svg>',
         "account": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="28" height="28"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>',
         "status": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="28" height="28"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>',
@@ -29426,27 +31071,64 @@ self.addEventListener('fetch', function(e){
         "brand": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="28" height="28"><circle cx="13.5" cy="6.5" r="2.5"/><circle cx="8" cy="12" r="2.5"/><circle cx="13.5" cy="17.5" r="2.5"/><path d="M16 7.5 19 9M16 16.5 19 15M9.5 10.5 12 8M9.5 13.5 12 16"/></svg>',
     }
 
-    def _settings_card_specs(is_dev: bool, signed_in: bool) -> list[tuple[str, str, str, str]]:
-        """(title, description, icon_key, href) for the settings tiles.
+    def _settings_card_specs(is_dev: bool) -> list[tuple[str, str, str, str, str]]:
+        """(title, description, icon_key, href, group) for the settings tiles.
 
-        12 cards for everyone, a 13th (Developer) only when an operator is
-        signed in. A "Pricing & plans" tile is added when signed into a club
-        profile, because Pricing leaves the top bar for signed-in users and
-        lives here instead (grouped with Billing & plan).
+        C-19: ``group`` places each tile in one of four headed clusters —
+        ``club`` (Your club), ``content`` (Content & brand), ``account``
+        (Account & billing), ``system`` (System) — rendered in that order,
+        plus ``soon`` for the two "Coming soon" placeholders, which collapse
+        into a muted compact strip at the very bottom. A Developer tile joins
+        the System cluster only when an operator is signed in.
+
+        Pricing has no tile of its own: for signed-in users the pricing page
+        is linked from inside Billing & plan ("See plans & pricing"), and
+        signed-out visitors keep the top-bar Pricing item.
         """
-        cards: list[tuple[str, str, str, str]] = [
+        cards: list[tuple[str, str, str, str, str]] = [
+            # --- Your club — the organisation itself and its data ---
             (
                 "Organisation & brand",
-                "Logos, palette, tone and the brand the engine applies to every card.",
+                "Your club's identity — name, colours, logos and voice, applied to every card.",
                 "org",
                 url_for("organisation_setup"),
+                "club",
             ),
             (
+                "Team members",
+                "Invite teammates and manage who can see and approve content.",
+                "members",
+                url_for("organisation_members_page"),
+                "club",
+            ),
+            (
+                "Sponsors",
+                "Manage sponsors and the sponsor-safe content they appear in.",
+                "sponsors",
+                url_for("sponsors_page"),
+                "club",
+            ),
+            (
+                "Club data",
+                "Club records and asking questions of your own processed results.",
+                "clubdata",
+                url_for("settings_section", section="clubdata"),
+                "club",
+            ),
+            (
+                "Activity",
+                "Every run for this organisation — status, matches, and one-click delete.",
+                "activity",
+                url_for("settings_section", section="activity"),
+                "club",
+            ),
+            # --- Content & brand — how the output looks and sounds ---
+            (
                 "Brand platform",
-                "Multiple kits (sponsor / event / team co-brands), token locks, "
-                "brand check and palette import — one home for your identity.",
+                "Brand kits & governance — alternate liveries, token locks and approvers.",
                 "brand",
                 url_for("brand_home_page"),
+                "content",
             ),
             (
                 "Templates",
@@ -29454,6 +31136,7 @@ self.addEventListener('fetch', function(e){
                 "picks the right one per moment.",
                 "templates",
                 url_for("template_gallery"),
+                "content",
             ),
             (
                 "Typography & fonts",
@@ -29461,6 +31144,7 @@ self.addEventListener('fetch', function(e){
                 "club's own brand typeface.",
                 "typography",
                 url_for("settings_section", section="typography"),
+                "content",
             ),
             (
                 "Audio & voiceover",
@@ -29468,86 +31152,67 @@ self.addEventListener('fetch', function(e){
                 "your own audio, and consent settings.",
                 "audio",
                 url_for("settings_section", section="audio"),
+                "content",
             ),
+            # --- Account & billing ---
             (
-                "Team members",
-                "Invite teammates and manage who can see and approve content.",
-                "members",
-                url_for("organisation_members_page"),
-            ),
-            (
-                "Activity",
-                "Every run for this organisation — status, matches, and one-click delete.",
-                "activity",
-                url_for("settings_section", section="activity"),
-            ),
-            (
-                "Auto scheduling",
-                "Queueing approved cards straight onto your social channels — coming soon.",
-                "schedule",
-                url_for("settings_section", section="scheduling"),
-            ),
-            (
-                "Autonomy",
-                "Per-content-type publishing levels — what may post without a human — coming soon.",
-                "autonomy",
-                url_for("settings_section", section="autonomy"),
-            ),
-            (
-                "Club data",
-                "Club records and asking questions of your own processed results.",
-                "clubdata",
-                url_for("settings_section", section="clubdata"),
-            ),
-            (
-                "Privacy & data",
-                "What this system stores, athletes & consent, cache clearing, and run deletion.",
-                "privacy",
-                url_for("settings_section", section="privacy"),
+                "Account",
+                "Two-factor security, data export, and account deletion.",
+                "account",
+                url_for("settings_section", section="account"),
+                "account",
             ),
             (
                 "Billing & plan",
                 "Your plan, invoices and upgrades.",
                 "billing",
                 url_for("billing_page"),
+                "account",
             ),
-        ]
-        # Pricing leaves the top bar once signed into a club profile — surface
-        # it here, right after Billing & plan, so signed-in users keep a
-        # one-click route to compare plans. Signed-out visitors use the top nav.
-        if signed_in:
-            cards.append(
-                (
-                    "Pricing & plans",
-                    "Compare plans and what each tier unlocks.",
-                    "pricing",
-                    url_for("pricing_page"),
-                )
-            )
-        cards += [
+            # --- System ---
             (
-                "Sponsors",
-                "Manage sponsors and the sponsor-safe content they appear in.",
-                "sponsors",
-                url_for("sponsors_page"),
+                # Point at the org-gate-exempt public /status, not the gated
+                # /settings/status members surface, so this "is the site up?"
+                # tile resolves for signed-out / not-yet-onboarded visitors
+                # too (settings_section is not setup-exempt, so it would bounce
+                # them to org setup). Operators still get full detail via the
+                # Developer card below.
+                "System status",
+                "Whether the site is operational right now.",
+                "status",
+                # G-2: straight to the canonical /status page — the settings
+                # sub-page was a byte-identical mirror of it.
+                url_for("status_page"),
+                "system",
             ),
             (
                 "AI governance",
                 "AI usage and quota headroom, who can use which AI feature, and provenance.",
                 "privacy",
                 url_for("settings_section", section="governance"),
+                "system",
             ),
             (
-                "Account",
-                "Two-factor security, data export, and account deletion.",
-                "account",
-                url_for("settings_section", section="account"),
+                "Privacy & data",
+                "What this system stores, athletes & consent, cache clearing, and run deletion.",
+                "privacy",
+                url_for("settings_section", section="privacy"),
+                "system",
+            ),
+            # --- Coming soon — muted strip at the very bottom (J-10 badges kept) ---
+            (
+                "Auto scheduling",
+                "Queueing approved cards straight onto your social channels.",
+                "schedule",
+                url_for("settings_section", section="scheduling"),
+                "soon",
             ),
             (
-                "System status",
-                "Whether the site is operational right now.",
-                "status",
-                url_for("settings_section", section="status"),
+                "Autonomy",
+                "Per-content-type publishing levels — what may post without a human.",
+                "autonomy",
+                url_for("settings_section", section="autonomy"),
+                "soon",
             ),
         ]
         if is_dev:
@@ -29557,46 +31222,67 @@ self.addEventListener('fetch', function(e){
                     "Deployment health, operator dashboards, and uptime detail.",
                     "dev",
                     url_for("settings_section", section="developer"),
+                    "system",
                 )
             )
         return cards
 
     def _render_settings_page() -> str:
-        """Render the Settings landing — a grid of heading cards."""
+        """Render the Settings landing — four headed clusters of heading cards
+        (C-19), with the two "Coming soon" placeholders collapsed into a muted
+        compact strip at the very bottom (J-10 badges kept)."""
         is_dev = _auth.is_dev_operator()
-        signed_in = bool(_active_profile_id())
-        # J-10: these two tiles lead only to a "Coming soon" placeholder — badge
-        # them and mute the CTA so the state reads before the click, instead of
-        # the same "Open →" weight as a working feature.
-        soon_sections = {
-            url_for("settings_section", section="scheduling"),
-            url_for("settings_section", section="autonomy"),
-        }
-        tiles = ""
-        for title, desc, icon_key, href in _settings_card_specs(is_dev, signed_in):
+        grouped: dict[str, str] = {}
+        for title, desc, icon_key, href, group in _settings_card_specs(is_dev):
             icon = _SETTINGS_ICONS.get(icon_key, "")
-            soon = href in soon_sections
+            soon = group == "soon"
+            # J-10: the two placeholder tiles carry a visible badge (and, in
+            # the strip, no "Open" CTA) so the state reads before the click.
             badge = '<span class="mh-template-soon-badge">Coming soon</span>' if soon else ""
-            cta = "Coming soon" if soon else "Open"
-            tiles += (
+            cta = "" if soon else '<span class="mh-template-cta">Open</span>'
+            grouped[group] = grouped.get(group, "") + (
                 f'<a href="{href}" class="mh-template mh-glow-border{" mh-template-soon" if soon else ""}">'
                 f'<div class="mh-template-icon">{icon}</div>'
                 '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:var(--sp-1)">'
-                f'<h2 style="margin:0">{_h(title)}</h2>'
+                f'<h3 style="margin:0">{_h(title)}</h3>'
                 f"{badge}"
                 "</div>"
                 f"<p>{_h(desc)}</p>"
-                f'<span class="mh-template-cta">{cta}</span>'
+                f"{cta}"
                 "</a>"
+            )
+        sections = ""
+        for key, heading in (
+            ("club", "Your club"),
+            ("content", "Content & brand"),
+            ("account", "Account & billing"),
+            ("system", "System"),
+        ):
+            tiles = grouped.pop(key, "")
+            if not tiles:
+                continue
+            sections += (
+                f'<section class="mh-settings-cluster" aria-labelledby="mh-settings-{key}">'
+                f'<h2 class="mh-settings-cluster-head" id="mh-settings-{key}">{_h(heading)}</h2>'
+                f'<div class="mh-template-grid mh-reveal-group">{tiles}</div>'
+                "</section>"
+            )
+        soon_tiles = grouped.pop("soon", "")
+        if soon_tiles:
+            sections += (
+                '<section class="mh-settings-cluster" aria-labelledby="mh-settings-soon">'
+                '<h2 class="mh-settings-cluster-head" id="mh-settings-soon">Coming soon</h2>'
+                f'<div class="mh-settings-soon-strip">{soon_tiles}</div>'
+                "</section>"
             )
         body = (
             '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-5);margin-bottom:var(--sp-5)">'
             '<span class="mh-hero-eyebrow">Settings</span>'
-            '<h1>Operations &amp; <em class="editorial">data</em></h1>'
-            '<p class="lede">Pick a heading to manage it. Each card opens its own '
-            "page so nothing is buried in one long scroll.</p>"
+            "<h1>Settings</h1>"
+            '<p class="lede">Your club, content, account and system controls '
+            "&mdash; grouped so each one is easy to find.</p>"
             "</section>"
-            f'<div class="mh-template-grid mh-reveal-group">{tiles}</div>'
+            f"{sections}"
         )
         # C-16 — a deliberate interface-language control (distinct from the org's
         # caption-output language), shown only when more than English ships.
@@ -29806,9 +31492,13 @@ self.addEventListener('fetch', function(e){
                 lambda prof: _render_settings_governance_section(prof),
             ),
             "account": ("Account", lambda prof: _render_settings_account_section()),
-            "status": ("System status", lambda prof: _render_settings_status_public_section()),
             "developer": ("Developer", lambda prof: _render_settings_developer_section()),
         }
+        # G-2: /settings/status used to render the exact same public
+        # status card as /status — one canonical page now; old links
+        # follow it there.
+        if section == "status":
+            return redirect(url_for("status_page"))
         entry = renderers.get(section)
         if entry is None:
             return redirect(url_for("settings_page"))
@@ -29842,6 +31532,11 @@ self.addEventListener('fetch', function(e){
         "no-attest": (False, "Tick the licence box to confirm you're allowed to embed this font."),
         "bad-font": (False, "That file isn't a usable font, or its licence forbids embedding."),
         "no-tooling": (False, "Font processing isn't available on this deployment right now."),
+        "pairing-applied": (True, "Pairing applied — your cards will use this typography trio."),
+        "pairing-invalid": (
+            False,
+            "That pairing could not be applied — ask for a new suggestion and try again.",
+        ),
     }
 
     def _typography_banner(status: str) -> str:
@@ -29892,6 +31587,23 @@ self.addEventListener('fetch', function(e){
         )
 
         # --- AI pairing ---
+        # H-16: show the pairing the club has applied (if any) so the state of
+        # "Apply this pairing to my brand" is visible where it was chosen.
+        applied_line = ""
+        try:
+            from mediahub.brand.store import load_brand as _load_brand_for_type
+
+            _kit_for_type, _t_unused, _tpl_unused = _load_brand_for_type(pid)
+            _applied = getattr(_kit_for_type, "type_pairing", None) or {}
+        except Exception:
+            _applied = {}
+        if _applied.get("headline_family"):
+            applied_line = (
+                '<p style="font-size:12px;color:var(--ink-dim);margin:8px 0 0">'
+                f"Applied pairing: <strong>{_h(_applied.get('headline_family') or '')}</strong> "
+                f"headlines · {_h(_applied.get('body_family') or '')} body · "
+                f"{_h(_applied.get('numeral_family') or '')} numerals</p>"
+            )
         pairing = (
             '<div class="card"><h2 style="margin-top:0">AI font pairing</h2>'
             '<p style="color:var(--ink-dim)">Ask the engine to pick a headline / body / numeral '
@@ -29902,7 +31614,8 @@ self.addEventListener('fetch', function(e){
             'style="flex:1;min-width:220px;padding:8px 10px" maxlength="60">'
             '<button class="btn" type="submit">Suggest a pairing</button></form>'
             '<p style="font-size:12px;color:var(--ink-muted);margin-bottom:0">Uses your '
-            "configured AI provider; shows an honest message if none is set.</p></div>"
+            "configured AI provider; shows an honest message if none is set.</p>"
+            f"{applied_line}</div>"
         )
 
         # --- Club's own uploaded fonts ---
@@ -30021,11 +31734,21 @@ self.addEventListener('fetch', function(e){
         try:
             result = _dt.ai_type_pairing(PairingContext(club_name=name, mood=mood))
         except Exception as e:
+            # H-16: honest, plain-English failure — the raw exception goes to
+            # the server log only, never the page (and never a fabricated
+            # pairing).
+            log.warning("AI font pairing failed: %s", e, exc_info=True)
+            from mediahub.ai_core import ProviderNotConfigured as _PNC
+            from mediahub.media_ai.llm import ClaudeUnavailableError as _CUE
+
+            if isinstance(e, (_PNC, _CUE)):
+                msg = "AI suggestions are unavailable on this deployment."
+            else:
+                msg = "We could not suggest a pairing just now — please try again in a moment."
             body = (
                 '<section class="mh-hero"><span class="mh-hero-eyebrow">Typography</span>'
                 '<h1 style="margin-bottom:0">AI pairing</h1></section>'
-                '<div class="card"><p style="color:#e74c3c">AI pairing is unavailable: '
-                f"{_h(str(e)[:200])}</p>"
+                f'<div class="card"><p style="color:var(--bad)">{_h(msg)}</p>'
                 f'<a class="btn" href="{back}">Back to typography</a></div>'
             )
             return _layout("Typography · pairing", body, active="settings")
@@ -30035,6 +31758,17 @@ self.addEventListener('fetch', function(e){
             if result.get("corrected")
             else ""
         )
+        # H-16: the suggestion is applicable, not a dead end — the form carries
+        # the trio to typography_pair_apply, which persists it to the brand kit.
+        apply_form = (
+            f'<form method="post" action="{url_for("typography_pair_apply")}" '
+            'style="display:inline-block;margin-right:8px">'
+            f'<input type="hidden" name="pairing" value="{_h(result.get("pairing") or "")}">'
+            f'<input type="hidden" name="headline_family" value="{_h(result["headline_family"])}">'
+            f'<input type="hidden" name="body_family" value="{_h(result["body_family"])}">'
+            f'<input type="hidden" name="numeral_family" value="{_h(result["numeral_family"])}">'
+            '<button class="btn" type="submit">Apply this pairing to my brand</button></form>'
+        )
         body = (
             '<section class="mh-hero"><span class="mh-hero-eyebrow">Typography</span>'
             '<h1 style="margin-bottom:0">Suggested pairing</h1></section>'
@@ -30043,9 +31777,49 @@ self.addEventListener('fetch', function(e){
             f"<strong>Body:</strong> {_h(result['body_family'])}<br>"
             f"<strong>Numerals:</strong> {_h(result['numeral_family'])}</p>"
             f'<p style="color:var(--ink-dim)">{_h(result["reason"])}</p>{corrected}'
-            f'<a class="btn" href="{back}">Back to typography</a></div>'
+            f'{apply_form}<a class="btn ghost" href="{back}">Back to typography</a></div>'
         )
         return _layout("Typography · pairing", body, active="settings")
+
+    @app.route("/settings/typography/pair/apply", methods=["POST"])
+    def typography_pair_apply():
+        """H-16: persist an AI-suggested pairing to the active club's brand kit.
+
+        The trio is re-validated against the self-hosted catalogue (family
+        names only — a form value can't smuggle an arbitrary font), then saved
+        through the brand write path everything else uses (``save_brand`` on
+        the profile JSON). ``resolve_design_tokens`` surfaces it as the
+        club's ``type`` block.
+        """
+        prof = _active_profile()
+        if prof is None:
+            return redirect(url_for("settings_page"))
+        from mediahub.typography import catalog as _cat
+
+        families = {f.family for f in _cat.load_catalog()}
+        headline = (request.form.get("headline_family") or "").strip()
+        body_family = (request.form.get("body_family") or "").strip()
+        numeral = (request.form.get("numeral_family") or "").strip()
+        if not ({headline, body_family, numeral} <= families):
+            return redirect(
+                url_for("settings_section", section="typography", status="pairing-invalid")
+            )
+        # The renderer override key the AI path emits (Pairing.typography_pair).
+        pairing_key = (request.form.get("pairing") or "").strip().lower()
+        if pairing_key not in {"anton-inter", "bebas-grotesk", "bowlby-inter"}:
+            pairing_key = "anton-inter"
+        from mediahub.brand.store import load_brand, save_brand
+
+        kit, _tone_unused, _templates_unused = load_brand(prof.profile_id)
+        kit.type_pairing = {
+            "pairing": pairing_key,
+            "headline_family": headline,
+            "body_family": body_family,
+            "numeral_family": numeral,
+            "source": "ai",
+        }
+        save_brand(prof.profile_id, kit=kit)
+        return redirect(url_for("settings_section", section="typography", status="pairing-applied"))
 
     # ------------------------------------------------------------------
     # Audio engine (roadmap 1.8) — library, voices, pronunciation lexicon,
@@ -30063,6 +31837,42 @@ self.addEventListener('fetch', function(e){
     }
     _AUDIO_UPLOAD_MAX_BYTES = 25 * 1024 * 1024  # 25 MB — clips/beds, not albums
 
+    # H-15: every status code a form POST can redirect back with, mapped to the
+    # plain-English banner copy the audio settings page renders (mirrors the
+    # _TYPOGRAPHY_STATUS pattern). Copy lives here server-side — raw exception
+    # text never reaches the page or the URL.
+    _AUDIO_ALLOWED_TYPES = ", ".join(sorted(s.lstrip(".").upper() for s in _AUDIO_UPLOAD_SUFFIXES))
+    _AUDIO_STATUS = {
+        "audio_added": (True, "Track added — it is listed under Your uploaded audio below."),
+        "audio_removed": (True, "Track removed."),
+        "lexicon_saved": (True, "Pronunciation saved — voiceovers will now say the name that way."),
+        "lexicon_removed": (True, "Pronunciation override removed."),
+        "consent_recorded": (True, "Consent recorded — the feature is now enabled."),
+        "consent_revoked": (True, "Consent revoked — the feature is switched off."),
+        "lexicon_invalid": (
+            False,
+            "Pronunciation not saved — enter both the written name and how to say it.",
+        ),
+        "consent_invalid": (
+            False,
+            "That consent change could not be recorded — please try again.",
+        ),
+        "no_file": (False, "Upload failed — choose an audio file first."),
+        "bad_type": (
+            False,
+            f"Upload failed — that file type is not supported. Use one of: {_AUDIO_ALLOWED_TYPES}.",
+        ),
+        "too_large": (False, "Upload failed — that audio is over the 25 MB limit."),
+        "save_failed": (False, "Upload failed — we could not save that file. Please try again."),
+        "no_org": (False, "Choose an organisation first, then try again."),
+        "not_found": (False, "That track was not found — it may already have been removed."),
+        "audio_unavailable": (
+            False,
+            "Audio features are not available on this deployment right now.",
+        ),
+        "error": (False, "That did not work — please try again."),
+    }
+
     def _audio_back_or_json(payload: dict, status: int = 200, *, flash_status: str = ""):
         from flask import request as _req
 
@@ -30072,17 +31882,14 @@ self.addEventListener('fetch', function(e){
         )
         if wants_json:
             return jsonify(payload), status
-        # D-14: a browser form POST must never land on a bare JSON error page.
-        # Redirect back with a friendly banner instead — the styled error card
-        # the graceful pages use — keeping the JSON body only for JSON callers.
-        if payload.get("error"):
-            emsg = payload.get("message") or "That didn't work — check the file and try again."
-            return redirect(url_for("settings_section", section="audio", status="error", emsg=emsg))
-        # D-7: a form POST navigates back to the audio settings; carry a status
-        # so the section can confirm the action ("Track added" / "Track removed")
-        # instead of a silent redirect the volunteer can't tell worked.
-        if flash_status:
-            return redirect(url_for("settings_section", section="audio", status=flash_status))
+        # D-14 / D-7 / H-15: a browser form POST must never land on a bare JSON
+        # page or a silent redirect. Carry a status CODE back to the audio
+        # settings page — _AUDIO_STATUS maps each code to plain-English banner
+        # copy server-side (success confirmations and error explanations), so
+        # raw exception text never reaches the customer.
+        code = flash_status or (payload.get("error") or "")
+        if code:
+            return redirect(url_for("settings_section", section="audio", status=code))
         return redirect(url_for("settings_section", section="audio"))
 
     @app.route("/api/audio/library")
@@ -30093,7 +31900,8 @@ self.addEventListener('fetch', function(e){
         try:
             from mediahub.audio import load_library
         except Exception as e:
-            return jsonify({"error": "audio_unavailable", "detail": str(e)}), 503
+            log.warning("audio backend unavailable: %s", e)
+            return jsonify({"error": "audio_unavailable"}), 503
         lib = load_library()
         tracks = lib.tracks(
             kind=(_req.args.get("kind") or None),
@@ -30113,7 +31921,8 @@ self.addEventListener('fetch', function(e){
         try:
             from mediahub.audio import load_library
         except Exception as e:
-            return jsonify({"error": "audio_unavailable", "detail": str(e)}), 503
+            log.warning("audio backend unavailable: %s", e)
+            return jsonify({"error": "audio_unavailable"}), 503
         track = load_library().get(track_id)
         if track is None or not Path(track.path).is_file():
             return jsonify({"error": "not_found"}), 404
@@ -30127,7 +31936,8 @@ self.addEventListener('fetch', function(e){
             from mediahub.audio import list_voices
             from mediahub.visual import voiceover as _vo
         except Exception as e:
-            return jsonify({"error": "audio_unavailable", "detail": str(e)}), 503
+            log.warning("audio backend unavailable: %s", e)
+            return jsonify({"error": "audio_unavailable"}), 503
         try:
             status = _vo.tts_provider_status()
         except Exception:
@@ -30146,13 +31956,16 @@ self.addEventListener('fetch', function(e){
 
         pid = _active_profile_id()
         if not pid:
-            return jsonify(
-                {"error": "no_org", "message": "Choose an organisation to manage a lexicon."}
-            ), 403
+            # SRV-4: a browser form POST must land on the banner, not raw JSON.
+            return _audio_back_or_json(
+                {"error": "no_org", "message": "Choose an organisation to manage a lexicon."},
+                403,
+            )
         try:
             from mediahub.audio.voice import OrgLexicon
         except Exception as e:
-            return jsonify({"error": "audio_unavailable", "detail": str(e)}), 503
+            log.warning("audio lexicon unavailable: %s", e)
+            return _audio_back_or_json({"error": "audio_unavailable"}, 503)
         lex = OrgLexicon(pid)
         if _req.method == "GET":
             return jsonify({"ok": True, "entries": lex.entries()})
@@ -30166,8 +31979,13 @@ self.addEventListener('fetch', function(e){
                     (_req.form.get("spoken") or "").strip(),
                 )
         except ValueError as e:
-            return _audio_back_or_json({"error": "invalid", "message": str(e)}, 400)
-        return _audio_back_or_json({"ok": True, "entries": lex.entries()})
+            return _audio_back_or_json(
+                {"error": "invalid", "message": str(e)}, 400, flash_status="lexicon_invalid"
+            )
+        return _audio_back_or_json(
+            {"ok": True, "entries": lex.entries()},
+            flash_status="lexicon_removed" if op == "remove" else "lexicon_saved",
+        )
 
     @app.route("/api/audio/upload", methods=["POST"])
     def api_audio_upload():
@@ -30203,12 +32021,9 @@ self.addEventListener('fetch', function(e){
             from mediahub.audio import rights as _rights
             from mediahub.audio.library import Licence
         except Exception as e:
+            log.warning("audio upload backend unavailable: %s", e)
             return _audio_back_or_json(
-                {
-                    "error": "audio_unavailable",
-                    "detail": str(e),
-                    "message": "Audio isn't available.",
-                },
+                {"error": "audio_unavailable", "message": "Audio isn't available."},
                 503,
             )
 
@@ -30325,11 +32140,13 @@ self.addEventListener('fetch', function(e){
 
         pid = _active_profile_id()
         if not pid:
-            return jsonify({"error": "no_org"}), 403
+            # SRV-4: a browser form POST must land on the banner, not raw JSON.
+            return _audio_back_or_json({"error": "no_org"}, 403)
         try:
             from mediahub.audio.consent import FEATURES, ConsentStore
         except Exception as e:
-            return jsonify({"error": "audio_unavailable", "detail": str(e)}), 503
+            log.warning("audio consent store unavailable: %s", e)
+            return _audio_back_or_json({"error": "audio_unavailable"}, 503)
         store = ConsentStore()
         if _req.method == "GET":
             return jsonify(
@@ -30353,8 +32170,13 @@ self.addEventListener('fetch', function(e){
                     granted_by=pid,
                 )
         except ValueError as e:
-            return _audio_back_or_json({"error": "invalid", "message": str(e)}, 400)
-        return _audio_back_or_json({"ok": True})
+            return _audio_back_or_json(
+                {"error": "invalid", "message": str(e)}, 400, flash_status="consent_invalid"
+            )
+        return _audio_back_or_json(
+            {"ok": True},
+            flash_status="consent_revoked" if action == "revoke" else "consent_recorded",
+        )
 
     @app.route("/api/audio/suggest")
     def api_audio_suggest():
@@ -30371,7 +32193,8 @@ self.addEventListener('fetch', function(e){
             from mediahub.audio import load_library
             from mediahub.audio.select import select_or_default
         except Exception as e:
-            return jsonify({"ok": False, "available": False, "detail": str(e)})
+            log.warning("audio library unavailable: %s", e)
+            return jsonify({"ok": False, "available": False})
         lib = load_library()
         mood = (_req.args.get("mood") or "").strip()
         kind = (_req.args.get("kind") or "music").strip()
@@ -30527,7 +32350,7 @@ self.addEventListener('fetch', function(e){
                     'gap:12px;flex-wrap:wrap">'
                     f'<div style="flex:1;min-width:180px"><strong>{_h(rec.filename)}</strong>'
                     f'<div class="dim" style="font-size:12px">{lic}'
-                    f'{(" · " + when) if when else ""}</div></div>'
+                    f"{(' · ' + when) if when else ''}</div></div>"
                     f'<audio controls preload="none" src="{src}" style="height:34px"></audio>'
                     f'<form method="post" action="{del_url}" style="margin:0" '
                     "onsubmit=\"return confirm('Remove this uploaded track?')\">"
@@ -30548,28 +32371,19 @@ self.addEventListener('fetch', function(e){
                     "and it'll appear here to preview or remove.</p>"
                 )
 
-        # D-7: confirm the upload/remove that a form POST just performed, so the
-        # volunteer sees it worked instead of a silent redirect.
+        # D-7 / D-14 / H-15: confirm or explain the action a form POST just
+        # performed. Every code maps to plain-English copy in _AUDIO_STATUS —
+        # the volunteer always sees a styled banner (success confirmation or
+        # error explanation), never raw exception text or a silent redirect.
         _audio_flash = (request.args.get("status") or "").strip()
         banner_html = ""
-        if _audio_flash == "audio_added":
+        _spec = _AUDIO_STATUS.get(_audio_flash)
+        if _spec:
+            _ok, _text = _spec
+            _colour = "var(--good)" if _ok else "var(--bad)"
             banner_html = (
-                '<div class="card" style="border-left:2px solid var(--good);margin-bottom:14px">'
-                '<strong style="color:var(--good)">Track added.</strong> '
-                'It\'s listed under "Your uploaded audio" below.</div>'
-            )
-        elif _audio_flash == "audio_removed":
-            banner_html = (
-                '<div class="card" style="border-left:2px solid var(--warn);margin-bottom:14px">'
-                "Track removed.</div>"
-            )
-        elif _audio_flash == "error":
-            # D-14: an upload validation error, rendered as a styled card instead
-            # of a bare JSON page. The message is server-supplied; escape it.
-            _emsg = _h((request.args.get("emsg") or "").strip()[:300]) or "That upload didn't work."
-            banner_html = (
-                '<div class="card" style="border-left:2px solid var(--bad);margin-bottom:14px">'
-                f'<strong style="color:var(--bad)">Upload failed.</strong> {_emsg}</div>'
+                f'<div class="card" style="border-left:2px solid {_colour};margin-bottom:14px">'
+                f'<p style="margin:0">{_h(_text)}</p></div>'
             )
 
         # --- Voice consent (cloning / changer; off by default) ---
@@ -30652,120 +32466,37 @@ self.addEventListener('fetch', function(e){
         )
 
     def _render_settings_activity_section(prof: Optional[ClubProfile]) -> str:
-        """Activity section — recent runs for the pinned org.
+        """Activity section — a pointer to the canonical /activity page.
 
-        Mirrors the standalone /activity page but degrades gracefully
-        when no profile is pinned (Settings is reachable pre-org-setup).
-        The settings sub-page supplies its own hero title, so this section
-        carries no big header of its own.
+        G-2: this used to re-render its own copy of the results table
+        ("Mirrors /activity") — a fourth surface showing the same history.
+        The canonical Activity page carries everything the mirror had (and
+        more): per-row delete, the why-it-failed explainers, search, status
+        filters, bulk clear, and the Table · Feed · Season views. Settings
+        now links instead of duplicating. Degrades gracefully when no
+        profile is pinned (Settings is reachable pre-org-setup).
         """
-        section_header = ""
         if prof is None:
             return (
-                f"{section_header}"
                 '<p class="dim" style="margin-bottom:14px">'
-                "Choose an organisation to see its recent runs here. "
+                "Choose an organisation to see its recent results. "
                 "Activity is scoped per-organisation so the data never "
                 "leaks between profiles.</p>"
                 '<div class="card empty">No organisation pinned. '
                 f'<a href="{url_for("sign_in_page")}">Choose organisation &rarr;</a></div>'
             )
-
-        try:
-            conn = _db()
-            rows = conn.execute(
-                "SELECT id, created_at, finished_at, status, profile_id, "
-                "meet_name, our_swims, n_cards, n_queue, error, file_name "
-                "FROM runs WHERE profile_id = ? "
-                "ORDER BY created_at DESC LIMIT 100",
-                (prof.profile_id,),
-            ).fetchall()
-            conn.close()
-        except Exception:
-            rows = []
-
-        section_intro = (
-            f'<p class="dim" style="margin-bottom:14px">Recent runs for '
-            f"<b>{_h(prof.display_name)}</b>.</p>"
-        )
-
-        if not rows:
-            return (
-                f"{section_header}"
-                f"{section_intro}"
-                '<div class="card empty">No results yet for this organisation. '
-                f'<a href="{url_for("make_page")}">Create your first piece of content &rarr;</a>'
-                "</div>"
-            )
-
-        rows_html = ""
-        n_errored = 0
-        for r in rows:
-            badge = {"done": "good", "running": "info", "queued": "info", "error": "bad"}.get(
-                r["status"], ""
-            )
-            review_href = url_for("review", run_id=r["id"])
-            delete_href = url_for("privacy_delete_run", run_id=r["id"])
-            started = (r["created_at"] or "")[:19]
-            started_iso = started.replace(" ", "T") + "Z" if started else ""
-            rows_html += (
-                f'<tr data-run-row="{_h(r["id"])}"><td data-label="Input"><a href="{review_href}">{_h(r["meet_name"] or r["file_name"] or r["id"])}</a></td>'
-                f'<td data-label="Status"><span class="tag {badge}">{_h(r["status"])}</span></td>'
-                f'<td data-label="Matched">{_h(r["our_swims"] or 0)}</td>'
-                f'<td data-label="Queue / Total">{_h(r["n_queue"] or 0)} / {_h(r["n_cards"] or 0)}</td>'
-                f'<td data-label="Started"><time class="mh-rel" datetime="{_h(started_iso)}">{_h(started)}</time></td>'
-                f'<td><form method="post" action="{delete_href}" '
-                f'class="mh-run-delete" data-run-id="{_h(r["id"])}" '
-                f'style="display:inline" data-no-loader="1">'
-                f'<input type="hidden" name="next" value="{_h(request.path)}">'
-                f'<button class="btn danger" type="submit" '
-                f'style="font-size:11px;padding:4px 10px">Delete</button>'
-                f"</form></td></tr>"
-            )
-            if r["status"] == "error" and r["error"]:
-                n_errored += 1
-                err_text = str(r["error"])
-                truncated = err_text[:600] + ("…" if len(err_text) > 600 else "")
-                rows_html += (
-                    f'<tr class="run-error-row" data-run-err="{_h(r["id"])}">'
-                    '<td colspan="7" style="padding:6px 14px 14px 14px;'
-                    'background:rgba(255,93,108,0.06);border-left:3px solid var(--mh-prim-error-500)">'
-                    "<details>"
-                    '<summary style="cursor:pointer;font-size:13px;font-weight:600;'
-                    'color:var(--mh-prim-error-300)">Why did this run fail?</summary>'
-                    '<pre style="margin:8px 0 0;padding:10px 12px;'
-                    "background:rgba(0,0,0,0.25);border-radius:6px;"
-                    'font-size:12px;white-space:pre-wrap;word-break:break-word">'
-                    f"{_h(truncated)}</pre>"
-                    "</details>"
-                    "</td></tr>"
-                )
-
-        failure_callout = ""
-        if n_errored:
-            label = "1 run failed" if n_errored == 1 else f"{n_errored} runs failed"
-            failure_callout = (
-                '<div class="card" style="padding:12px 18px;margin-bottom:20px;'
-                'background:rgba(255,93,108,0.06);border-left:3px solid var(--mh-prim-error-500)">'
-                f"<b>{_h(label)}</b> in the last 100 runs. "
-                "Expand <i>Why did this run fail?</i> on each row below to "
-                "see the pipeline error.</div>"
-            )
-
-        # Delete in place + bulk clear: shared, delegated handler (mh-run-delete
-        # removes a row via fetch; mh-clear-all-runs confirms then reloads).
-        # No-JS falls back to the plain form POST (honours ``next``).
         return (
-            f"{section_header}"
-            f"{section_intro}"
-            f"{failure_callout}"
-            '<div class="card"><table class="mh-table-stack">'
-            "<thead><tr><th>Input</th><th>Status</th>"
-            "<th>Matched</th><th>Queue / Total</th>"
-            "<th>Started</th><th></th></tr></thead>"
-            f"<tbody>{rows_html}</tbody>"
-            "</table></div>"
-            f"{_RUN_DELETE_JS}"
+            f'<p class="dim" style="margin-bottom:14px">Results for '
+            f"<b>{_h(prof.display_name)}</b> live in one place &mdash; the "
+            "Activity page &mdash; rather than a second copy here.</p>"
+            '<div class="card" style="padding:22px 20px;max-width:640px">'
+            '<h2 style="margin:0 0 6px 0;font-size:18px">Activity</h2>'
+            '<p class="dim" style="margin:0 0 14px 0;line-height:1.55">'
+            "Every processed meet for this organisation &mdash; status, matched "
+            "swims, achievements, why a result failed, per-row delete and bulk "
+            "clear &mdash; with table, feed and season views.</p>"
+            f'<a class="btn" href="{url_for("activity_page")}">Open Activity &rarr;</a>'
+            "</div>"
         )
 
     def _render_settings_status_section() -> str:
@@ -31070,7 +32801,7 @@ self.addEventListener('fetch', function(e){
             "(grant, refuse or revoke, lawful basis, child controls, retention), and log and "
             "clock a &ldquo;delete or export my child&rsquo;s data&rdquo; request.</p>"
             '<div style="display:flex;gap:8px;flex-wrap:wrap">'
-            f'<a class="btn secondary" href="{url_for("org_consent_page")}">Consent &amp; lawful basis</a>'
+            f'<a class="btn secondary" href="{url_for("athletes_page", tab="records")}">Consent &amp; lawful basis</a>'
             f'<a class="btn secondary" href="{url_for("org_athlete_rights")}">Athlete data requests</a>'
             "</div>"
             "</div>"
@@ -31138,7 +32869,7 @@ self.addEventListener('fetch', function(e){
 
 <div class="card">
   <h3 style="margin-top:0">Delete runs</h3>
-  <p class="muted" style="margin-top:0">To delete an individual run, open <a href="{url_for("settings_section", section="activity")}">Activity</a> and use the Delete button on its row — it's removed from everywhere across the site, including the athlete spotlight.</p>
+  <p class="muted" style="margin-top:0">To delete an individual result, open <a href="{url_for("activity_page")}">Activity</a> and use the Delete button on its row — it's removed from everywhere across the site, including the athlete spotlight.</p>
 </div>
 """
 
@@ -31449,6 +33180,34 @@ self.addEventListener('fetch', function(e){
             return jsonify({"error": str(exc)}), 500
         return jsonify({"ok": True, "org_id": pid, "parsed": parsed})
 
+    def _plan_subnav(active: str) -> str:
+        """The planner's shared sub-nav strip (C-15).
+
+        One helper renders the same five view links — Plan · Calendar · Board
+        · Grid · Performance — on every planner page, with the current view
+        marked. Replaces the old ad-hoc per-page link subsets (each page used
+        to link a different, partial set of the others, leaving Board and
+        Grid reachable only from the calendar toolbar).
+        """
+        views = (
+            ("plan", "Plan", "plan_page"),
+            ("calendar", "Calendar", "plan_calendar_page"),
+            ("board", "Board", "plan_board_page"),
+            ("grid", "Grid", "plan_grid_page"),
+            ("performance", "Performance", "plan_analytics_page"),
+        )
+        links = ""
+        for key, label, endpoint in views:
+            is_active = key == active
+            cls = "btn primary" if is_active else "btn"
+            current = ' aria-current="page"' if is_active else ""
+            links += f'<a class="{cls}" href="{url_for(endpoint)}"{current}>{label}</a>'
+        return (
+            '<nav aria-label="Plan views" '
+            'style="display:flex;gap:8px;flex-wrap:wrap;margin:0 0 14px 0">'
+            f"{links}</nav>"
+        )
+
     @app.route("/plan")
     def plan_page():
         pid = _active_profile_id()
@@ -31546,9 +33305,31 @@ self.addEventListener('fetch', function(e){
                     meta = _ct_registry.get(ct)
                     if meta is not None:
                         try:
+                            # J-6: free-text targets carry the idea itself —
+                            # the free-text landing prefills its textarea from
+                            # ?seed=<title — reason>. Other tools are
+                            # form-driven, so their links stay plain.
+                            if meta.primary_route_endpoint == "free_text_chat_page":
+                                _seed_bits = [str(item.get("title") or slug)]
+                                _first_reason = next(
+                                    (
+                                        str(r).strip()
+                                        for r in _as_list(item.get("reasons"))
+                                        if str(r).strip()
+                                    ),
+                                    "",
+                                )
+                                if _first_reason:
+                                    _seed_bits.append(_first_reason)
+                                _create_url = url_for(
+                                    meta.primary_route_endpoint,
+                                    seed=" — ".join(_seed_bits)[:500],
+                                )
+                            else:
+                                _create_url = url_for(meta.primary_route_endpoint)
                             create_link = (
                                 f'<a class="btn" style="font-size:12px;padding:4px 12px" '
-                                f'href="{url_for(meta.primary_route_endpoint)}">Create →</a>'
+                                f'href="{_h(_create_url)}">Create →</a>'
                             )
                         except Exception:
                             create_link = ""
@@ -31657,8 +33438,8 @@ self.addEventListener('fetch', function(e){
         if goal_opts:
             goals_add_html = (
                 '<div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">'
-                f'<select id="mh-plan-goal-type" style="flex:0 0 auto;min-width:180px">{goal_opts}</select>'
-                '<input type="text" id="mh-plan-goal-note" placeholder="why — e.g. push our new sponsor" style="flex:1;min-width:160px"/>'
+                f'<select id="mh-plan-goal-type" aria-label="Post type to push" style="flex:0 0 auto;min-width:180px">{goal_opts}</select>'
+                '<input type="text" id="mh-plan-goal-note" aria-label="Why you want to push this type" placeholder="why — e.g. push our new sponsor" style="flex:1;min-width:160px"/>'
                 '<button type="button" class="btn" onclick="mhPlanAddGoal()">Add goal</button>'
                 "</div>"
             )
@@ -31678,20 +33459,21 @@ self.addEventListener('fetch', function(e){
   recent results, the calendar, and anything you tell it below. Each item explains
   why it ranks where it does, and the ones marked <strong>Ready to create</strong>
   jump straight into the matching tool. Nothing publishes from here.</p>
+  <a class="mh-how-pill" href="{url_for("content_type_intro", ct="plan")}" style="margin-top:var(--sp-3)">How it works</a>
 </section>
+
+{_plan_subnav("plan")}
 
 <div class="mh-next-strip" aria-label="How the plan works" style="margin-bottom:16px">
   <div class="cell"><span class="num">1</span><span class="text"><b>Generate</b><br>One click fuses your results, drafts, the calendar and your direct notes.</span></div>
   <div class="cell"><span class="num">2</span><span class="text"><b>Read the why</b><br>Every item lists the exact signals that put it at that rank.</span></div>
-  <div class="cell"><span class="num">3</span><span class="text"><b>Create</b><br>Click <i>Create</i> on an item to open the right tool with that idea.</span></div>
+  <div class="cell"><span class="num">3</span><span class="text"><b>Create</b><br>Click <i>Create</i> on an item to open the right tool &mdash; free-text ideas arrive pre-filled.</span></div>
 </div>
 
 <div class="card" style="margin-bottom:14px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;justify-content:center">
   {sport_control_html}
   <button type="button" class="btn primary" id="mh-plan-generate" onclick="mhPlanGenerate(this)"
           data-loader-text="Fusing signals">Generate plan</button>
-  <a class="btn" href="{url_for("plan_calendar_page")}" title="See planned drafts, key dates and what you've posted on a calendar">Open calendar &rarr;</a>
-  <a class="btn" href="{url_for("plan_analytics_page")}" title="Log how posts did — what works feeds the plan">Performance</a>
   <span class="dim" id="mh-plan-status" style="font-size:12.5px"></span>
 </div>
 
@@ -31720,9 +33502,9 @@ self.addEventListener('fetch', function(e){
       <label style="font-weight:600">Upcoming events</label>
       <div id="mh-plan-events">{events_rows}</div>
       <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">
-        <input type="date" id="mh-plan-ev-date" style="flex:0 0 auto"/>
-        <input type="text" id="mh-plan-ev-name" placeholder="e.g. County Championships" style="flex:1;min-width:140px"/>
-        <input type="text" id="mh-plan-ev-venue" placeholder="venue (optional)" style="flex:1;min-width:120px"/>
+        <input type="date" id="mh-plan-ev-date" aria-label="Event date" style="flex:0 0 auto"/>
+        <input type="text" id="mh-plan-ev-name" aria-label="Event name" placeholder="e.g. County Championships" style="flex:1;min-width:140px"/>
+        <input type="text" id="mh-plan-ev-venue" aria-label="Event venue (optional)" placeholder="venue (optional)" style="flex:1;min-width:120px"/>
         <button type="button" class="btn" onclick="mhPlanAddEvent()">Add</button>
       </div>
     </div>
@@ -32077,19 +33859,49 @@ function mhPlanGenerate(btn) {{
             if e.kind == "planned_draft":
                 ch = e.meta.get("channel") or ""
                 ch_html = f'<span style="opacity:.7"> · {_h(ch)}</span>' if ch else ""
+                # D-26: the flag is always in the markup (hidden off-blackout) so an
+                # in-place move onto/off a blackout day can toggle it without a reload.
                 warn = (
-                    '<span title="On a blackout date you set" '
-                    'style="color:var(--bad);font-weight:700"> ⚠</span>'
-                    if e.meta.get("on_blackout")
-                    else ""
+                    '<span class="mh-cal-warnflag" title="On a blackout date you set" '
+                    'style="color:var(--bad);font-weight:700"'
+                    f'{"" if e.meta.get("on_blackout") else " hidden"}> ⚠</span>'
                 )
                 draft_url = url_for("stub_pack_view", pack_id=e.ref)
+                # I-1 parity: HTML5 drag never fires from touch and the chip isn't
+                # focusable, so a planned chip also carries a non-drag date field
+                # (reschedule) + an unschedule control — the same affordance
+                # _rail_card gives unscheduled drafts. mhCalPlanInput / mhCalUnplan →
+                # mhCalSchedule + the schedule endpoint already handle move + clear;
+                # only this UI was missing on planned chips, so touch/keyboard users
+                # could schedule but never reschedule or unschedule.
+                # JS2-1: data-prev carries the last date the SERVER confirmed —
+                # the change event fires after input.value already mutated, so a
+                # failed move must revert to data-prev, never to input.value.
+                reschedule = (
+                    f'<input type="date" class="mh-cal-plan-date" data-pack="{_h(e.ref)}" '
+                    f'value="{_h(e.date)}" data-prev="{_h(e.date)}" '
+                    f'aria-label="Move {_h(e.title)} to another day" '
+                    'onchange="mhCalPlanInput(this)" onclick="event.stopPropagation()" '
+                    'style="margin-top:5px;width:100%;font-size:11px;padding:2px 5px;'
+                    "border:1px solid var(--border);border-radius:6px;background:var(--panel);"
+                    'color:inherit">'
+                )
+                unplan = (
+                    f'<button type="button" class="mh-cal-unplan" data-pack="{_h(e.ref)}" '
+                    f'aria-label="Unschedule {_h(e.title)}" '
+                    'title="Unschedule — send back to the side rail" '
+                    'onclick="mhCalUnplan(event, this)" '
+                    'style="margin-top:3px;font-size:10.5px;background:none;border:none;'
+                    'color:var(--ink-muted);text-decoration:underline;cursor:pointer;padding:0">'
+                    "unschedule</button>"
+                )
                 return (
                     f'<div class="mh-cal-draft" draggable="true" data-pack="{_h(e.ref)}" '
                     f'data-href="{_h(draft_url)}" '
-                    f'title="{_h(e.title)} — drag to a day to move, or to the side rail to unschedule">'
+                    f'title="{_h(e.title)} — drag to a day to move, or use the date field to reschedule">'
                     f'<span class="mh-cal-draft-dot"></span>'
-                    f'<span class="mh-cal-draft-t">{_h(e.title)}{ch_html}{warn}</span></div>'
+                    f'<span class="mh-cal-draft-t">{_h(e.title)}{ch_html}{warn}</span>'
+                    f"{reschedule}{unplan}</div>"
                 )
             fg, bg = _kind_style.get(e.kind, ("var(--ink-dim)", "rgba(182,178,166,.10)"))
             note = e.meta.get("note") or e.meta.get("venue") or ""
@@ -32131,11 +33943,28 @@ function mhPlanGenerate(btn) {{
             # a day stays as the desktop enhancement.
             plan_input = (
                 f'<input type="date" class="mh-cal-plan-date" data-pack="{_h(d["pack_id"])}" '
+                'data-prev="" '
                 f'aria-label="Plan a date to post {_h(d["title"])}" '
                 f'onchange="mhCalPlanInput(this)" onclick="event.stopPropagation()" '
                 'style="margin-top:6px;width:100%;font-size:11px;padding:3px 6px;'
                 "border:1px solid var(--border);border-radius:6px;background:var(--panel);"
                 'color:inherit">'
+            )
+            # D-26: hidden blackout flag + unschedule control ship in the markup, so
+            # when this card is scheduled in place (no reload) it gains the same
+            # affordances a server-rendered planned chip has.
+            warn_flag = (
+                '<span class="mh-cal-warnflag" title="On a blackout date you set" '
+                'style="color:var(--bad);font-weight:700" hidden> ⚠</span>'
+            )
+            unplan = (
+                f'<button type="button" class="mh-cal-unplan" data-pack="{_h(d["pack_id"])}" '
+                f'aria-label="Unschedule {_h(d["title"])}" '
+                'title="Unschedule — send back to the side rail" '
+                'onclick="mhCalUnplan(event, this)" hidden '
+                'style="margin-top:3px;font-size:10.5px;background:none;border:none;'
+                'color:var(--ink-muted);text-decoration:underline;cursor:pointer;padding:0">'
+                "unschedule</button>"
             )
             return (
                 f'<div class="mh-cal-draft mh-cal-rail-card" draggable="true" '
@@ -32145,13 +33974,15 @@ function mhPlanGenerate(btn) {{
                 f'<span class="mh-cal-draft-dot"></span>'
                 f'<span class="mh-cal-draft-t">{_h(d["title"])}'
                 f'<span style="opacity:.6"> · {int(d["n_cards"])} card'
-                f"{'s' if int(d['n_cards']) != 1 else ''}</span></span>{plan_input}</div>"
+                f"{'s' if int(d['n_cards']) != 1 else ''}</span>{warn_flag}</span>"
+                f"{plan_input}{unplan}</div>"
             )
 
         rail = "".join(_rail_card(d) for d in model.unscheduled_drafts)
         if not rail:
             rail = (
-                '<p class="dim" style="font-size:12px;margin:6px 2px">No unscheduled drafts. '
+                '<p class="dim" id="mh-cal-rail-empty" style="font-size:12px;margin:6px 2px">'
+                "No unscheduled drafts. "
                 f'<a href="{url_for("make_page")}" style="text-decoration:underline">Make content</a>, '
                 "then drag it onto a day to plan when to post.</p>"
             )
@@ -32178,9 +34009,10 @@ function mhPlanGenerate(btn) {{
   <span class="mh-hero-eyebrow">Plan · Calendar</span>
   <h1>Your content<br><em class="editorial">on a calendar.</em></h1>
   <p class="lede">Planned drafts, key dates, your events and what you&rsquo;ve already posted, all in one month view.
-  Drag a draft onto a day to plan when to post it &mdash; nothing publishes from here, it&rsquo;s your plan to post by hand.
-  <a href="{url_for("plan_page")}" style="text-decoration:underline">Back to the ranked plan &rarr;</a></p>
+  Drag a draft onto a day to plan when to post it &mdash; nothing publishes from here, it&rsquo;s your plan to post by hand.</p>
 </section>
+
+{_plan_subnav("calendar")}
 
 <div class="mh-cal-bar">
   <div class="mh-cal-nav">
@@ -32188,14 +34020,16 @@ function mhPlanGenerate(btn) {{
     <strong class="mh-cal-month">{_h(month_name)}</strong>
     <a class="btn" href="{next_url}" aria-label="Next month">&rarr;</a>
     <a class="btn" href="{today_url}">Today</a>
-    <a class="btn" href="{url_for("plan_grid_page")}" title="See the planned feed as a grid">Grid preview</a>
-    <a class="btn" href="{url_for("plan_board_page")}" title="The committee idea board">Board</a>
-    <a class="btn" href="{url_for("plan_analytics_page")}" title="What's working — performance feeding the plan">Performance</a>
   </div>
   <div class="mh-cal-legend">{legend}</div>
 </div>
 
 <span class="dim" id="mh-cal-status" style="font-size:12.5px;display:block;min-height:18px;margin:2px 2px 8px"></span>
+
+<div id="mh-cal-warn" role="alert" style="display:none;gap:10px;align-items:flex-start;justify-content:space-between;margin:0 0 10px;padding:10px 14px;border:1px solid var(--bad);border-radius:10px;background:color-mix(in oklab, var(--bad) 10%, var(--panel));font-size:13px">
+  <span id="mh-cal-warn-text"></span>
+  <button type="button" onclick="mhCalWarnBanner('')" aria-label="Dismiss this warning" style="background:none;border:none;color:inherit;cursor:pointer;font-size:16px;line-height:1;padding:0">&times;</button>
+</div>
 
 <div class="mh-cal-wrap">
   <div class="mh-cal-grid-wrap">
@@ -32228,29 +34062,99 @@ function mhCalStatus(msg, warn) {{
 function mhCalPlanInput(el) {{
   if (el && el.value) mhCalSchedule(el.getAttribute('data-pack'), el.value);
 }}
+// I-1 parity: unschedule a planned chip (touch / keyboard) without dragging it
+// back to the rail. stopPropagation so the chip's open-draft click never fires.
+function mhCalUnplan(e, btn) {{
+  if (e) e.stopPropagation();
+  if (btn) mhCalSchedule(btn.getAttribute('data-pack'), '');
+}}
+// D-24 (kept by D-26): the blackout warning is an inline banner that stays
+// until the volunteer dismisses it — no reload ever erases it.
+function mhCalWarnBanner(msg) {{
+  var box = document.getElementById('mh-cal-warn');
+  var txt = document.getElementById('mh-cal-warn-text');
+  if (!box || !txt) return;
+  txt.textContent = msg || '';
+  box.style.display = msg ? 'flex' : 'none';
+}}
+// D-26: keep a moved chip's controls truthful (date field, unschedule,
+// blackout flag, rail styling) without re-rendering the page.
+function mhCalChipSync(chip, date, warned) {{
+  var input = chip.querySelector('.mh-cal-plan-date');
+  if (input) input.value = date || '';
+  var un = chip.querySelector('.mh-cal-unplan');
+  if (un) un.hidden = !date;
+  var flag = chip.querySelector('.mh-cal-warnflag');
+  if (flag) flag.hidden = !warned;
+  chip.classList.toggle('mh-cal-rail-card', !date);
+}}
+// D-26: a drop / "Plan for…" / unschedule moves the chip in place at once
+// (optimistically); a failed POST puts it back and MH.toasts the reason.
 function mhCalSchedule(packId, date) {{
   if (!packId) return;
+  var chip = document.querySelector('.mh-cal-draft[data-pack="' + packId + '"]');
+  var undo = null;
+  if (chip) {{
+    var parent = chip.parentNode, next = chip.nextSibling;
+    var prevInput = chip.querySelector('.mh-cal-plan-date');
+    // JS2-1: the change event fires AFTER input.value already holds the new
+    // date, so the last server-confirmed date lives in data-prev (stamped
+    // server-side, advanced only on a successful POST). Drag drops route
+    // through the same bookkeeping so the two paths cannot drift.
+    var prevDate = prevInput ? (prevInput.dataset.prev || '') : '';
+    var prevFlag = chip.querySelector('.mh-cal-warnflag');
+    var prevWarned = !!(prevFlag && !prevFlag.hidden);
+    var railEmpty = document.getElementById('mh-cal-rail-empty');
+    var target = null;
+    if (date) {{
+      var cell = document.querySelector('.mh-cal-cell[data-date="' + date + '"]');
+      target = cell ? cell.querySelector('.mh-cal-stack') : null;
+    }} else {{
+      target = document.querySelector('.mh-cal-rail');
+    }}
+    undo = function () {{
+      if (parent) parent.insertBefore(chip, next);
+      chip.style.display = '';
+      // mhCalChipSync restores input.value from prevDate (= data-prev), so a
+      // failed POST never leaves the chip claiming the date that failed.
+      mhCalChipSync(chip, prevDate, prevWarned);
+      if (railEmpty) railEmpty.style.display = '';
+    }};
+    if (target) {{ target.appendChild(chip); }} else {{ chip.style.display = 'none'; }}
+    mhCalChipSync(chip, date, false);
+    if (railEmpty && !date) railEmpty.style.display = 'none';
+  }}
   mhCalStatus(date ? 'Scheduling…' : 'Unscheduling…', false);
   fetch(MH_CAL_SCHEDULE_URL, {{
     method: 'POST', headers: {{'Content-Type': 'application/json'}},
     body: JSON.stringify({{ pack_id: packId, date: date || '' }})
   }}).then(function (r) {{ return r.json(); }}).then(function (j) {{
-    if (!j.ok) {{ mhCalStatus(j.error || 'Could not update.', true); return; }}
+    if (!j.ok) {{
+      if (undo) undo();
+      mhCalStatus(j.error || 'Could not update.', true);
+      if (window.MH && MH.toast) MH.toast(j.error || 'Could not update the plan.', 'error');
+      return;
+    }}
+    // JS2-1: the server confirmed the move — data-prev advances to the new
+    // date so the NEXT failed move reverts here, not to a stale value.
+    if (prevInput) prevInput.dataset.prev = date || '';
+    if (chip && date && !document.querySelector('.mh-cal-cell[data-date="' + date + '"]')) {{
+      chip.remove(); // planned onto a day outside this month's grid
+      mhCalStatus('Planned for ' + date + ' — see that month for the chip.', false);
+    }} else {{
+      mhCalStatus(date ? ('Planned for ' + date + '.') : 'Unscheduled — back in the side rail.', false);
+    }}
     if (j.warning) {{
-      // D-24: the reload used to wipe the blackout warning after 1.2s — the
-      // soft gate's one chance to warn. Persist it across the reload so it
-      // shows as a dismissible toast the volunteer actually reads.
-      try {{ sessionStorage.setItem('mhCalWarn', j.warning); }} catch (e) {{}}
-      window.location.reload();
-    }} else {{ window.location.reload(); }}
-  }}).catch(function () {{ mhCalStatus('Could not update.', true); }});
+      mhCalWarnBanner(j.warning);
+      var flag = chip ? chip.querySelector('.mh-cal-warnflag') : null;
+      if (flag) flag.hidden = false;
+    }}
+  }}).catch(function () {{
+    if (undo) undo();
+    mhCalStatus('Could not update.', true);
+    if (window.MH && MH.toast) MH.toast('Could not update the plan — check your connection and try again.', 'error');
+  }});
 }}
-// D-24: surface a blackout warning carried across the reload.
-(function () {{
-  var w = null;
-  try {{ w = sessionStorage.getItem('mhCalWarn'); sessionStorage.removeItem('mhCalWarn'); }} catch (e) {{}}
-  if (w && window.MH && MH.toast) MH.toast(w, 'error', 8000);
-}})();
 document.addEventListener('dragstart', function (e) {{
   var card = e.target.closest ? e.target.closest('.mh-cal-draft') : null;
   if (!card) return;
@@ -32347,9 +34251,13 @@ document.addEventListener('click', function (e) {{
         from mediahub.channel_preview import preview_card
 
         body = request.get_json(silent=True) or {}
+        # Coerce hashtags to a real list: a truthy non-list (a number/bool) would
+        # otherwise reach preview_card's ``len([h for h in hashtags ...])`` and raise
+        # a TypeError that 500s the endpoint. Only a genuine list carries hashtags.
+        raw_tags = body.get("hashtags")
         card = {
             "caption": str(body.get("caption") or ""),
-            "hashtags": body.get("hashtags") or [],
+            "hashtags": raw_tags if isinstance(raw_tags, list) else [],
             "platform": body.get("platform_label") or "",
         }
         pv = preview_card(
@@ -32497,9 +34405,9 @@ document.addEventListener('click', function (e) {{
   <span class="mh-hero-eyebrow">Plan · Grid preview</span>
   <h1>Your feed, <em class="editorial">as a grid.</em></h1>
   <p class="lede">A quick Instagram-style look at how your planned drafts sit together &mdash;
-  scheduled posts first, newest at the top. Tap a tile to preview it per channel.
-  <a href="{url_for("plan_calendar_page")}" style="text-decoration:underline">Open the calendar &rarr;</a></p>
+  scheduled posts first, newest at the top. Tap a tile to preview it per channel.</p>
 </section>
+{_plan_subnav("grid")}
 {grid_html}
 """
         return _layout("Grid preview", body, active="create")
@@ -32649,7 +34557,7 @@ document.addEventListener('click', function (e) {{
             cards_html = "".join(_card_html(c) for c in cards)
             add_form = (
                 '<div class="mh-bd-add">'
-                f'<input type="text" class="mh-bd-add-title" placeholder="New idea…" '
+                f'<input type="text" class="mh-bd-add-title" aria-label="New idea" placeholder="New idea…" '
                 f"onkeydown=\"if(event.key==='Enter')mhBoardAdd(this)\"/>"
                 '<button type="button" class="mh-bd-add-btn" onclick="mhBoardAdd(this)">Add</button>'
                 '<span class="mh-bd-add-hint">or press Enter to add</span>'
@@ -32672,9 +34580,10 @@ document.addEventListener('click', function (e) {{
   <span class="mh-hero-eyebrow">Plan · Board</span>
   <h1>The committee <em class="editorial">whiteboard.</em></h1>
   <p class="lede">Throw ideas on the board, drag them as they progress, and turn a good one into a
-  draft with one click &mdash; it flows straight into the previews and the calendar. Nothing posts from here.
-  <a href="{url_for("plan_calendar_page")}" style="text-decoration:underline">Open the calendar &rarr;</a></p>
+  draft with one click &mdash; it flows straight into the previews and the calendar. Nothing posts from here.</p>
 </section>
+
+{_plan_subnav("board")}
 
 <span class="dim" id="mh-bd-status" style="font-size:12.5px;display:block;min-height:18px;margin:0 2px 8px"></span>
 <div class="mh-bd-board">{columns_html}</div>
@@ -32684,18 +34593,84 @@ var MH_BD = {{
   add: {json.dumps(url_for("api_plan_board_add"))},
   move: {json.dumps(url_for("api_plan_board_move"))},
   del: {json.dumps(url_for("api_plan_board_delete"))},
-  promote: {json.dumps(url_for("api_plan_board_promote"))}
+  promote: {json.dumps(url_for("api_plan_board_promote"))},
+  draft: {json.dumps(url_for("stub_pack_view", pack_id="__PACK__"))},
+  preview: {json.dumps(url_for("plan_preview_page", pack_id="__PACK__"))},
+  cols: {json.dumps(list(COLUMNS))},
+  labels: {json.dumps(COLUMN_LABELS)}
 }};
 function mhBoardStatus(m, warn) {{
   var s = document.getElementById('mh-bd-status');
   if (s) {{ s.textContent = m || ''; s.style.color = warn ? 'var(--bad)' : 'var(--ink-muted)'; }}
 }}
-function mhBoardPost(url, payload, ok) {{
+function mhBoardFail(msg) {{
+  mhBoardStatus(msg, true);
+  if (window.MH && MH.toast) MH.toast(msg, 'error');
+}}
+// D-26: every board mutation updates the DOM in place — the POST stays, the
+// reload goes. `fail` reverts the optimistic change when the server says no.
+function mhBoardPost(url, payload, ok, fail) {{
   fetch(url, {{method:'POST', headers:{{'Content-Type':'application/json'}}, body: JSON.stringify(payload)}})
     .then(function(r){{return r.json();}}).then(function(j){{
-      if (j.ok === false || j.error) {{ mhBoardStatus(j.error || 'Could not update.', true); return; }}
-      ok ? ok(j) : window.location.reload();
-    }}).catch(function(){{ mhBoardStatus('Could not update.', true); }});
+      if (j.ok === false || j.error) {{ if (fail) fail(); mhBoardFail(j.error || 'Could not update.'); return; }}
+      if (ok) ok(j);
+    }}).catch(function(){{ if (fail) fail(); mhBoardFail('Could not update — check your connection and try again.'); }});
+}}
+function mhBoardCards(col) {{
+  return document.querySelector('.mh-bd-col[data-col="' + col + '"] .mh-bd-cards');
+}}
+function mhBoardRecount() {{
+  document.querySelectorAll('.mh-bd-col').forEach(function (col) {{
+    var badge = col.querySelector('.mh-bd-count');
+    if (badge) badge.textContent = col.querySelectorAll('.mh-bd-card').length;
+  }});
+}}
+function mhBoardMoveOpts(card, column) {{
+  var sel = card.querySelector('.mh-bd-move');
+  if (!sel) return;
+  sel.innerHTML = '';
+  var first = document.createElement('option');
+  first.value = ''; first.innerHTML = 'Move to&hellip;';
+  sel.appendChild(first);
+  MH_BD.cols.forEach(function (c) {{
+    if (c === column) return;
+    var o = document.createElement('option');
+    o.value = c; o.textContent = MH_BD.labels[c] || c;
+    sel.appendChild(o);
+  }});
+  sel.value = '';
+}}
+// Build a fresh idea card element (textContent for the title/note — never HTML).
+function mhBoardCardEl(card) {{
+  var el = document.createElement('div');
+  el.className = 'mh-bd-card'; el.draggable = true; el.dataset.card = card.id;
+  var head = document.createElement('div'); head.className = 'mh-bd-card-head';
+  var strong = document.createElement('strong'); strong.textContent = card.title;
+  var del = document.createElement('button');
+  del.type = 'button'; del.className = 'mh-bd-del'; del.dataset.card = card.id;
+  del.title = 'Delete'; del.innerHTML = '&times;';
+  del.addEventListener('click', function () {{ mhBoardDelete(del); }});
+  head.appendChild(strong); head.appendChild(del);
+  el.appendChild(head);
+  if (card.note) {{
+    var note = document.createElement('p'); note.className = 'mh-bd-note';
+    note.textContent = card.note; el.appendChild(note);
+  }}
+  var actions = document.createElement('div'); actions.className = 'mh-bd-actions';
+  var promote = document.createElement('button');
+  promote.type = 'button'; promote.className = 'mh-bd-act'; promote.dataset.card = card.id;
+  promote.title = 'Turn this idea into a free-text draft';
+  promote.textContent = 'Promote to draft';
+  promote.addEventListener('click', function () {{ mhBoardPromote(promote); }});
+  actions.appendChild(promote);
+  var sel = document.createElement('select');
+  sel.className = 'mh-bd-move'; sel.dataset.card = card.id;
+  sel.setAttribute('aria-label', 'Move ' + card.title + ' to a column');
+  sel.addEventListener('change', function () {{ mhBoardMove(sel); }});
+  actions.appendChild(sel);
+  el.appendChild(actions);
+  mhBoardMoveOpts(el, card.column || 'idea');
+  return el;
 }}
 function mhBoardAdd(el) {{
   // H-21: called from the input (Enter) or the Add button — resolve the input
@@ -32704,12 +34679,52 @@ function mhBoardAdd(el) {{
   var inp = box ? box.querySelector('.mh-bd-add-title') : el;
   var t = (inp && inp.value ? inp.value : '').trim();
   if (!t) {{ mhBoardStatus('Type an idea first, then press Add.', true); if (inp) inp.focus(); return; }}
-  mhBoardPost(MH_BD.add, {{title: t}});
+  if (inp) {{ inp.value = ''; inp.focus(); }}
+  mhBoardStatus('Adding…');
+  mhBoardPost(MH_BD.add, {{title: t}}, function (j) {{
+    var cards = mhBoardCards((j.card && j.card.column) || 'idea');
+    if (cards && j.card) cards.insertBefore(mhBoardCardEl(j.card), cards.firstChild);
+    mhBoardRecount();
+    mhBoardStatus('Added to Ideas.');
+  }}, function () {{ if (inp) {{ inp.value = t; inp.focus(); }} }});
 }}
-function mhBoardDelete(btn) {{ mhBoardPost(MH_BD.del, {{card_id: btn.dataset.card}}); }}
+function mhBoardDelete(btn) {{
+  var card = btn.closest ? btn.closest('.mh-bd-card') : null;
+  if (!card) return;
+  var parent = card.parentNode, next = card.nextSibling;
+  card.remove(); mhBoardRecount();
+  mhBoardPost(MH_BD.del, {{card_id: btn.dataset.card}}, function () {{
+    mhBoardStatus('Deleted.');
+  }}, function () {{ if (parent) parent.insertBefore(card, next); mhBoardRecount(); }});
+}}
 function mhBoardPromote(btn) {{
   btn.disabled = true; mhBoardStatus('Creating a draft from this idea…');
-  mhBoardPost(MH_BD.promote, {{card_id: btn.dataset.card}});
+  mhBoardPost(MH_BD.promote, {{card_id: btn.dataset.card}}, function (j) {{
+    var card = btn.closest ? btn.closest('.mh-bd-card') : null;
+    var column = (j.card && j.card.column) || 'drafted';
+    if (card && j.pack_id) {{
+      var actions = card.querySelector('.mh-bd-actions');
+      var sel = card.querySelector('.mh-bd-move');
+      if (actions && !card.querySelector('a.mh-bd-act')) {{
+        var open = document.createElement('a');
+        open.className = 'mh-bd-act';
+        open.href = MH_BD.draft.replace('__PACK__', encodeURIComponent(j.pack_id));
+        open.innerHTML = 'Open draft &rarr;';
+        var prev = document.createElement('a');
+        prev.className = 'mh-bd-act';
+        prev.href = MH_BD.preview.replace('__PACK__', encodeURIComponent(j.pack_id));
+        prev.textContent = 'Preview';
+        actions.insertBefore(prev, sel || null);
+        actions.insertBefore(open, prev);
+      }}
+      btn.remove();
+      var target = mhBoardCards(column);
+      if (target) target.insertBefore(card, target.firstChild);
+      mhBoardMoveOpts(card, column);
+      mhBoardRecount();
+    }}
+    mhBoardStatus('Promoted — the draft is ready to open and edit.');
+  }}, function () {{ btn.disabled = false; }});
 }}
 document.addEventListener('dragstart', function(e) {{
   var card = e.target.closest ? e.target.closest('.mh-bd-card') : null;
@@ -32719,16 +34734,37 @@ document.addEventListener('dragstart', function(e) {{
 }});
 function mhBoardOver(e) {{ e.preventDefault(); var c = e.currentTarget; if (c) c.classList.add('mh-bd-drop'); }}
 function mhBoardLeave(e) {{ var c = e.currentTarget; if (c) c.classList.remove('mh-bd-drop'); }}
+// D-26: a move (drag-drop or the I-1 select) lifts the card into its new
+// column at once; a failed POST puts it back where it was.
+function mhBoardMoveTo(cardId, column) {{
+  if (!cardId || !column) return;
+  var card = document.querySelector('.mh-bd-card[data-card="' + cardId + '"]');
+  var target = mhBoardCards(column);
+  if (!card || !target) return;
+  var parent = card.parentNode, next = card.nextSibling;
+  var fromCol = card.closest('.mh-bd-col');
+  var fromKey = fromCol ? fromCol.dataset.col : '';
+  target.insertBefore(card, target.firstChild);
+  mhBoardMoveOpts(card, column);
+  mhBoardRecount();
+  mhBoardPost(MH_BD.move, {{card_id: cardId, column: column}}, function () {{
+    mhBoardStatus('Moved to ' + (MH_BD.labels[column] || column) + '.');
+  }}, function () {{
+    if (parent) parent.insertBefore(card, next);
+    mhBoardMoveOpts(card, fromKey);
+    mhBoardRecount();
+  }});
+}}
 function mhBoardDrop(e) {{
   e.preventDefault();
   var col = e.currentTarget; if (col) col.classList.remove('mh-bd-drop');
   var id = e.dataTransfer.getData('text/plain');
-  if (id && col) mhBoardPost(MH_BD.move, {{card_id: id, column: col.dataset.col}});
+  if (id && col) mhBoardMoveTo(id, col.dataset.col);
 }}
 // I-1: non-drag move (touch / keyboard) via the per-card "Move to" select.
 function mhBoardMove(sel) {{
   if (!sel || !sel.value) return;
-  mhBoardPost(MH_BD.move, {{card_id: sel.getAttribute('data-card'), column: sel.value}});
+  mhBoardMoveTo(sel.getAttribute('data-card'), sel.value);
 }}
 </script>
 """
@@ -32741,12 +34777,33 @@ function mhBoardMove(sel) {{
         pid = _active_profile_id()
         if not pid:
             return jsonify({"error": "No organisation active."}), 403
-        from mediahub.analytics.store import METRIC_KEYS, record_metric
+        from mediahub.analytics.store import METRIC_KEYS, engagement_score, record_metric
 
         body = request.get_json(silent=True) or {}
         metrics = {k: body.get(k, 0) for k in METRIC_KEYS}
         if not any(metrics.values()):
-            metrics = {k: (body.get("metrics") or {}).get(k, 0) for k in METRIC_KEYS}
+            # Fall back to a nested {"metrics": {...}} object (what the page posts).
+            # Guard the type: a truthy non-dict (a number/string/list) made the old
+            # ``(... or {}).get`` raise AttributeError and 500 the route.
+            nested = body.get("metrics")
+            nested = nested if isinstance(nested, dict) else {}
+            metrics = {k: nested.get(k, 0) for k in METRIC_KEYS}
+
+        # Honour the "…and at least one metric" the error message promises: a
+        # submission with no metric > 0 (the form's all-zero default, or a
+        # negative-only value) carries no measurable performance. Reject it here
+        # so a data-free row never enters the store, is never counted toward
+        # MIN_SAMPLES, and never fabricates a "% below your average" planner signal.
+        def _positive(v: object) -> bool:
+            try:
+                return int(v) > 0
+            except (TypeError, ValueError):
+                return False
+
+        if not any(_positive(v) for v in metrics.values()):
+            return jsonify(
+                {"error": "Pick a post type and a valid date (and at least one metric)."}
+            ), 400
         rec = record_metric(
             pid,
             str(body.get("post_type") or ""),
@@ -32760,7 +34817,11 @@ function mhBoardMove(sel) {{
             return jsonify(
                 {"error": "Pick a post type and a valid date (and at least one metric)."}
             ), 400
-        return jsonify({"ok": True, "metric": rec.to_dict()})
+        # D-26: the page appends the logged row in place — hand it the same
+        # deterministic engagement number the server-rendered rows show.
+        return jsonify(
+            {"ok": True, "metric": rec.to_dict(), "engagement": engagement_score(rec.metrics)}
+        )
 
     @app.route("/api/plan/analytics/delete", methods=["POST"])
     def api_plan_analytics_delete():
@@ -32821,6 +34882,44 @@ function mhBoardMove(sel) {{
             f'<option value="{_h(spt.slug)}">{_h(spt.title)}</option>' for spt in spts
         )
 
+        # H-14: the store and API already model platform + pack_id, but the
+        # form never offered them. A platform select (blank "not sure"
+        # default) and an optional "Which draft?" select of this org's recent
+        # drafts close the gap; both prefill from query params so a draft
+        # page can link straight here.
+        _sel_platform = (request.args.get("platform") or "").strip().lower()
+        _sel_pack = (request.args.get("pack_id") or "").strip()
+        platform_opts = '<option value="">Not sure / other</option>' + "".join(
+            f'<option value="{_h(slug)}"{" selected" if slug == _sel_platform else ""}>'
+            f"{_h(label)}</option>"
+            for slug, label in _ORG_PLATFORMS
+        )
+        from mediahub.club_platform.stub_pack_store import list_packs as _an_list_packs
+        from mediahub.club_platform.stub_pack_store import load_pack as _an_load_pack
+
+        _pack_rows: list[tuple[str, str]] = []
+        try:
+            for _meta in _an_list_packs(limit=40):
+                _prec = _an_load_pack(_meta.get("pack_id", ""))
+                if _prec is None or (_prec.get("profile_id") or "") != pid:
+                    continue
+                _pack_rows.append((_prec.get("pack_id", ""), _prec.get("title") or "Draft"))
+                if len(_pack_rows) >= 15:
+                    break
+            # An older draft arriving via ?pack_id= must still appear selected.
+            if _sel_pack and _sel_pack not in {pk for pk, _ in _pack_rows}:
+                _prec = _an_load_pack(_sel_pack)
+                if _prec is not None and (_prec.get("profile_id") or "") == pid:
+                    _pack_rows.insert(0, (_sel_pack, _prec.get("title") or "Draft"))
+        except Exception:
+            _pack_rows = []
+        pack_opts = '<option value="">Not linked to a draft</option>' + "".join(
+            f'<option value="{_h(pk)}"{" selected" if pk == _sel_pack else ""}>'
+            f"{_h(t[:60])}</option>"
+            for pk, t in _pack_rows
+        )
+        _platform_labels = dict(_ORG_PLATFORMS)
+
         # The attribution table — what's working, with an index bar.
         if attribution.by_type:
             rows = ""
@@ -32872,14 +34971,17 @@ function mhBoardMove(sel) {{
                 "starts ranking what actually works for your club. Nothing is auto-collected.</p></div>"
             )
 
-        # Recent recorded posts (with delete).
+        # Recent recorded posts (with delete). Platform shows when recorded.
         recent = ""
         for m in sorted(metrics, key=lambda x: x.recorded_at, reverse=True)[:12]:
             title = _h(type_titles.get(m.post_type, m.post_type.replace("_", " ").title()))
             eng = _h(str(engagement_score(m.metrics)))
+            _plat = ""
+            if m.platform:
+                _plat = f" · {_h(_platform_labels.get(m.platform, m.platform))}"
             recent += (
                 f'<div class="mh-an-row" data-id="{_h(m.id)}">'
-                f'<span style="flex:1">{title} <span class="dim">· {_h(m.posted_date)}</span></span>'
+                f'<span style="flex:1">{title} <span class="dim">· {_h(m.posted_date)}{_plat}</span></span>'
                 f'<span class="dim" style="font-variant-numeric:tabular-nums">{eng} eng</span>'
                 f'<button type="button" class="btn" style="font-size:11px;padding:2px 8px" '
                 f'onclick="mhAnDelete(this)">remove</button></div>'
@@ -32897,9 +34999,10 @@ function mhBoardMove(sel) {{
   <h1>What actually <em class="editorial">works.</em></h1>
   <p class="lede">Post by hand, then log how it did &mdash; MediaHub learns which post types earn your club
   the most engagement and feeds that straight back into the plan. First-party and honest: nothing is
-  auto-collected (that waits on publishing integrations), and the numbers are yours.
-  <a href="{url_for("plan_page")}" style="text-decoration:underline">Back to the plan &rarr;</a></p>
+  auto-collected (that waits on publishing integrations), and the numbers are yours.</p>
 </section>
+
+{_plan_subnav("performance")}
 
 {table}
 
@@ -32907,6 +35010,8 @@ function mhBoardMove(sel) {{
   <h2 style="margin-top:0">Log a post&rsquo;s performance</h2>
   <div class="mh-an-form">
     <label class="mh-an-mlabel">Post type<select id="mh-an-type" style="min-width:170px">{type_opts}</select></label>
+    <label class="mh-an-mlabel">Platform<select id="mh-an-platform" style="min-width:150px">{platform_opts}</select></label>
+    <label class="mh-an-mlabel">Which draft? (optional)<select id="mh-an-pack" style="min-width:180px">{pack_opts}</select></label>
     <label class="mh-an-mlabel">Date posted<input type="date" id="mh-an-date"/></label>
     <label class="mh-an-mlabel">Hour (0&ndash;23, optional)<input type="number" min="0" max="23" id="mh-an-hour" style="width:88px"/></label>
     {metric_inputs}
@@ -32929,11 +35034,38 @@ var MH_AN = {{
   record: {json.dumps(url_for("api_plan_analytics_record"))},
   del: {json.dumps(url_for("api_plan_analytics_delete"))},
   digest: {json.dumps(url_for("api_plan_analytics_digest"))},
-  keys: {json.dumps(list(METRIC_KEYS))}
+  keys: {json.dumps(list(METRIC_KEYS))},
+  titles: {json.dumps(type_titles)},
+  platforms: {json.dumps(_platform_labels)}
 }};
 function mhAnStatus(m, warn) {{
   var s = document.getElementById('mh-an-status');
   if (s) {{ s.textContent = m || ''; s.style.color = warn ? 'var(--bad)' : 'var(--ink-muted)'; }}
+}}
+// D-26: a logged post appears in the recent list at once — same shape as the
+// server-rendered rows (textContent only, never HTML from data).
+function mhAnAppendRow(m, eng) {{
+  var list = document.getElementById('mh-an-recent'); if (!list) return;
+  var row = document.createElement('div');
+  row.className = 'mh-an-row'; row.dataset.id = m.id || '';
+  var title = MH_AN.titles[m.post_type] || String(m.post_type || '').replace(/_/g, ' ');
+  var plat = m.platform ? (' · ' + (MH_AN.platforms[m.platform] || m.platform)) : '';
+  var left = document.createElement('span'); left.style.flex = '1';
+  left.textContent = title + ' ';
+  var dim = document.createElement('span'); dim.className = 'dim';
+  dim.textContent = '· ' + (m.posted_date || '') + plat;
+  left.appendChild(dim);
+  var engEl = document.createElement('span'); engEl.className = 'dim';
+  engEl.style.fontVariantNumeric = 'tabular-nums';
+  engEl.textContent = eng + ' eng';
+  var del = document.createElement('button');
+  del.type = 'button'; del.className = 'btn';
+  del.style.fontSize = '11px'; del.style.padding = '2px 8px';
+  del.textContent = 'remove';
+  del.addEventListener('click', function () {{ mhAnDelete(del); }});
+  row.appendChild(left); row.appendChild(engEl); row.appendChild(del);
+  list.insertBefore(row, list.firstChild);
+  while (list.children.length > 12) list.removeChild(list.lastChild);
 }}
 function mhAnRecord(btn) {{
   var metrics = {{}};
@@ -32943,19 +35075,51 @@ function mhAnRecord(btn) {{
     post_type: document.getElementById('mh-an-type').value,
     posted_date: document.getElementById('mh-an-date').value,
     posted_hour: hour === '' ? null : parseInt(hour, 10),
+    platform: document.getElementById('mh-an-platform').value,
+    pack_id: document.getElementById('mh-an-pack').value,
     metrics: metrics
   }};
   mhAnStatus('Saving…');
   fetch(MH_AN.record, {{method:'POST', headers:{{'Content-Type':'application/json'}}, body: JSON.stringify(payload)}})
     .then(function(r){{return r.json();}}).then(function(j){{
-      if (!j.ok) {{ mhAnStatus(j.error || 'Could not save.', true); return; }}
-      window.location.reload();
-    }}).catch(function(){{ mhAnStatus('Could not save.', true); }});
+      if (!j.ok) {{
+        mhAnStatus(j.error || 'Could not save.', true);
+        if (window.MH && MH.toast) MH.toast(j.error || 'Could not save.', 'error');
+        return;
+      }}
+      // D-26: no reload — the row appears in place and the form keeps its post
+      // type, platform, draft and date, so logging a run of posts is painless.
+      // Only the metric counts reset (they belong to the post just logged).
+      mhAnAppendRow(j.metric || {{}}, j.engagement || 0);
+      MH_AN.keys.forEach(function(k){{ var el = document.getElementById('mh-an-'+k); if (el) el.value = '0'; }});
+      mhAnStatus('Logged — added to your recent posts. The averages above refresh next visit.');
+    }}).catch(function(){{
+      mhAnStatus('Could not save.', true);
+      if (window.MH && MH.toast) MH.toast('Could not save — check your connection and try again.', 'error');
+    }});
 }}
+// D-26: remove deletes the row in place (optimistically); a failed POST puts
+// it back and MH.toasts the reason.
 function mhAnDelete(btn) {{
   var row = btn.closest('.mh-an-row'); if (!row) return;
+  var parent = row.parentNode, next = row.nextSibling;
+  row.remove();
   fetch(MH_AN.del, {{method:'POST', headers:{{'Content-Type':'application/json'}}, body: JSON.stringify({{id: row.dataset.id}})}})
-    .then(function(r){{return r.json();}}).then(function(){{ window.location.reload(); }});
+    .then(function(r){{return r.json();}}).then(function(j){{
+      // JS2-2: error bodies like {{"error": "No organisation active."}} carry
+      // no ok key — treat them as failures too (match the sibling handlers).
+      if (!j || j.ok === false || j.error) {{
+        if (parent) parent.insertBefore(row, next);
+        mhAnStatus('Could not remove that row.', true);
+        if (window.MH && MH.toast) MH.toast('Could not remove that row.', 'error');
+        return;
+      }}
+      mhAnStatus('Removed.');
+    }}).catch(function(){{
+      if (parent) parent.insertBefore(row, next);
+      mhAnStatus('Could not remove that row.', true);
+      if (window.MH && MH.toast) MH.toast('Could not remove that row — check your connection and try again.', 'error');
+    }});
 }}
 function mhAnDigest(btn) {{
   var box = document.getElementById('mh-an-digest');
@@ -33152,7 +35316,10 @@ function mhAnDigest(btn) {{
                 _parts = [
                     _edits[k]
                     for k in sorted(_edits)
-                    if k and not str(k).startswith("insp.") and k != "alt_text" and _edits.get(k)
+                    if k
+                    and not str(k).startswith(("insp.", "prev."))
+                    and k != "alt_text"
+                    and _edits.get(k)
                 ]
                 caption = "\n".join(p for p in _parts if p).strip()
             except Exception:
@@ -33462,7 +35629,10 @@ function mhAnDigest(btn) {{
             make_url=url_for("make_page"),
             palette=seed_palette,
         )
-        return _layout("Studio", body, active="studio")
+        # The studio is a sub-surface of Create (reached from the Create tile), so
+        # it highlights the Create nav item — active="studio" matched no nav key and
+        # left the top bar with nothing lit, orphaning the page in the IA.
+        return _layout("Studio", body, active="create")
 
     @app.route("/api/studio/render", methods=["POST"])
     def api_studio_render():
@@ -33565,6 +35735,58 @@ function mhAnDigest(btn) {{
         _studio_render_cache[sig] = out
         return jsonify(out)
 
+    # ---- B-1: per-organisation "how it works" seen-set ----------------------
+    # The Create tiles open each heading's intro slide (/make/<type>) only the
+    # FIRST time an organisation meets that heading. Viewing the intro retires
+    # it: from then on the tile links straight into the real flow, and the
+    # explainer stays reachable via the "How it works" pill on the tile and on
+    # the flow's landing page. Persisted as a small per-profile DATA_DIR
+    # sidecar (not session-only) so it survives sign-out and redeploys, and is
+    # tenant-scoped by construction.
+    def _intro_seen_path(pid: str) -> Path:
+        safe = re.sub(r"[^a-zA-Z0-9_-]", "_", str(pid))[:120] or "unknown"
+        return DATA_DIR / "intro_seen" / f"{safe}.json"
+
+    def _intro_seen_slugs(pid: Optional[str]) -> set:
+        if not pid:
+            return set()
+        try:
+            p = _intro_seen_path(pid)
+            if not p.exists():
+                return set()
+            raw = json.loads(p.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            # Missing/corrupt sidecar loads as "nothing seen" — the only cost
+            # is the user meeting the explainer again.
+            return set()
+        return {str(s) for s in raw} if isinstance(raw, list) else set()
+
+    def _intro_mark_seen(pid: Optional[str], slug: str) -> None:
+        if not pid or not slug:
+            return
+        try:
+            seen = _intro_seen_slugs(pid)
+            if slug in seen:
+                return
+            seen.add(slug)
+            p = _intro_seen_path(pid)
+            p.parent.mkdir(parents=True, exist_ok=True)
+            # CON2-1 — unique-tmp + os.replace (the _variant_job_save idiom):
+            # two concurrent marks must never interleave into a torn sidecar.
+            # The reader already fails soft on a corrupt file, but a torn
+            # write would silently drop every previously-seen slug.
+            tmp = p.with_suffix(f".{uuid.uuid4().hex[:8]}.tmp")
+            try:
+                tmp.write_text(json.dumps(sorted(seen)), encoding="utf-8")
+                os.replace(tmp, p)
+            except OSError:
+                with contextlib.suppress(OSError):
+                    tmp.unlink(missing_ok=True)
+                raise
+        except OSError:
+            # A failed sidecar write must never break the intro page.
+            log.debug("intro_seen: could not persist %r for %r", slug, pid)
+
     # ---- /make &mdash; the Create tab (single entry point) -------------------
     @app.route("/make")
     def make_page():
@@ -33594,6 +35816,11 @@ function mhAnDigest(btn) {{
         # and back-compat; it's just not surfaced as a separate Create card.
         _hidden_cts = {"session_update", "sponsor_activation", "athlete_spotlight"}
 
+        # B-1: once this organisation has met a heading's intro slide, its tile
+        # links straight into the flow (nav → upload drops from 7 clicks to 4);
+        # first-timers still get the explainer. Per-profile, persisted.
+        _seen_intros = _intro_seen_slugs(_active_profile_id())
+
         tiles_html = ""
         # First implemented tile gets the "Start here" lane-yellow ribbon so
         # users have a clear primary path instead of six equal-weight options.
@@ -33620,7 +35847,14 @@ function mhAnDigest(btn) {{
                 href_ok = False
             if meta.is_implemented and href_ok:
                 badge = '<span class="tag live">Ready</span>'
-                action = f'href="{url_for("content_type_intro", ct=ct_val)}"'
+                # B-1: the intro is first-visit-only per organisation — once
+                # seen, the tile opens the real flow directly. The "How it
+                # works" pill (added on the tile below) keeps the explainer
+                # reachable forever.
+                if ct_val in _seen_intros:
+                    action = f'href="{url_for(meta.primary_route_endpoint)}"'
+                else:
+                    action = f'href="{url_for("content_type_intro", ct=ct_val)}"'
                 disabled_cls = ""
                 if not primary_marked:
                     disabled_cls = " mh-template-primary"
@@ -33674,7 +35908,18 @@ function mhAnDigest(btn) {{
                     "</div></template>"
                 )
 
+            # B-1: a tile is itself an <a>, so its always-available "How it
+            # works" link is a positioned sibling in a relative wrapper (a
+            # nested anchor would be invalid HTML). Live tiles only — a
+            # coming-soon tile has no intro to reach.
+            how_html = ""
+            if _is_live:
+                how_html = (
+                    f'<a class="mh-how-pill" href="{url_for("content_type_intro", ct=ct_val)}" '
+                    f'aria-label="How {_h(meta.title)} works">How it works</a>'
+                )
             tiles_html += (
+                '<div class="mh-template-cell">'
                 f'<a {action} class="mh-template{glow_cls}{disabled_cls}{hp_cls}">'
                 f'<div class="mh-template-icon">{meta.icon_svg}</div>'
                 '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:var(--sp-1)">'
@@ -33686,6 +35931,8 @@ function mhAnDigest(btn) {{
                 '<span class="mh-template-cta">Start</span>'
                 f"{hp_tpl}"
                 "</a>"
+                f"{how_html}"
+                "</div>"
             )
 
         # Design studio — a full, first-class Create tile, not the old slim
@@ -33784,36 +36031,6 @@ function mhAnDigest(btn) {{
                 "</a>"
             )
 
-        # Sites — the 1.16 microsite engine (club home / link-in-bio / meet
-        # microsite / event page + forms, widgets, QR). A first-class Create
-        # tile; gated on _sites_ok so it only shows where it works.
-        if _sites_ok:
-            _site_svg = (
-                '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" '
-                'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" width="28" height="28">'
-                '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18"/>'
-                '<circle cx="6.2" cy="6.5" r="0.6" fill="currentColor"/>'
-                '<circle cx="8.4" cy="6.5" r="0.6" fill="currentColor"/></svg>'
-            )
-            tiles_html += (
-                f'<a href="{_h(url_for("sites_home"))}" class="mh-template mh-glow-border">'
-                f'<div class="mh-template-icon">{_site_svg}</div>'
-                '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:var(--sp-1)">'
-                '<h3 style="margin:0">Sites</h3>'
-                '<span class="tag live">Ready</span>'
-                "</div>"
-                "<p>Build a club home, a link-in-bio page, a meet microsite or an event "
-                "page from your data &mdash; with forms, countdowns, a medal tally and a "
-                "brand QR code &mdash; then publish it when you approve it.</p>"
-                '<div class="mh-template-formats">'
-                '<span class="mh-template-fmt">Microsite</span>'
-                '<span class="mh-template-fmt">Forms</span>'
-                '<span class="mh-template-fmt">QR</span>'
-                "</div>"
-                '<span class="mh-template-cta">Open sites</span>'
-                "</a>"
-            )
-
         # Newsletters — the 1.17 email & newsletter composer. Email-safe branded
         # HTML auto-assembled from the period's approved content; export-first
         # (download / copy / hosted view). Gated on _email_design_ok.
@@ -33863,7 +36080,7 @@ function mhAnDigest(btn) {{
             "</div>"
             "<p>A free public celebration page of your approved cards &mdash; share the "
             "link, embed it on your club website, or offer an RSS/JSON feed. One "
-            "shared URL you can switch on and off.</p>"
+            "shared URL you can publish and unpublish.</p>"
             '<div class="mh-template-formats">'
             '<span class="mh-template-fmt">Public page</span>'
             '<span class="mh-template-fmt">Website embed</span>'
@@ -33998,13 +36215,27 @@ function mhAnDigest(btn) {{
             '<path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>'
             "</svg>"
         )
+        # C-20: exactly ONE "start here" on this page — the first implemented
+        # tile's START HERE ribbon (Meet Recap, the audience's actual first
+        # step). The Plan hero is the strategic aid, not the starting point,
+        # so its label stays a plain "Plan".
+        # B-1: Plan stops double-paying the interstitial — once its intro has
+        # been seen, the tile opens the planner directly; the "How it works"
+        # pill keeps the slide reachable.
+        _plan_intro_url = url_for("content_type_intro", ct="plan")
+        try:
+            _plan_direct_url = url_for("plan_page")
+        except Exception:
+            _plan_direct_url = _plan_intro_url
+        _plan_href = _plan_direct_url if "plan" in _seen_intros else _plan_intro_url
         plan_entry_html = (
-            f'<a href="{_h(url_for("content_type_intro", ct="plan"))}" class="mh-plan-tile">'
+            '<div class="mh-plan-tile-wrap">'
+            f'<a href="{_h(_plan_href)}" class="mh-plan-tile">'
             f'<span class="mh-plan-tile-icon">{_plan_tile_icon}</span>'
             '<span class="mh-plan-tile-body">'
-            '<span class="mh-plan-tile-eyebrow">Plan &middot; Start here</span>'
+            '<span class="mh-plan-tile-eyebrow">Plan</span>'
             '<span class="mh-plan-tile-title">Not sure what to post? '
-            '<em class="editorial">Plan your next posts.</em></span>'
+            '<em class="editorial">Plan it.</em></span>'
             '<span class="mh-plan-tile-desc">MediaHub ranks what to post next from your '
             "results, the calendar and what you tell it &mdash; with the reasoning shown for "
             "every item. Describe what&rsquo;s coming up in your own words and it fills in the "
@@ -34012,6 +36243,9 @@ function mhAnDigest(btn) {{
             "</span>"
             '<span class="mh-plan-tile-cta">Open Plan &rarr;</span>'
             "</a>"
+            f'<a class="mh-how-pill" href="{_h(_plan_intro_url)}" '
+            'aria-label="How Plan works">How it works</a>'
+            "</div>"
         )
 
         # C-3: everything you make (free text, spotlights, previews, event
@@ -34059,6 +36293,9 @@ function mhAnDigest(btn) {{
         # Plan is the predominant non-content-type entry. It gets the same
         # how-it-works first slide, but its "Open Plan" CTA opens the planner.
         if canonical_slug(ct) == "plan":
+            # B-1: viewing the intro retires it — the Create tile links
+            # straight to the planner from now on (per organisation).
+            _intro_mark_seen(_active_profile_id(), "plan")
             try:
                 plan_start = url_for("plan_page")
             except Exception:
@@ -34071,6 +36308,12 @@ function mhAnDigest(btn) {{
             # Unknown / planning-only slug — send them back to the chooser.
             return redirect(url_for("make_page"))
         meta = REGISTRY[ctype]
+
+        # B-1: viewing the intro retires it — this organisation's Create tile
+        # for the heading links straight into the flow from now on (the slide
+        # stays reachable via the "How it works" pills). Keyed on the
+        # canonical value so legacy slug aliases mark the same heading.
+        _intro_mark_seen(_active_profile_id(), ctype.value)
 
         formats, effort = _ct_presentation_for(ctype.value)
         # Start → the real flow. Degrade gracefully (a missing endpoint sends the
@@ -34322,7 +36565,12 @@ function mhAnDigest(btn) {{
         approving them first. Accepts an optional ``tone`` field (warm-club /
         hype / data-led) — empty means the organisation's brand voice."""
         try:
-            from mediahub.club_platform.stub_pack_store import save_pack
+            from mediahub.club_platform.stub_pack_store import (
+                list_packs,
+                load_pack,
+                save_pack,
+                update_pack,
+            )
         except ImportError:
             return _recovery_page(
                 "Spotlight unavailable",
@@ -34354,23 +36602,53 @@ function mhAnDigest(btn) {{
             ),
             "status": "queue",
         }
+        _active_pid = _active_profile_id()
+        _form_data = {
+            "free_text": f"Spotlight — {result['swimmer_name']}",
+            "source": "athlete_spotlight",
+            "swimmer_name": result["swimmer_name"],
+            "meet_name": result["meet_name"],
+            "run_id": run_id,
+            "swimmer_key": swimmer_key,
+            "n_approved": result["n_approved"],
+            "n_pbs": result["n_pbs"],
+            "n_medals": result["n_medals"],
+            "tone": tone,
+            "results_lines": result["results_lines"],
+        }
+
+        # Idempotency: re-building the same swimmer's spotlight refreshes the
+        # existing draft in place rather than minting a duplicate — a double-
+        # click or a deliberate rebuild would otherwise litter /drafts with
+        # clones keyed on the same (run_id, swimmer_key). Preserve the existing
+        # card's approval status (and update_pack leaves any planned_date
+        # untouched) so a rebuild never silently un-approves or unschedules a
+        # draft the reviewer already actioned.
+        existing = None
+        for _meta in list_packs(limit=200):
+            rec = load_pack(_meta["pack_id"])
+            if not rec or not _can_access_pack(rec, _active_pid):
+                continue
+            _fd = rec.get("form_data") or {}
+            if (
+                _fd.get("source") == "athlete_spotlight"
+                and str(_fd.get("run_id") or "") == str(run_id)
+                and str(_fd.get("swimmer_key") or "") == str(swimmer_key)
+            ):
+                existing = rec
+                break
+
+        if existing is not None:
+            _prev_card = (existing.get("cards") or [{}])[0]
+            card["status"] = _prev_card.get("status") or "queue"
+            update_pack(existing["pack_id"], cards=[card], form_data_updates=_form_data)
+            return redirect(url_for("stub_pack_view", pack_id=existing["pack_id"]))
+
         saved = save_pack(
             "free_text",  # reuses the stub-pack list; tagged in form_data
-            {
-                "free_text": f"Spotlight — {result['swimmer_name']}",
-                "source": "athlete_spotlight",
-                "swimmer_name": result["swimmer_name"],
-                "meet_name": result["meet_name"],
-                "run_id": run_id,
-                "swimmer_key": swimmer_key,
-                "n_approved": result["n_approved"],
-                "n_pbs": result["n_pbs"],
-                "n_medals": result["n_medals"],
-                "tone": tone,
-                "results_lines": result["results_lines"],
-            },
+            _form_data,
             [card],
-            profile_id=_active_profile_id(),
+            profile_id=_active_pid,
         )
         return redirect(url_for("stub_pack_view", pack_id=saved["pack_id"]))
 
@@ -34404,34 +36682,41 @@ function mhAnDigest(btn) {{
         _active_pid = _active_profile_id()
         recent_runs: list = []
         db_failed = False
-        # Spotlight is a *fresh-moments* surface: it only offers meets from the
-        # last month of runs. created_at is a tz-aware isoformat() string, so the
-        # cutoff is computed the same way and compared lexically (ISO-8601 sorts
-        # lexically for a fixed shape) — never SQLite datetime(), whose space/no-
-        # offset format wouldn't compare cleanly against the stored "T…+00:00".
+        # Spotlight is a *fresh-moments* surface: by default it only offers
+        # meets from the last 31 days of runs. C-10: ?older=1 lifts that cutoff
+        # so an older meet stays reachable (the hint below links the toggle).
+        # created_at is a tz-aware isoformat() string, so the cutoff is computed
+        # the same way and compared lexically (ISO-8601 sorts lexically for a
+        # fixed shape) — never SQLite datetime(), whose space/no-offset format
+        # wouldn't compare cleanly against the stored "T…+00:00".
         from datetime import timedelta as _td
 
+        show_older = request.args.get("older") == "1"
         _spot_cutoff = (datetime.now(timezone.utc) - _td(days=31)).isoformat()
+        _where = ["status='done'"]
+        _params: list = []
+        if not show_older:
+            _where.append("created_at >= ?")
+            _params.append(_spot_cutoff)
+        if _active_pid:
+            # TENANT ISOLATION (see comment above); without an active org
+            # (pre-onboarding sandbox / tests) there's nothing to isolate
+            # against, so list everything in-window.
+            _where.append("(profile_id = ? OR profile_id IS NULL OR profile_id = '')")
+            _params.append(_active_pid)
+        # The recent view keeps its tight shortlist; the older view lists up
+        # to 100 (matching Activity) so lifting the cutoff actually surfaces
+        # older meets for busy clubs.
+        _spot_limit = 100 if show_older else 20
         try:
             conn = _db()
             try:
-                if _active_pid:
-                    recent_runs = conn.execute(
-                        "SELECT id, meet_name, file_name, created_at FROM runs "
-                        "WHERE status='done' AND created_at >= ? AND "
-                        "(profile_id = ? OR profile_id IS NULL OR profile_id = '') "
-                        "ORDER BY created_at DESC LIMIT 20",
-                        (_spot_cutoff, _active_pid),
-                    ).fetchall()
-                else:
-                    # No active org (pre-onboarding sandbox / tests):
-                    # nothing to isolate against, so list everything in-window.
-                    recent_runs = conn.execute(
-                        "SELECT id, meet_name, file_name, created_at FROM runs "
-                        "WHERE status='done' AND created_at >= ? "
-                        "ORDER BY created_at DESC LIMIT 20",
-                        (_spot_cutoff,),
-                    ).fetchall()
+                recent_runs = conn.execute(
+                    "SELECT id, meet_name, file_name, created_at FROM runs "
+                    "WHERE " + " AND ".join(_where) + " "
+                    f"ORDER BY created_at DESC LIMIT {_spot_limit}",
+                    tuple(_params),
+                ).fetchall()
             finally:
                 conn.close()
         except Exception as e:
@@ -34488,6 +36773,13 @@ function mhAnDigest(btn) {{
                     "</section>"
                 )
                 return _layout("Athlete Spotlight", empty_body, active="create")
+            # C-10: with the 31-day window on, a club whose meets are all
+            # older would otherwise hit this hero with no way to reach them.
+            _older_cta = (
+                ""
+                if show_older
+                else f'<a class="mh-cta-secondary" href="{url_for("spotlight_landing", older=1)}">Show older meets</a>'
+            )
             empty_body = (
                 '<section class="mh-hero" data-lane="01" style="padding-top:var(--sp-9);padding-bottom:var(--sp-8)">'
                 '<span class="mh-hero-eyebrow">Athlete spotlight</span>'
@@ -34499,6 +36791,7 @@ function mhAnDigest(btn) {{
                 '<div class="mh-hero-actions">'
                 f'<a class="mh-cta-primary" href="{url_for("upload")}">Upload a meet &rarr;</a>'
                 f'<a class="mh-cta-secondary" href="{url_for("make_page")}">All input types</a>'
+                f"{_older_cta}"
                 "</div>"
                 "</section>"
             )
@@ -34541,9 +36834,19 @@ function mhAnDigest(btn) {{
                     _sp_club = (
                         run_data.get("profile_display") or run_data.get("club_filter") or ""
                     ).strip()
-                    swimmers_html = f'<div style="margin-top:20px"><h2>Swimmers in this meet <span class="muted" style="font-weight:400;font-size:13px">({len(swimmers)})</span></h2>'
+                    # Bound the render: a big multi-club invitational can list
+                    # hundreds of swimmers (~1.6KB of card markup each -> an
+                    # 800KB+ page), so cap the grid to the most content-worthy
+                    # names (list_swimmers_in_run already sorts by achievement
+                    # count) and point to the full meet review for the rest.
+                    # Realistic single-club rosters sit well under the cap and
+                    # are never truncated.
+                    _ROSTER_CAP = 120
+                    _total_sw = len(swimmers)
+                    _shown_sw = swimmers[:_ROSTER_CAP]
+                    swimmers_html = f'<div style="margin-top:20px"><h2>Swimmers in this meet <span class="muted" style="font-weight:400;font-size:13px">({_total_sw})</span></h2>'
                     swimmers_html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px;margin-top:12px">'
-                    for sw in swimmers:
+                    for sw in _shown_sw:
                         sp_url = url_for(
                             "spotlight_view", run_id=run_id_param, swimmer_key=sw["swimmer_key"]
                         )
@@ -34567,16 +36870,23 @@ function mhAnDigest(btn) {{
     <div style="font-size:12px;color:var(--ink-dim)">{_ach_label}</div>
   </div>
 </a>"""
-                    swimmers_html += "</div></div>"
+                    swimmers_html += "</div>"
+                    if _total_sw > len(_shown_sw):
+                        swimmers_html += (
+                            '<p class="muted" style="margin-top:12px;font-size:13px">'
+                            f"Showing the {len(_shown_sw)} swimmers with the most "
+                            f'achievements. <a href="{_review_url}" style="color:var(--ink)">'
+                            "Open the full meet review</a> to reach the other "
+                            f"{_total_sw - len(_shown_sw)}.</p>"
+                        )
+                    swimmers_html += "</div>"
                 else:
                     swimmers_html = '<div class="card"><p class="muted">No achievements found for this run. The recognition report may not be available.</p></div>'
             elif run_id_param:
-                # A meet was selected but couldn't be opened — a run stored in
-                # the legacy nested layout (runs_v4/<id>/run.json, which the
-                # shared _load_run helper doesn't read), a run the active org
-                # can't access, or a corrupt file. Surface an honest message
-                # instead of a silent dead-end (the dropdown selected, no roster,
-                # no explanation).
+                # A meet was selected but couldn't be opened — a run the active
+                # org can't access, or a corrupt/unreadable data file. Surface an
+                # honest message instead of a silent dead-end (the dropdown
+                # selected, no roster, no explanation).
                 swimmers_html = (
                     '<div class="card"><p class="muted">We couldn&rsquo;t open that '
                     "meet. It may have been processed on an older version, be "
@@ -34585,6 +36895,25 @@ function mhAnDigest(btn) {{
                 )
 
         change_js = url_for("spotlight_landing")
+        # C-10: the window hint states the cutoff and links the toggle, so the
+        # 31-day filter is a choice rather than a silent limit. The toggle
+        # keeps the current meet selection; the hidden input keeps the mode
+        # across the picker's own GET submit.
+        _toggle_args = {"run_id": run_id_param} if run_id_param else {}
+        if show_older:
+            window_hint = (
+                "Showing all processed meets. "
+                f'<a href="{url_for("spotlight_landing", **_toggle_args)}">Show the last 31 days only</a>. '
+                "A meet deleted in Settings disappears from here too."
+            )
+            older_field = '<input type="hidden" name="older" value="1">'
+        else:
+            window_hint = (
+                "Showing meets from the last 31 days. "
+                f'<a href="{url_for("spotlight_landing", older=1, **_toggle_args)}">Show older meets</a>. '
+                "A meet deleted in Settings disappears from here too."
+            )
+            older_field = ""
         body = f"""
 <section class="mh-hero" data-lane="" style="padding-top:var(--sp-8);padding-bottom:var(--sp-7);margin-bottom:var(--sp-5)">
   <span class="mh-hero-eyebrow">Athlete spotlight</span>
@@ -34596,9 +36925,11 @@ function mhAnDigest(btn) {{
 
 <div class="card">
   <h2>Choose a meet</h2>
-  <p class="muted" style="margin-top:0;font-size:13px">Showing meets from the last month. Older runs roll off automatically, and a run deleted in Settings disappears from here too.</p>
+  <p class="muted" style="margin-top:0;font-size:13px">{window_hint}</p>
   <form method="get" action="{url_for("spotlight_landing")}">
-    <select name="run_id" onchange="this.form.submit()" style="max-width:480px">
+    {older_field}
+    <label for="sp-meet-select" class="mh-sr-only">Choose a processed meet</label>
+    <select id="sp-meet-select" name="run_id" aria-label="Choose a processed meet" onchange="this.form.submit()" style="max-width:480px">
       {runs_opts}
     </select>
     <noscript><button class="btn" type="submit" style="margin-top:var(--sp-3)">Load swimmers &rarr;</button></noscript>
@@ -34849,7 +37180,8 @@ function mhAnDigest(btn) {{
   <div style="margin-top:14px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
     <form method="post" action="{url_for("spotlight_build", run_id=run_id, swimmer_key=swimmer_key)}" style="display:inline-flex;gap:8px;align-items:center;flex-wrap:wrap"
           data-loader-text="Composing the spotlight post">
-      <select name="tone" style="font-size:12px;max-width:220px" title="Caption tone for the spotlight post">{_sp_tone_opts}</select>
+      <label for="sp-tone-select" class="mh-sr-only">Caption tone for the spotlight post</label>
+      <select id="sp-tone-select" name="tone" aria-label="Caption tone for the spotlight post" style="font-size:12px;max-width:220px" title="Caption tone for the spotlight post">{_sp_tone_opts}</select>
       <button type="submit" class="btn"{_sp_build_attr} title="{_h(_sp_build_title)}" style="font-size:13px">Build spotlight post from approved cards &rarr;</button>
     </form>
     <a class="btn secondary" href="{_pack_url}" style="font-size:13px">Open content builder &rarr;</a>
@@ -34899,9 +37231,22 @@ function copySpotlightCaption(btn) {{
     # ---- Stub routes (now functional with real LLM + fallback) ---------
     _STUB_TYPE_BY_CLASS = {
         "WeekendPreviewStub": "event_preview",
-        "SponsorPostStub": "sponsor_activation",
-        "SessionUpdateStub": "session_update",
         "FreeTextStub": "free_text",
+    }
+
+    # C-11: seed prompts for the retired Sponsor Post / Session Update forms.
+    # Their routes now redirect into the free-text landing with these seeds
+    # (the landing's textarea prefills from ?seed=), and old saved drafts of
+    # those types point their "start a new draft" link the same way.
+    _RETIRED_STUB_SEEDS = {
+        "sponsor_activation": (
+            "A sponsor thank-you post — name the sponsor, the event and the "
+            "moment to celebrate, in club colours."
+        ),
+        "session_update": (
+            "A mid-session update from poolside — the event, what has "
+            "happened so far, and who swims next."
+        ),
     }
 
     # Per-content-type hero copy. Centralised once so every stub form
@@ -34918,18 +37263,6 @@ function copySpotlightCaption(btn) {{
             "Set the scene.",
             "preview it",
             "Give us the event name — add its website or meet pack and the AI works out what the event is. It can even read the entries and pick your ones to watch.",
-        ),
-        "Sponsor Post": (
-            "Sponsor post",
-            "Name the partner.",
-            "activate it",
-            "Lead with the moment. Tell us the sponsor, the event, the key achievement, and brand rules. We make the partnership feel natural in every caption.",
-        ),
-        "Session Update": (
-            "Session update",
-            "Mid-session.",
-            "live from poolside",
-            "Type the event, what's happened so far, and the current session. We draft short Stories and Twitter cards for mid-event sharing.",
         ),
         "Free Text (quick)": (
             "Free text — quick",
@@ -34975,7 +37308,7 @@ function copySpotlightCaption(btn) {{
             "border:1px solid rgba(255,180,84,0.45);border-radius:8px;"
             "background:rgba(255,180,84,0.08);font-size:13px;"
             'color:var(--ink);line-height:1.5">'
-            '<strong style="color:var(--warn,#FFB454)">AI features unavailable.</strong> '
+            '<strong style="color:var(--warn)">AI features unavailable.</strong> '
             "No cloud LLM provider is configured on this deployment. "
             "Submitting this form will surface an AI-unavailable error. "
             "Ask your administrator to set "
@@ -34987,9 +37320,18 @@ function copySpotlightCaption(btn) {{
         )
 
     def _render_stub(
-        stub_cls_name: str, route_endpoint: str, title: str, active_tab: str = "create"
+        stub_cls_name: str,
+        route_endpoint: str,
+        title: str,
+        active_tab: str = "create",
+        intro_ct: str = "",
     ):
-        """Shared handler for stub routes. GET renders form, POST renders cards."""
+        """Shared handler for stub routes. GET renders form, POST renders cards.
+
+        ``intro_ct`` — the content-type slug of this flow's "how it works"
+        slide (B-1): when set, the GET form keeps a small link back to the
+        explainer, since the Create tile skips it after the first visit.
+        """
         try:
             from mediahub.club_platform import stubs as _stubs_mod
         except Exception as exc:
@@ -35023,15 +37365,31 @@ function copySpotlightCaption(btn) {{
                 ext = Path(photo.filename).suffix.lower() or ".jpg"
                 if ext not in (".jpg", ".jpeg", ".png", ".webp", ".gif"):
                     ext = ".jpg"
-                att_dir = UPLOADS_DIR / "stub_attachments"
-                att_dir.mkdir(parents=True, exist_ok=True)
-                dest = att_dir / f"{_uuid.uuid4().hex[:16]}{ext}"
+                # Validate the bytes decode as a real image before storing —
+                # an extension whitelist alone would let arbitrary content land
+                # on disk as a .jpg and reach the downstream visual generator.
+                _photo_bytes = photo.read() or b""
+                _photo_ok = False
                 try:
-                    photo.save(str(dest))
-                    form_data["attached_photo_path"] = str(dest)
-                    form_data["attached_photo_filename"] = Path(photo.filename).name
+                    import io as _io_img
+
+                    from PIL import Image as _PILImg
+
+                    with _PILImg.open(_io_img.BytesIO(_photo_bytes)) as _im:
+                        _im.verify()
+                    _photo_ok = True
                 except Exception:
-                    app.logger.exception("stub photo upload failed")
+                    app.logger.warning("stub photo upload rejected: not a decodable image")
+                if _photo_ok:
+                    att_dir = UPLOADS_DIR / "stub_attachments"
+                    att_dir.mkdir(parents=True, exist_ok=True)
+                    dest = att_dir / f"{_uuid.uuid4().hex[:16]}{ext}"
+                    try:
+                        dest.write_bytes(_photo_bytes)
+                        form_data["attached_photo_path"] = str(dest)
+                        form_data["attached_photo_filename"] = Path(photo.filename).name
+                    except Exception:
+                        app.logger.exception("stub photo upload failed")
 
             # Media-library picks — strictly profile-scoped. Resolve each
             # selected asset id against the active profile only; foreign ids
@@ -35085,22 +37443,77 @@ function copySpotlightCaption(btn) {{
             # uploaded meet pack, and the entries source so the AI can work
             # out what the event IS and pick ones-to-watch from REAL
             # entries. All best-effort — a dead link or unreadable file
-            # just means that source contributes nothing.
+            # is noted in _pv_unread so the results page can say so rather
+            # than silently dropping it.
+            _pv_unread: list[str] = []
             if stub_cls_name == "WeekendPreviewStub":
+                # Resolve the active club up front so the LENEX path can order
+                # THIS club's entries first — they must survive truncation on a
+                # big multi-club meet.
+                _pv_club = ""
+                try:
+                    _pv_prof = _active_profile()
+                    if _pv_prof is not None:
+                        _pv_club = (_pv_prof.display_name or "").strip()
+                        form_data["club_name"] = _pv_prof.display_name
+                except Exception:
+                    app.logger.exception("event preview: active profile lookup failed")
                 try:
                     from mediahub.brand.guidelines import extract_text as _doc_text
-                    from mediahub.web_research.safe_fetch import safe_fetch as _sfetch
+
+                    def _pv_url_text(_u: str, _cap: int) -> str:
+                        """Extract text from a URL, handling BOTH HTML pages and
+                        document downloads (PDF / Word / RTF). A psych-sheet or
+                        entries link is usually a PDF, which the plain HTML text
+                        path reduces to noise — route those through the document
+                        extractor instead. SSRF-safe (safe_fetch_bytes pins the
+                        validated IP and re-checks every redirect hop)."""
+                        from mediahub.web_research.safe_fetch import (
+                            html_bytes_to_text as _h2t,
+                            safe_fetch_bytes as _sfb,
+                        )
+
+                        _got = _sfb(_u, max_bytes=4 * 1024 * 1024, timeout=6.0, max_hops=2)
+                        if not _got:
+                            return ""
+                        _ct, _body = _got
+                        _is_pdf = _ct == "application/pdf" or _body[:5] == b"%PDF-"
+                        _is_doc = (
+                            _is_pdf
+                            or "officedocument" in _ct
+                            or _ct
+                            in (
+                                "application/msword",
+                                "application/rtf",
+                                "text/rtf",
+                            )
+                        )
+                        if _is_doc:
+                            from pathlib import Path as _P
+                            from urllib.parse import urlparse as _urlp
+
+                            _fn = _P(_urlp(_u).path).name or "download"
+                            if _is_pdf and not _fn.lower().endswith(".pdf"):
+                                _fn = (_fn or "download") + ".pdf"
+                            try:
+                                _r = _doc_text(_fn, _body)
+                                if _r.get("status") == "ok" and (_r.get("text") or "").strip():
+                                    return _r["text"][:_cap]
+                            except Exception:
+                                app.logger.exception("event preview: URL document extract failed")
+                            return ""  # a document we could not read
+                        return _h2t(_body, _ct, _cap)
 
                     _site_url = (form_data.get("event_website_url") or "").strip()
                     if _site_url:
-                        _site_text = _sfetch(_site_url, max_chars=8000)
-                        if _site_text:
-                            form_data["event_site_text"] = _site_text
+                        _t = _pv_url_text(_site_url, 8000)
+                        if _t:
+                            form_data["event_site_text"] = _t
                     _entries_url = (form_data.get("entries_url") or "").strip()
                     if _entries_url:
-                        _etext = _sfetch(_entries_url, max_chars=20000)
-                        if _etext:
-                            form_data["entries_text"] = _etext
+                        _t = _pv_url_text(_entries_url, 20000)
+                        if _t:
+                            form_data["entries_text"] = _t
                     for _field, _key, _cap in (
                         ("event_pack", "event_pack_text", 8000),
                         ("entries_file", "entries_text", 20000),
@@ -35137,6 +37550,17 @@ function copySpotlightCaption(btn) {{
                                                 form_data["meet_name"] = _ln_meet.meet_name
                                         except Exception:
                                             pass
+                                    # F8: order the active club's entries first so
+                                    # the club we are previewing survives the
+                                    # brief's truncation on a big multi-club meet.
+                                    if _pv_club and _rows:
+                                        _cl = _pv_club.lower()
+                                        _rows = sorted(
+                                            _rows,
+                                            key=lambda _r: 0
+                                            if _cl in (_r.get("club") or "").lower()
+                                            else 1,
+                                        )
                                     _lines = []
                                     for _r in _rows:
                                         _bits = [
@@ -35163,19 +37587,51 @@ function copySpotlightCaption(btn) {{
                                 continue
                             if _res.get("status") == "ok" and (_res.get("text") or "").strip():
                                 form_data[_key] = _res["text"][:_cap]
-                    _pv_prof = _active_profile()
-                    if _pv_prof is not None:
-                        form_data["club_name"] = _pv_prof.display_name
                 except Exception:
                     app.logger.exception("event preview enrichment failed")
-            generation_error = None
+                # F9: note any source the user PROVIDED but we could not read,
+                # so the results page can say so instead of silently dropping it.
+                if (form_data.get("event_website_url") or "").strip() and not (
+                    form_data.get("event_site_text") or ""
+                ).strip():
+                    _pv_unread.append("the event website link")
+                _ef = request.files.get("entries_file")
+                _entries_given = bool(
+                    (form_data.get("entries_url") or "").strip()
+                    or (_ef and getattr(_ef, "filename", ""))
+                )
+                if _entries_given and not (form_data.get("entries_text") or "").strip():
+                    _pv_unread.append("the entries source")
+                _pf = request.files.get("event_pack")
+                if (
+                    _pf
+                    and getattr(_pf, "filename", "")
+                    and not (form_data.get("event_pack_text") or "").strip()
+                ):
+                    _pv_unread.append("the meet pack")
+                # Reject an empty submission: with no event name, no readable
+                # website/pack/entries text, and no typed ones-to-watch, the
+                # model would have nothing to ground on and would guess. Ask
+                # for a real source instead of generating an ungrounded preview.
+                if not stub.has_meaningful_input(form_data):
+                    return _recovery_page(
+                        "Add something to preview",
+                        (
+                            "Give us at least the event name, or upload the "
+                            "entries file, or add the event's website or meet "
+                            "pack, so the preview has real facts to work from. "
+                            "It never guesses."
+                        ),
+                        primary_cta=("Back to Event Preview", url_for(route_endpoint)),
+                        code=400,
+                    )
             try:
                 cards_payload = stub.generate_cards(form_data)
             except Exception as e:
                 app.logger.exception("stub generate_cards failed")
-                cards_payload = {"cards": []}
-                generation_error = str(e)
-                # Show the actual error to the user — no silent fake card.
+                # Show the actual error to the user — no silent fake card, and
+                # do NOT fall through to persist an empty pack + a misleading
+                # "success" shell with HTTP 200.
                 from mediahub.ai_core import (
                     ProviderNotConfigured,
                     ProviderError,
@@ -35206,6 +37662,19 @@ function copySpotlightCaption(btn) {{
                         secondary_cta=("Back to Create", url_for("make_page")),
                         code=502,
                     )
+                # Any other engine failure (e.g. malformed model JSON): honest
+                # error, no empty pack persisted.
+                return _recovery_page(
+                    "Couldn't generate your draft",
+                    (
+                        "Something went wrong while writing the cards. This is "
+                        "usually temporary — try again in a moment, or simplify "
+                        "the input."
+                    ),
+                    primary_cta=("Try again", url_for(route_endpoint)),
+                    secondary_cta=("Back to Create", url_for("make_page")),
+                    code=502,
+                )
             # Persist this pack so it survives refresh + is exportable.
             saved = None
             try:
@@ -35263,11 +37732,37 @@ function copySpotlightCaption(btn) {{
                         "markup drifted; View-&-export actions were not injected"
                     )
                 body = _new_body
+            # F9: if the user provided a source we could not read, say so on
+            # the results page rather than silently building the preview
+            # without it. Only shown when cards were actually generated.
+            if _pv_unread and (cards_payload.get("cards") or []):
+                if len(_pv_unread) == 1:
+                    _srcs, _it = _pv_unread[0], "it"
+                else:
+                    _srcs = ", ".join(_pv_unread[:-1]) + " and " + _pv_unread[-1]
+                    _it = "them"
+                _notice = (
+                    '<div role="status" style="margin-bottom:16px;padding:12px 14px;'
+                    "border:1px solid rgba(255,180,84,0.45);border-radius:8px;"
+                    "background:rgba(255,180,84,0.08);font-size:13px;line-height:1.5;"
+                    'color:var(--ink)">'
+                    f"We couldn&rsquo;t read {_h(_srcs)}, so the preview was built without "
+                    f"{_it}. For entries, the organiser&rsquo;s LENEX (.lef / .lxf) export "
+                    "or a pasted list reads most reliably.</div>"
+                )
+                body = _notice + body
             if _graphic_api_base:
                 body += _VISUAL_PANEL_JS
             return _layout(title, body, active=active_tab)
         # GET &mdash; render hero + form
-        body = _stub_hero(title) + _llm_unavailable_banner() + stub.render_stub_html()
+        _how_html = ""
+        if intro_ct:
+            _how_html = (
+                '<p style="margin:0 0 var(--sp-4)">'
+                f'<a class="mh-how-pill" href="{url_for("content_type_intro", ct=intro_ct)}">'
+                "How it works</a></p>"
+            )
+        body = _stub_hero(title) + _how_html + _llm_unavailable_banner() + stub.render_stub_html()
         # Inject the "Pick from your library" widget. The form-level photo
         # upload (stubs._PHOTO_INPUT_HTML) handles one-off uploads; this
         # picker pulls from the active organisation's library so the user
@@ -35364,21 +37859,37 @@ function copySpotlightCaption(btn) {{
 
     @app.route("/weekend-preview", methods=["GET", "POST"])
     def stub_weekend_preview():
-        return _render_stub("WeekendPreviewStub", "stub_weekend_preview", "Event Preview")
+        return _render_stub(
+            "WeekendPreviewStub",
+            "stub_weekend_preview",
+            "Event Preview",
+            intro_ct="event_preview",
+        )
 
-    @app.route("/sponsor-post", methods=["GET", "POST"])
+    # C-11: Sponsor Post and Session Update are retired as standalone forms —
+    # Free Text interprets any such prompt, so there is ONE "describe it"
+    # story instead of two hidden form paths. The old URLs live on as
+    # redirects into the free-text landing carrying a seed prompt for the
+    # textarea, so bookmarks, old draft links and the content-type registry
+    # endpoints keep resolving. Nothing renders forms that POST here any
+    # more, so the POST methods are gone with the forms.
+    @app.route("/sponsor-post")
     def stub_sponsor_post():
-        return _render_stub("SponsorPostStub", "stub_sponsor_post", "Sponsor Post")
+        return redirect(
+            url_for("free_text_chat_page", seed=_RETIRED_STUB_SEEDS["sponsor_activation"])
+        )
 
-    @app.route("/session-update", methods=["GET", "POST"])
+    @app.route("/session-update")
     def stub_session_update():
-        return _render_stub("SessionUpdateStub", "stub_session_update", "Session Update")
+        return redirect(url_for("free_text_chat_page", seed=_RETIRED_STUB_SEEDS["session_update"]))
 
     @app.route("/free-text/quick", methods=["GET", "POST"])
     def stub_free_text_quick():
         # One-shot single-textarea form (legacy). Kept under /quick because
         # the primary /free-text experience is now the iterative chat.
-        return _render_stub("FreeTextStub", "stub_free_text_quick", "Free Text (quick)")
+        return _render_stub(
+            "FreeTextStub", "stub_free_text_quick", "Free Text (quick)", intro_ct="free_text"
+        )
 
     # ---- /free-text — Claude-driven chat brief builder -----------------------
     @app.route("/free-text", methods=["GET"])
@@ -35391,7 +37902,12 @@ function copySpotlightCaption(btn) {{
         sessions: list = []
         store_failed = False
         try:
-            sessions = list_sessions(limit=20)
+            # Tenant isolation: a chat title is the first line of another org's
+            # free-text brief (often an athlete name), so the landing list must
+            # be scoped to the active organisation — mirrors the /drafts index
+            # and _can_access_pack. Unstamped legacy chats stay visible, and the
+            # no-org sandbox (active pid None) keeps everything visible.
+            sessions = list_sessions(limit=20, profile_id=_active_profile_id())
         except Exception as e:
             log.warning("free-text: list_sessions failed: %s", e)
             store_failed = True
@@ -35415,6 +37931,10 @@ function copySpotlightCaption(btn) {{
         quick_err = session.pop("free_text_quick_error", "")
         # H-8: restore the prompt the user typed if the last build failed.
         quick_prompt = session.pop("free_text_quick_prompt", "")
+        # J-6: a planner "Create →" link can carry the ranked idea — prefill
+        # the textarea from ?seed=… (capped; a restored failed prompt wins).
+        if not quick_prompt:
+            quick_prompt = (request.args.get("seed") or "").strip()[:500]
         quick_err_html = (
             '<div class="mh-flash error" role="alert" style="margin:0 0 14px;padding:12px 16px;'
             "border:1px solid rgba(255,107,107,0.30);border-left:3px solid var(--bad);"
@@ -35432,6 +37952,7 @@ function copySpotlightCaption(btn) {{
   builds a branded graphic from it. Add your own photos and it places them in.
   No forms, no templates: the prompt carries the context.
   </p>
+  <a class="mh-how-pill" href="{url_for("content_type_intro", ct="free_text")}" style="margin-top:var(--sp-3)">How it works</a>
 </section>
 
 {_llm_unavailable_banner()}
@@ -35446,7 +37967,8 @@ function copySpotlightCaption(btn) {{
       placeholder="e.g. A bold thank-you post for our sponsor Riverside Physio after a great gala weekend — upbeat, club colours."
       style="width:100%;font-size:14px;padding:10px 12px;border:1px solid var(--panel);border-radius:8px;background:var(--bg);color:var(--ink);resize:vertical">{_h(quick_prompt)}</textarea>
     <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:12px">
-      <label class="btn secondary" style="font-size:13px;cursor:pointer;margin:0">
+      <label class="btn secondary" style="font-size:13px;cursor:pointer;margin:0" tabindex="0" role="button"
+        onkeydown="if(event.key==='Enter'||event.key===' '){{event.preventDefault();this.querySelector('input[type=file]').click();}}">
         &#x1F4CE; Add photos
         <input type="file" name="photos" accept="image/*" multiple style="display:none"
           onchange="var n=this.files.length;var s=document.getElementById('ft-photo-count');if(s)s.textContent=n?(n+' photo'+(n===1?'':'s')+' attached'):'';">
@@ -35488,12 +38010,6 @@ function copySpotlightCaption(btn) {{
             )
         }
 </div>
-
-<p style="margin-top:18px;font-size:12px;color:var(--ink-muted)">
-  Prefer the one-shot form? <a href="{
-            url_for("stub_free_text_quick")
-        }">Use the legacy quick generator →</a>
-</p>
 """
         return _layout("Free text — chat", body, active="create")
 
@@ -35534,6 +38050,12 @@ function copySpotlightCaption(btn) {{
 
         prompt = (request.form.get("prompt") or "").strip()
         if not prompt:
+            return redirect(url_for("free_text_chat_page"))
+        if len(prompt) > _FREE_TEXT_MAX_PROMPT_CHARS:
+            session["free_text_quick_error"] = (
+                f"That prompt is very long ({len(prompt):,} characters). "
+                f"Please keep it under {_FREE_TEXT_MAX_PROMPT_CHARS:,} characters."
+            )
             return redirect(url_for("free_text_chat_page"))
         active_pid = _active_profile_id() or ""
 
@@ -35623,14 +38145,31 @@ function copySpotlightCaption(btn) {{
             return redirect(url_for("free_text_chat_page"))
         from mediahub.free_text_chat.session import create_session
 
-        s = create_session()
+        # Stamp the creating organisation so the chat is tenant-scoped from
+        # birth (mirrors runs/packs). Without this every web chat is ownerless
+        # and readable by any org via /free-text/chat/<id>.
+        s = create_session(profile_id=_active_profile_id() or "")
         return redirect(url_for("free_text_chat_view", chat_id=s.chat_id))
+
+    def _load_accessible_chat(chat_id):
+        """Load a chat only if the active organisation may access it.
+
+        Returns None both when the chat is missing AND when it belongs to a
+        different organisation — a foreign chat is indistinguishable from a
+        nonexistent one, the same anti-enumeration posture as the run/pack
+        guards (_can_access_run / _can_access_pack). Legacy ownerless chats
+        stay accessible so historical conversations aren't orphaned.
+        """
+        from mediahub.free_text_chat.session import load_session, can_access_session
+
+        s = load_session(chat_id)
+        if s is None or not can_access_session(s, _active_profile_id()):
+            return None
+        return s
 
     @app.route("/free-text/chat/<chat_id>", methods=["GET"])
     def free_text_chat_view(chat_id):
-        from mediahub.free_text_chat.session import load_session
-
-        s = load_session(chat_id)
+        s = _load_accessible_chat(chat_id)
         if not s:
             return _recovery_page(
                 "Chat not found",
@@ -35754,6 +38293,8 @@ function copySpotlightCaption(btn) {{
   </div>
 </section>
 
+{_llm_unavailable_banner()}
+
 <div id="chat-log">
   {msgs_html or '<p class="muted">Start by telling the assistant what you want to post. It will ask questions, research the web, and propose a brief.</p>'}
 </div>
@@ -35767,7 +38308,7 @@ function copySpotlightCaption(btn) {{
             {_CYCLE_PH_ATTR_MOMENT} style="min-height:110px" required></textarea>
   <div style="margin-top:var(--sp-3);display:flex;gap:var(--sp-3);align-items:center;flex-wrap:wrap">
     <button type="submit" class="btn">Send reply &rarr;</button>
-    <span class="strap" style="color:var(--ink-muted)">Assistant uses Claude · web research</span>
+    <span class="strap" style="color:var(--ink-muted)">AI assistant · web research</span>
   </div>
 </form>
 """
@@ -35809,10 +38350,10 @@ function copySpotlightCaption(btn) {{
 
     @app.route("/free-text/chat/<chat_id>/send", methods=["POST"])
     def free_text_chat_send(chat_id):
-        from mediahub.free_text_chat.session import load_session, save_session
+        from mediahub.free_text_chat.session import save_session
         from mediahub.free_text_chat.agent import next_assistant_turn
 
-        s = load_session(chat_id)
+        s = _load_accessible_chat(chat_id)
         if not s:
             return _recovery_page(
                 "Chat not found",
@@ -35821,6 +38362,14 @@ function copySpotlightCaption(btn) {{
                 secondary_cta=("Free-text home", url_for("free_text_chat_page")),
             )
         msg = (request.form.get("message") or "").strip()
+        if len(msg) > _FREE_TEXT_MAX_PROMPT_CHARS:
+            s.add_assistant_message(
+                f"That reply is very long ({len(msg):,} characters). Please shorten "
+                f"it to under {_FREE_TEXT_MAX_PROMPT_CHARS:,} characters and send again.",
+                meta={"error": True},
+            )
+            save_session(s)
+            return redirect(url_for("free_text_chat_view", chat_id=chat_id))
         if msg:
             s.add_user_message(msg)
             save_session(s)
@@ -35847,15 +38396,28 @@ function copySpotlightCaption(btn) {{
         brief = s.accepted_brief
         if not brief:
             return None
+        # The chat brief is the propose_brief tool input verbatim (unconstrained
+        # schema), so hashtags may arrive as a list, a string, or nothing. Reuse
+        # the quick path's normaliser so a stray string isn't iterated
+        # character-by-character into per-letter chips at render/export.
+        from mediahub.free_text_chat.agent import normalise_hashtags
+
+        hashtags = normalise_hashtags(brief.get("hashtags"))
+        # The chat brief is the propose_brief tool input verbatim (unconstrained
+        # schema), so headline/body/visual_concept may arrive as a non-string
+        # (a list of lines, a nested object, a number). Coerce to str before the
+        # caption join — a raw list headline used to raise a TypeError that 500'd
+        # accept/generate *and* bricked the chat (the brief was already frozen,
+        # so every retry hit the same crash).
+        _headline = str(brief.get("headline") or "").strip()
+        _body = str(brief.get("body") or "").strip()
         card = {
-            "platform": brief.get("platform") or "Instagram",
-            "caption": "\n\n".join(
-                [p for p in [brief.get("headline", ""), brief.get("body", "")] if p]
-            ).strip(),
-            "hashtags": brief.get("hashtags") or [],
+            "platform": str(brief.get("platform") or "Instagram").strip() or "Instagram",
+            "caption": "\n\n".join([p for p in [_headline, _body] if p]).strip(),
+            "hashtags": hashtags,
             # D-25: prompt-led chat draft — no fabricated confidence badge.
             "confidence": None,
-            "notes": brief.get("visual_concept", "") or "",
+            "notes": str(brief.get("visual_concept") or "").strip(),
             "status": "queue",
         }
         pack_form_data = {
@@ -35900,9 +38462,9 @@ function copySpotlightCaption(btn) {{
         # "Generate content from this brief" button and a third "Create graphic"
         # click. Accepting the brief and building the draft is a single POST that
         # ends on the rendered graphic (?autographic=1), like the quick path.
-        from mediahub.free_text_chat.session import load_session, save_session
+        from mediahub.free_text_chat.session import save_session
 
-        s = load_session(chat_id)
+        s = _load_accessible_chat(chat_id)
         if not s:
             return redirect(url_for("free_text_chat_page"))
         if s.pending_brief:
@@ -35916,17 +38478,22 @@ function copySpotlightCaption(btn) {{
                 }
             )
             save_session(s)
-        pack_url = _chat_brief_to_pack(s, chat_id, request.form.getlist("library_asset_id"))
-        if pack_url:
-            return redirect(pack_url)
+            # Build the draft exactly once, on the accepting POST. A stale or
+            # double-submitted re-POST (pending_brief already cleared) falls
+            # through to the chat view rather than minting another draft —
+            # deliberate regeneration is the explicit "Generate content from
+            # this brief" action (free_text_chat_generate).
+            pack_url = _chat_brief_to_pack(s, chat_id, request.form.getlist("library_asset_id"))
+            if pack_url:
+                return redirect(pack_url)
         return redirect(url_for("free_text_chat_view", chat_id=chat_id))
 
     @app.route("/free-text/chat/<chat_id>/decline", methods=["POST"])
     def free_text_chat_decline(chat_id):
-        from mediahub.free_text_chat.session import load_session, save_session
+        from mediahub.free_text_chat.session import save_session
         from mediahub.free_text_chat.agent import next_assistant_turn
 
-        s = load_session(chat_id)
+        s = _load_accessible_chat(chat_id)
         if not s:
             return redirect(url_for("free_text_chat_page"))
         if s.pending_brief:
@@ -35950,9 +38517,7 @@ function copySpotlightCaption(btn) {{
     def free_text_chat_generate(chat_id):
         """Turn an accepted brief into a saved stub-pack so the existing
         approval pills + export flow apply."""
-        from mediahub.free_text_chat.session import load_session
-
-        s = load_session(chat_id)
+        s = _load_accessible_chat(chat_id)
         if not s or not s.accepted_brief:
             return redirect(url_for("free_text_chat_view", chat_id=chat_id))
         # B-6: land on the draft with the graphic already rendering, like the
@@ -36022,9 +38587,10 @@ function copySpotlightCaption(btn) {{
                 '<span class="mh-hero-eyebrow">Saved drafts</span>'
                 '<h1>Nothing <em class="editorial">drafted</em> yet.</h1>'
                 '<p class="lede">'
-                "Content packs you generate from Free Text, Event Preview, "
-                "Sponsor Post and Session Update are kept here so you can "
-                "come back, edit, and approve later."
+                "Content packs you generate are kept here so you can come "
+                "back, edit, and approve later. Describe any moment in Free "
+                "Text &mdash; a sponsor thank-you, a mid-session update, a "
+                "shout-out &mdash; or build an Event Preview."
                 "</p>"
                 '<div class="mh-hero-actions">'
                 f'<a class="mh-cta-primary" href="{url_for("make_page")}">Start creating &rarr;</a>'
@@ -36141,20 +38707,27 @@ function copySpotlightCaption(btn) {{
         )
         # Replace the renderer's default footer to add export + regenerate.
         export_url = url_for("stub_pack_export", pack_id=pack_id)
-        regenerate_url = url_for(
-            {
-                # Endpoint names are implementation artifacts (kept across the
-                # ADR-0013 slug rename); keys are canonical post-type slugs.
-                "free_text": "free_text_chat_page",
-                "event_preview": "stub_weekend_preview",
-                "sponsor_activation": "stub_sponsor_post",
-                "session_update": "stub_session_update",
-            }.get(stub_type, "free_text_chat_page")
-        )
+        # C-11: sponsor / session drafts predate the retirement of their
+        # standalone forms — their "new draft" path is now the free-text
+        # landing, seeded with the retired type's ask so the prompt box
+        # starts in the right place. Other types keep their live form.
+        if stub_type in _RETIRED_STUB_SEEDS:
+            regenerate_url = url_for("free_text_chat_page", seed=_RETIRED_STUB_SEEDS[stub_type])
+        else:
+            regenerate_url = url_for(
+                {
+                    # Endpoint names are implementation artifacts (kept across
+                    # the ADR-0013 slug rename); keys are canonical post-type
+                    # slugs.
+                    "free_text": "free_text_chat_page",
+                    "event_preview": "stub_weekend_preview",
+                }.get(stub_type, "free_text_chat_page")
+            )
         regen_api = url_for("api_stub_pack_regenerate", pack_id=pack_id)
         footer = (
             f'<div style="margin-top:24px;display:flex;gap:10px;flex-wrap:wrap">'
-            f'<button type="button" class="btn" onclick="mhRegenerateDraft(this, {repr(regen_api)})" '
+            f'<button type="button" class="btn" '
+            f'onclick="mhRegenerateDraft(this, {repr(regen_api)}, {len(_pack_cards)})" '
             f'title="Re-run the content engine — the AI Director plans fresh angles, avoiding what you already have">'
             f"&#x21BA; Regenerate (fresh angles)</button>"
             f'<a class="btn secondary" href="{export_url}">Export as text</a>'
@@ -36164,7 +38737,10 @@ function copySpotlightCaption(btn) {{
             f'<a class="btn secondary" href="{url_for("plan_ad_variants_page", pack_id=pack_id)}" '
             f'title="Turn these angles into a sponsor A/B ad set, sized for ad managers (prepared, never placed)">'
             f"Prepare ad set</a>"
-            f'<a class="btn secondary" href="{regenerate_url}">Generate new draft</a>'
+            f'<a class="btn secondary" href="{url_for("plan_analytics_page", pack_id=pack_id)}" '
+            f'title="Posted this by hand? Log how it did — what works feeds the plan">'
+            f"Log performance</a>"
+            f'<a class="btn secondary" href="{regenerate_url}">Start a new draft from the form</a>'
             f'<a class="btn secondary" href="{back_url}">&larr; All drafts</a>'
             f"</div>"
         )
@@ -36201,6 +38777,35 @@ function copySpotlightCaption(btn) {{
                 pack_id,
             )
         cards_html = _new_cards_html
+        # E-11: "Previous versions" — the captions a Regenerate replaced.
+        # replace_cards archives {platform, caption} into card_history; this
+        # expander is the page that finally shows it (most recent first).
+        history = [
+            h
+            for h in (rec.get("card_history") or [])
+            if isinstance(h, dict) and str(h.get("caption") or "").strip()
+        ]
+        history_html = ""
+        if history:
+            rows = ""
+            for h_item in reversed(history):
+                rows += (
+                    f'<div style="padding:10px 0;border-top:1px solid var(--border)">'
+                    f'<div style="font-size:10.5px;text-transform:uppercase;'
+                    f'letter-spacing:0.14em;color:var(--ink-muted);margin-bottom:4px">'
+                    f"{_h(h_item.get('platform') or 'Post')}</div>"
+                    f'<div style="font-size:13px;line-height:1.5;white-space:pre-wrap">'
+                    f"{_h(h_item.get('caption'))}</div></div>"
+                )
+            _n_prev = len(history)
+            history_html = (
+                f'<details class="card" style="margin-top:18px">'
+                f'<summary style="cursor:pointer;font-weight:600">Previous versions '
+                f"({_n_prev})</summary>"
+                f'<p class="dim" style="font-size:12px;margin:8px 0 4px 0">'
+                f"Captions replaced by a regenerate — kept here so nothing is lost.</p>"
+                f"{rows}</details>"
+            )
         # Single-prompt flow lands here with ?autographic=1 — render the first
         # card's graphic on load (with the attached photo as background if one
         # was passed) so "describe it → get a graphic" needs no extra click.
@@ -36214,7 +38819,15 @@ function copySpotlightCaption(btn) {{
                 f"{json.dumps(f'{pack_id}-0')},{json.dumps(_g0)},"
                 f"{json.dumps(_photo)},'feed_portrait');}}}});</script>"
             )
-        body = header + attached_html + cards_html + _VISUAL_PANEL_JS + _DRAFT_REGEN_JS + auto_js
+        body = (
+            header
+            + attached_html
+            + cards_html
+            + history_html
+            + _VISUAL_PANEL_JS
+            + _DRAFT_REGEN_JS
+            + auto_js
+        )
         return _layout(rec.get("title") or "Draft", body, active="create")
 
     def _render_pack_attached_media(rec: dict) -> str:
@@ -36258,7 +38871,7 @@ function copySpotlightCaption(btn) {{
                 f'gap:4px;width:90px">'
                 f'<img src="{_h(file_url)}" alt="" loading="lazy" '
                 f'style="width:90px;height:90px;object-fit:cover;border-radius:6px;'
-                f'border:1px solid var(--border);background:#0a0a0a"/>'
+                f'border:1px solid var(--border);background:var(--bg)"/>'
                 f'<div style="font-size:10px;color:var(--ink-muted);text-align:center;'
                 f'width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'
                 f"{label}</div></div>"
@@ -36331,7 +38944,14 @@ function copySpotlightCaption(btn) {{
         existing = load_pack(pack_id)
         if not _can_access_pack(existing, _active_profile_id()):
             return jsonify({"ok": False, "error": "invalid_request"}), 400
-        status = (request.form.get("status") or "").strip().lower()
+        # Read the status from a JSON body (the pill posts application/json so
+        # the write stays inside the CSRF layer's same-origin JSON exemption);
+        # fall back to a form field for any legacy caller.
+        _body = request.get_json(silent=True) if request.is_json else None
+        status = (
+            (_body or {}).get("status") if isinstance(_body, dict) else request.form.get("status")
+        ) or ""
+        status = status.strip().lower()
         rec = update_card_status(pack_id, card_idx, status)
         if not rec:
             return jsonify({"ok": False, "error": "invalid_request"}), 400
@@ -36345,6 +38965,36 @@ function copySpotlightCaption(btn) {{
                 "status": card.get("status", status),
             }
         )
+
+    @app.route("/api/drafts/<pack_id>/card/<int:card_idx>/caption/save", methods=["POST"])
+    def api_stub_pack_caption_save(pack_id, card_idx):
+        """Persist a hand-edited caption on one saved-draft card (H-9).
+
+        Plain persistence, no AI: the draft pages reveal a per-card textarea
+        and save through the same pack-store mechanism the spotlight tone
+        rewrite uses (``update_pack``), so every stub pack type — quick
+        free-text included — can edit its captions in place. Tenant-gated
+        like the sibling caption endpoints: a foreign org's probe 404s
+        indistinguishably from a genuine miss.
+        """
+        from mediahub.club_platform.stub_pack_store import load_pack, update_pack
+
+        rec = load_pack(pack_id)
+        if not rec or not _can_access_pack(rec, _active_profile_id()):
+            return jsonify({"error": "pack_not_found"}), 404
+        cards = rec.get("cards") or []
+        if not (0 <= card_idx < len(cards)) or not isinstance(cards[card_idx], dict):
+            return jsonify({"error": "card_not_found"}), 404
+        payload = request.get_json(silent=True) or {}
+        caption = str(payload.get("caption") or "").strip()[:4000]
+        if not caption:
+            return jsonify(
+                {"error": "empty_caption", "message": "Type a caption before saving."}
+            ), 400
+        new_cards = list(cards)
+        new_cards[card_idx] = {**new_cards[card_idx], "caption": caption}
+        update_pack(pack_id, cards=new_cards)
+        return jsonify({"ok": True, "caption": caption})
 
     @app.route("/api/drafts/<pack_id>/card/<int:card_idx>/create-graphic", methods=["POST"])
     def api_stub_pack_create_graphic(pack_id, card_idx):
@@ -37317,13 +39967,7 @@ function copySpotlightCaption(btn) {{
             ("university_society", "University society or sports club"),
             ("corporate_team", "Corporate team"),
         ]
-        _PLATFORMS = [
-            ("instagram", "Instagram"),
-            ("tiktok", "TikTok"),
-            ("twitter", "Twitter / X"),
-            ("facebook", "Facebook"),
-            ("linkedin", "LinkedIn"),
-        ]
+        _PLATFORMS = _ORG_PLATFORMS
         _TONES = [
             (
                 "warm-club",
@@ -37339,10 +39983,11 @@ function copySpotlightCaption(btn) {{
         saved_msg = ""
         capture_preview = ""  # rendered preview HTML when a capture has just run
         capture_error = ""  # rendered error banner when capture failed
-        voice_preview = ""  # rendered preview HTML after voice analysis
         voice_error = ""  # rendered error banner when voice analysis failed
-        # The capture/voice previews are kept in-memory only &mdash; the user must
-        # click "Save organisation" to persist them (no silent writes).
+        # D-15: the analyse actions persist their results immediately on
+        # success; the values they overwrite are stashed in the session as a
+        # one-shot undo behind the "Discard this analysis" button. Failures
+        # surface an honest error and persist nothing.
         if request.method == "POST":
             action = (request.form.get("action") or "save").strip().lower()
             raw_id = (request.form.get("profile_id") or "default").strip().lower()
@@ -37357,12 +40002,23 @@ function copySpotlightCaption(btn) {{
                 profile_id=profile_id,
                 display_name=request.form.get("display_name") or profile_id,
                 # Children's Code standard 7 (high privacy by default): NEW
-                # organisations start with the child content controls ON;
-                # the club can relax them deliberately on /organisation/consent.
+                # organisations start with the child content controls ON; the
+                # club can relax them deliberately on the Consent records tab
+                # of /athletes (G-9).
                 child_surname_initial=True,
                 child_suppress_age=True,
                 child_exclude_photos=False,
             )
+
+            def _persist_profile(prof: ClubProfile) -> None:
+                """Write the profile and run the PC.3 tenancy tail — shared
+                by Save and the analyse actions (D-15): a newly created
+                workspace is born bound to its creator (ADR-0014), and the
+                session pins the org either way."""
+                save_profile(prof)
+                if _is_new_profile:
+                    _bind_creator_if_signed_in(prof.profile_id)
+                _pin_active_profile(prof.profile_id)
 
             if action == "capture":
                 # ---- Brand DNA capture from website URL ----
@@ -37382,10 +40038,12 @@ function copySpotlightCaption(btn) {{
                         result = {"brand_capture_status": f"error: {e}"}
                     status = (result or {}).get("brand_capture_status", "")
                     if status in ("ok", "no_provider", "ok_heuristic"):
-                        # Merge captured fields into the in-memory profile so
-                        # the preview shows them, but DON'T save until the user
-                        # clicks "Save organisation".
-                        for k in (
+                        # D-15: a successful capture persists immediately
+                        # (like the setup wizard) — 10-30s of analysis no
+                        # longer evaporates unless the user scrolls down and
+                        # clicks Save. The values it overwrites ride the
+                        # session as a one-shot Discard undo.
+                        _capture_fields = (
                             "brand_voice_summary",
                             "brand_keywords",
                             "brand_palette_extracted",
@@ -37398,7 +40056,20 @@ function copySpotlightCaption(btn) {{
                             "brand_capture_status",
                             "brand_palette_sources",
                             "brand_palette_reasoning",
-                        ):
+                        )
+                        _org_analysis_stash_previous(
+                            existing.profile_id,
+                            "brand",
+                            {
+                                k: getattr(existing, k, None)
+                                for k in (
+                                    *_capture_fields,
+                                    "brand_primary",
+                                    "brand_secondary",
+                                )
+                            },
+                        )
+                        for k in _capture_fields:
                             if k in result:
                                 setattr(existing, k, result[k])
                         # Adopt extracted palette into primary/secondary if
@@ -37415,13 +40086,15 @@ function copySpotlightCaption(btn) {{
                             "#000000",
                         ):
                             existing.brand_secondary = pal["secondary"]
+                        _persist_profile(existing)
                         note = (
-                            "Captured from website &mdash; review below and click "
-                            "Save organisation to persist."
+                            "Captured from website and saved to your organisation "
+                            "— Discard beside the preview restores the previous "
+                            "values."
                             if status == "ok"
-                            else "Captured from website (palette and logo only; "
-                            "AI provider not configured, so the voice "
-                            "summary and keywords are empty). Edit and save."
+                            else "Captured from website and saved (palette and "
+                            "logo only; AI provider not configured, so the voice "
+                            "summary and keywords are empty)."
                         )
                         capture_preview = (
                             f'<p class="tag info" style="margin-bottom:20px">{_h(note)}</p>'
@@ -37464,7 +40137,9 @@ function copySpotlightCaption(btn) {{
                         result = {"brand_capture_status": f"error: {e}"}
                     status = (result or {}).get("brand_capture_status", "")
                     if status in ("ok", "ok_heuristic"):
-                        for k in (
+                        # D-15: persist immediately on success, stashing the
+                        # overwritten values for the one-shot Discard undo.
+                        _capture_fields = (
                             "brand_voice_summary",
                             "brand_keywords",
                             "brand_palette_extracted",
@@ -37475,7 +40150,22 @@ function copySpotlightCaption(btn) {{
                             "brand_source_url",
                             "brand_captured_at",
                             "brand_capture_status",
-                        ):
+                        )
+                        _org_analysis_stash_previous(
+                            existing.profile_id,
+                            "brand",
+                            {
+                                k: getattr(existing, k, None)
+                                for k in (
+                                    *_capture_fields,
+                                    "voice_profile",
+                                    "social_links",
+                                    "brand_primary",
+                                    "brand_secondary",
+                                )
+                            },
+                        )
+                        for k in _capture_fields:
                             if k in result:
                                 setattr(existing, k, result[k])
                         vp = result.get("voice_profile") or {}
@@ -37491,12 +40181,14 @@ function copySpotlightCaption(btn) {{
                             existing.brand_primary = pal["primary"]
                         if pal.get("secondary") and existing.brand_secondary in ("", "#000000"):
                             existing.brand_secondary = pal["secondary"]
+                        _persist_profile(existing)
                         note = (
-                            "Re-analysed from website + socials &mdash; review below "
-                            "and click Save organisation to persist."
+                            "Re-analysed from website + socials and saved to your "
+                            "organisation — Discard beside the preview restores "
+                            "the previous values."
                             if status == "ok"
-                            else "Re-analysed (no live signal from the sources we tried). "
-                            "Edit and save."
+                            else "Re-analysed and saved (no live signal from the "
+                            "sources we tried)."
                         )
                         capture_preview = (
                             f'<p class="tag info" style="margin-bottom:20px">{_h(note)}</p>'
@@ -37516,42 +40208,15 @@ function copySpotlightCaption(btn) {{
                 profile = existing
 
             elif action == "analyse_voice":
-                # ---- Voice imitation analysis ----
-                raw_examples = (request.form.get("voice_examples") or "").strip()
-                if not raw_examples:
-                    voice_error = (
-                        '<p class="tag bad" style="margin-bottom:20px">'
-                        "Paste at least 3 captions (one per line) to analyse voice.</p>"
-                    )
-                    profile = existing
-                else:
-                    examples = [e.strip() for e in raw_examples.split("\n") if e.strip()]
-                    if len(examples) < 2:
-                        voice_error = (
-                            '<p class="tag bad" style="margin-bottom:20px">'
-                            "Paste at least 3 captions to get meaningful results.</p>"
-                        )
-                        profile = existing
-                    else:
-                        try:
-                            from mediahub.brand.voice_imitation import analyse_examples as _analyse
-
-                            vp = _analyse(examples)
-                        except Exception as exc:
-                            vp = {}
-                            voice_error = (
-                                f'<p class="tag bad" style="margin-bottom:20px">'
-                                f"Analysis failed: {_h(str(exc))}</p>"
-                            )
-                        if vp:
-                            existing.voice_examples = examples[:20]
-                            existing.voice_profile = vp
-                            voice_preview = (
-                                '<p class="tag info" style="margin-bottom:20px">'
-                                "Voice profile analysed &mdash; review below and click "
-                                "Save organisation to persist.</p>"
-                            )
-                    profile = existing
+                # SRV2-2 — pre-G-5 tabs posted analyse_voice as the ACTION
+                # with only the voice fields in the form; letting it fall
+                # through to the full save would clear every absent field.
+                # The G-5 handler is gone for good — redirect, save nothing.
+                _flash_toast(
+                    "Voice analysis moved — use the Analyse voice button in the form below.",
+                    "info",
+                )
+                return redirect(url_for("organisation_page"))
 
             else:
                 # ---- Save organisation ----
@@ -37628,53 +40293,21 @@ function copySpotlightCaption(btn) {{
                 existing.sponsor_name = (request.form.get("sponsor_name") or "").strip()
                 existing.sponsor_guidelines = (request.form.get("sponsor_guidelines") or "").strip()
 
-                def _hidden_list(name: str) -> list[str]:
-                    raw = (request.form.get(name) or "").strip()
-                    if not raw:
-                        return []
-                    try:
-                        v = json.loads(raw)
-                        if isinstance(v, list):
-                            return [str(x) for x in v]
-                    except Exception:
-                        return []
-                    return []
-
-                def _hidden_dict(name: str) -> dict:
-                    raw = (request.form.get(name) or "").strip()
-                    if not raw:
-                        return {}
-                    try:
-                        v = json.loads(raw)
-                        if isinstance(v, dict):
-                            return v
-                    except Exception:
-                        return {}
-                    return {}
-
-                existing.brand_voice_summary = (
-                    request.form.get("brand_voice_summary") or ""
-                ).strip()
-                existing.brand_logo_url = (request.form.get("brand_logo_url") or "").strip()
-                existing.brand_typography_hint = (
-                    request.form.get("brand_typography_hint") or ""
-                ).strip()
-                existing.brand_source_url = (
-                    request.form.get("brand_source_url_saved") or ""
-                ).strip()
-                existing.brand_captured_at = (request.form.get("brand_captured_at") or "").strip()
-                existing.brand_capture_status = (
-                    request.form.get("brand_capture_status") or ""
-                ).strip()
-                existing.brand_keywords = _hidden_list("brand_keywords_json")
-                existing.brand_phrases_to_use = _hidden_list("brand_phrases_to_use_json")
-                existing.brand_phrases_to_avoid = _hidden_list("brand_phrases_to_avoid_json")
-                existing.brand_palette_extracted = _hidden_dict("brand_palette_extracted_json")
+                # D-15: captured brand DNA persists the moment its analysis
+                # succeeds, so the save form no longer carries it through
+                # hidden inputs — the loaded profile already holds it and a
+                # plain save leaves it untouched.
                 from mediahub.brand.voice_imitation import (
                     analyse_examples as _analyse_voice,
                     redact_pii as _redact_pii,
                 )
 
+                # Snapshot the voice fields BEFORE they are overwritten so a
+                # successful analysis can stash them as the one-shot undo.
+                _prev_voice = {
+                    "voice_examples": existing.voice_examples or [],
+                    "voice_profile": existing.voice_profile or {},
+                }
                 raw_voice_examples = (request.form.get("voice_examples") or "").strip()
                 if raw_voice_examples:
                     voice_lines = [
@@ -37685,21 +40318,7 @@ function copySpotlightCaption(btn) {{
                     existing.voice_examples = voice_lines[:20]
                 else:
                     existing.voice_examples = []
-                vp_from_hidden = _hidden_dict("voice_profile_json")
-                if vp_from_hidden:
-                    existing.voice_profile = vp_from_hidden
-                elif not existing.voice_examples:
                     existing.voice_profile = {}
-                if request.form.get("analyse_voice") and existing.voice_examples:
-                    existing.voice_profile = _analyse_voice(existing.voice_examples)
-                    saved_msg = (
-                        '<p class="tag good" style="margin-bottom:20px">'
-                        "Voice profile analysed and saved.</p>"
-                    )
-                else:
-                    saved_msg = (
-                        '<p class="tag good" style="margin-bottom:20px">Organisation saved.</p>'
-                    )
                 # Persist any social-link edits made on the full form.
                 social_edits: dict[str, str] = {}
                 for key in ("instagram", "facebook", "twitter", "tiktok", "linkedin"):
@@ -37708,38 +40327,65 @@ function copySpotlightCaption(btn) {{
                         social_edits[key] = v
                 if social_edits or (request.form.get("social_links_edited") == "1"):
                     existing.social_links = social_edits
-                # Re-derive the AI operating profile whenever the user
-                # edits the org. Single LLM call; consumers cache-read.
-                try:
-                    from mediahub.brand.derived import derive_operating_profile
-
-                    existing.brand_operating_profile = derive_operating_profile(existing)
-                except Exception:
-                    existing.brand_operating_profile = {
-                        "tone_prose": {},
-                        "achievement_priorities": {},
-                        "type_phrases": {},
-                        "artefact_voice": {},
-                        "status": "error",
-                    }
-                # G-4: if the brand colours actually changed, force-recompute
-                # the derived theme so the chrome + still/motion renderers pick
-                # up the new primary (mirrors the palette-reorder handler).
-                if _palette_changed:
+                # D-15: the analysis persists immediately on success; a
+                # failed or unusable analysis is an honest error and this
+                # request persists NOTHING (no half-saved form, and never a
+                # fabricated voice profile).
+                _voice_problem = ""
+                if request.form.get("analyse_voice"):
+                    if len(existing.voice_examples) < 2:
+                        _voice_problem = (
+                            "Paste at least 3 captions (one per line) to analyse voice."
+                        )
+                    else:
+                        try:
+                            _new_vp = _analyse_voice(existing.voice_examples)
+                        except Exception as exc:
+                            _voice_problem = f"Voice analysis failed: {exc}."
+                        else:
+                            existing.voice_profile = _new_vp
+                            _org_analysis_stash_previous(existing.profile_id, "voice", _prev_voice)
+                            saved_msg = (
+                                '<p class="tag good" style="margin-bottom:20px">'
+                                "Voice profile analysed and saved.</p>"
+                            )
+                else:
+                    saved_msg = (
+                        '<p class="tag good" style="margin-bottom:20px">Organisation saved.</p>'
+                    )
+                if _voice_problem:
+                    voice_error = (
+                        f'<p class="tag bad" style="margin-bottom:20px">'
+                        f"{_h(_voice_problem)} Nothing was saved.</p>"
+                    )
+                else:
+                    # Re-derive the AI operating profile whenever the user
+                    # edits the org. Single LLM call; consumers cache-read.
                     try:
-                        _kit = existing.get_brand_kit()
-                        _kit.ensure_derived_palette(force=True)
-                        existing.brand_kit = _kit.to_dict()
-                    except Exception as e:
-                        log.warning("organisation save: derived palette recompute failed: %s", e)
-                save_profile(existing)
-                if _is_new_profile:
-                    # PC.3: a workspace created by a signed-in user is born
-                    # bound to its creator (ADR-0014).
-                    _bind_creator_if_signed_in(existing.profile_id)
-                # Pin into session so the routing gate unlocks and so
-                # the next session lands on the same org.
-                _pin_active_profile(existing.profile_id)
+                        from mediahub.brand.derived import derive_operating_profile
+
+                        existing.brand_operating_profile = derive_operating_profile(existing)
+                    except Exception:
+                        existing.brand_operating_profile = {
+                            "tone_prose": {},
+                            "achievement_priorities": {},
+                            "type_phrases": {},
+                            "artefact_voice": {},
+                            "status": "error",
+                        }
+                    # G-4: if the brand colours actually changed, force-recompute
+                    # the derived theme so the chrome + still/motion renderers pick
+                    # up the new primary (mirrors the palette-reorder handler).
+                    if _palette_changed:
+                        try:
+                            _kit = existing.get_brand_kit()
+                            _kit.ensure_derived_palette(force=True)
+                            existing.brand_kit = _kit.to_dict()
+                        except Exception as e:
+                            log.warning(
+                                "organisation save: derived palette recompute failed: %s", e
+                            )
+                    _persist_profile(existing)
                 profile = existing
         else:
             # GET: prefer the session-pinned profile; fall back to the
@@ -37832,49 +40478,6 @@ function copySpotlightCaption(btn) {{
                 "<code>data/standards/README.md</code>.</p>"
             )
 
-        # Build the voice-profile summary panel so the user can see what
-        # the engine learned the last time they ran "Analyse voice".
-        vp = profile.voice_profile or {}
-        if vp:
-
-            def _list_chips(items):
-                items = items or []
-                if not items:
-                    return '<span class="muted" style="font-size:12px">&mdash;</span>'
-                return "".join(
-                    f'<span style="display:inline-block;padding:2px 8px;'
-                    f"margin:2px 4px 2px 0;border:1px solid var(--border);"
-                    f'border-radius:999px;font-size:12px">{_h(s)}</span>'
-                    for s in items
-                )
-
-            voice_profile_html = (
-                f'<div style="margin-top:12px;padding:10px 12px;border:1px solid var(--border);'
-                f'border-radius:8px;background:var(--panel)">'
-                f'<div style="font-size:12px;color:var(--ink-dim);margin-bottom:6px">'
-                f"Voice profile (from {len(profile.voice_examples or [])} examples)</div>"
-                f'<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 16px;font-size:13px;margin-bottom:8px">'
-                f"<div>Avg sentence length: <b>{_h(vp.get('sentence_length_avg', '—'))}</b> words</div>"
-                f"<div>P90 sentence length: <b>{_h(vp.get('sentence_length_p90', '—'))}</b> words</div>"
-                f"<div>Emojis / caption: <b>{_h(vp.get('emoji_rate_per_caption', '—'))}</b></div>"
-                f"<div>Hashtags / caption: <b>{_h(vp.get('hashtag_count_avg', '—'))}</b></div>"
-                f"<div>Swimmer address: <b>{_h(vp.get('preferred_swimmer_address', 'first_name'))}</b></div>"
-                f"</div>"
-                f'<div style="font-size:12px;color:var(--ink-dim);margin-top:6px">Openers</div>'
-                f"<div>{_list_chips(vp.get('characteristic_openers'))}</div>"
-                f'<div style="font-size:12px;color:var(--ink-dim);margin-top:6px">Closers</div>'
-                f"<div>{_list_chips(vp.get('characteristic_closers'))}</div>"
-                f'<div style="font-size:12px;color:var(--ink-dim);margin-top:6px">Phrases to avoid</div>'
-                f"<div>{_list_chips(vp.get('forbidden_phrases'))}</div>"
-                f"</div>"
-            )
-        else:
-            voice_profile_html = (
-                '<p class="muted" style="font-size:12px;margin-top:8px">'
-                "No voice profile yet &mdash; paste 5-20 past captions and click "
-                "<b>Analyse voice</b>.</p>"
-            )
-
         # Empty constants — round-7 cleanup. The organisation form used to
         # apply its own inline input styles that overrode the global
         # `input[type=text]` rule, which is why /organisation looked
@@ -37883,6 +40486,38 @@ function copySpotlightCaption(btn) {{
         # the rare wide-form input.
         _input_style = "max-width:480px"
         _ta_style = "max-width:600px"
+
+        # D-15: a just-persisted analysis can be undone — the previous values
+        # ride the session as a one-shot stash, and the Discard button
+        # renders beside whichever preview the stash belongs to.
+        _stash_kind = str(_org_analysis_stash_for(profile.profile_id).get("kind") or "")
+        _discard_title = (
+            "Restores the values from before this analysis. Best-effort undo "
+            "held in your session — it survives one navigation, but not "
+            "signing out or another analysis."
+        )
+        _discard_label = "Discard this analysis — restore previous"
+        # CON2-2 — each Discard button posts its own kind, so a second tab's
+        # newer analysis of the OTHER kind can never be restored by this one.
+        brand_discard_html = ""
+        if _stash_kind == "brand":
+            brand_discard_html = (
+                f'<form method="POST" action="{url_for("organisation_analysis_discard")}" '
+                f'style="margin-top:12px">'
+                f'<button type="submit" name="kind" value="brand" class="btn secondary" '
+                f'title="{_h(_discard_title)}">'
+                f"{_h(_discard_label)}</button></form>"
+            )
+        voice_discard_html = ""
+        if _stash_kind == "voice":
+            # Inside the main save form, so a nested <form> is illegal —
+            # formaction routes this submit to the discard endpoint instead.
+            voice_discard_html = (
+                f'<button type="submit" formaction="{url_for("organisation_analysis_discard")}" '
+                f'name="kind" value="voice" '
+                f'class="btn secondary" style="margin-left:8px" title="{_h(_discard_title)}">'
+                f"{_h(_discard_label)}</button>"
+            )
 
         # ---- Brand DNA preview block (rendered when fields are populated) ----
         def _swatch(hexv: str) -> str:
@@ -37989,25 +40624,9 @@ function copySpotlightCaption(btn) {{
     </div>
   </div>
   {captured_meta}
+  {brand_discard_html}
 </div>
 """
-
-        # Hidden inputs that carry the captured brand fields through the
-        # next form submission so a click on Save persists them.
-        brand_hidden_inputs = (
-            f'<input type="hidden" name="brand_voice_summary" value="{_h(profile.brand_voice_summary or "")}"/>'
-            f'<input type="hidden" name="brand_logo_url" value="{_h(profile.brand_logo_url or "")}"/>'
-            f'<input type="hidden" name="brand_typography_hint" value="{_h(profile.brand_typography_hint or "")}"/>'
-            f'<input type="hidden" name="brand_source_url_saved" value="{_h(profile.brand_source_url or "")}"/>'
-            f'<input type="hidden" name="brand_captured_at" value="{_h(profile.brand_captured_at or "")}"/>'
-            f'<input type="hidden" name="brand_capture_status" value="{_h(profile.brand_capture_status or "")}"/>'
-            f'<input type="hidden" name="brand_keywords_json" value="{_h(json.dumps(profile.brand_keywords or []))}"/>'
-            f'<input type="hidden" name="brand_phrases_to_use_json" value="{_h(json.dumps(profile.brand_phrases_to_use or []))}"/>'
-            f'<input type="hidden" name="brand_phrases_to_avoid_json" value="{_h(json.dumps(profile.brand_phrases_to_avoid or []))}"/>'
-            f'<input type="hidden" name="brand_palette_extracted_json" value="{_h(json.dumps(profile.brand_palette_extracted or {}))}"/>'
-            f'<input type="hidden" name="voice_profile_json" value="{_h(json.dumps(profile.voice_profile or {}))}"/>'
-            f'<input type="hidden" name="voice_examples_json" value="{_h(json.dumps(profile.voice_examples or []))}"/>'
-        )
 
         # ---- Voice profile preview block ----
         voice_profile_html = ""
@@ -38064,8 +40683,6 @@ function copySpotlightCaption(btn) {{
 </div>
 """
 
-        voice_examples_text = "\n".join(profile.voice_examples or [])
-
         # Hoist brand-colour fallbacks into locals so the swatch markup and
         # the colour inputs share one literal each (keeps the inline-hex
         # budget in test_theme_tokens green — the literals live in plain
@@ -38084,7 +40701,7 @@ function copySpotlightCaption(btn) {{
         _org_sec = _org_eff.get("secondary") or profile.brand_secondary or "#000000"
 
         body = f"""
-{saved_msg}{capture_preview}{capture_error}{voice_preview}{voice_error}
+{saved_msg}{capture_preview}{capture_error}{voice_error}
 <section class="mh-hero" data-lane="" style="padding-top:var(--sp-8);padding-bottom:var(--sp-7);margin-bottom:var(--sp-5)">
   <span class="mh-hero-eyebrow">Organisation profile</span>
   <h1>{_h(profile.display_name) if profile.display_name else "Your organisation"}</h1>
@@ -38148,27 +40765,9 @@ function copySpotlightCaption(btn) {{
 
 {brand_preview_html}
 
-<div class="card" style="margin-bottom:20px;border:1px solid rgba(167,139,250,0.4);background:rgba(167,139,250,0.04)">
-  <h2 style="margin-top:0">Analyse voice from past posts</h2>
-  <p class="dim" style="margin-bottom:12px;font-size:13px">Paste 5&ndash;20 recent captions (one per line). MediaHub measures sentence length, emoji density, hashtag style, and extracts opening/closing phrase patterns so generated captions sound like you.</p>
-  <form method="POST" data-loader-text="Analysing voice">
-    <input type="hidden" name="action" value="analyse_voice"/>
-    <input type="hidden" name="profile_id" value="{_h(profile.profile_id)}"/>
-    <input type="hidden" name="display_name" value="{_h(profile.display_name)}"/>
-    <label for="org-voice-examples">Past captions (one per line)</label>
-    <textarea id="org-voice-examples" name="voice_examples" rows="8"
-              placeholder="Paste one caption per line&#10;e.g.&#10;Huge PB for the squad this weekend &mdash; 200 free goes sub-2 for the first time &#127946;&#10;What a meet! Five PBs and a county standard from our junior group. #swimming #clublife"
-              style="max-width:640px">{_h(voice_examples_text)}</textarea>
-    <div style="margin-top:var(--sp-3)"><button type="submit" class="btn">Analyse voice &rarr;</button></div>
-  </form>
-</div>
-
-{voice_profile_html}
-
 <form method="POST">
 <input type="hidden" name="action" value="save"/>
 <input type="hidden" name="profile_id" value="{_h(profile.profile_id)}"/>
-{brand_hidden_inputs}
 
 <div class="card" style="margin-bottom:20px">
   <h2 style="margin-top:0">Identity</h2>
@@ -38201,6 +40800,7 @@ function copySpotlightCaption(btn) {{
       <label>Caption language</label>
       <select name="language" style="{_input_style}">{language_opts}</select>
       <p style="font-size:12px;color:var(--ink-dim);margin-top:4px">Captions and alt text are written in this language. Bilingual options write every caption in English with a side-by-side translation, approved together in one pass.</p>
+      <p style="font-size:12px;color:var(--ink-muted);margin-top:4px">This affects generated captions only &mdash; change the app language from the Interface language control.</p>
     </div>
     <div>
       <label>Result file codes</label>
@@ -38287,7 +40887,8 @@ function copySpotlightCaption(btn) {{
   </div>
   <div style="margin-top:12px">
     <button type="submit" name="analyse_voice" value="1" class="btn">Analyse voice</button>
-    <span class="muted" style="font-size:12px;margin-left:8px">Re-runs the analyser on the captions above.</span>
+    {voice_discard_html}
+    <span class="muted" style="font-size:12px;margin-left:8px">Analyses and saves in one step.</span>
   </div>
   {voice_profile_html}
 </div>
@@ -38403,6 +41004,48 @@ function copySpotlightCaption(btn) {{
   </form>
 </div>"""
         return _layout("Organisation", body, active="settings")
+
+    @app.route("/organisation/analysis/discard", methods=["POST"])
+    def organisation_analysis_discard():
+        """D-15: one-shot undo for a just-persisted /organisation analysis.
+
+        Consumes the session stash written when "Re-analyse brand" or
+        "Analyse voice" saved its result, restores the stashed previous
+        values onto the profile, and bounces back to the editor. Best-effort
+        by design: a missing stash (expired session, already used) is a
+        friendly no-op, never an error page."""
+        stash = session.get(_ORG_ANALYSIS_STASH_KEY)
+        if not isinstance(stash, dict) or not stash.get("profile_id"):
+            session.pop(_ORG_ANALYSIS_STASH_KEY, None)
+            _flash_toast("Nothing to discard — no analysis is waiting.", "error")
+            return redirect(url_for("organisation_page"))
+        # CON2-2 — with two tabs open, a newer analysis of the OTHER kind
+        # overwrites the stash; a stale Discard button must not restore that
+        # snapshot. Each button posts its kind; a mismatch no-ops honestly
+        # (and leaves the stash for the button it actually belongs to). An
+        # absent kind (pre-deploy tab) keeps the legacy behaviour.
+        posted_kind = str(request.form.get("kind") or "").strip()
+        if posted_kind and posted_kind != str(stash.get("kind") or ""):
+            _flash_toast("That analysis was superseded by a newer one — nothing restored.", "error")
+            return redirect(url_for("organisation_page"))
+        pid = str(stash.get("profile_id"))
+        if not _session_can_use_profile(pid):
+            # PC.3: a bound org answers like a nonexistent one to outsiders.
+            abort(404)
+        prof = load_profile(pid)
+        if prof is None:
+            abort(404)
+        # One-shot: the stash is consumed by the restore it belongs to.
+        session.pop(_ORG_ANALYSIS_STASH_KEY, None)
+        fields = stash.get("fields")
+        if isinstance(fields, dict) and fields:
+            for name, value in fields.items():
+                if hasattr(prof, name):
+                    setattr(prof, name, value)
+            save_profile(prof)
+        kind_label = "brand" if stash.get("kind") == "brand" else "voice"
+        _flash_toast(f"Analysis discarded — the previous {kind_label} values are back.")
+        return redirect(url_for("organisation_page"))
 
     # ---- /organisation/setup &mdash; first-run AI brand-DNA flow -----------
     #
@@ -38531,14 +41174,14 @@ function copySpotlightCaption(btn) {{
             f"{err_html}"
             '<div class="card" style="padding:24px 28px;max-width:440px">'
             f'<form method="post" action="{action_url}" data-loader-text="Working&hellip;">'
-            '<label style="display:block;font-size:12px;text-transform:uppercase;'
+            '<label for="auth_email" style="display:block;font-size:12px;text-transform:uppercase;'
             'letter-spacing:0.06em;color:var(--ink-muted);margin-bottom:6px">Email</label>'
-            f'<input type="email" name="email" autocomplete="email" required '
+            f'<input type="email" id="auth_email" name="email" autocomplete="email" required '
             f'value="{_h(prefill_email)}" '
             'style="width:100%;margin-bottom:16px" placeholder="you@club.org" />'
-            '<label style="display:block;font-size:12px;text-transform:uppercase;'
+            '<label for="auth_password" style="display:block;font-size:12px;text-transform:uppercase;'
             'letter-spacing:0.06em;color:var(--ink-muted);margin-bottom:6px">Password</label>'
-            '<input type="password" name="password" required '
+            '<input type="password" id="auth_password" name="password" required '
             + (
                 'autocomplete="new-password" minlength="8" '
                 if min_password
@@ -38668,8 +41311,10 @@ function copySpotlightCaption(btn) {{
                 "One account runs your club&rsquo;s content. Free to start &mdash; "
                 "3 runs a month, no card required. "
                 "Before you start, have your club&rsquo;s website, social profiles, and brand "
-                "guidelines to hand &mdash; the engine needs them to produce on-brand content "
-                "(setup takes about 5&nbsp;minutes)."
+                "guidelines to hand &mdash; the engine needs them to produce on-brand content. "
+                "Right after you sign up we&rsquo;ll walk you through pasting those links (or "
+                "uploading a guidelines document) so the AI can build your brand kit &mdash; "
+                "most fields are optional, and the whole thing takes about 5&nbsp;minutes."
             ),
             action_url=url_for("signup_post"),
             submit_label="Create account",
@@ -38767,15 +41412,13 @@ function copySpotlightCaption(btn) {{
                 record_referred_signup(ref_code, user.email)
             except Exception:
                 log.warning("referral signup recording failed", exc_info=True)
-        # First-run routing (A-4): a brand-new account has no workspace yet,
-        # so sending it to /make just trips the org-ready gate, which bounces
-        # to /sign-in and — on a shared deployment — falsely reads "no
-        # organisations exist". Route straight to setup instead. An account
-        # that signed up via an invite already has an accessible workspace, so
-        # send it to the picker to choose/enter it.
-        accessible = [p for p in list_profiles() if _session_can_use_profile(p.profile_id)]
-        if accessible:
-            return redirect(url_for("sign_in_page"))
+        # First-run routing (A-4 + A1, org-access audit): an account that
+        # signed up via an invite already belongs to a workspace — pin it and
+        # land straight in the app, never on the picker. A brand-new account
+        # with no membership goes straight to setup to create its own club
+        # (sending it to /make would just trip the org-ready gate).
+        if _auto_pin_member_org():
+            return redirect(url_for("make_page"))
         return redirect(url_for("organisation_setup"))
 
     @app.route("/login", methods=["GET"])
@@ -38864,6 +41507,10 @@ function copySpotlightCaption(btn) {{
         session.clear()
         _auth.login_user(user)
         _sec_event("login", actor=user.email)
+        # A1 (org-access audit): bind the member's own organisation into the
+        # session at sign-in so they land straight on their club — the picker
+        # is never part of a member's sign-in flow.
+        _auto_pin_member_org()
         nxt = _safe_next(request.args.get("next") or request.form.get("next"))
         # Re-acceptance check: accounts whose recorded Terms acceptance
         # predates TERMS_VERSION (or legacy accounts with no record) are
@@ -38875,6 +41522,25 @@ function copySpotlightCaption(btn) {{
         session["terms_ok_version"] = _legal.TERMS_VERSION
         return redirect(nxt or url_for("make_page"))
 
+    def _login_2fa_page(error: str = "", status: int = 200):
+        """The one /login/2fa surface: errors re-render this same form inline
+        (input cleared + autofocused) — never a dead-end interstitial."""
+        error_html = f'<p class="tag bad" role="alert">{_h(error)}</p>' if error else ""
+        body = f"""
+<div class="card" style="max-width:420px;margin:40px auto">
+  <h2>Two-factor code</h2>
+  <p class="muted">Enter the 6-digit code from your authenticator app — or, if you have lost
+  your device, one of your recovery codes (looks like XXXX-XXXX; each works once).</p>
+  {error_html}
+  <form method="post" action="{url_for("login_2fa")}">
+    <input type="text" name="totp" autocomplete="one-time-code" maxlength="12" required autofocus>
+    <button class="btn" type="submit">Verify</button>
+  </form>
+  <p style="margin-top:14px"><a href="{url_for("login_2fa", cancel=1)}">&larr; Back to log in</a></p>
+</div>
+"""
+        return _layout("Two-factor", body, active=""), status
+
     @app.route("/login/2fa", methods=["GET", "POST"])
     def login_2fa():
         from mediahub.compliance.security_log import record_event as _sec_event
@@ -38883,43 +41549,175 @@ function copySpotlightCaption(btn) {{
         if not email:
             return redirect(url_for("login_page"))
         if request.method == "GET":
-            body = f"""
-<div class="card" style="max-width:420px;margin:40px auto">
-  <h2>Two-factor code</h2>
-  <p class="muted">Enter the 6-digit code from your authenticator app.</p>
-  <form method="post" action="{url_for("login_2fa")}">
-    <input type="text" name="totp" inputmode="numeric" autocomplete="one-time-code" maxlength="7" required autofocus>
-    <button class="btn" type="submit">Verify</button>
-  </form>
-</div>
-"""
-            return _layout("Two-factor", body, active="")
+            if request.args.get("cancel"):
+                # Back to log in: abandon the half-finished 2FA login.
+                session.pop("pending_2fa_email", None)
+                return redirect(url_for("login_page"))
+            return _login_2fa_page()
         if _auth.login_locked(email):
-            return _layout(
-                "Two-factor",
-                '<div class="card"><p class="tag bad">Too many failed attempts — try again later.</p></div>',
-                active="",
-            ), 429
-        user = _user_store().get(email)
+            return _login_2fa_page("Too many failed attempts — try again in 15 minutes.", 429)
+        store = _user_store()
+        user = store.get(email)
         code = request.form.get("totp") or ""
-        if user is None or not _auth.totp_verify(user.totp_secret, code):
+        ok = user is not None and _auth.totp_verify(user.totp_secret, code)
+        used_recovery = False
+        if not ok and user is not None:
+            # Same input doubles as the recovery-code field: a consumed code
+            # (single-use, hash removed on success) logs in like a TOTP match.
+            used_recovery = store.consume_recovery_code(email, code)
+            ok = used_recovery
+        if not ok:
             locked_now = _auth.record_login_failure(email)
             _sec_event(
                 "login_lockout" if locked_now else "login_2fa_failed",
                 actor=email,
                 outcome="lockout" if locked_now else "failed",
             )
-            return _layout(
-                "Two-factor",
-                f'<div class="card"><p class="tag bad">That code didn\'t match.</p>'
-                f'<p><a href="{url_for("login_2fa")}">Try again</a></p></div>',
-                active="",
-            ), 401
+            return _login_2fa_page("That code did not match — try again.", 401)
         _auth.clear_login_failures(email)
         session.clear()
         _auth.login_user(user)
-        _sec_event("login", actor=user.email, detail="2fa")
+        _sec_event("login", actor=user.email, detail="2fa_recovery" if used_recovery else "2fa")
+        # A1: same direct-to-their-club landing as the password-only path.
+        _auto_pin_member_org()
         return redirect(url_for("make_page"))
+
+    # Tiny clipboard helper shared by the 2FA setup + recovery-code pages.
+    # Plain string (not an f-string), so single braces are literal.
+    _TWOFA_COPY_JS = """
+<script>
+document.addEventListener('click', function (ev) {
+  var btn = ev.target.closest('[data-copy-target]');
+  if (!btn) return;
+  var el = document.getElementById(btn.getAttribute('data-copy-target'));
+  if (!el) return;
+  var text = (el.textContent || '').trim();
+  var orig = btn.textContent;
+  var done = function (ok) {
+    btn.textContent = ok ? 'Copied' : 'Copy failed';
+    setTimeout(function () { btn.textContent = orig; }, 1800);
+  };
+  if (navigator.clipboard && window.isSecureContext) {
+    navigator.clipboard.writeText(text).then(function () { done(true); }, function () { done(false); });
+  } else {
+    var ta = document.createElement('textarea');
+    ta.value = text; ta.style.position = 'fixed'; ta.style.left = '-9999px';
+    document.body.appendChild(ta); ta.select();
+    try { done(document.execCommand('copy')); } catch (e) { done(false); }
+    document.body.removeChild(ta);
+  }
+});
+</script>
+"""
+
+    def _twofa_no_store(page_html: str, status: int = 200):
+        """2FA pages that carry the secret or plaintext recovery codes must
+        never land in a shared cache."""
+        resp = make_response(page_html, status)
+        resp.headers["Cache-Control"] = "no-store"
+        return resp
+
+    def _twofa_setup_body(email: str, error: str = "") -> str:
+        """The enrolment page: QR of the otpauth URI + copyable secret."""
+        from mediahub.web import qr as _qr
+
+        secret = session.get("totp_setup_secret") or _auth.totp_generate_secret()
+        session["totp_setup_secret"] = secret
+        uri = _auth.totp_provisioning_uri(secret, email)
+        qr_html = ""
+        if _qr.is_available():
+            try:
+                # Inline SVG on this already-authenticated page: the secret is
+                # never exposed on a fetchable URL and nothing touches the
+                # content-addressed QR export cache on disk.
+                svg = _qr.qr_svg(uri, scale=4, border=3)
+                qr_html = (
+                    "<p>Scan this QR code with your authenticator app "
+                    "(Aegis, Google Authenticator, 1Password…):</p>"
+                    f'<div style="display:inline-block;line-height:0;border-radius:8px;overflow:hidden">{svg}</div>'
+                )
+            except Exception:
+                qr_html = ""
+        if not qr_html:
+            qr_html = "<p>Add this secret to your authenticator app (Aegis, Google Authenticator, 1Password…):</p>"
+        error_html = f'<p class="tag bad" role="alert">{_h(error)}</p>' if error else ""
+        return (
+            f"""
+<div class="card" style="max-width:560px;margin:40px auto">
+  <h2>Set up two-factor authentication</h2>
+  {error_html}
+  {qr_html}
+  <p>Or enter the secret by hand:</p>
+  <p><code id="totp-setup-secret">{_h(secret)}</code>
+  <button class="btn secondary" type="button" data-copy-target="totp-setup-secret">Copy secret</button></p>
+  <p class="muted" style="word-break:break-all">{_h(uri)}</p>
+  <form method="post" action="{url_for("account_2fa")}">
+    <input type="hidden" name="action" value="enable">
+    <label>Enter the current 6-digit code to confirm<br><input type="text" name="totp" inputmode="numeric" autocomplete="one-time-code" maxlength="7" required autofocus></label>
+    <button class="btn" type="submit">Enable 2FA</button>
+  </form>
+</div>
+"""
+            + _TWOFA_COPY_JS
+        )
+
+    def _twofa_enabled_body(user, error: str = "", error_action: str = "") -> str:
+        """The 2FA-on page: disable form + recovery-code status/regenerate."""
+        n = len(user.recovery_codes)
+        if n:
+            codes_note = (
+                f"<p>You have <strong>{n}</strong> unused recovery "
+                f"code{'s' if n != 1 else ''} left. Each one logs you in once if you "
+                "lose your authenticator device.</p>"
+            )
+        else:
+            codes_note = (
+                '<p class="tag bad">You have no recovery codes left — without them, '
+                "losing your authenticator device locks you out. Issue a fresh set now.</p>"
+            )
+        error_html = f'<p class="tag bad" role="alert">{_h(error)}</p>' if error else ""
+        disable_focus = " autofocus" if error_action == "disable" else ""
+        regen_focus = " autofocus" if error_action == "regenerate" else ""
+        return f"""
+<div class="card" style="max-width:560px;margin:40px auto">
+  <h2>Two-factor authentication is <span class="tag ok">on</span></h2>
+  {error_html}
+  <form method="post" action="{url_for("account_2fa")}">
+    <input type="hidden" name="action" value="disable">
+    <label>Current code to switch it off<br><input type="text" name="totp" inputmode="numeric" autocomplete="one-time-code" maxlength="7" required{disable_focus}></label>
+    <button class="btn secondary" type="submit">Disable 2FA</button>
+  </form>
+  <h3 style="margin-top:24px">Recovery codes</h3>
+  {codes_note}
+  <form method="post" action="{url_for("account_2fa")}">
+    <input type="hidden" name="action" value="regenerate">
+    <label>Current code to issue a fresh set<br><input type="text" name="totp" inputmode="numeric" autocomplete="one-time-code" maxlength="7" required{regen_focus}></label>
+    <button class="btn secondary" type="submit">Regenerate recovery codes</button>
+  </form>
+  <p class="muted">Regenerating replaces every unused code — the new set is shown once.</p>
+</div>
+"""
+
+    def _twofa_codes_page(codes: list[str], heading: str):
+        """Show the plaintext recovery codes exactly once (never persisted)."""
+        lines = "\n".join(codes)
+        body = (
+            f"""
+<div class="card" style="max-width:560px;margin:40px auto">
+  <h2>{heading}</h2>
+  <p><strong>Save these recovery codes now — this is the only time they are shown.</strong>
+  Each code logs you in once if you lose your authenticator device. Keep them somewhere
+  safe, such as a password manager. They replace any codes issued before.</p>
+  <code id="recovery-codes" style="display:block;white-space:pre;font-size:15px;line-height:1.9;padding:12px 16px">{_h(lines)}</code>
+  <p style="margin-top:12px">
+    <button class="btn" type="button" data-copy-target="recovery-codes">Copy all codes</button>
+    <a class="btn secondary" href="{url_for("account_2fa")}">Done &mdash; back to two-factor settings</a>
+  </p>
+</div>
+"""
+            + _TWOFA_COPY_JS
+        )
+        return _twofa_no_store(_layout("Two-factor", body, active=""))
 
     @app.route("/account/2fa", methods=["GET", "POST"])
     def account_2fa():
@@ -38934,67 +41732,100 @@ function copySpotlightCaption(btn) {{
             return redirect(url_for("login_page"))
         if request.method == "POST":
             action = request.form.get("action") or ""
+            code = request.form.get("totp") or ""
             if action == "enable":
                 secret = session.get("totp_setup_secret") or ""
-                if secret and _auth.totp_verify(secret, request.form.get("totp") or ""):
+                if secret and _auth.totp_verify(secret, code):
                     store.set_totp(email, secret)
+                    # Issue the one-time recovery codes: only salted hashes are
+                    # persisted; the plaintext is shown once on the next page.
+                    codes = _auth.recovery_generate_codes()
+                    store.set_recovery_codes(email, [_auth.recovery_hash(c) for c in codes])
                     session.pop("totp_setup_secret", None)
                     _sec_event("totp_enabled", actor=email)
-                    return redirect(url_for("account_2fa"))
-                return _layout(
-                    "Two-factor",
-                    '<div class="card"><p class="tag bad">Code didn\'t match — scan the secret again and retry.</p>'
-                    f'<p><a href="{url_for("account_2fa")}">Back</a></p></div>',
-                    active="",
-                ), 400
+                    return _twofa_codes_page(codes, "Two-factor authentication is on")
+                # Inline re-render of the same setup page (QR + secret intact —
+                # the session still holds the pending secret), not a dead end.
+                return _twofa_no_store(
+                    _layout(
+                        "Two-factor",
+                        _twofa_setup_body(
+                            email, error="That code did not match — scan the code again and retry."
+                        ),
+                        active="",
+                    ),
+                    400,
+                )
             if action == "disable":
-                if user.totp_secret and _auth.totp_verify(
-                    user.totp_secret, request.form.get("totp") or ""
-                ):
-                    store.set_totp(email, "")
+                if user.totp_secret and _auth.totp_verify(user.totp_secret, code):
+                    store.set_totp(email, "")  # also drops the recovery-code hashes
                     _sec_event("totp_disabled", actor=email)
                     return redirect(url_for("account_2fa"))
                 return _layout(
                     "Two-factor",
-                    '<div class="card"><p class="tag bad">Enter a valid current code to disable 2FA.</p>'
-                    f'<p><a href="{url_for("account_2fa")}">Back</a></p></div>',
+                    _twofa_enabled_body(
+                        user,
+                        error="Enter a valid current code to switch 2FA off.",
+                        error_action="disable",
+                    ),
+                    active="",
+                ), 400
+            if action == "regenerate":
+                if user.totp_secret and _auth.totp_verify(user.totp_secret, code):
+                    codes = _auth.recovery_generate_codes()
+                    store.set_recovery_codes(email, [_auth.recovery_hash(c) for c in codes])
+                    _sec_event("totp_recovery_regenerated", actor=email)
+                    return _twofa_codes_page(codes, "Fresh recovery codes")
+                return _layout(
+                    "Two-factor",
+                    _twofa_enabled_body(
+                        user,
+                        error="Enter a valid current code to issue fresh recovery codes.",
+                        error_action="regenerate",
+                    ),
                     active="",
                 ), 400
             return jsonify({"error": "unknown action"}), 400
         if user.totp_secret:
-            body = f"""
-<div class="card" style="max-width:520px;margin:40px auto">
-  <h2>Two-factor authentication is <span class="tag ok">on</span></h2>
-  <form method="post" action="{url_for("account_2fa")}">
-    <input type="hidden" name="action" value="disable">
-    <label>Current code to switch it off<br><input type="text" name="totp" inputmode="numeric" maxlength="7" required></label>
-    <button class="btn secondary" type="submit">Disable 2FA</button>
-  </form>
-</div>
-"""
-        else:
-            secret = session.get("totp_setup_secret") or _auth.totp_generate_secret()
-            session["totp_setup_secret"] = secret
-            uri = _auth.totp_provisioning_uri(secret, email)
-            body = f"""
-<div class="card" style="max-width:560px;margin:40px auto">
-  <h2>Set up two-factor authentication</h2>
-  <p>Add this secret to your authenticator app (Aegis, Google Authenticator, 1Password…):</p>
-  <p><code>{_h(secret)}</code></p>
-  <p class="muted" style="word-break:break-all">{_h(uri)}</p>
-  <form method="post" action="{url_for("account_2fa")}">
-    <input type="hidden" name="action" value="enable">
-    <label>Enter the current 6-digit code to confirm<br><input type="text" name="totp" inputmode="numeric" maxlength="7" required></label>
-    <button class="btn" type="submit">Enable 2FA</button>
-  </form>
-</div>
-"""
-        return _layout("Two-factor", body, active="")
+            return _layout("Two-factor", _twofa_enabled_body(user), active="")
+        return _twofa_no_store(_layout("Two-factor", _twofa_setup_body(email), active=""))
 
     @app.route("/logout", methods=["GET", "POST"])
     def logout():
-        _auth.logout_user()
-        session.pop("terms_ok_version", None)
+        """End the account (or operator) session.
+
+        POST performs the logout — the state change rides the app-wide CSRF
+        token like every other form (P3, org-access audit). GET only renders
+        a confirmation page, so a cross-site link can no longer end (or
+        probe) a session. Logout also revokes server-side: the account's
+        session epoch moves on (dev sessions: the revocation watermark), so
+        a replayed pre-logout cookie is dead, and the WHOLE session is
+        cleared — the org pin must never outlive the identity that earned it.
+        """
+        if request.method == "GET":
+            body = (
+                '<div class="card" style="max-width:420px;margin:40px auto;padding:24px 28px">'
+                "<h2>Sign out?</h2>"
+                '<p class="dim" style="font-size:13px">This ends your session on every '
+                "device you are signed in on.</p>"
+                f'<form method="post" action="{url_for("logout")}">'
+                '<button type="submit" class="btn" style="margin-top:12px;width:100%">'
+                "Sign out</button></form>"
+                f'<div class="dim" style="font-size:13px;margin-top:14px;text-align:center">'
+                f'<a href="{url_for("home")}" style="color:var(--accent)">Cancel</a></div>'
+                "</div>"
+            )
+            return _layout("Sign out", body, active="")
+        from mediahub.compliance.security_log import record_event as _sec_event
+
+        email = _auth.current_user_email()
+        if email:
+            _user_store().bump_session_epoch(email)
+            _sec_event("logout", actor=email)
+        if _auth.is_dev_operator():
+            _auth.revoke_dev_sessions()
+            _sec_event("logout", actor="dev_operator")
+        session.clear()
         return redirect(url_for("home"))
 
     # ---- PC.14 — password reset + email verification --------------------
@@ -39370,7 +42201,7 @@ function copySpotlightCaption(btn) {{
 
     # ---- /operator/commercial — Phase C sell-side console (PC.4 + PC.6) ----
     # Operator-only, exactly like /developer: non-operator sessions are sent to
-    # the (public, passwordless) developer sign-in. It holds commercially
+    # the username+password developer sign-in (ADR-0019). It holds commercially
     # sensitive data (quotes, pipeline) so it must never render for org users.
 
     def _require_operator():
@@ -40313,22 +43144,22 @@ what you're doing, what they should do.</p>
                     else '<div class="dim mh-cta-note">Included</div>'
                 )
             else:
-                if not configured:
+                if not _billing.plan_purchasable(tier.plan):
+                    # J-15: a tier that can't be bought here (billing not
+                    # configured, or no price wired for it) gets a live route
+                    # to a human — never a dead "Not yet available" pill that
+                    # leaves a treasurer with nothing to click.
                     cta = (
-                        '<div class="btn secondary mh-cta" '
-                        'style="pointer-events:none;opacity:0.6" '
-                        'title="' + _billing.NOT_CONFIGURED_MESSAGE + '">Unavailable</div>'
+                        '<a class="btn secondary mh-cta" '
+                        f'href="mailto:{_legal.CONTACT_EMAIL}'
+                        '?subject=MediaHub%20club%20pricing">'
+                        "Talk to us about pricing</a>"
                     )
                 elif not signed_in:
                     cta = (
                         f'<a class="btn mh-cta" '
                         f'href="{url_for("login_page", next=url_for("pricing_page"))}">'
                         "Log in to upgrade</a>"
-                    )
-                elif not _billing.plan_purchasable(tier.plan):
-                    cta = (
-                        '<div class="btn secondary mh-cta" '
-                        'style="pointer-events:none;opacity:0.6">Not yet available</div>'
                     )
                 else:
                     # CCR 2013: route through the pre-contract information
@@ -40427,7 +43258,7 @@ what you're doing, what they should do.</p>
             '<span class="mh-hero-eyebrow">Pricing</span>'
             '<h1>Simple <em class="editorial">plans</em> for every club.</h1>'
             '<p class="lede">Start free. Upgrade when your club is posting in earnest. '
-            "Annual prepay keeps it cheaper.</p>"
+            "Simple annual pricing.</p>"
             "</section>"
             '<div id="mh-pricing" class="mh-pricing" data-period="annual">'
             f"{toggle}"
@@ -40460,7 +43291,10 @@ what you're doing, what they should do.</p>
                 "You&rsquo;re on the Free plan with full access to the core "
                 "features. There&rsquo;s nothing to manage here on this deployment."
                 "</p>"
+                '<div style="display:flex;gap:10px;flex-wrap:wrap">'
                 f'<a class="btn secondary" href="{url_for("home")}">Back to home</a>'
+                f'<a class="btn secondary" href="{url_for("pricing_page")}">See plans &amp; pricing &rarr;</a>'
+                "</div>"
                 "</div>"
             )
             return _layout("Billing", body, active="signin")
@@ -40480,16 +43314,21 @@ what you're doing, what they should do.</p>
                 "<strong>Invoices &amp; receipts:</strong> every payment's invoice "
                 "is in the portal too — download the PDF for the club's expense "
                 "records.</div>"
+                '<div class="dim" style="font-size:12px;margin-top:6px">'
+                f'<a href="{url_for("pricing_page")}">See plans &amp; pricing &rarr;</a> '
+                "&mdash; compare tiers before switching.</div>"
             )
         elif _auth.is_premium(user.plan):
             manage_html = (
                 '<div class="dim" style="font-size:13px">'
                 "Your plan is active. A management link will appear here once "
                 "your first payment is processed.</div>"
+                '<div class="dim" style="font-size:12px;margin-top:6px">'
+                f'<a href="{url_for("pricing_page")}">See plans &amp; pricing &rarr;</a></div>'
             )
         else:
             manage_html = (
-                f'<a class="btn" href="{url_for("pricing_page")}">See plans &rarr;</a>'
+                f'<a class="btn" href="{url_for("pricing_page")}">See plans &amp; pricing &rarr;</a>'
                 '<div class="dim" style="font-size:12px;margin-top:10px">'
                 "Upgrade to unlock unlimited runs and more brand profiles.</div>"
             )
@@ -40804,6 +43643,22 @@ what you're doing, what they should do.</p>
         # signing in resumes the page the user was heading to.
         _next_val = _safe_next(request.args.get("next"))
 
+        # A1 (org-access audit): a signed-in member with exactly one
+        # organisation never routes through the picker — /sign-in IS their
+        # club, so pin it and continue to the app (or the threaded next).
+        # A pending error flash still renders the page so the message isn't
+        # lost; the rare multi-org account keeps a picker that the server
+        # filter above confines to its own workspaces; the dev operator
+        # keeps the full picker (cross-org roaming is operator-only).
+        if (
+            len(profiles) == 1
+            and _auth.current_user_email()
+            and not _auth.is_dev_operator()
+            and not session.get("sign_in_error")
+        ):
+            _pin_active_profile(profiles[0].profile_id)
+            return redirect(_next_val or url_for("make_page"))
+
         # Surface any error flashed by sign_in_post / a delete bounce / a
         # signed-out share-target (silent failures fixed). Computed up here so it
         # renders on BOTH the empty state and the picker.
@@ -41042,8 +43897,29 @@ what you're doing, what they should do.</p>
 
     @app.route("/sign-out", methods=["GET", "POST"])
     def sign_out():
-        """Clear the active profile pin and return to the sign-in picker."""
+        """Clear the active profile pin and return to the sign-in picker.
+
+        POST-only for the state change (same CSRF rationale as /logout);
+        GET renders a confirmation. Only anonymous pilot sessions and the
+        dev operator see this control — a member's org access is bound to
+        their account, so their exit is /logout.
+        """
+        if request.method == "GET":
+            body = (
+                '<div class="card" style="max-width:420px;margin:40px auto;padding:24px 28px">'
+                "<h2>Leave this organisation?</h2>"
+                '<p class="dim" style="font-size:13px">Your work is kept — you can '
+                "re-enter the organisation from the picker at any time.</p>"
+                f'<form method="post" action="{url_for("sign_out")}">'
+                '<button type="submit" class="btn" style="margin-top:12px;width:100%">'
+                "Leave organisation</button></form>"
+                f'<div class="dim" style="font-size:13px;margin-top:14px;text-align:center">'
+                f'<a href="{url_for("home")}" style="color:var(--accent)">Cancel</a></div>'
+                "</div>"
+            )
+            return _layout("Leave organisation", body, active="")
         session.pop("active_profile_id", None)
+        session.pop("login_seen_at", None)
         session.pop("sign_in_error", None)
         return redirect(url_for("sign_in_page"))
 
@@ -41415,7 +44291,17 @@ what you're doing, what they should do.</p>
         store = _tenancy.MembershipStore()
         user_email = _auth.current_user_email()
         is_operator = _auth.is_dev_operator()
-        can_admin = is_operator or bool(user_email and store.is_active_owner(user_email, pid))
+
+        def _is_admin() -> bool:
+            """Owner-or-operator, resolved from the per-request membership
+            snapshot (one ledger read, shared with the rest of the render)
+            instead of a fresh ``store`` read each time."""
+            if is_operator:
+                return True
+            m = _snap_membership(_memberships_snapshot(), user_email, pid)
+            return bool(m and m.status == _tenancy.STATUS_ACTIVE and m.role == _tenancy.ROLE_OWNER)
+
+        can_admin = _is_admin()
 
         notice, error = "", ""
         if request.method == "POST":
@@ -41426,31 +44312,71 @@ what you're doing, what they should do.</p>
             try:
                 if action == "add":
                     role = (request.form.get("role") or _tenancy.ROLE_MEMBER).strip().lower()
+                    # Two forms POST action=add: the "Add a member" form (which
+                    # carries via=add_form) and the per-row change-role picker
+                    # (which does not). Read the prior row once so we can tell a
+                    # brand-new invite from an edit of an existing membership and
+                    # behave correctly — and safely — for each.
+                    prior = store.get(target, pid)
+                    is_edit = prior is not None and prior.status != _tenancy.STATUS_REMOVED
+                    # Validate the address only when creating a NEW membership.
+                    # Reject one that can never activate (e.g. "coach@club" with no
+                    # TLD — the store only checks for an "@", so it would sit
+                    # "invited" forever) or that hides a control / line-separator
+                    # character (U+2028/U+2029/U+0085 split the JSON-lines ledger
+                    # on read-back, silently losing the row after a "success").
+                    # An edit targets a row that already exists, so re-validating
+                    # would wedge the role picker of a legacy dotless address.
+                    if not is_edit:
+                        if not _auth._looks_like_email(target) or any(
+                            (ord(ch) < 0x20 or ch in "\u2028\u2029\u0085") for ch in target
+                        ):
+                            raise _tenancy.TenancyError(
+                                "Enter a valid email address (like coach@club.org)."
+                            )
+                        if len(target) > 254:  # RFC 5321 address ceiling
+                            raise _tenancy.TenancyError("That email address is too long.")
+                    # The "Add a member" form adds someone new — it must never be a
+                    # silent role change. If the address is already an active
+                    # member, say so instead of demoting them to the form's default
+                    # seat; role changes go through the per-row picker.
+                    if (
+                        (request.form.get("via") or "").strip() == "add_form"
+                        and prior
+                        and prior.status == _tenancy.STATUS_ACTIVE
+                    ):
+                        raise _tenancy.TenancyError(
+                            f"{prior.email} is already a member — use the role "
+                            "selector in their row to change their role."
+                        )
                     # Don't let the upsert demote the last active owner to a
                     # non-owner seat — that would leave the workspace with no
                     # admin (the same invariant ``remove`` protects).
-                    if role != _tenancy.ROLE_OWNER:
-                        cur = store.get(target, pid)
-                        if (
-                            cur
-                            and cur.status == _tenancy.STATUS_ACTIVE
-                            and cur.role == _tenancy.ROLE_OWNER
-                        ):
-                            norm_target = _tenancy.normalize_email(target)
-                            others = [
-                                x
-                                for x in store.list_for_profile(pid)
-                                if x.role == _tenancy.ROLE_OWNER
-                                and x.status == _tenancy.STATUS_ACTIVE
-                                and x.email != norm_target
-                            ]
-                            if not others:
-                                raise _tenancy.TenancyError(
-                                    "Make another member an owner before changing "
-                                    "the last owner's role."
-                                )
+                    if (
+                        role != _tenancy.ROLE_OWNER
+                        and prior
+                        and prior.status == _tenancy.STATUS_ACTIVE
+                        and prior.role == _tenancy.ROLE_OWNER
+                    ):
+                        norm_target = _tenancy.normalize_email(target)
+                        others = [
+                            x
+                            for x in store.list_for_profile(pid)
+                            if x.role == _tenancy.ROLE_OWNER
+                            and x.status == _tenancy.STATUS_ACTIVE
+                            and x.email != norm_target
+                        ]
+                        if not others:
+                            raise _tenancy.TenancyError(
+                                "Make another member an owner before changing "
+                                "the last owner's role."
+                            )
                     has_account = _user_store().get(target) is not None
-                    inviter = user_email or _auth._dev_operator_email()
+                    # Stamp the inviter only on a NEW row. On an edit pass "" so
+                    # the store carries the original inviter forward — the column
+                    # must show who actually invited them, not whoever last
+                    # touched their role.
+                    inviter = "" if is_edit else (user_email or _auth._dev_operator_email())
                     m = store.add(
                         target,
                         pid,
@@ -41461,7 +44387,20 @@ what you're doing, what they should do.</p>
                     )
                     _invalidate_memberships_snapshot()
                     if m.status == _tenancy.STATUS_ACTIVE:
-                        notice = f"{m.email} added as {m.role}."
+                        notice = (
+                            f"{m.email} role updated to {m.role}."
+                            if is_edit
+                            else f"{m.email} added as {m.role}."
+                        )
+                    elif is_edit:
+                        # Editing a still-invited member's seat: update the role
+                        # but do NOT re-send the invite (that would email them
+                        # again on every tweak) and make no fresh "on its way"
+                        # claim — the original invite still stands.
+                        notice = (
+                            f"{m.email} is now {m.role} — still invited, activates "
+                            "when they sign up with that email."
+                        )
                     else:
                         # PC.14: deliver the invite when the email seam is
                         # configured; otherwise say honestly that the link
@@ -41471,12 +44410,17 @@ what you're doing, what they should do.</p>
                             "activates when they sign up with that email."
                         )
                         delivered = _send_invite_email(m.email, pid)
-                        notice += (
-                            " An invite email is on its way."
-                            if delivered
-                            else " Email delivery isn't configured here, so share "
-                            "the signup link with them yourself."
-                        )
+                        if delivered:
+                            notice += " An invite email is on its way."
+                        else:
+                            # No mail seam configured: the owner has to pass the
+                            # link on themselves, so actually SHOW it rather than
+                            # referring to a "signup link" that appears nowhere on
+                            # the page.
+                            notice += (
+                                " Email delivery isn't configured here, so share the "
+                                f"signup link with them: {url_for('signup_page', _external=True)}"
+                            )
                 elif action == "remove":
                     store.remove(target, pid)
                     _invalidate_memberships_snapshot()
@@ -41486,25 +44430,60 @@ what you're doing, what they should do.</p>
             except _tenancy.TenancyError as exc:
                 error = str(exc)
 
+        # Re-resolve admin/membership from a FRESH snapshot for the render: a
+        # POST invalidated the per-request cache, so this reflects the just-
+        # written state. In particular, an owner who demoted or removed
+        # themselves is no longer an admin here, so the stale admin controls
+        # don't linger for one render.
+        snap = _memberships_snapshot()
+        can_admin = _is_admin()
         # PII gate (ADR-0014 anti-enumeration): an unbound (open) workspace is
         # pinnable by ANY anonymous visitor, so member/invite emails must only
         # render for the operator, an active owner, or an active member —
         # never for a stranger who merely pinned the open org.
-        _viewer_row = store.get(user_email, pid) if user_email else None
+        _viewer_row = _snap_membership(snap, user_email, pid) if user_email else None
         viewer_is_member = bool(_viewer_row and _viewer_row.status == _tenancy.STATUS_ACTIVE)
         can_view_members = can_admin or viewer_is_member
-        rows = store.list_for_profile(pid) if can_view_members else []
-        bound = store.is_bound(pid)
-        prof = _active_profile()
+        # Derive the roster from the same snapshot (matches
+        # ``list_for_profile``: profile match, drop tombstones, sort by
+        # status then email) rather than a second full ledger parse.
+        rows = (
+            sorted(
+                (
+                    m
+                    for (e, p), m in snap.items()
+                    if p == pid and m.status != _tenancy.STATUS_REMOVED
+                ),
+                key=lambda m: (m.status, m.email),
+            )
+            if can_view_members
+            else []
+        )
+        bound = _snap_is_bound(snap, pid)
+        # The sole active owner can't be demoted or removed (server-guarded), so
+        # the row's controls are disabled with an explanation rather than
+        # rendered live only to fail (L8).
+        _active_owners = [
+            m for m in rows if m.status == _tenancy.STATUS_ACTIVE and m.role == _tenancy.ROLE_OWNER
+        ]
+        sole_owner_email = _active_owners[0].email if len(_active_owners) == 1 else None
+        prof = load_profile(pid)
         org_name = _h(prof.display_name if prof else pid)
 
         def _role_cell_html(m):
             """The role column: a label, plus an inline change-role picker for
-            admins (re-uses the upsert ``add`` action). The last active owner
-            can't be demoted here — the route guards it server-side too."""
+            admins (re-uses the upsert ``add`` action). The sole active owner
+            can't be demoted (the store guards it), so their row shows a static
+            label with a hint rather than a picker that could only fail."""
             label = _h(_perms.role_label(m.role))
             if not can_admin or m.status == _tenancy.STATUS_REMOVED:
                 return label
+            if m.email == sole_owner_email:
+                return (
+                    f'{label} <span class="dim" style="font-size:11px" '
+                    'title="Make another member an owner before changing the sole '
+                    'owner&#39;s role.">· sole owner</span>'
+                )
             opts = "".join(
                 f'<option value="{r}"{" selected" if r == m.role else ""}>'
                 f"{_h(_perms.role_label(r))}</option>"
@@ -41515,33 +44494,61 @@ what you're doing, what they should do.</p>
                 'style="display:flex;gap:6px;align-items:center;margin:0">'
                 '<input type="hidden" name="action" value="add"/>'
                 f'<input type="hidden" name="email" value="{_h(m.email)}"/>'
-                f'<select name="role" style="padding:3px 6px;font-size:12px">{opts}</select>'
+                f'<select name="role" aria-label="Change role for {_h(m.email)}" '
+                f'style="padding:3px 6px;font-size:12px">{opts}</select>'
                 '<button type="submit" class="btn secondary" '
+                f'aria-label="Update role for {_h(m.email)}" '
                 'style="padding:3px 9px;font-size:11px">Update</button></form>'
             )
 
         def _row_html(m):
             role_badge = _role_cell_html(m)
+            # These two status badges keep self-contained inline styling (shape +
+            # colour) even though a base ``.pill`` rule now exists in the shared
+            # cascade: it makes the exact colour role explicit and keeps the badge
+            # asserted directly in the rendered HTML (test_status_badges_are_self_styled),
+            # not dependent on the external stylesheet loading.
+            _pill_base = (
+                "display:inline-block;padding:2px 9px;border-radius:999px;"
+                "font-size:11px;font-weight:600;border:1px solid "
+            )
             status_badge = {
-                _tenancy.STATUS_ACTIVE: '<span class="pill">Active</span>',
+                _tenancy.STATUS_ACTIVE: (
+                    f'<span class="pill" style="{_pill_base}rgba(16,185,129,0.30);'
+                    'background:rgba(16,185,129,0.10);color:var(--good)">Active</span>'
+                ),
                 _tenancy.STATUS_INVITED: (
-                    '<span class="pill" style="background:rgba(245,158,11,0.10);'
-                    'border-color:rgba(245,158,11,0.30);color:var(--warn)">'
+                    f'<span class="pill" style="{_pill_base}rgba(245,158,11,0.30);'
+                    'background:rgba(245,158,11,0.10);color:var(--warn)">'
                     "Invited — activates at signup</span>"
                 ),
             }.get(m.status, "")
             remove_html = ""
             if can_admin:
-                remove_html = (
-                    f'<form method="post" action="{url_for("organisation_members_page")}" '
-                    'style="display:inline" '
-                    'onsubmit="return confirm(\'Remove this member from the organisation? '
-                    'They lose access immediately.\')">'
-                    '<input type="hidden" name="action" value="remove"/>'
-                    f'<input type="hidden" name="email" value="{_h(m.email)}"/>'
-                    '<button type="submit" class="btn secondary" '
-                    'style="padding:4px 10px;font-size:12px">Remove</button></form>'
-                )
+                if m.email == sole_owner_email:
+                    # The sole active owner can't be removed (the store refuses
+                    # it), so show a disabled control with the reason instead of
+                    # a live button that would only error.
+                    remove_html = (
+                        '<button type="button" class="btn secondary" disabled '
+                        f'aria-label="Remove {_h(m.email)} — unavailable: make another '
+                        'member an owner before removing the sole owner" '
+                        'title="Make another member an owner before removing the sole owner." '
+                        'style="padding:4px 10px;font-size:12px;opacity:0.5;'
+                        'cursor:not-allowed">Remove</button>'
+                    )
+                else:
+                    remove_html = (
+                        f'<form method="post" action="{url_for("organisation_members_page")}" '
+                        'style="display:inline" '
+                        "onsubmit=\"return confirm('Remove this member from the organisation? "
+                        "They lose access immediately.')\">"
+                        '<input type="hidden" name="action" value="remove"/>'
+                        f'<input type="hidden" name="email" value="{_h(m.email)}"/>'
+                        '<button type="submit" class="btn secondary" '
+                        f'aria-label="Remove {_h(m.email)}" '
+                        'style="padding:4px 10px;font-size:12px">Remove</button></form>'
+                    )
             return (
                 "<tr>"
                 f'<td data-label="Email" style="padding:8px 12px">{_h(m.email)}</td>'
@@ -41568,9 +44575,10 @@ what you're doing, what they should do.</p>
             state_html = (
                 '<p class="lede" style="margin-bottom:var(--sp-6)">'
                 f"<strong>{org_name}</strong> is currently an <strong>open</strong> "
-                "workspace (no active members), so any session on this deployment "
-                "can use it — the pre-multi-tenant behaviour. It becomes "
-                "members-only the moment its first membership activates."
+                "workspace — it has no members yet, so anyone using this site can "
+                "open it. Add the first member below and it becomes members-only: "
+                "from then on, only the people you add (and the deployment "
+                "operator) can sign in."
                 "</p>"
             )
         add_form_html = ""
@@ -41581,11 +44589,13 @@ what you're doing, what they should do.</p>
                 f'<form method="post" action="{url_for("organisation_members_page")}" '
                 'style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">'
                 '<input type="hidden" name="action" value="add"/>'
-                "<div><label>Email</label><br/>"
-                '<input type="email" name="email" required placeholder="coach@club.org" '
+                '<input type="hidden" name="via" value="add_form"/>'
+                '<div><label for="mh-member-email">Email</label><br/>'
+                '<input type="email" id="mh-member-email" name="email" required '
+                'autocomplete="email" placeholder="coach@club.org" '
                 'style="padding:8px 10px;min-width:min(260px,100%)"/></div>'
-                "<div><label>Role</label><br/>"
-                '<select name="role" style="padding:8px 10px">'
+                '<div><label for="mh-member-role">Role</label><br/>'
+                '<select id="mh-member-role" name="role" style="padding:8px 10px">'
                 + "".join(
                     f'<option value="{r}"{" selected" if r == _tenancy.ROLE_MEMBER else ""}>'
                     f"{_h(_perms.role_label(r))} — {_h(_perms.role_description(r))}</option>"
@@ -41600,10 +44610,15 @@ what you're doing, what they should do.</p>
                 "</p></div>"
             )
         elif not is_operator and not user_email:
+            # Reached only on an OPEN workspace (a members-only one bounces an
+            # anonymous visitor before here). There is no owner to "log in as"
+            # yet, so say what's actually true: an owner or the operator manages
+            # members, and signing in is how you get there.
             add_form_html = (
                 '<p class="dim" style="font-size:13px;margin-top:14px">'
-                f'<a href="{url_for("login_page")}" style="color:var(--accent)">Log in</a> '
-                "as a workspace owner to manage members."
+                "Only an owner or the deployment operator can add members. "
+                f'<a href="{url_for("login_page")}" style="color:var(--accent)">Sign in</a> '
+                "if that's you."
                 "</p>"
             )
         flash_html = ""
@@ -41617,11 +44632,12 @@ what you're doing, what they should do.</p>
                 '<table class="mh-table-stack" style="width:100%;border-collapse:collapse;font-size:13px">'
                 '<thead><tr style="text-align:left;border-bottom:1px solid '
                 'rgba(255,255,255,0.08)">'
-                '<th style="padding:10px 12px">Email</th>'
-                '<th style="padding:10px 12px">Role</th>'
-                '<th style="padding:10px 12px">Status</th>'
-                '<th style="padding:10px 12px">Invited by</th>'
-                "<th></th></tr></thead>"
+                '<th scope="col" style="padding:10px 12px">Email</th>'
+                '<th scope="col" style="padding:10px 12px">Role</th>'
+                '<th scope="col" style="padding:10px 12px">Status</th>'
+                '<th scope="col" style="padding:10px 12px">Invited by</th>'
+                '<th scope="col" aria-label="Actions"></th>'
+                "</tr></thead>"
                 f"<tbody>{rows_html}</tbody></table></div>"
             )
         else:
@@ -41632,7 +44648,7 @@ what you're doing, what they should do.</p>
                 "access.</p></div>"
             )
         body = (
-            "<h1>Workspace members</h1>"
+            "<h1>Team members</h1>"
             + state_html
             + flash_html
             + members_html
@@ -41640,7 +44656,7 @@ what you're doing, what they should do.</p>
             + f'<p style="margin-top:18px"><a class="btn secondary" '
             f'href="{url_for("organisation_page")}">&larr; Back to organisation</a></p>'
         )
-        return _layout("Workspace members", body, active="settings")
+        return _layout("Team members", body, active="settings")
 
     # ---- PC.13 — whole-org takeout + deletion (UK GDPR Arts. 15/17/20) ----
 
@@ -41686,7 +44702,13 @@ what you're doing, what they should do.</p>
         return not _tenancy.MembershipStore().is_bound(pid) and _session_can_use_profile(pid)
 
     def _resolved_kit_for_run(run_id: str, run_data=None):
-        """The brand kit the pipeline applies to this run (default kit today).
+        """The brand kit the pipeline applies to this run.
+
+        H-13: prefers the kit the user chose on the configure step
+        (``brand_kit_id`` persisted with the run's brand-kit config in
+        ``data/brand_kits/<run_id>.json``). An absent, empty, or since-deleted
+        id falls back to the org's default kit via ``resolve_kit_for``, so
+        runs recorded before the chooser existed behave exactly as before.
 
         Returns (profile, kit) or (None, None) when no profile resolves.
         """
@@ -41697,7 +44719,17 @@ what you're doing, what they should do.</p>
             return None, None
         from mediahub.brand import kits as _kits
 
-        return prof, _kits.resolve_kit_for(prof)
+        chosen_kit_id = ""
+        try:
+            _kit_path = DATA_DIR / "data" / "brand_kits" / f"{run_id}.json"
+            if _kit_path.exists():
+                chosen_kit_id = str(
+                    (json.loads(_kit_path.read_text()) or {}).get("brand_kit_id") or ""
+                ).strip()
+        except Exception:
+            chosen_kit_id = ""
+
+        return prof, _kits.resolve_kit_for(prof, kit_id=chosen_kit_id or None)
 
     def _card_content_type(run_id: str, card_id: str, run_data=None) -> str:
         """Best-effort content-type key for per-type approver rules (1.18).
@@ -41911,7 +44943,7 @@ what you're doing, what they should do.</p>
             )
         return chips or '<span style="color:var(--ink-muted);font-size:12px">No palette set</span>'
 
-    def _brand_kit_card_html(prof, kit, default_id: str) -> str:
+    def _brand_kit_card_html(prof, kit, default_id: str, can_admin: bool = True) -> str:
         from mediahub.brand.kits import LOCKABLE_TOKENS
 
         is_default = kit.kit_id == default_id
@@ -41985,16 +45017,34 @@ what you're doing, what they should do.</p>
         )
 
         def _kit_colour_slot(slot: str, label: str) -> str:
+            # A slot the kit never set must NOT be silently persisted from the
+            # picker's on-brand fallback: <input type=color> always submits a
+            # value, so an unset slot rendered at _pal_default would be read back
+            # by _form_palette() as a real user choice and fabricate a colour the
+            # club never picked (CLAUDE.md: palettes are evidence-grounded, never
+            # invented). Gate each picker behind a "set" checkbox: an unset slot
+            # renders its picker DISABLED (disabled inputs are not submitted), so
+            # a no-op save round-trips the palette unchanged. Ticking the box
+            # enables the picker so the slot can be set; unticking a set slot
+            # clears it.
             cur = pal.get(slot, "")
-            val = cur if str(cur).startswith("#") else _pal_default
+            is_set = str(cur).startswith("#")
+            val = cur if is_set else _pal_default
+            checked = " checked" if is_set else ""
+            disabled = "" if is_set else " disabled"
             return (
-                '<label style="display:flex;flex-direction:column;gap:3px;'
+                '<div style="display:flex;flex-direction:column;gap:3px;'
                 'font-size:11px;color:var(--ink-muted)">'
-                f"{label}"
-                f'<input type="color" name="{slot}" value="{_h(val)}" '
+                f"<span>{label}</span>"
+                '<span style="display:flex;align-items:center;gap:6px">'
+                f'<input type="checkbox"{checked} aria-label="Set {_h(label.lower())} colour" '
+                'onchange="this.nextElementSibling.disabled=!this.checked" '
+                'style="cursor:pointer"/>'
+                f'<input type="color" name="{slot}" value="{_h(val)}"{disabled} '
+                f'aria-label="{_h(label)} colour" '
                 'style="width:64px;height:40px;padding:0;border:1px solid var(--border);'
                 'border-radius:4px;background:var(--panel);cursor:pointer"/>'
-                "</label>"
+                "</span></div>"
             )
 
         palette_pickers = "".join(
@@ -42051,7 +45101,8 @@ what you're doing, what they should do.</p>
             f'<form method="post" action="{url_for("api_brand_kit_palette_import", kit_id=kit.kit_id)}" '
             'enctype="multipart/form-data" style="margin-top:12px;display:flex;gap:8px;'
             'align-items:center;flex-wrap:wrap">'
-            '<input type="file" name="palette_file" accept=".ase,.json,application/json" required />'
+            '<input type="file" name="palette_file" accept=".ase,.json,application/json" '
+            'aria-label="Palette file to import (Adobe .ase or Color JSON)" required />'
             '<button class="btn secondary" type="submit">Import palette file</button>'
             '<span style="font-size:12px;color:var(--ink-muted)">Adobe .ase or Color JSON</span>'
             "</form>"
@@ -42076,8 +45127,12 @@ what you're doing, what they should do.</p>
             + (f" · Font: {_h(kit.font_pairing)}" if kit.font_pairing else "")
             + (f" · Tone: {_h(kit.tone)}" if kit.tone else "")
             + "</p>"
-            f'<div style="margin-top:10px">{actions}</div>'
-            f"{edit_form}</div>"
+            # Mutating controls (make-default / delete / edit / import / resweep)
+            # only for an admin: a bound non-owner gets a read-only card instead
+            # of controls that would dead-end in a 404 (the POST routes gate on
+            # _brand_can_admin). See brand_home_page.
+            + (f'<div style="margin-top:10px">{actions}</div>{edit_form}' if can_admin else "")
+            + "</div>"
         )
 
     def _brand_identity_html(prof) -> str:
@@ -42133,7 +45188,7 @@ what you're doing, what they should do.</p>
                 )
         return "".join(bits)
 
-    def _render_brand_home(prof) -> str:
+    def _render_brand_home(prof, can_admin: bool = True) -> str:
         from mediahub.brand import kits as _kits
 
         default_id = _kits.default_kit_id(prof)
@@ -42148,36 +45203,74 @@ what you're doing, what they should do.</p>
                 '<div class="mh-notice" style="margin-bottom:14px;border-color:var(--bad);'
                 f'color:var(--bad)">{_h(err)}</div>'
             )
-        kit_cards = "".join(_brand_kit_card_html(prof, k, default_id) for k in all_kits)
+        kit_cards = "".join(_brand_kit_card_html(prof, k, default_id, can_admin) for k in all_kits)
         create_form = (
-            '<details style="margin-top:8px"><summary style="cursor:pointer;color:var(--accent)">'
-            "+ New kit</summary>"
-            f'<form method="post" action="{url_for("api_brand_kit_create")}" '
-            'style="display:flex;flex-direction:column;gap:8px;margin-top:12px;max-width:520px">'
-            '<input class="mh-input" name="name" placeholder="Kit name (e.g. Acme co-brand, Gala 2026)" required />'
-            '<select class="mh-input" name="role">'
-            '<option value="sponsor">Sponsor co-brand</option>'
-            '<option value="event">Event sub-brand</option>'
-            '<option value="section">Team / section</option>'
-            '<option value="personal">Personal</option>'
-            "</select>"
-            '<div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">'
-            + "".join(
-                '<label style="display:flex;flex-direction:column;gap:3px;'
-                'font-size:11px;color:var(--ink-muted)">'
-                f"{label}"
-                f'<input type="color" name="{slot}" value="{default}" '
-                'style="width:64px;height:40px;padding:0;border:1px solid var(--border);'
-                'border-radius:4px;background:var(--panel);cursor:pointer"/></label>'
-                for slot, label, default in (
-                    ("primary", "Primary", "#0a2540"),
-                    ("secondary", "Secondary", "#5b6b7a"),
-                    ("accent", "Accent", "#22d3ee"),
+            ""
+            if not can_admin
+            else (
+                '<details style="margin-top:8px"><summary style="cursor:pointer;color:var(--accent)">'
+                "+ New kit</summary>"
+                f'<form method="post" action="{url_for("api_brand_kit_create")}" '
+                'style="display:flex;flex-direction:column;gap:8px;margin-top:12px;max-width:520px">'
+                '<input class="mh-input" name="name" placeholder="Kit name (e.g. Acme co-brand, Gala 2026)" required />'
+                '<select class="mh-input" name="role">'
+                '<option value="sponsor">Sponsor co-brand</option>'
+                '<option value="event">Event sub-brand</option>'
+                '<option value="section">Team / section</option>'
+                '<option value="personal">Personal</option>'
+                "</select>"
+                '<div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">'
+                + "".join(
+                    '<label style="display:flex;flex-direction:column;gap:3px;'
+                    'font-size:11px;color:var(--ink-muted)">'
+                    f"{label}"
+                    f'<input type="color" name="{slot}" value="{default}" '
+                    'style="width:64px;height:40px;padding:0;border:1px solid var(--border);'
+                    'border-radius:4px;background:var(--panel);cursor:pointer"/></label>'
+                    for slot, label, default in (
+                        ("primary", "Primary", "#0a2540"),
+                        ("secondary", "Secondary", "#5b6b7a"),
+                        ("accent", "Accent", "#22d3ee"),
+                    )
                 )
+                + "</div>"
+                '<div><button class="btn" type="submit">Create kit</button></div>'
+                "</form></details>"
             )
-            + "</div>"
-            '<div><button class="btn" type="submit">Create kit</button></div>'
-            "</form></details>"
+        )
+        # Re-render sweep driver (admin-only). Both fetches send the session CSRF
+        # token via the X-CSRF-Token header so they pass _csrf_protect in
+        # production (the resweep POSTs carry no JSON body, so the content-type
+        # exemption would not cover them), and reject on !r.ok so a 403/404/500
+        # shows the .catch failure text instead of a misleading benign result.
+        resweep_js = (
+            "<script>(function(){"
+            f"var CSRF='{_csrf_token()}';"
+            "function jok(r){if(!r.ok){throw new Error('http '+r.status);}return r.json();}"
+            "document.querySelectorAll('.mh-resweep').forEach(function(box){"
+            "var prev=box.querySelector('.mh-resweep-preview'),"
+            "ap=box.querySelector('.mh-resweep-apply'),out=box.querySelector('.mh-resweep-out');"
+            "prev.addEventListener('click',function(){out.textContent='Checking…';"
+            "fetch(box.dataset.preview,{method:'POST',headers:{'X-CSRF-Token':CSRF}}).then(jok)"
+            ".then(function(d){var n=d.n_affected||0;"
+            "out.textContent=n?(n+' card(s) would change'):'No cards would change';"
+            "ap.style.display=n?'inline-block':'none';}).catch(function(){out.textContent='Preview failed.';});});"
+            # Chunked apply: each call renders at most a few cards (Playwright
+            # is seconds per card, and one big synchronous apply would blow the
+            # worker timeout), walking the offset cursor until remaining==0.
+            "ap.addEventListener('click',function(){"
+            "var total=0,off=0;ap.disabled=true;"
+            "function step(){out.textContent='Re-rendering…'+(total?(' ('+total+' done)'):'');"
+            "fetch(box.dataset.apply+'?limit=8&offset='+off,{method:'POST',headers:{'X-CSRF-Token':CSRF}})"
+            ".then(jok)"
+            ".then(function(d){total+=(d.n_rendered||0);"
+            "off=(typeof d.next_offset==='number')?d.next_offset:(off+8);"
+            "if(d.remaining){out.textContent='Re-rendered '+total+' card(s), '+d.remaining+' left…';step();return;}"
+            "out.textContent='Re-rendered '+total+' card(s) — re-queued for review.';"
+            "ap.disabled=false;}).catch(function(){"
+            "out.textContent='Apply failed'+(total?(' after '+total+' card(s)'):'')+'.';ap.disabled=false;});}"
+            "step();});"
+            "});})();</script>"
         )
         body = (
             '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-6);padding-bottom:var(--sp-4);margin-bottom:var(--sp-4)">'
@@ -42193,31 +45286,12 @@ what you're doing, what they should do.</p>
             '<p style="margin-top:24px"><a class="btn secondary" '
             f'href="{url_for("organisation_setup")}">Edit organisation &amp; brand DNA</a></p>'
             # Re-render sweep driver: preview the diff, then apply (re-queues for review).
-            "<script>(function(){"
-            "document.querySelectorAll('.mh-resweep').forEach(function(box){"
-            "var prev=box.querySelector('.mh-resweep-preview'),"
-            "ap=box.querySelector('.mh-resweep-apply'),out=box.querySelector('.mh-resweep-out');"
-            "prev.addEventListener('click',function(){out.textContent='Checking…';"
-            "fetch(box.dataset.preview,{method:'POST'}).then(function(r){return r.json();})"
-            ".then(function(d){var n=d.n_affected||0;"
-            "out.textContent=n?(n+' card(s) would change'):'No cards would change';"
-            "ap.style.display=n?'inline-block':'none';}).catch(function(){out.textContent='Preview failed.';});});"
-            # Chunked apply: each call renders at most a few cards (Playwright
-            # is seconds per card, and one big synchronous apply would blow the
-            # worker timeout), walking the offset cursor until remaining==0.
-            "ap.addEventListener('click',function(){"
-            "var total=0,off=0;ap.disabled=true;"
-            "function step(){out.textContent='Re-rendering…'+(total?(' ('+total+' done)'):'');"
-            "fetch(box.dataset.apply+'?limit=8&offset='+off,{method:'POST'})"
-            ".then(function(r){return r.json();})"
-            ".then(function(d){total+=(d.n_rendered||0);"
-            "off=(typeof d.next_offset==='number')?d.next_offset:(off+8);"
-            "if(d.remaining){out.textContent='Re-rendered '+total+' card(s), '+d.remaining+' left…';step();return;}"
-            "out.textContent='Re-rendered '+total+' card(s) — re-queued for review.';"
-            "ap.disabled=false;}).catch(function(){"
-            "out.textContent='Apply failed'+(total?(' after '+total+' card(s)'):'')+'.';ap.disabled=false;});}"
-            "step();});"
-            "});})();</script>"
+            # These are same-origin state-changing POSTs that carry no JSON body,
+            # so the app's CSRF layer (_csrf_protect) requires the X-CSRF-Token
+            # header — without it both fetches 403 in production. The .then also
+            # rejects on !r.ok so an error status surfaces as a visible failure
+            # instead of a false 'No cards would change' / '0 re-queued'.
+            + (resweep_js if can_admin else "")
         )
         return _layout("Brand platform", body, active="settings")
 
@@ -42229,7 +45303,10 @@ what you're doing, what they should do.</p>
         prof = _active_profile()
         if prof is None:
             return redirect(url_for("organisation_setup"))
-        return _render_brand_home(prof)
+        # A bound non-owner (Viewer/Reviewer/Editor) can view the brand home but
+        # not mutate kits — mirror the api_brand_kit_* POST gate so they see a
+        # read-only page rather than admin controls that dead-end in a 404.
+        return _render_brand_home(prof, can_admin=_brand_can_admin(pid))
 
     def _brand_redirect(msg: str = "", err: str = ""):
         from urllib.parse import urlencode
@@ -42260,10 +45337,18 @@ what you're doing, what they should do.</p>
         from mediahub.brand.kits import new_kit_id, upsert_kit, normalise_kit
 
         prof = _active_profile()
+        # A created kit is never the primary: an org has exactly one primary
+        # livery (synthesised or materialised), and a second role="primary" kit
+        # is undeletable (delete_kit protects every primary). Constrain to the
+        # four creatable roles so a hand-crafted/invalid role can't slip past
+        # normalise_kit's "unknown → primary" coercion and mint a duplicate.
+        role = (request.form.get("role") or "sponsor").strip().lower()
+        if role not in ("sponsor", "event", "section", "personal"):
+            role = "sponsor"
         raw = {
             "kit_id": new_kit_id(),
             "name": (request.form.get("name") or "").strip(),
-            "role": (request.form.get("role") or "sponsor").strip().lower(),
+            "role": role,
             "palette": _form_palette(),
         }
         kit = normalise_kit(raw)
@@ -42496,7 +45581,14 @@ what you're doing, what they should do.</p>
 
     def _brand_check_context(run_id: str, card_id: str):
         """Resolve (brief, kit, brand_kit) for a card, or an error response."""
-        run_data = _load_run(run_id)
+        # A run_id longer than the OS filename limit makes _load_run's p.exists()
+        # raise OSError(ENAMETOOLONG) (it stats outside its own try/except), which
+        # would 500 and log the internal RUNS_DIR path. Treat any such unusable
+        # id as a missing run — the anti-IDOR 404 the rest of this gate returns.
+        try:
+            run_data = _load_run(run_id)
+        except OSError:
+            return None, (jsonify({"error": "run_not_found"}), 404)
         if run_data is None:
             return None, (jsonify({"error": "run_not_found"}), 404)
         if not _can_access_run(run_id, run_data, _active_profile_id()):
@@ -42506,16 +45598,16 @@ what you're doing, what they should do.</p>
         brief_dict = _latest_brief_for_card(run_id, card_id)
         if not brief_dict:
             return None, (jsonify({"error": "no_brief"}), 404)
-        from mediahub.brand import kits as _kits
         from mediahub.creative_brief.generator import CreativeBrief
 
-        profile_id = run_data.get("profile_id", "")
-        prof = load_profile(profile_id) if profile_id else _active_profile()
+        # H-13: one resolver — the check must judge the card against the same
+        # kit the approval gate (_brand_lock_block_reason) enforces, i.e. the
+        # kit chosen for this run, not unconditionally the org default.
+        prof, kit = _resolved_kit_for_run(run_id, run_data)
         if prof is None:
             return None, (jsonify({"error": "no_profile"}), 404)
         brief = CreativeBrief.from_dict(brief_dict)
-        kit = _kits.resolve_kit_for(prof)
-        brand_kit = _resolve_run_brand_kit(profile_id, run_id, run_data)
+        brand_kit = _resolve_run_brand_kit(run_data.get("profile_id", ""), run_id, run_data)
         return (brief, kit, brand_kit, prof), None
 
     @app.route("/api/runs/<run_id>/card/<card_id>/brand-check", methods=["GET"])
@@ -42767,7 +45859,7 @@ what you're doing, what they should do.</p>
                 "border:1px solid rgba(255,180,84,0.45);border-radius:8px;"
                 "background:rgba(255,180,84,0.08);font-size:13px;"
                 'color:var(--ink);line-height:1.5">'
-                '<strong style="color:var(--warn,#FFB454)">AI features unavailable.</strong> '
+                '<strong style="color:var(--warn)">AI features unavailable.</strong> '
                 "No cloud LLM provider is configured on this deployment, so the "
                 "engine cannot infer your brand voice, palette, or operating "
                 "profile. You can still complete setup, but generated content "
@@ -42922,6 +46014,14 @@ what you're doing, what they should do.</p>
             ) -> str:
                 attr = "disabled" if disabled else ""
                 wrap_style = f"max-width:{max_width};" if max_width else ""
+                # The colour picker always needs a concrete value (it can't be
+                # empty), so it shows the effective colour (manual override, else
+                # the AI's pick). The hex TEXT field is the blankable control:
+                # pre-fill it ONLY with a real manual override, so an untouched
+                # slot posts blank and defers to the AI — exactly what the form
+                # copy promises. The AI's pick is shown as placeholder ghost text.
+                _mh = manual_pal.get(slot)
+                text_value = _mh if (isinstance(_mh, str) and _mh.startswith("#")) else ""
                 return (
                     f'<label style="display:flex;flex-direction:column;gap:4px;'
                     f'font-size:11.5px;color:var(--ink-dim);{wrap_style}">'
@@ -42933,7 +46033,8 @@ what you're doing, what they should do.</p>
                     f"border:1px solid var(--border);border-radius:4px;"
                     f'background:var(--panel);cursor:pointer;flex-shrink:0"/>'
                     f'<input type="text" name="palette_{slot}_hex" '
-                    f'id="palette-{slot}-hex" value="{_h(default_hex)}" '
+                    f'id="palette-{slot}-hex" value="{_h(text_value)}" '
+                    f'placeholder="{_h(default_hex)}" '
                     f'pattern="^#[0-9a-fA-F]{{6}}$" maxlength="7" '
                     f'data-palette-mirror="palette_{slot}" {attr} '
                     f'style="flex:1;min-width:0;padding:11px 10px;min-height:44px;'
@@ -43443,7 +46544,7 @@ what you're doing, what they should do.</p>
             if hint:
                 hint_html = (
                     f'<span class="muted" style="display:block;margin-top:4px;'
-                    f'font-size:11px;line-height:1.4;color:var(--warn,#FFB454)">'
+                    f'font-size:11px;line-height:1.4;color:var(--warn)">'
                     f"{_h(hint)}</span>"
                 )
             # When a link is populated, allow a per-link "re-read now"
@@ -43484,12 +46585,12 @@ what you're doing, what they should do.</p>
             chip = _chip_html_for(key, val)
             social_inputs += (
                 f'<div style="margin-bottom:10px">'
-                f'<label style="display:flex;align-items:center;flex-wrap:wrap;'
+                f'<label for="os-social-{_h(key)}" style="display:flex;align-items:center;flex-wrap:wrap;'
                 f'font-size:13px;color:var(--ink-dim);margin-bottom:4px">'
                 f'<span>{_h(label)} <span class="muted" style="font-size:11px">(optional)</span></span>'
                 f"{chip}"
                 f"</label>"
-                f'<input type="url" name="social_{key}" value="{_h(val)}" '
+                f'<input type="url" id="os-social-{_h(key)}" name="social_{key}" value="{_h(val)}" '
                 f'placeholder="{_h(placeholder)}" style="{_input_style}"/>'
                 f"</div>"
             )
@@ -43605,7 +46706,7 @@ what you're doing, what they should do.</p>
                 'style="margin-bottom:20px;border:1px solid rgba(255,180,84,0.5);'
                 'background:rgba(255,180,84,0.07)">'
                 '<h2 style="margin-top:0;font-size:18px;color:var(--ink)">'
-                f'Almost there &mdash; {_h(prof.display_name or "your organisation")} '
+                f"Almost there &mdash; {_h(prof.display_name or 'your organisation')} "
                 "isn&rsquo;t unlocked yet</h2>"
                 '<p style="font-size:14px;line-height:1.55;color:var(--ink);margin:0 0 12px">'
                 f"{_h(_lead)} Add <strong>any one</strong> of these and you&rsquo;re in:</p>"
@@ -43705,10 +46806,10 @@ what you're doing, what they should do.</p>
       <ul id="country-options" role="listbox" class="mh-combobox-options" hidden></ul>
     </div>
     <div>
-      <label>
+      <label for="os-governing-body">
         Governing body <span class="muted" style="font-size:11px">(optional)</span>
       </label>
-      <input type="text" name="governing_body" value="{_h(governing_body)}"
+      <input id="os-governing-body" type="text" name="governing_body" value="{_h(governing_body)}"
              placeholder="e.g. Swim England, UKA, BUCS"
              style="{_input_style}"/>
     </div>
@@ -43740,14 +46841,12 @@ what you're doing, what they should do.</p>
     &mdash; so you never have to explain &ldquo;this is how we sound&rdquo;.
   </p>
   <div style="margin-bottom:14px">
-    <label>
-      Club website
-    <label style="display:flex;align-items:center;flex-wrap:wrap;
+    <label for="os-website-url" style="display:flex;align-items:center;flex-wrap:wrap;
                   font-size:13px;color:var(--ink-dim);margin-bottom:4px">
       <span>Club website <span class="muted" style="font-size:11px">(optional)</span></span>
       {_website_chip}
     </label>
-    <input type="url" name="website_url" value="{_h(website_url)}"
+    <input id="os-website-url" type="url" name="website_url" value="{_h(website_url)}"
            placeholder="https://your-club.example"
            style="{_input_style}"/>
   </div>
@@ -43831,8 +46930,8 @@ what you're doing, what they should do.</p>
              autocomplete="off" style="{_input_style}"/>
     </div>
     <div>
-      <label>Governing body <span class="muted" style="font-size:11px">(optional)</span></label>
-      <input type="text" name="governing_body" value="{_h(governing_body)}"
+      <label for="ms-governing-body">Governing body <span class="muted" style="font-size:11px">(optional)</span></label>
+      <input id="ms-governing-body" type="text" name="governing_body" value="{_h(governing_body)}"
              placeholder="e.g. Swim England, UKA, BUCS" style="{_input_style}"/>
     </div>
   </div>
@@ -43842,17 +46941,18 @@ what you're doing, what they should do.</p>
   <h2 style="margin-top:0;font-size:18px">Voice &amp; platforms</h2>
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px 18px">
     <div>
-      <label>Caption tone</label>
-      <select name="caption_tone" style="{_input_style}">{_tone_opts}</select>
+      <label for="ms-caption-tone">Caption tone</label>
+      <select id="ms-caption-tone" name="caption_tone" style="{_input_style}">{_tone_opts}</select>
     </div>
     <div>
-      <label>Platforms you post to</label>
-      <div style="display:flex;flex-wrap:wrap;gap:12px;margin-top:8px">{_platform_checks}</div>
+      <label id="ms-platforms-label">Platforms you post to</label>
+      <div role="group" aria-labelledby="ms-platforms-label"
+           style="display:flex;flex-wrap:wrap;gap:12px;margin-top:8px">{_platform_checks}</div>
     </div>
   </div>
   <div style="margin-top:14px">
-    <label>How do you sound? <span class="muted" style="font-size:11px">(optional)</span></label>
-    <textarea name="tone_notes" rows="3"
+    <label for="ms-tone-notes">How do you sound? <span class="muted" style="font-size:11px">(optional)</span></label>
+    <textarea id="ms-tone-notes" name="tone_notes" rows="3"
               placeholder="e.g. Friendly and proud, first names only, never use exclamation marks, always thank the officials."
               style="{_input_style};resize:vertical">{_h(_m_tone_notes)}</textarea>
   </div>
@@ -44728,11 +47828,24 @@ function mhSetupMode(mode) {{
         )
         from mediahub.brand import palette as _palette
 
+        # The blankable ``palette_<slot>_hex`` text field is authoritative: the
+        # sibling ``<input type="color">`` can never submit an empty value, so
+        # reading it would make "leave a slot blank to fall back to the AI's
+        # pick" (promised on the form) impossible — every save would freeze the
+        # AI palette as a manual override. Prefer the hex mirror when the browser
+        # sent it; fall back to the colour input for non-browser callers (and the
+        # test corpus) that post only ``palette_<slot>``.
+        def _pal_slot(slot: str) -> str:
+            hexv = request.form.get(f"palette_{slot}_hex")
+            if hexv is not None:
+                return hexv.strip()
+            return (request.form.get(f"palette_{slot}") or "").strip()
+
         manual = _palette.sanitise_manual_palette(
-            primary=(request.form.get("palette_primary") or "").strip(),
-            secondary=(request.form.get("palette_secondary") or "").strip(),
-            accent=(request.form.get("palette_accent") or "").strip(),
-            fourth=(request.form.get("palette_fourth") or "").strip(),
+            primary=_pal_slot("primary"),
+            secondary=_pal_slot("secondary"),
+            accent=_pal_slot("accent"),
+            fourth=_pal_slot("fourth"),
             include_fourth=use_fourth,
         )
         prof.brand_palette_manual = manual
@@ -44911,7 +48024,9 @@ function mhSetupMode(mode) {{
             palette = kit.ensure_derived_palette()
         except Exception as e:
             log.warning("organisation_finalise: ensure_derived_palette failed: %s", e)
-            return jsonify({"error": "palette derivation failed", "detail": str(e)}), 500
+            # Log the exception server-side only; never echo str(e) back — it
+            # can carry the absolute DATA_DIR path / errno on a disk failure.
+            return jsonify({"error": "palette derivation failed"}), 500
         # Write the (possibly newly-cached) palette back to the profile
         # so subsequent requests see it. ensure_derived_palette mutated
         # kit in-place; we serialise that mutation through the profile
@@ -44921,7 +48036,9 @@ function mhSetupMode(mode) {{
             save_profile(prof)
         except Exception as e:
             log.warning("organisation_finalise: save_profile failed: %s", e)
-            return jsonify({"error": "profile save failed", "detail": str(e)}), 500
+            # As above — keep the raw exception (and any leaked path) in the
+            # server log, not in the client-visible JSON.
+            return jsonify({"error": "profile save failed"}), 500
         return jsonify(
             {
                 "seed_hex": (palette or {}).get("seed_hex", ""),
@@ -45152,7 +48269,7 @@ function mhSetupMode(mode) {{
                     "status": entry.get("status", "unknown"),
                     "playbook_age": entry.get("playbook_age", -1),
                     "regenerated": entry.get("regenerated", False),
-                    "voice_digest": (entry.get("dna") or {}).get("voice_summary", "")[:240],
+                    "voice_digest": ((entry.get("dna") or {}).get("voice_summary") or "")[:240],
                 }
                 prof.link_capture_state = state
                 save_profile(prof)
@@ -45415,6 +48532,33 @@ function mhSetupMode(mode) {{
             card_id_raw = card.get("_card_id") or ach.get("swim_id", "")
             card_uuid = str(card_id_raw).replace(":", "_").replace(",", "_")
             _dl_url = url_for("api_card_download", run_id=run_id, card_id=card_id_raw)
+            # B-2 — ONE primary export per card. The ZIP link only goes live
+            # once this card has a rendered graphic; before that it is
+            # honestly disabled instead of shipping a caption-only ZIP.
+            _dl_ready = str(card_id_raw) in _rendered
+            _dl_style = "font-size:11px;padding:4px 10px" + (
+                "" if _dl_ready else ";pointer-events:none;opacity:0.45"
+            )
+            # JS2-3 — the gate marker + the ready tooltip ride on the anchor
+            # so mhExportGatesEnable can lift this card's gate in place after
+            # an in-page render (no reload).
+            _dl_ready_title = (
+                "The graphic plus the caption text in one .zip, ready to post manually"
+            )
+            _dl_gate = (
+                ""
+                if _dl_ready
+                else (
+                    ' aria-disabled="true" onclick="return false" '
+                    'data-mh-export-gate="card" '
+                    f'data-mh-title-ready="{_h(_dl_ready_title)}"'
+                )
+            )
+            _dl_title = (
+                _dl_ready_title
+                if _dl_ready
+                else "No graphic yet — use Create graphic first, then download the post"
+            )
             # M30/M32 — persisted renders show on page load, no re-render.
             _initial_visual = _prefilled_visual_panel_html(
                 run_id, card_id_raw, _rendered.get(str(card_id_raw))
@@ -45441,8 +48585,8 @@ function mhSetupMode(mode) {{
             }
   {_render_stored_translations(card)}
   <div class="no-print" style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-    <a class="btn secondary" style="font-size:11px;padding:4px 10px" href="{_h(_dl_url)}"
-       title="Download caption + visual as a .zip for manual posting">&#x2B07; Download .zip</a>
+    <a class="btn" style="{_dl_style}" href="{_h(_dl_url)}"{_dl_gate}
+       title="{_dl_title}">Download post (graphic + caption)</a>
     <span class="muted" style="font-size:11px">Pick a tone, then create a graphic or motion and download.</span>
   </div>
 </div>"""
@@ -45461,6 +48605,10 @@ function mhSetupMode(mode) {{
         _print_tool_url = url_for("print_run_tool_page", run_id=run_id)
         _certs_url = url_for("pack_certificates_zip", run_id=run_id)
         _certs_print_url = url_for("pack_certificates_zip", run_id=run_id, print=1)
+        # D-12: the anchors keep their direct hrefs as the no-JS fallback;
+        # with JS the click kicks the background job and polls for progress.
+        _certs_job_url = url_for("api_run_certificates_job", run_id=run_id)
+        _certs_print_job_url = url_for("api_run_certificates_job", run_id=run_id, print=1)
         _turn_into_html = _render_turn_into_card(run_id)
 
         # W.14: what this club's own approval history says it prefers —
@@ -45532,6 +48680,7 @@ function mhSetupMode(mode) {{
                 "</label>"
             )
         _mix_select = ""
+        _dub_select = ""
         if _voiceover_enabled():
             _mix_select = (
                 '<label style="display:inline-flex;align-items:center;gap:6px;font-size:12px;'
@@ -45544,6 +48693,32 @@ function mhSetupMode(mode) {{
                 '<option value="music_forward">Music-forward</option>'
                 "</select></label>"
             )
+            # C-17 — the 1.24 AI-dub language was URL-only (?lang=), invisible
+            # from the composer. Offer the caption-language registry's
+            # dubbable languages (same registry as the Settings picker;
+            # English IS the original narration, so it isn't a dub target).
+            # Gated with the mix select: a dub re-voices the narration, which
+            # only exists when voiceover is enabled.
+            try:
+                from mediahub.visual import dub as _dub_mod
+                from mediahub.web.languages import single_language_options as _lang_opts
+
+                _dub_opts = "".join(
+                    f'<option value="{_h(code)}">{_h(label)}</option>'
+                    for code, label in _lang_opts()
+                    if code != "en" and _dub_mod.is_dubbable(code)
+                )
+            except Exception:
+                _dub_opts = ""
+            if _dub_opts:
+                _dub_select = (
+                    '<label style="display:inline-flex;align-items:center;gap:6px;font-size:12px;'
+                    'color:var(--ink-dim)">Narration language '
+                    '<select id="mh-reel-dub" onchange="mhReelComposerSync()" '
+                    'title="Re-voice the reel&#39;s fact-only narration in another language (clearly labelled as AI-dubbed)" '
+                    'style="font-size:12px;padding:4px 8px;min-height:0">'
+                    '<option value="">No narration dub</option>' + _dub_opts + "</select></label>"
+                )
         _reel_composer_html = f"""
 <div class="card no-print" id="mh-reel-composer" data-default-cards="{_h(",".join(_default_reel_ids))}" style="margin-bottom:14px">
   <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap">
@@ -45563,6 +48738,7 @@ function mhSetupMode(mode) {{
       </select>
     </label>
     {_mix_select}
+    {_dub_select}
   </div>
   <div style="display:flex;gap:6px;flex-wrap:wrap">
     <button class="btn mh-reel-go" style="font-size:12px;padding:6px 14px;background:var(--medal);color:var(--medal-ink);border:none"
@@ -45570,6 +48746,7 @@ function mhSetupMode(mode) {{
     <button class="btn secondary mh-reel-go" style="font-size:12px;padding:6px 14px"
             onclick="generateReelBatch(this, {repr(_reel_url)})">All 4 formats</button>
   </div>
+  {f'<div class="dim" style="font-size:11px;margin-top:8px">Working from race footage? <a href="{url_for("video_studio_page")}">Try the Video Studio &rarr;</a></div>' if _v8_ok else ""}
 </div>"""
 
         # ---- M30: Create-all-graphics + rendered-count + pack wall ------
@@ -45711,11 +48888,86 @@ function mhSetupMode(mode) {{
             )
         else:
             _export_note = f"All {len(approved)} approved cards are rendered and ready to export."
+        # JS2-3 — data-mh-export-gate marks exactly what the gate stamped so
+        # mhExportGatesEnable can lift it client-side after the first in-page
+        # render (no reload). The marker value names the gate variant.
         _export_disabled_attr = (
             ' aria-disabled="true" onclick="return false" '
-            'style="pointer-events:none;opacity:0.45" '
+            'style="pointer-events:none;opacity:0.45" data-mh-export-gate="attr" '
             'title="No graphics rendered yet — use Create all graphics first"'
             if rendered_n == 0
+            else ""
+        )
+        # B-2 — every pack-level export sits under the same render gate. Two
+        # variants for controls where the standard attr would double up an
+        # attribute: the certificate anchors carry their own onclick
+        # (mhCertificatesJob refuses aria-disabled anchors), and the
+        # browser-print button takes a real ``disabled``.
+        _export_disabled_plain = (
+            ' aria-disabled="true" style="pointer-events:none;opacity:0.45" '
+            'data-mh-export-gate="plain" '
+            'title="No graphics rendered yet — use Create all graphics first"'
+            if rendered_n == 0
+            else ""
+        )
+        _export_disabled_btn = (
+            ' disabled style="opacity:0.45" data-mh-export-gate="btn" '
+            'title="No graphics rendered yet — use Create all graphics first"'
+            if rendered_n == 0
+            else ""
+        )
+
+        # JS2-5 — exactly one title attribute per gated control in either
+        # state: when the render gate is on, the gate string above supplies
+        # the title and the control's own tooltip rides along in
+        # data-mh-title-ready (restored by mhExportGatesEnable); once
+        # rendered, the control's own title renders directly.
+        def _export_title_attr(ready_title: str) -> str:
+            if rendered_n == 0:
+                return f' data-mh-title-ready="{_h(ready_title)}"'
+            return f' title="{_h(ready_title)}"'
+
+        # B-2 — the single pack-level export disclosure's label carries the
+        # live approved count.
+        _export_summary_label = (
+            f"Export pack ({len(approved)} approved "
+            f"card{'s' if len(approved) != 1 else ''})&hellip;"
+        )
+
+        # J-9 — one "Share publicly" chooser: the two token-URL surfaces where
+        # approved cards can go live, each with a one-line explanation. Links
+        # only — nothing here publishes anything; each destination has its own
+        # explicit Publish step. Kept as its own card, outside the export row.
+        _share_newsletter_row = (
+            (
+                '<div style="font-size:13px;margin-top:6px">'
+                f'<a href="{_h(url_for("newsletters_home"))}">Newsletter</a>'
+                " &mdash; a digest you publish or email.</div>"
+            )
+            if _email_design_ok
+            else ""
+        )
+        _share_publicly_html = (
+            '<div class="card no-print" id="mh-share-publicly" style="margin-top:14px">'
+            '<div style="font-size:13px;font-weight:700">Share publicly</div>'
+            '<div style="font-size:12px;color:var(--ink-dim);margin:2px 0 8px">'
+            "Where approved cards can go beyond downloads. Nothing goes public until "
+            "you press Publish there.</div>"
+            '<div style="font-size:13px">'
+            f'<a href="{_h(url_for("public_wall_settings"))}">Public wall</a>'
+            " &mdash; a live page of your approved cards.</div>"
+            f"{_share_newsletter_row}"
+            "</div>"
+        )
+        # J-9 — the one-off meet email above vs the recurring composer: one
+        # clarifying line so the two newsletter systems stop reading as one.
+        _nl_composer_hint = (
+            (
+                '<div style="font-size:12px;color:var(--ink-dim);margin-top:4px">'
+                "Building a recurring email? Use "
+                f'<a href="{_h(url_for("newsletters_home"))}">Newsletters</a>.</div>'
+            )
+            if _email_design_ok
             else ""
         )
 
@@ -45763,43 +49015,7 @@ function mhSetupMode(mode) {{
             else ""
         }
 
-<div class="card no-print" style="margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
-  <div>
-    <div style="font-size:13px;font-weight:700">Parent newsletter</div>
-    <div style="font-size:12px;color:var(--ink-dim);margin-top:2px">Branded HTML email + plaintext fallback, ready to paste into Mailchimp / ConvertKit / your email client.</div>
-  </div>
-  <div style="display:flex;gap:6px;flex-wrap:wrap">
-    <a class="btn secondary" style="font-size:12px;padding:6px 12px" href="{
-            _h(_newsletter_html_url)
-        }" target="_blank" rel="noopener">Preview HTML &rarr;</a>
-    <a class="btn secondary" style="font-size:12px;padding:6px 12px" href="{
-            _h(_newsletter_html_url)
-        }?download=1">Download .html</a>
-    <a class="btn secondary" style="font-size:12px;padding:6px 12px" href="{
-            _h(_newsletter_text_url)
-        }&download=1">Download .txt</a>
-    <a class="btn" style="font-size:12px;padding:6px 12px" href="{
-            _h(_newsletter_zip_url)
-        }">Download .zip</a>
-  </div>
-</div>
-
 {_prefs_html}
-
-<div class="card no-print" style="margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
-  <div>
-    <div style="font-size:13px;font-weight:700">Print for the noticeboard</div>
-    <div style="font-size:12px;color:var(--ink-dim);margin-top:2px">A branded A4 certificate for every approved achievement — the thing families frame. Photo/name consent is honoured automatically.</div>
-  </div>
-  <div style="display:flex;gap:8px;flex-wrap:wrap">
-    <a class="btn secondary" style="font-size:12px;padding:6px 12px" href="{
-            _h(_certs_url)
-        }">Download certificates (.zip of PDFs)</a>
-    <a class="btn secondary" style="font-size:12px;padding:6px 12px" href="{
-            _h(_certs_print_url)
-        }" title="A4 + 3mm bleed and crop marks, ready for a professional print shop">Print-shop pack (bleed + crop marks)</a>
-  </div>
-</div>
 
 <div class="no-print">{_turn_into_html}</div>
 
@@ -45808,26 +49024,83 @@ function mhSetupMode(mode) {{
         }</span></h2>
 {cards_html}
 
-<div class="no-print" style="margin-top:16px">
-  <div id="mh-export-note" style="font-size:12px;color:var(--ink-dim);margin-bottom:8px">{
+<details class="card no-print" id="mh-export-pack" style="margin-top:16px">
+  <summary style="cursor:pointer;font-size:13px;font-weight:700">{_export_summary_label}
+    <span class="muted" style="font-weight:400;font-size:12px;margin-left:6px">ZIPs, bulk convert, print, certificates &amp; newsletter</span>
+  </summary>
+  <div id="mh-export-note"{' data-mh-export-note-gated="1"' if rendered_n == 0 else ""} style="font-size:12px;color:var(--ink-dim);margin:10px 0 12px">{
             _export_note
         }</div>
-  <div style="display:flex;gap:10px;flex-wrap:wrap">
-    <a class="btn" href="{_export_zip_url}"{_export_disabled_attr}
-       title="Every rendered card at every size (square, portrait, story), grouped per card, plus a metadata.json manifest">Download every format + manifest (.zip)</a>
-    <a class="btn secondary" href="{_zip_url}"{
-            _export_disabled_attr
-        }>Download all visuals (.zip)</a>
-    <a class="btn secondary" href="{_bulk_export_url}"
-       title="Convert this pack to JPG / WebP / AVIF / PNG with quality options, bundled into one ZIP">Bulk export &amp; convert&hellip;</a>
-    <a class="btn secondary" href="{_print_tool_url}"
-       title="Proof and export a print-ready PDF (posters, flyers, banners, merch) from this meet's cards — pre-flight checked before you send it to a printer">Print &amp; merch&hellip;</a>
-    <button class="btn secondary" onclick="window.print()">Print / Export PDF</button>
+
+  <div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:6px">Social posting</div>
+  <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px">
+    <a class="btn" href="{_export_zip_url}"{_export_disabled_attr}{
+            _export_title_attr(
+                "Every rendered card at every size (square, portrait, story), grouped per card and ready to post"
+            )
+        }>Every format, organised for posting (.zip)</a>
+    <a class="btn secondary" href="{_zip_url}"{_export_disabled_attr}{
+            _export_title_attr("One folder with just the rendered images — no captions, no grouping")
+        }>Just the images (.zip)</a>
+    <a class="btn secondary" href="{_bulk_export_url}"{_export_disabled_attr}{
+            _export_title_attr(
+                "Convert this pack to JPG / WebP / AVIF / PNG with quality options, bundled into one ZIP"
+            )
+        }>Bulk export &amp; convert&hellip;</a>
   </div>
-</div>
+
+  <div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:6px">Print &amp; certificates</div>
+  <div style="font-size:12px;color:var(--ink-dim);margin-bottom:6px">A branded A4 certificate for every approved achievement &mdash; the thing families frame. Photo/name consent is honoured automatically.</div>
+  <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+    <a class="btn secondary" href="{_print_tool_url}"{_export_disabled_attr}{
+            _export_title_attr(
+                "Proof and export a print-ready PDF (posters, flyers, banners, merch) "
+                "from this meet's cards — pre-flight checked before you send it to a printer"
+            )
+        }>Print &amp; merch&hellip;</a>
+    <a class="btn secondary mh-certs-go" href="{_h(_certs_url)}" data-certs-job="{
+            _h(_certs_job_url)
+        }" onclick="return mhCertificatesJob(this)"{
+            _export_disabled_plain
+        }>Download certificates (.zip of PDFs)</a>
+    <a class="btn secondary mh-certs-go" href="{_h(_certs_print_url)}" data-certs-job="{
+            _h(_certs_print_job_url)
+        }" onclick="return mhCertificatesJob(this)"{_export_disabled_plain}{
+            _export_title_attr("A4 + 3mm bleed and crop marks, ready for a professional print shop")
+        }>Print-shop pack (bleed + crop marks)</a>
+    <button class="btn secondary" onclick="window.print()"{_export_disabled_btn}{
+            _export_title_attr(
+                "Use the browser print dialog on this page as it stands — "
+                "for a press-ready file use Print & merch instead"
+            )
+        }>Print this page</button>
+  </div>
+  <div id="mh-certs-status" class="dim" role="status" aria-live="polite" style="font-size:12px;margin:4px 0 14px;min-height:1.2em"></div>
+
+  <div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:6px">Parent newsletter</div>
+  <div style="font-size:12px;color:var(--ink-dim);margin-bottom:6px">Branded HTML email + plaintext fallback, ready to paste into Mailchimp / ConvertKit / your email client.</div>
+  {_nl_composer_hint}
+  <div style="display:flex;gap:10px;flex-wrap:wrap">
+    <a class="btn secondary" href="{_h(_newsletter_html_url)}" target="_blank" rel="noopener"{
+            _export_disabled_attr
+        }>Preview HTML &rarr;</a>
+    <a class="btn secondary" href="{_h(_newsletter_html_url)}?download=1"{
+            _export_disabled_attr
+        }>Download .html</a>
+    <a class="btn secondary" href="{_h(_newsletter_text_url)}&download=1"{
+            _export_disabled_attr
+        }>Download .txt</a>
+    <a class="btn secondary" href="{_h(_newsletter_zip_url)}"{
+            _export_disabled_attr
+        }>Download .zip</a>
+  </div>
+</details>
+
+{_share_publicly_html}
 
 <style>{_CARD_TOOLBAR_CSS}</style>
 {_CARD_TOOLBAR_JS}
+{_PACK_EXPORT_GATE_JS}
 <script>var WF_API_BASE = {json.dumps(_wf_api_base)};</script>
 {_card_creative_js()}
 <script>
@@ -45839,27 +49112,88 @@ function mhSetupMode(mode) {{
   var prerendered = {json.dumps(_reel_prerendered)};
   var panel = document.getElementById('reel-panel');
   if (!panel || typeof mhReelComments !== 'function') return;
-  var fileUrl = reelUrl + '-file?n=3&format=story';
-  if (prerendered) {{
-    panel.style.display = '';
-    mhRenderReel(panel, reelUrl, 'story', fileUrl);
-    return;
-  }}
-  fetch(reelUrl + '/comments?target=reel', {{headers:{{'Accept':'application/json'}}}})
-    .then(function(r){{ return r.json(); }})
-    .then(function(j){{
-      var n = (j && j.comments && j.comments.length) || 0;
-      if (!n) return;
+  // JS-3: the finished-file restore is shared — mhResumeReelJob falls back
+  // to it when its recalled job record turns out stale/unreachable, so a
+  // dead record can no longer suppress the finished reel.
+  var mhRestoreFinishedReel = function() {{
+    var fileUrl = reelUrl + '-file?n=3&format=story';
+    if (prerendered) {{
       panel.style.display = '';
-      fetch(fileUrl, {{method:'HEAD'}})
-        .then(function(hr){{ if (hr.ok) mhRenderReel(panel, reelUrl, 'story', fileUrl); else mhRenderReelCommentsOnly(panel, reelUrl, n); }})
-        .catch(function(){{ mhRenderReelCommentsOnly(panel, reelUrl, n); }});
-    }})
-    .catch(function(){{}});
+      mhRenderReel(panel, reelUrl, 'story', fileUrl);
+      return;
+    }}
+    fetch(reelUrl + '/comments?target=reel', {{headers:{{'Accept':'application/json'}}}})
+      .then(function(r){{ return r.json(); }})
+      .then(function(j){{
+        var n = (j && j.comments && j.comments.length) || 0;
+        if (!n) return;
+        panel.style.display = '';
+        fetch(fileUrl, {{method:'HEAD'}})
+          .then(function(hr){{ if (hr.ok) mhRenderReel(panel, reelUrl, 'story', fileUrl); else mhRenderReelCommentsOnly(panel, reelUrl, n); }})
+          .catch(function(){{ mhRenderReelCommentsOnly(panel, reelUrl, n); }});
+      }})
+      .catch(function(){{}});
+  }};
+  // D-13: a reel render still in flight from before navigation wins over
+  // the finished-file restore — re-attach to it and keep polling.
+  if (typeof mhResumeReelJob === 'function' && mhResumeReelJob(reelUrl, mhRestoreFinishedReel)) return;
+  mhRestoreFinishedReel();
 }})();
 
 // M31 - initialise the reel composer readout (duration + max-5 rule).
 if (typeof mhReelComposerSync === 'function') mhReelComposerSync();
+
+// D-12 - the certificates ZIP renders one Chromium PDF per approved card,
+// far too slow to hold the click's request open. Kick the background job,
+// report per-certificate progress, then trigger the finished ZIP download
+// from the same gated file route. Returning false keeps the anchor's href
+// as the no-JS fallback.
+function mhCertificatesJob(a) {{
+  var status = document.getElementById('mh-certs-status');
+  var say = function(m) {{ if (status) status.textContent = m; }};
+  if (a.getAttribute('aria-disabled') === 'true') return false;
+  var siblings = document.querySelectorAll('a.mh-certs-go');
+  var setBusy = function(busy) {{
+    Array.prototype.forEach.call(siblings, function(el) {{
+      if (busy) {{ el.setAttribute('aria-disabled', 'true'); el.style.opacity = '0.55'; }}
+      else {{ el.removeAttribute('aria-disabled'); el.style.opacity = ''; }}
+    }});
+  }};
+  setBusy(true);
+  var finish = function(msg) {{ setBusy(false); say(msg || ''); }};
+  say('Starting…');
+  fetch(a.dataset.certsJob, {{method:'POST', headers:{{'Content-Type':'application/json'}}, body:'{{}}'}})
+    .then(function(r){{ return r.json().then(function(j){{ return {{status: r.status, j: j}}; }}); }})
+    .then(function(res){{
+      var j = res.j || {{}};
+      if (res.status !== 202 || !j.poll_url) {{
+        finish(j.user_message || j.error || 'Could not start the certificates export.');
+        return;
+      }}
+      var tries = 0;
+      var poll = function() {{
+        tries++;
+        if (tries > 200) {{ finish('Timed out waiting for the certificates — try again.'); return; }}
+        fetch(j.poll_url).then(function(r){{ return r.json(); }}).then(function(s){{
+          if (s.status === 'done' && s.download_url) {{
+            finish('Done — your download is starting.');
+            window.location.href = s.download_url;
+            return;
+          }}
+          if (s.status === 'error') {{
+            finish(s.user_message || s.error || 'Certificates export failed.');
+            return;
+          }}
+          var n = Math.min((s.done || 0) + 1, s.total || 1);
+          say('Rendering certificate ' + n + ' of ' + (s.total || '?') + (s.current ? (' — ' + s.current) : '') + '…');
+          setTimeout(poll, 2000);
+        }}).catch(function(){{ setTimeout(poll, 4000); }});
+      }};
+      setTimeout(poll, 1000);
+    }})
+    .catch(function(){{ finish('Network error — try again.'); }});
+  return false;
+}}
 
 // M30 - "Create all graphics": one background job over the approved cards
 // still missing a graphic, with honest per-card progress, then a reload so
@@ -47011,7 +50345,7 @@ if (typeof mhReelComposerSync === 'function') mhReelComposerSync();
             )
             skipped_html = (
                 '<div class="card" style="border-color:var(--warn);background:rgba(245,158,11,0.04)">'
-                '<h2 style="margin-top:0">Skipped artefacts</h2>'
+                '<h2 style="margin-top:0">Skipped pieces</h2>'
                 f'<ul style="margin:0">{items}</ul>'
                 "</div>"
             )
@@ -47044,7 +50378,7 @@ if (typeof mhReelComposerSync === 'function') mhReelComposerSync();
         for art_idx, art in enumerate(artefacts):
             atype = art.get("type", "")
             atype_label = _ARTEFACT_LABEL.get(
-                atype, atype.replace("_", " ").capitalize() or "Artefact"
+                atype, atype.replace("_", " ").capitalize() or "Piece"
             )
             title = _h(art.get("title", atype_label))
             captions = art.get("captions") or {}
@@ -47073,11 +50407,13 @@ if (typeof mhReelComposerSync === 'function') mhReelComposerSync();
                     "background:rgba(245,158,11,0.12);border:1px solid var(--warn);"
                     'border-radius:8px;font-weight:600;color:var(--warn)">'
                     "&#9888; Template copy &mdash; the AI writer was unavailable, so this "
-                    "artefact fell back to a deterministic draft. Review before posting."
+                    "piece fell back to a deterministic draft. Review before posting."
                     "</div>"
                 )
 
-            # Caption editor blocks &mdash; one per key
+            # Caption editor blocks &mdash; one per key. J-4: every block gets
+            # a Copy button (copyText) so a finished piece is one click from
+            # the clipboard instead of a select-all-and-copy dead end.
             caption_blocks = ""
             for cap_key, cap_val in captions.items():
                 if cap_key == "x_thread" and isinstance(cap_val, list):
@@ -47086,13 +50422,18 @@ if (typeof mhReelComposerSync === 'function') mhReelComposerSync();
                     for ti, post in enumerate(cap_val):
                         post_chars = len(post or "")
                         cls = "good" if post_chars <= 280 else "bad"
+                        _ta_id = f"ti-cap-{art_idx}-t{ti}"
                         sub += (
                             f'<div style="margin-bottom:10px">'
                             f'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">'
                             f'<span class="muted" style="font-size:11px">Post {ti + 1}</span>'
+                            f'<span style="display:inline-flex;gap:6px;align-items:center">'
+                            f'<button class="btn secondary" style="font-size:10px;padding:2px 8px" '
+                            f"onclick=\"copyText(this,'{_ta_id}')\">Copy</button>"
                             f'<span class="tag {cls}" style="font-size:10px">{post_chars}/280</span>'
+                            f"</span>"
                             f"</div>"
-                            f'<textarea class="ti-cap" data-artefact="{art_idx}" '
+                            f'<textarea class="ti-cap" id="{_ta_id}" data-artefact="{art_idx}" '
                             f'data-thread="{ti}" '
                             f'style="width:100%;min-height:60px;font-size:13px;'
                             f"padding:8px;border:1px solid var(--border);border-radius:6px;"
@@ -47120,12 +50461,18 @@ if (typeof mhReelComposerSync === 'function') mhReelComposerSync();
                 if cap_key == "instagram":
                     cls = "good" if char_count <= 2200 else "bad"
                     cap_limit_html = f'<span class="tag {cls}" style="font-size:10px;margin-left:8px">{char_count}/2200</span>'
+                _key_slug = re.sub(r"[^A-Za-z0-9_-]", "-", cap_key)
+                _ta_id = f"ti-cap-{art_idx}-{_key_slug}"
                 caption_blocks += (
                     '<div style="margin-bottom:14px">'
+                    f'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">'
                     f'<div style="font-size:12px;font-weight:600;text-transform:uppercase;'
-                    f'color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:6px">'
+                    f'color:var(--ink-muted);letter-spacing:0.5px">'
                     f"{_h(key_label)}{cap_limit_html}</div>"
-                    f'<textarea class="ti-cap" data-artefact="{art_idx}" '
+                    f'<button class="btn secondary" style="font-size:10px;padding:2px 8px" '
+                    f"onclick=\"copyText(this,'{_ta_id}')\">Copy</button>"
+                    f"</div>"
+                    f'<textarea class="ti-cap" id="{_ta_id}" data-artefact="{art_idx}" '
                     f'data-key="{_h(cap_key)}" '
                     f'style="width:100%;min-height:80px;font-size:13px;'
                     f"padding:10px;border:1px solid var(--border);border-radius:6px;"
@@ -47149,17 +50496,26 @@ if (typeof mhReelComposerSync === 'function') mhReelComposerSync();
                     )
                 sub_cards_html = f'<div style="margin-bottom:12px">{rows}</div>'
 
-            # Newsletter HTML preview
+            # Newsletter HTML preview + download (J-4: the piece's HTML was
+            # view-only — a hidden textarea carries the exact source so
+            # "Download HTML" hands over a ready-to-send file).
             html_preview_html = ""
+            html_download_btn = ""
             if html_block:
                 # Display rendered HTML in a sandboxed-ish preview area.
                 # The templates module HTML-escapes the body, so it's safe here.
                 html_preview_html = (
+                    f'<textarea id="ti-html-{art_idx}" style="display:none">{_h(html_block)}</textarea>'
                     '<details style="margin-top:8px">'
                     '<summary style="cursor:pointer;font-size:12px;color:var(--accent)">View HTML preview</summary>'
                     f'<div style="margin-top:10px;padding:14px;border:1px dashed var(--border);'
                     f'border-radius:8px;background:rgba(255,255,255,0.02)">{html_block}</div>'
                     "</details>"
+                )
+                html_download_btn = (
+                    f'<button class="btn secondary" style="font-size:12px;padding:6px 14px" '
+                    f'onclick="tiDownloadHtml({art_idx})" '
+                    f'title="Download this piece as a ready-to-send .html file">Download HTML</button>'
                 )
 
             notes_html = ""
@@ -47167,7 +50523,7 @@ if (typeof mhReelComposerSync === 'function') mhReelComposerSync();
                 lis = "".join(f"<li>{_h(n)}</li>" for n in notes_list)
                 notes_html = (
                     '<details style="margin-top:8px">'
-                    '<summary style="cursor:pointer;font-size:12px;color:var(--ink-muted)">Why this artefact?</summary>'
+                    '<summary style="cursor:pointer;font-size:12px;color:var(--ink-muted)">Why this piece?</summary>'
                     f'<ul style="margin:8px 0 0 0;font-size:12px;color:var(--ink-dim)">{lis}</ul>'
                     "</details>"
                 )
@@ -47185,6 +50541,7 @@ if (typeof mhReelComposerSync === 'function') mhReelComposerSync();
   <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
     <button class="btn" style="font-size:12px;padding:6px 14px"
             onclick="tiSaveArtefact({art_idx})">Save edits</button>
+    {html_download_btn}
     <span class="ti-status" data-artefact="{art_idx}" style="font-size:11px;color:var(--ink-muted)"></span>
   </div>
   {html_preview_html}
@@ -47192,21 +50549,22 @@ if (typeof mhReelComposerSync === 'function') mhReelComposerSync();
 </div>"""
 
         if not cards_html:
-            cards_html = '<div class="empty">No artefacts generated.</div>'
+            cards_html = '<div class="empty">No pieces generated.</div>'
 
         body = f"""
 <section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">
   <span class="mh-hero-eyebrow">Repurpose pack</span>
   <h1><span class="mh-shiny-text">{meet_name}</span></h1>
   <div class="strap" style="margin-top:var(--sp-3)">
-    <span>{len(artefacts):02d} {"artefact" if len(artefacts) == 1 else "artefacts"}</span><span class="sep">·</span>
+    <span>{len(artefacts):02d} {"piece" if len(artefacts) == 1 else "pieces"}</span><span class="sep">·</span>
     <span>generated {gen_at}</span><span class="sep">/</span>
     <a href="{_review_url}" style="color:var(--ink-muted);text-decoration:none">← Back to review</a>
   </div>
 </section>
 
-<div style="margin-bottom:var(--sp-5);display:flex;gap:var(--sp-3);flex-wrap:wrap">
-  <button class="btn secondary" onclick="tiRegenerate()">&#x21BA; Regenerate pack</button>
+<div style="margin-bottom:var(--sp-5);display:flex;gap:var(--sp-3);flex-wrap:wrap;align-items:center">
+  <button class="btn secondary" onclick="tiRegenerate(this)">&#x21BA; Regenerate pack</button>
+  <span id="ti-regen-status" role="status" aria-live="polite" style="font-size:12px;color:var(--ink-muted)"></span>
 </div>
 
 {skipped_html}
@@ -47216,6 +50574,40 @@ if (typeof mhReelComposerSync === 'function') mhReelComposerSync();
 const TI_EDIT_API = {json.dumps(_edit_api)};
 const TI_REGEN_API = {json.dumps(_api_url)};
 const TI_REVIEW_URL = {json.dumps(_review_url)};
+
+// J-4: one-click copy for each piece's caption (same behaviour as the
+// grouped page's copy buttons).
+function copyText(btn, taId) {{
+  var ta = document.getElementById(taId);
+  if (!ta) {{ btn.textContent = 'Error'; return; }}
+  var text = ta.value;
+  var origText = btn.textContent;
+  var done = function(ok) {{ btn.textContent = ok ? 'Copied!' : 'Copy failed'; setTimeout(function(){{ btn.textContent = origText; }}, 1800); }};
+  if (navigator.clipboard && window.isSecureContext) {{
+    navigator.clipboard.writeText(text).then(function(){{ done(true); }}).catch(function(){{ fallback(); }});
+  }} else {{ fallback(); }}
+  function fallback() {{
+    var t = document.createElement('textarea');
+    t.value = text; t.style.position = 'fixed'; t.style.left = '-9999px';
+    document.body.appendChild(t); t.focus(); t.select();
+    try {{ var ok = document.execCommand('copy'); done(ok); }} catch(e) {{ done(false); }}
+    document.body.removeChild(t);
+  }}
+}}
+
+// J-4: download a piece's HTML (the newsletter) as a ready-to-send file.
+// The hidden textarea carries the exact source the engine produced.
+function tiDownloadHtml(idx) {{
+  var ta = document.getElementById('ti-html-' + idx);
+  if (!ta) return;
+  var blob = new Blob([ta.value], {{ type: 'text/html' }});
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'repurpose-pack-newsletter.html';
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(function() {{ URL.revokeObjectURL(a.href); a.remove(); }}, 400);
+}}
 
 function tiSaveArtefact(idx) {{
   const root = document.querySelector('.ti-artefact[data-artefact-index="' + idx + '"]');
@@ -47244,29 +50636,54 @@ function tiSaveArtefact(idx) {{
   }}).catch(function() {{ status.textContent = 'Error saving.'; }});
 }}
 
-function tiRegenerate() {{
-  if (!confirm('Generate a fresh Turn-Into pack? The current pack is preserved.')) return;
-  fetch(TI_REGEN_API, {{
-    method: 'POST',
-    headers: {{ 'Content-Type': 'application/json' }},
-    body: JSON.stringify({{}}),
-  }}).then(r => r.json()).then(function(j) {{
-    if (j && j.pack_url) {{
-      window.location.href = j.pack_url;
-    }} else {{
-      alert('Regenerate failed: ' + (j && j.message ? j.message : 'unknown error'));
-    }}
-  }}).catch(function(err) {{
-    alert('Regenerate failed.');
-  }});
+// J-4: styled confirm (MH.confirm), a busy state on the button, and an
+// inline styled status/error line — no native confirm()/alert() dead ends.
+function tiRegenerate(btn) {{
+  var run = function() {{
+    var status = document.getElementById('ti-regen-status');
+    var say = function(m, bad) {{
+      if (!status) return;
+      status.textContent = m || '';
+      status.style.color = bad ? 'var(--bad)' : 'var(--ink-muted)';
+    }};
+    var origLabel = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'Regenerating\u2026';
+    say('Drafting a fresh pack with live AI \u2014 usually under a minute.');
+    fetch(TI_REGEN_API, {{
+      method: 'POST',
+      headers: {{ 'Content-Type': 'application/json' }},
+      body: JSON.stringify({{}}),
+    }}).then(r => r.json()).then(function(j) {{
+      if (j && j.pack_url) {{
+        say('Done \u2014 opening the new pack\u2026');
+        window.location.href = j.pack_url;
+        return;
+      }}
+      btn.disabled = false; btn.textContent = origLabel;
+      say('Regenerate failed: ' + ((j && (j.user_message || j.message || j.error)) || 'unknown error'), true);
+    }}).catch(function() {{
+      btn.disabled = false; btn.textContent = origLabel;
+      say('Regenerate failed: network error \u2014 try again.', true);
+    }});
+  }};
+  if (window.MH && MH.confirm) {{
+    MH.confirm({{title: 'Regenerate this pack?', body: 'A fresh Repurpose pack is drafted with live AI. The current pack is preserved.', confirmText: 'Regenerate', danger: false, onConfirm: run}});
+  }} else {{ run(); }}
 }}
 </script>
 """
-        return _layout(f"Turn-Into pack — {meet_name}", body, active="home")
+        return _layout(f"Repurpose pack — {meet_name}", body, active="home")
 
     @app.route("/pack/<run_id>/grouped")
     def content_pack_grouped(run_id):
-        """Grouped content pack page &mdash; 8 buckets."""
+        """Read-only "explore all recommendations" view &mdash; 8 buckets.
+
+        B-3: single-purpose pages. Triage (approve / re-queue) lives on
+        /review, creation + export on the content builder (/pack); this
+        page keeps no approval strap or export row of its own &mdash; each
+        card deep-links to its spot in the builder instead.
+        """
         state = _run_state(run_id)
         if state == "in_progress":
             return _layout(
@@ -47293,26 +50710,10 @@ function tiRegenerate() {{
         )
         _review_url = url_for("review", run_id=run_id)
         _pack_url = url_for("content_pack", run_id=run_id)
-        _reel_url = url_for("api_run_reel", run_id=run_id)
-        _newsletter_html_url = url_for("api_run_newsletter", run_id=run_id)
-        _newsletter_text_url = _newsletter_html_url + "?format=text"
-        _newsletter_zip_url = _newsletter_html_url + "?format=zip"
 
         if not _v73_ok or _build_grouped_pack is None:
             return redirect(_pack_url)
 
-        # Round-8: load the per-card workflow sidecar so the new
-        # Approve / Reject / Re-queue strap below each card can stamp
-        # the current state (queue|approved|rejected|posted|edited).
-        # Falls back to an empty dict so the loop below stays
-        # crash-safe when the workflow store can't be reached.
-        _wf_states: dict = {}
-        try:
-            _ws = _get_wf_store()
-            if _ws is not None:
-                _wf_states = _ws.load(run_id) or {}
-        except Exception:
-            _wf_states = {}
         # UI 1.25 — per-card reaction tallies for this run, in one query.
         _react_counts = _reaction_counts_for_run(run_id)
 
@@ -47323,8 +50724,6 @@ function tiRegenerate() {{
             import traceback
 
             traceback.print_exc()
-
-        counts = grouped.get("_counts", {})
 
         def _section_html(title, items, icon="", empty_msg="None in this category."):
             n = len(items) if isinstance(items, list) else (1 if items else 0)
@@ -47356,20 +50755,29 @@ function tiRegenerate() {{
                 band = _h(item.get("quality_band") or "")
                 prio = item.get("priority", 0)
                 n_ach = item.get("n_achievements", 0)
-                # Pull the per-card workflow status so the approve/reject row
-                # below can render the current state strap. Sidecar workflow
-                # state lives in _wf_states (loaded once at the top of the
-                # route), falling back to whatever the item itself carries.
-                _card_wf = _wf_states.get(card_id_raw) if isinstance(_wf_states, dict) else None
-                if _card_wf is not None and hasattr(_card_wf, "status"):
-                    wf_status = _card_wf.status.value
-                else:
-                    wf_status = str((item.get("workflow") or {}).get("status") or "queue").lower()
+                # B-3 — this page is a read-only explorer: approval lives on
+                # /review and creation on the content builder, so instead of
+                # its own approve strap each card deep-links to its builder
+                # spot (the builder's per-card anchor is `pc-<card id>`).
+                builder_link = ""
+                if card_id_raw:
+                    from urllib.parse import quote as _quote  # noqa: PLC0415
+
+                    builder_link = (
+                        f'<a class="btn secondary" style="font-size:12px;padding:4px 10px" '
+                        f'href="{_h(_pack_url)}#pc-{_h(_quote(str(card_id_raw), safe=""))}" '
+                        f'title="Open this card in the content builder — approved cards are '
+                        f'captioned, rendered and downloaded there.">'
+                        f"Open in content builder &rarr;</a>"
+                    )
                 schedule_btn = _schedule_button_html(run_id, card_id_raw, f"g-{card_uuid}")
-                # Per-card motion download — the endpoint renders (or
-                # serves cached) MP4. New tab so the user lands on the
-                # video preview rather than blocking the pack page.
+                # Per-card motion render — D-12: the same background job +
+                # poll + progress UI the Content builder uses (the shared
+                # _MOTION_CLIENT_JS block), instead of a plain link that
+                # held a 30-90s synchronous render open in a new tab with
+                # zero feedback.
                 motion_btn = ""
+                motion_panel = ""
                 if card_id_raw:
                     _motion_url = url_for(
                         "api_card_motion",
@@ -47377,11 +50785,18 @@ function tiRegenerate() {{
                         card_id=str(card_id_raw),
                     )
                     motion_btn = (
-                        f'<a class="btn secondary" style="font-size:12px;padding:4px 10px" '
-                        f'href="{_h(_motion_url)}" target="_blank" rel="noopener" '
+                        f'<button class="btn secondary" style="font-size:12px;padding:4px 10px" '
+                        f"onclick=\"generateMotion(this, {repr(_motion_url)}, '{card_uuid}')\" "
                         f'title="Render a 6-second branded story-format MP4 for this card. '
-                        f'First time can take 30-90s while Video Maker renders.">'
-                        f"&#x25B6; Motion video</a>"
+                        f'The first render can take up to 90 seconds; repeats are instant.">'
+                        f"&#x25B6; Motion video</button>"
+                    )
+                    motion_panel = (
+                        f'<div class="motion-panel" data-card="{card_uuid}" '
+                        f'data-motion-url="{_h(_motion_url)}" '
+                        f'style="display:none;margin-top:10px;padding:12px;'
+                        f"background:rgba(244,213,141,0.04);border:1px solid var(--border);"
+                        f'border-radius:8px"></div>'
                     )
                 # Per-card sponsor variant — Phase 1.2 deliverable.
                 # Sponsor-branded result-card graphic + sponsor-
@@ -47445,7 +50860,7 @@ function tiRegenerate() {{
   </div>
   {why_html}
   <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-    {_render_wf_actions(run_id, str(card_id_raw), wf_status) if card_id_raw else ""}
+    {builder_link}
     {_render_reactions(run_id, str(card_id_raw), _react_counts) if card_id_raw else ""}
     <span style="flex:1"></span>
     <button class="btn secondary" style="font-size:12px;padding:4px 10px" onclick="copyText(this,'cap-{card_id}-1')">Copy caption</button>
@@ -47458,6 +50873,7 @@ function tiRegenerate() {{
     {sponsor_btn}
     {schedule_btn}
   </div>
+  {motion_panel}
 </div>"""
             if not rows:
                 rows = f'<p class="muted">{_h(empty_msg)}</p>'
@@ -47564,6 +50980,9 @@ function tiRegenerate() {{
 <section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">
   <span class="mh-hero-eyebrow">All recommendations</span>
   <h1><span class="mh-shiny-text">{meet_name}</span></h1>
+  <p class="lede" style="max-width:60ch">Every ranked recommendation for this meet, in one read-only view.
+  Approve cards on the <a href="{_review_url}">review page</a>; captions, graphics, video and downloads
+  live in the <a href="{_pack_url}">content builder</a>.</p>
   <div class="strap" style="margin-top:var(--sp-3)">
     <a href="{_review_url}" style="color:var(--ink-muted);text-decoration:none">← Back to review</a><span class="sep">/</span>
     <a href="{_pack_url}" style="color:var(--ink-muted);text-decoration:none">Content builder &rarr;</a>
@@ -47573,24 +50992,10 @@ function tiRegenerate() {{
 <div class="card" style="margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
   <div>
     <div style="font-size:13px;font-weight:700">Meet reel</div>
-    <div style="font-size:12px;color:var(--ink-dim);margin-top:2px">Stitch the top 3 cards into a 15-second branded MP4 reel.</div>
+    <div style="font-size:12px;color:var(--ink-dim);margin-top:2px">Pick up to 5 moments, set the rhythm, and render a branded MP4 reel &mdash; the reel composer works from this meet&#39;s approved cards on the Content builder.</div>
   </div>
-  <button class="btn" style="font-size:12px;padding:6px 14px;background:var(--medal);color:var(--medal-ink);border:none"
-          onclick="generateReelGrouped(this, {repr(_reel_url)})">&#x25B6; Generate reel from this meet</button>
-</div>
-<div id="reel-panel-grouped" style="display:none;margin-bottom:14px;padding:14px;background:rgba(244,213,141,0.04);border:1px solid var(--border);border-radius:8px"></div>
-
-<div class="card" style="margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
-  <div>
-    <div style="font-size:13px;font-weight:700">Parent newsletter</div>
-    <div style="font-size:12px;color:var(--ink-dim);margin-top:2px">Branded HTML email + plaintext fallback, ready to paste into Mailchimp / ConvertKit / your email client.</div>
-  </div>
-  <div style="display:flex;gap:6px;flex-wrap:wrap">
-    <a class="btn secondary" style="font-size:12px;padding:6px 12px" href="{_h(_newsletter_html_url)}" target="_blank" rel="noopener">Preview HTML &rarr;</a>
-    <a class="btn secondary" style="font-size:12px;padding:6px 12px" href="{_h(_newsletter_html_url)}?download=1">Download .html</a>
-    <a class="btn secondary" style="font-size:12px;padding:6px 12px" href="{_h(_newsletter_text_url)}&download=1">Download .txt</a>
-    <a class="btn" style="font-size:12px;padding:6px 12px" href="{_h(_newsletter_zip_url)}">Download .zip</a>
-  </div>
+  <a class="btn" style="font-size:12px;padding:6px 14px;background:var(--medal);color:var(--medal-ink);border:none"
+     href="{_pack_url}#mh-reel-composer">&#x25B6; Open the reel composer</a>
 </div>
 
 {visuals_strip}
@@ -47603,6 +51008,7 @@ function tiRegenerate() {{
 {_section_html("Needs review", grouped.get("needs_review", []), icon="&#x26A0;")}
 {_section_html("Not recommended", grouped.get("rejected", []), icon="&#x2715;")}
 
+{_MOTION_CLIENT_JS}
 <script>
 function copyText(btn, taId) {{
   var ta = document.getElementById(taId);
@@ -47628,74 +51034,6 @@ function copyWhyCard(btn, taId) {{ copyText(btn, taId); }}
 function _attrEsc(jsExpr) {{
   return '"' + jsExpr.replace(/&/g, '&amp;').replace(/"/g, '&quot;') + '"';
 }}
-function generateReelGrouped(btn, reelUrl, fmt) {{
-  fmt = fmt || 'story';
-  var dims = {{story: '1080&times;1920', square: '1080&times;1080', landscape: '1920&times;1080'}};
-  var panel = document.getElementById('reel-panel-grouped');
-  if (!panel) return;
-  panel.style.display = '';
-  var origLabel = btn.textContent;
-  btn.disabled = true;
-  btn.textContent = 'Rendering reel\u2026';
-  var prog = MH.renderProgress(panel, {{label: 'Producing your ' + fmt + ' reel', sub: 'Top ranked moments \u2014 up to 90 seconds the first time', expectedMs: 60000, accent: 'medal'}});
-  var fail = function(msg) {{
-    prog.stop();
-    btn.disabled = false; btn.textContent = origLabel;
-    panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">Reel render error: ' + msg + '</div>';
-  }};
-  var success = function(videoUrl) {{
-    prog.complete(function(){{
-    btn.disabled = false; btn.textContent = origLabel;
-    var chips = '';
-    ['story', 'portrait', 'square', 'landscape'].forEach(function(f) {{
-      var label = f.charAt(0).toUpperCase() + f.slice(1);
-      if (f === fmt) {{
-        chips += '<span class="btn secondary" style="font-size:12px;padding:4px 12px;opacity:0.55;pointer-events:none">' + label + ' &#x2713;</span>';
-      }} else {{
-        chips += '<button class="btn secondary" style="font-size:12px;padding:4px 12px" onclick=' +
-          _attrEsc('generateReelGrouped(this, ' + JSON.stringify(reelUrl) + ', ' + JSON.stringify(f) + ')') + '>' + label + '</button>';
-      }}
-    }});
-    panel.innerHTML =
-      '<div style="display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap">' +
-        '<div style="' + (fmt === 'landscape' ? 'flex:0 0 min(320px,100%);max-width:340px' : 'flex:0 0 min(220px,100%);max-width:240px') + '">' +
-          '<video src="' + videoUrl + '" controls playsinline style="width:100%;border-radius:6px;border:1px solid var(--border);background:#000"></video>' +
-        '</div>' +
-        '<div style="flex:1;min-width:min(200px,100%)">' +
-          '<div style="font-size:11px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:6px">Meet reel &middot; ' + (dims[fmt] || '') + '</div>' +
-          '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px">' + chips + '</div>' +
-          '<a class="btn secondary" href="' + videoUrl + '" download="meet-reel-' + fmt + '.mp4" style="font-size:12px;padding:4px 12px">Download MP4</a>' +
-        '</div>' +
-      '</div>';
-    }});
-  }};
-  fetch(reelUrl + '-job' + (fmt !== 'story' ? '?format=' + encodeURIComponent(fmt) : ''), {{method:'POST'}})
-    .then(function(r) {{ return r.json().then(function(j){{ return {{status: r.status, body: j}}; }}); }})
-    .then(function(res) {{
-      if (res.status !== 202 || !res.body || !res.body.poll_url) {{
-        fail((res.body && (res.body.user_message || res.body.detail || res.body.error)) || 'could not start the render');
-        return;
-      }}
-      var tries = 0;
-      var poll = function() {{
-        tries++;
-        if (tries > 80) {{ fail('timed out waiting for the render \u2014 try again'); return; }}
-        fetch(res.body.poll_url)
-          .then(function(r){{ return r.json(); }})
-          .then(function(j) {{
-            if (j.status === 'done' && j.video_url) {{ success(j.video_url); return; }}
-            if (j.status === 'error' || (j.error && j.status !== 'running')) {{
-              fail(j.user_message || j.error || 'render failed'); return;
-            }}
-            setTimeout(poll, 3000);
-          }})
-          .catch(function() {{ setTimeout(poll, 3000); }});
-      }};
-      setTimeout(poll, 3000);
-    }})
-    .catch(function(err) {{ fail('Network error: ' + err); }});
-}}
-
 // Phase 1.4 — sort the cards within one pack section by a data
 // attribute on each .mh-pack-card. Toggles between desc / asc on
 // repeat clicks of the same key. The DOM is reordered in place,
@@ -48009,22 +51347,36 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
 <tr class="mh-hp mh-asset-row" data-asset-id="{_h(ad.get("id", ""))}"
     data-desc="{_h(_meta_desc)}" data-athletes="{_h(athlete_names)}"
     data-venue="{_h(_meta_venue)}" data-event="{_h(_meta_event)}" data-tags="{_h(_meta_tags)}">
-  <td class="mh-bulk-cell"><input type="checkbox" class="mh-row-check" name="asset_ids" value="{_h(ad.get("id", ""))}" aria-label="Select photo"></td>
-  <td data-label="Preview"><span class=\"mh-lens\" style=\"display:inline-block;border-radius:4px;overflow:hidden;line-height:0\"><img src=\"{_file_url}\" style=\"max-height:60px;border-radius:4px;display:block\" /></span>{_hp_tpl}</td>
+  <td class="mh-bulk-cell"><input type="checkbox" class="mh-row-check" name="asset_ids" value="{
+                _h(ad.get("id", ""))
+            }" aria-label="Select photo"></td>
+  <td data-label="Preview"><span class=\"mh-lens\" style=\"display:inline-block;border-radius:4px;overflow:hidden;line-height:0\"><img src=\"{
+                _file_url
+            }\" style=\"max-height:60px;border-radius:4px;display:block\" /></span>{_hp_tpl}</td>
   <td data-label="Type">{_h(ad.get("type", ""))}</td>
   <td data-label="Athlete">{_h(athlete_names)}{_tag_badges}</td>
   <td data-label="Venue / Event">{_h(ad.get("linked_venue") or ad.get("linked_event") or "")}</td>
   <td data-label="Permission">{
                 _media_permission_select(ad.get("id", ""), ad.get("permission_status", ""))
                 if ad.get("type") not in _skip_tag_types
-                else _h(_MEDIA_PERMISSION_LABELS.get(ad.get("permission_status", ""), ad.get("permission_status", "")))
+                else _h(
+                    _MEDIA_PERMISSION_LABELS.get(
+                        ad.get("permission_status", ""), ad.get("permission_status", "")
+                    )
+                )
             }</td>
   <td data-label="Status">{_media_approval_badge(ad.get("approval_status", ""))}</td>
   <td data-label="ID"><code>{_h(ad.get("id", "")[:12])}</code></td>
   <td style="white-space:nowrap">
-    <a class="btn ghost" href="{_edit_url}" style="font-size:11px;padding:3px 9px;margin-right:6px" title="Filters, adjustments, crop, shapes, blur brush — non-destructive edits">&#9998; Edit</a>
-    <a class="btn ghost" href="{_studio_url}" style="font-size:11px;padding:3px 9px;margin-right:6px" title="Edit this photo with AI — fill, erase, expand, upscale, restyle">&#x2726; Studio</a>
-    <a class="btn ghost" href="{_cutout_url}" style="font-size:11px;padding:3px 9px;margin-right:6px" title="See exactly what background removal knocks out">Cut-out</a>
+    <a class="btn ghost" href="{
+                _edit_url
+            }" style="font-size:11px;padding:3px 9px;margin-right:6px" title="Filters, adjustments, crop, shapes, blur brush — non-destructive edits">&#9998; Edit</a>
+    <a class="btn ghost" href="{
+                _studio_url
+            }" style="font-size:11px;padding:3px 9px;margin-right:6px" title="Edit this photo with AI — fill, erase, expand, upscale, restyle">&#x2726; Studio</a>
+    <a class="btn ghost" href="{
+                _cutout_url
+            }" style="font-size:11px;padding:3px 9px;margin-right:6px" title="See exactly what background removal knocks out">Cut-out</a>
     <button class="btn ghost" type="button" data-mh-meta-open style="font-size:11px;padding:3px 9px;margin-right:6px" title="Edit the description, swimmer, venue and tags">&#x270E; Info</button>
     <button class="btn ghost mh-ml-qa" type="button" data-qa-url="{_qa_url}"
             aria-haspopup="menu" aria-expanded="false"
@@ -48229,7 +51581,8 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
 {shared_banner}
 <div class="card">
   <h2>Upload photos</h2>
-  <p class="dim" style="margin-bottom:var(--sp-5)">Reusable photos for branded content cards. Pick several at once &mdash; each upload is parsed for athlete, venue, and event metadata so the engine can pull the right shot into the right moment. On a phone you can take a photo or share one straight from your camera roll into the library.</p>
+  <p class="dim" style="margin-bottom:var(--sp-5)">Reusable photos for branded content cards. Pick several at once &mdash; each upload is parsed for athlete, venue, and event metadata so the engine can pull the right shot into the right moment. On a phone you can take a photo or share one straight from your camera roll into the library.
+    No photos of your own yet? <a href="{url_for("stock_page")}">Find stock photos &rarr;</a> &mdash; licence-clean, saved straight into this library.</p>
   <form id="ml-upload-form" data-mh-capture-form method="POST" action="{
             url_for("api_media_library_upload")
         }" enctype="multipart/form-data" data-loader-text="Uploading photos">
@@ -50970,7 +54323,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         run_id = (_req.args.get("run_id") or "").strip()
         card_id = (_req.args.get("card_id") or "").strip()
         add_url = list_url = suggest_url = ""
-        card_label = ""
+        card_label = card_url = ""
         if run_id and card_id:
             run_data = _load_run(run_id)
             if run_data and _can_access_run(run_id, run_data, profile_id):
@@ -50978,6 +54331,9 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                 list_url = add_url
                 suggest_url = url_for("api_element_suggestions", run_id=run_id, card_id=card_id)
                 card_label = card_id
+                # C-12: the add-to-card toast links straight back to the
+                # card's review page so "Added" isn't a dead end.
+                card_url = url_for("review", run_id=run_id)
 
         body = _eb.render_browser_body(
             elements=seed,
@@ -50990,6 +54346,10 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             suggest_url=suggest_url,
             card_label=card_label,
             stock_url=url_for("stock_page"),
+            # C-12: browse-only visits get an explainer + a route into the
+            # card flow (Activity lists the processed meets).
+            activity_url=url_for("activity_page"),
+            card_url=card_url,
         )
         return _layout("Elements", body, active="elements")
 
@@ -51981,6 +55341,42 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                 return run_data, {"achievement": c}
         return run_data, None
 
+    def _sponsor_variant_sidecar(run_id: str, card_id: str) -> Optional[Path]:
+        """Path of the card's sponsor-variant result sidecar, or None if the
+        card id would escape the run's directory (defence-in-depth — the id
+        is a single URL segment, but never trust it as a filename)."""
+        svdir = RUNS_DIR / run_id / "sponsor_variants"
+        path = svdir / f"{card_id}.json"
+        try:
+            if svdir.resolve() not in path.resolve().parents:
+                return None
+        except OSError:
+            return None
+        return path
+
+    def _sponsor_variant_cached(run_id: str, card_id: str, sponsor_name: str) -> Optional[dict]:
+        """The last successfully rendered sponsor variant for this card, or
+        None when there is nothing usable (never rendered, PNG purged, or the
+        rotation now assigns a different sponsor). Only a render that
+        produced a visual counts — failures are never cached, so the page
+        retries them automatically."""
+        path = _sponsor_variant_sidecar(run_id, card_id)
+        if path is None or not path.exists():
+            return None
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            return None
+        if not isinstance(data, dict):
+            return None
+        if (data.get("sponsor_name") or "") != sponsor_name:
+            return None
+        vid = data.get("visual_id") or ""
+        png = str(data.get("png_path") or "")
+        if not vid or not png or not Path(png).exists():
+            return None
+        return data
+
     @app.route("/runs/<run_id>/card/<card_id>/sponsor-variant")
     def sponsor_variant_view(run_id: str, card_id: str):
         """Server-rendered sponsor variant page for one card."""
@@ -52037,171 +55433,443 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             return _layout("Sponsor variant", body, active="home")
 
         ach = target.get("achievement") or {}
-        meet_name = (run_data.get("meet") or {}).get("name") or run_data.get("meet_name", "")
 
-        # ---- 1. Render the sponsor-branded visual via the existing pipeline ----
-        visual_html = ""
-        visual_error = ""
-        if _v8_ok and _v8_create_visual_for_item is not None:
-            try:
-                item = {
-                    "id": ach.get("swim_id") or card_id,
-                    "swim_id": ach.get("swim_id") or card_id,
-                    "achievement": ach,
-                    "post_angle": ach.get("post_angle"),
-                    "meet_name": meet_name,
-                    "safe_to_post": target.get("safe_to_post") or {"level": "safe"},
-                }
-                resolved_pid = profile_id or "_run_" + run_id
-                resolved_pid = re.sub(r"[^a-z0-9_-]", "-", resolved_pid.lower()).strip("-") or (
-                    "_run_" + run_id
+        # ---- D-32: the render + caption used to run synchronously inside
+        # this GET (30–90s cold, LLM call included) before any HTML returned.
+        # The page shell now returns immediately: a cached variant renders
+        # straight away; otherwise a branded progress panel mounts and the
+        # background job (api_sponsor_variant_job → api_reel_job_status poll)
+        # does the work. "Refresh to regenerate" became a Regenerate button
+        # that starts a fresh job.
+        cached = _sponsor_variant_cached(run_id, card_id, sponsor_name)
+        if cached is not None:
+            img_url = url_for(
+                "api_visual_png",
+                vid=cached["visual_id"],
+                format_name=cached.get("format_name") or "feed_portrait",
+            )
+            visual_block = (
+                f'<img src="{_h(img_url)}" alt="Sponsor-branded variant" '
+                f'style="max-width:100%;border-radius:10px;border:1px solid var(--border)"/>'
+            )
+            _cap_text = str(cached.get("caption") or "")
+            if _cap_text:
+                caption_block = (
+                    f'<textarea readonly style="width:100%;min-height:140px;font-size:14px;'
+                    f"padding:12px;border:1px solid var(--border);border-radius:8px;"
+                    f'background:var(--bg);color:var(--ink);font-family:inherit">'
+                    f"{_h(_cap_text)}</textarea>"
+                    f'<button class="btn" style="margin-top:8px;font-size:12px;padding:6px 14px" '
+                    f'onclick="navigator.clipboard.writeText(this.previousElementSibling.value);'
+                    f"this.textContent='Copied ✓'\">Copy caption</button>"
                 )
-                if not _session_can_access_profile(resolved_pid):
-                    visual_error = "forbidden"
-                    raise RuntimeError("forbidden")
-                brand_kit = _v8_brand_kit_for(resolved_pid, run_id=run_id)
-                media_assets = []
-                try:
-                    from mediahub.media_library.photo_edit import asset_dicts_for_render
-
-                    store = _v8_get_media_store()
-                    assets = store.list(profile_id=resolved_pid)
-                    media_assets = asset_dicts_for_render(assets, store)
-                except Exception:
-                    pass
-                # UI 1.18 — honour the card's persisted inspector overrides,
-                # minus hide_sponsor: this surface's whole job is showing
-                # the sponsor slot.
-                _insp = {
-                    k: v
-                    for k, v in _inspector_overrides_for_card(run_id, card_id).items()
-                    if k != "hide_sponsor"
-                }
-                res = _v8_create_visual_for_item(
-                    item,
-                    brand_kit,
-                    profile_id=resolved_pid,
-                    run_id=run_id,
-                    media_assets=media_assets,
-                    sponsor_name=sponsor_name,
-                    user_overrides=_insp,
-                )
-                visuals = res.get("visuals") or []
-                if visuals:
-                    v0 = visuals[0]
-                    vid = v0.get("id") or v0.get("brief_id")
-                    fmt = v0.get("format_name") or "feed_portrait"
-                    if vid:
-                        img_url = url_for(
-                            "api_visual_png",
-                            vid=vid,
-                            format_name=fmt,
-                        )
-                        visual_html = (
-                            f'<img src="{_h(img_url)}" alt="Sponsor-branded variant" '
-                            f'style="max-width:100%;border-radius:10px;border:1px solid var(--border)"/>'
-                        )
-                        if _rotated and _rotated.get("sponsor_id"):
-                            try:
-                                from mediahub.club_platform.sponsors import (
-                                    record_exposure as _rec_exposure,
-                                )
-
-                                _rec_exposure(
-                                    resolved_pid,
-                                    run_id=run_id,
-                                    card_id=card_id,
-                                    sponsor_id=_rotated["sponsor_id"],
-                                    sponsor_name=sponsor_name,
-                                    surface="sponsor_variant",
-                                )
-                            except Exception:
-                                pass
-                    else:
-                        visual_error = "Visual rendered but no asset id returned."
-                else:
-                    errs = res.get("errors") or []
-                    visual_error = "Sponsor-branded visual could not be rendered: " + (
-                        errs[0] if errs else "no visuals returned"
-                    )
-            except Exception as e:
-                visual_error = f"render_failed: {e}"
-        else:
-            visual_error = "Visual pipeline unavailable in this environment."
-
-        # ---- 2. Generate the sponsor-acknowledging caption ----
-        caption_text = ""
-        caption_error = ""
-        caption_unavailable = False
-        try:
-            from mediahub.brand.sponsor import generate_sponsor_caption
-
-            caption_text = generate_sponsor_caption(ach, profile=profile)
-        except Exception as e:
-            # Detect "no LLM provider configured" by class name rather than
-            # importing ClaudeUnavailableError directly — keeps this surface
-            # resilient if the exception module moves.
-            if type(e).__name__ == "ClaudeUnavailableError":
-                caption_unavailable = True
             else:
-                caption_error = str(e)
-
-        # ---- 3. Render the page ----
-        _pack_url = url_for("content_pack_grouped", run_id=run_id)
-        visual_block = (
-            visual_html
-            if visual_html
-            else (
-                f'<div class="empty" style="text-align:left;padding:14px">'
-                f'<strong style="color:var(--warn)">Visual not available.</strong>'
-                f'<br><span class="muted" style="font-size:12px">{_h(visual_error)}</span>'
-                "</div>"
-            )
-        )
-        if caption_text:
-            caption_block = (
-                f'<textarea readonly style="width:100%;min-height:140px;font-size:14px;'
-                f"padding:12px;border:1px solid var(--border);border-radius:8px;"
-                f'background:var(--bg);color:var(--ink);font-family:inherit">'
-                f"{_h(caption_text)}</textarea>"
-                f'<button class="btn" style="margin-top:8px;font-size:12px;padding:6px 14px" '
-                f'onclick="navigator.clipboard.writeText(this.previousElementSibling.value);'
-                f"this.textContent='Copied ✓'\">Copy caption</button>"
-            )
-        elif caption_unavailable:
-            caption_block = (
-                '<div class="empty" style="text-align:left;padding:14px">'
-                "<strong>AI captions are unavailable on this deployment.</strong>"
-                '<br><span class="muted" style="font-size:13px">'
-                "The sponsor-branded visual is still ready to download. "
-                "Contact your administrator to enable AI captions."
-                "</span></div>"
-            )
+                caption_block = (
+                    '<div class="empty" style="text-align:left;padding:14px">'
+                    f"{_h(str(cached.get('caption_message') or 'No caption was generated — use Regenerate to try again.'))}"
+                    "</div>"
+                )
         else:
-            caption_block = (
-                f'<div class="empty" style="text-align:left;padding:14px">'
-                f'<strong style="color:var(--warn)">Caption not available.</strong>'
-                f'<br><span class="muted" style="font-size:12px">{_h(caption_error)}</span>'
-                "</div>"
+            # No-JS fallback copy; the script below replaces both panels the
+            # moment the job starts.
+            visual_block = (
+                '<p class="muted" style="padding:14px;font-size:13px">'
+                "Preparing the sponsor graphic&hellip;</p>"
             )
+            caption_block = (
+                '<p class="muted" style="padding:14px;font-size:13px">'
+                "The caption is written alongside the graphic&hellip;</p>"
+            )
+
+        _pack_url = url_for("content_pack_grouped", run_id=run_id)
+        _job_url = url_for("api_sponsor_variant_job", run_id=run_id, card_id=card_id)
         swimmer = _h(ach.get("swimmer_name") or "")
         event = _h(ach.get("event") or "")
         body = f"""
 <p class="dim"><a href="{_pack_url}">&larr; Back to recommendations</a></p>
 <h1 style="margin-bottom:4px">Sponsor variant &mdash; {swimmer}{(" · " + event) if event else ""}</h1>
-<p class="dim" style="margin-bottom:24px">Sponsor-branded result card + sponsor-acknowledging caption for <b>{_h(sponsor_name)}</b>. Generated on demand &mdash; refresh to regenerate.</p>
+<div style="display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:24px">
+  <p class="dim" style="margin:0">Sponsor-branded result card + sponsor-acknowledging caption for <b>{_h(sponsor_name)}</b>.</p>
+  <button id="sv-regen" class="btn secondary" type="button">Regenerate</button>
+</div>
 <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;align-items:start">
   <div class="card">
     <h3 style="margin-top:0;font-size:14px;text-transform:uppercase;letter-spacing:0.5px;color:var(--ink-dim)">Sponsor-branded visual</h3>
-    {visual_block}
+    <div id="sv-visual">{visual_block}</div>
   </div>
   <div class="card">
     <h3 style="margin-top:0;font-size:14px;text-transform:uppercase;letter-spacing:0.5px;color:var(--ink-dim)">Sponsor-acknowledging caption</h3>
-    {caption_block}
+    <div id="sv-caption">{caption_block}</div>
   </div>
 </div>
 """
+        # Plain string (not an f-string) so the JS braces stay single; the two
+        # dynamic values ride in via json.dumps.
+        body += (
+            "<script>\n(function(){\n"
+            "  var jobUrl = " + json.dumps(_job_url) + ";\n"
+            "  var autostart = " + ("false" if cached is not None else "true") + ";\n"
+            """  var visual = document.getElementById('sv-visual');
+  var caption = document.getElementById('sv-caption');
+  var btn = document.getElementById('sv-regen');
+  function emptyBox(text) {
+    var d = document.createElement('div');
+    d.className = 'empty';
+    d.style.cssText = 'text-align:left;padding:14px;font-size:13px';
+    d.textContent = text;
+    return d;
+  }
+  function fillVisual(j) {
+    visual.innerHTML = '';
+    if (j.image_url) {
+      var img = document.createElement('img');
+      img.src = j.image_url;
+      img.alt = 'Sponsor-branded variant';
+      img.style.cssText = 'max-width:100%;border-radius:10px;border:1px solid var(--border)';
+      visual.appendChild(img);
+    } else {
+      visual.appendChild(emptyBox(j.image_message || 'The graphic couldn\\u2019t be rendered \\u2014 try again.'));
+    }
+  }
+  function fillCaption(j) {
+    caption.innerHTML = '';
+    if (j.caption) {
+      var ta = document.createElement('textarea');
+      ta.readOnly = true;
+      ta.style.cssText = 'width:100%;min-height:140px;font-size:14px;padding:12px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--ink);font-family:inherit';
+      ta.value = j.caption;
+      var copy = document.createElement('button');
+      copy.className = 'btn';
+      copy.style.cssText = 'margin-top:8px;font-size:12px;padding:6px 14px';
+      copy.textContent = 'Copy caption';
+      copy.addEventListener('click', function(){ navigator.clipboard.writeText(ta.value); copy.textContent = 'Copied \\u2713'; });
+      caption.appendChild(ta);
+      caption.appendChild(copy);
+    } else {
+      caption.appendChild(emptyBox(j.caption_message || 'The caption couldn\\u2019t be generated \\u2014 try again.'));
+    }
+  }
+  function restoreBtn() { if (btn) { btn.disabled = false; btn.textContent = 'Regenerate'; } }
+  function fail(msg) {
+    fillVisual({image_message: msg});
+    fillCaption({caption_message: msg});
+    restoreBtn();
+  }
+  function svStart() {
+    if (btn) { btn.disabled = true; btn.textContent = 'Generating\\u2026'; }
+    caption.innerHTML = '';
+    caption.appendChild(emptyBox('The caption is written alongside the graphic\\u2026'));
+    visual.innerHTML = '';
+    var mount = document.createElement('div');
+    visual.appendChild(mount);
+    var prog = (window.MH && MH.renderProgress)
+      ? MH.renderProgress(mount, {label: 'Rendering the sponsor graphic', sub: 'Usually 30\\u201390 seconds the first time', expectedMs: 45000, accent: 'lane'})
+      : {stop: function(){}, complete: function(cb){ cb(); }};
+    fetch(jobUrl, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}'})
+      .then(function(r){ return r.json().then(function(j){ return {status: r.status, body: j}; }); })
+      .then(function(res){
+        if (res.status !== 202 || !res.body || !res.body.poll_url) {
+          prog.stop();
+          fail((res.body && (res.body.user_message || res.body.error)) || 'The sponsor variant couldn\\u2019t be started \\u2014 try again.');
+          return;
+        }
+        var tries = 0;
+        var poll = function(){
+          tries++;
+          if (tries > 100) { prog.stop(); fail('This is taking longer than expected \\u2014 reload the page to check again.'); return; }
+          fetch(res.body.poll_url)
+            .then(function(r){ return r.json(); })
+            .then(function(j){
+              if (j.status === 'done') {
+                prog.complete(function(){
+                  restoreBtn();
+                  fillVisual(j);
+                  fillCaption(j);
+                });
+                return;
+              }
+              if (j.status === 'error') {
+                prog.stop();
+                fail(j.user_message || 'The sponsor variant couldn\\u2019t be generated \\u2014 try again.');
+                return;
+              }
+              setTimeout(poll, 3000);
+            })
+            .catch(function(){ setTimeout(poll, 3000); });
+        };
+        setTimeout(poll, 3000);
+      })
+      .catch(function(){ prog.stop(); fail('Network error \\u2014 check your connection and try again.'); });
+  }
+  if (btn) btn.addEventListener('click', svStart);
+  if (autostart) {
+    if (document.readyState !== 'loading') svStart();
+    else document.addEventListener('DOMContentLoaded', svStart);
+  }
+})();
+</script>"""
+        )
         return _layout(f"Sponsor variant — {swimmer}", body, active="home")
+
+    @app.route("/api/runs/<run_id>/card/<card_id>/sponsor-variant-job", methods=["POST"])
+    def api_sponsor_variant_job(run_id: str, card_id: str):
+        """D-32: background render + caption for the sponsor-variant page;
+        ``202`` + ``{job_id, poll_url}``.
+
+        The synchronous page GET used to hold the HTTP connection for the
+        whole visual render *and* an LLM caption call. Fail-fast gates
+        (tenant, sponsor configured) stay in the request thread; the worker
+        does the heavy work and the shared ``api_reel_job_status`` route
+        reports ``image_url`` / ``caption`` (or their plain-copy failure
+        messages — raw exceptions go to the server log only).
+        """
+        run_data, target = _load_run_for_card(run_id, card_id)
+        if not _can_access_run(run_id, run_data, _active_profile_id()):
+            run_data = None
+            target = None
+        if run_data is None or target is None:
+            return jsonify({"error": "run_not_found"}), 404
+
+        profile_id = run_data.get("profile_id") or run_data.get("club_filter") or ""
+        profile = load_profile(profile_id) if profile_id else None
+        if profile is None:
+            profile = _active_profile()
+        _rotated = None
+        if profile is not None:
+            try:
+                from mediahub.club_platform.sponsors import sponsor_for_card as _sponsor_for_card
+
+                _rotated = _sponsor_for_card(profile, run_id, card_id)
+            except Exception:
+                _rotated = None
+        sponsor_name = (_rotated or {}).get("name", "").strip()
+        if not sponsor_name:
+            return (
+                jsonify(
+                    {
+                        "error": "no_sponsor",
+                        "user_message": (
+                            "No sponsor is configured for this organisation — "
+                            "add one on the Organisation page first."
+                        ),
+                    }
+                ),
+                400,
+            )
+        sponsor_id = (_rotated or {}).get("sponsor_id", "")
+        resolved_pid = profile_id or "_run_" + run_id
+        resolved_pid = re.sub(r"[^a-z0-9_-]", "-", resolved_pid.lower()).strip("-") or (
+            "_run_" + run_id
+        )
+        if not _session_can_access_profile(resolved_pid):
+            return jsonify({"error": "run_not_found"}), 404
+        sidecar = _sponsor_variant_sidecar(run_id, card_id)
+        if sidecar is None:
+            return jsonify({"error": "run_not_found"}), 404
+
+        # Capture everything the worker needs at enqueue — it has no request
+        # context (_active_profile_id() returns nothing on the thread).
+        ach = target.get("achievement") or {}
+        meet_name = (run_data.get("meet") or {}).get("name") or run_data.get("meet_name", "")
+        item = {
+            "id": ach.get("swim_id") or card_id,
+            "swim_id": ach.get("swim_id") or card_id,
+            "achievement": ach,
+            "post_angle": ach.get("post_angle"),
+            "meet_name": meet_name,
+            "safe_to_post": target.get("safe_to_post") or {"level": "safe"},
+        }
+        brand_kit = None
+        media_assets: list[dict] = []
+        if _v8_ok:
+            brand_kit = _v8_brand_kit_for(resolved_pid, run_id=run_id)
+            try:
+                from mediahub.media_library.photo_edit import asset_dicts_for_render
+
+                store = _v8_get_media_store()
+                assets = store.list(profile_id=resolved_pid)
+                media_assets = asset_dicts_for_render(assets, store)
+            except Exception:
+                pass
+        # UI 1.18 — honour the card's persisted inspector overrides, minus
+        # hide_sponsor: this surface's whole job is showing the sponsor slot.
+        _insp = {
+            k: v
+            for k, v in _inspector_overrides_for_card(run_id, card_id).items()
+            if k != "hide_sponsor"
+        }
+
+        job_id = uuid.uuid4().hex
+        job: dict = {
+            "id": job_id,
+            "kind": "sponsor-variant",
+            "status": "running",
+            "error": "",
+            "user_message": "",
+            "video_url": "",
+            "visual_id": "",
+            "format_name": "",
+            "png_path": "",
+            "image_message": "",
+            "caption": "",
+            "caption_message": "",
+            "created_at": time.time(),
+            "owner_pid": _active_profile_id() or "",
+        }
+        _variant_jobs_gc()
+        _variant_job_save(job)
+
+        def _worker() -> None:
+            try:
+                with _job_heartbeat(job):
+                    # ---- 1. Sponsor-branded visual (render-engine bound) ----
+                    if _v8_ok and _v8_create_visual_for_item is not None:
+                        try:
+                            # A 202-accepted background job queues for the
+                            # slot (like the render-all batch worker) rather
+                            # than borrowing the request threads' fast-fail
+                            # budget.
+                            with _render_slot(
+                                "graphic", f"sponsor:{card_id}", timeout=_RENDER_QUEUE_TIMEOUT
+                            ):
+                                res = _v8_create_visual_for_item(
+                                    item,
+                                    brand_kit,
+                                    profile_id=resolved_pid,
+                                    run_id=run_id,
+                                    media_assets=media_assets,
+                                    sponsor_name=sponsor_name,
+                                    user_overrides=_insp,
+                                )
+                            visuals = res.get("visuals") or []
+                            v0 = visuals[0] if visuals else {}
+                            vid = v0.get("id") or v0.get("brief_id") or ""
+                            if vid:
+                                job["visual_id"] = vid
+                                job["format_name"] = v0.get("format_name") or "feed_portrait"
+                                job["png_path"] = str(v0.get("file_path") or "")
+                                if sponsor_id:
+                                    try:
+                                        from mediahub.club_platform.sponsors import (
+                                            record_exposure as _rec_exposure,
+                                        )
+
+                                        _rec_exposure(
+                                            resolved_pid,
+                                            run_id=run_id,
+                                            card_id=card_id,
+                                            sponsor_id=sponsor_id,
+                                            sponsor_name=sponsor_name,
+                                            surface="sponsor_variant",
+                                        )
+                                    except Exception:
+                                        pass
+                            else:
+                                log.warning(
+                                    "sponsor variant %s/%s: no visual produced: %s",
+                                    run_id,
+                                    card_id,
+                                    (res.get("errors") or ["no visuals returned"])[0],
+                                )
+                                job["image_message"] = (
+                                    "The graphic couldn't be rendered — try again."
+                                )
+                        except _RenderBusy:
+                            job["image_message"] = (
+                                "Another render is in progress — try again in a minute."
+                            )
+                        except Exception:
+                            log.warning(
+                                "sponsor variant %s/%s: render failed",
+                                run_id,
+                                card_id,
+                                exc_info=True,
+                            )
+                            job["image_message"] = "The graphic couldn't be rendered — try again."
+                    else:
+                        job["image_message"] = (
+                            "Graphic rendering isn't available on this deployment."
+                        )
+                    _variant_job_save(job)
+                    # ---- 2. Sponsor-acknowledging caption (LLM) ----
+                    try:
+                        from mediahub.brand.sponsor import generate_sponsor_caption
+
+                        job["caption"] = generate_sponsor_caption(ach, profile=profile)
+                    except Exception as e:
+                        # Detect "no LLM provider configured" by class name
+                        # rather than importing ClaudeUnavailableError directly
+                        # — keeps this surface resilient if the module moves.
+                        if type(e).__name__ == "ClaudeUnavailableError":
+                            job["caption_message"] = (
+                                "AI captions are unavailable on this deployment. "
+                                "The sponsor-branded graphic is still ready to "
+                                "download. Contact your administrator to enable "
+                                "AI captions."
+                            )
+                        else:
+                            log.warning(
+                                "sponsor variant %s/%s: caption failed",
+                                run_id,
+                                card_id,
+                                exc_info=True,
+                            )
+                            job["caption_message"] = (
+                                "The caption couldn't be generated — try again."
+                            )
+                job["status"] = "done"
+                # A successful render is cached via the sidecar so the next
+                # page load shows it instantly, without a new job.
+                if job["visual_id"]:
+                    try:
+                        sidecar.parent.mkdir(parents=True, exist_ok=True)
+                        # A concurrent page GET must never read a torn sidecar
+                        # (torn read = cache miss = duplicate auto-start
+                        # render) — write via unique tmp + atomic os.replace,
+                        # the _variant_job_save idiom.
+                        _sc_tmp = sidecar.with_suffix(f".{uuid.uuid4().hex[:8]}.tmp")
+                        _sc_tmp.write_text(
+                            json.dumps(
+                                {
+                                    "visual_id": job["visual_id"],
+                                    "format_name": job["format_name"],
+                                    "png_path": job["png_path"],
+                                    "caption": job["caption"],
+                                    "caption_message": job["caption_message"],
+                                    "sponsor_name": sponsor_name,
+                                    "created_at": time.time(),
+                                }
+                            ),
+                            encoding="utf-8",
+                        )
+                        os.replace(_sc_tmp, sidecar)
+                    except Exception:
+                        log.warning(
+                            "sponsor variant %s/%s: sidecar write failed",
+                            run_id,
+                            card_id,
+                            exc_info=True,
+                        )
+            except Exception:
+                # Raw exception text stays in the server log — the client
+                # only ever sees the plain user_message.
+                log.warning("sponsor variant %s/%s: job failed", run_id, card_id, exc_info=True)
+                job["status"] = "error"
+                job["error"] = "sponsor_variant_failed"
+                job["user_message"] = "The sponsor variant couldn't be generated — try again."
+            _variant_job_save(job)
+
+        threading.Thread(target=_worker, name=f"sponsor-variant-{job_id[:8]}", daemon=True).start()
+        return (
+            jsonify(
+                {
+                    "ok": True,
+                    "job_id": job_id,
+                    "poll_url": url_for("api_reel_job_status", job_id=job_id),
+                }
+            ),
+            202,
+        )
 
     # ------------------------------------------------------------------
     # PC.8 — Sponsor manager + per-sponsor exposure reports.
@@ -52241,8 +55909,8 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                 f'<td data-label="Window">{window}</td>'
                 f'<td data-label="State">{state}</td>'
                 f'<td><form method="post" action="{url_for("sponsors_delete")}" style="margin:0" '
-                'onsubmit="return confirm(\'Remove this sponsor? Their logo and details are '
-                'permanently deleted.\')">'
+                "onsubmit=\"return confirm('Remove this sponsor? Their logo and details are "
+                "permanently deleted.')\">"
                 f'<input type="hidden" name="sponsor_id" value="{_h(s["sponsor_id"])}">'
                 '<button type="submit" class="btn secondary" style="font-size:12px;padding:4px 10px">Remove</button>'
                 "</form></td></tr>"
@@ -52352,6 +56020,9 @@ where they appeared, ready to forward.</p>
         if entry is not None:
             registry = [s for s in (prof.sponsors or [])]
             # Replace an entry with the same id (same name) instead of duplicating.
+            _had_existing = any(
+                isinstance(s, dict) and s.get("sponsor_id") == entry["sponsor_id"] for s in registry
+            )
             registry = [
                 s
                 for s in registry
@@ -52360,6 +56031,14 @@ where they appeared, ready to forward.</p>
             registry.append(entry)
             prof.sponsors = registry
             save_profile(prof)
+            # E-14: the replace semantics stay, but the user is told — a
+            # same-named add used to overwrite the existing entry silently.
+            if _had_existing:
+                _flash_toast(
+                    f"Updated existing sponsor {entry['name']} — "
+                    "its previous details were replaced.",
+                    "info",
+                )
         return redirect(url_for("sponsors_page"))
 
     @app.route("/sponsors/delete", methods=["POST"])
@@ -52473,8 +56152,7 @@ workflow, and the publish log &mdash; deterministic and auditable.</p>
                 _lbl = _excluded_labels.get(key)
                 if _lbl:
                     _name_cell = (
-                        f"<td>{_h(_lbl['title'])}</td>"
-                        f"<td class='dim'>{_h(_lbl['meet_name'])}</td>"
+                        f"<td>{_h(_lbl['title'])}</td><td class='dim'>{_h(_lbl['meet_name'])}</td>"
                     )
                 else:
                     # The run no longer exists — fall back to the raw key.
@@ -52524,9 +56202,10 @@ workflow, and the publish log &mdash; deterministic and auditable.</p>
       enforced on top &mdash; this blanket setting can only tighten it further)</label>
     <button type="submit" class="btn secondary" style="font-size:12px">Save</button>
   </form>
-  <form method="post" action="{url_for("public_wall_update")}" style="margin-top:14px">
+  <form method="post" action="{url_for("public_wall_update")}" style="margin-top:14px"
+        onsubmit="return mhWallOffConfirm(this)">
     <input type="hidden" name="action" value="disable">
-    <button type="submit" class="btn secondary">Switch off &amp; revoke the link</button>
+    <button type="submit" class="btn secondary">Unpublish &amp; revoke link</button>
   </form>
 </div>
 <div class="card" style="margin-bottom:20px">
@@ -52542,16 +56221,41 @@ workflow, and the publish log &mdash; deterministic and auditable.</p>
   {excluded_rows or '<tr><td class="dim" style="padding:12px">None hidden.</td></tr>'}
   </tbody></table>
 </div>"""
+            # E-12: switching off clears the token, so every shared URL,
+            # embed, feed and QR code dies permanently (re-enabling mints a
+            # NEW link). That deserves an explicit confirm — styled
+            # MH.confirm where loaded, native confirm fallback. Plain string
+            # (not an f-string) so the JS braces stay single.
+            status_block += """
+<script>
+function mhWallOffConfirm(f) {
+  if (f.dataset.mhConfirmed === '1') { f.dataset.mhConfirmed = ''; return true; }
+  var body = 'Your public link, website embed, feeds and any QR codes will stop working. Switching back on creates a DIFFERENT link.';
+  if (window.MH && MH.confirm) {
+    MH.confirm({
+      title: 'Switch off the public wall?',
+      body: body,
+      confirmText: 'Switch off & revoke',
+      onConfirm: function() {
+        f.dataset.mhConfirmed = '1';
+        if (f.requestSubmit) f.requestSubmit(); else f.submit();
+      }
+    });
+    return false;
+  }
+  return confirm('Switch off the public wall? ' + body);
+}
+</script>"""
         else:
             status_block = f"""
 <div class="card empty">
-  <p><b>Your public wall is off.</b> Switching it on creates an unguessable public link
+  <p><b>Your public wall is not published.</b> Publishing it creates an unguessable public link
   showing only your <i>approved</i> cards — a celebration page you can share or embed in
-  the club website. Names display as initials by default. Switching it off later revokes
+  the club website. Names display as initials by default. Unpublishing later revokes
   the link immediately.</p>
   <form method="post" action="{url_for("public_wall_update")}">
     <input type="hidden" name="action" value="enable">
-    <button type="submit" class="btn">Switch on the public wall</button>
+    <button type="submit" class="btn">Publish wall</button>
   </form>
 </div>"""
 
@@ -52598,7 +56302,15 @@ ever appear; queued, edited and rejected cards never do.</p>
 
     def _wall_page_html(prof, cards, token: str, *, embed: bool) -> str:
         kit = prof.get_brand_kit()
-        primary = getattr(kit, "primary_colour", None) or "#0A2540"
+        # The brand colour is interpolated into a <style> block below, where _h
+        # (HTML escaping) does NOT neutralise CSS metacharacters ({ } ; :). A
+        # non-hex brand_primary (e.g. set via a raw form POST that bypasses the
+        # type=color widget) could otherwise break out of the header selector and
+        # inject arbitrary CSS onto this public page. Gate it to a hex colour and
+        # fall back to the default otherwise.
+        primary = getattr(kit, "primary_colour", None) or ""
+        if not re.fullmatch(r"#[0-9A-Fa-f]{3,8}", primary):
+            primary = "#0A2540"
         items = ""
         for c in cards:
             img = url_for(
@@ -52641,7 +56353,7 @@ ever appear; queued, edited and rejected cards never do.</p>
 </style></head><body>
 {header}
 <div class="grid">{items}</div>
-<span class="powered">Powered by <a href="{_h(badge_href)}" rel="noopener">MediaHub</a></span>
+<span class="powered">Powered by <a href="{_h(badge_href)}" target="_blank" rel="noopener noreferrer">MediaHub</a></span>
 </body></html>"""
 
     def _resolve_wall_or_404(token: str):
@@ -52796,7 +56508,11 @@ ever appear; queued, edited and rejected cards never do.</p>
         if not path:
             abort(404)
         resp = make_response(send_file(path, mimetype="image/png"))
-        resp.headers["Cache-Control"] = "public, max-age=3600"
+        # Match the page/feed TTL (max-age=300) and require revalidation. On a
+        # children's-data surface where consent can be withdrawn or a card hidden
+        # at any moment, a 1-hour public cache could keep serving a withdrawn
+        # child's card image long after it should be gone.
+        resp.headers["Cache-Control"] = "public, max-age=300, must-revalidate"
         return resp
 
     # ------------------------------------------------------------------
@@ -54095,6 +57811,176 @@ voice, and queues them for one-click approval.</p>
             202,
         )
 
+    @app.route("/api/runs/<run_id>/card/<card_id>/motion-batch-job", methods=["POST"])
+    def api_card_motion_batch_job(run_id: str, card_id: str):
+        """Render every motion cut of one card in one background job (B-5);
+        ``202`` + ``{job_id, poll_url}``.
+
+        The reel already had an all-formats batch; per-card motion made the
+        user click four separate renders. This mirrors ``api_run_reel_batch``
+        over the motion job store: one job, kind ``motion-batch``, rendering
+        story / portrait / square / landscape sequentially — each cut under
+        its OWN render-slot acquire/release (never holding the gate across
+        the batch, so a foreground render can interleave) — with per-cut
+        progress in the job's ``total``/``done``/``current`` fields. On
+        ``done``, ``video_urls`` maps each produced cut to its persistent
+        ``motion-file`` URL and ``formats_failed`` carries the honest reason
+        for any cut that could not render. The motion cache makes re-runs
+        cheap: cuts already rendered complete near-instantly.
+        """
+        try:
+            from mediahub.visual import motion as _motion
+        except Exception as e:
+            return jsonify({"error": f"motion_module_unavailable: {e}"}), 503
+
+        # Fail-fast gates (tenant / card / mix validation) stay synchronous.
+        inputs, err = _assemble_card_motion_inputs(run_id, card_id)
+        if err is not None:
+            return err
+
+        out_dir = Path(inputs["out_path"]).parent
+        # url_for needs the request context — resolve every cut's file URL
+        # now, before the worker thread (which has none).
+        file_urls: dict[str, str] = {}
+        for fmt in _motion.MOTION_FORMATS:
+            _file_kwargs = {"run_id": run_id, "card_id": card_id}
+            if fmt != _motion.DEFAULT_MOTION_FORMAT:
+                _file_kwargs["format"] = fmt
+            file_urls[fmt] = url_for("api_card_motion_file", **_file_kwargs)
+
+        job_id = uuid.uuid4().hex
+        job: dict = {
+            "id": job_id,
+            "kind": "motion-batch",
+            "status": "running",
+            "error": "",
+            "user_message": "",
+            "video_url": "",
+            "video_urls": {},
+            "formats_failed": {},
+            "total": len(_motion.MOTION_FORMATS),
+            "done": 0,
+            "current": "",
+            "errors": {},
+            "created_at": time.time(),
+            "owner_pid": _active_profile_id() or "",
+        }
+        _variant_jobs_gc()
+        _variant_job_save(job)
+
+        def _worker() -> None:
+            rendered: dict[str, str] = {}
+            failed: dict[str, str] = {}
+            busy_cuts: set[str] = set()
+            try:
+                with _job_heartbeat(job):
+                    for fmt in _motion.MOTION_FORMATS:
+                        job["current"] = fmt
+                        _variant_job_save(job)
+                        out_name = (
+                            f"{card_id}.mp4"
+                            if fmt == _motion.DEFAULT_MOTION_FORMAT
+                            else f"{card_id}_{fmt}.mp4"
+                        )
+                        try:
+                            # Per-cut slot with the queue timeout (like the
+                            # reel batch): wait a turn per item rather than
+                            # hogging the render gate for the whole batch.
+                            with _render_slot(
+                                "motion", f"{card_id}:{fmt}", timeout=_RENDER_QUEUE_TIMEOUT
+                            ):
+                                mp4 = _motion.render_story_card(
+                                    inputs["card"],
+                                    inputs["brand_kit"],
+                                    out_dir / out_name,
+                                    variation_seed=inputs["variation_seed"],
+                                    brief=inputs["brief"],
+                                    format_name=fmt,
+                                )
+                            if not Path(mp4).exists():
+                                raise RuntimeError("mp4 missing after render")
+                            rendered[fmt] = file_urls[fmt]
+                        except _RenderBusy:
+                            busy_cuts.add(fmt)
+                            failed[fmt] = (
+                                "Another video is rendering right now — " "try again in a minute."
+                            )
+                        except Exception as e:
+                            # The honest per-cut reason (reel-batch parity):
+                            # detail carries the real error; the generic
+                            # user_message would hide which cut broke and why.
+                            _payload = _motion_error_payload(e)
+                            failed[fmt] = str(
+                                _payload.get("detail") or _payload.get("user_message") or e
+                            )
+                        job["done"] = int(job.get("done") or 0) + 1
+                        job["video_urls"] = dict(rendered)
+                        job["formats_failed"] = dict(failed)
+                        job["errors"] = dict(failed)
+                        _variant_job_save(job)
+                job["current"] = ""
+                if not rendered:
+                    # CON2-3 — every cut hit a busy renderer: surface the
+                    # machine token the JS reattach branch keys on (reel-batch
+                    # parity), not the human copy as job["error"].
+                    if failed and set(failed) == busy_cuts:
+                        raise _RenderBusy()
+                    # Not one cut produced — surface an honest reason rather
+                    # than reporting a successful job with no video.
+                    reason = next(iter(failed.values()), "no motion formats could be rendered")
+                    raise RuntimeError(reason)
+                job["status"] = "done"
+                # Keep the legacy single field on the story cut (or the first
+                # produced) so a single-format poller still gets a video_url.
+                job["video_url"] = rendered.get(_motion.DEFAULT_MOTION_FORMAT) or next(
+                    iter(rendered.values()), ""
+                )
+                try:
+                    from mediahub.notify import inbox as _inbox
+
+                    _inbox.record_render_complete(
+                        job.get("owner_pid") or "", run_id=run_id, label="motion (all formats)"
+                    )
+                except Exception:
+                    pass
+            except _RenderBusy:
+                # CON2-3 — the token in error (for the JS reattach branch),
+                # the human copy in user_message: reel-batch parity.
+                job["status"] = "error"
+                job["error"] = "renderer_busy"
+                job["user_message"] = (
+                    "Another video is rendering right now — try again in a minute."
+                )
+            except Exception as e:
+                _payload = _motion_error_payload(e)
+                job["status"] = "error"
+                job["error"] = str(_payload.get("detail") or e)
+                job["user_message"] = str(_payload.get("user_message") or "")
+                try:
+                    from mediahub.notify import inbox as _inbox
+
+                    _inbox.record_error(
+                        job.get("owner_pid") or "",
+                        "Motion batch render failed",
+                        job["user_message"] or job["error"],
+                        run_id=run_id,
+                    )
+                except Exception:
+                    pass
+            _variant_job_save(job)
+
+        threading.Thread(target=_worker, name=f"motionbatch-{job_id[:8]}", daemon=True).start()
+        return (
+            jsonify(
+                {
+                    "ok": True,
+                    "job_id": job_id,
+                    "poll_url": url_for("api_reel_job_status", job_id=job_id),
+                }
+            ),
+            202,
+        )
+
     @app.route("/api/runs/<run_id>/card/<card_id>/motion-file", methods=["GET"])
     def api_card_motion_file(run_id: str, card_id: str):
         """Serve an already-rendered per-card MP4 — never triggers a render.
@@ -54898,6 +58784,51 @@ voice, and queues them for one-click approval.</p>
                 f'<h2 style="text-transform:capitalize">{_h(grp["label"])}</h2>'
                 f'<div class="mh-chip-row">{chips}</div></section>'
             )
+        # J-8: the catalogue was a dead end — product chips and engine status
+        # with no path to any meet's actual print tool. List the active org's
+        # recent processed meets, each opening its own print tool.
+        _meet_rows = []
+        _pid = _active_profile_id()
+        if _pid:
+            try:
+                conn = _db()
+                _meet_rows = conn.execute(
+                    "SELECT id, meet_name, created_at FROM runs "
+                    "WHERE profile_id = ? AND status = 'done' "
+                    "ORDER BY created_at DESC LIMIT 8",
+                    (_pid,),
+                ).fetchall()
+                conn.close()
+            except Exception:  # noqa: BLE001
+                _meet_rows = []
+        if _meet_rows:
+            _meet_items = "".join(
+                f'<li style="margin-bottom:6px">'
+                f'<a href="{url_for("print_run_tool_page", run_id=r["id"])}">'
+                f"{_h((r['meet_name'] or 'Meet').strip() or 'Meet')}</a>"
+                f'<span class="muted" style="margin-left:8px;font-size:12px">'
+                f"processed {_h((r['created_at'] or '')[:10])}</span></li>"
+                for r in _meet_rows
+            )
+            _meets_inner = (
+                '<p class="muted" style="margin-top:0">Each meet opens its own print '
+                "tool: pick a card and a product, proof it, then export the "
+                "print-ready file.</p>"
+                f'<ul style="margin:0;padding-left:20px">{_meet_items}</ul>'
+            )
+        else:
+            _meets_inner = _empty_state(
+                "inbox",
+                "No results to print from yet",
+                "Process a results file first &mdash; every meet you process "
+                "appears here, ready to turn into posters, certificates and merch.",
+                actions=f'<a class="btn" href="{url_for("home")}">Upload results</a>',
+            )
+        _meets_html = (
+            '<section class="panel" style="margin-bottom:var(--sp-4)">'
+            "<h2>Print from a meet</h2>"
+            f"{_meets_inner}</section>"
+        )
         ff = _ff.status()
         # Name the piece that's actually missing: PDF/X-3 needs Ghostscript AND
         # an ICC profile, so "needs an ICC profile" when Ghostscript itself is
@@ -54922,9 +58853,9 @@ voice, and queues them for one-click approval.</p>
             '<p class="lede">Turn any approved design into a file a high-street or online '
             "printer will accept — posters, flyers, certificates, banners, and fundraising "
             "merch. MediaHub checks resolution, bleed, text size, contrast and ink before you "
-            "ever send it, and explains anything to fix. Open a meet's print tool to proof and "
-            "export a card.</p>"
-            f"{caps}</section>" + "".join(sections)
+            "ever send it, and explains anything to fix. Pick a meet below to proof and "
+            "export its cards.</p>"
+            f"{caps}</section>" + _meets_html + "".join(sections)
         )
         return _layout("Print & merch", body)
 
@@ -56196,6 +60127,8 @@ voice, and queues them for one-click approval.</p>
             "reel",
             "reel-batch",
             "motion",
+            # B-5: the per-card all-formats motion batch (4 cuts, one job).
+            "motion-batch",
             "render-all",
             "describe",
             # J-1: the Video Studio's async operations poll this same route.
@@ -56203,6 +60136,10 @@ voice, and queues them for one-click approval.</p>
             "video-clip",
             "video-reel",
             "video-stabilize",
+            # D-12: the certificates-ZIP build (one Chromium PDF per card).
+            "certificates",
+            # D-32: the sponsor-variant page's render + caption job.
+            "sponsor-variant",
         ):
             return jsonify({"error": "job_not_found"}), 404
         if (job.get("owner_pid") or "") != (_active_profile_id() or ""):
@@ -56239,6 +60176,27 @@ voice, and queues them for one-click approval.</p>
             payload["project_id"] = job.get("project_id")
         if job.get("project") is not None:
             payload["project"] = job.get("project")
+        # D-12: a file-producing job (certificates ZIP) hands back the gated
+        # download URL instead of a video_url; other pollers ignore the key.
+        if job.get("download_url"):
+            payload["download_url"] = job.get("download_url")
+        # D-32: the sponsor-variant job hands back the rendered visual +
+        # caption (or their plain-copy failure messages) instead of a
+        # video_url. Other kinds never carry these keys, so nothing changes
+        # for the existing pollers.
+        if job.get("kind") == "sponsor-variant":
+            payload["image_url"] = (
+                url_for(
+                    "api_visual_png",
+                    vid=job.get("visual_id"),
+                    format_name=job.get("format_name") or "feed_portrait",
+                )
+                if job.get("visual_id")
+                else ""
+            )
+            payload["image_message"] = job.get("image_message") or ""
+            payload["caption"] = job.get("caption") or ""
+            payload["caption_message"] = job.get("caption_message") or ""
         return jsonify(payload)
 
     @app.route("/api/runs/<run_id>/reel-file", methods=["GET"])
@@ -58040,13 +61998,17 @@ voice, and queues them for one-click approval.</p>
             "headers:{'Content-Type':'application/json'},body:JSON.stringify({name:n.value.trim()})})"
             ".then(function(r){return r.json();}).then(function(j){if(j.ok)location.reload();"
             "else if(window.MH&&MH.toast)MH.toast(j.reason||j.detail||'Could not create','error',3000);})"
-            ".catch(function(){});}\n"
+            ".catch(function(){if(window.MH&&MH.toast)"
+            "MH.toast('Network error — the collection was not created.','error',3000);});}\n"
             "function mhDeleteCollection(id){"
             "var go=function(){fetch('"
             + url_for("api_collections")
             + "/'+encodeURIComponent(id),{method:'POST',"
             "headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'delete'})})"
-            ".then(function(r){return r.json();}).then(function(){location.reload();}).catch(function(){});};"
+            ".then(function(r){return r.json();}).then(function(j){if(j.ok)location.reload();"
+            "else if(window.MH&&MH.toast)MH.toast(j.reason||j.detail||'Could not delete','error',3000);})"
+            ".catch(function(){if(window.MH&&MH.toast)"
+            "MH.toast('Network error — the collection was not deleted.','error',3000);});};"
             "if(window.MH&&MH.confirm){MH.confirm({title:'Delete this collection?',"
             "body:'The folder is removed. The meets and packs inside it are kept.',"
             "confirmText:'Delete',onConfirm:go});}"
@@ -58119,7 +62081,7 @@ voice, and queues them for one-click approval.</p>
                 '<div class="card" style="padding:10px 14px;margin-bottom:8px;display:flex;'
                 'justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">'
                 f'<div><span class="tag" style="font-size:10px;margin-right:8px">'
-                f'{_h(it["item_type"])}</span>{label_html}</div>{remove_btn}</div>'
+                f"{_h(it['item_type'])}</span>{label_html}</div>{remove_btn}</div>"
             )
         rows = rows or (
             '<p class="dim" style="margin:var(--sp-4) 0">Nothing in this collection yet — '
@@ -58261,6 +62223,13 @@ voice, and queues them for one-click approval.</p>
 
         name = str(raw or "none").strip().lower()
         return name if name in LOOKS else "none"
+
+    def _video_norm_source(src) -> str:
+        """Normalise a clip source path for identity comparison (resolve ./..)."""
+        try:
+            return str(Path(str(src or "")).resolve())
+        except Exception:
+            return str(src or "")
 
     def _footage_permission_error(asset) -> Optional[dict]:
         """Plain-language block reason when a clip may not be used (M26), or None.
@@ -58413,6 +62382,30 @@ voice, and queues them for one-click approval.</p>
         look_options = "".join(
             f'<option value="{_h(n)}">{_h(describe_look(n))}</option>' for n in look_names()
         )
+        # G-7: the OTHER reel — the Meet reel built from result cards on the
+        # pack page — gets a cross-link here so the two features stop being
+        # two unrelated things both called "reel". Link the latest processed
+        # meet's pack when there is one, else Activity.
+        _meet_reel_href = url_for("activity_page")
+        try:
+            conn = _db()
+            try:
+                _mr_row = conn.execute(
+                    "SELECT id FROM runs WHERE profile_id = ? AND status='done' "
+                    "ORDER BY created_at DESC LIMIT 1",
+                    (prof.profile_id,),
+                ).fetchone()
+            finally:
+                conn.close()
+            if _mr_row:
+                _meet_reel_href = url_for("content_pack", run_id=_mr_row["id"])
+        except Exception as e:  # noqa: BLE001 - hint only, never block the studio
+            log.warning("video studio: meet-reel hint lookup failed: %s", e)
+        meet_reel_hint = (
+            '<p class="muted" style="margin-top:6px">Want a highlights reel from '
+            "your result cards instead? "
+            f'<a href="{_h(_meet_reel_href)}">Build a Meet reel &rarr;</a></p>'
+        )
         body = (
             _VIDEO_STUDIO_HTML.replace("__CSRF__", _h(_csrf_token()))
             .replace("__FOOTAGE_URL__", url_for("api_video_footage_upload"))
@@ -58459,6 +62452,7 @@ voice, and queues them for one-click approval.</p>
             .replace("__LOOK_OPTIONS__", look_options)
             .replace("__VIDEO_MAX_MB__", str(_video_upload_max // (1024 * 1024)))
             .replace("__ENGINE_NOTE__", engine_note)
+            .replace("__MEET_REEL_HINT__", meet_reel_hint)
         )
         return _layout("Video studio", body, active="video")
 
@@ -58687,7 +62681,7 @@ voice, and queues them for one-click approval.</p>
         caption_style = "karaoke" if payload.get("animated_captions") else "static"
         slow_mo = 0.5 if payload.get("slow_mo") else 1.0
 
-        from mediahub.video.clip_maker import clip_maker
+        from mediahub.video.clip_maker import UndecodableClip, clip_maker
         from mediahub.video.probe import ProbeUnavailable
 
         try:
@@ -58716,6 +62710,11 @@ voice, and queues them for one-click approval.</p>
                     "this clip on this deployment.",
                 }
             ), 503
+        except UndecodableClip as e:
+            # The upload probes to nothing (corrupt / not a video). Reject it
+            # cleanly here rather than building a doomed timeline that 500s at
+            # render.
+            return jsonify({"error": "undecodable_clip", "message": str(e)[:200]}), 422
         except Exception as e:  # honest surface; never a fabricated clip
             log.warning("clip-maker failed for %s: %s", asset_id, e)
             return jsonify({"error": "clip_maker_failed", "message": str(e)[:200]}), 500
@@ -58806,7 +62805,7 @@ voice, and queues them for one-click approval.</p>
         _variant_job_save(job)
 
         def _worker() -> None:
-            from mediahub.video.clip_maker import clip_maker
+            from mediahub.video.clip_maker import UndecodableClip, clip_maker
             from mediahub.video.probe import ProbeUnavailable
             from mediahub.video.projects import VideoProject
 
@@ -58847,6 +62846,10 @@ voice, and queues them for one-click approval.</p>
                     "The video engine (FFmpeg) isn't available to analyse this clip "
                     "on this deployment."
                 )
+            except UndecodableClip as e:
+                job["status"] = "error"
+                job["error"] = "undecodable_clip"
+                job["user_message"] = str(e)[:200]
             except Exception as e:  # honest surface; never a fabricated clip
                 job["status"] = "error"
                 job["error"] = str(e)[:200]
@@ -58954,7 +62957,7 @@ voice, and queues them for one-click approval.</p>
 
         from mediahub.video.projects import VideoProject
 
-        name = (result.plan.hook or brief or "AI reel").strip()[:80] or "AI reel"
+        name = (result.plan.hook or brief or "Footage reel").strip()[:80] or "Footage reel"
         proj = VideoProject(
             id="",
             profile_id=profile_id,
@@ -59056,7 +63059,9 @@ voice, and queues them for one-click approval.</p>
                         brief_context=brief,
                         colours=colours,
                     )
-                    name = (result.plan.hook or brief or "AI reel").strip()[:80] or "AI reel"
+                    name = (result.plan.hook or brief or "Footage reel").strip()[
+                        :80
+                    ] or "Footage reel"
                     proj = VideoProject(
                         id="",
                         profile_id=profile_id,
@@ -59295,8 +63300,15 @@ voice, and queues them for one-click approval.</p>
                 return jsonify(
                     {"error": "bad_op", "message": "op must be edit|delete|retime|shift"}
                 ), 400
-        except (TypeError, ValueError) as e:
-            return jsonify({"error": "bad_params", "message": str(e)}), 400
+        except (TypeError, ValueError):
+            # A missing/non-numeric index or frame value fails an int() cast;
+            # surface an actionable message, never the raw Python cast error.
+            return jsonify(
+                {
+                    "error": "bad_params",
+                    "message": "A caption edit needs a whole-number index (and frame values).",
+                }
+            ), 400
         edl.captions = track
         proj.edl = edl
         proj.status = "draft"  # an edit reopens approval (rule 6)
@@ -59354,6 +63366,82 @@ voice, and queues them for one-click approval.</p>
                 validate(new_edl)
             except EDLError as e:
                 return jsonify({"error": "invalid_edl", "message": str(e)}), 400
+            except (ValueError, TypeError, AttributeError):
+                # EDL.from_dict coerces fields (int/float casts, per-clip dicts),
+                # so a wrong-typed field ("width": "abc", "clips": "x", a null
+                # fps) raises a plain ValueError/TypeError/AttributeError rather
+                # than EDLError. Catch those too so a malformed timeline is an
+                # honest 400, never an unhandled 500 with a Python-internals trace.
+                return jsonify(
+                    {
+                        "error": "invalid_edl",
+                        "message": "The timeline is malformed. Reload the studio and try again.",
+                    }
+                ), 400
+            # Bind every clip source to one already on this project's saved
+            # timeline. The EDL validator only checks a source is non-empty, so
+            # without this a caller could point a clip at ANY file on the box
+            # (another tenant's footage, any readable media) and have the
+            # render / waveform / export engine read it back. A legitimate edit
+            # only ever reorders / trims / grades / drops the clips it was given
+            # — new footage enters solely via Clip-Maker / the reel (new
+            # projects), never by rewriting an existing timeline's sources.
+            allowed = {_video_norm_source(c.source) for c in (proj.edl.clips or [])}
+            foreign = next(
+                (c.source for c in new_edl.clips if _video_norm_source(c.source) not in allowed),
+                None,
+            )
+            if foreign is not None:
+                return jsonify(
+                    {
+                        "error": "invalid_edl",
+                        "message": "A clip points at a source that isn't part of "
+                        "this project's footage. Reload the studio and try again.",
+                    }
+                ), 400
+            # F-14 — burned caption cues are frame-indexed to the timeline they
+            # were built on. When an edit reorders / trims / deletes clips the
+            # timeline shifts, so re-time the cues to follow their clip instead of
+            # drifting onto the wrong moment. Only fires when the clip structure
+            # actually changed (a text / grade-only edit leaves the track exactly
+            # as sent, so the render stays byte-identical).
+            if new_edl.captions and (new_edl.captions.get("cues")):
+                # A structural change is any edit that moves a clip's placement on
+                # the timeline: its source, trim window, or the transition that
+                # shifts everything after it. Grade / caption-text edits don't.
+                def _shape(clips):
+                    return [
+                        (
+                            c.source,
+                            c.in_ms,
+                            c.out_ms,
+                            c.transition_in.kind,
+                            c.transition_in.duration_ms,
+                        )
+                        for c in clips
+                    ]
+
+                if _shape(proj.edl.clips or []) != _shape(new_edl.clips or []):
+                    from mediahub.video.captions import retime_track_for_edit
+
+                    def _clip_descs(edl_obj):
+                        offs = edl_obj.clip_start_offsets_ms()
+                        return [
+                            {
+                                "source": c.source,
+                                "offset_ms": o,
+                                "in_ms": c.in_ms,
+                                "out_ms": c.out_ms,
+                            }
+                            for c, o in zip(edl_obj.clips, offs)
+                        ]
+
+                    new_edl.captions = retime_track_for_edit(
+                        new_edl.captions,
+                        _clip_descs(proj.edl),
+                        _clip_descs(new_edl),
+                        fps=new_edl.fps,
+                    )
             proj.edl = new_edl
             proj.status = "draft"  # an edit reopens approval (rule 6)
         store.save(proj)
@@ -59596,11 +63684,16 @@ voice, and queues them for one-click approval.</p>
             _blocked = _project_blocked_source(proj)
             if _blocked:
                 return jsonify(_blocked), 403
+        # Strip control characters (newlines especially) from the download name:
+        # send_file writes it into the Content-Disposition header, and werkzeug
+        # raises on a header value with a newline — an unhandled 500 on export
+        # for a project whose name contains one.
+        safe_name = re.sub(r"[\x00-\x1f\x7f]+", " ", proj.name[:48]).strip() or "clip"
         return send_file(
             str(path),
             mimetype="video/mp4",
             as_attachment=download,
-            download_name=f"{proj.name[:48] or 'clip'}.mp4",
+            download_name=f"{safe_name}.mp4",
         )
 
     @app.route("/api/runs/<run_id>/card/<card_id>/voiceover", methods=["POST", "GET"])
@@ -59681,10 +63774,11 @@ voice, and queues them for one-click approval.</p>
         text = ""
         if state is not None and state.edited_captions:
             # Honour the human's edits: join the saved slots in a stable order.
+            # ``prev.*`` slots are the H-10 restore history, not current copy.
             parts = [
                 state.edited_captions[k]
                 for k in sorted(state.edited_captions)
-                if state.edited_captions.get(k)
+                if state.edited_captions.get(k) and not str(k).startswith("prev.")
             ]
             text = "\n".join(p for p in parts if p).strip()
         if not text and _build_caption_text is not None:
@@ -59753,6 +63847,7 @@ voice, and queues them for one-click approval.</p>
     def api_visual_get(vid: str):
         if not _v8_ok:
             return jsonify({"error": "v8_unavailable"}), 503
+        active_pid = _active_profile_id()
         for run_dir in RUNS_DIR.iterdir():
             if not run_dir.is_dir():
                 continue
@@ -59771,6 +63866,15 @@ voice, and queues them for one-click approval.</p>
                     continue
                 ids_map = payload.get("visual_ids") or {}
                 if payload.get("id") == vid or vid in ids_map:
+                    # Tenant isolation (org-access audit): a visual belongs to
+                    # the run that produced it, so a foreign org must not read
+                    # its payload (caption, alt text, athlete names). Mirrors
+                    # the sibling /api/runs/<id>/venue-search guard; a run this
+                    # session can't access is skipped, so a foreign visual is
+                    # indistinguishable from a nonexistent one (anti-enumeration).
+                    run_id = run_dir.name
+                    if not _can_access_run(run_id, _load_run(run_id), active_pid):
+                        continue
                     return jsonify(payload)
         return jsonify({"error": "not_found"}), 404
 
@@ -59794,6 +63898,7 @@ voice, and queues them for one-click approval.</p>
             return "", 503
         from flask import send_file
 
+        active_pid = _active_profile_id()
         for run_dir in RUNS_DIR.iterdir():
             if not run_dir.is_dir():
                 continue
@@ -59813,6 +63918,12 @@ voice, and queues them for one-click approval.</p>
                 # Match either the primary id or any id in the visual_ids map
                 ids_map = payload.get("visual_ids") or {}
                 if payload.get("id") != vid and vid not in ids_map:
+                    continue
+                # Tenant isolation (org-access audit): the rendered PNG carries
+                # the same org data as the sidecar above, so gate it the same
+                # way — a run this session can't access is skipped, never served.
+                run_id = run_dir.name
+                if not _can_access_run(run_id, _load_run(run_id), active_pid):
                     continue
                 # Determine which format to serve. If vid matches a specific format-id, use that format; else use requested format_name.
                 if vid in ids_map:
@@ -60283,7 +64394,7 @@ voice, and queues them for one-click approval.</p>
             )
             msg = (
                 '<div class="card" style="border-color:var(--mh-success)">'
-                f'<p>{_h(request.args.get("msg"))}</p>{_review_link}</div>'
+                f"<p>{_h(request.args.get('msg'))}</p>{_review_link}</div>"
             )
         if request.args.get("err"):
             msg = f'<div class="card" style="border-color:var(--mh-error)"><p>{_h(request.args.get("err"))}</p></div>'
@@ -60658,839 +64769,192 @@ voice, and queues them for one-click approval.</p>
             return jsonify({"error": "Job not found."}), 404
         return jsonify(job.to_dict())
 
-    # ---- 1.16: Club microsites + link-in-bio + forms + QR + widgets -------
-    #
-    # Club pages generated from club data, hosted under an unguessable token
-    # URL, approval-gated (a site is a draft until the operator Publishes it,
-    # which freezes a snapshot). Mirrors the public-wall security model:
-    # constant-time token lookup, org-scoped, escaped output. Forms feed the
-    # 1.13 data hub; widgets/QR are the vetted interactive layer.
-
-    def _sites_unavailable_page():
-        return _layout(
-            "Sites",
-            '<div class="card"><h2>Sites unavailable</h2>'
-            '<p class="dim">This feature isn\'t enabled on this deployment.</p></div>',
-            active="create",
-        )
-
-    def _site_brand_kit(pid):
-        """The org's brand kit, or None (render falls back to a neutral brand)."""
-        try:
-            return _v8_brand_kit_for(pid)
-        except Exception:
-            return None
-
-    def _site_facts_for(pid, run_id=""):
-        """Build a SiteFacts from the org's profile + approved cards (+ a run)."""
-        from mediahub.sites.grounding import SiteFacts, site_facts_with_performance
-
-        prof = load_profile(pid)
-        bk = _site_brand_kit(pid)
-        name = (
-            getattr(bk, "display_name", "")
-            or getattr(prof, "display_name", "")
-            or getattr(prof, "name", "")
-            or "Our club"
-        )
-        facts = SiteFacts(
-            club_name=name,
-            tagline=getattr(prof, "tagline", "") or "",
-            location=getattr(prof, "location", "") or "",
-            contact_email=getattr(prof, "contact_email", "") or "",
-        )
-        try:
-            from mediahub.web import public_wall as _pw
-
-            for c in _pw.wall_cards(prof)[:9]:
-                facts.cards.append(
-                    {
-                        "src": f"card:{c['run_id']}/{c['card_id']}",
-                        "alt": c.get("alt_text", ""),
-                        "caption": c.get("title", ""),
-                    }
-                )
-        except Exception:
-            pass
-        if run_id:
-            try:
-                df = _doc_facts_for(pid, bk, scope="meet", run_id=run_id)
-                if df is not None:
-                    facts.event_name = getattr(df, "title", "") or facts.event_name
-                    facts.period = getattr(df, "period", "") or facts.period
-                    site_facts_with_performance(facts, df)
-            except Exception:
-                pass
-        return facts
-
-    def _site_render(pid, site_id, spec, page, *, token="", preview=False):
-        """Render one page of a site, wiring the public/preview resolvers."""
-        from mediahub.sites.render import render_page_html
-        from mediahub.sites.theme import resolve_role_vars
-
-        bk = _site_brand_kit(pid)
-        rv = resolve_role_vars(bk)
-
-        if preview:
-
-            def page_url(slug):
-                return (
-                    url_for("site_preview_page", site_id=site_id, slug=slug)
-                    if slug
-                    else url_for("site_preview_home", site_id=site_id)
-                )
-
-            def card_url(run_id, card_id):
-                return url_for(
-                    "site_preview_card_png", site_id=site_id, run_id=run_id, card_id=card_id
-                )
-
-            def form_action(_form_id):
-                return "#"
-
-            canonical = ""
-        else:
-
-            def page_url(slug):
-                return (
-                    url_for("site_public_page", token=token, slug=slug)
-                    if slug
-                    else url_for("site_public_home", token=token)
-                )
-
-            def card_url(run_id, card_id):
-                return url_for("site_card_png", token=token, run_id=run_id, card_id=card_id)
-
-            def form_action(form_id):
-                return url_for("site_form_submit", token=token, form_id=form_id)
-
-            canonical = (
-                url_for("site_public_home", token=token, _external=True)
-                if page.is_home
-                else url_for("site_public_page", token=token, slug=page.slug, _external=True)
-            )
-
-        def asset_url(src):
-            s = str(src or "")
-            if s.startswith("card:"):
-                run_id, _, card_id = s[5:].partition("/")
-                return card_url(run_id, card_id)
-            return s
-
-        def render_form(form_id, nonce):
-            from mediahub.forms import render as _fr
-            from mediahub.forms import store as _fs
-
-            form = _fs.load_form(pid, form_id)
-            if form is None:
-                return ""
-            return _fr.render_form_html(
-                form, action_url=form_action(form_id), nonce=nonce, interactive=not preview
-            )
-
-        def render_widget(props, nonce):
-            from mediahub.sites import widget_state as _ws
-            from mediahub.sites import widgets as _w
-
-            vote_url = ""
-            counts = None
-            if (props or {}).get("widget_type") == "poll" and not preview:
-                wid = str(props.get("widget_id") or "")
-                vote_url = url_for("site_widget_vote", token=token, widget_id=wid)
-                counts = _ws.vote_counts(pid, site_id, wid)
-            return _w.render_widget(
-                props, nonce=nonce, role_vars=rv, vote_url=vote_url, counts=counts
-            )
-
-        return render_page_html(
-            spec,
-            page,
-            brand_kit=bk,
-            role_vars=rv,
-            canonical=canonical,
-            page_url=page_url,
-            asset_url=asset_url,
-            render_form=render_form,
-            render_widget=render_widget,
-        )
-
-    def _site_has_form(spec, form_id) -> bool:
-        for p in spec.pages:
-            for s in p.sections:
-                for b in s.blocks:
-                    if b.kind == "form_embed" and str(b.props.get("form_id")) == str(form_id):
-                        return True
-        return False
-
-    def _site_find_poll(spec, widget_id):
-        for p in spec.pages:
-            for s in p.sections:
-                for b in s.blocks:
-                    if (
-                        b.kind == "widget_embed"
-                        and b.props.get("widget_type") == "poll"
-                        and str(b.props.get("widget_id")) == str(widget_id)
-                    ):
-                        return b
-        return None
-
-    # -- operator surface (signed-in) --------------------------------------
-
-    @app.route("/sites")
-    def sites_home():
-        if not _sites_ok:
-            return _sites_unavailable_page()
-        pid = _phase_w_org()
-        if not pid:
-            return _layout("Sites", _PW_NO_ORG, active="create")
-        from mediahub.forms import store as _fs
-        from mediahub.sites import store as _ss
-        from mediahub.web import sites_ui as _ui
-
-        sites = _ss.list_sites(pid)
-        forms = _fs.list_forms(pid) if _forms_ok else []
-        try:
-            runs = _doc_recent_runs(pid)
-        except Exception:
-            runs = []
-        flash = ""
-        if request.args.get("msg"):
-            flash = (
-                '<div class="card" style="border-color:var(--mh-success)">'
-                f"<p>{_h(request.args.get('msg'))}</p></div>"
-            )
-        return _layout("Sites", flash + _ui.render_index(sites, forms, runs), active="create")
-
-    @app.route("/api/sites/generate", methods=["POST"])
-    def api_sites_generate():
-        if not _sites_ok:
-            return jsonify({"error": "Sites unavailable."}), 404
-        pid = _active_profile_id()
-        if not pid:
-            return redirect(url_for("sites_home"))
-        from mediahub.sites import store as _ss
-        from mediahub.sites.archetypes import build_site
-
-        body = request.get_json(silent=True) if request.is_json else None
-        archetype = (body or request.form).get("archetype") or "club_home"
-        run_id = (body or request.form).get("run_id") or ""
-        with_ai = bool((body or request.form).get("with_ai"))
-        facts = _site_facts_for(pid, run_id)
-        note = ""
-        prose = None
-        if with_ai:
-            try:
-                from mediahub.sites.draft import draft_copy
-
-                prose = draft_copy(facts, archetype)
-            except Exception:
-                note = "AI copy isn't configured, so the site was built from your data alone."
-        spec = build_site(archetype, facts, prose=prose)
-        _ss.save_site(pid, spec)
-        if request.is_json:
-            return jsonify({"ok": True, "site_id": spec.site_id})
-        return redirect(url_for("site_editor", site_id=spec.site_id, msg=note or None))
-
-    @app.route("/sites/<site_id>")
-    def site_editor(site_id):
-        if not _sites_ok:
-            return _sites_unavailable_page()
-        pid = _phase_w_org()
-        if not pid:
-            return _layout("Sites", _PW_NO_ORG, active="create")
-        from mediahub.forms import store as _fs
-        from mediahub.sites import insights as _ins
-        from mediahub.sites import store as _ss
-        from mediahub.web import sites_ui as _ui
-
-        spec = _ss.load_site(pid, site_id)
-        rec = _ss.site_record(pid, site_id)
-        if spec is None or rec is None:
-            return (
-                _layout(
-                    "Sites",
-                    '<div class="card"><h2>Site not found</h2>'
-                    f'<p><a href="{url_for("sites_home")}">Back to sites</a></p></div>',
-                    active="create",
-                ),
-                404,
-            )
-        forms = _fs.list_forms(pid) if _forms_ok else []
-        insights = _ins.view_counts(pid, site_id)
-        body = _ui.render_editor(
-            rec, spec, forms=forms, insights=insights, flash=request.args.get("msg", "")
-        )
-        return _layout(f"Sites — {spec.title}", body, active="create")
-
-    @app.route("/api/sites/<site_id>/save", methods=["POST"])
-    def api_site_save(site_id):
-        if not _sites_ok:
-            return jsonify({"error": "unavailable"}), 404
-        pid = _active_profile_id()
-        if not pid:
-            return jsonify({"error": "not signed in"}), 403
-        from mediahub.sites import store as _ss
-        from mediahub.sites.models import SiteSpec
-
-        if _ss.load_site(pid, site_id) is None:
-            abort(404)
-        raw = request.form.get("spec")
-        if raw is None and request.is_json:
-            jb = request.get_json(silent=True) or {}
-            raw = json.dumps(jb.get("spec") or jb)
-        try:
-            data = json.loads(raw or "{}")
-        except ValueError:
-            if request.is_json:
-                return jsonify({"ok": False, "error": "invalid_json"}), 400
-            # H-6: re-render the editor with the user's SUBMITTED text and an
-            # error-styled message, instead of redirecting — the redirect
-            # reloaded the stored spec and silently threw away every edit.
-            from mediahub.forms import store as _fs
-            from mediahub.sites import insights as _ins
-            from mediahub.web import sites_ui as _ui
-
-            rec = _ss.site_record(pid, site_id)
-            spec = _ss.load_site(pid, site_id)
-            forms = _fs.list_forms(pid) if _forms_ok else []
-            insights = _ins.view_counts(pid, site_id)
-            body = _ui.render_editor(
-                rec,
-                spec,
-                forms=forms,
-                insights=insights,
-                flash="That wasn't valid JSON — nothing saved. Your text is kept below; fix it and save again.",
-                flash_is_error=True,
-                spec_override=raw or "",
-            )
-            return _layout(f"Sites — {spec.title}", body, active="create"), 400
-        if not isinstance(data, dict):
-            data = {}
-        data["site_id"] = site_id  # the id is never editable from the body
-        _ss.save_site(pid, SiteSpec.from_dict(data))
-        if request.is_json:
-            return jsonify({"ok": True})
-        return redirect(url_for("site_editor", site_id=site_id, msg="Saved."))
-
-    @app.route("/api/sites/<site_id>/content-edit", methods=["POST"])
-    def api_site_content_edit(site_id):
-        """H-5: apply the structured content editor's form onto the site draft —
-        the non-technical path that replaces hand-editing the raw spec JSON.
-
-        Mirrors api_site_page_protection exactly: load → to_dict → apply the
-        whitelisted (block_id, prop) edits by id → from_dict → save. The JSON
-        hatch (api_site_save) and its H-6 fail-safe are untouched; every field the
-        structured form doesn't expose survives byte-for-byte.
-        """
-        if not _sites_ok:
-            return jsonify({"error": "unavailable"}), 404
-        pid = _active_profile_id()
-        if not pid:
-            return jsonify({"error": "not signed in"}), 403
-        from mediahub.sites import store as _ss
-        from mediahub.sites.models import SiteSpec
-        from mediahub.web import spec_editor as _se
-
-        spec = _ss.load_site(pid, site_id)
-        if spec is None:
-            abort(404)
-        data = spec.to_dict()
-        _se.apply_structured(data, request.form, "site")
-        data["site_id"] = site_id  # identity is never editable from the body
-        _ss.save_site(pid, SiteSpec.from_dict(data))
-        if request.is_json:
-            return jsonify({"ok": True})
-        return redirect(url_for("site_editor", site_id=site_id, msg="Saved."))
-
-    @app.route("/api/sites/<site_id>/publish", methods=["POST"])
-    def api_site_publish(site_id):
-        if not _sites_ok:
-            return jsonify({"error": "unavailable"}), 404
-        pid = _active_profile_id()
-        if not pid:
-            return jsonify({"error": "not signed in"}), 403
-        from mediahub.sites import store as _ss
-
-        if _ss.load_site(pid, site_id) is None:
-            abort(404)
-        token = _ss.publish_site(pid, site_id)
-        if request.is_json:
-            url = url_for("site_public_home", token=token, _external=True) if token else ""
-            return jsonify({"ok": bool(token), "token": token, "url": url})
-        return redirect(url_for("site_editor", site_id=site_id, msg="Published."))
-
-    @app.route("/api/sites/<site_id>/unpublish", methods=["POST"])
-    def api_site_unpublish(site_id):
-        if not _sites_ok:
-            return jsonify({"error": "unavailable"}), 404
-        pid = _active_profile_id()
-        if not pid:
-            return jsonify({"error": "not signed in"}), 403
-        from mediahub.sites import store as _ss
-
-        if _ss.load_site(pid, site_id) is None:
-            abort(404)
-        _ss.unpublish_site(pid, site_id)
-        if request.is_json:
-            return jsonify({"ok": True})
-        return redirect(url_for("site_editor", site_id=site_id, msg="Taken offline."))
-
-    @app.route("/api/sites/<site_id>/delete", methods=["POST"])
-    def api_site_delete(site_id):
-        if not _sites_ok:
-            return jsonify({"error": "unavailable"}), 404
-        pid = _active_profile_id()
-        if not pid:
-            return jsonify({"error": "not signed in"}), 403
-        from mediahub.sites import store as _ss
-
-        _ss.delete_site(pid, site_id)
-        if request.is_json:
-            return jsonify({"ok": True})
-        return redirect(url_for("sites_home", msg="Site deleted."))
-
-    @app.route("/api/sites/<site_id>/password", methods=["POST"])
-    def api_site_password(site_id):
-        if not _sites_ok:
-            return jsonify({"error": "unavailable"}), 404
-        pid = _active_profile_id()
-        if not pid:
-            return jsonify({"error": "not signed in"}), 403
-        from mediahub.sites import store as _ss
-
-        if _ss.load_site(pid, site_id) is None:
-            abort(404)
-        pw = (
-            request.form.get("password")
-            if not request.is_json
-            else (request.get_json(silent=True) or {}).get("password")
-        ) or ""
-        _ss.set_site_password(pid, site_id, pw)
-        if request.is_json:
-            return jsonify({"ok": True})
-        # D-8: a password only does anything if at least one page is marked
-        # members-only. Setting one while no page is protected changes nothing
-        # public-facing, so say so honestly instead of "Password updated."
-        spec = _ss.load_site(pid, site_id)
-        any_protected = bool(spec and any(p.protected for p in spec.pages))
-        if pw and not any_protected:
-            msg = (
-                "Password saved, but no page is set to members-only yet — the site is "
-                "still fully public. Tick a page under Members-only pages to protect it."
-            )
-        elif pw:
-            msg = "Password updated."
-        else:
-            msg = "Password cleared."
-        return redirect(url_for("site_editor", site_id=site_id, msg=msg))
-
-    @app.route("/api/sites/<site_id>/page-protection", methods=["POST"])
-    def api_site_page_protection(site_id):
-        """D-8: set which pages are members-only (require the site password).
-        Replaces the previous raw-JSON-only ``protected`` flag with a real
-        editor control."""
-        if not _sites_ok:
-            return jsonify({"error": "unavailable"}), 404
-        pid = _active_profile_id()
-        if not pid:
-            return jsonify({"error": "not signed in"}), 403
-        from mediahub.sites import store as _ss
-        from mediahub.sites.models import SiteSpec
-
-        spec = _ss.load_site(pid, site_id)
-        if spec is None:
-            abort(404)
-        protected_slugs = set(request.form.getlist("protected"))
-        data = spec.to_dict()
-        for pg in data.get("pages", []):
-            pg["protected"] = pg.get("slug", "") in protected_slugs
-        _ss.save_site(pid, SiteSpec.from_dict(data))
-        n_prot = len(protected_slugs)
-        if request.is_json:
-            return jsonify({"ok": True, "protected": n_prot})
-        if n_prot and not _ss.has_password(pid, site_id):
-            msg = (
-                f"{n_prot} page(s) marked members-only — but no password is set yet, so "
-                "they're still open. Set a page password above to lock them."
-            )
-        elif n_prot:
-            msg = f"{n_prot} page(s) are now members-only."
-        else:
-            msg = "All pages are public."
-        return redirect(url_for("site_editor", site_id=site_id, msg=msg))
-
-    @app.route("/sites/<site_id>/preview")
-    def site_preview_home(site_id):
-        return _site_preview(site_id, "")
-
-    @app.route("/sites/<site_id>/preview/<slug>")
-    def site_preview_page(site_id, slug):
-        return _site_preview(site_id, slug)
-
-    def _site_preview(site_id, slug):
-        if not _sites_ok:
-            abort(404)
-        pid = _active_profile_id()
-        if not pid:
-            abort(403)
-        from mediahub.sites import store as _ss
-
-        spec = _ss.load_site(pid, site_id)
-        if spec is None:
-            abort(404)
-        page = spec.page_by_slug(slug)
-        if page is None:
-            abort(404)
-        return make_response(_site_render(pid, site_id, spec, page, preview=True))
-
-    @app.route("/sites/<site_id>/card/<run_id>/<card_id>.png")
-    def site_preview_card_png(site_id, run_id, card_id):
-        from flask import send_file
-
-        from mediahub.sites import store as _ss
-        from mediahub.web import public_wall as _pw
-
-        pid = _active_profile_id()
-        if not pid:
-            abort(403)
-        if _ss.load_site(pid, site_id) is None:
-            abort(404)
-        # the run must belong to this org (IDOR guard — run-route isolation invariant)
-        run_data = _load_run(run_id)
-        if run_data is None or not _can_access_run(run_id, run_data, pid):
-            abort(404)
-        prof = load_profile(pid)
-        path = _pw.wall_image_path(prof, run_id, card_id) if prof else None
-        if not path:
-            abort(404)
-        return send_file(path, mimetype="image/png")
-
-    @app.route("/sites/<site_id>/qr.<fmt>")
-    def api_site_qr(site_id, fmt):
-        if not _sites_ok:
-            abort(404)
-        pid = _active_profile_id()
-        if not pid:
-            abort(403)
-        from mediahub.sites import qr as _qr
-        from mediahub.sites import store as _ss
-        from mediahub.sites.theme import resolve_role_vars
-
-        rec = _ss.site_record(pid, site_id)
-        if rec is None:
-            abort(404)
-        if not rec.get("published") or not rec.get("public_token"):
-            return (
-                _layout(
-                    "Sites",
-                    '<div class="card"><p>Publish the site first to get its QR code.</p>'
-                    f'<p><a href="{url_for("site_editor", site_id=site_id)}">Back</a></p></div>',
-                    active="create",
-                ),
-                409,
-            )
-        url = url_for("site_public_home", token=rec["public_token"], _external=True)
-        rv = resolve_role_vars(_site_brand_kit(pid))
-        try:
-            payload, mime = _qr.export_qr(url, fmt, role_vars=rv)
-        except _qr.QRUnavailable:
-            abort(503)
-        resp = make_response(payload)
-        resp.headers["Content-Type"] = mime
-        ext = fmt if fmt in _qr.QR_FORMATS else "png"
-        resp.headers["Content-Disposition"] = f'inline; filename="site-qr.{ext}"'
-        return resp
-
-    @app.route("/api/sites/<site_id>/insights")
-    def api_site_insights(site_id):
-        if not _sites_ok:
-            return jsonify({"error": "unavailable"}), 404
-        pid = _active_profile_id()
-        if not pid:
-            return jsonify({"error": "not signed in"}), 403
-        from mediahub.sites import insights as _ins
-        from mediahub.sites import store as _ss
-
-        if _ss.site_record(pid, site_id) is None:
-            return jsonify({"error": "not found"}), 404
-        return jsonify(_ins.view_counts(pid, site_id))
-
-    # -- forms (operator) --------------------------------------------------
-
-    @app.route("/api/forms", methods=["POST"])
-    def api_forms_create():
-        if not _forms_ok:
-            return jsonify({"error": "unavailable"}), 404
-        pid = _active_profile_id()
-        if not pid:
-            return redirect(url_for("sites_home"))
-        from mediahub.forms import store as _fs
-        from mediahub.forms.models import new_form, rsvp_fields, trial_signup_fields
-
-        title = (request.form.get("title") or "Form").strip()
-        template = request.form.get("template", "blank")
-        if template == "trial_signup":
-            form = new_form(title, trial_signup_fields(), collects_minor_data=True)
-        elif template == "rsvp":
-            form = new_form(title, rsvp_fields())
-        else:
-            form = new_form(title, [])
-        _fs.save_form(pid, form)
-        return redirect(url_for("sites_home", msg=f"Created form — embed id {form.form_id}"))
-
-    @app.route("/api/forms/<form_id>/save", methods=["POST"])
-    def api_form_save(form_id):
-        if not _forms_ok:
-            return jsonify({"error": "unavailable"}), 404
-        pid = _active_profile_id()
-        if not pid:
-            return jsonify({"error": "not signed in"}), 403
-        from mediahub.forms import store as _fs
-        from mediahub.forms.models import FormSpec
-
-        if _fs.load_form(pid, form_id) is None:
-            abort(404)
-        body = request.get_json(silent=True) or {}
-        body["form_id"] = form_id
-        _fs.save_form(pid, FormSpec.from_dict(body))
-        return jsonify({"ok": True})
-
-    @app.route("/api/forms/<form_id>/delete", methods=["POST"])
-    def api_form_delete(form_id):
-        if not _forms_ok:
-            return jsonify({"error": "unavailable"}), 404
-        pid = _active_profile_id()
-        if not pid:
-            return redirect(url_for("sites_home"))
-        from mediahub.forms import store as _fs
-
-        _fs.delete_form(pid, form_id)
-        return redirect(url_for("sites_home", msg="Form deleted."))
-
-    # -- public surface (no login; token is the access control) ------------
-
-    def _site_password_prompt(token, slug, error=""):
-        err = f'<p style="color:var(--mh-error)">{_h(error)}</p>' if error else ""
-        body = (
-            '<div class="card" style="max-width:420px;margin:60px auto">'
-            "<h2>This page is protected</h2>"
-            f"{err}"
-            f'<form method="post" action="{url_for("site_unlock", token=token)}">'
-            f'<input type="hidden" name="next" value="{_h(slug)}">'
-            '<input name="site_password" type="password" placeholder="Password" required '
-            'style="width:100%;padding:10px;margin:8px 0">'
-            '<button class="btn" type="submit">Unlock</button></form></div>'
-        )
-        # Protected pages must never be indexed: the slug is excluded from the
-        # sitemap and the prompt itself carries an explicit noindex directive so
-        # a members-only page can't be advertised in search.
-        resp = make_response(_layout("Protected", body, active=""))
-        resp.headers["X-Robots-Tag"] = "noindex"
-        return resp
-
-    def _serve_public_site(token, slug):
-        from mediahub.sites import insights as _ins
-        from mediahub.sites import store as _ss
-
-        ref = _ss.resolve_token(token)
-        if not ref:
-            abort(404)
-        pid, site_id = ref
-        spec = _ss.load_published(pid, site_id)
-        if spec is None:
-            abort(404)
-        page = spec.page_by_slug(slug)
-        if page is None:
-            abort(404)
-        if (
-            page.protected
-            and _ss.has_password(pid, site_id)
-            and token not in (session.get("site_unlocked") or [])
-        ):
-            return _site_password_prompt(token, page.slug)
-        _ins.record_view(pid, site_id, page.slug)
-        resp = make_response(_site_render(pid, site_id, spec, page, token=token, preview=False))
-        if page.protected:
-            resp.headers["Cache-Control"] = "private, no-store"
-        else:
-            resp.headers["Cache-Control"] = "public, max-age=300"
-        return resp
-
-    @app.route("/site/<token>")
-    def site_public_home(token):
-        return _serve_public_site(token, "")
-
-    @app.route("/site/<token>/<slug>")
-    def site_public_page(token, slug):
-        return _serve_public_site(token, slug)
-
-    @app.route("/site/<token>/unlock", methods=["POST"])
-    def site_unlock(token):
-        from mediahub.sites import store as _ss
-
-        ref = _ss.resolve_token(token)
-        if not ref:
-            abort(404)
-        pid, site_id = ref
-        pw = request.form.get("site_password", "")
-        nxt = request.form.get("next", "")
-        # Same per-IP throttle as the sibling public form/vote routes — a page
-        # password must not be brute-forceable. HTML response (form post), not
-        # the JSON limiter body.
-        if _auth_rate_limited("site_unlock"):
-            return (
-                _site_password_prompt(
-                    token, nxt, error="Too many attempts — wait a few minutes and try again."
-                ),
-                429,
-            )
-        if _ss.check_site_password(pid, site_id, pw):
-            unlocked = list(session.get("site_unlocked") or [])
-            if token not in unlocked:
-                unlocked.append(token)
-                session["site_unlocked"] = unlocked
-            return redirect(
-                url_for("site_public_page", token=token, slug=nxt)
-                if nxt
-                else url_for("site_public_home", token=token)
-            )
-        return _site_password_prompt(token, nxt, error="Wrong password — try again.")
-
-    @app.route("/site/<token>/card/<run_id>/<card_id>.png")
-    def site_card_png(token, run_id, card_id):
-        from flask import send_file
-
-        from mediahub.sites import store as _ss
-        from mediahub.web import public_wall as _pw
-
-        ref = _ss.resolve_token(token)
-        if not ref:
-            abort(404)
-        pid, _site_id = ref
-        # the run must belong to the token's org (IDOR guard) before any image
-        run_data = _load_run(run_id)
-        if run_data is None or not _can_access_run(run_id, run_data, pid):
-            abort(404)
-        prof = load_profile(pid)
-        path = _pw.wall_image_path(prof, run_id, card_id) if prof else None
-        if not path:
-            abort(404)
-        resp = make_response(send_file(path, mimetype="image/png"))
-        resp.headers["Cache-Control"] = "public, max-age=3600"
-        return resp
-
-    @app.route("/site/<token>/form/<form_id>", methods=["POST"])
-    def site_form_submit(token, form_id):
-        from mediahub.forms import store as _fs
-        from mediahub.forms import submit as _fsub
-        from mediahub.sites import store as _ss
-
-        ref = _ss.resolve_token(token)
-        if not ref:
-            abort(404)
-        pid, site_id = ref
-        spec = _ss.load_published(pid, site_id)
-        if spec is None or not _site_has_form(spec, form_id):
-            abort(404)  # only forms embedded in the published site accept submissions
-        if _auth_rate_limited("site_form"):
-            return (
-                jsonify(
-                    {"ok": False, "error": "rate", "message": "Too many submissions — please wait."}
-                ),
-                429,
-            )
-        form = _fs.load_form(pid, form_id)
-        if form is None:
-            abort(404)
-        data = request.get_json(silent=True) or {}
-        result = _fsub.record_submission(pid, form, data, source=f"site:{site_id}")
-        if (
-            result.get("ok")
-            and result.get("form") is not None
-            and result["form"].table_id != form.table_id
-        ):
-            _fs.save_form(pid, result["form"])  # persist the freshly-created response table id
-        if result.get("ok"):
-            # Outbound webhook (1.21): a form was submitted. Best-effort.
-            try:
-                from mediahub import webhooks as _webhooks
-                from mediahub.webhooks import events as _wh_events
-
-                _webhooks.emit(
-                    _wh_events.EVENT_FORM_SUBMITTED,
-                    pid,
-                    _wh_events.form_submitted(
-                        pid,
-                        form_id,
-                        submission_id=str(result.get("submission_id") or ""),
-                        site_id=site_id,
-                    ),
-                )
-            except Exception:
-                pass
-            return jsonify({"ok": True, "message": result.get("message", "Thanks!")})
-        return jsonify({"ok": False, "errors": result.get("errors", {})}), 400
-
-    @app.route("/site/<token>/widget/<widget_id>/vote", methods=["POST"])
-    def site_widget_vote(token, widget_id):
-        from mediahub.sites import store as _ss
-        from mediahub.sites import widget_state as _ws
-
-        ref = _ss.resolve_token(token)
-        if not ref:
-            abort(404)
-        pid, site_id = ref
-        spec = _ss.load_published(pid, site_id)
-        poll = _site_find_poll(spec, widget_id) if spec else None
-        if poll is None:
-            abort(404)
-        if _auth_rate_limited("site_vote"):
-            return jsonify({"ok": False, "error": "rate"}), 429
-        data = request.get_json(silent=True) or {}
-        option = str(data.get("option", "")).strip()
-        options = [str(o) for o in ((poll.props.get("config") or {}).get("options") or [])]
-        if option not in options:
-            return jsonify({"ok": False, "error": "bad_option"}), 400
-        counts = _ws.record_vote(pid, site_id, widget_id, option)
-        return jsonify({"ok": True, "counts": counts})
-
-    @app.route("/site/<token>/sitemap.xml")
-    def site_sitemap(token):
-        from mediahub.sites import seo as _seo
-        from mediahub.sites import store as _ss
-
-        ref = _ss.resolve_token(token)
-        if not ref:
-            abort(404)
-        pid, site_id = ref
-        spec = _ss.load_published(pid, site_id)
-        if spec is None:
-            abort(404)
-        base = url_for("site_public_home", token=token, _external=True)
-        resp = make_response(_seo.sitemap_xml(spec, base))
-        resp.headers["Content-Type"] = "application/xml"
-        resp.headers["Cache-Control"] = "public, max-age=3600"
-        return resp
-
-    @app.route("/site/<token>/robots.txt")
-    def site_robots(token):
-        from mediahub.sites import seo as _seo
-        from mediahub.sites import store as _ss
-
-        if _ss.resolve_token(token) is None:
-            abort(404)
-        base = url_for("site_public_home", token=token, _external=True)
-        resp = make_response(_seo.robots_txt(base))
-        resp.headers["Content-Type"] = "text/plain"
-        return resp
-
     # ---- W.1 + W.2: athletes roster, merge, consent ----------------------
+
+    _ATHLETES_HERO = """
+<section class="mh-hero" style="padding-top:var(--sp-7);padding-bottom:var(--sp-4)">
+  <span class="mh-hero-eyebrow">Club data &middot; Athletes</span>
+  <h1>Athletes &amp; <em class="editorial">consent</em></h1>
+  <p class="lede">__LEDE__</p>
+</section>"""
+
+    def _athletes_tabs_html(show_records: bool) -> str:
+        """G-9: the two-tab strip shared by both /athletes views."""
+
+        def _tab(label, active, **args):
+            attrs = (
+                ' class="is-active" aria-selected="true"' if active else ' aria-selected="false"'
+            )
+            return f'<a href="{url_for("athletes_page", **args)}" role="tab"{attrs}>{label}</a>'
+
+        return (
+            '<nav class="mh-tabs" role="tablist" aria-label="Athletes and consent"'
+            ' style="margin-bottom:18px">'
+            + _tab("Roster &amp; permissions", not show_records)
+            + _tab("Consent records", show_records, tab="records")
+            + '<span class="mh-tabs__ind" aria-hidden="true"></span></nav>'
+        )
+
+    def _athletes_records_tab(pid: str, profile) -> str:
+        """G-9: the "Consent records" tab — the compliance registry (grant/
+        refuse/revoke decisions, lawful basis, child controls, retention)
+        that used to live on its own orphaned /organisation/consent page.
+        Same ConsentRegistry store, same records — only the page moved, so a
+        safeguarding officer finds the roster permissions and the signed
+        decisions behind them in one place.
+        """
+        from mediahub.compliance.consent import ConsentRegistry
+        from mediahub.compliance.retention import global_days as _ret_global
+
+        records = ConsentRegistry(pid).all()
+        rows = []
+        for r in records:
+            status_tag = {
+                "granted": '<span class="tag ok">granted</span>',
+                "refused": '<span class="tag bad">refused</span>',
+                "revoked": '<span class="tag bad">revoked</span>',
+            }.get(r.status, _h(r.status))
+            extra = []
+            if r.parental:
+                extra.append("parental")
+            if r.under_18 is True:
+                extra.append("under 18")
+            if r.restricted:
+                extra.append(
+                    '<strong title="UK GDPR Art 18 — processing restricted">Paused</strong>'
+                )
+            rows.append(
+                f"<tr><td>{_h(r.athlete_name)}</td><td>{status_tag}</td>"
+                f"<td>{', '.join(extra) or '—'}</td><td class='muted'>{_h(r.note[:160])}</td>"
+                f"<td class='muted'>{_h(r.recorded_at[:10])}</td></tr>"
+            )
+        table = (
+            # I-3: scroll wrapper so the multi-column registry doesn't overflow
+            # a phone (volunteers act on consent from poolside).
+            '<div class="mh-table-scroll"><table><thead><tr><th>Athlete</th><th>Status</th><th>Flags</th><th>Note</th><th>Recorded</th></tr></thead><tbody>'
+            + (
+                "".join(rows)
+                or '<tr><td colspan="5" class="muted">No consent records yet.</td></tr>'
+            )
+            + "</tbody></table></div>"
+        )
+        mode = (profile.consent_mode or "").strip()
+
+        def _sel(value, current):
+            return " selected" if value == current else ""
+
+        hero = _ATHLETES_HERO.replace(
+            "__LEDE__",
+            "Record why you're allowed to post about your athletes, and who has "
+            "said yes or no. A refused, revoked or restricted athlete can never be "
+            "approved, packed, or published &mdash; on any setting.",
+        )
+        return f"""{hero}
+{_athletes_tabs_html(True)}
+<p class="dim" style="margin-bottom:16px;font-size:13px">Consent records are the signed
+decisions &mdash; grant, refuse, revoke, and your lawful basis &mdash; behind the
+permissions MediaHub enforces. Set what actually appears on content under
+<a href="{url_for("athletes_page")}">Roster &amp; permissions</a>.</p>
+
+<div class="card">
+  <h2>Lawful basis &amp; gating mode</h2>
+  <form method="post" action="{url_for("org_consent_settings")}">
+    <label>Why you're allowed to post about your athletes<br>
+      <select name="lawful_basis_publication">
+        <option value=""{_sel("", profile.lawful_basis_publication)}>— not recorded —</option>
+        <option value="consent"{_sel("consent", profile.lawful_basis_publication)}>They (or a parent) said yes</option>
+        <option value="legitimate_interests"{_sel("legitimate_interests", profile.lawful_basis_publication)}>We have a good reason to (reporting club results)</option>
+        <option value="other"{_sel("other", profile.lawful_basis_publication)}>Other — explain in notes below</option>
+      </select>
+    </label>
+    <small class="muted" style="display:block;margin:-4px 0 10px">In legal terms: "said yes" = consent (UK GDPR Art&nbsp;6(1)(a)); "good reason" = legitimate interests (Art&nbsp;6(1)(f)).</small>
+    <label>Why you're allowed to look up their PB history<br>
+      <select name="lawful_basis_enrichment">
+        <option value=""{_sel("", profile.lawful_basis_enrichment)}>— not recorded —</option>
+        <option value="consent"{_sel("consent", profile.lawful_basis_enrichment)}>They (or a parent) said yes</option>
+        <option value="legitimate_interests"{_sel("legitimate_interests", profile.lawful_basis_enrichment)}>We have a good reason to (reporting club results)</option>
+        <option value="other"{_sel("other", profile.lawful_basis_enrichment)}>Other — explain in notes below</option>
+      </select>
+    </label><br>
+    <label><input type="checkbox" name="pb_enrichment_enabled" value="1"{" checked" if profile.pb_enrichment_enabled else ""}> Fetch PB history from public rankings (requires telling athletes/parents — Art 14 notice template in docs/compliance/templates/)</label><br>
+    <label>Consent gating mode<br>
+      <select name="consent_mode">
+        <option value=""{_sel("", mode)}>Opt-out (default) — block only recorded refusals</option>
+        <option value="opt_out"{_sel("opt_out", mode)}>Opt-out — block only recorded refusals</option>
+        <option value="opt_in"{_sel("opt_in", mode)}>Opt-in — publish ONLY athletes with recorded consent (recommended for youth squads)</option>
+      </select>
+    </label><br>
+    <label><input type="checkbox" name="parental_minors" value="1"{" checked" if profile.consent_require_parental_for_minors else ""}> Under-18s need parent/guardian consent (opt-in mode)</label><br>
+    <label>Notes (e.g. your balancing-test reference)<br><input type="text" name="lawful_basis_notes" maxlength="500" value="{_h(profile.lawful_basis_notes)}"></label><br>
+    <button class="btn" type="submit">Save settings</button>
+  </form>
+</div>
+
+<div class="card">
+  <h2>Under-18 content controls</h2>
+  <p class="muted">How identifiable under-18 athletes are in generated content (ICO Children's Code). New organisations start with the identity controls on.</p>
+  <form method="post" action="{url_for("org_child_policy_settings")}">
+    <label><input type="checkbox" name="child_surname_initial" value="1"{" checked" if profile.child_surname_initial else ""}> Show under-18s as first name + initial ("Eira H.")</label><br>
+    <label><input type="checkbox" name="child_suppress_age" value="1"{" checked" if profile.child_suppress_age else ""}> Don't show ages or age groups on content</label><br>
+    <label><input type="checkbox" name="child_exclude_photos" value="1"{" checked" if profile.child_exclude_photos else ""}> Never use athlete photos on under-18 posts (text-led cards instead)</label><br>
+    <button class="btn" type="submit">Save content controls</button>
+  </form>
+</div>
+
+<div class="card">
+  <h2>Retention</h2>
+  <p class="muted">How long this club's data lives before the nightly purge removes it. You can tighten the deployment-wide window, never extend it. Blank = use the deployment default. 0 = keep forever (deployment setting only).</p>
+  <form method="post" action="{url_for("org_retention_settings")}">
+    <label>Raw uploaded results files (days, default {_h(str(_ret_global("raw_uploads")))})<br>
+      <input type="number" min="0" name="raw_uploads" value="{_h(str((profile.retention_overrides or {}).get("raw_uploads", "")))}"></label><br>
+    <label>Runs, cards &amp; packs (days, default {_h(str(_ret_global("runs")))})<br>
+      <input type="number" min="0" name="runs" value="{_h(str((profile.retention_overrides or {}).get("runs", "")))}"></label><br>
+    <button class="btn" type="submit">Save retention</button>
+  </form>
+</div>
+
+<div class="card">
+  <h2>Record a consent decision</h2>
+  <form method="post" action="{url_for("org_consent_record")}">
+    <label>Athlete name<br><input type="text" name="athlete_name" maxlength="200" required></label><br>
+    <label>Decision<br>
+      <select name="status">
+        <option value="granted">Consent granted</option>
+        <option value="refused">Refused — never publish</option>
+        <option value="revoked">Revoked — was granted, now withdrawn</option>
+      </select>
+    </label><br>
+    <label><input type="checkbox" name="parental" value="1"> Given by a parent/guardian</label>
+    <label><input type="checkbox" name="under_18" value="1"> Athlete is under 18</label>
+    <label title="UK GDPR Art 18 — restriction of processing"><input type="checkbox" name="restricted" value="1"> Pause all use of their data <span class="muted">(Art&nbsp;18)</span></label><br>
+    <label>Note (how/when consent was collected)<br><input type="text" name="note" maxlength="1000"></label><br>
+    <button class="btn" type="submit">Save record</button>
+  </form>
+</div>
+
+<div class="card">
+  <h2>Registry</h2>
+  {table}
+  <p class="muted">Records are append-only: every change keeps its history (accountability). Revoking consent takes effect immediately for all future approvals, packs and publishes; already-published posts must be handled on the platform itself.</p>
+</div>
+"""
 
     @app.route("/athletes")
     def athletes_page():
         pid = _phase_w_org()
         if not pid:
             return _layout("Athletes", _PW_NO_ORG, active="settings")
+        # G-9: two tabs. "Roster & permissions" is what MediaHub enforces on
+        # content; "Consent records" holds the signed decisions behind it
+        # (moved here from the orphaned /organisation/consent page, which now
+        # redirects). /athletes is the record of truth for both.
+        if (request.args.get("tab") or "").strip() == "records":
+            profile = load_profile(pid)
+            if profile is None:
+                return _layout("Athletes", _PW_NO_ORG, active="settings")
+            return _layout(
+                "Athletes & consent", _athletes_records_tab(pid, profile), active="settings"
+            )
         from mediahub.athletes import list_athletes
         from mediahub.safeguarding import LEVEL_LABELS, list_consent, regime_active
 
@@ -61519,6 +64983,11 @@ voice, and queues them for one-click approval.</p>
             aliases = ", ".join(a for a in rec.aliases if a != rec.canonical_name.casefold())
             rows.append(
                 "<tr>"
+                # B-7: bulk-select checkbox — hidden until the enhancement
+                # script reveals it (it does nothing without JS).
+                f'<td data-label="Select" class="mh-consent-selcell" hidden>'
+                f'<input type="checkbox" class="mh-consent-check" value="{_h(rec.athlete_id)}"'
+                f' aria-label="Select {_h(rec.canonical_name)}"/></td>'
                 f'<td data-label="Athlete"><strong>{_h(rec.canonical_name)}</strong>'
                 + (
                     f'<br/><span class="muted" style="font-size:11px">also seen as: {_h(aliases)}</span>'
@@ -61528,20 +64997,44 @@ voice, and queues them for one-click approval.</p>
                 + "</td>"
                 f'<td data-label="Races">{rec.race_count}</td>'
                 f'<td data-label="Born">{_h(str(rec.birth_year or ""))}</td>'
-                f'<td data-label="Permission"><form method="POST" action="{url_for("athletes_action")}" style="display:flex;gap:6px;align-items:center">'
+                # B-7: the form POST stays as the no-JS fallback; with JS the
+                # dropdown auto-saves via fetch (no reload, scroll preserved).
+                f'<td data-label="Permission"><form method="POST" action="{url_for("athletes_action")}"'
+                f' class="mh-consent-form" data-athlete-id="{_h(rec.athlete_id)}" data-no-loader="1"'
+                f' style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">'
                 f'<input type="hidden" name="action" value="set_consent"/>'
                 f'<input type="hidden" name="athlete_id" value="{_h(rec.athlete_id)}"/>'
                 f'<select name="level" style="font-size:12px">{unknown_opt}{opts}</select>'
-                f'<button type="submit" class="btn secondary" style="font-size:12px;padding:4px 10px">Save</button>'
+                f'<button type="submit" class="btn secondary mh-consent-save" style="font-size:12px;padding:4px 10px">Save</button>'
+                f'<span class="mh-consent-tick" role="status" hidden'
+                f' style="font-size:12px;font-weight:600;color:var(--mh-success)">Saved &#10003;</span>'
                 f"</form></td>"
                 "</tr>"
             )
         rows_html = (
             "".join(rows)
             if rows
-            else '<tr><td colspan="4" class="muted">No athletes yet — run a meet '
+            else '<tr><td colspan="5" class="muted">No athletes yet — run a meet '
             "through the pipeline, or click &ldquo;Build from past runs&rdquo; below.</td></tr>"
         )
+        # B-7: the bulk bar (one select + Apply) posts once for every ticked
+        # swimmer and updates the rows in place. JS-only — revealed by the
+        # enhancement script below.
+        bulk_opts = "".join(
+            f'<option value="{_h(val)}">{_h(label)}</option>'
+            for val, label in level_options
+            if val != "unknown"
+        )
+        bulk_bar = f"""
+  <div id="mh-consent-bulk" style="display:none;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
+    <label class="muted" for="mh-consent-bulk-level" style="font-size:12px">Apply permission to selected&hellip;</label>
+    <select id="mh-consent-bulk-level" style="font-size:12px">
+      <option value="">Pick a permission</option>
+      {bulk_opts}
+    </select>
+    <button type="button" id="mh-consent-bulk-apply" class="btn secondary" style="font-size:12px;padding:4px 10px">Apply</button>
+    <span class="muted" style="font-size:12px"><span id="mh-consent-selcount">0</span> selected</span>
+  </div>"""
 
         merge_opts = "".join(
             f'<option value="{_h(r.athlete_id)}">{_h(r.canonical_name)} ({r.race_count} races)</option>'
@@ -61573,14 +65066,18 @@ voice, and queues them for one-click approval.</p>
             if regime
             else f' onsubmit="return athEnforceConfirm(this)" data-enforcing="1" data-msg="{_h(_enf_msg)}"'
         )
-        body = f"""
-<section class="mh-hero" style="padding-top:var(--sp-7);padding-bottom:var(--sp-4)">
-  <span class="mh-hero-eyebrow">Club data &middot; Athletes</span>
-  <h1>Athletes &amp; <em class="editorial">consent</em></h1>
-  <p class="lede">One identity per swimmer across every meet. Milestones (debut,
-  50th race), records and season wraps hang off this roster — and so does
-  photo/name permission.</p>
-</section>
+        roster_hero = _ATHLETES_HERO.replace(
+            "__LEDE__",
+            "One identity per swimmer across every meet. Milestones (debut, "
+            "50th race), records and season wraps hang off this roster &mdash; "
+            "and so does photo/name permission.",
+        )
+        body = f"""{roster_hero}
+{_athletes_tabs_html(False)}
+<p class="dim" style="margin-bottom:16px;font-size:13px">Permissions on this tab are what
+MediaHub enforces on content. The signed decisions behind them &mdash; who said yes or no,
+and your lawful basis &mdash; live under
+<a href="{url_for("athletes_page", tab="records")}">Consent records</a>.</p>
 {msg_html}
 <div class="card" style="margin-bottom:16px">{regime_note}
   <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px">
@@ -61596,9 +65093,9 @@ voice, and queues them for one-click approval.</p>
   </div>
 </div>
 <div class="card" style="margin-bottom:16px">
-  <h2 style="margin-top:0">Roster</h2>
+  <h2 style="margin-top:0">Roster</h2>{bulk_bar}
   <table class="mh-table mh-table-stack" style="width:100%">
-    <thead><tr><th>Athlete</th><th>Races logged</th><th>Born</th><th>Photo &amp; name permission</th></tr></thead>
+    <thead><tr><th class="mh-consent-selcell" hidden style="width:28px"><input type="checkbox" id="mh-consent-check-all" aria-label="Select every athlete"/></th><th>Athlete</th><th>Races logged</th><th>Born</th><th>Photo &amp; name permission</th></tr></thead>
     <tbody>{rows_html}</tbody>
   </table>
 </div>
@@ -61613,7 +65110,7 @@ voice, and queues them for one-click approval.</p>
     <label>absorbs</label><select name="merge_id">{merge_opts}</select>
     <button type="submit" class="btn">Merge</button>
   </form>
-</div>{_ATHLETES_CONFIRM_JS}
+</div>{_ATHLETES_CONFIRM_JS}{_ATHLETES_CONSENT_JS.replace("__CONSENT_URL__", url_for("api_athletes_consent"))}
 <div class="card">
   <h2 style="margin-top:0">Import the consent register (.csv)</h2>
   <p class="dim" style="font-size:13px">One row per athlete:
@@ -61683,6 +65180,70 @@ voice, and queues them for one-click approval.</p>
                 "into the roster."
             )
         return redirect(url_for("athletes_page", msg=msg))
+
+    @app.route("/api/athletes/consent", methods=["POST"])
+    def api_athletes_consent():
+        """B-7: inline single + bulk permission saves from the roster.
+
+        JSON body: ``{"athlete_ids": [...], "level": "<level>"}`` (a single
+        ``"athlete_id"`` is accepted too). Tenant-gated exactly like the
+        /athletes/action form post — active workspace only — and any id that
+        isn't on THIS organisation's roster 404s the whole request, so one
+        club can never write consent rows against another club's athletes.
+        The form post stays as the no-JS fallback.
+        """
+        pid = _phase_w_org()
+        if not pid:
+            return jsonify({"error": "Not signed in."}), 403
+        from mediahub.athletes import list_athletes
+        from mediahub.safeguarding import set_consent, set_consent_many
+        from mediahub.safeguarding.consent import LEVEL_LABELS as _CONSENT_LABELS
+        from mediahub.safeguarding.consent import LEVELS as _CONSENT_LEVELS
+
+        body = request.get_json(silent=True) or {}
+        ids = body.get("athlete_ids")
+        if ids is None:
+            single = str(body.get("athlete_id") or "").strip()
+            ids = [single] if single else []
+        if not isinstance(ids, list):
+            return jsonify({"error": "athlete_ids must be a list."}), 400
+        ids = list(dict.fromkeys(str(a).strip() for a in ids if str(a).strip()))
+        if not ids:
+            return jsonify({"error": "Pick at least one athlete."}), 400
+        level = str(body.get("level") or "").strip()
+        if level not in _CONSENT_LEVELS:
+            return jsonify({"error": "Pick a permission level first."}), 400
+        roster_ids = {r.athlete_id for r in list_athletes(pid)}
+        if any(a not in roster_ids for a in ids):
+            return jsonify({"error": "No such athlete on this organisation's roster."}), 404
+        actor = (session.get("user_email") or "web").strip()
+        # CON2-4 — a bulk save is all-or-nothing: one transaction, so a
+        # failure mid-way writes nothing rather than half the roster. The
+        # single save keeps set_consent (same row shape, same audit).
+        if len(ids) == 1:
+            updated = 1 if set_consent(pid, ids[0], level, actor=actor) else 0
+        else:
+            try:
+                updated = set_consent_many(pid, ids, level, actor=actor)
+            except sqlite3.Error:
+                log.warning("bulk consent save failed; rolled back", exc_info=True)
+                return (
+                    jsonify(
+                        {
+                            "error": "Could not save those permissions — "
+                            "nothing was changed. Try again."
+                        }
+                    ),
+                    500,
+                )
+        return jsonify(
+            {
+                "ok": True,
+                "updated": updated,
+                "level": level,
+                "label": _CONSENT_LABELS.get(level, level),
+            }
+        )
 
     @app.route("/athletes/consent.csv")
     def athletes_consent_export():
@@ -62080,17 +65641,27 @@ voice, and queues them for one-click approval.</p>
         now = datetime.now(timezone.utc)
         msg = ""
         if action == "month":
-            year, month = (now.year, now.month - 1) if now.month > 1 else (now.year - 1, 12)
-            draft = build_monthly_draft(pid, RUNS_DIR, year=year, month=month)
-            save_draft(pid, draft)
-            msg = f"Drafted: {draft.get('title', '')}"
+            # Drafting reads every stored run; a single malformed one must not
+            # 500 with a stack trace — fail with an honest message instead.
+            try:
+                year, month = (now.year, now.month - 1) if now.month > 1 else (now.year - 1, 12)
+                draft = build_monthly_draft(pid, RUNS_DIR, year=year, month=month)
+                save_draft(pid, draft)
+                msg = f"Drafted: {draft.get('title', '')}"
+            except Exception:
+                log.warning("season wrap month draft failed", exc_info=True)
+                msg = "Could not draft this wrap - please check your stored runs."
         elif action == "season":
-            season_start = f"{now.year}-09-01" if now.month >= 9 else f"{now.year - 1}-09-01"
-            draft = build_season_draft(
-                pid, RUNS_DIR, season_start=season_start, season_end=now.date().isoformat()
-            )
-            save_draft(pid, draft)
-            msg = f"Drafted: {draft.get('title', '')}"
+            try:
+                season_start = f"{now.year}-09-01" if now.month >= 9 else f"{now.year - 1}-09-01"
+                draft = build_season_draft(
+                    pid, RUNS_DIR, season_start=season_start, season_end=now.date().isoformat()
+                )
+                save_draft(pid, draft)
+                msg = f"Drafted: {draft.get('title', '')}"
+            except Exception:
+                log.warning("season wrap season draft failed", exc_info=True)
+                msg = "Could not draft this wrap - please check your stored runs."
         elif action == "monthly_on":
             try:
                 from mediahub.workflow.schedule import create_task as _ct
@@ -62145,7 +65716,7 @@ voice, and queues them for one-click approval.</p>
         highlights = (
             "".join(
                 "<tr>"
-                f"<td>{_h(h.get('swimmer_name', ''))}</td><td>{_h(h.get('event', ''))}</td>"
+                f"<td>{_h(h.get('swimmer', ''))}</td><td>{_h(h.get('event', ''))}</td>"
                 f"<td>{_h(h.get('headline', ''))}</td>"
                 "</tr>"
                 for h in (draft.get("highlights") or [])
@@ -62190,17 +65761,24 @@ voice, and queues them for one-click approval.</p>
         if not draft:
             abort(404)
         prof = load_profile(pid)
+
+        def _safe_hex(value, default: str) -> str:
+            # Defence in depth: brand colours are substituted raw into the
+            # poster's <style> block by the shared print renderer, so a non-hex
+            # stored value could break out of the CSS and inject markup into the
+            # server-side PDF render. Only let a strict hex literal through.
+            v = str(value or "").strip()
+            return v if re.fullmatch(r"#[0-9A-Fa-f]{3,8}", v) else default
+
         brand = {
-            "primary": getattr(prof, "brand_primary", "#0A2540") if prof else "#0A2540",
-            "secondary": getattr(prof, "brand_secondary", "#000000") if prof else "#000000",
+            "primary": _safe_hex(getattr(prof, "brand_primary", "") if prof else "", "#0A2540"),
+            "secondary": _safe_hex(getattr(prof, "brand_secondary", "") if prof else "", "#000000"),
         }
         highlight_rows = [
             {
-                "swimmer": h.get("swimmer_name", ""),
+                "swimmer": h.get("swimmer", ""),
                 "event": h.get("event", ""),
-                "time": (h.get("raw_facts") or {}).get("time", "")
-                if isinstance(h.get("raw_facts"), dict)
-                else "",
+                "time": h.get("time", ""),
                 "note": h.get("headline", ""),
             }
             for h in (draft.get("highlights") or [])[:10]
@@ -62296,25 +65874,16 @@ voice, and queues them for one-click approval.</p>
 
     # ---- W.12: print exports on the pack ------------------------------------
 
-    @app.route("/pack/<run_id>/certificates.zip")
-    def pack_certificates_zip(run_id: str):
-        if not _can_access_run(run_id, _load_run(run_id), _active_profile_id()):
-            abort(404)
-        import io as _io
-        import zipfile as _zip
+    def _certificates_approved_for(run_id: str):
+        """(run_data, pid, prof, approved_items) for the certificates export.
 
+        Shared by the synchronous ZIP route and the D-12 background job so
+        both build from exactly the same approved, consent-cleared set."""
         from mediahub.content_pack.builder import build_grouped_pack
-        from mediahub.graphic_renderer.print_export import (
-            CmykUnavailable,
-            build_certificate_html,
-            export_certificate_print_pdf,
-            ghostscript_available,
-            render_html_to_pdf,
-        )
 
         data = _load_run(run_id)
         if not data:
-            abort(404)
+            return None, "", None, []
         pid = _run_owner_profile_id(run_id) or ""
         prof = load_profile(pid) if pid else None
         pack = build_grouped_pack(data, pid, RUNS_DIR)
@@ -62324,16 +65893,46 @@ voice, and queues them for one-click approval.</p>
             for item in (pack.get(group) or [])
             if item.get("wf_status") in ("approved", "posted") and not item.get("consent_blocked")
         ]
-        if not approved:
-            return (
-                _layout(
-                    "Certificates",
-                    '<div class="card"><h2>No approved cards yet</h2>'
-                    '<p class="dim">Certificates are printed from approved achievements '
-                    "only — approve some cards first, then come back.</p></div>",
-                ),
-                200,
-            )
+        return data, pid, prof, approved
+
+    def _write_certificates_zip(
+        stream,
+        run_id: str,
+        data: dict,
+        pid: str,
+        prof,
+        approved: list,
+        *,
+        print_mode: bool,
+        bleed_mm: float,
+        crop_marks: bool,
+        colour_bar: bool,
+        want_cmyk: bool,
+        progress=None,
+        use_render_slot: bool = False,
+    ) -> None:
+        """Render one A4 certificate PDF per approved card into ``stream``
+        as a ZIP. ``progress(i, total, swimmer_name)`` (optional) is called
+        before each render so the D-12 background job can report
+        "Rendering certificate N of M" honestly.
+
+        ``use_render_slot=True`` (the D-12 background job) takes the shared
+        render slot per certificate with the queue timeout — like the
+        render-all batch worker — so a big meet's build queues politely and
+        other renders (thumbnails, motion) interleave between PDFs instead
+        of starving for minutes. The synchronous route keeps its historical
+        no-slot behaviour."""
+        import shutil as _shutil
+        import zipfile as _zip
+
+        from mediahub.graphic_renderer.print_export import (
+            CmykUnavailable,
+            build_certificate_html,
+            export_certificate_print_pdf,
+            ghostscript_available,
+            render_html_to_pdf,
+        )
+
         brand = {
             "primary": getattr(prof, "brand_primary", "#0A2540") if prof else "#0A2540",
             "secondary": getattr(prof, "brand_secondary", "#000000") if prof else "#000000",
@@ -62341,15 +65940,6 @@ voice, and queues them for one-click approval.</p>
         meet = data.get("meet") or {}
         meet_name = meet.get("name") or data.get("file_name") or run_id
         meet_date = str(meet.get("start_date") or "")
-        # G1.17: print-production mode (?print=1) adds bleed + crop marks; an
-        # optional ?cmyk=1 converts to DeviceCMYK via Ghostscript when present.
-        print_mode = (request.args.get("print") or "").strip().lower() in _TRUTHY
-        bleed_mm = _clamp_float(request.args.get("bleed"), default=3.0, lo=0.0, hi=10.0)
-        crop_marks = (request.args.get("marks") or "1").strip().lower() in _TRUTHY
-        colour_bar = (
-            request.args.get("colorbar") or request.args.get("colourbar") or "1"
-        ).strip().lower() in _TRUTHY
-        want_cmyk = (request.args.get("cmyk") or "").strip().lower() in _TRUTHY
         do_cmyk = print_mode and want_cmyk and ghostscript_available()
         cmyk_note = None
         if print_mode and want_cmyk and not do_cmyk:
@@ -62362,54 +65952,138 @@ voice, and queues them for one-click approval.</p>
             )
         out_dir = DATA_DIR / "print_exports" / run_id
         out_dir.mkdir(parents=True, exist_ok=True)
+        # Concurrent builds (background job + synchronous route) must never
+        # zip each other's half-written PDFs — intermediates render into a
+        # unique per-build subdirectory, removed when the build finishes.
+        # The final ZIP artifact path stays stable.
+        build_dir = out_dir / f"build-{uuid.uuid4().hex[:8]}"
+        build_dir.mkdir(parents=True, exist_ok=True)
         rgb_fallbacks: list = []  # certs where gs failed mid-run and RGB shipped
+        try:
+            with _zip.ZipFile(stream, "w", _zip.ZIP_DEFLATED) as zf:
+                for i, item in enumerate(approved):
+                    a = item.get("achievement") or {}
+                    name = a.get("swimmer_name") or "Swimmer"
+                    if progress is not None:
+                        progress(i, len(approved), name)
+                    facts = a.get("raw_facts") or {}
+                    time_str = (
+                        facts.get("new_time") or facts.get("time") or facts.get("time_str") or ""
+                    )
+                    cert_kwargs = dict(
+                        swimmer_name=name,
+                        event_label=a.get("event", ""),
+                        time_str=str(time_str),
+                        achievement_headline=a.get("headline", "Achievement"),
+                        meet_name=meet_name,
+                        meet_date=meet_date,
+                        club_name=(prof.display_name if prof else pid or "Our club"),
+                        brand=brand,
+                        detail_line=a.get("angle_hint", ""),
+                    )
+                    safe_name = re.sub(r"[^A-Za-z0-9._-]+", "-", f"{name}-{a.get('event', '')}")
+                    pdf_path = build_dir / f"cert-{i:02d}.pdf"
+                    slot = (
+                        _render_slot("certificates", run_id, timeout=_RENDER_QUEUE_TIMEOUT)
+                        if use_render_slot
+                        else contextlib.nullcontext()
+                    )
+                    with slot:
+                        if print_mode:
+                            try:
+                                export_certificate_print_pdf(
+                                    pdf_path,
+                                    bleed_mm=bleed_mm,
+                                    crop_marks=crop_marks,
+                                    colour_bar=colour_bar,
+                                    cmyk=do_cmyk,
+                                    **cert_kwargs,
+                                )
+                            except CmykUnavailable as e:
+                                # Ghostscript failed mid-run: the RGB print PDF
+                                # (bleed + crop marks intact) is already rendered
+                                # and print-ready — ship it and say so, mirroring
+                                # print_ready/engine.py.
+                                rgb_fallbacks.append(f"{i + 1:02d}-{safe_name}.pdf: {e}")
+                        else:
+                            render_html_to_pdf(build_certificate_html(**cert_kwargs), pdf_path)
+                    zf.writestr(f"certificates/{i + 1:02d}-{safe_name}.pdf", pdf_path.read_bytes())
+                if rgb_fallbacks:
+                    cmyk_note = (cmyk_note or "") + (
+                        "CMYK conversion failed at run time for these certificates, so "
+                        "they are RGB (the bleed and crop marks are intact):\n"
+                        + "\n".join(rgb_fallbacks)
+                        + "\n"
+                    )
+                if cmyk_note:
+                    zf.writestr("certificates/CMYK-NOTE.txt", cmyk_note)
+        finally:
+            _shutil.rmtree(build_dir, ignore_errors=True)
+
+    @app.route("/pack/<run_id>/certificates.zip")
+    def pack_certificates_zip(run_id: str):
+        if not _can_access_run(run_id, _load_run(run_id), _active_profile_id()):
+            abort(404)
+        import io as _io
+
+        # D-12: serve a ZIP a finished background job already built
+        # (?file=<job_id>) — this route stays the one gated file server.
+        _file_job = (request.args.get("file") or "").strip()
+        if _file_job:
+            job = _variant_job_load(_file_job)
+            if (
+                job is None
+                or job.get("kind") != "certificates"
+                or job.get("run_id") != run_id
+                or job.get("status") != "done"
+            ):
+                abort(404)
+            zip_path = Path(str(job.get("zip_path") or ""))
+            if not zip_path.is_file():
+                abort(404)
+            return send_file(
+                str(zip_path),
+                mimetype="application/zip",
+                as_attachment=True,
+                download_name=str(job.get("download_name") or f"certificates-{run_id}.zip"),
+            )
+
+        data, pid, prof, approved = _certificates_approved_for(run_id)
+        if data is None:
+            abort(404)
+        if not approved:
+            return (
+                _layout(
+                    "Certificates",
+                    '<div class="card"><h2>No approved cards yet</h2>'
+                    '<p class="dim">Certificates are printed from approved achievements '
+                    "only — approve some cards first, then come back.</p></div>",
+                ),
+                200,
+            )
+        # G1.17: print-production mode (?print=1) adds bleed + crop marks; an
+        # optional ?cmyk=1 converts to DeviceCMYK via Ghostscript when present.
+        print_mode = (request.args.get("print") or "").strip().lower() in _TRUTHY
+        bleed_mm = _clamp_float(request.args.get("bleed"), default=3.0, lo=0.0, hi=10.0)
+        crop_marks = (request.args.get("marks") or "1").strip().lower() in _TRUTHY
+        colour_bar = (
+            request.args.get("colorbar") or request.args.get("colourbar") or "1"
+        ).strip().lower() in _TRUTHY
+        want_cmyk = (request.args.get("cmyk") or "").strip().lower() in _TRUTHY
         buf = _io.BytesIO()
-        with _zip.ZipFile(buf, "w", _zip.ZIP_DEFLATED) as zf:
-            for i, item in enumerate(approved):
-                a = item.get("achievement") or {}
-                name = a.get("swimmer_name") or "Swimmer"
-                facts = a.get("raw_facts") or {}
-                time_str = facts.get("new_time") or facts.get("time") or facts.get("time_str") or ""
-                cert_kwargs = dict(
-                    swimmer_name=name,
-                    event_label=a.get("event", ""),
-                    time_str=str(time_str),
-                    achievement_headline=a.get("headline", "Achievement"),
-                    meet_name=meet_name,
-                    meet_date=meet_date,
-                    club_name=(prof.display_name if prof else pid or "Our club"),
-                    brand=brand,
-                    detail_line=a.get("angle_hint", ""),
-                )
-                safe_name = re.sub(r"[^A-Za-z0-9._-]+", "-", f"{name}-{a.get('event', '')}")
-                pdf_path = out_dir / f"cert-{i:02d}.pdf"
-                if print_mode:
-                    try:
-                        export_certificate_print_pdf(
-                            pdf_path,
-                            bleed_mm=bleed_mm,
-                            crop_marks=crop_marks,
-                            colour_bar=colour_bar,
-                            cmyk=do_cmyk,
-                            **cert_kwargs,
-                        )
-                    except CmykUnavailable as e:
-                        # Ghostscript failed mid-run: the RGB print PDF (bleed +
-                        # crop marks intact) is already rendered and print-ready
-                        # — ship it and say so, mirroring print_ready/engine.py.
-                        rgb_fallbacks.append(f"{i + 1:02d}-{safe_name}.pdf: {e}")
-                else:
-                    render_html_to_pdf(build_certificate_html(**cert_kwargs), pdf_path)
-                zf.writestr(f"certificates/{i + 1:02d}-{safe_name}.pdf", pdf_path.read_bytes())
-            if rgb_fallbacks:
-                cmyk_note = (cmyk_note or "") + (
-                    "CMYK conversion failed at run time for these certificates, so "
-                    "they are RGB (the bleed and crop marks are intact):\n"
-                    + "\n".join(rgb_fallbacks)
-                    + "\n"
-                )
-            if cmyk_note:
-                zf.writestr("certificates/CMYK-NOTE.txt", cmyk_note)
+        _write_certificates_zip(
+            buf,
+            run_id,
+            data,
+            pid,
+            prof,
+            approved,
+            print_mode=print_mode,
+            bleed_mm=bleed_mm,
+            crop_marks=crop_marks,
+            colour_bar=colour_bar,
+            want_cmyk=want_cmyk,
+        )
         buf.seek(0)
         kind = "print" if print_mode else "certificates"
         return send_file(
@@ -62417,6 +66091,135 @@ voice, and queues them for one-click approval.</p>
             mimetype="application/zip",
             as_attachment=True,
             download_name=f"{kind}-{run_id}.zip",
+        )
+
+    @app.route("/api/runs/<run_id>/certificates-job", methods=["POST"])
+    def api_run_certificates_job(run_id: str):
+        """D-12: build the certificates ZIP in the background; ``202`` +
+        ``{job_id, poll_url}``.
+
+        The synchronous ``certificates.zip`` route renders one Chromium PDF
+        per approved card inside the request — the same held-connection
+        failure the reel/motion routes already cured with the disk-backed
+        job store. Fail-fast gates (tenant, approved set) stay in the
+        request thread; the worker reports "Rendering certificate N of M"
+        via the shared poll route, and completion carries the download URL
+        served by the existing (equally gated) GET route."""
+        if not _can_access_run(run_id, _load_run(run_id), _active_profile_id()):
+            return jsonify({"error": "run_not_found"}), 404
+        data, pid, prof, approved = _certificates_approved_for(run_id)
+        if data is None:
+            return jsonify({"error": "run_not_found"}), 404
+        if not approved:
+            return (
+                jsonify(
+                    {
+                        "error": "no_approved_cards",
+                        "user_message": (
+                            "Certificates are printed from approved achievements only "
+                            "— approve some cards first, then come back."
+                        ),
+                    }
+                ),
+                409,
+            )
+        print_mode = (request.args.get("print") or "").strip().lower() in _TRUTHY
+        bleed_mm = _clamp_float(request.args.get("bleed"), default=3.0, lo=0.0, hi=10.0)
+        crop_marks = (request.args.get("marks") or "1").strip().lower() in _TRUTHY
+        colour_bar = (
+            request.args.get("colorbar") or request.args.get("colourbar") or "1"
+        ).strip().lower() in _TRUTHY
+        want_cmyk = (request.args.get("cmyk") or "").strip().lower() in _TRUTHY
+
+        job_id = uuid.uuid4().hex
+        out_dir = DATA_DIR / "print_exports" / run_id
+        out_dir.mkdir(parents=True, exist_ok=True)
+        zip_path = out_dir / f"certificates-{job_id}.zip"
+        kind_name = "print" if print_mode else "certificates"
+        # url_for needs the request context — resolve before the thread.
+        download_url = url_for("pack_certificates_zip", run_id=run_id, file=job_id)
+        job: dict = {
+            "id": job_id,
+            "kind": "certificates",
+            "status": "running",
+            "error": "",
+            "user_message": "",
+            "video_url": "",
+            "run_id": run_id,
+            "zip_path": str(zip_path),
+            "download_url": "",
+            "download_name": f"{kind_name}-{run_id}.zip",
+            "total": len(approved),
+            "done": 0,
+            "current": "",
+            "created_at": time.time(),
+            "owner_pid": _active_profile_id() or "",
+        }
+        _variant_jobs_gc()
+        _variant_job_save(job)
+
+        def _worker() -> None:
+            try:
+                with _job_heartbeat(job):
+                    # The render slot is taken per certificate inside
+                    # _write_certificates_zip (use_render_slot=True) with the
+                    # queue timeout — a 202-accepted job queues like the
+                    # render-all batch worker instead of fast-failing, and
+                    # never starves other renders for the whole ZIP build.
+
+                    def _progress(i: int, total: int, name: str) -> None:
+                        job["done"] = i
+                        job["total"] = total
+                        job["current"] = str(name or "")
+                        _variant_job_save(job)
+
+                    with open(zip_path, "wb") as fh:
+                        _write_certificates_zip(
+                            fh,
+                            run_id,
+                            data,
+                            pid,
+                            prof,
+                            approved,
+                            print_mode=print_mode,
+                            bleed_mm=bleed_mm,
+                            crop_marks=crop_marks,
+                            colour_bar=colour_bar,
+                            want_cmyk=want_cmyk,
+                            progress=_progress,
+                            use_render_slot=True,
+                        )
+                job["status"] = "done"
+                job["done"] = int(job.get("total") or len(approved))
+                job["current"] = ""
+                job["download_url"] = download_url
+            except _RenderBusy:
+                job["status"] = "error"
+                job["error"] = "renderer_busy"
+                job["user_message"] = (
+                    "Another export is rendering right now — try again in a minute."
+                )
+            except Exception as e:
+                log.exception("certificates job %s failed", job_id[:8])
+                job["status"] = "error"
+                job["error"] = str(e)
+                job["user_message"] = (
+                    "We couldn't finish building the certificates just now. "
+                    "Give it a moment and try again."
+                )
+            _variant_job_save(job)
+
+        threading.Thread(target=_worker, name=f"certs-{job_id[:8]}", daemon=True).start()
+        return (
+            jsonify(
+                {
+                    "ok": True,
+                    "job_id": job_id,
+                    "poll_url": url_for("api_reel_job_status", job_id=job_id),
+                    "total": len(approved),
+                }
+            ),
+            202,
         )
 
     @app.route("/pack/<run_id>/print/separations.json")
@@ -62498,14 +66301,17 @@ voice, and queues them for one-click approval.</p>
                 entries_text = "\n".join(lines)
                 n_rows = len(rows)
             else:
-                text = data.decode("utf-8", errors="replace")
+                # Bound the intermediate work: decode at most ~2 MB (well beyond
+                # any real entries list) so a large text upload — allowed up to
+                # the 50 MB request cap — can't build a giant line list in RAM.
+                text = data[:2_000_000].decode("utf-8", errors="replace")
                 cleaned = [ln.strip() for ln in text.splitlines() if ln.strip()]
                 if not cleaned:
                     return jsonify(
                         {"ok": False, "error": "Couldn't read any entries from that file."}
                     ), 422
-                entries_text = "\n".join(cleaned[:400])
                 n_rows = len(cleaned)
+                entries_text = "\n".join(cleaned[:400])[:20000]
         except Exception:
             log.warning("entry-file parse failed", exc_info=True)
             return jsonify(
@@ -62548,6 +66354,16 @@ voice, and queues them for one-click approval.</p>
     def _safe_filename(title: str, ext: str) -> str:
         slug = re.sub(r"[^A-Za-z0-9_-]+", "-", str(title or "document")).strip("-").lower()
         return f"{slug or 'document'}.{ext}"
+
+    def _doc_clean_detail(exc) -> str:
+        """A user-safe one-line failure reason for a document/PDF-tool error.
+
+        The document endpoints operate on server-side temp files, and library
+        errors (Pillow/pypdf/Playwright) embed the absolute path — leaking the
+        server's filesystem layout and the temp-naming scheme (CLAUDE.md: never
+        expose internal paths). Scrub any absolute path to a neutral token while
+        keeping the helpful validation text (e.g. page/size limits)."""
+        return re.sub(r"(?:/[^\s'\"]+)+", "a file", str(exc))[:200]
 
     def _doc_recent_runs(pid, limit=60):
         out = []
@@ -62741,16 +66557,32 @@ voice, and queues them for one-click approval.</p>
                 f'gap:12px">{"".join(rows)}</div>'
             )
 
-        def _tile(fmt, name, desc):
+        def _tile(fmt, name, desc, extra=""):
             return (
                 '<div class="card"><h3 style="margin-top:0">' + name + "</h3>"
-                '<p class="dim" style="font-size:13px">' + desc + "</p>"
-                '<label class="mh-ai-opt" style="display:flex;align-items:center;gap:6px;'
+                '<p class="dim" style="font-size:13px">'
+                + desc
+                + "</p>"
+                + extra
+                + '<label class="mh-ai-opt" style="display:flex;align-items:center;gap:6px;'
                 'font-size:12px;margin-top:8px;color:var(--ink-muted)">'
                 '<input type="checkbox" class="mh-ai-toggle" checked> Write the intro with AI</label>'
                 '<button class="btn" style="margin-top:8px" onclick="genNl(this,\'' + fmt + "')\">"
                 "Generate</button></div>"
             )
+
+        # H-12: the meet digest names which meet it covers. Same recent-meets
+        # query the Documents "Meet programme" tile uses; the default option
+        # keeps the pick-the-latest-in-range behaviour for one-click use.
+        digest_run_opts = '<option value="">Latest meet in range</option>' + "".join(
+            f'<option value="{_h(rid)}">{_h(name)} ({n} cards)</option>'
+            for rid, name, n in _doc_recent_runs(pid)
+        )
+        digest_meet_select = (
+            '<label class="dim" for="nl-digest-run" style="font-size:12px;display:block;'
+            'margin-top:8px">Meet</label>'
+            f'<select id="nl-digest-run" class="input">{digest_run_opts}</select>'
+        )
 
         body = (
             '<section class="mh-hero"><h1>Newsletters</h1>'
@@ -62771,6 +66603,7 @@ voice, and queues them for one-click approval.</p>
                 "meet_digest",
                 "Meet digest",
                 "One meet: the standout swims, athletes to watch and what's next.",
+                extra=digest_meet_select,
             )
             + _tile(
                 "season_highlights",
@@ -62844,6 +66677,14 @@ voice, and queues them for one-click approval.</p>
             return jsonify({"ok": False, "error": "bad_format"}), 400
         preset = (body.get("range") or "this_month").strip()
         with_ai = bool(body.get("with_ai", True))
+        # H-12: the meet digest can pin exactly one meet. Only the digest
+        # takes a run_id; ownership is tenant-gated the same way as every
+        # other per-run endpoint (a foreign run answers like a missing one).
+        run_id = (body.get("run_id") or "").strip()
+        if run_id and fmt != "meet_digest":
+            run_id = ""
+        if run_id and not _can_access_run(run_id, _load_run(run_id), pid):
+            return jsonify({"ok": False, "error": "run_not_found"}), 404
         if with_ai:  # AI drafting is metered spend — permission + quota first
             denied = _editorial_ai_gate(pid)
             if denied is not None:
@@ -62864,6 +66705,7 @@ voice, and queues them for one-click approval.</p>
                 with_ai=with_ai,
                 profile=prof,
                 runs_dir=RUNS_DIR,
+                run_id=run_id or None,
             )
         except Exception as e:  # honest AI-unavailable signal — offer a data-only build
             from mediahub.media_ai.llm import ClaudeUnavailableError
@@ -62912,7 +66754,7 @@ voice, and queues them for one-click approval.</p>
                 "<strong>Hosted web version is live.</strong> "
                 f'<a href="{_h(hosted)}" target="_blank">{_h(hosted)}</a>'
                 '<div style="margin-top:8px">'
-                '<button class="btn secondary" onclick="nlPublish(false)">Take offline</button> '
+                '<button class="btn secondary" onclick="nlPublish(false)">Unpublish</button> '
                 '<button class="btn secondary" onclick="nlPublish(true)">Re-publish latest</button>'
                 "</div></div>"
             )
@@ -63308,15 +67150,18 @@ voice, and queues them for one-click approval.</p>
             '<div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px">'
             '<div class="card"><h3 style="margin-top:0">Import to edit</h3>'
             '<p class="dim" style="font-size:13px">Open a PDF, Word or PowerPoint file as an editable document (bounded fidelity).</p>'
-            '<input type="file" id="imp-file" accept=".pdf,.docx,.pptx" class="input">'
+            '<input type="file" id="imp-file" accept=".pdf,.docx,.pptx" class="input" '
+            'aria-label="Choose a PDF, Word or PowerPoint file to import">'
             '<button class="btn secondary" style="margin-top:8px" onclick="importDoc()">Import</button></div>'
             '<div class="card"><h3 style="margin-top:0">Merge PDFs</h3>'
             '<p class="dim" style="font-size:13px">Combine several PDFs into one, in order.</p>'
-            '<input type="file" id="merge-files" accept="application/pdf" multiple class="input">'
+            '<input type="file" id="merge-files" accept="application/pdf" multiple class="input" '
+            'aria-label="Choose PDF files to merge">'
             '<button class="btn secondary" style="margin-top:8px" onclick="mergePdfs()">Merge &amp; download</button></div>'
             '<div class="card"><h3 style="margin-top:0">Images → PDF</h3>'
             '<p class="dim" style="font-size:13px">Turn photos/screenshots into a single PDF.</p>'
-            '<input type="file" id="img-files" accept="image/*" multiple class="input">'
+            '<input type="file" id="img-files" accept="image/*" multiple class="input" '
+            'aria-label="Choose images to combine into a PDF">'
             '<button class="btn secondary" style="margin-top:8px" onclick="imagesToPdf()">Build &amp; download</button></div>'
             "</div>"
             + saved
@@ -63324,6 +67169,7 @@ voice, and queues them for one-click approval.</p>
             .replace("__IMPORT_URL__", url_for("api_documents_import"))
             .replace("__MERGE_URL__", url_for("api_documents_tool_merge"))
             .replace("__IMG_URL__", url_for("api_documents_tool_images_to_pdf"))
+            .replace("__CSRF__", _csrf_token())
         )
         return _layout("Documents", body, active="create")
 
@@ -63435,6 +67281,7 @@ voice, and queues them for one-click approval.</p>
             f'<a class="btn secondary" href="{url_for("api_document_docx", doc_id=doc_id)}">Word (.docx)</a>'
             "</div>"
             f'<iframe src="{url_for("api_document_pdf", doc_id=doc_id)}" '
+            'title="Document preview" '
             'style="width:100%;height:70vh;border:1px solid var(--panel);border-radius:8px;background:var(--panel)"></iframe>'
             + doc_structured
             + '<details style="margin-top:18px"><summary class="dim">Advanced — raw spec (JSON)</summary>'
@@ -63461,7 +67308,7 @@ voice, and queues them for one-click approval.</p>
             path = render_document_pdf(spec, brand_kit=_doc_brand_kit(pid))
         except Exception as e:
             log.warning("document pdf render failed", exc_info=True)
-            return jsonify({"error": "render_failed", "detail": str(e)[:200]}), 503
+            return jsonify({"error": "render_failed", "detail": _doc_clean_detail(e)}), 503
         dl = request.args.get("dl") == "1"
         return send_file(
             path,
@@ -63487,7 +67334,7 @@ voice, and queues them for one-click approval.</p>
             try:
                 document_pptx(spec, out, brand_kit=_doc_brand_kit(pid))
             except Exception as e:
-                return jsonify({"error": "export_failed", "detail": str(e)[:200]}), 503
+                return jsonify({"error": "export_failed", "detail": _doc_clean_detail(e)}), 503
             return send_file(
                 out,
                 as_attachment=True,
@@ -63516,7 +67363,7 @@ voice, and queues them for one-click approval.</p>
             try:
                 document_docx(spec, out, brand_kit=_doc_brand_kit(pid))
             except Exception as e:
-                return jsonify({"error": "export_failed", "detail": str(e)[:200]}), 503
+                return jsonify({"error": "export_failed", "detail": _doc_clean_detail(e)}), 503
             return send_file(
                 out,
                 as_attachment=True,
@@ -63545,7 +67392,7 @@ voice, and queues them for one-click approval.</p>
         try:
             path = deck_to_mp4(spec, brand_kit=_doc_brand_kit(pid))
         except Exception as e:
-            return jsonify({"error": "video_failed", "detail": str(e)[:200]}), 503
+            return jsonify({"error": "video_failed", "detail": _doc_clean_detail(e)}), 503
         return send_file(
             path,
             mimetype="video/mp4",
@@ -63568,8 +67415,14 @@ voice, and queues them for one-click approval.</p>
         from mediahub.documents import store as _docstore
 
         raw["doc_id"] = doc_id  # never let an edit reassign identity
-        new_spec = DocumentSpec.from_dict(raw)
-        _docstore.save_document(pid, new_spec)
+        # from_dict is total over wrong-typed fields, but a spec the editor sends
+        # can still be unparseable in other ways — answer with a clean 400, never
+        # an unhandled 500, since this is a user-editable payload.
+        try:
+            new_spec = DocumentSpec.from_dict(raw)
+            _docstore.save_document(pid, new_spec)
+        except (TypeError, ValueError):
+            return jsonify({"ok": False, "error": "bad_spec"}), 400
         return jsonify({"ok": True})
 
     @app.route("/api/documents/<doc_id>/content-edit", methods=["POST"])
@@ -63627,7 +67480,9 @@ voice, and queues them for one-click approval.</p>
         try:
             spec = import_file(tmp)
         except Exception as e:
-            return jsonify({"ok": False, "error": "import_failed", "detail": str(e)[:200]}), 422
+            return jsonify(
+                {"ok": False, "error": "import_failed", "detail": _doc_clean_detail(e)}
+            ), 422
         finally:
             try:
                 tmp.unlink()
@@ -63664,7 +67519,7 @@ voice, and queues them for one-click approval.</p>
             try:
                 merge_pdfs(paths, out)
             except Exception as e:
-                return jsonify({"error": "merge_failed", "detail": str(e)[:200]}), 422
+                return jsonify({"error": "merge_failed", "detail": _doc_clean_detail(e)}), 422
             finally:
                 for p in paths:
                     try:
@@ -63702,7 +67557,7 @@ voice, and queues them for one-click approval.</p>
             try:
                 images_to_pdf(paths, out)
             except Exception as e:
-                return jsonify({"error": "convert_failed", "detail": str(e)[:200]}), 422
+                return jsonify({"error": "convert_failed", "detail": _doc_clean_detail(e)}), 422
             finally:
                 for p in paths:
                     try:
@@ -63763,6 +67618,30 @@ voice, and queues them for one-click approval.</p>
         notes = json.dumps([s["notes"] for s in view["slides"]]).replace("<", "\\u003c")
         titles = json.dumps([s["title"] for s in view["slides"]]).replace("<", "\\u003c")
         remote_url = url_for("remote_landing", _external=True)
+        # B-8: pair the phone by QR — encode the absolute /remote/<code> deep
+        # link (a valid code always connects, J-14) so a scan connects the
+        # remote with zero typing; a tappable link of the same URL covers a
+        # console open on a tablet. No QR backend → the block stays empty and
+        # the text-only pairing info in the template stands on its own.
+        remote_link_url = url_for("remote_control", code=session.pairing_code, _external=True)
+        from mediahub.web import qr as _qr
+
+        qr_block = ""
+        if _qr.is_available():
+            try:
+                svg = _qr.qr_svg(remote_link_url, scale=4, border=3)
+                qr_block = (
+                    '<div id="remote-qr" style="text-align:center;margin:8px 0">'
+                    '<div style="display:inline-block;line-height:0;border-radius:8px;overflow:hidden">'
+                    + svg
+                    + "</div>"
+                    '<p class="dim" style="font-size:12px;margin:6px 0 0">Scan with the phone camera to connect, '
+                    f'or tap <a href="{_h(remote_link_url)}" target="_blank" rel="noopener" '
+                    f'style="word-break:break-all">{_h(remote_link_url)}</a></p>'
+                    "</div>"
+                )
+            except Exception:
+                qr_block = ""
         body = (
             _DOC_PRESENT_CONSOLE.replace("__CODE__", _h(session.pairing_code))
             .replace("__TOTAL__", str(len(spec.sections)))
@@ -63775,6 +67654,7 @@ voice, and queues them for one-click approval.</p>
             .replace("__AUDIENCE_URL__", url_for("present_audience", session_id=session.session_id))
             .replace("__DOC_URL__", url_for("document_view", doc_id=doc_id))
             .replace("__REMOTE_URL__", _h(remote_url))
+            .replace("__REMOTE_QR_SVG__", qr_block)
             .replace("__NOTES__", notes)
             .replace("__TITLES__", titles)
         )
@@ -63822,7 +67702,7 @@ voice, and queues them for one-click approval.</p>
         try:
             path = render_section_png(spec, i, brand_kit=_doc_brand_kit(session.owner))
         except Exception as e:
-            return jsonify({"error": "render_failed", "detail": str(e)[:160]}), 503
+            return jsonify({"error": "render_failed", "detail": _doc_clean_detail(e)}), 503
         return send_file(path, mimetype="image/png")
 
     @app.route("/api/present/<session_id>/state")
@@ -63852,32 +67732,52 @@ voice, and queues them for one-click approval.</p>
         updated = _pres.apply_action(session_id, str(body.get("action", "")), body.get("value"))
         return jsonify({"ok": True, "state": updated.public_state() if updated else None})
 
-    # Per-IP budget on FAILED pairing-code lookups: the 6-char code drives a
-    # live presentation, so wrong-code guesses are throttled (presenter.py's
-    # documented guard). Successful lookups never count, so a presenter
-    # clicking through slides with the right code is unaffected.
-    _remote_code_attempts: dict = {}
+    # Budget on FAILED pairing-code lookups (J-14): the code is looked up
+    # BEFORE any limit check, so a correct code always connects — a venue
+    # full of phones behind one NAT can never be locked out of a live talk
+    # by someone else's typos. Confirmed-wrong guesses are throttled per
+    # (client IP, submitted code) so one member hammering their own typo
+    # doesn't burn the venue's budget, with a generous per-IP ceiling as
+    # the code-enumeration backstop.
+    _remote_code_attempts: dict = {}  # client IP -> [(ts, submitted code), ...]
     _remote_code_lock = threading.Lock()
-    _REMOTE_CODE_MAX_FAILURES = 20
+    _REMOTE_CODE_MAX_FAILURES = 20  # per (IP, code)
+    _REMOTE_CODE_IP_CEILING = 100  # per IP across all codes
     _REMOTE_CODE_WINDOW_S = 300
 
-    def _remote_code_limited() -> bool:
-        """True when this IP has exhausted its failed pairing-code budget."""
+    def _remote_code_limited(code: str) -> int:
+        """Seconds until this IP may retry ``code``; 0 when not limited.
+
+        Limited when this IP has exhausted its failed budget for this exact
+        code, or tripped the per-IP ceiling across all codes.
+        """
         now = time.time()
         key = _client_ip()
+        code = (code or "").strip().upper()
         with _remote_code_lock:
             window = [
-                t for t in _remote_code_attempts.get(key, []) if now - t < _REMOTE_CODE_WINDOW_S
+                e for e in _remote_code_attempts.get(key, []) if now - e[0] < _REMOTE_CODE_WINDOW_S
             ]
             _remote_code_attempts[key] = window
             if len(_remote_code_attempts) > 4096:  # opportunistic cleanup
                 for k in [k for k, v in _remote_code_attempts.items() if not v]:
                     _remote_code_attempts.pop(k, None)
-            return len(window) >= _REMOTE_CODE_MAX_FAILURES
+            frees_at = 0.0
+            same_code = [t for t, c in window if c == code]
+            if len(same_code) >= _REMOTE_CODE_MAX_FAILURES:
+                # Clears when enough same-code failures age out of the window.
+                frees_at = same_code[len(same_code) - _REMOTE_CODE_MAX_FAILURES]
+            if len(window) >= _REMOTE_CODE_IP_CEILING:
+                frees_at = max(frees_at, window[len(window) - _REMOTE_CODE_IP_CEILING][0])
+            if not frees_at:
+                return 0
+            return max(1, int(frees_at + _REMOTE_CODE_WINDOW_S - now) + 1)
 
-    def _remote_code_failed() -> None:
+    def _remote_code_failed(code: str) -> None:
         with _remote_code_lock:
-            _remote_code_attempts.setdefault(_client_ip(), []).append(time.time())
+            _remote_code_attempts.setdefault(_client_ip(), []).append(
+                (time.time(), (code or "").strip().upper())
+            )
 
     @app.route("/remote")
     def remote_landing():
@@ -63926,15 +67826,26 @@ voice, and queues them for one-click approval.</p>
             )
         from mediahub.documents import presenter as _pres
 
-        if _remote_code_limited():
-            return _recovery_page(
-                "Too many attempts",
-                "Too many code attempts from your network — wait a few minutes.",
-                primary_cta=("Try again", url_for("remote_landing")),
-            )
+        # A correct code always connects — the lookup runs before any
+        # throttle check, so a shared venue NAT can never lock out someone
+        # holding the real code (J-14).
         session = _pres.get_by_pairing_code(code, include_ended=True)
         if session is None:
-            _remote_code_failed()
+            wait_s = _remote_code_limited(code)
+            if wait_s:
+                mins = max(1, (wait_s + 59) // 60)
+                return _recovery_page(
+                    "Too many attempts",
+                    "Too many wrong code attempts — wait about "
+                    f"{mins} minute{'s' if mins != 1 else ''}, then check again. "
+                    "If you have the correct code from the presenter screen, it will still connect.",
+                    primary_cta=(
+                        f"Check again in about {mins} minute{'s' if mins != 1 else ''}",
+                        url_for("remote_control", code=code),
+                    ),
+                    code=429,
+                )
+            _remote_code_failed(code)
             return _recovery_page(
                 "Code not found",
                 "That code doesn't match a live presentation — check the code on the presenter screen.",
@@ -63962,11 +67873,15 @@ voice, and queues them for one-click approval.</p>
             return jsonify({"ok": False, "error": "unavailable"}), 503
         from mediahub.documents import presenter as _pres
 
-        if _remote_code_limited():
-            return jsonify({"ok": False, "error": "rate_limited"}), 429
+        # Lookup before throttle: a correct code is never rate limited (J-14).
         session = _pres.get_by_pairing_code(code, include_ended=True)
         if session is None:
-            _remote_code_failed()
+            wait_s = _remote_code_limited(code)
+            if wait_s:
+                resp = jsonify({"ok": False, "error": "rate_limited", "retry_after_s": wait_s})
+                resp.headers["Retry-After"] = str(wait_s)
+                return resp, 429
+            _remote_code_failed(code)
             return jsonify({"ok": False, "error": "no_session"}), 404
         if session.ended:
             # Valid code, but the talk is over — let the remote flip to its

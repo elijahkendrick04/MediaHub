@@ -1,6 +1,6 @@
 """charts.fonts — self-hosted typefaces for standalone chart SVG.
 
-A chart SVG is served and embedded on its own (a browser ``<img>``, a microsite,
+A chart SVG is served and embedded on its own (a browser ``<img>``, a document,
 a download), so it must carry its own fonts — and, like every other MediaHub
 surface, **never from the Google Fonts CDN** (reliability + the Munich GDPR
 ruling; see CLAUDE.md "Fonts are self-hosted on every surface"). This module

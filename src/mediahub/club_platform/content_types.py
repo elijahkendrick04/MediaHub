@@ -141,10 +141,12 @@ REGISTRY: dict[ContentType, ContentTypeMeta] = {
         title="Meet Recap",
         description="Turn a meet results file into ranked, source-grounded content cards.",
         input_contract=(
-            "Upload a Hytek Meet Manager file (.hy3) or a zip containing one. "
-            "Optional: a pre-meet PB snapshot will be fetched from a public PB "
-            "source (chosen automatically) for accurate PB claims. Requires a "
-            "configured club profile so the pipeline knows which swimmers are yours."
+            "Upload your meet results file — Hytek (.hy3 / .hyv), SDIF (.sd3 / "
+            ".sdif / .cl2), a .zip of results, a results PDF, HTML, CSV, TXT or "
+            "Excel (.xlsx). Optional: a pre-meet PB snapshot will be fetched from "
+            "a public PB source (chosen automatically) for accurate PB claims. "
+            "Requires a configured club profile so the pipeline knows which "
+            "swimmers are yours."
         ),
         is_implemented=True,
         icon_svg=_WAVES_SVG,
@@ -157,7 +159,8 @@ REGISTRY: dict[ContentType, ContentTypeMeta] = {
                 ("Your brand kit", "brand"),
             ),
             steps=(
-                "Upload your Hytek results file (.hy3) or a zip — we read every swim.",
+                "Upload your results file — Hytek (.hy3 / .hyv), SDIF/SD3/CL2, ZIP, "
+                "PDF, HTML, CSV, TXT or Excel (.xlsx) — we read every swim.",
                 "The engine detects PBs, medals, finals and first-times, then ranks "
                 "them by how content-worthy they are.",
                 "You get branded cards, captions and a reel to review, approve and export.",
@@ -196,9 +199,11 @@ REGISTRY: dict[ContentType, ContentTypeMeta] = {
         title="Event Preview",
         description="Tease upcoming athletes and story angles before an event.",
         input_contract=(
-            "Tell us the event name, date / venue, athletes to watch, and any story angles. "
-            "We generate Instagram, Stories and Twitter preview captions ready to edit and post. "
-            "Full entry-list parsing is coming next — this form already produces usable cards."
+            "All we need is the event name. Add the event's website or its meet pack "
+            "and the AI reads them to work out what the event is: dates, venue, level "
+            "and format. Upload the entries file too and it picks your ones to watch "
+            "from the real entry list. You get Instagram, Stories and Twitter preview "
+            "captions ready to edit and post."
         ),
         is_implemented=True,
         icon_svg=_CALENDAR_SVG,
@@ -206,16 +211,16 @@ REGISTRY: dict[ContentType, ContentTypeMeta] = {
         how_it_works=HowItWorks(
             tagline="Build the hype before the first whistle.",
             inputs=(
-                ("Event details", "event"),
-                ("Athletes to watch", "swimmer"),
+                ("Event name or entries file", "event"),
+                ("Ones to watch (AI or typed)", "swimmer"),
                 ("Photo (optional)", "photo"),
             ),
             steps=(
-                "Tell us the event, the date and venue, and who to watch.",
-                "The engine shapes the story angles and writes preview copy in your voice.",
-                "You get feed and story captions plus a branded graphic to approve.",
+                "Give us the event name, or upload the entries file and we read the meet name straight from it.",
+                "Add the website or meet pack and the AI works out the dates, venue, level and format before it writes a word.",
+                "You get feed and story preview captions plus a branded graphic to approve.",
             ),
-            engine_process="angle · write · brand",
+            engine_process="read · angle · write · brand",
         ),
     ),
     ContentType.SPONSOR_ACTIVATION: ContentTypeMeta(

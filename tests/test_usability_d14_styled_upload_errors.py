@@ -62,7 +62,9 @@ def test_bad_audio_type_form_post_redirects_with_styled_error(app_env):
             content_type="multipart/form-data",
         )
         assert r.status_code == 302
-        assert "status=error" in r.headers["Location"]
+        # H-15: the redirect carries a status CODE (mapped to copy server-side),
+        # not free-text — the banner intent of D-14 is unchanged.
+        assert "status=bad_type" in r.headers["Location"]
         page = c.get(r.headers["Location"]).get_data(as_text=True)
         assert "Upload failed" in page
         # The message is HTML-escaped in the banner; match its unescaped part.
@@ -74,7 +76,10 @@ def test_missing_file_form_post_is_styled(app_env):
         _signin(c)
         r = c.post("/api/audio/upload", data={}, content_type="multipart/form-data")
         assert r.status_code == 302
-        assert "status=error" in r.headers["Location"]
+        # H-15: code-carrying redirect ("no_file"), mapped to copy server-side.
+        assert "status=no_file" in r.headers["Location"]
+        page = c.get(r.headers["Location"]).get_data(as_text=True)
+        assert "choose an audio file" in page.lower()
 
 
 def test_audio_error_json_caller_still_gets_machine_body(app_env):

@@ -249,6 +249,66 @@ def test_anniversary_signal_from_year_old_meet(tmp_path):
     assert ann[0].payload["years"] == 1
 
 
+def test_anniversary_signal_spans_year_boundary(tmp_path):
+    """Regression (audit): near a year boundary the true nearest anniversary is in
+    today.year ± 1, so testing only finished.replace(year=today.year) silently
+    missed late-Dec / early-Jan anniversaries inside the ±7d window and disagreed
+    with the calendar. The planner signal must fire and match the calendar."""
+    from datetime import date as _date
+
+    from mediahub.content_engine.calendar import build_calendar
+
+    _seed_run(
+        tmp_path,
+        run_id="runNye",
+        profile_id=ORG_A,
+        meet_name="NYE Gala",
+        finished=_date(2020, 12, 30),
+        n_achievements=3,
+    )
+    today = _date(2026, 1, 2)  # 3 days AFTER the previous-year (Dec-30) anniversary
+    ext = gather_external_signals(ORG_A, data_dir=tmp_path, now=today)
+    ann = [s for s in ext if s.kind == "anniversary"]
+    assert ann, "the Dec-30 anniversary 3 days ago is inside the ±7d window"
+    assert ann[0].payload["years"] == 5 and ann[0].payload["delta_days"] == -3
+    assert ann[0].occurs_at == "2025-12-30"
+
+    # The anniversary boost actually reaches the ranked plan.
+    plan = build_content_plan("swimming", ORG_A, data_dir=tmp_path, now=today)
+    boosted = [i for i in plan.items if any("since NYE Gala" in r for r in i.reasons)]
+    assert boosted, "the anniversary boost reaches at least one ranked item"
+
+    # Plan and calendar must agree over the same boundary window.
+    cal = build_calendar(
+        ORG_A, "swimming", start=_date(2025, 12, 26), end=_date(2026, 1, 9), data_dir=tmp_path
+    )
+    assert any(e.kind == "anniversary" and "NYE Gala" in e.title for e in cal.entries)
+
+
+def test_signal_and_reason_copy_pluralise_singular_counts(tmp_path):
+    """British-English copy (audit): a count of exactly 1 must read '1 achievement'
+    / '1 card', never '1 achievements' / '1 cards'."""
+    _seed_run(
+        tmp_path,
+        run_id="runSolo",
+        profile_id=ORG_A,
+        meet_name="Solo Meet",
+        finished=TODAY - timedelta(days=1),
+        n_achievements=1,
+        queued=1,
+        approved=1,
+    )
+    own = gather_own_signals(ORG_A, data_dir=tmp_path, now=TODAY)
+    rr = next(s for s in own if s.kind == "run_results")
+    assert "1 achievement detected" in rr.summary and "1 card in review queue" in rr.summary
+    assert "1 achievements" not in rr.summary and "1 cards" not in rr.summary
+
+    plan = build_content_plan("swimming", ORG_A, data_dir=tmp_path, now=TODAY)
+    reasons = " ".join(r for i in plan.items for r in i.reasons)
+    assert "1 card awaiting review" in reasons and "1 approved card not yet posted" in reasons
+    assert "1 cards awaiting review" not in reasons and "1 approved cards" not in reasons
+
+
 def test_discovered_meet_signals_are_tenant_scoped(tmp_path):
     """The discovery cache is shared and unattributed, so gather_external_signals
     must only surface a discovered meet to an org whose own runs carry a

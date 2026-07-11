@@ -253,14 +253,16 @@ def test_monthly_draft_title_id_window_and_highlights_order(runs_dir):
         "race_milestone_50",
         "club_debut",
     ]
-    assert set(highlights[0]) == {"swimmer", "event", "headline", "type"}
+    assert set(highlights[0]) == {"swimmer", "event", "headline", "type", "time"}
     assert highlights[0]["swimmer"] == "Owen Hughes"
 
 
 def test_season_draft_shape(runs_dir):
     draft = build_season_draft(ORG_A, runs_dir, season_start="2025-09-01", season_end="2026-07-31")
-    assert draft["title"] == "Season wrap 2025-09-01–2026-07-31"
-    assert draft["id"] == "season-2025-09-01-2026-07-31"
+    assert draft["title"] == "Season wrap 2025-09-01 to 2026-07-31"
+    # The id is keyed to the season start only, so re-drafting the same season
+    # (the web action re-runs with a moving end date) overwrites one file.
+    assert draft["id"] == "season-2025-09-01"
     # The July org-A meet is inside the season window.
     assert draft["stats"]["n_runs"] == 3
     assert draft["stats"]["medals_by_colour"]["bronze"] == 1
@@ -290,6 +292,129 @@ def test_draft_paths_are_traversal_safe(tmp_path, runs_dir):
     path = save_draft("../evil", draft, data_dir=data_dir)
     assert data_dir in path.parents  # never escapes DATA_DIR
     assert ".." not in path.parts
+
+
+# --- W.8 audit regressions ---------------------------------------------------
+
+
+def test_highlights_carry_swimmer_and_time_keys(runs_dir):
+    """Audit F1: every highlight keeps the swimmer and a (possibly empty) time,
+    so the review page and poster render them instead of a blank column."""
+    draft = build_monthly_draft(ORG_A, runs_dir, year=2026, month=6)
+    assert draft["highlights"][0]["swimmer"] == "Owen Hughes"
+    for h in draft["highlights"]:
+        assert set(h) == {"swimmer", "event", "headline", "type", "time"}
+        assert isinstance(h["time"], str)
+
+
+def test_display_time_flows_from_raw_facts(tmp_path):
+    """Audit F1: a display time in raw_facts reaches the highlight so the
+    poster's Time column can be populated (it was structurally always empty)."""
+    d = tmp_path / "runs_v4"
+    d.mkdir()
+    _write_snapshot(
+        d,
+        "r1",
+        ORG_A,
+        "June Meet",
+        "2026-06-10",
+        [
+            _ra(
+                "pb_confirmed",
+                "Maya Patel",
+                "100m Freestyle (LC)",
+                priority=0.9,
+                rank=1,
+                raw={"time": "1:01.50", "drop_pct": 2.0},
+            )
+        ],
+    )
+    draft = build_monthly_draft(ORG_A, d, year=2026, month=6)
+    assert draft["highlights"][0]["time"] == "1:01.50"
+
+
+def test_iso_date_normalisation_windows_unpadded_and_slash_iso(tmp_path):
+    """Audit F2: year-first dates that differ only by zero-padding or separator
+    ('2026-6-5', '2026/06/20') now normalise into the window instead of being
+    silently dropped by the naive string compare."""
+    d = tmp_path / "runs_v4"
+    d.mkdir()
+    _write_snapshot(d, "unpadded", ORG_A, "Unpadded", "2026-6-5",
+                    [_ra("pb_confirmed", "A B", "50m FR (LC)", priority=0.9, rank=1)])
+    _write_snapshot(d, "slash", ORG_A, "SlashISO", "2026/06/20",
+                    [_ra("medal_gold", "C D", "50m FR (LC)", priority=0.9, rank=1)])
+    stats = aggregate_window(ORG_A, d, start="2026-06-01", end="2026-06-30")
+    assert stats.n_runs == 2
+    assert stats.n_pbs == 1 and stats.n_medals == 1
+
+
+def test_ambiguous_slash_date_is_not_guessed(tmp_path):
+    """Audit F2 residual: a day-first/month-first ambiguous slash date is left
+    out of the window rather than misfiled into the wrong month (documented;
+    the real fix is ISO normalisation at the interpreter seam)."""
+    d = tmp_path / "runs_v4"
+    d.mkdir()
+    # No started_at, so the ambiguous meet date alone decides placement.
+    payload = {
+        "run_id": "amb",
+        "profile_id": ORG_A,
+        "meet": {"name": "Ambiguous", "start_date": "06/05/2026"},
+        "recognition_report": {
+            "ranked_achievements": [_ra("pb_confirmed", "E F", "50m FR (LC)", priority=0.9, rank=1)]
+        },
+    }
+    (d / "amb.json").write_text(json.dumps(payload), encoding="utf-8")
+    stats = aggregate_window(ORG_A, d, start="2026-06-01", end="2026-06-30")
+    assert stats.n_runs == 0
+
+
+def test_aggregate_survives_malformed_runs(tmp_path):
+    """Audit F4: JSON-valid but structurally odd runs (non-dict report/meet/
+    achievement/raw_facts, non-list ranked, non-dict trace) must not crash the
+    whole workspace's wrap — the good rows are still counted."""
+    d = tmp_path / "runs_v4"
+    d.mkdir()
+    _write_snapshot(d, "good", ORG_A, "Good Meet", "2026-06-10",
+                    [_ra("pb_confirmed", "Maya Patel", "100m FR (LC)", priority=0.9, rank=1)])
+    (d / "bad1.json").write_text(
+        json.dumps({"profile_id": ORG_A, "meet": {"start_date": "2026-06-11"},
+                    "recognition_report": [1, 2, 3]}),
+        encoding="utf-8",
+    )
+    (d / "bad2.json").write_text(
+        json.dumps({
+            "profile_id": ORG_A,
+            "started_at": "2026-06-12T09:00:00+00:00",
+            "meet": "not a dict",
+            "recognition_report": {
+                "ranked_achievements": [
+                    "not a dict",
+                    {"achievement": "also not a dict", "priority": 0.5, "rank": 1},
+                    {"achievement": {"type": "pb_confirmed", "swimmer_name": "Zoe",
+                                     "event": "50m FR (LC)", "raw_facts": "oops"},
+                     "priority": 0.6, "rank": 2},
+                ],
+                "swim_traces": ["nope", {"swimmer_name": "Zoe"}],
+            },
+        }),
+        encoding="utf-8",
+    )
+    stats = aggregate_window(ORG_A, d, start="2026-06-01", end="2026-06-30")
+    assert stats.n_runs == 3  # good + bad1 + bad2 all placed, none crashed
+    assert stats.n_pbs == 2  # Maya (good) + Zoe (the one valid row in bad2)
+
+
+def test_season_draft_id_stable_across_end_dates(runs_dir, tmp_path):
+    """Audit F5: re-drafting the same season overwrites one file instead of
+    spawning a new draft per day the button is clicked."""
+    data_dir = tmp_path / "data"
+    d1 = build_season_draft(ORG_A, runs_dir, season_start="2025-09-01", season_end="2026-07-09")
+    d2 = build_season_draft(ORG_A, runs_dir, season_start="2025-09-01", season_end="2026-07-10")
+    assert d1["id"] == d2["id"] == "season-2025-09-01"
+    save_draft(ORG_A, d1, data_dir=data_dir)
+    save_draft(ORG_A, d2, data_dir=data_dir)
+    folder = data_dir / "season_wraps" / ORG_A
+    assert len(list(folder.glob("*.json"))) == 1
 
 
 # --- scheduler task ----------------------------------------------------------

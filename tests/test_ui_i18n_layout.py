@@ -58,13 +58,26 @@ class TestLocaleResolution:
         html = app.test_client().get("/?lang=klingon").get_data(as_text=True)
         assert _lang(html) == "en"
 
-    def test_welsh_org_gets_welsh_ui(self, app):
+    def test_welsh_caption_org_keeps_english_ui(self, app):
+        # G-11: the org's CAPTION language must not silently flip the interface
+        # — the chrome stays English until the interface-language control (or
+        # ?lang=) is used deliberately. (This replaces the pre-G-11 behaviour
+        # where a Welsh caption language localised the whole UI.)
         client = app.test_client()
         with client.session_transaction() as s:
             s["active_profile_id"] = "cy-club"
         html = client.get("/").get_data(as_text=True)
+        assert _lang(html) == "en"
+        assert "Hafan" not in html
+
+    def test_welsh_org_can_still_choose_welsh_ui_explicitly(self, app):
+        client = app.test_client()
+        with client.session_transaction() as s:
+            s["active_profile_id"] = "cy-club"
+        client.post("/settings/interface-language", data={"ui_lang": "cy"})
+        html = client.get("/").get_data(as_text=True)
         assert _lang(html) == "cy"
-        assert "Hafan" in html  # nav localised from the org's caption language
+        assert "Hafan" in html
 
     def test_english_org_gets_english_ui(self, app):
         client = app.test_client()

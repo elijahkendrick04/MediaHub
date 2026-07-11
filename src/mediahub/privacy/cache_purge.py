@@ -87,22 +87,16 @@ def cache_roots() -> List[Tuple[str, Path]]:
     except Exception:
         pass
 
-    # Rendered-document, microsite-asset, ASR-transcript and stock-thumbnail
-    # caches each keep their own resolver (which mkdirs — harmless here, the
-    # purge removes the tree anyway). Resolve through them so a path change is
-    # picked up for free; fall back to the conventional DATA_DIR locations.
+    # Rendered-document, ASR-transcript and stock-thumbnail caches each keep
+    # their own resolver (which mkdirs — harmless here, the purge removes the
+    # tree anyway). Resolve through them so a path change is picked up for free;
+    # fall back to the conventional DATA_DIR locations.
     try:
         from mediahub.documents.cache import cache_dir as _doc_cache_dir
 
         roots.append(("document_cache", _doc_cache_dir()))
     except Exception:
         roots.append(("document_cache", data / "document_cache"))
-    try:
-        from mediahub.sites.cache import cache_dir as _site_cache_dir
-
-        roots.append(("site_cache", _site_cache_dir()))
-    except Exception:
-        roots.append(("site_cache", data / "site_cache"))
     try:
         from mediahub.visual.transcribe import cache_dir as _asr_cache_dir
 
@@ -115,6 +109,25 @@ def cache_roots() -> List[Tuple[str, Path]]:
         roots.append(("stock_thumb_cache", _thumb_cache_dir()))
     except Exception:
         roots.append(("stock_thumb_cache", data / "stock_thumb_cache"))
+
+    # Export-engine and chart-export caches: both are content-addressed and a
+    # pure function of their inputs (a re-export/re-render is a cache hit), so
+    # they belong in the site-wide purge. Without them "clear all caches" left
+    # the generated exports (up to a 2 GB cap) and every chart PNG on disk
+    # despite the UI promising every re-derivable cache. Resolve through each
+    # module's own resolver, with the conventional DATA_DIR fallback.
+    try:
+        from mediahub.export_engine.cache import cache_dir as _export_cache_dir
+
+        roots.append(("export_cache", _export_cache_dir()))
+    except Exception:
+        roots.append(("export_cache", data / "export_cache"))
+    try:
+        from mediahub.charts.export import _cache_dir as _charts_cache_dir
+
+        roots.append(("charts_cache", _charts_cache_dir()))
+    except Exception:
+        roots.append(("charts_cache", data / "charts_cache"))
 
     return roots
 

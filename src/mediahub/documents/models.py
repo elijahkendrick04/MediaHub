@@ -128,6 +128,19 @@ def _new_id(prefix: str) -> str:
     return f"{prefix}_{uuid.uuid4().hex[:10]}"
 
 
+def _as_dict(value: Any) -> dict:
+    """A dict copy of ``value``, or ``{}`` if it isn't a mapping. Keeps
+    ``from_dict`` total over arbitrary persisted/edited JSON (a wrong-typed
+    field must default, never raise — mirrors the model's load contract)."""
+    return dict(value) if isinstance(value, dict) else {}
+
+
+def _as_list(value: Any) -> list:
+    """``value`` as a list if it is a list/tuple, else ``[]`` (a scalar or
+    mapping in a list slot defaults to empty rather than crashing iteration)."""
+    return list(value) if isinstance(value, (list, tuple)) else []
+
+
 def _clamp_level(value: Any) -> int:
     try:
         n = int(value)
@@ -164,7 +177,7 @@ class Block:
             return cls(kind="text", props={"text": ""})
         return cls(
             kind=str(raw.get("kind") or "text"),
-            props=dict(raw.get("props") or {}),
+            props=_as_dict(raw.get("props")),
             block_id=str(raw.get("block_id") or ""),
         )
 
@@ -289,7 +302,7 @@ class Section:
         if not isinstance(raw, dict):
             return cls()
         return cls(
-            blocks=[Block.from_dict(b) for b in (raw.get("blocks") or [])],
+            blocks=[Block.from_dict(b) for b in _as_list(raw.get("blocks"))],
             notes=str(raw.get("notes") or ""),
             layout=str(raw.get("layout") or "flow"),
             break_before=bool(raw.get("break_before")),
@@ -363,9 +376,9 @@ class DocumentSpec:
             doc_format=str(raw.get("doc_format") or "blank"),
             geometry=str(raw.get("geometry") or DEFAULT_GEOMETRY),
             brand_profile_id=str(raw.get("brand_profile_id") or ""),
-            meta=dict(raw.get("meta") or {}),
-            source_refs=[str(s) for s in (raw.get("source_refs") or [])],
-            sections=[Section.from_dict(s) for s in (raw.get("sections") or [])],
+            meta=_as_dict(raw.get("meta")),
+            source_refs=[str(s) for s in _as_list(raw.get("source_refs"))],
+            sections=[Section.from_dict(s) for s in _as_list(raw.get("sections"))],
             doc_id=str(raw.get("doc_id") or ""),
         )
 

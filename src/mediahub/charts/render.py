@@ -8,7 +8,7 @@ states them; the AI only ever chose *which* chart and *how to phrase* the takeaw
 (elsewhere). Same spec + same role vars → byte-identical SVG.
 
 The output is one ``<svg>`` document: it renders natively in a browser/``<img>``,
-embeds into card or microsite HTML, and rasterises through the existing HTML→PNG
+embeds into card or document HTML, and rasterises through the existing HTML→PNG
 pass for export. Fonts are self-hosted and inlined (:mod:`charts.fonts`) so the
 file is CDN-free on every surface.
 """

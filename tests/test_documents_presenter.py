@@ -96,6 +96,28 @@ def test_blackout_and_autoplay_toggle(tmp_path, monkeypatch):
     assert presenter.apply_action(sid, "autoplay", True).autoplay is True
 
 
+def test_manual_nav_takes_control_from_autoplay(tmp_path, monkeypatch):
+    """D-11: while autoplaying, a manual next/prev/goto hands control back to the
+    presenter (autoplay off) so the audience follows the driver, not the loop."""
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    sid = presenter.create_session("doc1", 3, owner="club-1").session_id
+
+    assert presenter.apply_action(sid, "autoplay", True).autoplay is True
+    s = presenter.apply_action(sid, "next")
+    assert s.current == 1 and s.autoplay is False  # next stopped the loop
+
+    presenter.apply_action(sid, "autoplay", True)
+    assert presenter.apply_action(sid, "prev").autoplay is False  # prev too
+
+    presenter.apply_action(sid, "autoplay", True)
+    g = presenter.apply_action(sid, "goto", 2)
+    assert g.current == 2 and g.autoplay is False  # goto too
+
+    # blackout / timer_reset do NOT stop autoplay (they're not navigation)
+    presenter.apply_action(sid, "autoplay", True)
+    assert presenter.apply_action(sid, "blackout").autoplay is True
+
+
 def test_end_session_then_pairing_lookup_fails(tmp_path, monkeypatch):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     s = presenter.create_session("doc1", 3, owner="club-1")

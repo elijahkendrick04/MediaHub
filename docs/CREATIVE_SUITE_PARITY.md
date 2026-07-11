@@ -179,7 +179,7 @@ print-ready CMYK/bleed output → 1.20, free-form manual element editing →
 | C2 | Magic Switch (convert design to another format / resize / reformat; deck→doc transforms) | ✅ P6.1 format transformer shipped (`turn_into.transform_design` re-lays-out through the director, deterministic floor); translation half ↗ 1.24 |
 | A1 | 220,000+ professional templates | 🚫 adapted — same as C10: archetypes + formats, not blanks |
 | A1 | Template categories (social, flyers, posters, banners, logos, invitations, cards, business cards, resumes, cover letters, brochures, menus, pamphlets, leaflets, certificates, worksheets, class schedules, book covers, album covers, product labels, gift certificates, ads, memes, collages, wallpapers, t-shirts) | 🆕 P6.1 — each becomes a `FormatSpec` where it has a club meaning (class schedule → training schedule; book/album cover → yearbook/season-mix cover; gift certificate → fundraiser voucher; meme → `meme` format with club in-jokes via caption engine; ads ↗ 1.14; collages ↗ 1.3; t-shirts ↗ 1.20; product labels ↗ 1.20) |
-| A1 | Presentations, documents, web pages, carousels | carousels 🆕 P6.1 multi-image carousel format; presentations/docs ↗ 1.15; web pages ↗ 1.16 |
+| A1 | Presentations, documents, web pages, carousels | carousels 🆕 P6.1 multi-image carousel format; presentations/docs ↗ 1.15 |
 | A1 | Animated / multi-page / video templates | animated formats ↗ 1.5; multi-page ↗ 1.15 composition; video formats ↗ 1.6 |
 | A1 | Print-ready templates; portrait/landscape/square/vertical orientations | 🆕 P6.1 orientation variants per `FormatSpec`; print-readiness ↗ 1.20 |
 | A1 | Blank canvas with custom dimensions | 🆕 P6.1 (same escape hatch as C1) |
@@ -252,7 +252,7 @@ speech + an honest server ASR seam (`assistant/asr.py`). Web: a per-card
 |---|---|---|
 | C2 | Canva AI conversational assistant (text/voice/media prompts; "Design for me") | ✅ P6.2 club content copilot on `ai_core.ask_with_tools` (spec-patch editing) |
 | C2 | Canva AI 2.0 — conversational design, iterative agentic editing, layered object intelligence, persistent Memory Library | ✅ P6.2 spec-patch agentic loop + org assistant memory (inspect/delete); layer-aware edits via the DesignSpec's structured fields |
-| C2 | Canva AI 2.0 six workflows | split: connectors ↗ 1.21 · scheduling ↗ 1.14 · web research ✅ shipped (`web_research/`) · brand intelligence ↗ 1.12 · Sheets AI ↗ 1.13 · Code 2.0 ↗ 1.16 |
+| C2 | Canva AI 2.0 six workflows | split: connectors ↗ 1.21 · scheduling ↗ 1.14 · web research ✅ shipped (`web_research/`) · brand intelligence ↗ 1.12 · Sheets AI ↗ 1.13 |
 | C2 | Canva Design Model (design-aware model: structure, layering, hierarchy, branding → fully editable output) | 🔵 partial — the Tier B design-spec director is exactly this pattern (LLM emits structured, editable specs; deterministic render); P6.2 extends it from generate-time to edit-time. "Available inside ChatGPT/Claude/Gemini" ↗ 1.21 (MCP server) |
 | C2 | Magic Design (AI layout from prompt or uploaded media) | 🔵 partial — director generates from data; 🆕 P6.2 adds prompt-/photo-first entry ("here's a photo, make something") routed into the same brief flow |
 | C2 | Magic Write (generate/summarise/expand/rewrite; tone adjustment; context awareness; 100+ languages) | ✅ P6.2 caption text-tools shipped (summarise/expand/rewrite on `web/caption_assist.py`; tone-shift via the tone arg); languages ↗ 1.24 |
@@ -766,7 +766,7 @@ routes. **Deferred to 1.2 (generative imagery):** the AI *shape generator*, the
 | C7 | Tables · Charts/Graphs (20+ types) · Interactive charts (Flourish embeds) | ↗ 1.11 |
 | C7 | Draw / Drawing tools (freehand, Shape Assist) | ✅ 1.10 annotate layer (telestration) |
 | C7 | 3D elements (3D Content Generator) | 🆕 1.10 3D-render element pack (crest/trophy renders via 1.2, cached as images) |
-| C7 | AI-Powered Elements (generate photos/videos/code/icons/shapes/3D from the Elements tab) | 🆕 1.10 "generate an element" entry → 1.2 services (code widgets ↗ 1.16) |
+| C7 | AI-Powered Elements (generate photos/videos/code/icons/shapes/3D from the Elements tab) | 🆕 1.10 "generate an element" entry → 1.2 services |
 | C7 | Frames, grids | ✅ 1.10 frame/grid elements (shared masks with 1.3) |
 | C7 | Custom emojis | ✅ 1.10 club emoji/mascot pack |
 | C7 | Backgrounds | ✅ 1.10 background packs + `venue_search` ✅ + 1.2 generation |
@@ -779,7 +779,7 @@ routes. **Deferred to 1.2 (generative imagery):** the AI *shape generator*, the
 | A11 | Gradients (linear/radial, prompt-driven) | ✅ 1.10 presets; prompt-driven gradient = brand-palette interpolation via `media_ai` suggestion |
 | A11 | Design elements search & browse; contextual recommendations | ✅ 1.10 embedding search + `context_engine`-aware suggestions |
 | A11 | Color themes; apply color themes; custom gradients; import from Adobe Color | ↗ 1.12 palette layer (Adobe-Color import = palette-file import) |
-| A11 | QR code generator (custom colour/style/logo; PNG/JPEG/PDF/SVG) | ↗ 1.16 |
+| A11 | QR code generator (custom colour/style/logo; PNG/JPEG/PDF/SVG) | 🚫 out of scope |
 | A11 | Charts; tables (add/customize) | ↗ 1.11 |
 
 ---
@@ -794,8 +794,8 @@ routes. **Deferred to 1.2 (generative imagery):** the AI *shape generator*, the
 > phrases pre-computed facts with a fabricated-number guard + source links), and the
 > data-driven diagram formats (`diagrams.py`: committee org chart, season timeline,
 > athlete journey, training flow) are all in. Surfaced on the content builder at
-> `/runs/<id>/charts`. Scroll-story export + interactive widgets remain forward to
-> 1.15/1.16 (static-first, as specified).
+> `/runs/<id>/charts`. Scroll-story export remains forward to
+> 1.15 (static-first, as specified).
 
 **What Canva/Adobe have.** 20+ chart types editable via data table, CSV
 import, interactive charts (Flourish: treemaps, packed circles, maps), Magic
@@ -821,16 +821,15 @@ takeaway carrying its source rows (explainability rule). Diagram formats
 **Build sketch.** (1) `charts/` package: typed chart specs (bar, line, pie,
 donut, scatter, table, medal table, progression, split ladder…) → SVG via a
 deterministic renderer (matplotlib-free, brand-token styled), embedded into
-cards/docs/sites; (2) data plumbing: chart series builders over `canonical.*`
+cards/docs; (2) data plumbing: chart series builders over `canonical.*`
 + `history/` + CSV upload (1.13 hub); (3) `charts/recommend.py` — AI picks
 chart type + headline stat with reasons (honest-error); (4)
 `charts/insights.py` — AI takeaways constrained to provided aggregates
 (numbers computed deterministically first; the LLM phrases, never
 calculates); (5) diagram `FormatSpec`s (org chart from committee roster,
 season timeline from fixtures, journey = athlete career map from history);
-(6) scrollytelling = multi-page story export (1.15/1.16) where each page
-reveals one chart beat; interactive variants ship as microsite widgets
-(1.16), static-first everywhere else.
+(6) scrollytelling = multi-page story export (1.15) where each page
+reveals one chart beat, static-first everywhere else.
 
 **Coverage.**
 
@@ -842,7 +841,7 @@ reveals one chart beat; interactive variants ship as microsite widgets
 | C2 | Magic Insights (AI patterns/trends/takeaways) | 🆕 1.11 `insights.py` — grounded, source-linked takeaways |
 | C7 | Tables (table maker) | 🆕 1.11 brand-styled table spec (heat sheets, results tables) |
 | C7 | Charts/Graphs (20+ types, editable data table, CSV import) | 🆕 1.11 chart spec library + CSV series input |
-| C7 | Interactive charts (Magic Charts, Flourish embeds — treemaps, packed circles, maps) | 🆕 1.11 static-first; interactive widgets on microsites ↗ 1.16 |
+| C7 | Interactive charts (Magic Charts, Flourish embeds — treemaps, packed circles, maps) | 🆕 1.11 static-first |
 | C11 | Magic Charts (data-to-chart, real-time sync) | 🆕 1.11 charts re-render when run data updates (spec-bound series) |
 | C11 | Magic Insights (AI data analysis) | 🆕 1.11 `insights.py` |
 | C11 | Match & Move animation / Scrollable Designs for data storytelling | scroll-story export 🆕 1.11/1.15; match-&-move motion ↗ 1.5 |
@@ -1049,8 +1048,6 @@ bounded and stated); (5) PDF utilities: merge, reorder/rotate/delete pages,
 images→PDF, PDF→images, with a11y tagging on export (tagged headings/alt
 text from the spec); (6) "Scrollables"/whiteboard-expansion map to the
 scroll-story export (1.11) and the planner board (1.14) respectively.
-Audience Q&A/polls (Canva Live) ride the microsite widget layer (1.16) as
-a meet-night companion page.
 
 **Coverage.**
 
@@ -1060,19 +1057,19 @@ a meet-night companion page.
 | C1 | Canva Docs (text documents) | 🆕 1.15 club document formats (report/proposal/programme) |
 | C1 | Reports · Proposals | 🆕 1.15 `season_report` / `sponsor_proposal` (data-grounded AI drafts) |
 | C2 | Guided Presentations (goal/story/structure before slides) | 🆕 1.15 outline-then-build flow driven by the P6.2 assistant |
-| C11 | Canva Docs — embed charts/sheets; Scrollables | 🆕 1.15 chart/table embeds (1.11); scroll-story export (1.11/1.16) |
+| C11 | Canva Docs — embed charts/sheets; Scrollables | 🆕 1.15 chart/table embeds (1.11); scroll-story export (1.11) |
 | C12 | Presenter View (previews, notes, timer) · Presenter notes | 🆕 1.15 presenter route |
 | C12 | Standard / full-screen / Presenter View modes | 🆕 1.15 view modes |
 | C12 | Autoplay (timed transitions) | 🆕 1.15 autoplay (kiosk mode for club foyer screens — a real club use) |
 | C12 | Recording yourself presenting / talking presentations | 🆕 1.15 talkover recording (1.6 recorder) |
 | C12 | Remote Control (control slides from any device via link/QR) | 🆕 1.15 phone-remote pairing |
-| C12 | Canva Live (audience Q&A, reactions, polls) | 🆕 1.15 meet-night companion page via 1.16 widgets (Q&A/poll, moderated) |
+| C12 | Canva Live (audience Q&A, reactions, polls) | 🚫 out of scope |
 | C12 | Magic Shortcuts (presenting keyboard effects: blur, drumroll, confetti, timers) | 🆕 1.15 presenter effects (confetti for medal slides; timer for warm-ups) — small, deterministic |
 | C12 | Offline presenting mode | 🆕 1.15 PWA-cached deck (↗ 1.22; hosted-only stands — it's a browser cache, not an install) |
 | C12 | Real-time live edits during presentation | 🆕 1.15 live spec reload (long-poll/SSE) |
 | C12 | Expand slide to infinite Whiteboard | ↗ 1.14 planner board (the whiteboard analogue) |
 | C12 | Turn presentation into a video | 🆕 1.15 deck→MP4 via reel engine |
-| C12 | Export as PowerPoint, PDF, video slideshow, or website | 🆕 1.15 PPTX/PDF/MP4 exports; deck→microsite ↗ 1.16 |
+| C12 | Export as PowerPoint, PDF, video slideshow, or website | 🆕 1.15 PPTX/PDF/MP4 exports |
 | C1 | Whiteboards (infinite canvas) | ↗ 1.14 planner board |
 | A7 | Convert to PDF (from Word/Excel/PowerPoint/images) | 🆕 1.15 bounded converters (images/docx/pptx→PDF; spreadsheet→PDF via 1.13 tables) |
 | A7 | Convert from PDF (to Word/Excel/PowerPoint/RTF/JPG/PNG) | 🆕 1.15 PDF→images + text extraction (full Office fidelity explicitly bounded) |
@@ -1087,79 +1084,6 @@ a meet-night companion page.
 | A8 | Import PowerPoint; export to PPTX; multi-page zoom controls | 🆕 1.15 PPTX round-trip + canvas zoom |
 | A2 | Generate presentation (A2 listing) | 🆕 1.15 (same flow; indexed under A2) |
 | C2 | Magic Switch deck→doc/blog transforms | ↗ P6.1 format transformer (uses this engine's specs) |
-
----
-
-## 1.16 — Club microsites, link-in-bio, forms & interactive widgets
-
-**What Canva/Adobe have.** Drag-and-drop multipage responsive websites, free
-subdomains, custom domains (purchase or BYO), SSL/privacy/password/SSO,
-website insights, SEO controls (sitemaps, meta, favicon, alt text, AI SEO
-descriptions), device preview, nav menus/link-in-bio, Canva Code 1.0/2.0
-(AI-generated interactive widgets/experiences, forms to Sheets,
-SSO-protected publishing), Canva Forms (RSVPs, surveys, sign-ups → Sheets),
-QR codes, webpage export as PDF, single-page Adobe webpages with TOC/anchor
-navigation.
-
-**The MediaHub shape.** Not a website builder — **club pages generated from
-club data**: a meet microsite (entry info, programme, live session updates,
-results recap as they land), a club link-in-bio page (latest approved posts,
-join/trial form, sponsors), an event page with RSVP. Pages are generated
-the same way cards are (brand tokens + data + archetype layouts), hosted on
-the existing infrastructure under `club.mediahub.app`-style subdomains
-(BYO domain supported; we don't become a registrar), and updated by the
-pipeline (a new approved recap auto-refreshes the meet page — publishing
-gates apply since pages are outward-facing). **Forms** capture structured
-data back into the org's data hub (1.13): trial sign-ups, volunteer
-rotas, kit orders, RSVPs — each submission a typed row, exportable, GDPR-
-deletable. **Widgets** (the Canva-Code analogue) are a vetted catalogue —
-countdown-to-meet, live medal tally, lane-draw lookup, poll/Q&A — generated
-as sandboxed, self-contained components (AI-assembled from audited
-primitives, never arbitrary hosted code), embeddable on pages.
-
-**Build sketch.** (1) `sites/` package: `SiteSpec` (pages → sections →
-blocks, reusing document blocks + card embeds), static-first render to
-hosted HTML (cache-busted, per-org path/subdomain routing, SSL via the
-platform), edit-in-place via spec patches; (2) `forms/` package: form
-schema, public submit endpoint (rate-limited, spam-filtered, isolation per
-ADR-0003 — minors' data rules apply hard here), responses into the 1.13
-hub + notify hooks; (3) widget catalogue: audited component primitives +
-AI composer constrained to them; SSO/password protection per page; (4)
-SEO: per-page meta/sitemap/favicon/alt-text (alt text AI-suggested,
-human-editable), AI SEO description honest-erroring without provider; (5)
-insights: privacy-respecting first-party page analytics (counts, not
-tracking) ↗ 1.14 surfaces them; (6) QR generator (deterministic,
-brand-coloured with contrast guard, logo-embedded; PNG/SVG/PDF export) for
-posters → pages/forms; (7) device preview = responsive preview frames in
-the editor.
-
-**Coverage.**
-
-| Source | Feature | MediaHub home / status |
-|---|---|---|
-| C1 | Websites (multipage, responsive) | 🆕 1.16 data-generated club pages/microsites |
-| C1 | Canva Code designs (interactive experiences) | 🆕 1.16 vetted widget catalogue (AI-composed from audited primitives) |
-| C13 | Website builder (drag-and-drop, no code, multipage, responsive) | 🆕 1.16 section/block editing on `SiteSpec` (generated-first, edited second) |
-| C13 | Templates for websites | 🆕 1.16 site archetypes (meet microsite, link-in-bio, event page, club home) |
-| C13 | Free my.canva.site domain (capped free sites) | 🆕 1.16 per-org subdomain on the platform domain |
-| C13 | Custom domain purchase | 🚫 adapted — no registrar business; BYO domain only |
-| C13 | Bring your own domain | 🆕 1.16 BYO domain (CNAME + managed cert) |
-| C13 | SSL, domain lock, WHOIS privacy, password protection, SSO | 🆕 1.16 SSL + password/SSO-protected pages (domain lock/WHOIS = registrar concerns, out with the registrar role) |
-| C13 | Website Insights (traffic/views/engagement) | 🆕 1.16 first-party, privacy-respecting page counts → 1.14 analytics |
-| C13 | SEO (auto sitemaps, meta title/description, favicon, alt text, AI SEO descriptions) | 🆕 1.16 SEO layer |
-| C13 | Canva Forms integration | 🆕 1.16 forms on pages |
-| C13 | Canva Code interactivity (calculators, countdowns, widgets) | 🆕 1.16 widget catalogue (countdown-to-meet, medal tally, lane lookup) |
-| C13 | Device preview (desktop/tablet/mobile) | 🆕 1.16 responsive preview |
-| C13 | Navigation menus, social links, link-in-bio sites | 🆕 1.16 nav blocks + link-in-bio archetype |
-| C13 | No native e-commerce (noted limitation) | 🆕 1.16 mirrors it honestly: payment links out to the club's existing store/Stripe links (`ticket_merch_promo` type), no checkout build |
-| C11 | Canva Forms (RSVPs, feedback, surveys, sign-ups; responses → Sheets) | 🆕 1.16 forms → 1.13 data hub rows |
-| C17 | Canva Code (AI interactive experiences; built on Claude; HTML import; copy/reuse code; publish as website) | 🆕 1.16 widget composer (sandboxed primitives; no arbitrary hosted code) |
-| C17 | Canva Code 2.0 (fully interactive from a prompt, responsive, forms to Sheets, SSO-protected publishing) | 🆕 1.16 (same composer + forms + SSO pages) |
-| C12 | Export presentation as Canva website | 🆕 1.16 deck→page export |
-| A9 | Design webpages; webpage templates; publish/host webpages; export webpage as PDF | 🆕 1.16 pages + PDF snapshot export (via 1.15 renderer) |
-| A9 | Navigation bar / TOC with anchor links; enhanced text handling | 🆕 1.16 anchor nav blocks |
-| A2 | Generate QR code | 🆕 1.16 QR generator (brand-safe colours, logo embed) |
-| A11 | QR code generator (custom colour/style/logo; PNG/JPEG/PDF/SVG output) | 🆕 1.16 (same generator; vector + print exports) |
 
 ---
 
@@ -1184,7 +1108,7 @@ surface grown into a real composer), assembled automatically from the
 period's approved content (results recaps, spotlights, upcoming fixtures
 from the planner, sponsor slot) with an AI editorial pass in the club's
 voice. Export = paste-ready HTML for the club's existing list tool
-(Mailchimp-class) + a hosted web version (1.16 page); direct sending stays
+(Mailchimp-class) + a hosted web version; direct sending stays
 out of scope until P4-class adapters exist for an email provider (and any
 such adapter would still require human approval before anything is sent).
 
@@ -1448,7 +1372,7 @@ links unified with 1.18 tokens.
 |---|---|---|
 | C15 | Export formats: PNG, JPG, PDF (standard + print), SVG, MP4, GIF, PPTX, DOCX, CSV | 🔵 PNG/MP4/ZIP/CSV shipped → 🆕 1.19 SVG/GIF/PPTX/DOCX + print-PDF (1.20 profile) |
 | C15 | Export quality settings (10–100); transparent background PNG; single-image merge | 🆕 1.19 options schema (transparent PNG rides the cutout layer; merge = flatten pages to one image) |
-| A16 | Quick Actions — Image: Remove background, Resize, Crop, Convert to JPG/PNG/SVG, WebP conversions, Generate QR | 🆕 1.19 utilities (cutout ✅ shipped; QR ↗ 1.16; SVG conversion via trace for raster sources, honest about fidelity) |
+| A16 | Quick Actions — Image: Remove background, Resize, Crop, Convert to JPG/PNG/SVG, WebP conversions, Generate QR | 🆕 1.19 utilities (cutout ✅ shipped; SVG conversion via trace for raster sources, honest about fidelity) |
 | A16 | Quick Actions — Video: Convert to MP4, Video→GIF, Trim, Crop, Resize, Merge, Caption, Change speed, Reverse, Mute, Animate from audio, Clip Maker | 🆕 1.19 utilities over 1.6 ops (animate-from-audio ↗ 1.5; Clip Maker ↗ 1.6) |
 | A16 | Quick Actions — Document/PDF: Create/Convert to PDF, Convert/Export from PDF, Combine PDF, Organize pages, Edit PDF | 🆕 1.19 utilities over 1.15 PDF tools |
 | A16 | Quick Actions — GIF: GIF to MP4, GIF to Video | 🆕 1.19 transcodes |
@@ -1530,8 +1454,8 @@ funds.
 versioned public API (org-scoped tokens, least-privilege scopes) exposing
 what the product already does — submit results/data, trigger pipeline runs,
 list/approve cards (approval via API still counts as the human signal),
-render/export, query the data hub, manage forms/sites — plus **our own
-webhooks** (run finished, card approved, pack exported, form submitted) so
+render/export, query the data hub — plus **our own
+webhooks** (run finished, card approved, pack exported) so
 clubs and federations wire MediaHub into anything (including, via *their*
 Zapier/Make accounts, the long tail — we publish recipes, we don't embed
 their runtimes). An **MCP server** exposes the same API as tools so a club
@@ -1564,7 +1488,7 @@ dependency.
 | Source | Feature | MediaHub home / status |
 |---|---|---|
 | C17 | Canva Apps Marketplace (430 apps; >half AI-powered; $50M fund) | 🚫 adapted — our own module system now; third-party marketplace explicitly long-term, demand-gated |
-| C17 | Named creative apps (Mockups/Smartmockups, Pixabay, Pexels, Bynder, D-ID, HeyGen, Neiro, DeepReel, Krikey AI Animate, Dynamic QR Codes, Google Drive, Issuu, Soundraw, MelodyMuse, Typecraft, Murf AI, AiVOOV, Colorify, LottieFiles, Flourish, soona, Shopify, Brandfetch, Imagen, DALL·E, Mojo AI, Enhancer, HubSpot, Analytics) | 🚫 adapted — each maps to our own equivalent: mockups/upscale/generation ↗ 1.2 · stock library ↗ 1.10 · avatars (opt-in) ↗ 1.6 · animation ↗ 1.5 · QR ↗ 1.16 · doc publishing ↗ 1.15/1.16 · music/TTS ↗ 1.8 · type effects ↗ 1.9 · charts ↗ 1.11 · brand-DNA ✅ shipped (P1.5, our own Brandfetch) · palette tools ↗ 1.12 · product photos ↗ 1.2+1.3 · commerce/CRM/analytics ↗ 1.14/webhooks (no embedded third-party apps; Google Drive excluded) |
+| C17 | Named creative apps (Mockups/Smartmockups, Pixabay, Pexels, Bynder, D-ID, HeyGen, Neiro, DeepReel, Krikey AI Animate, Dynamic QR Codes, Google Drive, Issuu, Soundraw, MelodyMuse, Typecraft, Murf AI, AiVOOV, Colorify, LottieFiles, Flourish, soona, Shopify, Brandfetch, Imagen, DALL·E, Mojo AI, Enhancer, HubSpot, Analytics) | 🚫 adapted — each maps to our own equivalent: mockups/upscale/generation ↗ 1.2 · stock library ↗ 1.10 · avatars (opt-in) ↗ 1.6 · animation ↗ 1.5 · doc publishing ↗ 1.15 · music/TTS ↗ 1.8 · type effects ↗ 1.9 · charts ↗ 1.11 · brand-DNA ✅ shipped (P1.5, our own Brandfetch) · palette tools ↗ 1.12 · product photos ↗ 1.2+1.3 · commerce/CRM/analytics ↗ 1.14/webhooks (no embedded third-party apps; Google Drive excluded) |
 | C17 | Canva Apps SDK (in-editor apps; Image/Video/Text/Content/Design-Editing/Tables/Fonts/Auth APIs) | 🚫 adapted — internal module APIs now; public app SDK only with the long-term marketplace |
 | C17 | Canva Connect APIs (Design, Export, Asset, Folder, Autofill, Brand Templates, Comment APIs + webhooks) | 🆕 1.21 our public API + webhooks (same capability set over our engine) |
 | C17 | iPaaS integrations (Zapier, Make, Workato) | 🆕 1.21 reached via our API + webhooks + published recipes (their runtimes stay theirs) |
@@ -1709,7 +1633,7 @@ scale via Sheets.
 **The MediaHub shape.** Welsh-language club content is a real, local,
 differentiating need (Swansea wedge — bilingual clubs are normal in Wales),
 then EU club markets later. **Our own localisation layer**: translate any
-caption/card/document/site into target languages through the existing LLM
+caption/card/document into target languages through the existing LLM
 providers (translation is judgement → `media_ai`, honest-error; sporting
 terms protected by a per-sport glossary so "PB" and event names survive),
 **layout-aware** re-render after translation (autofit absorbs text
@@ -1814,8 +1738,8 @@ table **and** this index in the same change.
 
 | Section | Bullets | Mapped in |
 |---|---|---|
-| C1 Design/content types | 40 | P6.1 (bulk of types) · 1.3 (collages) · 1.6 (videos) · 1.11 (infographics, diagram types) · 1.15 (presentations, docs, reports, proposals) · 1.16 (websites, Code) · 1.17 (email, newsletters) · 1.13 (Sheets) · 1.14 (whiteboards, Kanban) · 1.20 (apparel/promo/labels/stickers/banners) |
-| C2 AI / Magic Studio | 40 | P6.2 (assistant, Design Model, Magic Design/Write) · 1.2 (image/video gen + edits) · 1.8 (voice/music/SFX) · 1.9 (Magic Morph) · 1.11 (Charts/Insights) · 1.5 (Magic Animate) · 1.12 (brand intelligence) · 1.15 (Guided Presentations) · 1.16 (Code workflows) · 1.13 (Sheets AI, Formulas, Bulk, at-Scale) · 1.14 (scheduling workflow) · 1.18 (Ask @Canva) · 1.21 (connectors, in-Claude) · 1.23 (Shield, credits) · 1.24 (Translate) · P6.1 (Magic Switch) · shipped (Brand Voice, web research) |
+| C1 Design/content types | 40 | P6.1 (bulk of types) · 1.3 (collages) · 1.6 (videos) · 1.11 (infographics, diagram types) · 1.15 (presentations, docs, reports, proposals) · 1.17 (email, newsletters) · 1.13 (Sheets) · 1.14 (whiteboards, Kanban) · 1.20 (apparel/promo/labels/stickers/banners) |
+| C2 AI / Magic Studio | 40 | P6.2 (assistant, Design Model, Magic Design/Write) · 1.2 (image/video gen + edits) · 1.8 (voice/music/SFX) · 1.9 (Magic Morph) · 1.11 (Charts/Insights) · 1.5 (Magic Animate) · 1.12 (brand intelligence) · 1.15 (Guided Presentations) · 1.13 (Sheets AI, Formulas, Bulk, at-Scale) · 1.14 (scheduling workflow) · 1.18 (Ask @Canva) · 1.21 (connectors, in-Claude) · 1.23 (Shield, credits) · 1.24 (Translate) · P6.1 (Magic Switch) · shipped (Brand Voice, web research) |
 | C3 Photo editing | 22 | 1.3 (editor ops) · 1.2 (AI services incl. BG remover ✅/eraser/changer/upscale/style match/mockups) · P6.2 (point-and-click) |
 | C4 Video editing | 27 | 1.6 (suite) · 1.8 (voice cleanup/balance) · 1.10 (stock footage) · 1.5 (animation library) · 1.15 (presenting) · 1.19 (conversions) |
 | C5 Audio | 13 | 1.8 (all) |
@@ -1824,13 +1748,13 @@ table **and** this index in the same change.
 | C8 Animation | 14 | 1.5 (all) · 1.15 (click order surface) · 1.23 (reduce-motion noted) |
 | C9 Branding | 15 | 1.12 (platform) · 1.18 (approvals, folders) · 1.23 (role permissions) · shipped (kit builder, palettes) |
 | C10 Templates | 5 | P6.1 (catalogue, Quick Create) · 1.12 (brand templates) · 1.13 (bulk autofill) · shipped (AI generation) |
-| C11 Data & documents | 13 | 1.13 (Sheets/autofill/connectors/at-scale) · 1.11 (charts/insights/storytelling) · 1.15 (Docs/Scrollables) · 1.16 (Forms) · 1.21 (APIs) |
-| C12 Presentations | 16 | 1.15 (all) · 1.16 (Live page, website export) · 1.14 (whiteboard expansion) |
-| C13 Websites | 14 | 1.16 (all) · 1.14 (insights surfacing) |
+| C11 Data & documents | 13 | 1.13 (Sheets/autofill/connectors/at-scale) · 1.11 (charts/insights/storytelling) · 1.15 (Docs/Scrollables) · 1.21 (APIs) |
+| C12 Presentations | 16 | 1.15 (all) · 1.14 (whiteboard expansion) |
+| C13 Websites | 14 | 🚫 out of scope |
 | C14 Print | 20 | 1.20 (all; design side P6.1) |
 | C15 Publishing & planning | 12 | 1.14 (planner/analytics/preview/permissions/Grow) · P4 (direct publishing) · 1.19 (export formats/quality) · 1.18 (share links) · shipped (caption editing, drafts) |
 | C16 Collaboration | 11 | 1.18 (all) · 1.15 (live edits while presenting) |
-| C17 Apps & developer | 10 groups | 1.21 (API/webhooks/MCP/marketplace position/named-app equivalents) · 1.16 (Code 1.0/2.0) · 1.6 (avatar apps) |
+| C17 Apps & developer | 10 groups | 1.21 (API/webhooks/MCP/marketplace position/named-app equivalents) · 1.6 (avatar apps) |
 | C18 Mobile & desktop | 6 | 1.22 (all) · 1.15 (mobile presenting) |
 | C19 Affinity | 10 groups | 1.25 (editor + round-trip) · 1.3/1.2 (retouch/AI tools) · 1.15/1.13/1.20 (publisher craft) · 1.22 (platforms/offline) |
 | TL;DR / Key Findings / Recommendations / Caveats | — | context, not features; availability/plan-gating caveats inform 1.23 quotas and the per-item "verify at build time" rule below |
@@ -1839,22 +1763,22 @@ table **and** this index in the same change.
 
 | Section | Bullets | Mapped in |
 |---|---|---|
-| A1 Templates & design types | 13 groups | P6.1 (types, save-as-template, quick replace, orientations) · 1.11 (infographics) · 1.15 (presentations/docs) · 1.16 (webpages) · 1.6/1.5 (video/animated) · 1.14 (ads) · 1.3 (collages) · 1.20 (print/t-shirts/labels) · 1.12 (locked templates) |
-| A2 AI / Generative (Firefly) | 25 | 1.2 (image gen/fill/expand/remove/similar/video) · P6.2 (assistant, rewrite, text-to-template) · P6.1 (coloring pages) · 1.6 (avatars, Clip Maker ref) · 1.8 (speech/enhance/recommendations) · 1.9 (text effects, font recs) · 1.15 (presentations) · 1.16 (QR) · 1.23 (credentials, credits) · 1.24 (translate/dubbing) · shipped (caption writer) |
+| A1 Templates & design types | 13 groups | P6.1 (types, save-as-template, quick replace, orientations) · 1.11 (infographics) · 1.15 (presentations/docs) · 1.6/1.5 (video/animated) · 1.14 (ads) · 1.3 (collages) · 1.20 (print/t-shirts/labels) · 1.12 (locked templates) |
+| A2 AI / Generative (Firefly) | 25 | 1.2 (image gen/fill/expand/remove/similar/video) · P6.2 (assistant, rewrite, text-to-template) · P6.1 (coloring pages) · 1.6 (avatars, Clip Maker ref) · 1.8 (speech/enhance/recommendations) · 1.9 (text effects, font recs) · 1.15 (presentations) · 1.23 (credentials, credits) · 1.24 (translate/dubbing) · shipped (caption writer) |
 | A3 Image / photo editing | 17 | 1.3 (editor) · 1.2 (erase/replace-bg/AI assists; BG remove ✅) · 1.5 (animated images) · 1.19 (conversions, resize presets) |
 | A4 Video editing | 17 | 1.6 (suite) · 1.8 (audio) · 1.19 (conversions) · 1.15 (presentation controls) · 1.24 (caption languages) · P4 (Vimeo) |
 | A5 Audio | 9 | 1.8 (all) · 1.5 (animate-from-audio) · P6.2 (assistant controls) |
 | A6 Text & typography | 8 groups | 1.9 (all) · 1.5 (animations) · 1.24 (translate/spellcheck locales) · 1.8 (voiceover tone) |
 | A7 PDF & documents | 9 | 1.15 (PDF suite) · 1.20 (CMYK/print) · 1.23 (free limits) |
 | A8 Presentations & documents | 9 | 1.15 (all) · 1.5 (sequencing) · P6.1 (switch presentation↔design) |
-| A9 Webpages | 5 | 1.16 (all) |
+| A9 Webpages | 5 | 🚫 out of scope |
 | A10 Drawing & illustration | 5 | 1.10 (drawing) · P6.1 (worksheets, coloring) |
-| A11 Elements & assets | 9 | 1.10 (stock/elements/search) · 1.11 (charts/tables) · 1.12 (color themes/Adobe Color) · 1.16 (QR) |
+| A11 Elements & assets | 9 | 1.10 (stock/elements/search) · 1.11 (charts/tables) · 1.12 (color themes/Adobe Color) |
 | A12 Animation | 10 | 1.5 (all) · 1.19 (GIF export) |
 | A13 Branding | 6 | 1.12 (all) |
 | A14 Scheduling & publishing | 12 | 1.14 (planner/analytics/safe zones/grid/mentions/activation) · P4 (publish/connect) · shipped (caption writer) |
 | A15 Collaboration | 8 | 1.18 (all) |
-| A16 Quick Actions | 5 groups | 1.19 (toolbox) · 1.6/1.15/1.16 (underlying ops) · 1.23 (gating) |
+| A16 Quick Actions | 5 groups | 1.19 (toolbox) · 1.6/1.15 (underlying ops) · 1.23 (gating) |
 | A17 Imports & integrations | 12 | 1.21 (API/import/interop/MCP; GWS exclusions) · 1.25 (round-trip) · 1.14 (ads) · 1.12 (palettes) · 1.13 (bulk automate) · 1.22 (extension→PWA) |
 | A18 Layout, pages & export | 8 | 1.25 (layers/align/guides/pages) · 1.19 (exports/bulk) · 1.20 (bleed/print-order) · P6.1 (resize-for-channel) · 1.13 (bulk create) |
 | A19 Platforms & access | 6 | 1.22 (surfaces/guest/sync/education) · PC.4 (plans) |
@@ -1871,7 +1795,7 @@ shapes our own design — we are building our versions, not tracking theirs.
   (human approval before any external use) · deterministic
   engine boundary · Gemini-first honest-error AI · self-hosted fonts ·
   GWS + 9router exclusions (CLAUDE.md, ADR-0007) · the ADR-0003 isolation
-  invariant (forms/share-links/sites are new outward surfaces and inherit
+  invariant (share-links are new outward surfaces and inherit
   it hard).
 - Phase C gates still apply: no P6 item starts before the
   commercial-readiness and traction gates (see ROADMAP "Standing

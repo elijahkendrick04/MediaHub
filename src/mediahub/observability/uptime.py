@@ -293,8 +293,16 @@ def uptime_stats(window_hours: int = 24) -> dict:
         log.warning("uptime: stats OS error: %s", exc)
         return default
 
-    if not rows:
+    if not rows and first_row is None:
+        # Truly empty store — no heartbeat has ever been recorded. This is the
+        # honest "no data yet" case.
         return default
+    # If ``rows`` is empty but the store is NOT (``first_row`` exists), the
+    # service was silent for this entire window — an ongoing total outage, not
+    # "no data". Fall through: the tail-gap maths below scores the whole window
+    # as downtime (~0% uptime) instead of the misleading "&mdash;" a young/empty
+    # window would otherwise render. Reporting a live outage as "no data" on a
+    # short window while the 7d/30d windows show it is the defect this guards.
 
     # Clamp the measured span to the period we have actually been observing.
     # If tracking began *inside* the requested window (a young store), only

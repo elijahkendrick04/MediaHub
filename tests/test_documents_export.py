@@ -95,3 +95,122 @@ def test_pptx_export_includes_tables(tmp_path):
 
 def test_export_formats_listed():
     assert export.EXPORT_FORMATS == ("pdf", "pptx", "docx")
+
+
+# ---------------------------------------------------------------------------
+# Security: an export must only embed images that live under DATA_DIR. Specs are
+# tenant-editable (the advanced JSON editor), so an absolute path to an arbitrary
+# server file — or another tenant's assets — must never be baked into a DOCX/PPTX
+# (cross-tenant read / local-file disclosure). Mirrors render._img_src's guard.
+# ---------------------------------------------------------------------------
+
+
+def _png(path, colour):
+    from PIL import Image
+
+    Image.new("RGB", (48, 32), colour).save(path)
+    return path
+
+
+def _media_doc(*srcs):
+    return DocumentSpec(
+        title="pics",
+        sections=[Section(blocks=[m.media(str(s)) for s in srcs])],
+    )
+
+
+def _docx_media_bytes(out):
+    import zipfile
+
+    with zipfile.ZipFile(out) as z:
+        return {z.read(n) for n in z.namelist() if n.startswith("word/media/")}
+
+
+def _pptx_media_bytes(out):
+    import zipfile
+
+    with zipfile.ZipFile(out) as z:
+        return {z.read(n) for n in z.namelist() if n.startswith("ppt/media/")}
+
+
+def test_docx_export_drops_image_outside_data_dir(tmp_path, monkeypatch):
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    monkeypatch.setenv("DATA_DIR", str(data_dir))
+    outside = _png(tmp_path / "secret_outside.png", "magenta")  # sibling of DATA_DIR
+    inside = _png(data_dir / "legit.png", "green")
+
+    out = export.document_docx(_media_doc(outside, inside), tmp_path / "o.docx")
+    embedded = _docx_media_bytes(out)
+    assert outside.read_bytes() not in embedded  # cross-tenant/LFI src refused
+    assert inside.read_bytes() in embedded  # legitimate DATA_DIR image still embeds
+
+
+def test_pptx_export_drops_image_outside_data_dir(tmp_path, monkeypatch):
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    monkeypatch.setenv("DATA_DIR", str(data_dir))
+    outside = _png(tmp_path / "secret_outside.png", "magenta")
+    inside = _png(data_dir / "legit.png", "green")
+
+    out = export.document_pptx(_media_doc(outside, inside), tmp_path / "o.pptx")
+    embedded = _pptx_media_bytes(out)
+    assert outside.read_bytes() not in embedded
+    assert inside.read_bytes() in embedded
+
+
+def test_export_refuses_remote_and_traversal_srcs(tmp_path, monkeypatch):
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    monkeypatch.setenv("DATA_DIR", str(data_dir))
+    # http(s) (no SSRF), a non-image data: URI, and ../ traversal all resolve to nothing.
+    for bad in (
+        "https://evil.example/x.png",
+        "http://169.254.169.254/latest",
+        "data:text/html;base64,PHNjcmlwdD4=",  # non-image data: — refused
+        "data:image/png;notbase64,zzz",  # not a base64 payload — refused
+        "../secret_outside.png",
+        str(tmp_path / ".." / "etc" / "hostname"),
+    ):
+        assert export._img_source(m.media(bad)) is None
+
+
+def _tiny_png_bytes(colour="green"):
+    import io
+
+    from PIL import Image
+
+    buf = io.BytesIO()
+    Image.new("RGB", (24, 16), colour).save(buf, "PNG")
+    return buf.getvalue()
+
+
+def test_export_embeds_data_uri_image(tmp_path, monkeypatch):
+    """A ``data:image`` URI (hand-authored / imported) is decoded and embedded in
+    both DOCX and PPTX — export fidelity parity with the render path."""
+    import base64
+
+    monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))
+    (tmp_path / "data").mkdir()
+    raw = _tiny_png_bytes("blue")
+    uri = "data:image/png;base64," + base64.b64encode(raw).decode("ascii")
+
+    dx = export.document_docx(_media_doc(uri), tmp_path / "d.docx")
+    assert raw in _docx_media_bytes(dx)
+
+    px = export.document_pptx(_media_doc(uri), tmp_path / "d.pptx")
+    assert raw in _pptx_media_bytes(px)
+
+
+def test_export_oversized_data_uri_is_skipped(tmp_path, monkeypatch):
+    """A data: image over the embed cap is skipped (never OOMs the export)."""
+    import base64
+
+    monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))
+    (tmp_path / "data").mkdir()
+    huge = b"\x89PNG\r\n" + b"\x00" * (export._MAX_EMBED_BYTES + 1)
+    uri = "data:image/png;base64," + base64.b64encode(huge).decode("ascii")
+    assert export._img_source(m.media(uri)) is None
+    # and the document still exports (the image is simply skipped)
+    out = export.document_docx(_media_doc(uri), tmp_path / "d.docx")
+    assert not _docx_media_bytes(out)

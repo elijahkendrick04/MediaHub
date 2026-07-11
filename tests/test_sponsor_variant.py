@@ -199,16 +199,45 @@ def _seed_run(tmp_path: Path, run_id: str, profile_id: str, sponsor: str = ""):
     (tmp_path / "runs_v4" / f"{run_id}.json").write_text(json.dumps(run))
 
 
+def _poll_until(client, poll_url, tries=120, delay=0.05):
+    """Poll the shared job-status route until the job leaves 'running'."""
+    import time
+
+    for _ in range(tries):
+        j = client.get(poll_url).get_json()
+        if j.get("status") in ("done", "error"):
+            return j
+        time.sleep(delay)
+    return client.get(poll_url).get_json()
+
+
 class TestSponsorVariantPage:
     def test_renders_when_sponsor_configured(self, gated_app, monkeypatch):
+        """D-32 updated this test: the page GET returns the shell immediately
+        (no synchronous render/LLM call); the caption arrives via the
+        background job the shell polls. Intent preserved — a configured
+        sponsor yields the page and the generated caption."""
         app, tmp = gated_app
+        import mediahub.web.web as wm
+
         _seed_run(tmp, "run-1", "city-aquatics", sponsor="Acme Sports")
         # Stub the caption call so we don't need a live LLM.
-        monkeypatch.setattr(
-            "mediahub.web.ai_caption.call_claude",
-            lambda system, user, max_tokens=400, **_:
-                "Massive PB for Emma — thanks to @AcmeSports for backing us.",
-        )
+        caption_calls = {"n": 0}
+
+        def _fake_caption(system, user, max_tokens=400, **_):
+            caption_calls["n"] += 1
+            return "Massive PB for Emma — thanks to @AcmeSports for backing us."
+
+        monkeypatch.setattr("mediahub.web.ai_caption.call_claude", _fake_caption)
+        if wm._v8_ok:
+            monkeypatch.setattr(
+                wm,
+                "_v8_create_visual_for_item",
+                lambda item, brand_kit, **kw: {
+                    "visuals": [{"id": "vis1", "format_name": "feed_portrait"}],
+                    "errors": [],
+                },
+            )
         with app.test_client() as c:
             c.post("/api/organisation/active", data={"profile_id": "city-aquatics"})
             resp = c.get("/runs/run-1/card/swim-1/sponsor-variant")
@@ -216,10 +245,22 @@ class TestSponsorVariantPage:
             body = resp.get_data(as_text=True)
             assert "Sponsor variant" in body
             assert "Acme Sports" in body
-            # The generated caption surfaces in the textarea
-            assert "Massive PB for Emma" in body
             # Back-link to pack
             assert "/pack/run-1/grouped" in body
+            # The GET is a shell: no LLM call happened during it.
+            assert caption_calls["n"] == 0
+            assert "Massive PB for Emma" not in body
+            # The caption arrives through the background job instead.
+            r = c.post(
+                "/api/runs/run-1/card/swim-1/sponsor-variant-job",
+                data="{}",
+                content_type="application/json",
+            )
+            assert r.status_code == 202, r.get_data(as_text=True)
+            j = _poll_until(c, r.get_json()["poll_url"])
+            assert j["status"] == "done", j
+            assert "Massive PB for Emma" in j["caption"]
+            assert caption_calls["n"] == 1
 
     def test_shows_helpful_message_when_no_sponsor(self, gated_app):
         app, tmp = gated_app
@@ -249,7 +290,9 @@ class TestSponsorVariantPage:
     def test_overrides_reach_render_minus_hide_sponsor(self, gated_app, monkeypatch):
         """Persisted inspector overrides (UI 1.18) apply on the sponsor-variant
         render too — except hide_sponsor, since this surface's whole job is
-        showing the sponsor slot."""
+        showing the sponsor slot. (D-32 updated this test: the render now
+        happens in the background job, so it drives the job instead of the
+        page GET — the assertion is unchanged.)"""
         app, tmp = gated_app
         import mediahub.web.web as wm
         if not wm._v8_ok:
@@ -274,8 +317,14 @@ class TestSponsorVariantPage:
         )
         with app.test_client() as c:
             c.post("/api/organisation/active", data={"profile_id": "city-aquatics"})
-            resp = c.get("/runs/run-ov/card/swim-1/sponsor-variant")
-            assert resp.status_code == 200
+            r = c.post(
+                "/api/runs/run-ov/card/swim-1/sponsor-variant-job",
+                data="{}",
+                content_type="application/json",
+            )
+            assert r.status_code == 202, r.get_data(as_text=True)
+            j = _poll_until(c, r.get_json()["poll_url"])
+            assert j["status"] == "done", j
         ov = captured["user_overrides"]
         assert ov["accent"] == "#C9A227"
         assert ov["photo_pos"] == "left top"
@@ -306,13 +355,17 @@ class TestPackPageSurfacesSponsorButton:
 
 class TestSponsorVariantFriendlyLLMFallback:
     """When `generate_sponsor_caption` raises ClaudeUnavailableError because
-    no LLM provider is configured, the page must NOT dump the raw exception
-    class name to the user. It must render a friendly inline message and
-    keep the sponsor-branded visual block intact (the visual is rendered by
-    a separate pipeline that doesn't depend on the LLM)."""
+    no LLM provider is configured, the user must NOT see the raw exception
+    class name. They get a friendly message, and the sponsor-branded visual
+    is unaffected (it is rendered by a separate pipeline that doesn't depend
+    on the LLM). (D-32 updated this test: the caption now runs in the
+    background job, so the friendly message arrives in the job payload the
+    page polls — the intent is unchanged.)"""
 
     def test_friendly_message_when_llm_unavailable(self, gated_app, monkeypatch):
         app, tmp = gated_app
+        import mediahub.web.web as wm
+
         _seed_run(tmp, "run-llm-off", "city-aquatics", sponsor="Acme Sports")
 
         from mediahub.media_ai.llm import ClaudeUnavailableError
@@ -320,22 +373,43 @@ class TestSponsorVariantFriendlyLLMFallback:
         def _raise(*_a, **_kw):
             raise ClaudeUnavailableError("no provider configured")
 
-        # Patch the symbol the route imports at call-time, inside the
+        # Patch the symbol the worker imports at call-time, inside the
         # sponsor module.
         monkeypatch.setattr(
             "mediahub.brand.sponsor.generate_sponsor_caption", _raise,
         )
+        if wm._v8_ok:
+            monkeypatch.setattr(
+                wm,
+                "_v8_create_visual_for_item",
+                lambda item, brand_kit, **kw: {
+                    "visuals": [{"id": "vis1", "format_name": "feed_portrait"}],
+                    "errors": [],
+                },
+            )
 
         with app.test_client() as c:
             c.post("/api/organisation/active", data={"profile_id": "city-aquatics"})
             resp = c.get("/runs/run-llm-off/card/swim-1/sponsor-variant")
             assert resp.status_code == 200
             body = resp.get_data(as_text=True)
-            # Friendly message present (one of these tokens must appear)
-            lower = body.lower()
-            assert ("administrator" in lower) or ("unavailable" in lower)
-            # Raw exception class name MUST NOT leak to the user
-            assert "ClaudeUnavailableError" not in body
-            # The visual block (rendered by a separate pipeline) is still
-            # there — the sponsor-variant page heading is rendered.
+            # The page shell renders; no raw exception name anywhere.
             assert "Sponsor variant" in body
+            assert "ClaudeUnavailableError" not in body
+            r = c.post(
+                "/api/runs/run-llm-off/card/swim-1/sponsor-variant-job",
+                data="{}",
+                content_type="application/json",
+            )
+            assert r.status_code == 202, r.get_data(as_text=True)
+            j = _poll_until(c, r.get_json()["poll_url"])
+            assert j["status"] == "done", j
+            # Friendly message present (one of these tokens must appear)
+            msg = (j.get("caption_message") or "").lower()
+            assert ("administrator" in msg) or ("unavailable" in msg)
+            # Raw exception class name MUST NOT leak to the user
+            import json as _json
+
+            assert "ClaudeUnavailableError" not in _json.dumps(j)
+            # No fabricated caption.
+            assert j.get("caption") == ""

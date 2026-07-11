@@ -408,3 +408,98 @@ class TestLegacyOrphansStillAccessible:
         r = c.get(f"/api/runs/{legacy_id}/cards")
         # Legacy un-owned runs stay readable so we don't break history.
         assert r.status_code == 200
+
+
+class TestVisualSidecarTenantScoped:
+    """org-access audit: /api/visual/<vid> and its /png/<format> sibling
+    iterate ALL of RUNS_DIR to resolve a visual id. Both must refuse a
+    foreign org's visual — the sidecar carries the caption, alt text and
+    athlete names, and the PNG is the branded graphic — so a signed-in
+    member of one org can't read another org's visuals by id.
+    """
+
+    def _seed_alpha_visual(self, tmp_path, run_id, vid="v_alphasecret1"):
+        vdir = tmp_path / "runs_v4" / run_id / "visuals" / "brief-alpha"
+        vdir.mkdir(parents=True, exist_ok=True)
+        (vdir / "visual.json").write_text(
+            json.dumps(
+                {
+                    "id": vid,
+                    "visual_ids": {vid: "feed_portrait"},
+                    "caption": "ALPHA SECRET VISUAL CAPTION",
+                    "alt_text": "Alpha Athlete winning the 100m freestyle",
+                }
+            )
+        )
+        # A 1x1 PNG so the /png route has something to serve on the owner path.
+        png = bytes.fromhex(
+            "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4"
+            "890000000d4944415478da6360000002000154a24f1e0000000049454e44ae42"
+            "6082"
+        )
+        (vdir / "feed_portrait.png").write_bytes(png)
+        return vid
+
+    def test_foreign_org_cannot_read_visual_sidecar(self, two_orgs, tmp_path):
+        import mediahub.web.web as wm
+
+        if not wm._v8_ok:
+            import pytest
+
+            pytest.skip("v8 media engine unavailable")
+        vid = self._seed_alpha_visual(tmp_path, two_orgs["run_id"])
+        c = two_orgs["client"]
+        _pin(c, "org-beta")
+        r = c.get(f"/api/visual/{vid}")
+        assert r.status_code == 404
+        assert "ALPHA SECRET VISUAL CAPTION" not in r.get_data(as_text=True)
+
+    def test_foreign_org_cannot_read_visual_png(self, two_orgs, tmp_path):
+        import mediahub.web.web as wm
+
+        if not wm._v8_ok:
+            import pytest
+
+            pytest.skip("v8 media engine unavailable")
+        vid = self._seed_alpha_visual(tmp_path, two_orgs["run_id"])
+        c = two_orgs["client"]
+        _pin(c, "org-beta")
+        r = c.get(f"/api/visual/{vid}/png/feed_portrait")
+        assert r.status_code == 404
+        assert not r.get_data()
+
+    def test_owner_still_reads_her_own_visual(self, two_orgs, tmp_path):
+        import mediahub.web.web as wm
+
+        if not wm._v8_ok:
+            import pytest
+
+            pytest.skip("v8 media engine unavailable")
+        vid = self._seed_alpha_visual(tmp_path, two_orgs["run_id"])
+        c = two_orgs["client"]
+        _pin(c, "org-alpha")
+        r = c.get(f"/api/visual/{vid}")
+        assert r.status_code == 200
+        assert r.get_json()["caption"] == "ALPHA SECRET VISUAL CAPTION"
+        r = c.get(f"/api/visual/{vid}/png/feed_portrait")
+        assert r.status_code == 200
+        assert r.data  # the branded PNG bytes
+
+    def test_legacy_ownerless_visual_still_readable(self, two_orgs, tmp_path):
+        """A visual under an ownerless (legacy) run stays readable, mirroring
+        _can_access_run's ownerless-run tolerance."""
+        import mediahub.web.web as wm
+
+        if not wm._v8_ok:
+            import pytest
+
+            pytest.skip("v8 media engine unavailable")
+        legacy_id = "legacy-vis-" + uuid.uuid4().hex[:8]
+        (tmp_path / "runs_v4" / f"{legacy_id}.json").write_text(
+            json.dumps({"run_id": legacy_id, "profile_id": "", "cards": []})
+        )
+        vid = self._seed_alpha_visual(tmp_path, legacy_id, vid="v_legacyvisual")
+        c = two_orgs["client"]
+        _pin(c, "org-beta")
+        r = c.get(f"/api/visual/{vid}")
+        assert r.status_code == 200

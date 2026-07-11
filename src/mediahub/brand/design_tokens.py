@@ -209,6 +209,23 @@ def _type_pairing(pairing_id: str = "anton-inter") -> dict:
     }
 
 
+def _type_pairing_for_kit(brand_kit) -> dict:
+    """The club's applied pairing when one is saved on the brand kit (H-16 —
+    Settings → Typography → "Apply this pairing to my brand"), otherwise the
+    deterministic default. Same shape as :func:`_type_pairing`, plus
+    ``source: "applied"`` so consumers can tell a deliberate choice apart."""
+    saved = getattr(brand_kit, "type_pairing", None)
+    if not (isinstance(saved, dict) and saved.get("headline_family")):
+        return _type_pairing()
+    return {
+        "pairing": str(saved.get("pairing") or "anton-inter"),
+        "headline_family": str(saved.get("headline_family")),
+        "body_family": str(saved.get("body_family") or "Inter"),
+        "numeral_family": str(saved.get("numeral_family") or "JetBrains Mono"),
+        "source": "applied",
+    }
+
+
 def ai_type_pairing(context) -> dict:
     """AI-proposed type pairing in the same shape as :func:`_type_pairing` (1.9).
 
@@ -304,7 +321,7 @@ def resolve_design_tokens(profile_id: str, *, brand_kit=None) -> dict:
         },
         "roles": roles,
         "logo_lockups": _logo_lockups(brand_kit, profile),
-        "type": _type_pairing(),
+        "type": _type_pairing_for_kit(brand_kit),
         "voice": _voice_profile(profile_id, tone),
     }
 

@@ -50,6 +50,27 @@ def test_render_and_clip_and_reel_have_catch_handlers():
     assert "errLabel: 'Reel error'" in js
 
 
+def test_save_timeline_has_catch_handler():
+    """The editor's Save handler used to have no .catch, so a network failure left
+    it stuck on 'Saving...' forever — the same class the other studio fetches fixed.
+    """
+    js = _studio_js()
+    assert "The timeline may not have saved" in js
+
+
+def test_make_clip_button_guards_double_submit():
+    """A double-click on 'Make clip' must not create duplicate projects. Analysis
+    runs through the shared ``runVideoJob`` runner, which disables the triggering
+    button for the whole polled run and only restores it once the job settles — so
+    a second click can't fire a second clip-maker request.
+    """
+    js = _studio_js()
+    assert "runVideoJob(btn, CLIPMAKER_URL + '-job'" in js  # wired through the guarded runner
+    assert "function runVideoJob(btn, jobUrl, body, panel, opts, onDone)" in js
+    assert "btn.disabled = true" in js  # disabled for the whole run
+    assert "if(btn){ btn.disabled=false;" in js  # restored only on settle
+
+
 def test_no_error_alert_in_studio():
     js = _studio_js()
     # The three named error alert()s (permission change, render, load-clip) are gone.
@@ -61,6 +82,53 @@ def test_no_error_alert_in_studio():
     # No bare alert() error dialogs remain in the studio (the only dialog is the
     # deliberate window.confirm approve-for-export gate).
     assert "alert(" not in js
+
+
+# --- accessibility caveats (F-08..F-11) -----------------------------------
+
+
+def test_editor_modal_has_focus_management():
+    """F-08: the timeline editor modal must trap focus, close on Escape, restore
+    focus to the trigger, and expose itself to AT as a labelled modal dialog.
+    """
+    js = _studio_js()
+    assert 'aria-modal="true"' in js and 'aria-labelledby="vs-ed-title"' in js
+    assert "function showEditor()" in js and "function closeEditor()" in js
+    assert "editorPrevFocus = document.activeElement" in js  # remember trigger
+    assert "if(editorPrevFocus && editorPrevFocus.focus){ editorPrevFocus.focus(); }" in js
+    assert "e.key === 'Escape'" in js  # Escape closes
+    assert "e.key === 'Tab'" in js  # Tab is trapped within the dialog
+    # Backdrop click closes, and the modal is opened via the a11y helper.
+    assert "if(e.target === this){ closeEditor(); }" in js
+    assert "showEditor();" in js
+
+
+def test_reel_brief_has_accessible_label():
+    """F-09: the reel brief input was labelled by placeholder only."""
+    js = _studio_js()
+    assert 'aria-label="What this reel is about' in js
+
+
+def test_reel_has_independent_format_control():
+    """F-11: the reel used to read the Clip-Maker's format select (hidden unless a
+    clip was selected). It now has its own format control.
+    """
+    js = _studio_js()
+    assert 'id="vs-reel-format"' in js
+    assert "format: $('vs-reel-format').value" in js  # the reel submit reads its own select
+
+
+def test_editor_inputs_and_icon_buttons_have_accessible_names():
+    """F-10: the editor's trim/speed number inputs and glyph-only icon buttons were
+    named by adjacent text / a title only — add explicit accessible names.
+    """
+    js = _studio_js()
+    assert "aria-label=\"Clip '+cn+' trim start (ms)\"" in js
+    assert "aria-label=\"Clip '+cn+' trim end (ms)\"" in js
+    assert "aria-label=\"Clip '+cn+' playback speed\"" in js
+    assert "aria-label=\"Move clip '+cn+' up\"" in js
+    assert "aria-label=\"Remove clip '+cn+'\"" in js
+    assert "aria-label=\"Caption line '+(i+1)+' text\"" in js
 
 
 @pytest.fixture

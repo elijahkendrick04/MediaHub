@@ -30,6 +30,14 @@ class BrandKit:
     # field is added here so ``to_dict`` round-trips it).
     derived_palette: Optional[dict] = None
 
+    # H-16 — the club's applied type pairing (Settings → Typography →
+    # "Apply this pairing to my brand"). Shape:
+    # {"pairing": <renderer typography_pair key>, "headline_family": str,
+    #  "body_family": str, "numeral_family": str, "source": "ai"}.
+    # Optional + None default so old serialised profiles load cleanly;
+    # ``brand.design_tokens`` surfaces it as the profile's "type" block.
+    type_pairing: Optional[dict] = None
+
     # ---- factory ----
 
     @classmethod

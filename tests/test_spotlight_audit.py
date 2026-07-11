@@ -310,26 +310,46 @@ def test_spotlight_landing_rejects_path_traversal_run_id(app_ctx, tmp_path_facto
 
 
 def test_spotlight_landing_message_for_unopenable_run(app_ctx):
-    """A selected meet that _load_run can't open (legacy dir-form, wrong tenant,
-    or corrupt) must show an honest message, not a silent blank dead-end."""
+    """A selected meet that _load_run can't open (wrong tenant or corrupt file)
+    must show an honest message, not a silent blank dead-end."""
     app, wm, tmp = app_ctx
     runs = tmp / "runs_v4"
     # a legit run so the picker is non-empty
     _persist_run(runs, "good", "acme:G,G:50FR", "acme:G,G", "Good Person")
     _db_row(wm, "good", "acme")
 
-    # a run stored ONLY in the legacy nested layout that _load_run doesn't read
+    # a run whose flat JSON file is present but corrupt — _load_run returns None
+    (runs / "rBad.json").write_text("{not valid json at all")
+    _db_row(wm, "rBad", "acme")
+
+    c = _client(app)
+    body = c.get("/spotlight?run_id=rBad").get_data(as_text=True)
+    assert "open that meet" in body.lower()
+
+
+def test_spotlight_landing_opens_legacy_dir_form_run(app_ctx):
+    """A run stored in the legacy nested runs_v4/<id>/run.json layout is listed
+    in the picker (the stale-heal keeps it) and must now OPEN and show its
+    roster — _load_run centralises the dir-form fallback the other routes use."""
+    app, wm, tmp = app_ctx
+    runs = tmp / "runs_v4"
     dir_run = runs / "rDir"
     dir_run.mkdir(parents=True, exist_ok=True)
     (dir_run / "run.json").write_text(
         json.dumps(
             {
                 "run_id": "rDir",
+                "meet": {"name": "DirMeet"},
                 "recognition_report": {
                     "meet_name": "DirMeet",
                     "ranked_achievements": [
                         {
-                            "achievement": {"swimmer_id": "s", "swimmer_name": "S", "event": "A"},
+                            "achievement": {
+                                "swim_id": "acme:Dir,Sam:50FR",
+                                "swimmer_id": "acme:Dir,Sam",
+                                "swimmer_name": "Sam Dir",
+                                "event": "50m Freestyle",
+                            },
                             "priority": 1.0,
                             "quality_band": "story",
                         }
@@ -340,9 +360,124 @@ def test_spotlight_landing_message_for_unopenable_run(app_ctx):
     )
     _db_row(wm, "rDir", "acme")
 
+    # unit: _load_run reads the nested form
+    assert (wm._load_run("rDir") or {}).get("run_id") == "rDir"
+
     c = _client(app)
     body = c.get("/spotlight?run_id=rDir").get_data(as_text=True)
-    assert "open that meet" in body.lower()
+    assert "Sam Dir" in body
+    assert "Swimmers in this meet" in body
+    assert "open that meet" not in body.lower()
+
+
+def test_load_run_rejects_path_traversal(app_ctx):
+    """The shared _load_run helper refuses any run_id carrying a path separator
+    or '..' so no caller can escape RUNS_DIR (defense-in-depth for the sink)."""
+    app, wm, tmp = app_ctx
+    for hostile in ("../secrets", "..\\secrets", "a/b", "..", "", "x/../../y"):
+        assert wm._load_run(hostile) is None, f"traversal not blocked: {hostile!r}"
+
+
+def test_spotlight_landing_caps_large_roster(app_ctx):
+    """A meet with more swimmers than the render cap shows the cap's worth
+    (sorted by achievement count) plus an honest 'showing N, see the rest in the
+    full review' note — bounding the page instead of rendering hundreds."""
+    app, wm, tmp = app_ctx
+    runs = tmp / "runs_v4"
+    ach = []
+    for i in range(200):
+        sid = f"acme:S{i:04d},N"
+        ach.append(
+            {
+                "achievement": {
+                    "swim_id": f"{sid}:50FR",
+                    "swimmer_id": sid,
+                    "swimmer_name": f"Swimmer {i:04d}",
+                    "event": "50m Freestyle",
+                },
+                "priority": 1.0,
+                "quality_band": "story",
+            }
+        )
+    (runs / "big.json").write_text(
+        json.dumps(
+            {
+                "run_id": "big",
+                "meet": {"name": "Big Invitational"},
+                "recognition_report": {"meet_name": "Big", "ranked_achievements": ach},
+            }
+        )
+    )
+    _db_row(wm, "big", "acme")
+
+    c = _client(app)
+    body = c.get("/spotlight?run_id=big").get_data(as_text=True)
+    # honest total in the heading
+    assert "(200)" in body
+    # exactly the cap's worth of swimmer-card links are rendered
+    n_links = body.count("/spotlight/big/")
+    assert n_links == 120, f"expected 120 capped links, got {n_links}"
+    # a note pointing to the full review for the remaining swimmers
+    assert "Open the full meet review" in body
+    assert "the other 80" in body
+
+
+def test_spotlight_selects_are_labelled(app_ctx):
+    """Both the meet picker (landing) and the caption-tone select (view) carry a
+    programmatic label for assistive tech, not just a title attribute."""
+    app, wm, tmp = app_ctx
+    runs = tmp / "runs_v4"
+    sid = "acme:Doe,Jane"
+    _persist_run(runs, "r1", f"{sid}:100FR", sid, "Jane Doe")
+    _db_row(wm, "r1", "acme")
+    c = _client(app)
+
+    landing = c.get("/spotlight?run_id=r1").get_data(as_text=True)
+    assert 'id="sp-meet-select"' in landing and 'for="sp-meet-select"' in landing
+
+    view = c.get(f"/spotlight/r1/{sid}").get_data(as_text=True)
+    assert 'id="sp-tone-select"' in view and 'for="sp-tone-select"' in view
+
+
+def test_spotlight_build_idempotent_rebuild_in_place(app_ctx):
+    """Re-building the same swimmer's spotlight refreshes the existing draft in
+    place (same pack id, no duplicate) and preserves an already-approved card's
+    status rather than resetting it."""
+    app, wm, tmp = app_ctx
+    runs = tmp / "runs_v4"
+    sid = "acme:Doe,Jane"
+    _persist_run(runs, "r1", f"{sid}:100FR", sid, "Jane Doe")
+
+    import mediahub.ai_core as ai_core_pkg
+
+    ai_core_pkg.ask = lambda system, user, **kw: "Composed caption."
+    c = _client(app)
+
+    from mediahub.club_platform.stub_pack_store import list_packs, load_pack, update_card_status
+
+    def _n_spotlight():
+        return sum(
+            1
+            for m in list_packs(200)
+            if (load_pack(m["pack_id"]).get("form_data") or {}).get("source") == "athlete_spotlight"
+        )
+
+    locs = []
+    for _ in range(3):
+        r = c.post(f"/spotlight/r1/{sid}/build", follow_redirects=False)
+        assert r.status_code == 302
+        locs.append(r.headers["Location"])
+
+    assert _n_spotlight() == 1, "rebuilds must not mint duplicate drafts"
+    assert len(set(locs)) == 1, "every rebuild redirects to the same pack"
+
+    pack_id = locs[0].rstrip("/").split("/")[-1]
+    update_card_status(pack_id, 0, "approved")
+    c.post(f"/spotlight/r1/{sid}/build", follow_redirects=False)
+    rec = load_pack(pack_id)
+    assert (rec.get("cards") or [{}])[0].get(
+        "status"
+    ) == "approved", "a rebuild must not silently un-approve the draft"
 
 
 # ---- composite reel endpoint guards -------------------------------------

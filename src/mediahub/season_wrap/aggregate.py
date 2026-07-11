@@ -13,6 +13,7 @@ whose ``profile_id`` matches are read.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
@@ -92,12 +93,34 @@ def _is_pb_type(atype: str) -> bool:
     return atype.startswith("pb_") or atype in _PB_EXTRA_TYPES
 
 
+def _iso_date(raw) -> str:
+    """Best-effort canonical ``YYYY-MM-DD`` from a stored date string.
+
+    The window filter is a plain string compare, so a date must be canonical
+    ISO to land in a window. This normalises the *unambiguous* forms: a full
+    ISO date/datetime, and year-first values that only differ by separator or
+    zero-padding (``2026/6/5`` / ``2026-6-5`` → ``2026-06-05``). Genuinely
+    ambiguous day-first vs month-first slash dates (what HY3/SDIF ``MM/DD/YYYY``
+    exports produce) are left as-is rather than guessed — misfiling a swim into
+    the wrong month is worse than the honest miss the caller already tolerates.
+    """
+    s = str(raw or "").strip()
+    if not s:
+        return ""
+    m = re.match(r"^(\d{4})[-/](\d{1,2})[-/](\d{1,2})", s)
+    if m:
+        return f"{int(m.group(1)):04d}-{int(m.group(2)):02d}-{int(m.group(3)):02d}"
+    return s[:10]
+
+
 def _run_date(payload: dict) -> str:
     """ISO date (YYYY-MM-DD) a run belongs to: meet start_date, else the
     date part of started_at, else empty (never in any window)."""
-    meet = payload.get("meet") or {}
+    meet = payload.get("meet")
+    if not isinstance(meet, dict):
+        meet = {}
     raw = meet.get("start_date") or payload.get("started_at") or ""
-    return str(raw)[:10]
+    return _iso_date(raw)
 
 
 def _iter_window_runs(profile_id: str, runs_dir: Path, start: str, end: str):
@@ -137,25 +160,40 @@ def aggregate_window(profile_id: str, runs_dir: Path, *, start: str, end: str) -
 
     for payload in _iter_window_runs(profile_id, runs_dir, start, end):
         stats.n_runs += 1
-        meet = payload.get("meet") or {}
+        meet = payload.get("meet")
+        if not isinstance(meet, dict):
+            meet = {}
         name = str(meet.get("name") or payload.get("run_id") or "").strip()
         if name:
             stats.meet_names.append(name)
 
-        rr = payload.get("recognition_report") or {}
-        ranked = rr.get("ranked_achievements") or []
+        # A run file can be valid JSON but structurally odd (a truthy non-dict
+        # report, a list where a dict is expected). Guard every shape here so a
+        # single malformed run never crashes the whole workspace's wrap.
+        rr = payload.get("recognition_report")
+        if not isinstance(rr, dict):
+            rr = {}
+        ranked = rr.get("ranked_achievements")
+        if not isinstance(ranked, list):
+            ranked = []
 
         # Busiest swimmer: swim traces are the true swim count when present;
         # achievements per swimmer are the fallback signal.
-        traces = rr.get("swim_traces") or []
-        if traces:
+        traces = rr.get("swim_traces")
+        if isinstance(traces, list) and traces:
             for t in traces:
+                if not isinstance(t, dict):
+                    continue
                 who = str(t.get("swimmer_name") or "").strip()
                 if who:
                     swims_by_swimmer[who] = swims_by_swimmer.get(who, 0) + 1
         else:
             for ra in ranked:
-                ach = ra.get("achievement") or {}
+                if not isinstance(ra, dict):
+                    continue
+                ach = ra.get("achievement")
+                if not isinstance(ach, dict):
+                    continue
                 who = str(ach.get("swimmer_name") or "").strip()
                 if who:
                     swims_by_swimmer[who] = swims_by_swimmer.get(who, 0) + 1
@@ -163,11 +201,15 @@ def aggregate_window(profile_id: str, runs_dir: Path, *, start: str, end: str) -
         for ra in ranked:
             if not isinstance(ra, dict):
                 continue
-            ach = ra.get("achievement") or {}
+            ach = ra.get("achievement")
+            if not isinstance(ach, dict):
+                ach = {}
             atype = str(ach.get("type") or "")
             swimmer = str(ach.get("swimmer_name") or "").strip()
             event = str(ach.get("event") or "").strip()
-            raw = ach.get("raw_facts") or {}
+            raw = ach.get("raw_facts")
+            if not isinstance(raw, dict):
+                raw = {}
 
             stats.total_achievements += 1
             if swimmer:
@@ -211,6 +253,16 @@ def aggregate_window(profile_id: str, runs_dir: Path, *, start: str, end: str) -
                     "event": event,
                     "headline": str(ach.get("headline") or ""),
                     "type": atype,
+                    # Display time, if the parsed facts carry one — same honest
+                    # key-fallback the rest of the app uses. Deterministic string
+                    # passthrough (no detection/ranking decision); empty when absent.
+                    "time": str(
+                        raw.get("time")
+                        or raw.get("time_str")
+                        or raw.get("result")
+                        or raw.get("final_time")
+                        or ""
+                    ).strip(),
                     "priority": float(ra.get("priority") or 0.0),
                     "rank": int(ra.get("rank") or 0),
                     "meet": name,

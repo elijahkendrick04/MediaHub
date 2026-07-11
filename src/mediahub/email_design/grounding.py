@@ -236,6 +236,27 @@ def _runs_in_window(
     return out
 
 
+def _pinned_run(
+    profile_id: str, run_id: str, runs_dir: Path
+) -> list[tuple[str, dict, Optional[date]]]:
+    """The single owned run named by ``run_id`` (H-12 meet pinning), or ``[]``.
+
+    Same shape as one :func:`_runs_in_window` entry so the caller's loop is
+    unchanged; the same ``_owns`` tenant gate applies, so a foreign run id
+    yields nothing rather than another org's results.
+    """
+    f = runs_dir / f"{run_id}.json"
+    if not f.exists():
+        return []
+    try:
+        run_data = json.loads(f.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    if not isinstance(run_data, dict) or not _owns(run_data, profile_id):
+        return []
+    return [(run_id, run_data, _meet_date(run_data))]
+
+
 def _upcoming_fixtures(profile_id: str, sport: str, now: date, runs_dir: Path) -> list[dict]:
     """Forward-looking fixtures from the planner calendar."""
     try:
@@ -335,12 +356,18 @@ def gather_facts(
     tone: str = "warm-club",
     card_image_url: Optional[Callable[[str, str], str]] = None,
     asset_url: Optional[Callable[[str], str]] = None,
+    run_id: Optional[str] = None,
 ) -> NewsletterFacts:
     """Assemble the period's :class:`NewsletterFacts` for ``profile_id``.
 
     ``card_image_url(run_id, card_id) -> url`` and ``asset_url(asset_id) -> url``
     are optional resolvers the web layer supplies to turn internal refs into
     public image URLs; without them, cards render text-first (still valid email).
+
+    ``run_id`` (H-12) pins the facts to exactly one owned run — the meet-digest
+    "which meet?" chooser — instead of every run in the date window; the
+    period label then reflects that meet's own date. ``None`` keeps the
+    date-window behaviour unchanged.
     """
     if start > end:
         start, end = end, start
@@ -366,7 +393,14 @@ def gather_facts(
 
     consent_cache: dict[str, Optional[str]] = {}
 
-    runs = _runs_in_window(profile_id, start, end, rd)
+    if run_id:
+        runs = _pinned_run(profile_id, run_id, rd)
+        # The digest speaks about the meet itself, so the period follows the
+        # pinned meet's date (when it has one), not the range picker.
+        if runs and runs[0][2] is not None:
+            start = end = runs[0][2]
+    else:
+        runs = _runs_in_window(profile_id, start, end, rd)
     for run_id, _run_data, _md in runs:
         try:
             from mediahub.workflow.pack import build_content_pack
