@@ -33,7 +33,8 @@ def client(monkeypatch, tmp_path):
 
 
 def test_consent_lawful_basis_leads_with_plain_english(client):
-    html = client.get("/organisation/consent").get_data(as_text=True)
+    # G-9 moved the registry to /athletes?tab=records; the old URL redirects.
+    html = client.get("/organisation/consent", follow_redirects=True).get_data(as_text=True)
     # Plain-English option labels lead; the bare statute label is gone.
     assert "They (or a parent) said yes" in html
     assert "We have a good reason to" in html
@@ -43,7 +44,8 @@ def test_consent_lawful_basis_leads_with_plain_english(client):
 
 
 def test_consent_restrict_checkbox_is_plain_language(client):
-    html = client.get("/organisation/consent").get_data(as_text=True)
+    # G-9 moved the registry to /athletes?tab=records; the old URL redirects.
+    html = client.get("/organisation/consent", follow_redirects=True).get_data(as_text=True)
     assert "Pause all use of their data" in html
     assert "Restrict processing (Art 18)" not in html
 

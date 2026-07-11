@@ -60,5 +60,7 @@ def test_club_data_reachable_from_account_menu(client):
 
 def test_consent_and_dsr_reachable_from_settings_privacy(client):
     body = client.get("/settings/privacy").get_data(as_text=True)
-    assert "/organisation/consent" in body, "consent registry must be linked (C-7)"
+    # G-9: the consent registry moved to the /athletes "Consent records" tab —
+    # the C-7 card now points there instead of the retired standalone page.
+    assert "/athletes?tab=records" in body, "consent registry must be linked (C-7/G-9)"
     assert "/organisation/athlete-rights" in body, "athlete-rights/DSR must be linked (C-7)"

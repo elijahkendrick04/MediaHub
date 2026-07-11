@@ -28578,145 +28578,19 @@ function mhEraseAthleteConfirm(f) {
 
     @app.route("/organisation/consent")
     def org_consent_page():
+        # G-9: the consent registry now lives on /athletes as the "Consent
+        # records" tab, beside the roster permissions it underpins. This
+        # endpoint (and its 404-without-an-organisation gate) is kept so old
+        # links, bookmarks and url_for callers still resolve — signed-in
+        # officers land on the new tab.
         pid = _active_profile_id() or ""
-        profile = load_profile(pid) if pid else None
-        if profile is None:
+        if not pid or load_profile(pid) is None:
             return _layout(
                 "Consent",
                 '<div class="card"><p class="tag bad">Set up your organisation first.</p></div>',
                 active="settings",
             ), 404
-        from mediahub.compliance.consent import ConsentRegistry
-
-        from mediahub.compliance.retention import global_days as _ret_global
-
-        records = ConsentRegistry(pid).all()
-        rows = []
-        for r in records:
-            status_tag = {
-                "granted": '<span class="tag ok">granted</span>',
-                "refused": '<span class="tag bad">refused</span>',
-                "revoked": '<span class="tag bad">revoked</span>',
-            }.get(r.status, _h(r.status))
-            extra = []
-            if r.parental:
-                extra.append("parental")
-            if r.under_18 is True:
-                extra.append("under 18")
-            if r.restricted:
-                extra.append(
-                    '<strong title="UK GDPR Art 18 — processing restricted">Paused</strong>'
-                )
-            rows.append(
-                f"<tr><td>{_h(r.athlete_name)}</td><td>{status_tag}</td>"
-                f"<td>{', '.join(extra) or '—'}</td><td class='muted'>{_h(r.note[:160])}</td>"
-                f"<td class='muted'>{_h(r.recorded_at[:10])}</td></tr>"
-            )
-        table = (
-            # I-3: scroll wrapper so the multi-column registry doesn't overflow
-            # a phone (volunteers act on consent from poolside).
-            '<div class="mh-table-scroll"><table><thead><tr><th>Athlete</th><th>Status</th><th>Flags</th><th>Note</th><th>Recorded</th></tr></thead><tbody>'
-            + (
-                "".join(rows)
-                or '<tr><td colspan="5" class="muted">No consent records yet.</td></tr>'
-            )
-            + "</tbody></table></div>"
-        )
-        mode = (profile.consent_mode or "").strip()
-
-        def _sel(value, current):
-            return " selected" if value == current else ""
-
-        body = f"""
-<section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">
-  <span class="mh-hero-eyebrow">Privacy &amp; data</span>
-  <h1>Consent &amp; <em class="editorial">lawful basis.</em></h1>
-  <p class="lede">Record why you're allowed to post about your athletes, and who has said yes or no. A refused, revoked or restricted athlete can never be approved, packed, or published — on any setting.</p>
-</section>
-
-<div class="card">
-  <h2>Lawful basis &amp; gating mode</h2>
-  <form method="post" action="{url_for("org_consent_settings")}">
-    <label>Why you're allowed to post about your athletes<br>
-      <select name="lawful_basis_publication">
-        <option value=""{_sel("", profile.lawful_basis_publication)}>— not recorded —</option>
-        <option value="consent"{_sel("consent", profile.lawful_basis_publication)}>They (or a parent) said yes</option>
-        <option value="legitimate_interests"{_sel("legitimate_interests", profile.lawful_basis_publication)}>We have a good reason to (reporting club results)</option>
-        <option value="other"{_sel("other", profile.lawful_basis_publication)}>Other — explain in notes below</option>
-      </select>
-    </label>
-    <small class="muted" style="display:block;margin:-4px 0 10px">In legal terms: "said yes" = consent (UK GDPR Art&nbsp;6(1)(a)); "good reason" = legitimate interests (Art&nbsp;6(1)(f)).</small>
-    <label>Why you're allowed to look up their PB history<br>
-      <select name="lawful_basis_enrichment">
-        <option value=""{_sel("", profile.lawful_basis_enrichment)}>— not recorded —</option>
-        <option value="consent"{_sel("consent", profile.lawful_basis_enrichment)}>They (or a parent) said yes</option>
-        <option value="legitimate_interests"{_sel("legitimate_interests", profile.lawful_basis_enrichment)}>We have a good reason to (reporting club results)</option>
-        <option value="other"{_sel("other", profile.lawful_basis_enrichment)}>Other — explain in notes below</option>
-      </select>
-    </label><br>
-    <label><input type="checkbox" name="pb_enrichment_enabled" value="1"{" checked" if profile.pb_enrichment_enabled else ""}> Fetch PB history from public rankings (requires telling athletes/parents — Art 14 notice template in docs/compliance/templates/)</label><br>
-    <label>Consent gating mode<br>
-      <select name="consent_mode">
-        <option value=""{_sel("", mode)}>Opt-out (default) — block only recorded refusals</option>
-        <option value="opt_out"{_sel("opt_out", mode)}>Opt-out — block only recorded refusals</option>
-        <option value="opt_in"{_sel("opt_in", mode)}>Opt-in — publish ONLY athletes with recorded consent (recommended for youth squads)</option>
-      </select>
-    </label><br>
-    <label><input type="checkbox" name="parental_minors" value="1"{" checked" if profile.consent_require_parental_for_minors else ""}> Under-18s need parent/guardian consent (opt-in mode)</label><br>
-    <label>Notes (e.g. your balancing-test reference)<br><input type="text" name="lawful_basis_notes" maxlength="500" value="{_h(profile.lawful_basis_notes)}"></label><br>
-    <button class="btn" type="submit">Save settings</button>
-  </form>
-</div>
-
-<div class="card">
-  <h2>Under-18 content controls</h2>
-  <p class="muted">How identifiable under-18 athletes are in generated content (ICO Children's Code). New organisations start with the identity controls on.</p>
-  <form method="post" action="{url_for("org_child_policy_settings")}">
-    <label><input type="checkbox" name="child_surname_initial" value="1"{" checked" if profile.child_surname_initial else ""}> Show under-18s as first name + initial ("Eira H.")</label><br>
-    <label><input type="checkbox" name="child_suppress_age" value="1"{" checked" if profile.child_suppress_age else ""}> Don't show ages or age groups on content</label><br>
-    <label><input type="checkbox" name="child_exclude_photos" value="1"{" checked" if profile.child_exclude_photos else ""}> Never use athlete photos on under-18 posts (text-led cards instead)</label><br>
-    <button class="btn" type="submit">Save content controls</button>
-  </form>
-</div>
-
-<div class="card">
-  <h2>Retention</h2>
-  <p class="muted">How long this club's data lives before the nightly purge removes it. You can tighten the deployment-wide window, never extend it. Blank = use the deployment default. 0 = keep forever (deployment setting only).</p>
-  <form method="post" action="{url_for("org_retention_settings")}">
-    <label>Raw uploaded results files (days, default {_h(str(_ret_global("raw_uploads")))})<br>
-      <input type="number" min="0" name="raw_uploads" value="{_h(str((profile.retention_overrides or {}).get("raw_uploads", "")))}"></label><br>
-    <label>Runs, cards &amp; packs (days, default {_h(str(_ret_global("runs")))})<br>
-      <input type="number" min="0" name="runs" value="{_h(str((profile.retention_overrides or {}).get("runs", "")))}"></label><br>
-    <button class="btn" type="submit">Save retention</button>
-  </form>
-</div>
-
-<div class="card">
-  <h2>Record a consent decision</h2>
-  <form method="post" action="{url_for("org_consent_record")}">
-    <label>Athlete name<br><input type="text" name="athlete_name" maxlength="200" required></label><br>
-    <label>Decision<br>
-      <select name="status">
-        <option value="granted">Consent granted</option>
-        <option value="refused">Refused — never publish</option>
-        <option value="revoked">Revoked — was granted, now withdrawn</option>
-      </select>
-    </label><br>
-    <label><input type="checkbox" name="parental" value="1"> Given by a parent/guardian</label>
-    <label><input type="checkbox" name="under_18" value="1"> Athlete is under 18</label>
-    <label title="UK GDPR Art 18 — restriction of processing"><input type="checkbox" name="restricted" value="1"> Pause all use of their data <span class="muted">(Art&nbsp;18)</span></label><br>
-    <label>Note (how/when consent was collected)<br><input type="text" name="note" maxlength="1000"></label><br>
-    <button class="btn" type="submit">Save record</button>
-  </form>
-</div>
-
-<div class="card">
-  <h2>Registry</h2>
-  {table}
-  <p class="muted">Records are append-only: every change keeps its history (accountability). Revoking consent takes effect immediately for all future approvals, packs and publishes; already-published posts must be handled on the platform itself.</p>
-</div>
-"""
-        return _layout("Consent & lawful basis", body, active="settings")
+        return redirect(url_for("athletes_page", tab="records"))
 
     @app.route("/organisation/consent/settings", methods=["POST"])
     def org_consent_settings():
@@ -28738,7 +28612,7 @@ function mhEraseAthleteConfirm(f) {
         profile.pb_enrichment_enabled = bool(request.form.get("pb_enrichment_enabled"))
         profile.lawful_basis_notes = (request.form.get("lawful_basis_notes") or "").strip()[:500]
         save_profile(profile)
-        return redirect(url_for("org_consent_page"))
+        return redirect(url_for("athletes_page", tab="records"))
 
     @app.route("/organisation/consent/child-policy", methods=["POST"])
     def org_child_policy_settings():
@@ -28750,7 +28624,7 @@ function mhEraseAthleteConfirm(f) {
         profile.child_suppress_age = bool(request.form.get("child_suppress_age"))
         profile.child_exclude_photos = bool(request.form.get("child_exclude_photos"))
         save_profile(profile)
-        return redirect(url_for("org_consent_page"))
+        return redirect(url_for("athletes_page", tab="records"))
 
     @app.route("/organisation/consent/retention", methods=["POST"])
     def org_retention_settings():
@@ -28770,7 +28644,7 @@ function mhEraseAthleteConfirm(f) {
                 continue
         profile.retention_overrides = overrides
         save_profile(profile)
-        return redirect(url_for("org_consent_page"))
+        return redirect(url_for("athletes_page", tab="records"))
 
     @app.route("/organisation/consent/record", methods=["POST"])
     def org_consent_record():
@@ -28801,7 +28675,7 @@ function mhEraseAthleteConfirm(f) {
             note=request.form.get("note") or "",
             recorded_by=recorded_by,
         )
-        return redirect(url_for("org_consent_page"))
+        return redirect(url_for("athletes_page", tab="records"))
 
     # ---- DATA SUBJECT RIGHTS (per tenant) --------------------------------
     # SAR export / rectification / erasure / restriction, with the Art 12A
@@ -32539,7 +32413,7 @@ self.addEventListener('fetch', function(e){
             "(grant, refuse or revoke, lawful basis, child controls, retention), and log and "
             "clock a &ldquo;delete or export my child&rsquo;s data&rdquo; request.</p>"
             '<div style="display:flex;gap:8px;flex-wrap:wrap">'
-            f'<a class="btn secondary" href="{url_for("org_consent_page")}">Consent &amp; lawful basis</a>'
+            f'<a class="btn secondary" href="{url_for("athletes_page", tab="records")}">Consent &amp; lawful basis</a>'
             f'<a class="btn secondary" href="{url_for("org_athlete_rights")}">Athlete data requests</a>'
             "</div>"
             "</div>"
@@ -39334,8 +39208,9 @@ function copySpotlightCaption(btn) {{
                 profile_id=profile_id,
                 display_name=request.form.get("display_name") or profile_id,
                 # Children's Code standard 7 (high privacy by default): NEW
-                # organisations start with the child content controls ON;
-                # the club can relax them deliberately on /organisation/consent.
+                # organisations start with the child content controls ON; the
+                # club can relax them deliberately on the Consent records tab
+                # of /athletes (G-9).
                 child_surname_initial=True,
                 child_suppress_age=True,
                 child_exclude_photos=False,
@@ -63768,11 +63643,190 @@ voice, and queues them for one-click approval.</p>
 
     # ---- W.1 + W.2: athletes roster, merge, consent ----------------------
 
+    _ATHLETES_HERO = """
+<section class="mh-hero" style="padding-top:var(--sp-7);padding-bottom:var(--sp-4)">
+  <span class="mh-hero-eyebrow">Club data &middot; Athletes</span>
+  <h1>Athletes &amp; <em class="editorial">consent</em></h1>
+  <p class="lede">__LEDE__</p>
+</section>"""
+
+    def _athletes_tabs_html(show_records: bool) -> str:
+        """G-9: the two-tab strip shared by both /athletes views."""
+
+        def _tab(label, active, **args):
+            attrs = (
+                ' class="is-active" aria-selected="true"' if active else ' aria-selected="false"'
+            )
+            return f'<a href="{url_for("athletes_page", **args)}" role="tab"{attrs}>{label}</a>'
+
+        return (
+            '<nav class="mh-tabs" role="tablist" aria-label="Athletes and consent"'
+            ' style="margin-bottom:18px">'
+            + _tab("Roster &amp; permissions", not show_records)
+            + _tab("Consent records", show_records, tab="records")
+            + '<span class="mh-tabs__ind" aria-hidden="true"></span></nav>'
+        )
+
+    def _athletes_records_tab(pid: str, profile) -> str:
+        """G-9: the "Consent records" tab — the compliance registry (grant/
+        refuse/revoke decisions, lawful basis, child controls, retention)
+        that used to live on its own orphaned /organisation/consent page.
+        Same ConsentRegistry store, same records — only the page moved, so a
+        safeguarding officer finds the roster permissions and the signed
+        decisions behind them in one place.
+        """
+        from mediahub.compliance.consent import ConsentRegistry
+        from mediahub.compliance.retention import global_days as _ret_global
+
+        records = ConsentRegistry(pid).all()
+        rows = []
+        for r in records:
+            status_tag = {
+                "granted": '<span class="tag ok">granted</span>',
+                "refused": '<span class="tag bad">refused</span>',
+                "revoked": '<span class="tag bad">revoked</span>',
+            }.get(r.status, _h(r.status))
+            extra = []
+            if r.parental:
+                extra.append("parental")
+            if r.under_18 is True:
+                extra.append("under 18")
+            if r.restricted:
+                extra.append(
+                    '<strong title="UK GDPR Art 18 — processing restricted">Paused</strong>'
+                )
+            rows.append(
+                f"<tr><td>{_h(r.athlete_name)}</td><td>{status_tag}</td>"
+                f"<td>{', '.join(extra) or '—'}</td><td class='muted'>{_h(r.note[:160])}</td>"
+                f"<td class='muted'>{_h(r.recorded_at[:10])}</td></tr>"
+            )
+        table = (
+            # I-3: scroll wrapper so the multi-column registry doesn't overflow
+            # a phone (volunteers act on consent from poolside).
+            '<div class="mh-table-scroll"><table><thead><tr><th>Athlete</th><th>Status</th><th>Flags</th><th>Note</th><th>Recorded</th></tr></thead><tbody>'
+            + (
+                "".join(rows)
+                or '<tr><td colspan="5" class="muted">No consent records yet.</td></tr>'
+            )
+            + "</tbody></table></div>"
+        )
+        mode = (profile.consent_mode or "").strip()
+
+        def _sel(value, current):
+            return " selected" if value == current else ""
+
+        hero = _ATHLETES_HERO.replace(
+            "__LEDE__",
+            "Record why you're allowed to post about your athletes, and who has "
+            "said yes or no. A refused, revoked or restricted athlete can never be "
+            "approved, packed, or published &mdash; on any setting.",
+        )
+        return f"""{hero}
+{_athletes_tabs_html(True)}
+<p class="dim" style="margin-bottom:16px;font-size:13px">Consent records are the signed
+decisions &mdash; grant, refuse, revoke, and your lawful basis &mdash; behind the
+permissions MediaHub enforces. Set what actually appears on content under
+<a href="{url_for("athletes_page")}">Roster &amp; permissions</a>.</p>
+
+<div class="card">
+  <h2>Lawful basis &amp; gating mode</h2>
+  <form method="post" action="{url_for("org_consent_settings")}">
+    <label>Why you're allowed to post about your athletes<br>
+      <select name="lawful_basis_publication">
+        <option value=""{_sel("", profile.lawful_basis_publication)}>— not recorded —</option>
+        <option value="consent"{_sel("consent", profile.lawful_basis_publication)}>They (or a parent) said yes</option>
+        <option value="legitimate_interests"{_sel("legitimate_interests", profile.lawful_basis_publication)}>We have a good reason to (reporting club results)</option>
+        <option value="other"{_sel("other", profile.lawful_basis_publication)}>Other — explain in notes below</option>
+      </select>
+    </label>
+    <small class="muted" style="display:block;margin:-4px 0 10px">In legal terms: "said yes" = consent (UK GDPR Art&nbsp;6(1)(a)); "good reason" = legitimate interests (Art&nbsp;6(1)(f)).</small>
+    <label>Why you're allowed to look up their PB history<br>
+      <select name="lawful_basis_enrichment">
+        <option value=""{_sel("", profile.lawful_basis_enrichment)}>— not recorded —</option>
+        <option value="consent"{_sel("consent", profile.lawful_basis_enrichment)}>They (or a parent) said yes</option>
+        <option value="legitimate_interests"{_sel("legitimate_interests", profile.lawful_basis_enrichment)}>We have a good reason to (reporting club results)</option>
+        <option value="other"{_sel("other", profile.lawful_basis_enrichment)}>Other — explain in notes below</option>
+      </select>
+    </label><br>
+    <label><input type="checkbox" name="pb_enrichment_enabled" value="1"{" checked" if profile.pb_enrichment_enabled else ""}> Fetch PB history from public rankings (requires telling athletes/parents — Art 14 notice template in docs/compliance/templates/)</label><br>
+    <label>Consent gating mode<br>
+      <select name="consent_mode">
+        <option value=""{_sel("", mode)}>Opt-out (default) — block only recorded refusals</option>
+        <option value="opt_out"{_sel("opt_out", mode)}>Opt-out — block only recorded refusals</option>
+        <option value="opt_in"{_sel("opt_in", mode)}>Opt-in — publish ONLY athletes with recorded consent (recommended for youth squads)</option>
+      </select>
+    </label><br>
+    <label><input type="checkbox" name="parental_minors" value="1"{" checked" if profile.consent_require_parental_for_minors else ""}> Under-18s need parent/guardian consent (opt-in mode)</label><br>
+    <label>Notes (e.g. your balancing-test reference)<br><input type="text" name="lawful_basis_notes" maxlength="500" value="{_h(profile.lawful_basis_notes)}"></label><br>
+    <button class="btn" type="submit">Save settings</button>
+  </form>
+</div>
+
+<div class="card">
+  <h2>Under-18 content controls</h2>
+  <p class="muted">How identifiable under-18 athletes are in generated content (ICO Children's Code). New organisations start with the identity controls on.</p>
+  <form method="post" action="{url_for("org_child_policy_settings")}">
+    <label><input type="checkbox" name="child_surname_initial" value="1"{" checked" if profile.child_surname_initial else ""}> Show under-18s as first name + initial ("Eira H.")</label><br>
+    <label><input type="checkbox" name="child_suppress_age" value="1"{" checked" if profile.child_suppress_age else ""}> Don't show ages or age groups on content</label><br>
+    <label><input type="checkbox" name="child_exclude_photos" value="1"{" checked" if profile.child_exclude_photos else ""}> Never use athlete photos on under-18 posts (text-led cards instead)</label><br>
+    <button class="btn" type="submit">Save content controls</button>
+  </form>
+</div>
+
+<div class="card">
+  <h2>Retention</h2>
+  <p class="muted">How long this club's data lives before the nightly purge removes it. You can tighten the deployment-wide window, never extend it. Blank = use the deployment default. 0 = keep forever (deployment setting only).</p>
+  <form method="post" action="{url_for("org_retention_settings")}">
+    <label>Raw uploaded results files (days, default {_h(str(_ret_global("raw_uploads")))})<br>
+      <input type="number" min="0" name="raw_uploads" value="{_h(str((profile.retention_overrides or {}).get("raw_uploads", "")))}"></label><br>
+    <label>Runs, cards &amp; packs (days, default {_h(str(_ret_global("runs")))})<br>
+      <input type="number" min="0" name="runs" value="{_h(str((profile.retention_overrides or {}).get("runs", "")))}"></label><br>
+    <button class="btn" type="submit">Save retention</button>
+  </form>
+</div>
+
+<div class="card">
+  <h2>Record a consent decision</h2>
+  <form method="post" action="{url_for("org_consent_record")}">
+    <label>Athlete name<br><input type="text" name="athlete_name" maxlength="200" required></label><br>
+    <label>Decision<br>
+      <select name="status">
+        <option value="granted">Consent granted</option>
+        <option value="refused">Refused — never publish</option>
+        <option value="revoked">Revoked — was granted, now withdrawn</option>
+      </select>
+    </label><br>
+    <label><input type="checkbox" name="parental" value="1"> Given by a parent/guardian</label>
+    <label><input type="checkbox" name="under_18" value="1"> Athlete is under 18</label>
+    <label title="UK GDPR Art 18 — restriction of processing"><input type="checkbox" name="restricted" value="1"> Pause all use of their data <span class="muted">(Art&nbsp;18)</span></label><br>
+    <label>Note (how/when consent was collected)<br><input type="text" name="note" maxlength="1000"></label><br>
+    <button class="btn" type="submit">Save record</button>
+  </form>
+</div>
+
+<div class="card">
+  <h2>Registry</h2>
+  {table}
+  <p class="muted">Records are append-only: every change keeps its history (accountability). Revoking consent takes effect immediately for all future approvals, packs and publishes; already-published posts must be handled on the platform itself.</p>
+</div>
+"""
+
     @app.route("/athletes")
     def athletes_page():
         pid = _phase_w_org()
         if not pid:
             return _layout("Athletes", _PW_NO_ORG, active="settings")
+        # G-9: two tabs. "Roster & permissions" is what MediaHub enforces on
+        # content; "Consent records" holds the signed decisions behind it
+        # (moved here from the orphaned /organisation/consent page, which now
+        # redirects). /athletes is the record of truth for both.
+        if (request.args.get("tab") or "").strip() == "records":
+            profile = load_profile(pid)
+            if profile is None:
+                return _layout("Athletes", _PW_NO_ORG, active="settings")
+            return _layout(
+                "Athletes & consent", _athletes_records_tab(pid, profile), active="settings"
+            )
         from mediahub.athletes import list_athletes
         from mediahub.safeguarding import LEVEL_LABELS, list_consent, regime_active
 
@@ -63884,14 +63938,18 @@ voice, and queues them for one-click approval.</p>
             if regime
             else f' onsubmit="return athEnforceConfirm(this)" data-enforcing="1" data-msg="{_h(_enf_msg)}"'
         )
-        body = f"""
-<section class="mh-hero" style="padding-top:var(--sp-7);padding-bottom:var(--sp-4)">
-  <span class="mh-hero-eyebrow">Club data &middot; Athletes</span>
-  <h1>Athletes &amp; <em class="editorial">consent</em></h1>
-  <p class="lede">One identity per swimmer across every meet. Milestones (debut,
-  50th race), records and season wraps hang off this roster — and so does
-  photo/name permission.</p>
-</section>
+        roster_hero = _ATHLETES_HERO.replace(
+            "__LEDE__",
+            "One identity per swimmer across every meet. Milestones (debut, "
+            "50th race), records and season wraps hang off this roster &mdash; "
+            "and so does photo/name permission.",
+        )
+        body = f"""{roster_hero}
+{_athletes_tabs_html(False)}
+<p class="dim" style="margin-bottom:16px;font-size:13px">Permissions on this tab are what
+MediaHub enforces on content. The signed decisions behind them &mdash; who said yes or no,
+and your lawful basis &mdash; live under
+<a href="{url_for("athletes_page", tab="records")}">Consent records</a>.</p>
 {msg_html}
 <div class="card" style="margin-bottom:16px">{regime_note}
   <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px">
