@@ -2419,6 +2419,25 @@ time.mh-rel[title] { cursor: help; border-bottom: 1px dotted var(--hairline); }
   background: currentColor;
 }
 
+/* Bare `.pill` — a lightweight inline chip used across the settings tables
+   (Team members, API tokens, webhooks), status badges and role labels. It had
+   no base rule outside a profile card, so these all rendered as plain text.
+   This supplies only the shape; the inline `background` / `border-color` /
+   `color` overrides those call sites already set layer on top. The higher-
+   specificity `.mh-profile-card .meta-line .pill` rule still wins where it
+   applies. */
+.pill {
+  display: inline-block;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: var(--fs-9);
+  font-weight: 600;
+  line-height: 1.5;
+  border: 1px solid var(--hairline);
+  background: rgba(245, 242, 232, 0.05);
+  color: var(--ink-dim);
+}
+
 /* ---- DRAWER — right-side slide-in panel ---------------------------- */
 .mh-drawer-scrim {
   position: fixed; inset: 0;

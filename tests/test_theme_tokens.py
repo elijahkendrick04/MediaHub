@@ -386,6 +386,29 @@ class TestNoNewHardcodes:
             f"to var(--mh-*) references."
         )
 
+    def test_html_numeric_entities_are_not_counted_as_hex(self):
+        """Regression: ``&#127912;`` (the 🎨 emoji) and other HTML numeric
+        character references must NOT be classified as hex colours — their
+        digits otherwise match the ``hex6`` pattern and inflate the hardcode
+        budget with non-colours."""
+        from pathlib import Path
+        import sys
+
+        repo_root = Path(__file__).resolve().parents[1]
+        sys.path.insert(0, str(repo_root / "scripts"))
+        try:
+            import inventory_colors as inv
+        finally:
+            sys.path.pop(0)
+
+        hex_kinds = {"hex3", "hex4", "hex6", "hex8"}
+        # An emoji entity next to a genuine hex colour: only the real colour counts.
+        sample = 'style="color:#0A0B11">&#127912; &#9733; done'
+        kinds = [k for k, rx in inv.COLOUR_PATTERNS if rx.search(sample) and k in hex_kinds]
+        hits = [m.group(0) for k, rx in inv.COLOUR_PATTERNS if k in hex_kinds for m in rx.finditer(sample)]
+        assert "#0A0B11" in hits, "a real hex colour must still be detected"
+        assert "#127912" not in hits, "the &#127912; emoji entity must not count as hex"
+
 
 class TestUltrawideChromeAlignment:
     def test_footer_and_hud_widen_with_main_wrap(self):
