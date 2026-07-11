@@ -54290,8 +54290,12 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                     # ---- 1. Sponsor-branded visual (render-engine bound) ----
                     if _v8_ok and _v8_create_visual_for_item is not None:
                         try:
+                            # A 202-accepted background job queues for the
+                            # slot (like the render-all batch worker) rather
+                            # than borrowing the request threads' fast-fail
+                            # budget.
                             with _render_slot(
-                                "graphic", f"sponsor:{card_id}", timeout=_RENDER_TRY_TIMEOUT
+                                "graphic", f"sponsor:{card_id}", timeout=_RENDER_QUEUE_TIMEOUT
                             ):
                                 res = _v8_create_visual_for_item(
                                     item,
@@ -63947,11 +63951,20 @@ voice, and queues them for one-click approval.</p>
         colour_bar: bool,
         want_cmyk: bool,
         progress=None,
+        use_render_slot: bool = False,
     ) -> None:
         """Render one A4 certificate PDF per approved card into ``stream``
         as a ZIP. ``progress(i, total, swimmer_name)`` (optional) is called
         before each render so the D-12 background job can report
-        "Rendering certificate N of M" honestly."""
+        "Rendering certificate N of M" honestly.
+
+        ``use_render_slot=True`` (the D-12 background job) takes the shared
+        render slot per certificate with the queue timeout — like the
+        render-all batch worker — so a big meet's build queues politely and
+        other renders (thumbnails, motion) interleave between PDFs instead
+        of starving for minutes. The synchronous route keeps its historical
+        no-slot behaviour."""
+        import shutil as _shutil
         import zipfile as _zip
 
         from mediahub.graphic_renderer.print_export import (
@@ -63981,55 +63994,73 @@ voice, and queues them for one-click approval.</p>
             )
         out_dir = DATA_DIR / "print_exports" / run_id
         out_dir.mkdir(parents=True, exist_ok=True)
+        # Concurrent builds (background job + synchronous route) must never
+        # zip each other's half-written PDFs — intermediates render into a
+        # unique per-build subdirectory, removed when the build finishes.
+        # The final ZIP artifact path stays stable.
+        build_dir = out_dir / f"build-{uuid.uuid4().hex[:8]}"
+        build_dir.mkdir(parents=True, exist_ok=True)
         rgb_fallbacks: list = []  # certs where gs failed mid-run and RGB shipped
-        with _zip.ZipFile(stream, "w", _zip.ZIP_DEFLATED) as zf:
-            for i, item in enumerate(approved):
-                a = item.get("achievement") or {}
-                name = a.get("swimmer_name") or "Swimmer"
-                if progress is not None:
-                    progress(i, len(approved), name)
-                facts = a.get("raw_facts") or {}
-                time_str = facts.get("new_time") or facts.get("time") or facts.get("time_str") or ""
-                cert_kwargs = dict(
-                    swimmer_name=name,
-                    event_label=a.get("event", ""),
-                    time_str=str(time_str),
-                    achievement_headline=a.get("headline", "Achievement"),
-                    meet_name=meet_name,
-                    meet_date=meet_date,
-                    club_name=(prof.display_name if prof else pid or "Our club"),
-                    brand=brand,
-                    detail_line=a.get("angle_hint", ""),
-                )
-                safe_name = re.sub(r"[^A-Za-z0-9._-]+", "-", f"{name}-{a.get('event', '')}")
-                pdf_path = out_dir / f"cert-{i:02d}.pdf"
-                if print_mode:
-                    try:
-                        export_certificate_print_pdf(
-                            pdf_path,
-                            bleed_mm=bleed_mm,
-                            crop_marks=crop_marks,
-                            colour_bar=colour_bar,
-                            cmyk=do_cmyk,
-                            **cert_kwargs,
-                        )
-                    except CmykUnavailable as e:
-                        # Ghostscript failed mid-run: the RGB print PDF (bleed +
-                        # crop marks intact) is already rendered and print-ready
-                        # — ship it and say so, mirroring print_ready/engine.py.
-                        rgb_fallbacks.append(f"{i + 1:02d}-{safe_name}.pdf: {e}")
-                else:
-                    render_html_to_pdf(build_certificate_html(**cert_kwargs), pdf_path)
-                zf.writestr(f"certificates/{i + 1:02d}-{safe_name}.pdf", pdf_path.read_bytes())
-            if rgb_fallbacks:
-                cmyk_note = (cmyk_note or "") + (
-                    "CMYK conversion failed at run time for these certificates, so "
-                    "they are RGB (the bleed and crop marks are intact):\n"
-                    + "\n".join(rgb_fallbacks)
-                    + "\n"
-                )
-            if cmyk_note:
-                zf.writestr("certificates/CMYK-NOTE.txt", cmyk_note)
+        try:
+            with _zip.ZipFile(stream, "w", _zip.ZIP_DEFLATED) as zf:
+                for i, item in enumerate(approved):
+                    a = item.get("achievement") or {}
+                    name = a.get("swimmer_name") or "Swimmer"
+                    if progress is not None:
+                        progress(i, len(approved), name)
+                    facts = a.get("raw_facts") or {}
+                    time_str = (
+                        facts.get("new_time") or facts.get("time") or facts.get("time_str") or ""
+                    )
+                    cert_kwargs = dict(
+                        swimmer_name=name,
+                        event_label=a.get("event", ""),
+                        time_str=str(time_str),
+                        achievement_headline=a.get("headline", "Achievement"),
+                        meet_name=meet_name,
+                        meet_date=meet_date,
+                        club_name=(prof.display_name if prof else pid or "Our club"),
+                        brand=brand,
+                        detail_line=a.get("angle_hint", ""),
+                    )
+                    safe_name = re.sub(r"[^A-Za-z0-9._-]+", "-", f"{name}-{a.get('event', '')}")
+                    pdf_path = build_dir / f"cert-{i:02d}.pdf"
+                    slot = (
+                        _render_slot("certificates", run_id, timeout=_RENDER_QUEUE_TIMEOUT)
+                        if use_render_slot
+                        else contextlib.nullcontext()
+                    )
+                    with slot:
+                        if print_mode:
+                            try:
+                                export_certificate_print_pdf(
+                                    pdf_path,
+                                    bleed_mm=bleed_mm,
+                                    crop_marks=crop_marks,
+                                    colour_bar=colour_bar,
+                                    cmyk=do_cmyk,
+                                    **cert_kwargs,
+                                )
+                            except CmykUnavailable as e:
+                                # Ghostscript failed mid-run: the RGB print PDF
+                                # (bleed + crop marks intact) is already rendered
+                                # and print-ready — ship it and say so, mirroring
+                                # print_ready/engine.py.
+                                rgb_fallbacks.append(f"{i + 1:02d}-{safe_name}.pdf: {e}")
+                        else:
+                            render_html_to_pdf(build_certificate_html(**cert_kwargs), pdf_path)
+                    zf.writestr(f"certificates/{i + 1:02d}-{safe_name}.pdf", pdf_path.read_bytes())
+                if rgb_fallbacks:
+                    cmyk_note = (cmyk_note or "") + (
+                        "CMYK conversion failed at run time for these certificates, so "
+                        "they are RGB (the bleed and crop marks are intact):\n"
+                        + "\n".join(rgb_fallbacks)
+                        + "\n"
+                    )
+                if cmyk_note:
+                    zf.writestr("certificates/CMYK-NOTE.txt", cmyk_note)
+        finally:
+            _shutil.rmtree(build_dir, ignore_errors=True)
 
     @app.route("/pack/<run_id>/certificates.zip")
     def pack_certificates_zip(run_id: str):
@@ -64172,29 +64203,34 @@ voice, and queues them for one-click approval.</p>
         def _worker() -> None:
             try:
                 with _job_heartbeat(job):
-                    with _render_slot("certificates", run_id, timeout=_RENDER_TRY_TIMEOUT):
+                    # The render slot is taken per certificate inside
+                    # _write_certificates_zip (use_render_slot=True) with the
+                    # queue timeout — a 202-accepted job queues like the
+                    # render-all batch worker instead of fast-failing, and
+                    # never starves other renders for the whole ZIP build.
 
-                        def _progress(i: int, total: int, name: str) -> None:
-                            job["done"] = i
-                            job["total"] = total
-                            job["current"] = str(name or "")
-                            _variant_job_save(job)
+                    def _progress(i: int, total: int, name: str) -> None:
+                        job["done"] = i
+                        job["total"] = total
+                        job["current"] = str(name or "")
+                        _variant_job_save(job)
 
-                        with open(zip_path, "wb") as fh:
-                            _write_certificates_zip(
-                                fh,
-                                run_id,
-                                data,
-                                pid,
-                                prof,
-                                approved,
-                                print_mode=print_mode,
-                                bleed_mm=bleed_mm,
-                                crop_marks=crop_marks,
-                                colour_bar=colour_bar,
-                                want_cmyk=want_cmyk,
-                                progress=_progress,
-                            )
+                    with open(zip_path, "wb") as fh:
+                        _write_certificates_zip(
+                            fh,
+                            run_id,
+                            data,
+                            pid,
+                            prof,
+                            approved,
+                            print_mode=print_mode,
+                            bleed_mm=bleed_mm,
+                            crop_marks=crop_marks,
+                            colour_bar=colour_bar,
+                            want_cmyk=want_cmyk,
+                            progress=_progress,
+                            use_render_slot=True,
+                        )
                 job["status"] = "done"
                 job["done"] = int(job.get("total") or len(approved))
                 job["current"] = ""
