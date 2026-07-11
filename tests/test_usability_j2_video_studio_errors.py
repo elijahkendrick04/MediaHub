@@ -50,6 +50,27 @@ def test_render_and_clip_and_reel_have_catch_handlers():
     assert "errLabel: 'Reel error'" in js
 
 
+def test_save_timeline_has_catch_handler():
+    """The editor's Save handler used to have no .catch, so a network failure left
+    it stuck on 'Saving...' forever — the same class the other studio fetches fixed.
+    """
+    js = _studio_js()
+    assert "The timeline may not have saved" in js
+
+
+def test_make_clip_button_guards_double_submit():
+    """A double-click on 'Make clip' must not create duplicate projects. Analysis
+    runs through the shared ``runVideoJob`` runner, which disables the triggering
+    button for the whole polled run and only restores it once the job settles — so
+    a second click can't fire a second clip-maker request.
+    """
+    js = _studio_js()
+    assert "runVideoJob(btn, CLIPMAKER_URL + '-job'" in js  # wired through the guarded runner
+    assert "function runVideoJob(btn, jobUrl, body, panel, opts, onDone)" in js
+    assert "btn.disabled = true" in js  # disabled for the whole run
+    assert "if(btn){ btn.disabled=false;" in js  # restored only on settle
+
+
 def test_no_error_alert_in_studio():
     js = _studio_js()
     # The three named error alert()s (permission change, render, load-clip) are gone.

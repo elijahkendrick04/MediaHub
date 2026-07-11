@@ -45,6 +45,36 @@ def test_edit_cue_text_is_immutable():
     assert t["cues"][1]["text"] == "PB"  # original untouched
 
 
+def test_edit_cue_text_drops_stale_karaoke_words():
+    """On a karaoke cue the burned line comes from the per-word ``words`` stamps,
+    so a text edit must drop the now-mismatched words — otherwise the corrected
+    text is silently ignored and the old words stay on screen. caption_render then
+    renders the word-less cue as a still line of the new text.
+    """
+    from mediahub.video.caption_render import _karaoke_line
+
+    t = {
+        "style": "karaoke",
+        "cues": [
+            {
+                "from": 0,
+                "dur": 30,
+                "text": "New PB",
+                "words": [
+                    {"from": 0, "dur": 15, "text": "New"},
+                    {"from": 15, "dur": 15, "text": "PB"},
+                ],
+            }
+        ],
+    }
+    out = edit_cue_text(t, 0, "New club record")
+    assert out["cues"][0]["text"] == "New club record"
+    assert "words" not in out["cues"][0]  # stale per-word stamps dropped
+    # The renderer now burns the corrected text (word-less cue → still line).
+    assert "New club record" in _karaoke_line(out["cues"][0], fps=30)
+    assert t["cues"][0].get("words")  # original track untouched
+
+
 def test_retime_cue():
     out = retime_cue(_track(), 0, from_frame=10, dur_frames=45)
     assert out["cues"][0]["from"] == 10
@@ -72,7 +102,9 @@ def test_offset_track_shifts_cues_and_karaoke_words():
         "color": "#FFF",
         "scrim": "#000",
         "style": "karaoke",
-        "cues": [{"from": 10, "dur": 30, "text": "hi", "words": [{"from": 12, "dur": 8, "text": "hi"}]}],
+        "cues": [
+            {"from": 10, "dur": 30, "text": "hi", "words": [{"from": 12, "dur": 8, "text": "hi"}]}
+        ],
     }
     out = offset_track(t, 60)
     assert out["cues"][0]["from"] == 70
@@ -86,7 +118,12 @@ def test_offset_track_clamps_at_zero():
 
 
 def test_merge_tracks_concatenates_and_takes_first_style():
-    a = {"color": "#AAA", "scrim": "#111", "style": "karaoke", "cues": [{"from": 0, "dur": 10, "text": "a"}]}
+    a = {
+        "color": "#AAA",
+        "scrim": "#111",
+        "style": "karaoke",
+        "cues": [{"from": 0, "dur": 10, "text": "a"}],
+    }
     b = {"color": "#BBB", "scrim": "#222", "cues": [{"from": 100, "dur": 10, "text": "b"}]}
     merged = merge_tracks([a, None, b])
     assert [c["text"] for c in merged["cues"]] == ["a", "b"]
