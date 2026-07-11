@@ -172,3 +172,29 @@ def test_unknown_status_code_renders_no_banner(app_env):
         _signin(c)
         r = c.get("/settings/audio?status=not-a-real-code")
         assert r.status_code == 200
+
+
+class TestEarlyReturnsUseBanners:
+    def test_lexicon_post_without_org_lands_on_banner_not_json(self, app_env):
+        """SRV-4: the no_org early return goes through _audio_back_or_json —
+        a browser form POST gets the settings banner redirect, never JSON."""
+        with app_env.test_client() as c:
+            r = c.post("/api/audio/lexicon", data={"op": "set", "written": "A", "spoken": "ay"})
+            assert r.status_code == 302
+            assert "status=no_org" in (r.headers.get("Location") or "")
+
+    def test_voice_consent_post_without_org_lands_on_banner_not_json(self, app_env):
+        with app_env.test_client() as c:
+            r = c.post("/api/audio/voice-consent", data={"feature": "voice_clone"})
+            assert r.status_code == 302
+            assert "status=no_org" in (r.headers.get("Location") or "")
+
+    def test_no_raw_exception_detail_in_audio_errors(self):
+        """audio_unavailable responses never carry str(e) to the customer."""
+        from pathlib import Path
+
+        src = (
+            Path(__file__).resolve().parents[1] / "src" / "mediahub" / "web" / "web.py"
+        ).read_text(encoding="utf-8")
+        audio_region = src[src.index("def api_audio_library") : src.index("def api_audio_voice_consent")]
+        assert '"detail": str(e)' not in audio_region

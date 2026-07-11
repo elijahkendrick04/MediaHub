@@ -327,9 +327,76 @@ class TestPaginatedClientHonesty:
         assert "var pageScoped = !!document.querySelector('.mh-review-pager');" in _WEB_SRC
         assert "(pageScoped ? ' on this page' : '')" in _WEB_SRC
 
-    def test_tab_click_preserves_the_page_param(self):
-        """Rewriting ?wf= must not drop ?page=N — a reload jumped to page 1."""
+    def test_tab_click_url_stays_truthful(self):
+        """SRV-1: on a paginated run a tab click NAVIGATES (the server
+        re-filters and re-paginates; page resets to 1 because a new filter is
+        a new page universe). On single-page runs the client toggle keeps the
+        URL in sync via URLSearchParams, preserving any other params."""
+        assert "if (document.querySelector('.mh-review-pager')) {" in _WEB_SRC
+        assert "location.assign(location.pathname + (val ? ('?wf=' + encodeURIComponent(val)) : ''));" in _WEB_SRC
         assert "var qs = new URLSearchParams(location.search);" in _WEB_SRC
         assert "qs.set('wf', val)" in _WEB_SRC
-        # The old pathname-only rewrite (which dropped every other param) is gone.
-        assert "location.pathname + (val ? ('?wf='" not in _WEB_SRC
+
+
+# --------------------------------------------------------------------------- #
+# 6. SRV-1/SRV-2 — filtered pagination + exact-status recount deltas
+# --------------------------------------------------------------------------- #
+class TestFilteredPagination:
+    def test_wf_filtered_pages_hold_matching_cards(self, world):
+        """SRV-1: ?wf= slices pages from the MATCHING cards, so a filtered
+        multi-page run never renders mostly-empty pages whose cards live
+        elsewhere. Approve 30 of 60 → ?wf=approved paginates those 30."""
+        from mediahub.workflow.status import CardStatus
+
+        pid = _save_org(world)
+        _seed_run(world, "j3filt0001", profile_id=pid, n_cards=60)
+        ws = world.wm._get_wf_store()
+        for i in range(30):
+            ws.set_status("j3filt0001", f"sw{i:03d}", CardStatus.APPROVED)
+
+        html = _review(world, "j3filt0001", pid, "?wf=approved")
+        rows = _ach_list(html)
+        # Page 1 of the approved view: 25 approved cards, no queued ones.
+        assert html.count('class="ach-row"') == 25
+        assert 'data-status="queue"' not in rows
+        assert "Page 1 of 2" in html
+        assert "approved" in html.split('class="mh-review-pager"', 1)[1][:600]
+
+        html2 = _review(world, "j3filt0001", pid, "?wf=approved&page=2")
+        assert html2.count('class="ach-row"') == 5
+        assert 'data-status="queue"' not in _ach_list(html2)
+
+    def test_filtered_rows_keep_full_list_why_indices(self, world):
+        """The why-card index is the FULL ranked-list position even when the
+        filter skips rows — approving swimmers 0/2/4… must not renumber."""
+        from mediahub.workflow.status import CardStatus
+
+        pid = _save_org(world)
+        _seed_run(world, "j3filt0002", profile_id=pid, n_cards=30)
+        ws = world.wm._get_wf_store()
+        for i in (0, 2, 4):
+            ws.set_status("j3filt0002", f"sw{i:03d}", CardStatus.APPROVED)
+        html = _review(world, "j3filt0002", pid, "?wf=approved")
+        assert "/why/2" in html and "/why/4" in html
+        assert "/why/1?" not in html and '/why/1"' not in html
+
+    def test_paginated_tab_click_navigates_server_side(self, world):
+        """SRV-1 client half: with a pager present, a tab click navigates so
+        the server re-filters and re-paginates."""
+        src = _WEB_SRC
+        assert "if (document.querySelector('.mh-review-pager')) {" in src
+        assert (
+            "location.assign(location.pathname + (val ? ('?wf=' + encodeURIComponent(val)) : ''));"
+            in src
+        )
+
+
+class TestExactStatusRecount:
+    def test_pile_uses_exact_statuses(self):
+        """SRV-2: the recount deltas must count the same buckets the server
+        baselines count — no folding of edited/posted into queue."""
+        assert (
+            "function pile(s){ return (s === 'approved' || s === 'rejected' || s === 'queue') ? s : null; }"
+            in _WEB_SRC
+        )
+        assert "if (init) delta[init]--;" in _WEB_SRC

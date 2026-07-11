@@ -16503,14 +16503,21 @@ def _layout(
     // (data-wf-base-*) and apply the delta of status changes made on THIS
     // page (each row remembers its rendered status in data-status-initial).
     var total = parseInt(strip.getAttribute('data-wf-total'), 10) || rows.length || 0;
-    function pile(s){ return (s === 'approved' || s === 'rejected') ? s : 'queue'; }
+    // SRV-2: the server baselines (data-wf-base-*) count EXACT statuses, so
+    // the deltas must too. A card rendered as 'edited'/'posted' (set from the
+    // builder) is outside the three tracked piles — folding it into 'queue'
+    // here made approving it decrement a queue baseline that never held it.
+    function pile(s){ return (s === 'approved' || s === 'rejected' || s === 'queue') ? s : null; }
     var dom = {queue: 0, approved: 0, rejected: 0};
     var delta = {queue: 0, approved: 0, rejected: 0};
     rows.forEach(function(r){
       var st = pile(r.dataset.status);
-      dom[st]++;
+      if (st) dom[st]++;
       var init = pile(r.dataset.statusInitial || r.dataset.status);
-      if (init !== st) { delta[init]--; delta[st]++; }
+      if (init !== st) {
+        if (init) delta[init]--;
+        if (st) delta[st]++;
+      }
     });
     function base(name, fallback){
       var v = parseInt(strip.getAttribute('data-wf-base-' + name), 10);
@@ -22959,19 +22966,32 @@ def create_app() -> Flask:
   var kitSel  = document.getElementById('run-config-kit');
   var kitName = document.getElementById('mh-kit-choice-name');
   var kitSw   = document.getElementById('mh-kit-choice-sw');
-  function kitPaint() {{
+  function kitPaint(fromUser) {{
     if (!kitSel || !kitSel.options.length) return;
     var o = kitSel.options[kitSel.selectedIndex];
     if (!o) return;
     if (kitName) kitName.textContent = o.getAttribute('data-name') || o.textContent;
+    var cols = [o.getAttribute('data-primary'), o.getAttribute('data-secondary'), o.getAttribute('data-accent')];
     if (kitSw) {{
-      var cols = [o.getAttribute('data-primary'), o.getAttribute('data-secondary'), o.getAttribute('data-accent')];
       for (var i = 0; i < kitSw.children.length && i < 3; i++) {{
         if (cols[i]) kitSw.children[i].style.backgroundColor = cols[i];
       }}
     }}
+    // SRV-3: picking a kit must drive what the form actually SUBMITS — the
+    // run renders from these three colour inputs, while the kit id feeds
+    // the governance gates. Without this, "Away kit" rendered in the
+    // default kit's colours and the brand-lock then judged every card
+    // against the away kit's tokens. Only on a user change (never the
+    // initial paint, which would clobber a re-configured run's stored
+    // colours); the volunteer can still override the pickers afterwards.
+    if (fromUser) {{
+      if (pri && cols[0]) pri.value = cols[0];
+      if (sec && cols[1]) sec.value = cols[1];
+      if (acc && cols[2]) acc.value = cols[2];
+      paint();
+    }}
   }}
-  if (kitSel) {{ kitSel.addEventListener('change', kitPaint); kitPaint(); }}
+  if (kitSel) {{ kitSel.addEventListener('change', function(){{ kitPaint(true); }}); kitPaint(); }}
 
   // Colour-order tools — same idea as "Cycle colours" on organisation
   // setup, but scoped to this one run. Reset restores the official
@@ -24693,11 +24713,27 @@ def create_app() -> Flask:
         # only the rendered rows are sliced. Runs of 25 cards or fewer render
         # exactly as before (single page, no pager).
         _REVIEW_PAGE_SIZE = 25
+        # SRV-1: pages are sliced from the cards MATCHING the active workflow
+        # filter (tab badges stay full-run counts). Slicing the unfiltered
+        # list meant a filtered multi-page run rendered mostly-empty pages
+        # whose matching cards lived elsewhere. Each entry keeps its full-list
+        # index so the lazy why-card URLs stay stable under filtering.
+        _indexed_achs = list(enumerate(ranked_achs))
+        if _wf_filter:
+
+            def _row_wf_status(_ra: dict) -> str:
+                _cid = (_ra.get("achievement") or {}).get("swim_id", "")
+                _cst = _wf_states.get(_cid)
+                return _cst.status.value if _cst else "queue"
+
+            _indexed_achs = [
+                (_i, _ra) for _i, _ra in _indexed_achs if _row_wf_status(_ra) == _wf_filter
+            ]
         try:
             _pg = int(request.args.get("page", "1") or "1")
         except (TypeError, ValueError):
             _pg = 1
-        _n_pages = max(1, -(-len(ranked_achs) // _REVIEW_PAGE_SIZE))
+        _n_pages = max(1, -(-len(_indexed_achs) // _REVIEW_PAGE_SIZE))
         _pg = min(max(1, _pg), _n_pages)
         _pg_start = (_pg - 1) * _REVIEW_PAGE_SIZE
 
@@ -24727,7 +24763,13 @@ def create_app() -> Flask:
                 f'style="{_pg_btn_css};opacity:0.4;pointer-events:none">Next &rarr;</span>'
             )
             _pg_lo = _pg_start + 1
-            _pg_hi = min(_pg_start + _REVIEW_PAGE_SIZE, len(ranked_achs))
+            _pg_hi = min(_pg_start + _REVIEW_PAGE_SIZE, len(_indexed_achs))
+            # Say what the count counts when a filter narrows the pages.
+            _pg_noun = {
+                "queue": " in the queue",
+                "approved": " approved",
+                "rejected": " rejected",
+            }.get(_wf_filter, "")
             _pager_html = (
                 '<nav class="mh-review-pager" aria-label="Review pages" '
                 'style="display:flex;align-items:center;justify-content:center;'
@@ -24735,15 +24777,13 @@ def create_app() -> Flask:
                 f"{_prev_html}"
                 f'<span class="muted" style="font-size:12px;font-family:var(--font-mono)">'
                 f"Page {_pg} of {_n_pages} &middot; cards {_pg_lo}&ndash;{_pg_hi} "
-                f"of {len(ranked_achs)}</span>"
+                f"of {len(_indexed_achs)}{_pg_noun}</span>"
                 f"{_next_html}"
                 "</nav>"
             )
 
         ach_rows_html_wf = ""
-        for _why_idx, ra in enumerate(
-            ranked_achs[_pg_start : _pg_start + _REVIEW_PAGE_SIZE], start=_pg_start
-        ):
+        for _why_idx, ra in _indexed_achs[_pg_start : _pg_start + _REVIEW_PAGE_SIZE]:
             a = ra.get("achievement", {})
             band = ra.get("quality_band", "nice")
             prio = ra.get("priority", 0.0)
@@ -25349,8 +25389,17 @@ applyFilters();
   nav.addEventListener('click', function(ev) {{
     var tab = ev.target.closest('[data-wf-filter-to]');
     if (!tab || !nav.contains(tab)) return;
-    ev.preventDefault();           // no full reload — the kit moves the indicator
+    ev.preventDefault();
     var val = tab.getAttribute('data-wf-filter-to') || '';
+    // SRV-1: on a paginated run the pages are sliced server-side from the
+    // cards matching the active filter, so switching tabs needs the server
+    // to re-filter and re-paginate (page resets to 1). Single-page runs
+    // keep the instant client-side toggle — the kit just moves the
+    // indicator.
+    if (document.querySelector('.mh-review-pager')) {{
+      location.assign(location.pathname + (val ? ('?wf=' + encodeURIComponent(val)) : ''));
+      return;
+    }}
     list.setAttribute('data-wf-filter', val);
     try {{
       // JS-1: keep ?page=N (J-3 pagination) when rewriting ?wf= — dropping
@@ -31461,7 +31510,8 @@ self.addEventListener('fetch', function(e){
         try:
             from mediahub.audio import load_library
         except Exception as e:
-            return jsonify({"error": "audio_unavailable", "detail": str(e)}), 503
+            log.warning("audio backend unavailable: %s", e)
+            return jsonify({"error": "audio_unavailable"}), 503
         lib = load_library()
         tracks = lib.tracks(
             kind=(_req.args.get("kind") or None),
@@ -31481,7 +31531,8 @@ self.addEventListener('fetch', function(e){
         try:
             from mediahub.audio import load_library
         except Exception as e:
-            return jsonify({"error": "audio_unavailable", "detail": str(e)}), 503
+            log.warning("audio backend unavailable: %s", e)
+            return jsonify({"error": "audio_unavailable"}), 503
         track = load_library().get(track_id)
         if track is None or not Path(track.path).is_file():
             return jsonify({"error": "not_found"}), 404
@@ -31495,7 +31546,8 @@ self.addEventListener('fetch', function(e){
             from mediahub.audio import list_voices
             from mediahub.visual import voiceover as _vo
         except Exception as e:
-            return jsonify({"error": "audio_unavailable", "detail": str(e)}), 503
+            log.warning("audio backend unavailable: %s", e)
+            return jsonify({"error": "audio_unavailable"}), 503
         try:
             status = _vo.tts_provider_status()
         except Exception:
@@ -31514,13 +31566,16 @@ self.addEventListener('fetch', function(e){
 
         pid = _active_profile_id()
         if not pid:
-            return jsonify(
-                {"error": "no_org", "message": "Choose an organisation to manage a lexicon."}
-            ), 403
+            # SRV-4: a browser form POST must land on the banner, not raw JSON.
+            return _audio_back_or_json(
+                {"error": "no_org", "message": "Choose an organisation to manage a lexicon."},
+                403,
+            )
         try:
             from mediahub.audio.voice import OrgLexicon
         except Exception as e:
-            return jsonify({"error": "audio_unavailable", "detail": str(e)}), 503
+            log.warning("audio lexicon unavailable: %s", e)
+            return _audio_back_or_json({"error": "audio_unavailable"}, 503)
         lex = OrgLexicon(pid)
         if _req.method == "GET":
             return jsonify({"ok": True, "entries": lex.entries()})
@@ -31576,12 +31631,9 @@ self.addEventListener('fetch', function(e){
             from mediahub.audio import rights as _rights
             from mediahub.audio.library import Licence
         except Exception as e:
+            log.warning("audio upload backend unavailable: %s", e)
             return _audio_back_or_json(
-                {
-                    "error": "audio_unavailable",
-                    "detail": str(e),
-                    "message": "Audio isn't available.",
-                },
+                {"error": "audio_unavailable", "message": "Audio isn't available."},
                 503,
             )
 
@@ -31698,11 +31750,13 @@ self.addEventListener('fetch', function(e){
 
         pid = _active_profile_id()
         if not pid:
-            return jsonify({"error": "no_org"}), 403
+            # SRV-4: a browser form POST must land on the banner, not raw JSON.
+            return _audio_back_or_json({"error": "no_org"}, 403)
         try:
             from mediahub.audio.consent import FEATURES, ConsentStore
         except Exception as e:
-            return jsonify({"error": "audio_unavailable", "detail": str(e)}), 503
+            log.warning("audio consent store unavailable: %s", e)
+            return _audio_back_or_json({"error": "audio_unavailable"}, 503)
         store = ConsentStore()
         if _req.method == "GET":
             return jsonify(
@@ -31749,7 +31803,8 @@ self.addEventListener('fetch', function(e){
             from mediahub.audio import load_library
             from mediahub.audio.select import select_or_default
         except Exception as e:
-            return jsonify({"ok": False, "available": False, "detail": str(e)})
+            log.warning("audio library unavailable: %s", e)
+            return jsonify({"ok": False, "available": False})
         lib = load_library()
         mood = (_req.args.get("mood") or "").strip()
         kind = (_req.args.get("kind") or "music").strip()

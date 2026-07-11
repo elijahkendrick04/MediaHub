@@ -261,3 +261,22 @@ class TestResolvedKitForRun:
     def test_no_run_kit_json_at_all_uses_default(self, app_env):
         kit_id = self._check_kit_id(app_env, None)
         assert kit_id == "primary"
+
+
+class TestKitDrivesSubmittedColours:
+    def test_kit_change_writes_the_colour_inputs(self):
+        """SRV-3: picking a kit must update the three colour inputs the form
+        actually submits (the run renders from those), not just the preview
+        swatches — only on a user change, never the initial paint.
+        NOTE: this JS lives in an f-string region, so literal braces are
+        doubled in the source text."""
+        from pathlib import Path
+
+        src = (
+            Path(__file__).resolve().parents[1] / "src" / "mediahub" / "web" / "web.py"
+        ).read_text(encoding="utf-8")
+        assert "function kitPaint(fromUser) {{" in src
+        assert "if (pri && cols[0]) pri.value = cols[0];" in src
+        assert "if (sec && cols[1]) sec.value = cols[1];" in src
+        assert "if (acc && cols[2]) acc.value = cols[2];" in src
+        assert "kitSel.addEventListener('change', function(){{ kitPaint(true); }});" in src
