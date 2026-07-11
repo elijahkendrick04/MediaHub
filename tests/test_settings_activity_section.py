@@ -97,10 +97,13 @@ class TestLinkCard:
 
 
 class TestNoOrgState:
-    def test_degrades_gracefully_without_an_org(self, activity_client):
+    def test_bounces_to_onboarding_without_an_org(self, activity_client):
+        """With the org gate enforced and nothing pinned, Settings sub-pages
+        bounce into onboarding rather than rendering an empty shell. (The
+        renderer's own no-org branch is exercised where the gate is off —
+        see test_usability_g2_history_consolidation.py.)"""
         c, _ = activity_client
         resp = c.get("/settings/activity")
-        assert resp.status_code == 200
-        html = resp.get_data(as_text=True)
-        assert "No organisation pinned" in html
-        assert "Choose organisation" in html
+        assert resp.status_code == 302
+        loc = resp.headers.get("Location", "")
+        assert "sign-in" in loc or "organisation" in loc or loc == "/"
