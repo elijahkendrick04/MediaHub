@@ -313,4 +313,72 @@ def safe_fetch(
     return None  # too many redirects
 
 
-__all__ = ["safe_fetch", "is_url_safe", "resolve_safe_ip", "pinned_stream_get"]
+def html_bytes_to_text(body: bytes, content_type: str, max_chars: int) -> str:
+    """Decode + sanitise a fetched HTML/text body to plain text, capped.
+
+    Shares the same ``<script>``/``<style>``-stripping + charset decode the
+    ``safe_fetch`` text path uses, so a caller that already holds the raw bytes
+    (e.g. via :func:`safe_fetch_bytes`) can render them without a second fetch.
+    """
+    text = _html_to_text(_decode_body(body or b"", content_type or ""))
+    return text[: max(0, int(max_chars))] if text else ""
+
+
+def safe_fetch_bytes(
+    url: str,
+    *,
+    max_bytes: int = DEFAULT_MAX_BYTES,
+    timeout: float = DEFAULT_TIMEOUT,
+    max_hops: int = DEFAULT_MAX_HOPS,
+) -> Optional[tuple[str, bytes]]:
+    """SSRF-safe GET returning ``(content_type, capped_bytes)`` or ``None``.
+
+    Same defences as :func:`safe_fetch` — host re-validated on every redirect
+    hop, connection pinned to the validated IP, http(s)-only, bounded streaming
+    read, never raises — but hands back the raw bytes and the response
+    ``Content-Type`` so the caller can decide whether the URL is an HTML page
+    (sanitise via :func:`html_bytes_to_text`) or a document download (hand the
+    bytes to a document text extractor). ``None`` means blocked, failed, or
+    non-200.
+    """
+    pool = None
+    r = None
+    try:
+        r, pool = pinned_stream_get(url, timeout=timeout, max_hops=max_hops)
+        if int(r.status) != 200:
+            return None
+        ctype = r.headers.get("Content-Type") or r.headers.get("content-type") or ""
+        ctype = ctype.split(";")[0].strip().lower()
+        cap = max(1, int(max_bytes))
+        deadline = time.monotonic() + max(timeout * 3.0, timeout + 5.0)
+        chunks: list[bytes] = []
+        total = 0
+        for chunk in r.stream(_CHUNK_BYTES):
+            chunks.append(chunk)
+            total += len(chunk)
+            if total >= cap or time.monotonic() > deadline:
+                break
+        return ctype, b"".join(chunks)[:cap]
+    except Exception:
+        return None
+    finally:
+        if r is not None:
+            try:
+                r.close()
+            except Exception:
+                pass
+        if pool is not None:
+            try:
+                pool.close()
+            except Exception:
+                pass
+
+
+__all__ = [
+    "safe_fetch",
+    "safe_fetch_bytes",
+    "html_bytes_to_text",
+    "is_url_safe",
+    "resolve_safe_ip",
+    "pinned_stream_get",
+]

@@ -175,6 +175,10 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setattr(webmod, "DATA_DIR", tmp_path, raising=False)
     app = webmod.app
     app.config["TESTING"] = True
+    # The app is a module-level singleton; a sibling test may have left
+    # ENFORCE_CSRF set. Pin it off here (reverted after the test) so these
+    # form posts are not spuriously 403'd regardless of run order.
+    monkeypatch.setitem(app.config, "ENFORCE_CSRF", False)
 
     import mediahub.content_engine as ce
 
@@ -242,7 +246,7 @@ class TestApprovalPillCsrf:
         monkeypatch.setattr(webmod, "DATA_DIR", tmp_path, raising=False)
         app = webmod.app
         app.config["TESTING"] = True
-        app.config["ENFORCE_CSRF"] = True  # production-like
+        monkeypatch.setitem(app.config, "ENFORCE_CSRF", True)  # production-like (auto-reverted)
 
         from mediahub.web.club_profile import ClubProfile, save_profile
 
@@ -270,3 +274,184 @@ class TestApprovalPillCsrf:
             assert r_json.status_code == 200
             assert r_json.get_json()["status"] == "approved"
         assert (load_pack(pid)["cards"][0]["status"]) == "approved"
+
+
+# LENEX with two clubs (Rival SC first in document order, Otter SC second) —
+# the active org is "Otter SC" (see the client fixture), so the club-first
+# ordering must lift Otter's entrant above Rival's in the brief. (Audit F8.)
+_LENEX_2CLUB = (
+    b'<?xml version="1.0"?>'
+    b'<LENEX version="3.0"><MEETS><MEET name="County Champs" course="LCM"><CLUBS>'
+    b'<CLUB name="Rival SC"><ATHLETES><ATHLETE firstname="Tom" lastname="Rival" gender="M">'
+    b'<ENTRIES><ENTRY eventid="1" entrytime="00:59.80"/></ENTRIES></ATHLETE></ATHLETES></CLUB>'
+    b'<CLUB name="Otter SC"><ATHLETES><ATHLETE firstname="Eira" lastname="Hughes" gender="F">'
+    b'<ENTRIES><ENTRY eventid="1" entrytime="01:01.20"/></ENTRIES></ATHLETE></ATHLETES></CLUB>'
+    b"</CLUBS></MEET></MEETS></LENEX>"
+)
+
+
+class TestEventPreviewCaveatFixes:
+    """Second-pass audit: fixes for the caveats logged by the first pass."""
+
+    # F10 — the create page must carry a single <h1> (the hero's); the stub
+    # body no longer emits its own.
+    def test_no_duplicate_h1_on_form(self):
+        assert "<h1>" not in WeekendPreviewStub().render_stub_html()
+
+    # F12 — the ones-to-watch toggle is pure CSS (:has), so it degrades
+    # without JavaScript rather than trapping the manual panel behind an
+    # inline display:none only a script can undo.
+    def test_watch_toggle_is_css_and_degrades_without_js(self):
+        html = WeekendPreviewStub().render_form_html()
+        assert ":has(" in html
+        assert "pv-watch-group" in html
+        assert 'id="pv-watch-manual" style="display:none"' not in html
+        assert "mhPvWatchMode" not in html
+
+    # F15 — Event Preview copy uses plain hyphens, no em/en dashes.
+    def test_form_copy_uses_plain_hyphens(self):
+        html = WeekendPreviewStub().render_form_html()
+        assert "—" not in html and "–" not in html
+
+    # F8 — the brief keeps a generous slice of the entries text.
+    def test_brief_entries_cap_is_generous(self):
+        b = WeekendPreviewStub().generate_brief(
+            {"meet_name": "M", "watch_mode": "ai", "entries_text": "Z" * 12000}
+        )
+        assert b.count("Z") == 9000
+
+    # F8 — the active club's entrants are ordered first so they survive
+    # truncation on a big multi-club meet.
+    def test_active_club_entries_ordered_first(self, client):
+        import io
+
+        client.post(
+            "/weekend-preview",
+            data={
+                "meet_name": "County",
+                "watch_mode": "ai",
+                "entries_file": (io.BytesIO(_LENEX_2CLUB), "entries.lef"),
+            },
+            content_type="multipart/form-data",
+        )
+        brief = client._engine_calls[-1]["brief"]
+        assert "Eira Hughes" in brief and "Tom Rival" in brief
+        assert brief.index("Eira Hughes") < brief.index("Tom Rival")
+
+    # F7 — an entries URL that is a PDF (the common psych-sheet case) is
+    # routed through the document extractor, not reduced to HTML noise.
+    def test_entries_url_pdf_routed_through_extractor(self, client, monkeypatch):
+        import mediahub.brand.guidelines as gl
+        import mediahub.web_research.safe_fetch as sf
+
+        monkeypatch.setattr(
+            sf, "safe_fetch_bytes", lambda u, **k: ("application/pdf", b"%PDF-1.4 x")
+        )
+        monkeypatch.setattr(
+            gl, "extract_text", lambda fn, b: {"status": "ok", "text": "PDF ENTRIES Eira Hughes"}
+        )
+        client.post(
+            "/weekend-preview",
+            data={
+                "meet_name": "County",
+                "watch_mode": "ai",
+                "entries_url": "https://x.example/psych.pdf",
+            },
+        )
+        assert "PDF ENTRIES Eira Hughes" in client._engine_calls[-1]["brief"]
+
+    # F7 — an HTML entries page still works: tags/scripts stripped.
+    def test_entries_url_html_sanitized(self, client, monkeypatch):
+        import mediahub.web_research.safe_fetch as sf
+
+        monkeypatch.setattr(
+            sf,
+            "safe_fetch_bytes",
+            lambda u, **k: ("text/html", b"<b>Eira Hughes 100 Free</b><script>evil()</script>"),
+        )
+        client.post(
+            "/weekend-preview",
+            data={"meet_name": "County", "watch_mode": "ai", "entries_url": "https://x.example/e"},
+        )
+        b = client._engine_calls[-1]["brief"]
+        assert "Eira Hughes 100 Free" in b
+        assert "<script>" not in b and "evil" not in b
+
+    # F9 — a provided source we could not read is called out on the results
+    # page rather than silently dropped.
+    def test_unread_source_notice(self, client, monkeypatch):
+        import mediahub.web_research.safe_fetch as sf
+
+        monkeypatch.setattr(sf, "safe_fetch_bytes", lambda u, **k: None)
+        r = client.post(
+            "/weekend-preview",
+            data={"meet_name": "County Champs", "event_website_url": "https://dead.example/x"},
+        )
+        assert r.status_code == 200
+        assert b"event website link" in r.data
+        assert b"couldn" in r.data.lower()
+
+    # F11 — a non-provider engine failure returns an honest 5xx and persists
+    # no empty pack (was: HTTP 200 + a saved empty pack).
+    def test_generic_engine_error_returns_502_and_saves_no_pack(self, client, monkeypatch):
+        import mediahub.content_engine as ce
+        from mediahub.club_platform import stub_pack_store as sps
+
+        def _boom(**k):
+            raise ValueError("bad model json")
+
+        monkeypatch.setattr(ce, "generate_content", _boom)
+        before = len(sps.list_packs(limit=999))
+        r = client.post("/weekend-preview", data={"meet_name": "County"})
+        assert r.status_code == 502
+        assert len(sps.list_packs(limit=999)) == before
+
+    # F13 — the photo attachment must decode as a real image before it is
+    # stored; arbitrary bytes named .jpg are rejected.
+    def test_photo_upload_rejects_non_image(self, client):
+        import io
+
+        from mediahub.web import web as webmod
+
+        att = webmod.UPLOADS_DIR / "stub_attachments"
+        before = len(list(att.glob("*"))) if att.exists() else 0
+        client.post(
+            "/weekend-preview",
+            data={"meet_name": "County", "attached_photo": (io.BytesIO(b"not an image"), "x.jpg")},
+            content_type="multipart/form-data",
+        )
+        after = len(list(att.glob("*"))) if att.exists() else 0
+        assert after == before
+
+    def test_photo_upload_accepts_real_image(self, client):
+        import io
+
+        from PIL import Image
+
+        from mediahub.web import web as webmod
+
+        att = webmod.UPLOADS_DIR / "stub_attachments"
+        before = len(list(att.glob("*"))) if att.exists() else 0
+        buf = io.BytesIO()
+        Image.new("RGB", (4, 4), (200, 30, 30)).save(buf, "PNG")
+        buf.seek(0)
+        client.post(
+            "/weekend-preview",
+            data={"meet_name": "County", "attached_photo": (buf, "ok.png")},
+            content_type="multipart/form-data",
+        )
+        after = len(list(att.glob("*"))) if att.exists() else 0
+        assert after == before + 1
+
+    # F14 — the parse-entries helper bounds its work on a large upload.
+    def test_parse_entries_bounds_large_text(self, client):
+        import io
+
+        big = ("Sam Jones 100 Free 55.0\n" * 200000).encode()
+        r = client.post(
+            "/api/event-preview/parse-entries",
+            data={"file": (io.BytesIO(big), "e.txt")},
+            content_type="multipart/form-data",
+        )
+        assert r.status_code == 200
+        assert len(r.get_json()["entries_text"]) <= 20000
