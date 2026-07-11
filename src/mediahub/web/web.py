@@ -60145,7 +60145,13 @@ voice, and queues them for one-click approval.</p>
                 # shifts everything after it. Grade / caption-text edits don't.
                 def _shape(clips):
                     return [
-                        (c.source, c.in_ms, c.out_ms, c.transition_in.kind, c.transition_in.duration_ms)
+                        (
+                            c.source,
+                            c.in_ms,
+                            c.out_ms,
+                            c.transition_in.kind,
+                            c.transition_in.duration_ms,
+                        )
                         for c in clips
                     ]
 
