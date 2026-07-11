@@ -417,6 +417,112 @@ def test_edl_update_rejects_foreign_clip_source(app, tmp_path):
         assert ok.get_json()["project"]["edl"]["clips"][0]["out_ms"] == 2000
 
 
+def test_edl_edit_retimes_captions_on_reorder(app):
+    """F-14: burned caption cues are frame-indexed to the timeline they were built
+    on, so a reorder used to leave them drifting onto the wrong clip. On save the
+    cues must follow their source clip to its new place on the timeline.
+    """
+    from mediahub.video.edl import EDL, Clip, Transition
+    from mediahub.video.projects import VideoProject, get_store
+
+    application, _ = app
+    cut = Transition("cut", 0)
+    track = {
+        "color": "#FFFFFF",
+        "scrim": "#0A2540",
+        "cues": [
+            {"from": 10, "dur": 20, "text": "A line"},  # in clip A (timeline 0)
+            {"from": 100, "dur": 20, "text": "B line"},  # in clip B (offset 90f @30fps)
+        ],
+    }
+    old = EDL(
+        fps=30,
+        clips=[
+            Clip(source="a.mp4", in_ms=0, out_ms=3000, transition_in=cut),
+            Clip(source="b.mp4", in_ms=0, out_ms=3000, transition_in=cut),
+        ],
+        captions=track,
+    )
+    store = get_store()
+    proj = store.save(VideoProject(id="", profile_id="alpha", edl=old))
+
+    # Reorder: B first, A second (same sources → passes the source-binding guard).
+    reordered = EDL(
+        fps=30,
+        clips=[
+            Clip(source="b.mp4", in_ms=0, out_ms=3000, transition_in=cut),
+            Clip(source="a.mp4", in_ms=0, out_ms=3000, transition_in=cut),
+        ],
+        captions=track,
+    )
+    with application.test_client() as c:
+        _pin(c, "alpha")
+        r = c.post(f"/api/video/projects/{proj.id}", json={"edl": reordered.to_dict()})
+        assert r.status_code == 200
+        cues = c.get(f"/api/video/projects/{proj.id}").get_json()["project"]["edl"]["captions"][
+            "cues"
+        ]
+        by_text = {cue["text"]: cue["from"] for cue in cues}
+        assert by_text["B line"] == 10  # B moved to the front
+        assert by_text["A line"] == 100  # A moved to second (offset 90 + local 10)
+
+
+def test_edl_text_only_edit_leaves_caption_timing_untouched(app):
+    """A caption text/grade edit that doesn't change the clip structure must not
+    perturb cue timing — the render stays byte-identical.
+    """
+    from mediahub.video.edl import EDL, Clip, Transition
+    from mediahub.video.projects import VideoProject, get_store
+
+    application, _ = app
+    cut = Transition("cut", 0)
+    track = {"color": "#FFF", "scrim": "#000", "cues": [{"from": 42, "dur": 20, "text": "old"}]}
+    edl = EDL(
+        fps=30,
+        clips=[Clip(source="a.mp4", in_ms=0, out_ms=3000, transition_in=cut)],
+        captions=track,
+    )
+    store = get_store()
+    proj = store.save(VideoProject(id="", profile_id="alpha", edl=edl))
+
+    edited = {"color": "#FFF", "scrim": "#000", "cues": [{"from": 42, "dur": 20, "text": "new"}]}
+    new_edl = EDL(
+        fps=30,
+        clips=[Clip(source="a.mp4", in_ms=0, out_ms=3000, transition_in=cut)],
+        captions=edited,
+    )
+    with application.test_client() as c:
+        _pin(c, "alpha")
+        r = c.post(f"/api/video/projects/{proj.id}", json={"edl": new_edl.to_dict()})
+        assert r.status_code == 200
+        cue = c.get(f"/api/video/projects/{proj.id}").get_json()["project"]["edl"]["captions"][
+            "cues"
+        ][0]
+        assert cue["from"] == 42 and cue["text"] == "new"  # timing intact, text updated
+
+
+def test_clip_maker_undecodable_clip_is_422_not_500(app, tmp_path):
+    """F-15: an undecodable upload (junk bytes with a video extension) probes to
+    nothing. Clip-Maker must reject it with a clean 422 instead of building a
+    0-duration timeline that 500s at render. Needs a real FFmpeg to probe.
+    """
+    if not _ffmpeg_exe():
+        pytest.skip("undecodable-clip guard needs a real FFmpeg to probe")
+    application, _ = app
+    with application.test_client() as c:
+        _pin(c, "alpha")
+        up = c.post(
+            "/api/video/footage",
+            data={"file": (Path(__file__).open("rb"), "junk.mp4")},
+            content_type="multipart/form-data",
+        )
+        assert up.status_code == 200, up.get_json()
+        asset_id = up.get_json()["asset"]["id"]
+        r = c.post("/api/video/clip-maker", json={"asset_id": asset_id, "format": "story"})
+        assert r.status_code == 422, r.get_json()
+        assert r.get_json()["error"] == "undecodable_clip"
+
+
 def test_export_download_name_with_newline_does_not_500(app, tmp_path):
     """Regression: send_file writes the project name into the Content-Disposition
     header; werkzeug raises on a header value containing a newline, so a project
