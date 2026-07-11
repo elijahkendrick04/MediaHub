@@ -48,7 +48,8 @@ def test_athlete_rights_table_wrapped(client):
 
 
 def test_consent_registry_table_wrapped(client):
-    html = client.get("/organisation/consent").get_data(as_text=True)
+    # G-9 moved the registry to /athletes?tab=records; the old URL redirects.
+    html = client.get("/organisation/consent", follow_redirects=True).get_data(as_text=True)
     assert "mh-table-scroll" in html
 
 

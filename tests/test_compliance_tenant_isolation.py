@@ -48,9 +48,12 @@ def test_consent_records_stay_in_own_tenant(client, tmp_path):
 
     assert ConsentRegistry("org-a").get("Athlete A") is not None
     assert ConsentRegistry("org-b").get("Athlete A") is None
-    # B's page never shows A's athlete
+    # B's page never shows A's athlete (G-9: the registry now renders on
+    # /athletes?tab=records — follow the redirect so the table is actually
+    # rendered, not just the 302 body)
     _pin(client, "org-b")
-    page = client.get("/organisation/consent")
+    page = client.get("/organisation/consent", follow_redirects=True)
+    assert page.status_code == 200
     assert b"Athlete A" not in page.data
 
 
