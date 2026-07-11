@@ -35341,15 +35341,31 @@ function copySpotlightCaption(btn) {{
                 ext = Path(photo.filename).suffix.lower() or ".jpg"
                 if ext not in (".jpg", ".jpeg", ".png", ".webp", ".gif"):
                     ext = ".jpg"
-                att_dir = UPLOADS_DIR / "stub_attachments"
-                att_dir.mkdir(parents=True, exist_ok=True)
-                dest = att_dir / f"{_uuid.uuid4().hex[:16]}{ext}"
+                # Validate the bytes decode as a real image before storing —
+                # an extension whitelist alone would let arbitrary content land
+                # on disk as a .jpg and reach the downstream visual generator.
+                _photo_bytes = photo.read() or b""
+                _photo_ok = False
                 try:
-                    photo.save(str(dest))
-                    form_data["attached_photo_path"] = str(dest)
-                    form_data["attached_photo_filename"] = Path(photo.filename).name
+                    import io as _io_img
+
+                    from PIL import Image as _PILImg
+
+                    with _PILImg.open(_io_img.BytesIO(_photo_bytes)) as _im:
+                        _im.verify()
+                    _photo_ok = True
                 except Exception:
-                    app.logger.exception("stub photo upload failed")
+                    app.logger.warning("stub photo upload rejected: not a decodable image")
+                if _photo_ok:
+                    att_dir = UPLOADS_DIR / "stub_attachments"
+                    att_dir.mkdir(parents=True, exist_ok=True)
+                    dest = att_dir / f"{_uuid.uuid4().hex[:16]}{ext}"
+                    try:
+                        dest.write_bytes(_photo_bytes)
+                        form_data["attached_photo_path"] = str(dest)
+                        form_data["attached_photo_filename"] = Path(photo.filename).name
+                    except Exception:
+                        app.logger.exception("stub photo upload failed")
 
             # Media-library picks — strictly profile-scoped. Resolve each
             # selected asset id against the active profile only; foreign ids
@@ -35403,26 +35419,77 @@ function copySpotlightCaption(btn) {{
             # uploaded meet pack, and the entries source so the AI can work
             # out what the event IS and pick ones-to-watch from REAL
             # entries. All best-effort — a dead link or unreadable file
-            # just means that source contributes nothing.
+            # is noted in _pv_unread so the results page can say so rather
+            # than silently dropping it.
+            _pv_unread: list[str] = []
             if stub_cls_name == "WeekendPreviewStub":
+                # Resolve the active club up front so the LENEX path can order
+                # THIS club's entries first — they must survive truncation on a
+                # big multi-club meet.
+                _pv_club = ""
+                try:
+                    _pv_prof = _active_profile()
+                    if _pv_prof is not None:
+                        _pv_club = (_pv_prof.display_name or "").strip()
+                        form_data["club_name"] = _pv_prof.display_name
+                except Exception:
+                    app.logger.exception("event preview: active profile lookup failed")
                 try:
                     from mediahub.brand.guidelines import extract_text as _doc_text
-                    from mediahub.web_research.safe_fetch import safe_fetch as _sfetch
 
-                    # Bound each fetch tightly: this runs synchronously inside
-                    # the request, and two links plus the LLM call must finish
-                    # well inside the worker timeout. A slow or hostile host
-                    # gets a short leash rather than stalling the worker.
+                    def _pv_url_text(_u: str, _cap: int) -> str:
+                        """Extract text from a URL, handling BOTH HTML pages and
+                        document downloads (PDF / Word / RTF). A psych-sheet or
+                        entries link is usually a PDF, which the plain HTML text
+                        path reduces to noise — route those through the document
+                        extractor instead. SSRF-safe (safe_fetch_bytes pins the
+                        validated IP and re-checks every redirect hop)."""
+                        from mediahub.web_research.safe_fetch import (
+                            html_bytes_to_text as _h2t,
+                            safe_fetch_bytes as _sfb,
+                        )
+
+                        _got = _sfb(_u, max_bytes=4 * 1024 * 1024, timeout=6.0, max_hops=2)
+                        if not _got:
+                            return ""
+                        _ct, _body = _got
+                        _is_pdf = _ct == "application/pdf" or _body[:5] == b"%PDF-"
+                        _is_doc = (
+                            _is_pdf
+                            or "officedocument" in _ct
+                            or _ct
+                            in (
+                                "application/msword",
+                                "application/rtf",
+                                "text/rtf",
+                            )
+                        )
+                        if _is_doc:
+                            from pathlib import Path as _P
+                            from urllib.parse import urlparse as _urlp
+
+                            _fn = _P(_urlp(_u).path).name or "download"
+                            if _is_pdf and not _fn.lower().endswith(".pdf"):
+                                _fn = (_fn or "download") + ".pdf"
+                            try:
+                                _r = _doc_text(_fn, _body)
+                                if _r.get("status") == "ok" and (_r.get("text") or "").strip():
+                                    return _r["text"][:_cap]
+                            except Exception:
+                                app.logger.exception("event preview: URL document extract failed")
+                            return ""  # a document we could not read
+                        return _h2t(_body, _ct, _cap)
+
                     _site_url = (form_data.get("event_website_url") or "").strip()
                     if _site_url:
-                        _site_text = _sfetch(_site_url, max_chars=8000, timeout=6.0, max_hops=2)
-                        if _site_text:
-                            form_data["event_site_text"] = _site_text
+                        _t = _pv_url_text(_site_url, 8000)
+                        if _t:
+                            form_data["event_site_text"] = _t
                     _entries_url = (form_data.get("entries_url") or "").strip()
                     if _entries_url:
-                        _etext = _sfetch(_entries_url, max_chars=20000, timeout=6.0, max_hops=2)
-                        if _etext:
-                            form_data["entries_text"] = _etext
+                        _t = _pv_url_text(_entries_url, 20000)
+                        if _t:
+                            form_data["entries_text"] = _t
                     for _field, _key, _cap in (
                         ("event_pack", "event_pack_text", 8000),
                         ("entries_file", "entries_text", 20000),
@@ -35459,6 +35526,17 @@ function copySpotlightCaption(btn) {{
                                                 form_data["meet_name"] = _ln_meet.meet_name
                                         except Exception:
                                             pass
+                                    # F8: order the active club's entries first so
+                                    # the club we are previewing survives the
+                                    # brief's truncation on a big multi-club meet.
+                                    if _pv_club and _rows:
+                                        _cl = _pv_club.lower()
+                                        _rows = sorted(
+                                            _rows,
+                                            key=lambda _r: 0
+                                            if _cl in (_r.get("club") or "").lower()
+                                            else 1,
+                                        )
                                     _lines = []
                                     for _r in _rows:
                                         _bits = [
@@ -35485,11 +35563,28 @@ function copySpotlightCaption(btn) {{
                                 continue
                             if _res.get("status") == "ok" and (_res.get("text") or "").strip():
                                 form_data[_key] = _res["text"][:_cap]
-                    _pv_prof = _active_profile()
-                    if _pv_prof is not None:
-                        form_data["club_name"] = _pv_prof.display_name
                 except Exception:
                     app.logger.exception("event preview enrichment failed")
+                # F9: note any source the user PROVIDED but we could not read,
+                # so the results page can say so instead of silently dropping it.
+                if (form_data.get("event_website_url") or "").strip() and not (
+                    form_data.get("event_site_text") or ""
+                ).strip():
+                    _pv_unread.append("the event website link")
+                _ef = request.files.get("entries_file")
+                _entries_given = bool(
+                    (form_data.get("entries_url") or "").strip()
+                    or (_ef and getattr(_ef, "filename", ""))
+                )
+                if _entries_given and not (form_data.get("entries_text") or "").strip():
+                    _pv_unread.append("the entries source")
+                _pf = request.files.get("event_pack")
+                if (
+                    _pf
+                    and getattr(_pf, "filename", "")
+                    and not (form_data.get("event_pack_text") or "").strip()
+                ):
+                    _pv_unread.append("the meet pack")
                 # Reject an empty submission: with no event name, no readable
                 # website/pack/entries text, and no typed ones-to-watch, the
                 # model would have nothing to ground on and would guess. Ask
@@ -35506,14 +35601,13 @@ function copySpotlightCaption(btn) {{
                         primary_cta=("Back to Event Preview", url_for(route_endpoint)),
                         code=400,
                     )
-            generation_error = None
             try:
                 cards_payload = stub.generate_cards(form_data)
             except Exception as e:
                 app.logger.exception("stub generate_cards failed")
-                cards_payload = {"cards": []}
-                generation_error = str(e)
-                # Show the actual error to the user — no silent fake card.
+                # Show the actual error to the user — no silent fake card, and
+                # do NOT fall through to persist an empty pack + a misleading
+                # "success" shell with HTTP 200.
                 from mediahub.ai_core import (
                     ProviderNotConfigured,
                     ProviderError,
@@ -35544,6 +35638,19 @@ function copySpotlightCaption(btn) {{
                         secondary_cta=("Back to Create", url_for("make_page")),
                         code=502,
                     )
+                # Any other engine failure (e.g. malformed model JSON): honest
+                # error, no empty pack persisted.
+                return _recovery_page(
+                    "Couldn't generate your draft",
+                    (
+                        "Something went wrong while writing the cards. This is "
+                        "usually temporary — try again in a moment, or simplify "
+                        "the input."
+                    ),
+                    primary_cta=("Try again", url_for(route_endpoint)),
+                    secondary_cta=("Back to Create", url_for("make_page")),
+                    code=502,
+                )
             # Persist this pack so it survives refresh + is exportable.
             saved = None
             try:
@@ -35601,6 +35708,25 @@ function copySpotlightCaption(btn) {{
                         "markup drifted; View-&-export actions were not injected"
                     )
                 body = _new_body
+            # F9: if the user provided a source we could not read, say so on
+            # the results page rather than silently building the preview
+            # without it. Only shown when cards were actually generated.
+            if _pv_unread and (cards_payload.get("cards") or []):
+                if len(_pv_unread) == 1:
+                    _srcs, _it = _pv_unread[0], "it"
+                else:
+                    _srcs = ", ".join(_pv_unread[:-1]) + " and " + _pv_unread[-1]
+                    _it = "them"
+                _notice = (
+                    '<div role="status" style="margin-bottom:16px;padding:12px 14px;'
+                    "border:1px solid rgba(255,180,84,0.45);border-radius:8px;"
+                    "background:rgba(255,180,84,0.08);font-size:13px;line-height:1.5;"
+                    'color:var(--ink)">'
+                    f"We couldn&rsquo;t read {_h(_srcs)}, so the preview was built without "
+                    f"{_it}. For entries, the organiser&rsquo;s LENEX (.lef / .lxf) export "
+                    "or a pasted list reads most reliably.</div>"
+                )
+                body = _notice + body
             if _graphic_api_base:
                 body += _VISUAL_PANEL_JS
             return _layout(title, body, active=active_tab)
@@ -62413,14 +62539,17 @@ voice, and queues them for one-click approval.</p>
                 entries_text = "\n".join(lines)
                 n_rows = len(rows)
             else:
-                text = data.decode("utf-8", errors="replace")
+                # Bound the intermediate work: decode at most ~2 MB (well beyond
+                # any real entries list) so a large text upload — allowed up to
+                # the 50 MB request cap — can't build a giant line list in RAM.
+                text = data[:2_000_000].decode("utf-8", errors="replace")
                 cleaned = [ln.strip() for ln in text.splitlines() if ln.strip()]
                 if not cleaned:
                     return jsonify(
                         {"ok": False, "error": "Couldn't read any entries from that file."}
                     ), 422
-                entries_text = "\n".join(cleaned[:400])
                 n_rows = len(cleaned)
+                entries_text = "\n".join(cleaned[:400])[:20000]
         except Exception:
             log.warning("entry-file parse failed", exc_info=True)
             return jsonify(

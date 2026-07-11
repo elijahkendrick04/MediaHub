@@ -166,10 +166,12 @@ class _StubContentType:
                 break
         if not injected:
             form_html = form_html.replace("</form>", _PHOTO_INPUT_HTML + "</form>", 1)
+        # No <h1> here: every stub page is preceded by the editorial hero
+        # (``_stub_hero``) which already carries the page's single <h1> and a
+        # lede, so repeating the title + description would give the page two
+        # competing <h1>s and restate the same blurb. The "What you'll need"
+        # card keeps the input contract, which the hero does not cover.
         return f"""
-<h1>{_h(meta.title)}</h1>
-<p class="dim">{_h(meta.description)}</p>
-
 <div class="card">
   <h2>What you'll need</h2>
   <p style="font-size:14px;color:var(--ink-dim);line-height:1.6">{_h(meta.input_contract)}</p>
@@ -201,15 +203,22 @@ class WeekendPreviewStub(_StubContentType):
 
     def render_form_html(self) -> str:
         return """
+<style>
+  /* Ones-to-watch toggle is pure CSS via :has(), so it works with JavaScript
+     disabled. Where :has() is unsupported, both panels stay visible and remain
+     usable - the brief accepts either an entries source or a typed list. */
+  .pv-watch-group:has(input[name="watch_mode"][value="ai"]:checked) #pv-watch-manual { display: none; }
+  .pv-watch-group:has(input[name="watch_mode"][value="manual"]:checked) #pv-watch-ai { display: none; }
+</style>
 <div class="card">
   <h2>Tell us about the event</h2>
   <p class="dim" style="font-size:13px">All you need is the event name. Add the event's
-  website or its meet pack and the AI reads them to work out exactly what the event is —
-  dates, venue, level, format — before it writes a word.</p>
+  website or its meet pack and the AI reads them to work out exactly what the event is:
+  dates, venue, level and format, before it writes a word.</p>
   <form method="POST" enctype="multipart/form-data" data-loader-text="Reading the event"
         data-loader-sub="Fetching links, reading the pack, picking the ones to watch…" style="margin-top:16px">
     <div style="margin-bottom:14px">
-      <label for="pv-meet-name">Event name <span class="muted" style="font-size:11px">(optional if you attach the entry file — it names the meet)</span></label>
+      <label for="pv-meet-name">Event name <span class="muted" style="font-size:11px">(optional if you attach the entry file - it names the meet)</span></label>
       <input id="pv-meet-name" type="text" name="meet_name" placeholder="e.g. County Championships"/>
     </div>
     <div style="margin-bottom:14px">
@@ -217,33 +226,33 @@ class WeekendPreviewStub(_StubContentType):
       <input id="pv-event-website" type="url" name="event_website_url" placeholder="https://…"/>
     </div>
     <div style="margin-bottom:14px">
-      <label for="pv-event-pack">Meet pack / event pack <span class="muted" style="font-size:11px">(optional — PDF, Word, text)</span></label>
+      <label for="pv-event-pack">Meet pack / event pack <span class="muted" style="font-size:11px">(optional - PDF, Word, text)</span></label>
       <input id="pv-event-pack" type="file" name="event_pack" accept=".pdf,.docx,.txt,.md,.markdown,.rtf,.html,.htm"/>
     </div>
 
-    <div style="margin-bottom:14px;padding:14px;background:rgba(34,211,238,0.04);border:1px solid var(--border);border-radius:8px">
+    <div class="pv-watch-group" style="margin-bottom:14px;padding:14px;background:rgba(34,211,238,0.04);border:1px solid var(--border);border-radius:8px">
       <div style="font-weight:700;margin-bottom:4px">Ones to watch</div>
       <p class="dim" style="font-size:12px;margin:0 0 10px 0">Who should the preview spotlight?</p>
       <div style="display:flex;gap:16px;margin-bottom:12px;flex-wrap:wrap">
         <label style="display:inline-flex;gap:6px;align-items:center;font-weight:400;margin:0">
-          <input type="radio" name="watch_mode" value="ai" checked onchange="mhPvWatchMode()"/> The AI finds them from the entries
+          <input type="radio" name="watch_mode" value="ai" checked/> The AI finds them from the entries
         </label>
         <label style="display:inline-flex;gap:6px;align-items:center;font-weight:400;margin:0">
-          <input type="radio" name="watch_mode" value="manual" onchange="mhPvWatchMode()"/> I&rsquo;ll type them myself
+          <input type="radio" name="watch_mode" value="manual"/> I&rsquo;ll type them myself
         </label>
       </div>
       <div id="pv-watch-ai">
         <label for="pv-entries-url">Link to the entries / psych sheet <span class="muted" style="font-size:11px">(optional)</span></label>
         <input id="pv-entries-url" type="url" name="entries_url" placeholder="https://… (accepted entries list)"/>
-        <label for="pv-entries-file" style="margin-top:10px">Or upload an entries file <span class="muted" style="font-size:11px">(optional — the organiser&rsquo;s entry file (.lef / .lxf), PDF, Word, CSV, text)</span></label>
+        <label for="pv-entries-file" style="margin-top:10px">Or upload an entries file <span class="muted" style="font-size:11px">(optional - the organiser&rsquo;s entry file (.lef / .lxf), PDF, Word, CSV, text)</span></label>
         <input id="pv-entries-file" type="file" name="entries_file" accept=".lef,.lxf,.pdf,.docx,.txt,.csv,.md,.html,.htm"/>
         <p class="muted" style="font-size:11px;margin:8px 0 0 0">The AI reads the entries and picks your club&rsquo;s
-        ones to watch — name, events, and a factual one-line reason each. It only ever names athletes
+        ones to watch: name, events, and a factual one-line reason each. It only ever names athletes
         who actually appear in the entries.</p>
       </div>
-      <div id="pv-watch-manual" style="display:none">
+      <div id="pv-watch-manual">
         <label for="pv-athletes">Athletes to watch (one per line)</label>
-        <textarea id="pv-athletes" name="athletes" rows="4" placeholder="Sam Jones — 200 Free&#10;Alex Smith — 100 Back"></textarea>
+        <textarea id="pv-athletes" name="athletes" rows="4" placeholder="Sam Jones - 200 Free&#10;Alex Smith - 100 Back"></textarea>
       </div>
     </div>
 
@@ -253,17 +262,7 @@ class WeekendPreviewStub(_StubContentType):
     </div>
     <button type="submit" class="btn">Generate preview cards →</button>
   </form>
-</div>
-<script>
-function mhPvWatchMode() {
-  var ai = document.querySelector('input[name="watch_mode"][value="ai"]');
-  var aiPanel = document.getElementById('pv-watch-ai');
-  var manPanel = document.getElementById('pv-watch-manual');
-  var isAi = !!(ai && ai.checked);
-  if (aiPanel) aiPanel.style.display = isAi ? '' : 'none';
-  if (manPanel) manPanel.style.display = isAi ? 'none' : '';
-}
-</script>"""
+</div>"""
 
     def generate_brief(self, form_data: dict) -> str:
         # Cap the free-text user fields the same way the extracted website /
@@ -292,8 +291,11 @@ function mhPvWatchMode() {
         if watch_mode == "ai" and entries_text:
             who = f" for {club}" if club else " for our club"
             parts.append(
+                # Cap generously: the route orders the active club's entries
+                # first, so the club we are previewing survives truncation even
+                # on a large multi-club meet.
                 "Accepted entries (extracted text):\n"
-                + entries_text[:6000]
+                + entries_text[:9000]
                 + "\n\nFrom these entries, pick the strongest ones to watch"
                 + who
                 + " — name, event(s), and a one-line factual reason each. "
