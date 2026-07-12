@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-07-12 · `625ac141b` · Merge pull request #1179 from elijahkendrick04/claude/caption-generator-audit-j30c01
+**Last updated:** 2026-07-12 · `8c92cd6e2` · Add ⌘K command palette + engagement/findability upgrades across the app (#1187)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1226,6 +1226,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-07-12 | `bfd951d49` | Add ⌘K command palette + engagement/findability upgrades across the app |
 | 2026-07-12 | `7e29921aa` | Wire per-platform variants, reachable variant picker, and caption persistence |
 | 2026-07-12 | `ed957955b` | docs: add deep code review & improvement backlog (2026-07) |
 | 2026-07-11 | `428e0d9a1` | Vary the shared kicker signature across archetypes |
@@ -1236,6 +1237,4 @@ list and the auto table below, not here.
 | 2026-07-11 | `c47966be0` | style: satisfy ruff-format in caption_assist |
 | 2026-07-11 | `0d023dbf6` | Apply ruff-format normalization (quote style + line wrap) |
 | 2026-07-11 | `32682f562` | Strengthen and unify the caption-generator quality guardrails |
-| 2026-07-11 | `970777830` | Clarify the signed-out home page above the fold |
-| 2026-07-11 | `9793db3f2` | Align not-ready-panel test with new copy; refresh README test count |
 <!-- /ROADMAP:ACTIVITY -->
