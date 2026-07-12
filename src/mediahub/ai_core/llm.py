@@ -83,6 +83,11 @@ class ToolConversation:
     text: str
     provider: str = ""
     tool_calls: list[ToolCallRecord] = field(default_factory=list)
+    # True when the round cap was hit before the model produced a final answer.
+    # Downstream (deep_research / free-text chat) must branch on this flag rather
+    # than substring-sniffing the "still gathering evidence" sentence — a real
+    # answer that happens to contain that phrase must NOT be discarded.
+    exhausted: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -286,6 +291,7 @@ def _ask_claude_with_tools(
             results.append({"type": "tool_result", "tool_use_id": tu["id"], "content": r})
         messages.append({"role": "user", "content": results})
     convo.text = "(Claude is still gathering evidence; try a smaller question.)"
+    convo.exhausted = True
     return convo
 
 
@@ -504,6 +510,7 @@ def _ask_gemini_with_tools(
             )
         contents.append({"role": "user", "parts": tool_response_parts})
     convo.text = "(Gemini is still gathering evidence; try a smaller question.)"
+    convo.exhausted = True
     return convo
 
 
@@ -634,6 +641,7 @@ def _ask_openai_with_tools(
             )
             messages.append({"role": "tool", "tool_call_id": tc.get("id", ""), "content": r_str})
     convo.text = "(the model is still gathering evidence; try a smaller question.)"
+    convo.exhausted = True
     return convo
 
 
@@ -765,13 +773,25 @@ def ask_with_tools(
             "Contact your administrator."
         )
     last_err: Optional[Exception] = None
+    tool_calls_made = 0
+
+    def _counting_tool_call(name: str, inp: dict) -> str:
+        nonlocal tool_calls_made
+        tool_calls_made += 1
+        return on_tool_call(name, inp)
+
     for p in chain:
         try:
-            return _DISPATCH[p][1](system, user, tools, on_tool_call, max_tokens, max_rounds)
+            return _DISPATCH[p][1](system, user, tools, _counting_tool_call, max_tokens, max_rounds)
         except ProviderError as e:
             last_err = e
             transient = e.transient if e.transient is not None else _is_transient(str(e))
-            if not transient or p == chain[-1]:
+            # Never fail over to another provider once a tool call has already run:
+            # on_tool_call has lasting side effects (copilot applies + audit-logs
+            # ops; free-text chat appends to research_log) that would REPLAY on the
+            # fresh-provider restart. Only a first-request failure (no tools yet)
+            # may retry elsewhere.
+            if not transient or p == chain[-1] or tool_calls_made > 0:
                 raise
             log.warning("provider %s transient tool error, falling through: %s", p, str(e)[:200])
             continue

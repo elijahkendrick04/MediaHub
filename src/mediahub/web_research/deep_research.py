@@ -34,7 +34,6 @@ log = logging.getLogger(__name__)
 
 DEFAULT_MAX_ROUNDS = 4
 DEFAULT_MAX_TOKENS = 1200
-_INCOMPLETE_MARKER = "still gathering evidence"
 
 _SYSTEM = (
     "You are a meticulous web researcher. Answer the user's question using ONLY "
@@ -159,7 +158,9 @@ def deep_research(
         provider=provider,
     )
     answer = (convo.text or "").strip()
-    complete = bool(answer) and _INCOMPLETE_MARKER not in answer.lower()
+    # Completeness is the round-cap flag, not a substring of the answer — a real
+    # answer that merely contains "still gathering evidence" must not be discarded.
+    complete = bool(answer) and not getattr(convo, "exhausted", False)
     log.info(
         "deep_research: complete=%s rounds<=%d tool_calls=%d sources=%d",
         complete,
