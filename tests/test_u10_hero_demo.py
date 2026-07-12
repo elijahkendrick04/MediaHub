@@ -481,6 +481,30 @@ def test_demo_review_confidence_score_has_label():
     )
 
 
+def test_demo_review_confidence_score_has_a_visible_plain_language_label():
+    """A ``title=`` tooltip alone is not a legend: it only reaches a sighted
+    mouse user who happens to hover, so a non-technical volunteer scanning the
+    Review scene still sees a bare '0.94' with nothing on the page explaining
+    what it means or what a good value looks like. The visible text must carry
+    a plain-language label (e.g. 'High confidence'), not just the raw decimal.
+
+    Regression guard for: unexplained numeric confidence scores shown as core
+    UI without a legend ('SOURCE-GROUNDED · 0.96' / '0.94' with no plain-word
+    label visible without hovering).
+    """
+    import re
+
+    html = _demo_html()
+    m = re.search(r'<span[^>]*class="mh-demo-conf"[^>]*>(.*?)</span>\s*</div>', html, re.S)
+    assert m, "mh-demo-conf span not found in demo HTML"
+    inner = m.group(1)
+    visible_text = re.sub(r"<[^>]+>", "", inner)
+    assert re.search(r"[A-Za-z]", visible_text), (
+        "the Review scene's confidence indicator must show a plain-language "
+        f"label as VISIBLE text (not only in a title= tooltip); got {visible_text!r}"
+    )
+
+
 # =========================================================================== #
 # Group F — queue context (regression guard for autotest finding f51fbb0c9424)
 # =========================================================================== #
