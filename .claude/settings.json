@@ -5,7 +5,10 @@
       "mcp__playwright",
       "mcp__chrome-devtools",
       "mcp__puppeteer",
-      "mcp__browserbase"
+      "mcp__browserbase",
+      "mcp__exa",
+      "mcp__tavily",
+      "mcp__firecrawl"
     ]
   },
   "hooks": {

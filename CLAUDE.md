@@ -244,11 +244,13 @@ Previously-fixed files (now part of the passing suite):
 - `tests/test_pb_discovery.py` — all mock.patch targets updated to canonical `mediahub.*` paths; real ledger pollution cleared
 - `tests/test_corpus_recovery.py` — swim-count gate now scales with corpus size (`min(30_000, max(1_000, captured * 600))`) instead of a flat 30k
 
-## Web interaction (browser automation MCP servers)
+## Web interaction (browser automation + web-search MCP servers)
 
-Four browser-driving MCP servers are wired into `.mcp.json` and pre-approved in
-`.claude/settings.json`, so they auto-start and run without per-call prompts in
-every session in this repo. Full reference: `docs/WEB_INTERACTION.md`.
+Four browser-driving MCP servers plus three dedicated web-search servers are
+wired into `.mcp.json` and pre-approved in `.claude/settings.json`, so they
+auto-start and run without per-call prompts in every session in this repo (the
+search servers stay inert until their API key is set). Full reference:
+`docs/WEB_INTERACTION.md`.
 
 - **`playwright`** (primary, always works) — the remote container prebakes the
   matching Chromium at `/opt/pw-browsers`, so navigate / snapshot / click / type
@@ -263,14 +265,28 @@ every session in this repo. Full reference: `docs/WEB_INTERACTION.md`.
   anti-bot resilience. OPTIONAL: inert until `BROWSERBASE_API_KEY` +
   `BROWSERBASE_PROJECT_ID` are set in `.env` (keys are env-only — never hardcode).
 
-When to use vs. the built-ins: `WebFetch`/`WebSearch` are read-only — use them
-for research. The moment a task needs to click, log in, fill a form, drive a
-multi-step flow, or check the *running* app's behaviour, use a browser server
-(default: `playwright`). For logged-in-session parity (driving a real
+Three dedicated **web-search** MCP servers are also wired in for *finding* things
+on the open web (browser automation *operates* pages — it's the wrong tool for
+search). Each is OPTIONAL and inert until its key is set in `.env` (env-only):
+
+- **`exa`** (`EXA_API_KEY`) — neural/semantic search; best relevance, the real
+  quality jump over keyword search. Bundled clean content-fetch.
+- **`tavily`** (`TAVILY_API_KEY`) — agent-native search + extract; the one
+  genuinely no-credit-card free tier (1,000/mo), so the safe default.
+- **`firecrawl`** (`FIRECRAWL_API_KEY`) — scrape/crawl/map/extract to clean
+  markdown/JSON, plus a search tool; the deep-extraction leg the searchers lack.
+
+When to use vs. the built-ins: `WebFetch`/`WebSearch` handle quick read-only
+lookups. For serious research / finding sources, prefer a **search server**
+(`exa` for semantic relevance, `tavily` for agent-native search+extract,
+`firecrawl` for deep page/crawl extraction) — better ranked and cleaner than
+scraping a results page. The moment a task needs to click, log in, fill a form,
+drive a multi-step flow, or check the *running* app's behaviour, use a **browser
+server** (default: `playwright`). For logged-in-session parity (driving a real
 authenticated Chrome over CDP or a persistent profile), see the recipes in
-`docs/WEB_INTERACTION.md`. Browser automation never bypasses the human-approval
-rule: nothing gets published to an external/social account without explicit
-human approval (see "External integrations").
+`docs/WEB_INTERACTION.md`. These servers never bypass the human-approval rule:
+nothing gets published to an external/social account without explicit human
+approval (see "External integrations").
 
 ## Contributor / engineering setup
 
