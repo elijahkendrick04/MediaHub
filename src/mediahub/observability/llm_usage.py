@@ -217,6 +217,28 @@ def record_call(
         return 0
 
 
+def _gemini_calls_last_24h() -> int:
+    """Gemini call count over a FIXED trailing 24h — the free-tier daily reset.
+
+    Kept separate from the summary's ``window_hours`` so a 7- or 30-day dashboard
+    window can't subtract a week/month of calls from the 1,500/day ceiling and
+    understate (often to zero) the real headroom."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
+    try:
+        conn = _connect()
+        try:
+            row = conn.execute(
+                "SELECT COUNT(*) AS c FROM llm_calls WHERE provider = 'gemini' AND ts >= ?",
+                (cutoff,),
+            ).fetchone()
+            return int(row["c"] or 0) if row else 0
+        finally:
+            conn.close()
+    except (sqlite3.Error, OSError) as exc:
+        log.warning("llm_usage: 24h gemini count failed: %s", exc)
+        return 0
+
+
 def usage_for_window(window_hours: int = 24) -> dict:
     """Aggregate stats for the trailing ``window_hours`` window.
 
@@ -315,12 +337,13 @@ def usage_for_window(window_hours: int = 24) -> dict:
     ok = sum(b["ok"] for b in by_provider)
     failed = sum(b["failed"] for b in by_provider)
 
-    # Gemini free-tier headroom is "today" (rolling 24h is a fine proxy
-    # for the published per-day reset).
-    gemini_calls_today = sum(b["calls"] for b in by_provider if b["provider"] == "gemini")
+    # Gemini free-tier headroom is measured over a FIXED trailing 24h (the daily
+    # reset) — NOT this summary's window_hours, which for a 7/30-day view would
+    # subtract far more than a day's calls and understate the headroom.
+    gemini_calls_24h = _gemini_calls_last_24h()
     headroom = None
-    if gemini_calls_today > 0:
-        headroom = max(0, GEMINI_FREE_TIER_DAILY_REQ - gemini_calls_today)
+    if gemini_calls_24h > 0:
+        headroom = max(0, GEMINI_FREE_TIER_DAILY_REQ - gemini_calls_24h)
 
     return {
         "window_hours": window_hours,
