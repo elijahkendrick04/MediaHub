@@ -6,9 +6,7 @@
       "mcp__chrome-devtools",
       "mcp__puppeteer",
       "mcp__browserbase",
-      "mcp__exa",
-      "mcp__tavily",
-      "mcp__firecrawl"
+      "mcp__ddg-search"
     ]
   },
   "hooks": {
