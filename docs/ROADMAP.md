@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-07-12 · `7f189ae2f` · engine: identity resolver — no wrong-swimmer PB baseline + dead-palette-row fix (review batch 4) (#1
+**Last updated:** 2026-07-12 · `e7e2bbbe7` · Move "Leave organisation" from the nav org-menu into Settings → Account (#1186)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1226,7 +1226,9 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-07-12 | `799769382` | Drop dangling "Slide remote" row from the ⌘K command palette |
 | 2026-07-12 | `f9d256d57` | fix(nav): drop the dead 'Slide remote' command-palette row |
+| 2026-07-12 | `043b571d4` | Move "Leave organisation" from nav org-menu to Settings → Account |
 | 2026-07-12 | `6a52397a9` | fix(engine): identity resolver no longer assigns a ruled-out swimmer's PB record |
 | 2026-07-12 | `a2b214648` | fix(log_sentinel): redact secrets/PII from evidence; best-effort audit writes |
 | 2026-07-12 | `0adbad2b0` | fix(security): review batch 2 — verified prod-reachable security fixes |
@@ -1234,6 +1236,4 @@ list and the auto table below, not here.
 | 2026-07-12 | `bfd951d49` | Add ⌘K command palette + engagement/findability upgrades across the app |
 | 2026-07-12 | `c920b5b15` | Remove the phone slide-remote feature |
 | 2026-07-12 | `c575903e2` | fix(state): atomic + cross-process-safe writes for run/approval sidecars |
-| 2026-07-12 | `7e29921aa` | Wire per-platform variants, reachable variant picker, and caption persistence |
-| 2026-07-12 | `ed957955b` | docs: add deep code review & improvement backlog (2026-07) |
 <!-- /ROADMAP:ACTIVITY -->
