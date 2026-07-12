@@ -168,6 +168,8 @@ def test_parse_drops_entry_without_resolvable_course():
         ("Sam", "Jones", "Samuel", "Jones", True),        # nickname
         ("Ben", "Carter", "Benjamin", "Carter", True),    # prefix
         ("Sophie", "Lee", "Sofie", "Lee", True),          # 1-edit spelling
+        ("Freddie", "Smith", "Frederick", "Smith", True),  # #68: freddie↔frederick
+        ("Freya", "Smith", "Freddie", "Smith", False),     # #68: freya is NOT freddie
         ("Holly", "Greenslade", "Holly", "Greenwood", False),  # surname differs
         ("John", "Smith", "Jane", "Smith", False),        # distinct first names
         ("", "Smith", "John", "Smith", False),            # missing name

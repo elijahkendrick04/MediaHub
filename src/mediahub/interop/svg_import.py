@@ -83,7 +83,10 @@ def sanitize_svg(svg_bytes: bytes) -> bytes:
         if name in _DANGEROUS_ELEMENTS:
             to_remove.append(el)
             continue
-        if name == "style" and el.text and _BAD_CSS.search(el.text):
+        if name == "style" and el.text and (_BAD_CSS.search(el.text) or _URL_HTTP.search(el.text)):
+            # <style> element text gets the SAME checks as a style attribute —
+            # url(http…) in a <style> block (a tracking/exfil vector when the SVG
+            # is rendered inline) was previously scrubbed only from attributes.
             el.text = ""
         for attr in list(el.attrib):
             local = attr.rsplit("}", 1)[-1].lower()

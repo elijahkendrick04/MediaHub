@@ -65,7 +65,10 @@ _NICKNAME_GROUPS: list[set[str]] = [
     {"eleanor", "ellie", "nell", "nelly", "lenny"},
     {"madeline", "madeleine", "maddie", "maddy"},
     {"grace", "gracie"},
-    {"freya", "freddie"},
+    # "freya" is its own name — it was wrongly grouped with "freddie", which (being
+    # the alphabetically-first, first-wins canonical) hijacked "freddie" so
+    # Freddie↔Frederick failed while Freya↔Freddie matched. "freddie" belongs only
+    # to the Frederick group below.
     {"frederick", "fred", "freddie", "freddy"},
     {"patrick", "pat", "paddy"},
     {"theodore", "theo", "ted", "teddy"},
