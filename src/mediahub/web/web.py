@@ -14926,7 +14926,6 @@ _COMMAND_PALETTE_SPEC: tuple[tuple[str, tuple[tuple[str, str, str], ...]], ...] 
             ("print_center_page", "Print & merch", "print merch poster products fulfilment"),
             ("public_wall_settings", "Public wall", "public wall embed feed share widget"),
             ("sponsors_page", "Sponsors", "sponsors partners logos report"),
-            ("remote_landing", "Slide remote", "remote present slides controller phone"),
         ),
     ),
     (
