@@ -1693,23 +1693,26 @@ def _run_remotion(
     if size is not None:
         cmd.extend(["--width", str(int(size[0])), "--height", str(int(size[1]))])
 
+    from mediahub.visual.proc import run_capture
+
     try:
-        proc = subprocess.run(
-            cmd,
-            cwd=str(REMOTION_DIR),
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-        )
+        # run_capture launches node in its own process group and kills the WHOLE
+        # group on timeout, so Remotion's Chromium children don't leak (a plain
+        # subprocess.run would SIGKILL only node and reparent Chromium to init).
+        proc = run_capture(cmd, cwd=str(REMOTION_DIR), timeout=timeout)
     except subprocess.TimeoutExpired as e:
         raise RuntimeError(f"Remotion render timed out after {timeout}s") from e
 
     if proc.returncode != 0:
         stderr = (proc.stderr or "").strip().splitlines()
         tail = "\n".join(stderr[-15:]) if stderr else "(no stderr)"
+        # Keep props_path on failure — it's the render's input, useful to reproduce.
         raise RuntimeError(f"Remotion render failed (exit {proc.returncode}):\n{tail}")
     if not out_path.exists() or out_path.stat().st_size < 1024:
         raise RuntimeError(f"Remotion reported success but {out_path} is missing or empty")
+    # Success: drop the props sidecar so it doesn't accumulate one-per-MP4 forever
+    # (it was never pruned). Failed renders keep theirs for debugging (above).
+    props_path.unlink(missing_ok=True)
     return out_path
 
 
