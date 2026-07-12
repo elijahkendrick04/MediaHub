@@ -33920,9 +33920,7 @@ self.addEventListener('fetch', function(e){
             f'<li><a href="{url_for("mobile_parity_tool")}">Mobile parity audit</a>'
             " &mdash; every page scored for phone usability (overflow, tap "
             "targets, nav reachability) at real device widths.</li>"
-            "</ul></div>"
-            + _render_settings_cache_purge_card()
-            + _render_settings_data_purge_card()
+            "</ul></div>" + _render_settings_cache_purge_card() + _render_settings_data_purge_card()
         )
 
     def _cache_tally() -> tuple[int, int]:
