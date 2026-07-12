@@ -23,7 +23,7 @@ The system should not become a manual agency or a Canva template shop. The defen
 
 ```
 src/mediahub/          — Main Python package (~43 sub-packages)
-  web/web.py           — Flask monolith (~22,500 lines, 114 routes)
+  web/web.py           — Flask monolith (~69,000 lines, ~465 routes)
   web/club_profile.py  — ClubProfile dataclass + persistence
   media_ai/llm.py      — Cloud LLM wrapper (Gemini/Claude with provider failover)
   ai_core/             — Provider-agnostic LLM client + bounded ask_with_tools loop (Cap 1)
@@ -120,7 +120,7 @@ Removing or replacing existing routes and data structures is allowed when an upd
 2. **No dangling links.** Confirm no `url_for()`, template link, or JS call still points at a removed route.
 3. **Callers migrated.** Confirm every caller from the breakage map now uses the replacement.
 4. **Imports resolve.** Import the app and affected modules — no `ImportError` / `NameError` / `AttributeError`.
-5. **Full test suite.** Run `python -m pytest tests/ -q` — expect ~3,500+ passed (see *Running Tests* for the current count), with no *new* failures.
+5. **Full test suite.** Run `python -m pytest tests/ -q` — expect ~13,000+ passed (see *Running Tests* for the current count), with no *new* failures.
 6. **No test cheating.** Confirm no test was deleted, skipped, or weakened just to go green.
 7. **Route works.** Exercise each affected route end-to-end (request → expected response/status).
 8. **Templates render.** Confirm affected pages render with no undefined-variable / missing-field errors.
@@ -230,9 +230,10 @@ A key committed to the repo is a leak even if later removed.
 All test files pass. Run the full suite with no ignores:
 
 ```bash
-# Full suite (current expectation: ~3,500+ passed; skips vary by environment —
+# Full suite (current expectation: ~13,000+ passed; skips vary by environment —
 # 1 in the dev sandbox, more where corpus ZIPs / sample PDFs / optional deps
-# are absent). Last refreshed 2026-06-09: 3,576 passed, 1 skipped.
+# are absent). The pass count grows as tests are added (~10,900 test functions
+# across ~840 files, expanded by parametrisation) — treat the figure as approximate.
 python -m pytest tests/ -q
 ```
 
