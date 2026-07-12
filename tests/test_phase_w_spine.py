@@ -181,7 +181,10 @@ class TestRegistry:
         # A swimmer who only ever appears in the deleted run should drop off
         # the active roster entirely — otherwise they'd survive a deletion.
         record_run_swims(
-            ORG, "run1", [{"name": "Solo Swimmer", "event": "200IMSC", "time_cs": 14000}], db_path=db
+            ORG,
+            "run1",
+            [{"name": "Solo Swimmer", "event": "200IMSC", "time_cs": 14000}],
+            db_path=db,
         )
         assert len(list_athletes(ORG, db_path=db)) == 1
         rep = purge_run(ORG, "run1", db_path=db)
@@ -300,13 +303,30 @@ class TestMilestoneDetector:
         swim = _swim()
         assert det.detect(swim, _ctx(), _history(), [swim], {"swimmer_name": "Maya Patel"}) == []
 
-    def test_debut_fires_for_unknown_swimmer_when_registry_active(self):
+    def test_silent_for_unknown_swimmer_when_registry_active(self):
+        # #61: a swimmer who does NOT resolve in a non-empty registry could be a
+        # genuine first-timer OR a veteran whose name drifted — indistinguishable
+        # from the registry alone, so the detector fires nothing rather than a
+        # false confident "First gala".
         det = MilestoneDetector()
         swim = _swim()
         extra = {
             "swimmer_name": "Maya Patel",
             "athlete_milestones": {
                 "someone else": {"athlete_id": "x", "prior_races": 3, "prior_events": []}
+            },
+        }
+        assert det.detect(swim, _ctx(), _history(), [swim], extra) == []
+
+    def test_debut_fires_for_known_swimmer_with_zero_prior_races(self):
+        # #61: a CONFIRMED debut — the registry knows this athlete and has zero
+        # prior races logged — still fires the "First gala" card.
+        det = MilestoneDetector()
+        swim = _swim()
+        extra = {
+            "swimmer_name": "Maya Patel",
+            "athlete_milestones": {
+                "maya patel": {"athlete_id": "a1", "prior_races": 0, "prior_events": []}
             },
         }
         achs = det.detect(swim, _ctx(), _history(), [swim], extra)
