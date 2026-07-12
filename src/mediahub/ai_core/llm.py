@@ -35,7 +35,39 @@ class ProviderNotConfigured(RuntimeError):
 
 
 class ProviderError(RuntimeError):
-    """Raised when an LLM provider's API call fails."""
+    """Raised when an LLM provider's API call fails.
+
+    ``transient`` marks a failure worth retrying on the next configured provider
+    (transport error, 429, 5xx, 529, timeout, auth) versus a permanent one
+    (400/404 bad request / model-not-found) a retry can't fix. Set it explicitly
+    at the raise site so failover no longer depends solely on regexing the error
+    message — a transport-level failure (``ConnectionError``, DNS, reset) carries
+    no HTTP code in its text and the old regex never matched it, so failover
+    never fired. ``None`` means "unclassified": ``ask()`` falls back to the
+    message regex for older raise sites.
+    """
+
+    def __init__(self, *args: object, transient: Optional[bool] = None) -> None:
+        super().__init__(*args)
+        self.transient = transient
+
+
+def _exc_transient(e: BaseException) -> bool:
+    """Classify a caught provider exception: retry the next provider or not.
+
+    Transport-level errors (no HTTP status) are transient; a status of 401/403
+    (another provider may hold a valid key), 408/409/425/429/529 or any 5xx is
+    transient; a definite 400/404 config/request error is not."""
+    status = getattr(e, "status_code", None)
+    if status is None:
+        status = getattr(getattr(e, "response", None), "status_code", None)
+    if status is None:
+        return True  # transport-level (ConnectionError / DNS / reset / timeout)
+    try:
+        status = int(status)
+    except (TypeError, ValueError):
+        return True
+    return status in (401, 403, 408, 409, 425, 429, 529) or 500 <= status <= 599
 
 
 @dataclass
@@ -176,11 +208,15 @@ def _ask_claude(system: str, user: str, max_tokens: int) -> str:
             messages=[{"role": "user", "content": user}],
         )
     except Exception as e:
-        raise ProviderError(f"Anthropic call failed: {e}") from e
+        raise ProviderError(f"Anthropic call failed: {e}", transient=_exc_transient(e)) from e
     parts = [
         getattr(b, "text", "") or "" for b in resp.content if getattr(b, "type", None) == "text"
     ]
-    return "".join(parts).strip()
+    text = "".join(parts).strip()
+    if not text:
+        reason = getattr(resp, "stop_reason", None)
+        raise ProviderError(f"Anthropic returned no text (stop_reason={reason})", transient=True)
+    return text
 
 
 def _ask_claude_with_tools(
@@ -208,7 +244,9 @@ def _ask_claude_with_tools(
                 messages=messages,
             )
         except Exception as e:
-            raise ProviderError(f"Anthropic tool call failed: {e}") from e
+            raise ProviderError(
+                f"Anthropic tool call failed: {e}", transient=_exc_transient(e)
+            ) from e
         blocks: list[dict] = []
         tool_uses: list[dict] = []
         texts: list[str] = []
@@ -335,18 +373,33 @@ def _ask_gemini(system: str, user: str, max_tokens: int) -> str:
             timeout=45,
         )
     except Exception as e:
-        raise ProviderError(f"Gemini HTTP error: {_redacted(str(e), key)}") from e
+        # Transport-level failure (ConnectionError / DNS / reset / timeout) — no
+        # HTTP status, so it's transient: try the next provider.
+        raise ProviderError(f"Gemini HTTP error: {_redacted(str(e), key)}", transient=True) from e
     if r.status_code != 200:
-        raise ProviderError(f"Gemini HTTP {r.status_code}: {_redacted(r.text[:240], key)}")
+        raise ProviderError(
+            f"Gemini HTTP {r.status_code}: {_redacted(r.text[:240], key)}",
+            transient=(r.status_code in (401, 403, 408, 409, 425, 429, 529))
+            or 500 <= r.status_code <= 599,
+        )
     try:
         data = r.json()
     except Exception as e:
-        raise ProviderError(f"Gemini bad JSON: {e}") from e
+        raise ProviderError(f"Gemini bad JSON: {e}", transient=True) from e
     cands = data.get("candidates") or []
     if not cands:
-        raise ProviderError(f"Gemini empty response: {str(data)[:240]}")
+        raise ProviderError(f"Gemini empty response: {str(data)[:240]}", transient=True)
     parts = (cands[0].get("content") or {}).get("parts") or []
-    return "".join(p.get("text", "") for p in parts if isinstance(p, dict)).strip()
+    text = "".join(p.get("text", "") for p in parts if isinstance(p, dict)).strip()
+    if not text:
+        # Candidates but no text (safety block / MAX_TOKENS) used to return "" —
+        # a silent empty that surfaces later as a misleading JSON parse error.
+        # Raise (transient) citing the reason so a fallback provider is tried.
+        reason = cands[0].get("finishReason") or (data.get("promptFeedback") or {}).get(
+            "blockReason"
+        )
+        raise ProviderError(f"Gemini returned no text (finishReason={reason})", transient=True)
+    return text
 
 
 def _ask_gemini_with_tools(
@@ -398,13 +451,19 @@ def _ask_gemini_with_tools(
                 timeout=60,
             )
         except Exception as e:
-            raise ProviderError(f"Gemini tool HTTP error: {_redacted(str(e), key)}") from e
+            raise ProviderError(
+                f"Gemini tool HTTP error: {_redacted(str(e), key)}", transient=True
+            ) from e
         if r.status_code != 200:
-            raise ProviderError(f"Gemini tool HTTP {r.status_code}: {_redacted(r.text[:240], key)}")
+            raise ProviderError(
+                f"Gemini tool HTTP {r.status_code}: {_redacted(r.text[:240], key)}",
+                transient=(r.status_code in (401, 403, 408, 409, 425, 429, 529))
+                or 500 <= r.status_code <= 599,
+            )
         data = r.json()
         cands = data.get("candidates") or []
         if not cands:
-            raise ProviderError(f"Gemini empty response: {str(data)[:240]}")
+            raise ProviderError(f"Gemini empty response: {str(data)[:240]}", transient=True)
         content = cands[0].get("content") or {}
         parts = content.get("parts") or []
         # Capture the assistant turn whole so the next loop sees it.
@@ -486,8 +545,13 @@ def _ask_openai(system: str, user: str, max_tokens: int) -> str:
             max_completion_tokens=max_tokens,
         )
     except llm_client.OpenAICompatError as e:
-        raise ProviderError(f"OpenAI-compatible call failed: {e}") from e
-    return (result.text or "").strip()
+        raise ProviderError(
+            f"OpenAI-compatible call failed: {e}", transient=_exc_transient(e)
+        ) from e
+    text = (result.text or "").strip()
+    if not text:
+        raise ProviderError("OpenAI-compatible endpoint returned no text", transient=True)
+    return text
 
 
 def _ask_openai_with_tools(
@@ -533,7 +597,9 @@ def _ask_openai_with_tools(
                 tools=use_tools,
             )
         except llm_client.OpenAICompatError as e:
-            raise ProviderError(f"OpenAI-compatible tool call failed: {e}") from e
+            raise ProviderError(
+                f"OpenAI-compatible tool call failed: {e}", transient=_exc_transient(e)
+            ) from e
         choices = (result.raw or {}).get("choices") or []
         msg = (choices[0].get("message") if choices else {}) or {}
         tool_calls = msg.get("tool_calls") or []
@@ -626,7 +692,7 @@ def _fallback_chain(primary: Optional[str]) -> list[str]:
 # model name) and 'moderate'/'accurate'; "auth" matched 'author'. A permanent
 # config error must surface as-is, not get retried on the other provider.
 _TRANSIENT_RE = re.compile(
-    r"\b(429|401|403|50[0-4])\b"
+    r"\b(429|401|403|50[0-4]|529)\b"
     r"|rate.?limit"
     r"|quota"
     r"|resource.?exhausted"
@@ -669,7 +735,8 @@ def ask(system: str, user: str, *, max_tokens: int = 800, provider: Optional[str
             return _DISPATCH[p][0](system, user, max_tokens)
         except ProviderError as e:
             last_err = e
-            if not _is_transient(str(e)) or p == chain[-1]:
+            transient = e.transient if e.transient is not None else _is_transient(str(e))
+            if not transient or p == chain[-1]:
                 raise
             log.warning("provider %s transient error, falling through: %s", p, str(e)[:200])
             continue
@@ -703,7 +770,8 @@ def ask_with_tools(
             return _DISPATCH[p][1](system, user, tools, on_tool_call, max_tokens, max_rounds)
         except ProviderError as e:
             last_err = e
-            if not _is_transient(str(e)) or p == chain[-1]:
+            transient = e.transient if e.transient is not None else _is_transient(str(e))
+            if not transient or p == chain[-1]:
                 raise
             log.warning("provider %s transient tool error, falling through: %s", p, str(e)[:200])
             continue
