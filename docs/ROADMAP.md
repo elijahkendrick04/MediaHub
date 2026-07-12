@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-07-12 · `bc5707f99` · Merge pull request #1215 from elijahkendrick04/claude/code-review-cleanup-v2c6g6
+**Last updated:** 2026-07-12 · `fc88ebbab` · Merge pull request #1217 from elijahkendrick04/claude/code-review-cleanup-v2c6g6
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1226,6 +1226,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-07-12 | `16a17afd1` | Observability & log-sentinel robustness (deep-review batch 10: #94–#100) |
 | 2026-07-12 | `1c16aa061` | Compliance & privacy data-safety (deep-review batch 9: #103–#114) |
 | 2026-07-12 | `436d61376` | Concurrency & state hardening (deep-review batch 8: #79–#91) |
 | 2026-07-12 | `77d1632a5` | Harden privacy/compliance data-safety (deep-review batch 7: #108, #107, #106) |
@@ -1233,6 +1234,4 @@ list and the auto table below, not here.
 | 2026-07-12 | `9ac11ec48` | Fix red main: drop orphaned "Slide remote" command-palette row |
 | 2026-07-12 | `1127b5c46` | fix(engine): native-path time parse rejects bare mm:ss instead of a 100x error |
 | 2026-07-12 | `7b3b9d41d` | Restrict "Switch organisation" to the dev operator only |
-| 2026-07-12 | `2e7f57c59` | test: harden palette-reachability guard against shared-app pollution |
-| 2026-07-12 | `fbb4cabc2` | Fix CI: governance empty-state assertion + resilient palette reachability guard |
 <!-- /ROADMAP:ACTIVITY -->
