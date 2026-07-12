@@ -56,8 +56,13 @@ def build_api_v1_blueprint(
                 g.api_profile_id = tok.profile_id
                 g.api_scopes = list(tok.scopes)
 
-        # Rate limit (per token, or per IP for unauthenticated traffic).
-        key = f"tok:{g.api_token.id}" if g.api_token else f"ip:{request.remote_addr or '-'}"
+        # Rate limit (per token, or per IP for unauthenticated traffic). Use the
+        # proxy-aware client IP, not request.remote_addr — behind Render's proxy
+        # the latter is the proxy, so every unauthenticated client would share one
+        # bucket (#121). Same derivation as the web-app throttles.
+        from mediahub.web.request_ip import client_ip
+
+        key = f"tok:{g.api_token.id}" if g.api_token else f"ip:{client_ip(request)}"
         decision = limiter.check(key)
         g.api_rate = decision
         if not decision.allowed:

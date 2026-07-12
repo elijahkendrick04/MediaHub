@@ -60,8 +60,10 @@ SCOPE_GROUPS: dict[str, tuple[str, ...]] = {
     "Integrations": ("webhooks:manage",),
 }
 
-# The default a freshly-minted token gets if the caller specifies nothing: the
-# safe, read-only set. Widening is always an explicit choice.
+# The read-only bundle the token-creation UI suggests as a starting point. It is
+# NOT auto-applied: a token minted with no scopes is intentionally fail-closed
+# (``validate_scopes([]) -> []``, i.e. no access) — never silently granted the
+# read-only set. Widening is always an explicit choice.
 DEFAULT_SCOPES: tuple[str, ...] = SCOPE_GROUPS["Read-only"]
 
 ALL_SCOPES: tuple[str, ...] = tuple(SCOPES.keys())
