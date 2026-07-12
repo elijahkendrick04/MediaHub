@@ -325,8 +325,12 @@ def effective_policy(
     try:
         active = regime_active(profile_id, db_path)
     except sqlite3.Error:
-        log.warning("consent lookup failed; defaulting permissive", exc_info=True)
-        return ConsentPolicy("full", name, True, True, False, "")
+        # Fail CLOSED: the normal no-regime path returns False (ensure_schema
+        # runs first), so an error here is a genuine operational fault, not an
+        # unconfigured workspace. A transient SQLITE_BUSY must never let a
+        # do-not-feature / no-consent-on-file child be featured.
+        log.error("consent lookup failed; blocking the athlete to stay safe", exc_info=True)
+        return ConsentPolicy("unknown", "", False, False, True, "blocked: consent lookup failed")
     if not active:
         return ConsentPolicy("full", name, True, True, False, "")
 

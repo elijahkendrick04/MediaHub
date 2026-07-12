@@ -509,6 +509,11 @@ class UserStore:
             if user is None:
                 return None
             user.hashed_password = hash_password(new_plaintext)
+            # Revoke every outstanding session cookie: a password reset must
+            # invalidate any session an attacker already holds (mirrors
+            # bump_session_epoch, which logout uses). The reset handler then
+            # re-mints the current browser's cookie under the new epoch.
+            user.session_epoch = int(user.session_epoch or 0) + 1
             self._append(user)
             return user
 

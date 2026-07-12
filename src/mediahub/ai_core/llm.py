@@ -327,9 +327,11 @@ def _ask_gemini(system: str, user: str, max_tokens: int) -> str:
     try:
         r = requests.post(
             url,
-            params={"key": key},
             json=payload,
-            headers={"Content-Type": "application/json"},
+            # Key in the x-goog-api-key header, NOT the URL: a URL-borne ?key=
+            # rides into exception reprs, access logs and proxy logs (matches
+            # media_ai/llm.py, which moved off the query param for this reason).
+            headers={"Content-Type": "application/json", "x-goog-api-key": key},
             timeout=45,
         )
     except Exception as e:
@@ -390,9 +392,9 @@ def _ask_gemini_with_tools(
         try:
             r = requests.post(
                 url,
-                params={"key": key},
                 json=payload,
-                headers={"Content-Type": "application/json"},
+                # Key in the header, not the URL — see _ask_gemini above.
+                headers={"Content-Type": "application/json", "x-goog-api-key": key},
                 timeout=60,
             )
         except Exception as e:
