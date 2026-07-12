@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-07-12 · `18dad552c` · log_sentinel: redact secrets from evidence + best-effort audit (review batch 3) (#1194)
+**Last updated:** 2026-07-12 · `7f189ae2f` · engine: identity resolver — no wrong-swimmer PB baseline + dead-palette-row fix (review batch 4) (#1
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1226,6 +1226,8 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-07-12 | `f9d256d57` | fix(nav): drop the dead 'Slide remote' command-palette row |
+| 2026-07-12 | `6a52397a9` | fix(engine): identity resolver no longer assigns a ruled-out swimmer's PB record |
 | 2026-07-12 | `a2b214648` | fix(log_sentinel): redact secrets/PII from evidence; best-effort audit writes |
 | 2026-07-12 | `0adbad2b0` | fix(security): review batch 2 — verified prod-reachable security fixes |
 | 2026-07-12 | `538b7b377` | style: ruff-format the wrapped log line in workflow/store.py |
@@ -1234,6 +1236,4 @@ list and the auto table below, not here.
 | 2026-07-12 | `c575903e2` | fix(state): atomic + cross-process-safe writes for run/approval sidecars |
 | 2026-07-12 | `7e29921aa` | Wire per-platform variants, reachable variant picker, and caption persistence |
 | 2026-07-12 | `ed957955b` | docs: add deep code review & improvement backlog (2026-07) |
-| 2026-07-11 | `428e0d9a1` | Vary the shared kicker signature across archetypes |
-| 2026-07-11 | `32802043e` | Break the uniform tile grid in the motion background (PatternLayer) |
 <!-- /ROADMAP:ACTIVITY -->
