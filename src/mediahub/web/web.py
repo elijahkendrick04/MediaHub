@@ -2991,6 +2991,45 @@ def _db():
     return conn
 
 
+def _storage_counts() -> dict[str, int]:
+    """On-disk storage inventory: ``{n_runs, n_files, n_uploads, n_cache}``.
+
+    The single source of truth for the deployment inventory shown on both the
+    Settings → Privacy & data page and the Data Hub storage page. Every probe is
+    fail-soft — a corrupted DB or a missing directory falls through to ``0``
+    rather than 500ing a page whose whole point is to tell the operator what is
+    on disk. ``n_runs`` is the DB row count; ``n_files`` is the flat run-JSON
+    count under ``RUNS_DIR``; ``n_uploads`` is the top-level ``UPLOADS_DIR``
+    entry count; ``n_cache`` is the combined PB-lookup + legacy cache JSON count.
+    """
+    n_runs = 0
+    try:
+        conn = _db()
+        try:
+            n_runs = conn.execute("SELECT COUNT(*) FROM runs").fetchone()[0]
+        finally:
+            conn.close()
+    except Exception as e:
+        log.warning("storage inventory: runs DB unreachable: %s", e)
+    try:
+        n_files = sum(1 for _ in RUNS_DIR.glob("*.json"))
+    except Exception:
+        n_files = 0
+    try:
+        n_uploads = sum(1 for _ in UPLOADS_DIR.iterdir())
+    except Exception:
+        n_uploads = 0
+    cache_dir = DATA_DIR / ".cache" / "pb_lookup"
+    legacy_cache = DATA_DIR / ".cache" / "swimmingresults"
+    try:
+        n_cache = (sum(1 for _ in cache_dir.glob("*.json")) if cache_dir.exists() else 0) + (
+            sum(1 for _ in legacy_cache.glob("*.json")) if legacy_cache.exists() else 0
+        )
+    except Exception:
+        n_cache = 0
+    return {"n_runs": n_runs, "n_files": n_files, "n_uploads": n_uploads, "n_cache": n_cache}
+
+
 def _iso_age_secs(iso_str: Optional[str]) -> Optional[float]:
     """Seconds elapsed since an ISO-8601 timestamp, or None if unparseable."""
     if not iso_str:
@@ -9221,7 +9260,16 @@ def _run_url_fetch_job(job_id: str, url: str, profile_id: Optional[str]) -> None
 def _start_url_fetch_job(url: str, profile_id: Optional[str]) -> str:
     job_id = uuid.uuid4().hex[:12]
     _url_job_set(
-        job_id, status="queued", phase="queued", progress="Queued", source_url=url, percent=3
+        job_id,
+        status="queued",
+        phase="queued",
+        progress="Queued",
+        source_url=url,
+        percent=3,
+        # Bind the job to its creator's active org so the status route can gate
+        # foreign polls (defense-in-depth, same posture as the reel/variant/export
+        # job routes). ``profile_id`` here is the caller's ``_active_profile_id()``.
+        owner_pid=profile_id or "",
     )
     t = threading.Thread(target=_run_url_fetch_job, args=(job_id, url, profile_id), daemon=True)
     t.start()
@@ -24357,6 +24405,13 @@ def create_app() -> Flask:
         entry = _url_job_get(job_id)
         if entry is None:
             return jsonify({"status": "unknown"}), 404
+        # Owner gate — a job id is 48-bit random, but bind it to the creating
+        # session's active org anyway (same posture as the reel/variant/export
+        # job routes) so a foreign or guessed id can't read another org's crawl
+        # progress or the staged run_id. Report it as "unknown" — indistinguishable
+        # from a nonexistent id — so foreign existence isn't revealed (404, not 403).
+        if (entry.get("owner_pid") or "") != (_active_profile_id() or ""):
+            return jsonify({"status": "unknown"}), 404
         status = entry.get("status", "unknown")
         # Stall guard: a crawl runs in a background thread, so if it hangs (a
         # render that never settles) or its worker is recycled mid-run, the job
@@ -29295,32 +29350,13 @@ Relay team broke club record"></textarea>
         # Every inventory probe is fail-soft so a corrupted DB or missing
         # directory falls through to a "0" count instead of 500ing this
         # page — the user came here precisely BECAUSE they want to know
-        # what's on disk and how to delete it.
-        n_runs = 0
-        try:
-            conn = _db()
-            try:
-                n_runs = conn.execute("SELECT COUNT(*) FROM runs").fetchone()[0]
-            finally:
-                conn.close()
-        except Exception as e:
-            log.warning("privacy: runs DB unreachable: %s", e)
-        try:
-            n_files = sum(1 for _ in RUNS_DIR.glob("*.json"))
-        except Exception:
-            n_files = 0
-        try:
-            n_uploads = sum(1 for _ in UPLOADS_DIR.iterdir())
-        except Exception:
-            n_uploads = 0
-        cache_dir = DATA_DIR / ".cache" / "pb_lookup"
-        legacy_cache = DATA_DIR / ".cache" / "swimmingresults"
-        try:
-            n_cache = (sum(1 for _ in cache_dir.glob("*.json")) if cache_dir.exists() else 0) + (
-                sum(1 for _ in legacy_cache.glob("*.json")) if legacy_cache.exists() else 0
-            )
-        except Exception:
-            n_cache = 0
+        # what's on disk and how to delete it. Shared with the Data Hub
+        # storage page via ``_storage_counts()`` (one scan, two surfaces).
+        _sc = _storage_counts()
+        n_runs = _sc["n_runs"]
+        n_files = _sc["n_files"]
+        n_uploads = _sc["n_uploads"]
+        n_cache = _sc["n_cache"]
         # The deployment inventory (counts + cache-clear action) is only for
         # signed-in sessions — the notice text itself is public (Art. 13).
         account_email = _auth.current_user_email() or ""
@@ -33776,28 +33812,12 @@ self.addEventListener('fetch', function(e){
             "</div>"
             "</div>"
         )
-        try:
-            conn = _db()
-            n_runs = conn.execute("SELECT COUNT(*) FROM runs").fetchone()[0]
-            conn.close()
-        except Exception:
-            n_runs = 0
-        try:
-            n_files = sum(1 for _ in RUNS_DIR.glob("*.json"))
-        except Exception:
-            n_files = 0
-        try:
-            n_uploads = sum(1 for _ in UPLOADS_DIR.iterdir())
-        except Exception:
-            n_uploads = 0
-        cache_dir = DATA_DIR / ".cache" / "pb_lookup"
-        legacy_cache = DATA_DIR / ".cache" / "swimmingresults"
-        try:
-            n_cache = (sum(1 for _ in cache_dir.glob("*.json")) if cache_dir.exists() else 0) + (
-                sum(1 for _ in legacy_cache.glob("*.json")) if legacy_cache.exists() else 0
-            )
-        except Exception:
-            n_cache = 0
+        # Shared inventory scan (one source of truth with the Privacy page).
+        _sc = _storage_counts()
+        n_runs = _sc["n_runs"]
+        n_files = _sc["n_files"]
+        n_uploads = _sc["n_uploads"]
+        n_cache = _sc["n_cache"]
 
         return f"""
 {section_header}
