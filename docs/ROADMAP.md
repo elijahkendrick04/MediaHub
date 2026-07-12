@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-07-13 · `933908457` · Merge pull request #1239 from elijahkendrick04/claude/review-15-engine
+**Last updated:** 2026-07-13 · `27bc2fb12` · Merge pull request #1243 from elijahkendrick04/claude/review-17-webpy
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1226,6 +1226,8 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-07-12 | `934b4dc69` | test: add direct ranker_v3 unit tests + share motion-focus image fixture |
+| 2026-07-12 | `7897b1766` | fix(web): owner-bind from-url job status (IDOR) + dedup storage-inventory scan |
 | 2026-07-12 | `6b321d103` | Fix six deterministic-engine accuracy bugs (review batch 15) |
 | 2026-07-12 | `2f038264f` | security(ssrf): route web-fetch surfaces through the hardened door (#34/#120/#124/#126/#127) |
 | 2026-07-12 | `deb76a13c` | chore(hygiene): dependency/CI/docs cleanup from deep review (#10, #135–#137, #141–#143) |
@@ -1234,5 +1236,4 @@ list and the auto table below, not here.
 | 2026-07-12 | `84fcedcf4` | Upload + download hardening (deep-review batch 13: #28, #31) |
 | 2026-07-12 | `5ea57e938` | Rendering-stack durability (deep-review batch 12: #70, #72, #75) |
 | 2026-07-12 | `2f882d96c` | Research/chat prompt-injection guard + bounded chat (deep-review batch 11e: #40, #41) |
-| 2026-07-12 | `11aa4c058` | AI-wrapper honesty + ai_core usage recording (deep-review batch 11d: #35, #36) |
 <!-- /ROADMAP:ACTIVITY -->
