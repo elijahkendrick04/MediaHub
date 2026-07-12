@@ -19,13 +19,31 @@ File format:
 
 from __future__ import annotations
 
+import contextlib
 import json
+import logging
+import shutil
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Iterator, Optional
 
+from .._atomic_io import atomic_write_json, cross_process_lock
 from .status import CardStatus, CardWorkflowState
+
+log = logging.getLogger(__name__)
+
+
+def _preserve_corrupt(path: Path, exc: Exception) -> None:
+    """Copy a corrupt sidecar aside (once) and log, so its decisions can be
+    recovered instead of being silently overwritten by the next mutator."""
+    bad = path.with_name(path.name + ".corrupt")
+    try:
+        if not bad.exists():
+            shutil.copy2(path, bad)
+        log.error("workflow sidecar %s is corrupt (%s); preserved a copy at %s", path.name, exc, bad.name)
+    except OSError:
+        log.error("workflow sidecar %s is corrupt (%s); could not preserve it", path.name, exc)
 
 
 class WorkflowStore:
@@ -41,6 +59,20 @@ class WorkflowStore:
     def _path(self, run_id: str) -> Path:
         return self.runs_dir / f"{run_id}__workflow.json"
 
+    @contextlib.contextmanager
+    def _locked(self, run_id: str) -> Iterator[None]:
+        """Serialise a load -> mutate -> save both in-process and across workers.
+
+        The in-process ``threading.Lock`` guards threads within one gunicorn
+        worker; the ``flock`` on a per-run lock file guards the *other* workers
+        (the app runs ``--workers 2`` on a shared disk), which the thread lock
+        alone cannot — without it two workers can each persist a different card
+        and lose one another's approval decision.
+        """
+        with self._lock:
+            with cross_process_lock(self._path(run_id).with_suffix(".lock")):
+                yield
+
     def load(self, run_id: str) -> dict[str, CardWorkflowState]:
         """Return all CardWorkflowState objects for the run, keyed by card_id."""
         path = self._path(run_id)
@@ -52,18 +84,19 @@ class WorkflowStore:
                 card_id: CardWorkflowState.from_dict(state_dict)
                 for card_id, state_dict in raw.items()
             }
-        except Exception:
+        except (json.JSONDecodeError, OSError, ValueError, AttributeError) as exc:
+            # Never silently return {} on a corrupt sidecar — the next mutator
+            # would persist a single card over it, wiping prior approve/reject
+            # decisions. Atomic writes make torn reads impossible, so reaching
+            # here means genuine on-disk corruption: surface it and keep a copy.
+            _preserve_corrupt(path, exc)
             return {}
 
     def _save(self, run_id: str, states: dict[str, CardWorkflowState]) -> None:
-        """Persist the states dict to disk. Caller holds lock."""
-        path = self._path(run_id)
-        self.runs_dir.mkdir(parents=True, exist_ok=True)
-        path.write_text(
-            json.dumps(
-                {card_id: s.to_dict() for card_id, s in states.items()},
-                indent=2,
-            )
+        """Persist the states dict to disk atomically. Caller holds the lock."""
+        atomic_write_json(
+            self._path(run_id),
+            {card_id: s.to_dict() for card_id, s in states.items()},
         )
 
     def set_status(
@@ -76,7 +109,7 @@ class WorkflowStore:
     ) -> None:
         """Set the status of a card, preserving existing edits."""
         now = datetime.now(timezone.utc).isoformat()
-        with self._lock:
+        with self._locked(run_id):
             states = self.load(run_id)
             existing = states.get(card_id, CardWorkflowState(card_id=card_id))
 
@@ -114,7 +147,7 @@ class WorkflowStore:
         exactly like ``insp.*``.
         """
         now = datetime.now(timezone.utc).isoformat()
-        with self._lock:
+        with self._locked(run_id):
             states = self.load(run_id)
             existing = states.get(card_id, CardWorkflowState(card_id=card_id))
 
@@ -156,7 +189,7 @@ class WorkflowStore:
         lang = (language or "").strip()
         if not lang:
             return
-        with self._lock:
+        with self._locked(run_id):
             states = self.load(run_id)
             existing = states.get(card_id, CardWorkflowState(card_id=card_id))
             existing.translations = {**(existing.translations or {}), lang: variant}
@@ -185,7 +218,7 @@ class WorkflowStore:
         """Mark all approved cards as posted. Returns count of cards updated."""
         now = datetime.now(timezone.utc).isoformat()
         updated = 0
-        with self._lock:
+        with self._locked(run_id):
             states = self.load(run_id)
             for card_id, s in states.items():
                 if s.status == CardStatus.APPROVED:

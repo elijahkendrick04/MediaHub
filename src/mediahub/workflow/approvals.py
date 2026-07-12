@@ -14,10 +14,18 @@ its votes so a fresh approval round starts clean.
 
 from __future__ import annotations
 
+import contextlib
 import json
+import logging
+import shutil
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Iterator
+
+from .._atomic_io import atomic_write_json, cross_process_lock
+
+log = logging.getLogger(__name__)
 
 
 def _now_iso() -> str:
@@ -32,6 +40,15 @@ class ApprovalLedger:
     def _path(self, run_id: str) -> Path:
         return self.runs_dir / f"{run_id}__approvals.json"
 
+    @contextlib.contextmanager
+    def _locked(self, run_id: str) -> Iterator[None]:
+        """Serialise a load -> mutate -> save in-process and across gunicorn
+        workers — concurrent votes on the same run are the expected workload, so
+        without the cross-process ``flock`` one vote is silently dropped."""
+        with self._lock:
+            with cross_process_lock(self._path(run_id).with_suffix(".lock")):
+                yield
+
     def _load(self, run_id: str) -> dict:
         p = self._path(run_id)
         if not p.exists():
@@ -39,17 +56,24 @@ class ApprovalLedger:
         try:
             data = json.loads(p.read_text(encoding="utf-8"))
             return data if isinstance(data, dict) else {}
-        except Exception:
+        except (json.JSONDecodeError, OSError, ValueError) as exc:
+            # Preserve a corrupt ledger instead of silently zeroing every vote.
+            bad = p.with_name(p.name + ".corrupt")
+            try:
+                if not bad.exists():
+                    shutil.copy2(p, bad)
+            except OSError:
+                pass
+            log.error("approvals ledger %s is corrupt (%s); votes not counted", p.name, exc)
             return {}
 
     def _save(self, run_id: str, data: dict) -> None:
-        self.runs_dir.mkdir(parents=True, exist_ok=True)
-        self._path(run_id).write_text(json.dumps(data, indent=2), encoding="utf-8")
+        atomic_write_json(self._path(run_id), data)
 
     def record(self, run_id: str, card_id: str, email: str) -> list[str]:
         """Record a distinct approval vote; return the card's approver emails."""
         email = (email or "").strip().lower()
-        with self._lock:
+        with self._locked(run_id):
             data = self._load(run_id)
             votes = data.get(card_id) or []
             if email and not any((v.get("email") or "").lower() == email for v in votes):
@@ -64,7 +88,7 @@ class ApprovalLedger:
 
     def clear(self, run_id: str, card_id: str) -> None:
         """Drop a card's votes (on reject / re-queue) so approval restarts clean."""
-        with self._lock:
+        with self._locked(run_id):
             data = self._load(run_id)
             if card_id in data:
                 del data[card_id]
