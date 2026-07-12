@@ -28,8 +28,25 @@ from mediahub.web.web import (
     _COMMAND_PALETTE_OPERATOR,
     _COMMAND_PALETTE_SPEC,
     _command_palette_groups,
-    app,
+    create_app,
 )
+
+
+@pytest.fixture(scope="module")
+def app():
+    """A freshly-built app, NOT the shared module-level ``mediahub.web.web.app``.
+
+    Under ``pytest -n auto`` (xdist) the shared global app can be left
+    partially-built by an unrelated test that happens to land earlier in the
+    same worker — a known test-isolation hazard that silently drops
+    late-registered routes (e.g. ``remote_landing``) and made
+    ``test_every_palette_endpoint_builds`` flake on CI while passing in
+    isolation. A fresh ``create_app()`` always carries every route and is
+    immune to whatever other tests did to the global, so this guard tests the
+    real contract deterministically.
+    """
+    return create_app()
+
 
 # The surfaces a returning club must always be able to reach from the finder.
 # If a refactor removes one of these routes, or drops it from the palette, this
@@ -68,7 +85,7 @@ def _all_spec_endpoints() -> set[str]:
     return endpoints
 
 
-def test_palette_endpoints_resolve():
+def test_palette_endpoints_resolve(app):
     """Palette rows must resolve — matching the runtime's actual contract.
 
     ``_command_palette_groups`` deliberately DROPS any endpoint that fails to
@@ -77,6 +94,12 @@ def test_palette_endpoints_resolve():
     small number of non-key endpoints may fail to build in a given environment
     (some routes register late in create_app and can be environment-sensitive).
     A typo, a rename, or a mass create_app breakage still trips the ceiling.
+
+    The ``app`` fixture builds a fresh ``create_app()`` rather than importing the
+    shared module-level app — under xdist that global can be left partially-built
+    by an unrelated test in the same worker, which made this guard flake on CI.
+    A fresh app makes the check deterministic; the tolerance above still absorbs
+    genuinely environment-conditional routes.
     """
     dead = []
     with app.test_request_context("/"):
@@ -107,7 +130,7 @@ def test_key_surfaces_are_in_palette():
     )
 
 
-def test_palette_json_is_wellformed_and_substantial():
+def test_palette_json_is_wellformed_and_substantial(app):
     """The rendered palette payload is valid JSON with real, unique destinations."""
     with app.test_request_context("/"):
         groups = _command_palette_groups(dev_operator=False, profile_id=None)
@@ -128,7 +151,7 @@ def test_palette_json_is_wellformed_and_substantial():
         assert len(urls) == len(set(urls)), f"duplicate url in group {g['group']}"
 
 
-def test_operator_group_is_gated():
+def test_operator_group_is_gated(app):
     """Operator destinations appear only for a dev operator, never for a normal user."""
     with app.test_request_context("/"):
         normal = _command_palette_groups(dev_operator=False, profile_id=None)
@@ -138,7 +161,7 @@ def test_operator_group_is_gated():
 
 
 @pytest.mark.parametrize("dev", [False, True])
-def test_palette_never_raises(dev):
+def test_palette_never_raises(app, dev):
     """Building the palette must never raise, even with no active profile."""
     with app.test_request_context("/"):
         groups = _command_palette_groups(dev_operator=dev, profile_id=None)

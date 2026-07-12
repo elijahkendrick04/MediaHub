@@ -33916,7 +33916,7 @@ self.addEventListener('fetch', function(e){
             f'<li><a href="{url_for("mobile_parity_tool")}">Mobile parity audit</a>'
             " &mdash; every page scored for phone usability (overflow, tap "
             "targets, nav reachability) at real device widths.</li>"
-            "</ul></div>" + _render_settings_cache_purge_card()
+            "</ul></div>" + _render_settings_cache_purge_card() + _render_settings_data_purge_card()
         )
 
     def _cache_tally() -> tuple[int, int]:
@@ -33987,6 +33987,53 @@ self.addEventListener('fetch', function(e){
             "for all runs? This cannot be undone (but everything is re-derivable).')\">"
             '<button class="btn secondary" type="submit" '
             'style="border-color:rgba(255,93,108,0.4)">Clear all caches</button>'
+            "</form></div>"
+        )
+
+    def _render_settings_data_purge_card() -> str:
+        """Operator-only — permanently delete every run and draft, site-wide.
+
+        Unlike the cache purge, this removes SOURCE data across all
+        organisations — every processed run (the whole Activity history) and
+        every saved draft (the Drafts tab) — and it cannot be undone. Counts
+        the current runs + drafts so the operator sees the scale first.
+        """
+        n_runs = 0
+        n_drafts = 0
+        try:
+            conn = _db()
+            row = conn.execute("SELECT COUNT(*) AS n FROM runs").fetchone()
+            n_runs = int(row["n"]) if row else 0
+            conn.close()
+        except Exception:
+            n_runs = 0
+        try:
+            from mediahub.club_platform.stub_pack_store import list_packs
+
+            n_drafts = len(list_packs(limit=1_000_000))
+        except Exception:
+            n_drafts = 0
+        return (
+            '<div class="card" style="padding:18px 22px;margin-top:14px;'
+            'border-left:2px solid var(--mh-prim-error-500)">'
+            '<h3 style="margin-top:0;font-size:16px">Clear all runs &amp; drafts (site-wide)</h3>'
+            '<p class="dim" style="font-size:13px;margin-bottom:10px">'
+            "Permanently deletes <strong>every organisation&rsquo;s</strong> processed "
+            "runs (the whole Activity history) and <strong>every saved draft</strong> "
+            "(the Drafts tab), across the entire deployment. Each run is removed with "
+            "its full erasure cascade &mdash; run files, per-run sidecars, PB cache, "
+            "caption memory, motion renders and emoji reactions. Unlike the cache "
+            "purge this is <strong>source data</strong> and is <strong>not</strong> "
+            "re-derivable. Uploads, club profiles, brand kits, the media library and "
+            "team members are <strong>not</strong> touched. Operator-only.</p>"
+            '<p class="dim" style="font-size:13px;margin-bottom:12px">'
+            f"Currently holding <strong>{n_runs:,}</strong> run(s) and "
+            f"<strong>{n_drafts:,}</strong> draft(s).</p>"
+            f'<form method="post" action="{url_for("operator_data_purge")}" style="display:inline" '
+            "onsubmit=\"return confirm('Permanently delete ALL runs and ALL drafts for "
+            "every organisation? This removes source data and CANNOT be undone.')\">"
+            '<button class="btn secondary" type="submit" '
+            'style="border-color:rgba(255,93,108,0.4)">Clear all runs &amp; drafts</button>'
             "</form></div>"
         )
 
@@ -36772,7 +36819,15 @@ function mhAnDigest(btn) {{
         # first-timers still get the explainer. Per-profile, persisted.
         _seen_intros = _intro_seen_slugs(_active_profile_id())
 
-        tiles_html = ""
+        # C-19 parity: the Create tiles are bunched into headed segments
+        # (mirroring the Settings clusters) so related surfaces sit together
+        # instead of one flat wall of cards. Each tile is filed into a group
+        # bucket here and rendered under its heading below.
+        tile_groups: dict[str, str] = {}
+        # Which segment each REGISTRY content type belongs to; unknown types
+        # default to the results-driven lane so a future content type still
+        # lands somewhere sensible.
+        _CT_GROUP = {"free_text": "studios"}
         # First implemented tile gets the "Start here" lane-yellow ribbon so
         # users have a clear primary path instead of six equal-weight options.
         primary_marked = False
@@ -36880,7 +36935,8 @@ function mhAnDigest(btn) {{
                     "Also covers: Sponsor thank-you &middot; Session update &middot; Shout-out"
                     "</p>"
                 )
-            tiles_html += (
+            _ct_grp = _CT_GROUP.get(ct_val, "results")
+            tile_groups[_ct_grp] = tile_groups.get(_ct_grp, "") + (
                 '<div class="mh-template-cell">'
                 f'<a {action} class="mh-template{glow_cls}{disabled_cls}{hp_cls}">'
                 f'<div class="mh-template-icon">{meta.icon_svg}</div>'
@@ -36913,7 +36969,7 @@ function mhAnDigest(btn) {{
             '<line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/>'
             '<line x1="17" y1="16" x2="23" y2="16"/></svg>'
         )
-        tiles_html += (
+        tile_groups["studios"] = tile_groups.get("studios", "") + (
             f'<a href="{_h(url_for("design_studio"))}" class="mh-template mh-glow-border">'
             f'<div class="mh-template-icon">{_studio_svg}</div>'
             '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:var(--sp-1)">'
@@ -36945,7 +37001,7 @@ function mhAnDigest(btn) {{
                 '<polygon points="23 7 16 12 23 17 23 7"/>'
                 '<rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>'
             )
-            tiles_html += (
+            tile_groups["studios"] = tile_groups.get("studios", "") + (
                 f'<a href="{_h(url_for("video_studio_page"))}" class="mh-template mh-glow-border">'
                 f'<div class="mh-template-icon">{_video_svg}</div>'
                 '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:var(--sp-1)">'
@@ -36975,7 +37031,7 @@ function mhAnDigest(btn) {{
                 '<polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/>'
                 '<line x1="8" y1="17" x2="16" y2="17"/><line x1="8" y1="9" x2="10" y2="9"/></svg>'
             )
-            tiles_html += (
+            tile_groups["publish"] = tile_groups.get("publish", "") + (
                 f'<a href="{_h(url_for("documents_home"))}" class="mh-template mh-glow-border">'
                 f'<div class="mh-template-icon">{_doc_svg}</div>'
                 '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:var(--sp-1)">'
@@ -37004,7 +37060,7 @@ function mhAnDigest(btn) {{
                 '<rect x="3" y="5" width="18" height="14" rx="2"/>'
                 '<path d="m3 7 9 6 9-6"/></svg>'
             )
-            tiles_html += (
+            tile_groups["publish"] = tile_groups.get("publish", "") + (
                 f'<a href="{_h(url_for("newsletters_home"))}" class="mh-template mh-glow-border">'
                 f'<div class="mh-template-icon">{_nl_svg}</div>'
                 '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:var(--sp-1)">'
@@ -37034,7 +37090,7 @@ function mhAnDigest(btn) {{
             '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/>'
             '<rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>'
         )
-        tiles_html += (
+        tile_groups["publish"] = tile_groups.get("publish", "") + (
             f'<a href="{_h(url_for("public_wall_settings"))}" class="mh-template mh-glow-border">'
             f'<div class="mh-template-icon">{_wall_svg}</div>'
             '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:var(--sp-1)">'
@@ -37069,7 +37125,7 @@ function mhAnDigest(btn) {{
                 '<path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/>'
                 '<rect x="6" y="14" width="12" height="8"/></svg>'
             )
-            tiles_html += (
+            tile_groups["publish"] = tile_groups.get("publish", "") + (
                 f'<a href="{_h(_print_url)}" class="mh-template mh-glow-border">'
                 f'<div class="mh-template-icon">{_print_svg}</div>'
                 '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:var(--sp-1)">'
@@ -37133,7 +37189,7 @@ function mhAnDigest(btn) {{
             except Exception:
                 _cs_url = ""
             if _cs_url:
-                tiles_html += (
+                tile_groups["results"] = tile_groups.get("results", "") + (
                     f'<a href="{_cs_url}" class="mh-template">'
                     f'<div class="mh-template-icon">{_cs_icon}</div>'
                     '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:var(--sp-1)">'
@@ -37145,7 +37201,7 @@ function mhAnDigest(btn) {{
                     "</a>"
                 )
             else:
-                tiles_html += (
+                tile_groups["results"] = tile_groups.get("results", "") + (
                     '<a href="#" onclick="return false" class="mh-template is-disabled" aria-disabled="true">'
                     f'<div class="mh-template-icon">{_cs_icon}</div>'
                     '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:var(--sp-1)">'
@@ -37157,8 +37213,62 @@ function mhAnDigest(btn) {{
                     "</a>"
                 )
 
-        if tiles_html:
-            tiles_section = f'<div class="mh-template-grid">{tiles_html}</div>'
+        # Drafts — everything you generate (free text, spotlights, previews,
+        # event packs) lands here. Promoted from the old top-right strip to a
+        # first-class Create tile in its own segment, so returning users have
+        # an obvious way back into saved work.
+        _drafts_svg = (
+            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" '
+            'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" width="28" height="28">'
+            '<path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/>'
+            '<polyline points="13 2 13 9 20 9"/><line x1="9" y1="13" x2="15" y2="13"/>'
+            '<line x1="9" y1="17" x2="13" y2="17"/></svg>'
+        )
+        try:
+            _drafts_tile_url = url_for("stub_packs_list")
+        except Exception:
+            _drafts_tile_url = ""
+        if _drafts_tile_url:
+            tile_groups["drafts"] = tile_groups.get("drafts", "") + (
+                f'<a href="{_h(_drafts_tile_url)}" class="mh-template mh-glow-border">'
+                f'<div class="mh-template-icon">{_drafts_svg}</div>'
+                '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:var(--sp-1)">'
+                '<h3 style="margin:0">Drafts</h3>'
+                '<span class="tag live">Ready</span>'
+                "</div>"
+                "<p>Every piece you generate &mdash; free text, spotlights, previews "
+                "and event packs &mdash; is saved here so you can come back, edit, "
+                "approve and export it later.</p>"
+                '<div class="mh-template-formats">'
+                '<span class="mh-template-fmt">Saved packs</span>'
+                '<span class="mh-template-fmt">Edit &amp; approve</span>'
+                "</div>"
+                '<span class="mh-template-cta">Open drafts</span>'
+                "</a>"
+            )
+
+        # Render the tiles as headed segments (C-19 parity with Settings): each
+        # non-empty group becomes a labelled cluster of related tiles, in this
+        # order. Reuses the Settings cluster + reveal classes so the two
+        # surfaces read as one system.
+        _MAKE_SEGMENTS = (
+            ("results", "From your results"),
+            ("studios", "Studios & free-form"),
+            ("publish", "Documents & publishing"),
+            ("drafts", "Your drafts"),
+        )
+        if any(tile_groups.get(k) for k, _ in _MAKE_SEGMENTS):
+            tiles_section = ""
+            for _seg_key, _seg_head in _MAKE_SEGMENTS:
+                _seg_tiles = tile_groups.get(_seg_key, "")
+                if not _seg_tiles:
+                    continue
+                tiles_section += (
+                    f'<section class="mh-settings-cluster" aria-labelledby="mh-make-{_seg_key}">'
+                    f'<h2 class="mh-settings-cluster-head" id="mh-make-{_seg_key}">{_h(_seg_head)}</h2>'
+                    f'<div class="mh-template-grid">{_seg_tiles}</div>'
+                    "</section>"
+                )
         else:
             tiles_section = (
                 '<div class="card empty">'
@@ -37247,28 +37357,18 @@ function mhAnDigest(btn) {{
         )
 
         # C-3: everything you make (free text, spotlights, previews, event
-        # packs) lands in Drafts, but it had no link from the nav, home, or
-        # here — so returning users couldn't find their work. Surface it at the
-        # top of Create. (The template gallery is deliberately reached from
-        # Settings — and now the ⌘K palette — not from here, so Create stays
-        # focused; see test_make_page_no_longer_links_to_gallery.)
-        try:
-            _drafts_strip = (
-                '<div style="display:flex;justify-content:flex-end;margin-bottom:var(--sp-3)">'
-                f'<a href="{url_for("stub_packs_list")}" class="mh-template-cta" '
-                'style="font-size:13px">Your saved drafts &rarr;</a>'
-                "</div>"
-            )
-        except Exception:
-            _drafts_strip = ""
-
+        # packs) lands in Drafts. It now has a first-class tile in its own
+        # "Your drafts" segment below (built above), so the old top-right
+        # "Your saved drafts →" strip was retired to avoid two links to the
+        # same place on one page. (The template gallery is deliberately reached
+        # from Settings — and now the ⌘K palette — not from here, so Create
+        # stays focused; see test_make_page_no_longer_links_to_gallery.)
         body = (
             '<section class="mh-hero" data-lane="03" style="padding-top:var(--sp-9);padding-bottom:var(--sp-7);margin-bottom:var(--sp-6)">'
             '<span class="mh-hero-eyebrow">Create</span>'
             '<h1>What do you want<br>to <em class="editorial">make</em>?</h1>'
             '<p class="lede">Upload a file, paste a brief, or describe a moment in your own words. Pick a starting point and the engine takes it from there.</p>'
             "</section>"
-            f"{_drafts_strip}"
             f"{_free_tier_banner_html()}"
             f"{plan_entry_html}"
             f"{first_run_cta}"
@@ -43404,6 +43504,77 @@ what you're doing, what they should do.</p>
             f"Site-wide cache cleared — {files:,} file(s) deleted, {mb:.1f} MB "
             "reclaimed; this worker's in-process caches dropped from memory "
             "(any sibling worker refreshes as its own entries expire).",
+            "success",
+        )
+        return redirect(url_for("settings_section", section="developer"))
+
+    @app.route("/operator/data/purge", methods=["POST"])
+    def operator_data_purge():
+        """Permanently delete every run and every draft, site-wide.
+
+        Operator-only. Unlike the cache purge, this removes SOURCE data — every
+        organisation's processed runs (the Activity history) and every saved
+        draft (the Drafts tab) — and it is NOT re-derivable. Each run goes
+        through the same full deletion cascade a single-run delete uses (run
+        file + per-run sidecars + PB cache, caption memory, motion cache, emoji
+        reactions, in-memory progress); each draft pack file is removed.
+        Uploads, club profiles, brand kits, the media library and the databases'
+        own schema are untouched.
+        """
+        guard = _require_operator()
+        if guard is not None:
+            return guard
+
+        runs_deleted = 0
+        drafts_deleted = 0
+        try:
+            # Enumerate every run id: DB rows ∪ on-disk run files, so a run
+            # tracked in only one place is still reached.
+            run_ids: set[str] = set()
+            try:
+                conn = _db()
+                for row in conn.execute("SELECT id FROM runs").fetchall():
+                    rid = row["id"]
+                    if rid:
+                        run_ids.add(str(rid))
+                conn.close()
+            except Exception:
+                log.warning("data purge: run-table scan failed", exc_info=True)
+            try:
+                for p in RUNS_DIR.glob("*.json"):
+                    # Skip per-run sidecars (<run_id>__workflow.json,
+                    # <run_id>__approvals.json, …) so they aren't counted as
+                    # phantom runs — the same `__` guard every other RUNS_DIR
+                    # scanner uses. Their real run id is reached via <run_id>.json
+                    # or the DB row, and _delete_run removes the sidecars anyway.
+                    if "__" in p.name:
+                        continue
+                    run_ids.add(p.stem)
+            except OSError:
+                pass
+            for rid in run_ids:
+                try:
+                    _delete_run(rid)
+                    runs_deleted += 1
+                except Exception:
+                    log.warning("data purge: failed to delete run %s", rid, exc_info=True)
+
+            # Every draft pack across all organisations.
+            from mediahub.club_platform.stub_pack_store import delete_pack, list_packs
+
+            for it in list_packs(limit=1_000_000):
+                pack_id = it.get("pack_id", "")
+                if pack_id and delete_pack(pack_id):
+                    drafts_deleted += 1
+        except Exception as e:  # honest failure rather than a silent no-op
+            log.warning("site-wide data purge failed: %s", e, exc_info=True)
+            _flash_toast(f"Data purge failed: {e}", "error")
+            return redirect(url_for("settings_section", section="developer"))
+
+        _flash_toast(
+            f"All runs and drafts cleared site-wide — {runs_deleted:,} run(s) and "
+            f"{drafts_deleted:,} draft(s) deleted across every organisation. "
+            "Activity and Drafts are now empty.",
             "success",
         )
         return redirect(url_for("settings_section", section="developer"))
