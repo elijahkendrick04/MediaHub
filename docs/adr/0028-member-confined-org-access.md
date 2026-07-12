@@ -1,8 +1,12 @@
 # ADR-0028 — Member-confined organisation access and direct sign-in landing
 
 Date: 2026-07-10
-Status: Accepted
-Relates to: ADR-0014 (org→workspace membership binding), ADR-0019 (operator sign-in)
+Status: Accepted — the nav "Switch organisation" affordance in Decision §2 is
+superseded by ADR-0029 (2026-07-12): switching organisations is now offered to
+the dev operator only. Everything else in this ADR (member confinement, direct
+landing, real sign-out) still stands.
+Relates to: ADR-0014 (org→workspace membership binding), ADR-0019 (operator
+sign-in), ADR-0029 (switch-org restricted to the dev operator)
 
 ## Context
 
@@ -49,6 +53,9 @@ removed now that the findings are closed; see git history if needed).
    their own workspaces. The nav offers "Switch organisation" only to
    sessions that can actually switch (operator, anonymous pilot, 2+-org
    member) and "Leave organisation" only to operator/anonymous sessions.
+   **(Superseded by ADR-0029, 2026-07-12: the "Switch organisation" nav entry
+   and the pinned-home hero CTA are now shown to the dev operator only.
+   "Leave organisation" is unchanged.)**
 3. **Real sign-out.** `/logout` and `/sign-out` perform their state change on
    POST only (CSRF-protected like every form); GET renders a confirmation
    page. Logout clears the whole session (the org pin never outlives the
@@ -67,6 +74,12 @@ already-pinned org when it is one of the member's own; otherwise pin the
 alphabetically-first member org (deterministic). Multi-org members keep a
 confined picker as their switcher. Single-org members — the overwhelmingly
 common case — never see any org-selection step.
+
+**Superseded by ADR-0029 (2026-07-12):** the multi-org member no longer has an
+*advertised* nav switcher — the "Switch organisation" entry is dev-operator-only.
+The confined `/sign-in` picker still renders their own workspaces if reached
+directly (and the org-ready gate still routes an idle-dropped session there), so
+no access is lost server-side; only the surfaced switch control is removed.
 
 ## Consequences
 
