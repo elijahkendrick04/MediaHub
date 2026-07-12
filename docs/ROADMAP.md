@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-07-12 · `8bcb29e9f` · Reduce reading load + honest render progress + Help FAQ-first (follow-up) (#1198)
+**Last updated:** 2026-07-12 · `c076d0b7a` · engine: native-path time parse rejects bare mm:ss (review batch 5) (#1201)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1226,6 +1226,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-07-12 | `1127b5c46` | fix(engine): native-path time parse rejects bare mm:ss instead of a 100x error |
 | 2026-07-12 | `fbb4cabc2` | Fix CI: governance empty-state assertion + resilient palette reachability guard |
 | 2026-07-12 | `799769382` | Drop dangling "Slide remote" row from the ⌘K command palette |
 | 2026-07-12 | `f9d256d57` | fix(nav): drop the dead 'Slide remote' command-palette row |
@@ -1235,5 +1236,4 @@ list and the auto table below, not here.
 | 2026-07-12 | `a2b214648` | fix(log_sentinel): redact secrets/PII from evidence; best-effort audit writes |
 | 2026-07-12 | `0adbad2b0` | fix(security): review batch 2 — verified prod-reachable security fixes |
 | 2026-07-12 | `538b7b377` | style: ruff-format the wrapped log line in workflow/store.py |
-| 2026-07-12 | `bfd951d49` | Add ⌘K command palette + engagement/findability upgrades across the app |
 <!-- /ROADMAP:ACTIVITY -->
