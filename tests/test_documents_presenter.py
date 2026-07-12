@@ -53,24 +53,14 @@ def test_deck_view_outline_with_notes():
 # ---------------------------------------------------------------------------
 
 
-def test_create_session_has_code_and_state(tmp_path, monkeypatch):
+def test_create_session_has_state(tmp_path, monkeypatch):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     s = presenter.create_session("doc1", 3, owner="club-1", spec_version="v1")
     assert s.current == 0
     assert s.total_slides == 3
-    assert len(s.pairing_code) == 6
-    assert s.pairing_code.isupper()
     # round-trips from disk
     again = presenter.get_session(s.session_id)
     assert again is not None and again.doc_id == "doc1"
-
-
-def test_get_by_pairing_code(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    s = presenter.create_session("doc1", 3, owner="club-1")
-    found = presenter.get_by_pairing_code(s.pairing_code.lower())  # case-insensitive
-    assert found is not None and found.session_id == s.session_id
-    assert presenter.get_by_pairing_code("ZZZZZZ") is None
 
 
 def test_actions_navigate_and_clamp(tmp_path, monkeypatch):
@@ -118,12 +108,13 @@ def test_manual_nav_takes_control_from_autoplay(tmp_path, monkeypatch):
     assert presenter.apply_action(sid, "blackout").autoplay is True
 
 
-def test_end_session_then_pairing_lookup_fails(tmp_path, monkeypatch):
+def test_end_session_marks_ended_and_not_resumable(tmp_path, monkeypatch):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     s = presenter.create_session("doc1", 3, owner="club-1")
     presenter.apply_action(s.session_id, "end")
-    # ended sessions are not reachable by pairing code (can't be re-driven)
-    assert presenter.get_by_pairing_code(s.pairing_code) is None
+    # an ended talk stays flagged ended and is not resumed on reload
+    assert presenter.get_session(s.session_id).ended is True
+    assert presenter.get_live_for("doc1", "club-1") is None
 
 
 def test_public_state_does_not_leak_owner(tmp_path, monkeypatch):
@@ -144,10 +135,10 @@ def test_update_spec_bumps_version_and_clamps(tmp_path, monkeypatch):
     assert updated.current == 1  # clamped into the new, shorter deck
 
 
-def test_unique_codes_among_live_sessions(tmp_path, monkeypatch):
+def test_unique_session_ids_among_live_sessions(tmp_path, monkeypatch):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    codes = {presenter.create_session("d", 2, owner="c").pairing_code for _ in range(8)}
-    assert len(codes) == 8  # no collisions among concurrently-live sessions
+    ids = {presenter.create_session("d", 2, owner="c").session_id for _ in range(8)}
+    assert len(ids) == 8  # no collisions among concurrently-live sessions
 
 
 def test_expiry_and_purge(tmp_path, monkeypatch):

@@ -1,18 +1,17 @@
 """documents.presenter — the live presenter session for a deck (roadmap 1.15).
 
 The deck format gets a **presenter surface**: a console with speaker notes and a
-timer, an audience full-screen view, autoplay (kiosk mode for a foyer screen), and
-**phone-as-remote** pairing. This module is the engine behind it — a small,
-multi-worker-safe session store (one JSON file per session under
-``DATA_DIR/presenter_sessions``, atomic writes, TTL) and the state machine the web
-routes drive. No web code here, so it is unit-testable on its own.
+timer, an audience full-screen view, and autoplay (kiosk mode for a foyer screen).
+This module is the engine behind it — a small, multi-worker-safe session store
+(one JSON file per session under ``DATA_DIR/presenter_sessions``, atomic writes,
+TTL) and the state machine the web routes drive. No web code here, so it is
+unit-testable on its own.
 
-Control model: the owner (the signed-in presenter) creates a session and gets a
-short **pairing code**; a phone that knows the code can drive slide changes
-(next/prev/goto/blackout). The code is the capability — it is short-lived (TTL) and
-unguessable enough for an ephemeral in-room remote; the web layer rate-limits code
-entry. Live edits during a talk are handled by ``spec_version``: when the owner
-re-saves the deck the version bumps and the audience view reloads.
+Control model: the owner (the signed-in presenter) creates a session and drives
+slide changes (next/prev/goto/blackout) from the console; the audience view polls
+the session's public state to stay in step. Live edits during a talk are handled by
+``spec_version``: when the owner re-saves the deck the version bumps and the
+audience view reloads.
 """
 
 from __future__ import annotations
@@ -25,9 +24,6 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Optional
 
-# Unambiguous alphabet (no 0/O/1/I/L) for a code read aloud / typed on a phone.
-_CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
-_CODE_LEN = 6
 SESSION_TTL_SECONDS = 6 * 3600  # a presentation sitting; purged after
 
 ACTIONS = ("next", "prev", "goto", "blackout", "timer_reset", "autoplay", "end")
@@ -43,17 +39,12 @@ def _store_dir() -> Path:
     return d
 
 
-def _make_code() -> str:
-    return "".join(secrets.choice(_CODE_ALPHABET) for _ in range(_CODE_LEN))
-
-
 @dataclass
 class PresenterSession:
     session_id: str
     doc_id: str
     owner: str  # profile id of the presenter who created it
     total_slides: int
-    pairing_code: str
     current: int = 0
     blackout: bool = False
     autoplay: bool = False
@@ -76,7 +67,7 @@ class PresenterSession:
         return cls(**{k: v for k, v in raw.items() if k in fields})
 
     def public_state(self) -> dict:
-        """The state the audience / remote polls (no owner id leaked)."""
+        """The state the audience view polls (no owner id leaked)."""
         elapsed = int(_now() - self.timer_started_at) if self.timer_started_at else 0
         return {
             "session_id": self.session_id,
@@ -128,28 +119,6 @@ def get_session(session_id: str) -> Optional[PresenterSession]:
     return s
 
 
-def get_by_pairing_code(code: str, *, include_ended: bool = False) -> Optional[PresenterSession]:
-    """Resolve a live session by its pairing code.
-
-    ``include_ended=True`` also returns a session whose talk has ended (but not
-    one that has expired/been purged), so the remote can tell a *finished*
-    presentation apart from a *wrong* code — an ended-but-valid code gets a
-    friendly "presentation ended" screen instead of "Code not found", and never
-    burns the shared-NAT failure budget (E-4).
-    """
-    code = (code or "").strip().upper()
-    if not code:
-        return None
-    for f in _store_dir().glob("*.json"):
-        try:
-            s = PresenterSession.from_dict(json.loads(f.read_text(encoding="utf-8")))
-        except (OSError, ValueError, TypeError):
-            continue
-        if s.pairing_code == code and not s.is_expired() and (include_ended or not s.ended):
-            return s
-    return None
-
-
 def create_session(
     doc_id: str,
     total_slides: int,
@@ -159,22 +128,13 @@ def create_session(
     autoplay: bool = False,
     autoplay_seconds: float = 8.0,
 ) -> PresenterSession:
-    """Start a presenter session for a deck and mint its pairing code."""
+    """Start a presenter session for a deck."""
     total = max(1, int(total_slides))
-    # Mint a code not currently in use by a live session.
-    existing = {
-        s.pairing_code
-        for s in _iter_live()  # avoid collisions among active sessions
-    }
-    code = _make_code()
-    while code in existing:
-        code = _make_code()
     session = PresenterSession(
         session_id="ps_" + secrets.token_hex(8),
         doc_id=str(doc_id),
         owner=str(owner),
         total_slides=total,
-        pairing_code=code,
         spec_version=str(spec_version),
         autoplay=bool(autoplay),
         autoplay_seconds=float(autoplay_seconds),
@@ -212,7 +172,7 @@ def get_live_for(doc_id: str, owner: str) -> Optional[PresenterSession]:
 
 
 def apply_action(session_id: str, action: str, value=None) -> Optional[PresenterSession]:
-    """Apply a control action (used by the phone remote and the console)."""
+    """Apply a control action (driven from the presenter console)."""
     s = get_session(session_id)
     if s is None:
         return None
@@ -291,7 +251,6 @@ __all__ = [
     "create_session",
     "get_session",
     "get_live_for",
-    "get_by_pairing_code",
     "apply_action",
     "update_spec",
     "end_session",

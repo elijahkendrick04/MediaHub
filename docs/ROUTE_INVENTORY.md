@@ -144,7 +144,6 @@ _Auto-generated from `app.url_map` by `scripts/build_inventories.py`._
 | `api_print_fulfilment` | `GET` | `/api/print/fulfilment` |
 | `api_print_products` | `GET` | `/api/print/products` |
 | `api_reel_job_status` | `GET` | `/api/reel-jobs/<job_id>` |
-| `api_remote_action` | `POST` | `/api/remote/<code>/action` |
 | `api_run_bulk_export` | `POST` | `/api/runs/<run_id>/bulk-export` |
 | `api_run_bulk_export_file` | `GET` | `/api/runs/<run_id>/bulk-export/file` |
 | `api_card_assistant` | `POST` | `/api/runs/<run_id>/card/<card_id>/assistant` |
@@ -418,8 +417,6 @@ _Auto-generated from `app.url_map` by `scripts/build_inventories.py`._
 | `recognition_page` | `GET` | `/recognition/<run_id>` |
 | `club_records_page` | `GET` | `/records` |
 | `club_records_action` | `POST` | `/records/action` |
-| `remote_landing` | `GET` | `/remote` |
-| `remote_control` | `GET` | `/remote/<code>` |
 | `research_page` | `GET` | `/research` |
 | `review` | `GET` | `/review/<run_id>` |
 | `run_status` | `GET` | `/runs/<run_id>` |
