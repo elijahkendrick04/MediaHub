@@ -22,8 +22,11 @@ raises :class:`ExportUnavailable`; an impossible conversion raises
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from pathlib import Path
+
+from mediahub._atomic_io import unique_tmp
 
 from . import cache as _cache
 from . import images as _images
@@ -202,17 +205,24 @@ def convert_file(
             note="cache hit",
         )
 
+    # For the content-addressed cache slot, encode into a per-writer temp sibling
+    # and os.replace it into place only once it is whole. This closes the two
+    # windows the unlink-on-failure guard can't: a SIGKILL/OOM that never runs the
+    # except (leaving a partial file the next request's is_file()+size>0 gate would
+    # serve), and two identical concurrent renders racing the same slot. A
+    # caller-specified ``out`` is written directly — the caller owns that path.
+    to_cache_slot = out is None
+    write_path = unique_tmp(out_path) if to_cache_slot else out_path
     try:
-        note = _dispatch(src_path, key, scat, out_path, opts)
+        note = _dispatch(src_path, key, scat, write_path, opts)
     except BaseException:
-        # A killed/failed encode (FFmpeg timeout, OOM) must not leave a partial
-        # file in the content-addressed cache slot — the next identical request
-        # would pass the is_file()+size>0 check and serve the corrupt output.
-        out_path.unlink(missing_ok=True)
+        write_path.unlink(missing_ok=True)
         raise
-    if not out_path.is_file() or out_path.stat().st_size == 0:
-        out_path.unlink(missing_ok=True)
+    if not write_path.is_file() or write_path.stat().st_size == 0:
+        write_path.unlink(missing_ok=True)
         raise ExportError(f"conversion produced no output for {key!r}")
+    if to_cache_slot:
+        os.replace(write_path, out_path)
     return ExportResult(
         path=out_path,
         fmt=key,

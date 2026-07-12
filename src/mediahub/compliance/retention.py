@@ -33,6 +33,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable, Optional
 
+from mediahub._atomic_io import atomic_write_text
+
 log = logging.getLogger(__name__)
 
 DEFAULTS = {
@@ -241,20 +243,33 @@ def run_purge(
     cutoff = _age_cutoff(days, now)
     log_path = _data_dir() / "security_log" / "events.jsonl"
     if cutoff is not None and log_path.exists():
-        kept, dropped = [], 0
-        for line in log_path.read_text(encoding="utf-8").splitlines():
-            try:
-                ts = datetime.fromisoformat(json.loads(line).get("ts", ""))
-            except Exception:
-                kept.append(line)
-                continue
-            if ts < cutoff:
-                dropped += 1
-            else:
-                kept.append(line)
-        if dropped:
-            log_path.write_text("\n".join(kept) + ("\n" if kept else ""), encoding="utf-8")
-            report["security_log_lines_dropped"] = dropped
+        # Hold the security-log lock across read→filter→write so a concurrent
+        # record_event() append isn't dropped, and rewrite atomically so a crash
+        # can't lose the whole log. record_event() is called AFTER this block, so
+        # holding its (non-reentrant) lock only here can't deadlock.
+        from .security_log import _LOCK as _sec_lock  # noqa: PLC0415
+
+        with _sec_lock:
+            kept, dropped = [], 0
+            for line in log_path.read_text(encoding="utf-8").splitlines():
+                try:
+                    ts = datetime.fromisoformat(json.loads(line).get("ts", ""))
+                    # A naive timestamp is UTC; comparing it to the aware cutoff
+                    # must not raise (which used to abort the whole purge) — do the
+                    # comparison INSIDE the try so a bad/naive line just survives.
+                    if ts.tzinfo is None:
+                        ts = ts.replace(tzinfo=timezone.utc)
+                    aged = ts < cutoff
+                except Exception:
+                    kept.append(line)
+                    continue
+                if aged:
+                    dropped += 1
+                else:
+                    kept.append(line)
+            if dropped:
+                atomic_write_text(log_path, "\n".join(kept) + ("\n" if kept else ""))
+                report["security_log_lines_dropped"] = dropped
 
     try:
         from .security_log import record_event

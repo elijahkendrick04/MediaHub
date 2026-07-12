@@ -32,7 +32,11 @@ log = logging.getLogger(__name__)
 
 
 def _data_dir() -> Path:
-    return Path(os.environ.get("DATA_DIR", "data"))
+    # Fall back to the package root (src/mediahub) — the SAME default the web
+    # layer uses (web.py's DATA_DIR = _SRC_ROOT = parents[1]) — so with DATA_DIR
+    # unset the erasure cascade scans the very tree the app writes to, not a
+    # cwd-relative "data" the app never touches.
+    return Path(os.environ.get("DATA_DIR", str(Path(__file__).resolve().parents[1])))
 
 
 def _runs_dir() -> Path:
