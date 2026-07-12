@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-07-12 · `d80f27995` · Merge pull request #1184 from elijahkendrick04/claude/remove-slide-remote-kf5dsz
+**Last updated:** 2026-07-12 · `18dad552c` · log_sentinel: redact secrets from evidence + best-effort audit (review batch 3) (#1194)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1226,6 +1226,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-07-12 | `a2b214648` | fix(log_sentinel): redact secrets/PII from evidence; best-effort audit writes |
 | 2026-07-12 | `0adbad2b0` | fix(security): review batch 2 — verified prod-reachable security fixes |
 | 2026-07-12 | `538b7b377` | style: ruff-format the wrapped log line in workflow/store.py |
 | 2026-07-12 | `bfd951d49` | Add ⌘K command palette + engagement/findability upgrades across the app |
@@ -1235,5 +1236,4 @@ list and the auto table below, not here.
 | 2026-07-12 | `ed957955b` | docs: add deep code review & improvement backlog (2026-07) |
 | 2026-07-11 | `428e0d9a1` | Vary the shared kicker signature across archetypes |
 | 2026-07-11 | `32802043e` | Break the uniform tile grid in the motion background (PatternLayer) |
-| 2026-07-11 | `4fbff71c7` | Give quote_led_recap a sentence-case register (break all-caps monoculture) |
 <!-- /ROADMAP:ACTIVITY -->
