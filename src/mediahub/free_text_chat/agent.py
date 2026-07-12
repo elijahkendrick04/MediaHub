@@ -16,7 +16,14 @@ from __future__ import annotations
 import json
 from typing import Optional
 
+from mediahub.ai_core.prompt_guard import SYSTEM_GUARD, delimit_untrusted, scan
+
 from .session import ChatSession, save_session
+
+# Cap the transcript folded into every turn's prompt: an unbounded chat grows
+# token cost linearly and eventually exceeds the input window with an opaque
+# provider error (copilot uses a similar recent-N window).
+_MAX_HISTORY_MESSAGES = 16
 
 
 _SYSTEM_PROMPT = """\
@@ -197,8 +204,15 @@ def _render_history_as_prose(session: ChatSession) -> str:
     multi-provider abstraction simple — every provider gets the same
     plain-text user message + tools.
     """
+    msgs = session.messages
+    omitted = 0
+    if len(msgs) > _MAX_HISTORY_MESSAGES:
+        omitted = len(msgs) - _MAX_HISTORY_MESSAGES
+        msgs = msgs[-_MAX_HISTORY_MESSAGES:]
     lines: list[str] = []
-    for m in session.messages:
+    if omitted:
+        lines.append(f"[NOTE: {omitted} earlier turn(s) omitted to bound context.]")
+    for m in msgs:
         role = m.get("role")
         content = (m.get("content") or "").strip()
         if not content:
@@ -229,7 +243,7 @@ def next_assistant_turn(
         ProviderError,
     )
 
-    system = _SYSTEM_PROMPT
+    system = _SYSTEM_PROMPT + "\n\n" + SYSTEM_GUARD
     if club_brand:
         from mediahub.ai_core import narrate_brand
 
@@ -273,7 +287,11 @@ def next_assistant_turn(
                     "hits": evidence,
                 }
             )
-            return json.dumps({"hits": evidence}, ensure_ascii=False)
+            # Fence the scraped hits as untrusted DATA (prompt-injection guard):
+            # snippets/titles/urls are attacker-influenceable and must never be
+            # followed as instructions.
+            payload = json.dumps({"hits": evidence}, ensure_ascii=False)
+            return delimit_untrusted(payload, flagged=bool(scan(payload)))
         if name == "propose_brief":
             brief = inp.get("brief") or {}
             summary = inp.get("summary") or ""
