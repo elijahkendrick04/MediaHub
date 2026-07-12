@@ -15078,35 +15078,13 @@ def _layout(
         signed_in_pid = ""
         account_email = ""
         dev_operator = False
-    # Who may switch organisations from the nav (org-access audit): the dev
-    # operator always; an anonymous pilot session (picker is its only door);
-    # a member only when they actually belong to 2+ workspaces. A single-org
-    # member never sees a picker entry — their club IS their session. Reuses
-    # the per-request g._mh_memberships snapshot (one ledger read a request,
-    # same cache _session_can_use_profile fills).
-    can_switch_org = False
-    if dev_operator:
-        can_switch_org = True
-    elif account_email:
-        try:
-            from flask import g as _g
-
-            snap = getattr(_g, "_mh_memberships", None)
-            if snap is None:
-                snap = _tenancy.MembershipStore()._read_all()
-                _g._mh_memberships = snap
-            can_switch_org = (
-                sum(
-                    1
-                    for (e, _pid), m in snap.items()
-                    if e == account_email and m.status == _tenancy.STATUS_ACTIVE
-                )
-                >= 2
-            )
-        except Exception:
-            can_switch_org = False
-    elif signed_in_pid:
-        can_switch_org = True
+    # Switching organisations from the nav is a developer-operator-only
+    # affordance (rendered off ``dev_operator`` directly). Every other session
+    # — single- or multi-org account members and anonymous pilot sessions — no
+    # longer sees a switch-org entry; their club IS their session and their
+    # only exit is "Leave organisation" / "Log out". The /sign-in picker still
+    # exists (it is the org-ready-gate destination and the first org pick); it
+    # is simply no longer advertised as a "switch" affordance to non-operators.
     signed_in_name = ""
     signed_in_primary = ""
     signed_in_secondary = ""
@@ -15549,8 +15527,9 @@ def _layout(
       <span class="mh-cmdk-trigger-label">{{ t('nav.search') }}</span>
       <span class="mh-cmdk-trigger-kbd" aria-hidden="true"><kbd data-mh-cmdk-kbd>Ctrl K</kbd></span>
     </button>
-    {# Settings, Switch organisation and Sign out moved into the active-org
-       account menu (the dropdown on the far right) for signed-in users. Signed-
+    {# Settings and Sign out moved into the active-org account menu (the
+       dropdown on the far right) for signed-in users — plus a "Switch
+       organisation" entry for the dev operator only. Signed-
        out visitors keep a plain Settings + Pricing link here. Pricing is a
        top-bar item only for signed-out visitors (prospects) — once signed into
        a club profile it is linked from Settings → Billing & plan ("See plans
@@ -15628,7 +15607,8 @@ def _layout(
     {% if signed_in %}
     {# Active-organisation account menu. The chip itself no longer navigates
        (its old "review brand setup" shortcut was removed); clicking it opens a
-       dropdown with Settings / Switch organisation / Sign out. Progressive
+       dropdown with Settings / Sign out (plus Switch organisation for the dev
+       operator only). Progressive
        enhancement (mirrors the notifications dropdown): with JS the panel
        collapses under the chip and is JS-anchored so the scrollable / hamburger
        nav can never clip it; with no JS the items stay inline so they're never
@@ -15672,14 +15652,15 @@ def _layout(
            class="mh-orgmenu-item {{ 'active' if active=='settings' else '' }}">{{ t('nav.settings') }}</a>
         <a href="{{ url_for('help_page') }}" role="menuitem"
            class="mh-orgmenu-item {{ 'active' if active=='help' else '' }}">{{ t('nav.help') }}</a>
-        {# Org-access audit: switching organisations is only offered to sessions
-           that can actually do it — the dev operator, anonymous pilot sessions,
-           and the rare multi-org member. A single-org member's access is bound
-           to their account, so a picker entry would be a dead button; their
-           exit is "Log out". Leaving the current organisation moved out of this
-           menu into Settings → Account ("Leave organisation"), so the exit lives
-           beside the other session/account actions instead of the nav chrome. #}
-        {% if can_switch_org %}
+        {# Switching organisations is a developer-operator-only affordance.
+           Members (single- or multi-org) and anonymous pilot sessions never
+           see a picker entry — their club IS their session, so a switch
+           control here would be a dead (or looping) button. Their exit is
+           "Log out"; leaving the current organisation lives in Settings →
+           Account ("Leave organisation", moved out of this menu), beside the
+           other session/account actions. The dev operator keeps cross-org
+           roaming (ADR-0019 / ADR-0029). #}
+        {% if dev_operator %}
         <a href="{{ url_for('sign_in_page') }}" role="menuitem"
            class="mh-orgmenu-item {{ 'active' if active=='signin' else '' }}">{{ t('nav.switch_org') }}</a>
         {% endif %}
@@ -18277,7 +18258,6 @@ def _layout(
         signed_in=bool(signed_in_pid),
         account_email=account_email,
         dev_operator=dev_operator,
-        can_switch_org=can_switch_org,
         signed_in_name=signed_in_name,
         signed_in_primary=signed_in_primary,
         signed_in_secondary=signed_in_secondary,
@@ -21639,12 +21619,23 @@ def create_app() -> Flask:
             # rest; "Edit profile" stays the canonical link to brand/setup (it
             # must point at /organisation/setup, not the legacy /organisation
             # editor — g3 brand-canonical guard).
+            # "Switch organisation" is a developer-operator-only affordance
+            # (ADR-0029): members and anonymous pilot sessions never switch —
+            # their club IS their session. The /sign-in picker itself stays as
+            # the org-ready gate destination and the first org pick.
+            _switch_cta = (
+                f'<a class="mh-cta-secondary" href="{url_for("sign_in_page")}">'
+                "Switch organisation</a>"
+                if _auth.is_dev_operator()
+                else ""
+            )
             hero_actions = (
                 f'<a class="mh-cta-primary" href="{url_for("upload")}">'
                 "Upload results &rarr;</a>"
                 f'<a class="mh-cta-secondary" href="{url_for("make_page")}">'
                 "Create other content</a>"
-                f'<a class="mh-cta-secondary" href="{url_for("organisation_setup")}">'
+                + _switch_cta
+                + f'<a class="mh-cta-secondary" href="{url_for("organisation_setup")}">'
                 "Edit profile</a>"
             )
             eyebrow = "Pinned organisation"
@@ -44601,9 +44592,10 @@ what you're doing, what they should do.</p>
     # pin into their session, OR delete a profile they no longer want, OR
     # jump to /organisation/setup to create a fresh one.
     #
-    # This is the *only* path to switch tenants once a profile is set
-    # up; the home page links here, and the hero "Switch organisation"
-    # button on the pinned-state hero links here too.
+    # This is the *only* path to switch tenants once a profile is set up.
+    # The dev-operator-only "Switch organisation" entries (nav account menu +
+    # the pinned-state home hero CTA) link here; for everyone else this route
+    # is reached as the org-ready gate destination and the first org pick.
     @app.route("/sign-in", methods=["GET"])
     def sign_in_page():
         # PC.3: the picker only offers workspaces this session may enter —

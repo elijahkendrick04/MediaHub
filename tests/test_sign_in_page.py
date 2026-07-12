@@ -123,7 +123,25 @@ class TestSignInPage:
         resp = c.get("/")
         body = resp.get_data(as_text=True)
         assert "Wycombe District Swimming Club" in body
-        # The pinned-state CTA wording.
+        # The pinned-state hero renders its returning-user CTA.
+        assert "Create new content" in body
+        # Switching organisations is now a developer-operator-only affordance
+        # (ADR-0029). An anonymous pilot session (no account, not the dev
+        # operator) must not see it in the hero or the account menu.
+        assert "Switch organisation" not in body
+
+    def test_switch_organisation_is_dev_operator_only(self, app_two_profiles):
+        """Only the authenticated dev operator keeps the cross-org switcher —
+        it appears in both the account-menu dropdown and the pinned home hero
+        for a dev session, and nowhere for a non-dev session."""
+        c, _, _ = app_two_profiles
+        # A dev-operator session (ADR-0019 grants the session flag).
+        with c.session_transaction() as sess:
+            sess["dev_operator"] = True
+        c.post("/sign-in", data={"profile_id": "wycombe"})
+        body = c.get("/").get_data(as_text=True)
+        assert "Wycombe District Swimming Club" in body
+        # The operator sees the switch affordance (nav dropdown + hero CTA).
         assert "Switch organisation" in body
 
     def test_header_dropdowns_are_mutually_exclusive(self, app_two_profiles):
