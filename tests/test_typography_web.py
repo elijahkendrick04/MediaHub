@@ -68,7 +68,10 @@ class TestPage:
         app, _ = app_env
         with app.test_client() as c:
             body = c.get("/settings/typography").get_data(as_text=True)
-        assert "Select or create a club first" in body
+        # The empty state is directive: it names the missing club and offers a
+        # one-click path to set one up.
+        assert "No club yet" in body
+        assert "/organisation/setup" in body
 
     def test_section_with_profile_shows_catalogue_and_upload(self, app_env):
         app, _ = app_env
