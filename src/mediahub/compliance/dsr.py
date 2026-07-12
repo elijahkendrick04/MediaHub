@@ -32,6 +32,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
+from mediahub._atomic_io import atomic_write_text
+
 from .consent import ConsentRegistry, athlete_key
 from .store import JsonlLedger
 
@@ -499,7 +501,7 @@ def erase_athlete(profile_id: str, athlete_name: str, *, recorded_by: str = "") 
             run["cards"] = kept_cards
         report["names_redacted"] += _redact_names_deep(run, key)
         report["names_redacted"] += _redact_text_deep(run, athlete_name)
-        path.write_text(json.dumps(run))
+        atomic_write_text(path, json.dumps(run))
         run_id = run.get("run_id", path.stem)
         report["runs_touched"].append(run_id)
 
@@ -531,7 +533,7 @@ def erase_athlete(profile_id: str, athlete_name: str, *, recorded_by: str = "") 
                     removed = before - len(wf)
                     if removed:
                         report["workflow_entries_removed"] += removed
-                        wf_path.write_text(json.dumps(wf))
+                        atomic_write_text(wf_path, json.dumps(wf))
             except Exception:
                 report["residuals"].append(f"workflow sidecar unreadable: {wf_path}")
 
@@ -544,7 +546,7 @@ def erase_athlete(profile_id: str, athlete_name: str, *, recorded_by: str = "") 
                         pack = json.loads(f.read_text())
                         report["names_redacted"] += _redact_names_deep(pack, key)
                         report["names_redacted"] += _redact_text_deep(pack, athlete_name)
-                        f.write_text(json.dumps(pack))
+                        atomic_write_text(f, json.dumps(pack))
                     except Exception:
                         try:
                             f.unlink()
@@ -758,7 +760,7 @@ def rectify_athlete_name(profile_id: str, old_name: str, new_name: str) -> dict:
             continue
         changed = _rename_deep(run)
         if changed:
-            path.write_text(json.dumps(run))
+            atomic_write_text(path, json.dumps(run))
             report["runs_touched"].append(run.get("run_id", path.stem))
             report["fields_updated"] += changed
 

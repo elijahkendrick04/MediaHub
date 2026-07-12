@@ -30,6 +30,8 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Optional
 
+from mediahub._atomic_io import atomic_write_text, cross_process_lock
+
 # The engagement signals we track. Deliberately a small, universal set — every
 # platform reports some subset; absent ones are simply 0.
 METRIC_KEYS = ("impressions", "likes", "comments", "shares", "saves")
@@ -168,10 +170,17 @@ def load_metrics(org_id: str, *, data_dir: Optional[Path] = None) -> list[PostMe
 
 
 def _save(org_id: str, posts: list[PostMetric], *, data_dir: Optional[Path] = None) -> None:
+    # Atomic write; the caller (record_metric / delete_metric) holds the lock
+    # across the whole load -> modify -> save. A non-atomic write here could tear
+    # the file, after which load_metrics() returns [] and the next record would
+    # overwrite the org's entire metrics history with a single record.
     path = _path(org_id, data_dir)
     payload = json.dumps({"posts": [p.to_dict() for p in posts]}, indent=2, ensure_ascii=False)
-    with _LOCK:
-        path.write_text(payload, encoding="utf-8")
+    atomic_write_text(path, payload)
+
+
+def _lock_path(org_id: str, data_dir: Optional[Path] = None) -> Path:
+    return _path(org_id, data_dir).with_suffix(".lock")
 
 
 def record_metric(
@@ -203,21 +212,23 @@ def record_metric(
     )
     if rec is None:
         return None
-    posts = load_metrics(org_id, data_dir=data_dir)
-    if len(posts) >= MAX_POSTS:
-        return None
-    rec.recorded_at = _now()
-    posts.append(rec)
-    _save(org_id, posts, data_dir=data_dir)
+    with _LOCK, cross_process_lock(_lock_path(org_id, data_dir)):
+        posts = load_metrics(org_id, data_dir=data_dir)
+        if len(posts) >= MAX_POSTS:
+            return None
+        rec.recorded_at = _now()
+        posts.append(rec)
+        _save(org_id, posts, data_dir=data_dir)
     return rec
 
 
 def delete_metric(org_id: str, metric_id: str, *, data_dir: Optional[Path] = None) -> bool:
-    posts = load_metrics(org_id, data_dir=data_dir)
-    kept = [p for p in posts if p.id != metric_id]
-    if len(kept) == len(posts):
-        return False
-    _save(org_id, kept, data_dir=data_dir)
+    with _LOCK, cross_process_lock(_lock_path(org_id, data_dir)):
+        posts = load_metrics(org_id, data_dir=data_dir)
+        kept = [p for p in posts if p.id != metric_id]
+        if len(kept) == len(posts):
+            return False
+        _save(org_id, kept, data_dir=data_dir)
     return True
 
 

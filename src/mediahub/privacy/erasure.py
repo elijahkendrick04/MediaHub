@@ -26,6 +26,8 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from mediahub._atomic_io import atomic_write_text
+
 log = logging.getLogger(__name__)
 
 
@@ -268,6 +270,13 @@ def _name_value_match(d: dict, frag: str) -> bool:
 _CARD_SUBJECT_KEYS = ("name", "swimmer", "athlete", "title", "headline", "subject")
 
 
+def _name_in_text(text: str, frag: str) -> bool:
+    """Whole-name match — "Sam Lee" must NOT match inside "Sam Leeson". Erasing
+    one subject must never delete another whose name merely contains it (the same
+    name-boundary rule ``_delete_json_files_mentioning`` already applies)."""
+    return re.search(r"(?<![a-z0-9])" + re.escape(frag) + r"(?![a-z0-9])", text.lower()) is not None
+
+
 def _card_is_about(card: dict, frag: str) -> bool:
     """A card is removed only when the athlete is its subject; a card about
     someone else that merely mentions the name in prose is kept and redacted
@@ -275,7 +284,7 @@ def _card_is_about(card: dict, frag: str) -> bool:
     if _name_value_match(card, frag):
         return True
     for key in _CARD_SUBJECT_KEYS:
-        if frag in str(card.get(key) or "").lower():
+        if _name_in_text(str(card.get(key) or ""), frag):
             return True
     facts = card.get("raw_facts")
     if isinstance(facts, dict) and _name_value_match(facts, frag):
@@ -369,7 +378,7 @@ def erase_athlete(profile_id: str, name: str, club: str = "") -> AthleteErasureR
             stripped, n_cards, n_other, removed_ids = _strip_athlete_from_payload(payload, frag)
             stripped = _redact_strings(stripped, name)
             try:
-                run_file.write_text(json.dumps(stripped, indent=2, default=str), encoding="utf-8")
+                atomic_write_text(run_file, json.dumps(stripped, indent=2, default=str))
             except OSError as exc:
                 log.warning("erasure: could not rewrite %s: %s", run_file, exc)
                 continue
