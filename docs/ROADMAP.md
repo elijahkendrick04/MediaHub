@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-07-13 · `27bc2fb12` · Merge pull request #1243 from elijahkendrick04/claude/review-17-webpy
+**Last updated:** 2026-07-13 · `c01a0f367` · Merge pull request #1244 from elijahkendrick04/claude/review-18-tests
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1235,5 +1235,4 @@ list and the auto table below, not here.
 | 2026-07-12 | `c0dad34ce` | Infra hardening — durability, proxy-IP, isolation (deep-review batch 14a: #119, #121, #122, #123) |
 | 2026-07-12 | `84fcedcf4` | Upload + download hardening (deep-review batch 13: #28, #31) |
 | 2026-07-12 | `5ea57e938` | Rendering-stack durability (deep-review batch 12: #70, #72, #75) |
-| 2026-07-12 | `2f882d96c` | Research/chat prompt-injection guard + bounded chat (deep-review batch 11e: #40, #41) |
 <!-- /ROADMAP:ACTIVITY -->
