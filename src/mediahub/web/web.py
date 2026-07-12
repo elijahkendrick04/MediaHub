@@ -2299,7 +2299,12 @@ class _RenderBusy(Exception):
 
 @contextlib.contextmanager
 def _render_slot(kind: str, label: str = "", *, timeout: float):
-    """Hold a global render slot for the duration of one heavy render.
+    """Hold a **per-worker** render slot for the duration of one heavy render.
+
+    The semaphore is process-local: each Gunicorn worker has its own, so under
+    ``--workers N`` the real cross-process ceiling is ``N × _RENDER_LIMIT``
+    concurrent heavy renders, not ``_RENDER_LIMIT``. (Sizing/behaviour is
+    unchanged — this only corrects the earlier "global slot" wording.)
 
     Raises ``_RenderBusy`` if no slot frees up within ``timeout`` seconds.
     Always releases the slot, even if the render raises.
@@ -31583,7 +31588,7 @@ self.addEventListener('fetch', function(e){
         from mediahub.notify import inbox as _inbox
 
         me = _auth.current_user_email()
-        changed = _inbox.mark_read(pid, notif_id)
+        changed = _inbox.mark_read(pid, notif_id, user_email=me)
         return jsonify(
             {"ok": True, "changed": changed, "unread": _inbox.unread_count(pid, user_email=me)}
         )

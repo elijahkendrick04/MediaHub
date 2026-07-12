@@ -456,10 +456,14 @@ def unread_count(org_id: str, *, user_email: Optional[str] = None) -> int:
 # ---------------------------------------------------------------------------
 
 
-def mark_read(org_id: str, notif_id: str) -> bool:
+def mark_read(org_id: str, notif_id: str, *, user_email: Optional[str] = None) -> bool:
     """Mark one notification read. Returns ``True`` only when a row changed —
     the ``org_id`` guard makes this a no-op for another org's id (tenant
-    isolation), and the ``read_at IS NULL`` guard makes it idempotent."""
+    isolation), and the ``read_at IS NULL`` guard makes it idempotent.
+
+    Scoped to what ``user_email`` may see when given (org-wide + their own), the
+    same per-user clause ``list_for``/``mark_all_read`` apply — so one member can
+    never mark another member's personal mention/task read."""
     org_id = (org_id or "").strip()
     notif_id = (notif_id or "").strip()
     if not org_id or not notif_id:
@@ -467,11 +471,11 @@ def mark_read(org_id: str, notif_id: str) -> bool:
     try:
         conn = _connect()
         try:
-            cur = conn.execute(
-                "UPDATE notifications SET read_at = ? "
-                "WHERE id = ? AND org_id = ? AND read_at IS NULL",
-                (_now(), notif_id, org_id),
-            )
+            params: list = [_now(), notif_id, org_id]
+            sql = "UPDATE notifications SET read_at = ? WHERE id = ? AND org_id = ?"
+            sql += _user_clause(user_email, params)
+            sql += " AND read_at IS NULL"
+            cur = conn.execute(sql, params)
             conn.commit()
             return cur.rowcount > 0
         finally:
