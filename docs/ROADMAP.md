@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-07-12 · `ece5e80fb` · Fix red main: remove orphaned "Slide remote" command-palette row (#1202)
+**Last updated:** 2026-07-12 · `1b877bc90` · Merge pull request #1211 from elijahkendrick04/claude/code-review-cleanup-v2c6g6
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1226,6 +1226,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-07-12 | `77d1632a5` | Harden privacy/compliance data-safety (deep-review batch 7: #108, #107, #106) |
 | 2026-07-12 | `8899edf94` | fix: injection hardening + nickname canonicalisation (review batch 6) |
 | 2026-07-12 | `9ac11ec48` | Fix red main: drop orphaned "Slide remote" command-palette row |
 | 2026-07-12 | `1127b5c46` | fix(engine): native-path time parse rejects bare mm:ss instead of a 100x error |
@@ -1234,6 +1235,4 @@ list and the auto table below, not here.
 | 2026-07-12 | `fbb4cabc2` | Fix CI: governance empty-state assertion + resilient palette reachability guard |
 | 2026-07-12 | `799769382` | Drop dangling "Slide remote" row from the ⌘K command palette |
 | 2026-07-12 | `f9d256d57` | fix(nav): drop the dead 'Slide remote' command-palette row |
-| 2026-07-12 | `2b9815ce7` | Reduce reading load + honest render progress + Help FAQ-first (follow-up) |
-| 2026-07-12 | `128ecd288` | style: ruff-format the developer-settings purge-card concatenation |
 <!-- /ROADMAP:ACTIVITY -->
