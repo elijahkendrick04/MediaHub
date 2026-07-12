@@ -273,33 +273,6 @@ class WebResearcher:
 
         return results[:num]
 
-    def fetch_url(self, url: str, timeout: int = 10) -> Optional[str]:
-        """
-        Fetch a URL and return its text content (stripped HTML).
-        Returns None on failure.
-        """
-        try:
-            req = urllib.request.Request(
-                url,
-                headers={
-                    "User-Agent": (
-                        "Mozilla/5.0 (compatible; SwimMediaHub/1.0; "
-                        "+https://github.com/swim-media-hub)"
-                    ),
-                    "Accept": "text/html,application/xhtml+xml,application/xml",
-                    "Accept-Language": "en-GB,en;q=0.9",
-                },
-            )
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
-                raw = resp.read().decode("utf-8", errors="replace")
-            # Strip HTML tags
-            text = re.sub(r"<[^>]+>", " ", raw)
-            text = html.unescape(text)
-            text = re.sub(r"\s+", " ", text).strip()
-            return text[:8000]  # Limit length
-        except Exception:
-            return None
-
     # ------------------------------------------------------------------
     # Private helpers
     # ------------------------------------------------------------------
