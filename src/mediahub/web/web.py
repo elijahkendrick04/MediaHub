@@ -39809,11 +39809,21 @@ function copySpotlightCaption(btn) {{
         if request.args.get("autographic") and _pack_cards:
             _g0 = f"{_graphic_api_base}/0/create-graphic"
             _photo = (request.args.get("photo") or "").strip()
+            # Escape < in every value embedded in the inline <script>: an
+            # attacker-supplied ?photo=</script>... would otherwise break out of
+            # the tag (json.dumps does not neutralise </script>, and the CSP
+            # allows 'unsafe-inline', so the injected script would execute). The
+            # JS engine decodes < back to '<' inside the string literal, so
+            # behaviour is unchanged.
+            _lt = "\\u003c"
+            _arg_card = json.dumps(f"{pack_id}-0").replace("<", _lt)
+            _arg_g0 = json.dumps(_g0).replace("<", _lt)
+            _arg_photo = json.dumps(_photo).replace("<", _lt)
             auto_js = (
                 "<script>document.addEventListener('DOMContentLoaded',function(){"
                 "if(window.mhAutoGraphic){window.mhAutoGraphic("
-                f"{json.dumps(f'{pack_id}-0')},{json.dumps(_g0)},"
-                f"{json.dumps(_photo)},'feed_portrait');}}}});</script>"
+                f"{_arg_card},{_arg_g0},"
+                f"{_arg_photo},'feed_portrait');}}}});</script>"
             )
         body = (
             header
@@ -42982,6 +42992,10 @@ document.addEventListener('click', function (ev) {
                 return _layout("Choose a new password", body, active="signin"), 400
             if user is None:
                 abort(404)
+            # Rotate the session before re-login: set_password bumped the epoch
+            # (revoking pre-reset cookies), so re-mint the current browser under
+            # the new epoch and drop any stale pre-reset session state.
+            session.clear()
             _auth.login_user(user)
             if not _legal.AcceptanceStore().needs_terms_reacceptance(user.email):
                 session["terms_ok_version"] = _legal.TERMS_VERSION
@@ -53257,16 +53271,18 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
     def _session_can_access_profile(asset_profile_id: Optional[str]) -> bool:
         """Profile-scoped access guard for media-library files.
 
-        Run-scoped synthetic profiles (``_run_<id>``) are tied to a single
-        run and inherit that run's privacy semantics, so they're allowed
-        through. Otherwise the asset's profile must match the session's
-        currently-active organisation pin: this keeps one org's photos
-        out of another org's reach even if the asset id leaks.
+        Run-scoped synthetic profiles (``_run_<id>``) are tied to a single run,
+        so they inherit that run's privacy semantics by actually resolving the
+        run and applying the same guard the run routes use — NOT a blanket
+        allow, which would let a signed-in stranger read a run's photos from a
+        guessed/leaked asset id (the IDOR class fixed on /api/visual/<vid>).
+        Otherwise the asset's profile must match the session's active org pin.
         """
         if not asset_profile_id:
             return False
         if asset_profile_id.startswith("_run_"):
-            return True
+            rid = asset_profile_id[len("_run_") :]
+            return _can_access_run(rid, _load_run(rid), _active_profile_id())
         return asset_profile_id == _active_profile_id()
 
     # Suffix → served Content-Type for library files. Derived from the stored

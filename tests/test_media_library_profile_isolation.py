@@ -115,14 +115,35 @@ class TestFileServeIsolation:
         )
 
     def test_run_scoped_profile_is_allowed(self, two_org_app):
+        # A _run_ asset whose run has no owner on file (ownerless/legacy)
+        # inherits the run routes' ownerless-readable policy — still 200.
         app, tmp_path = two_org_app
         with app.test_client() as c:
             c.post("/api/organisation/active", data={"profile_id": "alpha"})
             run_id, _ = _seed_asset(tmp_path, "_run_abcdef123")
             resp = c.get(f"/api/media-library/file/{run_id}")
         assert resp.status_code == 200, (
-            "run-scoped synthetic profiles are allowed because privacy "
+            "an ownerless run-scoped asset is allowed because privacy "
             "is enforced at the run level — got 403 unexpectedly"
+        )
+
+    def test_run_scoped_asset_for_foreign_run_is_blocked(self, two_org_app):
+        """IDOR regression: a _run_<id> asset must inherit its run's access
+        policy, not blanket-allow. An asset tied to a run owned by beta must
+        NOT be readable from an alpha-pinned session even if its id leaks."""
+        app, tmp_path = two_org_app
+        run_dir = tmp_path / "runs_v4"
+        run_dir.mkdir(parents=True, exist_ok=True)
+        (run_dir / "runbeta9.json").write_text(
+            json.dumps({"run_id": "runbeta9", "profile_id": "beta"})
+        )
+        with app.test_client() as c:
+            c.post("/api/organisation/active", data={"profile_id": "alpha"})
+            asset_id, _ = _seed_asset(tmp_path, "_run_runbeta9")
+            resp = c.get(f"/api/media-library/file/{asset_id}")
+        assert resp.status_code in (403, 404), (
+            "a _run_ asset tied to beta's run must not be readable from an "
+            f"alpha session; got {resp.status_code} {resp.data!r}"
         )
 
     def test_served_file_carries_image_mime_and_nosniff(self, two_org_app):
