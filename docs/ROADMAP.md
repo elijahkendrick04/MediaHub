@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-07-12 · `02ca5afaa` · Data-safety: atomic + cross-process-safe state writes (review batch 1) (#1185)
+**Last updated:** 2026-07-12 · `3c99f3e52` · Security: verified prod-reachable fixes (review batch 2) (#1192)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1226,6 +1226,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-07-12 | `0adbad2b0` | fix(security): review batch 2 — verified prod-reachable security fixes |
 | 2026-07-12 | `538b7b377` | style: ruff-format the wrapped log line in workflow/store.py |
 | 2026-07-12 | `bfd951d49` | Add ⌘K command palette + engagement/findability upgrades across the app |
 | 2026-07-12 | `c575903e2` | fix(state): atomic + cross-process-safe writes for run/approval sidecars |
@@ -1235,5 +1236,4 @@ list and the auto table below, not here.
 | 2026-07-11 | `32802043e` | Break the uniform tile grid in the motion background (PatternLayer) |
 | 2026-07-11 | `4fbff71c7` | Give quote_led_recap a sentence-case register (break all-caps monoculture) |
 | 2026-07-11 | `13cf4e78f` | Wire typography_pair into v2 stills (still↔motion parity fix) |
-| 2026-07-11 | `34bdaa6ad` | chore(docs): remove completed audit reports and stale one-off build sweeps |
 <!-- /ROADMAP:ACTIVITY -->
