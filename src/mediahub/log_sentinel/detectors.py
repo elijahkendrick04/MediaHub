@@ -23,6 +23,36 @@ from mediahub.log_sentinel.render_api import LogLine
 MAX_EVIDENCE = 5
 EVIDENCE_TRIM = 300  # chars per evidence line
 
+# Evidence is verbatim production log text that leaves the process — it is
+# written to the audit ledger, pushed to ntfy topics, fed to AI triage and filed
+# into an external GitHub issue whose title flows into docs/ROADMAP.md. Access
+# logs can carry provider keys in query strings (Gemini's ``?key=AIza...``),
+# Authorization headers and athlete PII (emails). Redact BEFORE evidence is built
+# so every downstream sink is covered at once (CLAUDE.md: keys/PII must never
+# appear in user-visible text).
+_REDACTIONS: tuple[tuple[re.Pattern, str], ...] = (
+    (
+        re.compile(
+            r"(?i)\b((?:api[_-]?key|access[_-]?token|key|token|secret|password|pwd)\s*[=:]\s*)"
+            r"[^\s&'\"]+"
+        ),
+        r"\1***",
+    ),
+    (re.compile(r"(?i)\b(authorization\s*[:=]\s*)\S+"), r"\1***"),
+    (re.compile(r"(?i)\b(bearer\s+)\S+"), r"\1***"),
+    (re.compile(r"\bsk-ant-[A-Za-z0-9_-]{6,}"), "sk-ant-***"),
+    (re.compile(r"\bAIza[A-Za-z0-9_-]{10,}"), "AIza***"),
+    (re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b"), "<email redacted>"),
+)
+
+
+def redact_evidence(text: str) -> str:
+    """Mask provider keys, auth headers and emails from a log line before it
+    leaves the box (audit ledger, ntfy, GitHub issue, AI triage)."""
+    for pat, repl in _REDACTIONS:
+        text = pat.sub(repl, text)
+    return text
+
 
 @dataclass(frozen=True)
 class Finding:
@@ -182,7 +212,8 @@ def detect(lines: list[LogLine]) -> list[Finding]:
         if len(matched) < det.threshold:
             continue
         evidence = tuple(
-            f"{ln.timestamp} {ln.message}".strip()[:EVIDENCE_TRIM] for ln in matched[:MAX_EVIDENCE]
+            redact_evidence(f"{ln.timestamp} {ln.message}".strip())[:EVIDENCE_TRIM]
+            for ln in matched[:MAX_EVIDENCE]
         )
         findings.append(
             Finding(
@@ -197,4 +228,4 @@ def detect(lines: list[LogLine]) -> list[Finding]:
     return findings
 
 
-__all__ = ["Finding", "Detector", "DETECTORS", "detect", "MAX_EVIDENCE"]
+__all__ = ["Finding", "Detector", "DETECTORS", "detect", "redact_evidence", "MAX_EVIDENCE"]
