@@ -4409,6 +4409,7 @@ function generateMotion(btn, motionUrl, cardId, fmt) {
 function _mhMotionWatch(motionUrl, cardId, fmt, pollUrl, ctx) {
   ctx.panel.dataset.mhWatching = pollUrl;
   var tries = 0;
+  var t0 = Date.now();
   var poll = function() {
     tries++;
     if (tries > 200) {
@@ -4441,6 +4442,9 @@ function _mhMotionWatch(motionUrl, cardId, fmt, pollUrl, ctx) {
           _mhJobFail(ctx, j.user_message || j.error || 'render failed');
           return;
         }
+        // Still running — refresh the subhead with real elapsed time so the
+        // wait doesn't read as frozen (the eased bar keeps climbing separately).
+        if (ctx.prog && MH.renderElapsedSub) ctx.prog.setPhase(null, MH.renderElapsedSub(Date.now() - t0));
         setTimeout(poll, 3000);
       })
       .catch(function() { setTimeout(poll, 3000); });
@@ -5752,6 +5756,7 @@ function generateReel(btn, reelUrl, fmt) {
 function _mhReelWatch(reelUrl, fmt, pollUrl, ctx) {
   ctx.panel.dataset.mhWatching = pollUrl;
   var tries = 0;
+  var t0 = Date.now();
   var poll = function() {
     tries++;
     if (tries > 200) {
@@ -5783,6 +5788,9 @@ function _mhReelWatch(reelUrl, fmt, pollUrl, ctx) {
           _mhJobFail(ctx, j.user_message || j.error || 'render failed');
           return;
         }
+        // Still running — refresh the subhead with real elapsed time so the
+        // wait doesn't read as frozen (the eased bar keeps climbing separately).
+        if (ctx.prog && MH.renderElapsedSub) ctx.prog.setPhase(null, MH.renderElapsedSub(Date.now() - t0));
         setTimeout(poll, 3000);
       })
       .catch(function() { setTimeout(poll, 3000); });
@@ -13824,6 +13832,18 @@ _RENDER_PROGRESS_JS = """
       },
       stop: function(){ stopped = true; if (cursor) cursor.done(); }
     };
+  };
+  // Honest, elapsed-time reassurance for the single-render waits (reel / story
+  // card). The server doesn't report sub-stages for a single render, so this
+  // NEVER fabricates a phase or a percent — it just shows the real seconds
+  // elapsed and an honest expectation, so the subhead isn't one frozen sentence
+  // for 90 seconds. The eased estimate bar (capped at 94%) carries the visual
+  // progress as before.
+  MH.renderElapsedSub = function(ms){
+    var s = Math.max(0, Math.round((ms || 0) / 1000));
+    if (s < 25) return 'Rendering — ' + s + 's. The first render for a meet is the slowest; repeats are instant.';
+    if (s < 60) return 'Still rendering — ' + s + 's elapsed. Most finish within 90 seconds.';
+    return 'Still rendering — ' + s + 's elapsed. Bigger meets take a little longer.';
   };
 })();
 """
@@ -21962,18 +21982,37 @@ def create_app() -> Flask:
             "</section>"
         )
 
+        # Jump-chip row so the useful answers are one click away instead of a
+        # scroll past the whole explainer. Reuses the shared .mh-legal-toc chrome;
+        # every target is a real in-page anchor id (or a real page) so it works
+        # with JS off. The FAQ (a keyboard-operable <details> accordion) is
+        # rendered FIRST below — it's scannable in one screen — then the full
+        # "how it works" explainer follows for anyone who wants the deep read.
+        help_jump_html = (
+            '<nav class="mh-legal-toc card" aria-label="Jump to" '
+            'style="margin-top:var(--sp-4)">'
+            '<span class="mh-legal-toc-eyebrow">Jump to</span>'
+            '<div class="mh-legal-toc-links">'
+            '<a href="#mh-faq-h">Common questions</a>'
+            '<a href="#mh-pipeline-h">How the pipeline works</a>'
+            '<a href="#mh-ch-engine">What it makes</a>'
+            f'<a href="{url_for("research_page")}">Supported files</a>'
+            f'<a href="{url_for("privacy_page")}">Privacy &amp; data</a>'
+            "</div></nav>"
+        )
         return _layout(
             "Help",
             '<div class="mh-fx mh-spotlight">'
             + header_html
             + "</div>"
+            + help_jump_html
+            + _home_faq_html()
             + _pipeline_diagram_section_html()
             + demo_section_html
             + _home_io_headline_html()
             + _home_engine_bento_html()
             + _home_audience_html()
             + _home_promise_html()
-            + _home_faq_html()
             + closing_html,
             active="help",
         )
@@ -32195,8 +32234,10 @@ self.addEventListener('fetch', function(e){
         feature, the role→feature permission matrix, and a provenance note."""
         if prof is None:
             return (
-                '<div class="card"><p>Select or create a club first to see its '
-                "AI usage and permissions.</p></div>"
+                '<div class="card"><p style="margin-top:0">No club yet &mdash; set one up to '
+                "see its AI usage and permissions.</p>"
+                f'<a class="btn" href="{url_for("organisation_setup")}">'
+                "Create your organisation &rarr;</a></div>"
             )
         from mediahub import governance
         from mediahub.governance import features as _gf
@@ -32444,8 +32485,10 @@ self.addEventListener('fetch', function(e){
     def _render_settings_typography_section(prof: Optional[ClubProfile]) -> str:
         if prof is None:
             return (
-                '<div class="card"><p>Select or create a club first to manage its '
-                "typography.</p></div>"
+                '<div class="card"><p style="margin-top:0">No club yet &mdash; set one up to '
+                "manage its typography.</p>"
+                f'<a class="btn" href="{url_for("organisation_setup")}">'
+                "Create your organisation &rarr;</a></div>"
             )
         from mediahub.typography import catalog as _cat
         from mediahub.typography import font_intake as _fi
@@ -36835,6 +36878,17 @@ function mhAnDigest(btn) {{
                     f'<a class="mh-how-pill" href="{url_for("content_type_intro", ct=ct_val)}" '
                     f'aria-label="How {_h(meta.title)} works">How it works</a>'
                 )
+            # Search scent: Free text now absorbs the folded content types
+            # (sponsor thank-you, session update, shout-out — see _hidden_cts), but
+            # its description never named them, so anyone scanning Create for those
+            # words found nothing. A "Covers:" chip row restores that scent.
+            covers_html = ""
+            if ct_val == "free_text":
+                covers_html = (
+                    '<p class="dim" style="font-size:11px;margin:2px 0 6px 0">'
+                    "Also covers: Sponsor thank-you &middot; Session update &middot; Shout-out"
+                    "</p>"
+                )
             tiles_html += (
                 '<div class="mh-template-cell">'
                 f'<a {action} class="mh-template{glow_cls}{disabled_cls}{hp_cls}">'
@@ -36844,6 +36898,7 @@ function mhAnDigest(btn) {{
                 f"{badge}"
                 "</div>"
                 f"<p>{_h(meta.description)}</p>"
+                f"{covers_html}"
                 f'<div class="mh-template-formats">{fmt_chips}{effort_html}</div>'
                 '<span class="mh-template-cta">Start</span>'
                 f"{hp_tpl}"
@@ -47831,13 +47886,19 @@ what you're doing, what they should do.</p>
     Upload a document with your brand guidelines
     <span class="muted" style="font-size:12px;font-weight:400;margin-left:8px">(optional)</span>
   </h2>
-  <p class="dim" style="font-size:13px;line-height:1.5;margin:0 0 14px 0">
-    If your team already has a brand or style guide, drop it here. The
-    AI reads PDF, Word (.docx), plain text, Markdown, HTML, RTF, or a
-    ZIP of any of those, then extracts the voice rules, prohibited
-    words, sponsor mention rules, and key messages so every piece of
-    content the engine writes respects them. Up to 25 MB.
+  <p class="dim" style="font-size:13px;line-height:1.5;margin:0 0 10px 0">
+    If your team already has a brand or style guide, drop it here &mdash; the AI
+    reads it so every caption respects your voice.
   </p>
+  <details style="margin:0 0 14px 0">
+    <summary style="font-size:12px;color:var(--ink-muted);cursor:pointer">Which formats, and what it reads</summary>
+    <p class="dim" style="font-size:13px;line-height:1.5;margin:8px 0 0 0">
+      Accepts PDF, Word (.docx), plain text, Markdown, HTML, RTF, or a ZIP of any
+      of those, up to 25 MB. It extracts the voice rules, prohibited words,
+      sponsor mention rules, and key messages so every piece of content the
+      engine writes respects them.
+    </p>
+  </details>
   <label for="os-brand-guidelines">Brand guidelines (optional)</label>
   <input id="os-brand-guidelines" type="file" name="brand_guidelines_file"
          accept=".pdf,.docx,.txt,.md,.markdown,.rtf,.html,.htm,.zip,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain,text/markdown,text/html,application/zip"/>
@@ -47849,16 +47910,21 @@ what you're doing, what they should do.</p>
     Logos
     <span class="muted" style="font-size:12px;font-weight:400;margin-left:8px">(optional, multiple)</span>
   </h2>
-  <p class="dim" style="font-size:13px;line-height:1.5;margin:0 0 14px 0">
-    Drop in every logo variant your club has &mdash; full-colour, mono,
-    wordmark, icon, print versions. PNG, JPG, SVG, WEBP, GIF, BMP,
-    TIFF, HEIC, AVIF, ICO, PDF, EPS, AI, PSD, INDD, Sketch, Figma, XD,
-    Affinity files all accepted &mdash; if it's a logo format, we'll
-    take it. The AI describes each one so motion graphics, story
-    cards, and sponsor posts pick the right variant automatically
-    (e.g. white mono on dark backgrounds, the icon when the layout is
-    square).
+  <p class="dim" style="font-size:13px;line-height:1.5;margin:0 0 10px 0">
+    Drop in every logo variant your club has &mdash; the AI picks the right one
+    automatically for each card.
   </p>
+  <details style="margin:0 0 14px 0">
+    <summary style="font-size:12px;color:var(--ink-muted);cursor:pointer">Which formats, and how they're used</summary>
+    <p class="dim" style="font-size:13px;line-height:1.5;margin:8px 0 0 0">
+      Full-colour, mono, wordmark, icon, print versions. PNG, JPG, SVG, WEBP,
+      GIF, BMP, TIFF, HEIC, AVIF, ICO, PDF, EPS, AI, PSD, INDD, Sketch, Figma,
+      XD, Affinity files all accepted &mdash; if it's a logo format, we'll take
+      it. The AI describes each one so motion graphics, story cards, and sponsor
+      posts pick the right variant automatically (e.g. white mono on dark
+      backgrounds, the icon when the layout is square).
+    </p>
+  </details>
   <label for="logos-input" id="logos-drop-zone" class="mh-drop-zone">
     <div class="mh-drop-zone-inner">
       <strong>Click to choose</strong> or drag files here

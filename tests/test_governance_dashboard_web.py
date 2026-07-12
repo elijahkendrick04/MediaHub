@@ -70,9 +70,12 @@ def test_settings_governance_card_on_landing(app_with_org):
 def test_governance_section_without_org_is_graceful(app_with_org):
     client = _client(app_with_org, org=None)
     resp = client.get("/settings/governance")
-    # No active org → friendly prompt, never a 500.
+    # No active org → a friendly, directive empty state (never a 500): it names
+    # the missing club and offers a one-click path to set one up.
+    body = resp.get_data(as_text=True)
     assert resp.status_code == 200
-    assert "Select or create a club" in resp.get_data(as_text=True)
+    assert "No club yet" in body
+    assert "/organisation/setup" in body
 
 
 def test_operator_dashboard_requires_operator(app_with_org):
