@@ -36,6 +36,7 @@ _EN: dict[str, str] = {
     "nav.sign_out": "Leave organisation",
     "nav.switch_org": "Switch organisation",
     "nav.notifications": "Notifications",
+    "nav.search": "Search",
     # G-10 — the rest of the chrome: top nav, mobile bottom nav, account menu.
     "nav.media_library": "Media library",
     "nav.media": "Media",  # short mobile bottom-nav label
@@ -73,6 +74,7 @@ _CY: dict[str, str] = {
     "nav.sign_out": "Gadael sefydliad",
     "nav.switch_org": "Newid sefydliad",
     "nav.notifications": "Hysbysiadau",
+    "nav.search": "Chwilio",
     # G-10 — standard UI Welsh (gov.wales / established software conventions).
     "nav.media_library": "Llyfrgell cyfryngau",
     "nav.media": "Cyfryngau",
