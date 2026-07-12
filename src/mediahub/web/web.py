@@ -3400,6 +3400,20 @@ def _persist_run(run: PipelineRunV4, file_name: str) -> None:
             log.warning("athlete registry sync failed for run %s", run.run_id, exc_info=True)
 
 
+# ~50 megapixels: above this an upload is treated as a decompression bomb and
+# rejected, rather than relying on Pillow's ~178 MP default warn-only threshold.
+_MAX_UPLOAD_IMAGE_PIXELS = 50_000_000
+
+
+def _safe_disposition_token(value: str) -> str:
+    """Sanitise a filename component before it is interpolated into a
+    ``Content-Disposition`` header — defence-in-depth against header/quote
+    injection even though the ids these wrap are server-minted. Keeps
+    ``[A-Za-z0-9_.-]``; every other character becomes ``_``."""
+    token = re.sub(r"[^A-Za-z0-9_.-]", "_", str(value or ""))
+    return token or "download"
+
+
 def _load_run(run_id: str) -> Optional[dict]:
     # Path-traversal guard: run ids are minted as uuid hex / slugs and never
     # contain a path separator or "..", so any such value is hostile (e.g. a
@@ -40022,7 +40036,7 @@ function copySpotlightCaption(btn) {{
             text,
             mimetype="text/plain",
             headers={
-                "Content-Disposition": f'attachment; filename="{pack_id}.txt"',
+                "Content-Disposition": f'attachment; filename="{_safe_disposition_token(pack_id)}.txt"',
             },
         )
 
@@ -52962,11 +52976,16 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             pass
 
     def _verify_image_decodes(path: Path) -> bool:
-        """True when Pillow can actually decode ``path`` as an image."""
+        """True when Pillow can actually decode ``path`` as an image and it is
+        within the pixel budget (a decompression-bomb guard: Pillow's default
+        ~178 MP threshold only warns, so a bomb could exhaust worker memory)."""
         try:
             from PIL import Image as _PILImage
 
             with _PILImage.open(path) as im:
+                w, h = im.size
+                if w <= 0 or h <= 0 or w * h > _MAX_UPLOAD_IMAGE_PIXELS:
+                    return False
                 im.verify()
             return True
         except Exception:
@@ -53531,11 +53550,13 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                     a.path,
                     mimetype="application/octet-stream",
                     as_attachment=True,
-                    download_name=f"{asset_id}{suffix}",
+                    download_name=_safe_disposition_token(f"{asset_id}{suffix}"),
                 )
             else:
                 resp = send_file(a.path, mimetype=mime)
-                resp.headers["Content-Disposition"] = f'inline; filename="{asset_id}{suffix}"'
+                resp.headers["Content-Disposition"] = (
+                    f'inline; filename="{_safe_disposition_token(f"{asset_id}{suffix}")}"'
+                )
         except Exception:
             return "", 404
         resp.headers["X-Content-Type-Options"] = "nosniff"
