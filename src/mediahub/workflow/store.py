@@ -41,7 +41,9 @@ def _preserve_corrupt(path: Path, exc: Exception) -> None:
     try:
         if not bad.exists():
             shutil.copy2(path, bad)
-        log.error("workflow sidecar %s is corrupt (%s); preserved a copy at %s", path.name, exc, bad.name)
+        log.error(
+            "workflow sidecar %s is corrupt (%s); preserved a copy at %s", path.name, exc, bad.name
+        )
     except OSError:
         log.error("workflow sidecar %s is corrupt (%s); could not preserve it", path.name, exc)
 
