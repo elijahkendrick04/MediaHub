@@ -38,6 +38,30 @@ def _header_safe(value: str) -> str:
     return (value or "").replace("\r", " ").replace("\n", " ").strip()
 
 
+def _latin1_header(value: str) -> str:
+    """Make a header value survive ``requests``' Latin-1 header encoding.
+
+    ``requests`` encodes header values as Latin-1 and raises on any character
+    outside it — club names routinely carry emoji/diacritics, which would make
+    the push fail (caught + logged, never delivered). Return the value unchanged
+    when it is already Latin-1 clean; otherwise RFC 2047-encode it
+    (``=?utf-8?...?=``, pure ASCII) so a decoding client shows the full title,
+    falling back to an ASCII-stripped form if encoding fails. CR/LF stripping is
+    the caller's job (``_header_safe``)."""
+    v = value or ""
+    try:
+        v.encode("latin-1")
+        return v
+    except UnicodeEncodeError:
+        pass
+    try:
+        from email.header import Header  # noqa: PLC0415
+
+        return Header(v, "utf-8").encode()
+    except Exception:
+        return v.encode("ascii", "ignore").decode("ascii").strip()
+
+
 @dataclass
 class Notification:
     """A single notification, mapped onto each channel's wire format."""
@@ -86,7 +110,7 @@ class NtfyChannel(Channel):
             import requests  # noqa: PLC0415
 
             headers = {
-                "Title": _header_safe(n.title),
+                "Title": _latin1_header(_header_safe(n.title)),
                 "Priority": _header_safe(n.priority) or "default",
             }
             if n.tags:
