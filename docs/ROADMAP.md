@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-07-12 · `3c99f3e52` · Security: verified prod-reachable fixes (review batch 2) (#1192)
+**Last updated:** 2026-07-12 · `d80f27995` · Merge pull request #1184 from elijahkendrick04/claude/remove-slide-remote-kf5dsz
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1229,11 +1229,11 @@ list and the auto table below, not here.
 | 2026-07-12 | `0adbad2b0` | fix(security): review batch 2 — verified prod-reachable security fixes |
 | 2026-07-12 | `538b7b377` | style: ruff-format the wrapped log line in workflow/store.py |
 | 2026-07-12 | `bfd951d49` | Add ⌘K command palette + engagement/findability upgrades across the app |
+| 2026-07-12 | `c920b5b15` | Remove the phone slide-remote feature |
 | 2026-07-12 | `c575903e2` | fix(state): atomic + cross-process-safe writes for run/approval sidecars |
 | 2026-07-12 | `7e29921aa` | Wire per-platform variants, reachable variant picker, and caption persistence |
 | 2026-07-12 | `ed957955b` | docs: add deep code review & improvement backlog (2026-07) |
 | 2026-07-11 | `428e0d9a1` | Vary the shared kicker signature across archetypes |
 | 2026-07-11 | `32802043e` | Break the uniform tile grid in the motion background (PatternLayer) |
 | 2026-07-11 | `4fbff71c7` | Give quote_led_recap a sentence-case register (break all-caps monoculture) |
-| 2026-07-11 | `13cf4e78f` | Wire typography_pair into v2 stills (still↔motion parity fix) |
 <!-- /ROADMAP:ACTIVITY -->
