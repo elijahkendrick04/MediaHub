@@ -4813,9 +4813,10 @@ function switchToneLive(btn, captionUrl, cardId) {
   _fetchCaption(captionUrl, newTone, panel, cacheKey, isAiTone, cardId);
 }
 
-function _fetchCaption(captionUrl, tone, panel, cacheKey, isAi, cardId) {
+function _fetchCaption(captionUrl, tone, panel, cacheKey, isAi, cardId, nVariants, persist) {
   var captionDiv = panel.querySelector('.caption-text');
   var textarea = panel.querySelector('.caption-textarea');
+  var nv = Math.max(1, Math.min(parseInt(nVariants, 10) || 1, 4));
   if (captionDiv) {
     captionDiv.innerHTML = '<span style="color:var(--ink-muted);font-style:italic">Generating&hellip;<span class="spin" style="display:inline-block;margin-left:6px;animation:spin 0.8s linear infinite">&#x27F3;</span></span>';
   }
@@ -4825,7 +4826,7 @@ function _fetchCaption(captionUrl, tone, panel, cacheKey, isAi, cardId) {
   // silently renders blank. r.ok / r.status are threaded onto the parsed
   // body so the catch-all error branch below can never fall through to an
   // empty caption.
-  fetch(captionUrl + '?tone=' + encodeURIComponent(tone),
+  fetch(captionUrl + '?tone=' + encodeURIComponent(tone) + '&n_variants=' + nv,
         {method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}'})
     .then(function(r) { return r.json().then(function(j) { j.__ok = r.ok; j.__status = r.status; return j; }); })
     .then(function(j) {
@@ -4890,7 +4891,13 @@ function _fetchCaption(captionUrl, tone, panel, cacheKey, isAi, cardId) {
           }
           captionDiv.innerHTML = pickerHtml + '<span class="mh-cap-body" style="white-space:pre-wrap" dir="auto">' + safeText(active) + '</span>' + fallbackNote;
           captionDiv.querySelectorAll('.cap-var-pill').forEach(function(btn) {
-            btn.addEventListener('click', function() { _renderActive(parseInt(btn.dataset.idx, 10) || 0); });
+            btn.addEventListener('click', function() {
+              var pi = parseInt(btn.dataset.idx, 10) || 0;
+              _renderActive(pi);
+              // Picking a variant is an explicit "this is my caption" — persist
+              // it so approving without opening the inspector honours the choice.
+              _persistCaption(cardId, variants[pi] || text, function(ok, why){ _setSaveStatus(cardId, ok, why); });
+            });
           });
           // UI2.7 — word-by-word "AI is writing" reveal, on the *read-only*
           // caption preview only and only on a fresh generation (reveal=true);
@@ -4904,6 +4911,14 @@ function _fetchCaption(captionUrl, tone, panel, cacheKey, isAi, cardId) {
         if (textarea) { textarea.value = active; }
       }
       _renderActive(0, true);
+      // Persistence fix: a fresh caption the user actively asked for
+      // (Regenerate / More options) is persisted so it survives an approval
+      // that never opened the inspector. Passive tone-tab previews pass
+      // persist=false, so switching tabs never silently overwrites the saved
+      // caption.
+      if (persist) {
+        _persistCaption(cardId, variants[0] || text, function(ok, why){ _setSaveStatus(cardId, ok, why); });
+      }
       // W.13 (generalised): bilingual workspaces get the side-by-side
       // translation (Cymraeg, Gaeilge, 中文, …) beside the English caption
       // so both are approved in one pass. Label + text direction come from
@@ -5041,7 +5056,136 @@ function regenerateCaption(btn, captionUrl, cardId) {
   var panel = document.querySelector('.tone-panel[data-tone="' + tone + '"][data-card="' + cardId + '"]');
   if (!panel) { return; }
   var isAiTone = !!_AI_TONE_KEYS[tone];
-  _fetchCaption(captionUrl, tone, panel, cacheKey, isAiTone, cardId);
+  // persist=true: regenerating is an explicit "give me a caption to use", so
+  // the result is saved (WYSIWYG on approval).
+  _fetchCaption(captionUrl, tone, panel, cacheKey, isAiTone, cardId, 1, true);
+}
+
+// "More options" — fetch several variants at once so the variant picker (the
+// v1/v2/v3 pills in _renderActive) actually renders. This is user-initiated on
+// purpose: the auto-fetch stays at 1 variant to protect the free-tier provider
+// rate limit; asking for options is a deliberate click, not every card view.
+function moreCaptionOptions(btn, captionUrl, cardId) {
+  var activeToneTab = document.querySelector('.tone-tab.active[data-card="' + cardId + '"]');
+  var tone = activeToneTab ? activeToneTab.dataset.tone : 'ai';
+  var cacheKey = cardId + '|' + tone;
+  delete _captionCache[cacheKey];
+  var panel = document.querySelector('.tone-panel[data-tone="' + tone + '"][data-card="' + cardId + '"]');
+  if (!panel) { return; }
+  var isAiTone = !!_AI_TONE_KEYS[tone];
+  _fetchCaption(captionUrl, tone, panel, cacheKey, isAiTone, cardId, 3, false);
+}
+
+// Persist the on-screen caption to every tone's headline slot via the shared
+// workflow set_edits route — the same slots pack build + the inspector use, so
+// approving honours exactly what the reviewer sees. cb(ok, why) is optional.
+function _persistCaption(cardId, text, cb) {
+  text = (text || '').trim();
+  if (!text) { if (cb) cb(false, 'empty'); return; }
+  if (typeof WF_API_BASE === 'undefined') { if (cb) cb(false, 'n/a'); return; }
+  fetch(WF_API_BASE + encodeURIComponent(cardId), {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({action: 'set_edits', edits: {
+      'warm-club_headline': text, 'hype_headline': text, 'data-led_headline': text
+    }})
+  }).then(function(r){ return r.json().then(function(j){ return {ok:r.ok, j:j}; }); })
+    .then(function(o){
+      var ok = o.ok && o.j && o.j.ok !== false;
+      if (cb) cb(ok, ok ? '' : ((o.j && (o.j.reason || o.j.error || o.j.message)) || 'server error'));
+    }).catch(function(){ if (cb) cb(false, 'network'); });
+}
+
+// Reflect save state in the per-card ".caption-save-status" chip.
+function _setSaveStatus(cardId, ok, why) {
+  var el = document.querySelector('.caption-save-status[data-card="' + cardId + '"]');
+  if (!el) return;
+  if (ok) {
+    el.textContent = 'Saved ✓';
+    el.style.color = 'var(--ok, #34d399)';
+  } else {
+    el.textContent = 'Save failed' + (why ? ' — ' + why : '');
+    el.style.color = 'var(--warn, #f59e0b)';
+  }
+}
+
+// Explicit "Save caption" — persists whatever is on screen for the active tone.
+// Covers the paths auto-save doesn't (e.g. after a passive tone-tab preview the
+// user decides to keep).
+function saveActiveCaption(btn, cardId) {
+  var panel = _assistActivePanel(cardId);
+  if (!panel) { return; }
+  var ta = panel.querySelector('.caption-textarea');
+  var textEl = panel.querySelector('.caption-text');
+  var text = (ta && ta.value) ? ta.value : (textEl ? textEl.textContent.trim() : '');
+  var statusEl = document.querySelector('.caption-save-status[data-card="' + cardId + '"]');
+  if (!text) { if (statusEl) { statusEl.textContent = 'Generate a caption first.'; statusEl.style.color = 'var(--ink-muted)'; } return; }
+  var orig = btn.textContent;
+  btn.textContent = 'Saving…';
+  if (statusEl) { statusEl.textContent = ''; }
+  _persistCaption(cardId, text, function(ok, why){
+    btn.textContent = orig;
+    _setSaveStatus(cardId, ok, why);
+  });
+}
+
+// Per-platform variants — adapt the on-screen caption for feed / story / X /
+// LinkedIn in one call, each shown with its own Copy button. Read-only: it
+// never approves or overwrites the saved caption; it's a copy-out helper.
+var _PLATFORM_LABELS = {feed: 'Instagram / Facebook', story: 'Story', x: 'X (Twitter)', linkedin: 'LinkedIn'};
+var _PLATFORM_ORDER = ['feed', 'story', 'x', 'linkedin'];
+function platformVariants(btn, cardId) {
+  var picker = document.getElementById('wf-' + cardId);
+  if (!picker) { return; }
+  var out = picker.querySelector('.platform-variants-out[data-card="' + cardId + '"]');
+  var captionUrl = picker.dataset.captionUrl;
+  if (!out || !captionUrl) { return; }
+  var panel = _assistActivePanel(cardId);
+  var ta = panel ? panel.querySelector('.caption-textarea') : null;
+  var textEl = panel ? panel.querySelector('.caption-text') : null;
+  var current = (ta && ta.value) ? ta.value : (textEl ? textEl.textContent.trim() : '');
+  if (!current) { out.innerHTML = '<div style="font-size:11px;color:var(--ink-muted)">Generate a caption first, then adapt it per platform.</div>'; return; }
+  out.innerHTML = '<div style="font-size:11px;color:var(--ink-muted);font-style:italic">Adapting for each platform&hellip;</div>';
+  var safeText = window.safeText || function(t){ return (t||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); };
+  fetch(captionUrl + '/platforms', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({caption: current})
+  }).then(function(r){ return r.json().then(function(j){ return {ok:r.ok, j:j}; }); })
+    .then(function(o){
+      var j = o.j || {};
+      if (!o.ok || j.error || !j.variants || !Object.keys(j.variants).length) {
+        out.innerHTML = '<div style="font-size:11px;color:var(--warn)">' + safeText(j.message || 'Could not adapt the caption. Try again.') + '</div>';
+        return;
+      }
+      var html = '';
+      _PLATFORM_ORDER.forEach(function(k){
+        var v = j.variants[k];
+        if (typeof v !== 'string' || !v.trim()) { return; }
+        var label = _PLATFORM_LABELS[k] || k;
+        html += '<div style="margin-top:8px;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:color-mix(in oklab, var(--lane) 3%, transparent)">'
+          + '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:4px">'
+          + '<span style="font-size:10px;color:var(--ink-muted);text-transform:uppercase;letter-spacing:0.5px">' + safeText(label) + '</span>'
+          + '<button type="button" class="btn secondary pv-copy" data-pv="' + safeText(v).replace(/"/g,'&quot;') + '" style="font-size:10px;padding:2px 8px">Copy</button>'
+          + '</div>'
+          + '<span style="white-space:pre-wrap;font-size:12px;color:var(--ink)" dir="auto">' + safeText(v) + '</span></div>';
+      });
+      out.innerHTML = html;
+      out.querySelectorAll('.pv-copy').forEach(function(cb){
+        cb.addEventListener('click', function(){
+          var val = cb.getAttribute('data-pv') || '';
+          var ta2 = document.createElement('textarea'); ta2.value = val;
+          // Prefer the async clipboard; fall back to execCommand for older webviews.
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(val).then(function(){ cb.textContent = 'Copied!'; setTimeout(function(){ cb.textContent = 'Copy'; }, 1400); })
+              .catch(function(){ cb.textContent = 'Copy'; });
+          } else {
+            document.body.appendChild(ta2); ta2.select();
+            try { document.execCommand('copy'); cb.textContent = 'Copied!'; setTimeout(function(){ cb.textContent = 'Copy'; }, 1400); } catch(e) {}
+            document.body.removeChild(ta2);
+          }
+        });
+      });
+    }).catch(function(){ out.innerHTML = '<div style="font-size:11px;color:var(--warn)">Network error — try again.</div>'; });
 }
 
 
@@ -5128,7 +5272,10 @@ function captionAssistRun(btn, cardId, transform) {
       }
       if (textEl) textEl.textContent = j.caption;
       if (ta) ta.value = j.caption;
-      if (statusEl) statusEl.textContent = 'Revised — review and edit as you like.';
+      // Assist is an explicit wording change the user asked for — persist it so
+      // the revision survives approval without a trip to the inspector.
+      _persistCaption(cardId, j.caption, function(ok, why){ _setSaveStatus(cardId, ok, why); });
+      if (statusEl) statusEl.textContent = 'Revised & saved — review and edit as you like.';
     }).catch(function(){ if (statusEl) statusEl.textContent = 'Network error — try again.'; });
 }
 
@@ -7287,8 +7434,13 @@ def _render_card_creative_toolbar(
         # they act on.
         f'<div class="mh-caption-actions" style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap;align-items:center">'
         f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="regenerateCaption(this, {repr(_caption_url)}, \'{card_uuid}\')">&#x21BA; Regenerate caption</button>'
+        f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="moreCaptionOptions(this, {repr(_caption_url)}, \'{card_uuid}\')" title="Generate a few alternative captions and pick your favourite">&#x2726; More options</button>'
         f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="captionAssistToggle(this, \'{card_uuid}\')">&#10024; Assist&hellip;</button>'
+        f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="platformVariants(this, \'{card_uuid}\')" title="Adapt this caption for Instagram &amp; Facebook, Stories, X and LinkedIn">&#x1F4F1; Platform variants</button>'
+        f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="saveActiveCaption(this, \'{card_uuid}\')" title="Save this caption so it is used when the card is approved and exported">&#x1F4BE; Save caption</button>'
+        f'<span class="caption-save-status" data-card="{card_uuid}" style="font-size:10px;color:var(--ink-muted)" aria-live="polite"></span>'
         f"</div>"
+        f'<div class="platform-variants-out" data-card="{card_uuid}" style="margin-top:6px"></div>'
         # M35: the primary action row — the two things that matter, then Copy,
         # then everything else behind More.
         f'<div class="mh-card-actions" style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;align-items:center">'
@@ -27304,6 +27456,120 @@ function copyWhyCard(btn, taId) {{
                 "generated_at": now_iso,
             }
         )
+
+    @app.route("/api/runs/<run_id>/swim/<swim_id>/caption/platforms", methods=["POST"])
+    def api_caption_platforms(run_id, swim_id):
+        """Adapt one caption into per-platform variants (feed / story / X /
+        LinkedIn) via ai_caption.generate_platform_variants.
+
+        Mirrors api_caption_assist's access + honest-no-key handling: it never
+        invents facts — it re-shapes the caption the reviewer already has for
+        each platform's length + register. The club's brand voice and approved
+        few-shot examples flow through so the adaptations stay on-voice.
+        """
+        from datetime import datetime
+        from datetime import timezone as _tz
+
+        data = _load_run(run_id)
+        if not _can_access_run(run_id, data, _active_profile_id()) or not data:
+            return jsonify({"error": "run not found"}), 404
+
+        payload = request.get_json(silent=True) or {}
+        # Server-side length cap: the client caption is ~280 chars; anything
+        # much larger is truncated before it reaches the provider prompt.
+        base_caption = (payload.get("caption") or "").strip()[:4000]
+        if not base_caption:
+            return jsonify(
+                {
+                    "error": "empty_caption",
+                    "message": "Generate or write a caption first, then adapt it.",
+                }
+            ), 400
+        req_platforms = payload.get("platforms")
+        platforms = None
+        if isinstance(req_platforms, list):
+            platforms = [str(p).strip() for p in req_platforms if str(p).strip()]
+
+        now_iso = datetime.now(_tz.utc).isoformat()
+        from mediahub.media_ai.llm import is_available as _llm_available
+        from mediahub.web.ai_caption import (
+            ClaudeUnavailableError as _ClaudeUE,
+            generate_platform_variants as _gen_platforms,
+        )
+
+        if not _llm_available():
+            return jsonify(
+                {
+                    "variants": {},
+                    "live": False,
+                    "generated_at": now_iso,
+                    "error": "no_key",
+                    "message": "AI captions are unavailable on this deployment.",
+                }
+            ), 200
+
+        club_profile_obj = None
+        run_profile_id = data.get("profile_id") or ""
+        if run_profile_id:
+            try:
+                club_profile_obj = load_profile(run_profile_id)
+            except Exception:
+                club_profile_obj = None
+        club_brand = {
+            "club_name": data.get("profile_display", ""),
+            "meet_name": (data.get("meet") or {}).get("name", ""),
+        }
+        # Approved-caption few-shot voice so the adaptations stay on-voice.
+        try:
+            from mediahub.web.caption_examples import load_examples as _load_caption_examples
+
+            _few_shot = _load_caption_examples(run_profile_id) if run_profile_id else []
+        except Exception:
+            _few_shot = []
+
+        try:
+            variants = _gen_platforms(
+                base_caption,
+                club_brand=club_brand,
+                club_profile=club_profile_obj,
+                platforms=platforms,
+                few_shot_examples=_few_shot,
+            )
+        except _ClaudeUE:
+            return jsonify(
+                {
+                    "variants": {},
+                    "live": False,
+                    "generated_at": now_iso,
+                    "error": "no_key",
+                    "message": "AI captions are unavailable on this deployment.",
+                }
+            ), 200
+        except Exception:
+            return jsonify(
+                {
+                    "variants": {},
+                    "live": True,
+                    "generated_at": now_iso,
+                    "error": "transient",
+                    "message": "The AI is briefly busy — wait a few seconds and try again.",
+                }
+            ), 200
+
+        variants = {
+            k: v.strip() for k, v in (variants or {}).items() if isinstance(v, str) and v.strip()
+        }
+        if not variants:
+            return jsonify(
+                {
+                    "variants": {},
+                    "live": True,
+                    "generated_at": now_iso,
+                    "error": "transient",
+                    "message": "The AI returned nothing — wait a few seconds and try again.",
+                }
+            ), 200
+        return jsonify({"variants": variants, "live": True, "generated_at": now_iso})
 
     @app.route("/api/runs/<run_id>/card/<card_id>/translate", methods=["POST"])
     def api_card_translate(run_id, card_id):
