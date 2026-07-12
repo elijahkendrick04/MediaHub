@@ -109,7 +109,12 @@ def _gender_code(gender: Optional[str]) -> str:
 # Time conversion
 # ---------------------------------------------------------------------------
 
-_TIME_RE = re.compile(r"^\s*(?:(\d+):)?(\d{1,2})[.:](\d{1,2})\s*$")
+# The fraction separator is a period ONLY. A colon is the minutes:seconds
+# separator (the optional leading group), so accepting `:` before the fraction
+# too (the old `[.:]`) parsed a bare mm:ss like "23:45" as 23.45s — a ~60x error.
+# A time with no centiseconds no longer matches and is rejected (None → the swim
+# is flagged) rather than silently mis-read.
+_TIME_RE = re.compile(r"^\s*(?:(\d+):)?(\d{1,2})\.(\d{1,2})\s*$")
 
 
 def _time_to_cs(time_str: Optional[str]) -> Optional[int]:
