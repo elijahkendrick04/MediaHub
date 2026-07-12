@@ -155,6 +155,34 @@ class TestHomeShowcase:
         for src in re.findall(r'<img[^>]*\bsrc="([^"]+)"', body):
             assert not src.startswith("http://") and not src.startswith("https://"), src
 
+    def test_demo_meet_moment_count_consistent_across_sections(self, client):
+        # The "See it in action" carousel (_hero_product_demo) and the
+        # "Detected & ranked" bento tile (sample_graphics.detected_ranked_svg)
+        # both narrate the SAME fixed demo file ("42 swims read"). If they
+        # disagree on how many moments that file produced, a volunteer reading
+        # the page gets two different answers to "how much content will I get
+        # from my results file?" in the same scroll.
+        body = _home(client)
+        carousel = re.search(r"(\d+) swims read.{0,20}?(\d+) moments ranked", body)
+        assert carousel, "carousel demo meter text not found on the home page"
+        carousel_swims, carousel_moments = int(carousel.group(1)), int(carousel.group(2))
+
+        bento = re.search(
+            r'font-size="68"[^>]*>(\d+)</text>.*?FROM (\d+) SWIMS READ', body, re.S
+        )
+        assert bento, "bento 'detected & ranked' stat not found on the home page"
+        bento_moments, bento_swims = int(bento.group(1)), int(bento.group(2))
+
+        assert carousel_swims == bento_swims, (
+            f"same demo file quoted as {carousel_swims} swims read in the "
+            f"carousel but {bento_swims} in the bento tile"
+        )
+        assert carousel_moments == bento_moments, (
+            f"same {carousel_swims}-swim demo file scored {carousel_moments} "
+            f"moments ranked in the carousel but {bento_moments} moments "
+            "detected in the bento tile"
+        )
+
 
 # --------------------------------------------------------------------------- #
 # CSS contract
