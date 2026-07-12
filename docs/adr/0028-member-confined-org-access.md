@@ -29,8 +29,8 @@ Separately, the route-entitlement sweep this audit ran found the
 `/api/visual/<vid>` and `/api/visual/<vid>/png/<format>` endpoints resolving
 a visual id by scanning ALL of RUNS_DIR with no tenant check — a cross-org
 IDOR on the sidecar payload (caption, alt text, athlete names) and rendered
-PNG. Fixed under the same audit (see the findings table in
-`docs/audits/AUDIT_org-access.md`).
+PNG. Fixed under the same audit (the org-access audit report has since been
+removed now that the findings are closed; see git history if needed).
 
 ## Decision
 
