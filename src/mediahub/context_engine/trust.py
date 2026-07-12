@@ -117,6 +117,23 @@ def score_domain(domain: str) -> float:
     return (successes + 1) / (attempts + 2)
 
 
+def is_learned_authority(domain: str, *, min_score: float, min_attempts: int) -> bool:
+    """True only when a domain has BOTH enough evidence (>= ``min_attempts``
+    recorded parse attempts) AND a smoothed score >= ``min_score``.
+
+    The attempt floor matters: the Laplace-smoothed score reaches 0.8 after just
+    3 clean parses (4/5), so without it a site earns "authoritative" from format
+    extractability alone. Provenance needs a real track record."""
+    record = _load_ledger().get(domain)
+    if not record:
+        return False
+    attempts = int(record.get("parse_attempts", 0))
+    if attempts < min_attempts:
+        return False
+    successes = int(record.get("parse_successes", 0))
+    return (successes + 1) / (attempts + 2) >= min_score
+
+
 def rank_candidates(urls: list[str]) -> list[str]:
     """
     Order URLs by domain trust score (descending), then by position (stable).

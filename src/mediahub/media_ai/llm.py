@@ -251,8 +251,10 @@ def _call_anthropic(
     if not client:
         return None
     use_model = model or DEFAULT_MODEL
-    last_err: Optional[Exception] = None
-    for attempt_model in (use_model, ALT_MODEL):
+    # Only fall back to the alt model when it's actually different (don't retry
+    # the identical model the operator already pinned to ALT_MODEL).
+    attempt_models = (use_model,) if use_model == ALT_MODEL else (use_model, ALT_MODEL)
+    for attempt_model in attempt_models:
         started = time.monotonic()
         try:
             kwargs = {
@@ -281,7 +283,6 @@ def _call_anthropic(
             if text:
                 return text
         except Exception as e:
-            last_err = e
             log.warning("anthropic call failed (%s): %s", attempt_model, e)
             _log_call(
                 provider="anthropic",
@@ -291,6 +292,11 @@ def _call_anthropic(
                 error_kind=type(e).__name__,
                 error_message=str(e),
             )
+            # Only a model-specific failure (404 not-found / 529 overloaded) can
+            # be helped by trying the alt model. For auth/bad-request/rate-limit
+            # a second billable call won't succeed — stop instead of burning it.
+            if getattr(e, "status_code", None) not in (404, 529):
+                break
             continue
     return None
 
@@ -299,11 +305,32 @@ def _call_anthropic(
 # Gemini (free default)
 # ---------------------------------------------------------------------------
 
+
+def _safe_int(value: object, default: int) -> int:
+    """Coerce an already-read env value to int, falling back to ``default`` on a
+    bad value instead of raising at import time and taking down every importer
+    (e.g. web.py). Takes the value (not the name) so the ``os.environ.get(...)``
+    call stays visible to the env-inventory grep."""
+    try:
+        return int(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        log.warning("media_ai: expected an int env value, got %r; using %d", value, default)
+        return default
+
+
+def _safe_float(value: object, default: float) -> float:
+    try:
+        return float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        log.warning("media_ai: expected a numeric env value, got %r; using %s", value, default)
+        return default
+
+
 # Gemini default updated May 2026: gemini-2.0-flash was deprecated and
 # returns 410 Gone. gemini-2.5-flash is the current GA model with the
 # same free-tier (1,500 req/day) and similar quality.
 _GEMINI_MODEL = os.environ.get("MEDIAHUB_GEMINI_MODEL", "gemini-2.5-flash")
-_GEMINI_TIMEOUT = int(os.environ.get("MEDIAHUB_GEMINI_TIMEOUT", "45"))
+_GEMINI_TIMEOUT = _safe_int(os.environ.get("MEDIAHUB_GEMINI_TIMEOUT", "45"), 45)
 
 
 def _gemini_thinking_budget() -> int:
@@ -368,8 +395,10 @@ def _gemini_generation_config(max_tokens: int) -> dict:
 # fine — we'd rather not bring in Redis just for this signal.
 import threading as _bt
 
-_GEMINI_BREAKER_THRESHOLD = int(os.environ.get("MEDIAHUB_GEMINI_BREAKER_THRESHOLD", "3"))
-_GEMINI_BREAKER_COOLDOWN_S = float(os.environ.get("MEDIAHUB_GEMINI_BREAKER_COOLDOWN_S", "60"))
+_GEMINI_BREAKER_THRESHOLD = _safe_int(os.environ.get("MEDIAHUB_GEMINI_BREAKER_THRESHOLD", "3"), 3)
+_GEMINI_BREAKER_COOLDOWN_S = _safe_float(
+    os.environ.get("MEDIAHUB_GEMINI_BREAKER_COOLDOWN_S", "60"), 60.0
+)
 _gemini_breaker_lock = _bt.Lock()
 _gemini_breaker_state: dict[str, float] = {
     "consecutive_failures": 0.0,  # float so it round-trips through env
@@ -923,6 +952,14 @@ def generate_json(
     parsed = _extract_json(raw)
     if parsed is not None:
         return parsed
+    # The provider answered but the output didn't parse as JSON. Don't let that be
+    # silently indistinguishable from an empty result at the ~20 call sites — log
+    # it (a head snippet, never the whole blob) before falling back.
+    log.warning(
+        "generate_json: provider output was not parseable JSON (%d chars); using fallback. head=%r",
+        len(raw or ""),
+        (raw or "")[:120],
+    )
     return fallback if fallback is not None else {}
 
 

@@ -134,7 +134,19 @@ def embed(texts: list[str]) -> EmbedResult:
         raw = client.embeddings(list(texts), model=model)
     except OpenAICompatError as e:
         raise EmbedderUnavailable(f"embedding call failed: {e}") from e
-    vectors = [[float(x) for x in v] for v in (raw or []) if v]
+    rows = raw or []
+    # Never silently drop a null row: that would misalign vectors against texts
+    # (vector i no longer belongs to text i). Require one non-empty vector per
+    # input and raise otherwise.
+    if len(rows) != len(texts):
+        raise EmbedderUnavailable(
+            f"embedding endpoint returned {len(rows)} vectors for {len(texts)} inputs"
+        )
+    vectors = []
+    for v in rows:
+        if not v:
+            raise EmbedderUnavailable("embedding endpoint returned an empty/null vector row")
+        vectors.append([float(x) for x in v])
     if not vectors or not vectors[0]:
         raise EmbedderUnavailable("embedding endpoint returned no vectors")
     dim = len(vectors[0])
