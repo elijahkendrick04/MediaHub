@@ -31,8 +31,15 @@ from typing import Optional
 
 log = logging.getLogger(__name__)
 
-DATA_DIR = Path(os.environ.get("DATA_DIR", str(Path(__file__).resolve().parents[1])))
-DB_PATH = DATA_DIR / "memory.db"
+
+def _db_path() -> Path:
+    """Resolve the memory DB path per call, so a ``DATA_DIR`` set after import
+    (tests, late bootstrap) is honoured instead of freezing the source-tree
+    fallback and landing vectors in the package directory — every sibling store
+    resolves per call, this one used to freeze it at import."""
+    data_dir = Path(os.environ.get("DATA_DIR", str(Path(__file__).resolve().parents[1])))
+    return data_dir / "memory.db"
+
 
 _lock = threading.Lock()
 
@@ -65,8 +72,9 @@ def _entry_rowid(tenant_id: str, entry_id: str) -> int:
 
 
 def _connect() -> sqlite3.Connection:
-    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(DB_PATH))
+    p = _db_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(p))
     conn.row_factory = sqlite3.Row
     try:
         conn.enable_load_extension(True)
@@ -351,7 +359,6 @@ def delete_matching(*, tenant_id: str, needle: str) -> int:
 __all__ = [
     "MemoryStoreUnavailable",
     "MemoryHit",
-    "DB_PATH",
     "is_available",
     "upsert",
     "query",

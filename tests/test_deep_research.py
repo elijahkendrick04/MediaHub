@@ -130,9 +130,20 @@ def test_is_authority_source_operator_configured(monkeypatch):
 
 def test_is_authority_source_learned_trust(monkeypatch):
     monkeypatch.delenv("MEDIAHUB_RESEARCH_AUTHORITY_DOMAINS", raising=False)
-    monkeypatch.setattr("mediahub.context_engine.trust.score_domain", lambda d: 0.95)
+    from mediahub.context_engine import trust
+
+    def _ledger(attempts, successes):
+        return lambda: {"earned.test": {"parse_attempts": attempts, "parse_successes": successes}}
+
+    # High success rate but too few attempts (3/3 → score 0.8) is NOT authority —
+    # a site can't earn trust from just three clean parses.
+    monkeypatch.setattr(trust, "_load_ledger", _ledger(3, 3))
+    assert verify.is_authority_source("https://earned.test/x") is False
+    # Enough attempts AND a high score → authority.
+    monkeypatch.setattr(trust, "_load_ledger", _ledger(12, 12))
     assert verify.is_authority_source("https://earned.test/x") is True
-    monkeypatch.setattr("mediahub.context_engine.trust.score_domain", lambda d: 0.4)
+    # Enough attempts but a poor success rate → NOT authority.
+    monkeypatch.setattr(trust, "_load_ledger", _ledger(20, 5))
     assert verify.is_authority_source("https://earned.test/x") is False
 
 
