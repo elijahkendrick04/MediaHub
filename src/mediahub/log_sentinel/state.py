@@ -17,11 +17,14 @@ Plain JSON on purpose: tiny write volume, human-inspectable, no schema to migrat
 from __future__ import annotations
 
 import json
+import logging
 import os
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
+
+log = logging.getLogger(__name__)
 
 AUDIT_MAX_BYTES = 5 * 1024 * 1024  # rotate to .1 beyond this; two files max
 
@@ -88,16 +91,22 @@ def record_action(state: dict) -> None:
 
 
 def append_audit(entry: dict, data_dir: Optional[str] = None) -> None:
-    """Append one audit line; rotate once at AUDIT_MAX_BYTES (keep .1)."""
-    path = state_dir(data_dir) / "audit.jsonl"
+    """Append one audit line; rotate once at AUDIT_MAX_BYTES (keep .1).
+
+    Best-effort: a failed audit write — e.g. ``ENOSPC``, which happens exactly
+    when the ``disk_full`` detector fires — must NOT abort the sentinel cycle
+    before the operator notification is sent, so write failures are swallowed and
+    logged rather than raised.
+    """
     try:
+        path = state_dir(data_dir) / "audit.jsonl"
         if path.exists() and path.stat().st_size > AUDIT_MAX_BYTES:
             path.replace(path.with_suffix(".jsonl.1"))
-    except Exception:
-        pass
-    record = {"ts": _utc_now_iso(), **entry}
-    with path.open("a", encoding="utf-8") as fh:
-        fh.write(json.dumps(record, sort_keys=True) + "\n")
+        record = {"ts": _utc_now_iso(), **entry}
+        with path.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(record, sort_keys=True) + "\n")
+    except OSError as exc:
+        log.warning("log_sentinel: audit write failed (%s); continuing to notify", exc)
 
 
 def read_audit_tail(n: int = 50, data_dir: Optional[str] = None) -> list[dict]:
