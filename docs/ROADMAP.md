@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-07-13 · `c3aa68351` · Merge pull request #1236 from elijahkendrick04/claude/code-review-cleanup-v2c6g6
+**Last updated:** 2026-07-13 · `98f17730b` · Merge pull request #1237 from elijahkendrick04/claude/review-16-hygiene
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1226,6 +1226,9 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-07-12 | `6b321d103` | Fix six deterministic-engine accuracy bugs (review batch 15) |
+| 2026-07-12 | `2f038264f` | security(ssrf): route web-fetch surfaces through the hardened door (#34/#120/#124/#126/#127) |
+| 2026-07-12 | `deb76a13c` | chore(hygiene): dependency/CI/docs cleanup from deep review (#10, #135–#137, #141–#143) |
 | 2026-07-12 | `ed8cbfa59` | Stop the interpreter smoke test polluting the real working tree (deep-review #128) |
 | 2026-07-12 | `c0dad34ce` | Infra hardening — durability, proxy-IP, isolation (deep-review batch 14a: #119, #121, #122, #123) |
 | 2026-07-12 | `84fcedcf4` | Upload + download hardening (deep-review batch 13: #28, #31) |
@@ -1233,5 +1236,4 @@ list and the auto table below, not here.
 | 2026-07-12 | `2f882d96c` | Research/chat prompt-injection guard + bounded chat (deep-review batch 11e: #40, #41) |
 | 2026-07-12 | `11aa4c058` | AI-wrapper honesty + ai_core usage recording (deep-review batch 11d: #35, #36) |
 | 2026-07-12 | `d4c1380b1` | Tool-conversation semantics (deep-review batch 11c: #37, #39) |
-| 2026-07-12 | `2d3afba5c` | ai_core provider-call reliability (deep-review batch 11b: #32, #38) |
 <!-- /ROADMAP:ACTIVITY -->
