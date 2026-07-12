@@ -51,7 +51,7 @@
    narrower than the full-width box the autofit var assumes (~0.86) — so the
    surname is scaled via calc(var * 0.62) AND allowed to wrap, never run
    under the chip (the tl/ps narrow-column precedent). */
-.pp__surname { font-family: 'Anton','Bebas Neue',Impact,sans-serif; font-weight: 400; font-size: calc(var(--mh-fit-surname-px, 104px) * 0.62); line-height: 0.88; text-transform: uppercase; color: var(--mh-on-primary); white-space: normal; overflow-wrap: anywhere; word-break: break-word; max-width: 100%; }
+.pp__surname { font-family: var(--mh-font-display, 'Anton','Bebas Neue',Impact,sans-serif); font-weight: 400; font-size: calc(var(--mh-fit-surname-px, 104px) * 0.62); line-height: 0.88; text-transform: uppercase; color: var(--mh-on-primary); white-space: normal; overflow-wrap: anywhere; word-break: break-word; max-width: 100%; }
 .pp__event { margin-top: 12px; font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 600; font-size: 26px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--mh-on-primary); }
 .pp__sub { margin-top: 6px; font-family: 'Inter',sans-serif; font-weight: 500; font-size: 19px; color: var(--mh-on-primary); opacity: 0.72; }
 .pp__right { flex: 0 0 auto; display: flex; flex-direction: column; align-items: flex-end; gap: 14px; }

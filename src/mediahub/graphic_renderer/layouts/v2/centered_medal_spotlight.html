@@ -62,13 +62,13 @@
 .cm__mono {
   position: absolute; inset: 0; z-index: -1;
   display: flex; align-items: center; justify-content: center;
-  font-family: 'Anton','Bebas Neue',Impact,sans-serif;
+  font-family: var(--mh-font-display, 'Anton','Bebas Neue',Impact,sans-serif);
   font-size: 300px; line-height: 1; color: var(--mh-on-surface);
   opacity: 0.30; text-transform: uppercase;
 }
 
 .cm__name {
-  font-family: 'Anton','Bebas Neue',Impact,sans-serif; font-weight: 400;
+  font-family: var(--mh-font-display, 'Anton','Bebas Neue',Impact,sans-serif); font-weight: 400;
   font-size: var(--mh-fit-surname-px, 110px); line-height: 0.9;
   letter-spacing: -0.005em; text-transform: uppercase; color: var(--mh-on-primary);
 }

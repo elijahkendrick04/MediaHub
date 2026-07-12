@@ -32,15 +32,19 @@
 
 /* sky — name above the horizon */
 .hb__sky { flex: 1 1 0; padding: 88px 84px 28px; display: flex; flex-direction: column; justify-content: flex-end; gap: 18px; position: relative; z-index: 2; }
+/* Kicker signature: a boxed accent chip (not the shared horizontal tick) so
+   this archetype's top-left reads differently from its siblings. align-self
+   keeps it hugging its label instead of stretching to the flex column. */
 .hb__kicker {
-  display: inline-flex; align-items: center; gap: 14px;
+  display: inline-flex; align-items: center; gap: 14px; align-self: flex-start;
   font-family: 'Space Grotesk', 'Inter', sans-serif;
   font-weight: 700; font-size: 25px; letter-spacing: 0.22em; text-transform: uppercase; color: var(--mh-accent);
+  border: 2px solid var(--mh-accent); border-radius: 6px; padding: 9px 18px;
 }
-.hb__tick { width: 42px; height: 6px; border-radius: 3px; background: var(--mh-accent); }
+.hb__tick { display: none; }
 .hb__first { font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 700; font-size: 30px; letter-spacing: 0.10em; text-transform: uppercase; color: var(--mh-on-primary); }
 .hb__surname {
-  font-family: 'Anton', 'Bebas Neue', Impact, sans-serif;
+  font-family: var(--mh-font-display, 'Anton', 'Bebas Neue', Impact, sans-serif);
   font-weight: 400; font-size: var(--mh-fit-surname-px, 124px);
   line-height: 0.86; letter-spacing: -0.01em; text-transform: uppercase;
   color: var(--mh-on-primary); white-space: nowrap;

@@ -1110,6 +1110,16 @@ const PatternLayer: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
   if (!bgPattern) {
     return null;
   }
+  // motion-craft: a uniform repeating tile (edge-to-edge dots/grid) reads as
+  // cheap — the eye locks onto the regular grid instantly. Keep the tile
+  // (deterministic, brand-accent texture) but break its uniformity with a
+  // seeded radial mask so the texture pools off-centre and fades out to clean
+  // ground, reading as ambient depth rather than signage. Frame-pure: the
+  // focal point derives only from variationSeed.
+  const seed = ctx.card.variationSeed || 0;
+  const cx = 20 + (seed % 5) * 15; // 20..80%
+  const cy = 24 + ((seed >> 3) % 4) * 16; // 24..72%
+  const mask = `radial-gradient(125% 125% at ${cx}% ${cy}%, #000 0%, #000 32%, transparent 76%)`;
   return (
     <div
       style={{
@@ -1120,6 +1130,8 @@ const PatternLayer: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
         opacity: 0.85,
         pointerEvents: "none",
         transform: `translateY(${ctx.anim.bgDrift}px)`,
+        WebkitMaskImage: mask,
+        maskImage: mask,
       }}
     />
   );
