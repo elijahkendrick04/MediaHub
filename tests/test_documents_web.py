@@ -326,7 +326,7 @@ def test_present_deck_creates_session(app_env):
     spec = _save_deck()
     r = c.get(f"/documents/{spec.doc_id}/present")
     assert r.status_code == 200
-    assert b"Phone remote" in r.data
+    assert b"Audience view" in r.data
     # a live session now exists
     from mediahub.documents import presenter as _pres
 
@@ -356,7 +356,7 @@ def test_presenter_state_action_and_owner_gate(app_env):
     assert r2.status_code == 403
 
 
-def test_audience_view_and_remote(app_env):
+def test_audience_view(app_env):
     app, wm, _ = app_env
     c = app.test_client()
     _login(c)
@@ -369,22 +369,6 @@ def test_audience_view_and_remote(app_env):
     aud = app.test_client()
     r = aud.get(f"/present/{sess.session_id}")
     assert r.status_code == 200 and b"<html" in r.data.lower()
-
-    # remote by code drives without sign-in
-    rc = aud.get(f"/remote/{sess.pairing_code}")
-    assert rc.status_code == 200
-    act = aud.post(f"/api/remote/{sess.pairing_code}/action", json={"action": "next"})
-    assert act.get_json()["state"]["current"] == 1
-    # bad code → recovery
-    assert aud.get("/remote/ZZZZZZ").status_code == 404
-
-
-def test_remote_landing(app_env):
-    app, wm, _ = app_env
-    c = app.test_client()
-    r = c.get("/remote")
-    assert r.status_code == 200
-    assert b"code" in r.data.lower()
 
 
 # ---------------------------------------------------------------------------

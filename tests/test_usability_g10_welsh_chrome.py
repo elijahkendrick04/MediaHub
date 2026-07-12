@@ -118,7 +118,6 @@ class TestWelshChrome:
         # Account menu
         assert "Drafftiau" in html  # Drafts
         assert "Cymorth" in html  # Help
-        assert "Rheolydd sleidiau" in html  # Slide remote
         assert "clwb" in html  # Data'r clwb (apostrophe is _h-escaped)
         # Notifications header (panel title)
         assert "Hysbysiadau" in html
@@ -145,7 +144,6 @@ class TestWelshChrome:
         assert ">My Season</a>" in html
         assert ">Drafts</a>" in html
         assert ">Help</a>" in html
-        assert ">Slide remote</a>" in html
         assert "Hafan" not in html
         assert "Llyfrgell" not in html
 

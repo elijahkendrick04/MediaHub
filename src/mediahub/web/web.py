@@ -15675,10 +15675,6 @@ def _layout(
            class="mh-orgmenu-item {{ 'active' if active=='settings' else '' }}">{{ t('nav.settings') }}</a>
         <a href="{{ url_for('help_page') }}" role="menuitem"
            class="mh-orgmenu-item {{ 'active' if active=='help' else '' }}">{{ t('nav.help') }}</a>
-        {# C-18 — the slide remote had no in-app path (reachable only by typing
-           /remote); give a phone user a menu shortcut to the pairing screen. #}
-        <a href="{{ url_for('remote_landing') }}" role="menuitem"
-           class="mh-orgmenu-item">{{ t('nav.slide_remote') }}</a>
         {# Org-access audit: switching / leaving an organisation is only
            offered to sessions that can actually do it — the dev operator,
            anonymous pilot sessions, and the rare multi-org member. A
@@ -20411,13 +20407,8 @@ _DOC_PRESENT_CONSOLE = r"""
     <p class="dim" style="font-size:12px;margin-top:6px">Keys: ← / → move, B blackout.</p>
   </div>
   <div>
-    <div class="card"><strong>Phone remote</strong>
-      <!-- B-8: QR of the /remote/<code> deep link — scan and the phone is
-           connected, no hand-typing. Empty when the QR backend is absent, so
-           the text-only pairing info below stands on its own. -->
-      __REMOTE_QR_SVG__
-      <p class="dim" style="font-size:13px;margin:6px 0">Open <b>__REMOTE_URL__</b> and enter:</p>
-      <div style="font-size:32px;letter-spacing:6px;font-weight:700;text-align:center">__CODE__</div>
+    <div class="card"><strong>Audience view</strong>
+      <p class="dim" style="font-size:13px;margin:6px 0">Open the full-screen slide view on the projector or a second screen.</p>
       <p style="font-size:12px;margin-top:10px"><a href="__AUDIENCE_URL__" target="_blank">Open audience view ↗</a></p>
     </div>
     <div class="card" style="margin-top:12px"><strong>Speaker notes</strong>
@@ -20517,53 +20508,6 @@ async function poll(){
 setInterval(poll,1000); poll();
 document.body.addEventListener('click', function(){ if(document.documentElement.requestFullscreen) document.documentElement.requestFullscreen().catch(function(){}); });
 </script></body></html>"""
-
-_DOC_REMOTE = r"""<!doctype html><html lang="en"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1"><title>Slide remote</title>
-<style>html,body{margin:0;height:100%;font-family:system-ui,sans-serif;background:#0b1020;color:#fff}
-#g{position:fixed;inset:0;display:grid;grid-template-rows:auto auto 1fr 1fr auto;gap:10px;padding:14px}
-button{font-size:22px;border:0;border-radius:14px;background:#1b2440;color:#fff}
-button:active{background:#2b3a66}
-.row{display:flex;gap:10px}.row button{flex:1}
-/* E-4: End is destructive and one fat-finger tap from Blackout — deprioritise it
-   (danger tint, narrow, off to the side) and gate it behind a confirm. */
-.row .end{flex:0 0 auto;font-size:14px;padding:0 18px;background:#4a1d1d;color:#ffbdbd}
-.row .end:active{background:#6a2626}
-#pos{font-weight:700}.hd{text-align:center;color:#9fb0d0;font-size:14px}
-#rended{position:fixed;inset:0;background:#0b1020;color:#9fb0d0;font-size:20px;
-  display:none;flex-direction:column;align-items:center;justify-content:center;gap:14px;text-align:center;padding:24px}
-#rended a{color:#fff}
-</style></head><body>
-<div id="g">
-  <div class="hd">Remote · code <b>__CODE__</b> · <span id="pos">–</span></div>
-  <div id="rstat" class="hd" role="status" aria-live="polite" style="color:#ffb454;min-height:18px"></div>
-  <button onclick="act('prev')">◀ Previous</button>
-  <button onclick="act('next')">Next ▶</button>
-  <div class="row"><button onclick="act('blackout')">Blackout</button><button class="end" onclick="endPres()">End</button></div>
-</div>
-<div id="rended"><div>Presentation ended.</div><a href="/remote">Connect to another presentation</a></div>
-<script>
-function rstat(m){ var el=document.getElementById('rstat'); if(el) el.textContent=m||''; }
-function showEnded(){ var e=document.getElementById('rended'); if(e) e.style.display='flex';
-  var g=document.getElementById('g'); if(g) g.style.display='none'; }
-// E-4: ending the talk kills it for the whole room and can't be undone — confirm first.
-function endPres(){ if(confirm('End the presentation for everyone? This cannot be undone.')) act('end'); }
-async function act(a){
-  // D-31: a dead tap (offline wifi, a 429 rate-limit, a 4xx with no state) used
-  // to do nothing with zero feedback — now it says what happened.
-  try{
-    const r=await fetch('__ACTION_URL__',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:a})});
-    const j=await r.json().catch(function(){ return {}; });
-    if(!r.ok || j.ok===false){ rstat((r.status===429||j.error==='rate_limited')?'Too many taps — wait a moment':'Not connected'); return; }
-    if(j.state && j.state.ended){ showEnded(); return; }
-    if(j.state){ setPos(j.state); rstat(''); }
-  }catch(e){ rstat('Reconnecting…'); }
-}
-function setPos(s){ document.getElementById('pos').textContent=(s.current+1)+' / '+s.total+(s.blackout?' · black':''); }
-async function poll(){ try{ const r=await fetch('__STATE_URL__'); const s=await r.json(); if(s.ended){ showEnded(); return; } setPos(s); rstat(''); }catch(e){ rstat('Reconnecting…'); } }
-setInterval(poll,1500); poll();
-</script></body></html>"""
-
 
 # E-6 / E-7: client-side confirms for the two irreversible /athletes actions.
 # Merge reads the selected option text (which carries each swimmer's race count)
@@ -36976,7 +36920,7 @@ function mhAnDigest(btn) {{
                 "</div>"
                 "<p>Build a meet programme, season report, sponsor proposal or AGM "
                 "deck from your real results &mdash; then export to PDF, PowerPoint or "
-                "Word, or present the deck with speaker notes and a phone remote.</p>"
+                "Word, or present the deck with speaker notes.</p>"
                 '<div class="mh-template-formats">'
                 '<span class="mh-template-fmt">PDF</span>'
                 '<span class="mh-template-fmt">PPTX / DOCX</span>'
@@ -67347,7 +67291,7 @@ and your lawful basis &mdash; live under
     # =====================================================================
     # Document engine (roadmap 1.15): meet programmes / season reports /
     # sponsor proposals / AGM decks, PPTX·DOCX·PDF exports, PDF utilities,
-    # and the deck presenter surface (notes, timer, autoplay, phone remote).
+    # and the deck presenter surface (notes, timer, autoplay).
     # Thin routes — all logic lives in the `documents` package.
     # =====================================================================
     def _doc_brand_kit(pid):
@@ -68634,34 +68578,8 @@ and your lawful basis &mdash; live under
         # literal, not HTML), so speaker notes can carry any text.
         notes = json.dumps([s["notes"] for s in view["slides"]]).replace("<", "\\u003c")
         titles = json.dumps([s["title"] for s in view["slides"]]).replace("<", "\\u003c")
-        remote_url = url_for("remote_landing", _external=True)
-        # B-8: pair the phone by QR — encode the absolute /remote/<code> deep
-        # link (a valid code always connects, J-14) so a scan connects the
-        # remote with zero typing; a tappable link of the same URL covers a
-        # console open on a tablet. No QR backend → the block stays empty and
-        # the text-only pairing info in the template stands on its own.
-        remote_link_url = url_for("remote_control", code=session.pairing_code, _external=True)
-        from mediahub.web import qr as _qr
-
-        qr_block = ""
-        if _qr.is_available():
-            try:
-                svg = _qr.qr_svg(remote_link_url, scale=4, border=3)
-                qr_block = (
-                    '<div id="remote-qr" style="text-align:center;margin:8px 0">'
-                    '<div style="display:inline-block;line-height:0;border-radius:8px;overflow:hidden">'
-                    + svg
-                    + "</div>"
-                    '<p class="dim" style="font-size:12px;margin:6px 0 0">Scan with the phone camera to connect, '
-                    f'or tap <a href="{_h(remote_link_url)}" target="_blank" rel="noopener" '
-                    f'style="word-break:break-all">{_h(remote_link_url)}</a></p>'
-                    "</div>"
-                )
-            except Exception:
-                qr_block = ""
         body = (
-            _DOC_PRESENT_CONSOLE.replace("__CODE__", _h(session.pairing_code))
-            .replace("__TOTAL__", str(len(spec.sections)))
+            _DOC_PRESENT_CONSOLE.replace("__TOTAL__", str(len(spec.sections)))
             .replace(
                 "__SLIDE_URL__",
                 url_for("api_present_slide", session_id=session.session_id, i=0).rsplit("/0", 1)[0],
@@ -68670,8 +68588,6 @@ and your lawful basis &mdash; live under
             .replace("__ACTION_URL__", url_for("api_present_action", session_id=session.session_id))
             .replace("__AUDIENCE_URL__", url_for("present_audience", session_id=session.session_id))
             .replace("__DOC_URL__", url_for("document_view", doc_id=doc_id))
-            .replace("__REMOTE_URL__", _h(remote_url))
-            .replace("__REMOTE_QR_SVG__", qr_block)
             .replace("__NOTES__", notes)
             .replace("__TITLES__", titles)
         )
@@ -68747,167 +68663,6 @@ and your lawful basis &mdash; live under
             return jsonify({"ok": False, "error": "forbidden"}), 403
         body = request.get_json(silent=True) or {}
         updated = _pres.apply_action(session_id, str(body.get("action", "")), body.get("value"))
-        return jsonify({"ok": True, "state": updated.public_state() if updated else None})
-
-    # Budget on FAILED pairing-code lookups (J-14): the code is looked up
-    # BEFORE any limit check, so a correct code always connects — a venue
-    # full of phones behind one NAT can never be locked out of a live talk
-    # by someone else's typos. Confirmed-wrong guesses are throttled per
-    # (client IP, submitted code) so one member hammering their own typo
-    # doesn't burn the venue's budget, with a generous per-IP ceiling as
-    # the code-enumeration backstop.
-    _remote_code_attempts: dict = {}  # client IP -> [(ts, submitted code), ...]
-    _remote_code_lock = threading.Lock()
-    _REMOTE_CODE_MAX_FAILURES = 20  # per (IP, code)
-    _REMOTE_CODE_IP_CEILING = 100  # per IP across all codes
-    _REMOTE_CODE_WINDOW_S = 300
-
-    def _remote_code_limited(code: str) -> int:
-        """Seconds until this IP may retry ``code``; 0 when not limited.
-
-        Limited when this IP has exhausted its failed budget for this exact
-        code, or tripped the per-IP ceiling across all codes.
-        """
-        now = time.time()
-        key = _client_ip()
-        code = (code or "").strip().upper()
-        with _remote_code_lock:
-            window = [
-                e for e in _remote_code_attempts.get(key, []) if now - e[0] < _REMOTE_CODE_WINDOW_S
-            ]
-            _remote_code_attempts[key] = window
-            if len(_remote_code_attempts) > 4096:  # opportunistic cleanup
-                for k in [k for k, v in _remote_code_attempts.items() if not v]:
-                    _remote_code_attempts.pop(k, None)
-            frees_at = 0.0
-            same_code = [t for t, c in window if c == code]
-            if len(same_code) >= _REMOTE_CODE_MAX_FAILURES:
-                # Clears when enough same-code failures age out of the window.
-                frees_at = same_code[len(same_code) - _REMOTE_CODE_MAX_FAILURES]
-            if len(window) >= _REMOTE_CODE_IP_CEILING:
-                frees_at = max(frees_at, window[len(window) - _REMOTE_CODE_IP_CEILING][0])
-            if not frees_at:
-                return 0
-            return max(1, int(frees_at + _REMOTE_CODE_WINDOW_S - now) + 1)
-
-    def _remote_code_failed(code: str) -> None:
-        with _remote_code_lock:
-            _remote_code_attempts.setdefault(_client_ip(), []).append(
-                (time.time(), (code or "").strip().upper())
-            )
-
-    @app.route("/remote")
-    def remote_landing():
-        if not _documents_ok:
-            return _recovery_page(
-                "Unavailable", "Not enabled here.", primary_cta=("Home", url_for("home"))
-            )
-        code = (request.args.get("code") or "").strip().upper()
-        if code:
-            return redirect(url_for("remote_control", code=code))
-        # H-22: validate the code client-side (exactly 6 chars from the
-        # unambiguous alphabet) so a typo never navigates to /remote/<code>,
-        # fails the lookup, and burns a shared-NAT failure attempt for the venue.
-        body = (
-            '<div class="card" style="max-width:380px;margin:40px auto;text-align:center">'
-            '<h2>Slide remote</h2><p class="dim">Enter the 6-character code shown on the presenter screen.</p>'
-            '<input id="code" class="input" maxlength="6" autocapitalize="characters" '
-            'oninput="rgClean()" onkeydown="if(event.key===\'Enter\')rgGo()" '
-            'style="text-transform:uppercase;font-size:24px;text-align:center;letter-spacing:4px" placeholder="ABC123">'
-            '<button id="rgo" class="btn" style="margin-top:12px;width:100%" disabled '
-            'onclick="rgGo()">Connect</button>'
-            '<p id="rghint" class="dim" style="font-size:12px;margin-top:8px;min-height:16px"></p>'
-            "<script>"
-            "var RG=/^[A-HJKMNP-Z2-9]{6}$/;"
-            "function rgClean(){"
-            "var i=document.getElementById('code');"
-            "var v=i.value.toUpperCase().replace(/[^A-HJKMNP-Z2-9]/g,'');"
-            "if(v!==i.value){i.value=v;}"
-            "document.getElementById('rgo').disabled=!RG.test(v);"
-            "document.getElementById('rghint').textContent=(v.length>0&&v.length<6)?(v.length+' of 6 characters'):'';"
-            "}"
-            "function rgGo(){"
-            "var v=(document.getElementById('code').value||'').toUpperCase();"
-            "if(!RG.test(v)){document.getElementById('rghint').textContent='Enter all 6 characters from the presenter screen.';return;}"
-            "location.href='/remote/'+v;"
-            "}"
-            "</script></div>"
-        )
-        return _layout("Slide remote", body, active="create")
-
-    @app.route("/remote/<code>")
-    def remote_control(code: str):
-        if not _documents_ok:
-            return _recovery_page(
-                "Unavailable", "Not enabled here.", primary_cta=("Home", url_for("home"))
-            )
-        from mediahub.documents import presenter as _pres
-
-        # A correct code always connects — the lookup runs before any
-        # throttle check, so a shared venue NAT can never lock out someone
-        # holding the real code (J-14).
-        session = _pres.get_by_pairing_code(code, include_ended=True)
-        if session is None:
-            wait_s = _remote_code_limited(code)
-            if wait_s:
-                mins = max(1, (wait_s + 59) // 60)
-                return _recovery_page(
-                    "Too many attempts",
-                    "Too many wrong code attempts — wait about "
-                    f"{mins} minute{'s' if mins != 1 else ''}, then check again. "
-                    "If you have the correct code from the presenter screen, it will still connect.",
-                    primary_cta=(
-                        f"Check again in about {mins} minute{'s' if mins != 1 else ''}",
-                        url_for("remote_control", code=code),
-                    ),
-                    code=429,
-                )
-            _remote_code_failed(code)
-            return _recovery_page(
-                "Code not found",
-                "That code doesn't match a live presentation — check the code on the presenter screen.",
-                primary_cta=("Try again", url_for("remote_landing")),
-            )
-        if session.ended:
-            # A real code whose talk has finished — a friendly close, not a
-            # dead "Code not found", and it doesn't burn the failure budget.
-            return _recovery_page(
-                "Presentation ended",
-                "This presentation has finished. Ask the presenter to start a new "
-                "one for a fresh code.",
-                primary_cta=("Slide remote", url_for("remote_landing")),
-            )
-        body = (
-            _DOC_REMOTE.replace("__CODE__", _h(session.pairing_code))
-            .replace("__STATE_URL__", url_for("api_present_state", session_id=session.session_id))
-            .replace("__ACTION_URL__", url_for("api_remote_action", code=session.pairing_code))
-        )
-        return Response(body, mimetype="text/html")
-
-    @app.route("/api/remote/<code>/action", methods=["POST"])
-    def api_remote_action(code: str):
-        if not _documents_ok:
-            return jsonify({"ok": False, "error": "unavailable"}), 503
-        from mediahub.documents import presenter as _pres
-
-        # Lookup before throttle: a correct code is never rate limited (J-14).
-        session = _pres.get_by_pairing_code(code, include_ended=True)
-        if session is None:
-            wait_s = _remote_code_limited(code)
-            if wait_s:
-                resp = jsonify({"ok": False, "error": "rate_limited", "retry_after_s": wait_s})
-                resp.headers["Retry-After"] = str(wait_s)
-                return resp, 429
-            _remote_code_failed(code)
-            return jsonify({"ok": False, "error": "no_session"}), 404
-        if session.ended:
-            # Valid code, but the talk is over — let the remote flip to its
-            # "ended" screen without counting a real code as a failed attempt.
-            return jsonify({"ok": True, "state": session.public_state()})
-        body = request.get_json(silent=True) or {}
-        updated = _pres.apply_action(
-            session.session_id, str(body.get("action", "")), body.get("value")
-        )
         return jsonify({"ok": True, "state": updated.public_state() if updated else None})
 
     # Start the in-process scheduler once per worker. Idempotent and self-

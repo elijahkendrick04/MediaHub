@@ -1009,8 +1009,8 @@ evidence-grounded pipeline).
 > `season_report` / `sponsor_proposal` / `agm_deck`) with honest AI outline→draft,
 > PPTX/DOCX export + PPTX/DOCX/PDF import (bounded fidelity), PDF utilities
 > (merge / organise / images↔PDF), deck→MP4, and the deck presenter surface
-> (speaker notes, timer, autoplay/kiosk, phone-as-remote, live-reload). Web
-> surface at **Create → Documents** (`/documents`, `/present/<id>`, `/remote`).
+> (speaker notes, timer, autoplay/kiosk, live-reload). Web
+> surface at **Create → Documents** (`/documents`, `/present/<id>`).
 
 **What Canva/Adobe have.** Collaborative docs with embedded charts and
 "Scrollables", presentations (presenter view/notes, remote control, Canva
@@ -1028,8 +1028,8 @@ compositions assembled from the same card/chart/text primitives (Playwright
 already renders HTML → the engine adds paged HTML → PDF with print CSS), an
 AI outline-then-build flow for decks and reports (data-grounded: season
 report pulls real aggregates via 1.11), and a **presenter surface** for the
-deck format (presenter notes, timer, autoplay, phone-as-remote via the
-existing session infra, record-a-talkover via 1.6's recorder). PDF
+deck format (presenter notes, timer, autoplay, record-a-talkover via
+1.6's recorder). PDF
 *utilities* (merge/organise/convert) ship as honest, bounded tools on the
 export surface (pypdf-class, deterministic) because committee volunteers
 genuinely need them — not as an Acrobat clone.
@@ -1038,7 +1038,7 @@ genuinely need them — not as an Acrobat clone.
 blocks: text, card-embed, chart-embed, table, media), HTML/print-CSS
 renderer → PDF (Playwright `page.pdf`, CMYK/bleed handled in 1.20); (2)
 deck mode: same spec, slide-sized pages + step order (1.5) + presenter
-route (notes, timer, remote pairing code) + autoplay; (3) AI flows:
+route (notes, timer) + autoplay; (3) AI flows:
 outline→draft for `season_report`, `sponsor_proposal`, `agm_deck`,
 `meet_programme` formats (all data-grounded, honest-error); (4) exports:
 PDF (standard/print), PPTX/DOCX via deterministic converters
@@ -1062,7 +1062,7 @@ scroll-story export (1.11) and the planner board (1.14) respectively.
 | C12 | Standard / full-screen / Presenter View modes | 🆕 1.15 view modes |
 | C12 | Autoplay (timed transitions) | 🆕 1.15 autoplay (kiosk mode for club foyer screens — a real club use) |
 | C12 | Recording yourself presenting / talking presentations | 🆕 1.15 talkover recording (1.6 recorder) |
-| C12 | Remote Control (control slides from any device via link/QR) | 🆕 1.15 phone-remote pairing |
+| C12 | Remote Control (control slides from any device via link/QR) | 🚫 out of scope |
 | C12 | Canva Live (audience Q&A, reactions, polls) | 🚫 out of scope |
 | C12 | Magic Shortcuts (presenting keyboard effects: blur, drumroll, confetti, timers) | 🆕 1.15 presenter effects (confetti for medal slides; timer for warm-ups) — small, deterministic |
 | C12 | Offline presenting mode | 🆕 1.15 PWA-cached deck (↗ 1.22; hosted-only stands — it's a browser cache, not an install) |
@@ -1542,7 +1542,7 @@ share-target API, offline queue with idempotent sync against the workflow
 API); (2) mobile-first passes on review/approve/planner surfaces (the
 RESPONSIVE_DESIGN.md programme extended); (3) capture: `<input capture>`
 + media-library quick-upload with on-device downscale; (4) presenting
-from phone ↗ 1.15 remote; (5) guest access = 1.18 share tokens; (6)
+from phone ↗ 1.15 mobile deck view; (5) guest access = 1.18 share tokens; (6)
 cross-device sync is inherent (server-side state).
 
 **Coverage.**
@@ -1552,7 +1552,7 @@ cross-device sync is inherent (server-side state).
 | C18 | iOS and Android apps (full editor, photo editor, video editor, voice recorder) | 🚫 adapted — PWA with capture/recorder (1.6/1.8 recorders run in mobile browser); native-store apps only if PWA proves insufficient |
 | C18 | Desktop apps (Mac, Windows) | 🚫 adapted — hosted web app only (ADR-0011) |
 | C18 | Web browser (cross-platform) | ✅ shipped — the product is the web app |
-| C18 | Mobile presenting (present from pocket) | ↗ 1.15 phone-remote + mobile deck view |
+| C18 | Mobile presenting (present from pocket) | ↗ 1.15 mobile deck view |
 | C18 | Mobile photo/video editing | ✅ 1.22 — mobile-scoped editing shipped (approve/caption/quick-crop/pick via the thumb-reach bottom-sheet inspector); full editors stay desktop-primary |
 | C18 | Designs open in new browser tab by default (toggleable) | 🆕 1.22 small UX preference, noted for completeness |
 | A19 | Web (desktop browser), mobile apps (iOS/Android), iPad app, PWA, Chrome extension | ✅ 1.22 — installable PWA shipped (+ Web Share-Target replacing the extension); iPad = the responsive web app |
