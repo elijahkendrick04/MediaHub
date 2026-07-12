@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-07-12 · `3c99f3e52` · Security: verified prod-reachable fixes (review batch 2) (#1192)
+**Last updated:** 2026-07-12 · `8bcb29e9f` · Reduce reading load + honest render progress + Help FAQ-first (follow-up) (#1198)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1226,14 +1226,14 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-07-12 | `fbb4cabc2` | Fix CI: governance empty-state assertion + resilient palette reachability guard |
+| 2026-07-12 | `799769382` | Drop dangling "Slide remote" row from the ⌘K command palette |
+| 2026-07-12 | `f9d256d57` | fix(nav): drop the dead 'Slide remote' command-palette row |
+| 2026-07-12 | `2b9815ce7` | Reduce reading load + honest render progress + Help FAQ-first (follow-up) |
+| 2026-07-12 | `043b571d4` | Move "Leave organisation" from nav org-menu to Settings → Account |
+| 2026-07-12 | `6a52397a9` | fix(engine): identity resolver no longer assigns a ruled-out swimmer's PB record |
+| 2026-07-12 | `a2b214648` | fix(log_sentinel): redact secrets/PII from evidence; best-effort audit writes |
 | 2026-07-12 | `0adbad2b0` | fix(security): review batch 2 — verified prod-reachable security fixes |
 | 2026-07-12 | `538b7b377` | style: ruff-format the wrapped log line in workflow/store.py |
 | 2026-07-12 | `bfd951d49` | Add ⌘K command palette + engagement/findability upgrades across the app |
-| 2026-07-12 | `c575903e2` | fix(state): atomic + cross-process-safe writes for run/approval sidecars |
-| 2026-07-12 | `7e29921aa` | Wire per-platform variants, reachable variant picker, and caption persistence |
-| 2026-07-12 | `ed957955b` | docs: add deep code review & improvement backlog (2026-07) |
-| 2026-07-11 | `428e0d9a1` | Vary the shared kicker signature across archetypes |
-| 2026-07-11 | `32802043e` | Break the uniform tile grid in the motion background (PatternLayer) |
-| 2026-07-11 | `4fbff71c7` | Give quote_led_recap a sentence-case register (break all-caps monoculture) |
-| 2026-07-11 | `13cf4e78f` | Wire typography_pair into v2 stills (still↔motion parity fix) |
 <!-- /ROADMAP:ACTIVITY -->

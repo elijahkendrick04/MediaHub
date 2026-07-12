@@ -1,9 +1,8 @@
-"""C-8 / C-13 / C-18 — surface orphaned, phone-relevant destinations.
+"""C-8 / C-13 — surface orphaned, phone-relevant destinations.
 
 C-13: the media library (camera capture, PWA share-target) was missing from the
 mobile bottom nav. C-8: the public achievements wall's only link was buried in
-Organisation-settings prose — it gets a Create tile. C-18: the slide remote had
-no in-app path (only /remote by hand) — it gets an account-menu shortcut.
+Organisation-settings prose — it gets a Create tile.
 """
 
 from __future__ import annotations
@@ -53,9 +52,3 @@ def test_public_wall_has_create_tile(client):
     html = client.get("/make").get_data(as_text=True)
     assert "Public wall" in html
     assert "/organisation/public-wall" in html or "public-wall" in html
-
-
-def test_slide_remote_in_account_menu(client):
-    html = client.get("/").get_data(as_text=True)
-    assert "Slide remote" in html
-    assert "/remote" in html

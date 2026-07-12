@@ -4409,6 +4409,7 @@ function generateMotion(btn, motionUrl, cardId, fmt) {
 function _mhMotionWatch(motionUrl, cardId, fmt, pollUrl, ctx) {
   ctx.panel.dataset.mhWatching = pollUrl;
   var tries = 0;
+  var t0 = Date.now();
   var poll = function() {
     tries++;
     if (tries > 200) {
@@ -4441,6 +4442,9 @@ function _mhMotionWatch(motionUrl, cardId, fmt, pollUrl, ctx) {
           _mhJobFail(ctx, j.user_message || j.error || 'render failed');
           return;
         }
+        // Still running — refresh the subhead with real elapsed time so the
+        // wait doesn't read as frozen (the eased bar keeps climbing separately).
+        if (ctx.prog && MH.renderElapsedSub) ctx.prog.setPhase(null, MH.renderElapsedSub(Date.now() - t0));
         setTimeout(poll, 3000);
       })
       .catch(function() { setTimeout(poll, 3000); });
@@ -5752,6 +5756,7 @@ function generateReel(btn, reelUrl, fmt) {
 function _mhReelWatch(reelUrl, fmt, pollUrl, ctx) {
   ctx.panel.dataset.mhWatching = pollUrl;
   var tries = 0;
+  var t0 = Date.now();
   var poll = function() {
     tries++;
     if (tries > 200) {
@@ -5783,6 +5788,9 @@ function _mhReelWatch(reelUrl, fmt, pollUrl, ctx) {
           _mhJobFail(ctx, j.user_message || j.error || 'render failed');
           return;
         }
+        // Still running — refresh the subhead with real elapsed time so the
+        // wait doesn't read as frozen (the eased bar keeps climbing separately).
+        if (ctx.prog && MH.renderElapsedSub) ctx.prog.setPhase(null, MH.renderElapsedSub(Date.now() - t0));
         setTimeout(poll, 3000);
       })
       .catch(function() { setTimeout(poll, 3000); });
@@ -9653,8 +9661,8 @@ header.topnav nav a.live::before {
   padding: 9px 12px; border-radius: 4px;
 }
 .mh-js .mh-orgmenu-item:hover { background: rgba(245,242,232,0.05); color: var(--ink); }
-/* POST-form nav actions (Log out / Leave organisation) — the state change
-   rides POST + CSRF; the button reads exactly like the sibling links. */
+/* POST-form nav action (Log out) — the state change rides POST + CSRF; the
+   button reads exactly like the sibling links. */
 header.topnav nav form.mh-nav-form { display: inline-flex; margin: 0; }
 button.mh-nav-linkbtn {
   position: relative; display: inline-flex; align-items: center;
@@ -9665,8 +9673,6 @@ button.mh-nav-linkbtn {
   background: none; border: 0; cursor: pointer;
 }
 button.mh-nav-linkbtn:hover { color: var(--ink); }
-button.mh-orgmenu-item { background: none; border: 0; cursor: pointer; }
-.mh-orgmenu-panel form { display: contents; }
 
 /* MAIN */
 main.wrap { max-width: 1200px; margin: 0 auto; padding: 36px 28px 96px; }
@@ -13827,6 +13833,18 @@ _RENDER_PROGRESS_JS = """
       stop: function(){ stopped = true; if (cursor) cursor.done(); }
     };
   };
+  // Honest, elapsed-time reassurance for the single-render waits (reel / story
+  // card). The server doesn't report sub-stages for a single render, so this
+  // NEVER fabricates a phase or a percent — it just shows the real seconds
+  // elapsed and an honest expectation, so the subhead isn't one frozen sentence
+  // for 90 seconds. The eased estimate bar (capped at 94%) carries the visual
+  // progress as before.
+  MH.renderElapsedSub = function(ms){
+    var s = Math.max(0, Math.round((ms || 0) / 1000));
+    if (s < 25) return 'Rendering — ' + s + 's. The first render for a meet is the slowest; repeats are instant.';
+    if (s < 60) return 'Still rendering — ' + s + 's elapsed. Most finish within 90 seconds.';
+    return 'Still rendering — ' + s + 's elapsed. Bigger meets take a little longer.';
+  };
 })();
 """
 
@@ -14926,7 +14944,6 @@ _COMMAND_PALETTE_SPEC: tuple[tuple[str, tuple[tuple[str, str, str], ...]], ...] 
             ("print_center_page", "Print & merch", "print merch poster products fulfilment"),
             ("public_wall_settings", "Public wall", "public wall embed feed share widget"),
             ("sponsors_page", "Sponsors", "sponsors partners logos report"),
-            ("remote_landing", "Slide remote", "remote present slides controller phone"),
         ),
     ),
     (
@@ -15675,24 +15692,16 @@ def _layout(
            class="mh-orgmenu-item {{ 'active' if active=='settings' else '' }}">{{ t('nav.settings') }}</a>
         <a href="{{ url_for('help_page') }}" role="menuitem"
            class="mh-orgmenu-item {{ 'active' if active=='help' else '' }}">{{ t('nav.help') }}</a>
-        {# C-18 — the slide remote had no in-app path (reachable only by typing
-           /remote); give a phone user a menu shortcut to the pairing screen. #}
-        <a href="{{ url_for('remote_landing') }}" role="menuitem"
-           class="mh-orgmenu-item">{{ t('nav.slide_remote') }}</a>
-        {# Org-access audit: switching / leaving an organisation is only
-           offered to sessions that can actually do it — the dev operator,
-           anonymous pilot sessions, and the rare multi-org member. A
-           single-org member's access is bound to their account, so their
-           only exit is "Log out"; showing them a picker entry or a
-           leave-org control would be a dead (or looping) button. #}
+        {# Org-access audit: switching organisations is only offered to sessions
+           that can actually do it — the dev operator, anonymous pilot sessions,
+           and the rare multi-org member. A single-org member's access is bound
+           to their account, so a picker entry would be a dead button; their
+           exit is "Log out". Leaving the current organisation moved out of this
+           menu into Settings → Account ("Leave organisation"), so the exit lives
+           beside the other session/account actions instead of the nav chrome. #}
         {% if can_switch_org %}
         <a href="{{ url_for('sign_in_page') }}" role="menuitem"
            class="mh-orgmenu-item {{ 'active' if active=='signin' else '' }}">{{ t('nav.switch_org') }}</a>
-        {% endif %}
-        {% if dev_operator or not account_email %}
-        <form method="post" action="{{ url_for('sign_out') }}">
-          <button type="submit" role="menuitem" class="mh-orgmenu-item">{{ t('nav.sign_out') }}</button>
-        </form>
         {% endif %}
       </div>
     </div>
@@ -20411,13 +20420,8 @@ _DOC_PRESENT_CONSOLE = r"""
     <p class="dim" style="font-size:12px;margin-top:6px">Keys: ← / → move, B blackout.</p>
   </div>
   <div>
-    <div class="card"><strong>Phone remote</strong>
-      <!-- B-8: QR of the /remote/<code> deep link — scan and the phone is
-           connected, no hand-typing. Empty when the QR backend is absent, so
-           the text-only pairing info below stands on its own. -->
-      __REMOTE_QR_SVG__
-      <p class="dim" style="font-size:13px;margin:6px 0">Open <b>__REMOTE_URL__</b> and enter:</p>
-      <div style="font-size:32px;letter-spacing:6px;font-weight:700;text-align:center">__CODE__</div>
+    <div class="card"><strong>Audience view</strong>
+      <p class="dim" style="font-size:13px;margin:6px 0">Open the full-screen slide view on the projector or a second screen.</p>
       <p style="font-size:12px;margin-top:10px"><a href="__AUDIENCE_URL__" target="_blank">Open audience view ↗</a></p>
     </div>
     <div class="card" style="margin-top:12px"><strong>Speaker notes</strong>
@@ -20517,53 +20521,6 @@ async function poll(){
 setInterval(poll,1000); poll();
 document.body.addEventListener('click', function(){ if(document.documentElement.requestFullscreen) document.documentElement.requestFullscreen().catch(function(){}); });
 </script></body></html>"""
-
-_DOC_REMOTE = r"""<!doctype html><html lang="en"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1"><title>Slide remote</title>
-<style>html,body{margin:0;height:100%;font-family:system-ui,sans-serif;background:#0b1020;color:#fff}
-#g{position:fixed;inset:0;display:grid;grid-template-rows:auto auto 1fr 1fr auto;gap:10px;padding:14px}
-button{font-size:22px;border:0;border-radius:14px;background:#1b2440;color:#fff}
-button:active{background:#2b3a66}
-.row{display:flex;gap:10px}.row button{flex:1}
-/* E-4: End is destructive and one fat-finger tap from Blackout — deprioritise it
-   (danger tint, narrow, off to the side) and gate it behind a confirm. */
-.row .end{flex:0 0 auto;font-size:14px;padding:0 18px;background:#4a1d1d;color:#ffbdbd}
-.row .end:active{background:#6a2626}
-#pos{font-weight:700}.hd{text-align:center;color:#9fb0d0;font-size:14px}
-#rended{position:fixed;inset:0;background:#0b1020;color:#9fb0d0;font-size:20px;
-  display:none;flex-direction:column;align-items:center;justify-content:center;gap:14px;text-align:center;padding:24px}
-#rended a{color:#fff}
-</style></head><body>
-<div id="g">
-  <div class="hd">Remote · code <b>__CODE__</b> · <span id="pos">–</span></div>
-  <div id="rstat" class="hd" role="status" aria-live="polite" style="color:#ffb454;min-height:18px"></div>
-  <button onclick="act('prev')">◀ Previous</button>
-  <button onclick="act('next')">Next ▶</button>
-  <div class="row"><button onclick="act('blackout')">Blackout</button><button class="end" onclick="endPres()">End</button></div>
-</div>
-<div id="rended"><div>Presentation ended.</div><a href="/remote">Connect to another presentation</a></div>
-<script>
-function rstat(m){ var el=document.getElementById('rstat'); if(el) el.textContent=m||''; }
-function showEnded(){ var e=document.getElementById('rended'); if(e) e.style.display='flex';
-  var g=document.getElementById('g'); if(g) g.style.display='none'; }
-// E-4: ending the talk kills it for the whole room and can't be undone — confirm first.
-function endPres(){ if(confirm('End the presentation for everyone? This cannot be undone.')) act('end'); }
-async function act(a){
-  // D-31: a dead tap (offline wifi, a 429 rate-limit, a 4xx with no state) used
-  // to do nothing with zero feedback — now it says what happened.
-  try{
-    const r=await fetch('__ACTION_URL__',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:a})});
-    const j=await r.json().catch(function(){ return {}; });
-    if(!r.ok || j.ok===false){ rstat((r.status===429||j.error==='rate_limited')?'Too many taps — wait a moment':'Not connected'); return; }
-    if(j.state && j.state.ended){ showEnded(); return; }
-    if(j.state){ setPos(j.state); rstat(''); }
-  }catch(e){ rstat('Reconnecting…'); }
-}
-function setPos(s){ document.getElementById('pos').textContent=(s.current+1)+' / '+s.total+(s.blackout?' · black':''); }
-async function poll(){ try{ const r=await fetch('__STATE_URL__'); const s=await r.json(); if(s.ended){ showEnded(); return; } setPos(s); rstat(''); }catch(e){ rstat('Reconnecting…'); } }
-setInterval(poll,1500); poll();
-</script></body></html>"""
-
 
 # E-6 / E-7: client-side confirms for the two irreversible /athletes actions.
 # Merge reads the selected option text (which carries each swimmer's race count)
@@ -22025,18 +21982,37 @@ def create_app() -> Flask:
             "</section>"
         )
 
+        # Jump-chip row so the useful answers are one click away instead of a
+        # scroll past the whole explainer. Reuses the shared .mh-legal-toc chrome;
+        # every target is a real in-page anchor id (or a real page) so it works
+        # with JS off. The FAQ (a keyboard-operable <details> accordion) is
+        # rendered FIRST below — it's scannable in one screen — then the full
+        # "how it works" explainer follows for anyone who wants the deep read.
+        help_jump_html = (
+            '<nav class="mh-legal-toc card" aria-label="Jump to" '
+            'style="margin-top:var(--sp-4)">'
+            '<span class="mh-legal-toc-eyebrow">Jump to</span>'
+            '<div class="mh-legal-toc-links">'
+            '<a href="#mh-faq-h">Common questions</a>'
+            '<a href="#mh-pipeline-h">How the pipeline works</a>'
+            '<a href="#mh-ch-engine">What it makes</a>'
+            f'<a href="{url_for("research_page")}">Supported files</a>'
+            f'<a href="{url_for("privacy_page")}">Privacy &amp; data</a>'
+            "</div></nav>"
+        )
         return _layout(
             "Help",
             '<div class="mh-fx mh-spotlight">'
             + header_html
             + "</div>"
+            + help_jump_html
+            + _home_faq_html()
             + _pipeline_diagram_section_html()
             + demo_section_html
             + _home_io_headline_html()
             + _home_engine_bento_html()
             + _home_audience_html()
             + _home_promise_html()
-            + _home_faq_html()
             + closing_html,
             active="help",
         )
@@ -32258,8 +32234,10 @@ self.addEventListener('fetch', function(e){
         feature, the role→feature permission matrix, and a provenance note."""
         if prof is None:
             return (
-                '<div class="card"><p>Select or create a club first to see its '
-                "AI usage and permissions.</p></div>"
+                '<div class="card"><p style="margin-top:0">No club yet &mdash; set one up to '
+                "see its AI usage and permissions.</p>"
+                f'<a class="btn" href="{url_for("organisation_setup")}">'
+                "Create your organisation &rarr;</a></div>"
             )
         from mediahub import governance
         from mediahub.governance import features as _gf
@@ -32507,8 +32485,10 @@ self.addEventListener('fetch', function(e){
     def _render_settings_typography_section(prof: Optional[ClubProfile]) -> str:
         if prof is None:
             return (
-                '<div class="card"><p>Select or create a club first to manage its '
-                "typography.</p></div>"
+                '<div class="card"><p style="margin-top:0">No club yet &mdash; set one up to '
+                "manage its typography.</p>"
+                f'<a class="btn" href="{url_for("organisation_setup")}">'
+                "Create your organisation &rarr;</a></div>"
             )
         from mediahub.typography import catalog as _cat
         from mediahub.typography import font_intake as _fi
@@ -33630,7 +33610,7 @@ self.addEventListener('fetch', function(e){
         )
 
     def _render_settings_account_section() -> str:
-        """Account — security, data export, account deletion."""
+        """Account — leaving the current org, security, data export, deletion."""
         try:
             email = _auth.current_user_email() or ""
         except Exception:
@@ -33641,8 +33621,33 @@ self.addEventListener('fetch', function(e){
             else '<p class="dim" style="margin-bottom:14px">These actions apply to your '
             "MediaHub account.</p>"
         )
+        # Leave the currently-active organisation. Relocated here from the nav
+        # org-menu so the exit sits beside the other session/account actions.
+        # Same gate as the old nav control — offered only to sessions that can
+        # actually leave without it being a dead/looping button: the dev
+        # operator and anonymous pilot sessions (org pinned in the session, not
+        # bound to an account). A single-org member's access is bound to their
+        # account, so their exit is Log out, not "leave org". Hidden entirely
+        # when no org is pinned, since there is then nothing to leave.
+        try:
+            _leave_ok = _auth.is_dev_operator() or not email
+            _has_active_org = bool((session.get("active_profile_id") or "").strip())
+        except Exception:
+            _leave_ok, _has_active_org = False, False
+        leave_org_card = ""
+        if _has_active_org and _leave_ok:
+            leave_org_card = (
+                '<div class="card" style="padding:16px 18px;margin-bottom:14px">'
+                '<h3 style="margin-top:0;font-size:16px">Organisation</h3>'
+                '<p class="dim" style="font-size:13px;margin-bottom:10px">Leave the '
+                "organisation you&rsquo;re currently in. Your work is kept &mdash; you can "
+                "re-enter it from the picker at any time.</p>"
+                f'<form method="post" action="{url_for("sign_out")}">'
+                '<button class="btn secondary" type="submit">Leave organisation</button>'
+                "</form></div>"
+            )
         return (
-            who + '<div class="card" style="padding:16px 18px;margin-bottom:14px">'
+            who + leave_org_card + '<div class="card" style="padding:16px 18px;margin-bottom:14px">'
             '<h3 style="margin-top:0;font-size:16px">Security</h3>'
             '<p class="dim" style="font-size:13px;margin-bottom:10px">Protect your account with '
             "a second factor.</p>"
@@ -36928,6 +36933,17 @@ function mhAnDigest(btn) {{
                     f'<a class="mh-how-pill" href="{url_for("content_type_intro", ct=ct_val)}" '
                     f'aria-label="How {_h(meta.title)} works">How it works</a>'
                 )
+            # Search scent: Free text now absorbs the folded content types
+            # (sponsor thank-you, session update, shout-out — see _hidden_cts), but
+            # its description never named them, so anyone scanning Create for those
+            # words found nothing. A "Covers:" chip row restores that scent.
+            covers_html = ""
+            if ct_val == "free_text":
+                covers_html = (
+                    '<p class="dim" style="font-size:11px;margin:2px 0 6px 0">'
+                    "Also covers: Sponsor thank-you &middot; Session update &middot; Shout-out"
+                    "</p>"
+                )
             _ct_grp = _CT_GROUP.get(ct_val, "results")
             tile_groups[_ct_grp] = tile_groups.get(_ct_grp, "") + (
                 '<div class="mh-template-cell">'
@@ -36938,6 +36954,7 @@ function mhAnDigest(btn) {{
                 f"{badge}"
                 "</div>"
                 f"<p>{_h(meta.description)}</p>"
+                f"{covers_html}"
                 f'<div class="mh-template-formats">{fmt_chips}{effort_html}</div>'
                 '<span class="mh-template-cta">Start</span>'
                 f"{hp_tpl}"
@@ -37032,7 +37049,7 @@ function mhAnDigest(btn) {{
                 "</div>"
                 "<p>Build a meet programme, season report, sponsor proposal or AGM "
                 "deck from your real results &mdash; then export to PDF, PowerPoint or "
-                "Word, or present the deck with speaker notes and a phone remote.</p>"
+                "Word, or present the deck with speaker notes.</p>"
                 '<div class="mh-template-formats">'
                 '<span class="mh-template-fmt">PDF</span>'
                 '<span class="mh-template-fmt">PPTX / DOCX</span>'
@@ -48040,13 +48057,19 @@ what you're doing, what they should do.</p>
     Upload a document with your brand guidelines
     <span class="muted" style="font-size:12px;font-weight:400;margin-left:8px">(optional)</span>
   </h2>
-  <p class="dim" style="font-size:13px;line-height:1.5;margin:0 0 14px 0">
-    If your team already has a brand or style guide, drop it here. The
-    AI reads PDF, Word (.docx), plain text, Markdown, HTML, RTF, or a
-    ZIP of any of those, then extracts the voice rules, prohibited
-    words, sponsor mention rules, and key messages so every piece of
-    content the engine writes respects them. Up to 25 MB.
+  <p class="dim" style="font-size:13px;line-height:1.5;margin:0 0 10px 0">
+    If your team already has a brand or style guide, drop it here &mdash; the AI
+    reads it so every caption respects your voice.
   </p>
+  <details style="margin:0 0 14px 0">
+    <summary style="font-size:12px;color:var(--ink-muted);cursor:pointer">Which formats, and what it reads</summary>
+    <p class="dim" style="font-size:13px;line-height:1.5;margin:8px 0 0 0">
+      Accepts PDF, Word (.docx), plain text, Markdown, HTML, RTF, or a ZIP of any
+      of those, up to 25 MB. It extracts the voice rules, prohibited words,
+      sponsor mention rules, and key messages so every piece of content the
+      engine writes respects them.
+    </p>
+  </details>
   <label for="os-brand-guidelines">Brand guidelines (optional)</label>
   <input id="os-brand-guidelines" type="file" name="brand_guidelines_file"
          accept=".pdf,.docx,.txt,.md,.markdown,.rtf,.html,.htm,.zip,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain,text/markdown,text/html,application/zip"/>
@@ -48058,16 +48081,21 @@ what you're doing, what they should do.</p>
     Logos
     <span class="muted" style="font-size:12px;font-weight:400;margin-left:8px">(optional, multiple)</span>
   </h2>
-  <p class="dim" style="font-size:13px;line-height:1.5;margin:0 0 14px 0">
-    Drop in every logo variant your club has &mdash; full-colour, mono,
-    wordmark, icon, print versions. PNG, JPG, SVG, WEBP, GIF, BMP,
-    TIFF, HEIC, AVIF, ICO, PDF, EPS, AI, PSD, INDD, Sketch, Figma, XD,
-    Affinity files all accepted &mdash; if it's a logo format, we'll
-    take it. The AI describes each one so motion graphics, story
-    cards, and sponsor posts pick the right variant automatically
-    (e.g. white mono on dark backgrounds, the icon when the layout is
-    square).
+  <p class="dim" style="font-size:13px;line-height:1.5;margin:0 0 10px 0">
+    Drop in every logo variant your club has &mdash; the AI picks the right one
+    automatically for each card.
   </p>
+  <details style="margin:0 0 14px 0">
+    <summary style="font-size:12px;color:var(--ink-muted);cursor:pointer">Which formats, and how they're used</summary>
+    <p class="dim" style="font-size:13px;line-height:1.5;margin:8px 0 0 0">
+      Full-colour, mono, wordmark, icon, print versions. PNG, JPG, SVG, WEBP,
+      GIF, BMP, TIFF, HEIC, AVIF, ICO, PDF, EPS, AI, PSD, INDD, Sketch, Figma,
+      XD, Affinity files all accepted &mdash; if it's a logo format, we'll take
+      it. The AI describes each one so motion graphics, story cards, and sponsor
+      posts pick the right variant automatically (e.g. white mono on dark
+      backgrounds, the icon when the layout is square).
+    </p>
+  </details>
   <label for="logos-input" id="logos-drop-zone" class="mh-drop-zone">
     <div class="mh-drop-zone-inner">
       <strong>Click to choose</strong> or drag files here
@@ -67518,7 +67546,7 @@ and your lawful basis &mdash; live under
     # =====================================================================
     # Document engine (roadmap 1.15): meet programmes / season reports /
     # sponsor proposals / AGM decks, PPTX·DOCX·PDF exports, PDF utilities,
-    # and the deck presenter surface (notes, timer, autoplay, phone remote).
+    # and the deck presenter surface (notes, timer, autoplay).
     # Thin routes — all logic lives in the `documents` package.
     # =====================================================================
     def _doc_brand_kit(pid):
@@ -68805,34 +68833,8 @@ and your lawful basis &mdash; live under
         # literal, not HTML), so speaker notes can carry any text.
         notes = json.dumps([s["notes"] for s in view["slides"]]).replace("<", "\\u003c")
         titles = json.dumps([s["title"] for s in view["slides"]]).replace("<", "\\u003c")
-        remote_url = url_for("remote_landing", _external=True)
-        # B-8: pair the phone by QR — encode the absolute /remote/<code> deep
-        # link (a valid code always connects, J-14) so a scan connects the
-        # remote with zero typing; a tappable link of the same URL covers a
-        # console open on a tablet. No QR backend → the block stays empty and
-        # the text-only pairing info in the template stands on its own.
-        remote_link_url = url_for("remote_control", code=session.pairing_code, _external=True)
-        from mediahub.web import qr as _qr
-
-        qr_block = ""
-        if _qr.is_available():
-            try:
-                svg = _qr.qr_svg(remote_link_url, scale=4, border=3)
-                qr_block = (
-                    '<div id="remote-qr" style="text-align:center;margin:8px 0">'
-                    '<div style="display:inline-block;line-height:0;border-radius:8px;overflow:hidden">'
-                    + svg
-                    + "</div>"
-                    '<p class="dim" style="font-size:12px;margin:6px 0 0">Scan with the phone camera to connect, '
-                    f'or tap <a href="{_h(remote_link_url)}" target="_blank" rel="noopener" '
-                    f'style="word-break:break-all">{_h(remote_link_url)}</a></p>'
-                    "</div>"
-                )
-            except Exception:
-                qr_block = ""
         body = (
-            _DOC_PRESENT_CONSOLE.replace("__CODE__", _h(session.pairing_code))
-            .replace("__TOTAL__", str(len(spec.sections)))
+            _DOC_PRESENT_CONSOLE.replace("__TOTAL__", str(len(spec.sections)))
             .replace(
                 "__SLIDE_URL__",
                 url_for("api_present_slide", session_id=session.session_id, i=0).rsplit("/0", 1)[0],
@@ -68841,8 +68843,6 @@ and your lawful basis &mdash; live under
             .replace("__ACTION_URL__", url_for("api_present_action", session_id=session.session_id))
             .replace("__AUDIENCE_URL__", url_for("present_audience", session_id=session.session_id))
             .replace("__DOC_URL__", url_for("document_view", doc_id=doc_id))
-            .replace("__REMOTE_URL__", _h(remote_url))
-            .replace("__REMOTE_QR_SVG__", qr_block)
             .replace("__NOTES__", notes)
             .replace("__TITLES__", titles)
         )
@@ -68918,167 +68918,6 @@ and your lawful basis &mdash; live under
             return jsonify({"ok": False, "error": "forbidden"}), 403
         body = request.get_json(silent=True) or {}
         updated = _pres.apply_action(session_id, str(body.get("action", "")), body.get("value"))
-        return jsonify({"ok": True, "state": updated.public_state() if updated else None})
-
-    # Budget on FAILED pairing-code lookups (J-14): the code is looked up
-    # BEFORE any limit check, so a correct code always connects — a venue
-    # full of phones behind one NAT can never be locked out of a live talk
-    # by someone else's typos. Confirmed-wrong guesses are throttled per
-    # (client IP, submitted code) so one member hammering their own typo
-    # doesn't burn the venue's budget, with a generous per-IP ceiling as
-    # the code-enumeration backstop.
-    _remote_code_attempts: dict = {}  # client IP -> [(ts, submitted code), ...]
-    _remote_code_lock = threading.Lock()
-    _REMOTE_CODE_MAX_FAILURES = 20  # per (IP, code)
-    _REMOTE_CODE_IP_CEILING = 100  # per IP across all codes
-    _REMOTE_CODE_WINDOW_S = 300
-
-    def _remote_code_limited(code: str) -> int:
-        """Seconds until this IP may retry ``code``; 0 when not limited.
-
-        Limited when this IP has exhausted its failed budget for this exact
-        code, or tripped the per-IP ceiling across all codes.
-        """
-        now = time.time()
-        key = _client_ip()
-        code = (code or "").strip().upper()
-        with _remote_code_lock:
-            window = [
-                e for e in _remote_code_attempts.get(key, []) if now - e[0] < _REMOTE_CODE_WINDOW_S
-            ]
-            _remote_code_attempts[key] = window
-            if len(_remote_code_attempts) > 4096:  # opportunistic cleanup
-                for k in [k for k, v in _remote_code_attempts.items() if not v]:
-                    _remote_code_attempts.pop(k, None)
-            frees_at = 0.0
-            same_code = [t for t, c in window if c == code]
-            if len(same_code) >= _REMOTE_CODE_MAX_FAILURES:
-                # Clears when enough same-code failures age out of the window.
-                frees_at = same_code[len(same_code) - _REMOTE_CODE_MAX_FAILURES]
-            if len(window) >= _REMOTE_CODE_IP_CEILING:
-                frees_at = max(frees_at, window[len(window) - _REMOTE_CODE_IP_CEILING][0])
-            if not frees_at:
-                return 0
-            return max(1, int(frees_at + _REMOTE_CODE_WINDOW_S - now) + 1)
-
-    def _remote_code_failed(code: str) -> None:
-        with _remote_code_lock:
-            _remote_code_attempts.setdefault(_client_ip(), []).append(
-                (time.time(), (code or "").strip().upper())
-            )
-
-    @app.route("/remote")
-    def remote_landing():
-        if not _documents_ok:
-            return _recovery_page(
-                "Unavailable", "Not enabled here.", primary_cta=("Home", url_for("home"))
-            )
-        code = (request.args.get("code") or "").strip().upper()
-        if code:
-            return redirect(url_for("remote_control", code=code))
-        # H-22: validate the code client-side (exactly 6 chars from the
-        # unambiguous alphabet) so a typo never navigates to /remote/<code>,
-        # fails the lookup, and burns a shared-NAT failure attempt for the venue.
-        body = (
-            '<div class="card" style="max-width:380px;margin:40px auto;text-align:center">'
-            '<h2>Slide remote</h2><p class="dim">Enter the 6-character code shown on the presenter screen.</p>'
-            '<input id="code" class="input" maxlength="6" autocapitalize="characters" '
-            'oninput="rgClean()" onkeydown="if(event.key===\'Enter\')rgGo()" '
-            'style="text-transform:uppercase;font-size:24px;text-align:center;letter-spacing:4px" placeholder="ABC123">'
-            '<button id="rgo" class="btn" style="margin-top:12px;width:100%" disabled '
-            'onclick="rgGo()">Connect</button>'
-            '<p id="rghint" class="dim" style="font-size:12px;margin-top:8px;min-height:16px"></p>'
-            "<script>"
-            "var RG=/^[A-HJKMNP-Z2-9]{6}$/;"
-            "function rgClean(){"
-            "var i=document.getElementById('code');"
-            "var v=i.value.toUpperCase().replace(/[^A-HJKMNP-Z2-9]/g,'');"
-            "if(v!==i.value){i.value=v;}"
-            "document.getElementById('rgo').disabled=!RG.test(v);"
-            "document.getElementById('rghint').textContent=(v.length>0&&v.length<6)?(v.length+' of 6 characters'):'';"
-            "}"
-            "function rgGo(){"
-            "var v=(document.getElementById('code').value||'').toUpperCase();"
-            "if(!RG.test(v)){document.getElementById('rghint').textContent='Enter all 6 characters from the presenter screen.';return;}"
-            "location.href='/remote/'+v;"
-            "}"
-            "</script></div>"
-        )
-        return _layout("Slide remote", body, active="create")
-
-    @app.route("/remote/<code>")
-    def remote_control(code: str):
-        if not _documents_ok:
-            return _recovery_page(
-                "Unavailable", "Not enabled here.", primary_cta=("Home", url_for("home"))
-            )
-        from mediahub.documents import presenter as _pres
-
-        # A correct code always connects — the lookup runs before any
-        # throttle check, so a shared venue NAT can never lock out someone
-        # holding the real code (J-14).
-        session = _pres.get_by_pairing_code(code, include_ended=True)
-        if session is None:
-            wait_s = _remote_code_limited(code)
-            if wait_s:
-                mins = max(1, (wait_s + 59) // 60)
-                return _recovery_page(
-                    "Too many attempts",
-                    "Too many wrong code attempts — wait about "
-                    f"{mins} minute{'s' if mins != 1 else ''}, then check again. "
-                    "If you have the correct code from the presenter screen, it will still connect.",
-                    primary_cta=(
-                        f"Check again in about {mins} minute{'s' if mins != 1 else ''}",
-                        url_for("remote_control", code=code),
-                    ),
-                    code=429,
-                )
-            _remote_code_failed(code)
-            return _recovery_page(
-                "Code not found",
-                "That code doesn't match a live presentation — check the code on the presenter screen.",
-                primary_cta=("Try again", url_for("remote_landing")),
-            )
-        if session.ended:
-            # A real code whose talk has finished — a friendly close, not a
-            # dead "Code not found", and it doesn't burn the failure budget.
-            return _recovery_page(
-                "Presentation ended",
-                "This presentation has finished. Ask the presenter to start a new "
-                "one for a fresh code.",
-                primary_cta=("Slide remote", url_for("remote_landing")),
-            )
-        body = (
-            _DOC_REMOTE.replace("__CODE__", _h(session.pairing_code))
-            .replace("__STATE_URL__", url_for("api_present_state", session_id=session.session_id))
-            .replace("__ACTION_URL__", url_for("api_remote_action", code=session.pairing_code))
-        )
-        return Response(body, mimetype="text/html")
-
-    @app.route("/api/remote/<code>/action", methods=["POST"])
-    def api_remote_action(code: str):
-        if not _documents_ok:
-            return jsonify({"ok": False, "error": "unavailable"}), 503
-        from mediahub.documents import presenter as _pres
-
-        # Lookup before throttle: a correct code is never rate limited (J-14).
-        session = _pres.get_by_pairing_code(code, include_ended=True)
-        if session is None:
-            wait_s = _remote_code_limited(code)
-            if wait_s:
-                resp = jsonify({"ok": False, "error": "rate_limited", "retry_after_s": wait_s})
-                resp.headers["Retry-After"] = str(wait_s)
-                return resp, 429
-            _remote_code_failed(code)
-            return jsonify({"ok": False, "error": "no_session"}), 404
-        if session.ended:
-            # Valid code, but the talk is over — let the remote flip to its
-            # "ended" screen without counting a real code as a failed attempt.
-            return jsonify({"ok": True, "state": session.public_state()})
-        body = request.get_json(silent=True) or {}
-        updated = _pres.apply_action(
-            session.session_id, str(body.get("action", "")), body.get("value")
-        )
         return jsonify({"ok": True, "state": updated.public_state() if updated else None})
 
     # Start the in-process scheduler once per worker. Idempotent and self-

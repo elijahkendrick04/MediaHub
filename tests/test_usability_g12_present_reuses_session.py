@@ -1,11 +1,11 @@
 """G-12 — reloading the presenter console must not desync the live audience.
 
 document_present called create_session on every page load, so any reload
-(accidental refresh, laptop lid-close/wake) minted a new session with a NEW
-pairing code; the already-open audience view and paired phone kept polling the
-OLD session while the reloaded console drove the NEW one, so Next/Prev silently
-stopped moving the projector. The console now resumes the existing live session
-for the same deck+owner, keeping the code and audience URL stable across reloads.
+(accidental refresh, laptop lid-close/wake) minted a new session; the already-open
+audience view kept polling the OLD session while the reloaded console drove the NEW
+one, so Next/Prev silently stopped moving the projector. The console now resumes
+the existing live session for the same deck+owner, keeping the session and audience
+URL stable across reloads.
 """
 
 from __future__ import annotations
@@ -95,10 +95,8 @@ def test_console_reload_keeps_the_same_code(app_env):
     assert r2.status_code == 200
     s2 = _pres.get_live_for(spec.doc_id, "club-a")
 
-    # Same session, same pairing code across the reload — no remint.
+    # Same session across the reload — no remint.
     assert s2.session_id == s1.session_id
-    assert s2.pairing_code == s1.pairing_code
-    assert s1.pairing_code in r2.get_data(as_text=True)
     # Exactly one live session for this deck (not one per reload).
     live = [s for s in _pres._iter_live() if s.doc_id == spec.doc_id]
     assert len(live) == 1
