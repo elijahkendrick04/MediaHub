@@ -9653,8 +9653,8 @@ header.topnav nav a.live::before {
   padding: 9px 12px; border-radius: 4px;
 }
 .mh-js .mh-orgmenu-item:hover { background: rgba(245,242,232,0.05); color: var(--ink); }
-/* POST-form nav actions (Log out / Leave organisation) — the state change
-   rides POST + CSRF; the button reads exactly like the sibling links. */
+/* POST-form nav action (Log out) — the state change rides POST + CSRF; the
+   button reads exactly like the sibling links. */
 header.topnav nav form.mh-nav-form { display: inline-flex; margin: 0; }
 button.mh-nav-linkbtn {
   position: relative; display: inline-flex; align-items: center;
@@ -9665,8 +9665,6 @@ button.mh-nav-linkbtn {
   background: none; border: 0; cursor: pointer;
 }
 button.mh-nav-linkbtn:hover { color: var(--ink); }
-button.mh-orgmenu-item { background: none; border: 0; cursor: pointer; }
-.mh-orgmenu-panel form { display: contents; }
 
 /* MAIN */
 main.wrap { max-width: 1200px; margin: 0 auto; padding: 36px 28px 96px; }
@@ -15674,20 +15672,16 @@ def _layout(
            class="mh-orgmenu-item {{ 'active' if active=='settings' else '' }}">{{ t('nav.settings') }}</a>
         <a href="{{ url_for('help_page') }}" role="menuitem"
            class="mh-orgmenu-item {{ 'active' if active=='help' else '' }}">{{ t('nav.help') }}</a>
-        {# Org-access audit: switching / leaving an organisation is only
-           offered to sessions that can actually do it — the dev operator,
-           anonymous pilot sessions, and the rare multi-org member. A
-           single-org member's access is bound to their account, so their
-           only exit is "Log out"; showing them a picker entry or a
-           leave-org control would be a dead (or looping) button. #}
+        {# Org-access audit: switching organisations is only offered to sessions
+           that can actually do it — the dev operator, anonymous pilot sessions,
+           and the rare multi-org member. A single-org member's access is bound
+           to their account, so a picker entry would be a dead button; their
+           exit is "Log out". Leaving the current organisation moved out of this
+           menu into Settings → Account ("Leave organisation"), so the exit lives
+           beside the other session/account actions instead of the nav chrome. #}
         {% if can_switch_org %}
         <a href="{{ url_for('sign_in_page') }}" role="menuitem"
            class="mh-orgmenu-item {{ 'active' if active=='signin' else '' }}">{{ t('nav.switch_org') }}</a>
-        {% endif %}
-        {% if dev_operator or not account_email %}
-        <form method="post" action="{{ url_for('sign_out') }}">
-          <button type="submit" role="menuitem" class="mh-orgmenu-item">{{ t('nav.sign_out') }}</button>
-        </form>
         {% endif %}
       </div>
     </div>
@@ -33573,7 +33567,7 @@ self.addEventListener('fetch', function(e){
         )
 
     def _render_settings_account_section() -> str:
-        """Account — security, data export, account deletion."""
+        """Account — leaving the current org, security, data export, deletion."""
         try:
             email = _auth.current_user_email() or ""
         except Exception:
@@ -33584,8 +33578,33 @@ self.addEventListener('fetch', function(e){
             else '<p class="dim" style="margin-bottom:14px">These actions apply to your '
             "MediaHub account.</p>"
         )
+        # Leave the currently-active organisation. Relocated here from the nav
+        # org-menu so the exit sits beside the other session/account actions.
+        # Same gate as the old nav control — offered only to sessions that can
+        # actually leave without it being a dead/looping button: the dev
+        # operator and anonymous pilot sessions (org pinned in the session, not
+        # bound to an account). A single-org member's access is bound to their
+        # account, so their exit is Log out, not "leave org". Hidden entirely
+        # when no org is pinned, since there is then nothing to leave.
+        try:
+            _leave_ok = _auth.is_dev_operator() or not email
+            _has_active_org = bool((session.get("active_profile_id") or "").strip())
+        except Exception:
+            _leave_ok, _has_active_org = False, False
+        leave_org_card = ""
+        if _has_active_org and _leave_ok:
+            leave_org_card = (
+                '<div class="card" style="padding:16px 18px;margin-bottom:14px">'
+                '<h3 style="margin-top:0;font-size:16px">Organisation</h3>'
+                '<p class="dim" style="font-size:13px;margin-bottom:10px">Leave the '
+                "organisation you&rsquo;re currently in. Your work is kept &mdash; you can "
+                "re-enter it from the picker at any time.</p>"
+                f'<form method="post" action="{url_for("sign_out")}">'
+                '<button class="btn secondary" type="submit">Leave organisation</button>'
+                "</form></div>"
+            )
         return (
-            who + '<div class="card" style="padding:16px 18px;margin-bottom:14px">'
+            who + leave_org_card + '<div class="card" style="padding:16px 18px;margin-bottom:14px">'
             '<h3 style="margin-top:0;font-size:16px">Security</h3>'
             '<p class="dim" style="font-size:13px;margin-bottom:10px">Protect your account with '
             "a second factor.</p>"
