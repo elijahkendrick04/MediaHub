@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-07-12 · `51b6a5d96` · Merge pull request #1213 from elijahkendrick04/claude/code-review-cleanup-v2c6g6
+**Last updated:** 2026-07-12 · `bc5707f99` · Merge pull request #1215 from elijahkendrick04/claude/code-review-cleanup-v2c6g6
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1226,6 +1226,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-07-12 | `1c16aa061` | Compliance & privacy data-safety (deep-review batch 9: #103–#114) |
 | 2026-07-12 | `436d61376` | Concurrency & state hardening (deep-review batch 8: #79–#91) |
 | 2026-07-12 | `77d1632a5` | Harden privacy/compliance data-safety (deep-review batch 7: #108, #107, #106) |
 | 2026-07-12 | `8899edf94` | fix: injection hardening + nickname canonicalisation (review batch 6) |
