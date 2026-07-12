@@ -29,13 +29,58 @@ pattern as ``users.jsonl`` (web/auth.py).
 
 from __future__ import annotations
 
+import html as _html
 import json
 import os
+import re
 import threading
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
+
+
+def _with_section_toc(body: str, slug: str) -> str:
+    """Give a long numbered legal page an in-page jump list so a reader can go
+    straight to the section they want instead of scrolling twelve dense blocks.
+
+    Deterministic + safe: it only touches ``<h2>N. Title</h2>`` headings (the
+    numbered top-level sections), stamps each with a stable ``id`` and builds a
+    wrapped row of ``#anchor`` links. Section titles are HTML-escaped into the
+    link text. If fewer than three numbered sections are found (or the hero has
+    no boundary to insert after) the body is returned unchanged.
+    """
+    heading = re.compile(r"<h2>(\d+)\.\s*([^<]+?)</h2>")
+    sections: list[tuple[str, str, str]] = []  # (anchor_id, number, title)
+
+    def _stamp(m: "re.Match[str]") -> str:
+        num, title = m.group(1), m.group(2).strip()
+        anchor = f"{slug}-{num}"
+        sections.append((anchor, num, title))
+        return f'<h2 id="{anchor}">{num}. {_html.escape(title)}</h2>'
+
+    stamped = heading.sub(_stamp, body)
+    if len(sections) < 3:
+        return body
+
+    links = "".join(
+        f'<a href="#{anchor}">{num}. {_html.escape(title)}</a>' for anchor, num, title in sections
+    )
+    toc = (
+        '<nav class="mh-legal-toc card" aria-label="On this page">'
+        '<span class="mh-legal-toc-eyebrow">Jump to</span>'
+        f'<div class="mh-legal-toc-links">{links}</div>'
+        "</nav>"
+    )
+    # Insert right after the hero (the first </section>) so it sits above the
+    # first numbered block; fall back to prepending if there's no hero.
+    marker = "</section>"
+    idx = stamped.find(marker)
+    if idx == -1:
+        return toc + stamped
+    cut = idx + len(marker)
+    return stamped[:cut] + toc + stamped[cut:]
+
 
 # ---------------------------------------------------------------------------
 # Versions & identity placeholders
@@ -588,7 +633,8 @@ class AcceptanceStore:
 
 def terms_html(*, privacy_url: str, cookies_url: str, dpa_url: str) -> str:
     """Terms of Service body. CRA 2015 / CCR 2013 / DMCCA-aware."""
-    return f"""
+    return _with_section_toc(
+        f"""
 {_DRAFT_BANNER}
 <section class="mh-hero" style="padding-top:var(--sp-6);padding-bottom:var(--sp-5);margin-bottom:var(--sp-5)">
   <span class="mh-hero-eyebrow">Legal</span>
@@ -732,7 +778,9 @@ def terms_html(*, privacy_url: str, cookies_url: str, dpa_url: str) -> str:
   14 days. Also see the <a href="{privacy_url}">Privacy Notice</a> and
   <a href="{cookies_url}">Cookie Policy</a>.</p>
 </div>
-"""
+""",
+        "terms",
+    )
 
 
 def privacy_html(
@@ -743,7 +791,8 @@ def privacy_html(
     deployment_inventory_html: str = "",
 ) -> str:
     """Privacy Notice body — UK GDPR Articles 13/14, accurate to the code."""
-    return f"""
+    return _with_section_toc(
+        f"""
 {_DRAFT_BANNER}
 <section class="mh-hero" style="padding-top:var(--sp-6);padding-bottom:var(--sp-5);margin-bottom:var(--sp-5)">
   <span class="mh-hero-eyebrow">Legal</span>
@@ -941,7 +990,9 @@ def privacy_html(
 </div>
 
 {deployment_inventory_html}
-"""
+""",
+        "privacy",
+    )
 
 
 def cookies_html(*, privacy_url: str) -> str:
@@ -987,7 +1038,8 @@ def cookies_html(*, privacy_url: str) -> str:
 
 def dpa_html(*, privacy_url: str) -> str:
     """Article 28 Data Processing Agreement body."""
-    return f"""
+    return _with_section_toc(
+        f"""
 {_DRAFT_BANNER}
 <section class="mh-hero" style="padding-top:var(--sp-6);padding-bottom:var(--sp-5);margin-bottom:var(--sp-5)">
   <span class="mh-hero-eyebrow">Legal</span>
@@ -1109,7 +1161,9 @@ def dpa_html(*, privacy_url: str) -> str:
   the workspace; the acceptance (account email, version {DPA_VERSION}, timestamp,
   workspace) is recorded in an append-only ledger.</p>
 </div>
-"""
+""",
+        "dpa",
+    )
 
 
 __all__ = [

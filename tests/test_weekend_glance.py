@@ -216,11 +216,28 @@ class TestLede:
         g = build_weekend_glance(_run(ranked=[_ach(type="pb_confirmed")], n_analysed=8))
         assert g.lede_stats == "1 personal best across 8 analysed swims."
 
-    def test_no_pbs_no_medals_falls_back_to_standouts(self):
-        ranked = [_ach(type="club_record", post_angle="club_record"),
+    def test_no_records_pbs_or_medals_falls_back_to_standouts(self):
+        # A meet with only non-record, non-PB, non-medal moments still gets a
+        # factual standout count.
+        ranked = [_ach(type="first_sub_barrier"),
                   _ach(type="first_sub_barrier")]
         g = build_weekend_glance(_run(ranked=ranked, n_analysed=12, n_achievements=2))
         assert g.lede_stats == "2 standout moments across 12 analysed swims."
+
+    def test_records_lead_the_lede(self):
+        # A record-breaking meet must not read like a dull one: the record count
+        # leads the lede, ahead of PBs/medals.
+        ranked = [_ach(type="club_record", post_angle="club_record"),
+                  _ach(type="pb_confirmed")]
+        g = build_weekend_glance(_run(ranked=ranked, n_analysed=12, n_achievements=2))
+        assert g.n_records == 1
+        assert g.lede_stats == "1 club record and 1 personal best across 12 analysed swims."
+
+    def test_record_that_is_also_a_medal_is_counted_as_a_record(self):
+        # A record is counted even when it is also a medal — the tally is honest.
+        ranked = [_ach(type="club_record_gold", post_angle="club_record", raw_facts={"place": 1})]
+        g = build_weekend_glance(_run(ranked=ranked, n_analysed=5))
+        assert g.n_records == 1
 
     def test_singular_analysed_swim(self):
         g = build_weekend_glance(_run(ranked=[_ach(type="pb_confirmed")], n_analysed=1))
