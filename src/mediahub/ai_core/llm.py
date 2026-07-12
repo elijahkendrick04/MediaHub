@@ -19,6 +19,7 @@ import json
 import logging
 import os
 import re
+import time
 from dataclasses import dataclass, field
 from typing import Callable, Optional
 
@@ -718,6 +719,27 @@ def _is_transient(err_msg: str) -> bool:
     return bool(_TRANSIENT_RE.search(err_msg.lower()))
 
 
+def _record(
+    provider: str, *, ok: bool, started: float, error: Optional[BaseException] = None
+) -> None:
+    """Best-effort usage record for one ai_core provider call, so copilot /
+    free-text chat / deep-research / autonomy calls are visible on
+    /healthz/usage and count against the Gemini free-tier RPD tracker (ai_core
+    used to record nothing). Never lets a logging failure sink an LLM call."""
+    try:
+        from mediahub.observability import llm_usage as _u
+
+        _u.record_call(
+            provider=provider,
+            ok=ok,
+            duration_ms=(time.monotonic() - started) * 1000.0,
+            error_kind=type(error).__name__ if error else None,
+            error_message=str(error)[:240] if error else None,
+        )
+    except Exception:
+        pass
+
+
 def ask(system: str, user: str, *, max_tokens: int = 800, provider: Optional[str] = None) -> str:
     """Plain-text in, plain-text out.
 
@@ -739,9 +761,13 @@ def ask(system: str, user: str, *, max_tokens: int = 800, provider: Optional[str
         )
     last_err: Optional[Exception] = None
     for p in chain:
+        started = time.monotonic()
         try:
-            return _DISPATCH[p][0](system, user, max_tokens)
+            result = _DISPATCH[p][0](system, user, max_tokens)
+            _record(p, ok=True, started=started)
+            return result
         except ProviderError as e:
+            _record(p, ok=False, started=started, error=e)
             last_err = e
             transient = e.transient if e.transient is not None else _is_transient(str(e))
             if not transient or p == chain[-1]:
@@ -781,9 +807,15 @@ def ask_with_tools(
         return on_tool_call(name, inp)
 
     for p in chain:
+        started = time.monotonic()
         try:
-            return _DISPATCH[p][1](system, user, tools, _counting_tool_call, max_tokens, max_rounds)
+            result = _DISPATCH[p][1](
+                system, user, tools, _counting_tool_call, max_tokens, max_rounds
+            )
+            _record(p, ok=True, started=started)
+            return result
         except ProviderError as e:
+            _record(p, ok=False, started=started, error=e)
             last_err = e
             transient = e.transient if e.transient is not None else _is_transient(str(e))
             # Never fail over to another provider once a tool call has already run:
