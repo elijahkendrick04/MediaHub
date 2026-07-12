@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-07-12 · `fa005297e` · Merge pull request #1190 from elijahkendrick04/claude/clear-drafts-run-history-ipa9no
+**Last updated:** 2026-07-12 · `019cc9a73` · Injection hardening + nickname fix (review batch 6) (#1208)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1226,6 +1226,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-07-12 | `8899edf94` | fix: injection hardening + nickname canonicalisation (review batch 6) |
 | 2026-07-12 | `1127b5c46` | fix(engine): native-path time parse rejects bare mm:ss instead of a 100x error |
 | 2026-07-12 | `7b3b9d41d` | Restrict "Switch organisation" to the dev operator only |
 | 2026-07-12 | `2e7f57c59` | test: harden palette-reachability guard against shared-app pollution |
