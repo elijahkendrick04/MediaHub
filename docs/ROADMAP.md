@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-07-12 · `fc88ebbab` · Merge pull request #1217 from elijahkendrick04/claude/code-review-cleanup-v2c6g6
+**Last updated:** 2026-07-12 · `603c9572e` · Add a keyless web-search MCP server (ddg-search) (#1183)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1230,8 +1230,7 @@ list and the auto table below, not here.
 | 2026-07-12 | `1c16aa061` | Compliance & privacy data-safety (deep-review batch 9: #103–#114) |
 | 2026-07-12 | `436d61376` | Concurrency & state hardening (deep-review batch 8: #79–#91) |
 | 2026-07-12 | `77d1632a5` | Harden privacy/compliance data-safety (deep-review batch 7: #108, #107, #106) |
+| 2026-07-12 | `57bd251ed` | Switch web search to a keyless server (ddg-search), drop keyed ones |
+| 2026-07-12 | `a719ff0ed` | Add dedicated web-search MCP servers (Exa, Tavily, Firecrawl) |
 | 2026-07-12 | `8899edf94` | fix: injection hardening + nickname canonicalisation (review batch 6) |
-| 2026-07-12 | `9ac11ec48` | Fix red main: drop orphaned "Slide remote" command-palette row |
-| 2026-07-12 | `1127b5c46` | fix(engine): native-path time parse rejects bare mm:ss instead of a 100x error |
-| 2026-07-12 | `7b3b9d41d` | Restrict "Switch organisation" to the dev operator only |
 <!-- /ROADMAP:ACTIVITY -->
