@@ -1,19 +1,17 @@
 """Tests for results_fetch Tier A (static) + Tier B (rendered) + escalation.
 
-Everything here runs offline: the static backend's HTTP is mocked, the SSRF
-validator is stubbed for redirect cases (real loopback refusal is exercised
-without a network), and the rendered backend is driven through a fake
-Playwright page so no Chromium is launched. The security-critical decisions —
-SSRF refusal, content-type allowlist, byte caps, browser-level scope
-interception, network-capture filtering/caps, and the hard render budget — are
-each asserted directly.
+Everything here runs offline: the static backend's pinned transport
+(``_pinned_open``) is mocked, so redirect / allowlist / cap cases need no DNS
+(real loopback refusal is still exercised without a network), and the rendered
+backend is driven through a fake Playwright page so no Chromium is launched. The
+security-critical decisions — SSRF refusal, content-type allowlist, byte caps,
+browser-level scope interception, network-capture filtering/caps, and the hard
+render budget — are each asserted directly.
 """
 
 from __future__ import annotations
 
 import time
-
-import pytest
 
 from mediahub.results_fetch import (
     ReadResult,
@@ -40,41 +38,51 @@ from mediahub.results_fetch.rendered import (
 # ---------------------------------------------------------------------------
 
 
-class FakeResponse:
-    """Minimal stand-in for a streamed ``requests`` response."""
+class FakePinnedResponse:
+    """Minimal stand-in for a pinned urllib3 response (``preload_content=False``).
 
-    def __init__(self, status_code=200, headers=None, body=b"", location=None):
-        self.status_code = status_code
+    Exposes exactly what ``StaticBackend.fetch`` / ``_read_capped`` touch:
+    ``.status`` (int), case-insensitive-ish ``.headers`` (a plain dict is fine —
+    the code probes both ``Location``/``location`` and ``Content-Type``),
+    ``.stream(amt)`` and ``.close()``."""
+
+    def __init__(self, status=200, headers=None, body=b"", location=None):
+        self.status = status
         self.headers = headers or {}
         if location is not None:
             self.headers["Location"] = location
         self._body = body
         self.closed = False
 
-    def iter_content(self, chunk_size=65536):
-        for i in range(0, len(self._body), chunk_size):
-            yield self._body[i : i + chunk_size]
+    def stream(self, amt=65536, decode_content=None):
+        for i in range(0, len(self._body), amt):
+            yield self._body[i : i + amt]
 
     def close(self):
         self.closed = True
 
 
-def _install_requests(monkeypatch, handler):
-    """Patch ``requests.Session.get`` — StaticBackend fetches through one pooled,
-    keep-alive session (a fresh ``requests.get`` per page would re-handshake)."""
-    import requests
+class FakePool:
+    """Stand-in for the urllib3 connection pool returned alongside a response."""
 
-    def fake_get(self, url, **kwargs):  # bound method: self is the Session
-        return handler(url, kwargs)
+    def __init__(self):
+        self.closed = False
 
-    monkeypatch.setattr(requests.Session, "get", fake_get)
+    def close(self):
+        self.closed = True
 
 
-def _allow_all_hosts(monkeypatch):
-    """Stub the SSRF validator so redirect/allowlist tests need no DNS."""
-    monkeypatch.setattr(
-        fetchmod, "is_url_safe", lambda url: "internal" not in url and "127.0.0.1" not in url
-    )
+def _install_pinned(monkeypatch, handler):
+    """Patch ``fetch._pinned_open`` — StaticBackend now pins every hop to the
+    SSRF-validated IP via ``safe_fetch._pinned_open`` (one resolution, used for
+    the connection too), instead of a validate-then-reconnect. ``handler(url)``
+    returns a ``FakePinnedResponse`` or raises ``ValueError`` to model a hop the
+    SSRF guard refuses (unresolvable / internal IP / non-http(s) scheme)."""
+
+    def fake_open(url, *, timeout):
+        return handler(url), FakePool()
+
+    monkeypatch.setattr(fetchmod, "_pinned_open", fake_open)
 
 
 class FakeRequest:
@@ -102,8 +110,9 @@ class FakePage:
     verbatim. Tracks whether it was closed.
     """
 
-    def __init__(self, *, url="https://x", dom="<html></html>", text="hi",
-                 shot=b"jpg", responses=None):
+    def __init__(
+        self, *, url="https://x", dom="<html></html>", text="hi", shot=b"jpg", responses=None
+    ):
         self._url = url
         self._dom = dom
         self._text = text
@@ -171,11 +180,10 @@ def test_static_refuses_loopback_without_network():
 
 
 def test_static_fetches_html_and_extracts_text(monkeypatch):
-    _allow_all_hosts(monkeypatch)
     html = b"<html><body><table><tr><td>1</td><td>Ada</td><td>58.21</td></tr></table></body></html>"
-    _install_requests(
+    _install_pinned(
         monkeypatch,
-        lambda url, kw: FakeResponse(200, {"Content-Type": "text/html; charset=utf-8"}, html),
+        lambda url: FakePinnedResponse(200, {"Content-Type": "text/html; charset=utf-8"}, html),
     )
     page = StaticBackend().fetch("https://results.example/heat1.htm")
     assert page is not None
@@ -186,47 +194,44 @@ def test_static_fetches_html_and_extracts_text(monkeypatch):
 
 
 def test_static_redirect_to_internal_is_refused(monkeypatch):
-    """A public URL that 302s to an internal host is refused at the next hop."""
-    _allow_all_hosts(monkeypatch)
+    """A public URL that 302s to an internal host is refused at the next hop:
+    ``_pinned_open`` raises before any byte is read from the internal target."""
 
-    def handler(url, kw):
+    def handler(url):
         if "internal" in url:
-            pytest.fail("internal host should never be requested")
-        return FakeResponse(302, {}, location="http://internal.svc/admin")
+            raise ValueError("unsafe_url")  # the SSRF guard refuses the pinned open
+        return FakePinnedResponse(302, location="http://internal.svc/admin")
 
-    _install_requests(monkeypatch, handler)
+    _install_pinned(monkeypatch, handler)
     assert StaticBackend().fetch("https://public.example/start") is None
 
 
 def test_static_follows_safe_redirect(monkeypatch):
-    _allow_all_hosts(monkeypatch)
     final = b"<html><body>" + b"x" * 500 + b"</body></html>"
 
-    def handler(url, kw):
+    def handler(url):
         if url.endswith("/start"):
-            return FakeResponse(302, {}, location="https://public.example/final.htm")
-        return FakeResponse(200, {"Content-Type": "text/html"}, final)
+            return FakePinnedResponse(302, location="https://public.example/final.htm")
+        return FakePinnedResponse(200, {"Content-Type": "text/html"}, final)
 
-    _install_requests(monkeypatch, handler)
+    _install_pinned(monkeypatch, handler)
     page = StaticBackend().fetch("https://public.example/start")
     assert page is not None and page.final_url.endswith("/final.htm")
 
 
 def test_static_rejects_disallowed_content_type(monkeypatch):
-    _allow_all_hosts(monkeypatch)
-    _install_requests(
+    _install_pinned(
         monkeypatch,
-        lambda url, kw: FakeResponse(200, {"Content-Type": "video/mp4"}, b"\x00\x00\x00 ftyp"),
+        lambda url: FakePinnedResponse(200, {"Content-Type": "video/mp4"}, b"\x00\x00\x00 ftyp"),
     )
     assert StaticBackend().fetch("https://x.example/clip") is None
 
 
 def test_static_sniffs_pdf_when_mislabelled(monkeypatch):
-    _allow_all_hosts(monkeypatch)
     pdf = b"%PDF-1.7\n" + b"x" * 100
-    _install_requests(
+    _install_pinned(
         monkeypatch,
-        lambda url, kw: FakeResponse(200, {"Content-Type": "application/octet-stream"}, pdf),
+        lambda url: FakePinnedResponse(200, {"Content-Type": "application/octet-stream"}, pdf),
     )
     page = StaticBackend().fetch("https://x.example/results")
     assert page is not None and page.content_type == "application/pdf"
@@ -234,18 +239,16 @@ def test_static_sniffs_pdf_when_mislabelled(monkeypatch):
 
 
 def test_static_enforces_byte_cap(monkeypatch):
-    _allow_all_hosts(monkeypatch)
     limits = FetchLimits(max_page_bytes=1024)
     big = b"<html>" + b"a" * 4096 + b"</html>"
-    _install_requests(
-        monkeypatch, lambda url, kw: FakeResponse(200, {"Content-Type": "text/html"}, big)
+    _install_pinned(
+        monkeypatch, lambda url: FakePinnedResponse(200, {"Content-Type": "text/html"}, big)
     )
     assert StaticBackend(limits).fetch("https://x.example/big") is None
 
 
 def test_static_non_200_returns_none(monkeypatch):
-    _allow_all_hosts(monkeypatch)
-    _install_requests(monkeypatch, lambda url, kw: FakeResponse(404, {}, b"nope"))
+    _install_pinned(monkeypatch, lambda url: FakePinnedResponse(404, {}, b"nope"))
     assert StaticBackend().fetch("https://x.example/missing") is None
 
 
@@ -264,7 +267,9 @@ def test_count_result_shaped_tokens_is_sport_agnostic():
 
 def _html_page(body_text, *, content_type="text/html"):
     raw = f"<html><body>{body_text}</body></html>".encode()
-    return FetchedPage(content=raw, final_url="https://x", content_type=content_type, text=body_text)
+    return FetchedPage(
+        content=raw, final_url="https://x", content_type=content_type, text=body_text
+    )
 
 
 def test_trigger_thin_body():
@@ -466,11 +471,17 @@ def test_capture_keeps_inscope_json_filters_the_rest():
     captures: list[CapturedResponse] = []
     totals = [0]
 
-    keep = FakeNetworkResponse("https://site.test/api/r.json", "xhr", "application/json", b'{"a":1}')
+    keep = FakeNetworkResponse(
+        "https://site.test/api/r.json", "xhr", "application/json", b'{"a":1}'
+    )
     wrong_type = FakeNetworkResponse("https://site.test/page", "xhr", "text/html", b"<html>")
-    wrong_rtype = FakeNetworkResponse("https://site.test/x.json", "stylesheet", "application/json", b"{}")
+    wrong_rtype = FakeNetworkResponse(
+        "https://site.test/x.json", "stylesheet", "application/json", b"{}"
+    )
     off_host = FakeNetworkResponse("https://cdn.other/r.json", "fetch", "application/json", b"{}")
-    plus_json = FakeNetworkResponse("https://site.test/api/v", "fetch", "application/ld+json", b'{"x":2}')
+    plus_json = FakeNetworkResponse(
+        "https://site.test/api/v", "fetch", "application/ld+json", b'{"x":2}'
+    )
 
     for r in (keep, wrong_type, wrong_rtype, off_host, plus_json):
         rb._maybe_capture(r, scope, captures, totals)
@@ -486,9 +497,13 @@ def test_capture_enforces_per_body_and_total_caps():
     captures: list[CapturedResponse] = []
     totals = [0]
 
-    too_big = FakeNetworkResponse("https://site.test/big.json", "xhr", "application/json", b"x" * 50)
+    too_big = FakeNetworkResponse(
+        "https://site.test/big.json", "xhr", "application/json", b"x" * 50
+    )
     ok1 = FakeNetworkResponse("https://site.test/a.json", "xhr", "application/json", b"x" * 8)
-    ok2_over_total = FakeNetworkResponse("https://site.test/b.json", "xhr", "application/json", b"x" * 8)
+    ok2_over_total = FakeNetworkResponse(
+        "https://site.test/b.json", "xhr", "application/json", b"x" * 8
+    )
 
     rb._maybe_capture(too_big, scope, captures, totals)  # over per-body cap → skip
     rb._maybe_capture(ok1, scope, captures, totals)  # 8 ≤ 15 → keep
@@ -522,7 +537,9 @@ def test_render_refuses_internal_host():
 
 def test_fetch_through_fake_page_captures_and_reads():
     scope_url = "https://site.test/results/"
-    keep = FakeNetworkResponse("https://site.test/api/r.json", "xhr", "application/json", b'{"ok":1}')
+    keep = FakeNetworkResponse(
+        "https://site.test/api/r.json", "xhr", "application/json", b'{"ok":1}'
+    )
     skip = FakeNetworkResponse("https://cdn.other/r.json", "xhr", "application/json", b"{}")
     fake = FakePage(
         url="https://site.test/results/",
