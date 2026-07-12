@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-07-12 · `0d6fab73c` · Merge pull request #1222 from elijahkendrick04/claude/code-review-cleanup-v2c6g6
+**Last updated:** 2026-07-12 · `ebb0881eb` · Merge pull request #1224 from elijahkendrick04/claude/code-review-cleanup-v2c6g6
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1226,6 +1226,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-07-12 | `d4c1380b1` | Tool-conversation semantics (deep-review batch 11c: #37, #39) |
 | 2026-07-12 | `2d3afba5c` | ai_core provider-call reliability (deep-review batch 11b: #32, #38) |
 | 2026-07-12 | `8fb86a002` | AI-layer robustness, module-local (deep-review batch 11a: #42–#48) |
 | 2026-07-12 | `16a17afd1` | Observability & log-sentinel robustness (deep-review batch 10: #94–#100) |
@@ -1234,5 +1235,4 @@ list and the auto table below, not here.
 | 2026-07-12 | `77d1632a5` | Harden privacy/compliance data-safety (deep-review batch 7: #108, #107, #106) |
 | 2026-07-12 | `57bd251ed` | Switch web search to a keyless server (ddg-search), drop keyed ones |
 | 2026-07-12 | `a719ff0ed` | Add dedicated web-search MCP servers (Exa, Tavily, Firecrawl) |
-| 2026-07-12 | `8899edf94` | fix: injection hardening + nickname canonicalisation (review batch 6) |
 <!-- /ROADMAP:ACTIVITY -->
