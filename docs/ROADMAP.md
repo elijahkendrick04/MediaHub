@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-07-12 · `2cf9e0ef1` · Merge pull request #1228 from elijahkendrick04/claude/code-review-cleanup-v2c6g6
+**Last updated:** 2026-07-12 · `2ee30de46` · Merge pull request #1230 from elijahkendrick04/claude/code-review-cleanup-v2c6g6
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1226,6 +1226,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-07-12 | `5ea57e938` | Rendering-stack durability (deep-review batch 12: #70, #72, #75) |
 | 2026-07-12 | `2f882d96c` | Research/chat prompt-injection guard + bounded chat (deep-review batch 11e: #40, #41) |
 | 2026-07-12 | `11aa4c058` | AI-wrapper honesty + ai_core usage recording (deep-review batch 11d: #35, #36) |
 | 2026-07-12 | `d4c1380b1` | Tool-conversation semantics (deep-review batch 11c: #37, #39) |
@@ -1233,5 +1234,4 @@ list and the auto table below, not here.
 | 2026-07-12 | `8fb86a002` | AI-layer robustness, module-local (deep-review batch 11a: #42–#48) |
 | 2026-07-12 | `16a17afd1` | Observability & log-sentinel robustness (deep-review batch 10: #94–#100) |
 | 2026-07-12 | `1c16aa061` | Compliance & privacy data-safety (deep-review batch 9: #103–#114) |
-| 2026-07-12 | `436d61376` | Concurrency & state hardening (deep-review batch 8: #79–#91) |
 <!-- /ROADMAP:ACTIVITY -->
