@@ -46,8 +46,6 @@ Live issues that we accept for now. Each has a workaround and is tracked in
 
 ## Rendering
 
-- **WeasyPrint fallback can't render WebFonts** the way Chromium does. Pages
-  that depend on Google Fonts will subset fall back to Helvetica.
 - **Playwright cold start is ~5 s** in the Docker image. The first card after
   a server restart is slow.
 - **Story format (1080×1920)** sometimes truncates long captions. Layout is
