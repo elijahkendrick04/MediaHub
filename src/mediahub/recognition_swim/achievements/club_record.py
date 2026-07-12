@@ -100,66 +100,74 @@ class ClubRecordDetector(AchievementDetector):
 
         if not broken:
             return []
-        broken.sort(key=lambda item: item[0])
-        specificity, key, rec, age_group = broken[0]
+        broken.sort(key=lambda item: item[0])  # most specific age band first
 
         swimmer_name = (extra or {}).get("swimmer_name", "") or getattr(history, "swimmer_name", "")
         evt_label = _event_label(swim)
-        old_str = format_time_cs(int(rec["time_cs"]))
         new_str = format_time_cs(time_cs)
-        group_label = "" if age_group == "open" else f" ({age_group})"
-        holder = rec.get("holder") or "previous holder"
 
-        return [
-            Achievement(
-                type="club_record",
-                swim_id=_swim_id(swim),
-                swimmer_id=getattr(swim, "swimmer_key", ""),
-                swimmer_name=swimmer_name,
-                event=evt_label,
-                headline=(
-                    f"NEW CLUB RECORD{group_label}: {swimmer_name} — {new_str} in the {evt_label}"
-                ),
-                angle_hint=(
-                    f"Club record broken: the old mark of {old_str} ({holder}"
-                    + (f", {rec['set_date']}" if rec.get("set_date") else "")
-                    + f") falls by {format_time_cs(int(rec['time_cs']) - time_cs)}."
-                ),
-                confidence=0.95,
-                confidence_label="high",
-                evidence=[
-                    AchievementEvidence(
-                        source_type="registry",
-                        source_name="Club records table",
-                        statement=(
-                            f"Stored club record for {evt_label}{group_label} was {old_str} "
-                            f"by {holder}; this swim's verified time is {new_str}."
-                        ),
-                        confidence="high",
-                    )
-                ],
-                raw_facts={
-                    "distance": int(distance),
-                    "stroke": stroke,
-                    "course": course,
-                    "gender": gender,
-                    "age_group": age_group,
-                    "old_time_cs": int(rec["time_cs"]),
-                    "old_time": old_str,
-                    "old_holder": holder,
-                    "old_set_date": rec.get("set_date") or "",
-                    "new_time_cs": time_cs,
-                    "new_time": new_str,
-                    "swim_date": getattr(swim, "swim_date", None),
-                },
-                uncertainty_notes=(
-                    []
-                    if age is not None or age_group == "open"
-                    else ["Age-group records skipped: swimmer age unknown in this file."]
-                ),
-                detector_name=self.name,
+        # One achievement per broken record key. A swim that beats BOTH an
+        # age-band record and the open record must surface (and, on approval,
+        # update) both keys — keeping only the most-specific one left the open
+        # record stale, so a later slower swim triggered a false
+        # "NEW CLUB RECORD (open)" (#58). The age-group rides in each swim_id so
+        # the two cards stay distinct downstream.
+        out: list[Achievement] = []
+        for _specificity, _key, rec, age_group in broken:
+            old_str = format_time_cs(int(rec["time_cs"]))
+            group_label = "" if age_group == "open" else f" ({age_group})"
+            holder = rec.get("holder") or "previous holder"
+            out.append(
+                Achievement(
+                    type="club_record",
+                    swim_id=_swim_id(swim, f":clubrecord:{age_group}"),
+                    swimmer_id=getattr(swim, "swimmer_key", ""),
+                    swimmer_name=swimmer_name,
+                    event=evt_label,
+                    headline=(
+                        f"NEW CLUB RECORD{group_label}: {swimmer_name} — {new_str} in the {evt_label}"
+                    ),
+                    angle_hint=(
+                        f"Club record broken: the old mark of {old_str} ({holder}"
+                        + (f", {rec['set_date']}" if rec.get("set_date") else "")
+                        + f") falls by {format_time_cs(int(rec['time_cs']) - time_cs)}."
+                    ),
+                    confidence=0.95,
+                    confidence_label="high",
+                    evidence=[
+                        AchievementEvidence(
+                            source_type="registry",
+                            source_name="Club records table",
+                            statement=(
+                                f"Stored club record for {evt_label}{group_label} was {old_str} "
+                                f"by {holder}; this swim's verified time is {new_str}."
+                            ),
+                            confidence="high",
+                        )
+                    ],
+                    raw_facts={
+                        "distance": int(distance),
+                        "stroke": stroke,
+                        "course": course,
+                        "gender": gender,
+                        "age_group": age_group,
+                        "old_time_cs": int(rec["time_cs"]),
+                        "old_time": old_str,
+                        "old_holder": holder,
+                        "old_set_date": rec.get("set_date") or "",
+                        "new_time_cs": time_cs,
+                        "new_time": new_str,
+                        "swim_date": getattr(swim, "swim_date", None),
+                    },
+                    uncertainty_notes=(
+                        []
+                        if age is not None or age_group == "open"
+                        else ["Age-group records skipped: swimmer age unknown in this file."]
+                    ),
+                    detector_name=self.name,
+                )
             )
-        ]
+        return out
 
     def _no_fire_reason(self, swim, ctx, history, all_results=None, extra=None) -> str:
         if not ((extra or {}).get("club_records") or {}):
