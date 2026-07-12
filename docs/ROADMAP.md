@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-07-12 · `603c9572e` · Add a keyless web-search MCP server (ddg-search) (#1183)
+**Last updated:** 2026-07-12 · `e6527fefa` · Merge pull request #1219 from elijahkendrick04/claude/code-review-cleanup-v2c6g6
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1226,6 +1226,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-07-12 | `8fb86a002` | AI-layer robustness, module-local (deep-review batch 11a: #42–#48) |
 | 2026-07-12 | `16a17afd1` | Observability & log-sentinel robustness (deep-review batch 10: #94–#100) |
 | 2026-07-12 | `1c16aa061` | Compliance & privacy data-safety (deep-review batch 9: #103–#114) |
 | 2026-07-12 | `436d61376` | Concurrency & state hardening (deep-review batch 8: #79–#91) |
