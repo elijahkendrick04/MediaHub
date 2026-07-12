@@ -588,7 +588,12 @@ def apply_audio(
         }
 
     try:
-        with tempfile.TemporaryDirectory(prefix="mh_audio_mux_") as td:
+        # dir=video.parent keeps the mux temp on the SAME filesystem as the target
+        # MP4, so the os.replace below is an atomic same-fs rename. Without it the
+        # temp lands in the default /tmp, which on Render is a different mount from
+        # DATA_DIR — os.replace then raises EXDEV, the broad except reports
+        # silent_fallback, and the whole voiceover/music feature is dead in prod.
+        with tempfile.TemporaryDirectory(prefix="mh_audio_mux_", dir=str(video.parent)) as td:
             tmp_out = Path(td) / video.name
             _run_ffmpeg(
                 mux_args(
