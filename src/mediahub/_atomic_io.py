@@ -35,9 +35,11 @@ except ImportError:  # pragma: no cover - non-POSIX dev fallback
     _HAVE_FCNTL = False
 
 
-def _unique_tmp(path: Path) -> Path:
-    # pid + thread id keeps two concurrent writers to the same target off each
-    # other's temp file — a shared ``.tmp`` name would let them clobber.
+def unique_tmp(path: Path) -> Path:
+    """A per-writer temp sibling of ``path`` (same dir, so ``os.replace`` stays an
+    atomic same-filesystem rename). pid + thread id keeps two concurrent writers
+    to the same target off each other's temp file — a shared ``.tmp`` name would
+    let them clobber."""
     return path.with_name(f"{path.name}.{os.getpid()}.{threading.get_ident():x}.tmp")
 
 
@@ -45,7 +47,7 @@ def atomic_write_text(path: Path, text: str, *, encoding: str = "utf-8") -> None
     """Write ``text`` to ``path`` atomically (unique temp in the same dir + rename)."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = _unique_tmp(path)
+    tmp = unique_tmp(path)
     try:
         tmp.write_text(text, encoding=encoding)
         os.replace(tmp, path)
@@ -82,4 +84,4 @@ def cross_process_lock(lock_path: Path) -> Iterator[None]:
         os.close(fd)
 
 
-__all__ = ["atomic_write_text", "atomic_write_json", "cross_process_lock"]
+__all__ = ["atomic_write_text", "atomic_write_json", "cross_process_lock", "unique_tmp"]

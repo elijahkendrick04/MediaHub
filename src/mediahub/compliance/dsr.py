@@ -805,32 +805,19 @@ def rectify_athlete_name(profile_id: str, old_name: str, new_name: str) -> dict:
 def erase_user_account(email: str) -> bool:
     """Remove every trace of a user account from the append-only ledger.
 
-    The one place a rewrite (not an append) is correct: erasing the account
-    email from disk requires dropping its lines. Membership of the ledger is
-    operator-controller data (ROPA B1), so this is an operator action.
+    Delegates to :meth:`UserStore.delete` — the single, canonical account-erasure
+    path — so this shares its guarantees instead of re-implementing them: it takes
+    ``_LEDGER_LOCK`` (so it can't race a concurrent signup and silently erase the
+    new account) and rewrites via a temp + ``os.replace`` (so a crash mid-write
+    can't destroy every account). Membership of the ledger is operator-controller
+    data (ROPA B1), so this is an operator action. Returns True when a record was
+    removed.
     """
     norm = (email or "").strip().lower()
     if not norm:
         return False
-    users_path = _data_dir() / "users.jsonl"
-    if not users_path.exists():
-        return False
-    kept_lines = []
-    found = False
-    for line in users_path.read_text().splitlines():
-        try:
-            rec = json.loads(line)
-        except json.JSONDecodeError:
-            kept_lines.append(line)
-            continue
-        if str(rec.get("email", "")).strip().lower() == norm:
-            found = True
-        else:
-            kept_lines.append(line)
-    if found:
-        users_path.write_text("\n".join(kept_lines) + ("\n" if kept_lines else ""))
-        try:
-            os.chmod(users_path, 0o600)
-        except OSError:
-            pass
-    return found
+    from mediahub.web.auth import UserStore  # noqa: PLC0415
+
+    # No path arg: UserStore resolves the SAME ledger signups write to
+    # (auth._users_path()), so erasure targets the real account store.
+    return UserStore().delete(email)
