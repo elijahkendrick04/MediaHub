@@ -909,19 +909,33 @@ def generate(
     model on the OpenAI-compatible path. Gemini/Anthropic ignore it.
     """
     msgs = messages if messages else [{"role": "user", "content": prompt}]
+    # Track which providers actually had a key and were CALLED, so an all-attempts-
+    # failed outcome isn't reported as "not configured" (the same honest-error fix
+    # generate_vision already carries; the hot-path generate() had been left out).
+    attempted: list[str] = []
     for provider in _provider_order():
-        if provider == "gemini":
+        if provider == "gemini" and _has_gemini_key():
+            attempted.append(provider)
             out = _call_gemini(msgs, system, max_tokens)
-        elif provider == "anthropic":
+        elif provider == "anthropic" and _has_anthropic_key():
+            attempted.append(provider)
             out = _call_anthropic(msgs, system, max_tokens)
-        elif provider == "openai":
+        elif provider == "openai" and _is_openai_on():
             from mediahub.media_ai.llm_providers import call_openai
 
+            attempted.append(provider)
             out = call_openai(msgs, system, max_tokens, content_type=content_type)
         else:
             continue
         if out:
             return out
+    if attempted:
+        # Keys exist and calls were made — saying "not configured" would be a false
+        # reason. The failure detail is in the usage ledger / logs the helpers write.
+        raise ClaudeUnavailableError(
+            "AI text generation failed (provider(s) attempted: "
+            f"{', '.join(attempted)}). See the LLM usage log for the failure detail."
+        )
     raise ClaudeUnavailableError(
         "AI features are unavailable on this deployment. The operator "
         "has not configured a Gemini or Anthropic API key. Contact your "
