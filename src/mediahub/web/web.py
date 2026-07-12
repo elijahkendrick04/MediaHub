@@ -95,6 +95,7 @@ from flask import (
 from markupsafe import escape as _h
 
 from mediahub.pipeline.pipeline_v4 import run_pipeline_v4, PipelineRunV4
+from mediahub._atomic_io import atomic_write_json as _atomic_write_json
 from .humanise import humanise as _humanise
 from .weekend_glance import (
     build_weekend_glance as _build_weekend_glance,
@@ -3312,7 +3313,9 @@ def _persist_run(run: PipelineRunV4, file_name: str) -> None:
         "pb_audit": _serialise_pb_audit(getattr(run, "pb_audit", None)),
     }
     out = RUNS_DIR / f"{run.run_id}.json"
-    out.write_text(json.dumps(payload, indent=2, default=str))
+    # Atomic write: a status poll / review on the other gunicorn worker must not
+    # catch this large payload mid-truncate and read it as "run not found".
+    _atomic_write_json(out, payload, default=str)
 
     n_cards = len(run.cards)
     n_queue = sum(1 for c in run.cards if c.bucket == "queue")

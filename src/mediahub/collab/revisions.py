@@ -25,6 +25,8 @@ import uuid
 from pathlib import Path
 from typing import Optional
 
+from .._atomic_io import atomic_write_json
+
 # The brief fields worth surfacing in a diff — the design decisions a reviewer
 # cares about. Nested dicts (text layers, colour roles) are flattened to dotted
 # keys. Everything else (ids, signatures, timestamps) is bookkeeping, not design.
@@ -195,7 +197,9 @@ def restore_revision(
     bdir = _briefs_dir(run_id, runs_dir)
     bdir.mkdir(parents=True, exist_ok=True)
     path = bdir / f"{new['id']}.json"
-    path.write_text(json.dumps(new, indent=2), encoding="utf-8")
+    # Atomic: a torn write here yields an unparseable brief that the renderer
+    # silently skips while restore reports success — write it whole or not.
+    atomic_write_json(path, new)
     # Nudge mtime to now so it sorts last even on a coarse filesystem clock.
     try:
         now = time.time()
