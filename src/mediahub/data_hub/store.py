@@ -194,7 +194,8 @@ def list_org_tables(profile_id: str, *, db_path: Optional[Path] = None) -> list[
     try:
         rows = conn.execute(
             "SELECT t.table_id, t.title, t.kind, t.description, t.columns_json, "
-            "(SELECT COUNT(*) FROM data_hub_rows r WHERE r.table_id=t.table_id) AS n_rows "
+            "(SELECT COUNT(*) FROM data_hub_rows r "
+            " WHERE r.table_id=t.table_id AND r.profile_id=t.profile_id) AS n_rows "
             "FROM data_hub_tables t WHERE t.profile_id=? ORDER BY t.updated_at DESC",
             (profile_id,),
         ).fetchall()

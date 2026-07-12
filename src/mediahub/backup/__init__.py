@@ -102,6 +102,10 @@ def create_backup(dest_dir: Optional[Path] = None) -> dict:
     out_dir.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     archive = out_dir / f"mediahub-backup-{stamp}.zip"
+    # Build under a .part name and only os.replace into the canonical name once the
+    # archive verifies — a crash / OOM / full disk mid-write must not leave a
+    # truncated ZIP under the real name that _prune would treat as a valid backup.
+    part = archive.with_name(archive.name + ".part")
 
     manifest: dict = {
         "created_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
@@ -118,7 +122,7 @@ def create_backup(dest_dir: Optional[Path] = None) -> dict:
         ],
     }
 
-    with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+    with zipfile.ZipFile(part, "w", compression=zipfile.ZIP_DEFLATED) as zf:
         # 1. Consistent SQLite snapshots.
         for db_name in _DB_FILES:
             src = data_dir / db_name
@@ -172,6 +176,21 @@ def create_backup(dest_dir: Optional[Path] = None) -> dict:
                     continue
 
         zf.writestr("backup_manifest.json", json.dumps(manifest, indent=2))
+
+    # Verify integrity before publishing under the canonical name. testzip()
+    # returns the first bad member's name (or None when all CRCs check out).
+    try:
+        with zipfile.ZipFile(part, "r") as _zf:
+            bad = _zf.testzip()
+        if bad is not None:
+            raise RuntimeError(f"backup archive failed integrity check ({bad})")
+    except Exception:
+        try:
+            part.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
+    os.replace(part, archive)
 
     report = {
         "archive": str(archive),

@@ -42340,31 +42340,14 @@ function copySpotlightCaption(btn) {{
     _auth_attempts_lock = threading.Lock()
 
     def _client_ip() -> str:
-        """Proxy-aware client IP for the rate limiters / throttles.
+        """Proxy-aware client IP for the rate limiters / throttles (ADR-0019).
 
-        Behind Render's edge exactly ONE trusted reverse proxy APPENDS the
-        real client address as the LAST X-Forwarded-For hop; every earlier
-        hop is client-supplied. Trusting the FIRST hop hands an attacker a
-        fresh rate-limit bucket per request (rotate the header, dodge the
-        brake — ADR-0019 relies on this limiter). MEDIAHUB_TRUSTED_PROXY_HOPS
-        (default 1) counts the proxies in front of the app if the deployment
-        shape ever changes; 0 means no proxy — use the socket address.
+        Delegates to the shared ``web.request_ip.client_ip`` so the web-app
+        throttles and the public-API limiter derive the client identically.
         """
-        try:
-            hops = int(os.environ.get("MEDIAHUB_TRUSTED_PROXY_HOPS", "1"))
-        except (TypeError, ValueError):
-            hops = 1
-        if hops > 0:
-            fwd = [
-                p.strip()
-                for p in (request.headers.get("X-Forwarded-For") or "").split(",")
-                if p.strip()
-            ]
-            if len(fwd) >= hops:
-                return fwd[-hops]
-            if fwd:
-                return fwd[0]
-        return request.remote_addr or "unknown"
+        from mediahub.web.request_ip import client_ip
+
+        return client_ip(request)
 
     def _auth_rate_limited(bucket: str) -> bool:
         """Record an attempt; True when this IP exceeded the window budget."""
