@@ -25,6 +25,11 @@
         "GEMINI_API_KEY": "${GEMINI_API_KEY:-}"
       }
     },
+    "ddg-search": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@oevortex/ddg_search@latest"]
+    },
     "context7": {
       "type": "stdio",
       "command": "npx",

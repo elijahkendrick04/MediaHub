@@ -244,11 +244,12 @@ Previously-fixed files (now part of the passing suite):
 - `tests/test_pb_discovery.py` — all mock.patch targets updated to canonical `mediahub.*` paths; real ledger pollution cleared
 - `tests/test_corpus_recovery.py` — swim-count gate now scales with corpus size (`min(30_000, max(1_000, captured * 600))`) instead of a flat 30k
 
-## Web interaction (browser automation MCP servers)
+## Web interaction (browser automation + web-search MCP servers)
 
-Four browser-driving MCP servers are wired into `.mcp.json` and pre-approved in
-`.claude/settings.json`, so they auto-start and run without per-call prompts in
-every session in this repo. Full reference: `docs/WEB_INTERACTION.md`.
+Four browser-driving MCP servers plus one dedicated **keyless** web-search server
+are wired into `.mcp.json` and pre-approved in `.claude/settings.json`, so they
+auto-start and run without per-call prompts in every session in this repo. Full
+reference: `docs/WEB_INTERACTION.md`.
 
 - **`playwright`** (primary, always works) — the remote container prebakes the
   matching Chromium at `/opt/pw-browsers`, so navigate / snapshot / click / type
@@ -263,14 +264,25 @@ every session in this repo. Full reference: `docs/WEB_INTERACTION.md`.
   anti-bot resilience. OPTIONAL: inert until `BROWSERBASE_API_KEY` +
   `BROWSERBASE_PROJECT_ID` are set in `.env` (keys are env-only — never hardcode).
 
-When to use vs. the built-ins: `WebFetch`/`WebSearch` are read-only — use them
-for research. The moment a task needs to click, log in, fill a form, drive a
-multi-step flow, or check the *running* app's behaviour, use a browser server
-(default: `playwright`). For logged-in-session parity (driving a real
-authenticated Chrome over CDP or a persistent profile), see the recipes in
-`docs/WEB_INTERACTION.md`. Browser automation never bypasses the human-approval
-rule: nothing gets published to an external/social account without explicit
-human approval (see "External integrations").
+A dedicated **web-search** server is also wired in for *finding* things on the
+open web (browser automation *operates* pages — it's the wrong tool for search):
+
+- **`ddg-search`** (`@oevortex/ddg_search`) — **keyless** DuckDuckGo web search;
+  no API key, no account, no card. Works out of the box. Chosen because it's the
+  one keyless search MCP that reliably returns real results from the deployment
+  egress (the keyed searchers — Exa/Tavily/Brave/Firecrawl — and the other
+  keyless candidates were tested and ruled out; see `docs/WEB_INTERACTION.md`).
+  If a key is later acceptable, Tavily's no-card free tier is the easiest upgrade.
+
+When to use vs. the built-ins: `WebFetch`/`WebSearch` handle quick read-only
+lookups. For finding sources on the open web, prefer **`ddg-search`** — more
+robust than scraping a results page. The moment a task needs to click, log in,
+fill a form, drive a multi-step flow, or check the *running* app's behaviour, use
+a **browser server** (default: `playwright`). For logged-in-session parity
+(driving a real authenticated Chrome over CDP or a persistent profile), see the
+recipes in `docs/WEB_INTERACTION.md`. These servers never bypass the
+human-approval rule: nothing gets published to an external/social account without
+explicit human approval (see "External integrations").
 
 ## Contributor / engineering setup
 

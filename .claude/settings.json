@@ -5,7 +5,8 @@
       "mcp__playwright",
       "mcp__chrome-devtools",
       "mcp__puppeteer",
-      "mcp__browserbase"
+      "mcp__browserbase",
+      "mcp__ddg-search"
     ]
   },
   "hooks": {
