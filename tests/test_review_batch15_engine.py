@@ -1,7 +1,7 @@
 """Regression tests for the batch-15 deterministic-engine accuracy fixes.
 
-Each test pins the NEW behaviour of a fix landed from
-``docs/DEEP_CODE_REVIEW_2026-07.md`` so the old defect cannot creep back:
+Each test pins the NEW behaviour of a batch-15 deterministic-engine fix so the
+old defect cannot creep back:
 
 * #67 — native-parser overall confidence is no longer floored at 0.5, so a
   broken parse reads as broken.
