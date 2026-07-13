@@ -19838,56 +19838,90 @@ def _about_walkthrough_html() -> str:
         "Export</span>"
         "</div>"
     )
-    steps = _about_step_html(
-        "01", "Upload", "Drop in the weekend&rsquo;s results",
-        "Drag in a results file &mdash; HY3, SDIF, a meet-manager PDF or a plain "
-        "spreadsheet. MediaHub validates it, keeps the original as the source of "
-        "truth, and never asks you to re-type a single time.",
-        "upload", upload, "1 file &rarr; parsed",
-    ) + _about_step_html(
-        "02", "Read", "Every line, parsed &amp; normalised",
-        "The deterministic parser reads each row, normalises swimmer names, event "
-        "names and times, and separates clean canonical data from anything "
-        "ambiguous &mdash; which is flagged for you, never silently guessed.",
-        "read", read, "42 swims read",
-    ) + _about_step_html(
-        "03", "Detect", "It finds the moments that matter",
-        "Personal bests, medals, club and county records, first-time "
-        "achievements and standout debuts &mdash; the detectors surface every "
-        "meaningful moment in the meet, each grounded in the exact result line.",
-        "detect", detect, "3 moments detected",
-    ) + _about_step_html(
-        "04", "Rank", "Ranked by content-worthiness",
-        "Not every moment deserves a post. The ranker scores each one with a "
-        "confidence figure and orders them, so the county record leads and the "
-        "routine swim waits &mdash; and it tells you <em>why</em>.",
-        "rank", rank, "ranked &middot; confidence",
-    ) + _about_step_html(
-        "05", "Brand", "Dressed in your club&rsquo;s identity",
-        "Your palette, fonts, logo and tone &mdash; read once from your website "
-        "and brand guidelines &mdash; are locked onto every card, story, feed "
-        "graphic and reel. Set up once; on-brand forever.",
-        "brand", brand, "brand kit applied",
-    ) + _about_step_html(
-        "06", "Review", "You review and approve &mdash; always",
-        "Nothing posts without you. Every caption, graphic and reel lands in a "
-        "review queue with its facts and confidence on show. Edit the wording, "
-        "approve what&rsquo;s right, send the rest back &mdash; one click each.",
-        "review", review, "human approval gate",
-    ) + _about_step_html(
-        "07", "Export", "Export, ready to post",
-        "Approved content exports as story cards, feed graphics, athlete "
-        "spotlights, meet recaps and branded reels &mdash; sized for the formats "
-        "your club actually posts. You download and share; MediaHub never posts "
-        "for you.",
-        "export", export, "story &middot; feed &middot; reel",
+    steps = (
+        _about_step_html(
+            "01",
+            "Upload",
+            "Drop in the weekend&rsquo;s results",
+            "Drag in a results file &mdash; HY3, SDIF, a meet-manager PDF or a plain "
+            "spreadsheet. MediaHub validates it, keeps the original as the source of "
+            "truth, and never asks you to re-type a single time.",
+            "upload",
+            upload,
+            "1 file &rarr; parsed",
+        )
+        + _about_step_html(
+            "02",
+            "Read",
+            "Every line, parsed &amp; normalised",
+            "The deterministic parser reads each row, normalises swimmer names, event "
+            "names and times, and separates clean canonical data from anything "
+            "ambiguous &mdash; which is flagged for you, never silently guessed.",
+            "read",
+            read,
+            "42 swims read",
+        )
+        + _about_step_html(
+            "03",
+            "Detect",
+            "It finds the moments that matter",
+            "Personal bests, medals, club and county records, first-time "
+            "achievements and standout debuts &mdash; the detectors surface every "
+            "meaningful moment in the meet, each grounded in the exact result line.",
+            "detect",
+            detect,
+            "3 moments detected",
+        )
+        + _about_step_html(
+            "04",
+            "Rank",
+            "Ranked by content-worthiness",
+            "Not every moment deserves a post. The ranker scores each one with a "
+            "confidence figure and orders them, so the county record leads and the "
+            "routine swim waits &mdash; and it tells you <em>why</em>.",
+            "rank",
+            rank,
+            "ranked &middot; confidence",
+        )
+        + _about_step_html(
+            "05",
+            "Brand",
+            "Dressed in your club&rsquo;s identity",
+            "Your palette, fonts, logo and tone &mdash; read once from your website "
+            "and brand guidelines &mdash; are locked onto every card, story, feed "
+            "graphic and reel. Set up once; on-brand forever.",
+            "brand",
+            brand,
+            "brand kit applied",
+        )
+        + _about_step_html(
+            "06",
+            "Review",
+            "You review and approve &mdash; always",
+            "Nothing posts without you. Every caption, graphic and reel lands in a "
+            "review queue with its facts and confidence on show. Edit the wording, "
+            "approve what&rsquo;s right, send the rest back &mdash; one click each.",
+            "review",
+            review,
+            "human approval gate",
+        )
+        + _about_step_html(
+            "07",
+            "Export",
+            "Export, ready to post",
+            "Approved content exports as story cards, feed graphics, athlete "
+            "spotlights, meet recaps and branded reels &mdash; sized for the formats "
+            "your club actually posts. You download and share; MediaHub never posts "
+            "for you.",
+            "export",
+            export,
+            "story &middot; feed &middot; reel",
+        )
     )
     return (
         '<section class="mh-section" id="mh-ch-flow">'
         '<div class="mh-section-eyebrow-strip mh-reveal"><span class="label">Step by step</span></div>'
-        + _reveal_lines(
-            ["One upload, walked", 'all the way to a <em class="editorial">post</em>.']
-        )
+        + _reveal_lines(["One upload, walked", 'all the way to a <em class="editorial">post</em>.'])
         + '<p class="mh-pipeline-sub" style="max-width:56ch;margin-bottom:var(--sp-2)">'
         "Here is the whole flow, one step at a time &mdash; exactly what happens "
         "between dropping a results file in and having posting-ready content to "
@@ -44031,9 +44065,7 @@ what you're doing, what they should do.</p>
             '<section class="mh-section mh-reveal" id="mh-see-it-work">'
             '<div class="mh-section-eyebrow-strip mh-reveal">'
             '<span class="label">See it work</span></div>'
-            + _reveal_lines(
-                ["One result in.", 'A post you <em class="editorial">approve</em>.']
-            )
+            + _reveal_lines(["One result in.", 'A post you <em class="editorial">approve</em>.'])
             + _hero_product_demo()
             + "</section>"
         )
