@@ -1,7 +1,7 @@
 # MediaHub — production Docker image
 # Build:  docker build -t mediahub:latest .
 # Run:    docker run -p 5000:5000 --env-file .env mediahub:latest
-FROM python:3.14-slim AS base
+FROM python:3.12-slim AS base
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \

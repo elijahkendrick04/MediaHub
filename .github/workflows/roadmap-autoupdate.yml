@@ -93,7 +93,7 @@ jobs:
 
       - uses: actions/setup-python@v6
         with:
-          python-version: "3.11"
+          python-version: "3.12"
 
       - name: Branch the refresh off the freshest main
         # Regenerate on top of the live origin/main, NOT the (possibly stale)

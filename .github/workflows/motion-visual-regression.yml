@@ -62,7 +62,9 @@ jobs:
 
       - uses: actions/setup-node@v6
         with:
-          node-version: "20"
+          # Match the production image (Dockerfile installs Node 22) so this
+          # job pixel-diffs Remotion output on the SAME Node prod renders on.
+          node-version: "22"
           cache: npm
           cache-dependency-path: src/mediahub/remotion/package-lock.json
 
