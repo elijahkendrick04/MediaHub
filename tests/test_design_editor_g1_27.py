@@ -837,13 +837,29 @@ def test_render_cache_does_not_serve_a_stale_eased_notice(client, stub_render):
     assert any("eased" in n.lower() for n in bold_notices)
 
 
-def test_studio_page_highlights_the_create_nav(client):
+def test_studio_page_highlights_the_create_nav(tmp_path, monkeypatch):
     """F3: the Design Studio is a sub-surface of Create, so /studio must light
     the Create nav item (it previously passed active="studio", which matched no
-    nav key and left the top bar with nothing highlighted)."""
+    nav key and left the top bar with nothing highlighted).
+
+    The studio is a signed-in feature surface — the Create nav link (like every
+    feature link) only renders once a workspace is active — so this exercises
+    /studio with a pinned organisation, the real state a user is in there.
+    """
     import re
 
-    html = client.get("/studio").get_data(as_text=True)
+    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    from mediahub.web.club_profile import ClubProfile, save_profile
+    import mediahub.web.web as wm
+
+    save_profile(ClubProfile(profile_id="studio-club", display_name="Studio SC"))
+    app = wm.create_app()
+    app.config["TESTING"] = True  # bypass the org gate so /studio renders
+    c = app.test_client()
+    with c.session_transaction() as s:
+        s["active_profile_id"] = "studio-club"
+    html = c.get("/studio").get_data(as_text=True)
     assert re.search(r'<a href="/make"[^>]*class="[^"]*\bactive\b', html), (
         "the Create nav link is not marked active on /studio"
     )
