@@ -252,8 +252,19 @@ def test_svgs_are_decorative_with_a_text_alternative(section):
 
 
 # =========================================================================== #
-# End-to-end render on /
+# End-to-end render on /about
 # =========================================================================== #
+# The how-it-works pipeline diagram (and the rest of the product-story
+# explainer: engine bento, audience, promise, FAQ) moved off the deliberately
+# brief signed-out home onto the public /about tour. These end-to-end checks
+# fetch /about so each assertion runs against the page that now carries the
+# section.
+def _about_body(client):
+    r = client.get("/about")
+    assert r.status_code == 200
+    return r.get_data(as_text=True)
+
+
 def _home_body(client):
     r = client.get("/")
     assert r.status_code == 200
@@ -261,7 +272,7 @@ def _home_body(client):
 
 
 def test_home_renders_diagram_for_fresh_visitor(client):
-    body = _home_body(client)
+    body = _about_body(client)
     assert "mh-pl-stage" in body
     assert ">THE ENGINE</text>" in body
     for label in _READ_LABELS + _WRITE_LABELS:
@@ -296,13 +307,13 @@ def test_pinned_home_omits_diagram_now_on_help(client):
 
 
 def test_home_injects_pipeline_css(client):
-    body = _home_body(client)
+    body = _about_body(client)
     assert "@keyframes mh-pl-flow" in body
     assert ".mh-pl-stage" in body
 
 
 def test_home_section_order_hero_then_pipeline_then_engine(client):
-    body = _home_body(client)
+    body = _about_body(client)
     i_hero = body.index("mh-hero")
     i_pipeline = body.index("mh-pl-stage")
     i_engine = body.index("What the engine does")
@@ -312,7 +323,7 @@ def test_home_section_order_hero_then_pipeline_then_engine(client):
 def test_pipeline_css_sits_before_guardrails_layer(client):
     # The responsive guardrails must remain the final cascade layer; the
     # pipeline CSS therefore appears before them in the served stylesheet.
-    body = _home_body(client)
+    body = _about_body(client)
     # A marker unique to the guardrails layer (the leading comment block).
     marker = "RESPONSIVE GUARDRAILS (2026)"
     assert marker in body

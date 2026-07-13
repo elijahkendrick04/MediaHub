@@ -169,18 +169,44 @@ class TestSignedInHome:
 
 
 # =========================================================================== #
-# 4) The signed-OUT landing page still carries the whole explainer
+# 4) The signed-OUT landing is now BRIEF; the full explainer moved to /about.
+#    (The landing keeps the hero, the demo, the input→output headline and a
+#    clear path to the walkthrough; the deep sections live on /about.)
 # =========================================================================== #
-class TestSignedOutLandingUnchanged:
-    def test_landing_still_has_explainer(self, app):
+class TestSignedOutLandingAndAbout:
+    def test_landing_is_brief_with_a_path_to_about(self, app):
         body = _get(app, "/", pinned=False)
-        for hook in (
-            ">THE ENGINE</text>",      # diagram
-            "From a results sheet",     # io headline
-            "Real sample output",       # bento
-            "Club committees",          # audience
-            "Human in the loop,",       # promise
+        # Kept on the brief landing: the crisp "what it is" headline + a path
+        # to the full, animated walkthrough on /about.
+        assert "From a results sheet" in body  # io headline stays
+        assert 'href="/about"' in body
+        assert "Take the tour" in body
+        # Moved off the landing to /about — must no longer appear here.
+        for gone in (
+            ">THE ENGINE</text>",  # diagram
+            "Real sample output",  # bento
+            "Club committees",  # audience
+            "Human in the loop,",  # promise
         ):
-            assert hook in body, f"signed-out landing lost {hook!r}"
+            assert gone not in body, f"brief landing should no longer carry {gone!r}"
+        assert '<section class="mh-section mh-faq"' not in body  # FAQ moved too
+
+    def test_about_page_carries_the_whole_explainer(self, app):
+        body = _get(app, "/about", pinned=False)
+        for hook in (
+            ">THE ENGINE</text>",  # diagram
+            "From a results sheet",  # io headline
+            "Real sample output",  # bento
+            "Club committees",  # audience
+            "Human in the loop,",  # promise
+        ):
+            assert hook in body, f"/about lost {hook!r}"
         assert '<section class="mh-section mh-faq"' in body
         assert body.count('<details class="mh-faq-item">') == 7
+
+    def test_about_page_has_the_animated_walkthrough(self, app):
+        body = _get(app, "/about", pinned=False)
+        # The step-by-step animated walkthrough is the About page's centrepiece.
+        assert 'id="mh-ch-flow"' in body
+        assert "mh-about-flow" in body
+        assert "mh-abs--upload" in body and "mh-abs--export" in body

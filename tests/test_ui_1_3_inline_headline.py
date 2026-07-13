@@ -109,6 +109,11 @@ class TestHomeHeadline:
         assert resp.status_code == 200, resp.status_code
         return resp.get_data(as_text=True)
 
+    def _about(self, client):
+        resp = client.get("/about")
+        assert resp.status_code == 200, resp.status_code
+        return resp.get_data(as_text=True)
+
     def test_headline_band_present(self, client):
         body = self._home(client)
         assert 'class="mh-pipeline"' in body
@@ -120,7 +125,10 @@ class TestHomeHeadline:
         assert "and a reel" in body
 
     def test_band_sits_after_hero_before_engine(self, client):
-        body = self._home(client)
+        # The engine bento moved to /about (the brief home keeps the band but
+        # drops the deep sections), so the band→engine ordering is asserted on
+        # /about, where hero, the io band and the bento all coexist.
+        body = self._about(client)
         i_hero = body.find('class="mh-hero"')
         i_band = body.find('class="mh-pipeline"')
         # After the input→output band comes the "what the engine does" bento.

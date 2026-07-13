@@ -42,6 +42,12 @@ def _home(client) -> str:
     return resp.get_data(as_text=True)
 
 
+def _about(client) -> str:
+    resp = client.get("/about")
+    assert resp.status_code == 200, f"/about -> {resp.status_code}"
+    return resp.get_data(as_text=True)
+
+
 def _pipeline_sub_paragraph(body: str) -> str:
     start = body.find('class="mh-pipeline-sub"')
     assert start != -1, "mh-pipeline-sub paragraph not found on home page"
@@ -70,8 +76,14 @@ class TestAcceptedFormatsStatedBeforeSignup:
     def test_format_mention_sits_before_the_collapsed_faq(self, client):
         """A visible, non-decorative format mention must appear before the
         visitor reaches the collapsed FAQ accordion, not only inside it or
-        buried in the throwaway demo-widget filename."""
-        body = _home(client)
+        buried in the throwaway demo-widget filename.
+
+        The FAQ (and the rest of the deep explainer) now lives on /about — the
+        brief home only names formats in the visible io-headline copy, which
+        ``test_pipeline_sub_names_accepted_input_formats`` guards. So this
+        before-the-FAQ ordering guard runs against /about, where the FAQ lives.
+        """
+        body = _about(client)
         # "spring-open.hy3" is the demo widget's throwaway prop filename — it
         # doesn't count as telling the visitor what's accepted, so scope the
         # check to the copy *after* it (a real class-selector match earlier in
