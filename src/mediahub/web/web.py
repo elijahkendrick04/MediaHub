@@ -12059,67 +12059,10 @@ _MH_AUDIENCE_ICON_CSS = "\n.mh-audience-icon { color: var(--ink-dim); }\n.mh-aud
 # cadence-heatmap CSS ride AFTER the components layer (so they can elevate
 # existing component primitives) but BEFORE the guardrails, which must stay the
 # cascade's final layer (test_theme_tokens::test_guardrails_appended_last).
-# === Command palette (⌘K) styles ===========================================
-# Top-anchored fuzzy finder (Raycast/cmdk shape) reusing the house dark surface
-# tokens + lane-yellow accent. Scoped to .mh-cmdk so it can't leak. Honours
-# prefers-reduced-motion via the shared guard (no entrance transform there).
-_MH_CMDK_CSS = """
-.mh-cmdk-trigger{display:inline-flex;align-items:center;gap:8px;height:32px;
-  padding:0 10px;border:1px solid var(--mh-outline-rule,rgba(255,255,255,.14));
-  border-radius:8px;background:var(--mh-surface,rgba(255,255,255,.03));
-  color:var(--mh-on-surface-muted,#9aa0ad);font:inherit;font-size:12.5px;
-  letter-spacing:.01em;cursor:pointer;transition:border-color .15s,color .15s,background .15s}
-.mh-cmdk-trigger:hover{border-color:var(--mh-primary,#D4FF3A);color:var(--mh-on-surface,#e8eaf0)}
-.mh-cmdk-trigger svg{width:15px;height:15px;flex:0 0 auto;opacity:.85}
-.mh-cmdk-trigger .mh-cmdk-trigger-kbd{display:inline-flex;gap:2px;margin-left:2px}
-.mh-cmdk-trigger kbd{font:600 11px/1 var(--mh-font-mono,ui-monospace,monospace);
-  padding:2px 5px;border-radius:5px;border:1px solid var(--mh-outline-rule,rgba(255,255,255,.16));
-  background:rgba(255,255,255,.04);color:inherit}
-.mh-cmdk-trigger-label{display:inline}
-@media (max-width:900px){.mh-cmdk-trigger-label,.mh-cmdk-trigger .mh-cmdk-trigger-kbd{display:none}
-  .mh-cmdk-trigger{width:32px;justify-content:center;padding:0}}
-
-.mh-cmdk{position:fixed;inset:0;z-index:1200;display:none;
-  padding:10vh 16px 16px;background:rgba(4,5,9,.62);backdrop-filter:blur(3px)}
-.mh-cmdk.is-open{display:block}
-.mh-cmdk-panel{max-width:640px;margin:0 auto;border-radius:16px;overflow:hidden;
-  background:var(--mh-panel,#12141c);border:1px solid var(--mh-outline-rule,rgba(255,255,255,.12));
-  box-shadow:0 24px 80px -20px rgba(0,0,0,.7),0 0 0 1px rgba(0,0,0,.4);
-  display:flex;flex-direction:column;max-height:76vh}
-@media (prefers-reduced-motion:no-preference){
-  .mh-cmdk.is-open .mh-cmdk-panel{animation:mhCmdkIn .16s cubic-bezier(.2,.8,.2,1)}
-  @keyframes mhCmdkIn{from{opacity:0;transform:translateY(-8px) scale(.985)}to{opacity:1;transform:none}}}
-.mh-cmdk-search{display:flex;align-items:center;gap:10px;padding:14px 16px;
-  border-bottom:1px solid var(--mh-outline-rule,rgba(255,255,255,.1))}
-.mh-cmdk-search svg{width:18px;height:18px;flex:0 0 auto;color:var(--mh-on-surface-muted,#9aa0ad)}
-.mh-cmdk-input{flex:1 1 auto;background:transparent;border:0;outline:0;
-  color:var(--mh-on-surface,#eef0f5);font:inherit;font-size:16px;padding:2px 0}
-.mh-cmdk-input::placeholder{color:var(--mh-on-surface-muted,#7d828e)}
-.mh-cmdk-hint{font:600 10.5px/1 var(--mh-font-mono,ui-monospace,monospace);
-  color:var(--mh-on-surface-muted,#7d828e);border:1px solid var(--mh-outline-rule,rgba(255,255,255,.14));
-  border-radius:5px;padding:3px 6px;letter-spacing:.06em}
-.mh-cmdk-list{overflow-y:auto;padding:6px;scroll-padding:44px 0}
-.mh-cmdk-group-label{padding:10px 12px 4px;font:700 10px/1 var(--mh-font-mono,ui-monospace,monospace);
-  letter-spacing:.16em;text-transform:uppercase;color:var(--mh-on-surface-muted,#7d828e)}
-.mh-cmdk-item{display:flex;align-items:center;gap:12px;padding:9px 12px;border-radius:10px;
-  cursor:pointer;color:var(--mh-on-surface,#e8eaf0);text-decoration:none;scroll-margin:44px 0}
-.mh-cmdk-item .mh-cmdk-ico{width:30px;height:30px;flex:0 0 auto;display:grid;place-items:center;
-  border-radius:8px;background:rgba(255,255,255,.05);color:var(--mh-on-surface-muted,#aab0bd)}
-.mh-cmdk-item .mh-cmdk-ico svg{width:16px;height:16px}
-.mh-cmdk-label{flex:1 1 auto;font-size:14.5px;font-weight:600}
-.mh-cmdk-item .mh-cmdk-grp{font-size:11px;color:var(--mh-on-surface-muted,#7d828e);
-  letter-spacing:.02em;flex:0 0 auto}
-.mh-cmdk-item.is-active{background:var(--mh-primary,#D4FF3A);color:#0b0d07}
-.mh-cmdk-item.is-active .mh-cmdk-ico{background:rgba(0,0,0,.16);color:#0b0d07}
-.mh-cmdk-item.is-active .mh-cmdk-grp{color:rgba(11,13,7,.62)}
-.mh-cmdk-empty{padding:34px 16px;text-align:center;color:var(--mh-on-surface-muted,#7d828e);font-size:13.5px}
-.mh-cmdk-list-loading{padding:10px 12px;display:flex;flex-direction:column;gap:4px}
-.mh-cmdk-foot{display:flex;gap:16px;padding:9px 14px;border-top:1px solid var(--mh-outline-rule,rgba(255,255,255,.1));
-  font-size:11px;color:var(--mh-on-surface-muted,#7d828e)}
-.mh-cmdk-foot kbd{font:600 10px/1 var(--mh-font-mono,ui-monospace,monospace);
-  padding:2px 5px;border-radius:4px;border:1px solid var(--mh-outline-rule,rgba(255,255,255,.16));
-  background:rgba(255,255,255,.04);margin-right:3px}
-
+# === Misc chrome styles (hero meta strap, count badges, legal TOC) ==========
+# A small catch-all chunk of first-party chrome CSS appended after the component
+# layer. Scoped by class so nothing leaks; reduced-motion is honoured globally.
+_MH_MISC_CHROME_CSS = """
 /* Returning-user hero: the "N cards awaiting your review" strap leads in the
    lane accent so the one actionable number stands out from the season tallies. */
 .mh-hero-meta-live{color:var(--mh-primary,#D4FF3A);font-weight:600}
@@ -12151,7 +12094,7 @@ BASE_CSS = (
     + _MH_PL_CSS
     + _MH_CI_CSS
     + _MH_CAD_CSS
-    + _MH_CMDK_CSS
+    + _MH_MISC_CHROME_CSS
     # RESPONSIVE_GUARDRAILS_CSS (_MH_RG_CSS) MUST stay the final chunk — it holds
     # the highest-priority responsive overrides and is test-guarded to be last.
     + _MH_RG_CSS
@@ -14925,220 +14868,6 @@ def _interface_language_switcher_html(*, compact: bool = True) -> str:
     )
 
 
-# === Command palette (⌘K / Ctrl-K / "/") — the global "jump to anything" ======
-# MediaHub has ~50 user-facing work/creation/library/settings surfaces but the
-# top bar deliberately shows only the core few (see the nav comments — Templates,
-# the studios, Plan et al. are kept off the bar to keep the chrome focused). That
-# focus is the right call for the bar, but it leaves everything else reachable
-# only by hunting. The palette closes that gap without adding a single nav item:
-# one keystroke opens a fuzzy finder over EVERY surface, so anything is two
-# keystrokes away and nothing is buried.
-#
-# One source of truth: every destination is a real url_for() endpoint (honouring
-# the "url_for() always" rule), each wrapped so a renamed or absent endpoint drops
-# that one row instead of breaking the whole nav. The list is rendered to JSON in
-# _layout and handed to the client palette script; the client never hardcodes a
-# path.
-_COMMAND_PALETTE_SPEC: tuple[tuple[str, tuple[tuple[str, str, str], ...]], ...] = (
-    (
-        "Create",
-        (
-            ("make_page", "Create new content", "make build story reel graphic caption new"),
-            ("spotlight_landing", "Athlete spotlight", "spotlight athlete swimmer profile hero"),
-            ("free_text_chat_page", "Free-text post", "free text write chat idea prompt caption"),
-            ("stub_weekend_preview", "Weekend preview", "weekend preview fixture upcoming"),
-            ("stub_sponsor_post", "Sponsor post", "sponsor thank you partner ad"),
-            ("stub_session_update", "Session update", "session training update midweek"),
-            ("newsletters_home", "Newsletters", "newsletter email digest roundup"),
-            ("documents_home", "Documents", "document report programme deck pdf pptx docx"),
-            ("season_wraps_page", "Season wrap", "season wrap year review recap spotify"),
-            ("video_studio_page", "Video studio", "video footage reel clip edit"),
-            ("design_studio", "Design studio", "design studio editor canvas layout"),
-            ("template_gallery", "Templates", "templates gallery layouts starting point"),
-        ),
-    ),
-    (
-        "Plan",
-        (
-            ("plan_page", "Content plan", "plan calendar strategy what to make schedule"),
-            ("plan_calendar_page", "Plan calendar", "plan calendar schedule dates"),
-            ("plan_grid_page", "Content grid", "plan grid feed preview mockup"),
-            ("plan_board_page", "Planning board", "plan board kanban ideas backlog"),
-            (
-                "plan_analytics_page",
-                "Plan analytics",
-                "plan analytics performance results insights",
-            ),
-        ),
-    ),
-    (
-        "Results & data",
-        (
-            ("upload", "Upload results", "upload results file hy3 pdf spreadsheet import meet"),
-            ("activity_page", "Activity", "activity runs history resume packs recent"),
-            ("activity_feed_page", "Activity feed", "activity feed timeline events"),
-            ("season_timeline_page", "My season", "season timeline meets calendar year"),
-            ("data_hub_page", "Data hub", "data hub tables custom import derive"),
-            ("club_data_page", "Club data", "club data records ask questions results"),
-            ("athletes_page", "Athletes", "athletes swimmers members roster consent"),
-            ("club_records_page", "Club records", "records club best all-time leaderboard"),
-            ("live_meet_page", "Live meet", "live meet real-time results in progress"),
-        ),
-    ),
-    (
-        "Library",
-        (
-            (
-                "media_library_page",
-                "Media library",
-                "media library photos assets images upload camera",
-            ),
-            (
-                "media_library_generated_page",
-                "Generated media",
-                "generated media outputs renders cards reels",
-            ),
-            ("elements_page", "Elements", "elements stickers shapes graphics add-ons"),
-            ("stock_page", "Stock", "stock photos imagery free library"),
-            ("collections_page", "Collections", "collections folders group saved"),
-            ("stub_packs_list", "Drafts", "drafts packs in progress unfinished saved"),
-        ),
-    ),
-    (
-        "Publish & export",
-        (
-            ("export_center_page", "Export centre", "export download zip bundle deliver"),
-            ("print_center_page", "Print & merch", "print merch poster products fulfilment"),
-            ("public_wall_settings", "Public wall", "public wall embed feed share widget"),
-            ("sponsors_page", "Sponsors", "sponsors partners logos report"),
-        ),
-    ),
-    (
-        "Brand & organisation",
-        (
-            ("brand_home_page", "Brand", "brand kit colours logo voice tone identity"),
-            (
-                "organisation_setup",
-                "Organisation & brand setup",
-                "organisation setup club brand rebuild rerun profile",
-            ),
-            (
-                "organisation_members_page",
-                "Team members",
-                "team members invite people access roles",
-            ),
-            ("organisation_api_tokens_page", "API tokens", "api tokens developer keys integration"),
-            ("settings_page", "Settings", "settings preferences configuration controls"),
-        ),
-    ),
-    (
-        "Research & help",
-        (
-            ("web_research_console", "Web research", "research web search deep-dive investigate"),
-            ("club_qa_console", "Club Q&A", "club qa questions answers ask assistant"),
-            ("research_page", "Supported files", "supported files formats research help hy3 sdif"),
-            ("help_page", "Help", "help guide docs how-to support"),
-            ("api_docs_page", "API docs", "api docs developer reference endpoints"),
-            ("status_page", "System status", "status uptime health system incidents"),
-        ),
-    ),
-    (
-        "Account",
-        (
-            ("billing_page", "Billing & plan", "billing plan subscription invoice payment"),
-            ("pricing_page", "Pricing", "pricing plans cost tiers upgrade"),
-            ("privacy_page", "Privacy & data", "privacy data gdpr delete export rights"),
-        ),
-    ),
-)
-
-# Operator-only destinations — appended only for a signed-in dev operator so the
-# palette never exposes admin surfaces to ordinary users.
-_COMMAND_PALETTE_OPERATOR: tuple[str, tuple[tuple[str, str, str], ...]] = (
-    "Operator",
-    (
-        ("operator_commercial", "Commercial desk", "operator commercial leads quotes revenue"),
-        ("operator_notify_users", "Notify users", "operator notify broadcast message users"),
-        ("admin_compliance", "Compliance", "admin compliance complaints incidents dsr"),
-    ),
-)
-
-
-def _command_palette_recent_group(profile_id: Optional[str]) -> Optional[dict]:
-    """A "Recent" group of the signed-in org's own last few processed meets, so
-    "open the run I was reviewing" is one keystroke — not a hunt through Activity.
-
-    Tenant-safe by construction: the query is scoped to this profile_id (no
-    cross-org leak), and the meet name is DATA in the JSON that the client
-    renders with escaping — never raw HTML. Drafts are deliberately NOT included
-    here: they aren't profile-scoped on disk, so surfacing them would cost an
-    unbounded file scan on every page render (and risk a cross-tenant read). The
-    static "Drafts" destination already covers reaching them.
-    """
-    if not profile_id:
-        return None
-    try:
-        conn = _db()
-        try:
-            rows = conn.execute(
-                "SELECT id, meet_name, status, n_queue FROM runs "
-                "WHERE profile_id = ? ORDER BY created_at DESC LIMIT 4",
-                (profile_id,),
-            ).fetchall()
-        finally:
-            conn.close()
-    except Exception:  # noqa: BLE001 — a palette row is never worth breaking the nav
-        return None
-    items = []
-    for r in rows:
-        rid = r["id"]
-        meet = (r["meet_name"] or "Meet").strip() or "Meet"
-        try:
-            nq = int(r["n_queue"] or 0)
-        except (TypeError, ValueError):
-            nq = 0
-        done = (r["status"] or "") == "done"
-        label = meet if done else f"{meet} (processing)"
-        try:
-            href = url_for("review", run_id=rid)
-        except Exception:
-            continue
-        # A little status scent so the row tells you whether there's work waiting.
-        scent = f"{nq} awaiting review" if (done and nq > 0) else "meet run recent review"
-        items.append({"label": label, "url": href, "keys": f"{meet} {scent}", "group": "Recent"})
-    if not items:
-        return None
-    return {"group": "Recent", "items": items}
-
-
-def _command_palette_groups(dev_operator: bool, profile_id: Optional[str] = None) -> list[dict]:
-    """Build the palette destination list from url_for(), dropping any endpoint
-    that fails to build so one renamed route can never break the whole nav.
-
-    A dynamic "Recent" group (the org's own last few runs) is prepended when a
-    workspace is active, so the palette is a "jump to my work" tool, not just a
-    static site map.
-    """
-    spec = list(_COMMAND_PALETTE_SPEC)
-    if dev_operator:
-        spec.append(_COMMAND_PALETTE_OPERATOR)
-    groups: list[dict] = []
-    recent = _command_palette_recent_group(profile_id)
-    if recent:
-        groups.append(recent)
-    for group_name, items in spec:
-        rows = []
-        for endpoint, label, keywords in items:
-            try:
-                href = url_for(endpoint)
-            except Exception:
-                continue  # renamed / absent endpoint — skip this one row
-            rows.append({"label": label, "url": href, "keys": keywords, "group": group_name})
-        if rows:
-            groups.append({"group": group_name, "items": rows})
-    return groups
-
-
 def _layout(
     title: str,
     body: str,
@@ -15582,53 +15311,29 @@ def _layout(
   </button>
   <nav id="mh-primary-nav">
     <a href="{{ url_for('home') }}" class="{{ 'active' if active=='home' else '' }}">{{ t('nav.home') }}</a>
-    {# Plan moved out of the top bar and under Create — it answers "what should
-       we make?", so it lives as the strategic entry point on the Create page
-       (and stays on the g→p keyboard shortcut). #}
+    {# The feature surfaces (Create, Media, Activity, My Season, Research) are the
+       working chrome — they only make sense once a workspace exists, so they show
+       ONLY when signed in. Signed-out visitors get the marketing wayfinding
+       (About + Pricing) on the left instead; everything else stays off the bar
+       (Plan lives under Create, Templates + the studios are Create tiles). #}
+    {% if signed_in %}
     <a href="{{ url_for('make_page') }}" class="{{ 'active' if active=='create' else '' }}">{{ t('nav.create') }}</a>
-    {# Templates, the design studio and the video studio stay off the top bar:
-       the template gallery is reached from Settings (a tile in the settings
-       grid) and both studios are full Create tiles (the live design editor and
-       the footage→reel video studio). Keeping them off the top bar leaves the
-       signed-in chrome focused on the core workflow. #}
     <a href="{{ url_for('media_library_page') }}" class="{{ 'active' if active=='media' else '' }}">{{ t('nav.media_library') }}</a>
-    {# C-1/C-2 — Activity (where a volunteer resumes approving a pack) takes the
-       primary slot that browse-only "Elements" held, so desktop matches the
-       mobile bottom nav. Elements stays reachable in its add-to-card context
-       from the card editor; it no longer holds a top-bar slot it can't act in. #}
     <a href="{{ url_for('activity_page') }}" class="{{ 'active' if active=='activity' else '' }}">{{ t('nav.activity') }}</a>
     <a href="{{ url_for('season_timeline_page') }}" class="{{ 'active' if active=='season' else '' }}">{{ t('nav.my_season') }}</a>
     {% if research_enabled %}<a href="{{ url_for('web_research_console') }}" class="{{ 'active' if active=='research' else '' }}">{{ t('nav.research') }}</a>{% endif %}
+    {% else %}
+    <a href="{{ url_for('about_page') }}" class="{{ 'active' if active=='about' else '' }}">{{ t('nav.about') }}</a>
+    <a href="{{ url_for('pricing_page') }}" class="{{ 'active' if active=='pricing' else '' }}">{{ t('nav.pricing') }}</a>
+    {% endif %}
     {# Spacer — pushes the utility / account cluster to the right edge (it used
        to be the backend "online" pill's margin-left:auto; the pill is gone). #}
     <span class="mh-nav-spacer" aria-hidden="true"></span>
-    {# Command palette trigger — the "jump to anything" finder. One control that
-       makes all ~50 surfaces reachable in two keystrokes without cluttering the
-       bar with links. Keyboard users press ⌘K / Ctrl-K / "/"; this button is the
-       discoverable, click-to-open affordance for everyone else. #}
-    <button type="button" class="mh-cmdk-trigger" data-mh-cmdk-open
-            aria-haspopup="dialog" aria-controls="mh-cmdk"
-            title="Search &amp; jump to anything — Ctrl K (or /)">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"
-           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-      <span class="mh-cmdk-trigger-label">{{ t('nav.search') }}</span>
-      <span class="mh-cmdk-trigger-kbd" aria-hidden="true"><kbd data-mh-cmdk-kbd>Ctrl K</kbd></span>
-    </button>
-    {# Settings and Sign out moved into the active-org account menu (the
-       dropdown on the far right) for signed-in users — plus a "Switch
-       organisation" entry for the dev operator only. Signed-
-       out visitors keep a plain Settings + Pricing link here. Pricing is a
-       top-bar item only for signed-out visitors (prospects) — once signed into
-       a club profile it is linked from Settings → Billing & plan ("See plans
-       & pricing") so the signed-in chrome stays operations-focused, not
-       sales-focused. #}
-    {% if not signed_in %}
-    <a href="{{ url_for('settings_page') }}" class="{{ 'active' if active=='settings' else '' }}">{{ t('nav.settings') }}</a>
-    <a href="{{ url_for('pricing_page') }}" class="{{ 'active' if active=='pricing' else '' }}">{{ t('nav.pricing') }}</a>
-    {% if account_email %}
-    <a href="{{ url_for('sign_in_page') }}" class="{{ 'active' if active=='signin' else '' }}">{{ t('nav.sign_in') }}</a>
-    {% endif %}
-    {% endif %}
+    {# Right-hand cluster. Signed-out prospect: Sign up + Log in, then Settings on
+       the FAR right (About + Pricing sit on the left above). A logged-in account
+       with no organisation pinned keeps the org-picker + billing/logout; the dev
+       operator keeps its logout. Signed-in workspaces get the notifications bell
+       and account menu rendered further below. #}
     {% if dev_operator %}
       {# Logout is a state change: POST + CSRF (the response hook injects the
          token into every POST form), never a GET link. #}
@@ -15636,6 +15341,11 @@ def _layout(
         <button type="submit" class="mh-nav-linkbtn" title="Operator mode — unrestricted, no paywall">Developer &check;</button>
       </form>
     {% elif account_email %}
+      {% if not signed_in %}
+      {# Logged into an account but no organisation pinned yet — offer the picker
+         so they can get to work. #}
+      <a href="{{ url_for('sign_in_page') }}" class="{{ 'active' if active=='signin' else '' }}">{{ t('nav.sign_in') }}</a>
+      {% endif %}
       <a href="{{ url_for('billing_page') }}" title="{{ account_email }}">{{ t('nav.billing') }}</a>
       <form method="post" action="{{ url_for('logout') }}" class="mh-nav-form">
         <button type="submit" class="mh-nav-linkbtn">{{ t('nav.log_out') }}</button>
@@ -15649,9 +15359,13 @@ def _layout(
       <a href="{{ url_for('signup_page') }}" class="mh-nav-signup">{{ t('nav.sign_up') }}</a>
       <a href="{{ url_for('login_page') }}">{{ t('nav.log_in') }}</a>
       {# "Developer" sign-in link removed from the top bar — operator sign-in
-         lives in the footer ("Developer access") on the home page. The header
-         "online" status pill was removed too; reachability now lives only in
-         the footer status HUD. #}
+         lives on the sign-in page; the header "online" pill moved to the footer
+         status HUD. #}
+    {% endif %}
+    {# Settings — far right for signed-out visitors. Signed-in chrome reaches
+       Settings from the account menu (below) instead, keeping the bar focused. #}
+    {% if not signed_in %}
+    <a href="{{ url_for('settings_page') }}" class="{{ 'active' if active=='settings' else '' }}">{{ t('nav.settings') }}</a>
     {% endif %}
     {% if signed_in %}
     {# UI 1.14 — Notifications inbox. Bell + unread badge + dropdown listing
@@ -15838,6 +15552,11 @@ def _layout(
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11l9-8 9 8"/><path d="M5 10v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V10"/></svg>
     {{ t('nav.home') }}
   </a>
+  {# Mirrors the desktop bar: the three feature tiles (Create / Library /
+     Activity) show only when signed in. Signed-out visitors get the marketing
+     set (About / Pricing / Log in) so the mobile bar never leads a prospect into
+     a workspace-gated surface. Home + Settings stay for everyone. #}
+  {% if signed_in %}
   <a href="{{ url_for('make_page') }}" class="{{ 'is-active' if active=='create' else '' }}" aria-label="{{ t('nav.create') }}">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
     {{ t('nav.create') }}
@@ -15853,6 +15572,20 @@ def _layout(
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h4l2 7 4-16 2 9h6"/></svg>
     {{ t('nav.activity') }}
   </a>
+  {% else %}
+  <a href="{{ url_for('about_page') }}" class="{{ 'is-active' if active=='about' else '' }}" aria-label="{{ t('nav.about') }}">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+    {{ t('nav.about') }}
+  </a>
+  <a href="{{ url_for('pricing_page') }}" class="{{ 'is-active' if active=='pricing' else '' }}" aria-label="{{ t('nav.pricing') }}">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
+    {{ t('nav.pricing') }}
+  </a>
+  <a href="{{ url_for('login_page') }}" class="{{ 'is-active' if active=='signin' else '' }}" aria-label="{{ t('nav.log_in') }}">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>
+    {{ t('nav.log_in') }}
+  </a>
+  {% endif %}
   <a href="{{ url_for('settings_page') }}" class="{{ 'is-active' if active=='settings' else '' }}" aria-label="{{ t('nav.settings') }}">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
     {{ t('nav.settings') }}
@@ -15902,40 +15635,11 @@ def _layout(
     <section data-mh-shortcuts-group="general">
       <h4>General</h4>
       <div class="mh-kbd-table">
-        <span class="keys"><kbd>Ctrl</kbd> <kbd>K</kbd> <span class="mh-kbd-then">or</span> <kbd>/</kbd></span><span class="desc">Search &amp; jump to any page</span>
         <span class="keys"><kbd>?</kbd></span><span class="desc">Open or close this help</span>
         <span class="keys"><kbd>Esc</kbd></span><span class="desc">Close this help</span>
       </div>
     </section>
     <div class="mh-kbd-overlay-foot">Shortcuts pause while you're typing in a field.</div>
-  </div>
-</div>
-{# === Command palette overlay (⌘K / Ctrl-K / "/") ============================
-   The destination list is fetched lazily from /api/command-palette (data-cmdk-url)
-   the first time the palette opens — built from url_for() endpoints, one source
-   of truth, no hardcoded paths. The client script filters it, renders rows, and
-   navigates. Reuses MH.openModal for the focus-trap when present. Fully
-   keyboard-operable; with no JS the nav + footer links reach every surface. #}
-<div class="mh-cmdk" id="mh-cmdk" role="dialog" aria-modal="true"
-     aria-label="Search and jump to anything" aria-hidden="true"
-     data-cmdk-url="{{ url_for('api_command_palette') }}">
-  <div class="mh-cmdk-panel" role="document">
-    <div class="mh-cmdk-search">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"
-           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-      <input type="text" class="mh-cmdk-input" id="mh-cmdk-input" autocomplete="off"
-             autocorrect="off" autocapitalize="off" spellcheck="false"
-             placeholder="Search for a page or action…"
-             aria-label="Search for a page or action" role="combobox"
-             aria-expanded="true" aria-controls="mh-cmdk-list" aria-autocomplete="list" />
-      <span class="mh-cmdk-hint" aria-hidden="true">ESC</span>
-    </div>
-    <div class="mh-cmdk-list" id="mh-cmdk-list" role="listbox" aria-label="Destinations"></div>
-    <div class="mh-cmdk-foot" aria-hidden="true">
-      <span><kbd>↑</kbd><kbd>↓</kbd> move</span>
-      <span><kbd>↵</kbd> open</span>
-      <span><kbd>esc</kbd> close</span>
-    </div>
   </div>
 </div>
 {% if dock %}
@@ -17816,211 +17520,6 @@ def _layout(
   if (document.readyState !== 'loading') bindShortcuts();
   else document.addEventListener('DOMContentLoaded', bindShortcuts);
   MH.bindShortcuts = bindShortcuts;
-})();
-</script>
-<script>
-/* === Command palette (⌘K / Ctrl-K / "/") ===================================
-   The global "jump to anything" finder. Opens on ⌘K / Ctrl-K / "/" (or the nav
-   search button), fuzzy-filters every destination, and navigates on Enter/click.
-   Destinations are fetched lazily from #mh-cmdk[data-cmdk-url] (/api/command-palette)
-   — a JSON list built from url_for() in Python (one source of truth). Reuses
-   MH.openModal for the focus-trap when available. Fully keyboard-operable and
-   self-isolating: any error leaves the rest of the page working. */
-(function(){
-  var overlay = document.getElementById('mh-cmdk');
-  if (!overlay || overlay.dataset.mhCmdk === '1') return;
-  overlay.dataset.mhCmdk = '1';
-  var MH = (window.MH = window.MH || {});
-  var input = document.getElementById('mh-cmdk-input');
-  var listEl = document.getElementById('mh-cmdk-list');
-  if (!input || !listEl) return;
-  var DATA_URL = overlay.getAttribute('data-cmdk-url') || '';
-
-  // The destination list is fetched lazily the first time the palette opens
-  // (keeps ~50 label strings out of every page and defers the per-org "Recent"
-  // query until it's actually needed). Flattened into a searchable index once.
-  var ITEMS = null;       // null = not loaded yet
-  var loading = false;
-  function buildItems(groups){
-    ITEMS = [];
-    (groups || []).forEach(function(g){
-      (g.items || []).forEach(function(it){
-        ITEMS.push({ label: it.label, url: it.url, group: it.group || g.group || '',
-                     hay: ((it.label || '') + ' ' + (it.group || '') + ' ' + (it.keys || '')).toLowerCase() });
-      });
-    });
-  }
-  function ensureLoaded(done){
-    if (ITEMS) { done(); return; }
-    if (!DATA_URL){ buildItems([]); done(); return; }
-    if (loading) return;   // a fetch is already in flight
-    loading = true;
-    fetch(DATA_URL, { headers: { 'Accept': 'application/json' }, credentials: 'same-origin' })
-      .then(function(r){ return r.json(); })
-      .then(function(j){ buildItems((j && j.groups) || []); })
-      .catch(function(){ buildItems([]); })
-      .then(function(){ loading = false; done(); });
-  }
-
-  function esc(s){ return String(s).replace(/[&<>"']/g, function(c){
-    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
-
-  // Lightweight fuzzy score: exact-substring beats subsequence; earlier + word-
-  // start matches rank higher. Returns -1 for no match.
-  function score(hay, q){
-    if (!q) return 0;
-    var idx = hay.indexOf(q);
-    if (idx !== -1) return 1000 - idx - (hay.length * 0.05) + (idx === 0 || hay[idx-1] === ' ' ? 60 : 0);
-    // subsequence
-    var hi = 0, qi = 0, first = -1, gaps = 0, lastHit = -1;
-    while (hi < hay.length && qi < q.length){
-      if (hay[hi] === q[qi]){ if (first < 0) first = hi; if (lastHit >= 0) gaps += (hi - lastHit - 1); lastHit = hi; qi++; }
-      hi++;
-    }
-    if (qi < q.length) return -1;
-    return 300 - first - gaps * 2;
-  }
-
-  var results = [], activeIdx = -1;
-
-  function render(q){
-    if (!ITEMS){
-      // Data still loading — show a lightweight skeleton so the panel isn't blank.
-      listEl.innerHTML = '<div class="mh-cmdk-list-loading" aria-hidden="true">' +
-        '<div class="mh-skeleton mh-skeleton-line w-60"></div>' +
-        '<div class="mh-skeleton mh-skeleton-line w-90"></div>' +
-        '<div class="mh-skeleton mh-skeleton-line w-40"></div></div>';
-      activeIdx = -1;
-      return;
-    }
-    q = (q || '').trim().toLowerCase();
-    var scored = [];
-    for (var i = 0; i < ITEMS.length; i++){
-      var s = score(ITEMS[i].hay, q);
-      if (s > -1) scored.push({ it: ITEMS[i], s: s });
-    }
-    if (q) scored.sort(function(a,b){ return b.s - a.s; });
-    results = scored.map(function(r){ return r.it; });
-    if (q) results = results.slice(0, 40);
-
-    if (!results.length){
-      listEl.innerHTML = '<div class="mh-cmdk-empty">No matches for &ldquo;' + esc(q) + '&rdquo;. Try a page name — reel, plan, sponsor, records…</div>';
-      activeIdx = -1;
-      input.setAttribute('aria-activedescendant', '');
-      return;
-    }
-    var html = '', lastGroup = null;
-    for (var j = 0; j < results.length; j++){
-      var it = results[j];
-      // Group headers only in the unfiltered (browse) view, so a search reads as
-      // one ranked list.
-      if (!q && it.group !== lastGroup){
-        html += '<div class="mh-cmdk-group-label" role="presentation">' + esc(it.group) + '</div>';
-        lastGroup = it.group;
-      }
-      html += '<a class="mh-cmdk-item" role="option" id="mh-cmdk-opt-' + j + '" href="' + esc(it.url) + '" data-idx="' + j + '">' +
-              '<span class="mh-cmdk-ico" aria-hidden="true">' +
-                '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M13 6l6 6-6 6"/></svg>' +
-              '</span>' +
-              '<span class="mh-cmdk-label">' + esc(it.label) + '</span>' +
-              (q ? '<span class="mh-cmdk-grp">' + esc(it.group) + '</span>' : '') +
-              '</a>';
-    }
-    listEl.innerHTML = html;
-    setActive(0);
-  }
-
-  function rows(){ return listEl.querySelectorAll('.mh-cmdk-item'); }
-  function setActive(i){
-    var r = rows();
-    if (!r.length){ activeIdx = -1; return; }
-    if (i < 0) i = r.length - 1;
-    if (i >= r.length) i = 0;
-    for (var k = 0; k < r.length; k++) r[k].classList.toggle('is-active', k === i);
-    activeIdx = i;
-    var el = r[i];
-    if (el){
-      el.scrollIntoView({ block: 'nearest' });
-      input.setAttribute('aria-activedescendant', el.id || '');
-    }
-  }
-  function go(i){
-    var r = rows();
-    if (i >= 0 && i < r.length){ var href = r[i].getAttribute('href'); if (href) window.location.href = href; }
-  }
-
-  var closeFn = null;
-  function isOpen(){ return overlay.classList.contains('is-open'); }
-  function open(){
-    if (isOpen()) return;
-    input.value = '';
-    render('');  // shows the skeleton if data isn't loaded yet
-    // Fetch the destination list on first open, then paint (re-uses the
-    // current query so a fast typist doesn't lose keystrokes).
-    ensureLoaded(function(){ render(input.value); });
-    if (window.MH && typeof MH.openModal === 'function'){
-      closeFn = MH.openModal(overlay, { onClose: function(){ closeFn = null; } });
-    } else {
-      overlay.classList.add('is-open');
-      overlay.setAttribute('aria-hidden', 'false');
-    }
-    // openModal focuses the first focusable (the input) — but be explicit.
-    setTimeout(function(){ try { input.focus(); input.select(); } catch(e){} }, 0);
-  }
-  function close(){
-    if (!isOpen()) return;
-    if (closeFn){ var fn = closeFn; closeFn = null; fn(); return; }
-    overlay.classList.remove('is-open');
-    overlay.setAttribute('aria-hidden', 'true');
-  }
-  MH.openPalette = open;
-  MH.closePalette = close;
-
-  // Backdrop close for the no-openModal fallback (openModal wires its own).
-  overlay.addEventListener('click', function(e){ if (e.target === overlay && !closeFn) close(); });
-
-  input.addEventListener('input', function(){ render(input.value); });
-  input.addEventListener('keydown', function(e){
-    if (e.key === 'ArrowDown'){ e.preventDefault(); setActive(activeIdx + 1); }
-    else if (e.key === 'ArrowUp'){ e.preventDefault(); setActive(activeIdx - 1); }
-    else if (e.key === 'Enter'){ e.preventDefault(); go(activeIdx < 0 ? 0 : activeIdx); }
-    else if (e.key === 'Escape'){ e.preventDefault(); close(); }
-    // Esc is also handled by MH.openModal; both paths converge on close().
-  });
-  // Pointer hover keeps the active row in sync with the mouse.
-  listEl.addEventListener('mousemove', function(e){
-    var row = e.target.closest ? e.target.closest('.mh-cmdk-item') : null;
-    if (row){ var i = parseInt(row.getAttribute('data-idx'), 10); if (!isNaN(i) && i !== activeIdx) setActive(i); }
-  });
-
-  // Nav trigger button(s).
-  Array.prototype.slice.call(document.querySelectorAll('[data-mh-cmdk-open]')).forEach(function(btn){
-    btn.addEventListener('click', function(e){ e.preventDefault(); open(); });
-  });
-
-  // Global hotkeys: ⌘K / Ctrl-K anywhere; "/" when not typing in a field.
-  function isTyping(e){
-    var t = e.target; if (!t) return false;
-    var tag = (t.tagName || '').toLowerCase();
-    return tag === 'input' || tag === 'textarea' || tag === 'select' || t.isContentEditable;
-  }
-  document.addEventListener('keydown', function(e){
-    if ((e.key === 'k' || e.key === 'K') && (e.metaKey || e.ctrlKey)){
-      e.preventDefault(); if (isOpen()) close(); else open(); return;
-    }
-    if (isOpen()) return;
-    if (e.key === '/' && !isTyping(e) && !e.metaKey && !e.ctrlKey && !e.altKey){
-      e.preventDefault(); open();
-    }
-  });
-
-  // Show the platform-correct modifier on the trigger's kbd hint.
-  try {
-    var isMac = /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent || '');
-    if (isMac){
-      Array.prototype.slice.call(document.querySelectorAll('[data-mh-cmdk-kbd]')).forEach(function(k){ k.textContent = '⌘K'; });
-    }
-  } catch(e){}
 })();
 </script>
 {% if dock %}
@@ -20084,6 +19583,403 @@ def _home_faq_html() -> str:
 
 
 # --------------------------------------------------------------------------- #
+# About page — the detailed, animated product walkthrough.
+#
+# The signed-out home is deliberately BRIEF (hero + demo + one clear statement);
+# the depth lives here. This page walks a visitor through the whole flow, one
+# animated step at a time (upload → read → detect → rank → brand → review →
+# export), then reuses the shared product-story sections (input→output, the
+# engine bento, who it's for, the human-in-the-loop promise, the pipeline
+# diagram and the FAQ). The step animations are pure first-party CSS keyframes
+# scoped under .mh-about; every element defaults to its resting (visible) state
+# and the motion is gated behind `prefers-reduced-motion: no-preference`, so a
+# reduced-motion visitor sees a clean, static illustration and nothing is ever
+# hidden without JS/animation able to reveal it. Motion pauses on hover/focus.
+# --------------------------------------------------------------------------- #
+_ABOUT_CSS = (
+    "<style>"
+    # ---- Walkthrough timeline scaffold ----
+    ".mh-about-flow{list-style:none;margin:var(--sp-6) 0 0;padding:0;position:relative;"
+    "display:flex;flex-direction:column;gap:clamp(30px,5vw,58px)}"
+    ".mh-about-step{position:relative;display:grid;"
+    "grid-template-columns:56px minmax(0,1fr) minmax(0,1.08fr);"
+    "gap:clamp(14px,2.6vw,30px);align-items:start}"
+    ".mh-about-step:not(:last-child)::before{content:'';position:absolute;left:27px;"
+    "top:58px;bottom:calc(-1 * clamp(30px,5vw,58px));width:2px;"
+    "background:linear-gradient(180deg,var(--lane-glow),var(--hairline));opacity:.75}"
+    ".mh-about-node{grid-column:1;width:56px;height:56px;border-radius:50%;display:grid;"
+    "place-items:center;background:var(--panel);border:1px solid var(--hairline);"
+    "box-shadow:inset 0 0 0 4px rgba(0,0,0,.22);position:relative;z-index:1}"
+    ".mh-about-num{font-family:var(--font-display);font-weight:800;font-size:22px;"
+    "color:var(--lane);line-height:1}"
+    ".mh-about-copy{grid-column:2;padding-top:3px}"
+    ".mh-about-kicker{display:inline-block;font-family:var(--font-mono);font-size:10.5px;"
+    "letter-spacing:.16em;text-transform:uppercase;color:var(--ink-muted);margin-bottom:8px}"
+    ".mh-about-step-title{font-family:var(--font-display);font-weight:800;"
+    "font-size:clamp(19px,2.4vw,26px);line-height:1.08;margin:0 0 8px;color:var(--ink)}"
+    ".mh-about-step-desc{margin:0;font-size:14.5px;line-height:1.55;color:var(--ink-muted);max-width:44ch}"
+    ".mh-about-stage{grid-column:3;position:relative;overflow:hidden;min-height:190px;"
+    "border-radius:var(--radius-md);border:1px solid var(--hairline);"
+    "background:radial-gradient(130% 130% at 18% 0%,color-mix(in oklab,var(--lane) 6%,var(--panel)),var(--panel));"
+    "display:grid;place-items:center;padding:18px}"
+    ".mh-about-cap{position:absolute;left:12px;bottom:9px;font-family:var(--font-mono);"
+    "font-size:9.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--ink-faint)}"
+    "@media(max-width:860px){.mh-about-step{grid-template-columns:44px 1fr}"
+    ".mh-about-step:not(:last-child)::before{left:21px}"
+    ".mh-about-node{width:44px;height:44px}.mh-about-num{font-size:18px}"
+    ".mh-about-copy{grid-column:2}.mh-about-stage{grid-column:1/-1;margin-top:6px}}"
+    # ---- Stage 1: upload ----
+    ".mh-abs-up{position:relative;width:min(100%,240px);display:flex;flex-direction:column;gap:12px}"
+    ".mh-abs-drop{width:100%;height:100px;border:1.5px dashed color-mix(in oklab,var(--lane) 45%,var(--hairline));"
+    "border-radius:12px;display:flex;flex-direction:column;align-items:center;justify-content:center;"
+    "gap:6px;color:var(--ink-muted);font-size:11.5px;background:color-mix(in oklab,var(--lane) 4%,transparent)}"
+    ".mh-abs-drop svg{width:22px;height:22px;color:var(--lane)}"
+    ".mh-abs-file{position:absolute;left:50%;top:34px;transform:translateX(-50%);"
+    "display:inline-flex;align-items:center;gap:7px;padding:7px 12px;border-radius:8px;"
+    "background:var(--surface);border:1px solid var(--hairline);font-family:var(--font-mono);"
+    "font-size:11px;color:var(--ink);box-shadow:0 12px 26px -12px rgba(0,0,0,.75)}"
+    ".mh-abs-file .dot{width:7px;height:7px;border-radius:50%;background:var(--lane)}"
+    ".mh-abs-bar{width:100%;height:5px;border-radius:3px;background:var(--hairline);overflow:hidden}"
+    ".mh-abs-bar i{display:block;height:100%;width:100%;transform:scaleX(1);transform-origin:left;background:var(--lane)}"
+    # ---- Stage 2: read ----
+    ".mh-abs-sheet{position:relative;width:min(100%,252px);background:var(--surface);"
+    "border:1px solid var(--hairline);border-radius:10px;padding:10px;overflow:hidden;"
+    "display:flex;flex-direction:column;gap:5px}"
+    ".mh-abs-scan{position:absolute;left:0;right:0;top:0;height:28px;pointer-events:none;"
+    "background:linear-gradient(180deg,transparent,color-mix(in oklab,var(--lane) 28%,transparent),transparent)}"
+    ".mh-abs-r{display:grid;grid-template-columns:26px 1fr 44px;gap:8px;"
+    "font-family:var(--font-mono);font-size:10.5px;color:var(--ink);opacity:1}"
+    ".mh-abs-r.h{color:var(--ink-faint);font-size:9px;letter-spacing:.1em;text-transform:uppercase}"
+    ".mh-abs-r b{color:var(--ink);text-align:right}"
+    # ---- Stage 3: detect ----
+    ".mh-abs-finds{width:min(100%,254px);display:flex;flex-direction:column;gap:8px}"
+    ".mh-abs-find{display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:9px;"
+    "background:var(--surface);border:1px solid var(--hairline);font-size:11.5px;color:var(--ink)}"
+    ".mh-abs-find .who{flex:1 1 auto;color:var(--ink-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}"
+    ".mh-abs-find b{font-family:var(--font-mono);font-size:11px}"
+    ".mh-abs-badge{flex:0 0 auto;font-family:var(--font-mono);font-weight:700;font-size:9px;"
+    "letter-spacing:.05em;padding:3px 6px;border-radius:5px}"
+    ".mh-abs-badge.pb{background:var(--lane);color:var(--lane-ink)}"
+    ".mh-abs-badge.gold{background:#F4D58D;color:#3a2c05}"
+    ".mh-abs-badge.new{background:var(--good);color:#06231a}"
+    # ---- Stage 4: rank ----
+    ".mh-abs-ranks{width:min(100%,254px);display:flex;flex-direction:column;gap:10px}"
+    ".mh-abs-rank{display:grid;grid-template-columns:1fr 72px 30px;align-items:center;gap:9px;"
+    "font-size:11px;color:var(--ink);position:relative}"
+    ".mh-abs-rank .lab{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--ink-muted)}"
+    ".mh-abs-rank.top .lab{color:var(--ink)}"
+    ".mh-abs-rank .meter{height:6px;border-radius:3px;background:var(--hairline);overflow:hidden}"
+    ".mh-abs-rank .meter i{display:block;height:100%;width:var(--w,60%);"
+    "background:var(--lane);transform-origin:left}"
+    ".mh-abs-rank .cf{font-family:var(--font-mono);font-size:9.5px;color:var(--lane);text-align:right}"
+    ".mh-abs-rank.top::before{content:'1';position:absolute;left:-24px;top:50%;transform:translateY(-50%);"
+    "width:16px;height:16px;border-radius:50%;background:var(--lane);color:var(--lane-ink);"
+    "font-family:var(--font-mono);font-weight:700;font-size:9px;display:grid;place-items:center}"
+    # ---- Stage 5: brand ----
+    ".mh-abs-brand{position:relative;display:flex;flex-direction:column;align-items:center;gap:13px}"
+    ".mh-abs-bcard{position:relative;width:138px;height:106px;border-radius:12px;overflow:hidden;"
+    "border:1px solid var(--hairline);background:var(--surface)}"
+    ".mh-abs-wash{position:absolute;inset:0;clip-path:inset(0 0 0 0);"
+    "background:linear-gradient(135deg,#2563EB,var(--lane))}"
+    ".mh-abs-blogo{position:absolute;top:11px;left:11px;width:26px;height:26px;border-radius:7px;"
+    "background:rgba(255,255,255,.92)}"
+    ".mh-abs-bl{position:absolute;left:11px;height:7px;border-radius:4px;background:rgba(255,255,255,.88)}"
+    ".mh-abs-bl.l1{bottom:30px;width:82px}.mh-abs-bl.l2{bottom:15px;width:54px;opacity:.7}"
+    ".mh-abs-swatch{display:flex;gap:8px}"
+    ".mh-abs-swatch i{width:22px;height:22px;border-radius:6px;border:1px solid rgba(255,255,255,.16)}"
+    ".mh-abs-swatch i:nth-child(1){background:#2563EB}.mh-abs-swatch i:nth-child(2){background:var(--lane)}"
+    ".mh-abs-swatch i:nth-child(3){background:#0B1220}"
+    # ---- Stage 6: review ----
+    ".mh-abs-rev{position:relative;width:min(100%,224px)}"
+    ".mh-abs-revcard{position:relative;background:var(--surface);border:1px solid var(--hairline);"
+    "border-radius:11px;padding:12px;display:flex;gap:10px;align-items:center}"
+    ".mh-abs-revthumb{width:40px;height:54px;border-radius:6px;flex:0 0 auto;"
+    "background:linear-gradient(160deg,#2563EB,var(--lane))}"
+    ".mh-abs-revmeta{flex:1 1 auto;display:flex;flex-direction:column;gap:6px}"
+    ".mh-abs-revmeta span{height:6px;border-radius:3px;background:var(--hairline)}"
+    ".mh-abs-revmeta span:nth-child(1){width:72%}.mh-abs-revmeta span:nth-child(2){width:46%}"
+    ".mh-abs-approve{margin-top:10px;display:flex;align-items:center;justify-content:center;gap:7px;"
+    "padding:9px;border-radius:8px;background:var(--lane);color:var(--lane-ink);"
+    "font-family:var(--font-mono);font-size:11px;font-weight:700;letter-spacing:.04em}"
+    ".mh-abs-approve svg{width:14px;height:14px}"
+    ".mh-abs-stamp{position:absolute;top:8px;right:8px;font-family:var(--font-mono);font-size:9px;"
+    "font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--good);"
+    "border:1.5px solid var(--good);border-radius:5px;padding:3px 6px;transform:rotate(-8deg)}"
+    # ---- Stage 7: export ----
+    ".mh-abs-exp{position:relative;display:flex;flex-direction:column;align-items:center;gap:16px}"
+    ".mh-abs-fans{position:relative;height:88px;width:190px}"
+    ".mh-abs-fmt{position:absolute;left:50%;bottom:0;margin-left:-29px;width:58px;height:80px;"
+    "border-radius:8px;border:1px solid var(--hairline);background:var(--surface);display:flex;"
+    "align-items:flex-end;justify-content:center;padding-bottom:7px;font-family:var(--font-mono);"
+    "font-size:9px;letter-spacing:.05em;color:var(--ink-muted)}"
+    ".mh-abs-fmt::before{content:'';position:absolute;inset:6px 6px 22px;border-radius:5px;"
+    "background:linear-gradient(160deg,#2563EB,var(--lane));opacity:.85}"
+    ".mh-abs-fmt.f1{transform:rotate(-15deg) translateX(-44px)}"
+    ".mh-abs-fmt.f2{z-index:2;transform:translateY(-5px)}"
+    ".mh-abs-fmt.f3{transform:rotate(15deg) translateX(44px)}"
+    ".mh-abs-dl{display:inline-flex;align-items:center;gap:7px;padding:9px 15px;border-radius:8px;"
+    "background:var(--lane);color:var(--lane-ink);font-family:var(--font-mono);font-weight:700;"
+    "font-size:11px;letter-spacing:.04em}"
+    ".mh-abs-dl svg{width:14px;height:14px}"
+    # ---- Motion (gated: reduced-motion sees the static resting state above) ----
+    "@media(prefers-reduced-motion:no-preference){"
+    "@keyframes mhAbFile{0%{transform:translateX(-50%) translateY(-48px);opacity:0}"
+    "16%{opacity:1}32%,76%{transform:translateX(-50%) translateY(0);opacity:1}"
+    "92%,100%{transform:translateX(-50%) translateY(7px);opacity:0}}"
+    "@keyframes mhAbBar{0%,30%{transform:scaleX(0)}70%,100%{transform:scaleX(1)}}"
+    ".mh-abs-file{animation:mhAbFile 6.5s ease-in-out infinite}"
+    ".mh-abs-bar i{animation:mhAbBar 6.5s ease-in-out infinite}"
+    "@keyframes mhAbScan{0%{transform:translateY(-28px)}100%{transform:translateY(158px)}}"
+    "@keyframes mhAbLit{0%,100%{opacity:.42}50%{opacity:1}}"
+    ".mh-abs-scan{animation:mhAbScan 4.2s linear infinite}"
+    ".mh-abs--read .mh-abs-r:not(.h){opacity:.42;animation:mhAbLit 4.2s linear infinite}"
+    # child 1 is the scan line, child 2 the header row; the four data rows are
+    # children 3–6, so the stagger delays are pinned there.
+    ".mh-abs--read .mh-abs-r:nth-child(3){animation-delay:.35s}"
+    ".mh-abs--read .mh-abs-r:nth-child(4){animation-delay:.7s}"
+    ".mh-abs--read .mh-abs-r:nth-child(5){animation-delay:1.05s}"
+    ".mh-abs--read .mh-abs-r:nth-child(6){animation-delay:1.4s}"
+    "@keyframes mhAbPop{0%,8%{opacity:0;transform:translateY(9px)}22%,90%{opacity:1;transform:translateY(0)}"
+    "100%{opacity:0;transform:translateY(-6px)}}"
+    ".mh-abs--detect .mh-abs-find{animation:mhAbPop 6s ease-in-out infinite}"
+    ".mh-abs--detect .mh-abs-find:nth-child(2){animation-delay:.55s}"
+    ".mh-abs--detect .mh-abs-find:nth-child(3){animation-delay:1.1s}"
+    "@keyframes mhAbMeter{0%,10%{transform:scaleX(0)}58%,100%{transform:scaleX(1)}}"
+    ".mh-abs--rank .meter i{animation:mhAbMeter 5s ease-out infinite}"
+    ".mh-abs--rank .mh-abs-rank:nth-child(2) .meter i{animation-delay:.25s}"
+    ".mh-abs--rank .mh-abs-rank:nth-child(3) .meter i{animation-delay:.5s}"
+    "@keyframes mhAbWash{0%,12%{clip-path:inset(0 100% 0 0)}55%,100%{clip-path:inset(0 0 0 0)}}"
+    "@keyframes mhAbSwatch{0%,20%{opacity:0;transform:translateY(6px)}40%,100%{opacity:1;transform:translateY(0)}}"
+    ".mh-abs-wash{animation:mhAbWash 6s ease-in-out infinite}"
+    ".mh-abs-swatch i{animation:mhAbSwatch 6s ease-in-out infinite}"
+    ".mh-abs-swatch i:nth-child(2){animation-delay:.12s}.mh-abs-swatch i:nth-child(3){animation-delay:.24s}"
+    "@keyframes mhAbPress{0%,42%{transform:scale(1)}52%{transform:scale(.94)}64%,100%{transform:scale(1)}}"
+    "@keyframes mhAbStamp{0%,50%{opacity:0;transform:rotate(-8deg) scale(1.4)}"
+    "64%,100%{opacity:1;transform:rotate(-8deg) scale(1)}}"
+    ".mh-abs-approve{animation:mhAbPress 5.4s ease-in-out infinite}"
+    ".mh-abs-stamp{animation:mhAbStamp 5.4s ease-out infinite}"
+    "@keyframes mhAbFan1{0%,14%{transform:rotate(0) translateX(0);opacity:.35}"
+    "46%,100%{transform:rotate(-15deg) translateX(-44px);opacity:1}}"
+    "@keyframes mhAbFan3{0%,14%{transform:rotate(0) translateX(0);opacity:.35}"
+    "46%,100%{transform:rotate(15deg) translateX(44px);opacity:1}}"
+    "@keyframes mhAbDl{0%,60%{transform:translateY(0)}72%{transform:translateY(-4px)}84%,100%{transform:translateY(0)}}"
+    ".mh-abs-fmt.f1{animation:mhAbFan1 6.4s ease-in-out infinite}"
+    ".mh-abs-fmt.f3{animation:mhAbFan3 6.4s ease-in-out infinite}"
+    ".mh-abs-dl{animation:mhAbDl 6.4s ease-in-out infinite}"
+    # Dwell: pause every stage animation while the reader hovers or tabs in.
+    ".mh-about-flow:hover .mh-about-stage *,.mh-about-flow:focus-within .mh-about-stage *{animation-play-state:paused}"
+    "}"
+    "</style>"
+)
+
+
+def _about_step_html(
+    num: str, kicker: str, title: str, desc: str, stage_cls: str, stage_inner: str, cap: str
+) -> str:
+    """One numbered walkthrough step: a node + copy column + an animated stage.
+
+    All arguments are trusted static landing copy (no user data on this path),
+    so — like the sibling ``_home_*`` helpers and ``_reveal_lines`` — they are
+    embedded without re-escaping; any future dynamic caller must pass
+    already-escaped fragments. The stage is ``aria-hidden`` decorative motion;
+    the copy carries the real, screen-reader-legible narrative.
+    """
+    return (
+        '<li class="mh-about-step mh-reveal">'
+        f'<div class="mh-about-node" aria-hidden="true"><span class="mh-about-num">{num}</span></div>'
+        '<div class="mh-about-copy">'
+        f'<span class="mh-about-kicker">{kicker}</span>'
+        f'<h3 class="mh-about-step-title">{title}</h3>'
+        f'<p class="mh-about-step-desc">{desc}</p>'
+        "</div>"
+        f'<div class="mh-about-stage mh-abs--{stage_cls}" aria-hidden="true">'
+        f"{stage_inner}"
+        f'<span class="mh-about-cap">{cap}</span>'
+        "</div>"
+        "</li>"
+    )
+
+
+def _about_walkthrough_html() -> str:
+    """The step-by-step animated walkthrough — the heart of the About page.
+
+    Seven stages walk the full flow (upload → read → detect → rank → brand →
+    review → export). Every stage is a self-contained CSS-keyframe illustration
+    scoped under ``.mh-about`` (see ``_ABOUT_CSS``): elements rest in their final
+    visible state and the motion is gated behind ``prefers-reduced-motion``, so
+    the page is honest with JS off and calm for reduced-motion visitors.
+    """
+    upload = (
+        '<div class="mh-abs-up">'
+        '<div class="mh-abs-drop">'
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" '
+        'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+        '<path d="M12 15V3"/><path d="m7 8 5-5 5 5"/>'
+        '<path d="M20 17v2a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-2"/></svg>'
+        "<span>HY3 &middot; PDF &middot; CSV &middot; XLSX</span>"
+        "</div>"
+        '<span class="mh-abs-file"><i class="dot"></i>spring-open.hy3</span>'
+        '<span class="mh-abs-bar"><i></i></span>'
+        "</div>"
+    )
+    read = (
+        '<div class="mh-abs-sheet">'
+        '<span class="mh-abs-scan"></span>'
+        '<span class="mh-abs-r h"><span>LN</span><span>NAME</span><span>TIME</span></span>'
+        '<span class="mh-abs-r"><span>3</span><span>T. Davies</span><b>52.41</b></span>'
+        '<span class="mh-abs-r"><span>5</span><span>A. Nolan</span><b>59.74</b></span>'
+        '<span class="mh-abs-r"><span>1</span><span>R. Khan</span><b>1:04.2</b></span>'
+        '<span class="mh-abs-r"><span>6</span><span>W. 4&times;100</span><b>4:12.8</b></span>'
+        "</div>"
+    )
+    detect = (
+        '<div class="mh-abs-finds">'
+        '<span class="mh-abs-find"><b class="mh-abs-badge pb">PB</b>'
+        '<span class="who">Tom Davies &middot; 100m Free</span><b>52.41</b></span>'
+        '<span class="mh-abs-find"><b class="mh-abs-badge gold">1st</b>'
+        '<span class="who">Women&rsquo;s 4&times;100 Relay</span><b>4:12.8</b></span>'
+        '<span class="mh-abs-find"><b class="mh-abs-badge new">NEW</b>'
+        '<span class="who">Aoife Nolan &middot; first sub-1:00</span><b>59.74</b></span>'
+        "</div>"
+    )
+    rank = (
+        '<div class="mh-abs-ranks">'
+        '<span class="mh-abs-rank top" style="--w:97%"><span class="lab">County record</span>'
+        '<span class="meter"><i></i></span><span class="cf">0.97</span></span>'
+        '<span class="mh-abs-rank" style="--w:88%"><span class="lab">Club record &middot; PB</span>'
+        '<span class="meter"><i></i></span><span class="cf">0.94</span></span>'
+        '<span class="mh-abs-rank" style="--w:72%"><span class="lab">First sub-1:00</span>'
+        '<span class="meter"><i></i></span><span class="cf">0.88</span></span>'
+        "</div>"
+    )
+    brand = (
+        '<div class="mh-abs-brand">'
+        '<div class="mh-abs-bcard"><span class="mh-abs-wash"></span>'
+        '<span class="mh-abs-blogo"></span>'
+        '<span class="mh-abs-bl l1"></span><span class="mh-abs-bl l2"></span></div>'
+        '<span class="mh-abs-swatch"><i></i><i></i><i></i></span>'
+        "</div>"
+    )
+    review = (
+        '<div class="mh-abs-rev"><div class="mh-abs-revcard">'
+        '<span class="mh-abs-revthumb"></span>'
+        '<span class="mh-abs-revmeta"><span></span><span></span></span>'
+        '<span class="mh-abs-stamp">Approved</span>'
+        "</div>"
+        '<span class="mh-abs-approve">'
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" '
+        'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+        '<polyline points="20 6 9 17 4 12"/></svg>Approve</span>'
+        "</div>"
+    )
+    export = (
+        '<div class="mh-abs-exp"><div class="mh-abs-fans">'
+        '<span class="mh-abs-fmt f1">Story</span>'
+        '<span class="mh-abs-fmt f2">Feed</span>'
+        '<span class="mh-abs-fmt f3">Reel</span>'
+        "</div>"
+        '<span class="mh-abs-dl">'
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" '
+        'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+        '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>'
+        '<polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>'
+        "Export</span>"
+        "</div>"
+    )
+    steps = (
+        _about_step_html(
+            "01",
+            "Upload",
+            "Drop in the weekend&rsquo;s results",
+            "Drag in a results file &mdash; HY3, SDIF, a meet-manager PDF or a plain "
+            "spreadsheet. MediaHub validates it, keeps the original as the source of "
+            "truth, and never asks you to re-type a single time.",
+            "upload",
+            upload,
+            "1 file &rarr; parsed",
+        )
+        + _about_step_html(
+            "02",
+            "Read",
+            "Every line, parsed &amp; normalised",
+            "The deterministic parser reads each row, normalises swimmer names, event "
+            "names and times, and separates clean canonical data from anything "
+            "ambiguous &mdash; which is flagged for you, never silently guessed.",
+            "read",
+            read,
+            "42 swims read",
+        )
+        + _about_step_html(
+            "03",
+            "Detect",
+            "It finds the moments that matter",
+            "Personal bests, medals, club and county records, first-time "
+            "achievements and standout debuts &mdash; the detectors surface every "
+            "meaningful moment in the meet, each grounded in the exact result line.",
+            "detect",
+            detect,
+            "3 moments detected",
+        )
+        + _about_step_html(
+            "04",
+            "Rank",
+            "Ranked by content-worthiness",
+            "Not every moment deserves a post. The ranker scores each one with a "
+            "confidence figure and orders them, so the county record leads and the "
+            "routine swim waits &mdash; and it tells you <em>why</em>.",
+            "rank",
+            rank,
+            "ranked &middot; confidence",
+        )
+        + _about_step_html(
+            "05",
+            "Brand",
+            "Dressed in your club&rsquo;s identity",
+            "Your palette, fonts, logo and tone &mdash; read once from your website "
+            "and brand guidelines &mdash; are locked onto every card, story, feed "
+            "graphic and reel. Set up once; on-brand forever.",
+            "brand",
+            brand,
+            "brand kit applied",
+        )
+        + _about_step_html(
+            "06",
+            "Review",
+            "You review and approve &mdash; always",
+            "Nothing posts without you. Every caption, graphic and reel lands in a "
+            "review queue with its facts and confidence on show. Edit the wording, "
+            "approve what&rsquo;s right, send the rest back &mdash; one click each.",
+            "review",
+            review,
+            "human approval gate",
+        )
+        + _about_step_html(
+            "07",
+            "Export",
+            "Export, ready to post",
+            "Approved content exports as story cards, feed graphics, athlete "
+            "spotlights, meet recaps and branded reels &mdash; sized for the formats "
+            "your club actually posts. You download and share; MediaHub never posts "
+            "for you.",
+            "export",
+            export,
+            "story &middot; feed &middot; reel",
+        )
+    )
+    return (
+        '<section class="mh-section" id="mh-ch-flow">'
+        '<div class="mh-section-eyebrow-strip mh-reveal"><span class="label">Step by step</span></div>'
+        + _reveal_lines(["One upload, walked", 'all the way to a <em class="editorial">post</em>.'])
+        + '<p class="mh-pipeline-sub" style="max-width:56ch;margin-bottom:var(--sp-2)">'
+        "Here is the whole flow, one step at a time &mdash; exactly what happens "
+        "between dropping a results file in and having posting-ready content to "
+        "approve.</p>"
+        f'<ol class="mh-about-flow">{steps}</ol>'
+        "</section>"
+    )
+
+
+# --------------------------------------------------------------------------- #
 # Signed-in home — the content-creation workspace.
 #
 # This builds the lean dashboard a pinned, ready organisation sees instead of
@@ -21102,13 +20998,10 @@ def create_app() -> Flask:
             # gate and 302'd to /organisation/setup, and the language never
             # changes (the visible control silently fails).
             "set_interface_language",
-            # The command palette (⌘K) renders in the chrome on every page,
-            # including pre-ready ones — a brand-new user must still be able to
-            # jump to setup/help/pricing from it. The endpoint returns only
-            # url_for() destinations (operator group gated on dev-operator, the
-            # "Recent" rows scoped to the active profile), so exempting it from
-            # the org-ready gate exposes no org-scoped data.
-            "api_command_palette",
+            # The public About marketing page must render before an org exists
+            # (a brand-new visitor reads "what is this?" first), like /pricing
+            # and the legal pages exempted above.
+            "about_page",
             "healthz",
             "healthz_deps",
             "healthz_memory",
@@ -21812,7 +21705,8 @@ def create_app() -> Flask:
         if not (prof and prof.is_ready()):
             demo_line_html = (
                 '<p class="mh-demo-line">Just looking? '
-                '<a href="#mh-see-it-work">See it in action</a> '
+                '<a href="#mh-see-it-work">See it in action</a>, '
+                '<a href="' + url_for("about_page") + '">take the full tour</a> '
                 'or <a href="' + url_for("sign_in_page") + '">browse pinned organisations</a>.'
                 "</p>"
             )
@@ -21942,20 +21836,24 @@ def create_app() -> Flask:
                 active="home",
             )
 
-        # --- Signed-out landing page — the full product-story explainer. ---
-        # UI 1.29 — sticky chaptered scroll-spy nav. Each (anchor-id, label)
-        # maps to a section id below; _layout renders the sticky side rail and
-        # the IntersectionObserver scroll-spy wires the active state. The rail
-        # only appears on wide desktop viewports (where there is gutter room)
-        # and degrades to a plain in-page anchor list without JS.
-        home_chapters = [
-            ("mh-ch-overview", "Overview"),
-            ("mh-ch-how", "How it works"),
-            ("mh-ch-engine", "What it does"),
-            ("mh-ch-audience", "Who it's for"),
-            ("mh-ch-promise", "Our promise"),
-            ("mh-ch-start", "Get started"),
-        ]
+        # --- Signed-out landing page — brief, but really clear. ------------
+        # The home page states plainly what MediaHub is and shows it working;
+        # the depth (the animated step-by-step walkthrough and the full explainer
+        # sections) lives on /about, one obvious click away. Keeping the landing
+        # short means a cold visitor gets the value in one screen and one scroll,
+        # not a marketing scroll marathon. No scroll-spy rail here — the page is
+        # deliberately too short to need one (it lives on /about instead).
+        about_teaser_html = (
+            '<section class="mh-section mh-reveal" '
+            'style="text-align:center;padding-top:var(--sp-4)">'
+            + _reveal_lines(["See exactly how", 'it <em class="editorial">works</em>.'])
+            + '<p class="mh-pipeline-sub" style="margin:0 auto var(--sp-5);max-width:52ch">'
+            "A step-by-step, animated walkthrough of the whole flow &mdash; from a "
+            "results file to an approved post &mdash; plus who it&rsquo;s for and "
+            "our human-in-the-loop promise.</p>"
+            f'<a class="btn large" href="{url_for("about_page")}">Take the tour &rarr;</a>'
+            "</section>"
+        )
         return _layout(
             "Home",
             '<div class="mh-fx mh-spotlight">'
@@ -21963,19 +21861,15 @@ def create_app() -> Flask:
             + "</div>"
             # Concrete product proof FIRST: the framed generate → review →
             # approve demo shows the actual thing (a results file becoming a
-            # branded card + caption you approve) right after the hero, before
-            # the conceptual read → engine → write diagram explains how. Cold
-            # visitors decide in seconds, so "show" precedes "explain".
+            # branded card + caption you approve) right after the hero.
             + demo_section_html
-            + _pipeline_diagram_section_html()
+            # One crisp "what it is" statement — a results sheet in, four
+            # posting-ready formats out — then a single clear path to the full
+            # animated walkthrough and the deeper story on /about.
             + _home_io_headline_html()
-            + _home_engine_bento_html()
-            + _home_audience_html()
-            + _home_promise_html()
-            + _home_faq_html()
+            + about_teaser_html
             + final_cta_html,
             active="home",
-            chapters=home_chapters,
         )
 
     # ---- HELP — the product-story explainer (how it works / what it does /
@@ -31581,25 +31475,6 @@ self.addEventListener('fetch', function(e){
             return url_for(endpoint, run_id=rid)
         except Exception:
             return ""
-
-    @app.route("/api/command-palette", methods=["GET"])
-    def api_command_palette():
-        """Destination list for the ⌘K command palette, fetched lazily when the
-        palette first opens.
-
-        Served from an endpoint (rather than inlined into every page) so the
-        ~50 label strings don't bloat every response — and so the per-org
-        "Recent" query only runs when someone actually opens the finder, not on
-        every page render. Operator destinations are gated on the dev-operator
-        session; the "Recent" rows are scoped to the active profile, so nothing
-        cross-tenant is ever returned.
-        """
-        try:
-            dev_op = _auth.is_dev_operator()
-        except Exception:
-            dev_op = False
-        groups = _command_palette_groups(dev_op, _active_profile_id())
-        return jsonify({"groups": groups})
 
     @app.route("/api/notifications", methods=["GET"])
     def api_notifications():
@@ -44172,6 +44047,96 @@ what you're doing, what they should do.</p>
             _op_flash(error=str(exc))
         return redirect(url_for("operator_commercial"))
 
+    # ---- /about -------------------------------------------------------
+    @app.route("/about", methods=["GET"])
+    def about_page():
+        """The detailed, animated product walkthrough — "who we are and what we
+        do", in depth.
+
+        Public marketing page (exempt from the org-ready gate, like /pricing and
+        the legal pages). The signed-out home is deliberately brief; this is
+        where the depth lives — an animated step-by-step walk through the whole
+        flow, then the shared product-story sections (input→output, the engine
+        bento, who it's for, the human-in-the-loop promise, the pipeline diagram
+        and the FAQ). Linked from the top bar's "About" item for signed-out
+        visitors; the URL always resolves so a signed-in user can read it too.
+        """
+        hero_html = (
+            '<section class="mh-hero" id="mh-ch-overview" data-lane="00">'
+            '<span class="mh-hero-eyebrow">About MediaHub</span>'
+            '<h1>The intelligence layer between<br>'
+            '<em class="editorial">results</em> and ready-to-post.</h1>'
+            '<p class="lede">MediaHub turns the structured data a club already '
+            "produces &mdash; meet results, PDFs, spreadsheets &mdash; into "
+            "on-brand content that&rsquo;s ready to post. It detects the moments "
+            "that matter, ranks them by how content-worthy they are, dresses them "
+            "in your colours and voice, and stops at a review queue you control. "
+            "Nothing is invented, and nothing posts without you.</p>"
+            '<div class="mh-hero-actions">'
+            f'<a class="mh-cta-primary" href="{url_for("signup_page")}">Get started &rarr;</a>'
+            f'<a class="mh-cta-secondary" href="{url_for("pricing_page")}">See pricing</a>'
+            "</div>"
+            "</section>"
+        )
+        # The looping generate → review → approve product demo, wrapped exactly
+        # as the landing page wraps it (its non-chapter id keeps it out of the
+        # scroll-spy rail).
+        demo_section_html = (
+            '<section class="mh-section mh-reveal" id="mh-see-it-work">'
+            '<div class="mh-section-eyebrow-strip mh-reveal">'
+            '<span class="label">See it work</span></div>'
+            + _reveal_lines(["One result in.", 'A post you <em class="editorial">approve</em>.'])
+            + _hero_product_demo()
+            + "</section>"
+        )
+        final_cta_html = (
+            '<section class="mh-final-cta mh-reveal" id="mh-ch-start">'
+            "<div>"
+            + _reveal_lines(
+                ["A minute to set up.", "<em>Then</em> every week is easier."],
+                cls="mh-final-cta-headline",
+            )
+            + '<p class="mh-final-cta-sub mh-reveal">Tell us your club\'s name and '
+            "website. We'll read your brand, palette and voice, and have on-brand "
+            "drafts ready the next time you upload a results file.</p>"
+            "</div>"
+            '<div class="mh-final-cta-actions">'
+            f'<a class="btn large" href="{url_for("signup_page")}">Create your organisation &rarr;</a>'
+            f'<a class="btn secondary" href="{url_for("pricing_page")}">See plans &amp; pricing</a>'
+            "</div>"
+            "</section>"
+        )
+        # Rich scroll-spy rail: the animated walkthrough is the first chapter
+        # after the overview, then the supporting explainer sections (each owns
+        # its section id — mh-ch-how / -engine / -audience / -promise / -start).
+        about_chapters = [
+            ("mh-ch-overview", "Overview"),
+            ("mh-ch-flow", "Step by step"),
+            ("mh-ch-how", "How it works"),
+            ("mh-ch-engine", "What it does"),
+            ("mh-ch-audience", "Who it's for"),
+            ("mh-ch-promise", "Our promise"),
+            ("mh-ch-start", "Get started"),
+        ]
+        body = (
+            _ABOUT_CSS
+            + '<div class="mh-about">'
+            + '<div class="mh-fx mh-spotlight">'
+            + hero_html
+            + "</div>"
+            + demo_section_html
+            + _home_io_headline_html()
+            + _about_walkthrough_html()
+            + _pipeline_diagram_section_html()
+            + _home_engine_bento_html()
+            + _home_audience_html()
+            + _home_promise_html()
+            + _home_faq_html()
+            + final_cta_html
+            + "</div>"
+        )
+        return _layout("About", body, active="about", chapters=about_chapters)
+
     # ---- /pricing -----------------------------------------------------
     # UI 1.20 — polished pricing page styling (scoped under .mh-pricing /
     # .mh-compare). Plain strings (not f-strings): the CSS braces are literal.
@@ -44478,7 +44443,7 @@ what you're doing, what they should do.</p>
             f"{compare_table}"
             "</div>" + period_js
         )
-        return _layout("Pricing", body, active="signin")
+        return _layout("Pricing", body, active="pricing")
 
     # ---- /billing -----------------------------------------------------
     @app.route("/billing", methods=["GET"])

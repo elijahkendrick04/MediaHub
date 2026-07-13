@@ -133,10 +133,14 @@ class TestWelshChrome:
     def test_signed_out_chrome_is_welsh(self, env):
         app = env["app"]
         html = app.test_client().get("/?lang=cy").get_data(as_text=True)
+        assert "Amdanom ni" in html  # About (signed-out marketing nav)
         assert "Prisiau" in html  # Pricing
         assert "Cofrestru" in html  # Sign up
         assert "Mewngofnodi" in html  # Log in
-        assert "Llyfrgell cyfryngau" in html
+        assert "Gosodiadau" in html  # Settings (far-right for signed-out)
+        # Feature links (e.g. Media library / Llyfrgell cyfryngau) are signed-in
+        # only now, so they must NOT appear in the signed-out chrome.
+        assert "Llyfrgell cyfryngau" not in html
 
     def test_english_chrome_unchanged(self, env):
         html = env["client"].get("/?lang=en").get_data(as_text=True)

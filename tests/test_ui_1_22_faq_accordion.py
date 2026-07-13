@@ -122,6 +122,20 @@ def _home(application, *, pinned: bool = False) -> str:
         return resp.get_data(as_text=True)
 
 
+def _about(application, *, pinned: bool = False) -> str:
+    """The public /about walkthrough — where the product-story explainer
+    (including the FAQ) now lives after the signed-out home was pared back to a
+    brief hero + demo + CTA. The FAQ section is byte-for-byte the same one that
+    used to sit on the landing page, so every assertion holds here unchanged."""
+    with application.test_client() as c:
+        if pinned:
+            with c.session_transaction() as s:
+                s["active_profile_id"] = "test-org"
+        resp = c.get("/about")
+        assert resp.status_code == 200, f"GET /about -> {resp.status_code}"
+        return resp.get_data(as_text=True)
+
+
 def _help(application, *, pinned: bool = False) -> str:
     """The Help page — where the product-story explainer (incl. the FAQ) now
     lives after the signed-in home became a content-creation workspace."""
@@ -189,7 +203,9 @@ class TestRevealLinesElId:
 # =========================================================================== #
 class TestFaqOnPage:
     def test_section_present_signed_out(self, app):
-        body = _home(app)
+        # The FAQ moved off the deliberately-brief signed-out home onto the
+        # public /about walkthrough; it renders there in full.
+        body = _about(app)
         assert '<section class="mh-section mh-faq"' in body
         assert 'aria-labelledby="mh-faq-h"' in body
         assert 'id="mh-faq-h"' in body
@@ -210,7 +226,7 @@ class TestFaqOnPage:
         assert '<section class="mh-section mh-faq"' not in body
 
     def test_eyebrow_and_editorial_headline(self, app):
-        sec = _faq_section(_home(app))
+        sec = _faq_section(_about(app))
         assert "mh-section-eyebrow-strip mh-reveal" in sec
         assert "Common questions" in sec
         # Editorial reveal-lines headline with the gold accent word.
@@ -220,7 +236,7 @@ class TestFaqOnPage:
         assert '<em class="editorial">first</em>' in sec
 
     def test_seven_native_disclosure_rows(self, app):
-        sec = _faq_section(_home(app))
+        sec = _faq_section(_about(app))
         assert sec.count('<details class="mh-faq-item">') == 7
         assert sec.count('<summary class="mh-faq-q">') == 7
         # Each row carries an answer panel wrapped for the grid-rows animation.
@@ -228,7 +244,7 @@ class TestFaqOnPage:
         assert sec.count("mh-faq-a-inner") == 7
 
     def test_each_row_has_question_text_and_answer(self, app):
-        sec = _faq_section(_home(app))
+        sec = _faq_section(_about(app))
         questions = re.findall(
             r'<span class="mh-faq-q-text">(.*?)</span>', sec, flags=re.S
         )
@@ -241,18 +257,18 @@ class TestFaqOnPage:
         assert all(len(a.strip()) > 40 for a in answers), "an FAQ answer is too thin"
 
     def test_marker_icon_is_decorative(self, app):
-        sec = _faq_section(_home(app))
+        sec = _faq_section(_about(app))
         assert sec.count('<span class="mh-faq-icon" aria-hidden="true"></span>') == 7
 
 
 class TestFaqContent:
     def test_all_seven_questions_present(self, app):
-        body = _home(app)
+        body = _about(app)
         for question, _answer in FAQ_EXPECTATIONS:
             assert question in body, f"missing FAQ question: {question!r}"
 
     def test_answers_are_grounded_in_real_principles(self, app):
-        body = _home(app)
+        body = _about(app)
         for _question, answer_phrase in FAQ_EXPECTATIONS:
             assert answer_phrase in body, f"missing grounded answer: {answer_phrase!r}"
 
@@ -260,13 +276,13 @@ class TestFaqContent:
         # ADR-0011 / CLAUDE.md: MediaHub is operator-hosted SaaS with no
         # self-host framing. The old "deployment you control" copy implied a
         # customer-controlled deployment and must be gone.
-        body = _home(app)
+        body = _about(app)
         assert "deployment you control" not in body
         assert "private workspace on our hosted platform" in body
 
     def test_human_in_the_loop_is_answered_first(self, app):
         # The single most important objection (does it auto-post?) leads.
-        sec = _faq_section(_home(app))
+        sec = _faq_section(_about(app))
         first = sec.find("mh-faq-q-text")
         assert first != -1
         assert "Does anything post to our socials automatically" in sec[first : first + 120]
@@ -277,10 +293,10 @@ class TestFaqIsPureHtmlNoJs:
     no JS library, no scripted fallback inside the section."""
 
     def test_section_carries_no_script(self, app):
-        assert "<script" not in _faq_section(_home(app))
+        assert "<script" not in _faq_section(_about(app))
 
     def test_uses_native_disclosure_not_a_scripted_button(self, app):
-        sec = _faq_section(_home(app))
+        sec = _faq_section(_about(app))
         assert "<details" in sec and "<summary" in sec
         # No ARIA-button / scripted accordion fallback — the native element
         # already exposes expanded/collapsed state to assistive tech.
@@ -292,7 +308,7 @@ class TestFaqIsPureHtmlNoJs:
 
 class TestFaqPlacement:
     def test_after_promise_before_final_cta(self, app):
-        body = _home(app)
+        body = _about(app)
         i_hero = body.find('class="mh-hero"')
         i_promise = body.find('class="mh-promise"')
         i_faq = body.find('class="mh-section mh-faq"')
@@ -307,14 +323,14 @@ class TestFaqPlacement:
 
 class TestFaqAccessibilityAndIsolation:
     def test_region_is_labelled_by_its_heading(self, app):
-        body = _home(app)
+        body = _about(app)
         sec = _faq_section(body)
         assert 'aria-labelledby="mh-faq-h"' in sec
         # the referenced id must actually exist on the heading
         assert re.search(r'<h2 id="mh-faq-h"[^>]*class="mh-faq-title', sec)
 
     def test_no_external_or_image_resources_in_section(self, app):
-        sec = _faq_section(_home(app))
+        sec = _faq_section(_about(app))
         assert "http://" not in sec and "https://" not in sec
         assert "<img" not in sec
         assert "googleapis" not in sec and "gstatic" not in sec
@@ -408,7 +424,7 @@ class TestFaqBrowser:
         return pw, browser
 
     def test_clicking_a_question_reveals_its_answer(self, app):
-        body = _home(app)
+        body = _about(app)
         pw, browser = self._launch()
         try:
             page = browser.new_page(viewport={"width": 1100, "height": 800})

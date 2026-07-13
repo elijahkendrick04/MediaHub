@@ -108,9 +108,12 @@ def tilt_js(web_src) -> str:
     return web_src[start:end]
 
 
-def _home(client) -> str:
-    resp = client.get("/")
-    assert resp.status_code == 200, f"/ → {resp.status_code}"
+# The tilt targets (.mh-bento-tile engine bento + [data-mh-tilt] audience
+# cards) moved off the trimmed home to /about, so the page-wiring + browser
+# tilt tests exercise /about, where those tiles now render.
+def _about_page(client) -> str:
+    resp = client.get("/about")
+    assert resp.status_code == 200, f"/about → {resp.status_code}"
     return resp.get_data(as_text=True)
 
 
@@ -237,27 +240,27 @@ class TestTiltJs:
 # =========================================================================== #
 class TestHomePageWiring:
     def test_bento_tiles_render(self, client):
-        body = _home(client)
+        body = _about_page(client)
         # The bento capability tiles are the tilt targets since UI 1.2.
         assert "mh-bento mh-reveal-group" in body          # the grid wrapper
         assert 'class="mh-bento-tile feature' in body      # the 2×2 showpiece
         assert body.count('class="mh-bento-tile') == 6     # six tilt-target tiles
 
     def test_tilt_css_is_inlined(self, client):
-        body = _home(client)
+        body = _about_page(client)
         # The component CSS rides BASE_CSS into the inline <style> block.
         assert ".mh-bento-tile::before" in body
         assert ".mh-bento-tile.is-tilting" in body
         assert "radial-gradient(circle at var(--mh-gx" in body
 
     def test_tilt_js_is_inlined(self, client):
-        body = _home(client)
+        body = _about_page(client)
         assert "function bindCardTilt()" in body
         assert "MH.bindCardTilt = bindCardTilt;" in body
         assert "(hover: hover) and (pointer: fine)" in body
 
     def test_reduced_motion_guard_ships_on_page(self, client):
-        body = _home(client)
+        body = _about_page(client)
         assert "prefers-reduced-motion: reduce" in body
         assert "if (prefersReduced) return;" in body
 
@@ -300,7 +303,7 @@ class TestTiltBrowserBehaviour:
         return float(m.group(1))
 
     def test_tilt_tracks_pointer_and_settles(self, client):
-        body = _home(client)
+        body = _about_page(client)
         pw, browser = _launch_browser()
         try:
             page = browser.new_page()
@@ -371,7 +374,7 @@ class TestTiltBrowserBehaviour:
             pw.stop()
 
     def test_no_tilt_under_reduced_motion(self, client):
-        body = _home(client)
+        body = _about_page(client)
         pw, browser = _launch_browser()
         try:
             page = browser.new_page()

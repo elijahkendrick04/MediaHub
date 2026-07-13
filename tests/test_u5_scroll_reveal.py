@@ -115,6 +115,16 @@ def _home(application, *, pinned: bool = False) -> str:
         return resp.get_data(as_text=True)
 
 
+def _about(application) -> str:
+    # The marketing explainer sections (pipeline, engine bento, audience,
+    # promise, FAQ) now live on the public /about tour, not the deliberately
+    # brief signed-out home. Fetch the page that actually carries them.
+    with application.test_client() as c:
+        resp = c.get("/about")
+        assert resp.status_code == 200, f"GET /about → {resp.status_code}"
+        return resp.get_data(as_text=True)
+
+
 def _theme_css(application) -> str:
     with application.test_client() as c:
         resp = c.get("/static/theme/theme-components.css")
@@ -176,23 +186,25 @@ class TestHomeSignedOut:
         assert '<h2 class="mh-section-title mh-reveal-lines">' in body
 
     def test_line_spans_two_per_headline(self, app):
-        # Each reveal-lines headline is split into exactly two editorial lines
-        # (the U.10 "See it work" demo section, bento, audience, promise,
-        # UI 1.22 FAQ, final-CTA) → 12 line spans.
-        body = _home(app)
-        assert body.count('<span class="mh-line">') == 12
+        # Each reveal-lines headline is split into exactly two editorial lines.
+        # These sections now live on the /about tour: the U.10 "See it work"
+        # demo section, the "Step by step" walkthrough, bento, audience,
+        # promise, UI 1.22 FAQ, final-CTA → 14 line spans.
+        body = _about(app)
+        assert body.count('<span class="mh-line">') == 14
 
     def test_section_eyebrows_and_ledes_reveal_on_scroll(self, app):
-        body = _home(app)
+        body = _about(app)
         # The content-section eyebrows reveal (were static before): the U.10
-        # "See it work" demo section, bento, audience, UI 1.22 FAQ.
-        assert body.count("mh-section-eyebrow-strip mh-reveal") == 4
+        # "See it work" demo section, the "Step by step" walkthrough, bento,
+        # audience, UI 1.22 FAQ — all now on the /about tour.
+        assert body.count("mh-section-eyebrow-strip mh-reveal") == 5
         # Promise lede + final-CTA sub reveal as their own blocks.
         assert "mh-promise-lede mh-reveal" in body
         assert "mh-final-cta-sub mh-reveal" in body
 
     def test_rows_keep_their_group_stagger(self, app):
-        body = _home(app)
+        body = _about(app)
         # The card rows + the promise list stagger via .mh-reveal-group.
         assert "mh-bento mh-reveal-group" in body
         assert "mh-audience-row mh-reveal-group" in body
@@ -201,7 +213,7 @@ class TestHomeSignedOut:
         assert '<section class="mh-section mh-reveal">' not in body
 
     def test_headline_copy_and_accents_intact(self, app):
-        body = _home(app)
+        body = _about(app)
         # The marketing copy survived the split into lines …
         for frag in (
             "A results sheet in.",
