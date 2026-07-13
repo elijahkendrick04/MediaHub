@@ -20607,6 +20607,7 @@ _ATHLETES_CONSENT_JS = r"""
 # over nothing from ``create_app`` and references only module-level names.
 # ---------------------------------------------------------------------------
 
+
 def _format_uptime_pct(stats: dict) -> str:
     if not stats.get("has_data"):
         return "&mdash;"
@@ -20696,9 +20697,7 @@ def _nl_range(preset, body):
 
     today = _date.today()
     if preset == "custom":
-        return (_iso(body.get("start")) or today.replace(day=1)), (
-            _iso(body.get("end")) or today
-        )
+        return (_iso(body.get("start")) or today.replace(day=1)), (_iso(body.get("end")) or today)
     if preset == "last_month":
         last_prev = today.replace(day=1) - _td(days=1)
         return last_prev.replace(day=1), last_prev

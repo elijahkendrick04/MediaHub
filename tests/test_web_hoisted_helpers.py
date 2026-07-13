@@ -30,18 +30,14 @@ class TestFormatUptimePct:
 
     def test_perfect_window_is_100(self):
         assert (
-            _format_uptime_pct(
-                {"has_data": True, "uptime_pct": 1.0, "downtime_seconds": 0}
-            )
+            _format_uptime_pct({"has_data": True, "uptime_pct": 1.0, "downtime_seconds": 0})
             == "100%"
         )
 
     def test_near_perfect_with_downtime_never_rounds_to_100(self):
         # A window with real counted downtime must not read as a bare "100%".
         assert (
-            _format_uptime_pct(
-                {"has_data": True, "uptime_pct": 0.99998, "downtime_seconds": 5}
-            )
+            _format_uptime_pct({"has_data": True, "uptime_pct": 0.99998, "downtime_seconds": 5})
             == "99.99%"
         )
 
