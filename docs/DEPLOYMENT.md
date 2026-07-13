@@ -54,21 +54,6 @@ The image installs Playwright + Chromium for the HTML→PNG rendering step. The
 deployed container handles all rendering server-side; customers never run
 anything on their own machine.
 
-## Fly.io
-
-```bash
-fly launch --copy-config --no-deploy
-fly secrets set GEMINI_API_KEY=... ANTHROPIC_API_KEY=... REPLICATE_API_TOKEN=... PHOTOROOM_API_KEY=...
-fly deploy
-```
-
-`fly.toml` declares a `[mounts]` section pointing to a 1 GB volume named
-`mediahub_data`. Create it once with:
-
-```bash
-fly volumes create mediahub_data --size 1
-```
-
 ## Persistent volumes
 
 These directories must persist across deploys for the app to retain state:

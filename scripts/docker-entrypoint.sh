@@ -35,8 +35,9 @@ fi
 # 2 → 1 before touching anything else — Playwright + Chromium during a
 # pipeline render can still spike to ~800 MB per worker.
 #
-# IMPORTANT: keep this exec line in sync with the comments below and
-# the Procfile. A merge from main in May 2026 silently dropped
+# IMPORTANT: keep this exec line in sync with the comments below. This is
+# the single production launcher (the Dockerfile CMD invokes it; Render runs
+# the image directly). A merge from main in May 2026 silently dropped
 # --worker-tmp-dir/--access-log* and bumped max-requests 200→800; the
 # result was the "Worker was sent SIGTERM! / container restarts ~40
 # minutes later" pattern the user reported. The flags ARE the fix —

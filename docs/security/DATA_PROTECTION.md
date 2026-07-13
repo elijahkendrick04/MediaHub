@@ -8,8 +8,7 @@
 | Target | TLS termination | Operator action |
 |---|---|---|
 | **Render** (reference) | Render's edge terminates TLS and forwards over its private network; `RENDER`/`RENDER_EXTERNAL_URL` env makes the app set `Secure` session cookies + HSTS | None — verify the service URL is https and HTTP→HTTPS redirect is on (Render default) |
-| **Fly.io** | Fly edge terminates TLS (`force_https = true` in fly.toml) | Set `MEDIAHUB_SESSION_COOKIE_SECURE=true` |
-| **Docker / VPS** | **The container itself serves plain HTTP on :5000.** A reverse proxy (Caddy/nginx + Let's Encrypt) MUST terminate TLS in front of it; never expose :5000 to the internet | Proxy config; set `MEDIAHUB_SESSION_COOKIE_SECURE=true`; pass `X-Forwarded-For` (login throttling keys on it) |
+| **Docker / VPS** (operator self-managed) | **The container itself serves plain HTTP on :5000.** A reverse proxy (Caddy/nginx + Let's Encrypt) MUST terminate TLS in front of it; never expose :5000 to the internet | Proxy config; set `MEDIAHUB_SESSION_COOKIE_SECURE=true`; pass `X-Forwarded-For` (login throttling keys on it) |
 
 Internal egress (LLM APIs, image APIs, swimmingresults.org) is
 HTTPS via `requests`/SDK defaults with certificate verification — never
@@ -25,8 +24,8 @@ disable verification.
     the volume;
   - retention purges bound how much history is exposed by any disk
     compromise.
-- Disk-level encryption is the platform's job and is in place on managed
-  targets (Render/Fly volumes are encrypted at rest by the provider; on a
+- Disk-level encryption is the platform's job and is in place on the managed
+  target (Render volumes are encrypted at rest by the provider; on a
   VPS, use LUKS for the data volume — documented operator step).
 - Application-layer encryption (e.g. SQLCipher) was considered and
   deferred: key management inside the same container yields little real
