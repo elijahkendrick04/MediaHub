@@ -115,6 +115,7 @@ from .bounded_cache import BoundedCache
 # Both are import-safe with no env configured: auth has no required env, and
 # billing only touches Stripe lazily behind billing_configured().
 from . import auth as _auth
+from . import auth_brakes as _auth_brakes
 from . import billing as _billing
 from . import charts as _charts
 from . import recap_progress as _recap_progress
@@ -42226,13 +42227,20 @@ function copySpotlightCaption(btn) {{
 
     # ---- auth rate limiting (Art. 32 / audit finding 1.10) ---------------
     #
-    # Fixed-window, per-IP, per-endpoint, in-process. Two gunicorn workers
-    # means an attacker gets at most 2× the budget — still a hard brake on
-    # online guessing, with zero shared state to corrupt.
+    # Sliding-window, per-IP, per-endpoint. SEC-27: the counter lives in the
+    # shared SQLite DB (auth_brakes), NOT a per-worker dict, so it is consistent
+    # across gunicorn's two workers and survives a --max-requests recycle (the
+    # old per-worker dict was wiped on every recycle, resetting an attacker's
+    # budget). See docs/adr/0030-durable-cross-worker-bruteforce-brakes.md.
+    #
+    # The budget is 20/10-min (not 10) BY DESIGN: it equals the OLD per-worker
+    # budget (10) × the two-worker deployment, so a shared NAT (a club/school on
+    # one address) is locked out no sooner than today's most-lenient case and
+    # strictly later than today's worst case — legit NAT users are never worse
+    # off. Against a sustained attacker durable-20 is far stronger than the old
+    # per-worker-10-that-reset-every-~200-requests. (Shared-NAT analysis: ADR.)
     _AUTH_WINDOW_SECONDS = 600
-    _AUTH_MAX_ATTEMPTS = 10
-    _auth_attempts: dict = {}
-    _auth_attempts_lock = threading.Lock()
+    _AUTH_MAX_ATTEMPTS = 20
 
     def _client_ip() -> str:
         """Proxy-aware client IP for the rate limiters / throttles (ADR-0019).
@@ -42246,21 +42254,13 @@ function copySpotlightCaption(btn) {{
 
     def _auth_rate_limited(bucket: str) -> bool:
         """Record an attempt; True when this IP exceeded the window budget."""
-        now = time.time()
-        key = (bucket, _client_ip())
-        with _auth_attempts_lock:
-            window = [t for t in _auth_attempts.get(key, []) if now - t < _AUTH_WINDOW_SECONDS]
-            window.append(now)
-            _auth_attempts[key] = window
-            # Opportunistic cleanup so the dict can't grow unbounded.
-            if len(_auth_attempts) > 10_000:
-                for k in [
-                    k
-                    for k, v in _auth_attempts.items()
-                    if not v or now - v[-1] > _AUTH_WINDOW_SECONDS
-                ]:
-                    _auth_attempts.pop(k, None)
-            return len(window) > _AUTH_MAX_ATTEMPTS
+        count = _auth_brakes.record_event(
+            f"ip:{bucket}",
+            _client_ip(),
+            now=time.time(),
+            window_secs=_AUTH_WINDOW_SECONDS,
+        )
+        return count > _AUTH_MAX_ATTEMPTS
 
     def _auth_rate_limit_response():
         return (
@@ -42564,6 +42564,15 @@ function copySpotlightCaption(btn) {{
                 session.pop("pending_2fa_email", None)
                 return redirect(url_for("login_page"))
             return _login_2fa_page()
+        # SEC-27: per-IP volume brake on the code-submission POST, matching the
+        # password step's /login brake (it was previously missing here, so TOTP
+        # guessing was bounded only by the per-account lockout). Its OWN bucket
+        # ("login_2fa"), separate from "login", so a shared NAT completing both
+        # steps doesn't compound the two against one budget.
+        if _auth_rate_limited("login_2fa"):
+            return _login_2fa_page(
+                "Too many attempts from your network — wait a few minutes and try again.", 429
+            )
         if _auth.login_locked(email):
             return _login_2fa_page("Too many failed attempts — try again in 15 minutes.", 429)
         store = _user_store()
