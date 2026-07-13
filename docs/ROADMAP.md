@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-07-13 · `be3190166` · Merge pull request #1247 from elijahkendrick04/claude/code-review-cleanup-v2c6g6
+**Last updated:** 2026-07-13 · `05b4adea7` · Signed-out top bar + animated About page; remove ⌘K search (#1249)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1226,6 +1226,9 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-07-13 | `3142b2510` | test: render /studio signed-in for the Create-nav-active check |
+| 2026-07-13 | `30dd7cdd0` | style: ruff-format the new About walkthrough (pre-commit hygiene) |
+| 2026-07-13 | `acac1d616` | feat(web): signed-out top bar + animated About page; remove ⌘K search |
 | 2026-07-12 | `001defedc` | Remove the deep-review backlog doc now the findings are shipped |
 | 2026-07-12 | `934b4dc69` | test: add direct ranker_v3 unit tests + share motion-focus image fixture |
 | 2026-07-12 | `7897b1766` | fix(web): owner-bind from-url job status (IDOR) + dedup storage-inventory scan |
@@ -1233,6 +1236,4 @@ list and the auto table below, not here.
 | 2026-07-12 | `2f038264f` | security(ssrf): route web-fetch surfaces through the hardened door (#34/#120/#124/#126/#127) |
 | 2026-07-12 | `deb76a13c` | chore(hygiene): dependency/CI/docs cleanup from deep review (#10, #135–#137, #141–#143) |
 | 2026-07-12 | `ed8cbfa59` | Stop the interpreter smoke test polluting the real working tree (deep-review #128) |
-| 2026-07-12 | `c0dad34ce` | Infra hardening — durability, proxy-IP, isolation (deep-review batch 14a: #119, #121, #122, #123) |
-| 2026-07-12 | `84fcedcf4` | Upload + download hardening (deep-review batch 13: #28, #31) |
 <!-- /ROADMAP:ACTIVITY -->
