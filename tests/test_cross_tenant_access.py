@@ -503,3 +503,113 @@ class TestVisualSidecarTenantScoped:
         _pin(c, "org-beta")
         r = c.get(f"/api/visual/{vid}")
         assert r.status_code == 200
+
+    # --- #17: the O(1) index behind the two routes ------------------------
+
+    def test_slow_path_backfills_index(self, two_orgs, tmp_path):
+        """A run whose sidecar predates the index resolves on the walk and
+        self-heals: after one request the vid is indexed, so the next is O(1)."""
+        import mediahub.web.web as wm
+
+        if not wm._v8_ok:
+            import pytest
+
+            pytest.skip("v8 media engine unavailable")
+        run_id = two_orgs["run_id"]
+        vid = self._seed_alpha_visual(tmp_path, run_id, vid="v_backfill1")
+        # Nothing indexed yet — the sidecar was written straight to disk.
+        assert wm._vidx_lookup(vid) is None
+        c = two_orgs["client"]
+        _pin(c, "org-alpha")
+        r = c.get(f"/api/visual/{vid}")
+        assert r.status_code == 200
+        # The walk backfilled the index — a subsequent lookup is O(1).
+        assert wm._vidx_lookup(vid) == (run_id, "brief-alpha")
+
+    def test_fast_path_still_denies_foreign_org(self, two_orgs, tmp_path):
+        """With the vid already indexed (fast path), the tenant gate must still
+        refuse a foreign org — the folded _can_access_run, not the walk, guards."""
+        import mediahub.web.web as wm
+
+        if not wm._v8_ok:
+            import pytest
+
+            pytest.skip("v8 media engine unavailable")
+        run_id = two_orgs["run_id"]
+        vid = self._seed_alpha_visual(tmp_path, run_id, vid="v_indexed1")
+        # Pre-stamp the index so the request takes the O(1) fast path.
+        wm._vidx_index(run_id, "brief-alpha", {"id": vid, "visual_ids": {vid: "feed_portrait"}})
+        c = two_orgs["client"]
+        _pin(c, "org-beta")
+        r = c.get(f"/api/visual/{vid}")
+        assert r.status_code == 404
+        assert "ALPHA SECRET VISUAL CAPTION" not in r.get_data(as_text=True)
+        r = c.get(f"/api/visual/{vid}/png/feed_portrait")
+        assert r.status_code == 404
+        assert not r.get_data()
+        # A genuine-but-forbidden hit is NOT a stale row — it stays indexed.
+        assert wm._vidx_lookup(vid) == (run_id, "brief-alpha")
+
+    def test_stale_index_row_self_heals(self, two_orgs, tmp_path):
+        """An index row pointing at a vanished/renamed brief dir must fall back
+        to the walk, serve the real sidecar, and repoint the index."""
+        import mediahub.web.web as wm
+
+        if not wm._v8_ok:
+            import pytest
+
+            pytest.skip("v8 media engine unavailable")
+        run_id = two_orgs["run_id"]
+        vid = self._seed_alpha_visual(tmp_path, run_id, vid="v_stale1")
+        # Point the index at a brief dir that doesn't exist on disk.
+        wm._vidx_index(run_id, "brief-GHOST", {"id": vid, "visual_ids": {vid: "feed_portrait"}})
+        c = two_orgs["client"]
+        _pin(c, "org-alpha")
+        r = c.get(f"/api/visual/{vid}")
+        assert r.status_code == 200
+        assert r.get_json()["caption"] == "ALPHA SECRET VISUAL CAPTION"
+        # The stale row was corrected to the real brief dir.
+        assert wm._vidx_lookup(vid) == (run_id, "brief-alpha")
+
+    def test_walk_and_index_paths_are_byte_identical(self, two_orgs, tmp_path):
+        """The whole point of #17: the O(1) index only changes *how* a visual is
+        located, never the bytes served. The first request resolves via the walk
+        (cold index) and backfills; the second resolves via the index. Both the
+        JSON payload and the PNG must be byte-for-byte identical."""
+        import mediahub.web.web as wm
+
+        if not wm._v8_ok:
+            import pytest
+
+            pytest.skip("v8 media engine unavailable")
+        run_id = two_orgs["run_id"]
+        vid = self._seed_alpha_visual(tmp_path, run_id, vid="v_identical1")
+        c = two_orgs["client"]
+        _pin(c, "org-alpha")
+        # Cold — resolved by the walk, then backfilled.
+        assert wm._vidx_lookup(vid) is None
+        g_walk = c.get(f"/api/visual/{vid}")
+        p_walk = c.get(f"/api/visual/{vid}/png/feed_portrait")
+        assert wm._vidx_lookup(vid) == (run_id, "brief-alpha")
+        # Warm — resolved by the index.
+        g_idx = c.get(f"/api/visual/{vid}")
+        p_idx = c.get(f"/api/visual/{vid}/png/feed_portrait")
+        assert g_walk.status_code == g_idx.status_code == 200
+        assert p_walk.status_code == p_idx.status_code == 200
+        assert g_walk.get_data() == g_idx.get_data()
+        assert p_walk.get_data() == p_idx.get_data()
+
+    def test_delete_run_cascades_visual_index(self, two_orgs, tmp_path):
+        """Erasing a run must drop its vid→run rows, leaving no orphan mappings."""
+        import mediahub.web.web as wm
+
+        if not wm._v8_ok:
+            import pytest
+
+            pytest.skip("v8 media engine unavailable")
+        run_id = two_orgs["run_id"]
+        vid = self._seed_alpha_visual(tmp_path, run_id, vid="v_erase1")
+        wm._vidx_index(run_id, "brief-alpha", {"id": vid, "visual_ids": {vid: "feed_portrait"}})
+        assert wm._vidx_lookup(vid) == (run_id, "brief-alpha")
+        wm._delete_run(run_id)
+        assert wm._vidx_lookup(vid) is None

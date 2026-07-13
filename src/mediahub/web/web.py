@@ -1652,6 +1652,11 @@ try:
         create_candidate_pool_for_item as _v8_create_candidate_pool,
         visuals_dir_for_run as _v8_visuals_dir,
     )
+    from mediahub.content_pack_visual.visual_index import (
+        lookup as _vidx_lookup,
+        index_visual as _vidx_index,
+        forget as _vidx_forget,
+    )
     from mediahub.venue_search.search import search as _v8_search_venue
 
     _v8_ok = True
@@ -1664,6 +1669,9 @@ except ImportError as _v8_err:
     _v8_create_visual_for_item = None
     _v8_create_candidate_pool = None
     _v8_visuals_dir = None
+    _vidx_lookup = None
+    _vidx_index = None
+    _vidx_forget = None
     _v8_search_venue = None
 
 
@@ -3202,6 +3210,17 @@ def _init_db():
         conn.execute("ALTER TABLE runs ADD COLUMN content_hash TEXT")
     if "meet_fingerprint" not in cols:
         conn.execute("ALTER TABLE runs ADD COLUMN meet_fingerprint TEXT")
+    # #17 — the vid→(run_id, brief_id) index for /api/visual/<vid> lives in this
+    # same data.db. Ensure its schema here (schema owned by visual_index,
+    # single-source) so the run-erasure cascade DELETE never hits a missing
+    # table on a fresh DB. Best-effort: a fresh DB with the module absent still
+    # boots; the routes create the table on first write anyway.
+    try:
+        from mediahub.content_pack_visual import visual_index as _vidx
+
+        _vidx.ensure_schema(conn)
+    except Exception:
+        pass
     conn.commit()
     conn.close()
 
@@ -3625,6 +3644,103 @@ def _ownerless_run_readable() -> bool:
         return True
 
 
+def _read_visual_sidecar(brief_dir: Path) -> Optional[dict]:
+    """Parse ``<brief_dir>/visual.json`` into a dict, or ``None`` if absent /
+    corrupt / non-dict — matching the old routes' per-sidecar ``try/except``."""
+    try:
+        payload = json.loads((brief_dir / "visual.json").read_text())
+    except Exception:
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _sidecar_matches_vid(payload: dict, vid: str) -> bool:
+    """The exact match test the old routes used: ``vid`` is the primary id or
+    one of the per-format ids in ``visual_ids``."""
+    return payload.get("id") == vid or vid in (payload.get("visual_ids") or {})
+
+
+def _resolve_visual(vid: str, active_pid: Optional[str]) -> Optional[tuple[Path, dict]]:
+    """Locate a persisted visual by ``vid`` and enforce the tenant gate.
+
+    Returns ``(brief_dir, payload)`` for a visual the current session may read,
+    or ``None`` when ``vid`` is unknown *or* belongs to a run this session can't
+    access — the two are deliberately indistinguishable (anti-enumeration),
+    exactly as the pre-index full-walk routes behaved.
+
+    #17 fast path: one indexed lookup in ``visual_index`` (``vid → run_id,
+    brief_id``, stamped by ``persist_visual``) — O(1) instead of walking every
+    run dir and ``json.loads``-ing every ``visual.json``. The sidecar it points
+    at is always re-read and re-validated, and the tenant gate is the same
+    ``_can_access_run`` the old routes applied, so response bytes are identical
+    and a foreign run is a 404, never a serve.
+
+    Slow path: on an index miss (a run created before the index existed, or a
+    stale row after a torn write) fall back to the original ``RUNS_DIR`` walk,
+    backfilling the index for every sidecar touched so the next hit is O(1).
+    """
+    # --- Fast path: indexed O(1) lookup. ---
+    if _vidx_lookup is not None:
+        try:
+            hit = _vidx_lookup(vid)
+        except Exception:
+            hit = None
+        if hit is not None:
+            run_id, brief_id = hit
+            brief_dir = RUNS_DIR / run_id / "visuals" / brief_id
+            payload = _read_visual_sidecar(brief_dir)
+            if payload is not None and _sidecar_matches_vid(payload, vid):
+                # Genuine match — apply the tenant gate. A foreign run is a 404
+                # (the vid truly belongs there; no other run can hold it), so we
+                # don't fall through to a needless walk.
+                if _can_access_run(run_id, _load_run(run_id), active_pid):
+                    return brief_dir, payload
+                return None
+            # Stale row: the sidecar is gone or was re-rendered without this vid.
+            # Forget it and fall through to the authoritative walk.
+            if _vidx_forget is not None:
+                try:
+                    _vidx_forget(vid)
+                except Exception:
+                    pass
+
+    # --- Slow path: walk RUNS_DIR, backfilling as we go (matches old routes). ---
+    try:
+        run_dirs = list(RUNS_DIR.iterdir())
+    except OSError:
+        return None
+    for run_dir in run_dirs:
+        if not run_dir.is_dir():
+            continue
+        vdir = run_dir / "visuals"
+        if not vdir.is_dir():
+            continue
+        run_id = run_dir.name
+        try:
+            brief_dirs = list(vdir.iterdir())
+        except OSError:
+            continue
+        for brief_dir in brief_dirs:
+            if not brief_dir.is_dir():
+                continue
+            payload = _read_visual_sidecar(brief_dir)
+            if payload is None:
+                continue
+            # Backfill every sidecar we touch so pre-index runs self-heal to O(1).
+            if _vidx_index is not None:
+                try:
+                    _vidx_index(run_id, brief_dir.name, payload)
+                except Exception:
+                    pass
+            if not _sidecar_matches_vid(payload, vid):
+                continue
+            # Foreign run → skip and keep looking, exactly as the old walk did.
+            if not _can_access_run(run_id, _load_run(run_id), active_pid):
+                continue
+            return brief_dir, payload
+    return None
+
+
 def _can_access_pack(rec: Optional[dict], active_pid: Optional[str]) -> bool:
     """Tenant isolation guard for stub draft packs.
 
@@ -3945,6 +4061,9 @@ def _delete_run(run_id: str) -> bool:
     # UI 1.25 — cascade the run's emoji reactions so a deleted meet leaves no
     # orphan tally behind (and a recycled run id can never inherit stale counts).
     conn.execute("DELETE FROM card_reactions WHERE run_id = ?", (run_id,))
+    # #17 — cascade the visual-lookup index so an erased run leaves no orphan
+    # vid→run rows (and a recycled run id can never inherit stale mappings).
+    conn.execute("DELETE FROM visual_index WHERE run_id = ?", (run_id,))
     conn.commit()
     conn.close()
     return existed
@@ -65049,36 +65168,16 @@ voice, and queues them for one-click approval.</p>
     def api_visual_get(vid: str):
         if not _v8_ok:
             return jsonify({"error": "v8_unavailable"}), 503
-        active_pid = _active_profile_id()
-        for run_dir in RUNS_DIR.iterdir():
-            if not run_dir.is_dir():
-                continue
-            vdir = run_dir / "visuals"
-            if not vdir.is_dir():
-                continue
-            for sub in vdir.iterdir():
-                if not sub.is_dir():
-                    continue
-                sidecar = sub / "visual.json"
-                if not sidecar.exists():
-                    continue
-                try:
-                    payload = json.loads(sidecar.read_text())
-                except Exception:
-                    continue
-                ids_map = payload.get("visual_ids") or {}
-                if payload.get("id") == vid or vid in ids_map:
-                    # Tenant isolation (org-access audit): a visual belongs to
-                    # the run that produced it, so a foreign org must not read
-                    # its payload (caption, alt text, athlete names). Mirrors
-                    # the sibling /api/runs/<id>/venue-search guard; a run this
-                    # session can't access is skipped, so a foreign visual is
-                    # indistinguishable from a nonexistent one (anti-enumeration).
-                    run_id = run_dir.name
-                    if not _can_access_run(run_id, _load_run(run_id), active_pid):
-                        continue
-                    return jsonify(payload)
-        return jsonify({"error": "not_found"}), 404
+        # #17: O(1) indexed resolve (was an O(all-runs × visuals) walk on this
+        # hot <img src> route). Tenant isolation (org-access audit) is folded in
+        # — a visual belongs to the run that produced it, so a foreign org must
+        # not read its payload (caption, alt text, athlete names); an
+        # inaccessible run is indistinguishable from a nonexistent one.
+        resolved = _resolve_visual(vid, _active_profile_id())
+        if resolved is None:
+            return jsonify({"error": "not_found"}), 404
+        _brief_dir, payload = resolved
+        return jsonify(payload)
 
     _VALID_FORMAT_NAMES = {
         "feed_portrait",
@@ -65100,45 +65199,28 @@ voice, and queues them for one-click approval.</p>
             return "", 503
         from flask import send_file
 
-        active_pid = _active_profile_id()
-        for run_dir in RUNS_DIR.iterdir():
-            if not run_dir.is_dir():
-                continue
-            vdir = run_dir / "visuals"
-            if not vdir.is_dir():
-                continue
-            for brief_dir in vdir.iterdir():
-                if not brief_dir.is_dir():
-                    continue
-                sidecar = brief_dir / "visual.json"
-                if not sidecar.exists():
-                    continue
-                try:
-                    payload = json.loads(sidecar.read_text())
-                except Exception:
-                    continue
-                # Match either the primary id or any id in the visual_ids map
-                ids_map = payload.get("visual_ids") or {}
-                if payload.get("id") != vid and vid not in ids_map:
-                    continue
-                # Tenant isolation (org-access audit): the rendered PNG carries
-                # the same org data as the sidecar above, so gate it the same
-                # way — a run this session can't access is skipped, never served.
-                run_id = run_dir.name
-                if not _can_access_run(run_id, _load_run(run_id), active_pid):
-                    continue
-                # Determine which format to serve. If vid matches a specific format-id, use that format; else use requested format_name.
-                if vid in ids_map:
-                    fmt = ids_map[vid]
-                else:
-                    fmt = format_name
-                candidate = brief_dir / f"{fmt}.png"
-                if candidate.exists():
-                    return send_file(str(candidate), mimetype="image/png")
-                # Fall back to the requested format_name
-                fallback = brief_dir / f"{format_name}.png"
-                if fallback.exists():
-                    return send_file(str(fallback), mimetype="image/png")
+        # #17: O(1) indexed resolve + folded tenant gate (was an O(all-runs ×
+        # visuals) walk on this hot <img src> route). The rendered PNG carries
+        # the same org data as the sidecar, so a run this session can't access
+        # is a 404, never served.
+        resolved = _resolve_visual(vid, _active_profile_id())
+        if resolved is None:
+            return "", 404
+        brief_dir, payload = resolved
+        # Determine which format to serve. If vid matches a specific format-id,
+        # use that format; else use the requested format_name.
+        ids_map = payload.get("visual_ids") or {}
+        if vid in ids_map:
+            fmt = ids_map[vid]
+        else:
+            fmt = format_name
+        candidate = brief_dir / f"{fmt}.png"
+        if candidate.exists():
+            return send_file(str(candidate), mimetype="image/png")
+        # Fall back to the requested format_name
+        fallback = brief_dir / f"{format_name}.png"
+        if fallback.exists():
+            return send_file(str(fallback), mimetype="image/png")
         return "", 404
 
     @app.route("/api/runs/<run_id>/venue-search")

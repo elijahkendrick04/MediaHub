@@ -105,6 +105,17 @@ def persist_visual(visual, *, run_id: str, brief=None) -> Path:
     payload["visual_ids"] = ids_map
     sidecar.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
 
+    # Perf (#17): stamp the vid → (run_id, brief_id) index so /api/visual/<vid>
+    # resolves in one indexed SELECT instead of walking every run dir. Strictly
+    # best-effort — the routes backfill lazily on a miss, so a DB hiccup here
+    # only costs one slow walk, never a lost visual.
+    try:
+        from mediahub.content_pack_visual import visual_index as _vidx
+
+        _vidx.index_visual(run_id, brief_id, payload)
+    except Exception:
+        pass
+
     # Governance (1.23): stamp an honest provenance manifest beside the PNG —
     # what made this card, from what, when. A result card is a deterministic
     # composite of real photography (not an AI image); only the caption and
