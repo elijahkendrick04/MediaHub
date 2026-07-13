@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-07-13 · `c01a0f367` · Merge pull request #1244 from elijahkendrick04/claude/review-18-tests
+**Last updated:** 2026-07-13 · `be3190166` · Merge pull request #1247 from elijahkendrick04/claude/code-review-cleanup-v2c6g6
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1226,6 +1226,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-07-12 | `001defedc` | Remove the deep-review backlog doc now the findings are shipped |
 | 2026-07-12 | `934b4dc69` | test: add direct ranker_v3 unit tests + share motion-focus image fixture |
 | 2026-07-12 | `7897b1766` | fix(web): owner-bind from-url job status (IDOR) + dedup storage-inventory scan |
 | 2026-07-12 | `6b321d103` | Fix six deterministic-engine accuracy bugs (review batch 15) |
@@ -1234,5 +1235,4 @@ list and the auto table below, not here.
 | 2026-07-12 | `ed8cbfa59` | Stop the interpreter smoke test polluting the real working tree (deep-review #128) |
 | 2026-07-12 | `c0dad34ce` | Infra hardening — durability, proxy-IP, isolation (deep-review batch 14a: #119, #121, #122, #123) |
 | 2026-07-12 | `84fcedcf4` | Upload + download hardening (deep-review batch 13: #28, #31) |
-| 2026-07-12 | `5ea57e938` | Rendering-stack durability (deep-review batch 12: #70, #72, #75) |
 <!-- /ROADMAP:ACTIVITY -->
