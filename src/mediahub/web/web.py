@@ -30077,7 +30077,11 @@ function mhEraseAthleteConfirm(f) {
         except Exception:
             pass
         if req.request_type == "access":
-            export = _dsr.export_athlete(pid, req.athlete_name)
+            # finding #111 — confine a signed-in regular tenant to its own runs;
+            # ownerless (legacy) runs may belong to another club (ADR-0014 §5).
+            export = _dsr.export_athlete(
+                pid, req.athlete_name, include_ownerless=_ownerless_run_readable()
+            )
             # D-21 — persist the snapshot and redirect back with a confirmation,
             # so the request visibly flips to "completed" and the clock stops,
             # instead of a bare attachment that left the table looking un-actioned.
@@ -30095,7 +30099,12 @@ function mhEraseAthleteConfirm(f) {
             )
             return redirect(url_for("org_athlete_rights"))
         if req.request_type == "erasure":
-            report = _dsr.erase_athlete(pid, req.athlete_name, recorded_by=recorded_by)
+            report = _dsr.erase_athlete(
+                pid,
+                req.athlete_name,
+                recorded_by=recorded_by,
+                include_ownerless=_ownerless_run_readable(),
+            )
             log_store.complete(request_id, note="erasure executed")
             from mediahub.compliance.security_log import record_event
 
@@ -30128,7 +30137,9 @@ function mhEraseAthleteConfirm(f) {
             new_name = (request.form.get("new_name") or "").strip()
             if not new_name:
                 return jsonify({"error": "corrected name required"}), 400
-            _dsr.rectify_athlete_name(pid, req.athlete_name, new_name)
+            _dsr.rectify_athlete_name(
+                pid, req.athlete_name, new_name, include_ownerless=_ownerless_run_readable()
+            )
             log_store.complete(request_id, note=f"rectified to '{new_name}'")
             return redirect(url_for("org_athlete_rights"))
         return jsonify({"error": "unknown request type"}), 400
@@ -30219,7 +30230,9 @@ function mhEraseAthleteConfirm(f) {
             recorded_by = _auth.current_user_email() or ""
         except Exception:
             pass
-        report = _dsr_erase(active, name, recorded_by=recorded_by)
+        report = _dsr_erase(
+            active, name, recorded_by=recorded_by, include_ownerless=_ownerless_run_readable()
+        )
         cascade = report.get("cascade") or {}
         body = (
             '<section class="mh-hero" style="padding-top:var(--sp-7);'

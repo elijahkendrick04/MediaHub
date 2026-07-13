@@ -18,14 +18,18 @@ very same session is refused on every ordinary run route. The invariant sweeps
 miss it because the DSR routes are keyed on a DSR-request id, not ``run_id``, so
 they are never in the swept route set.
 
-These two tests reproduce the disclosure and the mutation end-to-end, driven by
-``stranger@clubg.org`` — a real signed-in owner of the BOUND org ``org-gamma``,
-i.e. precisely the "signed-in regular tenant" ADR-0014 says must be refused.
+The end-to-end tests reproduce the (now-fixed) disclosure and mutation, driven
+by ``stranger@clubg.org`` — a real signed-in owner of the BOUND org
+``org-gamma``, i.e. precisely the "signed-in regular tenant" ADR-0014 says must
+be refused. The fix (finding #111) threads an ``include_ownerless`` flag through
+``_tenant_runs`` and its three callers; the web routes pass
+``_ownerless_run_readable()`` so a signed-in regular tenant is confined to its
+own runs while the operator / single-tenant (pilot) / legacy path keeps today's
+reach. ``test_tenant_runs_flag_gates_ownerless_inclusion`` pins both sides of
+that flag so the fix does not over-correct and regress single-org GDPR
+completeness.
 
-They are marked ``xfail(strict=True)`` because they assert the *secure*
-(post-fix) behaviour, which the current code violates. When finding #111 is
-fixed, drop the ``xfail`` markers so they become the regression guard. The
-sibling ``privacy.erasure.erase_athlete`` already uses the strict rule
+The sibling ``privacy.erasure.erase_athlete`` already uses the strict rule
 (``!= profile_id``) and is pinned owned-vs-owned by
 ``test_privacy_erasure.py::test_athlete_erasure_is_tenant_scoped`` — this file
 closes the untested ownerless seam for the ``compliance.dsr`` engine.
@@ -35,6 +39,7 @@ from __future__ import annotations
 
 import importlib
 import json
+import time
 import uuid
 from pathlib import Path
 
@@ -111,34 +116,38 @@ def shared_instance(tmp_path, monkeypatch):
 
     app = wm.create_app()
     app.config["TESTING"] = True
-    app.config["ENFORCE_ORG_GATE"] = True
+    # Leave the org-ready gate on its TESTING bypass so the athlete-rights
+    # routes actually run; this test is about run isolation, not the gate.
     if not app.secret_key:
         app.secret_key = "test-secret"
     return {"app": app, "run_orphan": run_orphan, "runs_dir": tmp_path / "runs_v4"}
 
 
 def _login_and_pin_gamma(client) -> None:
+    """Sign in as a real member (so the session carries an email — the
+    ``_ownerless_run_readable`` "signed-in regular tenant" branch) and pin the
+    bound org they own."""
     r = client.post("/login", data={"email": STRANGER_EMAIL, "password": PASSWORD})
     assert r.status_code in (302, 303), r.status_code
-    r = client.post("/api/organisation/active", data={"profile_id": "org-gamma"})
-    assert r.status_code in (200, 302, 303), r.status_code
+    with client.session_transaction() as s:
+        assert s.get("user_email") == STRANGER_EMAIL, "login did not stamp the session email"
+        s["active_profile_id"] = "org-gamma"
+        s["login_seen_at"] = int(time.time())
 
 
 def _open_dsr(client, request_type: str) -> str:
-    client.post(
+    r = client.post(
         "/organisation/athlete-rights/open",
         data={"athlete_name": ORPHAN_ATHLETE, "request_type": request_type},
     )
+    assert r.status_code in (302, 303), (r.status_code, r.get_data(as_text=True)[:200])
     from mediahub.compliance.dsr import DsrRequestLog
 
-    return DsrRequestLog().all(profile_id="org-gamma")[0].id
+    reqs = DsrRequestLog().all(profile_id="org-gamma")
+    assert reqs, "DSR request was not created — session is not a pinned org-gamma tenant"
+    return reqs[0].id
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="finding #111: DSR erasure reaches ownerless runs cross-tenant "
-    "(remove xfail once _tenant_runs honours the _ownerless_run_readable rule)",
-)
 def test_dsr_erasure_must_not_mutate_an_ownerless_run(shared_instance):
     """A signed-in regular tenant's erasure must not rewrite a legacy ownerless
     run — that run may belong to a different club (ADR-0014 §5)."""
@@ -158,11 +167,6 @@ def test_dsr_erasure_must_not_mutate_an_ownerless_run(shared_instance):
     assert after["cards"], "org-gamma stripped cards from an ownerless run (finding #111)"
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="finding #111: DSR export discloses ownerless runs cross-tenant "
-    "(remove xfail once _tenant_runs honours the _ownerless_run_readable rule)",
-)
 def test_dsr_export_must_not_disclose_an_ownerless_run(shared_instance):
     """A signed-in regular tenant's SAR export must not include records read out
     of a legacy ownerless run it does not own (ADR-0014 §5)."""
@@ -181,3 +185,30 @@ def test_dsr_export_must_not_disclose_an_ownerless_run(shared_instance):
     assert shared_instance["run_orphan"] not in disclosed, (
         "org-gamma's SAR export disclosed an ownerless run it does not own (finding #111)"
     )
+
+
+def test_tenant_runs_flag_gates_ownerless_inclusion(tmp_path, monkeypatch):
+    """The fix must gate — not delete — ownerless reach: the default (library /
+    single-org / operator path) still reaches ownerless runs; only the gated
+    ``include_ownerless=False`` (a signed-in regular tenant) excludes them.
+    This locks Option A so single-org legacy GDPR completeness is preserved."""
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
+    runs = tmp_path / "runs_v4"
+    runs.mkdir(parents=True, exist_ok=True)
+    _seed_ownerless_run(runs, "run-orphan", ORPHAN_ATHLETE)
+    # an owned run for the asking tenant, always in scope
+    owned = json.loads((runs / "run-orphan.json").read_text())
+    owned["run_id"] = "run-owned"
+    owned["profile_id"] = "org-a"
+    (runs / "run-owned.json").write_text(json.dumps(owned))
+
+    from mediahub.compliance.dsr import _tenant_runs
+
+    default_stems = {p.stem for p in _tenant_runs("org-a")}
+    gated_stems = {p.stem for p in _tenant_runs("org-a", include_ownerless=False)}
+
+    # default: owned + ownerless both reachable (unchanged legacy/library behaviour)
+    assert default_stems == {"run-owned", "run-orphan"}
+    # gated: confined to the tenant's own run
+    assert gated_stems == {"run-owned"}
