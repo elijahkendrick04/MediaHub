@@ -15272,7 +15272,7 @@ def _layout(
      where the browser can't install or once the app already runs standalone. -->
 <script defer src="{{ pwa_install_js_url }}"></script>
 </head>
-<body class="{{ 'mh-has-dock' if dock else '' }}" data-page="{{ active }}">
+<body class="{{ 'mh-has-dock' if dock else '' }}"{{ ' data-has-dock' if dock else '' }} data-page="{{ active }}">
 <a class="mh-skip-link" href="#mh-main">Skip to content</a>
 {{ bg_logos_html | safe }}
 <div id="mh-loader" aria-live="polite" aria-busy="true">
@@ -15649,19 +15649,19 @@ def _layout(
      class hides it) so the two never stack; hidden on desktop. The "Approve"
      pill acts on the queued card nearest the viewport centre — see the dock
      script below. Inspired by Duties (duties.xyz); supports U.4. -->
-<nav class="mh-action-dock" aria-label="Quick review actions" data-builder-url="{{ dock.builder }}">
-  <a href="{{ url_for('make_page') }}" aria-label="Create — start a new content pack">
+<nav class="mh-action-dock" data-testid="action-dock" aria-label="Quick review actions" data-builder-url="{{ dock.builder }}">
+  <a href="{{ url_for('make_page') }}" data-testid="dock-create" aria-label="Create — start a new content pack">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
     Create
   </a>
-  <a href="{{ url_for('media_library_page') }}" aria-label="Open the media library">
+  <a href="{{ url_for('media_library_page') }}" data-testid="dock-library" aria-label="Open the media library">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.6"/><path d="M21 15l-5-5L5 21"/></svg>
     Library
   </a>
-  <button type="button" class="mh-dock-primary" data-mh-dock-approve aria-label="Approve the highlighted card">
+  <button type="button" class="mh-dock-primary" data-testid="dock-approve" data-mh-dock-approve aria-label="Approve the highlighted card">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
-    <span data-mh-dock-label>Approve</span>
-    <span class="mh-dock-count" data-mh-dock-count aria-hidden="true">{{ dock.queue|default(0) }}</span>
+    <span data-testid="dock-label" data-mh-dock-label>Approve</span>
+    <span class="mh-dock-count" data-testid="dock-count" data-mh-dock-count aria-hidden="true">{{ dock.queue|default(0) }}</span>
   </button>
 </nav>
 {% endif %}
