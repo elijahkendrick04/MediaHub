@@ -252,6 +252,45 @@ def test_reject_and_edit(world):
     assert r.status_code == 200 and r.get_json()["status"] == "edited"
 
 
+def test_api_approval_is_stamped_as_machine_originated(world):
+    """Finding #116: a public-API/MCP token approval is recorded as
+    machine-originated — ``api-token:<id>`` in the durable workflow state AND in
+    the approval telemetry (via=api) — so it can never be mistaken for a human's
+    sign-off. (MCP wraps this same route, so it stamps identically.)"""
+    import os
+    from pathlib import Path
+
+    from mediahub.api_public.tokens import ApiTokenStore
+    from mediahub.observability import approval_telemetry
+    from mediahub.workflow.store import WorkflowStore
+
+    world.seed("runactor0001", "org-a")
+    tok, secret = ApiTokenStore().create(
+        "org-a", name="agent", scopes=["cards:approve"], created_by="owner@org-a.com"
+    )
+    r = world.client.post("/api/v1/runs/runactor0001/cards/swim-1/approve", headers=_h(secret))
+    assert r.status_code == 200
+
+    # Durable per-card record: the token, not a bare human email.
+    state = WorkflowStore(Path(os.environ["RUNS_DIR"])).load("runactor0001")["swim-1"]
+    assert state.actor == f"api-token:{tok.id}"
+    assert state.actor.startswith("api-token:")
+
+    # Approval telemetry: same machine actor, recorded as an API action.
+    conn = approval_telemetry._connect()
+    try:
+        row = conn.execute(
+            "SELECT via, actor FROM approval_events "
+            "WHERE run_id=? AND card_id=? AND action='approved'",
+            ("runactor0001", "swim-1"),
+        ).fetchone()
+    finally:
+        conn.close()
+    assert row is not None
+    assert row["via"] == "api"
+    assert row["actor"] == f"api-token:{tok.id}"
+
+
 # --- export -----------------------------------------------------------------
 def test_export_without_visuals_is_404(world):
     world.seed("runaaaaaaa10", "org-a")

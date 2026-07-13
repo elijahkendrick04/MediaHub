@@ -11,7 +11,8 @@ File format:
       "edited_captions": {"warm-club_headline": "...", ...} | null,
       "notes": "..." | null,
       "posted_at": "2026-05-10T12:00:00Z" | null,
-      "last_changed_at": "2026-05-10T11:00:00Z"
+      "last_changed_at": "2026-05-10T11:00:00Z",
+      "actor": "member@club" | "api-token:mht_…" | null
     },
     ...
   }
@@ -108,8 +109,14 @@ class WorkflowStore:
         status: CardStatus,
         notes: Optional[str] = None,
         posted_at: Optional[str] = None,
+        actor: Optional[str] = None,
     ) -> None:
-        """Set the status of a card, preserving existing edits."""
+        """Set the status of a card, preserving existing edits.
+
+        ``actor`` (finding #116) records who/what made the change so the audit
+        trail distinguishes a human from an agent — a member's email for a web
+        approval, ``api-token:<token_id>`` for a public-API/MCP one. Omitted
+        (``None``) leaves the prior actor untouched."""
         now = datetime.now(timezone.utc).isoformat()
         with self._locked(run_id):
             states = self.load(run_id)
@@ -125,6 +132,8 @@ class WorkflowStore:
                 existing.notes = notes
             if posted_at is not None:
                 existing.posted_at = posted_at
+            if actor is not None:
+                existing.actor = actor
 
             states[card_id] = existing
             self._save(run_id, states)
@@ -134,11 +143,14 @@ class WorkflowStore:
         run_id: str,
         card_id: str,
         edits: dict[str, str],
+        actor: Optional[str] = None,
     ) -> None:
         """
         Persist user caption overrides for a card.
         Keys are '{tone_str}_{slot}', e.g. 'warm-club_headline'.
         Status is set to EDITED if currently QUEUE.
+        ``actor`` (finding #116) records who/what made the edit, as in
+        :meth:`set_status`.
 
         H-10: overwriting a caption slot stashes the value it replaces under
         a reserved ``prev.<key>`` slot in the same bag, so the review drawer
@@ -168,6 +180,8 @@ class WorkflowStore:
             existing.last_changed_at = now
             if existing.status == CardStatus.QUEUE:
                 existing.status = CardStatus.EDITED
+            if actor is not None:
+                existing.actor = actor
 
             states[card_id] = existing
             self._save(run_id, states)

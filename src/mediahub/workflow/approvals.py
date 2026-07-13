@@ -70,14 +70,26 @@ class ApprovalLedger:
     def _save(self, run_id: str, data: dict) -> None:
         atomic_write_json(self._path(run_id), data)
 
-    def record(self, run_id: str, card_id: str, email: str) -> list[str]:
-        """Record a distinct approval vote; return the card's approver emails."""
+    def record(
+        self, run_id: str, card_id: str, email: str, *, actor_kind: str = "human"
+    ) -> list[str]:
+        """Record a distinct approval vote; return the card's approver emails.
+
+        ``actor_kind`` (finding #116) marks *how* the vote arrived: ``"human"``
+        (a member in the app) is the default and stays byte-identical on disk;
+        anything else — e.g. ``"api_token"`` for a public-API/MCP approval — is
+        stamped onto the stored vote so a group-approval trail can tell an agent
+        from a person. Counting/dedup stay keyed on ``email`` and are unchanged.
+        """
         email = (email or "").strip().lower()
         with self._locked(run_id):
             data = self._load(run_id)
             votes = data.get(card_id) or []
             if email and not any((v.get("email") or "").lower() == email for v in votes):
-                votes.append({"email": email, "at": _now_iso()})
+                vote = {"email": email, "at": _now_iso()}
+                if actor_kind and actor_kind != "human":
+                    vote["actor_kind"] = actor_kind
+                votes.append(vote)
                 data[card_id] = votes
                 self._save(run_id, data)
             return [v.get("email", "") for v in votes]

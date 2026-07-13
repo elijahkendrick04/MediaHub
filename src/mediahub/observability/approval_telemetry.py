@@ -56,7 +56,8 @@ CREATE TABLE IF NOT EXISTS approval_events (
     post_angle       TEXT,
     tone             TEXT,
     quality_band     TEXT,
-    via              TEXT
+    via              TEXT,
+    actor            TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_approval_events_profile
     ON approval_events(profile_id, ts DESC);
@@ -69,6 +70,11 @@ def ensure_schema(db_path: Optional[Path] = None) -> None:
     conn = _connect(db_path)
     try:
         conn.executescript(_SCHEMA)
+        # Finding #116: the `actor` column was added after first ship; back-fill
+        # it on pre-existing tables (CREATE TABLE IF NOT EXISTS won't add it).
+        cols = {r["name"] for r in conn.execute("PRAGMA table_info(approval_events)")}
+        if "actor" not in cols:
+            conn.execute("ALTER TABLE approval_events ADD COLUMN actor TEXT")
         conn.commit()
     finally:
         conn.close()
@@ -85,9 +91,15 @@ def record_event(
     tone: str = "",
     quality_band: str = "",
     via: str = "web",
+    actor: str = "",
     db_path: Optional[Path] = None,
 ) -> bool:
-    """Best-effort insert — telemetry must never block an approval."""
+    """Best-effort insert — telemetry must never block an approval.
+
+    ``actor`` (finding #116) is the machine-distinguishable audit label of who
+    made the change — a member's email, or ``api-token:<id>`` for a public-API /
+    MCP action — so agent and human approvals can be told apart in the history.
+    """
     if action not in _ACTIONS or not profile_id:
         return False
     try:
@@ -96,8 +108,8 @@ def record_event(
         try:
             conn.execute(
                 "INSERT INTO approval_events (ts, profile_id, run_id, card_id, action,"
-                " achievement_type, post_angle, tone, quality_band, via)"
-                " VALUES (?,?,?,?,?,?,?,?,?,?)",
+                " achievement_type, post_angle, tone, quality_band, via, actor)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?)",
                 (
                     datetime.now(timezone.utc).isoformat(),
                     profile_id,
@@ -109,6 +121,7 @@ def record_event(
                     tone or None,
                     quality_band or None,
                     via or None,
+                    actor or None,
                 ),
             )
             conn.commit()

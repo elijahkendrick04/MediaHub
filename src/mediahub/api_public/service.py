@@ -251,11 +251,15 @@ def set_card_status(
     *,
     notes: Optional[str] = None,
     actor_email: str = "",
+    actor: str = "",
 ) -> tuple[dict, int]:
     """Approve / reject / requeue a card — through the SAME gates as the UI.
 
     ``actor_email`` (the token owner) is recorded as the approver so a group-
-    approval rule is enforced against a real identity, never bypassed."""
+    approval rule is enforced against a real identity, never bypassed. ``actor``
+    (finding #116) is the machine-distinguishable audit label — e.g.
+    ``api-token:<token_id>`` — stamped onto the durable workflow state and the
+    approval telemetry so an agent's approval is never mistaken for a human's."""
     if _card_action is None:
         raise unavailable("Card actions are not available in this context.")
     payload = {
@@ -263,19 +267,34 @@ def set_card_status(
         "status": status,
         "notes": notes,
         "_actor_email": actor_email,
+        "_actor": actor,
     }
     return _card_action(profile_id, run_id, card_id, "set_status", payload)
 
 
 def edit_card(
-    profile_id: str, run_id: str, card_id: str, edits: dict, *, actor_email: str = ""
+    profile_id: str,
+    run_id: str,
+    card_id: str,
+    edits: dict,
+    *,
+    actor_email: str = "",
+    actor: str = "",
 ) -> tuple[dict, int]:
-    """Edit a card's caption overrides — through the same gates as the UI."""
+    """Edit a card's caption overrides — through the same gates as the UI.
+
+    ``actor`` is the machine-distinguishable audit label (finding #116), as in
+    :func:`set_card_status`."""
     if _card_action is None:
         raise unavailable("Card actions are not available in this context.")
     if not isinstance(edits, dict):
         raise bad_request("`edits` must be an object of caption overrides.")
-    payload = {"action": "set_edits", "edits": edits, "_actor_email": actor_email}
+    payload = {
+        "action": "set_edits",
+        "edits": edits,
+        "_actor_email": actor_email,
+        "_actor": actor,
+    }
     return _card_action(profile_id, run_id, card_id, "set_edits", payload)
 
 
