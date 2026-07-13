@@ -20598,6 +20598,147 @@ _ATHLETES_CONSENT_JS = r"""
 """
 
 
+# ---------------------------------------------------------------------------
+# Hoisted pure helpers (refactor-15, finding #15 step 1)
+#
+# These are closure-free formatting/parsing helpers lifted out of the
+# ``create_app`` closure so they can be imported and unit-tested in isolation
+# without instantiating the Flask app. Behaviour is identical — each closes
+# over nothing from ``create_app`` and references only module-level names.
+# ---------------------------------------------------------------------------
+
+def _format_uptime_pct(stats: dict) -> str:
+    if not stats.get("has_data"):
+        return "&mdash;"
+    pct = float(stats.get("uptime_pct") or 0.0) * 100.0
+    if pct >= 99.995:
+        # Never round a window that had real, counted downtime up to a bare
+        # "100%" — it reads as a contradiction beside the non-zero Downtime
+        # cell on the same row. Show the honest "99.99%" instead; "100%" is
+        # reserved for a genuinely gap-free window.
+        return "100%" if not stats.get("downtime_seconds") else "99.99%"
+    if pct >= 99.9:
+        return f"{pct:.3f}%"
+    if pct >= 95.0:
+        return f"{pct:.2f}%"
+    return f"{pct:.1f}%"
+
+
+def _humanize_duration(seconds: int) -> str:
+    seconds = max(0, int(seconds))
+    if seconds < 60:
+        return f"{seconds}s"
+    if seconds < 3600:
+        mins = seconds // 60
+        return f"{mins} min"
+    if seconds < 86400:
+        hrs = seconds // 3600
+        mins = (seconds % 3600) // 60
+        return f"{hrs}h {mins}m" if mins else f"{hrs}h"
+    days = seconds // 86400
+    hrs = (seconds % 86400) // 3600
+    return f"{days}d {hrs}h" if hrs else f"{days}d"
+
+
+def _humanize_when(ts: Optional[str]) -> str:
+    if not ts:
+        return "&mdash;"
+    try:
+        parsed = ts
+        if parsed.endswith("Z"):
+            parsed = parsed[:-1] + "+00:00"
+        from datetime import datetime as _dt
+
+        then = _dt.fromisoformat(parsed)
+        delta = datetime.now(timezone.utc) - then
+        secs = int(delta.total_seconds())
+        if secs < 0:
+            return _h(ts[:19])
+        if secs < 60:
+            return f"{secs}s ago"
+        if secs < 3600:
+            return f"{secs // 60} min ago"
+        if secs < 86400:
+            return f"{secs // 3600}h ago"
+        return f"{secs // 86400}d ago"
+    except (ValueError, TypeError):
+        return _h(ts[:19])
+
+
+def _pounds_to_pence(raw: str) -> int:
+    from decimal import Decimal, InvalidOperation
+
+    try:
+        return int((Decimal((raw or "").strip().lstrip("£")) * 100).quantize(Decimal("1")))
+    except (InvalidOperation, ValueError):
+        return -1
+
+
+def _pence_str(p) -> str:
+    return f"£{p / 100:,.2f}" if isinstance(p, int) and p >= 0 else "—"
+
+
+def _safe_filename(title: str, ext: str) -> str:
+    slug = re.sub(r"[^A-Za-z0-9_-]+", "-", str(title or "document")).strip("-").lower()
+    return f"{slug or 'document'}.{ext}"
+
+
+def _nl_range(preset, body):
+    """Resolve a range preset (or a custom start/end) to (start, end) dates."""
+    from datetime import date as _date
+    from datetime import timedelta as _td
+
+    def _iso(v):
+        try:
+            return _date.fromisoformat(str(v)[:10])
+        except (TypeError, ValueError):
+            return None
+
+    today = _date.today()
+    if preset == "custom":
+        return (_iso(body.get("start")) or today.replace(day=1)), (
+            _iso(body.get("end")) or today
+        )
+    if preset == "last_month":
+        last_prev = today.replace(day=1) - _td(days=1)
+        return last_prev.replace(day=1), last_prev
+    if preset == "last_30":
+        return today - _td(days=30), today
+    if preset == "this_season":
+        yr = today.year if today.month >= 9 else today.year - 1
+        return _date(yr, 9, 1), today
+    return today.replace(day=1), today  # this_month (default)
+
+
+def _parse_month_param(raw: str):
+    """``YYYY-MM`` → (year, month), clamped to a sane range; today on miss."""
+    from mediahub.content_engine.calendar import today_utc
+
+    t = today_utc()
+    s = (raw or "").strip()
+    if len(s) == 7 and s[4] == "-":
+        try:
+            y, m = int(s[:4]), int(s[5:7])
+            if 1 <= m <= 12 and 1970 <= y <= 2200:
+                return y, m
+        except ValueError:
+            pass
+    return t.year, t.month
+
+
+def _org_calendar_sport(prof, fallback: str = "swimming") -> str:
+    """Resolve the sport whose key-date pack the calendar shows, from the
+    organisation type (same mapping the Plan page uses)."""
+    from mediahub.sport_profiles import list_sport_profiles
+
+    try:
+        avail = {p.sport for p in list_sport_profiles()}
+    except Exception:
+        avail = {"swimming"}
+    s = _ORG_TYPE_TO_SPORT.get(getattr(prof, "org_type", "") or "")
+    return s if s in avail else fallback
+
+
 def create_app() -> Flask:
     # Fail-fast env validation (security/secrets-and-config): production
     # refuses to boot with unsafe config (no DATA_DIR, weak operator key,
@@ -31169,60 +31310,6 @@ self.addEventListener('fetch', function(e){
     #
     # The numbers come from the SQLite uptime log; honest behaviour
     # when no data exists yet is to say so, not fake 100%.
-    def _format_uptime_pct(stats: dict) -> str:
-        if not stats.get("has_data"):
-            return "&mdash;"
-        pct = float(stats.get("uptime_pct") or 0.0) * 100.0
-        if pct >= 99.995:
-            # Never round a window that had real, counted downtime up to a bare
-            # "100%" — it reads as a contradiction beside the non-zero Downtime
-            # cell on the same row. Show the honest "99.99%" instead; "100%" is
-            # reserved for a genuinely gap-free window.
-            return "100%" if not stats.get("downtime_seconds") else "99.99%"
-        if pct >= 99.9:
-            return f"{pct:.3f}%"
-        if pct >= 95.0:
-            return f"{pct:.2f}%"
-        return f"{pct:.1f}%"
-
-    def _humanize_duration(seconds: int) -> str:
-        seconds = max(0, int(seconds))
-        if seconds < 60:
-            return f"{seconds}s"
-        if seconds < 3600:
-            mins = seconds // 60
-            return f"{mins} min"
-        if seconds < 86400:
-            hrs = seconds // 3600
-            mins = (seconds % 3600) // 60
-            return f"{hrs}h {mins}m" if mins else f"{hrs}h"
-        days = seconds // 86400
-        hrs = (seconds % 86400) // 3600
-        return f"{days}d {hrs}h" if hrs else f"{days}d"
-
-    def _humanize_when(ts: Optional[str]) -> str:
-        if not ts:
-            return "&mdash;"
-        try:
-            parsed = ts
-            if parsed.endswith("Z"):
-                parsed = parsed[:-1] + "+00:00"
-            from datetime import datetime as _dt
-
-            then = _dt.fromisoformat(parsed)
-            delta = datetime.now(timezone.utc) - then
-            secs = int(delta.total_seconds())
-            if secs < 0:
-                return _h(ts[:19])
-            if secs < 60:
-                return f"{secs}s ago"
-            if secs < 3600:
-                return f"{secs // 60} min ago"
-            if secs < 86400:
-                return f"{secs // 3600}h ago"
-            return f"{secs // 86400}d ago"
-        except (ValueError, TypeError):
-            return _h(ts[:19])
 
     def _uptime_tracking_note(*stats: dict) -> str:
         """Explain a clamped uptime window.
@@ -34632,33 +34719,6 @@ function mhPlanGenerate(btn) {{
         return _layout("Content plan", body, active="create")
 
     # ---- 1.14 — the Plan calendar (drag-reschedule + key dates) ------------
-
-    def _org_calendar_sport(prof, fallback: str = "swimming") -> str:
-        """Resolve the sport whose key-date pack the calendar shows, from the
-        organisation type (same mapping the Plan page uses)."""
-        from mediahub.sport_profiles import list_sport_profiles
-
-        try:
-            avail = {p.sport for p in list_sport_profiles()}
-        except Exception:
-            avail = {"swimming"}
-        s = _ORG_TYPE_TO_SPORT.get(getattr(prof, "org_type", "") or "")
-        return s if s in avail else fallback
-
-    def _parse_month_param(raw: str):
-        """``YYYY-MM`` → (year, month), clamped to a sane range; today on miss."""
-        from mediahub.content_engine.calendar import today_utc
-
-        t = today_utc()
-        s = (raw or "").strip()
-        if len(s) == 7 and s[4] == "-":
-            try:
-                y, m = int(s[:4]), int(s[5:7])
-                if 1 <= m <= 12 and 1970 <= y <= 2200:
-                    return y, m
-            except ValueError:
-                pass
-        return t.year, t.month
 
     @app.route("/api/plan/calendar", methods=["GET"])
     def api_plan_calendar():
@@ -43475,17 +43535,6 @@ what you're doing, what they should do.</p>
             "success",
         )
         return redirect(url_for("settings_section", section="developer"))
-
-    def _pounds_to_pence(raw: str) -> int:
-        from decimal import Decimal, InvalidOperation
-
-        try:
-            return int((Decimal((raw or "").strip().lstrip("£")) * 100).quantize(Decimal("1")))
-        except (InvalidOperation, ValueError):
-            return -1
-
-    def _pence_str(p) -> str:
-        return f"£{p / 100:,.2f}" if isinstance(p, int) and p >= 0 else "—"
 
     @app.route("/operator/commercial")
     def operator_commercial():
@@ -67553,10 +67602,6 @@ and your lawful basis &mdash; live under
             prof = None
         return getattr(prof, "display_name", "") or getattr(prof, "name", "") or ""
 
-    def _safe_filename(title: str, ext: str) -> str:
-        slug = re.sub(r"[^A-Za-z0-9_-]+", "-", str(title or "document")).strip("-").lower()
-        return f"{slug or 'document'}.{ext}"
-
     def _doc_clean_detail(exc) -> str:
         """A user-safe one-line failure reason for a document/PDF-tool error.
 
@@ -67638,32 +67683,6 @@ and your lawful basis &mdash; live under
         from mediahub.email_design import store as _ns
 
         return pid, _ns.load_newsletter(pid, newsletter_id)
-
-    def _nl_range(preset, body):
-        """Resolve a range preset (or a custom start/end) to (start, end) dates."""
-        from datetime import date as _date
-        from datetime import timedelta as _td
-
-        def _iso(v):
-            try:
-                return _date.fromisoformat(str(v)[:10])
-            except (TypeError, ValueError):
-                return None
-
-        today = _date.today()
-        if preset == "custom":
-            return (_iso(body.get("start")) or today.replace(day=1)), (
-                _iso(body.get("end")) or today
-            )
-        if preset == "last_month":
-            last_prev = today.replace(day=1) - _td(days=1)
-            return last_prev.replace(day=1), last_prev
-        if preset == "last_30":
-            return today - _td(days=30), today
-        if preset == "this_season":
-            yr = today.year if today.month >= 9 else today.year - 1
-            return _date(yr, 9, 1), today
-        return today.replace(day=1), today  # this_month (default)
 
     def _nl_resolve_images(spec, resolver):
         """Return a copy of ``spec`` with each card's image ``src`` filled from
