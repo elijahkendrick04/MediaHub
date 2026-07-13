@@ -5,7 +5,7 @@
 # `playwright install --with-deps` both fail at build time (see the
 # May 2026 build log: "List directory /var/lib/apt/lists/partial is
 # missing - Read-only file system"). The project's Dockerfile already
-# installs Node 20, Playwright + Chromium with system deps, and the
+# installs Node 22, Playwright + Chromium with system deps, and the
 # Remotion node_modules in one go, so we point Render at it directly.
 #
 # https://render.com/docs/blueprint-spec
