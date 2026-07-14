@@ -5,7 +5,7 @@ ASCII diagram of how the live packages fit together.
 ```
  ┌────────────────────────────────────────────────────────────────────┐
  │                       mediahub.web (Flask app)                     │
- │   /upload → upload_post → spawns thread → run_pipeline_v4          │
+ │   /upload → upload() → spawns thread → run_pipeline_v4             │
  │   /review/<id> ← reads runs_v4/<id>.json                           │
  │   /api/runs/<id>/* ← status / cards / trust / export               │
  └─────────────────────────────────┬──────────────────────────────────┘
