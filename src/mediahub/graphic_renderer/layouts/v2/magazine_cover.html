@@ -60,7 +60,7 @@
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  background: var(--mh-primary);
+  background: var(--mh-ground-gradient, var(--mh-primary));
   color: var(--mh-on-primary);
   font-family: 'Inter', system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
@@ -152,7 +152,7 @@
      headline sits in the left ~67% of the canvas, so scale to 0.74 and
      allow wrapping so a long/space-less name never clips the photo. */
   font-size: calc(var(--mh-fit-mega-name-px, 200px) * 0.62);
-  line-height: 0.84; letter-spacing: -0.015em; text-transform: uppercase;
+  line-height: 0.84; letter-spacing: var(--mh-track-mega-name, -0.015em); text-transform: uppercase;
   color: var(--mh-on-primary);
   white-space: normal; overflow-wrap: anywhere; word-break: break-word;
   max-width: 100%;
@@ -207,7 +207,7 @@
   /* result autofit box is ~52% of canvas; the burst is ~274px, so scale
      to 0.30 and let it break rather than clip the circle. */
   font-size: calc(var(--mh-fit-result-px, 92px) * 0.30); font-variation-settings: var(--mh-axes-result, normal);
-  line-height: 0.9; letter-spacing: -0.01em; color: var(--mh-primary);
+  line-height: 0.9; letter-spacing: var(--mh-track-result, -0.01em); color: var(--mh-primary);
   white-space: normal; overflow-wrap: anywhere; word-break: break-word;
   max-width: 100%;
 }
@@ -273,7 +273,7 @@
     </div>
 
     <div class="mc__star">
-      <div class="mc__star-tag">{{ACCENT_DECORATION}}</div>
+      <div class="mc__star-tag">Result</div>
       <div class="mc__star-val">{{RESULT_VALUE}}</div>
     </div>
   </div>
@@ -286,6 +286,8 @@
     <div class="mc__barcode"></div>
     <div class="mc__sponsor">{{SPONSOR_BLOCK}}</div>
   </div>
+
+  {{ACCENT_DECORATION}}
 
 </div>
 </body>

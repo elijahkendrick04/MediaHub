@@ -22,7 +22,7 @@
   width: {{WIDTH}}px;
   height: {{HEIGHT}}px;
   overflow: hidden;
-  background: var(--mh-primary);
+  background: var(--mh-ground-gradient, var(--mh-primary));
   color: var(--mh-on-primary);
   font-family: 'Inter', system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
@@ -67,7 +67,7 @@
   font-family: 'JetBrains Mono', 'Space Grotesk', monospace;
   font-feature-settings: "tnum";
   font-weight: 700; font-size: var(--mh-fit-mega-result-px, 220px); font-variation-settings: var(--mh-axes-mega-result, normal);
-  line-height: 0.82; letter-spacing: -0.035em; color: var(--mh-accent);
+  line-height: 0.82; letter-spacing: var(--mh-track-mega-result, -0.035em); color: var(--mh-accent);
   white-space: nowrap;
 }
 .cn__row {

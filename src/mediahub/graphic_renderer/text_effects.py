@@ -131,6 +131,8 @@ def _style_for(name: str) -> str:
             "0.165em 0.165em 0 rgba(0,0,0,0.05);"
         )
     if name == "glitch":
+        # No-brand fallback dyad; the brand-locked dyad (derived from the
+        # card's accent) is computed in effect_css via _glitch_style.
         return "text-shadow:-0.022em 0 0 rgba(255,0,86,0.62),0.022em 0 0 rgba(0,224,255,0.62);"
     if name == "neon":
         # Fill inherited (stays role-legible); glow in the brand accent.
@@ -153,6 +155,41 @@ def _outline_style() -> str:
         "color:var(--mh-on-primary);"
         "-webkit-text-stroke:0.03em var(--mh-primary);"
         "paint-order:stroke fill;"
+    )
+
+
+def _glitch_style(accent_hex: str) -> str:
+    """The glitch fringe dyad, derived from the card's own accent (C7).
+
+    Canva's Glitch restricts its colour to luminance-matched dyads, which is
+    what makes it read deliberate. Ours was the one decoration in the system
+    that ignored the brand palette (hardcoded magenta/cyan). The dyad here is
+    the accent hue rotated ±140° with the accent's own lightness kept — pure
+    HLS maths on a resolved role, so it is brand-derived, deterministic, and
+    changes with medal tints exactly like the rest of the card. Falls back to
+    the fixed dyad when the accent hex is unparseable.
+    """
+    import colorsys
+
+    h = (accent_hex or "").strip().lstrip("#")
+    if len(h) == 3:
+        h = "".join(c * 2 for c in h)
+    if len(h) != 6:
+        return _style_for("glitch")
+    try:
+        r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+    except ValueError:
+        return _style_for("glitch")
+    hue, lig, sat = colorsys.rgb_to_hls(r / 255.0, g / 255.0, b / 255.0)
+    sat = max(sat, 0.55)  # a grey accent still needs visible fringes
+    lig = min(max(lig, 0.35), 0.72)  # keep both fringes in a readable band
+
+    def _rot(deg: float) -> str:
+        rr, gg, bb = colorsys.hls_to_rgb((hue + deg / 360.0) % 1.0, lig, sat)
+        return f"{int(round(rr * 255))},{int(round(gg * 255))},{int(round(bb * 255))}"
+
+    return (
+        f"text-shadow:-0.022em 0 0 rgba({_rot(-140)},0.62)," f"0.022em 0 0 rgba({_rot(140)},0.62);"
     )
 
 
@@ -203,7 +240,11 @@ def effect_css(
         return EffectResult("curve", "curve", "", True, _is_legible(ink, ground), False, "")
 
     # Fill-preserving decorative effects: colour inherited, always ≥ plain legibility.
-    if req in ("shadow", "lift", "echo", "glitch", "neon", "extrude"):
+    if req == "glitch":
+        return EffectResult(
+            "glitch", "glitch", _glitch_style(accent), False, _is_legible(ink, ground), False, ""
+        )
+    if req in ("shadow", "lift", "echo", "neon", "extrude"):
         return EffectResult(req, req, _style_for(req), False, _is_legible(ink, ground), False, "")
 
     if req == "outline":

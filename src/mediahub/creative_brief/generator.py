@@ -68,7 +68,11 @@ _MOOD_PHOTO_RECIPES: dict[str, str] = {
     "calm": "soft",
     "warm": "soft",
 }
-_DEFAULT_PHOTO_RECIPE = "natural"
+# E1 (Canva gap analysis): briefs without a curated mood look get the MEASURED
+# auto-enhance (photo_adjust.auto_recipe — corrects only what each photo's
+# statistics justify) instead of the old blind fixed "natural" nudge. Healthy
+# photos pass through byte-identical; mood-keyed curated looks are unchanged.
+_DEFAULT_PHOTO_RECIPE = "auto"
 
 
 def _photo_recipe_for_mood(mood: str) -> str:

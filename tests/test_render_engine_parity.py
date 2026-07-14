@@ -21,6 +21,8 @@ No browser needed — the single ``render_html_to_png`` call is stubbed, exactly
 
 from __future__ import annotations
 
+import re
+
 from pathlib import Path
 
 import pytest
@@ -208,5 +210,10 @@ def test_content_fidelity_is_engine_independent(render_engine, monkeypatch, tmp_
     legitimately omits a single result), re-curate the seeds here."""
     brief = _brief(seed=seed, swimmer="Eira Hughes", result="2:08.41")
     _res, html = _render_capture(monkeypatch, tmp_path, brief, size=(1080, 1350))
-    assert "2:08.41" in html, f"result value dropped by {brief.layout_template!r}"
+    # A5 (Canva gap analysis) kern-wraps intra-numeric separators on the v2
+    # engine, so the verified value's text survives with kern cells around
+    # ":" / "." — de-kern before asserting fidelity (the rendered textContent
+    # is still exactly the verified string).
+    dekerned = re.sub(r'<span class="mh-sep">([.:])</span>', r"\1", html)
+    assert "2:08.41" in dekerned, f"result value dropped by {brief.layout_template!r}"
     assert "Test Swim Club" in html or "TSC" in html

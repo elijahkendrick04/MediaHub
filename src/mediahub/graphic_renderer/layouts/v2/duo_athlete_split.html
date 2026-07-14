@@ -189,7 +189,7 @@
   /* the bay is half the canvas, so scale the full-canvas autofit var */
   font-size: calc(var(--mh-fit-result-px, 96px) * 0.72); font-variation-settings: var(--mh-axes-result, normal);
   line-height: 0.9;
-  letter-spacing: -0.02em;
+  letter-spacing: var(--mh-track-result, -0.02em);
   white-space: nowrap;
   color: var(--mh-accent);
 }
@@ -234,7 +234,7 @@
   background: var(--mh-accent);
   color: var(--mh-primary);
   padding: 34px 64px 42px;
-  box-shadow: 0 18px 48px rgba(0,0,0,0.30);
+  box-shadow: var(--mh-elev-4, 0 18px 48px rgba(0,0,0,0.30));
 }
 .duo__first {
   font-family: 'Space Grotesk', 'Inter', sans-serif;
@@ -249,7 +249,7 @@
   font-weight: 400;
   font-size: var(--mh-fit-surname-px, 132px);
   line-height: 0.9;
-  letter-spacing: -0.02em;
+  letter-spacing: var(--mh-track-surname, -0.02em);
   text-transform: uppercase;
   /* the autofit var sizes this to one line; wrapping is the safety net for a
      name beyond the fit floor — the band grows downward without collision */

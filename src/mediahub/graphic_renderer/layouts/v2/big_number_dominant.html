@@ -24,7 +24,7 @@
   width: {{WIDTH}}px;
   height: {{HEIGHT}}px;
   overflow: hidden;
-  background: var(--mh-primary);
+  background: var(--mh-ground-gradient, var(--mh-primary));
   color: var(--mh-on-primary);
   font-family: 'Inter', system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
@@ -74,7 +74,7 @@
   font-weight: 700;
   font-size: var(--mh-fit-mega-result-px, 240px); font-variation-settings: var(--mh-axes-mega-result, normal);
   line-height: 0.86;
-  letter-spacing: -0.03em;
+  letter-spacing: var(--mh-track-mega-result, -0.03em);
   color: var(--mh-accent);
   white-space: nowrap;
 }

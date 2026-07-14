@@ -58,6 +58,7 @@ __all__ = [
     "balance_lines",
     "fit_balanced",
     "fit_balanced_px",
+    "tracking_for_px",
     # Variable-font axis optimisation (G1.9)
     "FontAxes",
     "AxisPlan",
@@ -199,8 +200,18 @@ _PROFILE_SCALE: dict[str, float] = {
 # the estimate errs slightly *wide* — a fitted hero line can shrink a touch more
 # than strictly needed but can never overflow its box, which is the module's
 # contract. Keys are normalised first-family names.
+#
+# D1 (Canva gap analysis): the OTHER two display faces the typography pairs can
+# bind to the hero slots are calibrated the same way, from fontTools advance
+# averages over the shipped woff2 (caps sample, relative to Anton's measured
+# 0.474 caps-em ↔ 0.76 table-scale anchor):
+#   bebas-neue.woff2  caps avg 0.389 em → 0.63 (narrower than Anton)
+#   bowlby-one.woff2  caps avg 0.758 em → 1.22 (≈60% wider than Anton — the
+#     face that OVERFLOWED hero slots when fitted with Anton's metrics)
 _FAMILY_SCALE: dict[str, float] = {
     "anton": 0.76,
+    "bebas neue": 0.63,
+    "bowlby one": 1.22,
 }
 
 # Family-name -> profile class. Names are normalised (lowercased, de-quoted, the
@@ -1123,3 +1134,44 @@ def fit_balanced(
 def fit_balanced_px(text: str, box_w: float, box_h: float, **kwargs) -> int:
     """The fitted size from :func:`fit_balanced`, dropping the line layout."""
     return fit_balanced(text, box_w, box_h, **kwargs)[0]
+
+
+# --------------------------------------------------------------------------- #
+# D2 (Canva gap analysis) — size-dependent optical tracking.
+#
+# Fixed per-class letter-spacing constants ignore the fitted size: a hero
+# fitted at 300px and one at 64px got identical tracking. Professional
+# display setting tightens as type grows (large condensed caps set loose fall
+# apart into letters) and opens small all-caps labels (tight small caps smear
+# at feed scale). The ramps below are pure deterministic maths on the fitted
+# px; the renderer emits them as --mh-track-* vars that layouts consume with
+# their old constants as var() fallbacks.
+# --------------------------------------------------------------------------- #
+
+# (px_lo, track_at_lo_em, px_hi, track_at_hi_em) per register — linear between,
+# clamped outside. Display ramps are NEGATIVE (safe direction for a fitted
+# line: tighter can never overflow); the label register opens small sizes.
+_TRACKING_RAMPS: dict[str, tuple[float, float, float, float]] = {
+    # Heavy condensed caps display (Anton/Bebas/Bowlby hero slots).
+    "display": (80.0, -0.010, 240.0, -0.035),
+    # Tabular mono numerals (result slots) — tightens a touch more slowly.
+    "numeral": (80.0, -0.010, 260.0, -0.030),
+    # Small all-caps labels/kickers — opens as they shrink.
+    "label": (14.0, 0.10, 34.0, 0.05),
+}
+
+
+def tracking_for_px(px: float, register: str = "display") -> float:
+    """The optical letter-spacing (em) for a slot fitted at ``px``.
+
+    Linear ramp per register, clamped at both ends; unknown registers return
+    0.0 (no adjustment) so callers can pass through unmapped slots safely.
+    """
+    lo_px, lo_tr, hi_px, hi_tr = _TRACKING_RAMPS.get(
+        (register or "").strip().lower(), (0.0, 0.0, 1.0, 0.0)
+    )
+    if lo_px == hi_px:
+        return 0.0
+    t = (float(px) - lo_px) / (hi_px - lo_px)
+    t = 0.0 if t < 0 else 1.0 if t > 1 else t
+    return round(lo_tr + (hi_tr - lo_tr) * t, 4)

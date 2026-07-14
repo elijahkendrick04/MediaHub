@@ -242,18 +242,25 @@ def _design_spec_system_prompt(archetypes: list[str], token_roles: list[str]) ->
         '  "accent_treatment": "brackets|stripe|badge|frame|minimal|ribbon|underline|'
         "diagonal_underline|thick_stripe|thin_stripe|double_stripe|side_rail|"
         'large_brackets|small_brackets|bracket_frame|corner_tabs|offset_badge",\n'
-        '  "photo_treatment": "cutout|duotone|halftone|vignette",\n'
+        '  "photo_treatment": "cutout|duotone|halftone|vignette|wash|sticker",\n'
         '  "logo_lockup": "full_horizontal|full_stacked|mono_light|mono_dark|icon",\n'
         '  "mood": "explosive|electric|calm|fierce|celebratory|stoic|precise|bold|triumphant|minimal",\n'
         '  "motion_intent": "fade_in|snap_in_then_settle|slide_up|scale_in|kinetic_type|count_up|static|bounce_in|flip_reveal|swirl|reveal_from_sides|cascade|rise|pop|drop_in",\n'
-        '  "text_effects": {"headline|result|kicker|event|meta": "none|shadow|outline|neon|gradient|extrude|curve"} (optional flourish — usually {} ),\n'
+        '  "text_effects": {"headline|result|kicker|event|meta": "none|shadow|lift|hollow|outline|splice|echo|glitch|neon|background|gradient|extrude|warp|curve"} (optional flourish — usually {} ),\n'
         '  "rationale": <one sentence: why this composition fits THIS result>\n'
         "}\n\n"
         "colour_roles values must be one of: " + ", ".join(token_roles) + ".\n"
         "text_effects is an optional flourish: leave it {} for most cards, and at "
-        "most add ONE slot (a loud headline neon/outline/gradient, or a curved "
-        "kicker) when the moment is genuinely big. The renderer auto-downgrades any "
-        "effect that would hurt legibility, so never reach for one to force drama.\n"
+        "most add ONE slot when the moment is genuinely big. Craft guide: "
+        "hollow/splice suit the heavy display faces only; background is the "
+        "highlight pill that keeps copy legible over a photo; echo adds speed "
+        "behind a result numeral; lift is the quiet photo-card shadow; glitch/neon "
+        "are loud electric moods; warp/curve are geometry, best on short kickers. "
+        "The renderer auto-downgrades any effect that would hurt legibility, so "
+        "never reach for one to force drama.\n"
+        "photo_treatment craft: wash unifies mismatched/phone photography into "
+        "one campaign look; sticker gives a cutout the die-cut poster edge "
+        "(cutout archetypes only); duotone is the full two-ink brand grade.\n"
         "Choose the archetype that fits the moment (a medal → spotlight; a standout "
         "time with no photo → big_number or minimal poster; a great photo → "
         "full-bleed or diagonal). Lead with the most newsworthy hero_stat. Pick "

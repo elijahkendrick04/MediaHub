@@ -22,7 +22,7 @@
   width: {{WIDTH}}px;
   height: {{HEIGHT}}px;
   overflow: hidden;
-  background: var(--mh-primary);
+  background: var(--mh-ground-gradient, var(--mh-primary));
   color: var(--mh-on-primary);
   font-family: 'Inter', system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
@@ -35,7 +35,7 @@
   z-index: 1;
   font-family: var(--mh-font-display, 'Anton', 'Bebas Neue', Impact, sans-serif);
   font-weight: 400; font-size: var(--mh-fit-mega-name-px, 300px);
-  line-height: 0.8; letter-spacing: -0.04em; text-transform: uppercase;
+  line-height: 0.8; letter-spacing: var(--mh-track-mega-name, -0.04em); text-transform: uppercase;
   color: var(--mh-on-primary); white-space: nowrap; opacity: 0.97;
 }
 

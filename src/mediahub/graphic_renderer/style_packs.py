@@ -1009,6 +1009,12 @@ def _accent_geometry_html(style: str, width: int, height: int, bold: bool) -> st
             f'<div style="position:absolute;right:{off}px;top:{off}px;width:{d}px;height:{d}px;'
             f'border:{weight}px solid {acc};border-radius:50%;opacity:{op};{z}"></div>'
         )
+    # C3 (Canva gap analysis): the two-stroke geometries paint their MINOR
+    # stroke in the visible second brand colour (--mh-secondary-vis, emitted by
+    # the role resolver, degrading to the accent for single-colour kits) — so a
+    # two-colour brand's whole palette shows up in the ornament, and a
+    # one-colour brand's card is byte-identical to the mono-accent render.
+    sec = "var(--mh-secondary-vis, var(--mh-accent))"
     if style == "double_rule":
         bar_h = max(4, int(height * 0.007 * mult))
         inset = int(width * 0.08)
@@ -1018,16 +1024,17 @@ def _accent_geometry_html(style: str, width: int, height: int, bold: bool) -> st
             f'<div style="position:absolute;left:{inset}px;right:{inset}px;bottom:{bottom}px;'
             f'height:{bar_h}px;background:{acc};{z}"></div>'
             f'<div style="position:absolute;left:{inset}px;right:{inset}px;bottom:{bottom + gap}px;'
-            f'height:{bar_h}px;background:{acc};opacity:0.55;{z}"></div>'
+            f'height:{bar_h}px;background:{sec};opacity:0.55;{z}"></div>'
         )
     if style == "dot_row":
         d = max(7, int(min(width, height) * 0.013 * mult))
         bottom = int(height * 0.065)
         gap = d * 2
         dots = "".join(
-            f'<span style="width:{d}px;height:{d}px;border-radius:50%;background:{acc};'
+            f'<span style="width:{d}px;height:{d}px;border-radius:50%;'
+            f"background:{acc if i % 2 == 0 else sec};"
             f'display:inline-block;"></span>'
-            for _ in range(6)
+            for i in range(6)
         )
         return (
             f'<div style="position:absolute;left:0;right:0;bottom:{bottom}px;display:flex;'

@@ -41,6 +41,7 @@ from concurrent.futures import TimeoutError as _FutureTimeout
 from contextlib import contextmanager
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Iterator, Optional
 
@@ -430,6 +431,14 @@ def darken(hex_colour: str, amount: float = 0.25) -> str:
 def lighten(hex_colour: str, amount: float = 0.25) -> str:
     r, g, b = _hex_to_rgb(hex_colour)
     return _rgb_to_hex((r + (255 - r) * amount, g + (255 - g) * amount, b + (255 - b) * amount))
+
+
+def _mix_hex(a: str, b: str, t: float) -> str:
+    """Blend ``t`` of hex colour ``b`` into hex colour ``a`` (sRGB lerp)."""
+    t = max(0.0, min(1.0, float(t)))
+    ar, ag, ab_ = _hex_to_rgb(a)
+    br, bg, bb = _hex_to_rgb(b)
+    return _rgb_to_hex((ar + (br - ar) * t, ag + (bg - ag) * t, ab_ + (bb - ab_) * t))
 
 
 def _encode_img_data_uri(p: Path) -> str:
@@ -1397,13 +1406,30 @@ def _build_logo_treatment(
     svg = getattr(brand_kit, "logo_svg", None)
     if svg and isinstance(svg, str) and svg.lstrip().startswith("<"):
         return svg, ""
-    # Text-mark fallback: club initials
+    # Text-mark fallback: club initials, rendered as a proper monogram chip.
+    # Bare unstyled initials in an img-sized logo box read as a stray glyph
+    # (a tiny floating "C"), so the fallback is an inline SVG ring + initials
+    # that scales exactly like the logo image it stands in for and inherits
+    # the lockup's own (already legible) text colour via currentColor.
     name = (
         getattr(brand_kit, "short_name", None) or getattr(brand_kit, "display_name", "") or "CLUB"
     )
-    parts = [w for w in str(name).replace("Swimming Club", "").split() if w]
+    generic = {"swimming", "club", "society", "team", "the", "of", "and"}
+    words = [w for w in str(name).split() if w]
+    parts = [w for w in words if w.lower() not in generic] or words
     initials = "".join(p[0].upper() for p in parts[:3]) or "CL"
-    return initials, ""
+    font_px = {1: 48, 2: 40, 3: 30}[len(initials)]
+    monogram = (
+        f'<svg viewBox="0 0 100 100" role="img" aria-label="{html_escape(name)} monogram" '
+        'style="height:100%;width:auto;display:block">'
+        '<circle cx="50" cy="50" r="46" fill="none" stroke="currentColor" '
+        'stroke-width="5" opacity="0.85"/>'
+        f'<text x="50" y="53" text-anchor="middle" dominant-baseline="central" '
+        f'font-family="Anton, \'Bebas Neue\', Arial, sans-serif" font-size="{font_px}" '
+        f'letter-spacing="1" fill="currentColor">{html_escape(initials)}</text>'
+        "</svg>"
+    )
+    return monogram, ""
 
 
 def _build_logo_block(brand_kit, logo_path: Optional[str | Path]) -> str:
@@ -3525,8 +3551,34 @@ def _rel_luminance(hex_colour: str) -> float:
 
 
 def _on_color(hex_colour: str) -> str:
-    """Black or white — whichever reads better as a foreground on ``hex_colour``."""
-    return "#0B0B0C" if _rel_luminance(hex_colour) > 0.42 else "#FFFFFF"
+    """The foreground ink for ``hex_colour`` — a brand-hue-tinted neutral (C2).
+
+    Canva-grade output never sets type in pure ``#000``/``#FFF``: the neutral
+    ink is tinted toward the ground's own hue (quietly — 7% / 97% lightness at
+    low saturation) so the card keeps its colour cast instead of greying out.
+    Legibility beats art: the tinted ink must read at least as well as AAA (or
+    as well as the pure ink would, whichever is the lower bar) or the old
+    binary black/white wins. Deterministic HLS maths, no invented hue — the
+    tint IS the ground's hue.
+    """
+    import colorsys
+
+    dark_ground = _rel_luminance(hex_colour) <= 0.42
+    pure = "#FFFFFF" if dark_ground else "#0B0B0C"
+    try:
+        r, g, b = _hex_to_rgb(hex_colour)
+    except Exception:
+        return pure
+    hue, _l, sat = colorsys.rgb_to_hls(r / 255.0, g / 255.0, b / 255.0)
+    if sat < 0.04:  # a genuinely neutral ground keeps the neutral ink
+        return pure
+    if dark_ground:
+        tr, tg, tb = colorsys.hls_to_rgb(hue, 0.97, 0.16)
+    else:
+        tr, tg, tb = colorsys.hls_to_rgb(hue, 0.07, 0.22)
+    cand = _rgb_to_hex((int(round(tr * 255)), int(round(tg * 255)), int(round(tb * 255))))
+    floor = min(7.0, _contrast_ratio(pure, hex_colour))
+    return cand if _contrast_ratio(cand, hex_colour) >= floor else pure
 
 
 def _contrast_ratio(c1: str, c2: str) -> float:
@@ -3594,6 +3646,39 @@ _MULTILINE_SURNAME_ARCHETYPES = frozenset(
 )
 _MULTILINE_RESULT_ARCHETYPES = frozenset({"big_number_dominant", "cornerstone_numeral"})
 
+# D3 (Canva gap analysis) — archetypes whose surname slot is single-line BY
+# DESIGN (band geometry, crawls, scorebug rows): the crush-triggered balanced
+# fit must not stack a second line into them. Everything else with a fitted
+# surname slot is balance-capable (see _surname_slot_capability).
+_BALANCE_OPT_OUT = frozenset(
+    {"ticker_strip", "marquee_crawl", "broadcast_scorebug", "scoreline_versus", "horizon_band"}
+)
+
+
+@lru_cache(maxsize=None)
+def _surname_slot_capability(archetype: str) -> str:
+    """Which fitted var an archetype's surname slot rides, or "" (D3).
+
+    A deterministic one-time template scan: the archetype can take a balanced
+    two-line surname only if it renders ``{{ATHLETE_SURNAME_DISPLAY}}`` in a
+    slot sized by one of the fitted name vars. The mega-name var wins when a
+    template uses both (the mega slot is the dominant one the balancer should
+    protect).
+    """
+    try:
+        from mediahub.graphic_renderer import archetypes as _archetypes
+
+        text = (_archetypes.V2_DIR / f"{archetype}.html").read_text(encoding="utf-8")
+    except Exception:
+        return ""
+    if "{{ATHLETE_SURNAME_DISPLAY}}" not in text:
+        return ""
+    if "--mh-fit-mega-name-px" in text:
+        return "--mh-fit-mega-name-px"
+    if "--mh-fit-surname-px" in text:
+        return "--mh-fit-surname-px"
+    return ""
+
 
 def _mh_role_vars(palette: dict, brand_kit=None) -> dict[str, str]:
     """Map the club's CANONICAL brand colours to the v2 ``--mh-*`` role tokens.
@@ -3646,7 +3731,29 @@ def _mh_role_vars(palette: dict, brand_kit=None) -> dict[str, str]:
     surface = darken(primary, 0.50)
     on_primary = _on_color(primary)
     on_surface = _on_color(surface)
-    outline = "rgba(255,255,255,0.20)" if on_primary == "#FFFFFF" else "rgba(0,0,0,0.20)"
+    # Ground luminance (not ink equality) decides the outline pole — the C2
+    # tinted inks are near-white/near-black, no longer literal #FFFFFF.
+    dark_ground = _rel_luminance(primary) <= 0.42
+    outline = "rgba(255,255,255,0.20)" if dark_ground else "rgba(0,0,0,0.20)"
+    # C1 (Canva gap analysis) — two derived surface tiers so layouts can build
+    # container/lift layering from the brand seed instead of one flat fill:
+    # surface-2 sits between ground and the deep surface; lift is a quiet
+    # raise of the ground for chip/panel fills. Both same-hue brand maths.
+    surface_2 = darken(primary, 0.30)
+    lift = lighten(primary, 0.10) if dark_ground else darken(primary, 0.08)
+    # C2 — the secondary ink for meta/supporting text: the on-ink pulled 30%
+    # toward the ground, replacing per-layout `opacity: 0.7`-ish greys with a
+    # single tokenised register.
+    ink_secondary = _mix_hex(on_primary, primary, 0.30)
+    # C3 — the VISIBLE second brand colour for the supporting decoration
+    # register (minor rules, alternate dots). The raw secondary of many kits
+    # sits in the ground's own luminance band (navy on navy) where a painted
+    # rule would vanish, so the token degrades to the accent whenever the
+    # secondary lacks real separation from the ground — two-colour ornament
+    # when the brand genuinely has two colours, mono-accent otherwise.
+    secondary_vis = (
+        secondary if abs(_rel_luminance(secondary) - _rel_luminance(primary)) >= 0.12 else accent
+    )
     return {
         "--mh-primary": primary,
         "--mh-secondary": secondary,
@@ -3655,6 +3762,10 @@ def _mh_role_vars(palette: dict, brand_kit=None) -> dict[str, str]:
         "--mh-on-primary": on_primary,
         "--mh-on-surface": on_surface,
         "--mh-outline": outline,
+        "--mh-surface-2": surface_2,
+        "--mh-lift": lift,
+        "--mh-ink-secondary": ink_secondary,
+        "--mh-secondary-vis": secondary_vis,
     }
 
 
@@ -3867,13 +3978,72 @@ def _halftone_mask_tile_uri(tile_px: int) -> str:
     return "data:image/svg+xml;utf8," + svg
 
 
-def _v2_photo_treatment_assets(brief, root_vars: dict[str, str]) -> tuple[str, str]:
-    """``(css, defs_html)`` for the card's requested photo grade (M10).
+def _wash_defs_svg(tint_hex: str, mix: float, saturation: float = 0.4) -> str:
+    """A zero-size SVG carrying the brand colour-wash filter (C5).
 
-    Only ``duotone`` / ``halftone`` produce output — every other treatment
-    returns ``("", "")`` so untreated cards are byte-identical. Both grades are
-    parameterised by the card's resolved ``--mh-*`` roles so the same maths can
-    be mirrored 1:1 into the motion side's photo_filters.tsx.
+    The unification recipe between "raw photo" and "full duotone": partially
+    desaturate, then mix ``mix`` of the deep brand tint into the visible
+    pixels (feComposite arithmetic — alpha passes through unchanged, so a
+    cutout's silhouette is untouched). Mixed-quality club photography washed
+    through the same brand tint reads as one commissioned campaign.
+    """
+    m = max(0.0, min(0.6, float(mix)))
+    return (
+        '<svg width="0" height="0" style="position:absolute" aria-hidden="true">'
+        '<filter id="mh-wash" color-interpolation-filters="sRGB">'
+        f'<feColorMatrix type="saturate" values="{saturation:.2f}" result="mh-w-desat"/>'
+        f'<feFlood flood-color="{tint_hex}" result="mh-w-tint"/>'
+        '<feComposite in="mh-w-tint" in2="SourceAlpha" operator="in" result="mh-w-clip"/>'
+        f'<feComposite in="mh-w-desat" in2="mh-w-clip" operator="arithmetic" '
+        f'k1="0" k2="{1 - m:.3f}" k3="{m:.3f}" k4="0"/>'
+        "</filter></svg>"
+    )
+
+
+def _sticker_outline_css(width: int, height: int, strength: float) -> str:
+    """The die-cut sticker contour for a cutout subject (B5).
+
+    Eight stacked zero-blur drop-shadows trace the alpha silhouette in the
+    card's on-ground ink — the classic Canva/Bleacher-Report cutout edge,
+    which also hides rembg matting fringe. Pure CSS filter maths (the same
+    stack is expressible in the motion grade), radius scaled by canvas and
+    ``decoration_strength``.
+    """
+    s = max(0.0, min(1.0, strength))
+    r = max(3, int(round(min(width, height) * (0.003 + 0.004 * s))))
+    d = max(2, int(round(r * 0.7071)))
+    ink = "var(--mh-on-primary)"
+    shadows = " ".join(
+        f"drop-shadow({dx}px {dy}px 0 {ink})"
+        for dx, dy in (
+            (r, 0),
+            (-r, 0),
+            (0, r),
+            (0, -r),
+            (d, d),
+            (d, -d),
+            (-d, d),
+            (-d, -d),
+        )
+    )
+    return (
+        "\n/* --- B5 die-cut sticker contour --- */\n"
+        f"img.athlete-cutout {{ filter: {shadows}; }}\n"
+    )
+
+
+def _v2_photo_treatment_assets(
+    brief, root_vars: dict[str, str], width: int = 1080, height: int = 1350, cutout_ok: bool = True
+) -> tuple[str, str]:
+    """``(css, defs_html)`` for the card's requested photo grade (M10 + B5/C5).
+
+    Only ``duotone`` / ``halftone`` / ``wash`` / ``sticker`` produce output —
+    every other treatment returns ``("", "")`` so untreated cards are
+    byte-identical. All grades are parameterised by the card's resolved
+    ``--mh-*`` roles so the same maths can be mirrored into the motion side's
+    photo_filters.tsx. ``sticker`` additionally requires a real alpha
+    silhouette (``cutout_ok``) — tracing a full-bleed rectangle would paint a
+    box halo, so a photo-mode / matte-rejected card honestly skips it.
     """
     treatment = (getattr(brief, "photo_treatment", "") or "").strip().lower()
     if treatment == "duotone":
@@ -3895,6 +4065,20 @@ def _v2_photo_treatment_assets(brief, root_vars: dict[str, str]) -> tuple[str, s
             f'  mask-image: url("{uri}"); mask-size: {tile}px {tile}px; }}\n'
         )
         return css, ""
+    if treatment == "wash":
+        strength = float(getattr(brief, "decoration_strength", 0.5) or 0.5)
+        mix = 0.18 + 0.24 * max(0.0, min(1.0, strength))  # 0.18–0.42 tint mix
+        tint = darken(root_vars.get("--mh-primary", "#0A2540"), 0.20)
+        css = (
+            "\n/* --- C5 brand colour-wash (campaign unifier) --- */\n"
+            "img.athlete-cutout { filter: url(#mh-wash); }\n"
+        )
+        return css, _wash_defs_svg(tint, mix)
+    if treatment == "sticker":
+        if not cutout_ok:
+            return "", ""
+        strength = float(getattr(brief, "decoration_strength", 0.5) or 0.5)
+        return _sticker_outline_css(width, height, strength), ""
     return "", ""
 
 
@@ -4087,11 +4271,14 @@ _LAYERED_CUTOUT_ARCHETYPES = frozenset({"poster_name_behind", "band_break"})
 
 
 def _cutout_depth_filter(root_vars: dict[str, str], strength: float) -> str:
-    """The role-coloured depth treatment for a layered cutout (M12).
+    """The role-coloured depth treatment for a layered cutout (M12 + B4).
 
-    A soft dark drop shadow for lift plus a faint accent outer glow, both
-    scaled by ``decoration_strength`` — deterministic colour maths on the
-    card's own resolved roles, never a hardcoded hex.
+    A tight contact shadow that seats the subject, a soft key shadow for
+    lift, and a faint accent outer glow — all scaled by
+    ``decoration_strength`` and painted in the card's hue-tinted shadow
+    colour (elevation.shadow_rgb on the resolved ground), never neutral
+    black and never a hardcoded hex. The two-layer dark contour is what
+    stops a cutout reading as a pasted collage piece.
     """
     s = max(0.0, min(1.0, strength))
     accent = root_vars.get("--mh-accent", "#FFFFFF")
@@ -4099,12 +4286,16 @@ def _cutout_depth_filter(root_vars: dict[str, str], strength: float) -> str:
         ar, ag, ab = _hex_to_rgb(accent)
     except Exception:
         ar, ag, ab = (255, 255, 255)
+    from mediahub.graphic_renderer.elevation import shadow_rgb as _shadow_rgb
+
+    srgb = _shadow_rgb(root_vars.get("--mh-primary", "#0A2540"))
     dy = int(round(10 + 14 * s))
     blur = int(round(24 + 30 * s))
     glow = int(round(8 + 22 * s))
     glow_a = 0.18 + 0.20 * s
     return (
-        f"drop-shadow(0 {dy}px {blur}px rgba(0,0,0,0.45)) "
+        f"drop-shadow(0 {dy}px {blur}px rgba({srgb},0.45)) "
+        f"drop-shadow(0 2px 5px rgba({srgb},0.38)) "
         f"drop-shadow(0 0 {glow}px rgba({ar},{ag},{ab},{glow_a:.2f}))"
     )
 
@@ -4317,6 +4508,58 @@ def _apply_text_effects_to_repl(repl: dict, effects: dict, root_vars: dict) -> N
             repl[key] = _fx.apply_to_value(value, res)
 
 
+# --------------------------------------------------------------------------- #
+# A5 (Canva gap analysis) — numeric separator kerning for the result slots.
+#
+# The result numerals set in JetBrains Mono with tabular figures give the
+# decimal point / colon a FULL glyph cell, so every time reads "58 . 34" with
+# a hole around the separator — a kerning tell no professionally-set sports
+# graphic shows. The fix is deterministic micro-typography: each separator
+# *between two digits* is wrapped in a narrow centred cell (0.55ch), and the
+# fitted size is scaled up by the recovered width so the numeral gets tighter
+# AND larger. Non-numeric values ("DQ", "1st") carry no intra-digit separator
+# and are untouched, keeping those cards byte-identical.
+# --------------------------------------------------------------------------- #
+
+_NUM_SEP_RE = re.compile(r"(?<=\d)([.:])(?=\d)")
+_TAG_SPLIT_RE = re.compile(r"(<[^>]+>)")
+
+# The kern is applied as symmetric negative margins on an INLINE span (an
+# inline-block cell would sit in its own client rect and read as a second
+# "line" to DOM line-measurement, and resets surrounding letter-spacing).
+# 0.10em per side pulls the neighbouring digits ~1/3 of a mono cell closer;
+# the upscale credits deliberately LESS than the pulled width (0.30 cells per
+# separator) so the enlarged numeral always still fits slots that carry their
+# own negative tracking.
+_SEP_RECOVERED_CELLS = 0.30
+_SEP_CSS = "\n.mh-sep{margin:0 -0.10em;}\n"
+
+
+def _kern_numeric_seps(value_html: str) -> tuple[str, int]:
+    """Wrap intra-numeric ``.``/``:`` in ``value_html`` in narrow kern cells.
+
+    Operates only on text *between* tags so an effect span's inline style
+    (which legitimately contains "0.16em") can never be corrupted; returns the
+    processed html and the number of separators wrapped (0 ⇒ untouched input,
+    so callers can keep no-separator cards byte-identical).
+    """
+    if not value_html or "<svg" in value_html:
+        return value_html, 0
+    count = 0
+
+    def _wrap(m: "re.Match[str]") -> str:
+        nonlocal count
+        count += 1
+        return f'<span class="mh-sep">{m.group(1)}</span>'
+
+    parts = _TAG_SPLIT_RE.split(value_html)
+    for i, part in enumerate(parts):
+        if part.startswith("<"):
+            continue
+        parts[i] = _NUM_SEP_RE.sub(_wrap, part)
+    return ("".join(parts), count) if count else (value_html, 0)
+
+
 def _fill_v2_archetype(
     brief,
     width,
@@ -4371,6 +4614,40 @@ def _fill_v2_archetype(
     # tint (the metal IS the information, gated the same way). One resolver,
     # shared with the Tier B pool's compliance scoring.
     root_vars = resolved_role_vars_for_brief(brief, brand_kit)
+
+    # B1/B2 (Canva gap analysis) — the elevation system: per-card layered
+    # shadow tokens (--mh-elev-N + drop twins) in a single implied light, all
+    # painted in --mh-shadow-rgb, a hue-tinted dark derived from the resolved
+    # ground so shadows carry the brand's cast instead of greying the card.
+    # Scaled with the canvas short edge so every cut sits in the same
+    # relative light. Deterministic maths on the resolved roles.
+    from mediahub.graphic_renderer.elevation import elevation_vars as _elevation_vars
+
+    root_vars.update(
+        _elevation_vars(root_vars.get("--mh-primary", "#0A2540"), scale=min(width, height) / 1080)
+    )
+
+    # B3 (Canva gap analysis) — surfaces read as lit material, not flat hex:
+    # a 4.5% lit→shaded vertical micro-gradient on the brand ground, emitted
+    # only when the headline ink still clears the APCA gate against the
+    # SHADED (worst-case) endpoint. Layout roots consume it as
+    # ``background: var(--mh-ground-gradient, var(--mh-primary))`` so a
+    # gate-failing card falls back to the flat fill it always had.
+    _ground_hex = root_vars.get("--mh-primary", "#0A2540")
+    _ink_hex = root_vars.get("--mh-on-primary", "#FFFFFF")
+    try:
+        _lit = lighten(_ground_hex, 0.045)
+        _shaded = darken(_ground_hex, 0.045)
+        from mediahub.quality.compliance import is_legible as _is_legible_ink
+
+        _grad_ok = bool(_is_legible_ink(_ink_hex, _shaded, min_lc=45.0))
+    except Exception:
+        _lit = _shaded = ""
+        _grad_ok = False
+    if _grad_ok and _lit and _shaded:
+        root_vars["--mh-ground-gradient"] = (
+            f"linear-gradient(180deg, {_lit} 0%, {_ground_hex} 52%, {_shaded} 100%)"
+        )
     # Size the hero slots SINGLE-LINE: the v2 layouts render name/result with
     # `white-space: nowrap`, so a long or multi-word surname ("Van Dyk") must
     # shrink rather than overflow. The per-layout defaults handle the short case.
@@ -4378,16 +4655,25 @@ def _fill_v2_archetype(
     # fractions (byte-identical renders); landscape families give the hero more
     # of the short edge and less of the abundant width.
     _boxes = _v2_fit_boxes(width, height)
+    # D1 (Canva gap analysis) — fit the hero name slots for the face the
+    # typography pair ACTUALLY binds to --mh-font-display, not always Anton.
+    # Bowlby One runs ~60% wider than Anton (a real overflow when fitted with
+    # Anton's metrics); Bebas Neue runs narrower (an under-filled hero).
+    # autofit carries measured per-family scales for all three display faces.
+    _display_family = (
+        _display_font_stack_for_pair(getattr(brief, "typography_pair", "") or "") or "Anton"
+    )
     _sw, _sh, _smin, _smax = _boxes["surname"]
-    root_vars["--mh-fit-surname-px"] = "%dpx" % _fit_one_line_px(
+    fit_surname_px = _fit_one_line_px(
         surname or "X",
         width * _sw,
         height * _sh,
-        font_family="Anton",
+        font_family=_display_family,
         weight=400,
         min_px=_smin,
         max_px=_smax,
     )
+    root_vars["--mh-fit-surname-px"] = "%dpx" % fit_surname_px
     _rw, _rh, _rmin, _rmax = _boxes["result"]
     fit_result_px = _fit_one_line_px(
         result or "X",
@@ -4413,15 +4699,29 @@ def _fill_v2_archetype(
     )
     root_vars["--mh-fit-mega-result-px"] = "%dpx" % fit_mega_result_px
     _nw, _nh, _nmin, _nmax = _boxes["mega_name"]
-    root_vars["--mh-fit-mega-name-px"] = "%dpx" % _fit_one_line_px(
+    fit_mega_name_px = _fit_one_line_px(
         surname or "X",
         width * _nw,
         height * _nh,
-        font_family="Anton",
+        font_family=_display_family,
         weight=400,
         min_px=_nmin,
         max_px=_nmax,
     )
+    root_vars["--mh-fit-mega-name-px"] = "%dpx" % fit_mega_name_px
+
+    # D2 (Canva gap analysis) — size-dependent optical tracking for the fitted
+    # hero slots: large display caps tighten (loose big caps fall apart into
+    # letters; PNG compression exaggerates it), emitted as vars the layouts
+    # consume with their historic constants as fallbacks. Negative-only ramps,
+    # so a tracked line is always narrower than the fitted estimate — the safe
+    # direction by construction.
+    from mediahub.graphic_renderer.autofit import tracking_for_px as _tracking_for_px
+
+    root_vars["--mh-track-surname"] = "%.4fem" % _tracking_for_px(fit_surname_px, "display")
+    root_vars["--mh-track-mega-name"] = "%.4fem" % _tracking_for_px(fit_mega_name_px, "display")
+    root_vars["--mh-track-result"] = "%.4fem" % _tracking_for_px(fit_result_px, "numeral")
+    root_vars["--mh-track-mega-result"] = "%.4fem" % _tracking_for_px(fit_mega_result_px, "numeral")
     # G1.12 — Multi-line hero & split-result fitting. The archetypes below carry
     # the surname / result in ONE dominant autofit slot. When a compound or
     # double-barrelled surname, or a split-time result ("1:45.23 / 50.12"), will
@@ -4435,19 +4735,36 @@ def _fill_v2_archetype(
     from mediahub.graphic_renderer.autofit import fit_balanced
 
     archetype = getattr(brief, "layout_template", "") or ""
+    # D3 (Canva gap analysis) — balanced wrapping is a *capability with a
+    # trigger*, not an allowlist. The legacy allowlist keeps its
+    # always-attempt behaviour (byte-identical); every OTHER archetype whose
+    # template actually renders the surname in a fitted slot gets the same
+    # balanced fit whenever the single-line fit has been crushed below 55% of
+    # its cap — a long compound surname now becomes a two-line poster headline
+    # instead of a thin strip, everywhere. Single-line-by-design archetypes
+    # opt out via _BALANCE_OPT_OUT.
+    var = ""
     if surname and archetype in _MULTILINE_SURNAME_ARCHETYPES:
-        if archetype == "split_diagonal_hero":
-            var = "--mh-fit-surname-px"
+        var = (
+            "--mh-fit-surname-px" if archetype == "split_diagonal_hero" else "--mh-fit-mega-name-px"
+        )
+    elif surname and archetype and archetype not in _BALANCE_OPT_OUT:
+        cand = _surname_slot_capability(archetype)
+        if cand == "--mh-fit-mega-name-px" and fit_mega_name_px < 0.55 * _nmax:
+            var = cand
+        elif cand == "--mh-fit-surname-px" and fit_surname_px < 0.55 * _smax:
+            var = cand
+    if var:
+        if var == "--mh-fit-surname-px":
             _bw, _bh, _bmin, _bmax = _boxes["surname"]
-        else:  # mega_surname_bleed / minimal_type_poster — the mega-name slot
-            var = "--mh-fit-mega-name-px"
+        else:
             _bw, _bh, _bmin, _bmax = _boxes["mega_name"]
         size, lines = fit_balanced(
             surname,
             width * _bw,
             height * _bh,
             max_lines=2,
-            font_family="Anton",
+            font_family=_display_family,
             weight=400,
             min_px=_bmin,
             max_px=_bmax,
@@ -4527,12 +4844,18 @@ def _fill_v2_archetype(
                 " transform-origin: var(--mh-photo-pos, center 28%%); }\n" % _intent
             )
 
-    # M10 — true brand duotone / real halftone. CSS rides BASE_CSS; the SVG
-    # filter defs ride the {{ACCENT_DECORATION}} slot (inside the archetype
-    # root, zero-size). Untreated cards emit neither.
+    # M10 + B5/C5 — true brand duotone / real halftone / brand wash / sticker
+    # contour. CSS rides BASE_CSS; the SVG filter defs ride the
+    # {{ACCENT_DECORATION}} slot (inside the archetype root, zero-size).
+    # Untreated cards emit neither. The sticker contour needs a real alpha
+    # silhouette, so a photo-mode archetype or a matte-gate flat fallback
+    # honestly skips it.
     treatment_css, treatment_defs = ("", "")
     if athlete_path:
-        treatment_css, treatment_defs = _v2_photo_treatment_assets(brief, root_vars)
+        _cutout_ok = (getattr(brief, "photo_mode", "") or "") == "cutout" and not photo_flat
+        treatment_css, treatment_defs = _v2_photo_treatment_assets(
+            brief, root_vars, width, height, _cutout_ok
+        )
     if treatment_css:
         extra_css += treatment_css
     if treatment_defs:
@@ -4576,6 +4899,31 @@ def _fill_v2_archetype(
     effects = getattr(brief, "text_effects", None) or {}
     if effects:
         _apply_text_effects_to_repl(repl, effects, root_vars)
+
+    # A5 (Canva gap analysis) — kern the result numeral's separators and spend
+    # the recovered width on a larger fit. Runs after effects so an effect span
+    # is processed tag-safely (and a curve SVG slot is skipped entirely). The
+    # upscale is skipped wherever it could reintroduce overflow: a balanced
+    # two-line result (per-line widths already govern), a slot whose variable
+    # axis was traded down (the fit had already bottomed out), or a fit at its
+    # floor.
+    kerned, n_sep = _kern_numeric_seps(repl.get("RESULT_VALUE") or "")
+    if n_sep:
+        repl["RESULT_VALUE"] = kerned
+        extra_css += _SEP_CSS
+        n_chars = len(result or "")
+        if n_chars > n_sep:
+            factor = n_chars / (n_chars - _SEP_RECOVERED_CELLS * n_sep)
+            if "<br>" not in kerned:
+                if not result_axes.css and fit_result_px > _rmin:
+                    root_vars["--mh-fit-result-px"] = "%dpx" % min(
+                        int(_rmax), int(round(fit_result_px * factor))
+                    )
+                mega_axes_css = root_vars.get("--mh-axes-mega-result", "")
+                if not mega_axes_css and fit_mega_result_px > _mmin:
+                    root_vars["--mh-fit-mega-result-px"] = "%dpx" % min(
+                        int(_mmax), int(round(fit_mega_result_px * factor))
+                    )
 
     # Typography pair → display/headline face (still↔motion parity). The v2
     # archetypes read the headline font as `var(--mh-font-display, 'Anton'…)`,

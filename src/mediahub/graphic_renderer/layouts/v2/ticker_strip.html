@@ -46,7 +46,7 @@
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  background: var(--mh-primary);
+  background: var(--mh-ground-gradient, var(--mh-primary));
   color: var(--mh-on-primary);
   font-family: 'Inter', system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
@@ -124,7 +124,7 @@
   /* full-canvas autofit var used directly: this band spans the whole
      canvas width, which is exactly what the renderer sizes the var for. */
   font-size: var(--mh-fit-surname-px, 132px);
-  line-height: 0.84; letter-spacing: -0.01em; text-transform: uppercase;
+  line-height: 0.84; letter-spacing: var(--mh-track-surname, -0.01em); text-transform: uppercase;
   color: var(--mh-on-primary);
   white-space: normal; overflow-wrap: anywhere; word-break: break-word;
   max-width: 100%;

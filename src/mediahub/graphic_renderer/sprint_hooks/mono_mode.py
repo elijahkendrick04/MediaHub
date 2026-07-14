@@ -226,6 +226,15 @@ _ROLE_DECL_RE = re.compile(
     r"\s*:\s*[^;}]+"
 )
 
+# The DERIVED colour tokens (Canva gap analysis B/C waves) embed brand-derived
+# hexes in their values — the B3 ground micro-gradient literally carries
+# lit/shaded stops of the brand primary — so a mono card must rewrite them too
+# or the brand colour leaks straight past the role remap.
+_DERIVED_DECL_RE = re.compile(
+    r"(?<![\w-])(--mh-(?:ground-gradient|surface-2|lift|ink-secondary|secondary-vis|shadow-rgb))"
+    r"\s*:\s*[^;}]+"
+)
+
 
 def _rewrite_role_decls(html: str, ramp: dict[str, str]) -> str:
     def _sub(m: "re.Match[str]") -> str:
@@ -233,7 +242,22 @@ def _rewrite_role_decls(html: str, ramp: dict[str, str]) -> str:
         repl = ramp.get(name)
         return f"{name}:{repl}" if repl is not None else m.group(0)
 
-    return _ROLE_DECL_RE.sub(_sub, html)
+    html = _ROLE_DECL_RE.sub(_sub, html)
+    derived = {
+        # A flat mono ground stands in for the micro-gradient (a colour is a
+        # valid background value, so the var() consumers are unaffected).
+        "--mh-ground-gradient": ramp.get("--mh-primary", "#111111"),
+        "--mh-surface-2": ramp.get("--mh-surface", "#181818"),
+        "--mh-lift": ramp.get("--mh-surface", "#181818"),
+        "--mh-ink-secondary": ramp.get("--mh-secondary", "#B4B4B4"),
+        "--mh-secondary-vis": ramp.get("--mh-secondary", "#B4B4B4"),
+        "--mh-shadow-rgb": "10,10,10",
+    }
+
+    def _sub_derived(m: "re.Match[str]") -> str:
+        return f"{m.group(1)}:{derived[m.group(1)]}"
+
+    return _DERIVED_DECL_RE.sub(_sub_derived, html)
 
 
 def _mono_contrast() -> float:

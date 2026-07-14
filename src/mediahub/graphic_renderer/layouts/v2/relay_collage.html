@@ -43,7 +43,7 @@
   height: {{HEIGHT}}px;
   overflow: hidden;
   isolation: isolate;
-  background: var(--mh-primary);
+  background: var(--mh-ground-gradient, var(--mh-primary));
   color: var(--mh-on-primary);
   font-family: 'Inter', system-ui, -apple-system, sans-serif;
   -webkit-font-smoothing: antialiased;
@@ -133,7 +133,7 @@
   padding: 0 var(--pad);
   background: var(--mh-accent);
   color: var(--mh-primary);
-  box-shadow: 0 16px 40px rgba(0,0,0,0.32);
+  box-shadow: var(--mh-elev-4, 0 16px 40px rgba(0,0,0,0.32));
 }
 .rc__first {
   font-family: 'Space Grotesk', 'Inter', sans-serif;
@@ -145,7 +145,7 @@
   font-family: var(--mh-font-display, 'Anton', 'Bebas Neue', Impact, sans-serif);
   font-weight: 400;
   font-size: var(--mh-fit-surname-px, 116px);
-  line-height: 0.9; letter-spacing: -0.02em;
+  line-height: 0.9; letter-spacing: var(--mh-track-surname, -0.02em);
   text-transform: uppercase;
   overflow-wrap: anywhere;
 }
@@ -182,7 +182,7 @@
   font-weight: 700;
   font-size: var(--mh-fit-result-px, 88px);
   font-variation-settings: var(--mh-axes-result, normal);
-  line-height: 0.9; letter-spacing: -0.02em;
+  line-height: 0.9; letter-spacing: var(--mh-track-result, -0.02em);
   white-space: nowrap; color: var(--mh-accent); text-align: right;
 }
 .rc__result:empty { display: none; }
