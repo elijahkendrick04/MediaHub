@@ -24,8 +24,9 @@ ASCII diagram of how the live packages fit together.
                  └─────┐  ┌────┘     ┌─────────┘
                        ▼  ▼          ▼
                  ┌──────────────────────────┐
-                 │  recognition.ranker      │
-                 │  (sport-agnostic)        │
+                 │  ranking (pipeline_v4):  │
+                 │  V3 rank_cards → buckets │
+                 │  V5 rank_achievements    │
                  └────────────┬─────────────┘
                               │
              ┌────────────────┼─────────────────┐
