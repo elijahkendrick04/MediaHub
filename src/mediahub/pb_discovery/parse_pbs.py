@@ -131,12 +131,18 @@ def _detect_course(text: str) -> Optional[str]:
     return None
 
 
+def _detect_stroke_match(text: str) -> tuple[Optional[str], Optional[re.Match]]:
+    """Return ``(canonical stroke, match)`` for the first stroke pattern that hits."""
+    for pattern, canonical in _STROKE_PATTERNS:
+        m = pattern.search(text)
+        if m:
+            return canonical, m
+    return None, None
+
+
 def _detect_stroke(text: str) -> Optional[str]:
     """Detect stroke name from text."""
-    for pattern, canonical in _STROKE_PATTERNS:
-        if pattern.search(text):
-            return canonical
-    return None
+    return _detect_stroke_match(text)[0]
 
 
 def _normalise_time(t: str) -> str:
@@ -156,6 +162,22 @@ def _is_relay_row(text: str) -> bool:
     (see ``_RELAY_RE``).
     """
     return bool(_RELAY_RE.search(text or ""))
+
+
+def _event_is_relay(text: str, dist_m: "re.Match", stroke_m: "re.Match") -> bool:
+    """Relay check scoped to the event descriptor within a heuristic row/line.
+
+    The heuristic scans a whole row (event + time + course + date + meet), so an
+    unscoped relay check lets a meet/venue name like "Freestyle Relay Cup" or
+    "City 400m Relay Gala" drop a real individual PB (F01 over-match). Restrict
+    the check to the span covering the event's first distance + stroke, widened
+    just enough to catch an adjacent "N x" leg count or a trailing "Relay" —
+    mirroring the interpreter path, which only ever inspects the event header.
+    """
+    lo = min(dist_m.start(), stroke_m.start())
+    hi = max(dist_m.end(), stroke_m.end())
+    # 6 chars back covers an "N x " / "N × " leg count; 8 forward covers " Relay(s)".
+    return _is_relay_row(text[max(0, lo - 6) : hi + 8])
 
 
 def _extract_times(text: str) -> list[str]:
@@ -182,27 +204,28 @@ def _heuristic_extract_pbs(page: ProfilePage) -> list[PBRow]:
     # fallback for rows that carry no marker of their own, and is None when the
     # page mixes long- and short-course sections so a marker-bearing row keeps
     # its own course instead of being flattened to the page's first marker (F09).
-    # Known limitation (heuristic path only): a bare "SC"/"LC" club suffix in a
-    # row text (e.g. "Anytown SC") is indistinguishable from a course token, so a
-    # course-less row on a page that also has a stray opposite marker can resolve
-    # to the club's course. Tolerated over risking the per-row win: the primary
-    # interpreter path is immune (it reads only event headers, not the meet/club),
-    # and the failure is a safe false-negative, never a fabricated PB.
+    # Known limitation: a bare "SC"/"LC" club suffix in a row text (e.g.
+    # "Anytown SC") is indistinguishable from a course token, so a course-less
+    # row on a page that also has a stray opposite marker can resolve to the
+    # club's course. Tolerated over risking the per-row win: the failure is a
+    # safe false-negative, never a fabricated PB. The interpreter path is immune
+    # in practice (it reads event section headers, not swim/meet rows) unless a
+    # header itself embeds a club abbreviation — rare in results-file headers.
     page_course = _detect_course(page.text)
 
     # Try extracting from tables first (more structured)
     for table in page.tables:
         for row in table:
             row_text = " ".join(row)
-            if _is_relay_row(row_text):
-                continue  # relay leg — not an individual-event PB (F01)
             time_matches = _extract_times(row_text)
             if not time_matches:
                 continue
             # Detect event components
             dist_m = _DISTANCE_RE.search(row_text)
-            stroke = _detect_stroke(row_text)
+            stroke, stroke_m = _detect_stroke_match(row_text)
             if dist_m and stroke:
+                if _event_is_relay(row_text, dist_m, stroke_m):
+                    continue  # relay leg — not an individual-event PB (F01)
                 event = f"{dist_m.group(1)}m {stroke}"
                 date_m = _DATE_RE.search(row_text)
                 rows.append(
@@ -219,14 +242,14 @@ def _heuristic_extract_pbs(page: ProfilePage) -> list[PBRow]:
     if not rows:
         lines = page.text.split("\n")
         for line in lines:
-            if _is_relay_row(line):
-                continue  # relay leg — not an individual-event PB (F01)
             time_matches = _extract_times(line)
             if not time_matches:
                 continue
             dist_m = _DISTANCE_RE.search(line)
-            stroke = _detect_stroke(line)
+            stroke, stroke_m = _detect_stroke_match(line)
             if dist_m and stroke:
+                if _event_is_relay(line, dist_m, stroke_m):
+                    continue  # relay leg — not an individual-event PB (F01)
                 event = f"{dist_m.group(1)}m {stroke}"
                 date_m = _DATE_RE.search(line)
                 rows.append(

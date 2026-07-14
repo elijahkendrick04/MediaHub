@@ -59,10 +59,15 @@ class TestF01RelayRejection:
             ("Mixed 4 x 50m Medley Relay 1:52.33", True),
             ("100m Freestyle 58.90", False),  # individual — must survive
             ("200m Individual Medley 2:20.10", False),  # 'Medley' alone is not a relay
-            # A meet/venue name containing "relay" must NOT flag an individual row:
-            # "relay" here is not adjacent to the event's stroke/distance.
+            # A bare meet/venue name containing "relay" must NOT flag an
+            # individual row: "relay" here is not adjacent to a stroke/distance.
             ("100m Freestyle 58.21 LC 15/03/2024 City of Manchester Relays", False),
             ("50m Freestyle 24.10 Summer 2024 Relays", False),
+            # The "N x DIST" leg count must never false-positive on individual
+            # rows (event / time / date / course digits do not form "\d x \d").
+            ("100m Freestyle 58.90 15/03/2024", False),
+            ("50m Backstroke 31.45 SC", False),
+            ("4x100 3:45.00", True),  # …but a real bare leg count is still a relay
         ],
     )
     def test_is_relay_row(self, text, is_relay):
@@ -85,6 +90,29 @@ class TestF01RelayRejection:
         got = {r.event: r.time_canonical for r in rows}
         assert got.get("100m Freestyle") == "58.21"
         assert got.get("200m Freestyle") == "2:05.43"
+
+    def test_qualified_relay_meet_name_does_not_drop_individual_pb(self):
+        # Deeper adversarial finding: a *stroke/distance-qualified* relay token in
+        # a Meet/venue column ("Freestyle Relay Cup", "City 400m Relay Gala")
+        # trips a whole-row relay check even though the row IS an individual swim.
+        # The relay guard is scoped to the event descriptor, so both PBs survive.
+        page = _page(
+            tables=[
+                [
+                    ["Event", "Time", "Course", "Date", "Meet"],
+                    ["100m Freestyle", "58.21", "LC", "15/03/2024", "Freestyle Relay Cup"],
+                    ["200m Backstroke", "2:18.90", "LC", "10/02/2024", "City 400m Relay Gala"],
+                ]
+            ]
+        )
+        rows = _heuristic_extract_pbs(page)
+        got = {r.event: r.time_canonical for r in rows}
+        assert got == {"100m Freestyle": "58.21", "200m Backstroke": "2:18.90"}
+
+    def test_qualified_relay_meet_name_freetext(self):
+        page = _page(text="100m Butterfly 1:02.30 Medley Relay Open 2024\n")
+        rows = _heuristic_extract_pbs(page)
+        assert any(r.event == "100m Butterfly" and r.time_canonical == "1:02.30" for r in rows)
 
     def test_heuristic_table_drops_relay_keeps_individual(self):
         page = _page(
@@ -178,6 +206,79 @@ class TestF09PerRowCourse:
         rows = _heuristic_extract_pbs(page)
         assert rows and rows[0].course == "LC"
 
+    def test_club_suffix_course_is_a_documented_limitation(self):
+        # CHARACTERIZATION of the documented heuristic-path limitation: a bare
+        # "SC" club suffix in a marker-less row, on a page that also carries a
+        # stray "Long Course" header, resolves to the club's course. This is a
+        # tolerated safe false-negative (never a fabricated PB), NOT desired
+        # behaviour — pinned so any future change to page/row course precedence
+        # is intentional and visible, not silent. If finding A is ever hardened,
+        # flip this to assert "LC".
+        page = _page(
+            text=(
+                "Long Course PBs\n"
+                "Anytown SC 100m Freestyle 58.21\n"
+                "Anytown SC 200m Backstroke 2:18.90\n"
+            )
+        )
+        rows = _heuristic_extract_pbs(page)
+        assert rows
+        assert all(r.course == "SC" for r in rows)  # documented club-'SC' limitation
+
+
+class TestF09InterpreterCourse:
+    """The interpreter path resolves per-event course from the section header
+    (event.course → header marker → page marker → 'LC'), not a flattened page."""
+
+    def test_interpreter_resolves_course_from_section_header(self, monkeypatch):
+        from types import SimpleNamespace
+
+        import mediahub.interpreter as interp_mod
+
+        def _swim(t):
+            return SimpleNamespace(
+                time=t, place=1, swimmer_name="Jane Doe", raw_row=f"1 Jane Doe {t}"
+            )
+
+        fake = SimpleNamespace(
+            meet_name="Mixed-course PBs",
+            overall_confidence=0.9,
+            events=[
+                # course unset on the event; only the raw_header names the course.
+                SimpleNamespace(
+                    distance_m=50,
+                    stroke="Freestyle",
+                    course=None,
+                    raw_header="Event 1 SCM 50m Freestyle",
+                    swims=[_swim("24.10")],
+                ),
+                SimpleNamespace(
+                    distance_m=100,
+                    stroke="Freestyle",
+                    course=None,
+                    raw_header="Event 2 LCM 100m Freestyle",
+                    swims=[_swim("52.30")],
+                ),
+                SimpleNamespace(
+                    distance_m=200,
+                    stroke="Backstroke",
+                    course=None,
+                    raw_header="Event 3 200m Backstroke",
+                    swims=[_swim("2:18.90")],
+                ),
+            ],
+        )
+        monkeypatch.setattr(interp_mod, "interpret_document", lambda *a, **k: fake)
+
+        # Page text mixes both markers → page_course is None (ambiguous), so the
+        # per-event header must decide.
+        page = _page(text="Long Course and Short Course personal bests")
+        rows, _conf = _interpreter_extract_pbs(page)
+        by_event = {r.event: r.course for r in rows}
+        assert by_event["50m Freestyle"] == "SC"  # SCM in header
+        assert by_event["100m Freestyle"] == "LC"  # LCM in header
+        assert by_event["200m Backstroke"] == "LC"  # no marker → 'LC' fallback
+
 
 # ── F20 · dotted dates are not swim times ────────────────────────────────────
 
@@ -193,6 +294,12 @@ class TestF20DateNotTime:
             ("100m Freestyle 58.90 12.03.2024", ["58.90"]),  # date after the time
             ("100m Freestyle 2024-03-12 58.90", ["58.90"]),  # ISO date
             ("100m Free 28.50", ["28.50"]),  # plain time, no date
+            # A ':'-delimited time must survive beside a dotted date — a colon
+            # time can never be eaten by _DATE_RE. This freezes the highest-value
+            # invariant against a future broadening of the date separators.
+            ("200m Butterfly 12.03.2024 2:14.30", ["2:14.30"]),
+            ("15/03/2024 1:02.34 58.90", ["1:02.34", "58.90"]),  # date first, two real times
+            ("1:02.34", ["1:02.34"]),  # colon time alone
         ],
     )
     def test_extract_times_excludes_dates(self, text, times):
