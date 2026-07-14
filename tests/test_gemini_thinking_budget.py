@@ -8,83 +8,100 @@ imitation, …) silently truncated mid-key when a real key was first
 configured in production.
 
 The fix sets ``thinkingConfig.thinkingBudget = 0`` on every Gemini
-generateContent call in both LLM wrappers. These tests pin the
-payload shape so a future refactor of the request builder can't
-re-introduce the regression.
+generateContent call. Since the finding-#43 convergence the config
+builder lives once in ``ai_core.gemini_transport`` and both LLM
+wrappers use it; these tests pin the builder's rules and then pin the
+payload each wrapper actually posts, so a future refactor of the
+request path can't re-introduce the regression on either side.
 """
 from __future__ import annotations
 
-import json as _json
-
 import pytest
 
+from mediahub.ai_core import gemini_transport
+
 
 # ---------------------------------------------------------------------------
-# media_ai.llm — primary Gemini wrapper (used by brand.palette, etc.)
+# gemini_transport.generation_config — the single shared builder
 # ---------------------------------------------------------------------------
 
-def test_media_ai_generation_config_disables_thinking_by_default(monkeypatch):
-    from mediahub.media_ai import llm as media_ai_llm
-    monkeypatch.setattr(media_ai_llm, "_GEMINI_MODEL", "gemini-2.5-flash")
+def test_generation_config_disables_thinking_by_default(monkeypatch):
+    monkeypatch.setenv("MEDIAHUB_GEMINI_MODEL", "gemini-2.5-flash")
     monkeypatch.delenv("MEDIAHUB_GEMINI_THINKING_BUDGET", raising=False)
-    cfg = media_ai_llm._gemini_generation_config(600)
+    cfg = gemini_transport.generation_config(600)
     assert cfg["maxOutputTokens"] == 600
     assert cfg["thinkingConfig"] == {"thinkingBudget": 0}
 
 
-def test_media_ai_generation_config_honours_env_override(monkeypatch):
-    from mediahub.media_ai import llm as media_ai_llm
-    monkeypatch.setattr(media_ai_llm, "_GEMINI_MODEL", "gemini-2.5-flash")
+def test_generation_config_sends_no_temperature(monkeypatch):
+    """Finding #43 parity: ai_core used to send temperature=0.7 while
+    media_ai sent none — the shared builder sends none, so both wrappers
+    sample at the API default."""
+    monkeypatch.setenv("MEDIAHUB_GEMINI_MODEL", "gemini-2.5-flash")
+    cfg = gemini_transport.generation_config(600)
+    assert "temperature" not in cfg
+
+
+def test_generation_config_honours_env_override(monkeypatch):
+    monkeypatch.setenv("MEDIAHUB_GEMINI_MODEL", "gemini-2.5-flash")
     monkeypatch.setenv("MEDIAHUB_GEMINI_THINKING_BUDGET", "1024")
-    cfg = media_ai_llm._gemini_generation_config(600)
+    cfg = gemini_transport.generation_config(600)
     assert cfg["thinkingConfig"] == {"thinkingBudget": 1024}
 
 
-def test_media_ai_generation_config_clamps_pro_to_minimum(monkeypatch):
+def test_generation_config_clamps_pro_to_minimum(monkeypatch):
     """Gemini 2.5 Pro cannot disable thinking — the API rejects
     thinkingBudget below 128 with 400 INVALID_ARGUMENT — so a Pro
     override must clamp to the minimum instead of breaking every call."""
-    from mediahub.media_ai import llm as media_ai_llm
-    monkeypatch.setattr(media_ai_llm, "_GEMINI_MODEL", "gemini-2.5-pro")
+    monkeypatch.setenv("MEDIAHUB_GEMINI_MODEL", "gemini-2.5-pro")
     monkeypatch.delenv("MEDIAHUB_GEMINI_THINKING_BUDGET", raising=False)
-    cfg = media_ai_llm._gemini_generation_config(600)
+    cfg = gemini_transport.generation_config(600)
     assert cfg["thinkingConfig"] == {"thinkingBudget": 128}
 
 
-def test_media_ai_generation_config_pro_keeps_larger_budget(monkeypatch):
-    from mediahub.media_ai import llm as media_ai_llm
-    monkeypatch.setattr(media_ai_llm, "_GEMINI_MODEL", "gemini-2.5-pro")
+def test_generation_config_pro_keeps_larger_budget(monkeypatch):
+    monkeypatch.setenv("MEDIAHUB_GEMINI_MODEL", "gemini-2.5-pro")
     monkeypatch.setenv("MEDIAHUB_GEMINI_THINKING_BUDGET", "1024")
-    cfg = media_ai_llm._gemini_generation_config(600)
+    cfg = gemini_transport.generation_config(600)
     assert cfg["thinkingConfig"] == {"thinkingBudget": 1024}
 
 
-def test_media_ai_generation_config_skips_thinking_on_older_models(monkeypatch):
+def test_generation_config_skips_thinking_on_older_models(monkeypatch):
     """``thinkingConfig`` is a 2.5+ field — older models reject the
     payload as an unknown field. Gate on the model name."""
-    from mediahub.media_ai import llm as media_ai_llm
-    monkeypatch.setattr(media_ai_llm, "_GEMINI_MODEL", "gemini-1.5-flash")
-    cfg = media_ai_llm._gemini_generation_config(600)
+    monkeypatch.setenv("MEDIAHUB_GEMINI_MODEL", "gemini-1.5-flash")
+    cfg = gemini_transport.generation_config(600)
     assert "thinkingConfig" not in cfg
 
 
+def test_generation_config_explicit_model_param_wins(monkeypatch):
+    """Callers may pass the model explicitly (media_ai resolves it once
+    per call); the env must not override an explicit argument."""
+    monkeypatch.setenv("MEDIAHUB_GEMINI_MODEL", "gemini-1.5-flash")
+    cfg = gemini_transport.generation_config(600, model="gemini-2.5-flash")
+    assert cfg["thinkingConfig"] == {"thinkingBudget": 0}
+
+
+# ---------------------------------------------------------------------------
+# End-to-end at the requests boundary — both wrappers must post the
+# thinkingConfig the shared builder produced.
+# ---------------------------------------------------------------------------
+
 def test_media_ai_call_gemini_sends_thinking_budget(monkeypatch):
-    """End-to-end at the requests boundary: capture the JSON payload
-    posted to the Gemini API and assert thinkingConfig is included."""
     from mediahub.media_ai import llm as media_ai_llm
 
-    monkeypatch.setattr(media_ai_llm, "_GEMINI_MODEL", "gemini-2.5-flash")
+    monkeypatch.setenv("MEDIAHUB_GEMINI_MODEL", "gemini-2.5-flash")
+    monkeypatch.delenv("MEDIAHUB_GEMINI_THINKING_BUDGET", raising=False)
     monkeypatch.setattr(media_ai_llm, "_resolve_gemini_key", lambda: "TEST")
     # Ensure the circuit breaker doesn't short-circuit the request.
-    with media_ai_llm._gemini_breaker_lock:
-        media_ai_llm._gemini_breaker_state["consecutive_failures"] = 0
-        media_ai_llm._gemini_breaker_state["tripped_until"] = 0.0
+    gemini_transport.breaker_record_success()
 
     captured: dict = {}
 
     class _FakeResp:
         status_code = 200
         ok = True
+
         def json(self):
             return {
                 "candidates": [{
@@ -112,61 +129,18 @@ def test_media_ai_call_gemini_sends_thinking_budget(monkeypatch):
     assert cfg["thinkingConfig"]["thinkingBudget"] == 0
 
 
-# ---------------------------------------------------------------------------
-# ai_core.llm — secondary failover wrapper
-# ---------------------------------------------------------------------------
-
-def test_ai_core_generation_config_disables_thinking_by_default(monkeypatch):
-    from mediahub.ai_core import llm as ai_core_llm
-    monkeypatch.setenv("MEDIAHUB_GEMINI_MODEL", "gemini-2.5-flash")
-    monkeypatch.delenv("MEDIAHUB_GEMINI_THINKING_BUDGET", raising=False)
-    cfg = ai_core_llm._gemini_generation_config(600)
-    assert cfg["maxOutputTokens"] == 600
-    assert cfg["temperature"] == 0.7
-    assert cfg["thinkingConfig"] == {"thinkingBudget": 0}
-
-
-def test_ai_core_generation_config_honours_env_override(monkeypatch):
-    from mediahub.ai_core import llm as ai_core_llm
-    monkeypatch.setenv("MEDIAHUB_GEMINI_MODEL", "gemini-2.5-flash")
-    monkeypatch.setenv("MEDIAHUB_GEMINI_THINKING_BUDGET", "256")
-    cfg = ai_core_llm._gemini_generation_config(600)
-    assert cfg["thinkingConfig"] == {"thinkingBudget": 256}
-
-
-def test_ai_core_generation_config_clamps_pro_to_minimum(monkeypatch):
-    from mediahub.ai_core import llm as ai_core_llm
-    monkeypatch.setenv("MEDIAHUB_GEMINI_MODEL", "gemini-2.5-pro")
-    monkeypatch.delenv("MEDIAHUB_GEMINI_THINKING_BUDGET", raising=False)
-    cfg = ai_core_llm._gemini_generation_config(600)
-    assert cfg["thinkingConfig"] == {"thinkingBudget": 128}
-
-
-def test_ai_core_generation_config_pro_keeps_larger_budget(monkeypatch):
-    from mediahub.ai_core import llm as ai_core_llm
-    monkeypatch.setenv("MEDIAHUB_GEMINI_MODEL", "gemini-2.5-pro")
-    monkeypatch.setenv("MEDIAHUB_GEMINI_THINKING_BUDGET", "512")
-    cfg = ai_core_llm._gemini_generation_config(600)
-    assert cfg["thinkingConfig"] == {"thinkingBudget": 512}
-
-
-def test_ai_core_generation_config_skips_thinking_on_older_models(monkeypatch):
-    from mediahub.ai_core import llm as ai_core_llm
-    monkeypatch.setenv("MEDIAHUB_GEMINI_MODEL", "gemini-1.5-flash")
-    cfg = ai_core_llm._gemini_generation_config(600)
-    assert "thinkingConfig" not in cfg
-
-
 def test_ai_core_ask_gemini_sends_thinking_budget(monkeypatch):
     from mediahub.ai_core import llm as ai_core_llm
 
     monkeypatch.setenv("MEDIAHUB_GEMINI_MODEL", "gemini-2.5-flash")
+    monkeypatch.delenv("MEDIAHUB_GEMINI_THINKING_BUDGET", raising=False)
     monkeypatch.setattr(ai_core_llm, "_key_for", lambda _name: "TEST")
 
     captured: dict = {}
 
     class _FakeResp:
         status_code = 200
+
         def json(self):
             return {
                 "candidates": [{

@@ -14,14 +14,17 @@ from __future__ import annotations
 
 
 def test_safe_int_float_fall_back_on_bad_values():
-    from mediahub.media_ai import llm
+    # The import-time env parses (breaker threshold/cooldown) live in the
+    # shared Gemini transport now (finding #43); the #44 guarantee — a bad
+    # env value coerces to the default instead of raising at import time
+    # and taking down every importer — must hold there.
+    from mediahub.ai_core import gemini_transport as t
 
-    # A bad env value coerces to the default instead of raising at import time.
-    assert llm._safe_int("not-an-int", 45) == 45
-    assert llm._safe_int("50", 45) == 50
-    assert llm._safe_int(None, 45) == 45
-    assert llm._safe_float("4x.5", 60.0) == 60.0
-    assert llm._safe_float("1.5", 60.0) == 1.5
+    assert t._safe_int("not-an-int", 45) == 45
+    assert t._safe_int("50", 45) == 50
+    assert t._safe_int(None, 45) == 45
+    assert t._safe_float("4x.5", 60.0) == 60.0
+    assert t._safe_float("1.5", 60.0) == 1.5
 
 
 def test_generate_json_returns_fallback_on_unparseable(monkeypatch):
