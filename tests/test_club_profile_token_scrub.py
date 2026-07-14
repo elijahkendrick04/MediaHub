@@ -85,7 +85,12 @@ def test_scrub_is_fail_soft_on_readonly_fs(profiles_dir, monkeypatch):
     assert "scheduler_access_token" in json.loads(path.read_text())
 
 
-def test_legacy_secrets_json_is_scrubbed(profiles_dir, tmp_path, monkeypatch):
+def test_legacy_secrets_json_is_scrubbed(tmp_path, monkeypatch):
+    # The legacy secrets.json scrub used to run on every load_profile /
+    # list_profiles (an uncached disk read on the hot active-profile path).
+    # It now runs once at app startup (create_app -> _scrub_legacy_secrets_file);
+    # this exercises that unit directly. The withdrawn token keys are never
+    # written at runtime, so a single scrub per boot suffices.
     import mediahub.web.secrets_store as ss
 
     secrets = tmp_path / "secrets.json"
@@ -99,9 +104,8 @@ def test_legacy_secrets_json_is_scrubbed(profiles_dir, tmp_path, monkeypatch):
         )
     )
     monkeypatch.setattr(ss, "_SECRETS_PATH", secrets)
-    _write_legacy_profile(profiles_dir)
 
-    assert cp.load_profile("legacy-club") is not None
+    cp._scrub_legacy_secrets_file()
 
     on_disk = json.loads(secrets.read_text())
     assert "buffer_access_token" not in on_disk

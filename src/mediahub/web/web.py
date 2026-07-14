@@ -108,6 +108,8 @@ from .club_profile import (
     load_profile,
     save_profile,
     seed_default_profiles,
+    set_profile_saved_hook,
+    _scrub_legacy_secrets_file,
 )
 from .bounded_cache import BoundedCache
 
@@ -20607,6 +20609,12 @@ def create_app() -> Flask:
     _setup_app_logging()
     validate_environment()
 
+    # One-time legacy-secrets cleanup at startup. This scrub used to run on
+    # every load_profile / list_profiles call — an uncached secrets.json read
+    # per call, on the hot active-profile path. The withdrawn token keys are
+    # never written at runtime, so a single scrub per boot is sufficient.
+    _scrub_legacy_secrets_file()
+
     # Python's mimetypes database omits font/woff2 on some Linux systems,
     # causing Flask to serve .woff2 as application/octet-stream and browsers
     # to treat it as a download rather than loading it as a font.
@@ -21137,6 +21145,65 @@ def create_app() -> Flask:
         except Exception:
             pass
 
+    def _load_profile_cached(pid: str) -> Optional[ClubProfile]:
+        """One ``load_profile`` disk read per profile id per request.
+
+        The active org is resolved 4-5× per request — two ``before_request``
+        hooks plus the handler, and ``_active_profile`` used to load it a
+        second time itself — each an uncached JSON parse (plus, until this
+        change, a per-call ``secrets.json`` scrub). Memoising the loaded
+        profile on ``flask.g`` — exactly as ``_memberships_snapshot`` memoises
+        the membership ledger a few lines above — collapses that to a single
+        read. A save or delete in the same request invalidates the entry
+        (``_invalidate_profile_cache``, wired to ``save_profile`` and the
+        delete/brand-write routes) so tenant gating never reads a stale copy.
+
+        Contract (matching ``_memberships_snapshot``): repeat calls in one
+        request return the SAME object. A caller that mutates it in place MUST
+        then ``save_profile`` (which invalidates) and must not rely on a later
+        read seeing pristine disk state. Handlers that mutate-without-saving
+        should load a fresh copy via ``load_profile`` instead."""
+        try:
+            cache = getattr(g, "_mh_profile_cache", None)
+        except Exception:
+            # No application/request context (e.g. a background call) — read
+            # directly rather than cache.
+            return load_profile(pid)
+        if cache is None:
+            cache = {}
+            try:
+                g._mh_profile_cache = cache
+            except Exception:
+                # Couldn't attach to g — fall back to an uncached read.
+                return load_profile(pid)
+        if pid not in cache:
+            cache[pid] = load_profile(pid)
+        return cache[pid]
+
+    def _invalidate_profile_cache(pid: Optional[str] = None) -> None:
+        """Drop the per-request profile cache after a save or delete so a
+        re-read in the same request sees fresh data. ``pid=None`` clears the
+        whole cache (defensive). Registered as the ``save_profile`` hook, and
+        called directly by the profile-delete route."""
+        try:
+            cache = getattr(g, "_mh_profile_cache", None)
+        except Exception:
+            return
+        if not cache:
+            return
+        if pid is None:
+            cache.clear()
+        else:
+            cache.pop(pid, None)
+
+    # A profile persisted mid-request must drop its cached copy, or a later
+    # read in the same request (tenant gating included) would see stale data.
+    # Registering the hook here covers every save_profile() call automatically,
+    # without threading invalidation through each caller. The few routes that
+    # write a profile another way (save_brand, the delete routes) call
+    # _invalidate_profile_cache explicitly at their call sites.
+    set_profile_saved_hook(_invalidate_profile_cache)
+
     def _snap_is_bound(snap: dict, pid: str) -> bool:
         pid = (pid or "").strip()
         if not pid:
@@ -21285,7 +21352,7 @@ def create_app() -> Flask:
                 session.pop("active_profile_id", None)
                 session.pop("login_seen_at", None)
                 return None
-        prof = load_profile(pid)
+        prof = _load_profile_cached(pid)
         if not prof:
             # Stale pin (the profile was deleted) — drop it and report
             # signed-out rather than guessing another org.
@@ -21308,8 +21375,11 @@ def create_app() -> Flask:
         return prof.profile_id
 
     def _active_profile() -> Optional[ClubProfile]:
+        # _active_profile_id() already resolved and loaded this pid through the
+        # per-request cache, so this is a cache hit — no redundant second disk
+        # load (the review's finding #16).
         pid = _active_profile_id()
-        return load_profile(pid) if pid else None
+        return _load_profile_cached(pid) if pid else None
 
     # Expose the helpers as app-level functions so other routes can reach
     # them without re-implementing the lookup. (Routes defined later in
@@ -32674,6 +32744,11 @@ self.addEventListener('fetch', function(e){
             "source": "ai",
         }
         save_brand(prof.profile_id, kit=kit)
+        # save_brand writes the profile JSON directly (not via save_profile), so
+        # the save hook never fires — drop the cached copy ourselves so any
+        # later read in this request sees the new type pairing, not the pre-save
+        # brand_kit.
+        _invalidate_profile_cache(prof.profile_id)
         return redirect(url_for("settings_section", section="typography", status="pairing-applied"))
 
     # ------------------------------------------------------------------
@@ -45122,6 +45197,10 @@ what you're doing, what they should do.</p>
                 p.unlink()
         except OSError:
             pass
+        # Deleting the file is a mid-request mutation the save hook can't see
+        # (it bypasses save_profile), so drop the cached copy here — otherwise
+        # the _active_profile_id() check below could read the just-deleted org.
+        _invalidate_profile_cache(pid)
         if _active_profile_id() == pid:
             session.pop("active_profile_id", None)
         return redirect(url_for("sign_in_page"))
@@ -46903,6 +46982,10 @@ what you're doing, what they should do.</p>
         from mediahub.privacy import delete_org
 
         report = delete_org(pid, delete_run=_delete_run)
+        # delete_org unlinks the profile JSON directly (bypassing save_profile),
+        # so drop the cached copy — mirrors the /sign-in/delete fix — before any
+        # later read in this request (e.g. _layout's active-profile chrome).
+        _invalidate_profile_cache(pid)
         session.pop("active_profile_id", None)
         db_rows = sum(report.get("db_rows_deleted", {}).values())
         retained = "".join(f"<li>{_h(r)}</li>" for r in report.get("retained", []))
