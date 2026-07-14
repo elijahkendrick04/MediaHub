@@ -98,8 +98,9 @@ def home_app(tmp_path, monkeypatch):
         ))
 
     conn = wm._db()
-    # 5 runs whose n_achievements sum to 1234. n_cards stays 0 on purpose —
-    # the hero must NOT read from it (it would render a falsehood).
+    # 5 runs whose n_standout (the deduped standout-swim figure the hero now
+    # sums) totals 1234. n_cards stays 0 on purpose — the hero must NOT read
+    # from it (it would render a falsehood).
     seeds = [
         ("r1", 1230),
         ("r2", 1),
@@ -110,10 +111,11 @@ def home_app(tmp_path, monkeypatch):
     for run_id, ach in seeds:
         conn.execute(
             "INSERT INTO runs (id, created_at, finished_at, status, profile_id, "
-            "meet_name, file_name, our_swims, n_cards, n_queue, n_achievements, error) "
+            "meet_name, file_name, our_swims, n_cards, n_queue, n_achievements, "
+            "n_standout, error) "
             "VALUES (?, datetime('now'), datetime('now'), 'done', 'org-a', "
-            "'Test Meet', 'test.pdf', 1, 0, 0, ?, NULL)",
-            (run_id, ach),
+            "'Test Meet', 'test.pdf', 1, 0, 0, ?, ?, NULL)",
+            (run_id, ach, ach),
         )
     conn.commit()
     conn.close()
@@ -150,12 +152,14 @@ class TestOdometerServerMarkup:
         assert f'data-mh-count="5" data-mh-odometer data-mh-count-pad="3">{EXP_RUNS}</b>' in body
         assert "results processed" in body
 
-    def test_moments_uses_achievements_not_cards(self, home_app):
-        """The third figure is SUM(n_achievements)=1234, never the ~0 n_cards."""
+    def test_moments_uses_standout_swims_not_cards(self, home_app):
+        """The third figure is SUM(n_standout)=1234 — the deduped standout-swim
+        count, never the ~0 n_cards and never the inflated raw detections."""
         app, _ = home_app
         body = _get_home(app)
         assert f'data-mh-count="1234" data-mh-odometer data-mh-count-pad="3">{EXP_MOMENTS}</b>' in body
-        assert "moments detected" in body
+        assert "standout swims found" in body
+        assert "moments detected" not in body
         # The honest source means the figure is NOT 0 even though n_cards is 0.
         assert 'aria-label="1,234"' in body  # comma-grouped clean value
 
@@ -195,9 +199,10 @@ class TestOdometerServerEdges:
         conn = wm._db()
         conn.execute(
             "INSERT INTO runs (id, created_at, finished_at, status, profile_id, "
-            "meet_name, file_name, our_swims, n_cards, n_queue, n_achievements, error) "
+            "meet_name, file_name, our_swims, n_cards, n_queue, n_achievements, "
+            "n_standout, error) "
             "VALUES ('r1', datetime('now'), datetime('now'), 'done', 'solo', "
-            "'M', 'f.pdf', 1, 0, 0, 1, NULL)"
+            "'M', 'f.pdf', 1, 0, 0, 1, 1, NULL)"
         )
         conn.commit()
         conn.close()
@@ -208,8 +213,8 @@ class TestOdometerServerEdges:
         assert "</b> organisation</span>" in body
         assert "</b> organisations</span>" not in body
         assert "</b> result processed</span>" in body
-        assert "</b> moment detected</span>" in body
-        assert "</b> moments detected</span>" not in body
+        assert "</b> standout swim found</span>" in body
+        assert "</b> standout swims found</span>" not in body
 
     def test_fresh_deployment_hides_odometers(self, tmp_path, monkeypatch):
         """No orgs + no runs -> no odometers, and the page still renders."""

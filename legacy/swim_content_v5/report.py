@@ -367,8 +367,15 @@ def build_recognition_report_for_run(run: "PipelineRunV4") -> dict:
 
     # Get all detectors. The mediahub recognition_swim set leads with the
     # V7.3 OfficialPBDetector (fires when the lookup source already lists
-    # this swim as the all-time PB — a case no V5 PB detector covers);
-    # imported lazily so this module keeps working standalone.
+    # this swim as the all-time PB — a case no V5 PB detector covers) and
+    # already ends with the Phase W registry-fed detectors (milestones,
+    # club records — silent without workspace context); imported lazily so
+    # this module keeps working standalone. Do NOT append the Phase W
+    # detectors again here: _run_detectors_for_swim runs every list entry,
+    # so a second copy emitted every milestone/club-record achievement
+    # twice (duplicate cards, inflated counts). The ImportError fallback
+    # cannot have them either — they live in the same mediahub package
+    # that just failed to import.
     try:
         from mediahub.recognition_swim import production_detectors
 
@@ -376,16 +383,10 @@ def build_recognition_report_for_run(run: "PipelineRunV4") -> dict:
     except ImportError:
         detectors = get_all_detectors()
 
-    # Phase W detectors + context (athlete registry milestones, club records).
-    # All optional enrichment: failure or absence leaves the V5 path untouched.
+    # Phase W workspace context (athlete registry milestones, club records,
+    # swimmer metadata). All optional enrichment: failure or absence leaves
+    # the V5 path untouched.
     extra_context: dict = {}
-    try:
-        from mediahub.recognition_swim.achievements.club_record import ClubRecordDetector
-        from mediahub.recognition_swim.achievements.milestones import MilestoneDetector
-
-        detectors = detectors + [MilestoneDetector(), ClubRecordDetector()]
-    except Exception:
-        pass
     if profile_id:
         try:
             from mediahub.athletes.registry import milestone_context

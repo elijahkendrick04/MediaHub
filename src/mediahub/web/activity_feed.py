@@ -280,6 +280,7 @@ def _run_event(row: Any) -> ActivityEvent:
     finished = str(_get(row, "finished_at", "") or "")
     swims = int(_get(row, "our_swims", 0) or 0)
     moments = int(_get(row, "n_achievements", 0) or 0)
+    standouts = int(_get(row, "n_standout", 0) or 0)
     queued = int(_get(row, "n_queue", 0) or 0)
     error = str(_get(row, "error", "") or "")
 
@@ -294,7 +295,12 @@ def _run_event(row: Any) -> ActivityEvent:
         bits = []
         if swims:
             bits.append(_plural(swims, "swim") + " matched")
-        if moments:
+        # Lead with the honest standout-swim count (distinct swims worth
+        # shouting about); fall back to the raw detection count only for
+        # rows persisted before the n_standout column existed.
+        if standouts:
+            bits.append(_plural(standouts, "standout swim") + " found")
+        elif moments:
             bits.append(_plural(moments, "moment") + " detected")
         summary = " · ".join(bits) if bits else "Run completed."
 
@@ -312,6 +318,8 @@ def _run_event(row: Any) -> ActivityEvent:
         detail.append(("Source file", fname))
     if swims:
         detail.append(("Swims matched", str(swims)))
+    if standouts:
+        detail.append(("Standout swims", str(standouts)))
     if moments:
         detail.append(("Moments detected", str(moments)))
     if queued:
@@ -445,7 +453,7 @@ def build_activity_feed(
                 if ev:
                     events.append(ev)
 
-    events.sort(key=lambda e: (parse_ts(e.ts) or _EPOCH), reverse=True)
+    events.sort(key=lambda e: parse_ts(e.ts) or _EPOCH, reverse=True)
     if limit is not None and limit >= 0:
         events = events[:limit]
     return events

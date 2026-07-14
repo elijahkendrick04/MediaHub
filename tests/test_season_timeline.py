@@ -35,12 +35,19 @@ def _insert_run(
     status="done",
     our_swims=10,
     n_achievements=3,
+    n_standout=None,
     error=None,
 ):
+    # n_standout (the deduped standout-swim count the timeline chips now show)
+    # defaults to the achievement figure so the seeded meets read the same as
+    # a freshly-persisted run where every detection was a distinct standout.
+    if n_standout is None:
+        n_standout = n_achievements
     conn.execute(
         "INSERT INTO runs (id, created_at, finished_at, status, profile_id, "
-        "meet_name, file_name, our_swims, n_cards, n_queue, n_achievements, error) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?)",
+        "meet_name, file_name, our_swims, n_cards, n_queue, n_achievements, "
+        "n_standout, error) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?)",
         (
             run_id,
             created_at,
@@ -51,6 +58,7 @@ def _insert_run(
             f"{meet}.pdf",
             our_swims,
             n_achievements,
+            n_standout,
             error,
         ),
     )
@@ -197,10 +205,10 @@ class TestGroupingAndContent:
         _pin(c, "club-a")
         body = c.get("/season").get_data(as_text=True)
         assert "24 swims matched" in body
-        assert "7 moments detected" in body
+        assert "7 standout swims" in body
         # The 40-swim gala.
         assert "40 swims matched" in body
-        assert "15 moments detected" in body
+        assert "15 standout swims" in body
 
 
 # ---------------------------------------------------------------------------
@@ -226,7 +234,7 @@ class TestTotals:
     def test_hero_totals_do_not_double_count_reruns(self, gated_client):
         """A re-upload of the same meet (shared content_hash) is badged as a
         re-run and must NOT inflate the celebratory hero stats — each real meet
-        counts once for Meets / Swims matched / Moments detected."""
+        counts once for Meets / Swims matched / Standout swims."""
         c, _, wm = gated_client
         conn = wm._db()
         # A re-run of "June Open Meet" (a-jun-1): same content_hash, newer date.

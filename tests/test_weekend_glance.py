@@ -218,11 +218,30 @@ class TestLede:
 
     def test_no_records_pbs_or_medals_falls_back_to_standouts(self):
         # A meet with only non-record, non-PB, non-medal moments still gets a
-        # factual standout count.
-        ranked = [_ach(type="first_sub_barrier"),
-                  _ach(type="first_sub_barrier")]
+        # factual count — now the DEDUPED standout-swim figure (distinct
+        # swims whose best band is elite/strong), not the raw moment tally.
+        ranked = [
+            {**_ach(type="first_sub_barrier"), "quality_band": "strong"},
+            {**_ach(type="first_sub_barrier"), "quality_band": "strong"},
+        ]
+        ranked[0]["achievement"]["swim_id"] = "k1:100FRLC:barrier:6000"
+        ranked[1]["achievement"]["swim_id"] = "k2:50FLSC:barrier:3000"
         g = build_weekend_glance(_run(ranked=ranked, n_analysed=12, n_achievements=2))
-        assert g.lede_stats == "2 standout moments across 12 analysed swims."
+        assert g.n_standout == 2
+        assert g.lede_stats == "2 standout swims across 12 analysed swims."
+
+    def test_standout_count_dedupes_one_swim_many_achievements(self):
+        # One race emitting a medal + a PB-magnitude derivative is ONE
+        # standout swim in the lede fallback, not two.
+        ranked = [
+            {**_ach(type="first_sub_barrier"), "quality_band": "strong"},
+            {**_ach(type="top_of_field_top_3"), "quality_band": "strong"},
+        ]
+        ranked[0]["achievement"]["swim_id"] = "k1:100FRLC:barrier:6000"
+        ranked[1]["achievement"]["swim_id"] = "k1:100FRLC:field:top_3"
+        g = build_weekend_glance(_run(ranked=ranked, n_analysed=12, n_achievements=2))
+        assert g.n_standout == 1
+        assert g.lede_stats == "1 standout swim across 12 analysed swims."
 
     def test_records_lead_the_lede(self):
         # A record-breaking meet must not read like a dull one: the record count
@@ -374,10 +393,10 @@ class TestRenderStructure:
 
     def test_stat_tiles_use_count_up_hook(self):
         html = self._html(n_analysed=24)
-        # PBs / Medals / Standout moments / Swims analysed
+        # PBs / Medals / Standout swims / Swims analysed
         assert html.count('class="stat') >= 4
         assert 'data-mh-count=' in html
-        for label in ("PBs", "Medals", "Standout moments", "Swims analysed"):
+        for label in ("PBs", "Medals", "Standout swims", "Swims analysed"):
             assert f">{label}<" in html
 
     def test_top_moments_preview_not_rendered(self):

@@ -126,6 +126,9 @@ class TestMachineReadableHelper:
             "parsed_swims": 120,
             "club_swims": 18,
             "achievements": 3,
+            # Deduped standout-swim count (recognition.swim_tiers) — 0 here
+            # because the sample achievements carry no elite/strong band.
+            "standout_swims": 0,
         }
         assert len(doc["achievements"]) == 3
         a0 = doc["achievements"][0]
