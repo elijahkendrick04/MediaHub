@@ -15,7 +15,9 @@ import pathlib
 
 import pytest
 
-_SRC = pathlib.Path("src/mediahub/web/web.py").read_text(encoding="utf-8")
+from tests._helpers import web_surface_src
+
+_SRC = web_surface_src()
 
 
 def test_mh_confirm_and_toast_action_exist():

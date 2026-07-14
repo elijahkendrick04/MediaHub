@@ -19,6 +19,7 @@ from __future__ import annotations
 import importlib
 import json
 import time
+import re
 from pathlib import Path
 
 import pytest
@@ -318,7 +319,12 @@ def test_sidecar_written_atomically_for_concurrent_page_gets():
     a torn read is a cache miss, and a cache miss auto-starts a duplicate
     render job. The write goes through a unique tmp + atomic os.replace
     (the _variant_job_save idiom), never a bare write_text."""
-    src = Path("src/mediahub/web/web.py").read_text(encoding="utf-8")
+    from tests._helpers import web_surface_src
+
+    src = web_surface_src()
     assert "sidecar.write_text(" not in src
-    assert '_sc_tmp = sidecar.with_suffix(f".{uuid.uuid4().hex[:8]}.tmp")' in src
+    # routes_api_runs spells web globals W.<name> since the finding-#15 carve.
+    assert re.search(
+        r'_sc_tmp = sidecar\.with_suffix\(f"\.\{(?:W\.)?uuid\.uuid4\(\)\.hex\[:8\]\}\.tmp"\)', src
+    )
     assert "os.replace(_sc_tmp, sidecar)" in src
