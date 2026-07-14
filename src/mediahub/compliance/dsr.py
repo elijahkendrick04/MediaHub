@@ -198,6 +198,30 @@ def _tenant_runs(profile_id: str, *, include_ownerless: bool = True) -> list[Pat
     return out
 
 
+def _tenant_pbs_dirs(profile_id: str, cache_root: Path, *, include_ownerless: bool) -> list[Path]:
+    """``pbs/<run_id>/`` cache dirs under ``cache_root`` for this tenant's runs.
+
+    Unlike the global ``swimmers/`` warm cache (keyed by ``md5(name|club)`` with
+    no tenant dimension), ``pbs/`` is keyed by run id — ``pb_discovery.cache``'s
+    ``RunCache`` writes ``discovered/pbs/<_safe(run_id)>/`` — so it carries the
+    run's tenant attribution. The SAR export and the erasure sweep confine the
+    ``pbs/`` walk to the tenant's own runs (the finding #111 rule applied one
+    layer down) instead of reading or deleting every tenant's PB cache. A run's
+    flat file is ``<run_id>.json``, so its stem is the run id the cache was
+    keyed under; ``include_ownerless`` follows the same gate as the run walk."""
+    from mediahub.pb_discovery.cache import _safe
+
+    pbs_root = cache_root / "pbs"
+    if not pbs_root.exists():
+        return []
+    dirs = []
+    for path in _tenant_runs(profile_id, include_ownerless=include_ownerless):
+        d = pbs_root / _safe(path.stem)
+        if d.exists():
+            dirs.append(d)
+    return dirs
+
+
 def _athlete_entries_in_run(run: dict, key: str) -> tuple[list[dict], list[str]]:
     """(matching achievement dicts, their card ids) in one run dict."""
     matches: list[dict] = []
@@ -380,23 +404,32 @@ def export_athlete(profile_id: str, athlete_name: str, *, include_ownerless: boo
     ):
         if not cache_root.exists():
             continue
-        for sub in ("swimmers", "pbs", "search_cache"):
-            d = cache_root / sub
+        # swimmers/ + search_cache/ are global public-reference caches with no
+        # tenant dimension (keyed by md5(name|club) / query hash); pbs/ is
+        # run-keyed, so confine it to this tenant's own runs — the finding #111
+        # rule one layer down — rather than reading every tenant's PB cache.
+        scan_dirs = [cache_root / "swimmers", cache_root / "search_cache"]
+        scan_dirs += _tenant_pbs_dirs(profile_id, cache_root, include_ownerless=include_ownerless)
+        for d in scan_dirs:
             if not d.exists():
                 continue
             for f in d.rglob("*.json"):
                 if _file_mentions(f, key):
+                    # Path is relative to the cache root so the export never
+                    # leaks the DATA_DIR filesystem layout; rows_redacted is
+                    # always present so the SAR never implies false completeness.
+                    rel = str(f.relative_to(cache_root))
                     try:
                         content, dropped = _redact_rows_for_subject(
                             json.loads(f.read_text()), _name_pattern(key)
                         )
-                        entry: dict = {"path": str(f), "content": content}
-                        if dropped:
-                            # Rows about other data subjects removed before export.
-                            entry["rows_redacted"] = dropped
-                        report["pb_caches"].append(entry)
+                        report["pb_caches"].append(
+                            {"path": rel, "content": content, "rows_redacted": dropped}
+                        )
                     except Exception:
-                        report["pb_caches"].append({"path": str(f), "content": "unparseable"})
+                        report["pb_caches"].append(
+                            {"path": rel, "content": "unparseable", "rows_redacted": 0}
+                        )
 
     try:
         from mediahub.memory import store as memory_store
@@ -596,12 +629,16 @@ def erase_athlete(
     except Exception as e:
         report["residuals"].append(f"privacy cascade unavailable: {e}")
 
-    # 2. PB caches (per-run, warm, and raw search HTML).
+    # 2. PB caches (per-run, warm, and search). swimmers/search_cache/meets are
+    #    global public-reference caches; pbs/ is run-keyed, so confine it to this
+    #    tenant's own runs (finding #111) — a signed-in regular tenant must not
+    #    delete another club's PB cache.
     for cache_root in (_data_dir() / "data" / "discovered", _data_dir() / "discovered"):
         if not cache_root.exists():
             continue
-        for sub in ("swimmers", "pbs", "search_cache", "meets"):
-            d = cache_root / sub
+        scan_dirs = [cache_root / "swimmers", cache_root / "search_cache", cache_root / "meets"]
+        scan_dirs += _tenant_pbs_dirs(profile_id, cache_root, include_ownerless=include_ownerless)
+        for d in scan_dirs:
             if not d.exists():
                 continue
             for f in list(d.rglob("*.json")):
