@@ -68,11 +68,28 @@ Tier A does at the socket:
 re-validated but not IP-pinned.** `--host-resolver-rules` pins only the crawl
 host; a subresource the page pulls from a different public host (`<img>`,
 `<script>`, `fetch`, …) is gated by a fresh `_host_ok` re-resolve but then
-re-resolved independently by Chromium — a narrow TOCTOU remains. Its blast
-radius is small: GET-only, cross-origin-read-blocked (the page cannot read the
-response), i.e. at most *blind* SSRF against internal endpoints reachable by a
-bare GET. We accept it for now and record it here rather than ship a guard that
-reads as "fully fixed".
+re-resolved independently by Chromium — a narrow TOCTOU remains. The blast
+radius is bounded but **not** merely "blind GET":
+
+* **Method is not restricted.** `route_decision` gates scheme, host safety, and
+  (for `document` requests) scope — never the HTTP method. A CORS *simple
+  request* — a form-encoded `POST` with no custom headers — is sent with no
+  preflight, so the residual includes **state-changing** blind SSRF against an
+  unauthenticated, CSRF-tokenless internal endpoint, not just `GET`. (`PUT`/
+  `DELETE`/JSON bodies are non-simple and trigger a preflight `OPTIONS`, so they
+  only fire if the internal endpoint returns permissive CORS.)
+* **Reads are blocked only for non-CORS targets.** "The page cannot read the
+  response" holds for opaque cross-origin responses (CORB/ORB). An internal
+  endpoint that returns `Access-Control-Allow-Origin` (common for internal JSON
+  APIs, dev servers, metrics/search dashboards) is **fully readable** by the
+  page's JS, which can then exfiltrate it to a public host — i.e. full-read
+  SSRF with exfiltration for that class, not blind.
+
+We accept this for now and record it accurately here rather than ship a guard
+that reads as "fully fixed". (Separately, and *pre-existing / out of scope for
+this fix*: the page-scoped `route`/`response` handlers don't cover a
+`window.open` popup, which is a distinct route-handler-scoping gap, not a
+DNS-rebinding one.)
 
 **Options considered to close the residual (not taken now):**
 
@@ -88,8 +105,14 @@ reads as "fully fixed".
   proxy) with its own surface. Deferred; this ADR is the pointer if the
   subresource residual is later judged worth closing.
 
-The change is reversible (a launch-flag guard) and adds one `getaddrinfo` per
-navigation. Proven by `tests/test_results_fetch_fetch.py` (offline: pin derived
-from the validated IP, rebound-internal host refused before launch, no verdict
-cache) and `tests/test_results_fetch_dns_pin.py` (live Chromium: the pin routes
-the browser to the validated IP for a host with no DNS at all).
+The change is reversible (a launch-flag guard) and adds one `getaddrinfo` on the
+first navigation to each host (an already-pinned host is accepted without
+re-resolving — the browser is locked to the validated IP, so re-resolving would
+do no security work and could only fail-close a legit same-host page on a
+transient resolver blip). Proven by `tests/test_results_fetch_fetch.py` (offline:
+pin derived through the real `resolve_safe_ip`, rebound-internal host refused
+before launch, no verdict cache, same-host accepted without re-resolving) and
+`tests/test_results_fetch_dns_pin.py` (live Chromium: the pin **overrides a
+genuine conflicting resolution** — `localhost`, which resolves to 127.0.0.1, is
+pinned to and reaches 127.0.0.2 instead — which is the precedence property
+DNS-rebinding turns on).

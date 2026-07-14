@@ -297,24 +297,28 @@ class RenderedBackend:
         """Resolve ``url``'s host to ONE validated public IP and pin the browser
         to it for this navigation; return ``False`` to refuse the navigation.
 
-        Refusal means the host is unresolvable or *any* current resolution is an
-        internal/reserved IP — i.e. a rebinding host that now points inward is
-        caught here, before the browser connects. When the host differs from the
-        one the running browser is pinned to, the browser is torn down so the
-        next ``_acquire_page`` relaunches with ``--host-resolver-rules`` re-pinned
-        to this host (``_launch_args``). Same-host navigations keep the existing
-        pin — already locked to a validated IP, so no rebind can move it and no
-        relaunch churn is incurred — but still require a fresh successful resolve
-        (fail-closed).
+        A host already pinned for this backend is accepted immediately: the
+        running browser is locked to its validated IP via ``--host-resolver-rules``
+        and cannot rebind, so re-resolving it would do no security work — it would
+        only risk fail-closing a legitimate same-host page on a transient resolver
+        blip. Only a *new* host is resolved: refusal (``False``) then means it is
+        unresolvable or *any* current resolution is an internal/reserved IP — a
+        rebinding host that now points inward is caught here, before the browser
+        connects. A new host tears the running browser down so the next
+        ``_acquire_page`` relaunches with ``--host-resolver-rules`` re-pinned to it
+        (``_launch_args``).
         """
         host = (urlparse(url).hostname or "").lower()
-        ip = self._resolve_ip(host) if host else None
+        if not host:
+            return False
+        if host == self._pinned_host:
+            return True  # already resolved + IP-pinned; the browser cannot rebind
+        ip = self._resolve_ip(host)
         if ip is None:
             return False
-        if host != self._pinned_host:
-            self._teardown_browser()  # running browser (if any) is pinned elsewhere
-            self._pinned_host = host
-            self._pinned_ip = ip
+        self._teardown_browser()  # running browser (if any) is pinned to another host
+        self._pinned_host = host
+        self._pinned_ip = ip
         return True
 
     def route_decision(self, url: str, resource_type: str, scope: Scope) -> str:

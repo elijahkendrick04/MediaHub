@@ -538,6 +538,50 @@ def test_apply_navigation_pin_relaunches_on_host_change_keeps_on_same_host():
     assert rb._pinned_host == "b.test"
 
 
+def test_apply_navigation_pin_same_host_does_not_re_resolve():
+    """An already-pinned host is accepted WITHOUT re-resolving: the browser is
+    locked to the validated IP via --host-resolver-rules and can't rebind, so
+    re-resolving would only risk fail-closing a legit same-host page on a
+    transient resolver blip. The resolver is called once (first nav), never again
+    for the same host — and would refuse even a same-host page if it were."""
+    calls: list[str] = []
+
+    def _resolve(host):
+        calls.append(host)
+        return "203.0.113.9" if len(calls) == 1 else None  # blip on every later call
+
+    rb = RenderedBackend(resolve_ip=_resolve)
+    assert rb._apply_navigation_pin("https://a.test/p1/") is True  # first nav resolves + pins
+    assert calls == ["a.test"]
+    # Same host again, mid-crawl resolver blip (would return None) — still accepted,
+    # because the pin already guarantees the connection IP; resolver not consulted.
+    assert rb._apply_navigation_pin("https://a.test/p2/") is True
+    assert rb._apply_navigation_pin("https://a.test/p3/") is True
+    assert calls == ["a.test"]  # never re-resolved the pinned host
+    assert (rb._pinned_host, rb._pinned_ip) == ("a.test", "203.0.113.9")
+
+
+def test_apply_navigation_pin_uses_real_resolve_safe_ip_by_default(monkeypatch):
+    """The security-critical default wiring (resolve_ip=resolve_safe_ip) is
+    exercised end to end: with a host that resolves to a public IP the pin is
+    derived through the REAL resolve_safe_ip; a host resolving to an internal IP
+    is refused. Guards against signature/default drift on the pin path."""
+    import mediahub.web_research.safe_fetch as sf
+
+    # Public resolution → pinned to that IP via the real resolve_safe_ip.
+    monkeypatch.setattr(sf, "_resolved_ips", lambda host: ["93.184.216.34"])
+    rb = RenderedBackend()  # production defaults: resolve_ip=resolve_safe_ip
+    assert rb._apply_navigation_pin("https://real.example/results/") is True
+    assert rb._pinned_ip == "93.184.216.34"
+    assert "--host-resolver-rules=MAP real.example 93.184.216.34" in rb._launch_args()
+
+    # Internal resolution → real resolve_safe_ip returns None → refused.
+    monkeypatch.setattr(sf, "_resolved_ips", lambda host: ["10.0.0.5"])
+    rb2 = RenderedBackend()
+    assert rb2._apply_navigation_pin("https://rebind.example/results/") is False
+    assert rb2._pinned_host is None
+
+
 def test_fetch_refuses_rebinding_host_at_browser_layer():
     """End-to-end #125 proof (no real browser): the up-front host check passes
     (attacker's DNS returned a public IP — a stale verdict would say 'safe'),
