@@ -210,6 +210,49 @@ def test_tool_loop_transport_error_records_breaker_failure(gemini_only, monkeypa
     assert _failures() == 1
 
 
+def test_no_parts_empty_shape_cites_finish_reason(gemini_only, monkeypatch):
+    """The documented MAX_TOKENS/SAFETY shape — candidate present, no parts
+    key — must surface the honest finishReason-citing error, not a
+    'malformed' mislabel (adversarial-review fix on finding #43 B)."""
+
+    class _NoPartsResp:
+        status_code = 200
+        text = "ok"
+
+        @staticmethod
+        def json():
+            return {"candidates": [{"content": {"role": "model"}, "finishReason": "MAX_TOKENS"}]}
+
+    monkeypatch.setattr(requests, "post", _Capture(response=_NoPartsResp()))
+    with pytest.raises(ai_core_llm.ProviderError) as ei:
+        ai_core_llm._ask_gemini("sys", "user", 64)
+    assert "no text" in str(ei.value).lower()
+    assert "MAX_TOKENS" in str(ei.value)
+    assert ei.value.transient is True
+
+
+def test_tool_loop_empty_conversation_raises_honestly(gemini_only, monkeypatch):
+    """A tool conversation that produced no tool calls AND no text must
+    raise the same honest empty-output error as the plain-ask path, not
+    return a silent empty ToolConversation."""
+
+    class _NoPartsResp:
+        status_code = 200
+        text = "ok"
+
+        @staticmethod
+        def json():
+            return {"candidates": [{"content": {"role": "model"}, "finishReason": "SAFETY"}]}
+
+    monkeypatch.setattr(requests, "post", _Capture(response=_NoPartsResp()))
+    with pytest.raises(ai_core_llm.ProviderError) as ei:
+        ai_core_llm._ask_gemini_with_tools(
+            "sys", "user", tools=[], on_tool_call=lambda n, a: "", max_tokens=64, max_rounds=2
+        )
+    assert "no text" in str(ei.value).lower()
+    assert "SAFETY" in str(ei.value)
+
+
 def test_ai_core_outage_trips_breaker_for_media_ai(gemini_only, monkeypatch):
     """The cross-wrapper point of finding #43: an outage seen only by
     ai_core (chat / copilot / deep-research) must trip the breaker that

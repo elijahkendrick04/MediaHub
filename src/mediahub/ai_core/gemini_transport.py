@@ -341,7 +341,9 @@ def generate_content(
         if r.status_code >= 500:
             breaker_record_failure()
         raise GeminiTransportError(
-            redact_key((r.text or "")[:300], key),
+            # Redact BEFORE truncating — a key straddling the cut would
+            # otherwise leave an un-redacted fragment in the message.
+            redact_key(r.text or "", key)[:300],
             kind=f"http_{r.status_code}",
             status=r.status_code,
             transient=status_transient(r.status_code),
@@ -384,6 +386,13 @@ def first_candidate_parts(data: dict) -> list[dict]:
         )
     content = first.get("content") or {}
     parts = content.get("parts") if isinstance(content, dict) else None
+    if parts is None:
+        # Documented empty-output shape, not damage: a candidate whose
+        # content carries no parts at all (safety block, or MAX_TOKENS spent
+        # entirely on thinking). Return [] so the wrappers surface their
+        # honest empty-output policy citing finish_reason(data) instead of
+        # mislabelling the response "malformed".
+        return []
     if not isinstance(parts, list):
         raise GeminiTransportError(
             "content.parts not a list", kind="malformed", transient=True

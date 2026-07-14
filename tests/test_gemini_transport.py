@@ -225,13 +225,34 @@ def test_first_candidate_parts_no_candidates():
     [
         {"candidates": ["not-a-dict"]},
         {"candidates": [{"content": {"parts": "not-a-list"}}]},
-        {"candidates": [{"content": {}}]},
     ],
 )
 def test_first_candidate_parts_malformed(data):
     with pytest.raises(t.GeminiTransportError) as ei:
         t.first_candidate_parts(data)
     assert ei.value.kind == "malformed"
+
+
+def test_missing_parts_is_empty_output_not_malformed():
+    """The documented empty-output shape — a candidate whose content has no
+    parts key (safety block / MAX_TOKENS eaten by thinking) — must come back
+    as [] so wrappers raise their honest finishReason-citing empty error
+    instead of mislabelling the response 'malformed'."""
+    data = {"candidates": [{"content": {"role": "model"}, "finishReason": "MAX_TOKENS"}]}
+    assert t.first_candidate_parts(data) == []
+    assert t.finish_reason(data) == "MAX_TOKENS"
+
+
+def test_error_body_redacted_before_truncation(monkeypatch):
+    """A key straddling the 300-char truncation boundary must not leave an
+    un-redacted fragment: redaction runs on the full body, then truncates."""
+    body = "x" * 290 + f"denied for key {KEY} end"
+    monkeypatch.setattr(requests, "post", _Capture(response=_Resp(403, text=body)))
+    with pytest.raises(t.GeminiTransportError) as ei:
+        t.generate_content(_payload(), key=KEY)
+    msg = str(ei.value)
+    assert KEY not in msg
+    assert KEY[:12] not in msg  # no partial fragment either
 
 
 def test_finish_reason_from_candidate_then_prompt_feedback():

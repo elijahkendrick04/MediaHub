@@ -409,6 +409,16 @@ def _ask_gemini_with_tools(
                 text_buf.append(part.get("text", ""))
         if not fn_calls:
             convo.text = "".join(text_buf).strip()
+            if not convo.text and not convo.tool_calls:
+                # Nothing came back at all — no tools ran, no text (e.g. a
+                # safety block or MAX_TOKENS spent on thinking). Mirror the
+                # plain-ask path's honest empty-output error instead of
+                # returning a silent empty conversation. When tools DID run,
+                # the convo is returned so their records aren't lost.
+                reason = gemini_transport.finish_reason(data)
+                raise ProviderError(
+                    f"Gemini returned no text (finishReason={reason})", transient=True
+                )
             return convo
         tool_response_parts = []
         for fc in fn_calls:

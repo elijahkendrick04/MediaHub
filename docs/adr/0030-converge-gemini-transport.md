@@ -92,6 +92,33 @@ and docs informed the design below.
   401/403 as transient because another provider holds a different key.
   These are different semantics, not duplication.
 
+## Post-review amendments (same PR)
+
+An adversarial multi-lens review of the diff (six findings, each
+independently verified against the code) led to four fixes before merge:
+
+- **Vision payloads build lazily again.** `_call_gemini_vision` had
+  started base64-encoding up to 5 images *before* the no-key /
+  breaker-open short-circuits; `_gemini_via_transport` now accepts a
+  payload builder so a skipped call costs zero encode work, matching the
+  pre-convergence hot path.
+- **Redact before truncate.** Non-200 bodies were truncated to 300 chars
+  and then redacted — a key straddling the cut could leave an
+  un-redacted fragment. The transport (and the imagine provider's log
+  line) now redact the full body first.
+- **The documented empty-output shape is not "malformed".** A candidate
+  whose content has no `parts` key (safety block, or MAX_TOKENS spent on
+  thinking) now yields `[]` from `first_candidate_parts`, so the honest
+  `Gemini returned no text (finishReason=…)` error is reachable again on
+  both wrappers; the ai_core tool loop raises it too when a conversation
+  produced no tool calls and no text (tool records are preserved when
+  tools did run).
+- **Recorded, not reverted:** gemini-vision ledger rows now use the text
+  path's `auth` / `rate_limited` error kinds instead of the raw
+  `http_401/403/429` they historically carried (one vocabulary across
+  both Gemini surfaces). External dashboards filtering the old vision
+  kinds should update their queries.
+
 ## Consequences
 
 - A Gemini API change (endpoint, payload shape, thinking-budget rules)

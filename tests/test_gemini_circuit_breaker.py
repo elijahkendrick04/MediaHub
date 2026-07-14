@@ -136,6 +136,25 @@ def test_breaker_trips_on_vision_transport_failures(monkeypatch):
     assert gemini_transport.breaker_is_open() is True
 
 
+def test_vision_skips_image_encode_while_breaker_open(monkeypatch):
+    """An open breaker must skip the vision call BEFORE any image work —
+    base64-encoding up to 5 photos per call is exactly the hot-path cost
+    the breaker exists to avoid (payloads are built lazily)."""
+    monkeypatch.setattr(gemini_transport, "_BREAKER_THRESHOLD", 1)
+    monkeypatch.setattr(media_ai_llm, "_resolve_gemini_key", lambda: "fake-key")
+    gemini_transport.breaker_record_failure()
+    assert gemini_transport.breaker_is_open() is True
+
+    def _must_not_encode(_path):
+        raise AssertionError("image encode must not run while breaker is open")
+
+    monkeypatch.setattr(media_ai_llm, "_read_image_for_vision", _must_not_encode)
+    out = media_ai_llm._call_gemini_vision(
+        ["some-photo.jpg"], "describe", system=None, max_tokens=10
+    )
+    assert out is None
+
+
 def test_ai_core_demotes_gemini_when_breaker_open(monkeypatch):
     """``ai_core.llm._fallback_chain`` must move Gemini to the tail
     so Anthropic (or whatever else is configured) gets first shot

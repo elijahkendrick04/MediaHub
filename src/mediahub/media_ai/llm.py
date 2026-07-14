@@ -32,7 +32,7 @@ import logging
 import os
 import re
 import time
-from typing import Any, Optional
+from typing import Any, Callable, Optional, Union
 
 # The Gemini REST transport (HTTP call, key redaction, thinking-budget
 # clamp, overload circuit breaker) is shared with ai_core.llm — one copy,
@@ -292,9 +292,12 @@ def _call_anthropic(
 
 
 def _ledger_kind(e: "gemini_transport.GeminiTransportError") -> str:
-    """Map a classified transport failure onto the ledger's historical
-    ``error_kind`` vocabulary (auth / rate_limited / transport / parse /
-    http_NNN / no_candidates / malformed)."""
+    """Map a classified transport failure onto the ledger's ``error_kind``
+    vocabulary (auth / rate_limited / transport / parse / http_NNN /
+    no_candidates / malformed). One vocabulary for both Gemini surfaces
+    now: gemini-vision rows adopted the text path's ``auth`` /
+    ``rate_limited`` names (they used to land as raw ``http_401/403/429``
+    — recorded in ADR-0030)."""
     if e.status in (401, 403):
         return "auth"
     if e.status == 429:
@@ -302,7 +305,10 @@ def _ledger_kind(e: "gemini_transport.GeminiTransportError") -> str:
     return e.kind
 
 
-def _gemini_via_transport(provider_label: str, payload: dict[str, Any]) -> Optional[str]:
+def _gemini_via_transport(
+    provider_label: str,
+    payload: Union[dict[str, Any], Callable[[], dict[str, Any]]],
+) -> Optional[str]:
     """One tolerant Gemini round-trip: text or ``None``, never raises.
 
     Skips the network entirely while the shared overload breaker is open
@@ -310,6 +316,11 @@ def _gemini_via_transport(provider_label: str, payload: dict[str, Any]) -> Optio
     calls, so a doomed round-trip per call turns ~10s into 60–80s).
     Breaker accounting itself happens inside the transport so outages
     seen by either wrapper trip the same switch.
+
+    ``payload`` may be a zero-arg builder: expensive payload construction
+    (vision's per-image base64 encode) then happens only after the no-key
+    and breaker-open short-circuits, matching the pre-convergence cost of
+    a skipped call (zero).
     """
     key = _resolve_gemini_key()
     if not key:
@@ -325,6 +336,8 @@ def _gemini_via_transport(provider_label: str, payload: dict[str, Any]) -> Optio
             error_message="Gemini circuit breaker is open; " "skipping to next provider",
         )
         return None
+    if callable(payload):
+        payload = payload()
     started = time.monotonic()
     try:
         data = gemini_transport.generate_content(
@@ -411,20 +424,26 @@ def _call_gemini_vision(
     Gemini outage doesn't waste vision round-trips when text calls
     have already noticed the failure.
     """
-    parts: list[dict] = []
-    for p in image_paths[:5]:
-        data, mt = _read_image_for_vision(p)
-        if data is None:
-            continue
-        parts.append({"inline_data": {"mime_type": mt, "data": data}})
-    parts.append({"text": prompt})
-    payload: dict[str, Any] = {
-        "contents": [{"role": "user", "parts": parts}],
-        "generationConfig": gemini_transport.generation_config(max_tokens),
-    }
-    if system:
-        payload["systemInstruction"] = {"parts": [{"text": system}]}
-    return _gemini_via_transport("gemini-vision", payload)
+    def _build_payload() -> dict[str, Any]:
+        # Built lazily: base64-encoding up to 5 photos is the expensive part
+        # of a vision call, and it must cost nothing when the breaker is
+        # open or no key is configured (the guards run first).
+        parts: list[dict] = []
+        for p in image_paths[:5]:
+            data, mt = _read_image_for_vision(p)
+            if data is None:
+                continue
+            parts.append({"inline_data": {"mime_type": mt, "data": data}})
+        parts.append({"text": prompt})
+        payload: dict[str, Any] = {
+            "contents": [{"role": "user", "parts": parts}],
+            "generationConfig": gemini_transport.generation_config(max_tokens),
+        }
+        if system:
+            payload["systemInstruction"] = {"parts": [{"text": system}]}
+        return payload
+
+    return _gemini_via_transport("gemini-vision", _build_payload)
 
 
 # ---------------------------------------------------------------------------
