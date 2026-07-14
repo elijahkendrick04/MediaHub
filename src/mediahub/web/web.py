@@ -28,6 +28,7 @@ from __future__ import annotations
 import contextlib
 import functools
 import hashlib
+import inspect
 import json
 import logging
 import mimetypes
@@ -21575,6 +21576,80 @@ def create_app() -> Flask:
     # create_app() close over these via the enclosing scope.)
     app.active_profile_id = _active_profile_id  # type: ignore[attr-defined]
     app.active_profile = _active_profile  # type: ignore[attr-defined]
+
+    def require_run(_view=None, *, deny=None, require_exists=False, param="run_id"):
+        """Single source of truth for the run-load + tenant-isolation guard.
+
+        Deep-review finding #18: the two-line
+
+            if not _can_access_run(run_id, _load_run(run_id), _active_profile_id()):
+                return <404>
+
+        was copy-pasted verbatim across ~90 run-scoped handlers, several of
+        which then re-loaded the run a *second* time in the body. Because the
+        check is security-critical (cross-tenant isolation — a foreign run must
+        answer "not found", never leak), any drift between copies is a latent
+        IDOR risk. This decorator collapses the check to one place.
+
+        Wrapping a view with ``@require_run``:
+
+        * loads the run **once** via ``_load_run(<param>)`` — the handler body
+          never loads it again;
+        * runs the tenant gate ``_can_access_run(run_id, run_data,
+          _active_profile_id())`` *before* the body; on failure the body never
+          executes;
+        * injects the loaded run dict as the ``run_data`` keyword argument, but
+          **only when the view declares it** (so handlers that don't need the
+          dict keep a clean signature and no unused argument).
+
+        The denial *response* is deliberately NOT centralised. Run-scoped
+        handlers legitimately answer a foreign/absent run with different shapes
+        — a JSON 404, an HTML page, a redirect, ``abort(404)`` — and flattening
+        them would change behaviour. ``deny`` is a zero-argument callable
+        returning that response; it defaults to the dominant shape, a JSON
+        ``{"error": "run_not_found"}`` with status 404. Only the
+        security-critical *check* is unified; the cosmetic response stays with
+        the handler.
+
+        ``require_exists=True`` also denies when the run is missing
+        (``run_data is None``), matching the handlers that guarded with
+        ``if run_data is None or not _can_access_run(...)``.
+        """
+
+        def _decorate(view):
+            try:
+                _params = inspect.signature(view).parameters
+                _wants_run_data = "run_data" in _params or any(
+                    p.kind is inspect.Parameter.VAR_KEYWORD for p in _params.values()
+                )
+            except (TypeError, ValueError):
+                _wants_run_data = False
+
+            @functools.wraps(view)
+            def _wrapped(*args, **kwargs):
+                run_id = kwargs.get(param)
+                run_data = _load_run(run_id)
+                allowed = _can_access_run(run_id, run_data, _active_profile_id())
+                if require_exists and run_data is None:
+                    allowed = False
+                if not allowed:
+                    if deny is not None:
+                        return deny()
+                    return jsonify({"error": "run_not_found"}), 404
+                if _wants_run_data:
+                    kwargs["run_data"] = run_data
+                return view(*args, **kwargs)
+
+            return _wrapped
+
+        # Support both bare ``@require_run`` and parametrised
+        # ``@require_run(deny=..., require_exists=...)`` usage.
+        return _decorate(_view) if _view is not None else _decorate
+
+    # Expose on the app (mirrors ``app.active_profile_id`` above) so the
+    # follow-up migration batches and the tenant-isolation tests can reach the
+    # one true guard without re-implementing it.
+    app.require_run = require_run  # type: ignore[attr-defined]
 
     @app.before_request
     def _bind_governance_context():
@@ -59456,12 +59531,11 @@ voice, and queues them for one-click approval.</p>
         return send_file(str(path), mimetype="video/mp4", as_attachment=False, download_name=name)
 
     @app.route("/api/runs/<run_id>/card/<card_id>/motion/manifest", methods=["GET"])
+    @require_run
     def api_card_motion_manifest(run_id: str, card_id: str):
         """The motion render's explainability record — archetype, motion
         intent, mood, colour source, seed — written as a JSON sidecar beside
         every rendered MP4. 404 until the matching cut has been rendered."""
-        if not _can_access_run(run_id, _load_run(run_id), _active_profile_id()):
-            return jsonify({"error": "run_not_found"}), 404
         try:
             from mediahub.visual import motion as _motion
 
@@ -62387,11 +62461,10 @@ voice, and queues them for one-click approval.</p>
         )
 
     @app.route("/api/runs/<run_id>/export-share", methods=["POST"])
+    @require_run
     def api_run_export_share(run_id: str):
         """Mint a 1.18 share token so a finished export ZIP has a shareable,
         revocable, expiring download link (no login needed to fetch it)."""
-        if not _can_access_run(run_id, _load_run(run_id), _active_profile_id()):
-            return jsonify({"error": "run_not_found"}), 404
         body = request.get_json(silent=True) or {}
         job_id = (body.get("job") or "").strip()
         if not re.fullmatch(r"[0-9a-f]{32}", job_id):
@@ -62934,11 +63007,9 @@ voice, and queues them for one-click approval.</p>
     # =====================================================================
 
     @app.route("/api/runs/<run_id>/card/<card_id>/revisions", methods=["GET"])
+    @require_run
     def api_card_revisions(run_id: str, card_id: str):
         """List a card's design versions, oldest→newest (latest = current)."""
-        run_data = _load_run(run_id)
-        if not _can_access_run(run_id, run_data, _active_profile_id()):
-            return jsonify({"error": "run_not_found"}), 404
         from mediahub.collab import revisions as _rev
 
         revs = _rev.list_revisions(run_id, card_id)
@@ -62946,11 +63017,9 @@ voice, and queues them for one-click approval.</p>
         return jsonify({"ok": True, "revisions": revs, "current_id": current})
 
     @app.route("/api/runs/<run_id>/card/<card_id>/revisions/diff", methods=["GET"])
+    @require_run
     def api_card_revisions_diff(run_id: str, card_id: str):
         """Field-level before/after between two of a card's design versions."""
-        run_data = _load_run(run_id)
-        if not _can_access_run(run_id, run_data, _active_profile_id()):
-            return jsonify({"error": "run_not_found"}), 404
         from mediahub.collab import revisions as _rev
 
         diff = _rev.diff_revisions(
@@ -62961,11 +63030,9 @@ voice, and queues them for one-click approval.</p>
         return jsonify({"ok": True, "diff": diff})
 
     @app.route("/api/runs/<run_id>/card/<card_id>/revisions/restore", methods=["POST"])
-    def api_card_revisions_restore(run_id: str, card_id: str):
+    @require_run
+    def api_card_revisions_restore(run_id: str, card_id: str, run_data):
         """Roll a card back to a prior version (re-issued as a fresh current)."""
-        run_data = _load_run(run_id)
-        if not _can_access_run(run_id, run_data, _active_profile_id()):
-            return jsonify({"error": "run_not_found"}), 404
         denied = _role_denied_json(_perms.CAP_EDIT, run_id, run_data)
         if denied:
             return denied
@@ -62978,15 +63045,13 @@ voice, and queues them for one-click approval.</p>
         return jsonify({"ok": True, "brief_id": restored.get("id", "")})
 
     @app.route("/api/runs/<run_id>/card/<card_id>/locks", methods=["GET", "POST"])
-    def api_card_locks(run_id: str, card_id: str):
+    @require_run
+    def api_card_locks(run_id: str, card_id: str, run_data):
         """List (GET) or set (POST) element locks on a card.
 
         POST {element, locked} — locking an element refuses any later edit
         (copilot patch or inspector toggle) that would change it.
         """
-        run_data = _load_run(run_id)
-        if not _can_access_run(run_id, run_data, _active_profile_id()):
-            return jsonify({"error": "run_not_found"}), 404
         from mediahub.collab import locks as _locks
 
         if request.method == "GET":
@@ -63024,12 +63089,10 @@ voice, and queues them for one-click approval.</p>
     # =====================================================================
 
     @app.route("/api/runs/<run_id>/shares", methods=["GET", "POST"])
-    def api_run_shares(run_id: str):
+    @require_run
+    def api_run_shares(run_id: str, run_data):
         """List (GET) or mint (POST) review-share links for a run. Owner-only —
         a share exposes club data outside the workspace."""
-        run_data = _load_run(run_id)
-        if not _can_access_run(run_id, run_data, _active_profile_id()):
-            return jsonify({"error": "run_not_found"}), 404
         denied = _role_denied_json(_perms.CAP_MANAGE, run_id, run_data)
         if denied:
             return denied
@@ -63069,10 +63132,8 @@ voice, and queues them for one-click approval.</p>
         ), 201
 
     @app.route("/api/runs/<run_id>/shares/<token>/revoke", methods=["POST"])
-    def api_run_share_revoke(run_id: str, token: str):
-        run_data = _load_run(run_id)
-        if not _can_access_run(run_id, run_data, _active_profile_id()):
-            return jsonify({"error": "run_not_found"}), 404
+    @require_run
+    def api_run_share_revoke(run_id: str, token: str, run_data):
         denied = _role_denied_json(_perms.CAP_MANAGE, run_id, run_data)
         if denied:
             return denied
