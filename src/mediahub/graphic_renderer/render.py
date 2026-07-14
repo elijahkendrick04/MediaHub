@@ -1425,7 +1425,7 @@ def _build_logo_treatment(
         '<circle cx="50" cy="50" r="46" fill="none" stroke="currentColor" '
         'stroke-width="5" opacity="0.85"/>'
         f'<text x="50" y="53" text-anchor="middle" dominant-baseline="central" '
-        f"font-family=\"Anton, 'Bebas Neue', Arial, sans-serif\" font-size=\"{font_px}\" "
+        f'font-family="Anton, \'Bebas Neue\', Arial, sans-serif" font-size="{font_px}" '
         f'letter-spacing="1" fill="currentColor">{html_escape(initials)}</text>'
         "</svg>"
     )
@@ -4721,9 +4721,7 @@ def _fill_v2_archetype(
     root_vars["--mh-track-surname"] = "%.4fem" % _tracking_for_px(fit_surname_px, "display")
     root_vars["--mh-track-mega-name"] = "%.4fem" % _tracking_for_px(fit_mega_name_px, "display")
     root_vars["--mh-track-result"] = "%.4fem" % _tracking_for_px(fit_result_px, "numeral")
-    root_vars["--mh-track-mega-result"] = "%.4fem" % _tracking_for_px(
-        fit_mega_result_px, "numeral"
-    )
+    root_vars["--mh-track-mega-result"] = "%.4fem" % _tracking_for_px(fit_mega_result_px, "numeral")
     # G1.12 — Multi-line hero & split-result fitting. The archetypes below carry
     # the surname / result in ONE dominant autofit slot. When a compound or
     # double-barrelled surname, or a split-time result ("1:45.23 / 50.12"), will
@@ -4748,9 +4746,7 @@ def _fill_v2_archetype(
     var = ""
     if surname and archetype in _MULTILINE_SURNAME_ARCHETYPES:
         var = (
-            "--mh-fit-surname-px"
-            if archetype == "split_diagonal_hero"
-            else "--mh-fit-mega-name-px"
+            "--mh-fit-surname-px" if archetype == "split_diagonal_hero" else "--mh-fit-mega-name-px"
         )
     elif surname and archetype and archetype not in _BALANCE_OPT_OUT:
         cand = _surname_slot_capability(archetype)

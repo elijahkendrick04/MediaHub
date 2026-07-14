@@ -189,8 +189,7 @@ def _glitch_style(accent_hex: str) -> str:
         return f"{int(round(rr * 255))},{int(round(gg * 255))},{int(round(bb * 255))}"
 
     return (
-        f"text-shadow:-0.022em 0 0 rgba({_rot(-140)},0.62),"
-        f"0.022em 0 0 rgba({_rot(140)},0.62);"
+        f"text-shadow:-0.022em 0 0 rgba({_rot(-140)},0.62)," f"0.022em 0 0 rgba({_rot(140)},0.62);"
     )
 
 
