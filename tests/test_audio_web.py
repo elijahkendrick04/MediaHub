@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import importlib
 import io
 import wave
 
@@ -10,25 +9,21 @@ import pytest
 
 
 @pytest.fixture
-def app_env(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    for sub in ("runs_v4", "uploads_v4", "club_profiles"):
-        (tmp_path / sub).mkdir(parents=True, exist_ok=True)
+def app_env(web_module, monkeypatch, tmp_path):
+    # DATA_DIR (+ RUNS_DIR / UPLOADS_DIR / SWIM_CONTENT_PROFILES_DIR) isolation is
+    # provided by the canonical fixtures (web_module → _isolate_data_dir).
     # Keep AI + library-bed off so honest-error / byte-parity paths are exercised.
-    for var in ("GEMINI_API_KEY", "GOOGLE_API_KEY", "ANTHROPIC_API_KEY", "MEDIAHUB_REEL_MUSIC_LIBRARY"):
+    for var in (
+        "GEMINI_API_KEY",
+        "GOOGLE_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "MEDIAHUB_REEL_MUSIC_LIBRARY",
+    ):
         monkeypatch.delenv(var, raising=False)
 
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
-    app = wm.create_app()
+    app = web_module.create_app()
     app.config["TESTING"] = True
-    return app, wm, tmp_path
+    return app, web_module, tmp_path
 
 
 def _tiny_wav(ms: int = 400, rate: int = 22050) -> bytes:

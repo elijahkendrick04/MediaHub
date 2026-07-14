@@ -18,9 +18,9 @@ the raw detection total, which read absurdly high ("400 achievements" when
 most swims were simply completed races). The raw count keeps its per-row
 column and its DB backfill; only the headline stat changed meaning.
 """
+
 from __future__ import annotations
 
-import importlib
 import json
 import uuid
 
@@ -28,20 +28,11 @@ import pytest
 
 
 @pytest.fixture
-def activity_app(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    for sub in ("runs_v4", "uploads_v4", "club_profiles"):
-        (tmp_path / sub).mkdir(parents=True, exist_ok=True)
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-    importlib.reload(cp)
-    importlib.reload(wm)
+def activity_app(web_module, tmp_path):
+    wm = web_module
     from mediahub.web.club_profile import ClubProfile, save_profile
-    save_profile(ClubProfile(profile_id="org-a", display_name="Org A",
-                             brand_voice_summary="Bold."))
+
+    save_profile(ClubProfile(profile_id="org-a", display_name="Org A", brand_voice_summary="Bold."))
 
     def seed_run(n_ach, n_standout=0, write_db_count=True):
         rid = "run-" + uuid.uuid4().hex[:8]
@@ -50,19 +41,32 @@ def activity_app(tmp_path, monkeypatch):
         ranked = [
             {
                 "rank": i + 1,
-                "achievement": {"swim_id": f"k{i}:100FRLC:F:gold", "type": "medal_gold",
-                                "swimmer_name": f"Swimmer {i}", "event": "100 Free"},
-                "quality_band": "elite", "priority": 0.9,
-                "suggested_post_type": "main_feed", "factors": [],
+                "achievement": {
+                    "swim_id": f"k{i}:100FRLC:F:gold",
+                    "type": "medal_gold",
+                    "swimmer_name": f"Swimmer {i}",
+                    "event": "100 Free",
+                },
+                "quality_band": "elite",
+                "priority": 0.9,
+                "suggested_post_type": "main_feed",
+                "factors": [],
             }
             for i in range(n_standout)
         ]
         payload = {
-            "run_id": rid, "profile_id": "org-a", "meet": {"name": f"Meet {rid}"},
-            "our_swim_count": n_ach, "cards": [],
+            "run_id": rid,
+            "profile_id": "org-a",
+            "meet": {"name": f"Meet {rid}"},
+            "our_swim_count": n_ach,
+            "cards": [],
             "recognition_report": {
-                "ranked_achievements": ranked, "n_elite": 1, "n_strong": 2,
-                "n_story": n_ach - 3, "n_achievements": n_ach, "n_swims_analysed": n_ach,
+                "ranked_achievements": ranked,
+                "n_elite": 1,
+                "n_strong": 2,
+                "n_story": n_ach - 3,
+                "n_achievements": n_ach,
+                "n_swims_analysed": n_ach,
             },
         }
         (tmp_path / "runs_v4" / f"{rid}.json").write_text(json.dumps(payload))
@@ -75,7 +79,8 @@ def activity_app(tmp_path, monkeypatch):
             "VALUES (?, datetime('now'), 'done', 'org-a', ?, ?, 0, 0, ?)",
             (rid, f"Meet {rid}", n_ach, "x.hy3"),
         )
-        conn.commit(); conn.close()
+        conn.commit()
+        conn.close()
         return rid
 
     app = wm.create_app()
@@ -95,7 +100,8 @@ def _activity(app):
 class TestActivitySurfacesAchievements:
     def test_headline_is_standout_swims_not_cards(self, activity_app):
         app, _wm, seed = activity_app
-        seed(40, n_standout=3); seed(31, n_standout=2)
+        seed(40, n_standout=3)
+        seed(31, n_standout=2)
         body = _activity(app)
         # The headline is the deduped standout-swim figure…
         assert "Standout swims" in body
