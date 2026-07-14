@@ -41,6 +41,7 @@ from concurrent.futures import TimeoutError as _FutureTimeout
 from contextlib import contextmanager
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Iterator, Optional
 
@@ -3645,6 +3646,39 @@ _MULTILINE_SURNAME_ARCHETYPES = frozenset(
 )
 _MULTILINE_RESULT_ARCHETYPES = frozenset({"big_number_dominant", "cornerstone_numeral"})
 
+# D3 (Canva gap analysis) — archetypes whose surname slot is single-line BY
+# DESIGN (band geometry, crawls, scorebug rows): the crush-triggered balanced
+# fit must not stack a second line into them. Everything else with a fitted
+# surname slot is balance-capable (see _surname_slot_capability).
+_BALANCE_OPT_OUT = frozenset(
+    {"ticker_strip", "marquee_crawl", "broadcast_scorebug", "scoreline_versus", "horizon_band"}
+)
+
+
+@lru_cache(maxsize=None)
+def _surname_slot_capability(archetype: str) -> str:
+    """Which fitted var an archetype's surname slot rides, or "" (D3).
+
+    A deterministic one-time template scan: the archetype can take a balanced
+    two-line surname only if it renders ``{{ATHLETE_SURNAME_DISPLAY}}`` in a
+    slot sized by one of the fitted name vars. The mega-name var wins when a
+    template uses both (the mega slot is the dominant one the balancer should
+    protect).
+    """
+    try:
+        from mediahub.graphic_renderer import archetypes as _archetypes
+
+        text = (_archetypes.V2_DIR / f"{archetype}.html").read_text(encoding="utf-8")
+    except Exception:
+        return ""
+    if "{{ATHLETE_SURNAME_DISPLAY}}" not in text:
+        return ""
+    if "--mh-fit-mega-name-px" in text:
+        return "--mh-fit-mega-name-px"
+    if "--mh-fit-surname-px" in text:
+        return "--mh-fit-surname-px"
+    return ""
+
 
 def _mh_role_vars(palette: dict, brand_kit=None) -> dict[str, str]:
     """Map the club's CANONICAL brand colours to the v2 ``--mh-*`` role tokens.
@@ -4490,10 +4524,15 @@ def _apply_text_effects_to_repl(repl: dict, effects: dict, root_vars: dict) -> N
 _NUM_SEP_RE = re.compile(r"(?<=\d)([.:])(?=\d)")
 _TAG_SPLIT_RE = re.compile(r"(<[^>]+>)")
 
-# The separator cell width as a fraction of a full mono advance (1ch). 0.55
-# keeps a visible pause without letting digits collide.
-_SEP_CELL_CH = 0.55
-_SEP_CSS = "\n.mh-sep{display:inline-block;width:0.55ch;text-align:center;}\n"
+# The kern is applied as symmetric negative margins on an INLINE span (an
+# inline-block cell would sit in its own client rect and read as a second
+# "line" to DOM line-measurement, and resets surrounding letter-spacing).
+# 0.10em per side pulls the neighbouring digits ~1/3 of a mono cell closer;
+# the upscale credits deliberately LESS than the pulled width (0.30 cells per
+# separator) so the enlarged numeral always still fits slots that carry their
+# own negative tracking.
+_SEP_RECOVERED_CELLS = 0.30
+_SEP_CSS = "\n.mh-sep{margin:0 -0.10em;}\n"
 
 
 def _kern_numeric_seps(value_html: str) -> tuple[str, int]:
@@ -4616,16 +4655,25 @@ def _fill_v2_archetype(
     # fractions (byte-identical renders); landscape families give the hero more
     # of the short edge and less of the abundant width.
     _boxes = _v2_fit_boxes(width, height)
+    # D1 (Canva gap analysis) — fit the hero name slots for the face the
+    # typography pair ACTUALLY binds to --mh-font-display, not always Anton.
+    # Bowlby One runs ~60% wider than Anton (a real overflow when fitted with
+    # Anton's metrics); Bebas Neue runs narrower (an under-filled hero).
+    # autofit carries measured per-family scales for all three display faces.
+    _display_family = (
+        _display_font_stack_for_pair(getattr(brief, "typography_pair", "") or "") or "Anton"
+    )
     _sw, _sh, _smin, _smax = _boxes["surname"]
-    root_vars["--mh-fit-surname-px"] = "%dpx" % _fit_one_line_px(
+    fit_surname_px = _fit_one_line_px(
         surname or "X",
         width * _sw,
         height * _sh,
-        font_family="Anton",
+        font_family=_display_family,
         weight=400,
         min_px=_smin,
         max_px=_smax,
     )
+    root_vars["--mh-fit-surname-px"] = "%dpx" % fit_surname_px
     _rw, _rh, _rmin, _rmax = _boxes["result"]
     fit_result_px = _fit_one_line_px(
         result or "X",
@@ -4651,14 +4699,30 @@ def _fill_v2_archetype(
     )
     root_vars["--mh-fit-mega-result-px"] = "%dpx" % fit_mega_result_px
     _nw, _nh, _nmin, _nmax = _boxes["mega_name"]
-    root_vars["--mh-fit-mega-name-px"] = "%dpx" % _fit_one_line_px(
+    fit_mega_name_px = _fit_one_line_px(
         surname or "X",
         width * _nw,
         height * _nh,
-        font_family="Anton",
+        font_family=_display_family,
         weight=400,
         min_px=_nmin,
         max_px=_nmax,
+    )
+    root_vars["--mh-fit-mega-name-px"] = "%dpx" % fit_mega_name_px
+
+    # D2 (Canva gap analysis) — size-dependent optical tracking for the fitted
+    # hero slots: large display caps tighten (loose big caps fall apart into
+    # letters; PNG compression exaggerates it), emitted as vars the layouts
+    # consume with their historic constants as fallbacks. Negative-only ramps,
+    # so a tracked line is always narrower than the fitted estimate — the safe
+    # direction by construction.
+    from mediahub.graphic_renderer.autofit import tracking_for_px as _tracking_for_px
+
+    root_vars["--mh-track-surname"] = "%.4fem" % _tracking_for_px(fit_surname_px, "display")
+    root_vars["--mh-track-mega-name"] = "%.4fem" % _tracking_for_px(fit_mega_name_px, "display")
+    root_vars["--mh-track-result"] = "%.4fem" % _tracking_for_px(fit_result_px, "numeral")
+    root_vars["--mh-track-mega-result"] = "%.4fem" % _tracking_for_px(
+        fit_mega_result_px, "numeral"
     )
     # G1.12 — Multi-line hero & split-result fitting. The archetypes below carry
     # the surname / result in ONE dominant autofit slot. When a compound or
@@ -4673,19 +4737,38 @@ def _fill_v2_archetype(
     from mediahub.graphic_renderer.autofit import fit_balanced
 
     archetype = getattr(brief, "layout_template", "") or ""
+    # D3 (Canva gap analysis) — balanced wrapping is a *capability with a
+    # trigger*, not an allowlist. The legacy allowlist keeps its
+    # always-attempt behaviour (byte-identical); every OTHER archetype whose
+    # template actually renders the surname in a fitted slot gets the same
+    # balanced fit whenever the single-line fit has been crushed below 55% of
+    # its cap — a long compound surname now becomes a two-line poster headline
+    # instead of a thin strip, everywhere. Single-line-by-design archetypes
+    # opt out via _BALANCE_OPT_OUT.
+    var = ""
     if surname and archetype in _MULTILINE_SURNAME_ARCHETYPES:
-        if archetype == "split_diagonal_hero":
-            var = "--mh-fit-surname-px"
+        var = (
+            "--mh-fit-surname-px"
+            if archetype == "split_diagonal_hero"
+            else "--mh-fit-mega-name-px"
+        )
+    elif surname and archetype and archetype not in _BALANCE_OPT_OUT:
+        cand = _surname_slot_capability(archetype)
+        if cand == "--mh-fit-mega-name-px" and fit_mega_name_px < 0.55 * _nmax:
+            var = cand
+        elif cand == "--mh-fit-surname-px" and fit_surname_px < 0.55 * _smax:
+            var = cand
+    if var:
+        if var == "--mh-fit-surname-px":
             _bw, _bh, _bmin, _bmax = _boxes["surname"]
-        else:  # mega_surname_bleed / minimal_type_poster — the mega-name slot
-            var = "--mh-fit-mega-name-px"
+        else:
             _bw, _bh, _bmin, _bmax = _boxes["mega_name"]
         size, lines = fit_balanced(
             surname,
             width * _bw,
             height * _bh,
             max_lines=2,
-            font_family="Anton",
+            font_family=_display_family,
             weight=400,
             min_px=_bmin,
             max_px=_bmax,
@@ -4834,7 +4917,7 @@ def _fill_v2_archetype(
         extra_css += _SEP_CSS
         n_chars = len(result or "")
         if n_chars > n_sep:
-            factor = n_chars / (n_chars - (1.0 - _SEP_CELL_CH) * n_sep)
+            factor = n_chars / (n_chars - _SEP_RECOVERED_CELLS * n_sep)
             if "<br>" not in kerned:
                 if not result_axes.css and fit_result_px > _rmin:
                     root_vars["--mh-fit-result-px"] = "%dpx" % min(

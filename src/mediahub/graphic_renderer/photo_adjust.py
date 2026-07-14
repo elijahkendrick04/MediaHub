@@ -74,6 +74,10 @@ __all__ = [
     "get_preset",
     "is_enabled",
     "ENV_VAR",
+    "AUTO_PRESET",
+    "AUTO_RECIPE_VERSION",
+    "measure_photo",
+    "auto_recipe",
 ]
 
 # Operator-level global default: set ``MEDIAHUB_PHOTO_ADJUST=<preset>`` to apply
@@ -383,8 +387,12 @@ class PhotoRecipe:
     # --- properties ----------------------------------------------------- #
 
     def is_noop(self) -> bool:
-        """True when applying this recipe leaves any image unchanged."""
-        return len(self.steps) == 0
+        """True when applying this recipe leaves any image unchanged.
+
+        The ``auto`` sentinel carries no static steps but is NOT a no-op: it
+        resolves to a per-image measured recipe at apply time (E1).
+        """
+        return len(self.steps) == 0 and self.name != AUTO_PRESET
 
     def to_dict(self) -> Dict[str, Any]:
         return {"name": self.name, "steps": [s.to_dict() for s in self.steps]}
@@ -398,7 +406,12 @@ class PhotoRecipe:
 
         Two recipes with identical steps share a signature even if named
         differently — exactly what a render-stage cache key (G1.24) wants.
+        The ``auto`` sentinel signs its ALGORITHM VERSION instead (its steps
+        are computed per image; the asset cache already keys on the image
+        bytes, so version + image uniquely determine the output).
         """
+        if self.name == AUTO_PRESET and not self.steps:
+            return hashlib.sha256(AUTO_RECIPE_VERSION.encode("utf-8")).hexdigest()[:12]
         payload = json.dumps([s.to_dict() for s in self.steps], sort_keys=True)
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:12]
 
@@ -419,6 +432,9 @@ class PhotoRecipe:
 PRESETS: Dict[str, PhotoRecipe] = {
     # Identity — explicit "do nothing" so a caller can name it without branching.
     "none": PhotoRecipe.build("none", []),
+    # E1 — the measured auto-enhance sentinel: resolves per image at apply
+    # time (see auto_recipe); healthy photos pass through byte-identical.
+    "auto": PhotoRecipe.build("auto", []),
     # Crisp clarity for action shots: tidy the histogram, then a gentle sharpen.
     "natural": PhotoRecipe.build(
         "natural",
@@ -465,6 +481,7 @@ PRESETS: Dict[str, PhotoRecipe] = {
 
 # Public, stable order for any "pick a look" UI.
 PRESET_NAMES: Tuple[str, ...] = (
+    "auto",
     "natural",
     "crisp",
     "punchy",
@@ -479,6 +496,96 @@ def get_preset(name: str) -> Optional[PhotoRecipe]:
     if not name:
         return None
     return PRESETS.get(str(name).strip().lower())
+
+
+# --------------------------------------------------------------------------- #
+# E1 (Canva gap analysis) — measured auto-enhance.
+#
+# Canva's one-click Auto Enhance is why "every Canva design looks decent":
+# a dim sports-hall phone shot and a bright outdoor shot enter the design at
+# a consistent baseline because the pipeline MEASURES each photo's
+# deficiencies and corrects only those. The fixed presets above are curated
+# looks; ``auto`` is the normaliser that runs underneath them for briefs
+# without a curated look. Pure PIL statistics on a fixed downsampled grid —
+# deterministic (same bytes → same recipe → same pixels), no AI, no network.
+# Already-healthy photos measure clean and pass through byte-identical.
+# --------------------------------------------------------------------------- #
+
+# Sentinel preset name + algorithm version (bumping the version rotates every
+# cached auto-graded asset exactly once).
+AUTO_PRESET = "auto"
+AUTO_RECIPE_VERSION = "auto-v1"
+
+# The measurement grid — same working-size philosophy as photo_palette.
+_MEASURE_MAX = 96
+
+
+def measure_photo(img: Image.Image) -> Dict[str, float]:
+    """Deterministic exposure/saturation statistics for ``img``.
+
+    Returns luminance percentiles (0–255), the luminance standard deviation
+    (a cheap midtone-contrast proxy) and the mean HSV saturation (0–1), all
+    computed on visible pixels of a ≤96px working copy.
+    """
+    rgb, _alpha = _split_alpha(img)
+    work = rgb.copy()
+    work.thumbnail((_MEASURE_MAX, _MEASURE_MAX), Image.Resampling.NEAREST)
+    lum = sorted(work.convert("L").getdata())
+    n = len(lum)
+    if n == 0:
+        return {"p01": 0.0, "p50": 128.0, "p99": 255.0, "std": 64.0, "sat": 0.5}
+
+    def _pct(p: float) -> float:
+        return float(lum[min(n - 1, max(0, int(round(p * (n - 1)))))])
+
+    mean = sum(lum) / n
+    std = (sum((v - mean) ** 2 for v in lum) / n) ** 0.5
+    sat_data = work.convert("HSV").getdata(band=1)
+    sat = (sum(sat_data) / (len(sat_data) * 255.0)) if len(sat_data) else 0.5
+    return {
+        "p01": _pct(0.01),
+        "p50": _pct(0.50),
+        "p99": _pct(0.99),
+        "std": float(std),
+        "sat": float(sat),
+    }
+
+
+def auto_recipe(img: Image.Image) -> PhotoRecipe:
+    """Build the measured normalisation recipe for ``img`` (possibly empty).
+
+    Emits ONLY the bounded ops the measurements justify:
+
+    * a levels stretch when the histogram doesn't span its range,
+    * a gentle brightness lift for a dark midtone (or trim for a blown one),
+    * a gated saturation nudge for under-/over-saturated sources,
+    * a light clarity sharpen when midtone local contrast is low.
+
+    A healthy photo yields an empty recipe → byte-identical passthrough.
+    """
+    m = measure_photo(img)
+    spec: List[Tuple[str, Dict[str, Any]]] = []
+    if m["p01"] > 12 or m["p99"] < 243:
+        spec.append(
+            (
+                "levels",
+                {"black": max(0.0, m["p01"] - 2), "white": min(255.0, m["p99"] + 2)},
+            )
+        )
+    if m["p50"] < 96:
+        spec.append(("brightness", {"factor": 1.10}))
+    elif m["p50"] > 176:
+        spec.append(("brightness", {"factor": 0.94}))
+    if m["sat"] < 0.24:
+        spec.append(("saturation", {"factor": 1.12}))
+    elif m["sat"] > 0.78:
+        spec.append(("saturation", {"factor": 0.94}))
+    if m["std"] < 40:
+        spec.append(("contrast", {"factor": 1.06}))
+        spec.append(("sharpen", {"amount": 0.5}))
+    # Named distinctly from the sentinel so an empty measured recipe is a TRUE
+    # no-op (is_noop() special-cases only the unresolved sentinel name).
+    return PhotoRecipe.build("auto-measured", spec)
 
 
 # --------------------------------------------------------------------------- #
@@ -507,6 +614,11 @@ def adjust_image(img: Image.Image, recipe: Union[PhotoRecipe, str, None]) -> Ima
     r = _as_recipe(recipe)
     if r is None or r.is_noop():
         return img
+    # E1 — the ``auto`` sentinel resolves to this image's measured recipe.
+    if r.name == AUTO_PRESET and not r.steps:
+        r = auto_recipe(img)
+        if r.is_noop():
+            return img
     rgb, alpha = _split_alpha(img)
     for step in r.steps:
         # Each op is alpha-aware too, but we feed it the already-split RGB so the

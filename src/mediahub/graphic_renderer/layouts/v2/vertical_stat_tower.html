@@ -69,7 +69,7 @@
 .vt__surname {
   font-family: var(--mh-font-display, 'Anton','Bebas Neue',Impact,sans-serif); font-weight: 400;
   font-size: calc(var(--mh-fit-surname-px, 132px) * 0.78);
-  line-height: 0.88; letter-spacing: -0.01em; text-transform: uppercase;
+  line-height: 0.88; letter-spacing: var(--mh-track-surname, -0.01em); text-transform: uppercase;
   color: var(--mh-on-primary);
   white-space: normal; overflow-wrap: anywhere; word-break: break-word;
 }
@@ -105,7 +105,7 @@
   font-feature-settings: "tnum"; font-weight: 700;
   font-size: calc(var(--mh-fit-result-px, 92px) * 0.92);
   font-variation-settings: var(--mh-axes-result, normal);
-  line-height: 0.9; letter-spacing: -0.02em;
+  line-height: 0.9; letter-spacing: var(--mh-track-result, -0.02em);
   color: var(--mh-primary);
   white-space: normal; overflow-wrap: anywhere; word-break: break-word;
 }

@@ -87,7 +87,7 @@
   font-family: 'JetBrains Mono', 'Space Grotesk', monospace; font-feature-settings: "tnum";
   font-weight: 700; font-size: calc(var(--mh-fit-result-px, 118px) * 0.5);
   font-variation-settings: var(--mh-axes-result, normal);
-  line-height: 0.9; letter-spacing: -0.02em; color: var(--mh-on-primary);
+  line-height: 0.9; letter-spacing: var(--mh-track-result, -0.02em); color: var(--mh-on-primary);
   white-space: normal; overflow-wrap: anywhere; word-break: break-word; max-width: 100%;
 }
 
@@ -101,7 +101,7 @@
 .rl__surname {
   font-family: var(--mh-font-display, 'Anton', 'Bebas Neue', Impact, sans-serif); font-weight: 400;
   font-size: calc(var(--mh-fit-surname-px, 132px) * 0.62);
-  line-height: 0.94; letter-spacing: -0.01em; text-transform: uppercase;
+  line-height: 0.94; letter-spacing: var(--mh-track-surname, -0.01em); text-transform: uppercase;
   color: var(--mh-on-primary);
   white-space: normal; overflow-wrap: anywhere; word-break: break-word; max-width: 100%;
 }
