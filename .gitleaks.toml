@@ -28,12 +28,16 @@ regexes = [
   # rule matches the `..._access_token": "..."` shape. Never real credentials.
   '''"(buffer|scheduler)_access_token":\s*"tok-(buf|sched)-\d{3}"''',
   # The Gemini transport/parity/redaction tests use self-describing fake
-  # keys ("AIzaSyTEST-parity-not-a-real-key", "AIzaSyTEST-transport-not-real",
-  # "AIzaSyTEST-do-not-leak-XYZ789", …). The AIzaSyTEST prefix is
-  # deliberately impossible for a real Google key issuance and the suffix is
-  # prose; the generic-api-key rule matches the `KEY = "..."` assignment
-  # shape. Synthetic, never real credentials — real keys are env-only.
+  # keys ("AIzaSyTEST-parity-not-a-real-key", "AIzaSyTEST-do-not-leak-XYZ789",
+  # …). Their prose-like suffixes sit below the generic-api-key entropy gate
+  # today; this entry is defence-in-depth so a future rule/threshold bump
+  # can't start failing history. Synthetic, never real credentials.
   '''AIzaSyTEST-[A-Za-z0-9_-]+''',
+  # tests/test_ai_core_gemini_parity.py's tool-loop helper passes the kwarg
+  # echo `max_tokens=max_tokens` on one line; the generic-api-key rule keys
+  # on the "tokens…=" shape and captures the right-hand identifier as a
+  # "secret" (entropy 3.58). Python syntax, not a credential.
+  '''max_tokens=max_tokens''',
 ]
 paths = [
   # Vendored reference material (never executed) and binary corpora.
