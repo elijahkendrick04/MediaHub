@@ -3607,6 +3607,66 @@ def _legible_accent(primary: str) -> str:
     return "#FFFFFF" if dark else "#0B0B0C"  # last resort: maximum contrast
 
 
+def _derived_accent_enabled(brand_kit) -> bool:
+    """True when the operator has opted into the C10 derived companion accent.
+
+    Per-club via the BrandKit ``allow_derived_accent`` flag, or globally via the
+    ``MEDIAHUB_DERIVED_ACCENT`` env switch. Default OFF — a derived accent
+    introduces a hue the club never uploaded, so it is always an explicit choice.
+    """
+    if os.environ.get("MEDIAHUB_DERIVED_ACCENT", "").strip().lower() in ("1", "true", "yes", "on"):
+        return True
+    return bool(getattr(brand_kit, "allow_derived_accent", False))
+
+
+def _companion_accent_for(primary: str, brand_kit, *extra_colours: str):
+    """The C10 hue-arithmetic companion accent for a thin palette, or ``None``.
+
+    Gated behind the operator opt-in (:func:`_derived_accent_enabled`). Every
+    other brand-adjacent colour (the resolved secondary and the brief-palette
+    accent) is fed to ``theming.companion.derive_companion_accent`` so its
+    brandability + distinctness gate returns ``None`` for any club that actually
+    has a second brand colour — the companion only ever fires for a genuinely
+    one-colour club that opted in. Deterministic; never raises.
+    """
+    if not _derived_accent_enabled(brand_kit):
+        return None
+    try:
+        from mediahub.theming.companion import derive_companion_accent
+
+        return derive_companion_accent(primary, [c for c in extra_colours if c])
+    except Exception:
+        return None
+
+
+def _companion_accent_note(brief, brand_kit) -> str:
+    """The explainability note when a C10 companion accent was actually painted.
+
+    Re-runs the exact accent-resolution decision ``_mh_role_vars`` makes and
+    returns the companion's provenance only when it genuinely filled the accent
+    (opt-in on, no real accent, secondary illegible, thin palette, no medal tint
+    overriding). ``""`` otherwise, so a non-derived card records nothing.
+    """
+    if not _derived_accent_enabled(brand_kit) or _detect_medal_tier(brief):
+        return ""
+    palette = dict(getattr(brief, "palette", None) or {})
+    primary = getattr(brand_kit, "primary_colour", None) if brand_kit is not None else None
+    if not _is_brand_hex(primary):
+        primary = palette.get("primary")
+    if not _is_brand_hex(primary):
+        return ""
+    # A real brand-kit accent always wins — the companion never fired.
+    if _is_brand_hex(getattr(brand_kit, "accent_colour", None) if brand_kit is not None else None):
+        return ""
+    secondary = getattr(brand_kit, "secondary_colour", None) if brand_kit is not None else None
+    if not _is_brand_hex(secondary):
+        secondary = palette.get("secondary")
+    if not _is_brand_hex(secondary):
+        secondary = darken(primary, 0.40)
+    companion = _companion_accent_for(primary, brand_kit, secondary, palette.get("accent"))
+    return f"accent {companion.hex} — {companion.provenance}" if companion is not None else ""
+
+
 def _fit_one_line_px(
     text: str,
     box_w: float,
@@ -3717,7 +3777,18 @@ def _mh_role_vars(palette: dict, brand_kit=None) -> dict[str, str]:
     # Without this, a single-colour kit (accent=None, secondary=#000000 by the
     # BrandKit default) collapses the accent to black and hides the result time.
     if not _is_brand_hex(accent):
-        accent = palette.get("accent")
+        # C10: for a genuinely thin palette AND the operator opt-in, a
+        # hue-arithmetic complementary companion (a real second colour, not the
+        # synthetic white/tint fallback) fills the accent. The resolved secondary
+        # and the brief-palette accent feed its thinness gate, so a club that has
+        # a second brand colour keeps it (the companion returns None). Off by
+        # default, so this whole branch is byte-identical to before.
+        palette_accent = palette.get("accent")
+        companion = _companion_accent_for(primary, brand_kit, secondary, palette_accent)
+        if companion is not None:
+            accent = companion.hex
+        elif _is_brand_hex(palette_accent):
+            accent = palette_accent
     if not _is_brand_hex(accent):
         from mediahub.quality.compliance import is_legible
 
@@ -5673,6 +5744,12 @@ def render_brief(
     # so the reason rides the visual's trace — never a silent substitution.
     if _cutout_note:
         _safety_notes.append(_cutout_note)
+
+    # C10 explainability: when the accent is a derived companion (a hue the club
+    # never uploaded), the decision trace must say so and name its provenance.
+    _companion_note = _companion_accent_note(brief, brand_kit)
+    if _companion_note:
+        _safety_notes.append(_companion_note)
 
     visual = GeneratedVisual(
         id=visual_id,

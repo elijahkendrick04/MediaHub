@@ -537,3 +537,100 @@ def test_photo_tint_layouts_reference_the_vars_with_neutral_fallbacks():
     assert "var(--mh-photo-wash, transparent)" in tk
     fb = (arch.V2_DIR / "full_bleed_photo_lower_third.html").read_text(encoding="utf-8")
     assert "var(--mh-photo-scrim, transparent)" in fb
+
+
+# --------------------------------------------------------------------------- #
+# C10 — derived companion accent for thin palettes, behind an operator opt-in
+# --------------------------------------------------------------------------- #
+def test_derive_companion_accent_completes_a_thin_palette():
+    from mediahub.theming.companion import derive_companion_accent
+    from mediahub.quality.compliance import is_legible
+
+    c = derive_companion_accent("#0E2A47")  # navy-only club
+    assert c is not None
+    assert c.provenance.startswith("derived complementary of #0E2A47")
+    assert is_legible(c.hex, "#0E2A47") and is_legible("#0E2A47", c.hex)
+    assert derive_companion_accent("#0E2A47") == c  # deterministic
+    # Two distinct brandable colours → no companion (not a thin palette).
+    assert derive_companion_accent("#0E2A47", ["#E8B94E"]) is None
+    # A near-grey primary has no hue to complement.
+    assert derive_companion_accent("#4A4A4A") is None
+    # A non-hex seed is safe.
+    assert derive_companion_accent("nope") is None
+
+
+def test_companion_accent_gated_behind_the_operator_opt_in(monkeypatch):
+    from mediahub.brand.kit import BrandKit
+
+    monkeypatch.delenv("MEDIAHUB_DERIVED_ACCENT", raising=False)
+    off = BrandKit(
+        profile_id="t",
+        display_name="Solo",
+        primary_colour="#0E2A47",
+        secondary_colour="#000000",
+        accent_colour=None,
+    )
+    on = BrandKit(
+        profile_id="t",
+        display_name="Solo",
+        primary_colour="#0E2A47",
+        secondary_colour="#000000",
+        accent_colour=None,
+        allow_derived_accent=True,
+    )
+    # Default OFF → the same-hue legible tint, byte-identical to the pre-C10 path.
+    assert R._mh_role_vars({}, off)["--mh-accent"] == R._legible_accent("#0E2A47")
+    # Opt-in ON → a hue-arithmetic companion (a different hue, still legible).
+    accent_on = R._mh_role_vars({}, on)["--mh-accent"]
+    assert accent_on != R._legible_accent("#0E2A47")
+    from mediahub.quality.compliance import is_legible
+
+    assert is_legible(accent_on, "#0E2A47") and is_legible("#0E2A47", accent_on)
+    # The env switch is the global equivalent.
+    monkeypatch.setenv("MEDIAHUB_DERIVED_ACCENT", "1")
+    assert R._mh_role_vars({}, off)["--mh-accent"] == accent_on
+
+
+def test_companion_never_overrides_a_real_second_brand_colour(monkeypatch):
+    from mediahub.brand.kit import BrandKit
+
+    monkeypatch.delenv("MEDIAHUB_DERIVED_ACCENT", raising=False)
+    # navy + gold, opt-in ON: the real gold stays the accent, no companion.
+    duo = BrandKit(
+        profile_id="t",
+        display_name="Duo",
+        primary_colour="#0E2A47",
+        secondary_colour="#C9A227",
+        accent_colour="#C9A227",
+        allow_derived_accent=True,
+    )
+    assert R._mh_role_vars({}, duo)["--mh-accent"] == "#C9A227"
+
+
+def test_companion_accent_records_provenance_only_when_used(monkeypatch):
+    from mediahub.brand.kit import BrandKit
+
+    monkeypatch.delenv("MEDIAHUB_DERIVED_ACCENT", raising=False)
+
+    class _Brief:
+        palette = {"accent": "#FFFFFF"}  # generate()'s synthetic default
+        text_layers: dict = {}
+
+    on = BrandKit(
+        profile_id="t",
+        display_name="Solo",
+        primary_colour="#0E2A47",
+        secondary_colour="#000000",
+        accent_colour=None,
+        allow_derived_accent=True,
+    )
+    off = BrandKit(
+        profile_id="t",
+        display_name="Solo",
+        primary_colour="#0E2A47",
+        secondary_colour="#000000",
+        accent_colour=None,
+    )
+    note = R._companion_accent_note(_Brief(), on)
+    assert note.startswith("accent #") and "complementary of #0E2A47" in note
+    assert R._companion_accent_note(_Brief(), off) == ""  # opt-in off → no note
