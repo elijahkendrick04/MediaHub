@@ -29,6 +29,19 @@ import pytest
 _ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_ROOT))
 
+# Deep-review #129: assert the dock's *controls* via stable data-testid hooks
+# instead of scraping its ``mh-*`` CSS classes out of the rendered template, so
+# the web.py blueprint decomposition can restyle/restructure the markup without
+# breaking this file. The CSS-file contract tests below (TestDockCss) keep
+# asserting on the stylesheet directly — that is the stylesheet's own contract,
+# not template scraping, so it stays.
+from tests._semantic import (
+    assert_body_flag,
+    assert_has_control,
+    assert_no_control,
+    scope,
+)
+
 _CSS = _ROOT / "src" / "mediahub" / "web" / "static" / "theme" / "theme-components.css"
 
 # Browser-test plumbing (mirrors tests/test_activity_count_up.py): the dock CSS
@@ -203,16 +216,6 @@ def env(tmp_path, monkeypatch):
         yield {"client": client, "wm": wm, "tmp_path": tmp_path, "app": app}
 
 
-def _real_body_tag(html: str) -> str:
-    """The actual <body> element (the one after </head>), not any literal that
-    might live inside the inlined <style>/comments. The tag also carries a
-    ``data-page="…"`` attribute (the site-wide page-scoped-effect hook), so the
-    match is not anchored to the closing ``">`` right after the class."""
-    head_end = html.find("</head>")
-    m = re.search(r"<body class=\"[^\"]*\"[^>]*>", html[head_end if head_end >= 0 else 0 :])
-    return m.group(0) if m else ""
-
-
 # ---------------------------------------------------------------------------
 # Unit: _layout(dock=...) contract
 # ---------------------------------------------------------------------------
@@ -223,52 +226,54 @@ class TestLayoutDockContract:
         wm = env["wm"]
         with env["app"].test_request_context("/"):
             html = wm._layout("Anything", "<p>body</p>")
-        assert 'class="mh-action-dock"' not in html
-        body_tag = _real_body_tag(html)
-        assert body_tag.startswith('<body class="" ')
-        assert "mh-has-dock" not in body_tag
+        assert_no_control(html, "action-dock")
+        assert_body_flag(html, "has-dock", present=False)
 
     def test_dock_renders_when_opted_in(self, env):
         wm = env["wm"]
         with env["app"].test_request_context("/"):
             html = wm._layout("Anything", "<p>body</p>", dock={"builder": "/pack/abc"})
-        assert 'class="mh-action-dock"' in html
-        assert 'class="mh-has-dock"' in _real_body_tag(html)
+        assert_has_control(html, "action-dock", tag="nav")
+        assert_body_flag(html, "has-dock", present=True)
 
     def test_dock_links_use_url_for(self, env):
         wm = env["wm"]
         with env["app"].test_request_context("/"):
             html = wm._layout("Anything", "<p>body</p>", dock={"builder": "/pack/abc"})
-            # Slice to just the dock element so we assert on its own links.
-            dock = html[html.find('class="mh-action-dock"') :]
-            dock = dock[: dock.find("</nav>")]
             from flask import url_for
 
-            assert f'href="{url_for("make_page")}"' in dock
-            assert f'href="{url_for("media_library_page")}"' in dock
-        assert 'data-builder-url="/pack/abc"' in html
+            # Scope to the dock, then assert each link is a real <a> pointing
+            # where url_for resolves (one source of truth for the URL).
+            dock = scope(html, "action-dock")
+            assert_has_control(dock, "dock-create", tag="a", href=url_for("make_page"))
+            assert_has_control(dock, "dock-library", tag="a", href=url_for("media_library_page"))
+        assert_has_control(html, "action-dock", attrs={"data-builder-url": "/pack/abc"})
 
     def test_create_library_are_links_approve_is_button(self, env):
         wm = env["wm"]
         with env["app"].test_request_context("/"):
             html = wm._layout("X", "<p>b</p>", dock={"builder": "/pack/abc"})
-        dock = html[html.find('class="mh-action-dock"') :]
-        dock = dock[: dock.find("</nav>")]
-        # Two navigation anchors (Create, Library) + one action button (Approve).
-        assert dock.count("<a ") == 2
-        assert "<button" in dock and "data-mh-dock-approve" in dock
-        assert "Create" in dock and "Library" in dock
+        dock = scope(html, "action-dock")
+        # Create/Library are navigation links; Approve is an action button that
+        # still carries the data-mh-dock-approve hook the production dock script
+        # binds its click handler to.
+        assert_has_control(dock, "dock-create", tag="a", text_contains="Create")
+        assert_has_control(dock, "dock-library", tag="a", text_contains="Library")
+        assert_has_control(
+            dock, "dock-approve", tag="button", role="button", attrs={"data-mh-dock-approve": True}
+        )
 
     def test_label_and_count_hooks_present(self, env):
         wm = env["wm"]
         with env["app"].test_request_context("/"):
             html = wm._layout("X", "<p>b</p>", dock={"builder": "/pack/abc"})
-        assert "data-mh-dock-label" in html
-        assert "data-mh-dock-count" in html
-        # The count chip is decorative for SR (the button's aria-label carries
-        # the live number), so it must be aria-hidden.
-        assert re.search(r'data-mh-dock-count[^>]*aria-hidden="true"', html) or re.search(
-            r'aria-hidden="true"[^>]*data-mh-dock-count', html
+        # The label/count spans keep their data-mh-dock-* hooks (the production
+        # script writes the live label + queue count through them); assert both
+        # the hook and, for the count, that it stays aria-hidden (the button's
+        # aria-label carries the number for screen readers).
+        assert_has_control(html, "dock-label", attrs={"data-mh-dock-label": True})
+        assert_has_control(
+            html, "dock-count", attrs={"data-mh-dock-count": True, "aria-hidden": "true"}
         )
 
     def test_dock_js_present_and_feature_detected(self, env):
@@ -315,36 +320,33 @@ class TestDockOnReview:
     def test_dock_present_on_review(self, env):
         run_id = self._seed(env)
         body = env["client"].get(f"/review/{run_id}").get_data(as_text=True)
-        assert 'class="mh-action-dock"' in body
-        assert 'class="mh-has-dock"' in body
+        assert_has_control(body, "action-dock", tag="nav")
+        assert_body_flag(body, "has-dock", present=True)
 
     def test_builder_url_points_at_content_pack(self, env):
         run_id = self._seed(env)
         body = env["client"].get(f"/review/{run_id}").get_data(as_text=True)
-        assert f'data-builder-url="/pack/{run_id}"' in body
+        assert_has_control(body, "action-dock", attrs={"data-builder-url": f"/pack/{run_id}"})
 
     def test_create_and_library_links_in_dock(self, env):
         run_id = self._seed(env)
         body = env["client"].get(f"/review/{run_id}").get_data(as_text=True)
-        dock = body[body.find('class="mh-action-dock"') :]
-        dock = dock[: dock.find("</nav>")]
-        assert 'href="/make"' in dock
-        assert 'href="/media-library"' in dock
-        assert "data-mh-dock-approve" in dock
+        dock = scope(body, "action-dock")
+        assert_has_control(dock, "dock-create", tag="a", href="/make")
+        assert_has_control(dock, "dock-library", tag="a", href="/media-library")
+        assert_has_control(dock, "dock-approve", role="button", attrs={"data-mh-dock-approve": True})
 
     def test_initial_queue_count_rendered_server_side(self, env):
         """The count chip is server-rendered (the dock script keeps it live, but
         the initial value must be right for no-JS / pre-hydration)."""
         run_id = self._seed(env, n=4)  # 4 fresh cards, none decided → all queued
         body = env["client"].get(f"/review/{run_id}").get_data(as_text=True)
-        m = re.search(r"data-mh-dock-count[^>]*>(\d+)</span>", body)
-        assert m, "count chip not found"
-        assert m.group(1) == "4", f"expected initial queued count 4, got {m.group(1)}"
+        assert_has_control(body, "dock-count", text="4")
 
     def test_dock_absent_on_home(self, env):
         body = env["client"].get("/").get_data(as_text=True)
-        assert 'class="mh-action-dock"' not in body
-        assert 'class="mh-has-dock"' not in body
+        assert_no_control(body, "action-dock")
+        assert_body_flag(body, "has-dock", present=False)
 
     def test_dock_absent_on_failed_run_review(self, env):
         """A terminally-failed run renders the U.2 error state via _layout with
@@ -360,8 +362,8 @@ class TestDockOnReview:
         _seed_run(env["tmp_path"], env["wm"], "org-test", payload)
         body = env["client"].get(f"/review/{run_id}").get_data(as_text=True)
         assert "couldn" in body.lower()  # the failure hero rendered
-        assert 'class="mh-action-dock"' not in body
-        assert 'class="mh-has-dock"' not in body
+        assert_no_control(body, "action-dock")
+        assert_body_flag(body, "has-dock", present=False)
 
 
 # ---------------------------------------------------------------------------
@@ -459,11 +461,11 @@ class TestDockBrowserBehaviour:
 
     _PROBE = """
     (idx) => {
-      var dock = document.querySelector('.mh-action-dock');
+      var dock = document.querySelector('[data-testid=action-dock]');
       var rows = Array.prototype.slice.call(document.querySelectorAll('.ach-row'));
       var tIdx = rows.findIndex(function(r){ return r.classList.contains('mh-dock-target'); });
-      var countEl = dock ? dock.querySelector('[data-mh-dock-count]') : null;
-      var labelEl = dock ? dock.querySelector('[data-mh-dock-label]') : null;
+      var countEl = dock ? dock.querySelector('[data-testid=dock-count]') : null;
+      var labelEl = dock ? dock.querySelector('[data-testid=dock-label]') : null;
       // NB: the dock is position:fixed, for which offsetParent is always null —
       // use computed display to tell desktop (none) from mobile (flex).
       return {
@@ -519,7 +521,7 @@ class TestDockBrowserBehaviour:
             # Drive the real click handler (the per-card workflow button it
             # delegates to does an optimistic DOM update before its fetch, so
             # the about:blank network failure doesn't affect the assertions).
-            page.evaluate("document.querySelector('[data-mh-dock-approve]').click()")
+            page.evaluate("document.querySelector('[data-testid=dock-approve]').click()")
             page.wait_for_timeout(250)
             after = page.evaluate(self._PROBE, before["targetIdx"])
         finally:
@@ -542,7 +544,7 @@ class TestDockBrowserBehaviour:
             _serve_dock(page, body)
             page.wait_for_timeout(200)
             for _ in range(3):  # approve all three
-                page.evaluate("document.querySelector('[data-mh-dock-approve]').click()")
+                page.evaluate("document.querySelector('[data-testid=dock-approve]').click()")
                 page.wait_for_timeout(120)
             state = page.evaluate(self._PROBE, None)
         finally:
