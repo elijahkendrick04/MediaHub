@@ -31274,18 +31274,27 @@ self.addEventListener('fetch', function(e){
             active_n = len(_active_runs)
             active_running = sum(1 for v in _active_runs.values() if v.get("status") == "running")
             ti_n = len(_turn_into_jobs)
-        payload = {
-            "ok": True,
-            "rss_mb": round(rss_mb, 1),
-            "rss_peak_mb": round(peak_mb, 1),
-            "rss_pct_of_2048": round((rss_mb / 2048.0) * 100.0, 1),
-            "active_runs": active_n,
-            "active_runs_running": active_running,
-            "active_runs_limit": _ACTIVE_RUNS_LIMIT,
-            "turn_into_jobs": ti_n,
-            "turn_into_jobs_limit": _TURN_INTO_LIMIT,
-            "ts": datetime.now(timezone.utc).isoformat(),
-        }
+        payload = {"ok": True, "ts": datetime.now(timezone.utc).isoformat()}
+        # RSS, the OOM-ceiling ratio and the in-memory concurrency limits map the
+        # deployment's resource envelope — useful to the operator diagnosing a
+        # restart loop, but reconnaissance for anyone else. Uptime monitors only
+        # need the liveness boolean; the internals are signed-in-operator only,
+        # mirroring /healthz/deps and /healthz/sentinel. (The `_active_runs`
+        # walk above still runs for every caller, so its crash-safety is
+        # exercised regardless of who is looking.)
+        if _auth.is_dev_operator():
+            payload.update(
+                {
+                    "rss_mb": round(rss_mb, 1),
+                    "rss_peak_mb": round(peak_mb, 1),
+                    "rss_pct_of_2048": round((rss_mb / 2048.0) * 100.0, 1),
+                    "active_runs": active_n,
+                    "active_runs_running": active_running,
+                    "active_runs_limit": _ACTIVE_RUNS_LIMIT,
+                    "turn_into_jobs": ti_n,
+                    "turn_into_jobs_limit": _TURN_INTO_LIMIT,
+                }
+            )
         return jsonify(payload)
 
     @app.route("/healthz/deps")
@@ -31777,7 +31786,15 @@ self.addEventListener('fetch', function(e){
         few times to land on each worker. Anything in the snapshot
         with ``open: true`` means that worker is currently skipping
         Gemini for the listed cooldown period.
+
+        The breaker counters and — especially — ``providers_configured``
+        (which of the GEMINI/ANTHROPIC keys are set on this deployment) are
+        operator diagnostics, not public information. Anonymous callers get
+        the liveness boolean alone, mirroring /healthz/deps and
+        /healthz/sentinel; the full snapshot is signed-in-operator only.
         """
+        if not _auth.is_dev_operator():
+            return jsonify({"ok": True})
         try:
             from mediahub.media_ai.llm import gemini_breaker_snapshot
 
@@ -31814,7 +31831,14 @@ self.addEventListener('fetch', function(e){
         Lets the operator confirm whether the in-container SearXNG actually
         started — if it's unreachable, MediaHub silently falls back to
         DuckDuckGo, and this endpoint says so.
+
+        Which backend is live (and any endpoint detail in the probe) is a
+        deployment internal, so it is signed-in-operator only. Anonymous
+        monitors get the liveness boolean alone, mirroring /healthz/deps and
+        /healthz/sentinel.
         """
+        if not _auth.is_dev_operator():
+            return jsonify({"ok": True})
         try:
             from mediahub.web_research import searxng_client
 

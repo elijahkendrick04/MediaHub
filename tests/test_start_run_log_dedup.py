@@ -94,6 +94,11 @@ def test_healthz_memory_does_not_crash_with_active_runs(monkeypatch, tmp_path):
     app = web.create_app()
     app.config["TESTING"] = True
     client = app.test_client()
+    # The active-run counters are operator-gated (deep-review #29); sign in as
+    # the operator so the `_active_runs.values()` walk is still asserted against
+    # its result (the regression this test pins is that walk not crashing).
+    with client.session_transaction() as s:
+        s["dev_operator"] = True
     r = client.get("/healthz/memory")
     assert r.status_code == 200
     payload = r.get_json()
