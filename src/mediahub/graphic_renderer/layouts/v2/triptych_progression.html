@@ -146,6 +146,8 @@
   color: var(--mh-primary);
   overflow-wrap: anywhere;
 }
+/* no measured hero stat → the tag collapses instead of leaving a stray gap */
+.tp__result-tag:empty { display: none; }
 
 /* panel 3 — CONTEXT (surface) */
 .tp__context { background: var(--mh-surface); color: var(--mh-on-surface); }
@@ -190,7 +192,7 @@
   <div class="tp__bay tp__result-bay">
     <div class="tp__spine">Result</div>
     <div class="tp__result">{{RESULT_VALUE}}</div>
-    <div class="tp__result-tag">{{ACCENT_DECORATION}}</div>
+    <div class="tp__result-tag">{{HERO_STAT}}</div>
   </div>
 
   <div class="tp__bay tp__context">
@@ -211,6 +213,8 @@
       <div class="tp__sponsor">{{SPONSOR_BLOCK}}</div>
     </div>
   </div>
+
+  {{ACCENT_DECORATION}}
 
 </div>
 </body>

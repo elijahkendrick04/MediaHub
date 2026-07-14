@@ -1397,13 +1397,30 @@ def _build_logo_treatment(
     svg = getattr(brand_kit, "logo_svg", None)
     if svg and isinstance(svg, str) and svg.lstrip().startswith("<"):
         return svg, ""
-    # Text-mark fallback: club initials
+    # Text-mark fallback: club initials, rendered as a proper monogram chip.
+    # Bare unstyled initials in an img-sized logo box read as a stray glyph
+    # (a tiny floating "C"), so the fallback is an inline SVG ring + initials
+    # that scales exactly like the logo image it stands in for and inherits
+    # the lockup's own (already legible) text colour via currentColor.
     name = (
         getattr(brand_kit, "short_name", None) or getattr(brand_kit, "display_name", "") or "CLUB"
     )
-    parts = [w for w in str(name).replace("Swimming Club", "").split() if w]
+    generic = {"swimming", "club", "society", "team", "the", "of", "and"}
+    words = [w for w in str(name).split() if w]
+    parts = [w for w in words if w.lower() not in generic] or words
     initials = "".join(p[0].upper() for p in parts[:3]) or "CL"
-    return initials, ""
+    font_px = {1: 48, 2: 40, 3: 30}[len(initials)]
+    monogram = (
+        f'<svg viewBox="0 0 100 100" role="img" aria-label="{html_escape(name)} monogram" '
+        'style="height:100%;width:auto;display:block">'
+        '<circle cx="50" cy="50" r="46" fill="none" stroke="currentColor" '
+        'stroke-width="5" opacity="0.85"/>'
+        f'<text x="50" y="53" text-anchor="middle" dominant-baseline="central" '
+        f"font-family=\"Anton, 'Bebas Neue', Arial, sans-serif\" font-size=\"{font_px}\" "
+        f'letter-spacing="1" fill="currentColor">{html_escape(initials)}</text>'
+        "</svg>"
+    )
+    return monogram, ""
 
 
 def _build_logo_block(brand_kit, logo_path: Optional[str | Path]) -> str:
@@ -4317,6 +4334,53 @@ def _apply_text_effects_to_repl(repl: dict, effects: dict, root_vars: dict) -> N
             repl[key] = _fx.apply_to_value(value, res)
 
 
+# --------------------------------------------------------------------------- #
+# A5 (Canva gap analysis) — numeric separator kerning for the result slots.
+#
+# The result numerals set in JetBrains Mono with tabular figures give the
+# decimal point / colon a FULL glyph cell, so every time reads "58 . 34" with
+# a hole around the separator — a kerning tell no professionally-set sports
+# graphic shows. The fix is deterministic micro-typography: each separator
+# *between two digits* is wrapped in a narrow centred cell (0.55ch), and the
+# fitted size is scaled up by the recovered width so the numeral gets tighter
+# AND larger. Non-numeric values ("DQ", "1st") carry no intra-digit separator
+# and are untouched, keeping those cards byte-identical.
+# --------------------------------------------------------------------------- #
+
+_NUM_SEP_RE = re.compile(r"(?<=\d)([.:])(?=\d)")
+_TAG_SPLIT_RE = re.compile(r"(<[^>]+>)")
+
+# The separator cell width as a fraction of a full mono advance (1ch). 0.55
+# keeps a visible pause without letting digits collide.
+_SEP_CELL_CH = 0.55
+_SEP_CSS = "\n.mh-sep{display:inline-block;width:0.55ch;text-align:center;}\n"
+
+
+def _kern_numeric_seps(value_html: str) -> tuple[str, int]:
+    """Wrap intra-numeric ``.``/``:`` in ``value_html`` in narrow kern cells.
+
+    Operates only on text *between* tags so an effect span's inline style
+    (which legitimately contains "0.16em") can never be corrupted; returns the
+    processed html and the number of separators wrapped (0 ⇒ untouched input,
+    so callers can keep no-separator cards byte-identical).
+    """
+    if not value_html or "<svg" in value_html:
+        return value_html, 0
+    count = 0
+
+    def _wrap(m: "re.Match[str]") -> str:
+        nonlocal count
+        count += 1
+        return f'<span class="mh-sep">{m.group(1)}</span>'
+
+    parts = _TAG_SPLIT_RE.split(value_html)
+    for i, part in enumerate(parts):
+        if part.startswith("<"):
+            continue
+        parts[i] = _NUM_SEP_RE.sub(_wrap, part)
+    return ("".join(parts), count) if count else (value_html, 0)
+
+
 def _fill_v2_archetype(
     brief,
     width,
@@ -4576,6 +4640,31 @@ def _fill_v2_archetype(
     effects = getattr(brief, "text_effects", None) or {}
     if effects:
         _apply_text_effects_to_repl(repl, effects, root_vars)
+
+    # A5 (Canva gap analysis) — kern the result numeral's separators and spend
+    # the recovered width on a larger fit. Runs after effects so an effect span
+    # is processed tag-safely (and a curve SVG slot is skipped entirely). The
+    # upscale is skipped wherever it could reintroduce overflow: a balanced
+    # two-line result (per-line widths already govern), a slot whose variable
+    # axis was traded down (the fit had already bottomed out), or a fit at its
+    # floor.
+    kerned, n_sep = _kern_numeric_seps(repl.get("RESULT_VALUE") or "")
+    if n_sep:
+        repl["RESULT_VALUE"] = kerned
+        extra_css += _SEP_CSS
+        n_chars = len(result or "")
+        if n_chars > n_sep:
+            factor = n_chars / (n_chars - (1.0 - _SEP_CELL_CH) * n_sep)
+            if "<br>" not in kerned:
+                if not result_axes.css and fit_result_px > _rmin:
+                    root_vars["--mh-fit-result-px"] = "%dpx" % min(
+                        int(_rmax), int(round(fit_result_px * factor))
+                    )
+                mega_axes_css = root_vars.get("--mh-axes-mega-result", "")
+                if not mega_axes_css and fit_mega_result_px > _mmin:
+                    root_vars["--mh-fit-mega-result-px"] = "%dpx" % min(
+                        int(_mmax), int(round(fit_mega_result_px * factor))
+                    )
 
     # Typography pair → display/headline face (still↔motion parity). The v2
     # archetypes read the headline font as `var(--mh-font-display, 'Anton'…)`,
