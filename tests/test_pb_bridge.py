@@ -83,13 +83,33 @@ class TestTimeToSeconds:
         assert _time_to_seconds("15:25.10") == pytest.approx(925.10)
 
     def test_single_digit_fraction_scales_to_tenths(self) -> None:
-        # The regex captures 1–2 fractional digits; single digit means tenths.
+        # A single fractional digit is tenths of a second (parsed as a decimal,
+        # so "59.8" is 59.8s not 59.08s).
         assert _time_to_seconds("59.8") == pytest.approx(59.8)
         assert _time_to_seconds("1:02.3") == pytest.approx(62.3)
 
-    def test_colon_instead_of_dot_is_accepted(self) -> None:
-        # The pattern allows "[.:]" as the centisecond separator.
-        assert _time_to_seconds("1:02:34") == pytest.approx(62.34)
+    def test_colon_is_a_clock_separator_not_a_decimal_point(self) -> None:
+        # Regression for F50: ':' separates hours/minutes/seconds and is never a
+        # centisecond separator. "1:02:34" is H:MM:SS = 1h 02m 34s = 3754.0s, not
+        # the 62.34s the old "[.:]" pattern silently produced.
+        assert _time_to_seconds("1:02:34") == pytest.approx(3754.0)
+
+    def test_hh_mm_ss_ss_roundtrips(self) -> None:
+        # parse_pbs._TIME_RE explicitly matches HH:MM:SS.ss ("2:01:02.34" per its
+        # own comment); the bridge must not drop it.
+        assert _time_to_seconds("2:01:02.34") == pytest.approx(7262.34)
+        assert _time_to_seconds("1:02:34.56") == pytest.approx(3754.56)
+
+    def test_three_digit_whole_seconds_roundtrips(self) -> None:
+        # Heuristic _TIME_RE's SS.ss branch is \d{2,3}\.\d{2}, so "159.87" is a
+        # valid emitted shape the old \d{1,2} pattern dropped.
+        assert _time_to_seconds("159.87") == pytest.approx(159.87)
+
+    def test_three_digit_fraction_preserved(self) -> None:
+        # Interpreter / cached-JSON paths can carry millisecond precision; keep
+        # the full value rather than truncating or dropping the row.
+        assert _time_to_seconds("58.345") == pytest.approx(58.345)
+        assert _time_to_seconds("1:02.345") == pytest.approx(62.345)
 
     def test_strips_whitespace(self) -> None:
         assert _time_to_seconds("  1:02.34  ") == pytest.approx(62.34)
@@ -98,8 +118,71 @@ class TestTimeToSeconds:
         assert _time_to_seconds("") is None
         assert _time_to_seconds(None) is None  # type: ignore[arg-type]
         assert _time_to_seconds("abc") is None
-        assert _time_to_seconds("99") is None  # no fraction
+        assert _time_to_seconds("99") is None  # bare integer, no fraction
         assert _time_to_seconds("DNF") is None
+        # A dotted date must never be read as a time (guards the P1 date-poison
+        # class from surviving into the bridge).
+        assert _time_to_seconds("12.03.2024") is None
+        # More clock fields than H:MM:SS is not a time.
+        assert _time_to_seconds("1:2:3:4") is None
+        # Empty clock/second fields are rejected, not read as zero.
+        assert _time_to_seconds("1:") is None
+        assert _time_to_seconds(":02") is None
+
+    # ---- Table-driven round-trip over every format parse_pbs can emit --------
+
+    @pytest.mark.parametrize(
+        "time_str, expected, emitted_by",
+        [
+            # SS.ss / SSS.ss — heuristic _TIME_RE \d{2,3}\.\d{2}; rows.py _TIME_PLAIN
+            ("59.87", 59.87, "heuristic SS.ss / interpreter plain"),
+            ("59.8", 59.8, "heuristic SS.s (1-digit fraction)"),
+            ("159.87", 159.87, "heuristic SSS.ss (3-digit whole)"),
+            # SS.sss — interpreter / cached JSON millisecond precision
+            ("58.345", 58.345, "cached-JSON 3-digit fraction"),
+            # M:SS.ss / MM:SS.ss — heuristic _TIME_RE; rows.py _TIME_COLON; hytek mm:ss.cc
+            ("1:02.34", 62.34, "heuristic/interpreter M:SS.ss"),
+            ("1:02.3", 62.3, "heuristic M:SS.s"),
+            ("1:02.345", 62.345, "interpreter/cache M:SS.sss"),
+            ("15:25.10", 925.10, "1500m MM:SS.ss"),
+            ("16:25.30", 985.30, "1500m MM:SS.ss"),
+            ("100:25.30", 6025.30, "hytek 3-digit-minute mm:ss.cc"),
+            # H:MM:SS.ss / HH:MM:SS.ss — heuristic _TIME_RE's (?:\d{1,2}:)? prefix
+            ("2:01:02.34", 7262.34, "heuristic HH:MM:SS.ss"),
+            ("1:02:34.56", 3754.56, "heuristic HH:MM:SS.ss"),
+            # No-fraction clock forms — ':' is a separator, so these are clock times
+            ("1:02:34", 3754.0, "H:MM:SS clock (no fraction)"),
+            ("1:02", 62.0, "M:SS clock (no fraction)"),
+        ],
+    )
+    def test_roundtrips_every_parse_pbs_format(
+        self, time_str: str, expected: float, emitted_by: str
+    ) -> None:
+        got = _time_to_seconds(time_str)
+        assert got == pytest.approx(expected), f"{time_str!r} ({emitted_by})"
+
+    @pytest.mark.parametrize(
+        "time_str",
+        [
+            "",
+            "   ",
+            "abc",
+            "DNF",
+            "NT",
+            "99",  # bare integer, no fraction
+            "12.03.2024",  # dotted date, not a time
+            "1.02.34",  # two dots, no colon
+            "1:2:3:4",  # too many clock fields
+            "12:34:56:78",  # too many clock fields
+            ":",
+            "1:",
+            ":02",
+            "1:02:",
+            "1:ab.34",  # non-numeric clock field
+        ],
+    )
+    def test_non_times_return_none(self, time_str: str) -> None:
+        assert _time_to_seconds(time_str) is None
 
 
 # ---------------------------------------------------------------------------
