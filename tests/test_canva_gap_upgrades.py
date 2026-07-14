@@ -17,13 +17,18 @@ Pins the Wave A–E builds:
 * D2 — tracking ramps are monotone and register-correct.
 * D3 — balanced-wrap capability scan + crush trigger.
 * E1 — measured auto-enhance: deficient photos corrected, healthy pass through.
+* C1/C6/C9 — tonal-container bridge, per-slot repair, mood tone table.
+* C4 — Android-Palette semantic swatches + photo-derived (non-brand) tint hook.
 
 All pure-function (no Playwright) so they run in any environment.
 """
 
 from __future__ import annotations
 
-from PIL import Image
+import base64
+import io
+
+from PIL import Image, ImageDraw
 
 from mediahub.graphic_renderer import elevation
 from mediahub.graphic_renderer import photo_adjust as pa
@@ -434,3 +439,101 @@ def test_seed_walk_indexes_only_gate_surviving_permutations():
         ) == _apply_palette_seed("#A30D2D", "#000000", "#FFD86E", s, gate=False)
     # An all-legible kit prunes nothing (byte-identical walk).
     assert gate_surviving_seeds("#0E2A47", "#C9A227", "#FFFFFF") == [1, 2, 3, 4, 5, 6]
+
+
+# --------------------------------------------------------------------------- #
+# C4 — Android-Palette semantic swatch classification
+# --------------------------------------------------------------------------- #
+def _four_colour_palette():
+    from mediahub.graphic_renderer.photo_palette import extract_palette
+
+    im = Image.new("RGB", (200, 200), (20, 30, 60))  # dark navy ground
+    im.paste(Image.new("RGB", (90, 90), (220, 40, 40)), (0, 0))  # vibrant red
+    im.paste(Image.new("RGB", (60, 200), (120, 150, 140)), (140, 0))  # muted teal
+    im.paste(Image.new("RGB", (200, 40), (235, 225, 205)), (0, 160))  # light cream
+    return extract_palette(im, k=6)
+
+
+def test_classify_swatches_assigns_distinct_semantic_roles():
+    from mediahub.graphic_renderer.photo_palette import (
+        SEMANTIC_ROLES,
+        PhotoPalette,
+        classify_swatches,
+    )
+
+    roles = classify_swatches(_four_colour_palette())
+    assert set(roles) == set(SEMANTIC_ROLES)
+    # The vivid red wins the vibrant role; a swatch is never reused across roles.
+    assert roles["vibrant"] is not None and roles["vibrant"].chroma >= 100
+    picked = [s.hex for s in roles.values() if s is not None]
+    assert len(picked) == len(set(picked)), "a swatch was reused across roles"
+    # Deterministic + empty-safe.
+    assert classify_swatches(_four_colour_palette()) == roles
+    assert all(v is None for v in classify_swatches(PhotoPalette(())).values())
+
+
+def _card_html_with_photo(ink="#FFFFFF"):
+    """Minimal card HTML: a role block + an athlete-cutout data-URI photo."""
+    im = Image.new("RGB", (80, 100), (18, 40, 96))
+    ImageDraw.Draw(im).rectangle((10, 10, 70, 90), fill=(210, 60, 48))
+    buf = io.BytesIO()
+    im.save(buf, "PNG")
+    uri = "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
+    return (
+        f":root{{--mh-primary:#0A2540;--mh-on-primary:{ink};--mh-surface:#05121F;}}"
+        f'<img class="athlete-cutout" src="{uri}"><body></body>'
+    )
+
+
+def _ctx(is_v2=True):
+    from mediahub.graphic_renderer.sprint_hooks import RenderHookCtx
+
+    return RenderHookCtx(
+        brief=None,
+        width=1080,
+        height=1350,
+        family="ticker_strip",
+        format_name="feed_portrait",
+        is_v2=is_v2,
+    )
+
+
+def test_photo_semantic_tint_emits_gated_nonbrand_tints(monkeypatch):
+    from mediahub.graphic_renderer.sprint_hooks import photo_semantic_tint as H
+
+    monkeypatch.setenv("MEDIAHUB_PHOTO_SEMANTIC_TINT", "1")
+    out = H.apply(_card_html_with_photo(), _ctx())
+    assert "<!-- mh-photo-roles:" in out  # decision recorded for explainability
+    assert "--mh-photo-wash:#" in out
+    # The scrim, when emitted, keeps the ink legible on it (APCA-gated).
+    import re
+
+    m = re.search(r"--mh-photo-scrim:(#[0-9A-Fa-f]{6})", out)
+    if m:
+        from mediahub.quality.compliance import is_legible
+
+        assert is_legible("#FFFFFF", m.group(1))
+
+
+def test_photo_semantic_tint_is_byte_identical_when_off_or_no_photo(monkeypatch):
+    from mediahub.graphic_renderer.sprint_hooks import photo_semantic_tint as H
+
+    html = _card_html_with_photo()
+    # Disabled → untouched.
+    monkeypatch.setenv("MEDIAHUB_PHOTO_SEMANTIC_TINT", "0")
+    assert H.apply(html, _ctx()) == html
+    # Enabled but v1 / no photo → untouched.
+    monkeypatch.setenv("MEDIAHUB_PHOTO_SEMANTIC_TINT", "1")
+    assert H.apply(html, _ctx(is_v2=False)) == html
+    assert H.apply(":root{--mh-on-primary:#FFF;}<body></body>", _ctx()) == (
+        ":root{--mh-on-primary:#FFF;}<body></body>"
+    )
+
+
+def test_photo_tint_layouts_reference_the_vars_with_neutral_fallbacks():
+    from mediahub.graphic_renderer import archetypes as arch
+
+    tk = (arch.V2_DIR / "ticker_strip.html").read_text(encoding="utf-8")
+    assert "var(--mh-photo-wash, transparent)" in tk
+    fb = (arch.V2_DIR / "full_bleed_photo_lower_third.html").read_text(encoding="utf-8")
+    assert "var(--mh-photo-scrim, transparent)" in fb

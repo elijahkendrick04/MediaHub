@@ -42,6 +42,14 @@
   position: absolute; inset: 0; z-index: 1; pointer-events: none;
   background: linear-gradient(180deg, rgba(0,0,0,0) 44%, rgba(0,0,0,0.12) 62%, rgba(0,0,0,0.40) 100%);
 }
+/* C4: an additive photo-cast scrim — the athlete photo's own shadow swatch
+   (dark_muted), APCA-gated by the hook. Deepens the neutral scrim with the
+   photo's hue; transparent (byte-identical) unless --mh-photo-scrim resolved. */
+.fb__grad::after {
+  content: ''; position: absolute; inset: 0; pointer-events: none;
+  background: linear-gradient(180deg, transparent 44%, var(--mh-photo-scrim, transparent) 100%);
+  opacity: 0.34;
+}
 
 /* kicker top-left, brand chip top-right — both over the photo */
 .fb__kicker {
