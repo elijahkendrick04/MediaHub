@@ -59,25 +59,91 @@ def _magnitude_bucket(pct: float) -> str:
     return "tiny"
 
 
+def _valid_finals_cs(swim) -> Optional[int]:
+    """Return the swim's finals time in centiseconds only when it is a real,
+    positive time; otherwise None.
+
+    A DQ/NS/scratch surfaces as ``finals_time_cs=None``, and a non-positive
+    value (0.00 or negative) is 'no swim', not a time. Either case must never
+    seed a PB — a fabricated PB of 0.00 is worse than a missing one (F56).
+    """
+    cs = getattr(swim, "finals_time_cs", None)
+    if cs is None or cs <= 0:
+        return None
+    return cs
+
+
+def _superseded_by_same_meet(swim, all_results) -> bool:
+    """True when another swim at the SAME meet, by the SAME swimmer, in the SAME
+    event, should carry the PB instead of ``swim``.
+
+    Only the single fastest same-meet swim in an event is a genuine new PB; a
+    swimmer who beats their online baseline twice in one meet (heats then final)
+    must not fire a second 'new PB' for the slower swim. We fold earlier/faster
+    same-meet swims into the baseline: ``swim`` is superseded when any valid
+    same-meet swim in the event is strictly faster, or ties it but was listed
+    earlier (deterministic single winner on exact ties). ``all_results`` is the
+    full meet result set; ``None``/empty means no same-meet context, so nothing
+    is suppressed and the historical baseline alone decides (F02).
+    """
+    if not all_results:
+        return False
+    my_cs = _valid_finals_cs(swim)
+    if my_cs is None:
+        return False  # invalid times are rejected by the caller's guard
+
+    self_index = None
+    for i, r in enumerate(all_results):
+        if r is swim:
+            self_index = i
+            break
+
+    for i, r in enumerate(all_results):
+        if r is swim:
+            continue
+        if getattr(r, "dq", False):
+            continue
+        rc = _valid_finals_cs(r)
+        if rc is None:
+            continue
+        if (getattr(r, "swimmer_key", None) != getattr(swim, "swimmer_key", None)
+                or getattr(r, "distance", None) != getattr(swim, "distance", None)
+                or getattr(r, "stroke", None) != getattr(swim, "stroke", None)
+                or getattr(r, "course", None) != getattr(swim, "course", None)):
+            continue
+        if rc < my_cs:
+            return True  # a faster same-meet swim carries the PB
+        if rc == my_cs and self_index is not None and i < self_index:
+            return True  # tie: the earlier-listed same-meet swim carries the PB
+    return False
+
+
 class PBConfirmedDetector(AchievementDetector):
     """Fires when prior PB exists and current time is faster. Confidence: high."""
     name = "pb_confirmed"
 
     def detect(self, swim, ctx, history, all_results=None, extra=None) -> list[Achievement]:
-        if getattr(swim, "dq", False) or getattr(swim, "finals_time_cs", None) is None:
+        cs = _valid_finals_cs(swim)
+        if getattr(swim, "dq", False) or cs is None:
             return []
 
-        time_sec = _cs_to_sec(swim.finals_time_cs)
         prior = history.best_time_in_event(swim.distance, swim.stroke, swim.course)
         if prior is None or prior <= 0:
             return []
 
+        time_sec = _cs_to_sec(cs)
         if time_sec >= prior:
+            return []
+
+        # F02: only the fastest same-meet swim in an event carries the PB. A
+        # slower final at the same meet as a faster heat folds into the baseline
+        # and must not be re-announced as a new PB.
+        if _superseded_by_same_meet(swim, all_results):
             return []
 
         drop_sec = prior - time_sec
         drop_pct = 100.0 * drop_sec / prior
-        time_str = _cs_to_str(swim.finals_time_cs)
+        time_str = _cs_to_str(cs)
         prior_str = _sec_to_str(prior)
         evt = _event_label(swim)
         swimmer_name = (extra or {}).get("swimmer_name", history.swimmer_name)
@@ -123,14 +189,17 @@ class PBConfirmedDetector(AchievementDetector):
         )]
 
     def _no_fire_reason(self, swim, ctx, history, all_results=None, extra=None) -> str:
-        if getattr(swim, "finals_time_cs", None) is None:
-            return "no time recorded (DQ/NS)"
+        cs = _valid_finals_cs(swim)
+        if getattr(swim, "dq", False) or cs is None:
+            return "no valid time recorded (DQ/NS/0.00)"
         prior = history.best_time_in_event(swim.distance, swim.stroke, swim.course)
-        if prior is None:
+        if prior is None or prior <= 0:
             return "no prior PB data in cache"
-        time_sec = _cs_to_sec(swim.finals_time_cs)
+        time_sec = _cs_to_sec(cs)
         if time_sec >= prior:
             return f"time {_sec_to_str(time_sec)} not faster than prior PB {_sec_to_str(prior)}"
+        if _superseded_by_same_meet(swim, all_results):
+            return "a faster swim in this event at the same meet already carries the PB"
         return "did not fire"
 
 
@@ -142,15 +211,21 @@ class PBImprovementMagnitudeDetector(AchievementDetector):
     name = "pb_magnitude"
 
     def detect(self, swim, ctx, history, all_results=None, extra=None) -> list[Achievement]:
-        if getattr(swim, "dq", False) or getattr(swim, "finals_time_cs", None) is None:
+        cs = _valid_finals_cs(swim)
+        if getattr(swim, "dq", False) or cs is None:
             return []
 
         prior = history.best_time_in_event(swim.distance, swim.stroke, swim.course)
         if prior is None or prior <= 0:
             return []
 
-        time_sec = _cs_to_sec(swim.finals_time_cs)
+        time_sec = _cs_to_sec(cs)
         if time_sec >= prior:
+            return []
+
+        # F02: fold same-meet swims into the baseline (see PBConfirmedDetector) so
+        # the magnitude achievement is not double-counted for a slower same-meet swim.
+        if _superseded_by_same_meet(swim, all_results):
             return []
 
         drop_pct = 100.0 * (prior - time_sec) / prior
@@ -163,7 +238,7 @@ class PBImprovementMagnitudeDetector(AchievementDetector):
         evt = _event_label(swim)
         swimmer_name = (extra or {}).get("swimmer_name", history.swimmer_name)
         drop_sec = prior - time_sec
-        time_str = _cs_to_str(swim.finals_time_cs)
+        time_str = _cs_to_str(cs)
         prior_str = _sec_to_str(prior)
 
         label_map = {
@@ -206,11 +281,16 @@ class PBImprovementMagnitudeDetector(AchievementDetector):
         )]
 
     def _no_fire_reason(self, swim, ctx, history, all_results=None, extra=None) -> str:
+        cs = _valid_finals_cs(swim)
+        if getattr(swim, "dq", False) or cs is None:
+            return "no valid time recorded (DQ/NS/0.00)"
         prior = history.best_time_in_event(swim.distance, swim.stroke, swim.course)
-        if prior is None:
+        if prior is None or prior <= 0:
             return "no prior PB data"
-        time_sec = _cs_to_sec(getattr(swim, "finals_time_cs", None) or 0)
+        time_sec = _cs_to_sec(cs)
         if time_sec >= prior:
             return "not a PB"
+        if _superseded_by_same_meet(swim, all_results):
+            return "a faster swim in this event at the same meet already carries the PB"
         drop_pct = 100.0 * (prior - time_sec) / prior
         return f"improvement {drop_pct:.2f}% is below notable threshold (0.5%)"
