@@ -58,6 +58,26 @@ def _problems() -> tuple[list[str], list[str]]:
             "No LLM provider configured — AI surfaces will honest-error "
             "(ClaudeUnavailableError) until a key is set."
         )
+
+    # Operator /developer credential (deep-review #26 / ADR-0022). The default
+    # password hash is committed to a PUBLIC repo, so it is offline-crackable by
+    # anyone with repo read; a crack yields an unrestricted operator session on
+    # production. Hard enforcement (refusing to boot until the hash is rotated)
+    # is DEFERRED to pre-launch — tracked as roadmap RP.5 — so the
+    # in-development Render deploy still boots on the baked-in default while the
+    # product is pre-customers. Until then we surface it as a production warning
+    # so it is never silently forgotten; at go-live RP.5 rotates the hash and
+    # flips this to a hard error (see ADR-0022).
+    from mediahub.web.auth import dev_password_hash_overridden
+
+    if is_production() and not dev_password_hash_overridden():
+        warnings.append(
+            "Operator /developer sign-in is running on the shipped default "
+            "credential, whose argon2id hash is public and offline-crackable. "
+            "Accepted during development; before go-live set "
+            "MEDIAHUB_DEV_PASSWORD_HASH and enable enforcement "
+            "(roadmap RP.5 / ADR-0022)."
+        )
     return errors, warnings
 
 

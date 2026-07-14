@@ -647,6 +647,21 @@ def _dev_password_hash() -> str:
     return (os.environ.get("MEDIAHUB_DEV_PASSWORD_HASH") or _DEV_PASSWORD_HASH_DEFAULT).strip()
 
 
+def dev_password_hash_overridden() -> bool:
+    """True when the operator password hash has been rotated away from the
+    shipped default via ``MEDIAHUB_DEV_PASSWORD_HASH``.
+
+    The default hash at ``_DEV_PASSWORD_HASH_DEFAULT`` is committed to a
+    *public* repository, so it is offline-crackable by anyone with repo read.
+    Production must not run on it — ``env_check`` refuses to boot unless this
+    returns True (deep-review #26 / ADR-0022, which amends ADR-0019's
+    zero-config boot for the operator credential specifically). Setting the env
+    var to the shipped-default value does not count as a rotation.
+    """
+    env = os.environ.get("MEDIAHUB_DEV_PASSWORD_HASH", "").strip()
+    return bool(env) and env != _DEV_PASSWORD_HASH_DEFAULT
+
+
 def verify_dev_credentials(username: object, password: object) -> bool:
     """Constant-time check of submitted operator username + password.
 
