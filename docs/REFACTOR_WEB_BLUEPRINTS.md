@@ -1,6 +1,14 @@
 # Decomposing the `web.py` monolith into Blueprints (finding #15)
 
-**Status:** in progress — Stage 0 landed; Stages 1–4 planned, not started.
+**Status:** stages 0–4 complete (2026-07-14). `create_app` now contains only
+route registrations, request-hook wiring and the three errorhandlers; all
+~237 helpers/constants and the tenant spine are module-level, and the four
+largest surfaces (153 routes, ~13.7k lines) live in importable
+`routes_*.py` modules — see §"Outcome" below and ADR-0031 for the
+endpoint-name decision. Remaining follow-up: bulk test migration onto the canonical `app`/`client`/
+`web_module` fixtures (which landed on `main` in parallel via finding-#130 work
+— this refactor's own `mh_*` fixture draft was superseded by them and dropped;
+`tests/_helpers.py` here contributes `web_surface_src()` for source-scan tests).
 **Scope:** `src/mediahub/web/web.py`. Deterministic engine (`interpreter/`,
 `pb_discovery/`, `recognition*/`, the ranker, colour-science) is **out of scope
 and untouched**.
@@ -220,3 +228,24 @@ For every helper/route/data-structure moved:
 **Hard stops (ask first):** any change to a route's URL; any change to
 tenant-gate *semantics* (not just location); Gemini-ifying anything on the
 deterministic-engine boundary (never in scope here).
+
+## 7. Outcome (stages 0–4, shipped 2026-07-14)
+
+Maintainer-authorized completion of every stage, including the previously
+gated Stage 2. All moves verified by: symtable safety gates + per-function
+AST-equivalence proofs (verbatim moves), `url_map` snapshot diff (rule
+strings, endpoint names, methods — byte-identical at every stage), hook-order
+capture, and the full suite.
+
+| Stage | What shipped |
+| --- | --- |
+| 0 | 9 pure formatter/parser helpers hoisted + isolation tests (PR #1258). |
+| 1 | 147 closure-free helpers hoisted by the fixpoint engine (3 rounds). |
+| 2 | Tenant spine extracted: `_active_profile_id` & friends module-level; `app.config` → `current_app.config`; the six request hooks converted to explicit `app.before_request(...)`/`after_request`/`teardown_request` registration at identical positions; gate semantics unchanged. |
+| 1b | Last non-route captures cleared: constants module-level; per-app mutable state (`_auth_attempts`, complaint throttle, icon cache) on `app.extensions` via `_app_state()` (per-app isolation preserved); `_login_idle_seconds()` / `_preview_render_timeout()` read env per call. |
+| 3 | Landed on `main` in parallel (canonical `app`/`client`/`web_module` fixtures + `tests/_semantic.py`, findings #129/#130) — this PR contributes `tests/_helpers.py::web_surface_src()` and repairs the source-scan tests the carve exposed. Bulk migration of the remaining reload-preamble files is incremental follow-up. |
+| 4 | `routes_api_runs.py` (74), `routes_organisation.py` (29), `routes_media_library.py` (32), `routes_video.py` (19) — handlers carved out with `W.<name>` call-time references (the `@require_run` tenant guard moves with its handlers as `@W.require_run`); registered via `register(app)` with ORIGINAL endpoint names (ADR-0031). |
+
+`web.py`: 69.6k → ~55.9k lines. `create_app`: 48.5k lines / 464 routes +
+~250 nested helpers → route registrations & wiring only. Every helper and
+all four surfaces are importable and unit-testable without building the app.
