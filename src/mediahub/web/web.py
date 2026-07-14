@@ -3949,7 +3949,8 @@ def _card_base_id_for(ach: dict) -> str:
     or the synthetic ``sp:type:event`` id the spotlight / reaction surfaces
     mint for an aggregate row that has no single swim."""
     return str(
-        (ach or {}).get("swim_id") or f"sp:{(ach or {}).get('type', '')}:{(ach or {}).get('event', '')}"
+        (ach or {}).get("swim_id")
+        or f"sp:{(ach or {}).get('type', '')}:{(ach or {}).get('event', '')}"
     )
 
 
@@ -4058,7 +4059,11 @@ def _run_card_id_set(run_data: dict) -> set[str]:
     # deduped id by the review / spotlight surfaces, so the reaction strip on a
     # twin row posts that id — accept it. (For the first occurrence the deduped
     # id equals the bare id already added above, so this only widens the set.)
-    out.update(cid for cid in _unique_card_ids(rr.get("ranked_achievements") or [], base_fn=_card_base_id_for) if cid)
+    out.update(
+        cid
+        for cid in _unique_card_ids(rr.get("ranked_achievements") or [], base_fn=_card_base_id_for)
+        if cid
+    )
     for c in (run_data or {}).get("cards") or []:
         for k in ("swim_id", "id", "card_id"):
             v = c.get(k)
@@ -30696,7 +30701,9 @@ def _assemble_spotlight_reel_inputs(pack_id: str, rec: dict):
     # F11: key on the same unique ~n-deduped ids the spotlight review approves
     # under (a duplicate swim_id's twin is read independently). Non-duplicate
     # runs key exactly as before.
-    _sp_reel_ids = _unique_card_ids(pack.get("ranked_achievements") or [], base_fn=_card_base_id_for)
+    _sp_reel_ids = _unique_card_ids(
+        pack.get("ranked_achievements") or [], base_fn=_card_base_id_for
+    )
     approved = []
     for _i, ra in enumerate(pack.get("ranked_achievements") or []):
         st = wf_states.get(_sp_reel_ids[_i])
@@ -35384,7 +35391,9 @@ def create_app() -> Flask:
             # existing create-graphic + live-caption + workflow routes for THIS
             # card via the data-* attributes. Lightweight: no markup is rendered
             # per card beyond the button itself.
-            _insp_graphic_url = url_for("api_create_graphic", run_id=run_id, card_id=_render_card_id)
+            _insp_graphic_url = url_for(
+                "api_create_graphic", run_id=run_id, card_id=_render_card_id
+            )
             _insp_caption_url = url_for("api_live_caption", run_id=run_id, swim_id=_render_card_id)
             # M29 (UX-1) — see before approve: a lazy, cached thumbnail of the
             # card's actual graphic. The <img> stays empty until it scrolls
