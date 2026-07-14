@@ -231,6 +231,65 @@ def test_dq_same_meet_swim_does_not_suppress():
     assert fired[0].raw_facts["time_str"] == "1:00.50"
 
 
+def test_three_same_meet_swims_faster_progression_one_survivor():
+    """Heat/semi/final all beat the baseline and get progressively faster:
+    exactly one PB fires — the fastest (final)."""
+    det = PBConfirmedDetector()
+    swims = [_swim(6090, rnd="heat"), _swim(6070, rnd="semi"), _swim(6050, rnd="final")]
+    fired = _run(det, swims, _StubHistory(61.0))
+    assert len(fired) == 1
+    assert fired[0].raw_facts["time_str"] == "1:00.50"
+
+
+def test_three_same_meet_swims_slower_progression_one_survivor():
+    """Fastest swim comes first (heat), then progressively slower: exactly one
+    PB fires — still the fastest (heat), regardless of the two slower swims."""
+    det = PBConfirmedDetector()
+    swims = [_swim(6050, rnd="heat"), _swim(6070, rnd="semi"), _swim(6090, rnd="final")]
+    fired = _run(det, swims, _StubHistory(61.0))
+    assert len(fired) == 1
+    assert fired[0].raw_facts["time_str"] == "1:00.50"
+
+
+def test_three_way_exact_tie_fires_once():
+    """Three identical same-meet times all beating the baseline: exactly one
+    card (the earliest-listed), never three and never zero."""
+    det = PBConfirmedDetector()
+    swims = [_swim(6050, rnd="heat"), _swim(6050, rnd="semi"), _swim(6050, rnd="final")]
+    fired = _run(det, swims, _StubHistory(61.0))
+    assert len(fired) == 1
+
+
+def test_magnitude_faster_final_only_final_fires():
+    """Magnitude detector, heats-then-faster-final: only the fastest swim's
+    magnitude fires (the huge drop), not the slower heat's big drop."""
+    det = PBImprovementMagnitudeDetector()
+    heat = _swim(6200, rnd="heat")   # 62.00 vs 65.00 -> 4.6% (big)
+    final = _swim(6000, rnd="final")  # 60.00 vs 65.00 -> 7.7% (huge)
+    fired = _run(det, [heat, final], _StubHistory(65.0))
+    assert len(fired) == 1
+    assert fired[0].type == "pb_magnitude_huge"
+
+
+def test_magnitude_supersession_is_order_independent():
+    """Magnitude detector suppresses the slower same-meet swim regardless of
+    list order."""
+    det = PBImprovementMagnitudeDetector()
+    heat = _swim(6000, rnd="heat")   # 60.00 -> huge
+    final = _swim(6200, rnd="final")  # 62.00 -> big, superseded
+    forward = _run(det, [heat, final], _StubHistory(65.0))
+    reverse = _run(det, [final, heat], _StubHistory(65.0))
+    assert len(forward) == len(reverse) == 1
+    assert forward[0].type == reverse[0].type == "pb_magnitude_huge"
+
+
+def test_magnitude_all_results_none_is_backward_compatible():
+    det = PBImprovementMagnitudeDetector()
+    achs = det.detect(_swim(6000), SimpleNamespace(), _StubHistory(65.0), all_results=None)
+    assert len(achs) == 1
+    assert achs[0].type == "pb_magnitude_huge"
+
+
 # ---------------------------------------------------------------------------
 # Explainability — the no-fire reasons stay honest
 # ---------------------------------------------------------------------------
