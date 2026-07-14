@@ -96,6 +96,7 @@ from markupsafe import escape as _h
 
 from mediahub.pipeline.pipeline_v4 import run_pipeline_v4, PipelineRunV4
 from mediahub._atomic_io import atomic_write_json as _atomic_write_json
+from mediahub.recognition import swim_tiers as _swim_tiers
 from .humanise import humanise as _humanise
 from .weekend_glance import (
     build_weekend_glance as _build_weekend_glance,
@@ -1614,9 +1615,9 @@ def _render_near_miss_hint(n_not_generated: int, n_close_calls: int) -> str:
     """A slim, trustworthy "why not" pointer under the decision list.
 
     Reassures the reviewer that the swims which produced no card weren't
-    silently dropped — they're traced, in plain English, under the diagnostics
-    section — and surfaces how many were genuine close calls worth a glance.
-    Empty when every swim produced a card.
+    silently dropped — every swim is ranked in the all-swims list below, in
+    plain English, with the genuine close calls flagged — and any of them can
+    be promoted to a custom highlight. Empty when every swim produced a card.
     """
     if n_not_generated <= 0:
         return ""
@@ -1627,18 +1628,19 @@ def _render_near_miss_hint(n_not_generated: int, n_close_calls: int) -> str:
         )
         body = (
             f"We also looked at <b>{swims}</b> that didn&rsquo;t make a card &mdash; "
-            f"<b>{calls}</b> worth a glance."
+            f"<b>{calls}</b> worth a glance. Any of them can be promoted to a highlight."
         )
         pip = '<span class="mh-nm-pip" aria-hidden="true"></span>'
     else:
         body = (
             f"We also looked at <b>{swims}</b> that didn&rsquo;t make a card &mdash; "
-            "none were close calls, but the reason for each is recorded."
+            "none were close calls, but every swim is ranked below and any can "
+            "be promoted to a highlight."
         )
         pip = ""
     return (
         f'<div class="mh-nearmiss-hint">{pip}<span>{body}</span>'
-        '<a href="#mh-not-generated">See why &rarr;</a></div>'
+        '<a href="#mh-all-swims">See every swim &rarr;</a></div>'
     )
 
 
@@ -3163,6 +3165,7 @@ def _init_db():
             n_cards INTEGER,         -- legacy V4 content-card count (≈0 in the V5 recognition-first flow)
             n_queue INTEGER,
             n_achievements INTEGER,  -- V5 recognition output: the REAL engine output a run produced
+            n_standout INTEGER,      -- distinct standout swims (deduped; the honest headline count)
             error TEXT,
             file_name TEXT,
             progress_log TEXT,       -- JSON array, streamed for cross-worker polls
@@ -3202,6 +3205,12 @@ def _init_db():
         conn.execute("ALTER TABLE runs ADD COLUMN heartbeat_at TEXT")
     if "n_achievements" not in cols:
         conn.execute("ALTER TABLE runs ADD COLUMN n_achievements INTEGER")
+    # Standout-swim count (distinct swims whose best band is elite/strong, plus
+    # human-promoted highlights) — the honest headline figure. Old rows keep
+    # NULL until they are listed (lazily backfilled from the run JSON, same as
+    # n_achievements) or re-run.
+    if "n_standout" not in cols:
+        conn.execute("ALTER TABLE runs ADD COLUMN n_standout INTEGER")
     # QA-015 — how many times a stale (interrupted) run has been auto-resumed.
     # Old rows keep NULL (treated as 0); bounded by _RUN_MAX_RESUMES.
     if "resume_count" not in cols:
@@ -3341,6 +3350,20 @@ def _deserialise_pb_audit(data: dict) -> Optional[dict]:
 # ---------------------------------------------------------------------
 
 
+def _n_standout_from_report(rr) -> int:
+    """Distinct standout swims for a recognition-report dict (0 when absent).
+
+    Deterministic dedup over the persisted report (recognition.swim_tiers):
+    one race can emit several achievements, so this — not ``n_achievements``
+    — is the honest headline count. Never raises: a malformed report reads
+    as zero standouts rather than a 500.
+    """
+    try:
+        return int(_swim_tiers.n_standout_for_report(rr if isinstance(rr, dict) else None))
+    except Exception:
+        return 0
+
+
 def _persist_run(run: PipelineRunV4, file_name: str) -> None:
     """Persist a finished run to runs_v4/<id>.json + DB row."""
     payload = {
@@ -3391,6 +3414,9 @@ def _persist_run(run: PipelineRunV4, file_name: str) -> None:
     n_achievements = int(
         (getattr(run, "recognition_report", None) or {}).get("n_achievements", 0) or 0
     )
+    # The honest headline figure: distinct standout SWIMS (deduped across the
+    # several achievements one race can emit), not raw detections.
+    n_standout = _n_standout_from_report(getattr(run, "recognition_report", None))
     meet_name = run.canonical_meet.name if run.canonical_meet else "(unknown)"
     status = "error" if run.error else "done"
     conn = _db()
@@ -3417,9 +3443,9 @@ def _persist_run(run: PipelineRunV4, file_name: str) -> None:
     conn.execute(
         """INSERT OR REPLACE INTO runs
            (id, created_at, finished_at, status, profile_id, meet_name,
-            our_swims, n_cards, n_queue, n_achievements, error, file_name,
-            content_hash, meet_fingerprint)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            our_swims, n_cards, n_queue, n_achievements, n_standout, error,
+            file_name, content_hash, meet_fingerprint)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (
             run.run_id,
             run.started_at,
@@ -3431,6 +3457,7 @@ def _persist_run(run: PipelineRunV4, file_name: str) -> None:
             n_cards,
             n_queue,
             n_achievements,
+            n_standout,
             run.error,
             file_name,
             prior_hash,
@@ -3556,6 +3583,7 @@ def _machine_readable_run(data: Optional[dict], run_id: str, *, max_achievements
                 "parsed_swims": data.get("parsed_swim_count"),
                 "club_swims": data.get("our_swim_count"),
                 "achievements": rr.get("n_achievements", total),
+                "standout_swims": _n_standout_from_report(rr),
             },
             "achievements": achievements,
             "parse_warnings": [str(w) for w in (data.get("parse_warnings") or [])][:50],
@@ -20124,7 +20152,7 @@ def _home_resume_strip_html(profile_id: Optional[str]) -> str:
     try:
         conn = _db()
         rows = conn.execute(
-            "SELECT id, meet_name, n_queue, n_achievements, created_at "
+            "SELECT id, meet_name, n_queue, n_achievements, n_standout, created_at "
             "FROM runs WHERE profile_id = ? AND status = 'done' "
             "ORDER BY created_at DESC LIMIT 3",
             (profile_id,),
@@ -20142,6 +20170,12 @@ def _home_resume_strip_html(profile_id: Optional[str]) -> str:
             n_queue = int(r["n_queue"] or 0)
         except (TypeError, ValueError):
             n_queue = 0
+        # Lead with the honest standout-swim count; fall back to the raw
+        # detection count only for pre-column rows that were never relisted.
+        try:
+            n_stand = int(r["n_standout"] if r["n_standout"] is not None else 0)
+        except (TypeError, ValueError, KeyError):
+            n_stand = 0
         try:
             n_ach = int(r["n_achievements"] or 0)
         except (TypeError, ValueError):
@@ -20149,6 +20183,9 @@ def _home_resume_strip_html(profile_id: Optional[str]) -> str:
         if n_queue > 0:
             status_line = f"{n_queue} awaiting review"
             cta = "Continue reviewing &rarr;"
+        elif n_stand > 0:
+            status_line = f"{n_stand} standout swim{'' if n_stand == 1 else 's'} · all reviewed"
+            cta = "Open pack &rarr;"
         elif n_ach > 0:
             status_line = f"{n_ach} moment{'' if n_ach == 1 else 's'} · all reviewed"
             cta = "Open pack &rarr;"
@@ -21857,11 +21894,14 @@ def create_app() -> Flask:
 
         # Compute small deployment-wide tallies for the hero meta line so the
         # page doesn't feel hollow once the user has activity. The third figure
-        # is the REAL engine output — the sum of recognised moments
-        # (n_achievements) — NOT the legacy n_cards column, which the V5
-        # recognition-first pipeline leaves at ~0 and would read as a falsehood
-        # ("0 cards generated"). COALESCE keeps NULL rows (pre-column runs that
-        # were never relisted) as 0: an honest lower bound, never a fabrication.
+        # is the honest headline — the sum of STANDOUT SWIMS (n_standout:
+        # distinct swims whose best band is elite/strong, deduped across the
+        # several achievements one race can emit) — NOT raw n_achievements,
+        # which counts every derivative detection and reads absurdly high, and
+        # NOT the legacy n_cards column, which the V5 recognition-first
+        # pipeline leaves at ~0 and would read as a falsehood ("0 cards
+        # generated"). COALESCE keeps NULL rows (pre-column runs that were
+        # never relisted) as 0: an honest lower bound, never a fabrication.
         # Honesty (H-3): a signed-in club must see ITS OWN season, not the
         # deployment-wide totals. When a workspace is pinned the tallies are
         # scoped to that profile_id; the signed-out landing keeps the global
@@ -21881,7 +21921,7 @@ def create_app() -> Flask:
                     )
                     n_moments = int(
                         conn.execute(
-                            "SELECT COALESCE(SUM(n_achievements), 0) FROM runs WHERE profile_id = ?",
+                            "SELECT COALESCE(SUM(n_standout), 0) FROM runs WHERE profile_id = ?",
                             (_tally_pid,),
                         ).fetchone()[0]
                         or 0
@@ -21897,9 +21937,7 @@ def create_app() -> Flask:
                 else:
                     n_runs = int(conn.execute("SELECT COUNT(*) FROM runs").fetchone()[0])
                     n_moments = int(
-                        conn.execute(
-                            "SELECT COALESCE(SUM(n_achievements), 0) FROM runs"
-                        ).fetchone()[0]
+                        conn.execute("SELECT COALESCE(SUM(n_standout), 0) FROM runs").fetchone()[0]
                         or 0
                     )
             finally:
@@ -22019,7 +22057,8 @@ def create_app() -> Flask:
             )
         if n_moments:
             meta_parts.append(
-                f"<span>{_odometer(n_moments, 3)} {'moment' if n_moments == 1 else 'moments'} detected</span>"
+                f"<span>{_odometer(n_moments, 3)} standout "
+                f"{'swim' if n_moments == 1 else 'swims'} found</span>"
             )
         if prof and prof.brand_capture_status in ("ok", "ok_heuristic"):
             meta_parts.append("<span>Brand voice <b>captured</b></span>")
@@ -22412,6 +22451,41 @@ def create_app() -> Flask:
                 pass
         return out
 
+    def _warm_run_standouts(conn, rows) -> dict:
+        """Return ``{run_id: n_standout}`` for every row — from the
+        ``n_standout`` column when present, else recomputed deterministically
+        from the run JSON's recognition report (recognition.swim_tiers).
+
+        Same column-or-JSON contract as ``_warm_run_achievements``: the
+        display never depends on the best-effort column write-back, and a
+        locked / read-only DB is a silent no-op. Standouts are DISTINCT
+        SWIMS whose best band is elite/strong (plus human-promoted
+        highlights) — the honest headline figure, deduped across the several
+        achievements one race can emit.
+        """
+        out: dict = {}
+        need: list = []
+        for r in rows:
+            v = r["n_standout"] if "n_standout" in r.keys() else None
+            if v is None:
+                need.append(r["id"])
+            else:
+                out[r["id"]] = int(v or 0)
+        for _rid in need:
+            _d = _load_run(_rid) or {}
+            out[_rid] = _n_standout_from_report(_d.get("recognition_report"))
+        if need:
+            try:
+                for _rid in need:
+                    conn.execute(
+                        "UPDATE runs SET n_standout = ? WHERE id = ?",
+                        (out[_rid], _rid),
+                    )
+                conn.commit()
+            except Exception:
+                pass
+        return out
+
     # ---- ACTIVITY &mdash; recent runs scoped to the active organisation ----
     @app.route("/activity")
     def activity_page():
@@ -22436,6 +22510,8 @@ def create_app() -> Flask:
         total_unfiltered = 0
         ach_unfiltered = 0
         ach_by_id: dict[str, int] = {}
+        standout_unfiltered = 0
+        standout_by_id: dict[str, int] = {}
         db_failed = False
         try:
             conn = _db()
@@ -22443,8 +22519,8 @@ def create_app() -> Flask:
                 if status_q:
                     rows = conn.execute(
                         "SELECT id, created_at, finished_at, status, profile_id, "
-                        "meet_name, our_swims, n_cards, n_queue, n_achievements, error, file_name, "
-                        "content_hash, meet_fingerprint "
+                        "meet_name, our_swims, n_cards, n_queue, n_achievements, n_standout, "
+                        "error, file_name, content_hash, meet_fingerprint "
                         "FROM runs WHERE profile_id = ? AND status = ? "
                         "ORDER BY created_at DESC LIMIT 100",
                         (prof.profile_id, status_q),
@@ -22461,8 +22537,8 @@ def create_app() -> Flask:
                 else:
                     rows = conn.execute(
                         "SELECT id, created_at, finished_at, status, profile_id, "
-                        "meet_name, our_swims, n_cards, n_queue, n_achievements, error, file_name, "
-                        "content_hash, meet_fingerprint "
+                        "meet_name, our_swims, n_cards, n_queue, n_achievements, n_standout, "
+                        "error, file_name, content_hash, meet_fingerprint "
                         "FROM runs WHERE profile_id = ? "
                         "ORDER BY created_at DESC LIMIT 100",
                         (prof.profile_id,),
@@ -22483,6 +22559,8 @@ def create_app() -> Flask:
                 # DB is a silent no-op, never a 500 and never an undercount.
                 ach_by_id = _warm_run_achievements(conn, rows)
                 ach_unfiltered = sum(ach_by_id.values())
+                standout_by_id = _warm_run_standouts(conn, rows)
+                standout_unfiltered = sum(standout_by_id.values())
             finally:
                 conn.close()
         except Exception as e:
@@ -22664,10 +22742,15 @@ def create_app() -> Flask:
         # Top stat strip — always shows the UNFILTERED picture so it's a
         # stable org-level summary regardless of the active ?status= chip.
         # Values count up on scroll-in via the Phase 10 motion system.
+        # The headline is STANDOUT SWIMS (distinct swims worth shouting about),
+        # not raw detections — one race can emit several achievements and most
+        # swims are simply completed races, so the old "Achievements detected"
+        # figure read absurdly high. The raw detection total stays available on
+        # each run's review page and trace JSON.
         summary_html = (
             '<div class="mh-activity-summary mh-reveal">'
             f'<div class="stat live"><div class="l">Total runs</div><div class="v" data-mh-count="{total_unfiltered}">{total_unfiltered:,}</div></div>'
-            f'<div class="stat medal"><div class="l">Achievements detected</div><div class="v" data-mh-count="{ach_unfiltered}">{ach_unfiltered:,}</div></div>'
+            f'<div class="stat medal"><div class="l">Standout swims</div><div class="v" data-mh-count="{standout_unfiltered}">{standout_unfiltered:,}</div></div>'
             f'<div class="stat good"><div class="l">Completed</div><div class="v" data-mh-count="{unfiltered_counts.get("done", 0)}">{unfiltered_counts.get("done", 0):,}</div></div>'
         )
         if unfiltered_counts.get("error", 0):
@@ -22988,34 +23071,40 @@ def create_app() -> Flask:
         # 1. Runs for this org (newest first), fail-soft on a bad DB.
         rows: list = []
         ach_by_id_feed: dict[str, int] = {}
+        standout_by_id_feed: dict[str, int] = {}
         db_failed = False
         try:
             conn = _db()
             try:
                 rows = conn.execute(
                     "SELECT id, created_at, finished_at, status, profile_id, "
-                    "meet_name, our_swims, n_cards, n_queue, n_achievements, error, file_name "
+                    "meet_name, our_swims, n_cards, n_queue, n_achievements, n_standout, "
+                    "error, file_name "
                     "FROM runs WHERE profile_id = ? "
                     "ORDER BY created_at DESC LIMIT 100",
                     (prof.profile_id,),
                 ).fetchall()
-                # Backfill n_achievements via the shared helper (column or JSON),
-                # which also warms the column so feed-only users don't re-read
-                # the JSON on every visit — same logic the runs-table view uses.
+                # Backfill n_achievements + n_standout via the shared helpers
+                # (column or JSON), which also warm the columns so feed-only
+                # users don't re-read the JSON on every visit — same logic the
+                # runs-table view uses.
                 ach_by_id_feed = _warm_run_achievements(conn, rows)
+                standout_by_id_feed = _warm_run_standouts(conn, rows)
             finally:
                 conn.close()
         except Exception as e:
             log.warning("activity feed: runs DB unreachable: %s", e)
             db_failed = True
 
-        # Normalise rows to plain dicts so the (lazily backfilled) achievement
-        # count rides along and the builder stays storage-agnostic.
+        # Normalise rows to plain dicts so the (lazily backfilled) counts
+        # ride along and the builder stays storage-agnostic.
         run_dicts: list[dict] = []
         for r in rows:
             d = {k: r[k] for k in r.keys()}
             if d["id"] in ach_by_id_feed:
                 d["n_achievements"] = ach_by_id_feed[d["id"]]
+            if d["id"] in standout_by_id_feed:
+                d["n_standout"] = standout_by_id_feed[d["id"]]
             run_dicts.append(d)
 
         # 2. Workflow states (approvals + posted) for the most recent runs only
@@ -23189,18 +23278,22 @@ def create_app() -> Flask:
         # isolation boundary). A missing / locked data.db must not 500 the
         # page — fall through to a recovery hero instead.
         rows = []
+        season_standout_by_id: dict[str, int] = {}
         db_failed = False
         try:
             conn = _db()
             try:
                 rows = conn.execute(
                     "SELECT id, created_at, finished_at, status, profile_id, "
-                    "meet_name, our_swims, n_achievements, error, file_name, "
+                    "meet_name, our_swims, n_achievements, n_standout, error, file_name, "
                     "content_hash, meet_fingerprint "
                     "FROM runs WHERE profile_id = ? "
                     "ORDER BY created_at DESC LIMIT 200",
                     (prof.profile_id,),
                 ).fetchall()
+                # Standout-swim counts (column, else recomputed from run JSON)
+                # — the timeline's honest per-meet figure.
+                season_standout_by_id = _warm_run_standouts(conn, rows)
             finally:
                 conn.close()
         except Exception as e:
@@ -23232,7 +23325,7 @@ def create_app() -> Flask:
                 f'<h1>Your season starts here, <em class="editorial">{_h(prof.display_name)}</em>.</h1>'
                 '<p class="lede">Process your first meet and it lands on this timeline '
                 "&mdash; every meet a node on the season, with the swims matched and the "
-                "moments detected, and a beam that traces the season as you scroll.</p>"
+                "standout swims found, and a beam that traces the season as you scroll.</p>"
                 '<div class="mh-hero-actions">'
                 f'<a class="mh-cta-primary" href="{url_for("make_page")}">Create your first piece &rarr;</a>'
                 f'<a class="mh-cta-secondary" href="{url_for("activity_page")}">Open activity</a>'
@@ -23276,8 +23369,9 @@ def create_app() -> Flask:
         # tally per-month + season totals, note the span, and remember the one
         # standout meet (most moments) so the timeline can celebrate it. Re-runs
         # still RENDER (with their Re-run badge) but are excluded from every
-        # count so "Meets", "Swims matched" and "Moments detected" count each
-        # real meet once.
+        # count so "Meets", "Swims matched" and "Standout swims" count each
+        # real meet once. "Moments" here are STANDOUT SWIMS (deduped), not raw
+        # detections — the honest per-meet figure.
         n_meets = 0
         total_swims = 0
         total_moments = 0
@@ -23292,7 +23386,7 @@ def create_app() -> Flask:
             dt = _parse(r["created_at"])
             month_label = dt.strftime("%B %Y") if dt else "Undated"
             swims = int(r["our_swims"] or 0)
-            moments = int((r["n_achievements"] if "n_achievements" in r.keys() else 0) or 0)
+            moments = int(season_standout_by_id.get(r["id"], 0) or 0)
             if not is_rerun:
                 n_meets += 1
                 total_swims += swims
@@ -23324,7 +23418,8 @@ def create_app() -> Flask:
             meta_bits = [f"{meets_n} {'meet' if meets_n == 1 else 'meets'}"]
             if bucket["moments"]:
                 meta_bits.append(
-                    f"{bucket['moments']:,} {'moment' if bucket['moments'] == 1 else 'moments'}"
+                    f"{bucket['moments']:,} standout "
+                    f"{'swim' if bucket['moments'] == 1 else 'swims'}"
                 )
             month_meta = " &middot; ".join(_h(b) for b in meta_bits)
             items_html += (
@@ -23365,7 +23460,7 @@ def create_app() -> Flask:
                 if moments:
                     chips += (
                         '<span class="mh-tl-chip mh-tl-chip--moments">'
-                        f"{icon_moment}{moments:,} {'moment' if moments == 1 else 'moments'} detected"
+                        f"{icon_moment}{moments:,} standout {'swim' if moments == 1 else 'swims'}"
                         "</span>"
                     )
 
@@ -23496,7 +23591,7 @@ def create_app() -> Flask:
             f'<div class="v" data-mh-count="{n_meets}">{n_meets:,}</div></div>'
             f'<div class="stat"><div class="l">Swims matched</div>'
             f'<div class="v" data-mh-count="{total_swims}">{total_swims:,}</div></div>'
-            f'<div class="stat medal"><div class="l">Moments detected</div>'
+            f'<div class="stat medal"><div class="l">Standout swims</div>'
             f'<div class="v" data-mh-count="{total_moments}">{total_moments:,}</div></div>'
             "</div>"
         )
@@ -25220,10 +25315,18 @@ def create_app() -> Flask:
 
     if (status === 'done') {{
       stopped = true;
+      // Lead with the honest standout-swim count (distinct swims worth a
+      // post); fall back to the raw detection count only for old payloads.
+      var nStand = (j && j.n_standout != null) ? j.n_standout : null;
       var nAch = (j && j.n_achievements != null) ? j.n_achievements : null;
-      var achLabel = (nAch !== null && nAch > 0)
-        ? nAch + ' moment' + (nAch === 1 ? '' : 's') + ' found — ready to review'
-        : 'All done — ready to review';
+      var achLabel;
+      if (nStand !== null && nStand > 0) {{
+        achLabel = nStand + ' standout swim' + (nStand === 1 ? '' : 's') + ' found — ready to review';
+      }} else if (nStand === null && nAch !== null && nAch > 0) {{
+        achLabel = nAch + ' moment' + (nAch === 1 ? '' : 's') + ' found — ready to review';
+      }} else {{
+        achLabel = 'All done — ready to review';
+      }}
       setStage(achLabel);
       if (lede) lede.textContent = achLabel + '. Opening your content…';
       setBar(100, null);
@@ -25318,6 +25421,9 @@ def create_app() -> Flask:
                     snap["error"] = _STALE_ERR
             if snap.get("status") == "done":
                 snap["n_achievements"] = _n_achievements_from_run(_run_data)
+                snap["n_standout"] = _n_standout_from_report(
+                    (_run_data or {}).get("recognition_report")
+                )
             # Customer-facing percent + plain-English phase (additive; the raw
             # `log`/`error` stay for operators and documented API clients).
             _pct, _phase = _recap_progress.recap_progress(snap.get("log"), snap.get("status"))
@@ -25357,6 +25463,9 @@ def create_app() -> Flask:
         payload = {"status": status, "error": error, "log": plog}
         if status == "done":
             payload["n_achievements"] = _n_achievements_from_run(_run_data)
+            payload["n_standout"] = _n_standout_from_report(
+                (_run_data or {}).get("recognition_report")
+            )
         _pct, _phase = _recap_progress.recap_progress(plog, status)
         payload["percent"], payload["phase"] = _pct, _phase
         return jsonify(payload)
@@ -25609,6 +25718,17 @@ def create_app() -> Flask:
         if _wf_filter not in ("", "queue", "approved", "rejected"):
             _wf_filter = ""
 
+        # Post-promotion confirmation (?promoted=1 set by the redirect from
+        # api_promote_swim). A fixed template — no user text rides in the URL.
+        _promoted_flash = ""
+        if (request.args.get("promoted") or "") == "1":
+            _promoted_flash = (
+                '<div class="tag good" style="display:block;padding:10px 12px;'
+                'font-size:12px;margin:0 0 12px">Highlight created — the new card '
+                "is in the review queue above. Approve it to send it to the "
+                "Content builder.</div>"
+            )
+
         # --- Recognition summary band
         n_elite = rr.get("n_elite", 0)
         n_strong = rr.get("n_strong", 0)
@@ -25616,16 +25736,23 @@ def create_app() -> Flask:
         n_total = rr.get("n_achievements", 0)
         n_analysed = rr.get("n_swims_analysed", data.get("our_swim_count", 0))
         n_cards = len(cards)
+        # The headline figure is STANDOUT SWIMS — distinct swims whose best
+        # band is elite/strong (plus human-promoted highlights), deduped
+        # across the several achievements one race can emit. The raw
+        # detection total stays in the trace JSON / machine-readable view;
+        # showing it as the headline read absurdly high ("400 achievements"
+        # when most swims were simply completed races).
+        n_standout = _n_standout_from_report(rr)
 
         # Recognition stats — semantic .stat variants tell the story:
-        # medal = elite (rare achievements), live = strong (the working set),
-        # plain = story / context counts.
+        # medal = standout swims (the headline), live = strong (the working
+        # set), plain = story / context counts.
         rec_stats_html = "".join(
             [
-                f'<div class="stat medal"><div class="l">Elite</div><div class="v" data-mh-count="{n_elite}">{n_elite}</div></div>',
+                f'<div class="stat medal"><div class="l">Standout swims</div><div class="v" data-mh-count="{n_standout}">{n_standout}</div></div>',
+                f'<div class="stat"><div class="l">Elite</div><div class="v" data-mh-count="{n_elite}">{n_elite}</div></div>',
                 f'<div class="stat live"><div class="l">Strong</div><div class="v" data-mh-count="{n_strong}">{n_strong}</div></div>',
                 f'<div class="stat"><div class="l">Story</div><div class="v" data-mh-count="{n_story}">{n_story}</div></div>',
-                f'<div class="stat"><div class="l">Total achievements</div><div class="v" data-mh-count="{n_total}">{n_total}</div></div>',
                 f'<div class="stat"><div class="l">Swims analysed</div><div class="v" data-mh-count="{n_analysed}">{n_analysed}</div></div>',
                 f'<div class="stat"><div class="l">Cards</div><div class="v" data-mh-count="{n_cards}">{n_cards}</div></div>',
             ]
@@ -25740,60 +25867,134 @@ def create_app() -> Flask:
         else:
             meet_charts_html = ""
 
-        # --- Not generated panel (the "why not" surface).
-        # The deterministic detectors traced every swim; for the ones that
-        # produced no card we surface the engine's near-miss category in plain
-        # English, leading with the genuine close calls (almost-a-PB, possible
-        # PB we couldn't confirm, an ambiguous swimmer match) so a reviewer can
-        # trust that nothing good was silently dropped. The raw engine summary
-        # stays available, demoted to a tooltip + muted second line for support.
+        # --- All swims — ranked (supersedes the old capped "Not generated"
+        # panel). Every analysed swim gets a row: the deterministic tier
+        # module (recognition.swim_tiers) joins the ranked achievements back
+        # to their underlying swims, so standouts pin to the top, notable
+        # swims follow by score, close calls are flagged in plain English,
+        # and ordinary completed swims read honestly as just that. Any swim
+        # the automation didn't flag carries a "Create highlight" form — the
+        # human promotion path into the review queue + Content builder.
         swim_traces_raw = rr.get("swim_traces") or []
         no_ach_traces = [t for t in swim_traces_raw if t.get("achievement_count", 0) == 0]
+        _n_close_calls = sum(
+            1 for t in no_ach_traces if _near_miss_is_close_call(t.get("near_miss_category"))
+        )
+        try:
+            _swim_rows = _swim_tiers.swim_rows_for_report(rr)
+        except Exception:
+            log.exception("all-swims: tier rows failed for run %s", run_id)
+            _swim_rows = []
 
-        def _nm_sort_key(t):
-            cat = (t.get("near_miss_category") or "lower_priority").strip().lower()
+        # Within the close-call tier (every score is 0), lead with the most
+        # reviewable near-misses (almost-a-PB before ambiguous-swimmer before
+        # weak-field) — the same severity order the old panel used.
+        def _nm_pos(r_):
+            cat = (r_.get("near_miss_category") or "lower_priority").strip().lower()
             try:
                 return _NEAR_MISS_ORDER.index(cat)
             except ValueError:
                 return len(_NEAR_MISS_ORDER)
 
-        no_ach_sorted = sorted(no_ach_traces, key=_nm_sort_key)
-        _n_close_calls = sum(
-            1 for t in no_ach_traces if _near_miss_is_close_call(t.get("near_miss_category"))
-        )
-        not_gen_rows = ""
-        for t in no_ach_sorted[:40]:
-            _cat = (t.get("near_miss_category") or "lower_priority").strip().lower()
-            _nm_label, _nm_blurb = _near_miss_label(_cat)
-            _nm_cls = "warn" if _near_miss_is_close_call(_cat) else ""
-            _raw = (t.get("summary") or "").strip()
-            _raw_line = (
-                f'<div class="muted" style="font-size:11px;margin-top:3px" '
-                f'title="{_h(_raw)}">{_h(_raw[:120])}</div>'
-                if _raw
-                else ""
+        _swim_rows = (
+            [
+                r_
+                for r_ in _swim_rows
+                if r_["tier"] in (_swim_tiers.TIER_STANDOUT, _swim_tiers.TIER_NOTABLE)
+            ]
+            + sorted(
+                (r_ for r_ in _swim_rows if r_["tier"] == _swim_tiers.TIER_CLOSE_CALL),
+                key=_nm_pos,
             )
-            not_gen_rows += (
-                f'<tr data-swimmer="{_h(t.get("swimmer_name", ""))}" '
-                f'data-event="{_h(t.get("event", ""))}" data-nearmiss="{_h(_cat)}">'
-                f"<td>{_h(t.get('swimmer_name', ''))}</td>"
-                f"<td>{_h(t.get('event', ''))}</td>"
-                f'<td style="font-family:monospace">{_h(t.get("time_str", ""))}</td>'
-                f'<td><span class="tag {_nm_cls}" style="font-size:10px">{_h(_nm_label)}</span>'
-                f'<div style="font-size:12px;color:var(--ink-dim);margin-top:3px">{_h(_nm_blurb)}</div>'
-                f"{_raw_line}</td>"
+            + [r_ for r_ in _swim_rows if r_["tier"] == _swim_tiers.TIER_ORDINARY]
+        )
+        _n_swim_standout = sum(1 for r_ in _swim_rows if r_["tier"] == _swim_tiers.TIER_STANDOUT)
+        # Swims the engine never analysed (DQ / no final time) — counted from
+        # the run's own figures so the panel is honest about its coverage.
+        _n_unanalysed = max(0, int(data.get("our_swim_count") or 0) - len(swim_traces_raw))
+        _TIER_TAG_CLS = {
+            _swim_tiers.TIER_STANDOUT: "good",
+            _swim_tiers.TIER_NOTABLE: "info",
+            _swim_tiers.TIER_CLOSE_CALL: "warn",
+            _swim_tiers.TIER_ORDINARY: "",
+        }
+        _promote_url = url_for("api_promote_swim", run_id=run_id)
+        all_swims_rows = ""
+        for _sr in _swim_rows:
+            _tier = _sr["tier"]
+            _tag_cls = _TIER_TAG_CLS.get(_tier, "")
+            _ranked_here = _sr["ranked"]
+            if _ranked_here:
+                # What the engine (or a human promotion) found for this swim,
+                # verbatim from the ranked achievements — no new copy.
+                _kinds = " · ".join(
+                    _humanise((ra.get("achievement") or {}).get("type", ""))
+                    for ra in _ranked_here[:3]
+                )
+                _best_headline = str(
+                    ((_ranked_here[0].get("achievement") or {}).get("headline") or "")
+                ).strip()
+                _why_cell = (
+                    f'<span class="tag {_tag_cls}" style="font-size:10px">{_h(_sr["tier_label"])}</span> '
+                    f'<span class="tag" style="font-size:10px">{_h(_kinds)}</span>'
+                    + (
+                        f'<div style="font-size:12px;color:var(--ink-dim);margin-top:3px">{_h(_best_headline[:140])}</div>'
+                        if _best_headline
+                        else ""
+                    )
+                    + '<div class="muted" style="font-size:11px;margin-top:3px">Card in the review list above.</div>'
+                )
+                _score_cell = _worthiness_meter(_sr["score"])
+            else:
+                _cat = (_sr.get("near_miss_category") or "lower_priority").strip().lower()
+                _nm_label, _nm_blurb = _near_miss_label(_cat)
+                _raw = (_sr.get("summary") or "").strip()
+                _raw_line = (
+                    f'<div class="muted" style="font-size:11px;margin-top:3px" '
+                    f'title="{_h(_raw)}">{_h(_raw[:120])}</div>'
+                    if _raw
+                    else ""
+                )
+                _why_cell = (
+                    f'<span class="tag {_tag_cls}" style="font-size:10px">'
+                    f"{_h(_nm_label if _sr['close_call'] else _sr['tier_label'])}</span>"
+                    f'<div style="font-size:12px;color:var(--ink-dim);margin-top:3px">{_h(_nm_blurb if _sr["close_call"] else "Completed race — nothing the detectors rank, and that is fine.")}</div>'
+                    f"{_raw_line}"
+                )
+                _score_cell = '<span class="muted" style="font-size:11px">—</span>'
+            _action_cell = ""
+            if _sr["promotable"]:
+                # No-JS friendly inline promotion form. The headline is
+                # optional — left blank, a deterministic fact-only template
+                # over the swim's own row is used. Never auto-approved: the
+                # new card lands in the review queue like any other.
+                _action_cell = f"""<details class="mh-promote">
+  <summary class="btn secondary" style="font-size:11px;padding:4px 10px;display:inline-flex;cursor:pointer" title="Create a custom highlight card for this swim — it joins the review queue, then the Content builder once you approve it.">&#x2606; Create highlight</summary>
+  <form method="post" action="{_promote_url}" style="margin-top:8px;display:flex;flex-direction:column;gap:6px;max-width:340px">
+    <input type="hidden" name="swim_id" value="{_h(_sr["swim_id"])}">
+    <input class="input" type="text" name="headline" maxlength="140" placeholder="Headline (optional — facts are used if blank)" style="font-size:12px">
+    <input class="input" type="text" name="note" maxlength="200" placeholder="Why does this swim matter? (optional)" style="font-size:12px">
+    <button class="btn" type="submit" style="font-size:12px;align-self:flex-start">Create highlight card</button>
+  </form>
+</details>"""
+            all_swims_rows += (
+                f'<tr data-swimmer="{_h(_sr["swimmer_name"])}" data-event="{_h(_sr["event"])}" '
+                f'data-tier="{_h(_tier)}" data-score="{_sr["score"]:.4f}">'
+                f"<td>{_h(_sr['swimmer_name'])}</td>"
+                f"<td>{_h(_sr['event'])}</td>"
+                f'<td style="font-family:monospace">{_h(_sr["time_str"])}</td>'
+                f"<td>{_score_cell}</td>"
+                f"<td>{_why_cell}</td>"
+                f"<td>{_action_cell}</td>"
                 f"</tr>"
             )
-        # Honest truncation notice: the table leads with the 40 closest calls, but
-        # a big meet can have far more no-achievement swims. Say so, so the copy
-        # ("Nothing here was silently dropped") stays true — every swim is in the
-        # run trace JSON.
-        if len(no_ach_sorted) > 40:
-            not_gen_rows += (
-                '<tr><td colspan="4" class="muted" '
+        if _n_unanalysed:
+            all_swims_rows += (
+                '<tr><td colspan="6" class="muted" '
                 'style="font-size:12px;text-align:center;padding:12px">'
-                f"Showing the 40 leading close calls of {len(no_ach_sorted)} "
-                "&mdash; every swim is in the run trace JSON.</td></tr>"
+                f"{_n_unanalysed} swim{'' if _n_unanalysed == 1 else 's'} "
+                "not analysed (DQ or no final time) &mdash; see Browse all results."
+                "</td></tr>"
             )
 
         # --- Legacy V4 cards (collapsed)
@@ -26767,14 +26968,15 @@ html:not(.mh-js) #mh-rv-select-toggle {{ display: none; }}
   </details>
 </div>
 
-<div class="card" id="mh-not-generated">
-  <details{" open" if _n_close_calls else ""}>
-    <summary style="cursor:pointer;font-size:15px;font-weight:700;color:var(--ink)">Not generated <span class="muted" style="font-weight:400;font-size:13px">&mdash; {len(no_ach_traces)} swims with no achievements{f", {_n_close_calls} close {'call' if _n_close_calls == 1 else 'calls'}" if _n_close_calls else ""}</span></summary>
+<div class="card" id="mh-all-swims">
+  <details{" open" if (_n_close_calls or _promoted_flash) else ""}>
+    <summary style="cursor:pointer;font-size:15px;font-weight:700;color:var(--ink)">All swims &mdash; ranked <span class="muted" style="font-weight:400;font-size:13px">&mdash; {len(_swim_rows)} analysed, {_n_swim_standout} standout{f", {_n_close_calls} close {'call' if _n_close_calls == 1 else 'calls'}" if _n_close_calls else ""}</span></summary>
     <div style="margin-top:8px">
-      <p class="muted" style="font-size:12px;margin:0 0 12px">Every swim was traced by the recognition engine. These produced no card &mdash; the close calls are led out first, each with the reason in plain English so you can override if you disagree. Nothing here was silently dropped.</p>
+      {_promoted_flash}
+      <p class="muted" style="font-size:12px;margin:0 0 12px">Every analysed swim, ranked by the engine's own scores &mdash; standouts pinned first, close calls flagged in plain English, and ordinary completed swims read honestly as just that. Nothing was silently dropped. If the automation missed a swim that matters to your club, <b>Create highlight</b> turns it into a card in the review queue &mdash; you approve it like any other before it reaches the Content builder.</p>
       <div class="mh-table-scroll"><table>
-        <thead><tr><th>Swimmer</th><th>Event</th><th>Time</th><th>Why not</th></tr></thead>
-        <tbody>{not_gen_rows or '<tr><td colspan="4" class="muted">All swims produced achievements, or no trace data available.</td></tr>'}</tbody>
+        <thead><tr><th>Swimmer</th><th>Event</th><th>Time</th><th>Score</th><th>What we saw</th><th></th></tr></thead>
+        <tbody>{all_swims_rows or '<tr><td colspan="6" class="muted">No trace data available for this run — re-run the file to get the per-swim breakdown.</td></tr>'}</tbody>
       </table></div>
     </div>
   </details>
@@ -29375,7 +29577,8 @@ Relay team broke club record"></textarea>
                     "  ],\n"
                     '  "percent": 100,\n'
                     '  "phase": "Ready",\n'
-                    '  "n_achievements": 12\n'
+                    '  "n_achievements": 12,\n'
+                    '  "n_standout": 5\n'
                     "}\n"
                 ),
             ),
@@ -50726,6 +50929,189 @@ function mhCertificatesJob(a) {{
 </script>
 """
         return _layout(f"Content builder — {meet_name}", body, active="home")
+
+    # ---- Custom-achievement promotion ----------------------------------
+    @app.route("/api/runs/<run_id>/swims/promote", methods=["POST"])
+    def api_promote_swim(run_id):
+        """Promote a swim the automation didn't flag into a custom highlight.
+
+        Human judgement path for the all-swims list: synthesises a
+        ``custom_highlight`` Achievement + RankedAchievement (append-only —
+        the "Why this card?" explainer addresses cards by list index, so the
+        existing order is never disturbed) from the swim's own traced facts,
+        applies the tenant's child-display policy, and persists atomically
+        under the same cross-process lock discipline the workflow sidecar
+        uses. The new card lands in the review QUEUE — it flows through the
+        normal approve → Content builder path with every gate (consent,
+        brand-lock, tasks) intact; promotion never publishes anything.
+        """
+        from mediahub._atomic_io import cross_process_lock
+
+        _pid = _active_profile_id()
+        if not _can_access_run(run_id, _load_run(run_id), _pid):
+            return jsonify({"error": "run not found"}), 404
+        # Creating a card is content creation (same seat as caption edits).
+        denied = _role_denied_json(_perms.CAP_EDIT, run_id)
+        if denied:
+            return denied
+
+        src = request.get_json(silent=True) if request.is_json else request.form
+        src = src or {}
+        swim_id = str(src.get("swim_id") or "").strip()
+        headline_in = str(src.get("headline") or "").strip()[:140]
+        note_in = str(src.get("note") or "").strip()[:200]
+        if not swim_id:
+            return jsonify({"error": "swim_id required"}), 400
+
+        wants_json = request.is_json or (request.accept_mimetypes.best == "application/json")
+
+        def _fail(code: int, msg: str):
+            if wants_json:
+                return jsonify({"error": msg}), code
+            return (
+                f'<p>{_h(msg)}</p><p><a href="{url_for("review", run_id=run_id)}">'
+                "Back to review</a></p>",
+                code,
+            )
+
+        # Load → mutate → save under one cross-process lock so two reviewers
+        # (or two gunicorn workers) can't lose each other's promotion. The
+        # only prior post-run JSON write-backs used bare write_text — this
+        # route deliberately uses the atomic + locked pattern instead.
+        with cross_process_lock(RUNS_DIR / f"{run_id}.json.lock"):
+            data = _load_run(run_id)
+            if not data:
+                return _fail(404, "Run not found.")
+            rr = data.get("recognition_report")
+            if not isinstance(rr, dict):
+                return _fail(400, "This run has no recognition report to add a highlight to.")
+            traces = rr.get("swim_traces") or []
+            trace = next(
+                (t for t in traces if isinstance(t, dict) and t.get("swim_id") == swim_id),
+                None,
+            )
+            if trace is None:
+                return _fail(404, "That swim isn't in this run's analysed swims.")
+            ranked = rr.get("ranked_achievements")
+            if not isinstance(ranked, list):
+                ranked = []
+                rr["ranked_achievements"] = ranked
+            # Only swims the automation flagged NOTHING for are promotable —
+            # a swim with cards is already in the review list, and a second
+            # promotion would duplicate the first.
+            gkey = _swim_tiers.swim_group_key(swim_id)
+            try:
+                groups = _swim_tiers.group_ranked_achievements(ranked)
+            except Exception:
+                groups = {}
+            if int(trace.get("achievement_count") or 0) > 0 or groups.get(gkey):
+                return _fail(409, "This swim already has a card in the review list.")
+
+            swimmer_name = str(trace.get("swimmer_name") or "").strip()
+            event = str(trace.get("event") or "").strip()
+            time_str = str(trace.get("time_str") or "").strip()
+            # Deterministic fact-only default headline — the swim's own traced
+            # facts, never invented copy. A club-typed headline wins.
+            headline = headline_in or f"{swimmer_name} — {event} in {time_str}"
+            now_iso = datetime.now(timezone.utc).isoformat()
+            ach = {
+                "type": _swim_tiers.CUSTOM_HIGHLIGHT_TYPE,
+                "swim_id": f"{swim_id}:custom",
+                "swimmer_id": swim_id.split(":", 1)[0],
+                "swimmer_name": swimmer_name,
+                "event": event,
+                "headline": headline,
+                "angle_hint": note_in
+                or "Club-chosen highlight — a reviewer promoted this swim from the all-swims list.",
+                "confidence": 0.9,
+                "confidence_label": "high",
+                "evidence": [
+                    {
+                        "source_type": "results_file",
+                        "source_name": str(data.get("file_name") or "results file"),
+                        "statement": f"Result row: {event} — {time_str}",
+                        "source_url": None,
+                        "fetched_at": None,
+                        "confidence": "high",
+                    }
+                ],
+                "raw_facts": {
+                    "time_str": time_str,
+                    "promoted_by": "reviewer",
+                    "promoted_at": now_iso,
+                    "reviewer_note": note_in,
+                },
+                "uncertainty_notes": [],
+                "detector_name": "manual_promotion",
+                "post_angle": "recap_mention",
+            }
+            ra = {
+                "achievement": ach,
+                # Fixed, explainable placement — this is a human call, not an
+                # engine score, and the single transparent factor says so.
+                "priority": 0.5,
+                "factors": [
+                    {
+                        "name": "manual_promotion",
+                        "value": 1.0,
+                        "weight": 1.0,
+                        "reason": "Promoted by a club reviewer from the all-swims list",
+                        "plain_summary": (
+                            "A reviewer chose this swim as a highlight — the "
+                            "automation didn't rank it."
+                        ),
+                    }
+                ],
+                "quality_band": "story",
+                "suggested_post_type": "story",
+                "rank": len(ranked) + 1,
+                "safe_to_post": {
+                    "level": "needs_review",
+                    "reason": "Human-promoted highlight — check the facts and caption before posting.",
+                },
+                "post_angle": "recap_mention",
+            }
+            # Children's Code display transform — the pipeline applies this at
+            # run time, so a card created after the run must apply it here or
+            # a minor's full name would leak through the promotion path.
+            try:
+                _prof = (
+                    load_profile(data.get("profile_id") or "") if data.get("profile_id") else None
+                )
+                if _prof is not None:
+                    from mediahub.compliance.child_policy import apply_to_ranked
+
+                    apply_to_ranked(_prof, [ra])
+            except Exception:
+                log.warning("promote: child-policy transform failed for %s", run_id, exc_info=True)
+
+            ranked.append(ra)
+            # Keep the report's own tallies consistent with the list it carries.
+            rr["n_achievements"] = int(rr.get("n_achievements") or 0) + 1
+            trace["achievement_count"] = int(trace.get("achievement_count") or 0) + 1
+            trace["summary"] = "promoted to a custom highlight by a reviewer"
+            _atomic_write_json(RUNS_DIR / f"{run_id}.json", data, default=str)
+
+        # Refresh the cached DB counts (display never depends on this write).
+        try:
+            conn = _db()
+            conn.execute(
+                "UPDATE runs SET n_achievements = ?, n_standout = ? WHERE id = ?",
+                (
+                    int(rr.get("n_achievements") or 0),
+                    _n_standout_from_report(rr),
+                    run_id,
+                ),
+            )
+            conn.commit()
+            conn.close()
+        except Exception:
+            pass
+
+        log.info("promote: run=%s swim=%s by profile=%s", run_id, swim_id, _pid)
+        if wants_json:
+            return jsonify({"ok": True, "card_id": ach["swim_id"]})
+        return redirect(url_for("review", run_id=run_id) + "?promoted=1#mh-all-swims")
 
     # ---- Workflow API --------------------------------------------------
     @app.route("/api/workflow/<run_id>/<card_id>", methods=["POST"])

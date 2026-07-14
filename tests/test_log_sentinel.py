@@ -283,7 +283,11 @@ def test_daily_cap_and_cooldown_block(monkeypatch):
 def test_boot_grace_blocks(monkeypatch):
     monkeypatch.setenv("MEDIAHUB_SENTINEL_AUTOFIX", "1")
     monkeypatch.setenv("MEDIAHUB_SENTINEL_AUTOFIX_WORKER_TIMEOUT", "1")
-    # default grace is 600s and the test process started moments ago
+    # Pin the module's boot epoch to "just now": the gate compares process
+    # uptime to the 600s grace default, so relying on the REAL process start
+    # made this fail whenever the whole suite ran longer than the grace
+    # window in one process (a >10-minute single-process pytest run).
+    monkeypatch.setattr(playbook, "_PROCESS_START", time.time())
     allowed, reason = playbook.action_decision(
         "worker_timeout", last_acted_epoch=0.0, actions_today=0
     )

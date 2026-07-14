@@ -10,6 +10,13 @@ was not even a DB column. A newcomer reads "0" as "this product made nothing".
 The honest fix (no fabricated cards): persist + surface the real achievement
 count. These tests pin it, including the self-healing backfill for rows written
 before the ``n_achievements`` column existed.
+
+2026-07: the headline moved one step honester again — it now shows STANDOUT
+SWIMS (distinct swims whose best band is elite/strong, deduped across the
+several achievements one race can emit, via ``recognition.swim_tiers``), not
+the raw detection total, which read absurdly high ("400 achievements" when
+most swims were simply completed races). The raw count keeps its per-row
+column and its DB backfill; only the headline stat changed meaning.
 """
 from __future__ import annotations
 
@@ -36,13 +43,25 @@ def activity_app(tmp_path, monkeypatch):
     save_profile(ClubProfile(profile_id="org-a", display_name="Org A",
                              brand_voice_summary="Bold."))
 
-    def seed_run(n_ach, write_db_count=True):
+    def seed_run(n_ach, n_standout=0, write_db_count=True):
         rid = "run-" + uuid.uuid4().hex[:8]
+        # n_standout distinct standout swims (one elite achievement each) so
+        # the deduped headline figure has real content to count.
+        ranked = [
+            {
+                "rank": i + 1,
+                "achievement": {"swim_id": f"k{i}:100FRLC:F:gold", "type": "medal_gold",
+                                "swimmer_name": f"Swimmer {i}", "event": "100 Free"},
+                "quality_band": "elite", "priority": 0.9,
+                "suggested_post_type": "main_feed", "factors": [],
+            }
+            for i in range(n_standout)
+        ]
         payload = {
             "run_id": rid, "profile_id": "org-a", "meet": {"name": f"Meet {rid}"},
             "our_swim_count": n_ach, "cards": [],
             "recognition_report": {
-                "ranked_achievements": [], "n_elite": 1, "n_strong": 2,
+                "ranked_achievements": ranked, "n_elite": 1, "n_strong": 2,
                 "n_story": n_ach - 3, "n_achievements": n_ach, "n_swims_analysed": n_ach,
             },
         }
@@ -74,15 +93,17 @@ def _activity(app):
 
 
 class TestActivitySurfacesAchievements:
-    def test_headline_is_achievements_not_cards(self, activity_app):
+    def test_headline_is_standout_swims_not_cards(self, activity_app):
         app, _wm, seed = activity_app
-        seed(40); seed(31)
+        seed(40, n_standout=3); seed(31, n_standout=2)
         body = _activity(app)
-        assert "Achievements detected" in body
-        # The misleading legacy headline must be gone.
+        # The headline is the deduped standout-swim figure…
+        assert "Standout swims" in body
+        assert 'data-mh-count="5"' in body
+        # …not the raw detection total (which read absurdly high), and not
+        # the misleading legacy card count.
+        assert "Achievements detected" not in body
         assert "Cards generated" not in body
-        # The real total (40 + 31 = 71) is surfaced.
-        assert "71" in body
 
     def test_per_row_shows_achievement_count(self, activity_app):
         app, _wm, seed = activity_app
