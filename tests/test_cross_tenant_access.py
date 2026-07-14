@@ -613,3 +613,190 @@ class TestVisualSidecarTenantScoped:
         assert wm._vidx_lookup(vid) == (run_id, "brief-alpha")
         wm._delete_run(run_id)
         assert wm._vidx_lookup(vid) is None
+
+
+# ---------------------------------------------------------------------------
+# @require_run migration (deep-review finding #18) — batch 1.
+#
+# These handlers had the copy-pasted
+#     if not _can_access_run(run_id, _load_run(run_id), _active_profile_id()):
+#         return jsonify({"error": "run_not_found"}), 404
+# guard replaced by the single-source-of-truth ``@require_run`` decorator. The
+# contract must be unchanged: a foreign org gets exactly the run_not_found 404
+# (no leak, no existence oracle), and the owner still passes the gate into the
+# body. If a future edit drops ``@require_run`` from any of these, the foreign
+# case flips to 2xx / a downstream error and these fail loudly.
+# ---------------------------------------------------------------------------
+
+# (method, url_template, json_body) — {rid}/{cid}/{tok} filled from the fixture.
+_BATCH1_ENDPOINTS = [
+    ("GET", "/api/runs/{rid}/card/{cid}/revisions", None),
+    ("GET", "/api/runs/{rid}/card/{cid}/revisions/diff", None),
+    ("POST", "/api/runs/{rid}/card/{cid}/revisions/restore", {}),
+    ("GET", "/api/runs/{rid}/card/{cid}/locks", None),
+    ("POST", "/api/runs/{rid}/card/{cid}/locks", {"element": "headline", "locked": True}),
+    ("GET", "/api/runs/{rid}/shares", None),
+    ("POST", "/api/runs/{rid}/shares", {"perm": "view"}),
+    ("POST", "/api/runs/{rid}/shares/{tok}/revoke", {}),
+    ("GET", "/api/runs/{rid}/card/{cid}/motion/manifest", None),
+    ("POST", "/api/runs/{rid}/export-share", {"job": "0" * 32}),
+]
+
+# A synthetic, obviously-fake share token — never a real credential. Kept
+# low-entropy (a repeated "deadbeef") so gitleaks' generic-api-key entropy
+# rule doesn't flag it; the value is only used as a URL path segment for the
+# revoke route, where a foreign org is refused before the token is ever read.
+_TOKEN = "deadbeefdeadbeefdeadbeefdeadbeef"
+
+
+def _fill(url, run_id):
+    return url.format(rid=run_id, cid="card-alpha-1", tok=_TOKEN)
+
+
+def _hit(client, method, url, body):
+    if method == "GET":
+        return client.get(url)
+    return client.post(url, json=body)
+
+
+class TestRequireRunBatch1:
+    @pytest.mark.parametrize("method,url,body", _BATCH1_ENDPOINTS)
+    def test_foreign_org_gets_run_not_found_404(self, two_orgs, method, url, body):
+        c = two_orgs["client"]
+        _pin(c, "org-beta")
+        r = _hit(c, method, _fill(url, two_orgs["run_id"]), body)
+        assert r.status_code == 404, (method, url, r.get_data(as_text=True))
+        text = r.get_data(as_text=True)
+        # The exact denial shape the copy-pasted guard produced, and no leak.
+        assert r.get_json() == {"error": "run_not_found"}, text
+        assert "Alpha Athlete" not in text
+        assert "SECRET ALPHA" not in text
+
+    @pytest.mark.parametrize("method,url,body", _BATCH1_ENDPOINTS)
+    def test_owner_passes_the_gate(self, two_orgs, method, url, body):
+        """The owner must reach the body — never the run_not_found 404. A
+        downstream 404 (revision_not_found / manifest_not_found /
+        export_not_found) is fine; run_not_found from the tenant gate is not."""
+        c = two_orgs["client"]
+        _pin(c, "org-alpha")
+        r = _hit(c, method, _fill(url, two_orgs["run_id"]), body)
+        if r.status_code == 404:
+            assert r.get_json() != {"error": "run_not_found"}, (method, url)
+        else:
+            assert r.status_code in (200, 201), (method, url, r.status_code)
+
+    def test_endpoint_names_preserved_for_url_for(self, two_orgs):
+        """functools.wraps keeps each view's __name__, so url_for still resolves
+        the migrated endpoints (a broken wrapper would raise BuildError)."""
+        import mediahub.web.web as wm
+
+        app = wm.create_app()
+        with app.test_request_context():
+            from flask import url_for
+
+            rid, cid = "r1", "c1"
+            assert url_for("api_card_revisions", run_id=rid, card_id=cid)
+            assert url_for("api_card_locks", run_id=rid, card_id=cid)
+            assert url_for("api_run_shares", run_id=rid)
+            assert url_for("api_run_share_revoke", run_id=rid, token=_TOKEN)
+            assert url_for("api_card_motion_manifest", run_id=rid, card_id=cid)
+            assert url_for("api_run_export_share", run_id=rid)
+
+
+# ---------------------------------------------------------------------------
+# @require_run decorator unit tests — the guard's own semantics, isolated from
+# any particular route. _load_run / _can_access_run are module-level, so they
+# monkeypatch cleanly; the pid from _active_profile_id() only feeds
+# _can_access_run, which we stub, so no session wiring is needed.
+# ---------------------------------------------------------------------------
+
+class TestRequireRunDecorator:
+    @pytest.fixture
+    def app(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("DATA_DIR", str(tmp_path))
+        import mediahub.web.web as wm
+
+        importlib.reload(wm)
+        application = wm.create_app()
+        application.config["TESTING"] = True
+        return application
+
+    def test_injects_run_data_only_when_declared(self, app, monkeypatch):
+        import mediahub.web.web as wm
+
+        sentinel = {"run_id": "r1", "sentinel": True}
+        monkeypatch.setattr(wm, "_load_run", lambda rid: dict(sentinel, run_id=rid))
+        monkeypatch.setattr(wm, "_can_access_run", lambda rid, data, pid: True)
+
+        @app.require_run
+        def wants(run_id, run_data=None):
+            return ("wants", run_data)
+
+        @app.require_run
+        def plain(run_id):
+            return "plain"
+
+        with app.test_request_context("/"):
+            label, injected = wants(run_id="r1")
+            assert label == "wants"
+            assert injected == {"run_id": "r1", "sentinel": True}
+            # A view that doesn't declare run_data is called without it.
+            assert plain(run_id="r1") == "plain"
+
+    def test_default_deny_is_run_not_found_404(self, app, monkeypatch):
+        import mediahub.web.web as wm
+
+        monkeypatch.setattr(wm, "_load_run", lambda rid: {"run_id": rid})
+        monkeypatch.setattr(wm, "_can_access_run", lambda rid, data, pid: False)
+
+        @app.require_run
+        def view(run_id):
+            return "should-not-run"
+
+        with app.test_request_context("/"):
+            resp, status = view(run_id="r1")
+            assert status == 404
+            assert resp.get_json() == {"error": "run_not_found"}
+
+    def test_custom_deny_response_is_used(self, app, monkeypatch):
+        import mediahub.web.web as wm
+
+        monkeypatch.setattr(wm, "_load_run", lambda rid: {"run_id": rid})
+        monkeypatch.setattr(wm, "_can_access_run", lambda rid, data, pid: False)
+
+        @app.require_run(deny=lambda: ("nope", 418))
+        def view(run_id):
+            return "should-not-run"
+
+        with app.test_request_context("/"):
+            assert view(run_id="r1") == ("nope", 418)
+
+    def test_require_exists_denies_missing_run_even_when_readable(self, app, monkeypatch):
+        import mediahub.web.web as wm
+
+        # Missing run, but _can_access_run says "allowed" (the ownerless-readable
+        # path). Without require_exists the body runs; with it, we 404.
+        monkeypatch.setattr(wm, "_load_run", lambda rid: None)
+        monkeypatch.setattr(wm, "_can_access_run", lambda rid, data, pid: True)
+
+        @app.require_run(require_exists=True)
+        def strict(run_id):
+            return "body-ran"
+
+        @app.require_run
+        def lenient(run_id):
+            return "body-ran"
+
+        with app.test_request_context("/"):
+            resp, status = strict(run_id="missing")
+            assert status == 404
+            assert resp.get_json() == {"error": "run_not_found"}
+            # Same conditions, no require_exists → the body still runs.
+            assert lenient(run_id="missing") == "body-ran"
+
+    def test_wraps_preserves_view_name(self, app):
+        @app.require_run
+        def my_view(run_id):
+            return "ok"
+
+        assert my_view.__name__ == "my_view"
