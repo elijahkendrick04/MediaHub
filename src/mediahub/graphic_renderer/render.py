@@ -5018,6 +5018,18 @@ def render_brief(
             explicit=getattr(brief, "photo_adjust", "") or "",
             treatment=getattr(brief, "photo_treatment", "") or "",
         )
+        # E4 — the Clarendon-signature cast: a preset that declares a tint slot
+        # (punchy/vivid) bakes a bounded overlay of the card's own DEEP brand
+        # primary, so a pack of mixed club photos reads as one graded set. The
+        # hex is the card's resolved role colour (never an invented decorative
+        # colour); every other preset (and the default no-preset path) is
+        # byte-identical.
+        if _photo_recipe is not None and _photo_recipe.name in _photo_adjust.PRESET_TINTS:
+            _primary = resolved_role_vars_for_brief(brief, brand_kit).get("--mh-primary", "")
+            if _primary:
+                _photo_recipe = _photo_adjust.resolve_recipe(
+                    _photo_recipe, tint_hex=darken(_primary, 0.25)
+                )
     except Exception:
         _photo_recipe = None
 
