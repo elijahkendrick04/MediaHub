@@ -62,9 +62,15 @@ _schema_ready: set[str] = set()
 
 
 def _data_dir() -> Path:
-    """Resolve DATA_DIR at call time (tests monkeypatch the env var) — mirrors
-    ``auth._data_dir`` and ``web.DATA_DIR`` so all three resolve the same file."""
-    src_root = Path(__file__).resolve().parents[2]
+    """Resolve DATA_DIR at call time (tests monkeypatch the env var).
+
+    ``parents[1]`` (``src/mediahub``) matches ``web.DATA_DIR``'s default exactly,
+    so when DATA_DIR is unset (dev/test) the brake tables land in the SAME
+    ``data.db`` as the runs index rather than a stray sibling file. In production
+    DATA_DIR is always set, so this resolves to ``$DATA_DIR/data.db`` — the same
+    file ``_db()`` uses — regardless.
+    """
+    src_root = Path(__file__).resolve().parents[1]
     return Path(os.environ.get("DATA_DIR", str(src_root)))
 
 

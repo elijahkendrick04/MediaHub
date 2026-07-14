@@ -29,6 +29,7 @@ import os
 import subprocess
 import sys
 import time
+from pathlib import Path
 
 import pytest
 
@@ -38,9 +39,9 @@ import pytest
 # --------------------------------------------------------------------------
 
 
-def _worker(data_dir, code: str) -> str:
+def _run_in_worker(data_dir, code: str) -> None:
     """Run ``code`` in a fresh Python process (a second worker) with DATA_DIR
-    pointed at the shared store; return its stdout (stripped)."""
+    pointed at the shared store; assert a clean exit."""
     env = dict(os.environ)
     env["DATA_DIR"] = str(data_dir)
     proc = subprocess.run(
@@ -51,7 +52,25 @@ def _worker(data_dir, code: str) -> str:
         timeout=120,
     )
     assert proc.returncode == 0, f"worker failed:\nSTDOUT:{proc.stdout}\nSTDERR:{proc.stderr}"
-    return proc.stdout.strip()
+
+
+def _worker_verdict(data_dir, code: str) -> str:
+    """Run ``code`` in a fresh worker and return the verdict it writes via
+    ``_emit(...)``. The verdict goes to a FILE, not stdout: importing mediahub
+    emits log lines to the child's stdout — including a *deferred* retention-purge
+    line that can land after a printed token — so parsing stdout is racy. ``code``
+    calls ``_emit(<verdict>)``; the helper is prepended automatically."""
+    verdict_path = Path(data_dir) / "worker_verdict.txt"
+    if verdict_path.exists():
+        verdict_path.unlink()
+    preamble = (
+        "import os as _os\n"
+        "def _emit(v):\n"
+        "    open(_os.path.join(_os.environ['DATA_DIR'], 'worker_verdict.txt'), 'w').write(str(v))\n"
+    )
+    _run_in_worker(data_dir, preamble + code)
+    assert verdict_path.exists(), "child worker did not emit a verdict"
+    return verdict_path.read_text().strip()
 
 
 # --------------------------------------------------------------------------
@@ -72,13 +91,13 @@ def test_account_lockout_is_shared_across_two_workers(monkeypatch, tmp_path):
     assert auth.login_locked("target@club.org") is False
 
     # Worker B (a separate process): 2 more failures, then report lock state.
-    out = _worker(
+    verdict = _worker_verdict(
         tmp_path,
         "from mediahub.web import auth\n"
         "for _ in range(2): auth.record_login_failure('target@club.org')\n"
-        "print('LOCKED' if auth.login_locked('target@club.org') else 'OPEN')\n",
+        "_emit('LOCKED' if auth.login_locked('target@club.org') else 'OPEN')\n",
     )
-    assert out.endswith("LOCKED")  # B sees A's 3 + its own 2 == 5
+    assert verdict == "LOCKED"  # B sees A's 3 + its own 2 == 5
 
     # And worker A now sees the combined lockout too.
     assert auth.login_locked("target@club.org") is True
@@ -90,18 +109,18 @@ def test_lockout_survives_worker_recycle(monkeypatch, tmp_path):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
 
     # Worker A records 5 failures, then exits (== the recycle).
-    _worker(
+    _run_in_worker(
         tmp_path,
         "from mediahub.web import auth\n"
         "for _ in range(5): auth.record_login_failure('victim@club.org')\n",
     )
     # Fresh process (recycled worker) with NO in-memory state still sees it.
-    out = _worker(
+    verdict = _worker_verdict(
         tmp_path,
         "from mediahub.web import auth\n"
-        "print('LOCKED' if auth.login_locked('victim@club.org') else 'OPEN')\n",
+        "_emit('LOCKED' if auth.login_locked('victim@club.org') else 'OPEN')\n",
     )
-    assert out.endswith("LOCKED")
+    assert verdict == "LOCKED"
 
     # Same-process check via the live import agrees.
     from mediahub.web import auth
@@ -118,7 +137,7 @@ def test_clear_login_failures_is_cross_worker(monkeypatch, tmp_path):
     for _ in range(4):
         auth.record_login_failure("user@club.org")
     # Worker B clears (== a success there); worker A must then start from zero.
-    _worker(
+    _run_in_worker(
         tmp_path,
         "from mediahub.web import auth\n"
         "auth.clear_login_failures('user@club.org')\n",
@@ -147,13 +166,13 @@ def test_totp_replay_guard_is_cross_worker(monkeypatch, tmp_path):
     assert totp_verify(secret, code, at=at) is True
 
     # Worker B (separate process) must reject the SAME code as a replay.
-    out = _worker(
+    verdict = _worker_verdict(
         tmp_path,
         "from mediahub.web.auth import totp_verify\n"
         f"ok = totp_verify({secret!r}, {code!r}, at={at!r})\n"
-        "print('ACCEPT' if ok else 'REPLAY')\n",
+        "_emit('ACCEPT' if ok else 'REPLAY')\n",
     )
-    assert out.endswith("REPLAY")
+    assert verdict == "REPLAY"
 
     # A re-check in this process is also a replay (durable, not a fluke).
     assert totp_verify(secret, code, at=at) is False
@@ -180,14 +199,14 @@ def test_per_ip_limiter_is_shared_across_two_workers(monkeypatch, tmp_path):
         auth_brakes.record_event("ip:login", ip, now=now, window_secs=600)
 
     # Worker B: 6 more; the 21st crosses 20 in the SHARED counter.
-    out = _worker(
+    verdict = _worker_verdict(
         tmp_path,
         "from mediahub.web import auth_brakes\n"
         "c = 0\n"
         f"for _ in range(6): c = auth_brakes.record_event('ip:login', {ip!r}, now={now!r}, window_secs=600)\n"
-        "print('LIMIT' if c > 20 else f'OK:{c}')\n",
+        "_emit('LIMIT' if c > 20 else 'OK:%d' % c)\n",
     )
-    assert out.endswith("LIMIT")
+    assert verdict == "LIMIT"
 
 
 def test_per_ip_budget_preserves_two_worker_leniency_for_shared_nat(client_factory, tmp_path):
