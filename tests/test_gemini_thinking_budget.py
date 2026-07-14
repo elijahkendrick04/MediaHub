@@ -122,7 +122,9 @@ def test_ai_core_generation_config_disables_thinking_by_default(monkeypatch):
     monkeypatch.delenv("MEDIAHUB_GEMINI_THINKING_BUDGET", raising=False)
     cfg = ai_core_llm._gemini_generation_config(600)
     assert cfg["maxOutputTokens"] == 600
-    assert cfg["temperature"] == 0.7
+    # Finding #43 parity: ai_core used to send temperature=0.7 while media_ai
+    # sent none — both wrappers now sample at the API default.
+    assert "temperature" not in cfg
     assert cfg["thinkingConfig"] == {"thinkingBudget": 0}
 
 

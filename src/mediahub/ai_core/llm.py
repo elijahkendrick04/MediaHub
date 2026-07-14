@@ -339,8 +339,30 @@ def _gemini_thinking_budget() -> int:
         return 0
 
 
-def _gemini_generation_config(max_tokens: int, *, temperature: float = 0.7) -> dict:
-    cfg: dict = {"maxOutputTokens": int(max_tokens), "temperature": temperature}
+def _gemini_timeout(default: float) -> float:
+    """Per-call read of ``MEDIAHUB_GEMINI_TIMEOUT`` (seconds).
+
+    ``media_ai`` honours this operator knob; ``ai_core`` used to hardcode
+    45/60s (deep-review finding #43), so raising the timeout for a slow
+    Gemini day silently didn't apply to copilot / chat / deep-research
+    calls. The call-site default (45s plain ask, 60s tool rounds) is
+    preserved when the env is unset or unparseable.
+    """
+    raw = os.environ.get("MEDIAHUB_GEMINI_TIMEOUT", "").strip()
+    if not raw:
+        return default
+    try:
+        return max(1.0, float(raw))
+    except ValueError:
+        return default
+
+
+def _gemini_generation_config(max_tokens: int) -> dict:
+    # No temperature is sent — parity with media_ai._gemini_generation_config
+    # (finding #43): both wrappers sample at the API default so the same
+    # surface can't drift in output character depending on which wrapper
+    # happened to serve it.
+    cfg: dict = {"maxOutputTokens": int(max_tokens)}
     model = _gemini_model()
     if "2.5" in model or "3." in model:
         budget = _gemini_thinking_budget()
@@ -350,6 +372,30 @@ def _gemini_generation_config(max_tokens: int, *, temperature: float = 0.7) -> d
             budget = max(128, budget)
         cfg["thinkingConfig"] = {"thinkingBudget": budget}
     return cfg
+
+
+def _gemini_breaker_record(ok: bool) -> None:
+    """Report a Gemini call outcome into the shared overload breaker.
+
+    The breaker state lives in ``media_ai.llm`` (``/healthz/breaker`` reads
+    its snapshot). ``ai_core`` used to *read* the breaker but never record
+    into it (finding #43), so a Gemini outage seen only via chat / copilot /
+    deep-research never tripped it and every caller kept paying the full
+    round-trip timeout. Lazy import + broad except mirror
+    ``_gemini_breaker_open``: a missing breaker must never sink an LLM call.
+    """
+    try:
+        from mediahub.media_ai.llm import (
+            _gemini_breaker_record_failure,
+            _gemini_breaker_record_success,
+        )
+
+        if ok:
+            _gemini_breaker_record_success()
+        else:
+            _gemini_breaker_record_failure()
+    except Exception:
+        pass
 
 
 def _ask_gemini(system: str, user: str, max_tokens: int) -> str:
@@ -377,13 +423,19 @@ def _ask_gemini(system: str, user: str, max_tokens: int) -> str:
             # rides into exception reprs, access logs and proxy logs (matches
             # media_ai/llm.py, which moved off the query param for this reason).
             headers={"Content-Type": "application/json", "x-goog-api-key": key},
-            timeout=45,
+            timeout=_gemini_timeout(45.0),
         )
     except Exception as e:
         # Transport-level failure (ConnectionError / DNS / reset / timeout) — no
-        # HTTP status, so it's transient: try the next provider.
+        # HTTP status, so it's transient: try the next provider. Counts toward
+        # tripping the shared breaker (each such call eats the full timeout).
+        _gemini_breaker_record(False)
         raise ProviderError(f"Gemini HTTP error: {_redacted(str(e), key)}", transient=True) from e
     if r.status_code != 200:
+        # 5xx/overload trips the breaker; 4xx (incl. 429 rate limit) is not an
+        # outage signal — same policy as media_ai._call_gemini.
+        if r.status_code >= 500:
+            _gemini_breaker_record(False)
         raise ProviderError(
             f"Gemini HTTP {r.status_code}: {_redacted(r.text[:240], key)}",
             transient=(r.status_code in (401, 403, 408, 409, 425, 429, 529))
@@ -393,6 +445,9 @@ def _ask_gemini(system: str, user: str, max_tokens: int) -> str:
         data = r.json()
     except Exception as e:
         raise ProviderError(f"Gemini bad JSON: {e}", transient=True) from e
+    # A decoded 200 proves the service is reachable — clear the breaker even
+    # if the model output turns out unusable below.
+    _gemini_breaker_record(True)
     cands = data.get("candidates") or []
     if not cands:
         raise ProviderError(f"Gemini empty response: {str(data)[:240]}", transient=True)
@@ -455,19 +510,29 @@ def _ask_gemini_with_tools(
                 json=payload,
                 # Key in the header, not the URL — see _ask_gemini above.
                 headers={"Content-Type": "application/json", "x-goog-api-key": key},
-                timeout=60,
+                timeout=_gemini_timeout(60.0),
             )
         except Exception as e:
+            _gemini_breaker_record(False)
             raise ProviderError(
                 f"Gemini tool HTTP error: {_redacted(str(e), key)}", transient=True
             ) from e
         if r.status_code != 200:
+            if r.status_code >= 500:
+                _gemini_breaker_record(False)
             raise ProviderError(
                 f"Gemini tool HTTP {r.status_code}: {_redacted(r.text[:240], key)}",
                 transient=(r.status_code in (401, 403, 408, 409, 425, 429, 529))
                 or 500 <= r.status_code <= 599,
             )
-        data = r.json()
+        try:
+            data = r.json()
+        except ValueError as e:
+            # Pre-A this ValueError escaped raw (uncatchable by the
+            # except-ProviderError failover in ask_with_tools); wrap it like
+            # the plain-ask path does.
+            raise ProviderError(f"Gemini bad JSON: {e}", transient=True) from e
+        _gemini_breaker_record(True)
         cands = data.get("candidates") or []
         if not cands:
             raise ProviderError(f"Gemini empty response: {str(data)[:240]}", transient=True)
