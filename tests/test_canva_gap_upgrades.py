@@ -285,3 +285,24 @@ def test_auto_sentinel_is_not_a_noop_and_signs_its_version():
     sent = pa.get_preset("auto")
     assert sent is not None and not sent.is_noop()
     assert sent.signature() != pa.get_preset("none").signature()
+
+
+# --------------------------------------------------------------------------- #
+# Mono-mode interaction — derived tokens must not leak brand colour
+# --------------------------------------------------------------------------- #
+def test_mono_mode_rewrites_the_derived_colour_tokens():
+    from mediahub.graphic_renderer.sprint_hooks.mono_mode import (
+        _rewrite_role_decls,
+        mono_role_vars,
+    )
+
+    html = (
+        ":root{--mh-primary:#0E5BFF;--mh-surface:#0A2540;"
+        "--mh-ground-gradient:linear-gradient(180deg, #1862FF 0%, #0E5BFF 52%, #0D56F3 100%);"
+        "--mh-surface-2:#0A407F;--mh-lift:#2665E0;--mh-ink-secondary:#B3C6EE;"
+        "--mh-secondary-vis:#C9A227;--mh-shadow-rgb:6,17,38;}"
+    )
+    out = _rewrite_role_decls(html, mono_role_vars("#0E5BFF", "#0A2540"))
+    for brand_hex in ("#0E5BFF", "#1862FF", "#0D56F3", "#0A407F", "#2665E0", "#C9A227"):
+        assert brand_hex not in out, f"{brand_hex} leaked past the mono remap"
+    assert "--mh-shadow-rgb:10,10,10" in out

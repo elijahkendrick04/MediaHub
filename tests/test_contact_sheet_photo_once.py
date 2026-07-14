@@ -89,8 +89,14 @@ def _photo(tmp_path: Path, rgb=(200, 30, 30)) -> Path:
 def _render(tmp_path: Path):
     from mediahub.graphic_renderer.render import render_brief
 
+    brief = _brief()
+    # E1 (Canva gap analysis) grades new briefs with the measured auto-enhance
+    # by default, which changes the inlined pixel bytes. This test pins the
+    # ONCE-ONLY inlining contract, not the grade — so grade explicitly off to
+    # keep counting the raw payload.
+    brief.photo_adjust = "none"
     return render_brief(
-        _brief(),
+        brief,
         output_dir=tmp_path / "out",
         size=(1080, 1350),
         format_name="feed_portrait",
