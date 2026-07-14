@@ -24,10 +24,17 @@ def app(monkeypatch, tmp_path):
 # ---- rate limiting ----------------------------------------------------------
 
 
+# SEC-27: the per-IP budget is now 20/10-min (the old per-worker 10 × the
+# two-worker deployment, so a shared NAT is never locked out sooner than
+# today). The per-IP counter increments on every attempt and is checked before
+# the per-account lockout, so the 21st same-IP request is the first to trip the
+# per-IP brake ("Too many attempts from your network").
+
+
 def test_login_rate_limited_after_budget(app):
     c = app.test_client()
     last = None
-    for _ in range(12):
+    for _ in range(21):
         last = c.post("/login", data={"email": "x@club.org", "password": "wrong-pass"})
     assert last.status_code == 429
     assert "Too many attempts" in last.get_data(as_text=True)
@@ -36,7 +43,7 @@ def test_login_rate_limited_after_budget(app):
 def test_signup_rate_limited_after_budget(app):
     c = app.test_client()
     last = None
-    for i in range(12):
+    for i in range(21):
         last = c.post(
             "/signup",
             data={"email": f"u{i}@club.org", "password": "short", "accept_terms": "1"},
