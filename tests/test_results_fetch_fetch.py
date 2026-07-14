@@ -11,8 +11,6 @@ render budget — are each asserted directly.
 
 from __future__ import annotations
 
-import time
-
 from mediahub.results_fetch import (
     ReadResult,
     RenderedBackend,
@@ -433,9 +431,11 @@ def test_route_allows_data_uri_blocks_file_scheme():
     assert rb.route_decision("ftp://x/y", "xhr", scope) == "abort"
 
 
-def test_safe_cache_expires_and_revalidates_after_ttl():
-    """The SSRF host-safety cache must not trust a host forever: after the TTL
-    it re-validates, so a host that flips to unsafe (DNS rebinding) is caught."""
+def test_host_ok_revalidates_every_call_no_stale_cache():
+    """#125: the SSRF host gate keeps NO verdict cache. Every check of a
+    non-pinned host re-runs the validator, so a host that flips to unsafe (DNS
+    rebinding) is caught on the very next request — never riding a stale 'safe'
+    verdict for a TTL window."""
     calls: list[str] = []
 
     def _host_safe(u):
@@ -444,20 +444,153 @@ def test_safe_cache_expires_and_revalidates_after_ttl():
         return len(calls) == 1
 
     rb = RenderedBackend(host_safe=_host_safe)
-    rb._safe_cache_ttl_s = 30.0
+    url = "https://cdn.other/app.js"  # a non-pinned (cross-host) subresource
 
-    url = "https://site.test/results/"
-    # First call validates and caches "safe".
-    assert rb._host_ok(url) is True
-    # Within TTL: served from cache, validator not re-run.
-    assert rb._host_ok(url) is True
-    assert len(calls) == 1
-
-    # Force the cached entry past its TTL and confirm re-validation flips it.
-    host, (_verdict, _expiry) = next(iter(rb._safe_cache.items()))
-    rb._safe_cache[host] = (True, time.monotonic() - 1.0)
+    assert rb._host_ok(url) is True  # first check: validator says safe
+    assert rb._host_ok(url) is False  # re-validated immediately, no cache → flips
     assert rb._host_ok(url) is False
-    assert len(calls) == 2
+    assert len(calls) == 3  # validator invoked every single time
+
+
+def test_host_ok_trusts_pinned_host_without_revalidating():
+    """The one host the browser is IP-pinned to for this navigation is trusted
+    without re-resolving — Chromium is locked to the validated IP regardless of
+    what DNS now returns, so re-validating it would only add a needless lookup
+    (and could fail-closed on a mid-render rebind of the attacker's own host)."""
+    calls: list[str] = []
+    rb = RenderedBackend(host_safe=lambda u: calls.append(u) or True)
+    rb._pinned_host = "site.test"
+    rb._pinned_ip = "203.0.113.7"
+
+    # Same-host request: trusted, validator never consulted.
+    assert rb._host_ok("https://site.test/api/r.json") is True
+    assert calls == []
+    # A different host still goes through the validator.
+    assert rb._host_ok("https://cdn.other/app.js") is True
+    assert calls == ["https://cdn.other/app.js"]
+
+
+# ---------------------------------------------------------------------------
+# Rendered backend — DNS pinning (anti-rebinding at the browser layer, #125)
+# ---------------------------------------------------------------------------
+
+
+def test_host_resolver_rule_pins_host_to_validated_ip():
+    """The launch flag maps ONLY the target host to the validated IP; the
+    replacement carries no port (Chromium keeps the request's), and an IPv6
+    address is bracketed so it is not mis-parsed as host:port."""
+    assert (
+        RenderedBackend._host_resolver_rule("site.test", "93.184.216.34")
+        == "--host-resolver-rules=MAP site.test 93.184.216.34"
+    )
+    assert (
+        RenderedBackend._host_resolver_rule("site.test", "2606:2800:220:1::10")
+        == "--host-resolver-rules=MAP site.test [2606:2800:220:1::10]"
+    )
+
+
+def test_launch_args_carry_the_pin_only_when_pinned():
+    rb = RenderedBackend()
+    base = ["--no-sandbox", "--disable-dev-shm-usage"]
+    # Unpinned: just the base convention, no resolver rule.
+    assert rb._launch_args() == base
+    # Pinned: the base plus exactly one --host-resolver-rules pin.
+    rb._pinned_host = "site.test"
+    rb._pinned_ip = "93.184.216.34"
+    assert rb._launch_args() == base + ["--host-resolver-rules=MAP site.test 93.184.216.34"]
+
+
+def test_apply_navigation_pin_sets_validated_ip():
+    rb = RenderedBackend(resolve_ip=lambda host: "93.184.216.34")
+    assert rb._apply_navigation_pin("https://site.test/results/") is True
+    assert rb._pinned_host == "site.test"
+    assert rb._pinned_ip == "93.184.216.34"
+    # And that pin is what would be baked into the Chromium launch.
+    assert "--host-resolver-rules=MAP site.test 93.184.216.34" in rb._launch_args()
+
+
+def test_apply_navigation_pin_refuses_rebound_internal_host():
+    """When the host re-resolves to an internal/reserved IP (or is
+    unresolvable), resolve_ip returns None → the navigation is refused and
+    nothing is pinned."""
+    rb = RenderedBackend(resolve_ip=lambda host: None)
+    assert rb._apply_navigation_pin("https://rebind.test/results/") is False
+    assert rb._pinned_host is None and rb._pinned_ip is None
+
+
+def test_apply_navigation_pin_relaunches_on_host_change_keeps_on_same_host():
+    """A host change drops the running browser (its --host-resolver-rules no
+    longer cover the new host) so the next acquire relaunches re-pinned; a
+    same-host navigation keeps the existing browser and pin (no churn)."""
+    rb = RenderedBackend(resolve_ip=lambda host: "203.0.113.9")
+    rb._apply_navigation_pin("https://a.test/x/")
+    sentinel = object()
+    rb._browser = sentinel  # pretend a browser is live, pinned to a.test
+
+    # Same host → keep the browser and the pin untouched.
+    assert rb._apply_navigation_pin("https://a.test/y/") is True
+    assert rb._browser is sentinel
+    assert rb._pinned_host == "a.test"
+
+    # Different host → tear the browser down and re-pin to the new host.
+    assert rb._apply_navigation_pin("https://b.test/z/") is True
+    assert rb._browser is None
+    assert rb._pinned_host == "b.test"
+
+
+def test_apply_navigation_pin_same_host_does_not_re_resolve():
+    """An already-pinned host is accepted WITHOUT re-resolving: the browser is
+    locked to the validated IP via --host-resolver-rules and can't rebind, so
+    re-resolving would only risk fail-closing a legit same-host page on a
+    transient resolver blip. The resolver is called once (first nav), never again
+    for the same host — and would refuse even a same-host page if it were."""
+    calls: list[str] = []
+
+    def _resolve(host):
+        calls.append(host)
+        return "203.0.113.9" if len(calls) == 1 else None  # blip on every later call
+
+    rb = RenderedBackend(resolve_ip=_resolve)
+    assert rb._apply_navigation_pin("https://a.test/p1/") is True  # first nav resolves + pins
+    assert calls == ["a.test"]
+    # Same host again, mid-crawl resolver blip (would return None) — still accepted,
+    # because the pin already guarantees the connection IP; resolver not consulted.
+    assert rb._apply_navigation_pin("https://a.test/p2/") is True
+    assert rb._apply_navigation_pin("https://a.test/p3/") is True
+    assert calls == ["a.test"]  # never re-resolved the pinned host
+    assert (rb._pinned_host, rb._pinned_ip) == ("a.test", "203.0.113.9")
+
+
+def test_apply_navigation_pin_uses_real_resolve_safe_ip_by_default(monkeypatch):
+    """The security-critical default wiring (resolve_ip=resolve_safe_ip) is
+    exercised end to end: with a host that resolves to a public IP the pin is
+    derived through the REAL resolve_safe_ip; a host resolving to an internal IP
+    is refused. Guards against signature/default drift on the pin path."""
+    import mediahub.web_research.safe_fetch as sf
+
+    # Public resolution → pinned to that IP via the real resolve_safe_ip.
+    monkeypatch.setattr(sf, "_resolved_ips", lambda host: ["93.184.216.34"])
+    rb = RenderedBackend()  # production defaults: resolve_ip=resolve_safe_ip
+    assert rb._apply_navigation_pin("https://real.example/results/") is True
+    assert rb._pinned_ip == "93.184.216.34"
+    assert "--host-resolver-rules=MAP real.example 93.184.216.34" in rb._launch_args()
+
+    # Internal resolution → real resolve_safe_ip returns None → refused.
+    monkeypatch.setattr(sf, "_resolved_ips", lambda host: ["10.0.0.5"])
+    rb2 = RenderedBackend()
+    assert rb2._apply_navigation_pin("https://rebind.example/results/") is False
+    assert rb2._pinned_host is None
+
+
+def test_fetch_refuses_rebinding_host_at_browser_layer():
+    """End-to-end #125 proof (no real browser): the up-front host check passes
+    (attacker's DNS returned a public IP — a stale verdict would say 'safe'),
+    but the per-navigation re-resolve now points internal (resolve_ip → None),
+    so fetch refuses BEFORE Chromium ever launches or navigates."""
+    rb = RenderedBackend(host_safe=lambda u: True, resolve_ip=lambda host: None)
+    assert rb.fetch("https://rebind.test/results/") is None
+    assert rb.renders_done == 0  # never launched, never navigated
+    assert rb._pinned_host is None
 
 
 # ---------------------------------------------------------------------------
