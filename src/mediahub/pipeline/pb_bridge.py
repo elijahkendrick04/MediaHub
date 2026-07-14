@@ -44,7 +44,7 @@ _STROKE_TO_CODE: dict[str, str] = {
 # field separator, never a decimal point. Validating one field each means a
 # dotted date (``12.03.2024``) or a stray integer (``99``) can never masquerade
 # as a time.
-_CLOCK_FIELD_RE = re.compile(r"^\d+$")             # hours / minutes — whole numbers
+_CLOCK_FIELD_RE = re.compile(r"^\d+$")  # hours / minutes — whole numbers
 _SECONDS_FIELD_RE = re.compile(r"^\d+(?:\.\d+)?$")  # seconds, optional decimal fraction
 
 
@@ -100,7 +100,7 @@ def _time_to_seconds(time_str: str) -> Optional[float]:
 
     total = float(seconds_field)
     for position, field_value in enumerate(reversed(clock_fields), start=1):
-        total += int(field_value) * (60 ** position)
+        total += int(field_value) * (60**position)
     return total
 
 
