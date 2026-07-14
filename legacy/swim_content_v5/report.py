@@ -6,7 +6,6 @@ Returns a dict (RecognitionReport.to_dict()) for storage and UI.
 
 Also exports:
   - _event_label(swim) → str (used by detectors)
-  - build_recognition_report_from_data(meet, our_swims, pb_snapshots, ...) → dict
 """
 from __future__ import annotations
 
@@ -171,10 +170,17 @@ def _add_multi_pb_achievements(
     After detecting PBs per swim, check per-swimmer PB counts and fire
     MultiPBWeekendDetector if a swimmer hits >= 3.
     """
-    # Count confirmed + likely PBs per swimmer
+    # Count this meet's confirmed PBs per swimmer. Only ``pb_confirmed`` is
+    # tallied here: a V5 PB requires a real prior-best baseline, never an
+    # entry/seed-time guess (see achievements/__init__.py), so there is no
+    # ``pb_likely`` achievement type — no detector produces one, and counting
+    # it was a dead branch. ``official_pb_confirmed`` (a swim that equals an
+    # already-listed all-time PB rather than beating a prior baseline) is a
+    # separate confirmed-PB type and is deliberately left out of the
+    # multi-PB-weekend threshold.
     pb_by_swimmer: dict[str, list[str]] = defaultdict(list)
     for a in all_achievements:
-        if a.type in ("pb_confirmed", "pb_likely"):
+        if a.type == "pb_confirmed":
             pb_by_swimmer[a.swimmer_id].append(a.event)
 
     from .achievements.standout_history import MultiPBWeekendDetector
@@ -249,6 +255,37 @@ def _detect_relay_achievements(
             pass
 
     return results
+
+
+# ---------------------------------------------------------------------------
+# Detector assembly
+# ---------------------------------------------------------------------------
+
+def _assemble_detectors() -> list:
+    """Assemble the full detector set for a recognition run, once.
+
+    The mediahub ``recognition_swim`` set (``production_detectors()``) leads
+    with the V7.3 ``OfficialPBDetector`` (fires when the lookup source already
+    lists this swim as the all-time PB — a case no V5 PB detector covers) and
+    already *ends* with the Phase W registry-fed detectors
+    (``MilestoneDetector``, ``ClubRecordDetector`` — silent without workspace
+    context), each registered exactly once. It is imported lazily so this
+    module keeps working standalone.
+
+    Do NOT append the Phase W detectors again on top of this list:
+    ``_run_detectors_for_swim`` runs every list entry, so a second copy would
+    detect, rank, count and export every milestone / club-record achievement
+    twice — duplicate review rows sharing one workflow state, inflated
+    ``n_achievements`` / band counts, and twin ``~n`` export stubs. The
+    ``ImportError`` fallback can't carry them either: they live in the same
+    mediahub package that just failed to import.
+    """
+    try:
+        from mediahub.recognition_swim import production_detectors
+
+        return production_detectors()
+    except ImportError:
+        return get_all_detectors()
 
 
 # ---------------------------------------------------------------------------
@@ -365,23 +402,11 @@ def build_recognition_report_for_run(run: "PipelineRunV4") -> dict:
     if profile and profile.club_codes:
         club_code = profile.club_codes[0]
 
-    # Get all detectors. The mediahub recognition_swim set leads with the
-    # V7.3 OfficialPBDetector (fires when the lookup source already lists
-    # this swim as the all-time PB — a case no V5 PB detector covers) and
-    # already ends with the Phase W registry-fed detectors (milestones,
-    # club records — silent without workspace context); imported lazily so
-    # this module keeps working standalone. Do NOT append the Phase W
-    # detectors again here: _run_detectors_for_swim runs every list entry,
-    # so a second copy emitted every milestone/club-record achievement
-    # twice (duplicate cards, inflated counts). The ImportError fallback
-    # cannot have them either — they live in the same mediahub package
-    # that just failed to import.
-    try:
-        from mediahub.recognition_swim import production_detectors
-
-        detectors = production_detectors()
-    except ImportError:
-        detectors = get_all_detectors()
+    # Assemble the detector set once. _assemble_detectors registers the Phase W
+    # milestone / club-record detectors exactly once — appending them a second
+    # time here would detect, rank, count and export every milestone and
+    # club-record achievement in duplicate.
+    detectors = _assemble_detectors()
 
     # Phase W workspace context (athlete registry milestones, club records,
     # swimmer metadata). All optional enrichment: failure or absence leaves
