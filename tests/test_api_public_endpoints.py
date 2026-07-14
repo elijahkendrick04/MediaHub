@@ -291,6 +291,73 @@ def test_api_approval_is_stamped_as_machine_originated(world):
     assert row["actor"] == f"api-token:{tok.id}"
 
 
+def test_api_reject_and_edit_stamp_machine_actor(world):
+    """Finding #116: the reject and edit routes (separate handlers) also stamp
+    the token actor, not just approve."""
+    import os
+    from pathlib import Path
+
+    from mediahub.api_public.tokens import ApiTokenStore
+    from mediahub.workflow.store import WorkflowStore
+
+    world.seed("runactor0002", "org-a")
+    tok, secret = ApiTokenStore().create(
+        "org-a", name="agent", scopes=["cards:approve", "cards:write"], created_by="owner@org-a.com"
+    )
+    store = WorkflowStore(Path(os.environ["RUNS_DIR"]))
+
+    world.client.post("/api/v1/runs/runactor0002/cards/swim-1/reject", headers=_h(secret))
+    assert store.load("runactor0002")["swim-1"].actor == f"api-token:{tok.id}"
+
+    world.client.patch(
+        "/api/v1/runs/runactor0002/cards/swim-2",
+        headers=_h(secret),
+        json={"edits": {"headline": "Custom"}},
+    )
+    assert store.load("runactor0002")["swim-2"].actor == f"api-token:{tok.id}"
+
+
+def test_api_group_approval_vote_is_marked_api_token(world):
+    """Finding #116: when an API approval flows through the group-approval rule
+    of a BOUND workspace, the recorded vote is marked ``actor_kind="api_token"``
+    (not a bare human vote). Guards the web.py call-site wiring end-to-end — a
+    unit test on the ledger alone wouldn't catch dropping the kwarg here."""
+    import json as _json
+    import os
+    from pathlib import Path
+
+    from mediahub.api_public.tokens import ApiTokenStore
+    from mediahub.brand.kits import BrandKitRef, set_default_kit, upsert_kit
+    from mediahub.web import tenancy as _tenancy
+    from mediahub.web.club_profile import load_profile, save_profile
+
+    # A default kit with an active 2-approver rule + a bound workspace (two
+    # active members) is what makes the group rule apply.
+    prof = load_profile("org-a")
+    upsert_kit(prof, BrandKitRef(kit_id="govkit", name="Gov", role="event",
+                                 approver_rule={"min_approvers": 2}))
+    set_default_kit(prof, "govkit")
+    save_profile(prof)
+    ms = _tenancy.MembershipStore()
+    ms.add("owner@org-a.com", "org-a", role=_tenancy.ROLE_OWNER, status=_tenancy.STATUS_ACTIVE)
+    ms.add("agent@org-a.com", "org-a", role=_tenancy.ROLE_MEMBER, status=_tenancy.STATUS_ACTIVE)
+
+    world.seed("runactor0003", "org-a")
+    _tok, secret = ApiTokenStore().create(
+        "org-a", name="agent", scopes=["cards:approve"], created_by="agent@org-a.com"
+    )
+    # One vote against a 2-approver rule → held in queue, but the vote is logged.
+    r = world.client.post("/api/v1/runs/runactor0003/cards/swim-1/approve", headers=_h(secret))
+    assert r.status_code == 200
+    assert r.get_json()["status"] == "queue"
+
+    ledger_path = Path(os.environ["RUNS_DIR"]) / "runactor0003__approvals.json"
+    votes = _json.loads(ledger_path.read_text())["swim-1"]
+    assert len(votes) == 1
+    assert votes[0]["email"] == "agent@org-a.com"
+    assert votes[0].get("actor_kind") == "api_token"
+
+
 # --- export -----------------------------------------------------------------
 def test_export_without_visuals_is_404(world):
     world.seed("runaaaaaaa10", "org-a")
