@@ -69,6 +69,10 @@ class Pairing:
             return "bebas-grotesk"
         if head == "bowlby-one":
             return "bowlby-inter"
+        if head == "playfair-display":
+            # D5 — the serif display register maps onto the curated serif
+            # quadruple (graphic_renderer.type_pairs PAIRINGS).
+            return "playfair-editorial"
         return "anton-inter"
 
     def to_dict(self) -> dict:

@@ -42,7 +42,7 @@
   display: flex;
   background: var(--mh-ground-gradient, var(--mh-primary));
   color: var(--mh-on-primary);
-  font-family: 'Inter', system-ui, sans-serif;
+  font-family: var(--mh-font-body, 'Inter', system-ui, sans-serif);
   -webkit-font-smoothing: antialiased;
 }
 .ss *, .ss *::before, .ss *::after { box-sizing: border-box; }
@@ -73,7 +73,7 @@
 
 .ss__kicker {
   display: flex; align-items: center; gap: 18px;
-  font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 700;
+  font-family: var(--mh-font-kicker, 'Space Grotesk','Inter',sans-serif); font-weight: 700;
   font-size: 27px; letter-spacing: 0.26em; text-transform: uppercase;
   color: var(--mh-accent);
   margin-bottom: 28px;
@@ -84,7 +84,7 @@
 }
 
 .ss__first {
-  font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 700;
+  font-family: var(--mh-font-kicker, 'Space Grotesk','Inter',sans-serif); font-weight: 700;
   font-size: 48px; letter-spacing: 0.02em; text-transform: uppercase;
   color: var(--mh-accent); margin-bottom: 2px;
 }
@@ -111,12 +111,12 @@
 .ss__ledger { display: flex; flex-direction: column; gap: 30px; }
 .ss__field { display: flex; flex-direction: column; }
 .ss__lab {
-  font-family: 'Inter',sans-serif; font-weight: 700; font-size: 17px;
+  font-family: var(--mh-font-body, 'Inter',sans-serif); font-weight: 700; font-size: 17px;
   letter-spacing: 0.24em; text-transform: uppercase;
   color: var(--mh-accent); margin-bottom: 10px;
 }
 .ss__event {
-  font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 600;
+  font-family: var(--mh-font-kicker, 'Space Grotesk','Inter',sans-serif); font-weight: 600;
   font-size: 34px; text-transform: uppercase; color: var(--mh-on-primary);
 }
 .ss__result {
@@ -139,12 +139,12 @@
 .ss__rail-top { display: flex; flex-direction: column; gap: 38px; }
 .ss__chip { display: flex; flex-direction: column; }
 .ss__chip-lab {
-  font-family: 'Inter',sans-serif; font-weight: 700; font-size: 15px;
+  font-family: var(--mh-font-body, 'Inter',sans-serif); font-weight: 700; font-size: 15px;
   letter-spacing: 0.22em; text-transform: uppercase;
   color: var(--mh-accent); margin-bottom: 10px;
 }
 .ss__chip-val {
-  font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 600;
+  font-family: var(--mh-font-kicker, 'Space Grotesk','Inter',sans-serif); font-weight: 600;
   font-size: 27px; line-height: 1.14; color: var(--mh-on-surface);
 }
 /* the emphasis chip collapses entirely when no hero stat is supplied */
@@ -154,7 +154,7 @@
 .ss__logo { height: 64px; width: auto; margin-bottom: 16px; }
 .ss__logo img, .ss__logo svg { height: 100%; width: auto; object-fit: contain; display: block; }
 .ss__club {
-  font-family: 'Inter',sans-serif; font-weight: 800; font-size: 21px;
+  font-family: var(--mh-font-body, 'Inter',sans-serif); font-weight: 800; font-size: 21px;
   line-height: 1.18; text-transform: uppercase; color: var(--mh-on-surface);
 }
 .ss__sponsor { margin-top: 20px; }

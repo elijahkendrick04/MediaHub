@@ -41,7 +41,7 @@
   flex-direction: column;
   background: var(--mh-ground-gradient, var(--mh-primary));
   color: var(--mh-on-primary);
-  font-family: 'Inter', system-ui, sans-serif;
+  font-family: var(--mh-font-body, 'Inter', system-ui, sans-serif);
   -webkit-font-smoothing: antialiased;
   padding: 78px 64px 70px;
   gap: 30px;
@@ -61,7 +61,7 @@
   overflow-wrap: anywhere;
 }
 .tg__masthead-meet {
-  font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 700;
+  font-family: var(--mh-font-kicker, 'Space Grotesk','Inter',sans-serif); font-weight: 700;
   font-size: 22px; letter-spacing: 0.14em; text-transform: uppercase;
   color: var(--mh-accent); text-align: right; flex: 0 0 auto;
   overflow-wrap: anywhere;
@@ -77,12 +77,12 @@
   overflow: hidden;
 }
 .tg__card-lab {
-  font-family: 'Inter',sans-serif; font-weight: 800;
+  font-family: var(--mh-font-body, 'Inter',sans-serif); font-weight: 800;
   font-size: 15px; letter-spacing: 0.22em; text-transform: uppercase;
   color: var(--mh-accent); margin-bottom: 18px;
 }
 .tg__first {
-  font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 700;
+  font-family: var(--mh-font-kicker, 'Space Grotesk','Inter',sans-serif); font-weight: 700;
   font-size: 30px; letter-spacing: 0.01em; text-transform: uppercase;
   color: var(--mh-on-surface); margin-bottom: 2px;
   overflow-wrap: anywhere; word-break: break-word;
@@ -112,19 +112,19 @@
 }
 
 .tg__ctx-val {
-  font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 600;
+  font-family: var(--mh-font-kicker, 'Space Grotesk','Inter',sans-serif); font-weight: 600;
   font-size: 24px; line-height: 1.16; color: var(--mh-on-surface);
   overflow-wrap: anywhere; word-break: break-word;
 }
 .tg__ctx-meet {
   margin-top: 16px;
-  font-family: 'Inter',sans-serif; font-weight: 600; font-size: 19px;
+  font-family: var(--mh-font-body, 'Inter',sans-serif); font-weight: 600; font-size: 19px;
   color: var(--mh-on-surface); opacity: 0.8; overflow-wrap: anywhere;
 }
 .tg__hero { margin-top: auto; padding-top: 18px; }
 .tg__hero:has(.tg__hero-val:empty) { display: none; }
 .tg__hero-lab {
-  font-family: 'Inter',sans-serif; font-weight: 700; font-size: 13px;
+  font-family: var(--mh-font-body, 'Inter',sans-serif); font-weight: 700; font-size: 13px;
   letter-spacing: 0.2em; text-transform: uppercase;
   color: var(--mh-accent); margin-bottom: 5px;
 }
@@ -142,7 +142,7 @@
 .tg__logo { height: 52px; width: auto; flex: 0 0 auto; }
 .tg__logo img, .tg__logo svg { height: 100%; width: auto; object-fit: contain; display: block; }
 .tg__club {
-  font-family: 'Inter',sans-serif; font-weight: 800; font-size: 19px;
+  font-family: var(--mh-font-body, 'Inter',sans-serif); font-weight: 800; font-size: 19px;
   text-transform: uppercase; color: var(--mh-on-primary);
   overflow-wrap: anywhere;
 }

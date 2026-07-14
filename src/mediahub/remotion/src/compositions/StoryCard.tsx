@@ -287,6 +287,9 @@ function bgPatternFor(style: string, roles: Roles): string {
 // SAME self-hosted brand woff2 as the still graphic (see src/fonts.ts; Council
 // 2026-05-31), so each stack LEADS with the real brand face and matches the
 // posted card. The system fonts are kept only as a safety net behind it.
+// D5 parity contract: the display face per pairing mirrors the still side's
+// curated table (graphic_renderer/type_pairs.py PAIRINGS), pinned by
+// tests/test_typography_pairings.py — a new pairing lands on both surfaces.
 // Exported for MeetReel (M18): the reel cover follows the top card's pair.
 export function fontStackFor(pair: string): string {
   switch (pair) {
@@ -300,7 +303,12 @@ export function fontStackFor(pair: string): string {
     case "bowlby-inter":
       return "'Bowlby One', 'Archivo Black', 'Impact', sans-serif";
     case "archivo-inter":
+    case "grotesk-mono":
       return "'Space Grotesk', 'Archivo', 'Inter', 'Helvetica Neue', Arial, sans-serif";
+    case "playfair-editorial":
+    case "playfair-mono":
+      // The serif display register (D5) — self-hosted Playfair Display.
+      return "'Playfair Display', Georgia, 'Times New Roman', serif";
     default:
       return "'Inter', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif";
   }

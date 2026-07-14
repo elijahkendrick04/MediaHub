@@ -843,6 +843,28 @@ def generate(
     except Exception:
         log.debug("gen-v2 style-pack selection skipped", exc_info=True)
 
+    # D5 (Canva gap analysis) — curated typography pairing. The old default
+    # left every card on anton-inter; now the no-seed bulk path (the way
+    # production packs render) draws a per-card pairing from the mood-keyed
+    # subset of the curated quadruple table (``graphic_renderer.type_pairs``),
+    # keyed to the same card id the archetype/pack walks hash — stable per
+    # card, varied across a pack, still deterministic. Explicit-seed callers
+    # (?variation_seed / ?stable re-renders) and explicit profiles keep their
+    # pinned pair byte-identically, as does the v1 engine under the kill
+    # switch.
+    try:
+        if _v2_on and variation_profile is None and variation_seed is None:
+            from mediahub.graphic_renderer.type_pairs import pick_pair_for_card
+
+            _pair_key = str(
+                content_item.get("id") or content_item.get("swim_id") or ach.get("swim_id") or ""
+            )
+            brief.typography_pair = pick_pair_for_card(
+                (brief.mood or "").strip(), _pair_key or None
+            ).id
+    except Exception:
+        log.debug("gen-v2 typography-pair selection skipped", exc_info=True)
+
     # G1.8: a pack with the gradient_mesh ground triggers the real mesh engine.
     _sync_background_style_with_pack(brief)
 
@@ -960,6 +982,20 @@ def apply_design_spec(brief: CreativeBrief, spec) -> CreativeBrief:
                 brief.style_pack = _sp.pick_mood_pack_for_card(brief.mood, _key).id
     except Exception:
         log.debug("gen-v2 mood style-pack re-key skipped", exc_info=True)
+    # D5 — mirror of the style-pack re-key for the typography pairing: the
+    # director's mood re-draws the pairing from its mood subset so the type
+    # register matches the chosen feeling on the pre-computed-spec paths too.
+    # Same guard (a selected pack marks the v2 engine active) and the same
+    # archetype-folded key, so distinct candidates for one card spread across
+    # the subset. Direct callers / the legacy engine stay byte-identical.
+    try:
+        if brief.style_pack and (spec.mood or "").strip():
+            from mediahub.graphic_renderer.type_pairs import pick_pair_for_card
+
+            _key = f"{brief.content_item_id}|{brief.layout_template}"
+            brief.typography_pair = pick_pair_for_card(spec.mood, _key).id
+    except Exception:
+        log.debug("gen-v2 mood typography-pair re-key skipped", exc_info=True)
     _sync_background_style_with_pack(brief)
     _stamp_signature(brief)
     return brief

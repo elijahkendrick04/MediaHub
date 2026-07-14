@@ -35,6 +35,8 @@ _VARIABLE = {
     "inter": {"wght": (100, 900), "opsz": (14, 32)},
     "space-grotesk": {"wght": (300, 700)},
     "jetbrains-mono": {"wght": (100, 800)},
+    # D5 — the serif display register joined as a genuine variable face.
+    "playfair-display": {"wght": (400, 900)},
 }
 _STATIC = ("anton", "bebas-neue", "bowlby-one")
 
@@ -43,6 +45,7 @@ _CSS_FAMILIES = {
     "Inter": (100, 900),
     "Space Grotesk": (300, 700),
     "JetBrains Mono": (100, 800),
+    "Playfair Display": (400, 900),
 }
 
 # Pillow variation-axis display name -> CSS axis tag.
@@ -118,9 +121,9 @@ class TestSharedCssDeclaresRanges:
         ]
         assert len(own) == 1, f"expected exactly one primary {family} face, got {len(own)}"
         lo, hi = rng
-        assert re.search(
-            rf"font-weight:\s*{lo} {hi}\b", own[0]
-        ), f"{family} not declared as a font-weight: {lo} {hi} range face"
+        assert re.search(rf"font-weight:\s*{lo} {hi}\b", own[0]), (
+            f"{family} not declared as a font-weight: {lo} {hi} range face"
+        )
 
     def test_optical_sizing_enabled(self):
         assert "font-optical-sizing: auto" in _SHARED_CSS.read_text(encoding="utf-8")
@@ -255,9 +258,9 @@ class TestV2LayoutsConsumeAxesVar:
         for html in sorted(_V2.glob("*.html")):
             text = html.read_text(encoding="utf-8")
             if "--mh-fit-result-px" in text or "--mh-fit-mega-result-px" in text:
-                assert (
-                    "font-variation-settings: var(--mh-axes" in text
-                ), f"{html.name}: result slot is not wired to an axes var"
+                assert "font-variation-settings: var(--mh-axes" in text, (
+                    f"{html.name}: result slot is not wired to an axes var"
+                )
 
     def test_mega_archetypes_use_the_mega_var(self):
         for name in ("big_number_dominant", "cornerstone_numeral"):

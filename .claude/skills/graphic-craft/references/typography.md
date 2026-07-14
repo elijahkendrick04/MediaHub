@@ -6,7 +6,7 @@ MediaHub's fixed, self-hosted type palette.
 
 ## The palette is fixed — the craft is in the use
 
-Six families, self-hosted on every surface (`layouts/_shared.css`,
+Seven families, self-hosted on every surface (`layouts/_shared.css`,
 `remotion/src/fonts.ts`, `web/static/theme/fonts.css`):
 
 | Family | Register | Voice |
@@ -14,9 +14,14 @@ Six families, self-hosted on every surface (`layouts/_shared.css`,
 | Bebas Neue | Display, condensed | Scoreboard, athletic, vertical |
 | Anton | Display, heavy | Poster impact, slab confidence |
 | Bowlby One | Display, rounded | Playful, junior-club warmth |
+| Playfair Display 400–900 | Display, serif | Editorial, elegant, quote register |
 | Space Grotesk 500/700 | Text/display hybrid | Contemporary, technical edge |
 | Inter 400/800 | Text | Neutral information carrier |
 | JetBrains Mono 500/700 | Mono | Data, splits, timestamps, labels |
+
+Pairings are curated quadruples — `graphic_renderer/type_pairs.py` binds an
+atomic (display, kicker, body, data) set per `typography_pair`, seed-keyed
+with mood subsets; the data register never leaves JetBrains Mono.
 
 Never add a family ad hoc and never reference a CDN — the refresh path is
 `scripts/fetch_renderer_fonts.py` / `fetch_fonts.py` plus the test guard

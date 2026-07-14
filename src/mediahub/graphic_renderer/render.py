@@ -803,26 +803,23 @@ def _typography_overrides_css(pair: str) -> str:
     return _TYPOGRAPHY_OVERRIDES.get((pair or "").lower(), "")
 
 
-# Display/headline face per typography_pair for the v2 archetypes. Mirrors the
-# motion renderer's fontStackFor (remotion StoryCard.tsx) so the posted still
-# and the reel show the SAME headline face for a given pair — closing the
-# still↔motion typography gap where the still always rendered Anton regardless
-# of the director's pick. Only the pairs whose face differs from the Anton
-# default appear here; anton/druk/oswald all resolve to Anton on both surfaces,
-# so they return "" and each archetype's own `var(--mh-font-display, 'Anton'…)`
-# fallback stands — keeping those renders byte-identical.
-_PAIR_DISPLAY_FONT: dict[str, str] = {
-    "bebas-grotesk": "'Bebas Neue','Oswald','Impact','Arial Narrow',sans-serif",
-    "bowlby-inter": "'Bowlby One','Anton','Impact',sans-serif",
-    "archivo-inter": "'Space Grotesk','Archivo','Inter','Helvetica Neue',Arial,sans-serif",
-}
-
-
+# Display/headline face per typography_pair for the v2 archetypes. D5 (Canva
+# gap analysis): the mapping is sourced from the curated pairing table
+# (``graphic_renderer.type_pairs``) — each pairing is an atomic (display,
+# kicker, body, data) quadruple, and this helper surfaces its display stack.
+# Parity contract unchanged: the display stack per pairing mirrors the motion
+# renderer's fontStackFor (remotion StoryCard.tsx) so the posted still and the
+# reel show the SAME headline face for a given pair. Pairs that resolve to the
+# Anton default (anton/druk/oswald) return "" so each archetype's own
+# `var(--mh-font-display, 'Anton'…)` fallback stands — keeping those renders
+# byte-identical.
 def _display_font_stack_for_pair(pair: str) -> str:
     """CSS font stack for the display/headline role for this typography_pair,
     or "" when it resolves to the Anton default. Parity contract: matches
     fontStackFor in the motion renderer."""
-    return _PAIR_DISPLAY_FONT.get((pair or "").lower(), "")
+    from mediahub.graphic_renderer.type_pairs import pairing_for
+
+    return pairing_for(pair).display
 
 
 # ---------------------------------------------------------------------------
@@ -4027,8 +4024,7 @@ def _sticker_outline_css(width: int, height: int, strength: float) -> str:
         )
     )
     return (
-        "\n/* --- B5 die-cut sticker contour --- */\n"
-        f"img.athlete-cutout {{ filter: {shadows}; }}\n"
+        f"\n/* --- B5 die-cut sticker contour --- */\nimg.athlete-cutout {{ filter: {shadows}; }}\n"
     )
 
 
@@ -4925,14 +4921,20 @@ def _fill_v2_archetype(
                         int(_mmax), int(round(fit_mega_result_px * factor))
                     )
 
-    # Typography pair → display/headline face (still↔motion parity). The v2
-    # archetypes read the headline font as `var(--mh-font-display, 'Anton'…)`,
-    # so setting this var swaps every headline to the pair's face at once;
-    # anton/druk/oswald resolve to "" and leave the Anton fallback in place,
-    # keeping those (and every brief-less) render byte-identical.
-    _disp = _display_font_stack_for_pair(getattr(brief, "typography_pair", "") or "")
-    if _disp:
-        root_vars["--mh-font-display"] = _disp
+    # Typography pairing → per-register font vars (D5, Canva gap analysis).
+    # The pairing table (``type_pairs``) binds an atomic (display, kicker,
+    # body, data) quadruple: the v2 archetypes read their registers as
+    # `var(--mh-font-display, 'Anton'…)` / `var(--mh-font-kicker, 'Space
+    # Grotesk'…)` / `var(--mh-font-body, 'Inter'…)`, so one pairing swaps every
+    # register coherently. The data register is locked to JetBrains Mono (no
+    # var is ever emitted for it). Pairs that keep a register on its default
+    # emit nothing for it — anton/druk/oswald emit nothing at all, keeping
+    # those (and every brief-less) render byte-identical. Display parity with
+    # the motion renderer's fontStackFor is pinned by
+    # tests/test_typography_pairings.py.
+    from mediahub.graphic_renderer.type_pairs import font_vars_for_pair as _font_vars_for_pair
+
+    root_vars.update(_font_vars_for_pair(getattr(brief, "typography_pair", "") or ""))
 
     root_block = "\n:root{" + "".join(f"{k}:{v};" for k, v in root_vars.items()) + "}\n"
     repl["BASE_CSS"] = base_repl.get("BASE_CSS", "") + root_block + extra_css

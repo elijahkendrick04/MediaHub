@@ -154,6 +154,23 @@
       "role_affinity": ["body", "headline"],
       "numeral": false,
       "pairs_well_with": ["big-shoulders-display", "fraunces", "jetbrains-mono"]
+    },
+    {
+      "slug": "playfair-display",
+      "family": "Playfair Display",
+      "klass": "serif",
+      "mood_tags": ["editorial", "elegant", "expressive"],
+      "variable": true,
+      "axes": {"wght": [400, 900]},
+      "weights": [400, 500, 600, 700, 800, 900],
+      "scripts": ["latin"],
+      "licence": "OFL-1.1",
+      "source": "Google Fonts — Claus Eggers Sørensen / github.com/clauseggers/Playfair-Display",
+      "renderer_slug": "playfair-display",
+      "web_slug": null,
+      "role_affinity": ["display", "headline"],
+      "numeral": false,
+      "pairs_well_with": ["inter", "space-grotesk", "jetbrains-mono"]
     }
   ]
 }

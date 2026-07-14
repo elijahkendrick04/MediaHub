@@ -214,6 +214,122 @@ _FAMILY_SCALE: dict[str, float] = {
     "bowlby one": 1.22,
 }
 
+# D5 (Canva gap analysis) — measured per-family character tables. A single
+# flat multiplier over the Helvetica table cannot model a serif's glyph
+# proportions (Playfair's ``I`` is ~25% wider *relative to its caps* than
+# Helvetica's, so an I-heavy run under-estimates and can overflow). For the
+# serif display face the advance of every ASCII glyph is measured offline with
+# fontTools over the shipped ``layouts/fonts/playfair-display.woff2`` (wght
+# 400, the weight the display slots render) and inflated by a fixed +2%
+# safety margin, so the estimate errs wide per glyph — the never-overflow
+# contract by construction. Kerning/ligature corrections are DISABLED for
+# char-table families (see ``_kern_ligature_em``): the Helvetica-calibrated
+# kern values do not transfer to a serif, and applying them could tighten the
+# estimate below the real rendered width. Chars outside the table (accented
+# Latin) fall through to the class default. Keys are normalised first-family
+# names, values advance widths in em.
+_FAMILY_CHAR_EM: dict[str, dict[str, float]] = {
+    # fmt: off
+    "playfair display": {
+        " ": 0.254,
+        "!": 0.268,
+        '"': 0.304,
+        "#": 0.65,
+        "$": 0.534,
+        "%": 0.757,
+        "&": 0.854,
+        "'": 0.193,
+        "(": 0.3,
+        ")": 0.3,
+        "*": 0.502,
+        "+": 0.599,
+        ",": 0.267,
+        "-": 0.509,
+        ".": 0.258,
+        "/": 0.38,
+        "0": 0.612,
+        "1": 0.378,
+        "2": 0.489,
+        "3": 0.461,
+        "4": 0.504,
+        "5": 0.424,
+        "6": 0.528,
+        "7": 0.415,
+        "8": 0.531,
+        "9": 0.52,
+        ":": 0.272,
+        ";": 0.291,
+        "<": 0.621,
+        "=": 0.66,
+        ">": 0.621,
+        "?": 0.469,
+        "@": 0.896,
+        "A": 0.643,
+        "B": 0.636,
+        "C": 0.702,
+        "D": 0.738,
+        "E": 0.622,
+        "F": 0.581,
+        "G": 0.718,
+        "H": 0.773,
+        "I": 0.346,
+        "J": 0.333,
+        "K": 0.669,
+        "L": 0.6,
+        "M": 0.889,
+        "N": 0.721,
+        "O": 0.756,
+        "P": 0.597,
+        "Q": 0.756,
+        "R": 0.661,
+        "S": 0.551,
+        "T": 0.634,
+        "U": 0.696,
+        "V": 0.643,
+        "W": 0.924,
+        "X": 0.647,
+        "Y": 0.603,
+        "Z": 0.606,
+        "[": 0.302,
+        "\\": 0.38,
+        "]": 0.302,
+        "^": 0.547,
+        "_": 0.603,
+        "`": 0.289,
+        "a": 0.508,
+        "b": 0.575,
+        "c": 0.496,
+        "d": 0.593,
+        "e": 0.517,
+        "f": 0.339,
+        "g": 0.539,
+        "h": 0.6,
+        "i": 0.299,
+        "j": 0.273,
+        "k": 0.561,
+        "l": 0.292,
+        "m": 0.906,
+        "n": 0.609,
+        "o": 0.559,
+        "p": 0.593,
+        "q": 0.575,
+        "r": 0.454,
+        "s": 0.456,
+        "t": 0.362,
+        "u": 0.593,
+        "v": 0.499,
+        "w": 0.786,
+        "x": 0.53,
+        "y": 0.515,
+        "z": 0.486,
+        "{": 0.311,
+        "|": 0.227,
+        "}": 0.311,
+        "~": 0.662,
+    },
+    # fmt: on
+}
+
 # Family-name -> profile class. Names are normalised (lowercased, de-quoted, the
 # first family in a CSS stack). Anything unrecognised falls back to "sans".
 _CONDENSED_FAMILIES = frozenset(
@@ -336,8 +452,18 @@ def _weight_factor(weight: int | str) -> float:
     return 1.0 + (numeric - 400) / 100.0 * 0.012
 
 
-def _char_em(ch: str, profile: str, scale: float) -> float:
-    """Advance width of one character in em units."""
+def _char_em(
+    ch: str, profile: str, scale: float, char_table: dict[str, float] | None = None
+) -> float:
+    """Advance width of one character in em units.
+
+    ``char_table`` is a measured per-family table (D5) consulted first — a
+    listed glyph returns its real (margin-inflated) advance directly, unscaled.
+    """
+    if char_table is not None:
+        measured = char_table.get(ch)
+        if measured is not None:
+            return measured
     if profile == "mono":
         return _MONO_EM
     return _SANS_EM.get(ch, _DEFAULT_EM) * scale
@@ -547,7 +673,14 @@ def em_width(text: str, *, font_family: str = "Inter", weight: int | str = 400) 
     profile = _classify_family(font_family)
     scale = _table_scale(font_family)
     factor = _weight_factor(weight)
-    advance = sum(_char_em(ch, profile, scale) for ch in text)
+    char_table = _FAMILY_CHAR_EM.get(_first_family(font_family))
+    advance = sum(_char_em(ch, profile, scale, char_table) for ch in text)
+    if char_table is not None:
+        # Measured-table family (D5): the Helvetica-calibrated kern/ligature
+        # corrections do not transfer (a serif kerns more gently), and the
+        # table's per-glyph margin already errs wide — apply no tightening so
+        # the estimate stays a safe upper bound on the rendered width.
+        return advance * factor
     correction = _kern_ligature_em(text, profile, scale, advance)
     return (advance + correction) * factor
 
@@ -557,9 +690,12 @@ def kern_ligature_em(text: str, *, font_family: str = "Inter", weight: int | str
 
     Explainability handle for the G1.11 correction: ``em_width(t)`` equals the
     bare advance sum **plus** this value (both already including the weight
-    factor). ``0.0`` for monospace, empty or single-character input.
+    factor). ``0.0`` for monospace, empty or single-character input — and for
+    measured-char-table families (D5), whose estimates carry no kern model.
     """
     if not text:
+        return 0.0
+    if _first_family(font_family) in _FAMILY_CHAR_EM:
         return 0.0
     profile = _classify_family(font_family)
     scale = _table_scale(font_family)
@@ -794,6 +930,8 @@ _FONT_AXES: dict[str, FontAxes] = {
     "inter": FontAxes(wght=(100, 900), opsz=(14.0, 32.0)),
     "space grotesk": FontAxes(wght=(300, 700)),
     "jetbrains mono": FontAxes(wght=(100, 800)),
+    # D5 — the serif display register ships as a genuine variable face.
+    "playfair display": FontAxes(wght=(400, 900)),
 }
 
 # How light the weight axis may be traded for fit. Lighter advances narrower,

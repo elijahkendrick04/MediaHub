@@ -53,7 +53,7 @@
   display: flex;
   background: var(--mh-ground-gradient, var(--mh-primary));
   color: var(--mh-on-primary);
-  font-family: 'Inter', system-ui, sans-serif;
+  font-family: var(--mh-font-body, 'Inter', system-ui, sans-serif);
   -webkit-font-smoothing: antialiased;
 }
 .tp *, .tp *::before, .tp *::after { box-sizing: border-box; }
@@ -80,7 +80,7 @@
 .tp__who > * { position: relative; z-index: 1; }
 .tp__kicker {
   display: flex; align-items: center; gap: 14px;
-  font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 700;
+  font-family: var(--mh-font-kicker, 'Space Grotesk','Inter',sans-serif); font-weight: 700;
   font-size: 23px; letter-spacing: 0.22em; text-transform: uppercase;
   color: var(--mh-accent); margin-bottom: 26px;
 }
@@ -89,7 +89,7 @@
   background: var(--mh-accent); flex: 0 0 auto;
 }
 .tp__first {
-  font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 700;
+  font-family: var(--mh-font-kicker, 'Space Grotesk','Inter',sans-serif); font-weight: 700;
   font-size: 40px; letter-spacing: 0.01em; text-transform: uppercase;
   color: var(--mh-accent); margin-bottom: 2px;
   white-space: normal; overflow-wrap: anywhere; word-break: break-word;
@@ -107,7 +107,7 @@
 .tp__event {
   margin-top: 34px; padding-top: 26px;
   border-top: 4px solid var(--mh-accent);
-  font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 600;
+  font-family: var(--mh-font-kicker, 'Space Grotesk','Inter',sans-serif); font-weight: 600;
   font-size: 28px; line-height: 1.12; text-transform: uppercase;
   color: var(--mh-on-primary);
   overflow-wrap: anywhere;
@@ -124,7 +124,7 @@
   border-right: 8px solid var(--mh-primary);
 }
 .tp__spine {
-  font-family: 'Inter',sans-serif; font-weight: 800;
+  font-family: var(--mh-font-body, 'Inter',sans-serif); font-weight: 800;
   font-size: 18px; letter-spacing: 0.42em; text-transform: uppercase;
   color: var(--mh-primary); opacity: 0.78; margin-bottom: 30px;
 }
@@ -141,7 +141,7 @@
 }
 .tp__result-tag {
   margin-top: 28px;
-  font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 700;
+  font-family: var(--mh-font-kicker, 'Space Grotesk','Inter',sans-serif); font-weight: 700;
   font-size: 21px; letter-spacing: 0.14em; text-transform: uppercase;
   color: var(--mh-primary);
   overflow-wrap: anywhere;
@@ -154,12 +154,12 @@
 .tp__ctx-top { display: flex; flex-direction: column; gap: 34px; }
 .tp__chip { display: flex; flex-direction: column; }
 .tp__chip-lab {
-  font-family: 'Inter',sans-serif; font-weight: 700; font-size: 15px;
+  font-family: var(--mh-font-body, 'Inter',sans-serif); font-weight: 700; font-size: 15px;
   letter-spacing: 0.2em; text-transform: uppercase;
   color: var(--mh-accent); margin-bottom: 9px;
 }
 .tp__chip-val {
-  font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 600;
+  font-family: var(--mh-font-kicker, 'Space Grotesk','Inter',sans-serif); font-weight: 600;
   font-size: 25px; line-height: 1.16; color: var(--mh-on-surface);
   overflow-wrap: anywhere;
 }
@@ -171,7 +171,7 @@
 .tp__logo { height: 58px; width: auto; margin-bottom: 14px; }
 .tp__logo img, .tp__logo svg { height: 100%; width: auto; object-fit: contain; display: block; }
 .tp__club {
-  font-family: 'Inter',sans-serif; font-weight: 800; font-size: 19px;
+  font-family: var(--mh-font-body, 'Inter',sans-serif); font-weight: 800; font-size: 19px;
   line-height: 1.18; text-transform: uppercase; color: var(--mh-on-surface);
   overflow-wrap: anywhere;
 }

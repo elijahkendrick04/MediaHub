@@ -23,7 +23,7 @@
   overflow: hidden;
   background: var(--mh-ground-gradient, var(--mh-primary));
   color: var(--mh-on-primary);
-  font-family: 'Inter', system-ui, sans-serif;
+  font-family: var(--mh-font-body, 'Inter', system-ui, sans-serif);
   -webkit-font-smoothing: antialiased;
   display: flex; flex-direction: column;
 }
@@ -37,12 +37,12 @@
    keeps it hugging its label instead of stretching to the flex column. */
 .hb__kicker {
   display: inline-flex; align-items: center; gap: 14px; align-self: flex-start;
-  font-family: 'Space Grotesk', 'Inter', sans-serif;
+  font-family: var(--mh-font-kicker, 'Space Grotesk', 'Inter', sans-serif);
   font-weight: 700; font-size: 25px; letter-spacing: 0.22em; text-transform: uppercase; color: var(--mh-accent);
   border: 2px solid var(--mh-accent); border-radius: 6px; padding: 9px 18px;
 }
 .hb__tick { display: none; }
-.hb__first { font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 700; font-size: 30px; letter-spacing: 0.10em; text-transform: uppercase; color: var(--mh-on-primary); }
+.hb__first { font-family: var(--mh-font-kicker, 'Space Grotesk','Inter',sans-serif); font-weight: 700; font-size: 30px; letter-spacing: 0.10em; text-transform: uppercase; color: var(--mh-on-primary); }
 .hb__surname {
   font-family: var(--mh-font-display, 'Anton', 'Bebas Neue', Impact, sans-serif);
   font-weight: 400; font-size: var(--mh-fit-surname-px, 124px);
@@ -56,7 +56,7 @@
   padding: 26px 84px; display: flex; align-items: baseline; justify-content: space-between; gap: 32px;
   position: relative; z-index: 3;
 }
-.hb__event { font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 800; font-size: 32px; letter-spacing: 0.05em; text-transform: uppercase; }
+.hb__event { font-family: var(--mh-font-kicker, 'Space Grotesk','Inter',sans-serif); font-weight: 800; font-size: 32px; letter-spacing: 0.05em; text-transform: uppercase; }
 .hb__result {
   font-family: 'JetBrains Mono','Space Grotesk',monospace; font-feature-settings: "tnum";
   font-weight: 700; font-size: var(--mh-fit-result-px, 84px); font-variation-settings: var(--mh-axes-result, normal); line-height: 0.9; white-space: nowrap;
@@ -64,14 +64,14 @@
 
 /* ground — meta + brand below the horizon */
 .hb__ground { flex: 1 1 0; padding: 30px 84px 84px; display: flex; flex-direction: column; justify-content: space-between; position: relative; z-index: 2; }
-.hb__stat { font-family: 'Inter',sans-serif; font-weight: 600; font-size: 26px; color: var(--mh-on-primary); opacity: 0.84; }
+.hb__stat { font-family: var(--mh-font-body, 'Inter',sans-serif); font-weight: 600; font-size: 26px; color: var(--mh-on-primary); opacity: 0.84; }
 .hb__foot { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; }
 .hb__brand { display: flex; align-items: center; gap: 16px; }
 .hb__logo { height: 60px; width: auto; }
 .hb__logo img, .hb__logo svg { height: 100%; width: auto; object-fit: contain; display: block; }
 .hb__brand-text { display: flex; flex-direction: column; line-height: 1.16; }
-.hb__club { font-family: 'Inter',sans-serif; font-weight: 800; font-size: 24px; text-transform: uppercase; color: var(--mh-on-primary); }
-.hb__meet { font-family: 'Inter',sans-serif; font-weight: 500; font-size: 18px; color: var(--mh-on-primary); opacity: 0.72; margin-top: 4px; }
+.hb__club { font-family: var(--mh-font-body, 'Inter',sans-serif); font-weight: 800; font-size: 24px; text-transform: uppercase; color: var(--mh-on-primary); }
+.hb__meet { font-family: var(--mh-font-body, 'Inter',sans-serif); font-weight: 500; font-size: 18px; color: var(--mh-on-primary); opacity: 0.72; margin-top: 4px; }
 .hb__sponsor { flex: 0 0 auto; }
 </style>
 </head>

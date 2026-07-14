@@ -41,7 +41,7 @@
   isolation: isolate;
   background: var(--mh-surface);
   color: var(--mh-on-primary);
-  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  font-family: var(--mh-font-body, 'Inter', system-ui, -apple-system, sans-serif);
   -webkit-font-smoothing: antialiased;
 }
 .sd *, .sd *::before, .sd *::after { box-sizing: border-box; }
@@ -100,7 +100,7 @@
 
 .sd__kicker {
   display: inline-flex; align-items: center; gap: 14px;
-  font-family: 'Space Grotesk', 'Inter', sans-serif;
+  font-family: var(--mh-font-kicker, 'Space Grotesk', 'Inter', sans-serif);
   font-weight: 700;
   font-size: 23px;
   letter-spacing: 0.22em;
@@ -114,7 +114,7 @@
 
 .sd__first {
   margin-top: 22px;
-  font-family: 'Space Grotesk', 'Inter', sans-serif;
+  font-family: var(--mh-font-kicker, 'Space Grotesk', 'Inter', sans-serif);
   font-weight: 700;
   font-size: 30px;
   letter-spacing: 0.10em;
@@ -134,7 +134,7 @@
 }
 .sd__event {
   margin-top: 14px;
-  font-family: 'Space Grotesk', 'Inter', sans-serif;
+  font-family: var(--mh-font-kicker, 'Space Grotesk', 'Inter', sans-serif);
   font-weight: 600;
   font-size: 30px;
   letter-spacing: 0.05em;
@@ -153,7 +153,7 @@
 }
 .sd__result { display: flex; flex-direction: column; }
 .sd__result-lab {
-  font-family: 'Inter', sans-serif;
+  font-family: var(--mh-font-body, 'Inter', sans-serif);
   font-weight: 600;
   font-size: 15px;
   letter-spacing: 0.26em;
@@ -173,7 +173,7 @@
 .sd__stat {
   text-align: right;
   max-width: 42%;
-  font-family: 'Space Grotesk', 'Inter', sans-serif;
+  font-family: var(--mh-font-kicker, 'Space Grotesk', 'Inter', sans-serif);
   font-weight: 700;
   font-size: 28px;
   line-height: 1.12;
@@ -194,7 +194,7 @@
 .sd__logo svg { height: 100%; width: auto; object-fit: contain; display: block; }
 .sd__brand-text { display: flex; flex-direction: column; line-height: 1.16; }
 .sd__club {
-  font-family: 'Inter', sans-serif;
+  font-family: var(--mh-font-body, 'Inter', sans-serif);
   font-weight: 800;
   font-size: 26px;
   letter-spacing: 0.01em;
@@ -202,7 +202,7 @@
   color: var(--mh-on-primary);
 }
 .sd__meet {
-  font-family: 'Inter', sans-serif;
+  font-family: var(--mh-font-body, 'Inter', sans-serif);
   font-weight: 500;
   font-size: 17px;
   letter-spacing: 0.04em;
