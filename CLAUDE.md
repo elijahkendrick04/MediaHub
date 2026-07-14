@@ -401,6 +401,29 @@ roadmap bot relies on to read `roadmap: <ID> <status>` directives. The two
 self-merging bots (`roadmap-autoupdate.yml`, the `autotest` CI fixer in
 `gitops.py`) use `gh pr merge --merge`; the roadmap bot keeps its `[skip render]`
 marker on the merge-commit subject via `--subject`.
+
+**Assistant PR watching & auto-merge (maintainer standing preference,
+2026-07-14).** When Claude opens a PR, drive it to merge *hands-off* — the
+maintainer does not want to click-approve recurring reminders:
+
+- **Auto-merge on green, no per-PR ask.** Once a PR Claude opened is fully
+  green, merge it (merge commit) without asking. This is the default; only
+  pause if the maintainer said "don't merge / hold" for that specific PR, or
+  it's an intentional draft.
+- **Prefer GitHub-native auto-merge.** Enable auto-merge (`enable_pr_auto_merge`,
+  merge method `merge`) right after opening the PR so GitHub merges it
+  server-side the instant required checks pass — no polling, no wake-ups.
+- **Do NOT schedule recurring self-check-ins to poll a PR.** No hourly (or any
+  cadence) `send_later` / `ScheduleWakeup` timers just to re-check CI — those
+  are what the maintainer asked to stop. Rely on GitHub-native auto-merge plus
+  the webhook PR subscription (which already pushes CI *failures* and review
+  comments instantly). If native auto-merge is genuinely unavailable (repo
+  setting off, or no required checks), poll on a *short* interval only while
+  checks are actively running and stop the moment it merges — never idle
+  hour-long waits, and never leave a standing recurring timer.
+- On a CI failure event, diagnose and push a fix on the branch; auto-merge then
+  carries it the rest of the way once green.
+
 The product is delivered to customers as a hosted web application — there is
 no customer-facing self-host or local-install path. This is a deliberate,
 decided commercial principle (hosted-only; no free or capped self-host tier) —
