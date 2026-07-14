@@ -10,35 +10,18 @@ identity data keep the original table and its controls.
 
 from __future__ import annotations
 
-import importlib
 import json
-import sys
 import uuid
-from pathlib import Path
 
 import pytest
 
-_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(_ROOT))
-
 
 @pytest.fixture
-def audit_env(tmp_path, monkeypatch):
-    """Fresh DATA_DIR with one club profile and a test client."""
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    (tmp_path / "runs_v4").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "uploads_v4").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "club_profiles").mkdir(parents=True, exist_ok=True)
+def audit_env(web_module, tmp_path):
+    """Fresh DATA_DIR with one club profile and a test client.
 
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
-
+    DATA_DIR isolation + one-time web.py import come from the autouse
+    ``_isolate_data_dir`` fixture in conftest.py."""
     from mediahub.web.club_profile import ClubProfile, save_profile
 
     save_profile(
@@ -49,14 +32,14 @@ def audit_env(tmp_path, monkeypatch):
         )
     )
 
-    app = wm.create_app()
+    app = web_module.create_app()
     app.config["TESTING"] = True
     app.config["ENFORCE_ORG_GATE"] = True
 
     with app.test_client() as client:
         r = client.post("/api/organisation/active", data={"profile_id": "org-test"})
         assert r.status_code == 200, r.get_json()
-        yield {"client": client, "wm": wm, "tmp_path": tmp_path}
+        yield {"client": client, "wm": web_module, "tmp_path": tmp_path}
 
 
 def _seed_run(tmp_path, wm, run_payload):

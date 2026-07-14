@@ -203,12 +203,29 @@ def build_api_v1_blueprint(
         tok = getattr(g, "api_token", None)
         return (getattr(tok, "created_by", "") or "") if tok else ""
 
+    def _actor_ref() -> str:
+        """A machine-distinguishable audit label for the calling token (#116).
+
+        Every write reaching this blueprint is authenticated by a bearer token —
+        the REST clients and the MCP server alike — so the honest, stable marker
+        is the token id, not "mcp" (the MCP server is a plain bearer client of
+        this API and is indistinguishable from a direct call server-side). This
+        is what lets the audit trail tell an agent's approval from a human's."""
+        tok = getattr(g, "api_token", None)
+        return f"api-token:{tok.id}" if tok else "api-token:unknown"
+
     @bp.route("/runs/<run_id>/cards/<card_id>/approve", methods=["POST"])
     def approve_card(run_id: str, card_id: str):
         pid = _require("cards:approve")
         payload = request.get_json(silent=True) or {}
         body, status = service.set_card_status(
-            pid, run_id, card_id, "approved", notes=payload.get("notes"), actor_email=_actor()
+            pid,
+            run_id,
+            card_id,
+            "approved",
+            notes=payload.get("notes"),
+            actor_email=_actor(),
+            actor=_actor_ref(),
         )
         return jsonify(body), status
 
@@ -217,7 +234,13 @@ def build_api_v1_blueprint(
         pid = _require("cards:approve")
         payload = request.get_json(silent=True) or {}
         body, status = service.set_card_status(
-            pid, run_id, card_id, "rejected", notes=payload.get("notes"), actor_email=_actor()
+            pid,
+            run_id,
+            card_id,
+            "rejected",
+            notes=payload.get("notes"),
+            actor_email=_actor(),
+            actor=_actor_ref(),
         )
         return jsonify(body), status
 
@@ -226,7 +249,9 @@ def build_api_v1_blueprint(
         pid = _require("cards:write")
         payload = request.get_json(silent=True) or {}
         edits = payload.get("edits", payload)
-        body, status = service.edit_card(pid, run_id, card_id, edits, actor_email=_actor())
+        body, status = service.edit_card(
+            pid, run_id, card_id, edits, actor_email=_actor(), actor=_actor_ref()
+        )
         return jsonify(body), status
 
     # --- content export ----------------------------------------------------

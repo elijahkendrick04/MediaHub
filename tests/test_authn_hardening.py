@@ -15,11 +15,11 @@ import pytest
 def app(monkeypatch, tmp_path):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     monkeypatch.delenv("STRIPE_SECRET_KEY", raising=False)
-    from mediahub.web import auth as auth_mod
     from mediahub.web.web import create_app
 
-    # lockout state is process-global — isolate per test
-    auth_mod._failed_logins.clear()
+    # SEC-27: brake state (lockout / per-IP / TOTP replay) now lives in the
+    # per-DATA_DIR SQLite DB, so a fresh tmp_path isolates each test — no
+    # process-global dict to clear.
     application = create_app()
     application.config["TESTING"] = True
     if not application.secret_key:
@@ -118,9 +118,14 @@ def test_successful_login_clears_failure_count(client):
 def test_rotating_xff_first_hop_cannot_dodge_rate_limit(client):
     """Behind one trusted proxy the real client is the LAST X-Forwarded-For
     hop — the first hop is attacker-supplied. Rotating it must land every
-    request in the SAME bucket and still 429 (ADR-0019's brute-force brake)."""
+    request in the SAME bucket and still 429 (ADR-0019's brute-force brake).
+
+    Distinct emails per request so the per-account lockout never fires — the
+    429 must come from the per-IP limiter alone. SEC-27 sets that budget to 20
+    (the old per-worker 10 × the two-worker deployment), so the 21st same-IP
+    attempt is the first to trip it."""
     last = None
-    for i in range(12):
+    for i in range(21):
         last = client.post(
             "/login",
             data={"email": f"u{i}@club.org", "password": "wrong-pass"},

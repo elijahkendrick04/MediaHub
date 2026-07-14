@@ -81,9 +81,15 @@ def test_healthz_endpoints_always_json(client, route, headers):
 
 
 def test_healthz_payloads_keep_their_shape(client):
-    """The JSON probes still carry their documented fields after the revert."""
+    """The JSON probes still carry their documented fields after the revert.
+
+    The RSS internals of /healthz/memory are now operator-gated (deep-review
+    #29), so the shape is checked against a signed-in operator session; the
+    anonymous liveness contract is pinned separately below."""
     assert client.get("/healthz").get_json().get("ok") is True
     assert client.get("/healthz/ping").get_json().get("pong") is True
+    with client.session_transaction() as s:
+        s["dev_operator"] = True
     _mem = client.get("/healthz/memory").get_json()
     assert "rss_mb" in _mem
     # rss_mb is CURRENT RSS (leak diagnostic); rss_peak_mb is the lifetime
@@ -91,6 +97,16 @@ def test_healthz_payloads_keep_their_shape(client):
     assert "rss_peak_mb" in _mem
     assert _mem["rss_peak_mb"] >= _mem["rss_mb"]
     assert "deps" in client.get("/healthz/deps").get_json()
+
+
+def test_healthz_memory_anonymous_is_liveness_only(client):
+    """An anonymous /healthz/memory returns the liveness boolean but none of the
+    RSS / concurrency internals — those are operator-only (deep-review #29)."""
+    _mem = client.get("/healthz/memory").get_json()
+    assert _mem.get("ok") is True
+    for leaked in ("rss_mb", "rss_peak_mb", "rss_pct_of_2048",
+                   "active_runs", "active_runs_running", "turn_into_jobs"):
+        assert leaked not in _mem, f"anonymous /healthz/memory leaked {leaked}"
 
 
 @pytest.mark.parametrize("headers", _ALL_HEADER_SETS)

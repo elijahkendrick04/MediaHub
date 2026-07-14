@@ -108,6 +108,8 @@ from .club_profile import (
     load_profile,
     save_profile,
     seed_default_profiles,
+    set_profile_saved_hook,
+    _scrub_legacy_secrets_file,
 )
 from .bounded_cache import BoundedCache
 
@@ -115,6 +117,7 @@ from .bounded_cache import BoundedCache
 # Both are import-safe with no env configured: auth has no required env, and
 # billing only touches Stripe lazily behind billing_configured().
 from . import auth as _auth
+from . import auth_brakes as _auth_brakes
 from . import billing as _billing
 from . import charts as _charts
 from . import recap_progress as _recap_progress
@@ -1652,6 +1655,11 @@ try:
         create_candidate_pool_for_item as _v8_create_candidate_pool,
         visuals_dir_for_run as _v8_visuals_dir,
     )
+    from mediahub.content_pack_visual.visual_index import (
+        lookup as _vidx_lookup,
+        index_visual as _vidx_index,
+        forget as _vidx_forget,
+    )
     from mediahub.venue_search.search import search as _v8_search_venue
 
     _v8_ok = True
@@ -1664,6 +1672,9 @@ except ImportError as _v8_err:
     _v8_create_visual_for_item = None
     _v8_create_candidate_pool = None
     _v8_visuals_dir = None
+    _vidx_lookup = None
+    _vidx_index = None
+    _vidx_forget = None
     _v8_search_venue = None
 
 
@@ -2448,7 +2459,7 @@ def _friendly_failure_message(exc: Exception, *, kind: str = "ai", context: str 
 # (the render gate is 1-slot anyway, so parallel threads only added
 # queue-timeout risk) and the UI polls /api/variant-jobs/<id>.
 # ---------------------------------------------------------------------------
-# DISK-BACKED, not in-memory: gunicorn runs ``--workers 2`` (Procfile), so
+# DISK-BACKED, not in-memory: gunicorn runs ``--workers 2`` (docker-entrypoint.sh), so
 # the POST that creates a job and the GETs that poll it routinely land on
 # different processes — an in-memory dict 404s ("job_not_found") for half
 # the polls. Jobs are tiny JSON files under RUNS_DIR/_variant_jobs/,
@@ -3202,6 +3213,17 @@ def _init_db():
         conn.execute("ALTER TABLE runs ADD COLUMN content_hash TEXT")
     if "meet_fingerprint" not in cols:
         conn.execute("ALTER TABLE runs ADD COLUMN meet_fingerprint TEXT")
+    # #17 — the vid→(run_id, brief_id) index for /api/visual/<vid> lives in this
+    # same data.db. Ensure its schema here (schema owned by visual_index,
+    # single-source) so the run-erasure cascade DELETE never hits a missing
+    # table on a fresh DB. Best-effort: a fresh DB with the module absent still
+    # boots; the routes create the table on first write anyway.
+    try:
+        from mediahub.content_pack_visual import visual_index as _vidx
+
+        _vidx.ensure_schema(conn)
+    except Exception:
+        pass
     conn.commit()
     conn.close()
 
@@ -3625,6 +3647,103 @@ def _ownerless_run_readable() -> bool:
         return True
 
 
+def _read_visual_sidecar(brief_dir: Path) -> Optional[dict]:
+    """Parse ``<brief_dir>/visual.json`` into a dict, or ``None`` if absent /
+    corrupt / non-dict — matching the old routes' per-sidecar ``try/except``."""
+    try:
+        payload = json.loads((brief_dir / "visual.json").read_text())
+    except Exception:
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _sidecar_matches_vid(payload: dict, vid: str) -> bool:
+    """The exact match test the old routes used: ``vid`` is the primary id or
+    one of the per-format ids in ``visual_ids``."""
+    return payload.get("id") == vid or vid in (payload.get("visual_ids") or {})
+
+
+def _resolve_visual(vid: str, active_pid: Optional[str]) -> Optional[tuple[Path, dict]]:
+    """Locate a persisted visual by ``vid`` and enforce the tenant gate.
+
+    Returns ``(brief_dir, payload)`` for a visual the current session may read,
+    or ``None`` when ``vid`` is unknown *or* belongs to a run this session can't
+    access — the two are deliberately indistinguishable (anti-enumeration),
+    exactly as the pre-index full-walk routes behaved.
+
+    #17 fast path: one indexed lookup in ``visual_index`` (``vid → run_id,
+    brief_id``, stamped by ``persist_visual``) — O(1) instead of walking every
+    run dir and ``json.loads``-ing every ``visual.json``. The sidecar it points
+    at is always re-read and re-validated, and the tenant gate is the same
+    ``_can_access_run`` the old routes applied, so response bytes are identical
+    and a foreign run is a 404, never a serve.
+
+    Slow path: on an index miss (a run created before the index existed, or a
+    stale row after a torn write) fall back to the original ``RUNS_DIR`` walk,
+    backfilling the index for every sidecar touched so the next hit is O(1).
+    """
+    # --- Fast path: indexed O(1) lookup. ---
+    if _vidx_lookup is not None:
+        try:
+            hit = _vidx_lookup(vid)
+        except Exception:
+            hit = None
+        if hit is not None:
+            run_id, brief_id = hit
+            brief_dir = RUNS_DIR / run_id / "visuals" / brief_id
+            payload = _read_visual_sidecar(brief_dir)
+            if payload is not None and _sidecar_matches_vid(payload, vid):
+                # Genuine match — apply the tenant gate. A foreign run is a 404
+                # (the vid truly belongs there; no other run can hold it), so we
+                # don't fall through to a needless walk.
+                if _can_access_run(run_id, _load_run(run_id), active_pid):
+                    return brief_dir, payload
+                return None
+            # Stale row: the sidecar is gone or was re-rendered without this vid.
+            # Forget it and fall through to the authoritative walk.
+            if _vidx_forget is not None:
+                try:
+                    _vidx_forget(vid)
+                except Exception:
+                    pass
+
+    # --- Slow path: walk RUNS_DIR, backfilling as we go (matches old routes). ---
+    try:
+        run_dirs = list(RUNS_DIR.iterdir())
+    except OSError:
+        return None
+    for run_dir in run_dirs:
+        if not run_dir.is_dir():
+            continue
+        vdir = run_dir / "visuals"
+        if not vdir.is_dir():
+            continue
+        run_id = run_dir.name
+        try:
+            brief_dirs = list(vdir.iterdir())
+        except OSError:
+            continue
+        for brief_dir in brief_dirs:
+            if not brief_dir.is_dir():
+                continue
+            payload = _read_visual_sidecar(brief_dir)
+            if payload is None:
+                continue
+            # Backfill every sidecar we touch so pre-index runs self-heal to O(1).
+            if _vidx_index is not None:
+                try:
+                    _vidx_index(run_id, brief_dir.name, payload)
+                except Exception:
+                    pass
+            if not _sidecar_matches_vid(payload, vid):
+                continue
+            # Foreign run → skip and keep looking, exactly as the old walk did.
+            if not _can_access_run(run_id, _load_run(run_id), active_pid):
+                continue
+            return brief_dir, payload
+    return None
+
+
 def _can_access_pack(rec: Optional[dict], active_pid: Optional[str]) -> bool:
     """Tenant isolation guard for stub draft packs.
 
@@ -3945,6 +4064,9 @@ def _delete_run(run_id: str) -> bool:
     # UI 1.25 — cascade the run's emoji reactions so a deleted meet leaves no
     # orphan tally behind (and a recycled run id can never inherit stale counts).
     conn.execute("DELETE FROM card_reactions WHERE run_id = ?", (run_id,))
+    # #17 — cascade the visual-lookup index so an erased run leaves no orphan
+    # vid→run rows (and a recycled run id can never inherit stale mappings).
+    conn.execute("DELETE FROM visual_index WHERE run_id = ?", (run_id,))
     conn.commit()
     conn.close()
     return existed
@@ -15272,7 +15394,7 @@ def _layout(
      where the browser can't install or once the app already runs standalone. -->
 <script defer src="{{ pwa_install_js_url }}"></script>
 </head>
-<body class="{{ 'mh-has-dock' if dock else '' }}" data-page="{{ active }}">
+<body class="{{ 'mh-has-dock' if dock else '' }}"{{ ' data-has-dock' if dock else '' }} data-page="{{ active }}">
 <a class="mh-skip-link" href="#mh-main">Skip to content</a>
 {{ bg_logos_html | safe }}
 <div id="mh-loader" aria-live="polite" aria-busy="true">
@@ -15649,19 +15771,19 @@ def _layout(
      class hides it) so the two never stack; hidden on desktop. The "Approve"
      pill acts on the queued card nearest the viewport centre — see the dock
      script below. Inspired by Duties (duties.xyz); supports U.4. -->
-<nav class="mh-action-dock" aria-label="Quick review actions" data-builder-url="{{ dock.builder }}">
-  <a href="{{ url_for('make_page') }}" aria-label="Create — start a new content pack">
+<nav class="mh-action-dock" data-testid="action-dock" aria-label="Quick review actions" data-builder-url="{{ dock.builder }}">
+  <a href="{{ url_for('make_page') }}" data-testid="dock-create" aria-label="Create — start a new content pack">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
     Create
   </a>
-  <a href="{{ url_for('media_library_page') }}" aria-label="Open the media library">
+  <a href="{{ url_for('media_library_page') }}" data-testid="dock-library" aria-label="Open the media library">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.6"/><path d="M21 15l-5-5L5 21"/></svg>
     Library
   </a>
-  <button type="button" class="mh-dock-primary" data-mh-dock-approve aria-label="Approve the highlighted card">
+  <button type="button" class="mh-dock-primary" data-testid="dock-approve" data-mh-dock-approve aria-label="Approve the highlighted card">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
-    <span data-mh-dock-label>Approve</span>
-    <span class="mh-dock-count" data-mh-dock-count aria-hidden="true">{{ dock.queue|default(0) }}</span>
+    <span data-testid="dock-label" data-mh-dock-label>Approve</span>
+    <span class="mh-dock-count" data-testid="dock-count" data-mh-dock-count aria-hidden="true">{{ dock.queue|default(0) }}</span>
   </button>
 </nav>
 {% endif %}
@@ -20598,6 +20720,146 @@ _ATHLETES_CONSENT_JS = r"""
 """
 
 
+# ---------------------------------------------------------------------------
+# Hoisted pure helpers (refactor-15, finding #15 step 1)
+#
+# These are closure-free formatting/parsing helpers lifted out of the
+# ``create_app`` closure so they can be imported and unit-tested in isolation
+# without instantiating the Flask app. Behaviour is identical — each closes
+# over nothing from ``create_app`` and references only module-level names.
+# ---------------------------------------------------------------------------
+
+
+def _format_uptime_pct(stats: dict) -> str:
+    if not stats.get("has_data"):
+        return "&mdash;"
+    pct = float(stats.get("uptime_pct") or 0.0) * 100.0
+    if pct >= 99.995:
+        # Never round a window that had real, counted downtime up to a bare
+        # "100%" — it reads as a contradiction beside the non-zero Downtime
+        # cell on the same row. Show the honest "99.99%" instead; "100%" is
+        # reserved for a genuinely gap-free window.
+        return "100%" if not stats.get("downtime_seconds") else "99.99%"
+    if pct >= 99.9:
+        return f"{pct:.3f}%"
+    if pct >= 95.0:
+        return f"{pct:.2f}%"
+    return f"{pct:.1f}%"
+
+
+def _humanize_duration(seconds: int) -> str:
+    seconds = max(0, int(seconds))
+    if seconds < 60:
+        return f"{seconds}s"
+    if seconds < 3600:
+        mins = seconds // 60
+        return f"{mins} min"
+    if seconds < 86400:
+        hrs = seconds // 3600
+        mins = (seconds % 3600) // 60
+        return f"{hrs}h {mins}m" if mins else f"{hrs}h"
+    days = seconds // 86400
+    hrs = (seconds % 86400) // 3600
+    return f"{days}d {hrs}h" if hrs else f"{days}d"
+
+
+def _humanize_when(ts: Optional[str]) -> str:
+    if not ts:
+        return "&mdash;"
+    try:
+        parsed = ts
+        if parsed.endswith("Z"):
+            parsed = parsed[:-1] + "+00:00"
+        from datetime import datetime as _dt
+
+        then = _dt.fromisoformat(parsed)
+        delta = datetime.now(timezone.utc) - then
+        secs = int(delta.total_seconds())
+        if secs < 0:
+            return _h(ts[:19])
+        if secs < 60:
+            return f"{secs}s ago"
+        if secs < 3600:
+            return f"{secs // 60} min ago"
+        if secs < 86400:
+            return f"{secs // 3600}h ago"
+        return f"{secs // 86400}d ago"
+    except (ValueError, TypeError):
+        return _h(ts[:19])
+
+
+def _pounds_to_pence(raw: str) -> int:
+    from decimal import Decimal, InvalidOperation
+
+    try:
+        return int((Decimal((raw or "").strip().lstrip("£")) * 100).quantize(Decimal("1")))
+    except (InvalidOperation, ValueError):
+        return -1
+
+
+def _pence_str(p) -> str:
+    return f"£{p / 100:,.2f}" if isinstance(p, int) and p >= 0 else "—"
+
+
+def _safe_filename(title: str, ext: str) -> str:
+    slug = re.sub(r"[^A-Za-z0-9_-]+", "-", str(title or "document")).strip("-").lower()
+    return f"{slug or 'document'}.{ext}"
+
+
+def _nl_range(preset, body):
+    """Resolve a range preset (or a custom start/end) to (start, end) dates."""
+    from datetime import date as _date
+    from datetime import timedelta as _td
+
+    def _iso(v):
+        try:
+            return _date.fromisoformat(str(v)[:10])
+        except (TypeError, ValueError):
+            return None
+
+    today = _date.today()
+    if preset == "custom":
+        return (_iso(body.get("start")) or today.replace(day=1)), (_iso(body.get("end")) or today)
+    if preset == "last_month":
+        last_prev = today.replace(day=1) - _td(days=1)
+        return last_prev.replace(day=1), last_prev
+    if preset == "last_30":
+        return today - _td(days=30), today
+    if preset == "this_season":
+        yr = today.year if today.month >= 9 else today.year - 1
+        return _date(yr, 9, 1), today
+    return today.replace(day=1), today  # this_month (default)
+
+
+def _parse_month_param(raw: str):
+    """``YYYY-MM`` → (year, month), clamped to a sane range; today on miss."""
+    from mediahub.content_engine.calendar import today_utc
+
+    t = today_utc()
+    s = (raw or "").strip()
+    if len(s) == 7 and s[4] == "-":
+        try:
+            y, m = int(s[:4]), int(s[5:7])
+            if 1 <= m <= 12 and 1970 <= y <= 2200:
+                return y, m
+        except ValueError:
+            pass
+    return t.year, t.month
+
+
+def _org_calendar_sport(prof, fallback: str = "swimming") -> str:
+    """Resolve the sport whose key-date pack the calendar shows, from the
+    organisation type (same mapping the Plan page uses)."""
+    from mediahub.sport_profiles import list_sport_profiles
+
+    try:
+        avail = {p.sport for p in list_sport_profiles()}
+    except Exception:
+        avail = {"swimming"}
+    s = _ORG_TYPE_TO_SPORT.get(getattr(prof, "org_type", "") or "")
+    return s if s in avail else fallback
+
+
 def create_app() -> Flask:
     # Fail-fast env validation (security/secrets-and-config): production
     # refuses to boot with unsafe config (no DATA_DIR, weak operator key,
@@ -20606,6 +20868,12 @@ def create_app() -> Flask:
 
     _setup_app_logging()
     validate_environment()
+
+    # One-time legacy-secrets cleanup at startup. This scrub used to run on
+    # every load_profile / list_profiles call — an uncached secrets.json read
+    # per call, on the hot active-profile path. The withdrawn token keys are
+    # never written at runtime, so a single scrub per boot is sufficient.
+    _scrub_legacy_secrets_file()
 
     # Python's mimetypes database omits font/woff2 on some Linux systems,
     # causing Flask to serve .woff2 as application/octet-stream and browsers
@@ -21137,6 +21405,65 @@ def create_app() -> Flask:
         except Exception:
             pass
 
+    def _load_profile_cached(pid: str) -> Optional[ClubProfile]:
+        """One ``load_profile`` disk read per profile id per request.
+
+        The active org is resolved 4-5× per request — two ``before_request``
+        hooks plus the handler, and ``_active_profile`` used to load it a
+        second time itself — each an uncached JSON parse (plus, until this
+        change, a per-call ``secrets.json`` scrub). Memoising the loaded
+        profile on ``flask.g`` — exactly as ``_memberships_snapshot`` memoises
+        the membership ledger a few lines above — collapses that to a single
+        read. A save or delete in the same request invalidates the entry
+        (``_invalidate_profile_cache``, wired to ``save_profile`` and the
+        delete/brand-write routes) so tenant gating never reads a stale copy.
+
+        Contract (matching ``_memberships_snapshot``): repeat calls in one
+        request return the SAME object. A caller that mutates it in place MUST
+        then ``save_profile`` (which invalidates) and must not rely on a later
+        read seeing pristine disk state. Handlers that mutate-without-saving
+        should load a fresh copy via ``load_profile`` instead."""
+        try:
+            cache = getattr(g, "_mh_profile_cache", None)
+        except Exception:
+            # No application/request context (e.g. a background call) — read
+            # directly rather than cache.
+            return load_profile(pid)
+        if cache is None:
+            cache = {}
+            try:
+                g._mh_profile_cache = cache
+            except Exception:
+                # Couldn't attach to g — fall back to an uncached read.
+                return load_profile(pid)
+        if pid not in cache:
+            cache[pid] = load_profile(pid)
+        return cache[pid]
+
+    def _invalidate_profile_cache(pid: Optional[str] = None) -> None:
+        """Drop the per-request profile cache after a save or delete so a
+        re-read in the same request sees fresh data. ``pid=None`` clears the
+        whole cache (defensive). Registered as the ``save_profile`` hook, and
+        called directly by the profile-delete route."""
+        try:
+            cache = getattr(g, "_mh_profile_cache", None)
+        except Exception:
+            return
+        if not cache:
+            return
+        if pid is None:
+            cache.clear()
+        else:
+            cache.pop(pid, None)
+
+    # A profile persisted mid-request must drop its cached copy, or a later
+    # read in the same request (tenant gating included) would see stale data.
+    # Registering the hook here covers every save_profile() call automatically,
+    # without threading invalidation through each caller. The few routes that
+    # write a profile another way (save_brand, the delete routes) call
+    # _invalidate_profile_cache explicitly at their call sites.
+    set_profile_saved_hook(_invalidate_profile_cache)
+
     def _snap_is_bound(snap: dict, pid: str) -> bool:
         pid = (pid or "").strip()
         if not pid:
@@ -21285,7 +21612,7 @@ def create_app() -> Flask:
                 session.pop("active_profile_id", None)
                 session.pop("login_seen_at", None)
                 return None
-        prof = load_profile(pid)
+        prof = _load_profile_cached(pid)
         if not prof:
             # Stale pin (the profile was deleted) — drop it and report
             # signed-out rather than guessing another org.
@@ -21308,8 +21635,11 @@ def create_app() -> Flask:
         return prof.profile_id
 
     def _active_profile() -> Optional[ClubProfile]:
+        # _active_profile_id() already resolved and loaded this pid through the
+        # per-request cache, so this is a cache hit — no redundant second disk
+        # load (the review's finding #16).
         pid = _active_profile_id()
-        return load_profile(pid) if pid else None
+        return _load_profile_cached(pid) if pid else None
 
     # Expose the helpers as app-level functions so other routes can reach
     # them without re-implementing the lookup. (Routes defined later in
@@ -30077,7 +30407,11 @@ function mhEraseAthleteConfirm(f) {
         except Exception:
             pass
         if req.request_type == "access":
-            export = _dsr.export_athlete(pid, req.athlete_name)
+            # finding #111 — confine a signed-in regular tenant to its own runs;
+            # ownerless (legacy) runs may belong to another club (ADR-0014 §5).
+            export = _dsr.export_athlete(
+                pid, req.athlete_name, include_ownerless=_ownerless_run_readable()
+            )
             # D-21 — persist the snapshot and redirect back with a confirmation,
             # so the request visibly flips to "completed" and the clock stops,
             # instead of a bare attachment that left the table looking un-actioned.
@@ -30095,7 +30429,12 @@ function mhEraseAthleteConfirm(f) {
             )
             return redirect(url_for("org_athlete_rights"))
         if req.request_type == "erasure":
-            report = _dsr.erase_athlete(pid, req.athlete_name, recorded_by=recorded_by)
+            report = _dsr.erase_athlete(
+                pid,
+                req.athlete_name,
+                recorded_by=recorded_by,
+                include_ownerless=_ownerless_run_readable(),
+            )
             log_store.complete(request_id, note="erasure executed")
             from mediahub.compliance.security_log import record_event
 
@@ -30128,7 +30467,9 @@ function mhEraseAthleteConfirm(f) {
             new_name = (request.form.get("new_name") or "").strip()
             if not new_name:
                 return jsonify({"error": "corrected name required"}), 400
-            _dsr.rectify_athlete_name(pid, req.athlete_name, new_name)
+            _dsr.rectify_athlete_name(
+                pid, req.athlete_name, new_name, include_ownerless=_ownerless_run_readable()
+            )
             log_store.complete(request_id, note=f"rectified to '{new_name}'")
             return redirect(url_for("org_athlete_rights"))
         return jsonify({"error": "unknown request type"}), 400
@@ -30219,7 +30560,9 @@ function mhEraseAthleteConfirm(f) {
             recorded_by = _auth.current_user_email() or ""
         except Exception:
             pass
-        report = _dsr_erase(active, name, recorded_by=recorded_by)
+        report = _dsr_erase(
+            active, name, recorded_by=recorded_by, include_ownerless=_ownerless_run_readable()
+        )
         cascade = report.get("cascade") or {}
         body = (
             '<section class="mh-hero" style="padding-top:var(--sp-7);'
@@ -31002,18 +31345,27 @@ self.addEventListener('fetch', function(e){
             active_n = len(_active_runs)
             active_running = sum(1 for v in _active_runs.values() if v.get("status") == "running")
             ti_n = len(_turn_into_jobs)
-        payload = {
-            "ok": True,
-            "rss_mb": round(rss_mb, 1),
-            "rss_peak_mb": round(peak_mb, 1),
-            "rss_pct_of_2048": round((rss_mb / 2048.0) * 100.0, 1),
-            "active_runs": active_n,
-            "active_runs_running": active_running,
-            "active_runs_limit": _ACTIVE_RUNS_LIMIT,
-            "turn_into_jobs": ti_n,
-            "turn_into_jobs_limit": _TURN_INTO_LIMIT,
-            "ts": datetime.now(timezone.utc).isoformat(),
-        }
+        payload = {"ok": True, "ts": datetime.now(timezone.utc).isoformat()}
+        # RSS, the OOM-ceiling ratio and the in-memory concurrency limits map the
+        # deployment's resource envelope — useful to the operator diagnosing a
+        # restart loop, but reconnaissance for anyone else. Uptime monitors only
+        # need the liveness boolean; the internals are signed-in-operator only,
+        # mirroring /healthz/deps and /healthz/sentinel. (The `_active_runs`
+        # walk above still runs for every caller, so its crash-safety is
+        # exercised regardless of who is looking.)
+        if _auth.is_dev_operator():
+            payload.update(
+                {
+                    "rss_mb": round(rss_mb, 1),
+                    "rss_peak_mb": round(peak_mb, 1),
+                    "rss_pct_of_2048": round((rss_mb / 2048.0) * 100.0, 1),
+                    "active_runs": active_n,
+                    "active_runs_running": active_running,
+                    "active_runs_limit": _ACTIVE_RUNS_LIMIT,
+                    "turn_into_jobs": ti_n,
+                    "turn_into_jobs_limit": _TURN_INTO_LIMIT,
+                }
+            )
         return jsonify(payload)
 
     @app.route("/healthz/deps")
@@ -31169,60 +31521,6 @@ self.addEventListener('fetch', function(e){
     #
     # The numbers come from the SQLite uptime log; honest behaviour
     # when no data exists yet is to say so, not fake 100%.
-    def _format_uptime_pct(stats: dict) -> str:
-        if not stats.get("has_data"):
-            return "&mdash;"
-        pct = float(stats.get("uptime_pct") or 0.0) * 100.0
-        if pct >= 99.995:
-            # Never round a window that had real, counted downtime up to a bare
-            # "100%" — it reads as a contradiction beside the non-zero Downtime
-            # cell on the same row. Show the honest "99.99%" instead; "100%" is
-            # reserved for a genuinely gap-free window.
-            return "100%" if not stats.get("downtime_seconds") else "99.99%"
-        if pct >= 99.9:
-            return f"{pct:.3f}%"
-        if pct >= 95.0:
-            return f"{pct:.2f}%"
-        return f"{pct:.1f}%"
-
-    def _humanize_duration(seconds: int) -> str:
-        seconds = max(0, int(seconds))
-        if seconds < 60:
-            return f"{seconds}s"
-        if seconds < 3600:
-            mins = seconds // 60
-            return f"{mins} min"
-        if seconds < 86400:
-            hrs = seconds // 3600
-            mins = (seconds % 3600) // 60
-            return f"{hrs}h {mins}m" if mins else f"{hrs}h"
-        days = seconds // 86400
-        hrs = (seconds % 86400) // 3600
-        return f"{days}d {hrs}h" if hrs else f"{days}d"
-
-    def _humanize_when(ts: Optional[str]) -> str:
-        if not ts:
-            return "&mdash;"
-        try:
-            parsed = ts
-            if parsed.endswith("Z"):
-                parsed = parsed[:-1] + "+00:00"
-            from datetime import datetime as _dt
-
-            then = _dt.fromisoformat(parsed)
-            delta = datetime.now(timezone.utc) - then
-            secs = int(delta.total_seconds())
-            if secs < 0:
-                return _h(ts[:19])
-            if secs < 60:
-                return f"{secs}s ago"
-            if secs < 3600:
-                return f"{secs // 60} min ago"
-            if secs < 86400:
-                return f"{secs // 3600}h ago"
-            return f"{secs // 86400}d ago"
-        except (ValueError, TypeError):
-            return _h(ts[:19])
 
     def _uptime_tracking_note(*stats: dict) -> str:
         """Explain a clamped uptime window.
@@ -31559,7 +31857,15 @@ self.addEventListener('fetch', function(e){
         few times to land on each worker. Anything in the snapshot
         with ``open: true`` means that worker is currently skipping
         Gemini for the listed cooldown period.
+
+        The breaker counters and — especially — ``providers_configured``
+        (which of the GEMINI/ANTHROPIC keys are set on this deployment) are
+        operator diagnostics, not public information. Anonymous callers get
+        the liveness boolean alone, mirroring /healthz/deps and
+        /healthz/sentinel; the full snapshot is signed-in-operator only.
         """
+        if not _auth.is_dev_operator():
+            return jsonify({"ok": True})
         try:
             from mediahub.media_ai.llm import gemini_breaker_snapshot
 
@@ -31596,7 +31902,14 @@ self.addEventListener('fetch', function(e){
         Lets the operator confirm whether the in-container SearXNG actually
         started — if it's unreachable, MediaHub silently falls back to
         DuckDuckGo, and this endpoint says so.
+
+        Which backend is live (and any endpoint detail in the probe) is a
+        deployment internal, so it is signed-in-operator only. Anonymous
+        monitors get the liveness boolean alone, mirroring /healthz/deps and
+        /healthz/sentinel.
         """
+        if not _auth.is_dev_operator():
+            return jsonify({"ok": True})
         try:
             from mediahub.web_research import searxng_client
 
@@ -32674,6 +32987,11 @@ self.addEventListener('fetch', function(e){
             "source": "ai",
         }
         save_brand(prof.profile_id, kit=kit)
+        # save_brand writes the profile JSON directly (not via save_profile), so
+        # the save hook never fires — drop the cached copy ourselves so any
+        # later read in this request sees the new type pairing, not the pre-save
+        # brand_kit.
+        _invalidate_profile_cache(prof.profile_id)
         return redirect(url_for("settings_section", section="typography", status="pairing-applied"))
 
     # ------------------------------------------------------------------
@@ -34632,33 +34950,6 @@ function mhPlanGenerate(btn) {{
         return _layout("Content plan", body, active="create")
 
     # ---- 1.14 — the Plan calendar (drag-reschedule + key dates) ------------
-
-    def _org_calendar_sport(prof, fallback: str = "swimming") -> str:
-        """Resolve the sport whose key-date pack the calendar shows, from the
-        organisation type (same mapping the Plan page uses)."""
-        from mediahub.sport_profiles import list_sport_profiles
-
-        try:
-            avail = {p.sport for p in list_sport_profiles()}
-        except Exception:
-            avail = {"swimming"}
-        s = _ORG_TYPE_TO_SPORT.get(getattr(prof, "org_type", "") or "")
-        return s if s in avail else fallback
-
-    def _parse_month_param(raw: str):
-        """``YYYY-MM`` → (year, month), clamped to a sane range; today on miss."""
-        from mediahub.content_engine.calendar import today_utc
-
-        t = today_utc()
-        s = (raw or "").strip()
-        if len(s) == 7 and s[4] == "-":
-            try:
-                y, m = int(s[:4]), int(s[5:7])
-                if 1 <= m <= 12 and 1970 <= y <= 2200:
-                    return y, m
-            except ValueError:
-                pass
-        return t.year, t.month
 
     @app.route("/api/plan/calendar", methods=["GET"])
     def api_plan_calendar():
@@ -42226,13 +42517,20 @@ function copySpotlightCaption(btn) {{
 
     # ---- auth rate limiting (Art. 32 / audit finding 1.10) ---------------
     #
-    # Fixed-window, per-IP, per-endpoint, in-process. Two gunicorn workers
-    # means an attacker gets at most 2× the budget — still a hard brake on
-    # online guessing, with zero shared state to corrupt.
+    # Sliding-window, per-IP, per-endpoint. SEC-27: the counter lives in the
+    # shared SQLite DB (auth_brakes), NOT a per-worker dict, so it is consistent
+    # across gunicorn's two workers and survives a --max-requests recycle (the
+    # old per-worker dict was wiped on every recycle, resetting an attacker's
+    # budget). See docs/adr/0030-durable-cross-worker-bruteforce-brakes.md.
+    #
+    # The budget is 20/10-min (not 10) BY DESIGN: it equals the OLD per-worker
+    # budget (10) × the two-worker deployment, so a shared NAT (a club/school on
+    # one address) is locked out no sooner than today's most-lenient case and
+    # strictly later than today's worst case — legit NAT users are never worse
+    # off. Against a sustained attacker durable-20 is far stronger than the old
+    # per-worker-10-that-reset-every-~200-requests. (Shared-NAT analysis: ADR.)
     _AUTH_WINDOW_SECONDS = 600
-    _AUTH_MAX_ATTEMPTS = 10
-    _auth_attempts: dict = {}
-    _auth_attempts_lock = threading.Lock()
+    _AUTH_MAX_ATTEMPTS = 20
 
     def _client_ip() -> str:
         """Proxy-aware client IP for the rate limiters / throttles (ADR-0019).
@@ -42246,21 +42544,13 @@ function copySpotlightCaption(btn) {{
 
     def _auth_rate_limited(bucket: str) -> bool:
         """Record an attempt; True when this IP exceeded the window budget."""
-        now = time.time()
-        key = (bucket, _client_ip())
-        with _auth_attempts_lock:
-            window = [t for t in _auth_attempts.get(key, []) if now - t < _AUTH_WINDOW_SECONDS]
-            window.append(now)
-            _auth_attempts[key] = window
-            # Opportunistic cleanup so the dict can't grow unbounded.
-            if len(_auth_attempts) > 10_000:
-                for k in [
-                    k
-                    for k, v in _auth_attempts.items()
-                    if not v or now - v[-1] > _AUTH_WINDOW_SECONDS
-                ]:
-                    _auth_attempts.pop(k, None)
-            return len(window) > _AUTH_MAX_ATTEMPTS
+        count = _auth_brakes.record_event(
+            f"ip:{bucket}",
+            _client_ip(),
+            now=time.time(),
+            window_secs=_AUTH_WINDOW_SECONDS,
+        )
+        return count > _AUTH_MAX_ATTEMPTS
 
     def _auth_rate_limit_response():
         return (
@@ -42564,6 +42854,15 @@ function copySpotlightCaption(btn) {{
                 session.pop("pending_2fa_email", None)
                 return redirect(url_for("login_page"))
             return _login_2fa_page()
+        # SEC-27: per-IP volume brake on the code-submission POST, matching the
+        # password step's /login brake (it was previously missing here, so TOTP
+        # guessing was bounded only by the per-account lockout). Its OWN bucket
+        # ("login_2fa"), separate from "login", so a shared NAT completing both
+        # steps doesn't compound the two against one budget.
+        if _auth_rate_limited("login_2fa"):
+            return _login_2fa_page(
+                "Too many attempts from your network — wait a few minutes and try again.", 429
+            )
         if _auth.login_locked(email):
             return _login_2fa_page("Too many failed attempts — try again in 15 minutes.", 429)
         store = _user_store()
@@ -43475,17 +43774,6 @@ what you're doing, what they should do.</p>
             "success",
         )
         return redirect(url_for("settings_section", section="developer"))
-
-    def _pounds_to_pence(raw: str) -> int:
-        from decimal import Decimal, InvalidOperation
-
-        try:
-            return int((Decimal((raw or "").strip().lstrip("£")) * 100).quantize(Decimal("1")))
-        except (InvalidOperation, ValueError):
-            return -1
-
-    def _pence_str(p) -> str:
-        return f"£{p / 100:,.2f}" if isinstance(p, int) and p >= 0 else "—"
 
     @app.route("/operator/commercial")
     def operator_commercial():
@@ -45122,6 +45410,10 @@ what you're doing, what they should do.</p>
                 p.unlink()
         except OSError:
             pass
+        # Deleting the file is a mid-request mutation the save hook can't see
+        # (it bypasses save_profile), so drop the cached copy here — otherwise
+        # the _active_profile_id() check below could read the just-deleted org.
+        _invalidate_profile_cache(pid)
         if _active_profile_id() == pid:
             session.pop("active_profile_id", None)
         return redirect(url_for("sign_in_page"))
@@ -45996,7 +46288,9 @@ what you're doing, what they should do.</p>
             return None
         return None
 
-    def _group_approval_block(run_id: str, card_id: str, *, actor_email=None, is_operator=None):
+    def _group_approval_block(
+        run_id: str, card_id: str, *, actor_email=None, is_operator=None, actor_kind="human"
+    ):
         """Record the current user's approval vote and evaluate the kit's
         group-approver rule. Returns (blocked, info_dict).
 
@@ -46008,7 +46302,10 @@ what you're doing, what they should do.</p>
         ``actor_email`` / ``is_operator`` default to the session identity (the
         web route's behaviour, byte-identical), but the public API passes the
         token's owner so an API approval is recorded as that person's vote and
-        the same group rule is enforced — never bypassed.
+        the same group rule is enforced — never bypassed. ``actor_kind``
+        (finding #116) marks a public-API/MCP vote as ``"api_token"`` so the
+        group-approval trail distinguishes an agent from a human; it does not
+        change how votes are counted.
         """
         try:
             prof, kit = _resolved_kit_for_run(run_id)
@@ -46031,7 +46328,7 @@ what you're doing, what they should do.</p>
             ledger = _get_approval_ledger()
             if ledger is None:
                 return False, {}
-            approvers = ledger.record(run_id, card_id, email)
+            approvers = ledger.record(run_id, card_id, email, actor_kind=actor_kind)
             owner_emails = [
                 m.email
                 for m in store.list_for_profile(pid)
@@ -46903,6 +47200,10 @@ what you're doing, what they should do.</p>
         from mediahub.privacy import delete_org
 
         report = delete_org(pid, delete_run=_delete_run)
+        # delete_org unlinks the profile JSON directly (bypassing save_profile),
+        # so drop the cached copy — mirrors the /sign-in/delete fix — before any
+        # later read in this request (e.g. _layout's active-profile chrome).
+        _invalidate_profile_cache(pid)
         session.pop("active_profile_id", None)
         db_rows = sum(report.get("db_rows_deleted", {}).values())
         retained = "".join(f"<li>{_h(r)}</li>" for r in report.get("retained", []))
@@ -50438,6 +50739,10 @@ function mhCertificatesJob(a) {{
 
         payload = request.get_json(silent=True) or {}
         action = payload.get("action", "set_status")
+        # Finding #116: record the signed-in member as the audit actor so the
+        # durable workflow state and telemetry can tell a human's change from an
+        # agent's ("api-token:<id>", stamped on the public-API path).
+        _human_actor = _auth.current_user_email() or ""
 
         if action == "set_status":
             status_str = payload.get("status", "queue")
@@ -50493,7 +50798,7 @@ function mhCertificatesJob(a) {{
                 if _led is not None:
                     _led.clear(run_id, card_id)
             notes = payload.get("notes")
-            ws.set_status(run_id, card_id, status, notes=notes)
+            ws.set_status(run_id, card_id, status, notes=notes, actor=_human_actor)
             # Phase W: approval telemetry (W.14) + records-on-approval (W.3).
             if status in (CardStatus.APPROVED, CardStatus.REJECTED, CardStatus.QUEUE):
                 _action = {
@@ -50506,6 +50811,7 @@ function mhCertificatesJob(a) {{
                     run_id,
                     card_id,
                     _action,
+                    actor=_human_actor,
                 )
             summary = ws.summary(run_id)
             return jsonify({"ok": True, "status": status_str, "summary": summary})
@@ -50536,12 +50842,13 @@ function mhCertificatesJob(a) {{
                         }
                 except Exception:
                     pass
-            ws.set_edits(run_id, card_id, edits)
+            ws.set_edits(run_id, card_id, edits, actor=_human_actor)
             _phase_w_after_status_change(
                 _run_owner_profile_id(run_id) or _active_profile_id() or "",
                 run_id,
                 card_id,
                 "edited",
+                actor=_human_actor,
             )
             # Auto-bump status to 'edited' if currently in queue, so the user
             # sees that this card has been modified. Don't overwrite approved/posted.
@@ -50549,7 +50856,7 @@ function mhCertificatesJob(a) {{
                 cur_state = ws.load(run_id).get(card_id)
                 cur_status = cur_state.status if cur_state else CardStatus.QUEUE
                 if cur_status == CardStatus.QUEUE:
-                    ws.set_status(run_id, card_id, CardStatus.EDITED)
+                    ws.set_status(run_id, card_id, CardStatus.EDITED, actor=_human_actor)
             except Exception:
                 pass
             return jsonify({"ok": True, "status": "edited"})
@@ -50622,6 +50929,8 @@ function mhCertificatesJob(a) {{
                 find_card_in_run,
             )
         owner_pid = _run_owner_profile_id(run_id) or _active_profile_id() or ""
+        # Finding #116: audit actor for bulk approvals (the signed-in member).
+        _human_actor = _auth.current_user_email() or ""
         results: list[dict] = []
         n_ok = 0
         n_blocked = 0
@@ -50665,14 +50974,14 @@ function mhCertificatesJob(a) {{
                 _led = _get_approval_ledger()
                 if _led is not None:
                     _led.clear(run_id, cid)
-            ws.set_status(run_id, cid, status)
+            ws.set_status(run_id, cid, status, actor=_human_actor)
             if status in (CardStatus.APPROVED, CardStatus.REJECTED, CardStatus.QUEUE):
                 _action = {
                     CardStatus.APPROVED: "approved",
                     CardStatus.REJECTED: "rejected",
                     CardStatus.QUEUE: "requeued",
                 }[status]
-                _phase_w_after_status_change(owner_pid, run_id, cid, _action)
+                _phase_w_after_status_change(owner_pid, run_id, cid, _action, actor=_human_actor)
             results.append({"id": cid, "ok": True, "status": status.value})
             n_ok += 1
         summary = ws.summary(run_id)
@@ -65049,36 +65358,16 @@ voice, and queues them for one-click approval.</p>
     def api_visual_get(vid: str):
         if not _v8_ok:
             return jsonify({"error": "v8_unavailable"}), 503
-        active_pid = _active_profile_id()
-        for run_dir in RUNS_DIR.iterdir():
-            if not run_dir.is_dir():
-                continue
-            vdir = run_dir / "visuals"
-            if not vdir.is_dir():
-                continue
-            for sub in vdir.iterdir():
-                if not sub.is_dir():
-                    continue
-                sidecar = sub / "visual.json"
-                if not sidecar.exists():
-                    continue
-                try:
-                    payload = json.loads(sidecar.read_text())
-                except Exception:
-                    continue
-                ids_map = payload.get("visual_ids") or {}
-                if payload.get("id") == vid or vid in ids_map:
-                    # Tenant isolation (org-access audit): a visual belongs to
-                    # the run that produced it, so a foreign org must not read
-                    # its payload (caption, alt text, athlete names). Mirrors
-                    # the sibling /api/runs/<id>/venue-search guard; a run this
-                    # session can't access is skipped, so a foreign visual is
-                    # indistinguishable from a nonexistent one (anti-enumeration).
-                    run_id = run_dir.name
-                    if not _can_access_run(run_id, _load_run(run_id), active_pid):
-                        continue
-                    return jsonify(payload)
-        return jsonify({"error": "not_found"}), 404
+        # #17: O(1) indexed resolve (was an O(all-runs × visuals) walk on this
+        # hot <img src> route). Tenant isolation (org-access audit) is folded in
+        # — a visual belongs to the run that produced it, so a foreign org must
+        # not read its payload (caption, alt text, athlete names); an
+        # inaccessible run is indistinguishable from a nonexistent one.
+        resolved = _resolve_visual(vid, _active_profile_id())
+        if resolved is None:
+            return jsonify({"error": "not_found"}), 404
+        _brief_dir, payload = resolved
+        return jsonify(payload)
 
     _VALID_FORMAT_NAMES = {
         "feed_portrait",
@@ -65100,45 +65389,28 @@ voice, and queues them for one-click approval.</p>
             return "", 503
         from flask import send_file
 
-        active_pid = _active_profile_id()
-        for run_dir in RUNS_DIR.iterdir():
-            if not run_dir.is_dir():
-                continue
-            vdir = run_dir / "visuals"
-            if not vdir.is_dir():
-                continue
-            for brief_dir in vdir.iterdir():
-                if not brief_dir.is_dir():
-                    continue
-                sidecar = brief_dir / "visual.json"
-                if not sidecar.exists():
-                    continue
-                try:
-                    payload = json.loads(sidecar.read_text())
-                except Exception:
-                    continue
-                # Match either the primary id or any id in the visual_ids map
-                ids_map = payload.get("visual_ids") or {}
-                if payload.get("id") != vid and vid not in ids_map:
-                    continue
-                # Tenant isolation (org-access audit): the rendered PNG carries
-                # the same org data as the sidecar above, so gate it the same
-                # way — a run this session can't access is skipped, never served.
-                run_id = run_dir.name
-                if not _can_access_run(run_id, _load_run(run_id), active_pid):
-                    continue
-                # Determine which format to serve. If vid matches a specific format-id, use that format; else use requested format_name.
-                if vid in ids_map:
-                    fmt = ids_map[vid]
-                else:
-                    fmt = format_name
-                candidate = brief_dir / f"{fmt}.png"
-                if candidate.exists():
-                    return send_file(str(candidate), mimetype="image/png")
-                # Fall back to the requested format_name
-                fallback = brief_dir / f"{format_name}.png"
-                if fallback.exists():
-                    return send_file(str(fallback), mimetype="image/png")
+        # #17: O(1) indexed resolve + folded tenant gate (was an O(all-runs ×
+        # visuals) walk on this hot <img src> route). The rendered PNG carries
+        # the same org data as the sidecar, so a run this session can't access
+        # is a 404, never served.
+        resolved = _resolve_visual(vid, _active_profile_id())
+        if resolved is None:
+            return "", 404
+        brief_dir, payload = resolved
+        # Determine which format to serve. If vid matches a specific format-id,
+        # use that format; else use the requested format_name.
+        ids_map = payload.get("visual_ids") or {}
+        if vid in ids_map:
+            fmt = ids_map[vid]
+        else:
+            fmt = format_name
+        candidate = brief_dir / f"{fmt}.png"
+        if candidate.exists():
+            return send_file(str(candidate), mimetype="image/png")
+        # Fall back to the requested format_name
+        fallback = brief_dir / f"{format_name}.png"
+        if fallback.exists():
+            return send_file(str(fallback), mimetype="image/png")
         return "", 404
 
     @app.route("/api/runs/<run_id>/venue-search")
@@ -67013,12 +67285,15 @@ and your lawful basis &mdash; live under
     # ---- W.14 + W.3 approval-seam hook --------------------------------------
 
     def _phase_w_after_status_change(
-        pid: str, run_id: str, card_id: str, action: str, *, via: str = "web"
+        pid: str, run_id: str, card_id: str, action: str, *, via: str = "web", actor: str = ""
     ) -> None:
         """Telemetry + records-on-approval, fed by every approval surface.
 
         Best-effort by design: a telemetry or records failure must never
-        block the approval itself.
+        block the approval itself. ``actor`` (finding #116) is the machine-
+        distinguishable audit label (member email, or ``api-token:<id>`` for a
+        public-API/MCP action) recorded alongside ``via`` in the approval
+        telemetry so agent and human approvals are separable after the fact.
         """
         # Outbound webhook (1.21): a single chokepoint for BOTH the web route and
         # the public API, so every approval fans out identically. Best-effort.
@@ -67059,6 +67334,7 @@ and your lawful basis &mdash; live under
                 tone=(getattr(prof, "tone", "") or "") if prof else "",
                 quality_band=str((card or {}).get("quality_band") or ""),
                 via=via,
+                actor=actor,
             )
         except Exception:
             log.warning("approval telemetry failed", exc_info=True)
@@ -67553,10 +67829,6 @@ and your lawful basis &mdash; live under
             prof = None
         return getattr(prof, "display_name", "") or getattr(prof, "name", "") or ""
 
-    def _safe_filename(title: str, ext: str) -> str:
-        slug = re.sub(r"[^A-Za-z0-9_-]+", "-", str(title or "document")).strip("-").lower()
-        return f"{slug or 'document'}.{ext}"
-
     def _doc_clean_detail(exc) -> str:
         """A user-safe one-line failure reason for a document/PDF-tool error.
 
@@ -67638,32 +67910,6 @@ and your lawful basis &mdash; live under
         from mediahub.email_design import store as _ns
 
         return pid, _ns.load_newsletter(pid, newsletter_id)
-
-    def _nl_range(preset, body):
-        """Resolve a range preset (or a custom start/end) to (start, end) dates."""
-        from datetime import date as _date
-        from datetime import timedelta as _td
-
-        def _iso(v):
-            try:
-                return _date.fromisoformat(str(v)[:10])
-            except (TypeError, ValueError):
-                return None
-
-        today = _date.today()
-        if preset == "custom":
-            return (_iso(body.get("start")) or today.replace(day=1)), (
-                _iso(body.get("end")) or today
-            )
-        if preset == "last_month":
-            last_prev = today.replace(day=1) - _td(days=1)
-            return last_prev.replace(day=1), last_prev
-        if preset == "last_30":
-            return today - _td(days=30), today
-        if preset == "this_season":
-            yr = today.year if today.month >= 9 else today.year - 1
-            return _date(yr, 9, 1), today
-        return today.replace(day=1), today  # this_month (default)
 
     def _nl_resolve_images(spec, resolver):
         """Return a copy of ``spec`` with each card's image ``src`` filled from
@@ -69085,6 +69331,10 @@ and your lawful basis &mdash; live under
         if ws is None:
             return {"error": "unavailable", "message": "Workflow not available."}, 503
         actor_email = payload.get("_actor_email") or ""
+        # Finding #116: the machine-distinguishable audit label for this
+        # public-API/MCP action (e.g. "api-token:<id>"), stamped onto the
+        # durable workflow state and the approval telemetry.
+        actor = payload.get("_actor") or ""
 
         if action == "set_status":
             status_str = payload.get("status", "queue")
@@ -69113,10 +69363,15 @@ and your lawful basis &mdash; live under
                 task_reason = _open_tasks_block_reason(run_id, card_id)
                 if task_reason:
                     return {"error": "tasks_open", "message": task_reason}, 403
-            # Group-approval rule — recorded under the token owner's identity.
+            # Group-approval rule — recorded under the token owner's identity,
+            # but marked api_token so the vote trail shows it came via an agent.
             if status == CardStatus.APPROVED:
                 held, info = _group_approval_block(
-                    run_id, card_id, actor_email=actor_email, is_operator=False
+                    run_id,
+                    card_id,
+                    actor_email=actor_email,
+                    is_operator=False,
+                    actor_kind="api_token",
                 )
                 if held:
                     return {"ok": True, "status": "queue", **info}, 200
@@ -69124,14 +69379,16 @@ and your lawful basis &mdash; live under
                 _led = _get_approval_ledger()
                 if _led is not None:
                     _led.clear(run_id, card_id)
-            ws.set_status(run_id, card_id, status, notes=payload.get("notes"))
+            ws.set_status(run_id, card_id, status, notes=payload.get("notes"), actor=actor)
             if status in (CardStatus.APPROVED, CardStatus.REJECTED, CardStatus.QUEUE):
                 _action = {
                     CardStatus.APPROVED: "approved",
                     CardStatus.REJECTED: "rejected",
                     CardStatus.QUEUE: "requeued",
                 }[status]
-                _phase_w_after_status_change(profile_id, run_id, card_id, _action, via="api")
+                _phase_w_after_status_change(
+                    profile_id, run_id, card_id, _action, via="api", actor=actor
+                )
             return {"ok": True, "status": status_str, "summary": ws.summary(run_id)}, 200
 
         if action == "set_edits":
@@ -69153,13 +69410,15 @@ and your lawful basis &mdash; live under
                         }
                 except Exception:
                     pass
-            ws.set_edits(run_id, card_id, edits)
-            _phase_w_after_status_change(profile_id, run_id, card_id, "edited", via="api")
+            ws.set_edits(run_id, card_id, edits, actor=actor)
+            _phase_w_after_status_change(
+                profile_id, run_id, card_id, "edited", via="api", actor=actor
+            )
             try:
                 cur_state = ws.load(run_id).get(card_id)
                 cur_status = cur_state.status if cur_state else CardStatus.QUEUE
                 if cur_status == CardStatus.QUEUE:
-                    ws.set_status(run_id, card_id, CardStatus.EDITED)
+                    ws.set_status(run_id, card_id, CardStatus.EDITED, actor=actor)
             except Exception:
                 pass
             return {"ok": True, "status": "edited"}, 200

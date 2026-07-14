@@ -112,7 +112,13 @@ def build_content_pack(
         wf = wf_states.get(card_id)
         if wf and wf.status == CardStatus.APPROVED:
             card = dict(ra)
-            card["workflow"] = wf.to_dict()
+            # Finding #116: `actor` is internal approval-audit state — keep it out
+            # of the built pack so approver identities (a member email, or the
+            # token id) are never disclosed through the content:export ZIP. The
+            # pack renderer only uses status + edited_captions, never the actor.
+            _wf = wf.to_dict()
+            _wf.pop("actor", None)
+            card["workflow"] = _wf
             card["_card_id"] = card_id
 
             # Apply brand captions
