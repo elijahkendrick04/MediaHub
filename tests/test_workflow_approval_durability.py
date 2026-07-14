@@ -58,6 +58,24 @@ def test_concurrent_status_writes_on_distinct_cards_all_survive(tmp_path: Path):
     assert summary["approved"] == n, f"lost status updates (last-writer-wins): {summary}"
 
 
+def test_ledger_marks_machine_votes_but_leaves_human_votes_byte_identical(tmp_path: Path):
+    """Finding #116: a public-API/MCP vote is stamped ``actor_kind=api_token`` so
+    the group-approval trail can tell an agent from a human; a human vote stays
+    exactly ``{email, at}`` on disk (no new key), and counting is unchanged."""
+    ledger = ApprovalLedger(tmp_path)
+    ledger.record("runK", "cardA", "member@club")  # human (default)
+    ledger.record("runK", "cardA", "agent@club", actor_kind="api_token")
+
+    raw = json.loads((tmp_path / "runK__approvals.json").read_text())["cardA"]
+    human = next(v for v in raw if v["email"] == "member@club")
+    machine = next(v for v in raw if v["email"] == "agent@club")
+
+    assert set(human.keys()) == {"email", "at"}  # unchanged shape for humans
+    assert machine.get("actor_kind") == "api_token"
+    # Both still count as distinct approvers — attribution, not a power change.
+    assert sorted(ledger.approvers_for("runK", "cardA")) == ["agent@club", "member@club"]
+
+
 def test_corrupt_sidecar_is_preserved_not_wiped(tmp_path: Path):
     store = WorkflowStore(tmp_path)
     path = tmp_path / "runC__workflow.json"

@@ -38,6 +38,13 @@ class CardWorkflowState:
     # display metadata). Approving the card approves its translations with it —
     # a bilingual pair is one approval. None until a translation is requested.
     translations: Optional[dict[str, dict]] = None
+    # Finding #116: who/what last changed this card's status/edits, so the audit
+    # trail distinguishes an agent from a human. A web approval records the
+    # member's email; a public-API/MCP approval records ``api-token:<token_id>``
+    # (MCP is a plain bearer client of /api/v1 and is indistinguishable from a
+    # direct call server-side, so the honest marker is the token, not "mcp").
+    # None on legacy state written before this field existed.
+    actor: Optional[str] = None
 
     def to_dict(self) -> dict:
         d = asdict(self)
@@ -59,4 +66,5 @@ class CardWorkflowState:
             posted_at=d.get("posted_at"),
             last_changed_at=d.get("last_changed_at", ""),
             translations=d.get("translations"),
+            actor=d.get("actor"),
         )

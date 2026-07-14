@@ -46200,7 +46200,9 @@ what you're doing, what they should do.</p>
             return None
         return None
 
-    def _group_approval_block(run_id: str, card_id: str, *, actor_email=None, is_operator=None):
+    def _group_approval_block(
+        run_id: str, card_id: str, *, actor_email=None, is_operator=None, actor_kind="human"
+    ):
         """Record the current user's approval vote and evaluate the kit's
         group-approver rule. Returns (blocked, info_dict).
 
@@ -46212,7 +46214,10 @@ what you're doing, what they should do.</p>
         ``actor_email`` / ``is_operator`` default to the session identity (the
         web route's behaviour, byte-identical), but the public API passes the
         token's owner so an API approval is recorded as that person's vote and
-        the same group rule is enforced — never bypassed.
+        the same group rule is enforced — never bypassed. ``actor_kind``
+        (finding #116) marks a public-API/MCP vote as ``"api_token"`` so the
+        group-approval trail distinguishes an agent from a human; it does not
+        change how votes are counted.
         """
         try:
             prof, kit = _resolved_kit_for_run(run_id)
@@ -46235,7 +46240,7 @@ what you're doing, what they should do.</p>
             ledger = _get_approval_ledger()
             if ledger is None:
                 return False, {}
-            approvers = ledger.record(run_id, card_id, email)
+            approvers = ledger.record(run_id, card_id, email, actor_kind=actor_kind)
             owner_emails = [
                 m.email
                 for m in store.list_for_profile(pid)
@@ -50642,6 +50647,10 @@ function mhCertificatesJob(a) {{
 
         payload = request.get_json(silent=True) or {}
         action = payload.get("action", "set_status")
+        # Finding #116: record the signed-in member as the audit actor so the
+        # durable workflow state and telemetry can tell a human's change from an
+        # agent's ("api-token:<id>", stamped on the public-API path).
+        _human_actor = _auth.current_user_email() or ""
 
         if action == "set_status":
             status_str = payload.get("status", "queue")
@@ -50697,7 +50706,7 @@ function mhCertificatesJob(a) {{
                 if _led is not None:
                     _led.clear(run_id, card_id)
             notes = payload.get("notes")
-            ws.set_status(run_id, card_id, status, notes=notes)
+            ws.set_status(run_id, card_id, status, notes=notes, actor=_human_actor)
             # Phase W: approval telemetry (W.14) + records-on-approval (W.3).
             if status in (CardStatus.APPROVED, CardStatus.REJECTED, CardStatus.QUEUE):
                 _action = {
@@ -50710,6 +50719,7 @@ function mhCertificatesJob(a) {{
                     run_id,
                     card_id,
                     _action,
+                    actor=_human_actor,
                 )
             summary = ws.summary(run_id)
             return jsonify({"ok": True, "status": status_str, "summary": summary})
@@ -50740,12 +50750,13 @@ function mhCertificatesJob(a) {{
                         }
                 except Exception:
                     pass
-            ws.set_edits(run_id, card_id, edits)
+            ws.set_edits(run_id, card_id, edits, actor=_human_actor)
             _phase_w_after_status_change(
                 _run_owner_profile_id(run_id) or _active_profile_id() or "",
                 run_id,
                 card_id,
                 "edited",
+                actor=_human_actor,
             )
             # Auto-bump status to 'edited' if currently in queue, so the user
             # sees that this card has been modified. Don't overwrite approved/posted.
@@ -50753,7 +50764,7 @@ function mhCertificatesJob(a) {{
                 cur_state = ws.load(run_id).get(card_id)
                 cur_status = cur_state.status if cur_state else CardStatus.QUEUE
                 if cur_status == CardStatus.QUEUE:
-                    ws.set_status(run_id, card_id, CardStatus.EDITED)
+                    ws.set_status(run_id, card_id, CardStatus.EDITED, actor=_human_actor)
             except Exception:
                 pass
             return jsonify({"ok": True, "status": "edited"})
@@ -50826,6 +50837,8 @@ function mhCertificatesJob(a) {{
                 find_card_in_run,
             )
         owner_pid = _run_owner_profile_id(run_id) or _active_profile_id() or ""
+        # Finding #116: audit actor for bulk approvals (the signed-in member).
+        _human_actor = _auth.current_user_email() or ""
         results: list[dict] = []
         n_ok = 0
         n_blocked = 0
@@ -50869,14 +50882,14 @@ function mhCertificatesJob(a) {{
                 _led = _get_approval_ledger()
                 if _led is not None:
                     _led.clear(run_id, cid)
-            ws.set_status(run_id, cid, status)
+            ws.set_status(run_id, cid, status, actor=_human_actor)
             if status in (CardStatus.APPROVED, CardStatus.REJECTED, CardStatus.QUEUE):
                 _action = {
                     CardStatus.APPROVED: "approved",
                     CardStatus.REJECTED: "rejected",
                     CardStatus.QUEUE: "requeued",
                 }[status]
-                _phase_w_after_status_change(owner_pid, run_id, cid, _action)
+                _phase_w_after_status_change(owner_pid, run_id, cid, _action, actor=_human_actor)
             results.append({"id": cid, "ok": True, "status": status.value})
             n_ok += 1
         summary = ws.summary(run_id)
@@ -67180,12 +67193,15 @@ and your lawful basis &mdash; live under
     # ---- W.14 + W.3 approval-seam hook --------------------------------------
 
     def _phase_w_after_status_change(
-        pid: str, run_id: str, card_id: str, action: str, *, via: str = "web"
+        pid: str, run_id: str, card_id: str, action: str, *, via: str = "web", actor: str = ""
     ) -> None:
         """Telemetry + records-on-approval, fed by every approval surface.
 
         Best-effort by design: a telemetry or records failure must never
-        block the approval itself.
+        block the approval itself. ``actor`` (finding #116) is the machine-
+        distinguishable audit label (member email, or ``api-token:<id>`` for a
+        public-API/MCP action) recorded alongside ``via`` in the approval
+        telemetry so agent and human approvals are separable after the fact.
         """
         # Outbound webhook (1.21): a single chokepoint for BOTH the web route and
         # the public API, so every approval fans out identically. Best-effort.
@@ -67226,6 +67242,7 @@ and your lawful basis &mdash; live under
                 tone=(getattr(prof, "tone", "") or "") if prof else "",
                 quality_band=str((card or {}).get("quality_band") or ""),
                 via=via,
+                actor=actor,
             )
         except Exception:
             log.warning("approval telemetry failed", exc_info=True)
@@ -69222,6 +69239,10 @@ and your lawful basis &mdash; live under
         if ws is None:
             return {"error": "unavailable", "message": "Workflow not available."}, 503
         actor_email = payload.get("_actor_email") or ""
+        # Finding #116: the machine-distinguishable audit label for this
+        # public-API/MCP action (e.g. "api-token:<id>"), stamped onto the
+        # durable workflow state and the approval telemetry.
+        actor = payload.get("_actor") or ""
 
         if action == "set_status":
             status_str = payload.get("status", "queue")
@@ -69250,10 +69271,15 @@ and your lawful basis &mdash; live under
                 task_reason = _open_tasks_block_reason(run_id, card_id)
                 if task_reason:
                     return {"error": "tasks_open", "message": task_reason}, 403
-            # Group-approval rule — recorded under the token owner's identity.
+            # Group-approval rule — recorded under the token owner's identity,
+            # but marked api_token so the vote trail shows it came via an agent.
             if status == CardStatus.APPROVED:
                 held, info = _group_approval_block(
-                    run_id, card_id, actor_email=actor_email, is_operator=False
+                    run_id,
+                    card_id,
+                    actor_email=actor_email,
+                    is_operator=False,
+                    actor_kind="api_token",
                 )
                 if held:
                     return {"ok": True, "status": "queue", **info}, 200
@@ -69261,14 +69287,16 @@ and your lawful basis &mdash; live under
                 _led = _get_approval_ledger()
                 if _led is not None:
                     _led.clear(run_id, card_id)
-            ws.set_status(run_id, card_id, status, notes=payload.get("notes"))
+            ws.set_status(run_id, card_id, status, notes=payload.get("notes"), actor=actor)
             if status in (CardStatus.APPROVED, CardStatus.REJECTED, CardStatus.QUEUE):
                 _action = {
                     CardStatus.APPROVED: "approved",
                     CardStatus.REJECTED: "rejected",
                     CardStatus.QUEUE: "requeued",
                 }[status]
-                _phase_w_after_status_change(profile_id, run_id, card_id, _action, via="api")
+                _phase_w_after_status_change(
+                    profile_id, run_id, card_id, _action, via="api", actor=actor
+                )
             return {"ok": True, "status": status_str, "summary": ws.summary(run_id)}, 200
 
         if action == "set_edits":
@@ -69290,13 +69318,15 @@ and your lawful basis &mdash; live under
                         }
                 except Exception:
                     pass
-            ws.set_edits(run_id, card_id, edits)
-            _phase_w_after_status_change(profile_id, run_id, card_id, "edited", via="api")
+            ws.set_edits(run_id, card_id, edits, actor=actor)
+            _phase_w_after_status_change(
+                profile_id, run_id, card_id, "edited", via="api", actor=actor
+            )
             try:
                 cur_state = ws.load(run_id).get(card_id)
                 cur_status = cur_state.status if cur_state else CardStatus.QUEUE
                 if cur_status == CardStatus.QUEUE:
-                    ws.set_status(run_id, card_id, CardStatus.EDITED)
+                    ws.set_status(run_id, card_id, CardStatus.EDITED, actor=actor)
             except Exception:
                 pass
             return {"ok": True, "status": "edited"}, 200

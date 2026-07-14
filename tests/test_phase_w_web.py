@@ -275,6 +275,41 @@ class TestRecordsFlow:
         assert summary["total_events"] >= 1
         assert any(a["post_angle"] == "club_record" for a in summary["angles"])
 
+    def test_web_approval_stamps_human_actor(self, env):
+        """Finding #116: a web approval records the signed-in member's email as
+        the actor — the human half of 'distinguish agent from human' — in both
+        the durable workflow state and the approval telemetry (never an
+        ``api-token:`` marker, which is reserved for the public-API path)."""
+        from mediahub.observability.approval_telemetry import _connect
+        from mediahub.workflow.store import WorkflowStore
+
+        c = env["client"]
+        with c.session_transaction() as s:
+            s["active_profile_id"] = "org-alpha"
+            s["user_email"] = "coach@org-alpha.test"
+        r = c.post(
+            f"/api/workflow/{env['run_id']}/swim-1",
+            json={"action": "set_status", "status": "approved"},
+        )
+        assert r.status_code == 200 and r.get_json()["ok"]
+
+        state = WorkflowStore(env["tmp"] / "runs_v4").load(env["run_id"])["swim-1"]
+        assert state.actor == "coach@org-alpha.test"
+        assert not state.actor.startswith("api-token:")
+
+        conn = _connect()
+        try:
+            row = conn.execute(
+                "SELECT via, actor FROM approval_events WHERE run_id=? AND card_id='swim-1'"
+                " AND action='approved'",
+                (env["run_id"],),
+            ).fetchone()
+        finally:
+            conn.close()
+        assert row is not None
+        assert row["actor"] == "coach@org-alpha.test"
+        assert row["via"] == "web"
+
 
 # ---------------------------------------------------------------------------
 # W.12 — certificates export guards
