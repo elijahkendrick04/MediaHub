@@ -43,7 +43,7 @@
   height: {{HEIGHT}}px;
   overflow: hidden;
   isolation: isolate;
-  background: var(--mh-primary);
+  background: var(--mh-ground-gradient, var(--mh-primary));
   color: var(--mh-on-primary);
   font-family: 'Inter', system-ui, -apple-system, sans-serif;
   -webkit-font-smoothing: antialiased;
@@ -133,7 +133,7 @@
   padding: 0 var(--pad);
   background: var(--mh-accent);
   color: var(--mh-primary);
-  box-shadow: 0 16px 40px rgba(0,0,0,0.32);
+  box-shadow: var(--mh-elev-4, 0 16px 40px rgba(0,0,0,0.32));
 }
 .rc__first {
   font-family: 'Space Grotesk', 'Inter', sans-serif;

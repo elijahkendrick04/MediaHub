@@ -432,6 +432,14 @@ def lighten(hex_colour: str, amount: float = 0.25) -> str:
     return _rgb_to_hex((r + (255 - r) * amount, g + (255 - g) * amount, b + (255 - b) * amount))
 
 
+def _mix_hex(a: str, b: str, t: float) -> str:
+    """Blend ``t`` of hex colour ``b`` into hex colour ``a`` (sRGB lerp)."""
+    t = max(0.0, min(1.0, float(t)))
+    ar, ag, ab_ = _hex_to_rgb(a)
+    br, bg, bb = _hex_to_rgb(b)
+    return _rgb_to_hex((ar + (br - ar) * t, ag + (bg - ag) * t, ab_ + (bb - ab_) * t))
+
+
 def _encode_img_data_uri(p: Path) -> str:
     """Read an image from disk and return a base64 ``data:`` URI (the raw work)."""
     raw = p.read_bytes()
@@ -3542,8 +3550,34 @@ def _rel_luminance(hex_colour: str) -> float:
 
 
 def _on_color(hex_colour: str) -> str:
-    """Black or white — whichever reads better as a foreground on ``hex_colour``."""
-    return "#0B0B0C" if _rel_luminance(hex_colour) > 0.42 else "#FFFFFF"
+    """The foreground ink for ``hex_colour`` — a brand-hue-tinted neutral (C2).
+
+    Canva-grade output never sets type in pure ``#000``/``#FFF``: the neutral
+    ink is tinted toward the ground's own hue (quietly — 7% / 97% lightness at
+    low saturation) so the card keeps its colour cast instead of greying out.
+    Legibility beats art: the tinted ink must read at least as well as AAA (or
+    as well as the pure ink would, whichever is the lower bar) or the old
+    binary black/white wins. Deterministic HLS maths, no invented hue — the
+    tint IS the ground's hue.
+    """
+    import colorsys
+
+    dark_ground = _rel_luminance(hex_colour) <= 0.42
+    pure = "#FFFFFF" if dark_ground else "#0B0B0C"
+    try:
+        r, g, b = _hex_to_rgb(hex_colour)
+    except Exception:
+        return pure
+    hue, _l, sat = colorsys.rgb_to_hls(r / 255.0, g / 255.0, b / 255.0)
+    if sat < 0.04:  # a genuinely neutral ground keeps the neutral ink
+        return pure
+    if dark_ground:
+        tr, tg, tb = colorsys.hls_to_rgb(hue, 0.97, 0.16)
+    else:
+        tr, tg, tb = colorsys.hls_to_rgb(hue, 0.07, 0.22)
+    cand = _rgb_to_hex((int(round(tr * 255)), int(round(tg * 255)), int(round(tb * 255))))
+    floor = min(7.0, _contrast_ratio(pure, hex_colour))
+    return cand if _contrast_ratio(cand, hex_colour) >= floor else pure
 
 
 def _contrast_ratio(c1: str, c2: str) -> float:
@@ -3663,7 +3697,29 @@ def _mh_role_vars(palette: dict, brand_kit=None) -> dict[str, str]:
     surface = darken(primary, 0.50)
     on_primary = _on_color(primary)
     on_surface = _on_color(surface)
-    outline = "rgba(255,255,255,0.20)" if on_primary == "#FFFFFF" else "rgba(0,0,0,0.20)"
+    # Ground luminance (not ink equality) decides the outline pole — the C2
+    # tinted inks are near-white/near-black, no longer literal #FFFFFF.
+    dark_ground = _rel_luminance(primary) <= 0.42
+    outline = "rgba(255,255,255,0.20)" if dark_ground else "rgba(0,0,0,0.20)"
+    # C1 (Canva gap analysis) — two derived surface tiers so layouts can build
+    # container/lift layering from the brand seed instead of one flat fill:
+    # surface-2 sits between ground and the deep surface; lift is a quiet
+    # raise of the ground for chip/panel fills. Both same-hue brand maths.
+    surface_2 = darken(primary, 0.30)
+    lift = lighten(primary, 0.10) if dark_ground else darken(primary, 0.08)
+    # C2 — the secondary ink for meta/supporting text: the on-ink pulled 30%
+    # toward the ground, replacing per-layout `opacity: 0.7`-ish greys with a
+    # single tokenised register.
+    ink_secondary = _mix_hex(on_primary, primary, 0.30)
+    # C3 — the VISIBLE second brand colour for the supporting decoration
+    # register (minor rules, alternate dots). The raw secondary of many kits
+    # sits in the ground's own luminance band (navy on navy) where a painted
+    # rule would vanish, so the token degrades to the accent whenever the
+    # secondary lacks real separation from the ground — two-colour ornament
+    # when the brand genuinely has two colours, mono-accent otherwise.
+    secondary_vis = (
+        secondary if abs(_rel_luminance(secondary) - _rel_luminance(primary)) >= 0.12 else accent
+    )
     return {
         "--mh-primary": primary,
         "--mh-secondary": secondary,
@@ -3672,6 +3728,10 @@ def _mh_role_vars(palette: dict, brand_kit=None) -> dict[str, str]:
         "--mh-on-primary": on_primary,
         "--mh-on-surface": on_surface,
         "--mh-outline": outline,
+        "--mh-surface-2": surface_2,
+        "--mh-lift": lift,
+        "--mh-ink-secondary": ink_secondary,
+        "--mh-secondary-vis": secondary_vis,
     }
 
 
@@ -3884,13 +3944,72 @@ def _halftone_mask_tile_uri(tile_px: int) -> str:
     return "data:image/svg+xml;utf8," + svg
 
 
-def _v2_photo_treatment_assets(brief, root_vars: dict[str, str]) -> tuple[str, str]:
-    """``(css, defs_html)`` for the card's requested photo grade (M10).
+def _wash_defs_svg(tint_hex: str, mix: float, saturation: float = 0.4) -> str:
+    """A zero-size SVG carrying the brand colour-wash filter (C5).
 
-    Only ``duotone`` / ``halftone`` produce output — every other treatment
-    returns ``("", "")`` so untreated cards are byte-identical. Both grades are
-    parameterised by the card's resolved ``--mh-*`` roles so the same maths can
-    be mirrored 1:1 into the motion side's photo_filters.tsx.
+    The unification recipe between "raw photo" and "full duotone": partially
+    desaturate, then mix ``mix`` of the deep brand tint into the visible
+    pixels (feComposite arithmetic — alpha passes through unchanged, so a
+    cutout's silhouette is untouched). Mixed-quality club photography washed
+    through the same brand tint reads as one commissioned campaign.
+    """
+    m = max(0.0, min(0.6, float(mix)))
+    return (
+        '<svg width="0" height="0" style="position:absolute" aria-hidden="true">'
+        '<filter id="mh-wash" color-interpolation-filters="sRGB">'
+        f'<feColorMatrix type="saturate" values="{saturation:.2f}" result="mh-w-desat"/>'
+        f'<feFlood flood-color="{tint_hex}" result="mh-w-tint"/>'
+        '<feComposite in="mh-w-tint" in2="SourceAlpha" operator="in" result="mh-w-clip"/>'
+        f'<feComposite in="mh-w-desat" in2="mh-w-clip" operator="arithmetic" '
+        f'k1="0" k2="{1 - m:.3f}" k3="{m:.3f}" k4="0"/>'
+        "</filter></svg>"
+    )
+
+
+def _sticker_outline_css(width: int, height: int, strength: float) -> str:
+    """The die-cut sticker contour for a cutout subject (B5).
+
+    Eight stacked zero-blur drop-shadows trace the alpha silhouette in the
+    card's on-ground ink — the classic Canva/Bleacher-Report cutout edge,
+    which also hides rembg matting fringe. Pure CSS filter maths (the same
+    stack is expressible in the motion grade), radius scaled by canvas and
+    ``decoration_strength``.
+    """
+    s = max(0.0, min(1.0, strength))
+    r = max(3, int(round(min(width, height) * (0.003 + 0.004 * s))))
+    d = max(2, int(round(r * 0.7071)))
+    ink = "var(--mh-on-primary)"
+    shadows = " ".join(
+        f"drop-shadow({dx}px {dy}px 0 {ink})"
+        for dx, dy in (
+            (r, 0),
+            (-r, 0),
+            (0, r),
+            (0, -r),
+            (d, d),
+            (d, -d),
+            (-d, d),
+            (-d, -d),
+        )
+    )
+    return (
+        "\n/* --- B5 die-cut sticker contour --- */\n"
+        f"img.athlete-cutout {{ filter: {shadows}; }}\n"
+    )
+
+
+def _v2_photo_treatment_assets(
+    brief, root_vars: dict[str, str], width: int = 1080, height: int = 1350, cutout_ok: bool = True
+) -> tuple[str, str]:
+    """``(css, defs_html)`` for the card's requested photo grade (M10 + B5/C5).
+
+    Only ``duotone`` / ``halftone`` / ``wash`` / ``sticker`` produce output —
+    every other treatment returns ``("", "")`` so untreated cards are
+    byte-identical. All grades are parameterised by the card's resolved
+    ``--mh-*`` roles so the same maths can be mirrored into the motion side's
+    photo_filters.tsx. ``sticker`` additionally requires a real alpha
+    silhouette (``cutout_ok``) — tracing a full-bleed rectangle would paint a
+    box halo, so a photo-mode / matte-rejected card honestly skips it.
     """
     treatment = (getattr(brief, "photo_treatment", "") or "").strip().lower()
     if treatment == "duotone":
@@ -3912,6 +4031,20 @@ def _v2_photo_treatment_assets(brief, root_vars: dict[str, str]) -> tuple[str, s
             f'  mask-image: url("{uri}"); mask-size: {tile}px {tile}px; }}\n'
         )
         return css, ""
+    if treatment == "wash":
+        strength = float(getattr(brief, "decoration_strength", 0.5) or 0.5)
+        mix = 0.18 + 0.24 * max(0.0, min(1.0, strength))  # 0.18–0.42 tint mix
+        tint = darken(root_vars.get("--mh-primary", "#0A2540"), 0.20)
+        css = (
+            "\n/* --- C5 brand colour-wash (campaign unifier) --- */\n"
+            "img.athlete-cutout { filter: url(#mh-wash); }\n"
+        )
+        return css, _wash_defs_svg(tint, mix)
+    if treatment == "sticker":
+        if not cutout_ok:
+            return "", ""
+        strength = float(getattr(brief, "decoration_strength", 0.5) or 0.5)
+        return _sticker_outline_css(width, height, strength), ""
     return "", ""
 
 
@@ -4104,11 +4237,14 @@ _LAYERED_CUTOUT_ARCHETYPES = frozenset({"poster_name_behind", "band_break"})
 
 
 def _cutout_depth_filter(root_vars: dict[str, str], strength: float) -> str:
-    """The role-coloured depth treatment for a layered cutout (M12).
+    """The role-coloured depth treatment for a layered cutout (M12 + B4).
 
-    A soft dark drop shadow for lift plus a faint accent outer glow, both
-    scaled by ``decoration_strength`` — deterministic colour maths on the
-    card's own resolved roles, never a hardcoded hex.
+    A tight contact shadow that seats the subject, a soft key shadow for
+    lift, and a faint accent outer glow — all scaled by
+    ``decoration_strength`` and painted in the card's hue-tinted shadow
+    colour (elevation.shadow_rgb on the resolved ground), never neutral
+    black and never a hardcoded hex. The two-layer dark contour is what
+    stops a cutout reading as a pasted collage piece.
     """
     s = max(0.0, min(1.0, strength))
     accent = root_vars.get("--mh-accent", "#FFFFFF")
@@ -4116,12 +4252,16 @@ def _cutout_depth_filter(root_vars: dict[str, str], strength: float) -> str:
         ar, ag, ab = _hex_to_rgb(accent)
     except Exception:
         ar, ag, ab = (255, 255, 255)
+    from mediahub.graphic_renderer.elevation import shadow_rgb as _shadow_rgb
+
+    srgb = _shadow_rgb(root_vars.get("--mh-primary", "#0A2540"))
     dy = int(round(10 + 14 * s))
     blur = int(round(24 + 30 * s))
     glow = int(round(8 + 22 * s))
     glow_a = 0.18 + 0.20 * s
     return (
-        f"drop-shadow(0 {dy}px {blur}px rgba(0,0,0,0.45)) "
+        f"drop-shadow(0 {dy}px {blur}px rgba({srgb},0.45)) "
+        f"drop-shadow(0 2px 5px rgba({srgb},0.38)) "
         f"drop-shadow(0 0 {glow}px rgba({ar},{ag},{ab},{glow_a:.2f}))"
     )
 
@@ -4435,6 +4575,40 @@ def _fill_v2_archetype(
     # tint (the metal IS the information, gated the same way). One resolver,
     # shared with the Tier B pool's compliance scoring.
     root_vars = resolved_role_vars_for_brief(brief, brand_kit)
+
+    # B1/B2 (Canva gap analysis) — the elevation system: per-card layered
+    # shadow tokens (--mh-elev-N + drop twins) in a single implied light, all
+    # painted in --mh-shadow-rgb, a hue-tinted dark derived from the resolved
+    # ground so shadows carry the brand's cast instead of greying the card.
+    # Scaled with the canvas short edge so every cut sits in the same
+    # relative light. Deterministic maths on the resolved roles.
+    from mediahub.graphic_renderer.elevation import elevation_vars as _elevation_vars
+
+    root_vars.update(
+        _elevation_vars(root_vars.get("--mh-primary", "#0A2540"), scale=min(width, height) / 1080)
+    )
+
+    # B3 (Canva gap analysis) — surfaces read as lit material, not flat hex:
+    # a 4.5% lit→shaded vertical micro-gradient on the brand ground, emitted
+    # only when the headline ink still clears the APCA gate against the
+    # SHADED (worst-case) endpoint. Layout roots consume it as
+    # ``background: var(--mh-ground-gradient, var(--mh-primary))`` so a
+    # gate-failing card falls back to the flat fill it always had.
+    _ground_hex = root_vars.get("--mh-primary", "#0A2540")
+    _ink_hex = root_vars.get("--mh-on-primary", "#FFFFFF")
+    try:
+        _lit = lighten(_ground_hex, 0.045)
+        _shaded = darken(_ground_hex, 0.045)
+        from mediahub.quality.compliance import is_legible as _is_legible_ink
+
+        _grad_ok = bool(_is_legible_ink(_ink_hex, _shaded, min_lc=45.0))
+    except Exception:
+        _lit = _shaded = ""
+        _grad_ok = False
+    if _grad_ok and _lit and _shaded:
+        root_vars["--mh-ground-gradient"] = (
+            f"linear-gradient(180deg, {_lit} 0%, {_ground_hex} 52%, {_shaded} 100%)"
+        )
     # Size the hero slots SINGLE-LINE: the v2 layouts render name/result with
     # `white-space: nowrap`, so a long or multi-word surname ("Van Dyk") must
     # shrink rather than overflow. The per-layout defaults handle the short case.
@@ -4591,12 +4765,18 @@ def _fill_v2_archetype(
                 " transform-origin: var(--mh-photo-pos, center 28%%); }\n" % _intent
             )
 
-    # M10 — true brand duotone / real halftone. CSS rides BASE_CSS; the SVG
-    # filter defs ride the {{ACCENT_DECORATION}} slot (inside the archetype
-    # root, zero-size). Untreated cards emit neither.
+    # M10 + B5/C5 — true brand duotone / real halftone / brand wash / sticker
+    # contour. CSS rides BASE_CSS; the SVG filter defs ride the
+    # {{ACCENT_DECORATION}} slot (inside the archetype root, zero-size).
+    # Untreated cards emit neither. The sticker contour needs a real alpha
+    # silhouette, so a photo-mode archetype or a matte-gate flat fallback
+    # honestly skips it.
     treatment_css, treatment_defs = ("", "")
     if athlete_path:
-        treatment_css, treatment_defs = _v2_photo_treatment_assets(brief, root_vars)
+        _cutout_ok = (getattr(brief, "photo_mode", "") or "") == "cutout" and not photo_flat
+        treatment_css, treatment_defs = _v2_photo_treatment_assets(
+            brief, root_vars, width, height, _cutout_ok
+        )
     if treatment_css:
         extra_css += treatment_css
     if treatment_defs:

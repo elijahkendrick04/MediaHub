@@ -38,7 +38,7 @@
   width: {{WIDTH}}px;
   height: {{HEIGHT}}px;
   overflow: hidden;
-  background: var(--mh-primary);
+  background: var(--mh-ground-gradient, var(--mh-primary));
   color: var(--mh-on-primary);
   font-family: 'Inter', system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
@@ -79,7 +79,7 @@
   background: var(--mh-surface); color: var(--mh-on-surface);
   border-top: 8px solid var(--mh-accent);
   border-bottom: 8px solid var(--mh-accent);
-  box-shadow: 0 30px 70px rgba(0,0,0,0.45);
+  box-shadow: var(--mh-elev-5, 0 30px 70px rgba(0,0,0,0.45));
   padding: 40px 64px 44px;
   display: flex; flex-direction: column; gap: 8px;
 }

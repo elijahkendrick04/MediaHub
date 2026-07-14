@@ -1337,9 +1337,42 @@ function packTextureImage(texture: string): string | null {
 }
 
 // Accent geometry confined to the margins, painted in the resolved accent role.
+// WCAG relative luminance — mirrors render._rel_luminance for the C3
+// secondary-vis guard, so still and motion agree on when the second brand
+// colour is visible enough to paint.
+function relLuminance(hex: string): number {
+  const h = (hex || "").trim().replace(/^#/, "");
+  const full = h.length === 3 ? h.split("").map((c) => c + c).join("") : h;
+  if (!/^[0-9a-fA-F]{6}$/.test(full)) {
+    return 0;
+  }
+  const chan = (c: number): number => {
+    const x = c / 255;
+    return x <= 0.03928 ? x / 12.92 : Math.pow((x + 0.055) / 1.055, 2.4);
+  };
+  return (
+    0.2126 * chan(parseInt(full.slice(0, 2), 16)) +
+    0.7152 * chan(parseInt(full.slice(2, 4), 16)) +
+    0.0722 * chan(parseInt(full.slice(4, 6), 16))
+  );
+}
+
+// C3 parity: the still's --mh-secondary-vis — the brand secondary when it has
+// real luminance separation from the ground, else the accent (mono-accent
+// ornament for single-colour kits). Same 0.12 threshold as the Python side.
+function secondaryVisFor(brand: BrandProps, ground: string, accent: string): string {
+  const sec = brand.secondary || "";
+  if (sec && Math.abs(relLuminance(sec) - relLuminance(ground)) >= 0.12) {
+    return sec;
+  }
+  return accent;
+}
+
 function packAccentGeometry(
   style: string, width: number, height: number, bold: boolean, accent: string,
+  secondaryVis?: string,
 ): React.ReactNode {
+  const sec = secondaryVis || accent;
   const mult = bold ? 1.35 : 1.0;
   const weight = Math.max(3, Math.round(Math.min(width, height) * 0.006 * mult));
   const m = Math.min(width, height);
@@ -1397,7 +1430,7 @@ function packAccentGeometry(
       return (
         <>
           <div style={{ position: "absolute", left: inset, right: inset, bottom, height: bh, background: accent }} />
-          <div style={{ position: "absolute", left: inset, right: inset, bottom: bottom + gap, height: bh, background: accent, opacity: 0.55 }} />
+          <div style={{ position: "absolute", left: inset, right: inset, bottom: bottom + gap, height: bh, background: sec, opacity: 0.55 }} />
         </>
       );
     }
@@ -1408,7 +1441,7 @@ function packAccentGeometry(
       return (
         <div style={{ position: "absolute", left: 0, right: 0, bottom, display: "flex", justifyContent: "center", gap }}>
           {[0, 1, 2, 3, 4, 5].map((i) => (
-            <span key={i} style={{ width: d, height: d, borderRadius: "50%", background: accent, display: "inline-block" }} />
+            <span key={i} style={{ width: d, height: d, borderRadius: "50%", background: i % 2 === 0 ? accent : sec, display: "inline-block" }} />
           ))}
         </div>
       );
@@ -1635,7 +1668,10 @@ const StylePackLayer: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
       );
     }
   }
-  const geo = packAccentGeometry(pack.accentGeo, width, height, pack.bold, accent);
+  const geo = packAccentGeometry(
+    pack.accentGeo, width, height, pack.bold, accent,
+    secondaryVisFor(ctx.brand, roles.ground || "#0A2540", accent),
+  );
   if (geo) {
     children.push(<React.Fragment key="geo">{geo}</React.Fragment>);
   }

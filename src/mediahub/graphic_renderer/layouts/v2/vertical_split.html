@@ -42,7 +42,7 @@
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  background: var(--mh-primary);
+  background: var(--mh-ground-gradient, var(--mh-primary));
   color: var(--mh-on-primary);
   font-family: 'Inter', system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
@@ -97,7 +97,7 @@
 .vs__seam {
   flex: 0 0 auto; height: 12px;
   background: var(--mh-accent);
-  box-shadow: 0 0 40px rgba(0,0,0,0.35);
+  box-shadow: var(--mh-elev-3, 0 0 40px rgba(0,0,0,0.35));
   position: relative; z-index: 3;
 }
 

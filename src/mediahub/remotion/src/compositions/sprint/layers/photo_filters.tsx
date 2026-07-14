@@ -217,6 +217,21 @@ function baseStackFor(treatment: string): FilterStack | null {
         grayscale: 0,
         sepia: 0,
       };
+    case "wash":
+      // C5 brand colour-wash: the still runs a partial desaturation + a deep
+      // brand-tint mix (render._wash_defs_svg). The motion grade carries the
+      // desaturation half; the tint mix needs the resolved tint hex plumbed
+      // into the props before it can mirror exactly (roadmap).
+      return {
+        brightness: 0.98,
+        contrast: 1.02,
+        saturate: 0.55,
+        grayscale: 0,
+        sepia: 0,
+      };
+    // "sticker" (B5) is a structural cutout contour, not a grade — the still
+    // is authoritative; the outline stack mirrors here once the outline ink
+    // reaches the props (roadmap). Falls through to the no-grade default.
     default:
       return null;
   }

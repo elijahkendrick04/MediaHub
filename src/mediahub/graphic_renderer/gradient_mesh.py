@@ -453,10 +453,22 @@ def build_mesh_svg(
     chosen = mode if mode in MESH_MODES else mesh_mode_for_seed(seed)
     field = _field(rls, inten)
     body = _BUILDERS[chosen](field, _Seq(f"{chosen}:{seed}"), w, h, inten)
+    # C8 (Canva gap analysis) — grainy-gradient dither: a faint fractal-noise
+    # layer over the soft colour field breaks the 8-bit banding a long
+    # dark-to-dark gradient shows at 1080px+ and reads as print texture.
+    # Deterministic (fixed feTurbulence seed, no randomness), self-contained
+    # inside the same SVG asset, and quiet enough (5%) that the APCA-clamped
+    # stop colours still govern every legibility decision.
+    grain = (
+        '<filter id="mh-mesh-grain"><feTurbulence type="fractalNoise" '
+        'baseFrequency="0.65" numOctaves="2" seed="7" stitchTiles="stitch"/>'
+        "</filter>"
+        f'<rect width="{w}" height="{h}" filter="url(#mh-mesh-grain)" opacity="0.05"/>'
+    )
     return (
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" '
         f'viewBox="0 0 {w} {h}" preserveAspectRatio="none" '
-        f'data-mh-mesh="{chosen}">{body}</svg>'
+        f'data-mh-mesh="{chosen}">{body}{grain}</svg>'
     )
 
 

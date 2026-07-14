@@ -109,11 +109,22 @@ ACCENT_TREATMENTS: tuple[str, ...] = (
 # default (no grade). Structural values ("no-photo", "frame") are deliberately
 # NOT offered here: whether a card carries a photo is a pipeline/caller
 # decision, never an art-direction whim.
+#
+# Canva gap analysis additions (B5/C5): "wash" is the soft brand colour-wash
+# between raw photo and full duotone (partial desaturation + a bounded mix
+# toward the deep brand primary — the treatment that makes mixed club
+# photography read as one commissioned campaign); "sticker" traces the cutout
+# silhouette with a die-cut contour in the card's on-ground ink (which also
+# masks background-removal edge fringe). Both are still-authoritative; the
+# motion side carries wash as a saturation grade and treats sticker as
+# structural until the outline parameters are plumbed into the props.
 PHOTO_TREATMENTS: tuple[str, ...] = (
     "cutout",
     "duotone",
     "halftone",
     "vignette",
+    "wash",
+    "sticker",
 )
 
 LOGO_LOCKUPS: tuple[str, ...] = (
