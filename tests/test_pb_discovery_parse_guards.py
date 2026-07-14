@@ -52,14 +52,39 @@ class TestF01RelayRejection:
             ("4x100 Free Relay", True),
             ("4 × 100 Medley Relay", True),  # unicode multiplication sign
             ("4X50 Free", True),  # bare N x DIST, capital X
-            ("Freestyle Relay 3:45.00", True),  # word only, no "N x"
+            ("Freestyle Relay 3:45.00", True),  # word after stroke, no "N x"
+            ("Relay 100m Free 3:45", True),  # word before distance
+            ("Medley Relay 200m", True),
+            ("IM Relay 1:52", True),
             ("Mixed 4 x 50m Medley Relay 1:52.33", True),
             ("100m Freestyle 58.90", False),  # individual — must survive
             ("200m Individual Medley 2:20.10", False),  # 'Medley' alone is not a relay
+            # A meet/venue name containing "relay" must NOT flag an individual row:
+            # "relay" here is not adjacent to the event's stroke/distance.
+            ("100m Freestyle 58.21 LC 15/03/2024 City of Manchester Relays", False),
+            ("50m Freestyle 24.10 Summer 2024 Relays", False),
         ],
     )
     def test_is_relay_row(self, text, is_relay):
         assert _is_relay_row(text) is is_relay
+
+    def test_relay_named_meet_does_not_drop_individual_pb(self):
+        # Regression (adversarial finding): the heuristic scans the whole row,
+        # incl. a Meet column. A meet named "…Relays" must not suppress the real
+        # individual PB in that row.
+        page = _page(
+            tables=[
+                [
+                    ["Event", "Time", "Course", "Date", "Meet"],
+                    ["100m Freestyle", "58.21", "LC", "15/03/2024", "City of Manchester Relays"],
+                    ["200m Freestyle", "2:05.43", "LC", "10/02/2024", "Summer Meet"],
+                ]
+            ]
+        )
+        rows = _heuristic_extract_pbs(page)
+        got = {r.event: r.time_canonical for r in rows}
+        assert got.get("100m Freestyle") == "58.21"
+        assert got.get("200m Freestyle") == "2:05.43"
 
     def test_heuristic_table_drops_relay_keeps_individual(self):
         page = _page(

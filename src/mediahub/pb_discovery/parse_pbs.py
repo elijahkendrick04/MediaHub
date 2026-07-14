@@ -91,11 +91,25 @@ _DATE_RE = re.compile(
     r"\b(\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4}|\d{4}[\/\-\.]\d{2}[\/\-\.]\d{2})\b"
 )
 
-# Relay pattern: an "N x DIST" leg count or the literal word "relay". A relay
-# split ("4 x 100m Freestyle Relay 3:45.00") must never seed an individual-event
-# PB baseline — it would make every real individual swim look like a huge new PB
-# (F01). "×" is the Unicode multiplication sign for "4 × 100" layouts.
-_RELAY_RE = re.compile(r"\brelays?\b|\b\d+\s*[x×]\s*\d", re.IGNORECASE)
+# Relay pattern. A relay split ("4 x 100m Freestyle Relay 3:45.00") must never
+# seed an individual-event PB baseline — it would make every real individual swim
+# look like a huge new PB (F01). Two independent signals:
+#   * an "N x DIST" leg count ("4 x 100", "4×100", "4X50") — always a relay;
+#   * the word "relay" *adjacent to the event descriptor* (a stroke or an "Nm"
+#     distance, either order). Requiring adjacency stops a meet/venue name that
+#     merely contains "Relays" (e.g. "Manchester Relays") from suppressing a real
+#     individual PB on the heuristic path, which scans the whole row including the
+#     meet column. "×" is the Unicode multiplication sign for "4 × 100" layouts.
+_STROKE_WORD = (
+    r"(?:free(?:style)?|back(?:stroke)?|breast(?:stroke)?|butt?erfly|fly|medley|i\.?m\.?)"
+)
+_DIST_TOKEN = r"(?:\d{2,4}\s*m)"
+_RELAY_RE = re.compile(
+    r"\b\d+\s*[x×]\s*\d"  # "N x DIST" leg count
+    r"|(?:" + _DIST_TOKEN + "|" + _STROKE_WORD + r")\s+relays?\b"  # "<distance|stroke> relay"
+    r"|\brelays?\s+(?:leg|split|team|" + _DIST_TOKEN + "|" + _STROKE_WORD + r")",  # "relay <…>"
+    re.IGNORECASE,
+)
 
 
 def _detect_course(text: str) -> Optional[str]:
@@ -137,8 +151,9 @@ def _is_relay_row(text: str) -> bool:
 
     A relay split ("4 x 100m Freestyle Relay 3:45.00") otherwise parses into a
     bogus individual-event baseline ("100m Freestyle" @ 3:45.00) that makes
-    every real individual swim look like a huge new PB (F01). Detected on both
-    the "N x DIST" leg form and the literal word "relay".
+    every real individual swim look like a huge new PB (F01). Detected via the
+    "N x DIST" leg form or the word "relay" adjacent to the event descriptor
+    (see ``_RELAY_RE``).
     """
     return bool(_RELAY_RE.search(text or ""))
 
@@ -167,6 +182,12 @@ def _heuristic_extract_pbs(page: ProfilePage) -> list[PBRow]:
     # fallback for rows that carry no marker of their own, and is None when the
     # page mixes long- and short-course sections so a marker-bearing row keeps
     # its own course instead of being flattened to the page's first marker (F09).
+    # Known limitation (heuristic path only): a bare "SC"/"LC" club suffix in a
+    # row text (e.g. "Anytown SC") is indistinguishable from a course token, so a
+    # course-less row on a page that also has a stray opposite marker can resolve
+    # to the club's course. Tolerated over risking the per-row win: the primary
+    # interpreter path is immune (it reads only event headers, not the meet/club),
+    # and the failure is a safe false-negative, never a fabricated PB.
     page_course = _detect_course(page.text)
 
     # Try extracting from tables first (more structured)
