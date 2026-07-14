@@ -232,7 +232,7 @@ def _design_spec_system_prompt(archetypes: list[str], token_roles: list[str]) ->
         '  "archetype": <one archetype name from the list>,\n'
         '  "colour_roles": {"ground": <role>, "surface": <role>, "headline": <role>, "accent": <role>},\n'
         '  "focal_element": "athlete_cutout|athlete_photo|big_number|medal|logo|none",\n'
-        '  "crop_intent": "tight_portrait|rule_of_thirds_action|centered|full_bleed|original",\n'
+        '  "crop_intent": "smart|tight_portrait|rule_of_thirds_action|centered|full_bleed|original",\n'
         '  "hero_stat": "final_time|pb_delta|placing|relay_split|event|points",\n'
         '  "secondary_stats": [<stat>, ...],\n'
         '  "headline_hook": <<=80 chars, no emoji; ground it in THIS result '
@@ -277,7 +277,11 @@ def _design_spec_system_prompt(archetypes: list[str], token_roles: list[str]) ->
         "photo_treatment is normally cutout (clean). Reach for duotone or "
         "halftone only when an editorial, monochrome grade suits the mood, and "
         "vignette to pull focus onto the athlete — never to disguise a weak "
-        "photo, and never on a card without one."
+        "photo, and never on a card without one.\n"
+        "crop_intent smart hands framing to the smartcrop scorer: it picks the "
+        "zoom, places the subject on a rule-of-thirds line, and punches in on a "
+        "distant subject — a strong default when you want editorial framing but "
+        "have no specific crop in mind."
     )
 
 
@@ -292,7 +296,7 @@ def _photo_context(photo_facts: Optional[dict]) -> str:
     if not isinstance(photo_facts, dict):
         return ""
     if not photo_facts.get("has_photo"):
-        return "PHOTO: none available — pick a type-led composition; " "never a photo-led stage."
+        return "PHOTO: none available — pick a type-led composition; never a photo-led stage."
     bits = []
     asset_type = str(photo_facts.get("asset_type") or "").strip()
     orientation = str(photo_facts.get("orientation") or "").strip()

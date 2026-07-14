@@ -40,13 +40,29 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Dict, Iterable, List, Tuple, Union
+from typing import Dict, Iterable, List, NamedTuple, Optional, Tuple, Union
 
 import numpy as np
 from PIL import Image
 
 Crop = Tuple[int, int, int, int]
 RatioSpec = Union[str, float, int, Tuple[int, int]]
+
+
+class SmartCrop(NamedTuple):
+    """A smartcrop-style crop: the window ``(x, y, w, h)`` plus the CSS ``zoom``.
+
+    ``zoom`` (≥ 1.0) is how much the still/motion photo layer must scale the
+    ``object-fit: cover`` image to present this crop — 1.0 is the largest crop
+    (today's answer, no punch-in). ``x, y, w, h`` are original-image pixels.
+    """
+
+    x: int
+    y: int
+    w: int
+    h: int
+    zoom: float
+
 
 # Energy is computed on a downscaled working copy — the chosen crop offset is
 # resolution-independent (a fraction of the free axis), so the small map gives
@@ -436,6 +452,413 @@ def _slide(value: float, hi: int) -> int:
     return pos
 
 
+# --------------------------------------------------------------------------- #
+# Smart crop (E2, Canva gap analysis / photo-imagery) — multi-scale candidate
+# scoring, rule-of-thirds placement, headroom, subject punch-in.
+#
+# smartcrop.js (MIT) slides candidate crops from maxScale 1.0 down to minScale
+# in 0.1 steps over edge/skin/saturation feature maps with a rule-of-thirds
+# importance bump and an edge penalty; a distant subject earns a punch-in, a
+# subject that fills the frame keeps full context. This is a deterministic
+# integer-maths port that runs on the same working grid as ``best_crop``, so
+# it stays on the engine's deterministic side (no LLM, no randomness). It is
+# additive: ``best_crop`` / ``focus_position`` are unchanged, and when the
+# scorer's winner equals today's largest-crop answer the emitted vars are
+# byte-identical, so a card only changes when the scorer genuinely reframes it.
+# --------------------------------------------------------------------------- #
+
+# Candidate zoom levels, largest (most context) first so ties prefer less
+# punch-in — a tighter crop must strictly out-score full context to win.
+_SMART_SCALES: Tuple[float, ...] = (1.0, 0.9, 0.8, 0.7, 0.6)
+# CSS-zoom ceiling: never punch past this (matches the tight_portrait cap, so a
+# crop never degrades resolution more than ~1.3x).
+_SMART_MAX_ZOOM = 1.30
+# The scorer runs on a coarse grid — subject placement is a low-frequency
+# decision, so a small grid gives the same argmax far cheaper.
+_SCORE_MAX = 96
+# Importance-function weights (smartcrop.js lineage).
+_EDGE_WEIGHT = 3.0  # penalty for saliency pushed into the crop edges
+_THIRDS_WEIGHT = 1.1  # reward for saliency on the rule-of-thirds power lines
+_ZOOM_COST = 0.08  # a punch-in must beat full context by this margin per unit
+_HEADROOM_BAND = 0.06  # keep ~6% of frame height above the subject's head
+# Subject-size punch-in floor (Canva gap: "punch in when the subject bbox
+# occupies < ~20% of frame"). A subject smaller than the trigger is enlarged
+# toward the target fill, snapped to the 0.1 scale grid and bounded by the zoom
+# cap. A subject that already fills the frame is never punched in.
+_PUNCH_TRIGGER = 0.50  # subject max-extent below this is a candidate for punch-in
+_PUNCH_TARGET = 0.66  # enlarge the subject toward this fraction of the crop
+
+
+def _score_saliency(
+    image_path: Union[str, Path], mask_path: Union[str, Path, None] = None
+) -> Tuple[int, int, np.ndarray, bool]:
+    """The scorer's saliency grid: alpha subject when present, else edge+skin+sat.
+
+    Returns ``(width, height, sal, is_alpha)`` where ``sal`` is a non-negative
+    float grid on the ≤``_SCORE_MAX`` working size. The alpha path IS the
+    subject silhouette; the gradient path blends edge energy with a skin-tone
+    and a saturation map so the athlete (not the lane ropes) reads as salient.
+    """
+    with Image.open(image_path) as im:
+        im.load()
+        width, height = im.size
+        # An external cutout's alpha steers the original's crop (parity with
+        # focus_position_with_mask); otherwise read the image's own alpha.
+        mask_im = None
+        if mask_path and str(mask_path) != str(image_path):
+            try:
+                with Image.open(mask_path) as mim:
+                    mim.load()
+                    mask_im = _alpha_mask(mim)
+            except Exception:
+                mask_im = None
+        alpha = mask_im if mask_im is not None else _alpha_mask(im)
+        sw, sh = _score_work_size(width, height)
+        if alpha is not None:
+            sal = np.asarray(alpha.resize((sw, sh), Image.BILINEAR), dtype=np.float32)
+            return width, height, sal, True
+        rgb = im.convert("RGB").resize((sw, sh), Image.BILINEAR)
+    arr = np.asarray(rgb, dtype=np.float32)
+    lum = arr @ np.array([0.2126, 0.7152, 0.0722], dtype=np.float32)
+    edges = _gradient_energy(lum)
+    edges = edges / (float(edges.max()) or 1.0)
+    skin = _skin_map(arr)
+    sat = _saturation_map(arr)
+    sal = edges + 0.6 * skin + 0.3 * sat
+    return width, height, sal, False
+
+
+def _score_work_size(width: int, height: int) -> Tuple[int, int]:
+    longest = max(width, height)
+    if longest <= _SCORE_MAX:
+        return max(1, width), max(1, height)
+    scale = _SCORE_MAX / longest
+    return max(1, round(width * scale)), max(1, round(height * scale))
+
+
+def _skin_map(rgb: np.ndarray) -> np.ndarray:
+    """A 0–1 skin-likeness map (deterministic RGB heuristic).
+
+    Not face detection — a cheap prior that a warm, moderately-bright,
+    R>G>B pixel is more likely the athlete than blue water or a dark wall, so
+    the crop biases toward people. Pure elementwise maths.
+    """
+    r, g, b = rgb[..., 0], rgb[..., 1], rgb[..., 2]
+    mx = np.maximum(np.maximum(r, g), b)
+    mn = np.minimum(np.minimum(r, g), b)
+    like = (
+        (r > 95) & (g > 40) & (b > 20) & ((mx - mn) > 15) & (np.abs(r - g) > 15) & (r > g) & (r > b)
+    )
+    return like.astype(np.float32)
+
+
+def _saturation_map(rgb: np.ndarray) -> np.ndarray:
+    """A 0–1 saturation map — vivid pixels (kit, medals) carry more interest."""
+    mx = np.maximum(np.maximum(rgb[..., 0], rgb[..., 1]), rgb[..., 2])
+    mn = np.minimum(np.minimum(rgb[..., 0], rgb[..., 1]), rgb[..., 2])
+    return np.where(mx > 0, (mx - mn) / mx, 0.0).astype(np.float32)
+
+
+def _importance_kernel(cw: int, ch: int, thirds: bool) -> np.ndarray:
+    """The per-pixel importance weighting for a ``cw×ch`` crop (smartcrop.js).
+
+    Positive toward the centre (``1.41 − radial``), penalised toward the edges,
+    and — unless ``thirds`` is off (a symmetric composition) — bumped on the
+    rule-of-thirds power lines so saliency there is rewarded.
+    """
+    xs = (np.arange(cw, dtype=np.float32) + 0.5) / cw
+    ys = (np.arange(ch, dtype=np.float32) + 0.5) / ch
+    px = np.abs(0.5 - xs) * 2.0  # 0 at centre → 1 at the crop edge
+    py = np.abs(0.5 - ys) * 2.0
+    PX, PY = np.meshgrid(px, py)
+    centre = 1.41 - np.sqrt(PX * PX + PY * PY)
+    edge = -(np.maximum(PX - 0.8, 0.0) ** 2 + np.maximum(PY - 0.8, 0.0) ** 2) * _EDGE_WEIGHT
+    imp = centre + edge
+    if thirds:
+        imp = imp + (_thirds_bump(PX) + _thirds_bump(PY)) * _THIRDS_WEIGHT
+    return imp.astype(np.float32)
+
+
+def _thirds_bump(p: np.ndarray) -> np.ndarray:
+    """A triangular bump peaking on the thirds power line (centre-distance 1/3)."""
+    return np.maximum(0.0, 1.0 - np.abs(p - (1.0 / 3.0)) / 0.18)
+
+
+def _crop_dims(sw: int, sh: int, ratio: float, scale: float) -> Tuple[int, int]:
+    """Grid crop dims of ``ratio`` at ``scale`` of the largest fitting crop."""
+    if ratio >= sw / sh:
+        base_w = sw
+        base_h = min(sh, max(1, round(sw / ratio)))
+    else:
+        base_h = sh
+        base_w = min(sw, max(1, round(sh * ratio)))
+    cw = max(1, min(sw, round(base_w * scale)))
+    ch = max(1, min(sh, round(base_h * scale)))
+    return cw, ch
+
+
+def _positions(free: int, count: int = 12) -> List[int]:
+    """Up to ``count+1`` evenly-spaced slide positions across ``[0, free]``."""
+    if free <= 0:
+        return [0]
+    step = max(1, free // count)
+    xs = list(range(0, free + 1, step))
+    if xs[-1] != free:
+        xs.append(free)
+    return xs
+
+
+def _best_position_at_scale(
+    sal: np.ndarray, ratio: float, scale: float, thirds: bool
+) -> Tuple[float, float, float]:
+    """Argmax ``(score, cx, cy)`` for one scale — the best placement of a crop
+    of this size over the saliency grid (centre fractions in [0, 1])."""
+    sh, sw = sal.shape
+    cw, ch = _crop_dims(sw, sh, ratio, scale)
+    kernel = _importance_kernel(cw, ch, thirds)
+    best_score = -np.inf
+    best_cx, best_cy = 0.5, 0.5
+    for y0 in _positions(sh - ch):
+        for x0 in _positions(sw - cw):
+            window = sal[y0 : y0 + ch, x0 : x0 + cw]
+            score = float((window * kernel).sum())
+            if score > best_score:
+                best_score = score
+                best_cx = (x0 + cw / 2.0) / sw
+                best_cy = (y0 + ch / 2.0) / sh
+    return best_score, best_cx, best_cy
+
+
+def _smart_search(sal: np.ndarray, ratio: float, symmetric: bool) -> Tuple[float, float, float]:
+    """Argmax ``(scale, cx, cy)`` over the candidate crops (fractions in [0,1]).
+
+    Scores every crop at scales 1.0→0.6 with the rule-of-thirds importance
+    kernel; ties prefer the largest scale (least punch-in), so a tighter crop
+    must strictly out-score full context. Deterministic.
+    """
+    thirds = not symmetric
+    best_score = -np.inf
+    best = (1.0, 0.5, 0.5)
+    for scale in _SMART_SCALES:
+        bias = 1.0 - _ZOOM_COST * (1.0 - scale)
+        score, cx, cy = _best_position_at_scale(sal, ratio, scale, thirds)
+        score *= bias
+        if score > best_score:
+            best_score = score
+            best = (scale, cx, cy)
+    return best
+
+
+def _snap_scale(scale: float) -> float:
+    """Snap a continuous scale to the nearest candidate in the 0.1 grid, bounded
+    below by the zoom cap (so a crop never zooms past ``_SMART_MAX_ZOOM``)."""
+    floor = 1.0 / _SMART_MAX_ZOOM
+    candidates = [s for s in _SMART_SCALES if s >= floor - 1e-6]
+    return min(candidates, key=lambda s: abs(s - scale))
+
+
+def _punch_floor_scale(band: Optional[Tuple[float, float, float, float]]) -> float:
+    """The deepest crop scale a small subject earns (1.0 = no punch-in).
+
+    Implements the Canva-gap rule: a subject whose larger extent is below
+    ``_PUNCH_TRIGGER`` of the frame is enlarged toward ``_PUNCH_TARGET`` fill,
+    snapped to the scale grid and bounded by the zoom cap. A subject that
+    already fills the frame returns 1.0 (no punch-in).
+    """
+    if band is None:
+        return 1.0
+    extent = max(band[2], band[3])
+    if extent <= 0 or extent >= _PUNCH_TRIGGER:
+        return 1.0
+    return _snap_scale(max(1.0 / _SMART_MAX_ZOOM, min(1.0, extent / _PUNCH_TARGET)))
+
+
+def _subject_band(sal: np.ndarray) -> Optional[Tuple[float, float, float, float]]:
+    """Subject bbox ``(left, top, w, h)`` fractions from the saliency grid."""
+    sh, sw = sal.shape
+    thresh = float(sal.max()) * 0.35
+    if thresh <= 0:
+        return None
+    mask = sal > thresh
+    rows = np.flatnonzero(mask.any(axis=1))
+    cols = np.flatnonzero(mask.any(axis=0))
+    if rows.size == 0 or cols.size == 0:
+        return None
+    return (
+        cols[0] / sw,
+        rows[0] / sh,
+        (cols[-1] - cols[0] + 1) / sw,
+        (rows[-1] - rows[0] + 1) / sh,
+    )
+
+
+def smart_crop(
+    image_path: Union[str, Path],
+    ratio: RatioSpec = "4:5",
+    *,
+    symmetric: bool = False,
+    mask_path: Union[str, Path, None] = None,
+) -> SmartCrop:
+    """Multi-scale, thirds-aware, headroom-constrained crop for ``ratio``.
+
+    The scorer decides zoom + placement; a symmetric composition keeps the
+    subject centred (thirds bump off) and pins placement to today's centroid
+    crop so a scale-1.0 symmetric card stays byte-identical. On any failure the
+    result degrades to :func:`best_crop` at zoom 1.0.
+    """
+    try:
+        r = _parse_ratio(ratio)
+        width, height, sal, is_alpha = _score_saliency(image_path, mask_path)
+        # Today's answer (centroid / head-biased largest crop) — the byte-identity
+        # anchor and the symmetric placement.
+        bx, by, bw, bh = _base_crop_for_ratio(image_path, r, mask_path)
+        base_cx = (bx + bw / 2.0) / width
+        base_cy = (by + bh / 2.0) / height
+
+        scale, cx, cy = _smart_search(sal, r, symmetric)
+        # Subject-size punch-in floor (dossier rule): a small/distant subject
+        # earns a bounded zoom even when full context scores well. Take the
+        # deeper of the scorer's scale and the size floor, then re-place at it.
+        band = _subject_band(sal)
+        floor = _punch_floor_scale(band)
+        if floor < scale:
+            scale = floor
+            _, cx, cy = _best_position_at_scale(sal, r, scale, not symmetric)
+        if symmetric:
+            cx, cy = base_cx, base_cy  # centred composition: keep today's focus
+        cx, cy = _apply_headroom(sal, r, scale, cx, cy, is_alpha)
+
+        crop = _place_crop_scaled(width, height, r, scale, cx, cy)
+        zoom = round(min(_SMART_MAX_ZOOM, max(1.0, 1.0 / scale)), 2)
+        # Snap to the byte-identity anchor when the winner is today's largest crop.
+        if (crop.x, crop.y, crop.w, crop.h) == (bx, by, bw, bh):
+            return SmartCrop(bx, by, bw, bh, 1.0)
+        return SmartCrop(crop.x, crop.y, crop.w, crop.h, zoom)
+    except Exception:
+        try:
+            x, y, w, h = best_crop(image_path, ratio)
+            return SmartCrop(x, y, w, h, 1.0)
+        except Exception:
+            return SmartCrop(0, 0, 1, 1, 1.0)
+
+
+def _base_crop_for_ratio(
+    image_path: Union[str, Path], ratio: float, mask_path: Union[str, Path, None]
+) -> Crop:
+    """Today's largest-crop answer for ``ratio`` — mask-steered when a cutout
+    exists, exactly like :func:`_v2_photo_position` resolves it."""
+    if mask_path and str(mask_path) != str(image_path):
+        with Image.open(image_path) as im:
+            im.load()
+            width, height = im.size
+        with Image.open(mask_path) as mim:
+            mim.load()
+            alpha = _alpha_mask(mim)
+        if alpha is not None and width > 0 and height > 0:
+            sw, sh = _work_size(width, height)
+            energy = np.asarray(alpha.resize((sw, sh), Image.BILINEAR), dtype=np.float32)
+            cx, cy = _focus_centroids(energy, True, ratio)
+            return _place_crop(width, height, ratio, cx, cy)
+    return best_crop(image_path, ratio)
+
+
+def _apply_headroom(
+    sal: np.ndarray, ratio: float, scale: float, cx: float, cy: float, is_alpha: bool
+) -> Tuple[float, float]:
+    """Nudge a portrait-ish crop down so the subject keeps head-room.
+
+    Only for subject silhouettes (alpha) on portrait-ish targets, where cutting
+    the crop's top edge into the head band reads as a decapitated portrait.
+    Deterministic; a no-op when there is no measurable subject.
+    """
+    if not is_alpha or ratio >= 1.0:
+        return cx, cy
+    band = _subject_band(sal)
+    if band is None:
+        return cx, cy
+    _, subj_top, _, _ = band
+    sh, sw = sal.shape
+    _, crop_h = _crop_dims(sw, sh, ratio, scale)
+    crop_h_frac = crop_h / sh
+    crop_top = cy - crop_h_frac / 2.0
+    # Want the crop's top edge to sit at least _HEADROOM_BAND above the subject
+    # top; if it cuts below, slide the crop up (smaller crop_top → smaller cy).
+    max_crop_top = subj_top - _HEADROOM_BAND
+    if crop_top > max_crop_top:
+        cy = max(crop_h_frac / 2.0, max_crop_top + crop_h_frac / 2.0)
+    return cx, cy
+
+
+def _place_crop_scaled(
+    width: int, height: int, ratio: float, scale: float, cx: float, cy: float
+) -> SmartCrop:
+    """Place a crop of ``ratio`` at ``scale`` of the max crop, centred on
+    ``(cx, cy)`` fractions, clamped within bounds (pixels)."""
+    if ratio >= width / height:
+        base_w = width
+        base_h = min(height, max(1, round(width / ratio)))
+    else:
+        base_h = height
+        base_w = min(width, max(1, round(height * ratio)))
+    cw = max(1, min(width, round(base_w * scale)))
+    ch = max(1, min(height, round(base_h * scale)))
+    x = _slide(cx * width - cw / 2.0, width - cw)
+    y = _slide(cy * height - ch / 2.0, height - ch)
+    return SmartCrop(int(x), int(y), int(cw), int(ch), round(1.0 / scale, 4))
+
+
+def smart_focus(
+    image_path: Union[str, Path],
+    ratio: RatioSpec = "4:5",
+    *,
+    symmetric: bool = False,
+    mask_path: Union[str, Path, None] = None,
+) -> Dict[str, str]:
+    """The ``--mh-photo-*`` CSS vars for a smart crop of ``image_path``.
+
+    Returns ``{"--mh-photo-pos": "x% y%"}`` and, only when a punch-in applies,
+    ``"--mh-photo-scale": "1.NN"``. When the winner equals today's largest-crop
+    answer the position string is exactly :func:`focus_position`'s and no scale
+    is emitted, so the render is byte-identical. Safe default on any failure.
+    """
+    base_pos = (
+        focus_position_with_mask(image_path, mask_path, ratio)
+        if mask_path and str(mask_path) != str(image_path)
+        else focus_position(image_path, ratio)
+    )
+    try:
+        crop = smart_crop(image_path, ratio, symmetric=symmetric, mask_path=mask_path)
+        with Image.open(image_path) as im:
+            iw, ih = im.size
+        if iw <= 0 or ih <= 0:
+            return {"--mh-photo-pos": base_pos}
+        cx = max(0.0, min(1.0, (crop.x + crop.w / 2.0) / iw)) * 100.0
+        cy = max(0.0, min(1.0, (crop.y + crop.h / 2.0) / ih)) * 100.0
+        pos = f"{cx:.0f}% {cy:.0f}%"
+        out = {"--mh-photo-pos": pos}
+        if crop.zoom > 1.0:
+            out["--mh-photo-scale"] = f"{crop.zoom:.2f}"
+        # Byte-identity: no punch-in and the position matches today's answer.
+        if "--mh-photo-scale" not in out and pos == base_pos:
+            return {"--mh-photo-pos": base_pos}
+        return out
+    except Exception:
+        return {"--mh-photo-pos": base_pos}
+
+
+def smart_focus_for_format(
+    image_path: Union[str, Path],
+    format_name: str = "story",
+    *,
+    symmetric: bool = False,
+    mask_path: Union[str, Path, None] = None,
+) -> Dict[str, str]:
+    """:func:`smart_focus` resolved for a named output cut (story/portrait/…)."""
+    return smart_focus(
+        image_path, ratio_for_format(format_name), symmetric=symmetric, mask_path=mask_path
+    )
+
+
 __all__ = [
     "crops_for",
     "best_crop",
@@ -443,7 +866,11 @@ __all__ = [
     "focus_position_for_format",
     "focus_position_with_mask",
     "ratio_for_format",
+    "smart_crop",
+    "smart_focus",
+    "smart_focus_for_format",
     "FORMAT_RATIOS",
     "Crop",
+    "SmartCrop",
     "RatioSpec",
 ]

@@ -3841,6 +3841,26 @@ def _v2_photo_position(athlete_path, width: int = 1080, height: int = 1350, mask
 # Intents that keep today's saliency framing untouched (no vars emitted).
 _CROP_INTENT_NOOPS = frozenset({"", "original", "full_bleed", "wide_action"})
 
+# E2 — operator switch turning the smartcrop scorer on for undirected photo
+# cards. Unset (the default) keeps today's saliency framing, byte-identical.
+_SMART_CROP_ENV = "MEDIAHUB_SMART_CROP"
+
+
+def effective_crop_intent(intent: str) -> str:
+    """The crop intent a render (still or motion) should execute.
+
+    A director-set intent passes straight through. When none is set and the
+    operator enabled the smart-crop default (``MEDIAHUB_SMART_CROP``), an
+    undirected photo card resolves to ``"smart"`` so the scorer frames it;
+    otherwise ``""`` (today's saliency framing, byte-identical). Shared by the
+    still fill and the motion prop builder so both surfaces agree on the intent.
+    """
+    intent = (intent or "").strip()
+    if intent:
+        return intent
+    raw = os.environ.get(_SMART_CROP_ENV, "").strip().lower()
+    return "smart" if raw in ("1", "true", "yes", "on") else ""
+
 
 def _subject_bbox_fractions(mask_path) -> Optional[tuple[float, float, float, float]]:
     """Subject bounding box as ``(left, top, w, h)`` fractions of the image,
@@ -3878,7 +3898,7 @@ def _subject_bbox_fractions(mask_path) -> Optional[tuple[float, float, float, fl
 
 
 def _crop_intent_vars(
-    intent: str, athlete_path, mask_path, width: int, height: int
+    intent: str, athlete_path, mask_path, width: int, height: int, symmetric: bool = False
 ) -> dict[str, str]:
     """The ``--mh-photo-*`` overrides that execute a director crop intent (M10).
 
@@ -3886,6 +3906,11 @@ def _crop_intent_vars(
     window's ``object-position`` / scale — derived from the same saliency maths
     the default focus uses, never from taste:
 
+    * ``smart`` (E2) — the smartcrop scorer: multi-scale candidate scoring
+      picks the zoom, rule-of-thirds placement is the default (centred when
+      ``symmetric``), a distant subject is punched in. Emits ``--mh-photo-pos``
+      and, only on a punch-in, ``--mh-photo-scale``; byte-identical to today's
+      framing when the scorer agrees with the largest crop.
     * ``tight_portrait`` — head-accurate focus + a bounded scale-up derived
       from the subject's alpha-bbox (shrink the crop toward the subject).
     * ``centered``       — the geometric centre, exactly as named.
@@ -3897,6 +3922,18 @@ def _crop_intent_vars(
     intent = (intent or "").strip()
     if intent in _CROP_INTENT_NOOPS or not athlete_path:
         return {}
+    if intent == "smart":
+        try:
+            from mediahub.graphic_renderer import saliency as _sal
+
+            return _sal.smart_focus(
+                athlete_path,
+                f"{int(width)}:{int(height)}",
+                symmetric=symmetric,
+                mask_path=mask_path,
+            )
+        except Exception:
+            return {}
     if intent == "centered":
         return {"--mh-photo-pos": "50% 50%"}
     base_pos = _v2_photo_position(athlete_path, width, height, mask_path)
@@ -4027,8 +4064,7 @@ def _sticker_outline_css(width: int, height: int, strength: float) -> str:
         )
     )
     return (
-        "\n/* --- B5 die-cut sticker contour --- */\n"
-        f"img.athlete-cutout {{ filter: {shadows}; }}\n"
+        f"\n/* --- B5 die-cut sticker contour --- */\nimg.athlete-cutout {{ filter: {shadows}; }}\n"
     )
 
 
@@ -4833,9 +4869,14 @@ def _fill_v2_archetype(
     # adjustments. A manual crop (the inspector override) always wins; the
     # scale rule is emitted ONLY when a scale applies, so every undirected /
     # default-intent card keeps byte-identical HTML.
-    _intent = (getattr(brief, "crop_intent", "") or "").strip()
+    _intent = effective_crop_intent(getattr(brief, "crop_intent", "") or "")
     if _intent and athlete_path and not _sanitise_photo_pos(photo_pos_override):
-        intent_vars = _crop_intent_vars(_intent, athlete_path, cutout_mask_path, width, height)
+        from mediahub.graphic_renderer.archetypes import is_symmetric as _is_symmetric
+
+        _symmetric = _is_symmetric(getattr(brief, "layout_template", "") or "")
+        intent_vars = _crop_intent_vars(
+            _intent, athlete_path, cutout_mask_path, width, height, symmetric=_symmetric
+        )
         root_vars.update(intent_vars)
         if "--mh-photo-scale" in intent_vars:
             extra_css += (

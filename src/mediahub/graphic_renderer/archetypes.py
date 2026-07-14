@@ -144,6 +144,24 @@ def photo_mode(name: str) -> str:
     return "photo" if name in photo_archetypes() else "cutout"
 
 
+# E2 (Canva gap analysis) — archetypes whose photo well is a deliberately
+# CENTRED composition (a symmetric disc / medal spotlight). The smart-crop
+# scorer keeps these dead-centre (rule-of-thirds snapping OFF) so the subject
+# stays under the ring/emblem rather than sliding to a power line; every other
+# archetype takes thirds placement as the deterministic default.
+_SYMMETRIC_ARCHETYPES: frozenset[str] = frozenset(
+    {
+        "centered_medal_spotlight",
+        "spotlight_disc",
+    }
+)
+
+
+def is_symmetric(name: str) -> bool:
+    """True when ``name`` is a centred composition (thirds snapping opts out)."""
+    return name in _SYMMETRIC_ARCHETYPES
+
+
 def _pool(names: Iterable[str] | None) -> list[str]:
     """The sorted pick pool: an explicit subset (photo-led / type-led) or the
     full library. Sorting keeps the seeded modulo stable regardless of the
