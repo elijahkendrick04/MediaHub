@@ -80,8 +80,12 @@
   flex: 0 0 auto;
   display: flex; flex-direction: column; justify-content: center;
   padding: 26px 34px; border-radius: 14px;
-  background: var(--mh-surface); color: var(--mh-on-surface);
+  /* C1: tonal container tier — a lit step off the ground; the result tier
+     (accent) and the move tier (raised) sit at their own tonal levels below,
+     so the tower reads as layered material, not three flat slabs. */
+  background: var(--mh-surface-container, var(--mh-surface)); color: var(--mh-on-surface);
 }
+.vt__move-tier { background: var(--mh-surface-raised, var(--mh-surface)); }
 .vt__tier-lab {
   font-family: 'Inter',sans-serif; font-weight: 800;
   font-size: 16px; letter-spacing: 0.24em; text-transform: uppercase;

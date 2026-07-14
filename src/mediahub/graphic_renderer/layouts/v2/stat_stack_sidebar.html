@@ -131,7 +131,10 @@
   flex: 0 0 320px;
   position: relative;
   display: flex; flex-direction: column;
-  background: var(--mh-surface);
+  /* C1: the scoreboard rail rides the tonal surface-container so it reads as a
+     lit panel stepped off the ground rather than the same deep surface fill;
+     falls back to --mh-surface where the token is absent. */
+  background: var(--mh-surface-container, var(--mh-surface));
   color: var(--mh-on-surface);
   border-left: 10px solid var(--mh-accent);
   padding: 92px 40px 84px;

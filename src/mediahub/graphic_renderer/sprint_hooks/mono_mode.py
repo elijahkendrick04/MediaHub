@@ -231,7 +231,8 @@ _ROLE_DECL_RE = re.compile(
 # lit/shaded stops of the brand primary — so a mono card must rewrite them too
 # or the brand colour leaks straight past the role remap.
 _DERIVED_DECL_RE = re.compile(
-    r"(?<![\w-])(--mh-(?:ground-gradient|surface-2|lift|ink-secondary|secondary-vis|shadow-rgb))"
+    r"(?<![\w-])(--mh-(?:ground-gradient|surface-container|surface-raised|surface-2|lift"
+    r"|accent-container|on-accent-container|ink-secondary|secondary-vis|shadow-rgb))"
     r"\s*:\s*[^;}]+"
 )
 
@@ -249,6 +250,13 @@ def _rewrite_role_decls(html: str, ramp: dict[str, str]) -> str:
         "--mh-ground-gradient": ramp.get("--mh-primary", "#111111"),
         "--mh-surface-2": ramp.get("--mh-surface", "#181818"),
         "--mh-lift": ramp.get("--mh-surface", "#181818"),
+        # C1 tonal-container tokens embed brand-derived hexes; flatten them to
+        # the mono surface (containers/raised) and mono ink (on-accent-container)
+        # so the container layering stays legible in grey and no hue leaks past.
+        "--mh-surface-container": ramp.get("--mh-surface", "#181818"),
+        "--mh-surface-raised": ramp.get("--mh-surface", "#181818"),
+        "--mh-accent-container": ramp.get("--mh-surface", "#181818"),
+        "--mh-on-accent-container": ramp.get("--mh-on-primary", "#F4F4F4"),
         "--mh-ink-secondary": ramp.get("--mh-secondary", "#B4B4B4"),
         "--mh-secondary-vis": ramp.get("--mh-secondary", "#B4B4B4"),
         "--mh-shadow-rgb": "10,10,10",

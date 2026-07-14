@@ -132,14 +132,10 @@ def test_on_color_tints_toward_the_ground_hue():
 # --------------------------------------------------------------------------- #
 def test_secondary_vis_degrades_to_accent_for_one_band_palettes():
     # Navy secondary on a navy ground: no separation → accent.
-    vars_ = R._mh_role_vars(
-        {"primary": "#0A2540", "secondary": "#0E1B2C", "accent": "#E8B94E"}
-    )
+    vars_ = R._mh_role_vars({"primary": "#0A2540", "secondary": "#0E1B2C", "accent": "#E8B94E"})
     assert vars_["--mh-secondary-vis"] == vars_["--mh-accent"]
     # A genuinely separated secondary deploys itself.
-    vars2 = R._mh_role_vars(
-        {"primary": "#0A2540", "secondary": "#C9A227", "accent": "#FFFFFF"}
-    )
+    vars2 = R._mh_role_vars({"primary": "#0A2540", "secondary": "#C9A227", "accent": "#FFFFFF"})
     assert vars2["--mh-secondary-vis"] == "#C9A227"
 
 
@@ -160,9 +156,7 @@ def test_glitch_dyad_derives_from_the_accent():
     assert "rgba(255,0,86" not in res.style  # not the fixed fallback dyad
     assert res.style.count("rgba(") == 2
     # Unparseable accent → the fixed fallback dyad still renders something.
-    res2 = fx.effect_css(
-        "glitch", ground="#0A2540", ink="#FFFFFF", accent="", on_accent="#0A2540"
-    )
+    res2 = fx.effect_css("glitch", ground="#0A2540", ink="#FFFFFF", accent="", on_accent="#0A2540")
     assert "rgba(255,0,86" in res2.style
 
 
@@ -300,9 +294,143 @@ def test_mono_mode_rewrites_the_derived_colour_tokens():
         ":root{--mh-primary:#0E5BFF;--mh-surface:#0A2540;"
         "--mh-ground-gradient:linear-gradient(180deg, #1862FF 0%, #0E5BFF 52%, #0D56F3 100%);"
         "--mh-surface-2:#0A407F;--mh-lift:#2665E0;--mh-ink-secondary:#B3C6EE;"
+        # C1 tonal-container tokens also embed brand-derived hexes.
+        "--mh-surface-container:#19324D;--mh-surface-raised:#253D59;"
+        "--mh-accent-container:#5B4300;--mh-on-accent-container:#FFDF9E;"
         "--mh-secondary-vis:#C9A227;--mh-shadow-rgb:6,17,38;}"
     )
     out = _rewrite_role_decls(html, mono_role_vars("#0E5BFF", "#0A2540"))
-    for brand_hex in ("#0E5BFF", "#1862FF", "#0D56F3", "#0A407F", "#2665E0", "#C9A227"):
+    for brand_hex in (
+        "#0E5BFF",
+        "#1862FF",
+        "#0D56F3",
+        "#0A407F",
+        "#2665E0",
+        "#C9A227",
+        "#19324D",
+        "#253D59",
+        "#5B4300",
+        "#FFDF9E",
+    ):
         assert brand_hex not in out, f"{brand_hex} leaked past the mono remap"
     assert "--mh-shadow-rgb:10,10,10" in out
+
+
+# --------------------------------------------------------------------------- #
+# C1 — tonal-container bridge from the brand seed into the role resolver
+# --------------------------------------------------------------------------- #
+def test_tonal_pick_is_deterministic_hct_and_clamped():
+    from mediahub.theming.palette import tonal_pick
+
+    # A dark navy seed rides its own HCT ramp; higher tone → lighter hex.
+    assert R._rel_luminance(tonal_pick("#0A2540", 90)) > R._rel_luminance(tonal_pick("#0A2540", 20))
+    assert tonal_pick("#0A2540", 20) == tonal_pick("#0A2540", 20)  # deterministic
+    assert tonal_pick("#0A2540", 999) == tonal_pick("#0A2540", 100)  # tone clamped
+    assert tonal_pick("not-a-hex", 30) == "#000000"  # safe fallback
+
+
+def test_bridge_emits_container_tokens_gated():
+    base = R._mh_role_vars({"primary": "#0A2540", "secondary": "#0E1B2C", "accent": "#E8B94E"})
+    out = R._bridge_tonal_tokens(base, R._mood_tone_plan("neutral"))
+    for tok in (
+        "--mh-surface-container",
+        "--mh-surface-raised",
+        "--mh-accent-container",
+        "--mh-on-accent-container",
+    ):
+        assert out[tok].startswith("#")
+    # The accent-container carries a legible on-colour by construction.
+    from mediahub.quality.compliance import is_legible
+
+    assert is_legible(out["--mh-on-accent-container"], out["--mh-accent-container"])
+    # Neutral mood emits no scrim/mesh hint (byte-identical to the C1-only set).
+    assert "--mh-scrim-alpha" not in out and "--mh-mesh-intensity" not in out
+    # A non-brand primary yields nothing to bridge.
+    assert (
+        R._bridge_tonal_tokens({"--mh-primary": "x", "--mh-accent": "y"}, R._mood_tone_plan(""))
+        == {}
+    )
+
+
+def test_resolver_ships_the_container_tokens_and_adopted_layouts_consume_them():
+    from mediahub.graphic_renderer import archetypes as arch
+
+    class _Brief:
+        palette = {"primary": "#0A2540", "secondary": "#0E1B2C", "accent": "#E8B94E"}
+        colour_role_assignment: dict = {}
+        mood = ""
+        text_layers: dict = {}
+        confidence_label = ""
+
+    roles = R.resolved_role_vars_for_brief(_Brief())
+    assert roles["--mh-surface-container"].startswith("#")
+    # The three adopted archetypes reference the token with a var() fallback.
+    for name in ("three_card_editorial_grid", "vertical_stat_tower", "stat_stack_sidebar"):
+        text = (arch.V2_DIR / f"{name}.html").read_text(encoding="utf-8")
+        assert "var(--mh-surface-container, var(--mh-surface))" in text
+
+
+# --------------------------------------------------------------------------- #
+# C9 — mood → derived-tone table (only derived tones move; brand hexes fixed)
+# --------------------------------------------------------------------------- #
+def test_mood_tone_table_covers_every_mood():
+    from mediahub.creative_brief import design_spec as ds
+
+    # Drift guard: every design_spec.MOODS token must resolve to a plan.
+    for mood in ds.MOODS:
+        assert mood in R._MOOD_TONE_PLANS, f"mood {mood!r} missing a tone plan"
+    # neutral and minimal are the identity (no derived tone moves).
+    assert R._mood_tone_plan("neutral") == R._MOOD_IDENTITY
+    assert R._mood_tone_plan("minimal") == R._MOOD_IDENTITY
+    assert R._mood_tone_plan("nonsense word") == R._MOOD_IDENTITY
+
+
+def test_mood_moves_only_derived_tones_never_brand_hexes():
+    base = R._mh_role_vars({"primary": "#0A2540", "secondary": "#0E1B2C", "accent": "#E8B94E"})
+    neutral = R._bridge_tonal_tokens(base, R._mood_tone_plan("neutral"))
+    stoic = R._bridge_tonal_tokens(base, R._mood_tone_plan("stoic"))
+    celeb = R._bridge_tonal_tokens(base, R._mood_tone_plan("celebratory"))
+    # Stoic drops the container tone (deeper), celebratory lifts it (lighter).
+    assert R._rel_luminance(stoic["--mh-surface-container"]) < R._rel_luminance(
+        neutral["--mh-surface-container"]
+    )
+    assert R._rel_luminance(celeb["--mh-surface-container"]) > R._rel_luminance(
+        neutral["--mh-surface-container"]
+    )
+    # A moving mood emits the scrim/mesh hints; the confirmed brand hexes never shift.
+    assert "--mh-scrim-alpha" in stoic and "--mh-mesh-intensity" in celeb
+    assert base["--mh-primary"] == "#0A2540" and base["--mh-accent"] == "#E8B94E"
+
+
+# --------------------------------------------------------------------------- #
+# C6 — per-slot contrast repair + gate-filtered colourway walk
+# --------------------------------------------------------------------------- #
+def test_role_assignment_repairs_a_failing_slot_instead_of_reverting():
+    from mediahub.quality.compliance import check_roles
+
+    base = R._mh_role_vars({"primary": "#0E2A47", "secondary": "#C9A227", "accent": "#C9A227"})
+    # ground→gold leaves accent==ground (Lc 0): the OLD engine reverted wholesale;
+    # C6 steps ONLY the accent to legibility and ships the director's gold ground.
+    out = R._apply_role_assignment(base, {"ground": "secondary"})
+    assert out["--mh-primary"] == "#C9A227"  # director's ground kept
+    assert out["--mh-accent"] != "#C9A227"  # failing slot repaired
+    assert check_roles(out).passes
+    assert out.get("--mh-repair-note", "").startswith("repaired-")
+    # A fully-legible assignment ships unchanged with no repair note.
+    ok = R._apply_role_assignment(base, {"ground": "secondary", "accent": "primary"})
+    assert "--mh-repair-note" not in ok
+
+
+def test_seed_walk_indexes_only_gate_surviving_permutations():
+    from mediahub.creative_brief.generator import gate_surviving_seeds, _apply_palette_seed
+
+    # maroon/black/gold: a maroon accent on a black ground is illegible, so that
+    # permutation is pruned — but seeds 1..3 (the legacy contract) are preserved.
+    survivors = gate_surviving_seeds("#A30D2D", "#000000", "#FFD86E")
+    assert survivors and survivors[:3] == [1, 2, 3]
+    for s in (1, 2, 3):
+        assert _apply_palette_seed(
+            "#A30D2D", "#000000", "#FFD86E", s, gate=True
+        ) == _apply_palette_seed("#A30D2D", "#000000", "#FFD86E", s, gate=False)
+    # An all-legible kit prunes nothing (byte-identical walk).
+    assert gate_surviving_seeds("#0E2A47", "#C9A227", "#FFFFFF") == [1, 2, 3, 4, 5, 6]

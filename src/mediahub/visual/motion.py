@@ -566,12 +566,27 @@ def _motion_roles_from_vars(root_vars: dict[str, str]) -> dict[str, str]:
     exactly the pre-parity behaviour."""
     if not root_vars:
         return {}
-    return {
+    out = {
         "roleGround": str(root_vars.get("--mh-primary") or ""),
         "roleSurface": str(root_vars.get("--mh-surface") or ""),
         "roleAccent": str(root_vars.get("--mh-accent") or ""),
         "roleOnGround": str(root_vars.get("--mh-on-primary") or ""),
     }
+    # C1 (Canva gap analysis): the tonal container / raised / accent-container
+    # tokens ride the SAME resolver into the motion props so a scene can paint
+    # the still's exact container layering. Each is forwarded only when resolved
+    # (an empty value never enters the map), so a brief without them contributes
+    # nothing new — keeping the brief-less seed-permutation fallback intact.
+    for src, dst in (
+        ("--mh-surface-container", "roleSurfaceContainer"),
+        ("--mh-surface-raised", "roleSurfaceRaised"),
+        ("--mh-accent-container", "roleAccentContainer"),
+        ("--mh-on-accent-container", "roleOnAccentContainer"),
+    ):
+        value = str(root_vars.get(src) or "")
+        if value:
+            out[dst] = value
+    return out
 
 
 def _archetype_photo_mode(brief: Optional[dict]) -> str:
@@ -1086,6 +1101,18 @@ def _card_to_props(
         "roleAccent": roles.get("roleAccent", ""),
         "roleOnGround": roles.get("roleOnGround", ""),
     }
+    # C1 (Canva gap analysis): the resolved tonal-container roles ride into the
+    # props so a motion scene can mirror the still's container layering. Attached
+    # only when the resolver emitted them (every real brief with a parseable
+    # palette), so a brief-less card keeps a byte-identical prop dict.
+    for _role_key in (
+        "roleSurfaceContainer",
+        "roleSurfaceRaised",
+        "roleAccentContainer",
+        "roleOnAccentContainer",
+    ):
+        if roles.get(_role_key):
+            props[_role_key] = roles[_role_key]
     # M20: extra linked-athlete photos for the multi-panel archetypes, only
     # attached when at least one resolved — an empty list never touches the
     # prop dict, so single-photo cards keep byte-identical cache keys.
