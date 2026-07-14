@@ -334,9 +334,7 @@ def generate_content(
         # may answer) and the breaker's most expensive case — each such call
         # eats the full request timeout — so it counts toward tripping.
         breaker_record_failure()
-        raise GeminiTransportError(
-            redact_key(str(e), key), kind="transport", transient=True
-        ) from e
+        raise GeminiTransportError(redact_key(str(e), key), kind="transport", transient=True) from e
     if r.status_code != 200:
         if r.status_code >= 500:
             breaker_record_failure()
@@ -381,9 +379,7 @@ def first_candidate_parts(data: dict) -> list[dict]:
         )
     first = candidates[0] if isinstance(candidates, list) else None
     if not isinstance(first, dict):
-        raise GeminiTransportError(
-            "first candidate not a dict", kind="malformed", transient=True
-        )
+        raise GeminiTransportError("first candidate not a dict", kind="malformed", transient=True)
     content = first.get("content") or {}
     parts = content.get("parts") if isinstance(content, dict) else None
     if parts is None:
@@ -394,9 +390,7 @@ def first_candidate_parts(data: dict) -> list[dict]:
         # mislabelling the response "malformed".
         return []
     if not isinstance(parts, list):
-        raise GeminiTransportError(
-            "content.parts not a list", kind="malformed", transient=True
-        )
+        raise GeminiTransportError("content.parts not a list", kind="malformed", transient=True)
     return parts
 
 

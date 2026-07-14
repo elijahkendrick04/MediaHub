@@ -424,6 +424,7 @@ def _call_gemini_vision(
     Gemini outage doesn't waste vision round-trips when text calls
     have already noticed the failure.
     """
+
     def _build_payload() -> dict[str, Any]:
         # Built lazily: base64-encoding up to 5 photos is the expensive part
         # of a vision call, and it must cost nothing when the breaker is

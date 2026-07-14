@@ -27,6 +27,13 @@ regexes = [
   # synthetic values ("tok-buf-789", "tok-sched-123"). The generic-api-key
   # rule matches the `..._access_token": "..."` shape. Never real credentials.
   '''"(buffer|scheduler)_access_token":\s*"tok-(buf|sched)-\d{3}"''',
+  # The Gemini transport/parity/redaction tests use self-describing fake
+  # keys ("AIzaSyTEST-parity-not-a-real-key", "AIzaSyTEST-transport-not-real",
+  # "AIzaSyTEST-do-not-leak-XYZ789", …). The AIzaSyTEST prefix is
+  # deliberately impossible for a real Google key issuance and the suffix is
+  # prose; the generic-api-key rule matches the `KEY = "..."` assignment
+  # shape. Synthetic, never real credentials — real keys are env-only.
+  '''AIzaSyTEST-[A-Za-z0-9_-]+''',
 ]
 paths = [
   # Vendored reference material (never executed) and binary corpora.
