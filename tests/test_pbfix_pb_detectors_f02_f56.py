@@ -148,7 +148,15 @@ def test_heats_then_slower_final_is_order_independent():
 
 def test_heats_then_faster_final_yields_one_pb_the_final():
     """Both swims beat the baseline but the final is faster: only the fastest
-    (the final) fires; the slower heat folds into the baseline."""
+    (the final) fires; the slower heat folds into the baseline.
+
+    The fired card reports the online baseline (1:01.00) as its prior, not the
+    earlier heat — a deliberate, chronology-safe choice: firing is decided by
+    the order-independent "strictly faster" rule, but showing the earlier
+    same-meet swim as the prior would require reliable heat/final ordering the
+    results feed does not guarantee, and the same rule applied to the
+    heats-then-SLOWER-final case would wrongly surface the later swim as the
+    prior. The pre-meet PB is always the honest reference."""
     det = PBConfirmedDetector()
     heat = _swim(6090, rnd="heat")
     final = _swim(6050, rnd="final")

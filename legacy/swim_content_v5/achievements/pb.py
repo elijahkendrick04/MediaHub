@@ -137,7 +137,10 @@ class PBConfirmedDetector(AchievementDetector):
 
         # F02: only the fastest same-meet swim in an event carries the PB. A
         # slower final at the same meet as a faster heat folds into the baseline
-        # and must not be re-announced as a new PB.
+        # and must not be re-announced as a new PB. The surviving (fastest) swim
+        # reports the online baseline as its prior: every same-meet swim is >= it,
+        # and the pre-meet PB is the chronologically honest reference without
+        # inferring heat/final order (which the results feed does not guarantee).
         if _superseded_by_same_meet(swim, all_results):
             return []
 
