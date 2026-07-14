@@ -40,7 +40,8 @@ def call_openai(messages, system, max_tokens, *, content_type=None) -> Optional[
     escalates to the premium model once on a transient/empty cheap result.
     """
     # Local import avoids an import cycle (media_ai.llm imports this module).
-    from mediahub.media_ai.llm import _log_call, _redact_key
+    from mediahub.ai_core.gemini_transport import redact_key as _redact_key
+    from mediahub.media_ai.llm import _log_call
 
     client = llm_client.client_from_env()
     if client is None:

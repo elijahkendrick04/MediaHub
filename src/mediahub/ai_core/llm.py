@@ -23,6 +23,13 @@ import time
 from dataclasses import dataclass, field
 from typing import Callable, Optional
 
+# The Gemini REST transport (HTTP call, key redaction, thinking-budget
+# clamp, overload circuit breaker) is shared with media_ai.llm — one copy,
+# both wrappers (deep-review finding #43). This module keeps the strict
+# contract on top of it: helpers raise ProviderError(transient=…) so
+# ask()/ask_with_tools() can branch on failover.
+from mediahub.ai_core import gemini_transport
+
 log = logging.getLogger(__name__)
 
 
@@ -68,7 +75,9 @@ def _exc_transient(e: BaseException) -> bool:
         status = int(status)
     except (TypeError, ValueError):
         return True
-    return status in (401, 403, 408, 409, 425, 429, 529) or 500 <= status <= 599
+    # One classification for the whole cross-provider failover path (the
+    # Gemini transport uses the same helper).
+    return gemini_transport.status_transient(status)
 
 
 @dataclass
@@ -122,7 +131,7 @@ def _key_for(provider: str) -> Optional[str]:
     if provider == "claude":
         return _resolve_key(("ANTHROPIC_API_KEY",), "anthropic_api_key")
     if provider == "gemini":
-        return _resolve_key(("GEMINI_API_KEY", "GOOGLE_API_KEY"), "gemini_api_key")
+        return gemini_transport.resolve_gemini_key()
     if provider == "openai":
         # An OpenAI-compatible endpoint is "configured" whenever an endpoint
         # URL is set; the bearer key is optional (keyless local servers). Return
@@ -297,169 +306,53 @@ def _ask_claude_with_tools(
 
 
 # ---------------------------------------------------------------------------
-# Gemini (Google) — text + native tool-use; free-tier default
+# Gemini (Google) — text + native tool-use; free-tier default.
+# The HTTP transport, key redaction, thinking-budget clamp and breaker
+# accounting live in ai_core.gemini_transport (one copy for both LLM
+# wrappers, finding #43). This side keeps the strict contract: translate
+# every classified transport failure into ProviderError(transient=…).
 # ---------------------------------------------------------------------------
-def _gemini_model() -> str:
-    # May 2026: gemini-2.0-flash was deprecated by Google and now
-    # returns HTTP 404 "model is no longer available to new users".
-    # gemini-2.5-flash is the current GA model with the same free-tier
-    # quotas (1,500 req/day) and equivalent capability.
-    return os.environ.get("MEDIAHUB_GEMINI_MODEL", "gemini-2.5-flash")
 
 
-def _redacted(text: str, key: Optional[str]) -> str:
-    """Strip the Gemini API key from error text before it rides a
-    ProviderError — messages are logged (ai_director) and surfaced to
-    users via ClaudeUnavailableError, and a requests exception repr
-    embeds the failing URL including its ``?key=…``. Reuses
-    ``media_ai.llm._redact_key``; the lazy import keeps ``ai_core``
-    independently importable.
-    """
-    try:
-        from mediahub.media_ai.llm import _redact_key
-
-        return _redact_key(text, key)
-    except Exception:
-        return text.replace(key, "***REDACTED***") if key and key in text else text
-
-
-def _gemini_thinking_budget() -> int:
-    """See ``media_ai.llm._gemini_thinking_budget`` for context.
-
-    Gemini 2.5+ ships thinking on by default; thinking tokens count
-    against ``maxOutputTokens`` but never appear in the response text,
-    so callers sized for the visible output get truncated mid-JSON.
-    Default off here too. Operators can opt back in via
-    ``MEDIAHUB_GEMINI_THINKING_BUDGET``.
-    """
-    raw = os.environ.get("MEDIAHUB_GEMINI_THINKING_BUDGET", "0").strip()
-    try:
-        return max(0, int(raw))
-    except ValueError:
-        return 0
-
-
-def _gemini_timeout(default: float) -> float:
-    """Per-call read of ``MEDIAHUB_GEMINI_TIMEOUT`` (seconds).
-
-    ``media_ai`` honours this operator knob; ``ai_core`` used to hardcode
-    45/60s (deep-review finding #43), so raising the timeout for a slow
-    Gemini day silently didn't apply to copilot / chat / deep-research
-    calls. The call-site default (45s plain ask, 60s tool rounds) is
-    preserved when the env is unset or unparseable.
-    """
-    raw = os.environ.get("MEDIAHUB_GEMINI_TIMEOUT", "").strip()
-    if not raw:
-        return default
-    try:
-        return max(1.0, float(raw))
-    except ValueError:
-        return default
-
-
-def _gemini_generation_config(max_tokens: int) -> dict:
-    # No temperature is sent — parity with media_ai._gemini_generation_config
-    # (finding #43): both wrappers sample at the API default so the same
-    # surface can't drift in output character depending on which wrapper
-    # happened to serve it.
-    cfg: dict = {"maxOutputTokens": int(max_tokens)}
-    model = _gemini_model()
-    if "2.5" in model or "3." in model:
-        budget = _gemini_thinking_budget()
-        # Pro models reject thinkingBudget < 128 (400 INVALID_ARGUMENT);
-        # clamp there. Flash models keep 0 (thinking off).
-        if "pro" in model:
-            budget = max(128, budget)
-        cfg["thinkingConfig"] = {"thinkingBudget": budget}
-    return cfg
-
-
-def _gemini_breaker_record(ok: bool) -> None:
-    """Report a Gemini call outcome into the shared overload breaker.
-
-    The breaker state lives in ``media_ai.llm`` (``/healthz/breaker`` reads
-    its snapshot). ``ai_core`` used to *read* the breaker but never record
-    into it (finding #43), so a Gemini outage seen only via chat / copilot /
-    deep-research never tripped it and every caller kept paying the full
-    round-trip timeout. Lazy import + broad except mirror
-    ``_gemini_breaker_open``: a missing breaker must never sink an LLM call.
-    """
-    try:
-        from mediahub.media_ai.llm import (
-            _gemini_breaker_record_failure,
-            _gemini_breaker_record_success,
-        )
-
-        if ok:
-            _gemini_breaker_record_success()
-        else:
-            _gemini_breaker_record_failure()
-    except Exception:
-        pass
+def _gemini_provider_error(
+    e: gemini_transport.GeminiTransportError, *, tool: bool = False
+) -> ProviderError:
+    """Translate a classified transport failure into the strict contract,
+    preserving the message shapes callers and tests pin ("Gemini HTTP
+    error: …", "Gemini HTTP 503: …", "Gemini bad JSON: …", "Gemini empty
+    response: …"). Messages arrive already key-redacted."""
+    label = "Gemini tool" if tool else "Gemini"
+    if e.kind == "parse":
+        msg = f"{label} bad JSON: {e}"
+    elif e.kind in ("no_candidates", "malformed"):
+        msg = f"{label} empty response: {e}"
+    elif e.status is not None:
+        msg = f"{label} HTTP {e.status}: {e}"
+    else:
+        msg = f"{label} HTTP error: {e}"
+    return ProviderError(msg, transient=e.transient)
 
 
 def _ask_gemini(system: str, user: str, max_tokens: int) -> str:
     key = _key_for("gemini")
     if not key:
         raise ProviderNotConfigured("Gemini API key not configured.")
-    try:
-        import requests
-    except ImportError as e:
-        raise ProviderError(f"requests not available: {e}")
     payload = {
         "systemInstruction": {"parts": [{"text": system}]},
         "contents": [{"role": "user", "parts": [{"text": user}]}],
-        "generationConfig": _gemini_generation_config(max_tokens),
+        "generationConfig": gemini_transport.generation_config(max_tokens),
     }
-    url = (
-        "https://generativelanguage.googleapis.com/v1beta/models/"
-        f"{_gemini_model()}:generateContent"
-    )
     try:
-        r = requests.post(
-            url,
-            json=payload,
-            # Key in the x-goog-api-key header, NOT the URL: a URL-borne ?key=
-            # rides into exception reprs, access logs and proxy logs (matches
-            # media_ai/llm.py, which moved off the query param for this reason).
-            headers={"Content-Type": "application/json", "x-goog-api-key": key},
-            timeout=_gemini_timeout(45.0),
-        )
-    except Exception as e:
-        # Transport-level failure (ConnectionError / DNS / reset / timeout) — no
-        # HTTP status, so it's transient: try the next provider. Counts toward
-        # tripping the shared breaker (each such call eats the full timeout).
-        _gemini_breaker_record(False)
-        raise ProviderError(f"Gemini HTTP error: {_redacted(str(e), key)}", transient=True) from e
-    if r.status_code != 200:
-        # 5xx/overload trips the breaker; 4xx (incl. 429 rate limit) is not an
-        # outage signal — same policy as media_ai._call_gemini.
-        if r.status_code >= 500:
-            _gemini_breaker_record(False)
-        raise ProviderError(
-            f"Gemini HTTP {r.status_code}: {_redacted(r.text[:240], key)}",
-            transient=(r.status_code in (401, 403, 408, 409, 425, 429, 529))
-            or 500 <= r.status_code <= 599,
-        )
-    try:
-        data = r.json()
-    except Exception as e:
-        raise ProviderError(f"Gemini bad JSON: {e}", transient=True) from e
-    # A decoded 200 proves the service is reachable — clear the breaker even
-    # if the model output turns out unusable below.
-    _gemini_breaker_record(True)
-    cands = data.get("candidates") or []
-    if not cands:
-        raise ProviderError(f"Gemini empty response: {str(data)[:240]}", transient=True)
-    parts = (cands[0].get("content") or {}).get("parts") or []
-    text = "".join(p.get("text", "") for p in parts if isinstance(p, dict)).strip()
+        data = gemini_transport.generate_content(payload, key=key, timeout_default=45.0)
+        parts = gemini_transport.first_candidate_parts(data)
+    except gemini_transport.GeminiTransportError as e:
+        raise _gemini_provider_error(e) from e
+    text = gemini_transport.text_from_parts(parts)
     if not text:
         # Candidates but no text (safety block / MAX_TOKENS) used to return "" —
         # a silent empty that surfaces later as a misleading JSON parse error.
         # Raise (transient) citing the reason so a fallback provider is tried.
-        reason = cands[0].get("finishReason") or (data.get("promptFeedback") or {}).get(
-            "blockReason"
-        )
+        reason = gemini_transport.finish_reason(data)
         raise ProviderError(f"Gemini returned no text (finishReason={reason})", transient=True)
     return text
 
@@ -475,8 +368,6 @@ def _ask_gemini_with_tools(
     """Gemini function-calling loop. Tool schema in Anthropic shape is
     translated to Gemini's functionDeclarations on the fly so callers
     pass the same `tools` list whichever provider is active."""
-    import requests
-
     key = _key_for("gemini")
     if not key:
         raise ProviderNotConfigured("Gemini API key not configured.")
@@ -493,51 +384,20 @@ def _ask_gemini_with_tools(
     ]
     contents: list[dict] = [{"role": "user", "parts": [{"text": user}]}]
     convo = ToolConversation(text="", provider="gemini")
-    url = (
-        "https://generativelanguage.googleapis.com/v1beta/models/"
-        f"{_gemini_model()}:generateContent"
-    )
     for _ in range(max_rounds):
         payload = {
             "systemInstruction": {"parts": [{"text": system}]},
             "contents": contents,
             "tools": [{"functionDeclarations": fn_decls}],
-            "generationConfig": _gemini_generation_config(max_tokens),
+            "generationConfig": gemini_transport.generation_config(max_tokens),
         }
         try:
-            r = requests.post(
-                url,
-                json=payload,
-                # Key in the header, not the URL — see _ask_gemini above.
-                headers={"Content-Type": "application/json", "x-goog-api-key": key},
-                timeout=_gemini_timeout(60.0),
-            )
-        except Exception as e:
-            _gemini_breaker_record(False)
-            raise ProviderError(
-                f"Gemini tool HTTP error: {_redacted(str(e), key)}", transient=True
-            ) from e
-        if r.status_code != 200:
-            if r.status_code >= 500:
-                _gemini_breaker_record(False)
-            raise ProviderError(
-                f"Gemini tool HTTP {r.status_code}: {_redacted(r.text[:240], key)}",
-                transient=(r.status_code in (401, 403, 408, 409, 425, 429, 529))
-                or 500 <= r.status_code <= 599,
-            )
-        try:
-            data = r.json()
-        except ValueError as e:
-            # Pre-A this ValueError escaped raw (uncatchable by the
-            # except-ProviderError failover in ask_with_tools); wrap it like
-            # the plain-ask path does.
-            raise ProviderError(f"Gemini bad JSON: {e}", transient=True) from e
-        _gemini_breaker_record(True)
-        cands = data.get("candidates") or []
-        if not cands:
-            raise ProviderError(f"Gemini empty response: {str(data)[:240]}", transient=True)
-        content = cands[0].get("content") or {}
-        parts = content.get("parts") or []
+            # Tool rounds default to 60s (function-call payloads run longer);
+            # MEDIAHUB_GEMINI_TIMEOUT still overrides per call.
+            data = gemini_transport.generate_content(payload, key=key, timeout_default=60.0)
+            parts = gemini_transport.first_candidate_parts(data)
+        except gemini_transport.GeminiTransportError as e:
+            raise _gemini_provider_error(e, tool=True) from e
         # Capture the assistant turn whole so the next loop sees it.
         contents.append({"role": "model", "parts": parts})
         fn_calls = []
@@ -722,22 +582,6 @@ _DISPATCH = {
 }
 
 
-def _gemini_breaker_open() -> bool:
-    """Forwarder to ``media_ai.llm._gemini_breaker_is_open``.
-
-    Both LLM wrappers hit the same Gemini endpoint, so a 503 noticed
-    by one warrants skipping Gemini in the other for the cool-off
-    period too. Import lazily to keep ``ai_core`` independently
-    importable if ``media_ai`` is ever vendored separately.
-    """
-    try:
-        from mediahub.media_ai.llm import _gemini_breaker_is_open
-
-        return _gemini_breaker_is_open()
-    except Exception:
-        return False
-
-
 def _fallback_chain(primary: Optional[str]) -> list[str]:
     """Return the provider order to try, starting with `primary` (if
     configured) then the remaining configured providers. Lets a rate-
@@ -754,9 +598,11 @@ def _fallback_chain(primary: Optional[str]) -> list[str]:
     for p in _PROVIDERS:
         if p != primary and _key_for(p):
             chain.append(p)
-    # If Gemini is in the breaker cool-off, move it to the back of the
-    # queue so any other configured provider is tried first.
-    if _gemini_breaker_open() and "gemini" in chain and len(chain) > 1:
+    # If Gemini is in the breaker cool-off (shared transport-level state —
+    # both wrappers hit the same endpoint, so a 503 noticed by either
+    # warrants demoting Gemini here too), move it to the back of the queue
+    # so any other configured provider is tried first.
+    if gemini_transport.breaker_is_open() and "gemini" in chain and len(chain) > 1:
         chain = [p for p in chain if p != "gemini"] + ["gemini"]
     return chain
 

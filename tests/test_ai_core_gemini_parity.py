@@ -17,6 +17,7 @@ from __future__ import annotations
 import pytest
 import requests
 
+from mediahub.ai_core import gemini_transport
 from mediahub.ai_core import llm as ai_core_llm
 from mediahub.media_ai import llm as media_ai_llm
 
@@ -62,9 +63,9 @@ class _Capture:
 @pytest.fixture(autouse=True)
 def _clean_breaker():
     """Breaker state is module-global; make every test start and end closed."""
-    media_ai_llm._gemini_breaker_record_success()
+    gemini_transport.breaker_record_success()
     yield
-    media_ai_llm._gemini_breaker_record_success()
+    gemini_transport.breaker_record_success()
 
 
 @pytest.fixture
@@ -160,7 +161,7 @@ def test_key_rides_header_not_url(gemini_only, monkeypatch):
 
 
 def _failures() -> int:
-    return media_ai_llm.gemini_breaker_snapshot()["consecutive_failures"]
+    return gemini_transport.breaker_snapshot()["consecutive_failures"]
 
 
 def test_transport_error_records_breaker_failure(gemini_only, monkeypatch):
@@ -217,10 +218,10 @@ def test_ai_core_outage_trips_breaker_for_media_ai(gemini_only, monkeypatch):
     monkeypatch.setattr(
         requests, "post", _Capture(exc=requests.exceptions.ConnectionError("reset"))
     )
-    for _ in range(media_ai_llm._GEMINI_BREAKER_THRESHOLD):
+    for _ in range(gemini_transport._BREAKER_THRESHOLD):
         with pytest.raises(ai_core_llm.ProviderError):
             ai_core_llm._ask_gemini("sys", "user", 64)
-    assert media_ai_llm._gemini_breaker_is_open() is True
+    assert gemini_transport.breaker_is_open() is True
 
     # media_ai must now short-circuit without any HTTP round-trip.
     def _must_not_post(*a, **k):  # pragma: no cover - failure path

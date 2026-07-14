@@ -3,15 +3,18 @@
 Pre-fix, ``log.warning("gemini transport failed: %s", e)`` embedded the
 failing URL — including the ``?key=…`` query parameter — straight into
 stdout, which is the canonical leak path for Render's log aggregator.
-The fix runs the exception string through ``_redact_key`` before
-logging or storing it on the usage ledger.
+The fix runs the exception string through the shared transport's
+``redact_key`` before logging or storing it on the usage ledger (the
+helper lives in ``ai_core.gemini_transport`` — one copy for both LLM
+wrappers, finding #43).
 
 We exercise the redaction helper directly rather than provoking a real
 network failure, so the test runs offline and deterministically.
 """
 from __future__ import annotations
 
-from mediahub.media_ai.llm import _redact_key
+from mediahub.ai_core import gemini_transport
+from mediahub.ai_core.gemini_transport import redact_key as _redact_key
 
 
 SECRET = "AIzaSyTEST-do-not-log-DEF456"
@@ -56,9 +59,7 @@ def test_call_gemini_sends_key_in_header_not_url(monkeypatch):
     from mediahub.media_ai import llm as media_ai_llm
 
     monkeypatch.setattr(media_ai_llm, "_resolve_gemini_key", lambda: SECRET)
-    with media_ai_llm._gemini_breaker_lock:
-        media_ai_llm._gemini_breaker_state["consecutive_failures"] = 0
-        media_ai_llm._gemini_breaker_state["tripped_until"] = 0.0
+    gemini_transport.breaker_record_success()  # start closed
     seen = {}
 
     class _Resp:
@@ -87,9 +88,7 @@ def test_call_gemini_vision_sends_key_in_header_not_url(monkeypatch):
     from mediahub.media_ai import llm as media_ai_llm
 
     monkeypatch.setattr(media_ai_llm, "_resolve_gemini_key", lambda: SECRET)
-    with media_ai_llm._gemini_breaker_lock:
-        media_ai_llm._gemini_breaker_state["consecutive_failures"] = 0
-        media_ai_llm._gemini_breaker_state["tripped_until"] = 0.0
+    gemini_transport.breaker_record_success()  # start closed
     seen = {}
 
     class _Resp:

@@ -144,7 +144,7 @@ def imagen_predict(
             "safetySetting": safety,
         },
     }
-    from mediahub.media_ai.llm import _redact_key
+    from mediahub.ai_core.gemini_transport import redact_key as _redact_key
 
     try:
         r = requests.post(

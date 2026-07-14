@@ -26,7 +26,9 @@ src/mediahub/          — Main Python package (~43 sub-packages)
   web/web.py           — Flask monolith (~69,000 lines, ~465 routes)
   web/club_profile.py  — ClubProfile dataclass + persistence
   media_ai/llm.py      — Cloud LLM wrapper (Gemini/Claude with provider failover)
-  ai_core/             — Provider-agnostic LLM client + bounded ask_with_tools loop (Cap 1)
+  ai_core/             — Provider-agnostic LLM client + bounded ask_with_tools loop (Cap 1);
+                         gemini_transport.py is the single Gemini REST transport + overload
+                         breaker shared by both LLM wrappers (finding #43 convergence)
   club_platform/       — Content types, stubs, athlete spotlight
   brand/               — BrandKit, tone system
   workflow/            — CardStatus, WorkflowStore, content pack, schedule, audit log

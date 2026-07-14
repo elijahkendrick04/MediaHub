@@ -31561,7 +31561,11 @@ self.addEventListener('fetch', function(e){
         Gemini for the listed cooldown period.
         """
         try:
-            from mediahub.media_ai.llm import gemini_breaker_snapshot
+            # Breaker state lives in the shared Gemini transport (one copy
+            # for both LLM wrappers — finding #43).
+            from mediahub.ai_core.gemini_transport import (
+                breaker_snapshot as gemini_breaker_snapshot,
+            )
 
             snap = gemini_breaker_snapshot()
         except Exception as e:
