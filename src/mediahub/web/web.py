@@ -2448,7 +2448,7 @@ def _friendly_failure_message(exc: Exception, *, kind: str = "ai", context: str 
 # (the render gate is 1-slot anyway, so parallel threads only added
 # queue-timeout risk) and the UI polls /api/variant-jobs/<id>.
 # ---------------------------------------------------------------------------
-# DISK-BACKED, not in-memory: gunicorn runs ``--workers 2`` (Procfile), so
+# DISK-BACKED, not in-memory: gunicorn runs ``--workers 2`` (docker-entrypoint.sh), so
 # the POST that creates a job and the GETs that poll it routinely land on
 # different processes — an in-memory dict 404s ("job_not_found") for half
 # the polls. Jobs are tiny JSON files under RUNS_DIR/_variant_jobs/,

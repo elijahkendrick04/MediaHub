@@ -1,6 +1,8 @@
-# Roadmap auto-update — keeps docs/ROADMAP.md current on every push to main.
+# Roadmap auto-update — keeps docs/ROADMAP.md current on a daily schedule.
 #
-# On each push to `main` this workflow runs scripts/roadmap_autoupdate.py, which:
+# Once a day (debounced from the former every-push-to-main trigger — #139:
+# that fired on every merge and landed 2 commits per update, ~26% of all repo
+# history) this workflow runs scripts/roadmap_autoupdate.py, which:
 #   1. sweeps completed items: any to-do item already hand-marked with a ✅
 #      badge is MOVED off its to-do list into the Completed list (dated from
 #      the badge), no directive needed. A human remainder declared on the
@@ -33,9 +35,14 @@
 # ever switched off, the PR is still created and left open with a warning
 # (one click to land) — updates are never silently lost again.
 #
-# Why only `main`? So the file-disjoint feature-branch PRs (Appendix A's
-# parallel bucket) never collide on ROADMAP.md — the roadmap moves when work
-# *lands* on the mainline, not on every feature-branch push.
+# Why a daily batch (not per-push)? The roadmap tracks work that has *landed*
+# on `main`, and every refresh rewrites the same stamp/activity lines — so
+# firing on each push produced 2 commits per merge for a doc that only needs
+# to be eventually-consistent. A once-a-day run collapses that to ~2 commits
+# per day; `roadmap: <ID> <status>` directives from the day's merges are still
+# harvested via roadmap_autoupdate.py's bounded commit lookback (a scheduled
+# run sees them without a per-push commit range — the same path a manual
+# workflow_dispatch has always used).
 #
 # Self-conflict fix (2026-06-13): every refresh rewrites the SAME lines (the
 # LAST_UPDATED stamp + the top of the ACTIVITY table), so a bot PR computed
@@ -51,20 +58,21 @@
 #     keeping the tidy `docs: auto-update roadmap (#N) [skip render]` title on
 #     the merge commit Render inspects.
 #
-# Loop safety, three layers:
-#   1. pushes/merges made with the built-in GITHUB_TOKEN do not trigger
-#      `push` workflows, so the bot's own merge cannot recurse;
-#   2. the job-level `if` skips bot-roadmap merge commits anyway;
-#   3. the diff-quiet guard exits early when nothing changed.
-# The bot commit deliberately does NOT carry `[skip ci]`: the required
-# checks must run on the bot PR or branch protection would hold the
-# auto-merge forever.
+# Loop safety: the workflow no longer triggers on `push`, so the bot's own
+# roadmap merge cannot recurse — only the daily `schedule` (and manual
+# `workflow_dispatch`) start it. The diff-quiet guard still exits early when a
+# run produces no change. The bot commit deliberately does NOT carry
+# `[skip ci]`: the required checks must run on the bot PR or branch protection
+# would hold the auto-merge forever.
 
 name: Roadmap auto-update
 
 on:
-  push:
-    branches: [main]
+  schedule:
+    # Daily at 06:17 UTC. Off-the-hour to dodge GitHub's peak-of-hour
+    # scheduled-run backlog. Debounced from the former push-to-main trigger
+    # (#139) so the roadmap refresh lands ~once a day instead of per merge.
+    - cron: "17 6 * * *"
   workflow_dispatch:
 
 permissions:
@@ -80,12 +88,9 @@ jobs:
   update:
     name: Update roadmap
     runs-on: ubuntu-latest
-    # Belt-and-braces loop guard (layer 2): never re-run for the bot's own
-    # roadmap landing. workflow_dispatch has no head_commit — always allowed.
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      (!contains(github.event.head_commit.message, 'bot/roadmap-autoupdate') &&
-       !startsWith(github.event.head_commit.message, 'docs: auto-update roadmap'))
+    # No loop guard needed: the only triggers are the daily `schedule` and
+    # manual `workflow_dispatch` — the bot's own merge to `main` no longer
+    # starts this workflow (the `push` trigger was removed in #139).
     steps:
       - uses: actions/checkout@v7
         with:
@@ -93,7 +98,7 @@ jobs:
 
       - uses: actions/setup-python@v6
         with:
-          python-version: "3.11"
+          python-version: "3.12"
 
       - name: Branch the refresh off the freshest main
         # Regenerate on top of the live origin/main, NOT the (possibly stale)
@@ -111,8 +116,10 @@ jobs:
           # For the sentinel-issues fetch (read-only; fail-soft to "leave the
           # block as it was" when the API is unreachable).
           GITHUB_TOKEN: ${{ github.token }}
-          ROADMAP_BEFORE: ${{ github.event.before }}
-          ROADMAP_AFTER: ${{ github.sha }}
+          # No per-push commit range on a scheduled/dispatch run: the refresh
+          # operates on the freshest main checked out above (the script defaults
+          # ROADMAP_AFTER to HEAD), and `roadmap: <ID>` directives self-heal via
+          # the script's bounded commit lookback (ROADMAP_DIRECTIVE_LOOKBACK).
         run: python scripts/roadmap_autoupdate.py
 
       - name: Land via auto-merge PR (main requires PRs)

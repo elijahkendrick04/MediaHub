@@ -853,7 +853,7 @@ Why this workstream jumped to the head of the founder list:
   the **US** (per the DPA's subprocessor register); an EU/UK box simplifies
   F.4's transfer-mechanism homework.
 - **The move is already cheap to execute.** The deploy is one Dockerfile
-  (compose + `fly.toml` templates exist), all state lives under `DATA_DIR`,
+  (a compose template exists), all state lives under `DATA_DIR`,
   and PC.14 shipped daily backups with a restore drill rehearsed on every
   test run — restoring a production backup onto a new box *is* the
   migration. 3.1 packages the remainder: reverse-proxy TLS template,

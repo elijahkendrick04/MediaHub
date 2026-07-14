@@ -107,7 +107,8 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v6
         with:
-          node-version: "20"
+          # Match the production image (Dockerfile installs Node 22).
+          node-version: "22"
 
       - name: Install stylelint
         run: |
