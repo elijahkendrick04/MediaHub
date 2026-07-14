@@ -2742,6 +2742,10 @@ def api_create_graphic(run_id: str, card_id: str):
     try:
         if _req.is_json and _req.json:
             chosen_asset_id = (_req.json.get("asset_id") or "").strip() or None
+            # HTML checkbox truthiness — the form value is "on" or absent, never a
+            # NaN literal; bool() is the intended presence test. (pre-existing web.py
+            # body exposed to semgrep by the finding-#15 carve; behaviour unchanged.)
+            # nosemgrep: python.flask.security.injection.nan-injection.nan-injection
             force_no_photo = bool(_req.json.get("no_photo"))
     except Exception:
         pass
@@ -3422,6 +3426,10 @@ def api_regenerate_variants(run_id: str, card_id: str):
     try:
         if request.is_json and request.json:
             _chosen = (request.json.get("asset_id") or "").strip() or None
+            # HTML checkbox truthiness — the form value is "on" or absent, never a
+            # NaN literal; bool() is the intended presence test. (pre-existing web.py
+            # body exposed to semgrep by the finding-#15 carve; behaviour unchanged.)
+            # nosemgrep: python.flask.security.injection.nan-injection.nan-injection
             _nop = bool(request.json.get("no_photo"))
     except Exception:
         pass

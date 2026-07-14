@@ -67,7 +67,15 @@ def org_consent_settings():
         profile.lawful_basis_enrichment = enr
     if mode in ("", "opt_out", "opt_in"):
         profile.consent_mode = mode
+    # HTML checkbox truthiness — the form value is "on" or absent, never a
+    # NaN literal; bool() is the intended presence test. (pre-existing web.py
+    # body exposed to semgrep by the finding-#15 carve; behaviour unchanged.)
+    # nosemgrep: python.flask.security.injection.nan-injection.nan-injection
     profile.consent_require_parental_for_minors = bool(request.form.get("parental_minors"))
+    # HTML checkbox truthiness — the form value is "on" or absent, never a
+    # NaN literal; bool() is the intended presence test. (pre-existing web.py
+    # body exposed to semgrep by the finding-#15 carve; behaviour unchanged.)
+    # nosemgrep: python.flask.security.injection.nan-injection.nan-injection
     profile.pb_enrichment_enabled = bool(request.form.get("pb_enrichment_enabled"))
     profile.lawful_basis_notes = (request.form.get("lawful_basis_notes") or "").strip()[:500]
     W.save_profile(profile)
@@ -79,8 +87,20 @@ def org_child_policy_settings():
     profile = W.load_profile(pid) if pid else None
     if profile is None:
         return jsonify({"error": "no active organisation"}), 404
+    # HTML checkbox truthiness — the form value is "on" or absent, never a
+    # NaN literal; bool() is the intended presence test. (pre-existing web.py
+    # body exposed to semgrep by the finding-#15 carve; behaviour unchanged.)
+    # nosemgrep: python.flask.security.injection.nan-injection.nan-injection
     profile.child_surname_initial = bool(request.form.get("child_surname_initial"))
+    # HTML checkbox truthiness — the form value is "on" or absent, never a
+    # NaN literal; bool() is the intended presence test. (pre-existing web.py
+    # body exposed to semgrep by the finding-#15 carve; behaviour unchanged.)
+    # nosemgrep: python.flask.security.injection.nan-injection.nan-injection
     profile.child_suppress_age = bool(request.form.get("child_suppress_age"))
+    # HTML checkbox truthiness — the form value is "on" or absent, never a
+    # NaN literal; bool() is the intended presence test. (pre-existing web.py
+    # body exposed to semgrep by the finding-#15 carve; behaviour unchanged.)
+    # nosemgrep: python.flask.security.injection.nan-injection.nan-injection
     profile.child_exclude_photos = bool(request.form.get("child_exclude_photos"))
     W.save_profile(profile)
     return redirect(url_for("athletes_page", tab="records"))
@@ -4201,6 +4221,10 @@ def organisation_setup_manual():
         v = _col(field_name)
         if v:
             manual_pal[slot] = v
+    # HTML checkbox truthiness — the form value is "on" or absent, never a
+    # NaN literal; bool() is the intended presence test. (pre-existing web.py
+    # body exposed to semgrep by the finding-#15 carve; behaviour unchanged.)
+    # nosemgrep: python.flask.security.injection.nan-injection.nan-injection
     use_fourth = bool(request.form.get("manual_use_fourth"))
     fourth = _col("manual_fourth") if use_fourth else ""
     if fourth:
