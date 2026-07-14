@@ -169,9 +169,19 @@ class DsrRequestLog:
 # --------------------------------------------------------------------------
 
 
-def _tenant_runs(profile_id: str) -> list[Path]:
-    """Run JSON files owned by this tenant (legacy unowned runs included —
-    they pre-date multi-tenancy and belong to the single org that made them)."""
+def _tenant_runs(profile_id: str, *, include_ownerless: bool = True) -> list[Path]:
+    """Run JSON files this tenant may act on under a DSR request.
+
+    A run owned by this tenant (``owner == profile_id``) is always included.
+    Ownerless runs (legacy / pre-multi-tenancy, ``profile_id == ""``) are
+    included only when ``include_ownerless`` is set. The caller decides that
+    from the SAME ADR-0014 rule the run routes use (``_ownerless_run_readable``):
+    the operator and single-tenant / anonymous (pilot) sessions keep today's
+    reach over legacy data, while a signed-in *regular* tenant on a shared
+    instance is confined to its own runs — an ownerless run may be another
+    club's legacy data (finding #111). Defaults to ``True`` so direct/library
+    callers, tests, and the single-org legacy path are unchanged; the web
+    routes pass the gated value."""
     out = []
     runs_dir = _runs_dir()
     if not runs_dir.exists():
@@ -183,7 +193,7 @@ def _tenant_runs(profile_id: str) -> list[Path]:
             owner = json.loads(p.read_text()).get("profile_id", "")
         except Exception:
             continue
-        if owner == profile_id or not owner:
+        if owner == profile_id or (include_ownerless and not owner):
             out.append(p)
     return out
 
@@ -310,8 +320,12 @@ def _redact_rows_for_subject(node: object, pattern: re.Pattern) -> tuple[object,
 # --------------------------------------------------------------------------
 
 
-def export_athlete(profile_id: str, athlete_name: str) -> dict:
-    """Everything held about one athlete, machine-readable (Arts 15 + 20)."""
+def export_athlete(profile_id: str, athlete_name: str, *, include_ownerless: bool = True) -> dict:
+    """Everything held about one athlete, machine-readable (Arts 15 + 20).
+
+    ``include_ownerless`` gates whether legacy ownerless runs are read (see
+    ``_tenant_runs``); the web route passes the ADR-0014 value so a signed-in
+    regular tenant cannot disclose another club's ownerless data."""
     key = athlete_key(athlete_name)
     report: dict = {
         "athlete_name": athlete_name,
@@ -328,7 +342,7 @@ def export_athlete(profile_id: str, athlete_name: str) -> dict:
         ],
     }
 
-    for path in _tenant_runs(profile_id):
+    for path in _tenant_runs(profile_id, include_ownerless=include_ownerless):
         try:
             run = json.loads(path.read_text())
         except Exception:
@@ -433,8 +447,20 @@ def _memory_rows_matching(memory_store, tenant_id: str, key: str) -> list[dict]:
 # --------------------------------------------------------------------------
 
 
-def erase_athlete(profile_id: str, athlete_name: str, *, recorded_by: str = "") -> dict:
+def erase_athlete(
+    profile_id: str,
+    athlete_name: str,
+    *,
+    recorded_by: str = "",
+    include_ownerless: bool = True,
+) -> dict:
     """Remove one athlete from every reachable store; report residuals.
+
+    ``include_ownerless`` gates whether legacy ownerless runs are mutated (see
+    ``_tenant_runs``); the web route passes the ADR-0014 value so a signed-in
+    regular tenant cannot rewrite another club's ownerless data. The privacy
+    cascade below is already strict (``!= profile_id``), so it never reaches
+    ownerless runs regardless.
 
     ONE erasure engine, two layers: the UK-legal cascade
     (``mediahub.privacy.erasure`` — runs/cards/rendered assets, PB caches,
@@ -467,7 +493,7 @@ def erase_athlete(profile_id: str, athlete_name: str, *, recorded_by: str = "") 
     }
 
     # 1. Runs: drop the athlete's achievements/cards, redact remaining mentions.
-    for path in _tenant_runs(profile_id):
+    for path in _tenant_runs(profile_id, include_ownerless=include_ownerless):
         try:
             run = json.loads(path.read_text())
         except Exception:
@@ -731,8 +757,14 @@ def _count_mentions(node: object, key: str) -> int:
 # --------------------------------------------------------------------------
 
 
-def rectify_athlete_name(profile_id: str, old_name: str, new_name: str) -> dict:
-    """Correct an athlete's name across runs, media links and consent records."""
+def rectify_athlete_name(
+    profile_id: str, old_name: str, new_name: str, *, include_ownerless: bool = True
+) -> dict:
+    """Correct an athlete's name across runs, media links and consent records.
+
+    ``include_ownerless`` gates whether legacy ownerless runs are renamed (see
+    ``_tenant_runs``); the web route passes the ADR-0014 value so a signed-in
+    regular tenant cannot rewrite another club's ownerless data."""
     key = athlete_key(old_name)
     new_clean = re.sub(r"\s+", " ", (new_name or "").strip())
     if not key or not new_clean:
@@ -753,7 +785,7 @@ def rectify_athlete_name(profile_id: str, old_name: str, new_name: str) -> dict:
                 n += _rename_deep(item)
         return n
 
-    for path in _tenant_runs(profile_id):
+    for path in _tenant_runs(profile_id, include_ownerless=include_ownerless):
         try:
             run = json.loads(path.read_text())
         except Exception:

@@ -56,7 +56,7 @@ Document versions are date-stamped constants (`TERMS_VERSION` etc.). **Bumping
    (or self-host), hosting provider. Verify UK–US Data Bridge certification per
    vendor or execute IDTA/Addendum; disable provider training on submitted data
    where the toggle exists.
-4. **Hosting**: pin the Render region (or use Fly `lhr`), confirm disk encryption,
+4. **Hosting**: pin the Render region, confirm disk encryption,
    confirm TLS/HSTS at the edge.
 5. **Stripe**: enable renewal-reminder emails for annual subscriptions (the ToS and
    `/billing/confirm` say "we send a reminder before renewal" — make it true), and
