@@ -297,7 +297,9 @@ def test_certificates_builds_use_unique_intermediate_dirs_and_clean_up(env, monk
 # Source-level: the builder page wires the job client
 # ---------------------------------------------------------------------------
 
-_SRC = pathlib.Path("src/mediahub/web/web.py").read_text(encoding="utf-8")
+from tests._helpers import web_surface_src
+
+_SRC = web_surface_src()
 
 
 def test_pack_page_wires_certificates_job_client():
@@ -332,9 +334,13 @@ def test_background_workers_queue_for_the_render_slot():
     # (_RENDER_QUEUE_TIMEOUT, like the render-all batch worker) instead of
     # borrowing the request threads' 0.75s fast-fail budget.
     assert '_render_slot("certificates", run_id, timeout=_RENDER_QUEUE_TIMEOUT)' in _SRC
-    assert '"graphic", f"sponsor:{card_id}", timeout=_RENDER_QUEUE_TIMEOUT' in _SRC
+    # The sponsor-variant worker lives in routes_api_runs since the finding-#15
+    # carve, where web globals are spelled W.<name> — accept either spelling.
+    assert re.search(
+        r'"graphic", f"sponsor:\{card_id\}", timeout=(?:W\.)?_RENDER_QUEUE_TIMEOUT', _SRC
+    )
     assert '_render_slot("certificates", run_id, timeout=_RENDER_TRY_TIMEOUT)' not in _SRC
-    assert 'f"sponsor:{card_id}", timeout=_RENDER_TRY_TIMEOUT' not in _SRC
+    assert not re.search(r'f"sponsor:\{card_id\}", timeout=(?:W\.)?_RENDER_TRY_TIMEOUT', _SRC)
 
 
 def test_certificates_slot_is_per_pdf_not_whole_build():
