@@ -20062,9 +20062,7 @@ def _home_resume_strip_html(profile_id: Optional[str]) -> str:
             status_line = f"{n_queue} awaiting review"
             cta = "Continue reviewing &rarr;"
         elif n_stand > 0:
-            status_line = (
-                f"{n_stand} standout swim{'' if n_stand == 1 else 's'} · all reviewed"
-            )
+            status_line = f"{n_stand} standout swim{'' if n_stand == 1 else 's'} · all reviewed"
             cta = "Open pack &rarr;"
         elif n_ach > 0:
             status_line = f"{n_ach} moment{'' if n_ach == 1 else 's'} · all reviewed"
@@ -21609,9 +21607,7 @@ def create_app() -> Flask:
                 else:
                     n_runs = int(conn.execute("SELECT COUNT(*) FROM runs").fetchone()[0])
                     n_moments = int(
-                        conn.execute(
-                            "SELECT COALESCE(SUM(n_standout), 0) FROM runs"
-                        ).fetchone()[0]
+                        conn.execute("SELECT COALESCE(SUM(n_standout), 0) FROM runs").fetchone()[0]
                         or 0
                     )
             finally:
@@ -25571,7 +25567,11 @@ def create_app() -> Flask:
                 return len(_NEAR_MISS_ORDER)
 
         _swim_rows = (
-            [r_ for r_ in _swim_rows if r_["tier"] in (_swim_tiers.TIER_STANDOUT, _swim_tiers.TIER_NOTABLE)]
+            [
+                r_
+                for r_ in _swim_rows
+                if r_["tier"] in (_swim_tiers.TIER_STANDOUT, _swim_tiers.TIER_NOTABLE)
+            ]
             + sorted(
                 (r_ for r_ in _swim_rows if r_["tier"] == _swim_tiers.TIER_CLOSE_CALL),
                 key=_nm_pos,
@@ -25598,7 +25598,8 @@ def create_app() -> Flask:
                 # What the engine (or a human promotion) found for this swim,
                 # verbatim from the ranked achievements — no new copy.
                 _kinds = " · ".join(
-                    _humanise((ra.get("achievement") or {}).get("type", "")) for ra in _ranked_here[:3]
+                    _humanise((ra.get("achievement") or {}).get("type", ""))
+                    for ra in _ranked_here[:3]
                 )
                 _best_headline = str(
                     ((_ranked_here[0].get("achievement") or {}).get("headline") or "")
@@ -50661,9 +50662,7 @@ function mhCertificatesJob(a) {{
         if not swim_id:
             return jsonify({"error": "swim_id required"}), 400
 
-        wants_json = request.is_json or (
-            request.accept_mimetypes.best == "application/json"
-        )
+        wants_json = request.is_json or (request.accept_mimetypes.best == "application/json")
 
         def _fail(code: int, msg: str):
             if wants_json:
@@ -50775,7 +50774,9 @@ function mhCertificatesJob(a) {{
             # run time, so a card created after the run must apply it here or
             # a minor's full name would leak through the promotion path.
             try:
-                _prof = load_profile(data.get("profile_id") or "") if data.get("profile_id") else None
+                _prof = (
+                    load_profile(data.get("profile_id") or "") if data.get("profile_id") else None
+                )
                 if _prof is not None:
                     from mediahub.compliance.child_policy import apply_to_ranked
 
