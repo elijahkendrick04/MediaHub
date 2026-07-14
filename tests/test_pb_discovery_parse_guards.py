@@ -15,6 +15,7 @@ These pin the three baseline-corruption defects fixed in
 
 The parser is deterministic engine code (no LLM), so these assert exact output.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -42,17 +43,18 @@ def _page(*, text: str = "", tables=None) -> ProfilePage:
 
 # ── F01 · relay rows never become individual-event baselines ─────────────────
 
+
 class TestF01RelayRejection:
     @pytest.mark.parametrize(
         "text,is_relay",
         [
             ("4 x 100m Freestyle Relay 3:45.00", True),
             ("4x100 Free Relay", True),
-            ("4 × 100 Medley Relay", True),   # unicode multiplication sign
-            ("4X50 Free", True),                    # bare N x DIST, capital X
-            ("Freestyle Relay 3:45.00", True),      # word only, no "N x"
+            ("4 × 100 Medley Relay", True),  # unicode multiplication sign
+            ("4X50 Free", True),  # bare N x DIST, capital X
+            ("Freestyle Relay 3:45.00", True),  # word only, no "N x"
             ("Mixed 4 x 50m Medley Relay 1:52.33", True),
-            ("100m Freestyle 58.90", False),        # individual — must survive
+            ("100m Freestyle 58.90", False),  # individual — must survive
             ("200m Individual Medley 2:20.10", False),  # 'Medley' alone is not a relay
         ],
     )
@@ -60,11 +62,15 @@ class TestF01RelayRejection:
         assert _is_relay_row(text) is is_relay
 
     def test_heuristic_table_drops_relay_keeps_individual(self):
-        page = _page(tables=[[
-            ["4 x 100m Freestyle Relay", "3:45.00", "SC"],
-            ["4 x 50m Medley Relay", "1:52.33", "SC"],
-            ["100m Freestyle", "59.90", "SC"],       # real individual PB
-        ]])
+        page = _page(
+            tables=[
+                [
+                    ["4 x 100m Freestyle Relay", "3:45.00", "SC"],
+                    ["4 x 50m Medley Relay", "1:52.33", "SC"],
+                    ["100m Freestyle", "59.90", "SC"],  # real individual PB
+                ]
+            ]
+        )
         rows = _heuristic_extract_pbs(page)
         # No relay leg leaked as an individual baseline.
         assert all("Relay" not in r.event for r in rows)
@@ -73,23 +79,22 @@ class TestF01RelayRejection:
         assert any(r.event == "100m Freestyle" and r.time_canonical == "59.90" for r in rows)
 
     def test_heuristic_freetext_drops_relay(self):
-        page = _page(text=(
-            "4 x 100m Freestyle Relay 3:45.00\n"
-            "100m Backstroke 1:05.50 LC\n"
-        ))
+        page = _page(text=("4 x 100m Freestyle Relay 3:45.00\n" "100m Backstroke 1:05.50 LC\n"))
         rows = _heuristic_extract_pbs(page)
         assert not any(r.time_canonical == "3:45.00" for r in rows)
         assert any(r.event == "100m Backstroke" for r in rows)
 
     def test_interpreter_path_drops_relay(self):
         # Real interpreter: a relay listing followed by an individual event.
-        page = _page(text=(
-            "Club Relay Results\n"
-            "Event 1 Girls 4 x 100m Freestyle Relay\n"
-            "1 Anytown SC 3:45.00\n"
-            "Event 2 Girls 100m Freestyle\n"
-            "1 Smith, Jane 2008 Anytown 59.90\n"
-        ))
+        page = _page(
+            text=(
+                "Club Relay Results\n"
+                "Event 1 Girls 4 x 100m Freestyle Relay\n"
+                "1 Anytown SC 3:45.00\n"
+                "Event 2 Girls 100m Freestyle\n"
+                "1 Smith, Jane 2008 Anytown 59.90\n"
+            )
+        )
         rows, _conf = _interpreter_extract_pbs(page)
         # The relay split must not appear as a 100m Freestyle @ 3:45.00 baseline.
         assert not any(r.time_canonical == "3:45.00" for r in rows)
@@ -97,6 +102,7 @@ class TestF01RelayRejection:
 
 
 # ── F09 · course resolved per row, mixed pages stay distinct ─────────────────
+
 
 class TestF09PerRowCourse:
     def test_detect_course_unambiguous(self):
@@ -129,10 +135,12 @@ class TestF09PerRowCourse:
         # A page with only LC markers: every row is LC (no behaviour change).
         page = _page(
             text="Long Course personal bests",
-            tables=[[
-                ["100m Freestyle", "58.90"],
-                ["200m Backstroke", "2:18.90"],
-            ]],
+            tables=[
+                [
+                    ["100m Freestyle", "58.90"],
+                    ["200m Backstroke", "2:18.90"],
+                ]
+            ],
         )
         rows = _heuristic_extract_pbs(page)
         assert rows
@@ -148,17 +156,18 @@ class TestF09PerRowCourse:
 
 # ── F20 · dotted dates are not swim times ────────────────────────────────────
 
+
 class TestF20DateNotTime:
     @pytest.mark.parametrize(
         "text,times",
         [
-            ("100m Freestyle 12.03.2024 58.90", ["58.90"]),   # dotted date before time
-            ("100m Freestyle 12.03.24 58.90", ["58.90"]),     # 2-digit year
-            ("100m Freestyle 1.3.2024 58.90", ["58.90"]),     # single-digit d/m
-            ("100m Freestyle 12/03/2024 58.90", ["58.90"]),   # slashes
-            ("100m Freestyle 58.90 12.03.2024", ["58.90"]),   # date after the time
-            ("100m Freestyle 2024-03-12 58.90", ["58.90"]),   # ISO date
-            ("100m Free 28.50", ["28.50"]),                   # plain time, no date
+            ("100m Freestyle 12.03.2024 58.90", ["58.90"]),  # dotted date before time
+            ("100m Freestyle 12.03.24 58.90", ["58.90"]),  # 2-digit year
+            ("100m Freestyle 1.3.2024 58.90", ["58.90"]),  # single-digit d/m
+            ("100m Freestyle 12/03/2024 58.90", ["58.90"]),  # slashes
+            ("100m Freestyle 58.90 12.03.2024", ["58.90"]),  # date after the time
+            ("100m Freestyle 2024-03-12 58.90", ["58.90"]),  # ISO date
+            ("100m Free 28.50", ["28.50"]),  # plain time, no date
         ],
     )
     def test_extract_times_excludes_dates(self, text, times):
@@ -183,12 +192,17 @@ class TestF20DateNotTime:
 
 # ── end-to-end · a relay+date listing yields no fabricated baselines ─────────
 
+
 def test_relay_and_date_page_produces_no_fabricated_baseline():
     """Acceptance: a relay-listing / date-bearing page produces zero
     individual-event baselines from those rows, on the public entry point."""
-    page = _page(tables=[[
-        ["4 x 100m Freestyle Relay", "3:45.00", "LC", "12.03.2024"],
-        ["4 x 50m Medley Relay", "1:52.33", "LC", "10.02.2024"],
-    ]])
+    page = _page(
+        tables=[
+            [
+                ["4 x 100m Freestyle Relay", "3:45.00", "LC", "12.03.2024"],
+                ["4 x 50m Medley Relay", "1:52.33", "LC", "10.02.2024"],
+            ]
+        ]
+    )
     rows, _conf = parse_pbs_from_page(page, use_interpreter=False)
     assert rows == []

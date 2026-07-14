@@ -264,12 +264,7 @@ def _interpreter_extract_pbs(page: ProfilePage) -> tuple[list[PBRow], float]:
             # the interpreter path folds them into "100m Freestyle" etc. too.
             if _is_relay_row(f"{event_name} {event.raw_header or ''}"):
                 continue
-            course = (
-                event.course
-                or _detect_course(event.raw_header or "")
-                or page_course
-                or "LC"
-            )
+            course = event.course or _detect_course(event.raw_header or "") or page_course or "LC"
             for swim in event.swims:
                 if not swim.time:
                     continue
