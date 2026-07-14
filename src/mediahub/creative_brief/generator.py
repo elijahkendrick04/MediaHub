@@ -197,6 +197,13 @@ class CreativeBrief:
     # (graphic_renderer.text_effects), APCA-policed at apply time. Empty (the
     # default) means no effects, so every legacy card renders byte-identically.
     text_effects: dict[str, str] = field(default_factory=dict)
+    # D6 — the optional per-word emphasis the director named for this card (the
+    # two-tone headline). ``emphasis_word`` is fact-gated at apply time (kept only
+    # when it whole-word matches a slot's actual value); ``emphasis_style`` picks
+    # the treatment (design_spec.EMPHASIS_STYLES). Empty word (the default) ⇒ no
+    # emphasis, so every legacy card renders byte-identically.
+    emphasis_word: str = ""
+    emphasis_style: str = ""
     # 1.10 — brand-token-recolourable library elements painted on this card. Each
     # entry is an ``elements.models.ElementPlacement`` dict (element_id + position
     # + scale + rotation + opacity); the ``sprint_hooks/elements`` hook resolves
@@ -941,6 +948,11 @@ def apply_design_spec(brief: CreativeBrief, spec) -> CreativeBrief:
         brief.text_effects = dict(spec.text_effects_map())
     except Exception:
         brief.text_effects = {}
+    # D6 — carry the director's per-word emphasis. The renderer fact-gates the
+    # word against the slot's actual value at apply time, so an empty word (or a
+    # word the card never contains) leaves the card byte-identical.
+    brief.emphasis_word = getattr(spec, "emphasis_word", "") or ""
+    brief.emphasis_style = getattr(spec, "emphasis_style", "") or ""
     # Mood-keyed style pack (G1.28): re-key the decorative pack to the mood's
     # curated preset bundle so the decoration matches the feeling the director
     # chose. This is the same selection ``generate()``'s v2 pack block makes for

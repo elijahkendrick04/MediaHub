@@ -169,6 +169,14 @@ export const cardSchema = z.object({
   // Painted on the composition root beneath every content layer, exactly the
   // still's ground override. Empty = the flat roles.ground (byte-identical).
   meshBg: z.string().default(""),
+  // D8 (Canva gap analysis): the still's density/mood-coherent supporting weight
+  // register (kicker/meta/data over the shipped variable axes), mirrored from
+  // render.py so the reel's labels/meta/data carry the same weights the still
+  // painted. 0 = the still did not spend the register (standard density + neutral
+  // mood), so the scene keeps its static fontWeight and stays byte-identical.
+  wghtKicker: z.number().default(0),
+  wghtMeta: z.number().default(0),
+  wghtData: z.number().default(0),
 });
 
 const brandSchema = z.object({
@@ -189,6 +197,14 @@ type Props = z.infer<typeof storyCardSchema>;
 type CardProps = Props["card"];
 type BrandProps = Props["brand"];
 export type Roles = { ground: string; surface: string; accent: string; onGround: string };
+
+// D8 (Canva gap analysis) — fontVariationSettings for a supporting-register
+// weight (kicker/meta/data) mirrored from the still's --mh-wght-* vars. A 0 (the
+// still did not spend the register) omits the setting, so the scene keeps its
+// static fontWeight and renders byte-identically to the pre-D8 reel.
+function wghtFvs(weight: number | undefined): React.CSSProperties {
+  return weight && weight > 0 ? { fontVariationSettings: `'wght' ${Math.round(weight)}` } : {};
+}
 
 // Six palette role permutations — mirror creative_brief/generator.py
 // _apply_palette_seed so the static graphic and motion render agree on
@@ -1725,8 +1741,8 @@ const BottomStrip: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
         textTransform: "uppercase",
       }}
     >
-      <span>{meet}</span>
-      <span style={{ fontWeight: 700 }}>{club}</span>
+      <span style={{ ...wghtFvs(ctx.card.wghtMeta) }}>{meet}</span>
+      <span style={{ fontWeight: 700, ...wghtFvs(ctx.card.wghtMeta) }}>{club}</span>
     </div>
   );
 };
@@ -1753,6 +1769,7 @@ const LabelChip: React.FC<{ ctx: SceneCtx; left?: number; top?: number; center?:
         color: roles.ground,
         fontSize: Math.round(36 * ts),
         fontWeight: 800,
+        ...wghtFvs(ctx.card.wghtKicker),
         letterSpacing: "0.12em",
         opacity: anim.chipOpacity,
         borderRadius: 6,

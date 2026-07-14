@@ -1135,6 +1135,22 @@ def _card_to_props(
         props["photoScale"] = crop_scale
     # M10 true-brand duotone / real halftone parameters (exact still mirror).
     props.update(_photo_treatment_mirror_props(b, root_vars, bool(photo_uri)))
+    # D8 (Canva gap analysis): the still's density/mood-coherent supporting weight
+    # register (kicker/meta/data), mirrored so the reel's labels/meta/data carry
+    # the same weights the still painted. Attached ONLY when the still spent the
+    # register (a bold pack or a non-neutral mood); a standard/neutral card omits
+    # it and keeps byte-identical props + cache key.
+    try:
+        from mediahub.graphic_renderer.autofit import weight_register_for as _weight_register_for
+
+        _density = ((str(b.get("style_pack") or "")).strip().split("-") or [""])[-1]
+        _wr = _weight_register_for(_density, str(b.get("mood") or ""))
+        if _wr:
+            props["wghtKicker"] = int(_wr["kicker"])
+            props["wghtMeta"] = int(_wr["meta"])
+            props["wghtData"] = int(_wr["data"])
+    except Exception:
+        pass
     # M11 data weight: secondary-stat chips + honest proportional PB bars for
     # the data-led archetypes, with the exact ink hex the still's bay uses.
     stat_chips = _stat_chips_for_brief(b)

@@ -411,6 +411,9 @@ export const StatChipsBlock: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
               fontFamily: "'JetBrains Mono', monospace",
               fontVariantNumeric: "tabular-nums",
               fontWeight: 700,
+              // D8 — the still's data-register weight (0 ⇒ omit, byte-identical).
+              fontVariationSettings:
+                card.wghtData && card.wghtData > 0 ? `'wght' ${Math.round(card.wghtData)}` : undefined,
               fontSize: Math.round(17 * ts),
               color: valueInk,
               padding: `0 ${Math.round(10 * ts)}px`,
@@ -477,6 +480,11 @@ export const StatChipsBlock: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
                     fontFamily: "'JetBrains Mono', 'Space Grotesk', monospace",
                     fontVariantNumeric: "tabular-nums",
                     fontWeight: 700,
+                    // D8 — the still's data-register weight (0 ⇒ omit, byte-identical).
+                    fontVariationSettings:
+                      card.wghtData && card.wghtData > 0
+                        ? `'wght' ${Math.round(card.wghtData)}`
+                        : undefined,
                     fontSize: Math.round(30 * ts),
                     lineHeight: 1.05,
                     color: ink,

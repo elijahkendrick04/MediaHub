@@ -4027,8 +4027,7 @@ def _sticker_outline_css(width: int, height: int, strength: float) -> str:
         )
     )
     return (
-        "\n/* --- B5 die-cut sticker contour --- */\n"
-        f"img.athlete-cutout {{ filter: {shadows}; }}\n"
+        f"\n/* --- B5 die-cut sticker contour --- */\nimg.athlete-cutout {{ filter: {shadows}; }}\n"
     )
 
 
@@ -4465,7 +4464,14 @@ def _unescape_basic(s: str) -> str:
     )
 
 
-def _apply_text_effects_to_repl(repl: dict, effects: dict, root_vars: dict) -> None:
+def _apply_text_effects_to_repl(
+    repl: dict,
+    effects: dict,
+    root_vars: dict,
+    *,
+    emphasis_word: str = "",
+    emphasis_style: str = "",
+) -> None:
     """Wrap effect-bearing slot values in APCA-policed effect spans / curve SVG.
 
     Mutates ``repl`` in place. Reads the card's resolved role colours from
@@ -4473,6 +4479,14 @@ def _apply_text_effects_to_repl(repl: dict, effects: dict, root_vars: dict) -> N
     included), and the renderer-side APCA gate downgrades an illegible effect to a
     safe outline. Unknown slots/effects are ignored and an empty slot value is
     skipped — so this can only decorate, never break, a card.
+
+    D6 — when ``emphasis_word`` is given, the FIRST slot (in a fixed scan order)
+    whose value contains it as a whole word gets that word wrapped in an
+    APCA-gated ``mh-em`` span (the two-tone headline). The emphasis is applied
+    *before* the slot effects so an effect span nests cleanly around it, and a
+    slot that is being replaced by a curve SVG is skipped (the SVG lays raw text,
+    so a span would leak literally). A word the card never contains produces no
+    emphasis — byte-identical.
     """
     try:
         from mediahub.graphic_renderer import text_effects as _fx
@@ -4485,6 +4499,29 @@ def _apply_text_effects_to_repl(repl: dict, effects: dict, root_vars: dict) -> N
         on_accent = _on_color(accent)
     except Exception:
         on_accent = "#FFFFFF"
+
+    word = (emphasis_word or "").strip()
+    if word:
+        curve_slots = {s for s, e in effects.items() if str(e).strip().lower() == "curve"}
+        try:
+            em_res = _fx.emphasis_css(
+                emphasis_style, ground=ground, accent=accent, on_accent=on_accent
+            )
+        except Exception:
+            em_res = None
+        if em_res is not None and em_res.style:
+            for slot in ("headline", "kicker", "event", "meta", "result"):
+                if slot in curve_slots:
+                    continue
+                key = _TEXT_EFFECT_SLOT_KEYS.get(slot)
+                value = repl.get(key) or ""
+                if not value:
+                    continue
+                new_value = _fx.emphasise_value(value, word, em_res)
+                if new_value != value:
+                    repl[key] = new_value
+                    break
+
     for slot, effect in effects.items():
         key = _TEXT_EFFECT_SLOT_KEYS.get(str(slot).strip().lower())
         if not key:
@@ -4722,6 +4759,23 @@ def _fill_v2_archetype(
     root_vars["--mh-track-mega-name"] = "%.4fem" % _tracking_for_px(fit_mega_name_px, "display")
     root_vars["--mh-track-result"] = "%.4fem" % _tracking_for_px(fit_result_px, "numeral")
     root_vars["--mh-track-mega-result"] = "%.4fem" % _tracking_for_px(fit_mega_result_px, "numeral")
+
+    # D8 (Canva gap analysis) — density/mood-coherent supporting weight register.
+    # The style-pack density lever + the director's mood pick a kicker/meta/data
+    # weight (over the shipped variable axes) the migrated layouts consume via
+    # font-variation-settings with their historic weight as the fallback. Emitted
+    # ONLY when a bold pack or a non-neutral mood spends the register, so a
+    # standard-density / neutral-mood card (and every legacy/brief-less render)
+    # keeps every layout on its historic weight — byte-identical. Mirrored into
+    # the Remotion props (motion.py) for still↔motion parity.
+    from mediahub.graphic_renderer.autofit import weight_register_for as _weight_register_for
+
+    _pack_density = ((getattr(brief, "style_pack", "") or "").strip().split("-") or [""])[-1]
+    _wght_register = _weight_register_for(_pack_density, getattr(brief, "mood", "") or "")
+    if _wght_register:
+        root_vars["--mh-wght-kicker"] = str(_wght_register["kicker"])
+        root_vars["--mh-wght-meta"] = str(_wght_register["meta"])
+        root_vars["--mh-wght-data"] = str(_wght_register["data"])
     # G1.12 — Multi-line hero & split-result fitting. The archetypes below carry
     # the surname / result in ONE dominant autofit slot. When a compound or
     # double-barrelled surname, or a split-time result ("1:45.23 / 50.12"), will
@@ -4897,8 +4951,16 @@ def _fill_v2_archetype(
     # multi-line balancer has settled RESULT_VALUE / ATHLETE_SURNAME_DISPLAY).
     # Empty (the default) is a no-op, so a card with no effects is byte-identical.
     effects = getattr(brief, "text_effects", None) or {}
-    if effects:
-        _apply_text_effects_to_repl(repl, effects, root_vars)
+    emphasis_word = getattr(brief, "emphasis_word", "") or ""
+    emphasis_style = getattr(brief, "emphasis_style", "") or ""
+    if effects or emphasis_word:
+        _apply_text_effects_to_repl(
+            repl,
+            effects,
+            root_vars,
+            emphasis_word=emphasis_word,
+            emphasis_style=emphasis_style,
+        )
 
     # A5 (Canva gap analysis) — kern the result numeral's separators and spend
     # the recovered width on a larger fit. Runs after effects so an effect span

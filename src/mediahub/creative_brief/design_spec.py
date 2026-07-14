@@ -202,6 +202,17 @@ TEXT_EFFECTS: tuple[str, ...] = (
 )
 DEFAULT_TEXT_EFFECT = "none"
 
+# D6 — per-word emphasis (the two-tone headline). The director may name ONE word
+# of a slot to highlight and pick a treatment. Kept identical to
+# ``text_effects.EMPHASIS_STYLES`` by ``tests/test_text_effects.py`` (the renderer
+# is the authority that executes each). ``emphasis_word`` is fact-gated at apply
+# time — kept only when it whole-word matches the slot's actual value — exactly
+# like ``hero_stat`` is gated against the measured ``hero_stat_options``, so a
+# hallucinated word simply never wraps and the card stays byte-identical.
+EMPHASIS_STYLES: tuple[str, ...] = ("accent_ink", "accent_pill", "heavy")
+DEFAULT_EMPHASIS_STYLE = "accent_ink"
+MAX_EMPHASIS_WORD_LEN = 48
+
 # Safe defaults — each MUST be a member of its vocabulary above. These are the
 # values an out-of-vocabulary (hallucinated) field falls back to: every one is
 # renderable without depending on an optional asset.
@@ -275,6 +286,11 @@ class DesignSpec:
     # byte-identically. Stored as a tuple (not a dict) so DesignSpec stays
     # frozen-hashable like its other fields.
     text_effects: tuple[tuple[str, str], ...] = ()
+    # D6 — the optional accent word + its treatment (the two-tone headline). An
+    # empty ``emphasis_word`` (the default) means no per-word emphasis, so an
+    # older spec dict without the fields normalises to a byte-identical card.
+    emphasis_word: str = ""
+    emphasis_style: str = DEFAULT_EMPHASIS_STYLE
 
     def text_effects_map(self) -> dict[str, str]:
         """The text effects as a ``slot -> effect`` dict (renderer-facing shape)."""
@@ -296,6 +312,8 @@ class DesignSpec:
             "rationale": self.rationale,
             "photo_treatment": self.photo_treatment,
             "text_effects": self.text_effects_map(),
+            "emphasis_word": self.emphasis_word,
+            "emphasis_style": self.emphasis_style,
         }
 
 
@@ -357,6 +375,24 @@ def _coerce_stat_list(value: Any, *, exclude: str) -> tuple[str, ...]:
         if len(out) >= MAX_SECONDARY_STATS:
             break
     return tuple(out)
+
+
+def _coerce_emphasis_word(value: Any) -> str:
+    """Clean an emphasis word to a single bounded token (or ``""``).
+
+    Vocabulary validity only: strips to the first whitespace-delimited token and
+    bounds its length. The authoritative FACT gate — that the word actually
+    occurs as a whole word in the slot it decorates — runs at apply time in the
+    renderer (``text_effects.emphasise_value``), exactly as ``hero_stat`` is
+    gated against the measured ``hero_stat_options``. So a word the card never
+    contains silently produces no emphasis and the card stays byte-identical.
+    """
+    if not isinstance(value, str):
+        return ""
+    tokens = value.strip().split()
+    if not tokens:
+        return ""
+    return tokens[0][:MAX_EMPHASIS_WORD_LEN]
 
 
 def _coerce_text_effects(value: Any) -> tuple[tuple[str, str], ...]:
@@ -441,6 +477,10 @@ def normalise(raw: dict, *, archetypes: list[str], token_roles: list[str]) -> De
             data.get("photo_treatment"), PHOTO_TREATMENTS, DEFAULT_PHOTO_TREATMENT
         ),
         text_effects=_coerce_text_effects(data.get("text_effects")),
+        emphasis_word=_coerce_emphasis_word(data.get("emphasis_word")),
+        emphasis_style=_coerce_enum(
+            data.get("emphasis_style"), EMPHASIS_STYLES, DEFAULT_EMPHASIS_STYLE
+        ),
     )
 
 
@@ -499,6 +539,11 @@ def design_spec_json_schema(*, archetypes: list[str], token_roles: list[str]) ->
                     for slot in TEXT_EFFECT_SLOTS
                 },
             },
+            # D6 — the two-tone headline. An empty ``emphasis_word`` ⇒ no
+            # per-word emphasis (byte-identical); ``normalise`` fills both
+            # defaults, so an older dict without them still validates.
+            "emphasis_word": {"type": "string", "maxLength": MAX_EMPHASIS_WORD_LEN},
+            "emphasis_style": {"type": "string", "enum": list(EMPHASIS_STYLES)},
         },
         "required": [
             "archetype",
@@ -515,6 +560,10 @@ def design_spec_json_schema(*, archetypes: list[str], token_roles: list[str]) ->
             "rationale",
             "photo_treatment",
             "text_effects",
+            # D6 — required like every other spec field (normalise fills the
+            # "" / accent_ink defaults, so an older dict still validates).
+            "emphasis_word",
+            "emphasis_style",
         ],
     }
 
@@ -536,6 +585,9 @@ __all__ = [
     "TEXT_EFFECT_SLOTS",
     "TEXT_EFFECTS",
     "DEFAULT_TEXT_EFFECT",
+    "EMPHASIS_STYLES",
+    "DEFAULT_EMPHASIS_STYLE",
+    "MAX_EMPHASIS_WORD_LEN",
     "DEFAULT_FOCAL_ELEMENT",
     "DEFAULT_CROP_INTENT",
     "DEFAULT_HERO_STAT",
