@@ -20,7 +20,7 @@ import json
 import os
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 
 @dataclass
@@ -468,8 +468,28 @@ def _scrub_legacy_secrets_file() -> None:
         pass
 
 
+# The web layer keeps a per-request cache of loaded profiles (on ``flask.g``)
+# so the active org isn't re-read from disk 4-5× per request. Persisting a
+# profile has to drop that cache entry, or a save + re-read within the same
+# request would still see the pre-write copy — a correctness bug and, because
+# the active profile drives tenant gating, a security-relevant one.
+# ``save_profile`` is the primary write path, so it fires this hook
+# (registered by ``create_app`` via ``set_profile_saved_hook``). The handful of
+# routes that write a profile JSON another way (``brand.store.save_brand``, the
+# profile-delete paths) invalidate explicitly at their call sites. Non-web
+# callers (scripts, unit tests) leave the hook unset and pay nothing.
+_profile_saved_hook: Optional[Callable[[str], None]] = None
+
+
+def set_profile_saved_hook(hook: Optional[Callable[[str], None]]) -> None:
+    """Register (or clear with ``None``) a callback invoked with the profile
+    id immediately after every ``save_profile``. The web layer uses it to
+    invalidate its per-request profile cache; it is safe to leave unset."""
+    global _profile_saved_hook
+    _profile_saved_hook = hook
+
+
 def list_profiles() -> list[ClubProfile]:
-    _scrub_legacy_secrets_file()
     out = []
     for f in sorted(_profiles_dir().glob("*.json")):
         try:
@@ -484,7 +504,6 @@ def load_profile(profile_id: str) -> Optional[ClubProfile]:
     p = _profiles_dir() / f"{profile_id}.json"
     if not p.exists():
         return None
-    _scrub_legacy_secrets_file()
     try:
         return ClubProfile.from_dict(_scrub_withdrawn_tokens(p, json.loads(p.read_text())))
     except Exception:
@@ -494,6 +513,14 @@ def load_profile(profile_id: str) -> Optional[ClubProfile]:
 def save_profile(profile: ClubProfile) -> Path:
     p = _profiles_dir() / f"{profile.profile_id}.json"
     p.write_text(json.dumps(profile.to_dict(), indent=2))
+    hook = _profile_saved_hook
+    if hook is not None:
+        # Best-effort cache invalidation for the web layer; never let a hook
+        # failure break a persist.
+        try:
+            hook(profile.profile_id)
+        except Exception:
+            pass
     return p
 
 
