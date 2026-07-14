@@ -43,9 +43,10 @@ _STROKE_TO_CODE: dict[str, str] = {
 # optional ``.`` decimal fraction on the final (seconds) field only. ``:`` is a
 # field separator, never a decimal point. Validating one field each means a
 # dotted date (``12.03.2024``) or a stray integer (``99``) can never masquerade
-# as a time.
-_CLOCK_FIELD_RE = re.compile(r"^\d+$")  # hours / minutes — whole numbers
-_SECONDS_FIELD_RE = re.compile(r"^\d+(?:\.\d+)?$")  # seconds, optional decimal fraction
+# as a time. ``re.ASCII`` keeps ``\d`` to ``[0-9]`` so a non-ASCII digit string
+# (which no producer emits) is rejected rather than silently coerced to a number.
+_CLOCK_FIELD_RE = re.compile(r"^\d+$", re.ASCII)  # hours / minutes — whole numbers
+_SECONDS_FIELD_RE = re.compile(r"^\d+(?:\.\d+)?$", re.ASCII)  # seconds + optional fraction
 
 
 def _stroke_to_code(stroke: str) -> str:

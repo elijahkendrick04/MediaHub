@@ -179,6 +179,8 @@ class TestTimeToSeconds:
             ":02",
             "1:02:",
             "1:ab.34",  # non-numeric clock field
+            "１２.３４",  # fullwidth digits — no producer emits these
+            "٥٩.٨٧",  # Arabic-Indic digits
         ],
     )
     def test_non_times_return_none(self, time_str: str) -> None:
