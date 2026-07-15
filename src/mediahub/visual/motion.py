@@ -624,6 +624,16 @@ def _motion_roles_from_vars(root_vars: dict[str, str]) -> dict[str, str]:
         value = str(root_vars.get(src) or "")
         if value:
             out[dst] = value
+    # F9 (Canva gap analysis) — medal chrome parity: forward the resolved
+    # specular ramp so the motion medal scene paints the same gradient-clipped
+    # numeral / bevelled chip. Present only on a gate-passing medal card, so a
+    # non-medal card keeps byte-identical props.
+    ramp = str(root_vars.get("--mh-medal-ramp") or "")
+    if ramp:
+        out["roleMedalRamp"] = ramp
+    numeral_ramp = str(root_vars.get("--mh-medal-numeral-ramp") or "")
+    if numeral_ramp:
+        out["roleMedalNumeralRamp"] = numeral_ramp
     return out
 
 
@@ -665,6 +675,37 @@ def _is_v2_archetype(name: str) -> bool:
         return name in _archetypes.list_archetypes()
     except Exception:
         return False
+
+
+def _overlap_accent_for_brief(brief: Optional[dict]) -> str:
+    """The still's seeded overlap accent as ``"shape:rotation"`` (F7), or ``""``.
+
+    Mirrors ``render._v2_overlap_accent``: only a decorated card (a NON-BARE
+    style pack) with a stable card key gets one, seeded independently of the pack
+    (salt='overlap'). Attached only when non-empty, so a bare/legacy card keeps
+    byte-identical props. The motion side paints the same shape + rotation in the
+    pack layer.
+    """
+    if not isinstance(brief, dict):
+        return ""
+    pack_id = str(brief.get("style_pack") or "").strip()
+    if not pack_id:
+        return ""
+    key = str(brief.get("variation_signature") or brief.get("id") or "").strip()
+    if not key:
+        return ""
+    try:
+        from mediahub.graphic_renderer import style_packs as _sp
+
+        pack = _sp.style_pack_from_id(pack_id)
+        if pack is None or pack.is_bare:
+            return ""
+        picked = _sp.overlap_accent_for(key)
+        if not picked:
+            return ""
+        return f"{picked[0]}:{picked[1]}"
+    except Exception:
+        return ""
 
 
 # The v2 archetypes whose motion scenes paint the cutout as layered depth
@@ -1213,6 +1254,20 @@ def _card_to_props(
         props["photoSrcs"] = photo_srcs
     if mesh_bg:
         props["meshBg"] = mesh_bg
+    # F9 medal chrome (still parity): the resolved specular ramp, attached only
+    # on a gate-passing medal card so non-medal cards keep byte-identical props.
+    medal_ramp = roles.get("roleMedalRamp", "")
+    if medal_ramp:
+        props["roleMedalRamp"] = medal_ramp
+    medal_numeral_ramp = roles.get("roleMedalNumeralRamp", "")
+    if medal_numeral_ramp:
+        props["roleMedalNumeralRamp"] = medal_numeral_ramp
+    # F7 overlap accent (still parity): the seeded badge/tab/rule/tape the still
+    # straddles across an anchor. Attached only for a decorated card, so a
+    # bare/legacy card keeps byte-identical props (and cache key).
+    overlap_accent = _overlap_accent_for_brief(b)
+    if overlap_accent:
+        props["overlapAccent"] = overlap_accent
     # LEFTOVER-1 (UI 1.18 → motion): a manual crop persisted in the card's
     # inspector overrides wins over the saliency focus — the same
     # ``photo_pos`` value the still honours, validated by the still's own
@@ -1365,6 +1420,7 @@ def _card_manifest_axes(card_props: dict) -> dict:
     return {
         "archetype": card_props.get("archetype") or "",
         "style_pack": card_props.get("stylePack") or "",
+        "overlap_accent": card_props.get("overlapAccent") or "",
         "motion_intent": card_props.get("motionIntent") or "",
         "accent_style": card_props.get("accentStyle") or "",
         "photo_treatment": card_props.get("photoTreatment") or "",

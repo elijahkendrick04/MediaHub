@@ -125,6 +125,21 @@ ACCENT_GEOS: tuple[str, ...] = (
     "wave_rule",
     "spiral_flourish",
     "glitch_divider",
+    # F8 (Canva gap analysis) — large expressive motifs. Unlike every geometry
+    # above (small margin marks), these are big directional fields painted at a
+    # low z-band (behind content) at capped alpha, so they read as background
+    # energy: a tapered speed band, a corner burst of spokes, an organic blob,
+    # and a fading screen-print halftone wedge. All brand-colour-only via
+    # --mh-accent / --mh-secondary-vis and weight-capped, and each has an
+    # executor in StoryCard.packAccentGeometry (parity test-enforced).
+    "speed_band",
+    "corner_burst",
+    "blob",
+    "variable_halftone",
+    # D7 (Canva gap analysis) — a broadcast-angled accent slab (skewX(-12deg),
+    # the shared-angle scoreboard move) banded low in the card. Solid accent,
+    # z-band 4, executed on both surfaces.
+    "skew_slab",
 )
 
 # Intensity tier — scales the alphas / weights / sizes of the levers above.
@@ -194,6 +209,13 @@ _ACCENT_W = {
     "wave_rule": 1,
     "spiral_flourish": 2,
     "glitch_divider": 1,
+    # F8 large motifs — weight 2 so the coherence cap prunes them off the heavy
+    # grounds/textures (never a busy-on-busy-on-busy card).
+    "speed_band": 2,
+    "corner_burst": 2,
+    "blob": 2,
+    "variable_halftone": 2,
+    "skew_slab": 2,
 }
 
 # Coherence caps: standard density tolerates a little more stacking than bold
@@ -259,6 +281,11 @@ _ACCENT_LABEL = {
     "wave_rule": "wave rule",
     "spiral_flourish": "spiral",
     "glitch_divider": "glitch divider",
+    "speed_band": "speed band",
+    "corner_burst": "corner burst",
+    "blob": "blob",
+    "variable_halftone": "halftone wedge",
+    "skew_slab": "skew slab",
 }
 
 
@@ -1152,7 +1179,121 @@ def _accent_geometry_html(style: str, width: int, height: int, bold: bool) -> st
             f'<div style="position:absolute;left:{inset}px;width:{int(inner * 0.34)}px;'
             f'bottom:{bottom + 2 * (bh + gap)}px;height:{bh}px;background:{acc};opacity:0.45;{z}"></div>'
         )
+    # --- F8 large-motif class (Canva gap analysis) -------------------------
+    # These sit at a LOW z-band (z-index 4: above the pack ground, below the
+    # archetype's content planes) so they read as background energy, not a
+    # margin mark. Alpha is capped <=0.30 over text-bearing grounds. Fills are
+    # neutral-mask (``black``/``transparent`` keywords, never a hex) + the role
+    # tokens — brand-colour-only, mono-safe (the role tokens are rewritten by
+    # mono_mode). Fixed (unseeded) geometry per token so the still and the motion
+    # ``packAccentGeometry`` twin draw the byte-same shape.
+    zb = "z-index:4;pointer-events:none;"
+    if style == "speed_band":
+        # Tapered accent speed-lines banded along the bottom edge, faded up.
+        op = 0.28 if bold else 0.20
+        bar = max(4, int(min(width, height) * 0.010 * mult))
+        gap = bar * 3
+        band_h = int(height * 0.34)
+        return (
+            f'<div style="position:absolute;left:0;right:0;bottom:0;height:{band_h}px;{zb}'
+            f"opacity:{op};background:repeating-linear-gradient(115deg,"
+            f"{acc} 0 {bar}px,transparent {bar}px {bar + gap}px);"
+            f"-webkit-mask-image:linear-gradient(0deg,black 0%,transparent 100%);"
+            f'mask-image:linear-gradient(0deg,black 0%,transparent 100%);"></div>'
+        )
+    if style == "corner_burst":
+        # Radiating conic spokes fanning from the top-right corner.
+        op = 0.26 if bold else 0.18
+        size = int(min(width, height) * 0.62)
+        spoke = 4 if bold else 3
+        return (
+            f'<div style="position:absolute;right:0;top:0;width:{size}px;height:{size}px;{zb}'
+            f"opacity:{op};background:repeating-conic-gradient(from 198deg at 100% 0%,"
+            f"{acc} 0deg {spoke}deg,transparent {spoke}deg 12deg);"
+            f"-webkit-mask-image:radial-gradient(100% 100% at 100% 0%,black 0%,transparent 72%);"
+            f'mask-image:radial-gradient(100% 100% at 100% 0%,black 0%,transparent 72%);"></div>'
+        )
+    if style == "blob":
+        # A soft organic blob motif in the low corner (fixed smooth path).
+        op = 0.22 if bold else 0.16
+        size = int(min(width, height) * 0.44 * mult)
+        off = int(min(width, height) * 0.03)
+        return (
+            f'<svg viewBox="0 0 100 100" preserveAspectRatio="none" '
+            f'style="position:absolute;left:{off}px;bottom:{off}px;width:{size}px;'
+            f'height:{size}px;{zb}opacity:{op};">'
+            f'<path d="{_blob_path()}" style="fill:{acc};"/></svg>'
+        )
+    if style == "variable_halftone":
+        # A dot lattice whose radius fades along a fixed diagonal axis — a
+        # screen-print corner wedge. Major dots in the accent, minor dots in
+        # the visible secondary (two-ink for a two-colour brand, mono otherwise).
+        op = 0.30 if bold else 0.22
+        size = int(min(width, height) * 0.52)
+        return (
+            f'<div style="position:absolute;right:0;bottom:0;width:{size}px;height:{size}px;'
+            f'{zb}opacity:{op};">{_variable_halftone_svg(acc, sec)}</div>'
+        )
+    if style == "skew_slab":
+        # D7 — a broadcast-angled accent slab low in the card (skewX(-12deg), the
+        # shared-angle scoreboard move). Kept in a band so it never covers the
+        # hero; layouts that want the numeral to ride it opt in structurally.
+        op = 0.9 if bold else 0.72
+        slab_h = int(height * 0.13 * mult)
+        bottom = int(height * 0.15)
+        return (
+            f'<div style="position:absolute;left:-8%;right:-8%;bottom:{bottom}px;'
+            f"height:{slab_h}px;{zb}opacity:{op};background:{acc};"
+            f'transform:skewX(-12deg);"></div>'
+        )
     return ""
+
+
+def _blob_path() -> str:
+    """A fixed smooth organic-blob path in a 0–100 viewBox (F8 large motif).
+
+    Deterministic (no seed): the same path always renders, so the still and the
+    motion ``packAccentGeometry`` blob draw byte-identically. Cubic segments
+    round a 6-point rosette so nothing important aligns to the edge.
+    """
+    return (
+        "M50 6 C70 6 86 16 90 36 C94 56 84 76 66 88 "
+        "C48 100 26 96 14 80 C2 64 6 40 20 24 C30 12 40 6 50 6 Z"
+    )
+
+
+def _variable_halftone_svg(accent_css: str, secondary_css: str) -> str:
+    """A variable-radius dot lattice fading along a fixed diagonal (F8).
+
+    Circles are laid on a staggered grid; each radius scales with the distance
+    from the bottom-right corner (dense/large near the corner, fading out toward
+    the top-left) — the screen-print wedge look. Alternate cells tint in the
+    visible secondary so a two-colour brand shows both inks; fills ride the role
+    tokens (mono-safe). Fixed grid + fixed maths ⇒ still↔motion byte-parity.
+    """
+    cols, rows = 10, 10
+    step = 100.0 / cols
+    r_max = step * 0.52
+    circles: list[str] = []
+    for row in range(rows):
+        for col in range(cols):
+            cx = (col + (0.5 if row % 2 else 0.0)) * step + step * 0.25
+            cy = row * step + step * 0.5
+            # distance from bottom-right corner (100,100), normalised 0..1
+            dx = (100.0 - cx) / 100.0
+            dy = (100.0 - cy) / 100.0
+            d = (dx * dx + dy * dy) ** 0.5 / 1.41421356
+            r = r_max * max(0.0, 1.0 - d)
+            if r < 0.35:
+                continue
+            fill = accent_css if (row + col) % 2 == 0 else secondary_css
+            circles.append(
+                f'<circle cx="{cx:.2f}" cy="{cy:.2f}" r="{r:.2f}" style="fill:{fill};"/>'
+            )
+    return (
+        '<svg viewBox="0 0 100 100" preserveAspectRatio="none" '
+        'style="width:100%;height:100%;display:block;">' + "".join(circles) + "</svg>"
+    )
 
 
 def _wave_path(inner: int, band: int, *, humps: int = 7) -> str:
@@ -1194,6 +1335,105 @@ def _spiral_points(*, steps: int = 72, turns: float = 2.4, max_r: float = 44.0) 
     return " ".join(pts)
 
 
+# ---------------------------------------------------------------------------
+# F7 (Canva gap analysis) — overlap accents that STRADDLE a declared anchor.
+#
+# Canva output reads rich because a foreground accent crosses a midground edge
+# (a badge half-off a photo, a tab over a panel corner, tape holding a seam) —
+# overlap + shadow is what the eye reads as art direction rather than clip-art.
+# The layouts mark overlap-safe edges with ``mh-anchor--*`` classes (positioned
+# by ``layouts/_components.css``); this module supplies the seeded accent that is
+# dropped INTO one anchor via the ``{{OVERLAP_ACCENT}}`` slot. The axis is seeded
+# INDEPENDENTLY of the four-lever pack (salt='overlap' on the same ``_seed_for``
+# walk) so it varies on its own, and an absent card key / un-anchored layout
+# renders byte-identically (empty slot).
+# ---------------------------------------------------------------------------
+
+# Closed shape vocabulary + the seeded rotation set (fixed, per the dossier).
+OVERLAP_SHAPES: tuple[str, ...] = ("badge", "tab", "rule", "tape")
+_OVERLAP_ROTATIONS: tuple[int, ...] = (-4, -2, 2, 4)
+
+
+def overlap_accent_for(card_key: Optional[str]) -> Optional[tuple[str, int]]:
+    """The seeded ``(shape, rotation)`` overlap accent for a card, or ``None``.
+
+    Deterministic per card (same key → same accent), independent of the pack
+    axis (salt='overlap'). ``None`` for a missing key so the no-key path stays
+    byte-identical.
+    """
+    if not card_key:
+        return None
+    seed = _seed_for(card_key, salt="overlap")
+    shape = OVERLAP_SHAPES[seed % len(OVERLAP_SHAPES)]
+    rotation = _OVERLAP_ROTATIONS[(seed // 7) % len(_OVERLAP_ROTATIONS)]
+    return shape, rotation
+
+
+def overlap_accent_html(shape: str, rotation: int, *, width: int, height: int) -> str:
+    """The overlap-accent element dropped into a declared anchor's slot.
+
+    Positioned ``left:50%;top:50%;translate(-50%,-50%)`` so it straddles the
+    anchor point, with the seeded ``rotation`` and ``z-index:15`` (between the
+    midground and the icon overlay's z80). Brand-colour-only (``--mh-accent`` /
+    ``--mh-primary``); the washi ``tape`` multiplies over whatever it crosses.
+    Returns ``""`` for an unknown shape so a bad value injects nothing.
+    """
+    m = min(width, height)
+    z = "z-index:15;pointer-events:none;"
+    base = f"position:absolute;left:50%;top:50%;{z}"
+    tf = f"transform:translate(-50%,-50%) rotate({int(rotation)}deg);"
+    shadow = "box-shadow:0 6px 16px rgba(0,0,0,0.28);"
+    if shape == "badge":
+        d = int(m * 0.14)
+        ring = max(3, int(m * 0.006))
+        return (
+            f'<div style="{base}{tf}width:{d}px;height:{d}px;border-radius:50%;'
+            f"background:var(--mh-accent);border:{ring}px solid var(--mh-primary);"
+            f'{shadow}"></div>'
+        )
+    if shape == "tab":
+        w = int(m * 0.20)
+        h = int(m * 0.075)
+        return (
+            f'<div style="{base}{tf}width:{w}px;height:{h}px;'
+            f'background:var(--mh-accent);{shadow}"></div>'
+        )
+    if shape == "rule":
+        w = int(m * 0.24)
+        h = max(6, int(m * 0.018))
+        return (
+            f'<div style="{base}{tf}width:{w}px;height:{h}px;'
+            f'background:var(--mh-accent);{shadow}"></div>'
+        )
+    if shape == "tape":
+        # A washi-tape strip: accent at 0.6 alpha, multiply-blended over the
+        # layer it crosses, with serrated (zig-zag) ends.
+        w = int(m * 0.26)
+        h = int(m * 0.06)
+        clip = (
+            "polygon(0 18%,4% 0,8% 18%,12% 0,100% 0,96% 82%,100% 100%,"
+            "96% 82%,92% 100%,88% 82%,0 82%)"
+        )
+        return (
+            f'<div style="{base}{tf}width:{w}px;height:{h}px;'
+            f"background:var(--mh-accent);opacity:0.60;mix-blend-mode:multiply;"
+            f"-webkit-clip-path:{clip};clip-path:{clip};"
+            f'box-shadow:0 2px 8px rgba(0,0,0,0.18);"></div>'
+        )
+    return ""
+
+
+def overlap_accent_for_card(card_key: Optional[str], *, width: int, height: int) -> str:
+    """The full overlap-accent element for a card (or ``""``) — the slot fill.
+
+    Convenience wrapper the renderer drops straight into ``{{OVERLAP_ACCENT}}``.
+    """
+    picked = overlap_accent_for(card_key)
+    if not picked:
+        return ""
+    return overlap_accent_html(picked[0], picked[1], width=width, height=height)
+
+
 __all__ = [
     "GROUNDS",
     "TEXTURES",
@@ -1216,4 +1456,8 @@ __all__ = [
     "pick_mood_pack_avoiding",
     "pick_mood_pack_for_card",
     "pack_overlay_html",
+    "OVERLAP_SHAPES",
+    "overlap_accent_for",
+    "overlap_accent_html",
+    "overlap_accent_for_card",
 ]

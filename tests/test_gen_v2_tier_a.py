@@ -53,6 +53,9 @@ _ALLOWED_PLACEHOLDERS = {
     # M14 — matte-gate fallback marker for the layered cutout archetypes
     # (" mh-photo-flat" when the original photo honestly ships instead).
     "PHOTO_FLAT_CLASS",
+    # F7 (Canva gap analysis) — the seeded overlap accent that straddles a
+    # declared mh-anchor edge (badge/tab/rule/tape); "" for a bare/legacy card.
+    "OVERLAP_ACCENT",
 }
 
 

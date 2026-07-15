@@ -129,6 +129,12 @@ def _geometry_scale_css(width: int, height: int) -> str:
     return ":root{" + decls + "}\n"
 
 
+# F7/F8 (Canva gap analysis) — shared v2 component utilities (overlap anchors +
+# physical-panel silhouettes). Injected into v2 BASE_CSS only; inert until a
+# layout opts in, so an un-migrated archetype's pixels are unchanged.
+_COMPONENTS_CSS_PATH = LAYOUTS_DIR / "_components.css"
+
+
 # ---------------------------------------------------------------------------
 # V8.1 Issue 7 — feature flags (env-driven so tests + ops can toggle)
 # ---------------------------------------------------------------------------
@@ -469,6 +475,21 @@ class RenderResult:
 
 def _read_text(p: Path) -> str:
     return p.read_text(encoding="utf-8")
+
+
+@lru_cache(maxsize=1)
+def _components_css() -> str:
+    """The shared v2 component utilities (F7 anchors + F8 panel silhouettes).
+
+    Read once; wrapped in a comment banner. Missing file → "" (the utilities are
+    inert until a layout opts in, so an absent sheet just leaves those layouts
+    un-migrated). Injected into v2 BASE_CSS only.
+    """
+    try:
+        css = _read_text(_COMPONENTS_CSS_PATH) if _COMPONENTS_CSS_PATH.exists() else ""
+    except OSError:
+        css = ""
+    return ("\n/* --- v2 component utilities (F7/F8) --- */\n" + css + "\n") if css else ""
 
 
 def _hex_to_rgb(c: str) -> tuple[int, int, int]:
@@ -2032,6 +2053,19 @@ _MEDAL_ACCENTS = {
     "bronze": {"accent": "#E2A26A", "accent_deep": "#7E481B", "badge": "BRONZE"},
 }
 
+# F9 (Canva gap analysis) — which v2 archetype result element takes medal chrome,
+# and how. ``numeral`` selectors get the gradient-clipped specular ramp (the
+# result glyphs BECOME the metal, APCA-gated on the ramp's darkest stop vs the
+# ground by the resolver); ``chip`` selectors get the ramp fill + bevel + rim.
+# Only the big-numeral / medal-spotlight layouts are mapped, so chrome lands
+# where it reads as an achievement grammar (shinier = bigger medal) rather than
+# on every card. Absent archetype → skipped → byte-identical.
+_MEDAL_CHROME_SELECTORS: dict[str, dict[str, str]] = {
+    "big_number_dominant": {"numeral": ".bn__result"},
+    "cornerstone_numeral": {"numeral": ".cn__num"},
+    "centered_medal_spotlight": {"chip": ".cm__result"},
+}
+
 
 def _localized_overrides_css(language: str) -> str:
     """RTL text-direction CSS for a right-to-left target language (1.24).
@@ -2331,6 +2365,9 @@ def _common_replacements(
         "BASE_CSS": base_css,
         "WATER_PATTERN": _background_pattern_for(bg_style),
         "ACCENT_DECORATION": accent_overlay_html,
+        # F7 overlap-accent slot default — "" so any layout carrying the anchor
+        # token strips it cleanly; _fill_v2_archetype overrides for v2 cards.
+        "OVERLAP_ACCENT": "",
         "NOISE_PATTERN": _noise_pattern_data_uri(),
         "AI_BG_URI": ai_bg_uri or "",
         "ATHLETE_FULL_NAME": html_escape(full_name),
@@ -3985,12 +4022,18 @@ def _fit_one_line_px(
     weight,
     min_px: int,
     max_px: int,
+    vertical: bool = False,
 ) -> int:
     """Largest int px at which ``text`` fits on **one line** in ``box_w`` (≤ ``box_h``).
 
     The v2 hero slots render with ``white-space: nowrap``, so they must be sized
     single-line. ``autofit.fit_font_px`` word-*wraps* to measure, which over-sizes
     a multi-word surname ("Van Dyk") that then overflows on the one forced line.
+
+    D7 (Canva gap analysis) — a ``vertical=True`` run (``writing-mode:vertical-rl``,
+    a rotated spine) reads DOWN the box, so its available line length is the box
+    HEIGHT and its size cap is the box WIDTH: the two axes swap. Chromium renders
+    ``writing-mode`` deterministically, so the fit stays reproducible.
     """
     from mediahub.graphic_renderer.autofit import em_width
 
@@ -3999,7 +4042,11 @@ def _fit_one_line_px(
     ew = em_width(text, font_family=font_family, weight=weight)
     if ew <= 0:
         return max_px
-    px = min(int(box_w / ew), int(box_h))
+    if vertical:
+        # The run travels along the box's HEIGHT; the glyph size is capped by width.
+        px = min(int(box_h / ew), int(box_w))
+    else:
+        px = min(int(box_w / ew), int(box_h))
     return max(min_px, min(max_px, px))
 
 
@@ -5163,6 +5210,31 @@ def resolved_role_vars_for_brief(brief, brand_kit=None) -> dict[str, str]:
         for metal in (_MEDAL_ACCENTS[tier]["accent"], _MEDAL_ACCENTS[tier]["accent_deep"]):
             if is_legible(metal, ground) and is_legible(ground, metal):
                 root_vars = {**root_vars, "--mh-accent": metal}
+                # F9 (Canva gap analysis) — metallic chrome. Derive a
+                # deterministic 7-stop specular ramp from the chosen medal tint
+                # (fixed offsets — same tint → same ramp) and emit it as
+                # ``--mh-medal-ramp``. The accent gate above already proved the
+                # metal is legible BOTH ways against the ground, so the ramp's
+                # bright body + a bevelled chip's dark ground-colour text are
+                # legible by construction; the per-selector NUMERAL gate (a
+                # gradient-clipped glyph sitting straight on the ground) is
+                # applied at the still injection site (darkest stop vs ground).
+                # A non-medal card never reaches here → byte-identical render.
+                # ``--mh-medal-ramp`` (chip/bevel) is always emitted; the
+                # ``--mh-medal-numeral-ramp`` twin is emitted ONLY when the
+                # ramp's darkest stop clears the APCA gate against the ground
+                # (the gradient-clipped glyph sits straight on it) — so the
+                # numeral downgrades to flat on a dark ground while the chip
+                # (rim + bright body + dark ground-colour text) still reads.
+                # Archetype-independent so the motion mirror gates identically.
+                try:
+                    from mediahub.graphic_renderer import medal_chrome as _mc
+
+                    root_vars["--mh-medal-ramp"] = _mc.medal_ramp_css(metal)
+                    if is_legible(_mc.darkest_ramp_stop(metal), ground, min_lc=45.0):
+                        root_vars["--mh-medal-numeral-ramp"] = root_vars["--mh-medal-ramp"]
+                except Exception:
+                    pass
                 break
     # C1 + C9 (Canva gap analysis) — bridge the tonal engine onto the FINAL
     # resolved roles: Material-style container / raised / accent-container tones,
@@ -5196,6 +5268,36 @@ def _v2_style_pack_overlay(brief, width: int, height: int) -> str:
         if pack is None:
             return ""
         return _sp.pack_overlay_html(pack, width=width, height=height)
+    except Exception:
+        return ""
+
+
+def _v2_overlap_accent(brief, width: int, height: int) -> str:
+    """The seeded overlap-accent element for the ``{{OVERLAP_ACCENT}}`` slot (F7).
+
+    Emitted only for a *decorated* card (one that resolved a NON-BARE style
+    pack) with a stable card key, so a bare / legacy brief fills the slot with
+    "" — byte-identical to the pre-F7 render. The accent is seeded independently
+    of the pack (salt='overlap'), so its axis varies on its own. Any failure
+    degrades to "".
+    """
+    pack_id = (getattr(brief, "style_pack", "") or "").strip()
+    if not pack_id:
+        return ""
+    card_key = str(
+        getattr(brief, "variation_signature", "") or getattr(brief, "id", "") or ""
+    ).strip()
+    if not card_key:
+        return ""
+    try:
+        from mediahub.graphic_renderer import style_packs as _sp
+
+        pack = _sp.style_pack_from_id(pack_id)
+        # The bare (undecorated) card carries no decoration, so it gets no
+        # overlap accent either — the "absent" path stays byte-identical.
+        if pack is None or pack.is_bare:
+            return ""
+        return _sp.overlap_accent_for_card(card_key, width=width, height=height)
     except Exception:
         return ""
 
@@ -5660,6 +5762,14 @@ def _fill_v2_archetype(
     # legacy brief with no ``style_pack``) yields "", i.e. the undecorated card.
     repl["ACCENT_DECORATION"] = _v2_style_pack_overlay(brief, width, height)
 
+    # F7 (Canva gap analysis) — the seeded OVERLAP accent that STRADDLES a
+    # declared anchor (a badge/tab/rule/tape crossing a photo/panel edge). Only
+    # a decorated card (a resolved style pack) with a stable card key gets one,
+    # and only layouts that declare an ``mh-anchor--*`` slot render it; a bare /
+    # legacy card, or an un-anchored layout, fills the slot with "" —
+    # byte-identical. Seeded independently of the pack (salt='overlap').
+    repl["OVERLAP_ACCENT"] = _v2_overlap_accent(brief, width, height)
+
     # Tier A baseline → director's APCA-gated colour-role assignment → medal
     # tint (the metal IS the information, gated the same way). One resolver,
     # shared with the Tier B pool's compliance scoring.
@@ -6019,6 +6129,54 @@ def _fill_v2_archetype(
                 root_vars["--mh-break-solid"] = f"{solid * 100:.1f}%"
                 root_vars["--mh-break-fade"] = f"{fade * 100:.1f}%"
 
+    # E5 (Canva gap analysis) — frame_breakout's seeded frame shape. A
+    # deterministic pick (salt='breakout') among a circle and an arch (tall
+    # ellipse) framing, each with its own ring/breakout-floor. The layout's own
+    # CSS defaults already render the first (circle) framing, so a card with no
+    # stable key keeps that default — byte-identical.
+    if archetype_name == "frame_breakout":
+        _fb_key = str(
+            getattr(brief, "variation_signature", "") or getattr(brief, "id", "") or ""
+        ).strip()
+        if _fb_key:
+            from mediahub.graphic_renderer.style_packs import _seed_for as _fb_seed
+
+            _framings = (
+                # (clip-path, frame-r, frame-cy, breakout-floor, ring-display)
+                ("circle(40% at 50% 60%)", "40%", "60%", "78%", "block"),
+                ("circle(37% at 50% 55%)", "37%", "55%", "74%", "block"),
+                ("ellipse(37% 46% at 50% 56%)", "37%", "56%", "86%", "none"),
+            )
+            _clip, _fr, _fcy, _floor, _ring = _framings[_fb_seed(_fb_key, salt="breakout") % 3]
+            root_vars["--mh-frame-clip"] = _clip
+            root_vars["--mh-frame-r"] = _fr
+            root_vars["--mh-frame-cy"] = _fcy
+            root_vars["--mh-breakout-floor"] = _floor
+            root_vars["--mh-ring-display"] = _ring
+
+    # D7 (Canva gap analysis) — poster_spine's vertical surname. The rail runs
+    # DOWN the left margin (writing-mode:vertical-rl), so the run is fitted with
+    # the axes swapped (vertical=True): its length is the rail HEIGHT and its
+    # size cap is the rail WIDTH. Only this archetype emits the var, so every
+    # other card is byte-identical.
+    if archetype_name == "poster_spine":
+        _display_family_sp = (
+            (_display_font_stack_for_pair(getattr(brief, "typography_pair", "") or "") or "Anton")
+            .split(",")[0]
+            .strip("'\" ")
+        )
+        spine_px = _fit_one_line_px(
+            surname or "X",
+            width * 0.235,
+            height * 0.84,
+            font_family=_display_family_sp,
+            weight=400,
+            min_px=64,
+            max_px=int(width * 0.235),
+            vertical=True,
+        )
+        root_vars["--mh-fit-spine-px"] = "%dpx" % spine_px
+
     # 1.9 — apply per-slot text effects to the finalised slot values (AFTER the
     # multi-line balancer has settled RESULT_VALUE / ATHLETE_SURNAME_DISPLAY).
     # Empty (the default) is a no-op, so a card with no effects is byte-identical.
@@ -6074,8 +6232,31 @@ def _fill_v2_archetype(
 
     root_vars.update(_font_vars_for_pair(getattr(brief, "typography_pair", "") or ""))
 
+    # F9 (Canva gap analysis) — medal chrome. When the resolver emitted a legible
+    # ``--mh-medal-ramp`` (a medal card that cleared the APCA gate) AND this
+    # archetype declares a chrome-eligible result selector, paint the numeral
+    # with the gradient-clipped specular ramp and the result chip with the bevel.
+    # A non-medal card carries no ramp var → no injection → byte-identical; an
+    # archetype without a mapped selector is skipped so the effect only lands
+    # where it reads well (the big-numeral / medal-spotlight layouts).
+    if root_vars.get("--mh-medal-ramp") and archetype in _MEDAL_CHROME_SELECTORS:
+        from mediahub.graphic_renderer import medal_chrome as _mc
+
+        _sel = _MEDAL_CHROME_SELECTORS[archetype]
+        # NUMERAL: gradient-clipped glyphs on the ground — only when the
+        # resolver's numeral-safe gate passed (darkest stop legible vs ground).
+        if _sel.get("numeral") and root_vars.get("--mh-medal-numeral-ramp"):
+            extra_css += _mc.medal_numeral_css(_sel["numeral"])
+        # CHIP: rim-bordered bevelled pill — always (accent gate covers the
+        # dark ground-colour text on the bright ramp body).
+        if _sel.get("chip"):
+            extra_css += _mc.medal_chip_css(_sel["chip"])
+
     root_block = "\n:root{" + "".join(f"{k}:{v};" for k, v in root_vars.items()) + "}\n"
-    repl["BASE_CSS"] = base_repl.get("BASE_CSS", "") + root_block + extra_css
+    # F7/F8 shared v2 component utilities (overlap anchors + panel silhouettes).
+    # Inert until a layout opts in, so an un-migrated archetype's pixels are
+    # unchanged.
+    repl["BASE_CSS"] = base_repl.get("BASE_CSS", "") + _components_css() + root_block + extra_css
     return repl
 
 

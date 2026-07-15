@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>{{ATHLETE_FULL_NAME}} — {{ACHIEVEMENT_LABEL}}</title>
+<style>{{BASE_CSS}}
+
+/* ===================================================================
+   poster_spine  (v2 archetype, D7 — Canva gap analysis)
+
+   The varsity/broadcast SPINE: the surname runs full-height up the left rail
+   in a rotated display cut (writing-mode:vertical-rl), the single most
+   recognisable rotated-type register in sports-poster craft — a compositional
+   axis MediaHub had nowhere else. The facts (kicker, event, mega result, club
+   lockup) stack on the right in the usual horizontal register, so the vertical
+   spine reads as a deliberate structural counterpoint, not a gimmick.
+
+   The spine is sized by --mh-fit-spine-px, fitted with the axes SWAPPED
+   (vertical=True in _fit_one_line_px) so the rotated run fills the rail height
+   without overflowing its width. Type-led: no photo slot — the name IS the art.
+
+   Structural signature: full-height vertical surname — the only archetype with
+   a rotated hero. Distinct from every horizontal name plane.
+   =================================================================== */
+
+.psp {
+  position: relative;
+  width: {{WIDTH}}px;
+  height: {{HEIGHT}}px;
+  overflow: hidden;
+  isolation: isolate;
+  background: linear-gradient(160deg, var(--mh-surface) 0%, var(--mh-primary) 60%);
+  color: var(--mh-on-primary);
+  font-family: 'Inter', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+.psp *, .psp *::before, .psp *::after { box-sizing: border-box; }
+
+/* the vertical spine — the surname up the left rail */
+.psp__spine {
+  position: absolute; left: 4%; top: 8%; bottom: 8%; width: 23.5%;
+  z-index: 2; display: flex; align-items: flex-start; justify-content: center;
+  writing-mode: vertical-rl; text-orientation: mixed;
+  font-family: var(--mh-font-display, 'Anton','Bebas Neue',Impact,sans-serif);
+  font-weight: 400; font-size: var(--mh-fit-spine-px, 210px);
+  line-height: 0.9; letter-spacing: var(--mh-track-surname, 0.01em); text-transform: uppercase;
+  color: var(--mh-on-primary); white-space: nowrap;
+}
+/* the accent rule dividing the spine from the fact column */
+.psp__rule {
+  position: absolute; left: 29%; top: 8%; bottom: 8%; width: 5px;
+  z-index: 3; background: var(--mh-accent);
+}
+
+/* the fact column on the right */
+.psp__facts {
+  position: absolute; left: 33%; right: 60px; top: 8%; bottom: 8%;
+  z-index: 4; display: flex; flex-direction: column;
+}
+.psp__kicker {
+  display: inline-flex; align-self: flex-start; align-items: center; padding: 14px 22px;
+  background: var(--mh-accent); color: var(--mh-primary);
+  font-family: var(--mh-font-kicker, 'Space Grotesk','Inter',sans-serif);
+  font-weight: 800; font-size: 24px; letter-spacing: 0.16em; text-transform: uppercase;
+}
+.psp__kicker:empty { display: none; }
+.psp__first {
+  margin-top: 28px;
+  font-family: var(--mh-font-kicker, 'Space Grotesk','Inter',sans-serif); font-weight: 700;
+  font-size: 40px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--mh-accent);
+}
+.psp__event {
+  margin-top: 14px;
+  font-family: var(--mh-font-kicker, 'Space Grotesk','Inter',sans-serif); font-weight: 600;
+  font-size: 28px; letter-spacing: 0.04em; text-transform: uppercase;
+  color: var(--mh-on-primary); opacity: 0.9; overflow-wrap: anywhere;
+}
+.psp__result-wrap { margin-top: auto; }
+.psp__result-lab {
+  font-family: var(--mh-font-body, 'Inter',sans-serif); font-weight: 800;
+  font-size: 16px; letter-spacing: 0.28em; text-transform: uppercase;
+  color: var(--mh-accent); margin-bottom: 8px;
+}
+.psp__result {
+  font-family: 'JetBrains Mono','Space Grotesk',monospace; font-feature-settings: "tnum";
+  font-weight: 700; font-size: var(--mh-fit-result-px, 96px);
+  font-variation-settings: var(--mh-axes-result, normal); line-height: 0.86;
+  letter-spacing: var(--mh-track-result, -0.02em); color: var(--mh-accent); white-space: nowrap;
+}
+.psp__stat { margin-top: 12px; font-family: 'Inter',sans-serif; font-weight: 600; font-size: 22px; color: var(--mh-on-primary); opacity: 0.8; }
+.psp__foot {
+  margin-top: 28px; display: flex; align-items: center; gap: 14px;
+}
+.psp__logo { height: 46px; width: auto; }
+.psp__logo img, .psp__logo svg { height: 100%; width: auto; object-fit: contain; display: block; }
+.psp__club { font-family: 'Inter',sans-serif; font-weight: 800; font-size: 20px; text-transform: uppercase; color: var(--mh-on-primary); }
+.psp__meet { font-family: 'Inter',sans-serif; font-weight: 500; font-size: 17px; color: var(--mh-on-primary); opacity: 0.7; }
+.psp__sponsor { position: absolute; bottom: 40px; right: 60px; z-index: 5; }
+</style>
+</head>
+<body>
+<div class="psp">
+
+  <div class="psp__spine">{{ATHLETE_SURNAME_DISPLAY}}</div>
+  <div class="psp__rule"></div>
+
+  <div class="psp__facts">
+    <div class="psp__kicker">{{ACHIEVEMENT_LABEL}}</div>
+    <div class="psp__first">{{ATHLETE_FIRST_NAME}}</div>
+    <div class="psp__event">{{EVENT_NAME}}</div>
+    <div class="psp__result-wrap">
+      <div class="psp__result-lab">Result</div>
+      <div class="psp__result">{{RESULT_VALUE}}</div>
+      <div class="psp__stat">{{HERO_STAT}}</div>
+      <div class="psp__foot">
+        <div class="psp__logo">{{LOGO_BLOCK}}</div>
+        <div class="psp__club">{{CLUB_FULL}}</div>
+        <div class="psp__meet">· {{MEET_NAME}}</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="psp__sponsor">{{SPONSOR_BLOCK}}</div>
+
+  {{ACCENT_DECORATION}}
+
+</div>
+</body>
+</html>

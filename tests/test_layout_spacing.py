@@ -42,6 +42,10 @@ _PX_RE = re.compile(r"(?<![\w.-])(\d+)px")
 # should ship on-scale (empty entry, or add one deliberately with a rationale).
 _BASELINE: dict[str, tuple[int, ...]] = {
     "_base.css": (6, 10, 14, 18, 20, 22, 28, 56, 120, 140, 180, 200),
+    # F7/F8 shared v2 component utilities (overlap anchors + panel silhouettes),
+    # built on origin/main before the F1 scale landed — the 26px is the ticket
+    # silhouette's notch offset, a bespoke physical-panel dimension.
+    "_components.css": (26,),
     "_text_led_fill.css": (6, 14, 18, 20, 56, 165, 220),
     "action_photo_hero.html": (18, 20, 56, 150),
     "athlete_spotlight.html": (6, 14, 18, 22, 56, 130, 180, 240),
@@ -61,6 +65,7 @@ _BASELINE: dict[str, tuple[int, ...]] = {
     "v2/cornerstone_numeral.html": (14, 84, 92),
     "v2/duo_athlete_split.html": (10, 14, 22, 26, 34, 42),
     "v2/editorial_numbers_grid.html": (14, 20, 26, 30, 34, 40, 76, 80),
+    "v2/frame_breakout.html": (6, 14, 22, 34, 54, 60),
     "v2/full_bleed_photo_lower_third.html": (14, 22, 26, 44, 50, 60),
     "v2/full_height_portrait_split.html": (2, 14, 22, 28, 40, 60, 72, 92),
     "v2/horizon_band.html": (9, 14, 18, 26, 28, 30, 84, 88),
@@ -71,6 +76,7 @@ _BASELINE: dict[str, tuple[int, ...]] = {
     "v2/minimal_type_poster.html": (6, 10, 20, 30, 40, 84, 104),
     "v2/photo_passepartout.html": (6, 14, 36, 72),
     "v2/poster_name_behind.html": (10, 14, 22, 26, 34, 42, 60, 140),
+    "v2/poster_spine.html": (14, 22, 28, 40, 60),
     "v2/quote_led_recap.html": (14, 18, 30, 60, 84, 112, 120),
     "v2/radial_competition_ring.html": (2, 18, 26, 30, 52, 56, 70, 80, 110),
     "v2/radial_rings.html": (2, 10, 30, 44, 52, 70, 80),

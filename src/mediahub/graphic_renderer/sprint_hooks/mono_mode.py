@@ -146,6 +146,14 @@ _LIGHT_RAMP = {
 }
 
 
+# A neutral grey specular ramp (light-dark-light) — the mono stand-in for the
+# F9 medal chrome, carrying no brand hue.
+_MONO_MEDAL_RAMP = (
+    "linear-gradient(135deg, #6E6E6E 0%, #9A9A9A 18%, #B4B4B4 36%, "
+    "#E6E6E6 50%, #B4B4B4 64%, #8A8A8A 82%, #6E6E6E 100%)"
+)
+
+
 def _hex_to_rgb(value: str) -> tuple[int, int, int]:
     h = value.lstrip("#")
     if len(h) == 3:
@@ -242,7 +250,13 @@ _ROLE_DECL_RE = re.compile(
 _DERIVED_DECL_RE = re.compile(
     r"(?<![\w-])(--mh-(?:ground-gradient|surface-container|surface-raised|surface-2|lift"
     r"|accent-container|on-accent-container|ink-secondary|secondary-vis|shadow-rgb"
-    r"|surface-rgb))"
+    r"|surface-rgb"
+    # F9 medal chrome: the specular ramp vars embed the medal-tint hexes, so a
+    # mono card must rewrite them to a neutral grey specular or the gold/silver
+    # leaks past the role remap (the global grayscale would desaturate the pixels
+    # anyway, but rewriting keeps the token itself brand-free — the B3 precedent).
+    r"|medal-numeral-ramp|medal-ramp"
+    r"))"
     r"\s*:\s*[^;}]+"
 )
 
@@ -275,6 +289,10 @@ def _rewrite_role_decls(html: str, ramp: dict[str, str]) -> str:
         # var() reference then follows automatically; --mh-glass-ink already
         # rides var(--mh-on-primary), remapped above).
         "--mh-surface-rgb": _mono_rgb_triple(ramp.get("--mh-surface", "#181818")),
+        # F9 medal chrome — a neutral grey specular so a medal card still reads
+        # as polished metal in mono, with no brand hue in the token.
+        "--mh-medal-ramp": _MONO_MEDAL_RAMP,
+        "--mh-medal-numeral-ramp": _MONO_MEDAL_RAMP,
     }
 
     def _sub_derived(m: "re.Match[str]") -> str:

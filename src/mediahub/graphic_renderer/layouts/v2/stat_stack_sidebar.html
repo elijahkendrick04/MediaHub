@@ -120,6 +120,7 @@
   font-size: 34px; text-transform: uppercase; color: var(--mh-on-primary);
 }
 .ss__result {
+  position: relative;
   font-family: 'JetBrains Mono','Space Grotesk',monospace;
   font-feature-settings: "tnum"; font-weight: 700;
   font-size: var(--mh-fit-result-px, 92px); font-variation-settings: var(--mh-axes-result, normal); line-height: 0.9;
@@ -181,7 +182,7 @@
       </div>
       <div class="ss__field">
         <div class="ss__lab">Result</div>
-        <div class="ss__result">{{RESULT_VALUE}}</div>
+        <div class="ss__result">{{RESULT_VALUE}}<div class="mh-anchor mh-anchor--panel-tr">{{OVERLAP_ACCENT}}</div></div>
       </div>
     </div>
     {{STAT_CHIPS}}

@@ -146,6 +146,11 @@ export const cardSchema = z.object({
   // ground / texture / accent-geometry overlay over the scene so a card's
   // video carries the still's exact decorative treatment. Empty = bare.
   stylePack: z.string().default(""),
+  // F7 overlap accent (still parity): "shape:rotation" (e.g. "tab:-4"), the
+  // seeded badge/tab/rule/tape the still straddles across a declared anchor.
+  // The motion pack layer paints the same shape at a fixed overlap-safe corner.
+  // Empty = no overlap accent (bare/legacy card), byte-equivalent.
+  overlapAccent: z.string().default(""),
   // The design-spec director's motion language for this card
   // (design_spec.MOTION_INTENTS). Empty = the mood/seed default programme.
   motionIntent: z.string().default(""),
@@ -157,6 +162,13 @@ export const cardSchema = z.object({
   roleSurface: z.string().default(""),
   roleAccent: z.string().default(""),
   roleOnGround: z.string().default(""),
+  // F9 medal chrome (still parity): the resolved specular ramp CSS
+  // (linear-gradient(...)). roleMedalRamp fills the bevelled result chip;
+  // roleMedalNumeralRamp is the gate-passing twin that gradient-clips the mega
+  // result numeral (emitted only when the ramp's darkest stop clears APCA vs
+  // the ground). Empty = no chrome (non-medal / dark-ground numeral), byte-equiv.
+  roleMedalRamp: z.string().default(""),
+  roleMedalNumeralRamp: z.string().default(""),
   // Subtitle/caption burn-in track (R1.3): a JSON string of the APCA-gated,
   // frame-timed caption cues built by visual/subtitle_burn.py and painted by
   // sprint/layers/captions.tsx. Empty = no captions (byte-identical render).
@@ -725,6 +737,7 @@ function sceneForArchetype(archetype: string): SceneMode {
     case "quote_led_recap":
     case "cornerstone_numeral":
     case "mega_surname_bleed":
+    case "poster_spine":
       return "poster";
     case "full_bleed_photo_lower_third":
     case "broadcast_scorebug":
@@ -732,6 +745,7 @@ function sceneForArchetype(archetype: string): SceneMode {
     case "centered_medal_spotlight":
     case "photo_passepartout":
     case "spotlight_disc":
+    case "frame_breakout":
       return "spotlight";
     case "editorial_numbers_grid":
     case "stat_stack_sidebar":
@@ -1204,6 +1218,10 @@ const PACK_ACCENT_GEOS = new Set([
   "none", "corner_ticks", "side_rule", "baseline_rule", "frame", "wedge", "ring", "corner_blocks",
   "double_rule", "dot_row", "cross_ticks", "corner_arc",
   "hexagons", "deco_corners", "wave_rule", "spiral_flourish", "glitch_divider",
+  // F8 large motifs (mirror style_packs.ACCENT_GEOS).
+  "speed_band", "corner_burst", "blob", "variable_halftone",
+  // D7 broadcast-angled slab.
+  "skew_slab",
 ]);
 
 type ParsedPack = { ground: string; texture: string; accentGeo: string; bold: boolean };
@@ -1578,9 +1596,87 @@ function packAccentGeometry(
         </>
       );
     }
+    // --- F8 large-motif class (mirrors style_packs._accent_geometry_html) --
+    // Painted at z-index 4 (behind content) at capped alpha — background energy,
+    // not a margin mark. Fixed (unseeded) geometry so still and motion match.
+    case "speed_band": {
+      const op = bold ? 0.28 : 0.2;
+      const bar = Math.max(4, Math.round(m * 0.01 * mult));
+      const gap = bar * 3;
+      const bandH = Math.round(height * 0.34);
+      const taper = "linear-gradient(0deg, black 0%, transparent 100%)";
+      return (
+        <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, height: bandH, zIndex: 4, opacity: op, background: `repeating-linear-gradient(115deg, ${accent} 0 ${bar}px, transparent ${bar}px ${bar + gap}px)`, WebkitMaskImage: taper, maskImage: taper }} />
+      );
+    }
+    case "corner_burst": {
+      const op = bold ? 0.26 : 0.18;
+      const size = Math.round(m * 0.62);
+      const spoke = bold ? 4 : 3;
+      const fade = "radial-gradient(100% 100% at 100% 0%, black 0%, transparent 72%)";
+      return (
+        <div style={{ position: "absolute", right: 0, top: 0, width: size, height: size, zIndex: 4, opacity: op, background: `repeating-conic-gradient(from 198deg at 100% 0%, ${accent} 0deg ${spoke}deg, transparent ${spoke}deg 12deg)`, WebkitMaskImage: fade, maskImage: fade }} />
+      );
+    }
+    case "blob": {
+      const op = bold ? 0.22 : 0.16;
+      const size = Math.round(m * 0.44 * mult);
+      const off = Math.round(m * 0.03);
+      const d = "M50 6 C70 6 86 16 90 36 C94 56 84 76 66 88 C48 100 26 96 14 80 C2 64 6 40 20 24 C30 12 40 6 50 6 Z";
+      return (
+        <svg viewBox="0 0 100 100" preserveAspectRatio="none" style={{ position: "absolute", left: off, bottom: off, width: size, height: size, zIndex: 4, opacity: op }}>
+          <path d={d} style={{ fill: accent }} />
+        </svg>
+      );
+    }
+    case "variable_halftone": {
+      const op = bold ? 0.3 : 0.22;
+      const size = Math.round(m * 0.52);
+      return (
+        <div style={{ position: "absolute", right: 0, bottom: 0, width: size, height: size, zIndex: 4, opacity: op }}>
+          <svg viewBox="0 0 100 100" preserveAspectRatio="none" style={{ width: "100%", height: "100%", display: "block" }}>
+            {packHalftoneDots(accent, sec)}
+          </svg>
+        </div>
+      );
+    }
+    case "skew_slab": {
+      const op = bold ? 0.9 : 0.72;
+      const slabH = Math.round(height * 0.13 * mult);
+      const bottom = Math.round(height * 0.15);
+      return (
+        <div style={{ position: "absolute", left: "-8%", right: "-8%", bottom, height: slabH, zIndex: 4, opacity: op, background: accent, transform: "skewX(-12deg)" }} />
+      );
+    }
     default:
       return null;
   }
+}
+
+// F8 variable-halftone lattice — mirrors style_packs._variable_halftone_svg so
+// the still and the video draw the same fading dot wedge (fixed grid + maths).
+function packHalftoneDots(accent: string, sec: string): React.ReactNode[] {
+  const cols = 10;
+  const rows = 10;
+  const step = 100 / cols;
+  const rMax = step * 0.52;
+  const dots: React.ReactNode[] = [];
+  for (let row = 0; row < rows; row++) {
+    for (let col = 0; col < cols; col++) {
+      const cx = (col + (row % 2 ? 0.5 : 0)) * step + step * 0.25;
+      const cy = row * step + step * 0.5;
+      const dx = (100 - cx) / 100;
+      const dy = (100 - cy) / 100;
+      const dist = Math.sqrt(dx * dx + dy * dy) / 1.41421356;
+      const r = rMax * Math.max(0, 1 - dist);
+      if (r < 0.35) {
+        continue;
+      }
+      const fill = (row + col) % 2 === 0 ? accent : sec;
+      dots.push(<circle key={`${row}-${col}`} cx={cx.toFixed(2)} cy={cy.toFixed(2)} r={r.toFixed(2)} style={{ fill }} />);
+    }
+  }
+  return dots;
 }
 
 // A smooth horizontal sine as alternating cubic-bézier humps, in px units
@@ -1712,6 +1808,17 @@ const StylePackLayer: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
   if (geo) {
     children.push(<React.Fragment key="geo">{geo}</React.Fragment>);
   }
+  // F7 overlap accent (still parity): the seeded badge/tab/rule/tape the still
+  // straddles across a declared anchor. The motion side has no per-layout
+  // anchor geometry, so it paints the same shape at a fixed overlap-safe corner
+  // (upper-right, straddling the card's top-right third) — the mirror the
+  // parity contract asks for.
+  const overlap = packOverlapAccent(
+    ctx.card.overlapAccent || "", width, height, accent, roles.ground || "#0A2540",
+  );
+  if (overlap) {
+    children.push(<React.Fragment key="overlap">{overlap}</React.Fragment>);
+  }
 
   return (
     <div style={{ position: "absolute", inset: 0, overflow: "hidden", pointerEvents: "none", opacity: enter }}>
@@ -1719,6 +1826,47 @@ const StylePackLayer: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
     </div>
   );
 };
+
+// F7 overlap accent — mirrors style_packs.overlap_accent_html. Placed at a
+// fixed overlap-safe point (72% across, 20% down) so it straddles the upper-
+// right composition edge like the still's anchored accent. Parses "shape:rot".
+function packOverlapAccent(
+  id: string, width: number, height: number, accent: string, ground: string,
+): React.ReactNode {
+  const parts = (id || "").split(":");
+  if (parts.length !== 2) {
+    return null;
+  }
+  const shape = parts[0];
+  const rotation = parseInt(parts[1], 10);
+  if (!Number.isFinite(rotation) || !["badge", "tab", "rule", "tape"].includes(shape)) {
+    return null;
+  }
+  const m = Math.min(width, height);
+  const base: React.CSSProperties = {
+    position: "absolute",
+    left: "72%",
+    top: "20%",
+    zIndex: 15,
+    transform: `translate(-50%,-50%) rotate(${rotation}deg)`,
+    boxShadow: "0 6px 16px rgba(0,0,0,0.28)",
+  };
+  if (shape === "badge") {
+    const d = Math.round(m * 0.14);
+    return <div style={{ ...base, width: d, height: d, borderRadius: "50%", background: accent, border: `${Math.max(3, Math.round(m * 0.006))}px solid ${ground}` }} />;
+  }
+  if (shape === "tab") {
+    return <div style={{ ...base, width: Math.round(m * 0.2), height: Math.round(m * 0.075), background: accent }} />;
+  }
+  if (shape === "rule") {
+    return <div style={{ ...base, width: Math.round(m * 0.24), height: Math.max(6, Math.round(m * 0.018)), background: accent }} />;
+  }
+  // tape — accent at 0.6 alpha, multiply-blended, serrated ends.
+  const clip = "polygon(0 18%,4% 0,8% 18%,12% 0,100% 0,96% 82%,100% 100%,96% 82%,92% 100%,88% 82%,0 82%)";
+  return (
+    <div style={{ ...base, width: Math.round(m * 0.26), height: Math.round(m * 0.06), background: accent, opacity: 0.6, mixBlendMode: "multiply", WebkitClipPath: clip, clipPath: clip, boxShadow: "0 2px 8px rgba(0,0,0,0.18)" }} />
+  );
+}
 
 const LogoChip: React.FC<{ ctx: SceneCtx; size?: number }> = ({ ctx, size = 140 }) => {
   const { brand, anim, width, ts } = ctx;
@@ -1956,11 +2104,31 @@ const HeroScene: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
 };
 
 // Poster scene — the number (or the name) IS the story, centred, minimal.
+// F9 medal chrome: gradient-clip a numeral with the resolved specular ramp so
+// the video reads as polished metal like the still. Empty ramp → no override
+// (the numeral keeps its role colour), byte-equivalent to the pre-F9 scene.
+function medalNumeralStyle(ramp: string): React.CSSProperties {
+  if (!ramp) {
+    return {};
+  }
+  return {
+    backgroundImage: ramp,
+    WebkitBackgroundClip: "text",
+    backgroundClip: "text",
+    WebkitTextFillColor: "transparent",
+    color: "transparent",
+  };
+}
+
 const PosterScene: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
   const { card, roles, anim, width, ts } = ctx;
   const isQuote = card.archetype === "quote_led_recap";
   const megaIsResult = Boolean(ctx.resultFinal);
   const mega = megaIsResult ? ctx.result : ctx.surnameText;
+  // Medal chrome on the mega RESULT numeral only (parity with the still's
+  // gradient-clipped .bn__result / .cn__num — uses the gate-passing numeral
+  // ramp, so a dark-ground numeral stays flat exactly like the still).
+  const megaChrome = megaIsResult ? medalNumeralStyle(card.roleMedalNumeralRamp || "") : {};
   // Fit against the FINAL value so the size never wobbles mid-count.
   const megaSize = fitLinePx(
     megaIsResult ? ctx.resultFinal : ctx.surnameText,
@@ -2024,6 +2192,7 @@ const PosterScene: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
             transform: `translateY(${anim.heroY}px) scale(${anim.heroScale})`,
             fontVariantNumeric: "tabular-nums",
             textTransform: "uppercase",
+            ...megaChrome,
           }}
         />
         <div
@@ -2316,6 +2485,21 @@ export const FrameEcho: React.FC<{
 const SpotlightScene: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
   const { card, roles, anim, width, height, ts } = ctx;
   const ringSize = Math.round(Math.min(width, height) * 0.34);
+  // F9 medal chrome: on a medal card the result reads as a bevelled ramp chip
+  // (parity with the still's .cm__result pill). Empty ramp → plain accent
+  // numeral, byte-equivalent to before.
+  const medalRamp = card.roleMedalRamp || "";
+  const chipChrome: React.CSSProperties = medalRamp
+    ? {
+        display: "inline-block",
+        padding: `${Math.round(16 * ts)}px ${Math.round(40 * ts)}px`,
+        borderRadius: 999,
+        background: medalRamp,
+        color: roles.ground,
+        boxShadow: "inset 0 1px 0 rgba(255,255,255,0.28), inset 0 -2px 4px rgba(0,0,0,0.5)",
+        border: "1px solid rgba(255,255,255,0.28)",
+      }
+    : {};
   const place = placeDisplay(card.place || "");
   const shaped = hasFrameShape(card);
   const ringTransform = `scale(${0.8 + 0.2 * anim.heroOpacity}) translateY(${anim.heroY * 0.4}px)`;
@@ -2478,6 +2662,7 @@ const SpotlightScene: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
             fontVariantNumeric: "tabular-nums",
             opacity: anim.resultOpacity,
             transform: `scale(${anim.resultScale})`,
+            ...chipChrome,
           }}
         >
           {ctx.result}

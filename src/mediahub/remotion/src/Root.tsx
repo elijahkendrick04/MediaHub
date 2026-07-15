@@ -63,6 +63,9 @@ const defaultCard = {
   // A valid sample pack so the studio preview demonstrates the style-pack
   // overlay; production passes the still's real pack id (or "" for bare).
   stylePack: "vignette-grain-corner_ticks-standard",
+  overlapAccent: "",
+  roleMedalRamp: "",
+  roleMedalNumeralRamp: "",
   motionIntent: "",
   roleGround: "",
   roleSurface: "",
