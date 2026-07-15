@@ -13,9 +13,9 @@ Covers the "every swim ranked, standouts honest, any swim promotable" feature:
 * The detector assembly regression — the Phase W detectors must appear
   exactly once (the old double-append emitted duplicate achievements).
 """
+
 from __future__ import annotations
 
-import importlib
 import json
 import sys
 import uuid
@@ -93,7 +93,9 @@ class TestStandoutCounting:
         assert st.n_standout_for_report(rr) == 1
 
     def test_relay_standout_counts(self):
-        rr = {"ranked_achievements": [_ra("club:400FR:relay:gold", "relay_medal_gold", "strong", 0.7)]}
+        rr = {
+            "ranked_achievements": [_ra("club:400FR:relay:gold", "relay_medal_gold", "strong", 0.7)]
+        }
         assert st.n_standout_for_report(rr) == 1
 
     def test_tolerates_missing_and_malformed_reports(self):
@@ -115,23 +117,46 @@ class TestSwimRows:
                 _ra("k2:50BKSC:F:pb", "pb_confirmed", "nice", 0.3),
             ],
             "swim_traces": [
-                {"swim_id": "k2:50BKSC:F", "swimmer_name": "Ben", "event": "50 Back",
-                 "time_str": "31.20", "achievement_count": 1},
-                {"swim_id": "k1:100FRLC:F", "swimmer_name": "Ava", "event": "100 Free",
-                 "time_str": "59.10", "achievement_count": 2},
-                {"swim_id": "k3:200IMLC:F", "swimmer_name": "Cara", "event": "200 IM",
-                 "time_str": "2:41.00", "achievement_count": 0,
-                 "near_miss_category": "almost_pb"},
-                {"swim_id": "k4:100BRLC:F", "swimmer_name": "Dan", "event": "100 Breast",
-                 "time_str": "1:25.00", "achievement_count": 0,
-                 "near_miss_category": "lower_priority"},
+                {
+                    "swim_id": "k2:50BKSC:F",
+                    "swimmer_name": "Ben",
+                    "event": "50 Back",
+                    "time_str": "31.20",
+                    "achievement_count": 1,
+                },
+                {
+                    "swim_id": "k1:100FRLC:F",
+                    "swimmer_name": "Ava",
+                    "event": "100 Free",
+                    "time_str": "59.10",
+                    "achievement_count": 2,
+                },
+                {
+                    "swim_id": "k3:200IMLC:F",
+                    "swimmer_name": "Cara",
+                    "event": "200 IM",
+                    "time_str": "2:41.00",
+                    "achievement_count": 0,
+                    "near_miss_category": "almost_pb",
+                },
+                {
+                    "swim_id": "k4:100BRLC:F",
+                    "swimmer_name": "Dan",
+                    "event": "100 Breast",
+                    "time_str": "1:25.00",
+                    "achievement_count": 0,
+                    "near_miss_category": "lower_priority",
+                },
             ],
         }
 
     def test_rows_ordered_standout_first_then_score(self):
         rows = st.swim_rows_for_report(self._report())
         assert [r["tier"] for r in rows] == [
-            st.TIER_STANDOUT, st.TIER_NOTABLE, st.TIER_CLOSE_CALL, st.TIER_ORDINARY,
+            st.TIER_STANDOUT,
+            st.TIER_NOTABLE,
+            st.TIER_CLOSE_CALL,
+            st.TIER_ORDINARY,
         ]
         assert rows[0]["swimmer_name"] == "Ava"
         assert rows[0]["score"] == 0.88  # max across the swim's achievements
@@ -157,11 +182,21 @@ class TestSwimRows:
         rr = {
             "ranked_achievements": [_ra("k1:100FRLC:F:gold", "medal_gold", "elite", 0.9)],
             "swim_traces": [
-                {"swim_id": "k1:100FRLC:P", "swimmer_name": "Ava", "event": "100 Free",
-                 "time_str": "60.00", "achievement_count": 0,
-                 "near_miss_category": "lower_priority"},
-                {"swim_id": "k1:100FRLC:F", "swimmer_name": "Ava", "event": "100 Free",
-                 "time_str": "59.10", "achievement_count": 1},
+                {
+                    "swim_id": "k1:100FRLC:P",
+                    "swimmer_name": "Ava",
+                    "event": "100 Free",
+                    "time_str": "60.00",
+                    "achievement_count": 0,
+                    "near_miss_category": "lower_priority",
+                },
+                {
+                    "swim_id": "k1:100FRLC:F",
+                    "swimmer_name": "Ava",
+                    "event": "100 Free",
+                    "time_str": "59.10",
+                    "achievement_count": 1,
+                },
             ],
         }
         rows = {r["swim_id"]: r for r in st.swim_rows_for_report(rr)}
@@ -214,34 +249,20 @@ def _seed_run(tmp_path, wm, profile_id, run_payload):
 
 
 @pytest.fixture
-def review_env(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    (tmp_path / "runs_v4").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "uploads_v4").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "club_profiles").mkdir(parents=True, exist_ok=True)
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-    importlib.reload(cp)
-    importlib.reload(wm)
-
+def review_env(client, web_module, tmp_path):
     from mediahub.web.club_profile import ClubProfile, save_profile
-    save_profile(ClubProfile(
-        profile_id="org-test",
-        display_name="Test Club",
-        brand_voice_summary="Clear and energetic.",
-    ))
 
-    app = wm.create_app()
-    app.config["TESTING"] = True
+    save_profile(
+        ClubProfile(
+            profile_id="org-test",
+            display_name="Test Club",
+            brand_voice_summary="Clear and energetic.",
+        )
+    )
 
-    with app.test_client() as client:
-        r = client.post("/api/organisation/active", data={"profile_id": "org-test"})
-        assert r.status_code == 200, r.get_json()
-        yield {"client": client, "wm": wm, "tmp_path": tmp_path}
+    r = client.post("/api/organisation/active", data={"profile_id": "org-test"})
+    assert r.status_code == 200, r.get_json()
+    yield {"client": client, "wm": web_module, "tmp_path": tmp_path}
 
 
 def _payload(profile_id="org-test"):
@@ -288,22 +309,42 @@ def _payload(profile_id="org-test"):
                 },
             ],
             "swim_traces": [
-                {"swim_id": "k1:100FRLC:F", "swimmer_name": "Ava Gold",
-                 "event": "100m Freestyle (LC)", "time_str": "59.10",
-                 "achievement_count": 2, "detector_traces": [],
-                 "summary": "2 achievement(s) detected"},
-                {"swim_id": "k3:200IMLC:F", "swimmer_name": "Cara Close",
-                 "event": "200m IM (LC)", "time_str": "2:41.00",
-                 "achievement_count": 0, "detector_traces": [],
-                 "summary": "almost a PB", "near_miss_category": "almost_pb"},
-                {"swim_id": "k4:100BRLC:F", "swimmer_name": "Dan Ordinary",
-                 "event": "100m Breaststroke (LC)", "time_str": "1:25.00",
-                 "achievement_count": 0, "detector_traces": [],
-                 "summary": "no notable achievement detected by any detector",
-                 "near_miss_category": "lower_priority"},
+                {
+                    "swim_id": "k1:100FRLC:F",
+                    "swimmer_name": "Ava Gold",
+                    "event": "100m Freestyle (LC)",
+                    "time_str": "59.10",
+                    "achievement_count": 2,
+                    "detector_traces": [],
+                    "summary": "2 achievement(s) detected",
+                },
+                {
+                    "swim_id": "k3:200IMLC:F",
+                    "swimmer_name": "Cara Close",
+                    "event": "200m IM (LC)",
+                    "time_str": "2:41.00",
+                    "achievement_count": 0,
+                    "detector_traces": [],
+                    "summary": "almost a PB",
+                    "near_miss_category": "almost_pb",
+                },
+                {
+                    "swim_id": "k4:100BRLC:F",
+                    "swimmer_name": "Dan Ordinary",
+                    "event": "100m Breaststroke (LC)",
+                    "time_str": "1:25.00",
+                    "achievement_count": 0,
+                    "detector_traces": [],
+                    "summary": "no notable achievement detected by any detector",
+                    "near_miss_category": "lower_priority",
+                },
             ],
-            "n_elite": 1, "n_strong": 0, "n_story": 0, "n_nice": 1,
-            "n_achievements": 2, "n_swims_analysed": 4,
+            "n_elite": 1,
+            "n_strong": 0,
+            "n_story": 0,
+            "n_nice": 1,
+            "n_achievements": 2,
+            "n_swims_analysed": 4,
         },
         "parse_warnings": [],
         "self_check": {},
@@ -353,8 +394,11 @@ class TestPromoteRoute:
         run_id = _seed_run(tmp_path, wm, "org-test", _payload())
         r = client.post(
             f"/api/runs/{run_id}/swims/promote",
-            data={"swim_id": "k3:200IMLC:F", "headline": "Cara's comeback",
-                  "note": "First 200 IM since injury"},
+            data={
+                "swim_id": "k3:200IMLC:F",
+                "headline": "Cara's comeback",
+                "note": "First 200 IM since injury",
+            },
         )
         assert r.status_code == 302
         assert "promoted=1" in r.headers["Location"]
@@ -395,12 +439,18 @@ class TestPromoteRoute:
     def test_duplicate_promotion_refused(self, review_env):
         wm, tmp_path, client = review_env["wm"], review_env["tmp_path"], review_env["client"]
         run_id = _seed_run(tmp_path, wm, "org-test", _payload())
-        assert client.post(
-            f"/api/runs/{run_id}/swims/promote", data={"swim_id": "k3:200IMLC:F"}
-        ).status_code == 302
-        assert client.post(
-            f"/api/runs/{run_id}/swims/promote", data={"swim_id": "k3:200IMLC:F"}
-        ).status_code == 409
+        assert (
+            client.post(
+                f"/api/runs/{run_id}/swims/promote", data={"swim_id": "k3:200IMLC:F"}
+            ).status_code
+            == 302
+        )
+        assert (
+            client.post(
+                f"/api/runs/{run_id}/swims/promote", data={"swim_id": "k3:200IMLC:F"}
+            ).status_code
+            == 409
+        )
 
     def test_carded_swim_not_promotable(self, review_env):
         wm, tmp_path, client = review_env["wm"], review_env["tmp_path"], review_env["client"]
@@ -411,9 +461,10 @@ class TestPromoteRoute:
     def test_unknown_swim_404(self, review_env):
         wm, tmp_path, client = review_env["wm"], review_env["tmp_path"], review_env["client"]
         run_id = _seed_run(tmp_path, wm, "org-test", _payload())
-        assert client.post(
-            f"/api/runs/{run_id}/swims/promote", data={"swim_id": "nope:1"}
-        ).status_code == 404
+        assert (
+            client.post(f"/api/runs/{run_id}/swims/promote", data={"swim_id": "nope:1"}).status_code
+            == 404
+        )
 
     def test_missing_swim_id_400(self, review_env):
         wm, tmp_path, client = review_env["wm"], review_env["tmp_path"], review_env["client"]
@@ -430,7 +481,7 @@ class TestPromoteRoute:
         """A promoted headline/note is user input — it must render escaped."""
         wm, tmp_path, client = review_env["wm"], review_env["tmp_path"], review_env["client"]
         run_id = _seed_run(tmp_path, wm, "org-test", _payload())
-        xss = '<script>alert(1)</script>'
+        xss = "<script>alert(1)</script>"
         client.post(
             f"/api/runs/{run_id}/swims/promote",
             data={"swim_id": "k3:200IMLC:F", "headline": xss, "note": xss},

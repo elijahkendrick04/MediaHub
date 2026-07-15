@@ -179,25 +179,11 @@ def test_exposure_report_other_month_is_empty():
 
 
 @pytest.fixture
-def sponsor_app(tmp_path, monkeypatch):
-    import importlib
-
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
-
+def sponsor_app(app, web_module, tmp_path):
     from mediahub.web.club_profile import ClubProfile, save_profile
 
     save_profile(ClubProfile(profile_id="testclub", display_name="Test Club"))
-    app = wm.create_app()
-    app.config["TESTING"] = True
-    return {"app": app, "wm": wm, "tmp": tmp_path}
+    return {"app": app, "wm": web_module, "tmp": tmp_path}
 
 
 def _pin(client, profile_id="testclub"):

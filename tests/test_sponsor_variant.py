@@ -22,9 +22,9 @@ Pins:
   5. The grouped content pack page surfaces a "Sponsor variant"
      button per card.
 """
+
 from __future__ import annotations
 
-import importlib
 import json
 import sys
 from pathlib import Path
@@ -39,18 +39,22 @@ sys.path.insert(0, str(_ROOT))
 # 1. The requirement helper
 # ---------------------------------------------------------------------------
 
+
 class TestRequirementHelper:
     def test_empty_when_no_sponsor(self):
         from mediahub.brand.sponsor import sponsor_caption_requirement
         from mediahub.web.club_profile import ClubProfile
+
         p = ClubProfile(profile_id="x", display_name="X")
         assert sponsor_caption_requirement(p) == ""
 
     def test_includes_sponsor_name_and_is_explicit(self):
         from mediahub.brand.sponsor import sponsor_caption_requirement
         from mediahub.web.club_profile import ClubProfile
+
         p = ClubProfile(
-            profile_id="x", display_name="X",
+            profile_id="x",
+            display_name="X",
             sponsor_name="Acme Sports",
         )
         req = sponsor_caption_requirement(p)
@@ -62,8 +66,10 @@ class TestRequirementHelper:
     def test_includes_guidelines_when_present(self):
         from mediahub.brand.sponsor import sponsor_caption_requirement
         from mediahub.web.club_profile import ClubProfile
+
         p = ClubProfile(
-            profile_id="x", display_name="X",
+            profile_id="x",
+            display_name="X",
             sponsor_name="Acme Sports",
             sponsor_guidelines="Always include #PoweredByAcme",
         )
@@ -75,10 +81,12 @@ class TestRequirementHelper:
 # 2. generate_sponsor_caption — through the real caption pipeline
 # ---------------------------------------------------------------------------
 
+
 class TestGenerateSponsorCaption:
     def test_raises_when_no_sponsor(self):
         from mediahub.brand.sponsor import generate_sponsor_caption
         from mediahub.web.club_profile import ClubProfile
+
         p = ClubProfile(profile_id="x", display_name="X")
         with pytest.raises(ValueError, match="no sponsor configured"):
             generate_sponsor_caption({"swimmer_name": "Emma"}, profile=p)
@@ -87,6 +95,7 @@ class TestGenerateSponsorCaption:
         """The sponsor requirement must arrive at the LLM verbatim — not
         be swallowed by the brand-context block or the tone block."""
         from mediahub.web.club_profile import ClubProfile
+
         captured = {}
 
         def fake_call(system, user, max_tokens=400, **_):
@@ -94,18 +103,23 @@ class TestGenerateSponsorCaption:
             return "Emma went 58.21 - cheers @AcmeSports"
 
         monkeypatch.setattr(
-            "mediahub.web.ai_caption.call_claude", fake_call,
+            "mediahub.web.ai_caption.call_claude",
+            fake_call,
         )
         from mediahub.brand.sponsor import generate_sponsor_caption
+
         p = ClubProfile(
-            profile_id="x", display_name="City Aquatics",
+            profile_id="x",
+            display_name="City Aquatics",
             sponsor_name="Acme Sports",
             brand_voice_summary="Inclusive community club.",
         )
         out = generate_sponsor_caption(
             {
-                "swimmer_name": "Emma", "event": "100 Free",
-                "time": "58.21", "type": "pb_confirmed",
+                "swimmer_name": "Emma",
+                "event": "100 Free",
+                "time": "58.21",
+                "type": "pb_confirmed",
             },
             profile=p,
         )
@@ -129,13 +143,16 @@ class TestGenerateSponsorCaption:
         )
         from mediahub.web.club_profile import ClubProfile
         from mediahub.brand.sponsor import generate_sponsor_caption
+
         p = ClubProfile(
-            profile_id="x", display_name="X",
+            profile_id="x",
+            display_name="X",
             sponsor_name="Acme",
         )
         generate_sponsor_caption(
             {
-                "swimmer_name": "Emma", "event": "100 Free",
+                "swimmer_name": "Emma",
+                "event": "100 Free",
                 "time": "58.21",
                 "_extra_instructions": "Mention the volunteers.",
             },
@@ -150,23 +167,9 @@ class TestGenerateSponsorCaption:
 # 3. /runs/<run_id>/card/<card_id>/sponsor-variant page
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
-def gated_app(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    (tmp_path / "runs_v4").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "uploads_v4").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "club_profiles").mkdir(parents=True, exist_ok=True)
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-    importlib.reload(cp)
-    importlib.reload(wm)
-
-    app = wm.create_app()
-    app.config["TESTING"] = True
+def gated_app(app, tmp_path):
     app.config["ENFORCE_ORG_GATE"] = True
     return app, tmp_path
 
@@ -174,26 +177,37 @@ def gated_app(tmp_path, monkeypatch):
 def _seed_run(tmp_path: Path, run_id: str, profile_id: str, sponsor: str = ""):
     """Seed a profile (with optional sponsor) and a single-card run."""
     from mediahub.web.club_profile import ClubProfile, save_profile
-    save_profile(ClubProfile(
-        profile_id=profile_id, display_name="City Aquatics",
-        brand_voice_summary="Inclusive community club.",
-        sponsor_name=sponsor,
-    ))
+
+    save_profile(
+        ClubProfile(
+            profile_id=profile_id,
+            display_name="City Aquatics",
+            brand_voice_summary="Inclusive community club.",
+            sponsor_name=sponsor,
+        )
+    )
     run = {
-        "run_id": run_id, "profile_id": profile_id,
+        "run_id": run_id,
+        "profile_id": profile_id,
         "meet": {"name": "Winter Champs", "venue": "Manchester"},
         "recognition_report": {
             "n_achievements": 1,
-            "ranked_achievements": [{
-                "rank": 1, "priority": 0.95,
-                "achievement": {
-                    "swim_id": "swim-1", "swimmer_name": "Emma",
-                    "event": "100 Free", "time": "58.21",
-                    "type": "pb_confirmed", "pb": True,
-                    "headline": "First sub-60",
-                },
-                "factors": [],
-            }],
+            "ranked_achievements": [
+                {
+                    "rank": 1,
+                    "priority": 0.95,
+                    "achievement": {
+                        "swim_id": "swim-1",
+                        "swimmer_name": "Emma",
+                        "event": "100 Free",
+                        "time": "58.21",
+                        "type": "pb_confirmed",
+                        "pb": True,
+                        "headline": "First sub-60",
+                    },
+                    "factors": [],
+                }
+            ],
         },
     }
     (tmp_path / "runs_v4" / f"{run_id}.json").write_text(json.dumps(run))
@@ -278,10 +292,14 @@ class TestSponsorVariantPage:
         app, tmp = gated_app
         # Seed a profile so the gate lifts.
         from mediahub.web.club_profile import ClubProfile, save_profile
-        save_profile(ClubProfile(
-            profile_id="city-aquatics", display_name="City",
-            brand_voice_summary="x",
-        ))
+
+        save_profile(
+            ClubProfile(
+                profile_id="city-aquatics",
+                display_name="City",
+                brand_voice_summary="x",
+            )
+        )
         with app.test_client() as c:
             c.post("/api/organisation/active", data={"profile_id": "city-aquatics"})
             resp = c.get("/runs/no-such-run/card/anything/sponsor-variant")
@@ -295,20 +313,25 @@ class TestSponsorVariantPage:
         page GET — the assertion is unchanged.)"""
         app, tmp = gated_app
         import mediahub.web.web as wm
+
         if not wm._v8_ok:
             pytest.skip("v8 engine unavailable")
         _seed_run(tmp, "run-ov", "city-aquatics", sponsor="Acme Sports")
         ws = wm._get_wf_store()
-        ws.set_edits("run-ov", "swim-1", {
-            "insp.accent": "#C9A227", "insp.focus": "left top",
-            "insp.hideSponsor": "1",
-        })
+        ws.set_edits(
+            "run-ov",
+            "swim-1",
+            {
+                "insp.accent": "#C9A227",
+                "insp.focus": "left top",
+                "insp.hideSponsor": "1",
+            },
+        )
         captured = {}
 
         def _fake(item, brand_kit, **kwargs):
             captured.update(kwargs)
-            return {"visuals": [{"id": "vis1", "format_name": "feed_portrait"}],
-                    "errors": []}
+            return {"visuals": [{"id": "vis1", "format_name": "feed_portrait"}], "errors": []}
 
         monkeypatch.setattr(wm, "_v8_create_visual_for_item", _fake)
         monkeypatch.setattr(
@@ -336,6 +359,7 @@ class TestSponsorVariantPage:
 # 4. The grouped pack page surfaces the sponsor-variant button per card
 # ---------------------------------------------------------------------------
 
+
 class TestPackPageSurfacesSponsorButton:
     def test_button_present_per_card(self, gated_app):
         app, tmp = gated_app
@@ -352,6 +376,7 @@ class TestPackPageSurfacesSponsorButton:
 # ---------------------------------------------------------------------------
 # 5. Friendly fallback when the LLM is unavailable
 # ---------------------------------------------------------------------------
+
 
 class TestSponsorVariantFriendlyLLMFallback:
     """When `generate_sponsor_caption` raises ClaudeUnavailableError because
@@ -376,7 +401,8 @@ class TestSponsorVariantFriendlyLLMFallback:
         # Patch the symbol the worker imports at call-time, inside the
         # sponsor module.
         monkeypatch.setattr(
-            "mediahub.brand.sponsor.generate_sponsor_caption", _raise,
+            "mediahub.brand.sponsor.generate_sponsor_caption",
+            _raise,
         )
         if wm._v8_ok:
             monkeypatch.setattr(

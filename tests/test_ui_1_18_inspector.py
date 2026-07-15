@@ -19,9 +19,9 @@ These tests pin, end to end:
     swatches, crop grid and persisted state — XSS-safe;
   - the CSS contract (rules present + reduced-motion gated).
 """
+
 from __future__ import annotations
 
-import importlib
 import json
 import sys
 import uuid
@@ -41,6 +41,7 @@ sys.path.insert(0, str(_ROOT))
 class TestCropOverride:
     def test_sanitise_accepts_keyword_pairs(self):
         from mediahub.graphic_renderer.render import _sanitise_photo_pos as s
+
         assert s("left top") == "left top"
         assert s("center center") == "center center"
         assert s("right bottom") == "right bottom"
@@ -48,16 +49,29 @@ class TestCropOverride:
 
     def test_sanitise_accepts_percentages(self):
         from mediahub.graphic_renderer.render import _sanitise_photo_pos as s
+
         assert s("center 25%") == "center 25%"
         assert s("0% 100%") == "0% 100%"
         assert s("50% 50%") == "50% 50%"
 
     def test_sanitise_rejects_injection_and_junk(self):
         from mediahub.graphic_renderer.render import _sanitise_photo_pos as s
+
         for bad in (
-            "url(http://evil)", "red;}", "center;}", "120%", "-5%", "10px",
-            "left top center", "expression(1)", "}{", "var(--x)", "center 25px",
-            "", "   ", "TOPLEFT123",
+            "url(http://evil)",
+            "red;}",
+            "center;}",
+            "120%",
+            "-5%",
+            "10px",
+            "left top center",
+            "expression(1)",
+            "}{",
+            "var(--x)",
+            "center 25px",
+            "",
+            "   ",
+            "TOPLEFT123",
         ):
             assert s(bad) == "", f"{bad!r} must be rejected"
 
@@ -73,17 +87,29 @@ class TestCropOverride:
 
     def test_override_reaches_root_css(self):
         from mediahub.graphic_renderer import render as r
+
         repl = r._fill_v2_archetype(
-            self._brief(), 1080, 1350, {"BASE_CSS": ""},
-            athlete_path=None, brand_kit=None, photo_pos_override="left top",
+            self._brief(),
+            1080,
+            1350,
+            {"BASE_CSS": ""},
+            athlete_path=None,
+            brand_kit=None,
+            photo_pos_override="left top",
         )
         assert "--mh-photo-pos:left top;" in repl["BASE_CSS"]
 
     def test_injection_override_falls_back_to_saliency(self):
         from mediahub.graphic_renderer import render as r
+
         repl = r._fill_v2_archetype(
-            self._brief(), 1080, 1350, {"BASE_CSS": ""},
-            athlete_path=None, brand_kit=None, photo_pos_override="red;}",
+            self._brief(),
+            1080,
+            1350,
+            {"BASE_CSS": ""},
+            athlete_path=None,
+            brand_kit=None,
+            photo_pos_override="red;}",
         )
         css = repl["BASE_CSS"]
         assert "red;}" not in css
@@ -92,9 +118,14 @@ class TestCropOverride:
 
     def test_no_override_is_unchanged_default(self):
         from mediahub.graphic_renderer import render as r
+
         repl = r._fill_v2_archetype(
-            self._brief(), 1080, 1350, {"BASE_CSS": ""},
-            athlete_path=None, brand_kit=None,  # photo_pos_override defaults ""
+            self._brief(),
+            1080,
+            1350,
+            {"BASE_CSS": ""},
+            athlete_path=None,
+            brand_kit=None,  # photo_pos_override defaults ""
         )
         assert "--mh-photo-pos:center 28%;" in repl["BASE_CSS"]
 
@@ -102,6 +133,7 @@ class TestCropOverride:
         import inspect
         from mediahub.graphic_renderer.render import render_brief
         from mediahub.graphic_renderer.variants import render_all_formats
+
         assert "photo_pos_override" in inspect.signature(render_brief).parameters
         assert "photo_pos_override" in inspect.signature(render_all_formats).parameters
 
@@ -112,6 +144,7 @@ class TestCropOverride:
 class TestAccentOverride:
     def test_hex_guard(self):
         from mediahub.content_pack_visual.integration import _sanitise_hex as s
+
         assert s("#D4FF3A") == "#D4FF3A"
         assert s("#abc") == "#abc"
         assert s(" #0A2540 ") == "#0A2540"
@@ -121,6 +154,7 @@ class TestAccentOverride:
     def test_create_visual_accepts_user_overrides_kwarg(self):
         import inspect
         from mediahub.content_pack_visual.integration import create_visual_for_item
+
         assert "user_overrides" in inspect.signature(create_visual_for_item).parameters
 
 
@@ -145,22 +179,35 @@ class TestOverrideApplication:
         monkeypatch.setattr(variants, "render_all_formats", _fake_render_all_formats)
 
         from mediahub.content_pack_visual.integration import create_visual_for_item
+
         item = {
-            "id": "x", "swim_id": "x",
+            "id": "x",
+            "swim_id": "x",
             "achievement": {
-                "swimmer_name": "Jane Davies", "event": "200m Backstroke",
-                "time": "2:23.45", "pb": True, "type": "pb",
-                "headline": "New PB", "confidence_label": "high",
+                "swimmer_name": "Jane Davies",
+                "event": "200m Backstroke",
+                "time": "2:23.45",
+                "pb": True,
+                "type": "pb",
+                "headline": "New PB",
+                "confidence_label": "high",
             },
             "safe_to_post": {"level": "safe"},
         }
         bk = BrandKit(
-            profile_id="p", display_name="C",
-            primary_colour="#0A2540", secondary_colour="#C9A227", accent_colour="#D4FF3A",
+            profile_id="p",
+            display_name="C",
+            primary_colour="#0A2540",
+            secondary_colour="#C9A227",
+            accent_colour="#D4FF3A",
         )
         create_visual_for_item(
-            item, bk, profile_id="p", run_id="r1",
-            formats=["feed_portrait"], sponsor_name="Acme Pools",
+            item,
+            bk,
+            profile_id="p",
+            run_id="r1",
+            formats=["feed_portrait"],
+            sponsor_name="Acme Pools",
             user_overrides=overrides,
         )
         return captured
@@ -202,9 +249,12 @@ class TestSwatchesAndState:
     def test_swatches_are_brand_locked_deduped_valid(self):
         from mediahub.web import web as webmod
         from mediahub.brand.kit import BrandKit
+
         bk = BrandKit(
-            profile_id="p", display_name="C",
-            primary_colour="#0A2540", secondary_colour="#0A2540",  # dup → deduped
+            profile_id="p",
+            display_name="C",
+            primary_colour="#0A2540",
+            secondary_colour="#0A2540",  # dup → deduped
             accent_colour="#C9A227",
         )
         sw = webmod._brand_swatches(bk)
@@ -215,19 +265,27 @@ class TestSwatchesAndState:
     def test_swatches_drop_invalid(self):
         from mediahub.web import web as webmod
         from mediahub.brand.kit import BrandKit
+
         bk = BrandKit(
-            profile_id="p", display_name="C",
-            primary_colour="not-a-colour", secondary_colour="#C9A227", accent_colour=None,
+            profile_id="p",
+            display_name="C",
+            primary_colour="not-a-colour",
+            secondary_colour="#C9A227",
+            accent_colour=None,
         )
         sw = webmod._brand_swatches(bk)
         assert [s["hex"] for s in sw] == ["#C9A227"]
 
     def test_state_attrs_only_emit_set_keys(self):
         from mediahub.web import web as webmod
-        st = SimpleNamespace(edited_captions={
-            "insp.accent": "#C9A227", "insp.focus": "left top",
-            "insp.hideSponsor": "1",
-        })
+
+        st = SimpleNamespace(
+            edited_captions={
+                "insp.accent": "#C9A227",
+                "insp.focus": "left top",
+                "insp.hideSponsor": "1",
+            }
+        )
         attrs = webmod._inspector_state_attrs(st)
         assert 'data-insp-accent="#C9A227"' in attrs
         assert 'data-insp-focus="left top"' in attrs
@@ -237,11 +295,13 @@ class TestSwatchesAndState:
 
     def test_state_attrs_reject_bad_accent(self):
         from mediahub.web import web as webmod
+
         st = SimpleNamespace(edited_captions={"insp.accent": "javascript:alert(1)"})
         assert webmod._inspector_state_attrs(st) == ""
 
     def test_state_attrs_empty_for_clean_card(self):
         from mediahub.web import web as webmod
+
         assert webmod._inspector_state_attrs(None) == ""
         assert webmod._inspector_state_attrs(SimpleNamespace(edited_captions=None)) == ""
 
@@ -306,31 +366,26 @@ def _make_run_payload(profile_id, achievements):
 
 
 @pytest.fixture
-def env(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    (tmp_path / "runs_v4").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "uploads_v4").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "club_profiles").mkdir(parents=True, exist_ok=True)
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-    importlib.reload(cp)
-    importlib.reload(wm)
+def env(web_module, tmp_path):
+    wm = web_module
 
     from mediahub.web.club_profile import ClubProfile, save_profile
     from mediahub.brand.kit import BrandKit
-    save_profile(ClubProfile(
-        profile_id="org-test",
-        display_name="Test Club",
-        brand_voice_summary="Clear and energetic.",
-        brand_kit=BrandKit(
-            profile_id="org-test", display_name="Test Club",
-            primary_colour="#0A2540", secondary_colour="#C9A227", accent_colour="#D4FF3A",
-        ),
-    ))
+
+    save_profile(
+        ClubProfile(
+            profile_id="org-test",
+            display_name="Test Club",
+            brand_voice_summary="Clear and energetic.",
+            brand_kit=BrandKit(
+                profile_id="org-test",
+                display_name="Test Club",
+                primary_colour="#0A2540",
+                secondary_colour="#C9A227",
+                accent_colour="#D4FF3A",
+            ),
+        )
+    )
 
     app = wm.create_app()
     app.config["TESTING"] = True
@@ -353,16 +408,29 @@ class TestReviewRendersInspector:
         return run_id, r.get_data(as_text=True)
 
     def test_drawer_present_once(self, env):
-        _, body = self._review(env, [
-            {"swim_id": "s1", "swimmer_name": "Jane Smith", "event": "200m Fly", "headline": "PB"},
-        ])
+        _, body = self._review(
+            env,
+            [
+                {
+                    "swim_id": "s1",
+                    "swimmer_name": "Jane Smith",
+                    "event": "200m Fly",
+                    "headline": "PB",
+                },
+            ],
+        )
         assert body.count('id="mh-inspector"') == 1
         assert 'id="mh-inspector-scrim"' in body
         assert 'role="dialog"' in body
 
     def test_inspect_button_per_card(self, env):
         achs = [
-            {"swim_id": f"s{i}", "swimmer_name": f"Swimmer {i}", "event": "100m Free", "headline": f"PB {i}"}
+            {
+                "swim_id": f"s{i}",
+                "swimmer_name": f"Swimmer {i}",
+                "event": "100m Free",
+                "headline": f"PB {i}",
+            }
             for i in range(3)
         ]
         run_id, body = self._review(env, achs)
@@ -374,9 +442,17 @@ class TestReviewRendersInspector:
         assert f"/api/runs/{run_id}/swim/s0/caption" in body
 
     def test_brand_locked_swatches_rendered(self, env):
-        _, body = self._review(env, [
-            {"swim_id": "s1", "swimmer_name": "Jane Smith", "event": "200m Fly", "headline": "PB"},
-        ])
+        _, body = self._review(
+            env,
+            [
+                {
+                    "swim_id": "s1",
+                    "swimmer_name": "Jane Smith",
+                    "event": "200m Fly",
+                    "headline": "PB",
+                },
+            ],
+        )
         # The profile's brand colours appear as swatch options...
         assert 'data-accent="#0A2540"' in body
         assert 'data-accent="#C9A227"' in body
@@ -385,9 +461,17 @@ class TestReviewRendersInspector:
         assert 'data-accent=""' in body
 
     def test_controls_and_crop_grid_present(self, env):
-        _, body = self._review(env, [
-            {"swim_id": "s1", "swimmer_name": "Jane Smith", "event": "200m Fly", "headline": "PB"},
-        ])
+        _, body = self._review(
+            env,
+            [
+                {
+                    "swim_id": "s1",
+                    "swimmer_name": "Jane Smith",
+                    "event": "200m Fly",
+                    "headline": "PB",
+                },
+            ],
+        )
         assert 'id="mh-insp-caption"' in body
         assert 'id="mh-insp-photo"' in body
         assert 'id="mh-insp-sponsor"' in body
@@ -398,23 +482,45 @@ class TestReviewRendersInspector:
         assert 'id="mh-insp-apply"' in body
 
     def test_persisted_state_shows_on_button(self, env):
-        payload = _make_run_payload("org-test", [
-            {"swim_id": "s1", "swimmer_name": "Jane Smith", "event": "200m Fly", "headline": "PB"},
-        ])
+        payload = _make_run_payload(
+            "org-test",
+            [
+                {
+                    "swim_id": "s1",
+                    "swimmer_name": "Jane Smith",
+                    "event": "200m Fly",
+                    "headline": "PB",
+                },
+            ],
+        )
         run_id = _seed_run(env["tmp_path"], env["wm"], "org-test", payload)
         ws = env["wm"]._get_wf_store()
-        ws.set_edits(run_id, "s1", {
-            "insp.accent": "#C9A227", "insp.focus": "left top", "insp.hideSponsor": "1",
-        })
+        ws.set_edits(
+            run_id,
+            "s1",
+            {
+                "insp.accent": "#C9A227",
+                "insp.focus": "left top",
+                "insp.hideSponsor": "1",
+            },
+        )
         body = env["client"].get(f"/review/{run_id}").get_data(as_text=True)
         assert 'data-insp-accent="#C9A227"' in body
         assert 'data-insp-focus="left top"' in body
         assert 'data-insp-hide-sponsor="1"' in body
 
     def test_inspector_js_wired(self, env):
-        _, body = self._review(env, [
-            {"swim_id": "s1", "swimmer_name": "Jane Smith", "event": "200m Fly", "headline": "PB"},
-        ])
+        _, body = self._review(
+            env,
+            [
+                {
+                    "swim_id": "s1",
+                    "swimmer_name": "Jane Smith",
+                    "event": "200m Fly",
+                    "headline": "PB",
+                },
+            ],
+        )
         assert "set_edits" in body
         assert "insp.accent" in body
         assert "warm-club_headline" in body  # caption save honours every tone
@@ -422,9 +528,17 @@ class TestReviewRendersInspector:
     def test_title_uses_textcontent_not_innerhtml(self, env):
         """DOM-XSS guard: getAttribute decodes the server escaping, so the card
         title must be assigned via textContent (innerHTML would re-parse it)."""
-        _, body = self._review(env, [
-            {"swim_id": "s1", "swimmer_name": "Jane Smith", "event": "200m Fly", "headline": "PB"},
-        ])
+        _, body = self._review(
+            env,
+            [
+                {
+                    "swim_id": "s1",
+                    "swimmer_name": "Jane Smith",
+                    "event": "200m Fly",
+                    "headline": "PB",
+                },
+            ],
+        )
         assert "titleEl.textContent = ctx.title" in body
         assert "titleEl.innerHTML = ctx.title" not in body
 
@@ -433,10 +547,18 @@ class TestReviewRendersInspector:
         hostile swimmer name can neither break out of the attribute nor inject a
         tag. (The pre-existing .ach-row data-swimmer attribute is out of scope.)"""
         import re as _re
-        run_id, body = self._review(env, [
-            {"swim_id": "s1", "swimmer_name": 'A"><img src=x onerror=alert(1)>',
-             "event": "200m Fly", "headline": "PB"},
-        ])
+
+        run_id, body = self._review(
+            env,
+            [
+                {
+                    "swim_id": "s1",
+                    "swimmer_name": 'A"><img src=x onerror=alert(1)>',
+                    "event": "200m Fly",
+                    "headline": "PB",
+                },
+            ],
+        )
         titles = _re.findall(r'data-card-title="([^"]*)"', body)
         assert titles, "inspect button must carry a data-card-title"
         joined = " ".join(titles)
@@ -453,9 +575,17 @@ class TestReviewRendersInspector:
 # ===========================================================================
 class TestCreateGraphicOverrides:
     def _seed(self, env):
-        payload = _make_run_payload("org-test", [
-            {"swim_id": "s1", "swimmer_name": "Jane Smith", "event": "200m Fly", "headline": "PB"},
-        ])
+        payload = _make_run_payload(
+            "org-test",
+            [
+                {
+                    "swim_id": "s1",
+                    "swimmer_name": "Jane Smith",
+                    "event": "200m Fly",
+                    "headline": "PB",
+                },
+            ],
+        )
         return _seed_run(env["tmp_path"], env["wm"], "org-test", payload)
 
     @pytest.fixture
@@ -466,9 +596,11 @@ class TestCreateGraphicOverrides:
         def _fake(item, brand_kit, **kwargs):
             calls["kwargs"] = kwargs
             calls["brand_kit"] = brand_kit
-            return {"visuals": [{"id": "vis1", "format_name": "feed_portrait"}],
-                    "brief": {"variation_signature": "sig", "primary_hook": "hook"},
-                    "errors": []}
+            return {
+                "visuals": [{"id": "vis1", "format_name": "feed_portrait"}],
+                "brief": {"variation_signature": "sig", "primary_hook": "hook"},
+                "errors": [],
+            }
 
         env["calls"] = calls
         with mock.patch.object(env["wm"], "_v8_create_visual_for_item", _fake):
@@ -492,9 +624,14 @@ class TestCreateGraphicOverrides:
         if not captured["wm"]._v8_ok:
             pytest.skip("v8 engine unavailable")
         run_id = self._seed(captured)
-        j = captured["client"].post(
-            f"/api/runs/{run_id}/cards/s1/create-graphic", json={"accent": "#C9A227"},
-        ).get_json()
+        j = (
+            captured["client"]
+            .post(
+                f"/api/runs/{run_id}/cards/s1/create-graphic",
+                json={"accent": "#C9A227"},
+            )
+            .get_json()
+        )
         assert "brand_swatches" in j and isinstance(j["brand_swatches"], list)
         assert any(s["hex"] == "#0A2540" for s in j["brand_swatches"])
         assert j["inspector"]["accent"] == "#C9A227"
@@ -508,7 +645,8 @@ class TestCreateGraphicOverrides:
         ws = captured["wm"]._get_wf_store()
         ws.set_edits(run_id, "s1", {"insp.focus": "right bottom", "insp.hideSponsor": "1"})
         r = captured["client"].post(
-            f"/api/runs/{run_id}/cards/s1/create-graphic", json={},
+            f"/api/runs/{run_id}/cards/s1/create-graphic",
+            json={},
         )
         assert r.status_code == 200
         ov = captured["calls"]["kwargs"]["user_overrides"]
@@ -522,7 +660,8 @@ class TestCreateGraphicOverrides:
         ws = captured["wm"]._get_wf_store()
         ws.set_edits(run_id, "s1", {"insp.focus": "right bottom"})
         captured["client"].post(
-            f"/api/runs/{run_id}/cards/s1/create-graphic", json={"focus": "left top"},
+            f"/api/runs/{run_id}/cards/s1/create-graphic",
+            json={"focus": "left top"},
         )
         assert captured["calls"]["kwargs"]["user_overrides"]["photo_pos"] == "left top"
 
@@ -559,7 +698,8 @@ class TestCreateGraphicOverrides:
         ws = captured["wm"]._get_wf_store()
         ws.set_edits(run_id, "s1", {"insp.accent": "#C9A227", "insp.focus": "left top"})
         r = captured["client"].post(
-            f"/api/runs/{run_id}/cards/s1/regenerate-variants?sync=1", json={},
+            f"/api/runs/{run_id}/cards/s1/regenerate-variants?sync=1",
+            json={},
         )
         assert r.status_code == 200, r.get_json()
         ov = captured["calls"]["kwargs"]["user_overrides"]
@@ -572,13 +712,24 @@ class TestCreateGraphicOverrides:
 # ===========================================================================
 class TestPersistence:
     def test_set_edits_stores_insp_keys(self, env):
-        payload = _make_run_payload("org-test", [
-            {"swim_id": "s1", "swimmer_name": "Jane Smith", "event": "200m Fly", "headline": "PB"},
-        ])
+        payload = _make_run_payload(
+            "org-test",
+            [
+                {
+                    "swim_id": "s1",
+                    "swimmer_name": "Jane Smith",
+                    "event": "200m Fly",
+                    "headline": "PB",
+                },
+            ],
+        )
         run_id = _seed_run(env["tmp_path"], env["wm"], "org-test", payload)
         r = env["client"].post(
             f"/api/workflow/{run_id}/s1",
-            json={"action": "set_edits", "edits": {"insp.accent": "#C9A227", "insp.focus": "left top"}},
+            json={
+                "action": "set_edits",
+                "edits": {"insp.accent": "#C9A227", "insp.focus": "left top"},
+            },
         )
         assert r.status_code == 200 and r.get_json().get("ok")
         got = env["wm"]._inspector_overrides_for_card(run_id, "s1")
@@ -586,9 +737,12 @@ class TestPersistence:
         assert got["photo_pos"] == "left top"
 
     def test_overrides_reader_coerces_bools(self, env):
-        payload = _make_run_payload("org-test", [
-            {"swim_id": "s1", "swimmer_name": "Jane", "event": "100m Free", "headline": "PB"},
-        ])
+        payload = _make_run_payload(
+            "org-test",
+            [
+                {"swim_id": "s1", "swimmer_name": "Jane", "event": "100m Free", "headline": "PB"},
+            ],
+        )
         run_id = _seed_run(env["tmp_path"], env["wm"], "org-test", payload)
         ws = env["wm"]._get_wf_store()
         ws.set_edits(run_id, "s1", {"insp.hideSponsor": "1", "insp.noPhoto": ""})
@@ -601,6 +755,7 @@ class TestPersistence:
         (which parses ``{tone}_{slot}`` keys), so palette/crop state never leaks
         into a caption."""
         from mediahub.workflow.pack import build_content_pack  # noqa: F401  (import-safety)
+
         # The builder applies edited_captions as card["brand_captions"][tone][slot]
         # only when the rsplit('_',1) head is a known tone. 'insp.accent' has no
         # underscore → rsplit yields a single element → skipped.
@@ -613,6 +768,7 @@ class TestPersistence:
         export honours it regardless of tone — the keys must be the real ones the
         pack builder consumes."""
         import mediahub.brand.apply as ap
+
         src = Path(ap.__file__).read_text(encoding="utf-8")
         for tone in ("warm-club", "hype", "data-led"):
             assert f'"{tone}"' in src, f"{tone} is no longer a brand tone"
@@ -628,24 +784,30 @@ class TestInspectorCss:
 
     def test_core_rules_present(self):
         for sel in (
-            ".mh-inspector", ".mh-inspector-scrim", ".mh-inspector.is-open",
-            ".mh-insp-head", ".mh-insp-preview", ".mh-insp-swatch",
-            ".mh-insp-cropgrid", ".mh-insp-crop", ".mh-insp-foot",
+            ".mh-inspector",
+            ".mh-inspector-scrim",
+            ".mh-inspector.is-open",
+            ".mh-insp-head",
+            ".mh-insp-preview",
+            ".mh-insp-swatch",
+            ".mh-insp-cropgrid",
+            ".mh-insp-crop",
+            ".mh-insp-foot",
         ):
             assert sel in self.CSS, f"missing CSS rule {sel}"
 
     def test_uses_brand_tokens(self):
-        block = self.CSS[self.CSS.find("UI 1.18"):]
+        block = self.CSS[self.CSS.find("UI 1.18") :]
         assert "var(--surface" in block
         assert "var(--lane" in block
         assert "var(--ink" in block
 
     def test_motion_is_reduced_motion_gated(self):
-        block = self.CSS[self.CSS.find("UI 1.18"):]
+        block = self.CSS[self.CSS.find("UI 1.18") :]
         assert "prefers-reduced-motion: reduce" in block
-        rm = block[block.find("prefers-reduced-motion"):]
+        rm = block[block.find("prefers-reduced-motion") :]
         assert "transition: none" in rm
 
     def test_mobile_full_width(self):
-        block = self.CSS[self.CSS.find("UI 1.18"):]
+        block = self.CSS[self.CSS.find("UI 1.18") :]
         assert "max-width: 560px" in block

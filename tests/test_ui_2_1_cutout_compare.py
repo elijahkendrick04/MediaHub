@@ -22,9 +22,9 @@ These tests pin the whole surface:
 The background remover is mocked everywhere so tests never download the
 ~170 MB rembg model or hit the network.
 """
+
 from __future__ import annotations
 
-import importlib
 import io
 import sys
 from pathlib import Path
@@ -34,9 +34,7 @@ import pytest
 _ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_ROOT))
 
-THEME_MOTION_CSS = (
-    _ROOT / "src" / "mediahub" / "web" / "static" / "theme" / "theme-motion.css"
-)
+THEME_MOTION_CSS = _ROOT / "src" / "mediahub" / "web" / "static" / "theme" / "theme-motion.css"
 UI_KIT_JS = _ROOT / "src" / "mediahub" / "web" / "static" / "js" / "ui-kit.js"
 
 
@@ -44,30 +42,14 @@ UI_KIT_JS = _ROOT / "src" / "mediahub" / "web" / "static" / "js" / "ui-kit.js"
 # Fixtures + helpers
 # --------------------------------------------------------------------------- #
 @pytest.fixture
-def app_ctx(tmp_path, monkeypatch):
+def app_ctx(app, web_module, tmp_path):
     """Fresh Flask app with two saved orgs and DATA_DIR pinned to tmp."""
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    for sub in ("runs_v4", "uploads_v4", "club_profiles"):
-        (tmp_path / sub).mkdir(parents=True, exist_ok=True)
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
-
-    app = wm.create_app()
-    app.config["TESTING"] = True
-
     from mediahub.web.club_profile import ClubProfile, save_profile
 
     save_profile(ClubProfile(profile_id="alpha", display_name="Alpha SC"))
     save_profile(ClubProfile(profile_id="beta", display_name="Beta SC"))
 
-    return app, tmp_path, wm
+    return app, tmp_path, web_module
 
 
 def _png_bytes(w: int = 200, h: int = 250) -> bytes:
@@ -281,9 +263,7 @@ class TestCutoutFileRoute:
             _pin(c)
             aid = _seed_asset(tmp_path, "alpha")
             resp = c.get(f"/api/media-library/cutout/{aid}")
-        assert resp.status_code == 503, (
-            f"honest 503 when no remover; got {resp.status_code}"
-        )
+        assert resp.status_code == 503, f"honest 503 when no remover; got {resp.status_code}"
 
     def test_run_scoped_profile_allowed(self, app_ctx, patch_remover):
         app, tmp_path, _wm = app_ctx
@@ -365,9 +345,7 @@ class TestCutoutPreviewPage:
         patch_remover(available=True)
         with app.test_client() as c:
             _pin(c)
-            aid = _seed_asset(
-                tmp_path, "alpha", athlete_names=["<script>alert(1)</script>"]
-            )
+            aid = _seed_asset(tmp_path, "alpha", athlete_names=["<script>alert(1)</script>"])
             body = self._page(c, aid).get_data(as_text=True)
         assert "<script>alert(1)</script>" not in body
         assert "&lt;script&gt;" in body
@@ -453,13 +431,13 @@ class TestKitContract:
             assert sel in self.CSS, f"missing reused kit rule {sel}"
 
     def test_checker_is_token_driven(self):
-        block = self.CSS[self.CSS.find(".mh-compare__after--checker"):]
+        block = self.CSS[self.CSS.find(".mh-compare__after--checker") :]
         block = block[: block.find("}") + 1]
         assert "var(--mh-surface)" in block
         assert "var(--mh-outline-variant)" in block
 
     def test_checker_is_static_no_motion(self):
-        block = self.CSS[self.CSS.find(".mh-compare__after--checker"):]
+        block = self.CSS[self.CSS.find(".mh-compare__after--checker") :]
         block = block[: block.find("}") + 1]
         # A transparency backdrop must not animate (reduced-motion / no-JS safe).
         assert "animation" not in block
