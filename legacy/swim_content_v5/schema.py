@@ -271,7 +271,6 @@ class RecognitionReport:
     meet_name: str
     meet_context: MeetContext
     ranked_achievements: list[RankedAchievement] = field(default_factory=list)
-    recommendations: list[ContentRecommendation] = field(default_factory=list)
     swim_traces: list[SwimTrace] = field(default_factory=list)
     n_swims_analysed: int = 0
     n_achievements: int = 0
@@ -288,7 +287,6 @@ class RecognitionReport:
             "meet_name": self.meet_name,
             "meet_context": self.meet_context.to_dict(),
             "ranked_achievements": [r.to_dict() for r in self.ranked_achievements],
-            "recommendations": [r.to_dict() for r in self.recommendations],
             "swim_traces": [t.to_dict() for t in self.swim_traces],
             "n_swims_analysed": self.n_swims_analysed,
             "n_achievements": self.n_achievements,

@@ -22,7 +22,6 @@ from .schema import (
 from .context_profile import build_meet_context
 from .history import SwimmerHistory, build_history_map
 from .ranker import rank_achievements
-from .recommender import recommend_post_type
 from .explainer import build_swim_trace
 from .achievements import get_all_detectors
 
@@ -489,9 +488,6 @@ def build_recognition_report_for_run(run: "PipelineRunV4") -> dict:
     # Rank
     ranked = rank_achievements(all_achievements, ctx, history_map)
 
-    # Recommend
-    recommendations = recommend_post_type(ranked, ctx)
-
     # Collect all sources
     all_sources = _collect_sources(all_achievements, ctx)
 
@@ -506,7 +502,6 @@ def build_recognition_report_for_run(run: "PipelineRunV4") -> dict:
         meet_name=meet.name,
         meet_context=ctx,
         ranked_achievements=ranked,
-        recommendations=recommendations,
         swim_traces=swim_traces,
         n_swims_analysed=len(our_results),
         n_achievements=len(all_achievements),

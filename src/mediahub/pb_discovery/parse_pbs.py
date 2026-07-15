@@ -131,6 +131,41 @@ def _detect_course(text: str) -> Optional[str]:
     return None
 
 
+# A row/line that is *only* a pool-length marker ("50m" / "25 m" / "50m pool").
+# The bare distance would otherwise slip past _detect_course (which requires the
+# word "pool"); scoped to the whole stripped cell so a genuine event row like
+# "50m Freestyle 24.10" (which carries a stroke) is never mistaken for a heading.
+_COURSE_LENGTH_ONLY_RE = re.compile(
+    r"^\s*(?:(50)|(25))\s*m?(?:\s*pool)?\s*$", re.IGNORECASE
+)
+
+
+def _section_course(text: str) -> Optional[str]:
+    """Course implied by a *section-heading* row/line, else ``None``.
+
+    A heading is a row/line that is (mostly) just a course marker — "Long
+    Course" / "Short Course" / "LC" / "SC" / a bare "50m"/"25m" pool length —
+    carrying no swim time of its own. Such a row updates the running "current
+    section course" the extractor applies to the data rows that follow it (F09:
+    a page laid out as an LC heading + its data rows, then an SC heading + its
+    data rows, so the two sections file under distinct courses instead of both
+    flattening to the page/default course).
+
+    Returns ``None`` for any row that carries a swim time — a data row resolves
+    its own course (inline marker → section → page → "LC") and must never be
+    treated as a heading.
+    """
+    if _extract_times(text):
+        return None  # a data row, not a heading
+    c = _detect_course(text)
+    if c is not None:
+        return c
+    m = _COURSE_LENGTH_ONLY_RE.match(text or "")
+    if m:
+        return "LC" if m.group(1) else "SC"
+    return None
+
+
 def _detect_stroke_match(text: str) -> tuple[Optional[str], Optional[re.Match]]:
     """Return ``(canonical stroke, match)`` for the first stroke pattern that hits."""
     for pattern, canonical in _STROKE_PATTERNS:
@@ -213,10 +248,22 @@ def _heuristic_extract_pbs(page: ProfilePage) -> list[PBRow]:
     # header itself embeds a club abbreviation — rare in results-file headers.
     page_course = _detect_course(page.text)
 
+    # Running course for the section the current row belongs to. A course-marker
+    # heading row (no swim time) updates this; subsequent data rows inherit it
+    # when they carry no inline marker of their own, so an LC section and an SC
+    # section on the same page keep distinct courses (F09). Precedence per data
+    # row: inline marker → section heading → page marker → final "LC" fallback.
+    # Persisted across all tables so a heading in one table governs data rows in
+    # the next.
+    section_course: Optional[str] = None
+
     # Try extracting from tables first (more structured)
     for table in page.tables:
         for row in table:
             row_text = " ".join(row)
+            sec = _section_course(row_text)
+            if sec is not None:
+                section_course = sec
             time_matches = _extract_times(row_text)
             if not time_matches:
                 continue
@@ -231,7 +278,7 @@ def _heuristic_extract_pbs(page: ProfilePage) -> list[PBRow]:
                 rows.append(
                     PBRow(
                         event=event,
-                        course=_detect_course(row_text) or page_course or "LC",
+                        course=_detect_course(row_text) or section_course or page_course or "LC",
                         time_canonical=_normalise_time(time_matches[0]),
                         date=date_m.group(1) if date_m else None,
                         raw={"row": row, "source": "table_heuristic"},
@@ -240,8 +287,12 @@ def _heuristic_extract_pbs(page: ProfilePage) -> list[PBRow]:
 
     # If no table rows found, try free text extraction
     if not rows:
+        section_course = None
         lines = page.text.split("\n")
         for line in lines:
+            sec = _section_course(line)
+            if sec is not None:
+                section_course = sec
             time_matches = _extract_times(line)
             if not time_matches:
                 continue
@@ -255,7 +306,7 @@ def _heuristic_extract_pbs(page: ProfilePage) -> list[PBRow]:
                 rows.append(
                     PBRow(
                         event=event,
-                        course=_detect_course(line) or page_course or "LC",
+                        course=_detect_course(line) or section_course or page_course or "LC",
                         time_canonical=_normalise_time(time_matches[0]),
                         date=date_m.group(1) if date_m else None,
                         raw={"line": line.strip(), "source": "text_heuristic"},
