@@ -100,6 +100,11 @@ ACCENT_TREATMENTS: tuple[str, ...] = (
     "bracket_frame",
     "corner_tabs",
     "offset_badge",
+    # B6 (Canva gap analysis) — the frosted-glass treatment: a translucent,
+    # brand-tinted panel over the photo. Executed by BOTH surfaces (still:
+    # render._accent_decoration_html margin pill + the v2 modules' --mh-glass-*
+    # tokens; motion: sprint/accents/glass_chip.tsx). APCA-gated in Python.
+    "glass_chip",
 )
 
 # R1.10 — the photo grades the director may request. Executed in lock-step on

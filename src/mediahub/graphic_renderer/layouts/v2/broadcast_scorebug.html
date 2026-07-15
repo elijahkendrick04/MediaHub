@@ -56,8 +56,16 @@
   text-transform: uppercase; color: var(--mh-on-primary); white-space: nowrap;
   text-shadow: 0 4px 22px rgba(0,0,0,0.45);
 }
-/* the scorebug module */
-.bg__bug { display: flex; align-items: stretch; background: var(--mh-primary); border: 2px solid var(--mh-outline); }
+/* the scorebug module — B6: glass when the director opts in (--mh-glass-*),
+   else the opaque brand box via the var() fallbacks (byte-identical). */
+.bg__bug {
+  display: flex; align-items: stretch;
+  background: var(--mh-glass-bg, var(--mh-primary));
+  border: var(--mh-glass-border, 2px solid var(--mh-outline));
+  -webkit-backdrop-filter: var(--mh-glass-filter, none);
+  backdrop-filter: var(--mh-glass-filter, none);
+  box-shadow: var(--mh-glass-shadow, none);
+}
 .bg__bug-tab { background: var(--mh-accent); width: 10px; flex: 0 0 auto; }
 .bg__bug-cells { display: flex; align-items: center; }
 .bg__bug-cell { padding: 16px 26px; display: flex; flex-direction: column; gap: 4px; }

@@ -241,7 +241,8 @@ def _design_spec_system_prompt(archetypes: list[str], token_roles: list[str]) ->
         '("delve","elevate")>,\n'
         '  "accent_treatment": "brackets|stripe|badge|frame|minimal|ribbon|underline|'
         "diagonal_underline|thick_stripe|thin_stripe|double_stripe|side_rail|"
-        'large_brackets|small_brackets|bracket_frame|corner_tabs|offset_badge",\n'
+        "large_brackets|small_brackets|bracket_frame|corner_tabs|offset_badge|"
+        'glass_chip",  # glass_chip = frosted-glass data chips over a photo (photo-led cards)\n'
         '  "photo_treatment": "cutout|duotone|halftone|vignette|wash|sticker",\n'
         '  "logo_lockup": "full_horizontal|full_stacked|mono_light|mono_dark|icon",\n'
         '  "mood": "explosive|electric|calm|fierce|celebratory|stoic|precise|bold|triumphant|minimal",\n'
@@ -292,7 +293,7 @@ def _photo_context(photo_facts: Optional[dict]) -> str:
     if not isinstance(photo_facts, dict):
         return ""
     if not photo_facts.get("has_photo"):
-        return "PHOTO: none available — pick a type-led composition; " "never a photo-led stage."
+        return "PHOTO: none available — pick a type-led composition; never a photo-led stage."
     bits = []
     asset_type = str(photo_facts.get("asset_type") or "").strip()
     orientation = str(photo_facts.get("orientation") or "").strip()
