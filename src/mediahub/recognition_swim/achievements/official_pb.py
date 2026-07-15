@@ -10,6 +10,7 @@ runtime) and creates a high-confidence achievement.
 
 from __future__ import annotations
 
+import re
 from datetime import date, timedelta
 
 from swim_content_v5.achievements.base import AchievementDetector
@@ -22,6 +23,62 @@ def _parse_iso_date(value) -> date | None:
     try:
         return date.fromisoformat(str(value)[:10])
     except (TypeError, ValueError):
+        return None
+
+
+# Ranking sites publish PB dates in whatever locale format the source page uses,
+# and the interpreter extraction path carries no date at all. A strict ISO gate
+# (``date.fromisoformat``) therefore rejects the dates real snapshots actually
+# hold, which is what made ``official_pb_confirmed`` effectively unfireable in
+# production (F18). ``_parse_pb_date`` normalises the common forms so a genuinely
+# confirmed official PB can fire; it stays deterministic and LLM-free.
+_YEAR_FIRST_RE = re.compile(r"^\s*(\d{4})[./](\d{1,2})[./](\d{1,2})")
+_DAY_FIRST_RE = re.compile(r"^\s*(\d{1,2})[./-](\d{1,2})[./-](\d{4}|\d{2})(?!\d)")
+
+
+def _parse_pb_date(value) -> date | None:
+    """Parse a listed-PB entry date, tolerating the formats real sources emit.
+
+    Accepts ISO ``YYYY-MM-DD`` (also the leading date of an ISO datetime), the
+    year-first slash/dot forms ``YYYY/MM/DD`` / ``YYYY.MM.DD``, and the day-first
+    forms ``DD/MM/YYYY`` / ``DD.MM.YYYY`` / ``DD-MM-YYYY`` — including the
+    two-digit-year variants (``DD/MM/YY``) the discovery scraper emits
+    (``pb_discovery/parse_pbs.py`` captures ``\\d{2,4}`` years) — used by the
+    European / continental swimming-results sites in scope. A two-digit year is
+    pivoted on 70 (PB dates are recent; never before 1970). Genuinely ambiguous
+    ``xx/xx/yyyy`` values are read day-first — the convention on those sources —
+    a deterministic, documented choice. Returns ``None`` for empty / ``None`` /
+    unrecognised input.
+
+    Crucially, the caller distinguishes a *genuinely absent* date (empty field →
+    may still confirm on the fastest-time match) from a *present but unparseable*
+    one (a date WAS recorded but cannot be verified in-window → never a
+    confirmation), so a ``None`` returned here is never read as "confirmed
+    in-window".
+    """
+    if not value:
+        return None
+    s = str(value).strip()
+    if not s:
+        return None
+    iso = _parse_iso_date(s)
+    if iso is not None:
+        return iso
+    m = _YEAR_FIRST_RE.match(s)
+    if m:
+        year, month, day = int(m.group(1)), int(m.group(2)), int(m.group(3))
+    else:
+        m = _DAY_FIRST_RE.match(s)
+        if not m:
+            return None
+        day, month, year = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        if year < 100:
+            # Two-digit year → pivot on 70. Swim PB dates are recent, so a value
+            # under 70 is this century (24 → 2024), 70–99 the previous (98 → 1998).
+            year += 2000 if year < 70 else 1900
+    try:
+        return date(year, month, day)
+    except ValueError:
         return None
 
 
@@ -172,13 +229,23 @@ class OfficialPBDetector(AchievementDetector):
     def _derive_decision(self, swim, history, ctx) -> dict | None:
         """V7.3 Rule 0 over the discovery-bridged snapshot.
 
-        The swimmer's listed all-time PB matches this swim by time (within
-        0.005s) and date (within the meet window ±1 day) — i.e. the source
-        the PB lookup chose already records THIS swim as the official PB.
-        Deterministic; returns None unless every condition holds. The plain
-        PBConfirmedDetector cannot fire in this scenario (the swim equals,
-        not beats, the listed best), so without this rule a genuine PB
-        produces no achievement at all.
+        This swim IS the swimmer's official PB when it equals their *fastest*
+        listed time for the event (within 0.005s) — i.e. the source the PB
+        lookup chose records this time as their all-time best. When the source
+        also dates that best time inside the meet window (±1 day) the source has
+        already recorded THIS swim; that is the strongest confirmation. When the
+        source records NO date at all — the interpreter extraction path carries
+        none (F18) — the exact match to the *fastest* listed time still confirms
+        "this is their listed all-time PB", so we fire with an honest reason. A
+        listed best whose date is *present* but either outside the meet window or
+        unparseable is a different / unverifiable swim that merely equals this
+        time, so it is never a confirmation (a recorded-but-unreadable date must
+        never be mistaken for "no date").
+
+        Deterministic; returns None unless the swim equals the listed best. The
+        plain PBConfirmedDetector cannot fire in this scenario (the swim equals,
+        not beats, the listed best), so without this rule a genuine PB produces
+        no achievement at all.
         """
         if not getattr(history, "has_data", False):
             return None
@@ -191,32 +258,72 @@ class OfficialPBDetector(AchievementDetector):
         except Exception:
             return None
         current_sec = swim.finals_time_cs / 100.0
-        for entry in entries or []:
-            time_sec = entry.get("time_sec")
-            if time_sec is None or abs(float(time_sec) - current_sec) > 0.005:
+
+        # The listed all-time PB is the *fastest* recorded time for the event.
+        # This swim only *is* that PB if it matches the fastest listed time; a
+        # slower progression entry that happens to equal this swim must never be
+        # announced as the all-time PB.
+        timed = [e for e in (entries or []) if e.get("time_sec") is not None]
+        if not timed:
+            return None
+        best_sec = min(float(e["time_sec"]) for e in timed)
+        if abs(best_sec - current_sec) > 0.005:
+            return None
+
+        window_start = meet_start - timedelta(days=1)
+        window_end = meet_end + timedelta(days=1)
+
+        # Among the fastest-tier entries (those equal to the listed best), prefer
+        # a date-confirmed match; otherwise fall back to a date-less match. An
+        # entry whose date is known but outside the meet window is excluded.
+        date_confirmed = None
+        dateless = None
+        for entry in timed:
+            if abs(float(entry["time_sec"]) - best_sec) > 0.005:
                 continue
-            entry_date = _parse_iso_date(entry.get("date_iso") or entry.get("date"))
-            if entry_date is None:
+            raw = entry.get("date_iso") or entry.get("date")
+            raw_str = str(raw).strip() if raw is not None else ""
+            if raw_str:
+                # A date WAS recorded. Only an in-window date confirms this swim;
+                # a known out-of-window date is an older swim that merely equals
+                # this time, and a date we cannot parse is unverifiable — neither
+                # may fire, and neither is ever treated as "dateless".
+                entry_date = _parse_pb_date(raw_str)
+                if entry_date is not None and window_start <= entry_date <= window_end:
+                    date_confirmed = entry
+                    break
                 continue
-            window_start = meet_start - timedelta(days=1)
-            window_end = meet_end + timedelta(days=1)
-            if not (window_start <= entry_date <= window_end):
-                continue
-            source_url = entry.get("source_url") or ""
-            source_name = ""
-            try:
-                source_name = history.source_name() or ""
-            except Exception:
-                pass
-            return {
-                "status": "CONFIRMED_OFFICIAL_PB",
-                "reason": (
-                    "Time and date match the swimmer's listed all-time PB — "
-                    "this swim is their official PB."
-                ),
-                "evidence": [{"source_url": source_url, "source_name": source_name}],
-            }
-        return None
+            # Genuinely no date recorded (the interpreter path carries none). The
+            # exact match to the fastest listed time still confirms the official PB.
+            if dateless is None:
+                dateless = entry
+
+        chosen = date_confirmed or dateless
+        if chosen is None:
+            return None
+
+        source_url = chosen.get("source_url") or ""
+        source_name = ""
+        try:
+            source_name = history.source_name() or ""
+        except Exception:
+            pass
+        if date_confirmed is not None:
+            reason = (
+                "Time and date match the swimmer's listed all-time PB — "
+                "this swim is their official PB."
+            )
+        else:
+            reason = (
+                "Time matches the swimmer's listed all-time PB for the event — "
+                "this swim is their official PB (the source published no "
+                "cross-checkable date)."
+            )
+        return {
+            "status": "CONFIRMED_OFFICIAL_PB",
+            "reason": reason,
+            "evidence": [{"source_url": source_url, "source_name": source_name}],
+        }
 
     def _no_fire_reason(self, swim, ctx, history, all_results=None, extra=None) -> str:
         pb_decision = self._get_pb_decision(swim, history, ctx=ctx)
