@@ -723,9 +723,7 @@ def run_pipeline_v4(
     # step 12b — feeding them to the trust surface would leak untransformed
     # under-18 identity.
     _ranked = (run.recognition_report or {}).get("ranked_achievements") or []
-    run.cards, run.cards_order_source = _reconcile_review_cards(
-        run.cards, _ranked, meet.results
-    )
+    run.cards, run.cards_order_source = _reconcile_review_cards(run.cards, _ranked, meet.results)
     if run.cards_order_source == "v5":
         run.trust = build_trust_report(
             meet=meet,
