@@ -770,6 +770,24 @@ def generate(
                     _pick_pool = sorted(_v2_archetypes.type_archetypes())
                     _director_names = _pick_pool or _names
                 _pick_pool = _pick_pool or None
+            # F4 (systemic floor): content-fit eligibility. Filter the pick pool
+            # (and the director's catalog) to the archetypes that can comfortably
+            # hold THIS card's shape — a long surname or a stat-heavy card is
+            # routed to a layout built for it before the seed picks within it. A
+            # no-op for ordinary content (every archetype stays eligible → the
+            # pool, and the pick, are byte-identical); disabled by
+            # MEDIAHUB_ARCHETYPE_FIT=0. Degrades to the full pool rather than
+            # emptying it, so a card always has somewhere to land.
+            if _names:
+                _fit_card = _v2_archetypes.fit_features_from_layers(
+                    brief.text_layers or {},
+                    has_photo=bool(photo_facts and photo_facts.get("has_photo")),
+                    n_stats=len(getattr(brief, "secondary_stats", None) or []),
+                )
+                _pick_pool = _v2_archetypes.eligible_archetypes(
+                    _fit_card, _pick_pool if _pick_pool is not None else _names
+                )
+                _director_names = _v2_archetypes.eligible_archetypes(_fit_card, _director_names)
             _spec = None
             if _names and use_ai_director:
                 try:

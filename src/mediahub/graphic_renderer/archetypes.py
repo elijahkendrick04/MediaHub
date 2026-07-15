@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import os
 import re
+from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 from typing import Iterable
@@ -209,6 +210,174 @@ def pick_archetype_avoiding(
         if candidate not in avoid:
             return candidate
     return pool[start]
+
+
+# ---------------------------------------------------------------------------
+# F4 (systemic floor) — content-fit eligibility
+# ---------------------------------------------------------------------------
+#
+# The seeded modulo picker (above) spreads a pack across the library for
+# VARIETY, but it is content-blind: a 19-character double-barrel surname can land
+# on a tight centred medal spotlight, or a four-stat card on a big-number layout
+# with nowhere to put the stats. F4 adds a HARD eligibility filter in front of
+# the picker: given a card's content shape (surname width, stat count, photo,
+# multiline need) it keeps only the archetypes built to hold it, so hostile
+# content is routed to a layout that fits before the seed picks within it.
+#
+# Crucially it is a NO-OP for ordinary content: a normal surname (≤ the tight
+# threshold) with ≤2 stats is eligible for EVERY archetype, so the filtered pool
+# equals the input pool and the seeded pick — and the rendered card — is
+# byte-identical. Only genuinely oversized content shrinks the pool. Kill switch:
+# ``MEDIAHUB_ARCHETYPE_FIT=0`` disables the filter entirely (pure legacy picker).
+
+
+@dataclass(frozen=True)
+class _Capability:
+    """What a card shape an archetype can comfortably hold.
+
+    * ``max_surname``   — the longest surname (in characters, a stable proxy for
+      em-width in the uppercase display face) the hero slot reads well at on ONE
+      line. A multiline archetype effectively raises this (see ``multiline``).
+    * ``stat_capacity`` — how many SECONDARY stat facts the archetype's stat
+      slots (``{{STAT_CHIPS}}`` / ``{{PB_BARS}}`` / a stat rail/tower/grid) hold
+      before crowding. The single hero stat is always assumed to fit.
+    * ``multiline``     — the hero headline can wrap to a second line cleanly, so
+      a long surname is tolerated (``max_surname`` is scaled up).
+    """
+
+    max_surname: int = 16
+    stat_capacity: int = 4
+    multiline: bool = False
+
+
+_DEFAULT_CAPABILITY = _Capability()
+
+# Per-archetype overrides where the composition is clearly tighter or roomier
+# than the default. Anything unlisted uses ``_DEFAULT_CAPABILITY``. The values
+# encode design judgement about each layout's hero slot and stat furniture; they
+# are deliberately generous so the filter only bites on genuinely hostile
+# content.
+_CAPABILITY: dict[str, _Capability] = {
+    # Tight, centred / fixed-frame heroes — a long surname breaks the symmetry.
+    "centered_medal_spotlight": _Capability(max_surname=12, stat_capacity=1),
+    "spotlight_disc": _Capability(max_surname=12, stat_capacity=1),
+    "broadcast_scorebug": _Capability(max_surname=12, stat_capacity=1),
+    "scoreline_versus": _Capability(max_surname=11, stat_capacity=1),
+    "ribbon_banner": _Capability(max_surname=13, stat_capacity=1),
+    "duo_athlete_split": _Capability(max_surname=13, stat_capacity=1),
+    "split_diagonal_hero": _Capability(max_surname=13, stat_capacity=2),
+    # Radial dials wrap the surname beneath the dial, so they tolerate more.
+    "radial_competition_ring": _Capability(max_surname=14, stat_capacity=1, multiline=True),
+    "radial_rings": _Capability(max_surname=14, stat_capacity=1, multiline=True),
+    # Big-type / bleed heroes built FOR long surnames.
+    "mega_surname_bleed": _Capability(max_surname=26, stat_capacity=1, multiline=True),
+    "poster_name_behind": _Capability(max_surname=24, stat_capacity=1, multiline=True),
+    "minimal_type_poster": _Capability(max_surname=22, stat_capacity=1, multiline=True),
+    "magazine_cover": _Capability(max_surname=22, stat_capacity=1),
+    "cornerstone_numeral": _Capability(max_surname=20, stat_capacity=1),
+    "big_number_dominant": _Capability(max_surname=20, stat_capacity=1),
+    # Ticker / crawl — the name rides a strip; the result is the star, few stats.
+    "marquee_crawl": _Capability(max_surname=20, stat_capacity=1),
+    "ticker_strip": _Capability(max_surname=20, stat_capacity=1),
+    "quote_led_recap": _Capability(max_surname=18, stat_capacity=1, multiline=True),
+    # Stat-forward layouts — lots of stat furniture.
+    "editorial_numbers_grid": _Capability(max_surname=16, stat_capacity=8),
+    "timeline_progression": _Capability(max_surname=16, stat_capacity=8),
+    "stat_stack_sidebar": _Capability(max_surname=14, stat_capacity=8),
+    "vertical_stat_tower": _Capability(max_surname=16, stat_capacity=8),
+    "triptych_progression": _Capability(max_surname=16, stat_capacity=6),
+    "three_card_editorial_grid": _Capability(max_surname=16, stat_capacity=6),
+    "index_card": _Capability(max_surname=16, stat_capacity=6),
+}
+
+# A multiline hero can carry a surname this many times its one-line comfort.
+_MULTILINE_SURNAME_FACTOR = 1.7
+
+
+def _capability(name: str) -> _Capability:
+    return _CAPABILITY.get(name, _DEFAULT_CAPABILITY)
+
+
+def fit_enabled() -> bool:
+    """True unless the F4 content-fit filter is explicitly disabled.
+
+    Opt-out (like the v2 engine itself): ``MEDIAHUB_ARCHETYPE_FIT=0`` (also
+    ``false``/``off``/``no``) restores the pure content-blind seeded picker.
+    """
+    return os.environ.get("MEDIAHUB_ARCHETYPE_FIT", "").strip().lower() not in _FALSE
+
+
+def _surname_len(card: dict) -> int:
+    """The card's surname length in characters (spaces/hyphens included — a
+    'Van Dyk' / 'Vandenberg-Whitmore' is as wide as it reads)."""
+    surname = str(card.get("surname") or "")
+    return len(surname.strip())
+
+
+def _stat_count(card: dict) -> int:
+    """How many SECONDARY stat facts the card wants to show (beyond the hero)."""
+    try:
+        return max(0, int(card.get("n_stats") or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def score_archetype(name: str, card: dict) -> float:
+    """Content-fit score in ``[0, 1]`` for placing ``card`` on archetype ``name``.
+
+    ``card`` is a small feature dict — ``{"surname": str, "n_stats": int,
+    "has_photo": bool}`` (see :func:`fit_features_from_layers`). 1.0 is a clean
+    fit; the score falls as the surname overruns the archetype's one-line (or
+    wrapped) comfort or the stat count overruns its slot capacity. A score at or
+    above :data:`FIT_THRESHOLD` is ELIGIBLE. Deterministic and cheap — pure
+    arithmetic on the capability registry, no rendering.
+    """
+    cap = _capability(name)
+    max_surname = cap.max_surname * (_MULTILINE_SURNAME_FACTOR if cap.multiline else 1.0)
+    slen = _surname_len(card)
+    surname_fit = 1.0 if slen <= max_surname else max(0.0, max_surname / slen)
+    stats = _stat_count(card)
+    stat_fit = 1.0 if stats <= cap.stat_capacity else max(0.0, cap.stat_capacity / stats)
+    return min(surname_fit, stat_fit)
+
+
+# An archetype scoring at/above this is eligible. 1.0 means "hard filter": a
+# card is only eligible for archetypes that comfortably hold it, with a tiny
+# epsilon for float safety.
+FIT_THRESHOLD = 0.999
+
+
+def eligible_archetypes(card: dict, names: Iterable[str] | None = None) -> list[str]:
+    """The sorted subset of ``names`` (or the full library) that fits ``card``.
+
+    A HARD filter in front of the seeded picker: only archetypes whose
+    :func:`score_archetype` clears :data:`FIT_THRESHOLD` survive. For ordinary
+    content this is every archetype in the pool — the returned list equals the
+    input pool, so the downstream seeded pick is byte-identical. When the filter
+    would empty the pool (pathologically hostile content), it DEGRADES to the
+    full input pool rather than returning nothing, so a card always renders. The
+    filter is skipped entirely (returns the input pool) when
+    :func:`fit_enabled` is False.
+    """
+    pool = _pool(names)
+    if not pool or not fit_enabled():
+        return pool
+    keep = [n for n in pool if score_archetype(n, card) >= FIT_THRESHOLD]
+    return keep or pool
+
+
+def fit_features_from_layers(layers: dict, *, has_photo: bool = False, n_stats: int = 0) -> dict:
+    """Build the :func:`score_archetype` feature dict from a brief's text layers.
+
+    Keeps the eligibility surface decoupled from the brief object: callers pass
+    the resolved ``text_layers`` (for the surname) plus the already-computed
+    photo/stat counts.
+    """
+    return {
+        "surname": str((layers or {}).get("athlete_surname") or ""),
+        "has_photo": bool(has_photo),
+        "n_stats": int(n_stats or 0),
+    }
 
 
 # Marker introducing the when-to-pick passage in every <name>.notes.md. The

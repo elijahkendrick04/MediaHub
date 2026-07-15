@@ -43,7 +43,11 @@
 .cm__ring {
   position: relative;
   margin: 44px 0 36px;
-  width: 620px; height: 620px;
+  /* F2: the spotlight ring tracks the canvas short edge — 31/54 of it is
+     exactly 620px at a 1080-wide format (byte-identical), and it scales
+     down together with the geometry on a smaller canvas. */
+  width: calc(var(--mh-short, 1080px) * 31 / 54);
+  height: calc(var(--mh-short, 1080px) * 31 / 54);
   border-radius: 50%;
   background: var(--mh-surface);
   border: 10px solid var(--mh-accent);
@@ -89,7 +93,7 @@
 
 .cm__foot {
   margin-top: auto;
-  display: flex; align-items: center; justify-content: center; gap: 16px;
+  display: flex; align-items: center; justify-content: center; gap: var(--mh-sp-4);
   padding-top: 28px;
 }
 .cm__logo { height: 56px; width: auto; }

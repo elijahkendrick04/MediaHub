@@ -61,6 +61,72 @@ LAYOUTS_DIR = Path(__file__).parent / "layouts"
 _BASE_CSS_PATH = LAYOUTS_DIR / "_base.css"
 _TEXT_LED_FILL_CSS_PATH = LAYOUTS_DIR / "_text_led_fill.css"
 _SHARED_CSS_PATH = LAYOUTS_DIR / "_shared.css"
+# F1 (systemic floor) — the shared component/token sheet. Carries the
+# spacing-scale-built lockup/footer/logo component classes that layouts opt into
+# instead of re-declaring a near-identical footer block each. Named ``_tokens``
+# to avoid colliding with the composition-decoration track's ``_components.css``.
+_TOKENS_CSS_PATH = LAYOUTS_DIR / "_tokens.css"
+
+# F1 — the spacing token scale. ``--mh-sp-1..-9`` = round(min(w,h) * k / 1080)
+# for these multipliers, so the scale is the fixed 4/8/12/16/24/32/48/64/96 px
+# ramp at any 1080-wide portrait/square/story canvas (min(w,h)==1080 for all of
+# them → byte-identical) and shrinks proportionally on a shorter (landscape)
+# short-edge. Consumed as ``var(--mh-sp-3)`` etc.; unused, it paints nothing.
+_SPACING_STEPS: tuple[int, ...] = (4, 8, 12, 16, 24, 32, 48, 64, 96)
+
+
+def _spacing_scale_css(width: int, height: int) -> str:
+    """A ``:root{}`` block publishing the ``--mh-sp-*`` spacing scale.
+
+    Deterministic pure function of the canvas short edge. At every certified
+    1080-wide format the values are the exact historic px literals
+    (4/8/12/16/24/32/48/64/96), so a layout that swaps ``16px`` for
+    ``var(--mh-sp-3)`` renders byte-identical there; on a landscape canvas the
+    scale tracks the (smaller) short edge so spacing stays proportional.
+    """
+    short = min(int(width), int(height))
+    decls = "".join(
+        f"--mh-sp-{i}:{int(round(short * k / 1080))}px;"
+        for i, k in enumerate(_SPACING_STEPS, start=1)
+    )
+    return ":root{" + decls + "}\n"
+
+
+def _round8(x: float) -> int:
+    """Snap to the nearest 8px — the module the geometry context is built on."""
+    return int(round(x / 8.0)) * 8
+
+
+def _geometry_scale_css(width: int, height: int) -> str:
+    """A ``:root{}`` block publishing the F2 geometry context.
+
+    Deterministic pure function of the canvas short edge, so a layout that
+    expresses a fixed dimension as a fraction of the geometry — e.g. a
+    ``calc(var(--mh-short) * 31 / 54)`` medal ring — tracks the canvas instead
+    of freezing a 1080-tuned pixel count.
+
+    * ``--mh-short``  — the short edge in px (``min(w,h)``); the base every other
+      geometry token and every migrated offender scales from.
+    * ``--mh-margin`` — ``round8(0.06 * short)`` — the outer safe inset.
+    * ``--mh-gutter`` — ``round8(0.02 * short)`` — the tight inter-column gutter.
+    * ``--mh-col``    — a 12-column module, ``(short - 2*margin) / 12``, left as a
+      ``calc`` so it stays exact.
+
+    At every certified 1080-wide format ``short == 1080``, so the tokens resolve
+    to the exact historic pixel counts and any offender migrated with an
+    exact-ratio coefficient renders byte-identical; a shorter canvas scales the
+    whole geometry down together.
+    """
+    short = min(int(width), int(height))
+    margin = _round8(0.06 * short)
+    gutter = _round8(0.02 * short)
+    decls = (
+        f"--mh-short:{short}px;"
+        f"--mh-margin:{margin}px;"
+        f"--mh-gutter:{gutter}px;"
+        "--mh-col:calc((var(--mh-short) - var(--mh-margin) * 2) / 12);"
+    )
+    return ":root{" + decls + "}\n"
 
 
 # ---------------------------------------------------------------------------
@@ -116,6 +182,17 @@ class RenderEncodeError(RuntimeError):
     or silently downgrade the format the caller asked for — if the deployment's
     Pillow can't encode the requested codec, the operator gets a clear error
     instead of a lie on disk.
+    """
+
+
+class RenderError(RuntimeError):
+    """Raised when a render cannot be produced faithfully (F5 render-time floor).
+
+    The honest-error principle applied to the pixel stage: if a brand typeface a
+    card references never loaded, the card would silently fall back to a system
+    sans — an off-brand lie. Rather than ship that, the render fails loudly so the
+    operator sees a real error and fixes the font, exactly as the AI surfaces
+    surface ``ClaudeUnavailableError`` instead of a fabricated caption.
     """
 
 
@@ -441,18 +518,79 @@ def _mix_hex(a: str, b: str, t: float) -> str:
     return _rgb_to_hex((ar + (br - ar) * t, ag + (bg - ag) * t, ab_ + (bb - ab_) * t))
 
 
+_ICC_MIME = {
+    "png": "image/png",
+    "jpg": "image/jpeg",
+    "jpeg": "image/jpeg",
+    "webp": "image/webp",
+    "svg": "image/svg+xml",
+    "gif": "image/gif",
+}
+# Raster formats that can carry an embedded ICC profile worth normalising.
+_ICC_RASTER = {"png", "jpg", "jpeg", "webp"}
+
+
+def _srgb_normalised_bytes(raw: bytes, suffix: str) -> bytes:
+    """F5: convert a NON-sRGB-profiled photo to sRGB, else return the bytes as-is.
+
+    A wide-gamut source (Display P3, Adobe RGB) carries an embedded ICC profile;
+    Chromium honours it, so the club's brand hues and the photo's colours would
+    shift versus the sRGB the rest of the card is authored in. We transform such
+    a photo into sRGB once, at the inline seam, via Pillow's ImageCms (Little
+    CMS) and drop the now-redundant profile so the render is colour-accurate.
+
+    Byte-identical for the common case: a photo with NO embedded profile, or one
+    already described as sRGB, is returned untouched — only a genuinely
+    off-sRGB profile triggers a re-encode. Any failure (Pillow/ImageCms absent,
+    an unreadable profile) falls back to the original bytes, never a crash.
+    """
+    if suffix not in _ICC_RASTER or Image is None:
+        return raw
+    try:
+        from io import BytesIO
+
+        from PIL import ImageCms  # type: ignore
+
+        with Image.open(BytesIO(raw)) as im:
+            icc = im.info.get("icc_profile")
+            if not icc:
+                return raw  # no embedded profile → already treated as sRGB
+            src = ImageCms.ImageCmsProfile(BytesIO(icc))
+            try:
+                desc = (ImageCms.getProfileDescription(src) or "").lower()
+            except Exception:
+                desc = ""
+            if "srgb" in desc:
+                return raw  # already sRGB — leave the file byte-identical
+            im.load()
+            mode = "RGBA" if (im.mode in ("RGBA", "LA") or "transparency" in im.info) else "RGB"
+            converted = ImageCms.profileToProfile(
+                im, src, ImageCms.createProfile("sRGB"), outputMode=mode
+            )
+            buf = BytesIO()
+            fmt = {"jpg": "JPEG", "jpeg": "JPEG", "png": "PNG", "webp": "WEBP"}[suffix]
+            save_kwargs = {"format": fmt}
+            if fmt == "JPEG":
+                save_kwargs.update(quality=95, subsampling=0)
+                if converted.mode == "RGBA":
+                    converted = converted.convert("RGB")
+            converted.save(buf, **save_kwargs)  # no icc_profile → tagged sRGB
+            return buf.getvalue()
+    except Exception:
+        return raw
+
+
 def _encode_img_data_uri(p: Path) -> str:
-    """Read an image from disk and return a base64 ``data:`` URI (the raw work)."""
+    """Read an image from disk and return a base64 ``data:`` URI (the raw work).
+
+    F5: a non-sRGB-profiled raster is normalised to sRGB here (see
+    :func:`_srgb_normalised_bytes`) so Chromium can't colour-shift it away from
+    the sRGB the card is authored in.
+    """
     raw = p.read_bytes()
     suffix = p.suffix.lower().lstrip(".")
-    mime = {
-        "png": "image/png",
-        "jpg": "image/jpeg",
-        "jpeg": "image/jpeg",
-        "webp": "image/webp",
-        "svg": "image/svg+xml",
-        "gif": "image/gif",
-    }.get(suffix, "application/octet-stream")
+    raw = _srgb_normalised_bytes(raw, suffix)
+    mime = _ICC_MIME.get(suffix, "application/octet-stream")
     return f"data:{mime};base64,{base64.b64encode(raw).decode('ascii')}"
 
 
@@ -463,9 +601,10 @@ def _img_to_data_uri(path: str | Path) -> str:
     unchanged file is read and base64-encoded once per process — the returned
     text is byte-identical to a direct encode. A genuine read error still
     surfaces, exactly as before, because the cache falls through to the encoder
-    for any file it can't ``stat``.
+    for any file it can't ``stat``. The ``srgb`` salt domain-separates the F5
+    ICC→sRGB normalisation from any pre-F5 cached encode of the same file.
     """
-    return _render_cache.asset_data_uri(path, loader=_encode_img_data_uri)
+    return _render_cache.asset_data_uri(path, loader=_encode_img_data_uri, salt="srgb")
 
 
 # ----- Background generators (SVG data URIs, no network) -------------------
@@ -2024,6 +2163,24 @@ def _common_replacements(
         )
     base_css = shared_css + "\n" + base_css + "\n" + text_led_css
 
+    # F1 (systemic floor) — publish the spacing-token scale, then load the shared
+    # component/token sheet. The scale is emitted first (a :root{} block) so the
+    # component classes and any layout can consume ``var(--mh-sp-N)``. Both are
+    # inert until referenced: an unused custom property paints nothing and an
+    # unused ``.mh-lockup`` class matches no element, so every legacy render is
+    # byte-identical. ``_tokens.css`` carries no @font-face and no absolute path,
+    # so it needs no url() rewrite.
+    base_css = base_css + "\n" + _spacing_scale_css(width, height)
+    # F2 — the geometry context (short/margin/gutter/col). Same inert-until-used
+    # contract as the spacing scale: an unreferenced custom property paints
+    # nothing, so this is byte-identical for every legacy layout.
+    base_css = base_css + "\n" + _geometry_scale_css(width, height)
+    try:
+        if _TOKENS_CSS_PATH.exists():
+            base_css = base_css + "\n" + _read_text(_TOKENS_CSS_PATH)
+    except Exception:
+        pass
+
     # 1.9 — inline this org's UPLOADED custom fonts (typography.font_intake) as
     # self-hosted file:// @font-face, so a club's own brand typeface renders on
     # its cards. Byte-identical when the org has no uploads (empty CSS), and never
@@ -2954,7 +3111,16 @@ def _apply(template: str, replacements: dict[str, str]) -> str:
 
 # Chromium launch flags shared by the one-shot path and every pooled browser, so
 # a warm pooled render is byte-identical to a cold one-shot render.
-_CHROMIUM_LAUNCH_ARGS = ["--no-sandbox", "--font-render-hinting=none"]
+# F5 (render-time floor): pin the rasteriser's colour profile to sRGB so a card
+# renders the same regardless of the host display profile and so the brand hexes
+# hit the pixels exactly. This flag changes output bytes, so it is folded into
+# the PNG cache salt (render_cache._launch_args_salt) — a deploy that adds/removes
+# it naturally ages out pre-flag cache entries instead of serving stale renders.
+_CHROMIUM_LAUNCH_ARGS = [
+    "--no-sandbox",
+    "--font-render-hinting=none",
+    "--force-color-profile=srgb",
+]
 
 
 def _renderer_net_locked() -> bool:
@@ -2994,6 +3160,83 @@ def _new_render_context(browser, size: tuple[int, int], dpr: int):
     if _renderer_net_locked():
         ctx.route("**/*", _renderer_route_guard)
     return ctx
+
+
+# F5 render-time floor: a single in-page sweep run AFTER document.fonts.ready and
+# BEFORE the screenshot. It (a) checks every font family actually used by rendered
+# text is loaded — a miss means the card silently fell back to a system sans, an
+# off-brand lie we refuse to ship; (b) measures each photo's source pixels against
+# its rendered box × DPR, recording >1.5× upscales; and (c) clamps a crop-intent
+# zoom (--mh-photo-scale) so it never magnifies a photo beyond its native
+# resolution. The clamp only mutates the DOM when a genuine over-zoom exists, so a
+# card with adequate-resolution photography (and every photo-less card) is
+# byte-identical.
+_RENDER_FLOOR_JS = r"""
+(dpr) => {
+  const GENERIC = new Set(['serif','sans-serif','monospace','cursive','fantasy',
+    'system-ui','ui-sans-serif','ui-serif','ui-monospace','-apple-system',
+    'blinkmacsystemfont','math','emoji','inherit','initial','unset']);
+  // (a) used font families → any that failed to load
+  const used = new Set();
+  for (const el of document.querySelectorAll('*')) {
+    const cs = getComputedStyle(el);
+    if (cs.display === 'none' || cs.visibility === 'hidden') continue;
+    let hasText = false;
+    for (const n of el.childNodes) if (n.nodeType === 3 && n.textContent.trim()) hasText = true;
+    if (!hasText) continue;
+    const first = (cs.fontFamily || '').split(',')[0].trim().replace(/^["']|["']$/g, '');
+    if (first && !GENERIC.has(first.toLowerCase())) used.add(first);
+  }
+  const missing = [];
+  for (const fam of used) {
+    try { if (!document.fonts.check('32px "' + fam + '"')) missing.push(fam); }
+    catch (e) { /* malformed shorthand — ignore */ }
+  }
+  // (b) photo upscale guard + (c) native crop-zoom clamp
+  const upscales = [];
+  let clamped = null;
+  for (const img of document.querySelectorAll('img')) {
+    const nat = img.naturalWidth || 0;
+    const r = img.getBoundingClientRect();
+    if (nat < 1 || r.width < 1) continue;
+    // current crop-intent zoom on this element (identity if none)
+    let scale = 1;
+    const m = getComputedStyle(img).transform;
+    if (m && m !== 'none') {
+      const p = m.match(/matrix\(([^)]+)\)/);
+      if (p) { const a = parseFloat(p[1].split(',')[0]); if (a > 0) scale = a; }
+    }
+    const sampled = r.width * dpr * scale;           // device px drawn from the source
+    const ratio = sampled / nat;
+    if (ratio > 1.5) upscales.push({w: Math.round(r.width), nat: nat, ratio: +ratio.toFixed(2)});
+    // clamp the shared --mh-photo-scale so the zoom never exceeds native
+    if (scale > 1) {
+      const maxScale = Math.max(1, nat / (r.width * dpr));
+      if (scale > maxScale + 1e-3) {
+        const ns = Math.max(1, maxScale);
+        document.documentElement.style.setProperty('--mh-photo-scale', ns.toFixed(3));
+        clamped = {from: +scale.toFixed(2), to: +ns.toFixed(2)};
+      }
+    }
+  }
+  return {missing, upscales, clamped};
+}
+"""
+
+# Sidecar suffix the floor sweep drops its non-fatal notes into, for render_brief
+# to fold into the visual's safety_notes. Written next to the output PNG so both
+# the pooled and one-shot paths (which share output_path) reach the same file.
+_RENDER_NOTES_SUFFIX = ".rendernotes.json"
+
+
+def _font_strict_enabled() -> bool:
+    """True unless the F5 raise-on-missing-font gate is disabled.
+
+    Opt-out kill switch ``MEDIAHUB_RENDER_FONT_STRICT=0`` for an environment
+    where a genuine font is unavailable and an honest error is worse than a
+    fallback; on (the default) a missing brand face fails the render loudly.
+    """
+    return _flag("MEDIAHUB_RENDER_FONT_STRICT", "1")
 
 
 def _render_on_context(ctx, html: str, output_path: Path, size: tuple[int, int], dpr: int) -> int:
@@ -3046,12 +3289,59 @@ def _render_on_context(ctx, html: str, output_path: Path, size: tuple[int, int],
                 page.wait_for_timeout(400)
             except Exception:
                 pass
+        # F5 render-time floor — one sweep between fonts.ready and the screenshot.
+        # Fatal: a referenced brand font that never loaded (raise, never ship a
+        # silent system-sans fallback). Non-fatal: photo upscale notes → sidecar;
+        # a native crop-zoom clamp mutates --mh-photo-scale in place before the
+        # shot. Any sweep failure is swallowed so it can never sink a render that
+        # would otherwise succeed — except the deliberate RenderError.
+        _floor_notes: list[str] = []
+        try:
+            _floor = page.evaluate(_RENDER_FLOOR_JS, dpr)
+        except RenderError:
+            raise
+        except Exception:
+            _floor = None
+        if _floor:
+            _missing = [str(f) for f in (_floor.get("missing") or []) if f]
+            if _missing and _font_strict_enabled():
+                raise RenderError(
+                    "font(s) referenced by this card did not load, so text would "
+                    "fall back to a system typeface: " + ", ".join(sorted(set(_missing)))
+                )
+            for up in _floor.get("upscales") or []:
+                try:
+                    _floor_notes.append(
+                        "photo upscaled {:.1f}× beyond native ({}px source in a {}px slot)".format(
+                            float(up["ratio"]), int(up["nat"]), int(up["w"])
+                        )
+                    )
+                except (KeyError, TypeError, ValueError):
+                    continue
+            _cl = _floor.get("clamped")
+            if _cl:
+                try:
+                    _floor_notes.append(
+                        "crop zoom clamped to native ({:.2f}× → {:.2f}×)".format(
+                            float(_cl["from"]), float(_cl["to"])
+                        )
+                    )
+                except (KeyError, TypeError, ValueError):
+                    pass
         png = page.screenshot(
             full_page=False,
             type="png",
             omit_background=False,
             clip={"x": 0, "y": 0, "width": width, "height": height},
         )
+        # Drop the non-fatal notes beside the output for render_brief to read.
+        if _floor_notes:
+            try:
+                output_path.with_suffix(output_path.suffix + _RENDER_NOTES_SUFFIX).write_text(
+                    json.dumps(_floor_notes), encoding="utf-8"
+                )
+            except OSError:
+                pass
     finally:
         # Close the page (NOT the context) so a pooled context stays warm for
         # the next render while per-render page memory is released immediately.
@@ -5751,7 +6041,26 @@ def render_brief(
         encode_kwargs["image_format"] = image_format
     if quality is not None:
         encode_kwargs["quality"] = quality
+    # F5: clear any stale render-notes sidecar so a cache-hit render (which never
+    # re-runs the in-page floor sweep) can't inherit a previous card's notes.
+    _notes_sidecar = out_path.with_suffix(out_path.suffix + _RENDER_NOTES_SUFFIX)
+    try:
+        _notes_sidecar.unlink()
+    except OSError:
+        pass
     bytes_written = render_html_to_png(html, out_path, (width, height), **encode_kwargs)
+    # F5: fold the floor sweep's non-fatal notes (photo upscales, crop-zoom
+    # clamp) into this render's explainability trail, then remove the sidecar.
+    _render_floor_notes: list[str] = []
+    try:
+        _render_floor_notes = [str(n) for n in json.loads(_notes_sidecar.read_text("utf-8")) if n]
+    except (OSError, ValueError, TypeError):
+        _render_floor_notes = []
+    finally:
+        try:
+            _notes_sidecar.unlink()
+        except OSError:
+            pass
 
     # G1.16: stamp the exported card with its own credit chain — photographer,
     # copyright, credit, caption — so attribution survives the re-share that
@@ -5853,6 +6162,9 @@ def render_brief(
     # this card's pixels, say so on the visual — the recipe changed the
     # deliverable, so the "why this design" trail must record it.
     _safety_notes = list(brief.safety_notes or [])
+    # F5: render-time floor observations (photo upscales, crop-zoom clamp) —
+    # the pixels shipped differ from a naive render, so the trail records why.
+    _safety_notes.extend(_render_floor_notes)
     if _recipe_applied and _photo_recipe is not None and not _photo_recipe.is_noop():
         _safety_notes.append(
             "photo adjusted ({}): {}".format(

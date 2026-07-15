@@ -29,7 +29,9 @@
 .sd {
   /* geometry knobs — the seam angle depends only on --slant and the
      canvas width, so it is identical across both portrait ratios */
-  --wedge-h: 690px;   /* height of the data band, anchored to the bottom */
+  /* F2: the data-band height is 23/36 of the short edge = exactly 690px at a
+     1080-wide format (byte-identical), tracking the canvas below that. */
+  --wedge-h: calc(var(--mh-short, 1080px) * 23 / 36);   /* height of the data band, anchored to the bottom */
   --slant: 184px;     /* vertical drop of the diagonal, left edge to right */
   --seam: 14px;       /* thickness of the accent edge along the diagonal  */
   --pad: 78px;        /* horizontal inset for wedge content               */
@@ -91,7 +93,7 @@
   left: 0; right: 0; bottom: 0;
   z-index: 4;
   height: var(--wedge-h);
-  padding: calc(var(--slant) + 48px) var(--pad) 56px;
+  padding: calc(var(--slant) + var(--mh-sp-7)) var(--pad) 56px;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
@@ -186,7 +188,7 @@
   display: flex;
   align-items: flex-end;
   justify-content: space-between;
-  gap: 24px;
+  gap: var(--mh-sp-5);
 }
 .sd__brand { display: flex; align-items: center; gap: 18px; }
 .sd__logo { height: 66px; width: auto; flex: 0 0 auto; }
@@ -208,7 +210,7 @@
   letter-spacing: 0.04em;
   color: var(--mh-on-primary);
   opacity: 0.78;
-  margin-top: 4px;
+  margin-top: var(--mh-sp-1);
 }
 .sd__sponsor { flex: 0 0 auto; }
 </style>

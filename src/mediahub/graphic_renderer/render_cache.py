@@ -227,13 +227,31 @@ def _compute_renderer_generation(fonts_dir: Path) -> str:
     return h.hexdigest()[:16]
 
 
+def _launch_args_salt() -> str:
+    """A stable digest of the Chromium launch flags (F5).
+
+    The rasteriser's flags — notably ``--force-color-profile=srgb`` — decide the
+    exact output bytes for unchanged HTML, so they belong in the render-generation
+    salt: adding or removing a flag naturally ages out pre-change cache entries.
+    Imported lazily to avoid a module-load import cycle (``render`` imports this
+    module); a failure degrades to an empty marker so the cache still works.
+    """
+    try:
+        from mediahub.graphic_renderer.render import _CHROMIUM_LAUNCH_ARGS
+
+        return "|".join(_CHROMIUM_LAUNCH_ARGS)
+    except Exception:
+        return ""
+
+
 def _renderer_generation() -> str:
     """Once-per-process salt identifying the rendering environment.
 
     ``DATA_DIR/render_cache`` persists across deploys with no TTL, but a cached
     PNG is only reusable while the *renderer environment* holds still: a
-    renderer-font refresh (``scripts/fetch_renderer_fonts.py``) or a
-    Playwright/Chromium bump changes the output for unchanged HTML. Folding
+    renderer-font refresh (``scripts/fetch_renderer_fonts.py``), a
+    Playwright/Chromium bump, or a change to the Chromium launch flags (F5's
+    ``--force-color-profile=srgb``) changes the output for unchanged HTML. Folding
     this salt into every PNG key makes such a deploy naturally invalidate
     pre-upgrade entries (they age out of the LRU) instead of serving stale
     renders as hits. Computed once per process — cheap ``stat`` calls only.
@@ -242,7 +260,10 @@ def _renderer_generation() -> str:
     with _salt_lock:
         if _salt_cache is None:
             fonts_dir = Path(__file__).resolve().parent / "layouts" / "fonts"
-            _salt_cache = _compute_renderer_generation(fonts_dir)
+            h = hashlib.sha256()
+            h.update(_compute_renderer_generation(fonts_dir).encode("ascii"))
+            h.update(("|launch:" + _launch_args_salt()).encode("utf-8"))
+            _salt_cache = h.hexdigest()[:16]
         return _salt_cache
 
 

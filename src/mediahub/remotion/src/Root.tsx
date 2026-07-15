@@ -71,6 +71,11 @@ const defaultCard = {
   captionsJson: "",
   inReel: false,
   meshBg: "",
+  // D8 register weight vars mirrored from the still's --mh-wght-* (0 = leave the
+  // static cut untouched, matching the schema defaults in StoryCard.tsx).
+  wghtKicker: 0,
+  wghtMeta: 0,
+  wghtData: 0,
 };
 
 export const RemotionRoot: React.FC = () => {
