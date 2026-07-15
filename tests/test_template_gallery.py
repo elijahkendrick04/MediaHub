@@ -188,8 +188,9 @@ def test_gallery_entries_shape():
 
 def test_render_body_structure():
     html = G.render_gallery_body(gallery_url="/templates", make_url="/make")
-    # E5 (Canva gap analysis) — frame_breakout is the 35th registered archetype.
-    assert _cards(html) == len(A.list_archetypes()) == 35
+    # E5 + D7 (Canva gap analysis) — frame_breakout + poster_spine bring the
+    # registered archetype count to 36.
+    assert _cards(html) == len(A.list_archetypes()) == 36
     assert _hidden_cards(html) == 0  # the default "all" view hides nothing
     # Chips for All + every category, with counts.
     assert 'aria-label="Filter templates by category"' in html

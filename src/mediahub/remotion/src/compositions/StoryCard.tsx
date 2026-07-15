@@ -700,6 +700,7 @@ function sceneForArchetype(archetype: string): SceneMode {
     case "quote_led_recap":
     case "cornerstone_numeral":
     case "mega_surname_bleed":
+    case "poster_spine":
       return "poster";
     case "full_bleed_photo_lower_third":
     case "broadcast_scorebug":
@@ -1182,6 +1183,8 @@ const PACK_ACCENT_GEOS = new Set([
   "hexagons", "deco_corners", "wave_rule", "spiral_flourish", "glitch_divider",
   // F8 large motifs (mirror style_packs.ACCENT_GEOS).
   "speed_band", "corner_burst", "blob", "variable_halftone",
+  // D7 broadcast-angled slab.
+  "skew_slab",
 ]);
 
 type ParsedPack = { ground: string; texture: string; accentGeo: string; bold: boolean };
@@ -1598,6 +1601,14 @@ function packAccentGeometry(
             {packHalftoneDots(accent, sec)}
           </svg>
         </div>
+      );
+    }
+    case "skew_slab": {
+      const op = bold ? 0.9 : 0.72;
+      const slabH = Math.round(height * 0.13 * mult);
+      const bottom = Math.round(height * 0.15);
+      return (
+        <div style={{ position: "absolute", left: "-8%", right: "-8%", bottom, height: slabH, zIndex: 4, opacity: op, background: accent, transform: "skewX(-12deg)" }} />
       );
     }
     default:

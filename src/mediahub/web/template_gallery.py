@@ -97,6 +97,7 @@ CATEGORY_BY_ARCHETYPE: dict[str, str] = {
     "staggered_diagonal_offset": "editorial",  # G1.1
     "ribbon_banner": "editorial",  # G1.1
     "marquee_crawl": "editorial",  # R1.2 — a repeating-fact ribbon wall + plate
+    "poster_spine": "editorial",  # D7 — full-height rotated surname spine
 }
 
 # Default for any future archetype with no explicit mapping yet (a test guards
@@ -146,6 +147,8 @@ _DISPLAY_ORDER: tuple[str, ...] = (
     "band_break",
     # E5 — the pop-out: cutout breaking out of a brand shape frame.
     "frame_breakout",
+    # D7 — the rotated spine: full-height vertical surname.
+    "poster_spine",
 )
 
 # Friendly card titles (the snake_case slug is shown separately for
@@ -186,6 +189,7 @@ _TITLE: dict[str, str] = {
     "poster_name_behind": "Name Behind",
     "band_break": "Band Break",
     "frame_breakout": "Frame Breakout",
+    "poster_spine": "Spine Poster",
 }
 
 # Short fallback "what it is" blurb, used only if an archetype's notes file is
@@ -227,6 +231,7 @@ _FALLBACK_SUMMARY: dict[str, str] = {
     "poster_name_behind": "A mega surname on the ground plane with the athlete cutout standing over it.",
     "band_break": "A broadcast band crossed by the athlete — head and shoulders break its top edge.",
     "frame_breakout": "A cutout clipped inside a brand shape frame with the head breaking out above it.",
+    "poster_spine": "The surname runs full-height up the left rail with the facts stacked on the right.",
 }
 
 _CARD_SUMMARY_MAX = 180
@@ -739,6 +744,18 @@ _SVG: dict[str, str] = {
         '<rect class="ik2" x="34" y="104" width="52" height="9" rx="1"/>'
         '<rect class="ac" x="42" y="118" width="36" height="12" rx="1"/>'
         '<rect class="ik" x="40" y="136" width="40" height="5" rx="1"/>'
+    ),
+    # Editorial — the rotated spine: a tall vertical surname rail on the left,
+    # an accent rule, and the facts stacked on the right (D7).
+    "poster_spine": (
+        '<rect class="gd" x="0" y="0" width="120" height="150" rx="3"/>'
+        '<rect class="ik2" x="18" y="16" width="16" height="118" rx="2"/>'
+        '<rect class="ac" x="42" y="14" width="4" height="122"/>'
+        '<rect class="ac" x="54" y="18" width="30" height="10" rx="1"/>'
+        '<rect class="ik" x="54" y="36" width="46" height="6" rx="1"/>'
+        '<rect class="ik" x="54" y="48" width="38" height="5" rx="1"/>'
+        '<rect class="ik2" x="54" y="96" width="52" height="20" rx="1"/>'
+        '<rect class="ik" x="54" y="124" width="40" height="6" rx="1"/>'
     ),
 }
 

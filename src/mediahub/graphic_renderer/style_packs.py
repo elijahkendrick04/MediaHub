@@ -136,6 +136,10 @@ ACCENT_GEOS: tuple[str, ...] = (
     "corner_burst",
     "blob",
     "variable_halftone",
+    # D7 (Canva gap analysis) — a broadcast-angled accent slab (skewX(-12deg),
+    # the shared-angle scoreboard move) banded low in the card. Solid accent,
+    # z-band 4, executed on both surfaces.
+    "skew_slab",
 )
 
 # Intensity tier — scales the alphas / weights / sizes of the levers above.
@@ -211,6 +215,7 @@ _ACCENT_W = {
     "corner_burst": 2,
     "blob": 2,
     "variable_halftone": 2,
+    "skew_slab": 2,
 }
 
 # Coherence caps: standard density tolerates a little more stacking than bold
@@ -280,6 +285,7 @@ _ACCENT_LABEL = {
     "corner_burst": "corner burst",
     "blob": "blob",
     "variable_halftone": "halftone wedge",
+    "skew_slab": "skew slab",
 }
 
 
@@ -1227,6 +1233,18 @@ def _accent_geometry_html(style: str, width: int, height: int, bold: bool) -> st
         return (
             f'<div style="position:absolute;right:0;bottom:0;width:{size}px;height:{size}px;'
             f'{zb}opacity:{op};">{_variable_halftone_svg(acc, sec)}</div>'
+        )
+    if style == "skew_slab":
+        # D7 — a broadcast-angled accent slab low in the card (skewX(-12deg), the
+        # shared-angle scoreboard move). Kept in a band so it never covers the
+        # hero; layouts that want the numeral to ride it opt in structurally.
+        op = 0.9 if bold else 0.72
+        slab_h = int(height * 0.13 * mult)
+        bottom = int(height * 0.15)
+        return (
+            f'<div style="position:absolute;left:-8%;right:-8%;bottom:{bottom}px;'
+            f"height:{slab_h}px;{zb}opacity:{op};background:{acc};"
+            f'transform:skewX(-12deg);"></div>'
         )
     return ""
 

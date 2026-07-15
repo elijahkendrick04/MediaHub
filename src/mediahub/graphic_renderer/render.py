@@ -3651,12 +3651,18 @@ def _fit_one_line_px(
     weight,
     min_px: int,
     max_px: int,
+    vertical: bool = False,
 ) -> int:
     """Largest int px at which ``text`` fits on **one line** in ``box_w`` (≤ ``box_h``).
 
     The v2 hero slots render with ``white-space: nowrap``, so they must be sized
     single-line. ``autofit.fit_font_px`` word-*wraps* to measure, which over-sizes
     a multi-word surname ("Van Dyk") that then overflows on the one forced line.
+
+    D7 (Canva gap analysis) — a ``vertical=True`` run (``writing-mode:vertical-rl``,
+    a rotated spine) reads DOWN the box, so its available line length is the box
+    HEIGHT and its size cap is the box WIDTH: the two axes swap. Chromium renders
+    ``writing-mode`` deterministically, so the fit stays reproducible.
     """
     from mediahub.graphic_renderer.autofit import em_width
 
@@ -3665,7 +3671,11 @@ def _fit_one_line_px(
     ew = em_width(text, font_family=font_family, weight=weight)
     if ew <= 0:
         return max_px
-    px = min(int(box_w / ew), int(box_h))
+    if vertical:
+        # The run travels along the box's HEIGHT; the glyph size is capped by width.
+        px = min(int(box_h / ew), int(box_w))
+    else:
+        px = min(int(box_w / ew), int(box_h))
     return max(min_px, min(max_px, px))
 
 
@@ -5014,6 +5024,29 @@ def _fill_v2_archetype(
             root_vars["--mh-frame-cy"] = _fcy
             root_vars["--mh-breakout-floor"] = _floor
             root_vars["--mh-ring-display"] = _ring
+
+    # D7 (Canva gap analysis) — poster_spine's vertical surname. The rail runs
+    # DOWN the left margin (writing-mode:vertical-rl), so the run is fitted with
+    # the axes swapped (vertical=True): its length is the rail HEIGHT and its
+    # size cap is the rail WIDTH. Only this archetype emits the var, so every
+    # other card is byte-identical.
+    if archetype_name == "poster_spine":
+        _display_family_sp = (
+            (_display_font_stack_for_pair(getattr(brief, "typography_pair", "") or "") or "Anton")
+            .split(",")[0]
+            .strip("'\" ")
+        )
+        spine_px = _fit_one_line_px(
+            surname or "X",
+            width * 0.235,
+            height * 0.84,
+            font_family=_display_family_sp,
+            weight=400,
+            min_px=64,
+            max_px=int(width * 0.235),
+            vertical=True,
+        )
+        root_vars["--mh-fit-spine-px"] = "%dpx" % spine_px
 
     # 1.9 — apply per-slot text effects to the finalised slot values (AFTER the
     # multi-line balancer has settled RESULT_VALUE / ATHLETE_SURNAME_DISPLAY).
