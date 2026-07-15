@@ -6,9 +6,9 @@ The synchronous /reel route holds the HTTP connection for the whole
 outcome, and streams the finished MP4 from a file route that never
 triggers a render.
 """
+
 from __future__ import annotations
 
-import importlib
 import json
 import sys
 import time
@@ -22,21 +22,8 @@ sys.path.insert(0, str(_ROOT))
 
 
 @pytest.fixture
-def app_env(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    for d in ("runs_v4", "uploads_v4", "club_profiles"):
-        (tmp_path / d).mkdir(parents=True, exist_ok=True)
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
-    app = wm.create_app()
-    app.config["TESTING"] = True
+def app_env(app, web_module, tmp_path):
+    wm = web_module
 
     from mediahub.web.club_profile import ClubProfile, save_profile
 
@@ -123,9 +110,7 @@ class TestReelJob:
 
         with app.test_client() as c:
             c.post("/api/organisation/active", data={"profile_id": "alpha"})
-            with mock.patch.object(
-                motion, "render_meet_reel", side_effect=RuntimeError("x")
-            ):
+            with mock.patch.object(motion, "render_meet_reel", side_effect=RuntimeError("x")):
                 resp = c.post("/api/runs/r1/reel-job")
                 poll = resp.get_json()["poll_url"]
                 _poll_until_settled(c, poll)
@@ -256,9 +241,7 @@ class TestVariantJobStoreAtomicity:
 
         def _writer(tag: str) -> None:
             for i in range(200):
-                wm._variant_job_save(
-                    {"id": job_id, "kind": "reel", "status": "running", tag: i}
-                )
+                wm._variant_job_save({"id": job_id, "kind": "reel", "status": "running", tag: i})
 
         def _reader() -> None:
             path = wm._variant_jobs_dir() / f"{job_id}.json"

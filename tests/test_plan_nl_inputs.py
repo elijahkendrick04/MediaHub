@@ -18,7 +18,6 @@ Covers the three parts of the change:
 
 from __future__ import annotations
 
-import importlib
 import sys
 import types
 from datetime import date
@@ -63,7 +62,12 @@ def _install_fake_llm(monkeypatch, proposal, *, research=False, provider="gemini
         searchmod.WebResearcher,
         "search",
         lambda self, q, num=5: [
-            SearchResult("https://swimming.org/champs", "County Champs 2026", "12 July 2026 at Ponds Forge.", "searxng")
+            SearchResult(
+                "https://swimming.org/champs",
+                "County Champs 2026",
+                "12 July 2026 at Ponds Forge.",
+                "searxng",
+            )
         ],
         raising=True,
     )
@@ -180,23 +184,11 @@ def test_interpret_propagates_unconfigured_provider(monkeypatch):
 
 
 @pytest.fixture()
-def app_with_org(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    (tmp_path / "runs_v4").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "club_profiles").mkdir(parents=True, exist_ok=True)
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
-
+def app_with_org(web_module):
     from mediahub.web.club_profile import ClubProfile, save_profile
 
     save_profile(ClubProfile(profile_id="org-test", display_name="Test Club"))
-    application = wm.create_app()
+    application = web_module.create_app()
     application.config["TESTING"] = True
     application.config["SECRET_KEY"] = "test-secret"
     return application
@@ -375,7 +367,9 @@ def test_inputs_route_round_trips_goals(app_with_org):
             },
         )
         assert r.status_code == 200
-        assert r.get_json()["inputs"]["goals"] == [{"post_type": "meet_recap", "note": "push recap"}]
+        assert r.get_json()["inputs"]["goals"] == [
+            {"post_type": "meet_recap", "note": "push recap"}
+        ]
         # And it persists for the next load.
         got = client.get("/api/plan/inputs").get_json()["inputs"]
         assert got["goals"] == [{"post_type": "meet_recap", "note": "push recap"}]

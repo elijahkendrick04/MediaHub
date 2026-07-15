@@ -12,7 +12,6 @@ Covers the finishing build of the Mobile PWA:
 
 from __future__ import annotations
 
-import importlib
 import io
 import sys
 from pathlib import Path
@@ -22,19 +21,6 @@ import pytest
 _ROOT = Path(__file__).resolve().parents[1]
 _CSS = _ROOT / "src" / "mediahub" / "web" / "static" / "theme" / "theme-components.css"
 sys.path.insert(0, str(_ROOT))
-
-
-@pytest.fixture
-def client(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    import mediahub.web.web as wm
-
-    importlib.reload(wm)
-    app = wm.create_app()
-    app.config["TESTING"] = True
-    if not app.secret_key:
-        app.secret_key = "test-secret"
-    return app.test_client()
 
 
 # ---------------------------------------------------------------------------

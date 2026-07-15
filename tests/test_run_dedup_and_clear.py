@@ -10,7 +10,6 @@ Covers:
 
 from __future__ import annotations
 
-import importlib
 import json
 import sys
 from pathlib import Path
@@ -103,22 +102,7 @@ def test_placeholder_unknown_meet_is_not_a_usable_fingerprint():
 
 
 @pytest.fixture
-def client(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    for sub in ("runs_v4", "uploads_v4", "club_profiles"):
-        (tmp_path / sub).mkdir(parents=True, exist_ok=True)
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
-
-    app = wm.create_app()
-    app.config["TESTING"] = True
+def client(app, web_module, tmp_path):
     app.config["ENFORCE_ORG_GATE"] = True
 
     from mediahub.web.club_profile import ClubProfile, save_profile
@@ -129,7 +113,7 @@ def client(tmp_path, monkeypatch):
         )
 
     with app.test_client() as c:
-        yield c, wm, tmp_path
+        yield c, web_module, tmp_path
 
 
 def _seed_run(
@@ -212,8 +196,18 @@ def test_two_unnamed_runs_share_no_fingerprint(client):
     # …so the duplicate map groups nothing (no false Re-run badge).
     dmap = wm._duplicate_map(
         [
-            {"id": "unnamed2", "created_at": "2026-05-11", "content_hash": "", "meet_fingerprint": rows["unnamed2"]},
-            {"id": "unnamed1", "created_at": "2026-05-10", "content_hash": "", "meet_fingerprint": rows["unnamed1"]},
+            {
+                "id": "unnamed2",
+                "created_at": "2026-05-11",
+                "content_hash": "",
+                "meet_fingerprint": rows["unnamed2"],
+            },
+            {
+                "id": "unnamed1",
+                "created_at": "2026-05-10",
+                "content_hash": "",
+                "meet_fingerprint": rows["unnamed1"],
+            },
         ]
     )
     assert dmap == {}

@@ -21,7 +21,6 @@ resumed) and pass after it.
 
 from __future__ import annotations
 
-import importlib
 import time
 from datetime import datetime, timedelta, timezone
 
@@ -146,14 +145,9 @@ def _make_printout(n_swimmers: int, events_per_swimmer: int, club: str = CLUB):
 
 
 @pytest.fixture
-def web(monkeypatch, tmp_path):
+def web(web_module, monkeypatch):
     """A fresh web module bound to an isolated DATA_DIR, with the V5 meet-identity
     web research stubbed out so the pipeline stays fully offline and fast."""
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    import mediahub.web.web as web_mod
-
-    importlib.reload(web_mod)
-
     # Keep "Researching meet identity…" offline + instant (it is purely additive
     # enrichment the pipeline already treats as best-effort).
     import context_engine.identity as _ident
@@ -162,7 +156,7 @@ def web(monkeypatch, tmp_path):
         raise RuntimeError("offline (test)")
 
     monkeypatch.setattr(_ident, "discover_meet_identity", _no_research, raising=False)
-    return web_mod
+    return web_module
 
 
 def _stale_iso(web) -> str:

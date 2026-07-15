@@ -14,6 +14,7 @@ has had a go. Covered:
   5. The setup-page GET renders the confirmation form when a profile
      is ready.
 """
+
 from __future__ import annotations
 
 import sys
@@ -26,40 +27,22 @@ sys.path.insert(0, str(_ROOT))
 
 
 @pytest.fixture
-def isolated_profiles(tmp_path, monkeypatch):
-    """Same isolation as test_org_setup_gate but exposed as a
-    standalone fixture so this test file is independent."""
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv(
-        "SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles")
-    )
-    (tmp_path / "runs_v4").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "uploads_v4").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "club_profiles").mkdir(parents=True, exist_ok=True)
-    import importlib
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-    importlib.reload(cp)
-    importlib.reload(wm)
-    yield tmp_path
+def client(app):
+    """Yields ``(test_client, app)`` on an isolated per-test DATA_DIR.
 
-
-@pytest.fixture
-def client(isolated_profiles):
-    import mediahub.web.web as wm
-    app = wm.create_app()
-    app.config["TESTING"] = True
+    Depends on the canonical ``app`` fixture (conftest), which builds a fresh
+    ``create_app()`` on a private DATA_DIR with fresh module state — no
+    ``importlib.reload`` needed."""
     with app.test_client() as c:
         yield c, app
 
 
-def _seed_profile_via_capture(c, monkeypatch, *, palette_extracted=None,
-                              brand_signals=None):
+def _seed_profile_via_capture(c, monkeypatch, *, palette_extracted=None, brand_signals=None):
     from mediahub.brand import social_dna
+
     monkeypatch.setattr(
-        social_dna, "capture_from_socials",
+        social_dna,
+        "capture_from_socials",
         lambda **kw: {
             "brand_voice_summary": "Friendly community club.",
             "brand_keywords": ["community"],
@@ -75,7 +58,8 @@ def _seed_profile_via_capture(c, monkeypatch, *, palette_extracted=None,
             "social_links_status": {"website": "ok"},
             "captions_captured": 0,
             "link_capture_state": {},
-            "brand_palette_signals": brand_signals or {
+            "brand_palette_signals": brand_signals
+            or {
                 "website": ["#0066cc", "#ffffff"],
             },
         },
@@ -85,8 +69,11 @@ def _seed_profile_via_capture(c, monkeypatch, *, palette_extracted=None,
     monkeypatch.setattr(
         "mediahub.brand.derived.derive_operating_profile",
         lambda profile: {
-            "tone_prose": {}, "achievement_priorities": {},
-            "type_phrases": {}, "artefact_voice": {}, "status": "ok",
+            "tone_prose": {},
+            "achievement_priorities": {},
+            "type_phrases": {},
+            "artefact_voice": {},
+            "status": "ok",
         },
     )
     return c.post(
@@ -103,9 +90,13 @@ def _seed_profile_via_capture(c, monkeypatch, *, palette_extracted=None,
 # 1. The capture step runs the unified resolver, not website-only
 # ---------------------------------------------------------------------------
 
+
 class TestUnifiedResolveOnCapture:
     def test_capture_pulls_colours_from_logos_and_guidelines(
-        self, client, monkeypatch, tmp_path,
+        self,
+        client,
+        monkeypatch,
+        tmp_path,
     ):
         c, _ = client
         # Stub the LLM so the resolver picks a deterministic palette.
@@ -123,13 +114,14 @@ class TestUnifiedResolveOnCapture:
         )
 
         _seed_profile_via_capture(
-            c, monkeypatch,
+            c,
+            monkeypatch,
             palette_extracted={"primary": "#0066cc"},
-            brand_signals={"website": ["#0066cc", "#ffffff"],
-                           "instagram": ["#ff8800"]},
+            brand_signals={"website": ["#0066cc", "#ffffff"], "instagram": ["#ff8800"]},
         )
 
         from mediahub.web.club_profile import load_profile
+
         prof = load_profile("demo-club")
         assert prof is not None
         # The resolver's pick should have replaced / merged onto the
@@ -147,6 +139,7 @@ class TestUnifiedResolveOnCapture:
 # ---------------------------------------------------------------------------
 # 2 + 3 + 4. POST /organisation/setup/palette
 # ---------------------------------------------------------------------------
+
 
 class TestPaletteOverrideRoute:
     def test_manual_override_lands_on_profile(self, client, monkeypatch):
@@ -170,6 +163,7 @@ class TestPaletteOverrideRoute:
         assert "/organisation/setup" in resp.headers.get("Location", "")
 
         from mediahub.web.club_profile import load_profile
+
         prof = load_profile("demo-club")
         assert prof is not None
         manual = prof.brand_palette_manual
@@ -200,6 +194,7 @@ class TestPaletteOverrideRoute:
         )
 
         from mediahub.web.club_profile import load_profile
+
         prof = load_profile("demo-club")
         assert prof.brand_palette_use_fourth is True
         assert prof.brand_palette_manual.get("fourth") == "#444444"
@@ -218,12 +213,15 @@ class TestPaletteOverrideRoute:
             },
         )
         from mediahub.web.club_profile import load_profile
+
         prof = load_profile("demo-club")
         assert prof.brand_palette_use_fourth is False
         assert "fourth" not in prof.brand_palette_manual
 
     def test_unticking_fourth_clears_extracted_fourth(
-        self, client, monkeypatch,
+        self,
+        client,
+        monkeypatch,
     ):
         """Bug regression: once the AI surfaced a fourth colour and the
         user later unticks the box, the stale ``extracted.fourth`` must
@@ -235,10 +233,13 @@ class TestPaletteOverrideRoute:
 
         # 1. Tick the box + supply a fourth — AI extracted fourth too.
         from mediahub.web.club_profile import load_profile, save_profile
+
         prof = load_profile("demo-club")
         prof.brand_palette_extracted = {
-            "primary": "#111111", "secondary": "#222222",
-            "accent": "#333333", "fourth": "#444444",
+            "primary": "#111111",
+            "secondary": "#222222",
+            "accent": "#333333",
+            "fourth": "#444444",
         }
         save_profile(prof)
 
@@ -256,12 +257,14 @@ class TestPaletteOverrideRoute:
         )
         prof = load_profile("demo-club")
         assert prof.brand_palette_use_fourth is False
-        assert "fourth" not in prof.brand_palette_extracted, (
-            "stale extracted.fourth must be dropped when tickbox is off"
-        )
+        assert (
+            "fourth" not in prof.brand_palette_extracted
+        ), "stale extracted.fourth must be dropped when tickbox is off"
 
     def test_blank_fields_clear_override_and_keep_ai_pick(
-        self, client, monkeypatch,
+        self,
+        client,
+        monkeypatch,
     ):
         c, _ = client
         _seed_profile_via_capture(c, monkeypatch)
@@ -277,6 +280,7 @@ class TestPaletteOverrideRoute:
             },
         )
         from mediahub.web.club_profile import load_profile
+
         first = load_profile("demo-club")
         assert first.brand_palette_manual.get("primary") == "#aa0000"
 
@@ -301,6 +305,7 @@ class TestPaletteOverrideRoute:
 # ---------------------------------------------------------------------------
 # 4b. POST /organisation/setup/palette/reorder — swap colours between roles
 # ---------------------------------------------------------------------------
+
 
 class TestPaletteReorderRoute:
     def _seed_confirmed_palette(self, c, monkeypatch):
@@ -329,6 +334,7 @@ class TestPaletteReorderRoute:
         assert "/organisation/setup" in resp.headers.get("Location", "")
 
         from mediahub.web.club_profile import load_profile
+
         prof = load_profile("demo-club")
         manual = prof.brand_palette_manual
         assert manual.get("primary") == "#222222"
@@ -345,6 +351,7 @@ class TestPaletteReorderRoute:
         c.post("/organisation/setup/palette/reorder", data={})
 
         from mediahub.web.club_profile import load_profile
+
         prof = load_profile("demo-club")
         manual = prof.brand_palette_manual
         # Forward cycle: primary's colour walks to secondary, last wraps round.
@@ -358,6 +365,7 @@ class TestPaletteReorderRoute:
 
         # Prime a stale derived palette seeded off the OLD primary.
         from mediahub.web.club_profile import load_profile, save_profile
+
         prof = load_profile("demo-club")
         kit = prof.get_brand_kit()
         kit.ensure_derived_palette(force=True)
@@ -387,6 +395,7 @@ class TestPaletteReorderRoute:
             data={"order": "fourth,primary,secondary,accent"},
         )
         from mediahub.web.club_profile import load_profile
+
         prof = load_profile("demo-club")
         assert prof.brand_palette_use_fourth is False
         assert "fourth" not in prof.brand_palette_manual
@@ -422,6 +431,7 @@ class TestPaletteReorderRoute:
         c.post("/organisation/setup/palette/reorder", data={})
 
         from mediahub.web.club_profile import load_profile
+
         prof = load_profile("demo-club")
         manual = prof.brand_palette_manual
         assert prof.brand_palette_use_fourth is True
@@ -434,6 +444,7 @@ class TestPaletteReorderRoute:
 # ---------------------------------------------------------------------------
 # 5. Setup-page GET renders the confirmation form
 # ---------------------------------------------------------------------------
+
 
 class TestSetupPageRendersForm:
     def test_form_appears_when_profile_is_ready(self, client, monkeypatch):
@@ -454,14 +465,18 @@ class TestSetupPageRendersForm:
         assert "/organisation/setup/palette" in body
 
     def test_reorder_control_appears_with_multiple_colours(
-        self, client, monkeypatch,
+        self,
+        client,
+        monkeypatch,
     ):
         c, _ = client
         # >=2 colours so the "Arrange brand colours" control renders.
         _seed_profile_via_capture(
-            c, monkeypatch,
+            c,
+            monkeypatch,
             palette_extracted={
-                "primary": "#0066cc", "secondary": "#ff8800",
+                "primary": "#0066cc",
+                "secondary": "#ff8800",
                 "accent": "#222222",
             },
         )
@@ -475,12 +490,16 @@ class TestSetupPageRendersForm:
         assert 'name="order"' in body
 
     def test_reorder_control_hidden_with_single_colour(
-        self, client, monkeypatch,
+        self,
+        client,
+        monkeypatch,
     ):
         c, _ = client
         # Only one colour → nothing to rearrange → control omitted.
         _seed_profile_via_capture(
-            c, monkeypatch, palette_extracted={"primary": "#0066cc"},
+            c,
+            monkeypatch,
+            palette_extracted={"primary": "#0066cc"},
         )
         resp = c.get("/organisation/setup")
         body = resp.get_data(as_text=True)
@@ -498,14 +517,19 @@ class TestSetupPageRendersForm:
 # re-analysis can never update it, contradicting the on-screen copy.
 # ---------------------------------------------------------------------------
 
+
 class TestPaletteBlankDefersToAI:
     def test_hex_text_field_renders_blank_with_ai_pick_as_placeholder(
-        self, client, monkeypatch,
+        self,
+        client,
+        monkeypatch,
     ):
         c, _ = client
         # AI capture only — no manual override yet.
         _seed_profile_via_capture(
-            c, monkeypatch, palette_extracted={"primary": "#0066cc"},
+            c,
+            monkeypatch,
+            palette_extracted={"primary": "#0066cc"},
         )
         body = c.get("/organisation/setup").get_data(as_text=True)
         # The colour picker carries the AI value (it can't be blank) …
@@ -517,7 +541,9 @@ class TestPaletteBlankDefersToAI:
     def test_untouched_save_defers_to_ai_not_freezing_it(self, client, monkeypatch):
         c, _ = client
         _seed_profile_via_capture(
-            c, monkeypatch, palette_extracted={"primary": "#0066cc"},
+            c,
+            monkeypatch,
+            palette_extracted={"primary": "#0066cc"},
         )
         monkeypatch.setattr("mediahub.media_ai.llm.is_available", lambda: False)
         # Exactly what a real browser posts when the user changes nothing:
@@ -534,6 +560,7 @@ class TestPaletteBlankDefersToAI:
             },
         )
         from mediahub.web.club_profile import load_profile
+
         prof = load_profile("demo-club")
         # No manual override was frozen — the AI palette still flows through.
         assert prof.brand_palette_manual == {}
@@ -542,9 +569,12 @@ class TestPaletteBlankDefersToAI:
     def test_typed_hex_pins_only_that_slot(self, client, monkeypatch):
         c, _ = client
         _seed_profile_via_capture(
-            c, monkeypatch,
+            c,
+            monkeypatch,
             palette_extracted={
-                "primary": "#0066cc", "secondary": "#ff8800", "accent": "#222222",
+                "primary": "#0066cc",
+                "secondary": "#ff8800",
+                "accent": "#222222",
             },
         )
         monkeypatch.setattr("mediahub.media_ai.llm.is_available", lambda: False)
@@ -561,6 +591,7 @@ class TestPaletteBlankDefersToAI:
             },
         )
         from mediahub.web.club_profile import load_profile
+
         prof = load_profile("demo-club")
         manual = prof.brand_palette_manual
         # Only the typed slot is pinned; the others defer to the AI's pick.
@@ -573,7 +604,9 @@ class TestPaletteBlankDefersToAI:
         field (so it's preserved and editable), not blank."""
         c, _ = client
         _seed_profile_via_capture(
-            c, monkeypatch, palette_extracted={"primary": "#0066cc"},
+            c,
+            monkeypatch,
+            palette_extracted={"primary": "#0066cc"},
         )
         monkeypatch.setattr("mediahub.media_ai.llm.is_available", lambda: False)
         c.post(

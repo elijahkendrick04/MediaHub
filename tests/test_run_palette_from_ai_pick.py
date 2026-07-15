@@ -17,7 +17,6 @@ falling back to the legacy fields only when the resolver has nothing.
 
 from __future__ import annotations
 
-import importlib
 import io
 import sys
 from pathlib import Path
@@ -35,27 +34,12 @@ _AI_SECONDARY = "#1b2a55"
 _AI_ACCENT = "#77a7ff"
 
 
-def _make_app(tmp_path, monkeypatch, profile):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    for sub in ("runs_v4", "uploads_v4", "club_profiles", "data"):
-        (tmp_path / sub).mkdir(parents=True, exist_ok=True)
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
-
+def _make_app(web_module, profile):
     from mediahub.web.club_profile import save_profile
 
     save_profile(profile)
 
-    wm.RUNS_DIR = tmp_path / "runs_v4"
-    wm.UPLOADS_DIR = tmp_path / "uploads_v4"
-    a = wm.create_app()
+    a = web_module.create_app()
     a.config["TESTING"] = True
     return a
 
@@ -79,13 +63,12 @@ def _configure_body(app, profile_id):
     return rv2.data.decode("utf-8", errors="ignore")
 
 
-def test_ai_pick_drives_run_primary_secondary(tmp_path, monkeypatch):
+def test_ai_pick_drives_run_primary_secondary(web_module):
     """AI-extracted palette present, brand_primary still at legacy default."""
     from mediahub.web.club_profile import ClubProfile
 
     app = _make_app(
-        tmp_path,
-        monkeypatch,
+        web_module,
         ClubProfile(
             profile_id="org-ai",
             display_name="AI Org",
@@ -115,15 +98,14 @@ def test_ai_pick_drives_run_primary_secondary(tmp_path, monkeypatch):
     ), "Configure leaked the legacy #A30D2D default into a run colour picker."
 
 
-def test_legacy_brand_primary_still_used_when_no_ai_pick(tmp_path, monkeypatch):
+def test_legacy_brand_primary_still_used_when_no_ai_pick(web_module):
     """No extracted/manual palette -> fall back to explicit legacy fields."""
     from mediahub.web.club_profile import ClubProfile
 
     legacy_primary = "#003da5"
     legacy_secondary = "#0b1f3a"
     app = _make_app(
-        tmp_path,
-        monkeypatch,
+        web_module,
         ClubProfile(
             profile_id="org-legacy",
             display_name="Legacy Org",

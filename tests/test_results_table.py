@@ -14,7 +14,6 @@ Two layers:
 
 from __future__ import annotations
 
-import importlib
 import json
 
 import pytest
@@ -242,7 +241,9 @@ class TestSortFilter:
 
     def test_filter_pb_only(self):
         history = {
-            "sw1": [{"event": "100FRLC", "swim_date": "2025-12-01", "time_cs": 6300, "run_id": "old"}]
+            "sw1": [
+                {"event": "100FRLC", "swim_date": "2025-12-01", "time_cs": 6300, "run_id": "old"}
+            ]
         }
         rows = rt.build_rows(_meet(), history, "cur")
         only = rt.filter_rows(rows, pb_only=True)
@@ -257,7 +258,9 @@ class TestSortFilter:
 
     def test_sparkline_series_shape(self):
         history = {
-            "sw1": [{"event": "100FRLC", "swim_date": "2025-12-01", "time_cs": 6300, "run_id": "old"}]
+            "sw1": [
+                {"event": "100FRLC", "swim_date": "2025-12-01", "time_cs": 6300, "run_id": "old"}
+            ]
         }
         row = rt.build_rows(_meet(), history, "cur")[0]
         s = rt.sparkline_series(row)
@@ -273,22 +276,16 @@ class TestSortFilter:
 
 
 @pytest.fixture
-def wm(tmp_path, monkeypatch):
-    """A freshly-reloaded web module pinned at an isolated DATA_DIR.
+def wm(web_module):
+    """The imported web module pinned at an isolated DATA_DIR.
 
-    Reloading (the same pattern the run-route isolation invariant uses) keeps
-    the module-level RUNS_DIR / DB_PATH and the registry's env-derived data.db
-    pointing at the *same* tmp dir, so a run written here is the run the route
-    reads and the history seeded here is the history it charts.
+    Delegates to the canonical ``web_module`` fixture (tests/conftest.py), which
+    repoints the shared module's RUNS_DIR / DB_PATH — and the registry's
+    env-derived data.db — at this test's tmp dir, so a run written here is the
+    run the route reads and the history seeded here is the history it charts.
+    No reload: class identity stays stable across tests.
     """
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    (tmp_path / "runs_v4").mkdir(parents=True, exist_ok=True)
-    import mediahub.web.web as _wm
-
-    importlib.reload(_wm)
-    return _wm
+    return web_module
 
 
 def _write_run(wm, run_id="r1", profile_id="org-x", meet=None):
@@ -394,12 +391,14 @@ class TestRoute:
         record_run_swims(
             "org-x",
             "old1",
-            [{
-                "name": "Alice Lee",
-                "event": "100FRLC",
-                "time_cs": 6300,
-                "swim_date": "2025-12-01</script><script>alert(1)//",
-            }],
+            [
+                {
+                    "name": "Alice Lee",
+                    "event": "100FRLC",
+                    "time_cs": 6300,
+                    "swim_date": "2025-12-01</script><script>alert(1)//",
+                }
+            ],
         )
         _write_run(wm)
         b = _client(wm).get("/runs/r1/results").get_data(as_text=True)

@@ -9,9 +9,7 @@ catalogue/capability surface.
 
 from __future__ import annotations
 
-import importlib
 import json
-import sys
 import uuid
 from pathlib import Path
 from types import SimpleNamespace
@@ -31,21 +29,10 @@ def _run_payload(run_id: str, profile_id: str) -> dict:
 
 
 @pytest.fixture
-def web_env(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
+def web_env(client, web_module, tmp_path, monkeypatch):
     monkeypatch.delenv("MEDIAHUB_FULFILMENT_PROVIDER", raising=False)
-    for sub in ("runs_v4", "uploads_v4", "club_profiles"):
-        (tmp_path / sub).mkdir(parents=True, exist_ok=True)
+    wm = web_module
 
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
     from mediahub.web.club_profile import ClubProfile, save_profile
 
     save_profile(
@@ -60,7 +47,9 @@ def web_env(tmp_path, monkeypatch):
     save_profile(ClubProfile(profile_id="org-beta", display_name="Org Beta"))
 
     run_id = "run-print-" + uuid.uuid4().hex[:8]
-    (tmp_path / "runs_v4" / f"{run_id}.json").write_text(json.dumps(_run_payload(run_id, "org-alpha")))
+    (tmp_path / "runs_v4" / f"{run_id}.json").write_text(
+        json.dumps(_run_payload(run_id, "org-alpha"))
+    )
     conn = wm._db()
     conn.execute(
         "INSERT OR REPLACE INTO runs (id, created_at, status, profile_id, meet_name, file_name)"
@@ -70,10 +59,7 @@ def web_env(tmp_path, monkeypatch):
     conn.commit()
     conn.close()
 
-    app = wm.create_app()
-    app.config["TESTING"] = True
-    with app.test_client() as c:
-        yield {"client": c, "run_id": run_id, "tmp_path": tmp_path}
+    yield {"client": client, "run_id": run_id, "tmp_path": tmp_path}
 
 
 def _pin(client, profile_id):
@@ -288,8 +274,10 @@ def test_print_success_serves_pdf(web_env):
     _pin(c, "org-alpha")
     _seed_brief(web_env["tmp_path"], run_id)
     fake, captured = _fake_render_brief_factory()  # renders at the print canvas → dpi met
-    with mock.patch("mediahub.graphic_renderer.render.render_brief", fake), \
-         mock.patch("mediahub.print_ready.engine.render_html_to_pdf", _fake_render_html_to_pdf):
+    with (
+        mock.patch("mediahub.graphic_renderer.render.render_brief", fake),
+        mock.patch("mediahub.print_ready.engine.render_html_to_pdf", _fake_render_html_to_pdf),
+    ):
         r = c.post(f"/api/runs/{run_id}/card/c1/print?product=poster_a3")
     assert r.status_code == 200, r.get_data(as_text=True)
     assert r.headers["Content-Type"].startswith("application/pdf")
@@ -310,12 +298,14 @@ def test_print_cmyk_downgrade_names_file_for_achieved_mode(web_env):
     _pin(c, "org-alpha")
     _seed_brief(web_env["tmp_path"], run_id)
     fake, _captured = _fake_render_brief_factory()
-    with mock.patch("mediahub.graphic_renderer.render.render_brief", fake), \
-         mock.patch("mediahub.print_ready.engine.render_html_to_pdf", _fake_render_html_to_pdf), \
-         mock.patch(
-             "mediahub.print_ready.engine.cmyk_convert_pdf",
-             side_effect=CmykUnavailable("Ghostscript is not installed"),
-         ):
+    with (
+        mock.patch("mediahub.graphic_renderer.render.render_brief", fake),
+        mock.patch("mediahub.print_ready.engine.render_html_to_pdf", _fake_render_html_to_pdf),
+        mock.patch(
+            "mediahub.print_ready.engine.cmyk_convert_pdf",
+            side_effect=CmykUnavailable("Ghostscript is not installed"),
+        ),
+    ):
         r = c.post(f"/api/runs/{run_id}/card/c1/print?product=poster_a3&colour=cmyk")
     assert r.status_code == 200, r.get_data(as_text=True)
     assert r.headers["X-Print-Colour-Requested"] == "cmyk"
@@ -333,13 +323,17 @@ def test_print_caps_line_names_the_missing_piece(web_env):
 
     c = web_env["client"]
     _pin(c, "org-alpha")
-    with mock.patch.object(gpe, "ghostscript_available", return_value=False), \
-         mock.patch.object(pdfx, "pdfx_available", return_value=False):
+    with (
+        mock.patch.object(gpe, "ghostscript_available", return_value=False),
+        mock.patch.object(pdfx, "pdfx_available", return_value=False),
+    ):
         page = c.get("/print")
     assert b"needs Ghostscript" in page.data
     assert b"needs an ICC profile" not in page.data
-    with mock.patch.object(gpe, "ghostscript_available", return_value=True), \
-         mock.patch.object(pdfx, "pdfx_available", return_value=False):
+    with (
+        mock.patch.object(gpe, "ghostscript_available", return_value=True),
+        mock.patch.object(pdfx, "pdfx_available", return_value=False),
+    ):
         page = c.get("/print")
     assert b"needs an ICC profile" in page.data
 
@@ -367,8 +361,10 @@ def test_preflight_palette_only_before_render_then_artwork_after(web_env):
     assert "alette-only" in pre["note"]
     # Render the print artwork (mocked Chromium/PDF hops), then re-proof.
     fake, _captured = _fake_render_brief_factory()
-    with mock.patch("mediahub.graphic_renderer.render.render_brief", fake), \
-         mock.patch("mediahub.print_ready.engine.render_html_to_pdf", _fake_render_html_to_pdf):
+    with (
+        mock.patch("mediahub.graphic_renderer.render.render_brief", fake),
+        mock.patch("mediahub.print_ready.engine.render_html_to_pdf", _fake_render_html_to_pdf),
+    ):
         assert c.post(f"/api/runs/{run_id}/card/c1/print?product=poster_a3").status_code == 200
         post = c.post(f"/api/runs/{run_id}/card/c1/preflight?product=poster_a3").get_json()
     assert post["checked"] == "artwork"
@@ -389,8 +385,10 @@ def test_print_art_cache_invalidates_on_brief_edit(web_env):
         calls.append(1)
         return fake(*a, **kw)
 
-    with mock.patch("mediahub.graphic_renderer.render.render_brief", counting_fake), \
-         mock.patch("mediahub.print_ready.engine.render_html_to_pdf", _fake_render_html_to_pdf):
+    with (
+        mock.patch("mediahub.graphic_renderer.render.render_brief", counting_fake),
+        mock.patch("mediahub.print_ready.engine.render_html_to_pdf", _fake_render_html_to_pdf),
+    ):
         assert c.post(f"/api/runs/{run_id}/card/c1/print?product=poster_a3").status_code == 200
         assert len(calls) == 1
         # unchanged brief → cache hit, no second render
@@ -474,8 +472,10 @@ def test_print_preflight_blocked_422_then_force_overrides(web_env):
     _seed_brief(web_env["tmp_path"], run_id)
     # a 100×100 artwork on an A3 poster is ~8 dpi → blocking resolution error
     fake, _captured = _fake_render_brief_factory(fixed_size=(100, 100))
-    with mock.patch("mediahub.graphic_renderer.render.render_brief", fake), \
-         mock.patch("mediahub.print_ready.engine.render_html_to_pdf", _fake_render_html_to_pdf):
+    with (
+        mock.patch("mediahub.graphic_renderer.render.render_brief", fake),
+        mock.patch("mediahub.print_ready.engine.render_html_to_pdf", _fake_render_html_to_pdf),
+    ):
         blocked = c.post(f"/api/runs/{run_id}/card/c1/print?product=poster_a3")
         forced = c.post(f"/api/runs/{run_id}/card/c1/print?product=poster_a3&force=1")
     assert blocked.status_code == 422
