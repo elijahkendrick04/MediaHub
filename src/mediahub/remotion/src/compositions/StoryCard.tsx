@@ -109,6 +109,13 @@ export const cardSchema = z.object({
   // sticker (the cutout keeps its grounded depth shadow, byte-identical).
   stickerInk: z.string().default(""),
   stickerRadius: z.number().default(0),
+  // C5 brand colour-wash — the deep brand tint (render.darken(--mh-primary,
+  // 0.20)) + the arithmetic mix fraction (0.18 + 0.24·decoration_strength) the
+  // still's _wash_defs_svg composites, so photo_filters rebuilds the identical
+  // SVG wash. Empty/0 = the approximate saturate grade (or no grade), which
+  // keeps v1 briefs byte-identical.
+  washTint: z.string().default(""),
+  washMix: z.number().default(0),
   // M11 data weight — the still's secondary-stat chip row (label/value pairs
   // already selected + trimmed by the still's own tables) and the honest
   // proportional PB bars, with the exact ink hex the still's bay uses.

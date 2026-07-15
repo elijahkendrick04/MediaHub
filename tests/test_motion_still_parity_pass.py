@@ -392,6 +392,68 @@ def test_tsx_sticker_contour_mirrors_the_still_eight_directions():
     assert "exactGrade ||\n            sticker ||" in cut
 
 
+# ===========================================================================
+# C5 — brand colour-wash (render._wash_defs_svg)
+# ===========================================================================
+
+
+def test_wash_props_carry_the_stills_tint_and_mix(photo_env):
+    """A wash-treated v2 card passes the deep brand tint (darken(--mh-primary,
+    0.20)) and the arithmetic mix fraction (0.18 + 0.24·strength) the still's
+    _wash_defs_svg composites, so the TSX rebuilds the identical filter."""
+    brief = _full_brief(
+        layout_template="full_bleed_photo_lower_third",
+        sourced_asset_ids=["a1"],
+        photo_treatment="wash",
+        decoration_strength=0.5,
+    )
+    expected_vars = resolved_role_vars_for_brief(CreativeBrief.from_dict(brief), BRAND)
+    props = motion._card_to_props(_card(1), variation_seed=2, brief=brief, brand_kit=BRAND)
+    assert props["washTint"] == darken(expected_vars["--mh-primary"], 0.20)
+    assert props["washMix"] == round(0.18 + 0.24 * 0.5, 4)
+    assert "duotoneShadow" not in props and "halftoneTile" not in props
+
+
+def test_tsx_wash_rebuilds_the_still_arithmetic_filter():
+    """photo_filters rebuilds render._wash_defs_svg's structure verbatim: a
+    saturate feColorMatrix, a feFlood of the brand tint clipped to SourceAlpha,
+    then the feComposite arithmetic mix (k2 = 1-m source, k3 = m tint). The
+    exact mirror suppresses the approximate saturate-only grade."""
+    src = _src("sprint/layers/photo_filters.tsx")
+    assert "export function washFilterId" in src
+    assert 'type="saturate"' in src and "values={WASH_SATURATION}" in src
+    assert 'WASH_SATURATION = "0.40"' in src  # still's default 0.4 formatted .2f
+    assert "feFlood floodColor={card.washTint}" in src
+    assert 'in2="SourceAlpha"' in src and 'operator="in"' in src
+    assert 'operator="arithmetic"' in src
+    assert "k2={Number((1 - m).toFixed(3))}" in src and "k3={Number(m.toFixed(3))}" in src
+    # The exact url(#wash) grade wins before the approximate saturate stack.
+    grade_fn = src.split("export function photoExactGradeFor", 1)[1]
+    assert "washActive(card)" in grade_fn
+    assert grade_fn.index("washFilterId") < grade_fn.index("HALFTONE_FILTER")
+
+
+def test_wash_mix_matches_the_still_clamp(photo_env):
+    """The still clamps mix to [0, 0.6]; the motion mix (0.18–0.42 across the
+    strength range) sits inside it, and the emitted value equals the still's.
+    (strength 0.0 resolves to the shared 0.5 default via ``float(... or 0.5)``,
+    so the boundaries exercised here use non-falsy strengths.)"""
+    for strength, expected in ((0.5, 0.30), (1.0, 0.42)):
+        brief = _full_brief(
+            layout_template="full_bleed_photo_lower_third",
+            sourced_asset_ids=["a1"],
+            photo_treatment="wash",
+            decoration_strength=strength,
+        )
+        props = motion._card_to_props(_card(1), variation_seed=2, brief=brief, brand_kit=BRAND)
+        assert props["washMix"] == round(expected, 4)
+        # The still's _wash_defs_svg emits the same 1-m / m arithmetic constants.
+        vars_ = resolved_role_vars_for_brief(CreativeBrief.from_dict(brief), BRAND)
+        still_svg = _wash_defs_svg(darken(vars_["--mh-primary"], 0.20), props["washMix"])
+        assert f'k2="{1 - props["washMix"]:.3f}"' in still_svg
+        assert f'k3="{props["washMix"]:.3f}"' in still_svg
+
+
 def test_photo_scale_mirrors_the_stills_crop_intent(photo_env):
     from mediahub.graphic_renderer.render import _crop_intent_vars
 
