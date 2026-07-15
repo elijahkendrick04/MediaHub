@@ -4027,8 +4027,7 @@ def _sticker_outline_css(width: int, height: int, strength: float) -> str:
         )
     )
     return (
-        "\n/* --- B5 die-cut sticker contour --- */\n"
-        f"img.athlete-cutout {{ filter: {shadows}; }}\n"
+        f"\n/* --- B5 die-cut sticker contour --- */\nimg.athlete-cutout {{ filter: {shadows}; }}\n"
     )
 
 
@@ -4080,6 +4079,139 @@ def _v2_photo_treatment_assets(
         strength = float(getattr(brief, "decoration_strength", 0.5) or 0.5)
         return _sticker_outline_css(width, height, strength), ""
     return "", ""
+
+
+# --------------------------------------------------------------------------- #
+# E4 (Canva gap analysis) — shaped photo frames for the windowed archetypes
+# --------------------------------------------------------------------------- #
+
+# The three windowed-photo archetypes the ``photo_frame_shape`` lever dresses,
+# mapped to the selectors it re-styles: ``window`` is the photo well (its own
+# fill/border/box-shadow is dropped so the shape + offset echo take over),
+# ``media`` are the elements that must clip to the shape (the ``arch``/``blob``
+# border-radius rides them; ``torn_edge`` displaces the whole window subtree via
+# one window-level filter, so it needs no per-media rule), and ``img_lift`` is
+# the in-flow ``<img>`` that must be raised above the shaped surface pseudo so
+# the photo isn't hidden behind it (empty where the layout already positions its
+# media with an explicit z-index).
+# Selectors are prefixed with the archetype ROOT class (``.pp`` / ``.di`` /
+# ``.ps``) so the shape rules out-specify the layout's own window rules (border,
+# overflow, background, box-shadow, the disc's ``border-radius:50%``) regardless
+# of source order — the shape CSS rides at the top of the injected ``:root``
+# block, ahead of the layout's ``<style>`` body.
+_WINDOWED_SHAPE_ARCHETYPES: dict[str, dict[str, object]] = {
+    "photo_passepartout": {
+        "root": ".pp",
+        "window": ".pp__window",
+        "media": (".pp__window img",),
+        "img_lift": ".pp__window img",
+    },
+    "spotlight_disc": {
+        "root": ".di",
+        "window": ".di__disc",
+        "media": (".di__disc img",),
+        "img_lift": ".di__disc img",
+    },
+    "full_height_portrait_split": {
+        "root": ".ps",
+        "window": ".ps__photo",
+        "media": (".ps__photo-img img", ".ps__scrim", ".ps__watermark"),
+        "img_lift": "",
+    },
+}
+
+
+def _photo_frame_shape_card_key(brief, archetype: str) -> str:
+    """A stable per-card key for the seeded shapes (blob radius / torn tear).
+
+    Prefers the content-item id (stable across a card's re-renders), falls back
+    to the brief id, then the surname — folded with the archetype so the two
+    windowed archetypes on one card draw independent silhouettes. Mirrored by
+    ``motion.py`` so the reel's shape matches the still's exactly.
+    """
+    base = (
+        str(getattr(brief, "content_item_id", "") or "")
+        or str(getattr(brief, "id", "") or "")
+        or str((getattr(brief, "text_layers", None) or {}).get("athlete_surname") or "")
+    )
+    return f"{base}|{archetype}"
+
+
+def _photo_frame_shape_assets(brief, archetype: str, width: int, height: int) -> tuple[str, str]:
+    """``(css, defs_html)`` for the card's ``photo_frame_shape`` lever (E4).
+
+    A non-rect shape on one of the three windowed archetypes reshapes the photo
+    window and pairs it with the classic offset accent echo (the same shape in
+    ``var(--mh-accent)`` shifted ~12px behind). ``rect`` — and any brief on any
+    other archetype, or with the lever absent — returns ``("", "")`` so the card
+    is byte-identical to the pre-lever render. All colour comes from the resolved
+    ``--mh-accent`` / ``--mh-surface`` role tokens; the shapes are pure geometry.
+    Deterministic: the ``blob`` radius and the ``torn_edge`` filter are seeded
+    from the card key, so the same brief + seed yields the same PNG.
+    """
+    from mediahub.graphic_renderer import photo_frame as _pf
+
+    shape = (getattr(brief, "photo_frame_shape", "") or "").strip().lower()
+    cfg = _WINDOWED_SHAPE_ARCHETYPES.get(archetype)
+    if cfg is None or shape in ("", "rect") or shape not in _pf.PHOTO_FRAME_SHAPES:
+        return "", ""
+
+    root = str(cfg["root"])
+    win = f"{root} {cfg['window']}"
+    media: tuple[str, ...] = tuple(f"{root} {sel}" for sel in cfg["media"])  # type: ignore[arg-type]
+    img_lift = f"{root} {cfg['img_lift']}" if cfg["img_lift"] else ""
+    # ~12px offset at 1080, scaled with the short edge so every cut echoes the
+    # shape by the same relative amount.
+    off = max(8, int(round(min(width, height) * 0.011)))
+    card_key = _photo_frame_shape_card_key(brief, archetype)
+
+    # The window loses its own fill / keyline / elevation (the echo carries the
+    # accent now) and becomes an unclipped, isolated stacking context so the
+    # offset echo can peek out behind the photo (clipped only by the card edge).
+    # ``min-width/height: 0`` is load-bearing: a flex item with ``overflow:
+    # visible`` reverts to ``min-*: auto`` (content-sized), which would let the
+    # photo grow the window past its flex basis and crush the caption/column —
+    # pinning the minima to 0 keeps the flex geometry byte-for-byte as the rect
+    # window sized it, so only the shape + echo change.
+    win_reset = (
+        "overflow: visible; min-width: 0; min-height: 0; background: transparent;"
+        " border: none; box-shadow: none; position: relative; z-index: 2;"
+        " isolation: isolate;"
+    )
+
+    defs = ""
+    if shape == "torn_edge":
+        # One window-level displacement filter tears the entire window subtree
+        # (surface pseudo, photo, echo) along one seeded noise field — so it
+        # composes over any photo grade already on the <img> instead of fighting
+        # it for the single `filter` slot.
+        defs = _pf.torn_filter_svg(card_key)
+        shape_decl = f" filter: url(#{_pf.TORN_FILTER_ID});"
+        css = (
+            f"\n/* --- E4 photo frame shape: torn_edge ({archetype}) --- */\n"
+            f"{win} {{ {win_reset}{shape_decl} }}\n"
+            f'{win}::before {{ content: ""; position: absolute; inset: 0; z-index: 0;'
+            f" background: var(--mh-surface); }}\n"
+            f'{win}::after {{ content: ""; position: absolute; inset: 0; z-index: -1;'
+            f" background: var(--mh-accent); transform: translate({off}px, {off}px); }}\n"
+        )
+    else:
+        radius = _pf.frame_radius(shape, card_key)
+        r = f"border-radius: {radius};"
+        media_css = "".join(f"{sel} {{ {r} }}\n" for sel in media)
+        css = (
+            f"\n/* --- E4 photo frame shape: {shape} ({archetype}) --- */\n"
+            f"{win} {{ {win_reset} {r} }}\n"
+            f'{win}::before {{ content: ""; position: absolute; inset: 0; z-index: 0;'
+            f" background: var(--mh-surface); {r} }}\n"
+            f'{win}::after {{ content: ""; position: absolute; inset: 0; z-index: -1;'
+            f" background: var(--mh-accent); transform: translate({off}px, {off}px); {r} }}\n"
+            f"{media_css}"
+        )
+    if img_lift:
+        # Raise the in-flow photo above the shaped surface pseudo (::before, z0).
+        css += f"{img_lift} {{ position: relative; z-index: 1; }}\n"
+    return css, defs
 
 
 # --------------------------------------------------------------------------- #
@@ -4860,6 +4992,20 @@ def _fill_v2_archetype(
         extra_css += treatment_css
     if treatment_defs:
         repl["ACCENT_DECORATION"] = treatment_defs + (repl.get("ACCENT_DECORATION") or "")
+
+    # E4 (Canva gap analysis) — shaped photo frames (arch / blob / torn_edge) on
+    # the three windowed archetypes, paired with the offset accent echo. CSS
+    # rides BASE_CSS; the torn-edge SVG filter def rides the {{ACCENT_DECORATION}}
+    # slot (like the duotone def above). ``rect`` / the lever absent / any other
+    # archetype emits neither, so those cards are byte-identical. Independent of a
+    # photo: the shape frames the surface fallback too (the no-photo grace).
+    shape_css, shape_defs = _photo_frame_shape_assets(
+        brief, getattr(brief, "layout_template", "") or "", width, height
+    )
+    if shape_css:
+        extra_css += shape_css
+    if shape_defs:
+        repl["ACCENT_DECORATION"] = shape_defs + (repl.get("ACCENT_DECORATION") or "")
 
     # M11 — data weight: the secondary-stat chip row and the honest
     # before/after PB bars for the data-led archetypes. Both collapse to ""

@@ -169,6 +169,19 @@ export const cardSchema = z.object({
   // Painted on the composition root beneath every content layer, exactly the
   // still's ground override. Empty = the flat roles.ground (byte-identical).
   meshBg: z.string().default(""),
+  // E4 (Canva gap analysis): the still's shaped photo frame on the three
+  // windowed archetypes (photo_passepartout / spotlight_disc /
+  // full_height_portrait_split). "" / "rect" keeps the plain window (byte-
+  // identical). "arch"/"blob" carry the exact border-radius the still computed
+  // (frameRadius); "torn_edge" carries the three feTurbulence/feDisplacementMap
+  // numbers so the motion filter tears along the same seeded field. The scenes
+  // apply the shape to their framed element + a static offset accent echo — the
+  // still's geometry mirrored one-to-one.
+  frameShape: z.string().default(""),
+  frameRadius: z.string().default(""),
+  frameTornFreq: z.number().default(0),
+  frameTornScale: z.number().default(0),
+  frameTornSeed: z.number().default(0),
 });
 
 const brandSchema = z.object({
@@ -2184,10 +2197,135 @@ const LowerThirdScene: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
 };
 
 // Medal spotlight — symmetric, ring badge, radial glow.
+// E4 (Canva gap analysis) — shaped photo-frame parity helpers. The still
+// reshapes the windowed archetypes' photo well and pairs it with an offset
+// accent echo; these mirror that as STATIC geometry in the motion scenes, keyed
+// off the SAME numbers Python forwarded so the silhouette matches the still.
+// All are no-ops for rect / the lever absent, so unshaped cards are unchanged.
+// Per-card so a reel with several torn beats in one DOM never collides ids.
+function frameTornId(card: CardProps): string {
+  return `mh-frame-torn-motion-${card.frameTornSeed || 0}`;
+}
+
+export function hasFrameShape(card: CardProps): boolean {
+  const shape = (card.frameShape || "").toLowerCase();
+  return shape === "arch" || shape === "blob" || shape === "torn_edge";
+}
+
+export function frameClipStyle(card: CardProps): React.CSSProperties {
+  const shape = (card.frameShape || "").toLowerCase();
+  if (shape === "arch" || shape === "blob") {
+    return card.frameRadius ? { borderRadius: card.frameRadius } : {};
+  }
+  if (shape === "torn_edge") {
+    return { filter: `url(#${frameTornId(card)})` };
+  }
+  return {};
+}
+
+// The zero-size torn-edge filter, built from the exact feTurbulence /
+// feDisplacementMap numbers the still seeded (graphic_renderer.photo_frame),
+// so the motion tear runs along the identical noise field. Null unless torn.
+export const FrameTornDef: React.FC<{ card: CardProps }> = ({ card }) => {
+  if ((card.frameShape || "").toLowerCase() !== "torn_edge") return null;
+  return (
+    <svg width={0} height={0} style={{ position: "absolute" }} aria-hidden>
+      <filter
+        id={frameTornId(card)}
+        x="-12%"
+        y="-12%"
+        width="124%"
+        height="124%"
+        colorInterpolationFilters="sRGB"
+      >
+        <feTurbulence
+          type="fractalNoise"
+          baseFrequency={card.frameTornFreq || 0.03}
+          numOctaves={2}
+          seed={card.frameTornSeed || 0}
+          result="mh-frame-noise"
+        />
+        <feDisplacementMap
+          in="SourceGraphic"
+          in2="mh-frame-noise"
+          scale={card.frameTornScale || 14}
+          xChannelSelector="R"
+          yChannelSelector="G"
+        />
+      </filter>
+    </svg>
+  );
+};
+
+// The offset accent echo — the same shape in the accent role, shifted `off` px
+// down-right behind the framed element (which must sit in a position:relative
+// box). Rendered only for a real shape, so it never appears on rect cards.
+export const FrameEcho: React.FC<{
+  card: CardProps;
+  accent: string;
+  width: number | string;
+  height: number | string;
+  off: number;
+  left?: number;
+  top?: number;
+  zIndex?: number;
+}> = ({ card, accent, width, height, off, left = 0, top = 0, zIndex = -1 }) => {
+  if (!hasFrameShape(card)) return null;
+  return (
+    <div
+      style={{
+        position: "absolute",
+        left,
+        top,
+        width,
+        height,
+        background: accent,
+        transform: `translate(${off}px, ${off}px)`,
+        zIndex,
+        ...frameClipStyle(card),
+      }}
+    />
+  );
+};
+
 const SpotlightScene: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
   const { card, roles, anim, width, height, ts } = ctx;
   const ringSize = Math.round(Math.min(width, height) * 0.34);
   const place = placeDisplay(card.place || "");
+  const shaped = hasFrameShape(card);
+  const ringTransform = `scale(${0.8 + 0.2 * anim.heroOpacity}) translateY(${anim.heroY * 0.4}px)`;
+  // The ring badge is the spotlight's framed focal element; when the still
+  // shaped its photo window, mirror the same silhouette + offset echo onto it.
+  const ringChildren = (
+    <>
+      <div
+        style={{
+          fontSize: place ? ringSize * 0.34 : ringSize * 0.16,
+          fontWeight: 900,
+          color: roles.accent,
+          lineHeight: 1,
+          textTransform: "uppercase",
+          padding: `0 ${Math.round(18 * ts)}px`,
+        }}
+      >
+        {place || ctx.label}
+      </div>
+      {place ? (
+        <div
+          style={{
+            marginTop: Math.round(8 * ts),
+            fontSize: ringSize * 0.1,
+            fontWeight: 800,
+            letterSpacing: "0.2em",
+            color: roles.onGround,
+            textTransform: "uppercase",
+          }}
+        >
+          {ctx.label}
+        </div>
+      ) : null}
+    </>
+  );
   return (
     <>
       <PhotoLayer ctx={ctx} />
@@ -2214,48 +2352,60 @@ const SpotlightScene: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
           textAlign: "center",
         }}
       >
-        {/* Ring badge with the placing (only real data) or the label. */}
-        <div
-          style={{
-            width: ringSize,
-            height: ringSize,
-            borderRadius: "50%",
-            border: `${Math.max(5, Math.round(8 * ts))}px solid ${roles.accent}`,
-            display: "flex",
-            flexDirection: "column",
-            justifyContent: "center",
-            alignItems: "center",
-            transform: `scale(${0.8 + 0.2 * anim.heroOpacity}) translateY(${anim.heroY * 0.4}px)`,
-            opacity: anim.heroOpacity,
-          }}
-        >
+        {/* Ring badge with the placing (only real data) or the label. When the
+            still shaped this card's photo window, the ring mirrors the same
+            silhouette + offset accent echo (E4). */}
+        {shaped ? (
           <div
             style={{
-              fontSize: place ? ringSize * 0.34 : ringSize * 0.16,
-              fontWeight: 900,
-              color: roles.accent,
-              lineHeight: 1,
-              textTransform: "uppercase",
-              padding: `0 ${Math.round(18 * ts)}px`,
+              position: "relative",
+              width: ringSize,
+              height: ringSize,
+              transform: ringTransform,
+              opacity: anim.heroOpacity,
             }}
           >
-            {place || ctx.label}
-          </div>
-          {place ? (
+            <FrameTornDef card={card} />
+            <FrameEcho
+              card={card}
+              accent={roles.accent}
+              width={ringSize}
+              height={ringSize}
+              off={Math.round(12 * ts)}
+            />
             <div
               style={{
-                marginTop: Math.round(8 * ts),
-                fontSize: ringSize * 0.1,
-                fontWeight: 800,
-                letterSpacing: "0.2em",
-                color: roles.onGround,
-                textTransform: "uppercase",
+                position: "absolute",
+                inset: 0,
+                border: `${Math.max(5, Math.round(8 * ts))}px solid ${roles.accent}`,
+                display: "flex",
+                flexDirection: "column",
+                justifyContent: "center",
+                alignItems: "center",
+                ...frameClipStyle(card),
               }}
             >
-              {ctx.label}
+              {ringChildren}
             </div>
-          ) : null}
-        </div>
+          </div>
+        ) : (
+          <div
+            style={{
+              width: ringSize,
+              height: ringSize,
+              borderRadius: "50%",
+              border: `${Math.max(5, Math.round(8 * ts))}px solid ${roles.accent}`,
+              display: "flex",
+              flexDirection: "column",
+              justifyContent: "center",
+              alignItems: "center",
+              transform: ringTransform,
+              opacity: anim.heroOpacity,
+            }}
+          >
+            {ringChildren}
+          </div>
+        )}
 
         <KineticLine
           text={ctx.surnameText}

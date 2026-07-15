@@ -71,6 +71,11 @@ const defaultCard = {
   captionsJson: "",
   inReel: false,
   meshBg: "",
+  frameShape: "",
+  frameRadius: "",
+  frameTornFreq: 0,
+  frameTornScale: 0,
+  frameTornSeed: 0,
 };
 
 export const RemotionRoot: React.FC = () => {

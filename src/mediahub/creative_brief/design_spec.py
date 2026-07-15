@@ -127,6 +127,16 @@ PHOTO_TREATMENTS: tuple[str, ...] = (
     "sticker",
 )
 
+# E4 (Canva gap analysis) — the shaped photo-frame the director may request on
+# the three windowed-photo archetypes (photo_passepartout / spotlight_disc /
+# full_height_portrait_split). "rect" is the raw rectangular window (the
+# default, byte-identical to the pre-lever render); the others reshape the photo
+# window and pair it with an offset accent echo. Executed still-side by
+# ``render._photo_frame_shape_assets`` and mirrored as static geometry in the
+# motion scenes (``StoryCard.tsx`` + ``sprint/scenes``). Kept identical to
+# ``graphic_renderer.photo_frame.PHOTO_FRAME_SHAPES`` by ``tests/test_photo_frame.py``.
+PHOTO_FRAME_SHAPES: tuple[str, ...] = ("rect", "arch", "blob", "torn_edge")
+
 LOGO_LOCKUPS: tuple[str, ...] = (
     "full_horizontal",
     "full_stacked",
@@ -210,6 +220,7 @@ DEFAULT_CROP_INTENT = "centered"
 DEFAULT_HERO_STAT = "final_time"
 DEFAULT_ACCENT_TREATMENT = "minimal"
 DEFAULT_PHOTO_TREATMENT = "cutout"
+DEFAULT_PHOTO_FRAME_SHAPE = "rect"
 DEFAULT_LOGO_LOCKUP = "icon"
 DEFAULT_MOOD = "neutral"
 DEFAULT_MOTION_INTENT = "fade_in"
@@ -269,6 +280,10 @@ class DesignSpec:
     # default) asks for no grade, so an older spec dict without the field
     # normalises to a byte-identical card.
     photo_treatment: str = DEFAULT_PHOTO_TREATMENT
+    # E4 — the shaped photo frame for the windowed archetypes (PHOTO_FRAME_SHAPES).
+    # "rect" (the default) is the raw rectangular window, so an older spec dict
+    # without the field normalises to a byte-identical card.
+    photo_frame_shape: str = DEFAULT_PHOTO_FRAME_SHAPE
     # 1.9 — per-slot text effects as a hashable, sorted (slot, effect) tuple.
     # Only non-"none" effects on known slots survive ``normalise``; an empty
     # tuple (the default) means the card carries no effects and renders
@@ -295,6 +310,7 @@ class DesignSpec:
             "motion_intent": self.motion_intent,
             "rationale": self.rationale,
             "photo_treatment": self.photo_treatment,
+            "photo_frame_shape": self.photo_frame_shape,
             "text_effects": self.text_effects_map(),
         }
 
@@ -440,6 +456,9 @@ def normalise(raw: dict, *, archetypes: list[str], token_roles: list[str]) -> De
         photo_treatment=_coerce_enum(
             data.get("photo_treatment"), PHOTO_TREATMENTS, DEFAULT_PHOTO_TREATMENT
         ),
+        photo_frame_shape=_coerce_enum(
+            data.get("photo_frame_shape"), PHOTO_FRAME_SHAPES, DEFAULT_PHOTO_FRAME_SHAPE
+        ),
         text_effects=_coerce_text_effects(data.get("text_effects")),
     )
 
@@ -491,6 +510,7 @@ def design_spec_json_schema(*, archetypes: list[str], token_roles: list[str]) ->
             "motion_intent": {"type": "string", "enum": list(MOTION_INTENTS)},
             "rationale": {"type": "string", "maxLength": MAX_RATIONALE_LEN},
             "photo_treatment": {"type": "string", "enum": list(PHOTO_TREATMENTS)},
+            "photo_frame_shape": {"type": "string", "enum": list(PHOTO_FRAME_SHAPES)},
             "text_effects": {
                 "type": "object",
                 "additionalProperties": False,
@@ -514,6 +534,7 @@ def design_spec_json_schema(*, archetypes: list[str], token_roles: list[str]) ->
             "motion_intent",
             "rationale",
             "photo_treatment",
+            "photo_frame_shape",
             "text_effects",
         ],
     }
@@ -530,6 +551,7 @@ __all__ = [
     "STAT_KEYS",
     "ACCENT_TREATMENTS",
     "PHOTO_TREATMENTS",
+    "PHOTO_FRAME_SHAPES",
     "LOGO_LOCKUPS",
     "MOODS",
     "MOTION_INTENTS",
@@ -541,6 +563,7 @@ __all__ = [
     "DEFAULT_HERO_STAT",
     "DEFAULT_ACCENT_TREATMENT",
     "DEFAULT_PHOTO_TREATMENT",
+    "DEFAULT_PHOTO_FRAME_SHAPE",
     "DEFAULT_LOGO_LOCKUP",
     "DEFAULT_MOOD",
     "DEFAULT_MOTION_INTENT",

@@ -745,6 +745,51 @@ def _pb_bars_for_brief(brief: Optional[dict]) -> Optional[dict]:
     return {"prev": prev_str, "now": new_str, "nowPct": round(new_pct, 1), "caption": caption}
 
 
+def _photo_frame_shape_mirror_props(brief: Optional[dict]) -> dict:
+    """E4 parity — the shaped photo frame the still painted, as motion props.
+
+    Returns ``{}`` for ``rect`` / the lever absent / an archetype the still
+    doesn't shape, so those cards keep a byte-identical prop dict (and cache
+    key). Otherwise forwards the shape token plus the EXACT geometry the still
+    computed from the same seeded card key (``render._photo_frame_shape_card_key``
+    + ``graphic_renderer.photo_frame``): the ``border-radius`` string for
+    ``arch``/``blob``, or the three ``feTurbulence``/``feDisplacementMap``
+    numbers for ``torn_edge`` — so the motion scene renders the identical
+    silhouette the reviewer approved on the still.
+    """
+    b = brief if isinstance(brief, dict) else {}
+    archetype = str(b.get("layout_template") or "")
+    try:
+        from mediahub.graphic_renderer import photo_frame as _pf
+        from mediahub.graphic_renderer.render import (
+            _WINDOWED_SHAPE_ARCHETYPES,
+            _photo_frame_shape_card_key,
+        )
+    except Exception:
+        return {}
+    shape = str(b.get("photo_frame_shape") or "").strip().lower()
+    if archetype not in _WINDOWED_SHAPE_ARCHETYPES or shape in ("", "rect"):
+        return {}
+    if shape not in _pf.PHOTO_FRAME_SHAPES:
+        return {}
+
+    class _B:  # a tiny attr view so the still's key helper reads the dict brief
+        content_item_id = str(b.get("content_item_id") or "")
+        id = str(b.get("id") or "")
+        text_layers = b.get("text_layers") if isinstance(b.get("text_layers"), dict) else {}
+
+    card_key = _photo_frame_shape_card_key(_B(), archetype)
+    props: dict = {"frameShape": shape}
+    if shape == "torn_edge":
+        freq, scale, seed = _pf.torn_params(card_key)
+        props["frameTornFreq"] = float(freq)
+        props["frameTornScale"] = float(scale)
+        props["frameTornSeed"] = int(seed)
+    else:
+        props["frameRadius"] = _pf.frame_radius(shape, card_key)
+    return props
+
+
 def _stat_ink_for_brief(brief: Optional[dict], root_vars: dict[str, str]) -> str:
     """The resolved hex of the ink var the still's chip row / PB bars use for
     this archetype (``--mh-on-surface`` or ``--mh-on-primary``), or ``""``."""
@@ -1135,6 +1180,10 @@ def _card_to_props(
         props["photoScale"] = crop_scale
     # M10 true-brand duotone / real halftone parameters (exact still mirror).
     props.update(_photo_treatment_mirror_props(b, root_vars, bool(photo_uri)))
+    # E4 shaped photo frame (arch / blob / torn_edge) — the exact seeded geometry
+    # the still painted, so the reel's window silhouette matches its still. {}
+    # for rect / other archetypes → byte-identical props + cache key.
+    props.update(_photo_frame_shape_mirror_props(b))
     # M11 data weight: secondary-stat chips + honest proportional PB bars for
     # the data-led archetypes, with the exact ink hex the still's bay uses.
     stat_chips = _stat_chips_for_brief(b)
@@ -1239,6 +1288,7 @@ def _card_manifest_axes(card_props: dict) -> dict:
         "has_footage": bool(card_props.get("videoSrc")),
         "photo_mode": card_props.get("photoMode") or "",
         "photo_focus": card_props.get("photoPos") or "",
+        "frame_shape": card_props.get("frameShape") or "",
         "hero_stat": card_props.get("heroStat") or "",
         "stat_chips": len(card_props.get("statChips") or []),
         "has_pb_bars": bool(card_props.get("pbBars")),
