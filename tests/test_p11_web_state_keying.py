@@ -227,12 +227,14 @@ def _review_html(env, run_id):
 
 
 def _row_status(html, card_id):
-    """data-status for the .ach-row whose checkbox value is exactly card_id."""
+    """data-status for the .ach-row whose row identity (the inspect button's
+    data-card-id, i.e. the unique ~n id) is exactly card_id."""
+    marker = f'data-card-id="{card_id}"'
     for m in re.finditer(r'<div class="ach-row"[^>]*data-status="([^"]*)"[^>]*>', html):
         s = m.start()
         end = html.find('<div class="ach-row"', s + 10)
         chunk = html[s : end if end > 0 else len(html)]
-        if f'name="card_ids" value="{card_id}"' in chunk:
+        if marker in chunk:
             return m.group(1)
     raise AssertionError(f"no .ach-row for card_id={card_id!r}")
 
@@ -241,8 +243,20 @@ class TestReviewDuplicateSwimIds:
     def test_twins_get_distinct_card_ids(self, env):
         run_id = env["make_run"]([("dup", "Ada Lovelace", 25), ("dup", "Ada Lovelace", 25)])
         html = _review_html(env, run_id)
-        assert 'name="card_ids" value="dup"' in html
-        assert 'name="card_ids" value="dup~2"' in html
+        # Row identity (workflow state) is the unique ~n id.
+        assert 'data-card-id="dup"' in html
+        assert 'data-card-id="dup~2"' in html
+
+    def test_bulk_select_checkbox_carries_resolvable_base_id(self, env):
+        """The bulk-select checkbox feeds the BULK approve route, whose consent
+        gate resolves on the base swim_id — so a twin's checkbox must carry the
+        base id (never a ~n id the bulk consent gate can't resolve)."""
+        run_id = env["make_run"]([("dup", "Ada Lovelace", 25), ("dup", "Ada Lovelace", 25)])
+        html = _review_html(env, run_id)
+        # Both twins' checkboxes carry the resolvable base id...
+        assert html.count('name="card_ids" value="dup"') == 2
+        # ...never the ~n id (which the bulk consent gate can't resolve).
+        assert 'name="card_ids" value="dup~2"' not in html
 
     def test_approve_one_twin_does_not_flip_the_other(self, env):
         from mediahub.workflow.status import CardStatus

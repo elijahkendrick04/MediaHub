@@ -35342,13 +35342,18 @@ def create_app() -> Flask:
 
             # V7: workflow state for this card.
             # F11: ``card_id_raw`` is this row's UNIQUE identity (the ~n-deduped
-            # id) — it keys the workflow state (approve/reject/caption-edit),
+            # id) — it keys the workflow state (approve/reject/caption-edit via
+            # the in-app /api/workflow route, which base-gates consent),
             # reactions, the row's DOM id and the inspector's data-card-id, so a
-            # duplicate swim_id's twin decides independently. The render/preview
-            # routes (graphic/caption/thumb, resolved by the shared recognition
-            # report) key on the bare swim_id via ``_render_card_id`` so the
-            # twin still resolves a graphic. For a non-duplicate row the two are
-            # identical, so every URL + attribute is byte-identical to before.
+            # duplicate swim_id's twin decides independently. ``_render_card_id``
+            # is the bare swim_id, used for (a) the render/preview routes
+            # (graphic/caption/thumb, resolved against the shared recognition
+            # report) so the twin still resolves, and (b) the bulk-select
+            # checkbox, whose ids flow to the BULK approve route whose consent
+            # gate resolves on the base swim_id — emitting a ~n id there would
+            # let a consent-blocked twin slip past. For a non-duplicate row the
+            # two ids are identical, so every URL + attribute is byte-identical
+            # to before.
             card_id_raw = _card_ids[_why_idx]
             _render_card_id = a.get("swim_id", "")
             wf_state = _wf_states.get(card_id_raw)
@@ -35450,7 +35455,7 @@ def create_app() -> Flask:
             ach_rows_html_wf += f"""
 <div class="ach-row" data-type="{a.get("type", "")}" data-conf="{conf_label}" data-swimmer="{_h(a.get("swimmer_name", ""))}" data-event="{_h(a.get("event", ""))}" data-band="{band}" data-post="{ra.get("suggested_post_type", "")}" data-status="{wf_status}" data-status-initial="{wf_status}">
   <div style="display:flex;align-items:flex-start;gap:14px;padding:14px 0;border-bottom:1px solid var(--border)">
-    <label class="mh-row-check-wrap" title="Select card"><input type="checkbox" class="mh-row-check" name="card_ids" value="{_h(card_id_raw)}" aria-label="Select this card"></label>
+    <label class="mh-row-check-wrap" title="Select card"><input type="checkbox" class="mh-row-check" name="card_ids" value="{_h(_render_card_id)}" aria-label="Select this card"></label>
     <div style="min-width:28px;text-align:center;color:var(--ink-muted);font-size:13px;padding-top:2px">#{rank}</div>
     <div class="mh-thumb-wrap" style="flex:0 0 76px">
       <img class="mh-card-thumb" data-thumb-src="{_h(_thumb_url)}" alt=""
@@ -48295,7 +48300,7 @@ what you're doing, what they should do.</p>
                 _missing_btns = ""
                 for _nm, _cid in _missing[:12]:
                     _first = _h(_nm.split(" ")[0])
-                    _cuid = str(_cid).replace(":", "_").replace(",", "_")
+                    _cuid = _dom_card_uuid(_cid)
                     _photo_url = url_for("api_card_photo_upload", run_id=run_id, card_id=_cid)
                     _create_url = url_for("api_create_graphic", run_id=run_id, card_id=_cid)
                     _oc = _h(
