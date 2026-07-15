@@ -38,6 +38,13 @@ class BrandKit:
     # ``brand.design_tokens`` surfaces it as the profile's "type" block.
     type_pairing: Optional[dict] = None
 
+    # C10 (Canva gap analysis) — operator opt-in for the derived companion accent.
+    # A one-/two-colour club can let the renderer complete its palette with a
+    # hue-arithmetic complementary accent (``theming.companion``). OFF by default
+    # (and env ``MEDIAHUB_DERIVED_ACCENT`` is the global equivalent), because it
+    # introduces a hue the club did not upload — a deliberate, per-club choice.
+    allow_derived_accent: bool = False
+
     # ---- factory ----
 
     @classmethod

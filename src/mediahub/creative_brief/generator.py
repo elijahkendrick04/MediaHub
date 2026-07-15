@@ -516,8 +516,12 @@ def generate(
             else 0,
         )
     else:
+        # C6 (Canva gap analysis): gate the seed walk so it only lands on
+        # colour-role permutations that clear the APCA gate — never on a
+        # colourway the renderer would have to bounce. Byte-identical for kits
+        # whose permutations are all legible (the common case).
         palette = _apply_palette_seed(
-            base_primary, base_secondary, base_accent, variation_seed or 0
+            base_primary, base_secondary, base_accent, variation_seed or 0, gate=True
         )
 
     # Brand / sponsor instructions
@@ -1273,7 +1277,44 @@ _PALETTE_PERMUTATIONS: list[tuple[int, int, int]] = [
 ]
 
 
-def _apply_palette_seed(primary: str, secondary: str, accent: str, seed: int) -> dict[str, str]:
+def _permutation_is_legible(colors: tuple[str, str, str], perm: tuple[int, int, int]) -> bool:
+    """True when a permutation's ground/accent pair clears the APCA gate both ways.
+
+    C6 (Canva gap analysis): the permuted accent must read as a kicker on the
+    permuted ground AND as a chip behind ground-coloured text — the same
+    two-direction test the renderer's accent repair uses. A gate import failure
+    (or a non-hex colour) is treated as legible so gating never *removes* a
+    permutation the renderer could still handle.
+    """
+    p_idx, _s_idx, a_idx = perm
+    ground, accent = colors[p_idx], colors[a_idx]
+    try:
+        from mediahub.quality.compliance import is_legible
+
+        return is_legible(accent, ground) and is_legible(ground, accent)
+    except Exception:
+        return True
+
+
+def gate_surviving_seeds(primary: str, secondary: str, accent: str) -> list[int]:
+    """The 1-based seeds whose colour-role permutation clears the APCA gate (C6).
+
+    Deterministic and order-preserving over ``_PALETTE_PERMUTATIONS``. Used to
+    remap the seed walk onto only the legible permutations, so a seed never lands
+    on a colourway the gate would bounce. Empty only if EVERY permutation fails
+    (a pathological all-illegible kit) — the caller then keeps the raw seed.
+    """
+    colors = (primary, secondary, accent)
+    return [
+        i + 1
+        for i, perm in enumerate(_PALETTE_PERMUTATIONS)
+        if _permutation_is_legible(colors, perm)
+    ]
+
+
+def _apply_palette_seed(
+    primary: str, secondary: str, accent: str, seed: int, *, gate: bool = False
+) -> dict[str, str]:
     """Permute role assignments based on the seed.
 
     The actual hex values come from the club's BrandKit and are NEVER
@@ -1283,9 +1324,20 @@ def _apply_palette_seed(primary: str, secondary: str, accent: str, seed: int) ->
     integer maps to a consistent visual permutation.
 
     seed == 0 -> identity (legacy default).
+
+    ``gate=True`` (C6) remaps the seed onto only the gate-surviving permutations
+    (:func:`gate_surviving_seeds`) so a seed can never select an illegible
+    colourway. When every permutation survives — the common case, and every
+    single-/two-colour legible kit — the survivor list is the full list and the
+    mapping is byte-identical to the ungated walk, preserving the legacy seed
+    contract; only a kit with a genuinely illegible permutation is remapped.
     """
     if seed <= 0:
         return {"primary": primary, "secondary": secondary, "accent": accent}
+    if gate:
+        survivors = gate_surviving_seeds(primary, secondary, accent)
+        if survivors:
+            seed = survivors[(seed - 1) % len(survivors)]
     colors = (primary, secondary, accent)
     p_idx, s_idx, a_idx = _PALETTE_PERMUTATIONS[(seed - 1) % len(_PALETTE_PERMUTATIONS)]
     return {

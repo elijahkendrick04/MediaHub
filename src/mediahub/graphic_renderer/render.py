@@ -43,7 +43,7 @@ from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Iterator, Optional
+from typing import Any, Iterator, NamedTuple, Optional
 
 from . import render_cache as _render_cache
 from .sprint_hooks import RenderHookCtx as _RenderHookCtx
@@ -3604,6 +3604,66 @@ def _legible_accent(primary: str) -> str:
     return "#FFFFFF" if dark else "#0B0B0C"  # last resort: maximum contrast
 
 
+def _derived_accent_enabled(brand_kit) -> bool:
+    """True when the operator has opted into the C10 derived companion accent.
+
+    Per-club via the BrandKit ``allow_derived_accent`` flag, or globally via the
+    ``MEDIAHUB_DERIVED_ACCENT`` env switch. Default OFF — a derived accent
+    introduces a hue the club never uploaded, so it is always an explicit choice.
+    """
+    if os.environ.get("MEDIAHUB_DERIVED_ACCENT", "").strip().lower() in ("1", "true", "yes", "on"):
+        return True
+    return bool(getattr(brand_kit, "allow_derived_accent", False))
+
+
+def _companion_accent_for(primary: str, brand_kit, *extra_colours: str):
+    """The C10 hue-arithmetic companion accent for a thin palette, or ``None``.
+
+    Gated behind the operator opt-in (:func:`_derived_accent_enabled`). Every
+    other brand-adjacent colour (the resolved secondary and the brief-palette
+    accent) is fed to ``theming.companion.derive_companion_accent`` so its
+    brandability + distinctness gate returns ``None`` for any club that actually
+    has a second brand colour — the companion only ever fires for a genuinely
+    one-colour club that opted in. Deterministic; never raises.
+    """
+    if not _derived_accent_enabled(brand_kit):
+        return None
+    try:
+        from mediahub.theming.companion import derive_companion_accent
+
+        return derive_companion_accent(primary, [c for c in extra_colours if c])
+    except Exception:
+        return None
+
+
+def _companion_accent_note(brief, brand_kit) -> str:
+    """The explainability note when a C10 companion accent was actually painted.
+
+    Re-runs the exact accent-resolution decision ``_mh_role_vars`` makes and
+    returns the companion's provenance only when it genuinely filled the accent
+    (opt-in on, no real accent, secondary illegible, thin palette, no medal tint
+    overriding). ``""`` otherwise, so a non-derived card records nothing.
+    """
+    if not _derived_accent_enabled(brand_kit) or _detect_medal_tier(brief):
+        return ""
+    palette = dict(getattr(brief, "palette", None) or {})
+    primary = getattr(brand_kit, "primary_colour", None) if brand_kit is not None else None
+    if not _is_brand_hex(primary):
+        primary = palette.get("primary")
+    if not _is_brand_hex(primary):
+        return ""
+    # A real brand-kit accent always wins — the companion never fired.
+    if _is_brand_hex(getattr(brand_kit, "accent_colour", None) if brand_kit is not None else None):
+        return ""
+    secondary = getattr(brand_kit, "secondary_colour", None) if brand_kit is not None else None
+    if not _is_brand_hex(secondary):
+        secondary = palette.get("secondary")
+    if not _is_brand_hex(secondary):
+        secondary = darken(primary, 0.40)
+    companion = _companion_accent_for(primary, brand_kit, secondary, palette.get("accent"))
+    return f"accent {companion.hex} — {companion.provenance}" if companion is not None else ""
+
+
 def _fit_one_line_px(
     text: str,
     box_w: float,
@@ -3714,7 +3774,18 @@ def _mh_role_vars(palette: dict, brand_kit=None) -> dict[str, str]:
     # Without this, a single-colour kit (accent=None, secondary=#000000 by the
     # BrandKit default) collapses the accent to black and hides the result time.
     if not _is_brand_hex(accent):
-        accent = palette.get("accent")
+        # C10: for a genuinely thin palette AND the operator opt-in, a
+        # hue-arithmetic complementary companion (a real second colour, not the
+        # synthetic white/tint fallback) fills the accent. The resolved secondary
+        # and the brief-palette accent feed its thinness gate, so a club that has
+        # a second brand colour keeps it (the companion returns None). Off by
+        # default, so this whole branch is byte-identical to before.
+        palette_accent = palette.get("accent")
+        companion = _companion_accent_for(primary, brand_kit, secondary, palette_accent)
+        if companion is not None:
+            accent = companion.hex
+        elif _is_brand_hex(palette_accent):
+            accent = palette_accent
     if not _is_brand_hex(accent):
         from mediahub.quality.compliance import is_legible
 
@@ -4385,7 +4456,200 @@ def _apply_role_assignment(root_vars: dict[str, str], assignment: dict) -> dict[
     cand["--mh-outline"] = (
         "rgba(255,255,255,0.20)" if cand["--mh-on-primary"] == "#FFFFFF" else "rgba(0,0,0,0.20)"
     )
-    return cand if check_roles(cand).passes else root_vars
+    report = check_roles(cand)
+    if report.passes:
+        return cand
+    # C6 (Canva gap analysis) — per-slot contrast repair. Rather than discard the
+    # whole art direction because one pair is illegible, step ONLY the failing
+    # slot(s) through tonal blends of the SAME assigned colour toward legibility
+    # (Canva "automatically adjusts text colours to keep them readable"). Ship the
+    # repaired set only if it now clears the full gate; otherwise fall back to the
+    # brand-safe baseline exactly as before (legibility still beats art direction).
+    repaired = _repair_failing_slots(cand, report.failures)
+    if check_roles(repaired).passes:
+        repaired["--mh-repair-note"] = "repaired-" + "+".join(sorted(set(report.failures)))
+        return repaired
+    return root_vars
+
+
+# C6 — the text/background pair each scored failure implicates, and how to repair
+# it: a text pair nudges its INK toward the guaranteed-legible on-colour; the two
+# accent pairs nudge the ACCENT away from the ground until it reads both as text
+# on the ground and as a chip behind ground-coloured text.
+def _repair_text_on(text: str, bg: str) -> str:
+    """Step ``text`` toward the guaranteed-legible ink for ``bg`` until it reads.
+
+    Blends in eighths (the same 1/8 ladder as ``gradient_mesh._legible_floor``),
+    preserving as much of the assigned hue as legibility allows. Deterministic.
+    """
+    from mediahub.quality.compliance import is_legible
+
+    if not (_is_brand_hex(text) and _is_brand_hex(bg)):
+        return text
+    if is_legible(text, bg):
+        return text
+    anchor = _on_color(bg)
+    for i in range(1, 9):
+        cand = _mix_hex(text, anchor, i / 8.0)
+        if is_legible(cand, bg):
+            return cand
+    return anchor
+
+
+def _repair_accent_on(accent: str, ground: str) -> str:
+    """Step ``accent`` toward its legible pole until it reads BOTH ways on ``ground``.
+
+    Mirrors ``_legible_accent``'s two-direction test (kicker text on the ground
+    AND the result chip behind ground-coloured text), but preserves the director's
+    assigned accent hue instead of re-deriving from the primary. Deterministic.
+    """
+    from mediahub.quality.compliance import is_legible
+
+    if not (_is_brand_hex(accent) and _is_brand_hex(ground)):
+        return accent
+    if is_legible(accent, ground) and is_legible(ground, accent):
+        return accent
+    pole = "#FFFFFF" if _rel_luminance(ground) < 0.45 else "#0B0B0C"
+    for i in range(1, 9):
+        cand = _mix_hex(accent, pole, i / 8.0)
+        if is_legible(cand, ground) and is_legible(ground, cand):
+            return cand
+    return pole
+
+
+def _repair_failing_slots(cand: dict[str, str], failures: list[str]) -> dict[str, str]:
+    """Return a copy of ``cand`` with each failing scored pair's slot repaired (C6)."""
+    repaired = dict(cand)
+    for pair in failures:
+        if pair == "name_on_ground":
+            repaired["--mh-on-primary"] = _repair_text_on(
+                repaired["--mh-on-primary"], repaired["--mh-primary"]
+            )
+        elif pair == "text_on_surface":
+            repaired["--mh-on-surface"] = _repair_text_on(
+                repaired["--mh-on-surface"], repaired["--mh-surface"]
+            )
+        elif pair in ("accent_on_ground", "chip_text_on_accent"):
+            repaired["--mh-accent"] = _repair_accent_on(
+                repaired["--mh-accent"], repaired["--mh-primary"]
+            )
+    # The headline ink may have moved — re-pick the hairline outline pole from
+    # the (unchanged) ground luminance so it still separates from the surface.
+    repaired["--mh-outline"] = (
+        "rgba(255,255,255,0.20)"
+        if _rel_luminance(repaired["--mh-primary"]) <= 0.42
+        else "rgba(0,0,0,0.20)"
+    )
+    return repaired
+
+
+# ---------------------------------------------------------------------------
+# C1 + C9 (Canva gap analysis) — the tonal-container bridge + mood tone table
+# ---------------------------------------------------------------------------
+# C1 pulls Material-style container / raised / accent-container tones out of the
+# brand seed (via ``theming.palette.tonal_pick``, the same HCT engine
+# ``derive_palette`` runs) so layouts can build container/lift layering from one
+# colour instead of a single flat fill. C9 lets the card's MOOD move ONLY those
+# derived tones (surface tone offset, accent-container chroma, plus scrim/mesh
+# hints) — the confirmed brand hexes never shift, every moved tone is re-gated,
+# and a neutral / absent / minimal mood is byte-identical to the C1-only output.
+
+
+class _MoodTonePlan(NamedTuple):
+    surface_tone_delta: int  # tone steps added to the container base tone
+    accent_chroma_mult: float  # multiplier on the accent-container chroma
+    scrim_alpha: Optional[float]  # photo-scrim alpha hint (None → not emitted)
+    mesh_intensity: Optional[float]  # gradient-mesh intensity hint (None → not emitted)
+
+
+# Identity plan — no derived tone moves. neutral / minimal / unknown resolve here,
+# so those cards keep the exact C1-only tokens (byte-identical rendered output).
+_MOOD_IDENTITY = _MoodTonePlan(0, 1.0, None, None)
+
+# The 12 design_spec.MOODS → derived-tone offsets. Pinned by
+# ``tests/test_canva_gap_upgrades.py::test_mood_tone_table_matches_moods``.
+_MOOD_TONE_PLANS: dict[str, _MoodTonePlan] = {
+    "neutral": _MOOD_IDENTITY,
+    "minimal": _MOOD_IDENTITY,  # dossier: "minimal pins everything at baseline"
+    "explosive": _MoodTonePlan(4, 1.15, 0.42, 0.90),
+    "electric": _MoodTonePlan(3, 1.12, 0.40, 0.85),
+    "calm": _MoodTonePlan(-3, 0.85, 0.30, 0.40),
+    "fierce": _MoodTonePlan(2, 1.10, 0.48, 0.70),
+    "celebratory": _MoodTonePlan(5, 1.15, 0.38, 0.95),  # lifts surface, raises mesh
+    "stoic": _MoodTonePlan(-8, 0.75, 0.32, 0.30),  # drops surface, mutes container
+    "precise": _MoodTonePlan(0, 0.95, 0.34, 0.50),
+    "warm": _MoodTonePlan(2, 1.05, 0.36, 0.60),
+    "bold": _MoodTonePlan(3, 1.18, 0.44, 0.80),
+    "triumphant": _MoodTonePlan(5, 1.12, 0.40, 0.90),
+}
+
+
+def _mood_tone_plan(mood: str) -> _MoodTonePlan:
+    """Resolve a brief's free-text mood to its derived-tone plan (C9).
+
+    ``brief.mood`` is one or two words; the first recognised MOODS token wins.
+    Anything unrecognised (or empty) falls to the identity plan so the card is
+    byte-identical to the C1-only output.
+    """
+    for word in (mood or "").lower().split():
+        plan = _MOOD_TONE_PLANS.get(word)
+        if plan is not None:
+            return plan
+    return _MOOD_IDENTITY
+
+
+def _bridge_tonal_tokens(root_vars: dict[str, str], plan: _MoodTonePlan) -> dict[str, str]:
+    """Emit the C1 container / raised / accent-container tokens (C9 mood-shifted).
+
+    Fixed-tone-distance picks off the FINAL resolved roles, each re-verified
+    through the APCA gate with a fall-back to the existing tokens so a pairing
+    that can't clear the gate degrades to the flat baseline. Returns only the new
+    tokens (the caller merges them); an unparseable primary/accent yields ``{}``
+    so nothing changes.
+    """
+    primary = root_vars.get("--mh-primary")
+    accent = root_vars.get("--mh-accent")
+    if not (_is_brand_hex(primary) and _is_brand_hex(accent)):
+        return {}
+    from mediahub.theming.palette import tonal_pick
+    from mediahub.quality.compliance import is_legible
+
+    dark = _rel_luminance(primary) <= 0.42
+    d = plan.surface_tone_delta
+    if dark:
+        container_tone, raised_tone, ac_tone, on_ac_tone = 20 + d, 25 + d, 30, 90
+    else:
+        container_tone, raised_tone, ac_tone, on_ac_tone = 90 + d, 94 + d, 90, 10
+
+    # The surface family carries surface ink; the fixed tone distance keeps it
+    # legible by construction, but re-gate and fall back to --mh-surface-2 anyway.
+    surf_ink = root_vars.get("--mh-on-surface") or _on_color(root_vars.get("--mh-surface", primary))
+    surface_2 = root_vars.get("--mh-surface-2") or darken(primary, 0.30)
+    container = tonal_pick(primary, container_tone)
+    if not (_is_brand_hex(surf_ink) and is_legible(surf_ink, container)):
+        container = surface_2
+    raised = tonal_pick(primary, raised_tone)
+    if not (_is_brand_hex(surf_ink) and is_legible(surf_ink, raised)):
+        raised = container
+
+    ac = tonal_pick(accent, ac_tone, chroma_scale=plan.accent_chroma_mult)
+    on_ac = tonal_pick(accent, on_ac_tone)
+    if not (_is_brand_hex(on_ac) and is_legible(on_ac, ac)):
+        ac, on_ac = accent, _on_color(accent)
+
+    out = {
+        "--mh-surface-container": container,
+        "--mh-surface-raised": raised,
+        "--mh-accent-container": ac,
+        "--mh-on-accent-container": on_ac,
+    }
+    # C9 mood-only hints: emitted ONLY when the mood moves them, so a neutral /
+    # absent / minimal mood keeps the C1-only token set (byte-identical output).
+    if plan.scrim_alpha is not None:
+        out["--mh-scrim-alpha"] = f"{plan.scrim_alpha:.2f}"
+    if plan.mesh_intensity is not None:
+        out["--mh-mesh-intensity"] = f"{plan.mesh_intensity:.2f}"
+    return out
 
 
 def resolved_role_vars_for_brief(brief, brand_kit=None) -> dict[str, str]:
@@ -4409,6 +4673,16 @@ def resolved_role_vars_for_brief(brief, brand_kit=None) -> dict[str, str]:
             if is_legible(metal, ground) and is_legible(ground, metal):
                 root_vars = {**root_vars, "--mh-accent": metal}
                 break
+    # C1 + C9 (Canva gap analysis) — bridge the tonal engine onto the FINAL
+    # resolved roles: Material-style container / raised / accent-container tones,
+    # optionally mood-shifted (only DERIVED tones move; the confirmed brand hexes
+    # never shift). Emitted here so both the still fill AND the motion role
+    # forwarding pick them up from one resolver. Byte-identical rendered output
+    # for archetypes that don't consume the tokens (an unused CSS var paints
+    # nothing) and for a neutral / absent mood.
+    root_vars.update(
+        _bridge_tonal_tokens(root_vars, _mood_tone_plan(getattr(brief, "mood", "") or ""))
+    )
     return root_vars
 
 
@@ -5473,6 +5747,12 @@ def render_brief(
     # so the reason rides the visual's trace — never a silent substitution.
     if _cutout_note:
         _safety_notes.append(_cutout_note)
+
+    # C10 explainability: when the accent is a derived companion (a hue the club
+    # never uploaded), the decision trace must say so and name its provenance.
+    _companion_note = _companion_accent_note(brief, brand_kit)
+    if _companion_note:
+        _safety_notes.append(_companion_note)
 
     visual = GeneratedVisual(
         id=visual_id,

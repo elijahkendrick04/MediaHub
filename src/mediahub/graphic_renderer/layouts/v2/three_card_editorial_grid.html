@@ -72,7 +72,10 @@
 .tg__card {
   flex: 1 1 0; min-width: 0;
   display: flex; flex-direction: column;
-  background: var(--mh-surface); color: var(--mh-on-surface);
+  /* C1: the tonal surface-container gives these panels a lit, tinted step off
+     the ground (Canva's container layering) instead of one flat deep surface;
+     falls back to --mh-surface for any brief where the token is absent. */
+  background: var(--mh-surface-container, var(--mh-surface)); color: var(--mh-on-surface);
   border-radius: 18px; padding: 34px 28px;
   overflow: hidden;
 }
