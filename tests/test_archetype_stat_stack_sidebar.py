@@ -40,6 +40,8 @@ _ALLOWED = {
     "BASE_CSS",
     # M11 — secondary-stat chip row (collapses to "" when undirected).
     "STAT_CHIPS",
+    # F7 — the seeded overlap accent straddling a declared mh-anchor edge.
+    "OVERLAP_ACCENT",
 }
 
 
