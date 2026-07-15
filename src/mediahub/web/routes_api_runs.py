@@ -2014,6 +2014,15 @@ def api_turn_into_edit_caption(run_id, pack_id):
     """
     from mediahub.turn_into import load_pack, save_pack
 
+    # Editing a persisted pack caption is an edit-class action — gate it the
+    # same way every sibling caption-mutating route does (api_card_translate,
+    # api_card_revisions_restore, api_card_locks POST), so a narrowed
+    # Viewer/Reviewer seat in the owning org can't rewrite pack captions here
+    # when it can't anywhere else.
+    denied = W._role_denied_json(W._perms.CAP_EDIT, run_id)
+    if denied:
+        return denied
+
     base = W.DATA_DIR / "turn_into_packs"
     pack = load_pack(run_id, pack_id, base_dir=base)
     if pack is None:
@@ -2148,7 +2157,12 @@ def api_card_photo_upload(run_id: str, card_id: str):
             try:
                 run_data = json.loads(run_json.read_text())
             except Exception as e:
-                return jsonify({"error": f"run_load_failed: {e}"}), 500
+                # A corrupt run file must not leak its existence (or the raw
+                # exception text) to a caller that has not passed the tenant
+                # gate below: answer exactly like a missing run. The operator
+                # still gets the detail in the server log.
+                W.log.warning("run_load_failed run=%s: %s", run_id, e)
+                return jsonify({"error": "run_not_found"}), 404
         else:
             return jsonify({"error": "run_not_found"}), 404
     if not W._can_access_run(run_id, run_data, W._active_profile_id()):
@@ -2328,6 +2342,8 @@ def api_card_photo_confirm(run_id: str, card_id: str):
     run_data, target = W._load_run_for_card(run_id, card_id)
     if not W._can_access_run(run_id, run_data, W._active_profile_id()):
         return jsonify({"error": "run_not_found"}), 404
+    if run_data is None:
+        return jsonify({"error": "run_not_found"}), 404
     if target is None:
         return jsonify({"error": "card_not_found"}), 404
     athlete = str((target.get("achievement") or {}).get("swimmer_name") or "").strip()
@@ -2360,6 +2376,8 @@ def api_card_clip_unlink(run_id: str, card_id: str):
         return jsonify({"error": "v8_unavailable"}), 503
     run_data, target = W._load_run_for_card(run_id, card_id)
     if not W._can_access_run(run_id, run_data, W._active_profile_id()):
+        return jsonify({"error": "run_not_found"}), 404
+    if run_data is None:
         return jsonify({"error": "run_not_found"}), 404
     if target is None:
         return jsonify({"error": "card_not_found"}), 404
@@ -2574,7 +2592,12 @@ def api_create_graphic(run_id: str, card_id: str):
             try:
                 run_data = json.loads(run_json.read_text())
             except Exception as e:
-                return jsonify({"error": f"run_load_failed: {e}"}), 500
+                # A corrupt run file must not leak its existence (or the raw
+                # exception text) to a caller that has not passed the tenant
+                # gate below: answer exactly like a missing run. The operator
+                # still gets the detail in the server log.
+                W.log.warning("run_load_failed run=%s: %s", run_id, e)
+                return jsonify({"error": "run_not_found"}), 404
         else:
             return jsonify({"error": "run_not_found"}), 404
     # Tenant isolation: even though the per-profile gate below
@@ -3333,7 +3356,12 @@ def api_regenerate_variants(run_id: str, card_id: str):
             try:
                 run_data = json.loads(run_json.read_text())
             except Exception as e:
-                return jsonify({"error": f"run_load_failed: {e}"}), 500
+                # A corrupt run file must not leak its existence (or the raw
+                # exception text) to a caller that has not passed the tenant
+                # gate below: answer exactly like a missing run. The operator
+                # still gets the detail in the server log.
+                W.log.warning("run_load_failed run=%s: %s", run_id, e)
+                return jsonify({"error": "run_not_found"}), 404
         else:
             return jsonify({"error": "run_not_found"}), 404
     if not W._can_access_run(run_id, run_data, W._active_profile_id()):
@@ -3960,7 +3988,12 @@ def api_card_motion_file(run_id: str, card_id: str):
             try:
                 run_data = json.loads(run_json.read_text())
             except Exception as e:
-                return jsonify({"error": f"run_load_failed: {e}"}), 500
+                # A corrupt run file must not leak its existence (or the raw
+                # exception text) to a caller that has not passed the tenant
+                # gate below: answer exactly like a missing run. The operator
+                # still gets the detail in the server log.
+                W.log.warning("run_load_failed run=%s: %s", run_id, e)
+                return jsonify({"error": "run_not_found"}), 404
         else:
             return jsonify({"error": "run_not_found"}), 404
     if not W._can_access_run(run_id, run_data, W._active_profile_id()):
@@ -4047,6 +4080,8 @@ def api_card_thumb(run_id: str, card_id: str):
 
     run_data, target = W._load_run_for_card(run_id, card_id)
     if not W._can_access_run(run_id, run_data, W._active_profile_id()):
+        return jsonify({"error": "run_not_found"}), 404
+    if run_data is None:
         return jsonify({"error": "run_not_found"}), 404
     if target is None:
         return jsonify({"error": "card_not_found"}), 404
@@ -5062,7 +5097,12 @@ def api_run_reel_file(run_id: str):
             try:
                 run_data = json.loads(run_json.read_text())
             except Exception as e:
-                return jsonify({"error": f"run_load_failed: {e}"}), 500
+                # A corrupt run file must not leak its existence (or the raw
+                # exception text) to a caller that has not passed the tenant
+                # gate below: answer exactly like a missing run. The operator
+                # still gets the detail in the server log.
+                W.log.warning("run_load_failed run=%s: %s", run_id, e)
+                return jsonify({"error": "run_not_found"}), 404
         else:
             return jsonify({"error": "run_not_found"}), 404
     if not W._can_access_run(run_id, run_data, W._active_profile_id()):
@@ -5136,7 +5176,12 @@ def api_run_reel_manifest(run_id: str):
             try:
                 run_data = json.loads(run_json.read_text())
             except Exception as e:
-                return jsonify({"error": f"run_load_failed: {e}"}), 500
+                # A corrupt run file must not leak its existence (or the raw
+                # exception text) to a caller that has not passed the tenant
+                # gate below: answer exactly like a missing run. The operator
+                # still gets the detail in the server log.
+                W.log.warning("run_load_failed run=%s: %s", run_id, e)
+                return jsonify({"error": "run_not_found"}), 404
         else:
             return jsonify({"error": "run_not_found"}), 404
     if not W._can_access_run(run_id, run_data, W._active_profile_id()):
@@ -5193,6 +5238,8 @@ def api_run_render_all_job(run_id: str):
         return jsonify({"error": "v8_unavailable"}), 503
     run_data = W._load_run(run_id)
     if not W._can_access_run(run_id, run_data, W._active_profile_id()):
+        return jsonify({"error": "run_not_found"}), 404
+    if run_data is None:
         return jsonify({"error": "run_not_found"}), 404
 
     raw_profile_id = (run_data or {}).get("profile_id", "")
@@ -5947,7 +5994,12 @@ def api_card_voiceover(run_id: str, card_id: str):
             try:
                 run_data = json.loads(run_json.read_text())
             except Exception as e:
-                return jsonify({"error": f"run_load_failed: {e}"}), 500
+                # A corrupt run file must not leak its existence (or the raw
+                # exception text) to a caller that has not passed the tenant
+                # gate below: answer exactly like a missing run. The operator
+                # still gets the detail in the server log.
+                W.log.warning("run_load_failed run=%s: %s", run_id, e)
+                return jsonify({"error": "run_not_found"}), 404
         else:
             return jsonify({"error": "run_not_found"}), 404
     if not W._can_access_run(run_id, run_data, W._active_profile_id()):

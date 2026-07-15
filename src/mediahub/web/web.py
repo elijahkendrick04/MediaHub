@@ -23755,17 +23755,17 @@ def _print_product_placement(product_slug, placement_slug):
 
 
 def _run_data_any(run_id: str):
-    """Load a run from either the flat or nested layout (or None)."""
-    rd = _load_run(run_id)
-    if rd is not None:
-        return rd
-    nested = RUNS_DIR / run_id / "run.json"
-    if nested.exists():
-        try:
-            return json.loads(nested.read_text())
-        except Exception:
-            return None
-    return None
+    """Load a run from either the flat or nested layout (or None).
+
+    Delegates entirely to :func:`_load_run`, which already reads both the
+    canonical flat ``runs_v4/<id>.json`` and the legacy nested
+    ``runs_v4/<id>/run.json`` layouts, enforces the path-traversal guard, and
+    honours the corrupt->None contract. The former manual nested fallback here
+    bypassed that guard (it rebuilt ``RUNS_DIR/<id>/run.json`` from a hostile id
+    after ``_load_run`` had refused it) and masked a corrupt flat file with
+    nested data — both are fixed by this delegation.
+    """
+    return _load_run(run_id)
 
 
 def _assistant_card_facts(run_data: dict, card_id: str) -> dict:
@@ -28608,7 +28608,12 @@ def _assemble_card_motion_inputs(run_id: str, card_id: str):
             try:
                 run_data = json.loads(run_json.read_text())
             except Exception as e:
-                return None, (jsonify({"error": f"run_load_failed: {e}"}), 500)
+                # A corrupt run file must not leak its existence (or the raw
+                # exception text) to a caller that has not passed the tenant
+                # gate below: answer exactly like a missing run. The operator
+                # still gets the detail in the server log.
+                log.warning("run_load_failed run=%s: %s", run_id, e)
+                return None, (jsonify({"error": "run_not_found"}), 404)
         else:
             return None, (jsonify({"error": "run_not_found"}), 404)
     if not _can_access_run(run_id, run_data, _active_profile_id()):
@@ -28730,7 +28735,12 @@ def _assemble_reel_inputs(run_id: str):
             try:
                 run_data = json.loads(run_json.read_text())
             except Exception as e:
-                return None, (jsonify({"error": f"run_load_failed: {e}"}), 500)
+                # A corrupt run file must not leak its existence (or the raw
+                # exception text) to a caller that has not passed the tenant
+                # gate below: answer exactly like a missing run. The operator
+                # still gets the detail in the server log.
+                log.warning("run_load_failed run=%s: %s", run_id, e)
+                return None, (jsonify({"error": "run_not_found"}), 404)
         else:
             return None, (jsonify({"error": "run_not_found"}), 404)
     if not _can_access_run(run_id, run_data, _active_profile_id()):
@@ -36943,10 +36953,12 @@ function copyWhyCard(btn, taId) {{
         return _layout("Verify swimmer", body, active="")
 
     @app.route("/audit/<run_id>/ignore/<path:swimmer_key>", methods=["POST"])
-    @require_run(deny=lambda: (redirect(url_for("home"))))
+    @require_run(deny=lambda: (redirect(url_for("home"))), require_exists=True)
     def pb_ignore(run_id, swimmer_key):
         """Mark 'ignore PBs for this swimmer in this meet'."""
-        # Refuse to mutate corrections for a run that isn't ours.
+        # Refuse to mutate corrections for a run that isn't ours or doesn't
+        # exist &mdash; a missing run must not persist a CorrectionsStore row
+        # keyed to a fabricated id (mirrors pb_verify_form's require_exists).
         reason = request.form.get("reason", "User requested ignore")
         from swim_content_pb.corrections import CorrectionsStore
 
@@ -47933,13 +47945,20 @@ what you're doing, what they should do.</p>
         created here until a card has been approved. The grouped 8-bucket
         recommendation explorer still lives at /pack/<run_id>/grouped.
         """
-        if _run_state(run_id) == "in_progress":
+        # Tenant gate BEFORE the in_progress short-circuit (mirrors
+        # api_cards / api_export): a foreign org or anonymous prober must get
+        # run_not_found whether or not the run is still processing, so the
+        # "Still processing" page can't be used as an existence / timing
+        # oracle. _can_access_run resolves ownership from the runs DB row, so
+        # it works mid-pipeline before the run JSON is written.
+        run_data = _load_run(run_id)
+        _has_access = _can_access_run(run_id, run_data, _active_profile_id())
+        if not _has_access:
+            run_data = None
+        if _has_access and _run_state(run_id) == "in_progress":
             return _layout(
                 "Still processing", _in_progress_page(run_id, "content_pack"), active="home"
             )
-        run_data = _load_run(run_id)
-        if not _can_access_run(run_id, run_data, _active_profile_id()):
-            run_data = None
         if not run_data:
             return _recovery_page(
                 "Run not found",
@@ -49483,14 +49502,20 @@ function tiRegenerate(btn) {{
         page keeps no approval strap or export row of its own &mdash; each
         card deep-links to its spot in the builder instead.
         """
-        state = _run_state(run_id)
-        if state == "in_progress":
+        # Tenant gate BEFORE the in_progress short-circuit (mirrors
+        # api_cards / api_export): a foreign org or anonymous prober must get
+        # run_not_found whether or not the run is still processing, so the
+        # "Still processing" page can't be used as an existence / timing
+        # oracle. _can_access_run resolves ownership from the runs DB row, so
+        # it works mid-pipeline before the run JSON is written.
+        run_data = _load_run(run_id)
+        _has_access = _can_access_run(run_id, run_data, _active_profile_id())
+        if not _has_access:
+            run_data = None
+        if _has_access and _run_state(run_id) == "in_progress":
             return _layout(
                 "Still processing", _in_progress_page(run_id, "content_pack_grouped"), active="home"
             )
-        run_data = _load_run(run_id)
-        if not _can_access_run(run_id, run_data, _active_profile_id()):
-            run_data = None
         if not run_data:
             return _recovery_page(
                 "Run not found",
