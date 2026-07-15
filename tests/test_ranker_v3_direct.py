@@ -66,7 +66,7 @@ def _claim(
     """A fully-populated ``Claim`` of the given kind.
 
     ``level`` (for ``qual_hit`` claims) rides in ``extra`` exactly where the
-    ranker reads it (``_qual_hit_levels`` → ``c.extra.get("level")``).
+    ranker reads it (``_qual_hits`` → ``c.extra.get("level")``).
     """
     extra: dict = {}
     if level is not None:
