@@ -92,6 +92,43 @@ def _spacing_scale_css(width: int, height: int) -> str:
     return ":root{" + decls + "}\n"
 
 
+def _round8(x: float) -> int:
+    """Snap to the nearest 8px — the module the geometry context is built on."""
+    return int(round(x / 8.0)) * 8
+
+
+def _geometry_scale_css(width: int, height: int) -> str:
+    """A ``:root{}`` block publishing the F2 geometry context.
+
+    Deterministic pure function of the canvas short edge, so a layout that
+    expresses a fixed dimension as a fraction of the geometry — e.g. a
+    ``calc(var(--mh-short) * 31 / 54)`` medal ring — tracks the canvas instead
+    of freezing a 1080-tuned pixel count.
+
+    * ``--mh-short``  — the short edge in px (``min(w,h)``); the base every other
+      geometry token and every migrated offender scales from.
+    * ``--mh-margin`` — ``round8(0.06 * short)`` — the outer safe inset.
+    * ``--mh-gutter`` — ``round8(0.02 * short)`` — the tight inter-column gutter.
+    * ``--mh-col``    — a 12-column module, ``(short - 2*margin) / 12``, left as a
+      ``calc`` so it stays exact.
+
+    At every certified 1080-wide format ``short == 1080``, so the tokens resolve
+    to the exact historic pixel counts and any offender migrated with an
+    exact-ratio coefficient renders byte-identical; a shorter canvas scales the
+    whole geometry down together.
+    """
+    short = min(int(width), int(height))
+    margin = _round8(0.06 * short)
+    gutter = _round8(0.02 * short)
+    decls = (
+        f"--mh-short:{short}px;"
+        f"--mh-margin:{margin}px;"
+        f"--mh-gutter:{gutter}px;"
+        "--mh-col:calc((var(--mh-short) - var(--mh-margin) * 2) / 12);"
+    )
+    return ":root{" + decls + "}\n"
+
+
 # ---------------------------------------------------------------------------
 # V8.1 Issue 7 — feature flags (env-driven so tests + ops can toggle)
 # ---------------------------------------------------------------------------
@@ -2064,6 +2101,10 @@ def _common_replacements(
     # byte-identical. ``_tokens.css`` carries no @font-face and no absolute path,
     # so it needs no url() rewrite.
     base_css = base_css + "\n" + _spacing_scale_css(width, height)
+    # F2 — the geometry context (short/margin/gutter/col). Same inert-until-used
+    # contract as the spacing scale: an unreferenced custom property paints
+    # nothing, so this is byte-identical for every legacy layout.
+    base_css = base_css + "\n" + _geometry_scale_css(width, height)
     try:
         if _TOKENS_CSS_PATH.exists():
             base_css = base_css + "\n" + _read_text(_TOKENS_CSS_PATH)

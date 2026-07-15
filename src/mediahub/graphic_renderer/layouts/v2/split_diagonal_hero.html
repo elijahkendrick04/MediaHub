@@ -29,7 +29,9 @@
 .sd {
   /* geometry knobs — the seam angle depends only on --slant and the
      canvas width, so it is identical across both portrait ratios */
-  --wedge-h: 690px;   /* height of the data band, anchored to the bottom */
+  /* F2: the data-band height is 23/36 of the short edge = exactly 690px at a
+     1080-wide format (byte-identical), tracking the canvas below that. */
+  --wedge-h: calc(var(--mh-short, 1080px) * 23 / 36);   /* height of the data band, anchored to the bottom */
   --slant: 184px;     /* vertical drop of the diagonal, left edge to right */
   --seam: 14px;       /* thickness of the accent edge along the diagonal  */
   --pad: 78px;        /* horizontal inset for wedge content               */

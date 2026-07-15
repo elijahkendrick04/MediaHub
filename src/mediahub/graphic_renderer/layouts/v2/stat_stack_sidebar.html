@@ -128,7 +128,9 @@
 
 /* ---- right rail ---- */
 .ss__rail {
-  flex: 0 0 320px;
+  /* F2: the stat rail is 8/27 of the short edge = exactly 320px at a 1080-wide
+     format (byte-identical), scaling with the canvas below that. */
+  flex: 0 0 calc(var(--mh-short, 1080px) * 8 / 27);
   position: relative;
   display: flex; flex-direction: column;
   background: var(--mh-surface);
