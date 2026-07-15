@@ -157,6 +157,44 @@ def test_motion_props_no_ramp_for_a_non_medal_card():
     assert "roleMedalRamp" not in props
 
 
+def test_medal_ramp_is_mono_safe():
+    """A mono card must rewrite the medal-ramp vars to a neutral grey specular —
+    the medal-tint hexes must not leak past the role remap (the B3 precedent)."""
+    from mediahub.graphic_renderer.sprint_hooks import mono_mode
+
+    html = (
+        "<style>:root{--mh-primary:#0E2A47;--mh-surface:#081B30;"
+        "--mh-accent:#FFD24A;"
+        f"--mh-medal-ramp:{mc.medal_ramp_css('#FFD24A')};"
+        f"--mh-medal-numeral-ramp:{mc.medal_ramp_css('#FFD24A')};}}</style>"
+        "<div>x</div>"
+    )
+
+    class _B:
+        render_mode = "mono"
+        background_style = ""
+        mood = ""
+        style_pack = ""
+
+    from mediahub.graphic_renderer.sprint_hooks import RenderHookCtx
+
+    ctx = RenderHookCtx(
+        brief=_B(),
+        width=1080,
+        height=1350,
+        family="centered_medal_spotlight",
+        format_name="story",
+        is_v2=True,
+    )
+    out = mono_mode.apply(html, ctx)
+    # The gold tint is gone from the ramp declarations; a neutral grey remains.
+    import re
+
+    ramp_decl = re.search(r"--mh-medal-ramp:([^;}]+)", out).group(1)
+    assert "#FFD24A" not in ramp_decl and "#FFE596" not in ramp_decl
+    assert "#B4B4B4" in ramp_decl or "#E6E6E6" in ramp_decl
+
+
 def test_tsx_paints_medal_chrome():
     from pathlib import Path
 
