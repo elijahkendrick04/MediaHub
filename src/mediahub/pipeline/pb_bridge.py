@@ -39,7 +39,14 @@ _STROKE_TO_CODE: dict[str, str] = {
     "im": "IM",
 }
 
-_TIME_RE = re.compile(r"^\s*(?:(\d+):)?(\d{1,2})[.:](\d{1,2})\s*$")
+# A canonical swim time is colon-separated clock fields (``[HH:]MM:SS``) with an
+# optional ``.`` decimal fraction on the final (seconds) field only. ``:`` is a
+# field separator, never a decimal point. Validating one field each means a
+# dotted date (``12.03.2024``) or a stray integer (``99``) can never masquerade
+# as a time. ``re.ASCII`` keeps ``\d`` to ``[0-9]`` so a non-ASCII digit string
+# (which no producer emits) is rejected rather than silently coerced to a number.
+_CLOCK_FIELD_RE = re.compile(r"^\d+$", re.ASCII)  # hours / minutes — whole numbers
+_SECONDS_FIELD_RE = re.compile(r"^\d+(?:\.\d+)?$", re.ASCII)  # seconds + optional fraction
 
 
 def _stroke_to_code(stroke: str) -> str:
@@ -53,19 +60,49 @@ def _stroke_to_code(stroke: str) -> str:
 
 
 def _time_to_seconds(time_str: str) -> Optional[float]:
+    """Convert a canonical swim-time string to a float number of seconds.
+
+    Accepts every shape ``parse_pbs`` can emit as ``time_canonical`` — the
+    heuristic ``_TIME_RE`` explicitly produces ``HH:MM:SS.ss`` (per its own
+    comment) and the interpreter / cache paths can carry a 3-digit fraction:
+
+      * ``SS.ss`` / ``SSS.ss``           → ``"59.87"`` → 59.87, ``"159.87"`` → 159.87
+      * ``SS.sss``                       → ``"58.345"`` → 58.345
+      * ``M:SS.ss`` / ``MM:SS.ss``       → ``"1:02.34"`` → 62.34, ``"15:25.10"`` → 925.10
+      * ``H:MM:SS.ss`` / ``HH:MM:SS.ss`` → ``"2:01:02.34"`` → 7262.34
+
+    ``:`` separates hours / minutes / seconds and is **never** a decimal point,
+    so ``"1:02:34"`` is 1h 02m 34s = 3754.0s (not 62.34s). The fraction is
+    introduced only by ``.``. Returns ``None`` for non-times (``""``, ``None``,
+    ``"DNF"``, bare integers like ``"99"``, dotted dates like ``"12.03.2024"``)
+    so an unparseable row is dropped rather than poisoning a baseline.
+    """
     if not time_str:
         return None
-    m = _TIME_RE.match(str(time_str).strip())
-    if not m:
+    s = str(time_str).strip()
+    if not s:
         return None
-    mins = int(m.group(1)) if m.group(1) else 0
-    secs = int(m.group(2))
-    frac = m.group(3)
-    if len(frac) == 1:
-        frac_val = int(frac) / 10.0
-    else:
-        frac_val = int(frac[:2]) / 100.0
-    return mins * 60 + secs + frac_val
+
+    parts = s.split(":")
+    if len(parts) > 3:  # more fields than H:MM:SS — not a clock time
+        return None
+
+    seconds_field = parts[-1]
+    clock_fields = parts[:-1]  # hours and/or minutes, most-significant first
+
+    # A bare number (no ``:``) must carry a decimal fraction, so a stray integer
+    # (rank, bib, place) never becomes a spurious 0-fraction baseline.
+    if not clock_fields and "." not in seconds_field:
+        return None
+    if not _SECONDS_FIELD_RE.match(seconds_field):
+        return None
+    if any(not _CLOCK_FIELD_RE.match(f) for f in clock_fields):
+        return None
+
+    total = float(seconds_field)
+    for position, field_value in enumerate(reversed(clock_fields), start=1):
+        total += int(field_value) * (60**position)
+    return total
 
 
 def _event_key(distance: int, stroke_code: str, course: str) -> str:
