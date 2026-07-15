@@ -1141,6 +1141,28 @@ def _accent_decoration_html(
             f"width:{size}px;height:{size}px;border-radius:50%;border:{w}px solid {color};"
             f'z-index:11;pointer-events:none;"></div>'
         )
+    if style == "glass_chip":
+        # B6 — a frosted-glass margin pill (the v1 / motion-parity execution of
+        # the treatment; the v2 archetypes glass their own modules via the
+        # --mh-glass-* tokens). Surface tint rides --mh-surface-rgb (fallback for
+        # the standalone/test call); the mirror lives at
+        # remotion/.../sprint/accents/glass_chip.tsx.
+        pill_w = int(m * 0.20 * (0.7 + s))
+        pill_h = max(24, int(m * 0.055))
+        tab_w = max(4, int(m * 0.006))
+        return (
+            f'<div style="position:absolute;left:{int(width * 0.06)}px;'
+            f"bottom:{int(height * 0.12)}px;width:{pill_w}px;height:{pill_h}px;"
+            f"border-radius:{pill_h // 2}px;overflow:hidden;"
+            f"background:rgba(var(--mh-surface-rgb,20,24,33),0.30);"
+            f"-webkit-backdrop-filter:blur(12px) saturate(140%);"
+            f"backdrop-filter:blur(12px) saturate(140%);"
+            f"border:1px solid rgba(255,255,255,0.16);"
+            f"box-shadow:var(--mh-elev-3,0 6px 20px rgba(10,12,16,0.26));"
+            f'z-index:11;pointer-events:none;">'
+            f'<div style="position:absolute;left:0;top:0;bottom:0;width:{tab_w}px;'
+            f'background:{color};"></div></div>'
+        )
     return ""
 
 
@@ -4527,7 +4549,7 @@ _STAT_CHIP_ARCHETYPES: dict[str, str] = {
 }
 
 
-def _stat_chips_html(brief, ink_var: str) -> str:
+def _stat_chips_html(brief, ink_var: str, *, glass: bool = False) -> str:
     """The rendered secondary-stat chip row for a data-led archetype (M11).
 
     One geometry across every archetype (visual continuity per the data-graphics
@@ -4535,7 +4557,16 @@ def _stat_chips_html(brief, ink_var: str) -> str:
     (JetBrains Mono, tnum). Only verified facts appear — each chip's value comes
     from ``hero_stat_options``, so a stat the detectors never measured cannot
     render. Empty ``secondary_stats`` → ``""`` (the slot collapses).
+
+    ``glass`` (B6) frosts the chips over a photo: the ``mh-glass`` recipe replaces
+    the hairline border with the brand-tinted backdrop-blur panel. Off by default,
+    so a non-glass row is byte-identical.
     """
+    chip_open = (
+        '<div class="mh-glass" style="padding:18px 24px;min-width:0">'
+        if glass
+        else '<div style="border:1px solid var(--mh-outline);padding:18px 24px;min-width:0">'
+    )
     keys = [k for k in (getattr(brief, "secondary_stats", None) or []) if k]
     opts = getattr(brief, "hero_stat_options", None) or {}
     hero_key = None  # never chip the fact already carried by the hero line
@@ -4553,8 +4584,8 @@ def _stat_chips_html(brief, ink_var: str) -> str:
             continue
         value = _chip_value(key, str(opts[key]))
         cells.append(
-            '<div style="border:1px solid var(--mh-outline);padding:18px 24px;min-width:0">'
-            "<div style=\"font-family:'Inter',sans-serif;font-weight:700;font-size:17px;"
+            chip_open
+            + "<div style=\"font-family:'Inter',sans-serif;font-weight:700;font-size:17px;"
             "letter-spacing:0.22em;text-transform:uppercase;color:var(--mh-accent);"
             'margin-bottom:8px">' + html_escape(label) + "</div>"
             "<div style=\"font-family:'JetBrains Mono','Space Grotesk',monospace;"
@@ -5195,6 +5226,257 @@ def _kern_numeric_seps(value_html: str) -> tuple[str, int]:
     return ("".join(parts), count) if count else (value_html, 0)
 
 
+# --------------------------------------------------------------------------- #
+# B6 (Canva gap analysis) — frosted-glass chips over photos.
+#
+# The director opts in via the accent_treatment "glass_chip"; the still then
+# emits --mh-glass-* tokens consumed (with the chip's OPAQUE value as the CSS
+# var() fallback) by the broadcast_scorebug module, the lower-third result chip
+# and the photo-led stat-chip row, so a card WITHOUT the treatment is
+# byte-identical. The fill is the resolved --mh-surface at a gate-chosen alpha:
+# a translucent dark panel does NOT protect its ink over a bright photo region,
+# so the nominal 0.30 is floored UP in 0.05 steps until every chip ink clears
+# APCA against the fill composited over BOTH pure white and pure black — the
+# worst backdrops a photo can present behind the blur. If no glassy alpha clears
+# (a dark accent on dark glass, say), no tokens are emitted and the chip keeps
+# its opaque fill. Pure deterministic maths on the resolved roles.
+# --------------------------------------------------------------------------- #
+
+_GLASS_NOMINAL_ALPHA = 0.30
+_GLASS_MAX_ALPHA = 0.85
+
+
+def _composite_over(fill_hex: str, alpha: float, base_hex: str) -> str:
+    """``fill_hex`` at ``alpha`` over an opaque ``base_hex`` → the flat sRGB hex."""
+    fr, fg, fb = _hex_to_rgb(fill_hex)
+    br, bg, bb = _hex_to_rgb(base_hex)
+    return _rgb_to_hex(
+        (
+            int(round(fr * alpha + br * (1.0 - alpha))),
+            int(round(fg * alpha + bg * (1.0 - alpha))),
+            int(round(fb * alpha + bb * (1.0 - alpha))),
+        )
+    )
+
+
+def _glass_role_vars(root_vars: dict[str, str]) -> dict[str, str]:
+    """The ``--mh-glass-*`` tokens for a glass_chip card, or ``{}`` when unsafe.
+
+    Steps the fill alpha up from the nominal 0.30 until the chip inks
+    (``--mh-on-primary`` for the lower-third result / stat values, ``--mh-accent``
+    for the scorebug result numeral) clear APCA against the resolved surface
+    composited over pure white AND pure black. The threshold is ``LC_LARGE`` —
+    the same bar the engine's own role gate (compliance._ROLE_PAIRS) holds the
+    result numeral / accent chip to. Returns ``{}`` — meaning "keep the opaque
+    fill" — when no alpha ≤ 0.85 clears both, or the roles are unparseable.
+    ``--mh-glass-ink`` rides ``var(--mh-on-primary)`` (never a raw hex) so mono
+    mode's role remap flows straight through it.
+    """
+    from mediahub.quality.compliance import LC_LARGE, is_legible
+
+    surface = root_vars.get("--mh-surface") or ""
+    on_primary = root_vars.get("--mh-on-primary") or ""
+    if not (_is_brand_hex(surface) and _is_brand_hex(on_primary)):
+        return {}
+    inks = [i for i in (on_primary, root_vars.get("--mh-accent") or "") if _is_brand_hex(i)]
+    try:
+        r, g, b = _hex_to_rgb(surface)
+    except Exception:
+        return {}
+    chosen: Optional[float] = None
+    alpha = _GLASS_NOMINAL_ALPHA
+    while alpha <= _GLASS_MAX_ALPHA + 1e-6:
+        over_white = _composite_over(surface, alpha, "#FFFFFF")
+        over_black = _composite_over(surface, alpha, "#000000")
+        if all(
+            is_legible(ink, over_white, min_lc=LC_LARGE)
+            and is_legible(ink, over_black, min_lc=LC_LARGE)
+            for ink in inks
+        ):
+            chosen = alpha
+            break
+        alpha = round(alpha + 0.05, 2)
+    if chosen is None:
+        return {}
+    return {
+        "--mh-surface-rgb": f"{r},{g},{b}",
+        "--mh-glass-bg": f"rgba(var(--mh-surface-rgb),{chosen:.2f})",
+        "--mh-glass-border": "1px solid rgba(255,255,255,0.16)",
+        "--mh-glass-filter": "blur(12px) saturate(140%)",
+        "--mh-glass-shadow": "var(--mh-elev-3,0 6px 20px rgba(10,12,16,0.26))",
+        "--mh-glass-ink": "var(--mh-on-primary)",
+    }
+
+
+# --------------------------------------------------------------------------- #
+# B7 (Canva gap analysis) — photo-adaptive scrim alpha.
+#
+# A fixed-alpha scrim can be defeated by a bright or busy photo region: the
+# headline "technically" sits on a 0.40 ribbon but the sky behind it blows the
+# ink out. Canva-grade pipelines guarantee post-composite legibility. This
+# deterministic PIL pre-pass samples the GRADED photo region that lands under
+# the over-photo text (the cover-crop bottom band, pinned by the saliency
+# object-position), takes the adverse (brightest, for light ink) percentile
+# luminance, and steps the scrim alpha up from the archetype's authored floor
+# until the ink clears APCA Lc≥60 against the scrim-over-sample composite. The
+# chosen alpha rides --mh-scrim-alpha (fallback = the current constant, so a
+# photo-less card — or a card whose authored floor already clears — is
+# byte-identical). Same photo + crop → same alpha.
+# --------------------------------------------------------------------------- #
+
+# archetype → (scrim base colour hex or None=use primary, authored floor alpha).
+_SCRIM_PLAN: dict[str, tuple[Optional[str], float]] = {
+    "broadcast_scorebug": ("#000000", 0.55),
+    "full_bleed_photo_lower_third": ("#000000", 0.40),
+    "magazine_cover": (None, 0.62),
+}
+_SCRIM_MAX_ALPHA = 0.90
+_SCRIM_BAND = 0.45  # bottom fraction of the visible crop the text sits over
+
+
+def _pos_fraction(token: str, axis: str) -> float:
+    """A CSS object-position token → its 0..1 alignment fraction."""
+    t = (token or "").strip().lower()
+    if t.endswith("%"):
+        try:
+            return max(0.0, min(1.0, float(t[:-1]) / 100.0))
+        except ValueError:
+            return 0.5
+    return {
+        "left": 0.0,
+        "right": 1.0,
+        "top": 0.0,
+        "bottom": 1.0,
+        "center": 0.5,
+    }.get(t, 0.5)
+
+
+def _parse_object_position(pos: str) -> tuple[float, float]:
+    """Parse ``--mh-photo-pos`` ("center 24%", "50% 30%", "left top") → (fx, fy)."""
+    toks = (pos or "").strip().split()
+    if not toks:
+        return 0.5, 0.5
+    if len(toks) == 1:
+        # a single keyword sets that axis; the other stays centred.
+        if toks[0].lower() in ("top", "bottom"):
+            return 0.5, _pos_fraction(toks[0], "y")
+        return _pos_fraction(toks[0], "x"), 0.5
+    return _pos_fraction(toks[0], "x"), _pos_fraction(toks[1], "y")
+
+
+def _cover_bottom_band_luma(img, width: int, height: int, pos: str) -> Optional[int]:
+    """The adverse (95th-percentile) luma 0..255 of the text region of ``img``.
+
+    Models ``object-fit: cover`` + the resolved ``object-position`` to find which
+    pixels of the source land in the bottom band of the frame, then samples that
+    region. Returns ``None`` on any failure (caller keeps the authored scrim).
+    """
+    try:
+        pw, ph = img.size
+        if pw <= 0 or ph <= 0:
+            return None
+        s = max(width / pw, height / ph)
+        sw, sh = pw * s, ph * s
+        fx, fy = _parse_object_position(pos)
+        vx = (sw - width) * fx  # visible window origin in scaled px
+        vy = (sh - height) * fy
+        by0 = vy + height * (1.0 - _SCRIM_BAND)
+        by1 = vy + height
+        # scaled → source pixels, clamped to the image.
+        left = max(0, int(vx / s))
+        right = min(pw, int(round((vx + width) / s)))
+        top = max(0, int(by0 / s))
+        bot = min(ph, int(round(by1 / s)))
+        if right - left < 2 or bot - top < 2:
+            return None
+        crop = img.crop((left, top, right, bot)).convert("L")
+        crop.thumbnail((48, 48))
+        vals = sorted(crop.getdata())
+        if not vals:
+            return None
+        idx = min(len(vals) - 1, int(round(0.95 * (len(vals) - 1))))
+        return int(vals[idx])
+    except Exception:
+        return None
+
+
+def _scrim_alpha_for_luma(luma: int, ink_hex: str, base_hex: str, floor: float) -> float:
+    """Least alpha ≥ ``floor`` making ``ink`` clear APCA over ``base``-scrim-over-photo.
+
+    The sampled region is treated as an achromatic ``luma`` grey (APCA is
+    luminance-driven); the scrim ``base_hex`` composited over it at each candidate
+    alpha is closed-form. Never drops below the authored ``floor`` (so a photo the
+    baseline already handled is unchanged); caps at 0.90.
+    """
+    from mediahub.quality.compliance import LC_SUPPORT, is_legible
+
+    try:
+        br, bg, bb = _hex_to_rgb(base_hex)
+    except Exception:
+        br = bg = bb = 0
+    a = round(max(0.0, min(floor, _SCRIM_MAX_ALPHA)), 2)
+    while a <= _SCRIM_MAX_ALPHA + 1e-6:
+        cr = int(round(br * a + luma * (1.0 - a)))
+        cg = int(round(bg * a + luma * (1.0 - a)))
+        cb = int(round(bb * a + luma * (1.0 - a)))
+        comp = _rgb_to_hex((cr, cg, cb))
+        if is_legible(ink_hex, comp, min_lc=LC_SUPPORT):
+            return a
+        a = round(a + 0.05, 2)
+    return round(min(_SCRIM_MAX_ALPHA, max(floor, _SCRIM_MAX_ALPHA)), 2)
+
+
+def _photo_scrim_plan(
+    archetype: str,
+    athlete_path,
+    brief,
+    root_vars: dict[str, str],
+    width: int,
+    height: int,
+    pos: str,
+) -> Optional[tuple[float, int]]:
+    """(chosen alpha, region luma) for a photo-led scrim archetype, or ``None``.
+
+    Returns ``None`` — keep the authored scrim, byte-identical — for a non-scrim
+    archetype, a photo-less card, a dark (non-light) ink (a black scrim can't help
+    it), or any load/grade failure. Applies the same photo-adjust recipe the render
+    bakes in, so the sampled pixels match what ships.
+    """
+    if archetype not in _SCRIM_PLAN or not athlete_path:
+        return None
+    ink = root_vars.get("--mh-on-primary") or ""
+    if not _is_brand_hex(ink) or _rel_luminance(ink) <= 0.5:
+        return None  # the black/primary scrim only protects a LIGHT ink
+    base_hex, floor = _SCRIM_PLAN[archetype]
+    if base_hex is None:
+        base_hex = root_vars.get("--mh-primary") or "#0A2540"
+    try:
+        from PIL import Image
+
+        from mediahub.graphic_renderer import photo_adjust as _photo_adjust
+
+        img = Image.open(athlete_path)
+        img.load()
+        if img.mode not in ("RGB", "L"):
+            img = img.convert("RGB")
+        try:
+            recipe = _photo_adjust.recipe_for(
+                explicit=getattr(brief, "photo_adjust", "") or "",
+                treatment=getattr(brief, "photo_treatment", "") or "",
+            )
+            if recipe is not None and not recipe.is_noop():
+                img = recipe.apply(img)
+        except Exception:
+            pass
+        luma = _cover_bottom_band_luma(img, width, height, pos)
+    except Exception:
+        return None
+    if luma is None:
+        return None
+    alpha = _scrim_alpha_for_luma(luma, ink, base_hex, floor)
+    return alpha, luma
+
+
 def _fill_v2_archetype(
     brief,
     width,
@@ -5261,6 +5543,20 @@ def _fill_v2_archetype(
     root_vars.update(
         _elevation_vars(root_vars.get("--mh-primary", "#0A2540"), scale=min(width, height) / 1080)
     )
+
+    # B6 (Canva gap analysis) — frosted-glass chips. The director opts in with
+    # the accent_treatment "glass_chip"; when the ink clears APCA against the
+    # tinted fill over the worst-case backdrops the resolver emits the
+    # --mh-glass-* tokens that the scorebug module / lower-third result chip
+    # consume (with their opaque values as var() fallbacks) and that turn on the
+    # photo-led stat chips. A gate miss (or any other accent) emits nothing, so
+    # those chips stay opaque and every non-glass card is byte-identical.
+    glass_on = False
+    if (getattr(brief, "accent_style", "") or "") == "glass_chip":
+        _glass = _glass_role_vars(root_vars)
+        if _glass:
+            root_vars.update(_glass)
+            glass_on = True
 
     # B3 (Canva gap analysis) — surfaces read as lit material, not flat hex:
     # a 4.5% lit→shaded vertical micro-gradient on the brand ground, emitted
@@ -5523,7 +5819,33 @@ def _fill_v2_archetype(
     # (and inject nothing) when the facts aren't there.
     archetype_name = getattr(brief, "layout_template", "") or ""
     chip_ink = _STAT_CHIP_ARCHETYPES.get(archetype_name)
-    repl["STAT_CHIPS"] = _stat_chips_html(brief, chip_ink) if chip_ink else ""
+    # B6 — glass the stat chips only when the treatment is on AND there is a
+    # photo behind them (photo-led card); a chip-row on a flat ground keeps its
+    # hairline treatment (glass over an opaque ground reads as a muddy box).
+    repl["STAT_CHIPS"] = (
+        _stat_chips_html(brief, chip_ink, glass=glass_on and bool(athlete_path)) if chip_ink else ""
+    )
+
+    # B7 — photo-adaptive scrim: raise the over-photo scrim alpha until the
+    # light ink clears APCA against the actual pixels behind it. Emits
+    # --mh-scrim-alpha (consumed by this archetype's scrim rule with the authored
+    # constant as the var() fallback) and stashes the region-luminance + chosen
+    # alpha note for the explainability sidecar. Photo-less cards emit nothing.
+    _scrim = _photo_scrim_plan(
+        archetype_name,
+        athlete_path,
+        brief,
+        root_vars,
+        width,
+        height,
+        root_vars.get("--mh-photo-pos", "") or "",
+    )
+    if _scrim is not None:
+        _scrim_alpha, _scrim_luma = _scrim
+        root_vars["--mh-scrim-alpha"] = f"{_scrim_alpha:.2f}"
+        repl["_SCRIM_NOTE"] = (
+            f"scrim adapted to photo (region luma {_scrim_luma}/255 → alpha {_scrim_alpha:.2f})"
+        )
     bars_ink = _PB_BARS_ARCHETYPES.get(archetype_name)
     repl["PB_BARS"] = _pb_bars_html(brief, bars_ink) if bars_ink else ""
 
@@ -6182,6 +6504,11 @@ def render_brief(
     _companion_note = _companion_accent_note(brief, brand_kit)
     if _companion_note:
         _safety_notes.append(_companion_note)
+    # B7 explainability: record the photo-adaptive scrim decision (region luma +
+    # chosen alpha) so the "why this design" trail shows the legibility guarantee.
+    _scrim_note = repl.get("_SCRIM_NOTE") if isinstance(repl, dict) else None
+    if _scrim_note:
+        _safety_notes.append(_scrim_note)
 
     visual = GeneratedVisual(
         id=visual_id,

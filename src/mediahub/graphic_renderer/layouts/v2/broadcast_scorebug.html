@@ -32,8 +32,10 @@
 
 .bg__stage { position: absolute; inset: 0; z-index: 0; }
 .bg__stage img { width: 100%; height: 100%; object-fit: cover; object-position: var(--mh-photo-pos, center 24%); display: block; }
+/* B7: the bottom scrim alpha adapts to the pixels under the name
+   (--mh-scrim-alpha), with the authored 0.55 as the byte-identical fallback. */
 .bg__scrim { position: absolute; inset: 0; z-index: 1; pointer-events: none;
-  background: linear-gradient(180deg, rgba(0,0,0,0.34) 0%, rgba(0,0,0,0) 26%, rgba(0,0,0,0) 50%, rgba(0,0,0,0.55) 100%); }
+  background: linear-gradient(180deg, rgba(0,0,0,0.34) 0%, rgba(0,0,0,0) 26%, rgba(0,0,0,0) 50%, rgba(0,0,0,var(--mh-scrim-alpha,0.55)) 100%); }
 
 /* top broadcast ribbon */
 .bg__ribbon {
@@ -56,8 +58,16 @@
   text-transform: uppercase; color: var(--mh-on-primary); white-space: nowrap;
   text-shadow: 0 4px 22px rgba(0,0,0,0.45);
 }
-/* the scorebug module */
-.bg__bug { display: flex; align-items: stretch; background: var(--mh-primary); border: 2px solid var(--mh-outline); }
+/* the scorebug module — B6: glass when the director opts in (--mh-glass-*),
+   else the opaque brand box via the var() fallbacks (byte-identical). */
+.bg__bug {
+  display: flex; align-items: stretch;
+  background: var(--mh-glass-bg, var(--mh-primary));
+  border: var(--mh-glass-border, 2px solid var(--mh-outline));
+  -webkit-backdrop-filter: var(--mh-glass-filter, none);
+  backdrop-filter: var(--mh-glass-filter, none);
+  box-shadow: var(--mh-glass-shadow, none);
+}
 .bg__bug-tab { background: var(--mh-accent); width: 10px; flex: 0 0 auto; }
 .bg__bug-cells { display: flex; align-items: center; }
 .bg__bug-cell { padding: 16px 26px; display: flex; flex-direction: column; gap: 4px; }

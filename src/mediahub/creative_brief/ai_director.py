@@ -241,7 +241,8 @@ def _design_spec_system_prompt(archetypes: list[str], token_roles: list[str]) ->
         '("delve","elevate")>,\n'
         '  "accent_treatment": "brackets|stripe|badge|frame|minimal|ribbon|underline|'
         "diagonal_underline|thick_stripe|thin_stripe|double_stripe|side_rail|"
-        'large_brackets|small_brackets|bracket_frame|corner_tabs|offset_badge",\n'
+        "large_brackets|small_brackets|bracket_frame|corner_tabs|offset_badge|"
+        'glass_chip",  # glass_chip = frosted-glass data chips over a photo (photo-led cards)\n'
         '  "photo_treatment": "cutout|duotone|halftone|vignette|wash|sticker",\n'
         '  "logo_lockup": "full_horizontal|full_stacked|mono_light|mono_dark|icon",\n'
         '  "mood": "explosive|electric|calm|fierce|celebratory|stoic|precise|bold|triumphant|minimal",\n'

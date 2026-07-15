@@ -153,6 +153,15 @@ def _hex_to_rgb(value: str) -> tuple[int, int, int]:
     return (int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16))
 
 
+def _mono_rgb_triple(value: str) -> str:
+    """``"r,g,b"`` for a mono ramp hex — the flattened --mh-surface-rgb (B6)."""
+    try:
+        r, g, b = _hex_to_rgb(value)
+        return f"{r},{g},{b}"
+    except Exception:
+        return "24,24,24"
+
+
 def _relative_luminance(value: str) -> float:
     """WCAG relative luminance of a ``#hex`` — used only to order the two grounds."""
 
@@ -232,7 +241,8 @@ _ROLE_DECL_RE = re.compile(
 # or the brand colour leaks straight past the role remap.
 _DERIVED_DECL_RE = re.compile(
     r"(?<![\w-])(--mh-(?:ground-gradient|surface-container|surface-raised|surface-2|lift"
-    r"|accent-container|on-accent-container|ink-secondary|secondary-vis|shadow-rgb))"
+    r"|accent-container|on-accent-container|ink-secondary|secondary-vis|shadow-rgb"
+    r"|surface-rgb))"
     r"\s*:\s*[^;}]+"
 )
 
@@ -260,6 +270,11 @@ def _rewrite_role_decls(html: str, ramp: dict[str, str]) -> str:
         "--mh-ink-secondary": ramp.get("--mh-secondary", "#B4B4B4"),
         "--mh-secondary-vis": ramp.get("--mh-secondary", "#B4B4B4"),
         "--mh-shadow-rgb": "10,10,10",
+        # B6 — the glass fill's surface RGB triple carries the brand-derived
+        # surface, so flatten it to the mono surface's grey (the --mh-glass-bg
+        # var() reference then follows automatically; --mh-glass-ink already
+        # rides var(--mh-on-primary), remapped above).
+        "--mh-surface-rgb": _mono_rgb_triple(ramp.get("--mh-surface", "#181818")),
     }
 
     def _sub_derived(m: "re.Match[str]") -> str:

@@ -38,9 +38,11 @@
   object-position: var(--mh-photo-pos, center 26%);
   display: block;
 }
+/* B7: the bottom scrim alpha adapts to the pixels behind it (--mh-scrim-alpha),
+   with the authored 0.40 as the byte-identical fallback. */
 .fb__grad {
   position: absolute; inset: 0; z-index: 1; pointer-events: none;
-  background: linear-gradient(180deg, rgba(0,0,0,0) 44%, rgba(0,0,0,0.12) 62%, rgba(0,0,0,0.40) 100%);
+  background: linear-gradient(180deg, rgba(0,0,0,0) 44%, rgba(0,0,0,0.12) 62%, rgba(0,0,0,var(--mh-scrim-alpha,0.40)) 100%);
 }
 /* C4: an additive photo-cast scrim — the athlete photo's own shadow swatch
    (dark_muted), APCA-gated by the hook. Deepens the neutral scrim with the
@@ -97,9 +99,16 @@
 .fb__where { margin-top: 8px; font-family: var(--mh-font-body, 'Inter', sans-serif); font-weight: 500; font-size: 21px; color: var(--mh-on-primary); opacity: 0.74; }
 .fb__stat { margin-top: 8px; font-family: var(--mh-font-body, 'Inter', sans-serif); font-weight: 600; font-size: 22px; color: var(--mh-accent); }
 .fb__right { flex: 0 0 auto; display: flex; flex-direction: column; align-items: flex-end; gap: 14px; }
+/* B6: the result chip frosts over the photo when glass is opted in
+   (--mh-glass-*), with the light on-primary ink; else the opaque accent chip
+   via the var() fallbacks (byte-identical). */
 .fb__result {
   display: inline-block; padding: 16px 26px;
-  background: var(--mh-accent); color: var(--mh-primary);
+  background: var(--mh-glass-bg, var(--mh-accent)); color: var(--mh-glass-ink, var(--mh-primary));
+  -webkit-backdrop-filter: var(--mh-glass-filter, none);
+  backdrop-filter: var(--mh-glass-filter, none);
+  border: var(--mh-glass-border, none);
+  box-shadow: var(--mh-glass-shadow, none);
   font-family: 'JetBrains Mono', 'Space Grotesk', monospace; font-feature-settings: "tnum";
   font-weight: 700; font-size: var(--mh-fit-result-px, 80px); font-variation-settings: var(--mh-axes-result, normal); line-height: 0.9;
 }
