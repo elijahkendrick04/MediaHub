@@ -4,7 +4,8 @@ Ranker V3 — context-aware scoring with explanations.
 Each ContentCard ends with:
   - score (0-100)
   - score_reasons: short bullets the user reads on the card
-  - bucket: 'queue' | 'recap' | 'needs_confirmation' | 'archive'
+  - bucket: 'queue' | 'recap' | 'archive'  ('needs_confirmation' is a
+    RESERVED bucket — see the note below; no live producer reaches it)
   - suggested_format: see cards.FMT_*
 
 Scoring rules (transparent and adjustable):
@@ -16,8 +17,20 @@ Base scores by card type:
   podium_roundup        base 55
   standout_swim         base 40
   weekend_in_numbers    base 45
-  needs_confirmation    base 30
   recap_only            base 25
+
+RESERVED / currently-unreachable — the needs_confirmation path:
+  No producer in the live pipeline emits a TYPE_NEEDS_CONFIRMATION card or
+  sets ContentCard.needs_confirmation, so none of the following fire in
+  practice. They are kept (not deleted) because TYPE_NEEDS_CONFIRMATION and
+  the surrounding branches are still referenced by cards.py / captions_v3.py /
+  grouper.py; a future producer could revive this path. Until then, treat the
+  needs_confirmation base score, the -15 flag penalty, the needs_confirmation
+  bucket, and the FMT_HOLD format below as a reserved (inactive) sink, not an
+  active scoring rule:
+    - needs_confirmation  base 30   (TYPE_NEEDS_CONFIRMATION)
+    - -15                 needs_confirmation flag set
+    - bucket              needs_confirmation  (-> FMT_HOLD)
 
 Modifiers per card:
   +10  national-level qualifier hit inside the window
@@ -31,7 +44,7 @@ Modifiers per card:
   +5   spotlight covers >=3 notable events (distinct distance/stroke/course)
   +5   same-stroke gold dominance (2 golds = "doubles up", 3+ = "clean sweep")
   -10  card has only LIKELY_PBs and no medal/qualifier
-  -15  needs_confirmation flag set
+  (the -15 needs_confirmation penalty is RESERVED / unreachable — see above)
 
 Anti-spam (defensive safety-net):
   After scoring, if a swimmer has a SPOTLIGHT card, each of their STANDOUT
@@ -47,8 +60,9 @@ Anti-spam (defensive safety-net):
 Buckets:
   >= 65         queue
   40 - 64       recap
-  needs_conf    needs_confirmation
   < 40          archive
+  (needs_confirmation is a RESERVED bucket — see the note above; no live
+   producer sets the flag, so a card never routes here in practice)
 
 We also cap the queue at 20 cards, demoting overflow to recap.
 """
@@ -108,6 +122,8 @@ def _qual_hits(card: ContentCard) -> list[tuple[str, bool]]:
 
 
 def _suggested_format(card: ContentCard) -> str:
+    # RESERVED / inactive: no live producer sets the needs_confirmation bucket,
+    # so this branch is currently unreachable. Kept for a future producer.
     if card.bucket == "needs_confirmation":
         return FMT_HOLD
     if card.bucket == "archive":
@@ -215,7 +231,10 @@ def score_card(card: ContentCard) -> ContentCard:
         score -= 10
         reasons.append("Only a likely (unverified) PB — needs evidence (-10)")
 
-    # Needs-confirmation flag explicit penalty
+    # Needs-confirmation flag explicit penalty.
+    # RESERVED / inactive: no live producer sets card.needs_confirmation, so
+    # this penalty never fires in the current pipeline. Kept for a future
+    # producer (see the module docstring's reserved-path note).
     if card.needs_confirmation:
         score -= 15
         reasons.append("Card flagged as needing human confirmation (-15)")
@@ -233,6 +252,9 @@ def _spotlight_owners(cards: list[ContentCard]) -> set[str]:
 
 
 def _bucket_for_score(card: ContentCard, score: int) -> str:
+    # RESERVED / inactive: no live producer sets card.needs_confirmation, so a
+    # card never routes into the needs_confirmation bucket in practice. Kept for
+    # a future producer (see the module docstring's reserved-path note).
     if card.needs_confirmation:
         return "needs_confirmation"
     if score >= 65:

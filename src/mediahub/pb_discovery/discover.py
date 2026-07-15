@@ -24,7 +24,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 # Ensure repo root on path
 _REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -387,6 +387,7 @@ def discover_swimmer_pbs(
     use_interpreter: bool = True,
     max_sources: int = 3,
     sport: str = _DEFAULT_SPORT,
+    meet_date: Any = None,
 ) -> PBDiscovery:
     """
     Discover a swimmer's personal best times via live web research.
@@ -404,6 +405,11 @@ def discover_swimmer_pbs(
         max_sources: Maximum number of candidate URLs to try.
         sport: Sport vocabulary for query building (default "swimming"); makes
             the same engine work for other sports with no code change.
+        meet_date: Optional date of the meet being processed (epoch seconds or
+            ISO string). When supplied, a warm-cache baseline captured more than
+            the meet-freshness grace before this date is treated as stale and
+            re-researched, so a swimmer's swim is never compared against a
+            baseline that pre-dates an intervening competition (finding F25).
 
     Returns:
         PBDiscovery with discovered PBs, sources tried, and confidence.
@@ -427,7 +433,7 @@ def discover_swimmer_pbs(
 
     # 2. Warm swimmer cache check
     if not force_refresh:
-        cached = warm_cache.get(swimmer_key)
+        cached = warm_cache.get(swimmer_key, meet_date=meet_date)
         if cached is not None:
             result = PBDiscovery.from_dict(cached)
             result.cache_hit = True

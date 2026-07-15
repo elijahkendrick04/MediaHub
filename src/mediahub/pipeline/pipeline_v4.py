@@ -842,9 +842,21 @@ def _enrich_pbs_via_discovery(
     deadline = (_time.monotonic() + budget_s) if budget_s > 0 else None
     budget_exceeded = False
 
+    # Thread the meet's date into discovery so a warm-cache PB baseline that
+    # pre-dates this meet (and may miss PBs set at an intervening competition)
+    # is rejected as stale rather than served as a pre-meet baseline (F25).
+    # Only forward it when a date is actually known: meet_date=None is identical
+    # to omitting it, and omitting keeps the call signature-compatible.
+    meet_date = getattr(meet, "start_date", None) or getattr(meet, "end_date", None)
+    _date_kw = {"meet_date": meet_date} if meet_date else {}
+
     def _lookup(key: str, full_name: str) -> tuple[str, object]:
         disc = discover_swimmer_pbs(
-            name=full_name, club=club_name, run_id=run_id, force_refresh=force_refresh
+            name=full_name,
+            club=club_name,
+            run_id=run_id,
+            force_refresh=force_refresh,
+            **_date_kw,
         )
         return key, discovery_to_snapshot(disc, swimmer_key=key)
 
