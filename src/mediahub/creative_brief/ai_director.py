@@ -247,6 +247,8 @@ def _design_spec_system_prompt(archetypes: list[str], token_roles: list[str]) ->
         '  "mood": "explosive|electric|calm|fierce|celebratory|stoic|precise|bold|triumphant|minimal",\n'
         '  "motion_intent": "fade_in|snap_in_then_settle|slide_up|scale_in|kinetic_type|count_up|static|bounce_in|flip_reveal|swirl|reveal_from_sides|cascade|rise|pop|drop_in",\n'
         '  "text_effects": {"headline|result|kicker|event|meta": "none|shadow|lift|hollow|outline|splice|echo|glitch|neon|background|gradient|extrude|warp|curve"} (optional flourish — usually {} ),\n'
+        '  "emphasis_word": <optional: ONE word already present in a slot to two-tone-highlight, else "">,\n'
+        '  "emphasis_style": "accent_ink|accent_pill|heavy",\n'
         '  "rationale": <one sentence: why this composition fits THIS result>\n'
         "}\n\n"
         "colour_roles values must be one of: " + ", ".join(token_roles) + ".\n"
@@ -256,8 +258,16 @@ def _design_spec_system_prompt(archetypes: list[str], token_roles: list[str]) ->
         "highlight pill that keeps copy legible over a photo; echo adds speed "
         "behind a result numeral; lift is the quiet photo-card shadow; glitch/neon "
         "are loud electric moods; warp/curve are geometry, best on short kickers. "
+        "curve arcs text on a baseline: keep it gentle for a headline, but a large "
+        "curve wraps a SHORT all-caps string (a club name, one word) toward a "
+        "varsity-crest circle — only ever short all-caps, never a long line. "
         "The renderer auto-downgrades any effect that would hurt legibility, so "
         "never reach for one to force drama.\n"
+        "emphasis_word is the two-tone headline: name ONE word that already "
+        "appears in your headline_hook (or a slot's text) to lift in the accent "
+        "(accent_ink), behind a highlight pill (accent_pill), or in a heavier cut "
+        '(heavy). Leave it "" for most cards; the renderer only highlights the '
+        "word when it genuinely appears and reads legibly, else it stays plain.\n"
         "photo_treatment craft: wash unifies mismatched/phone photography into "
         "one campaign look; sticker gives a cutout the die-cut poster edge "
         "(cutout archetypes only); duotone is the full two-ink brand grade.\n"

@@ -194,7 +194,7 @@
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url(fonts/noto-sans-cyrillic.woff2) format('woff2');
+  src: url(fonts/noto-sans-cyrillic-black.woff2) format('woff2');
   unicode-range: U+0400-04FF, U+0500-052F, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
 }
 @font-face {
@@ -202,7 +202,7 @@
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url(fonts/noto-sans-arabic.woff2) format('woff2');
+  src: url(fonts/noto-sans-arabic-bold.woff2) format('woff2');
   unicode-range: U+0600-06FF, U+0750-077F, U+0870-088E, U+08A0-08FF, U+FB50-FDFF, U+FE70-FEFF;
 }
 @font-face {
@@ -210,7 +210,7 @@
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url(fonts/noto-sans-devanagari.woff2) format('woff2');
+  src: url(fonts/noto-sans-devanagari-bold.woff2) format('woff2');
   unicode-range: U+0900-097F, U+1CD0-1CFF, U+A830-A839, U+A8E0-A8FF;
 }
 @font-face {
@@ -218,7 +218,7 @@
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url(fonts/noto-sans-bengali.woff2) format('woff2');
+  src: url(fonts/noto-sans-bengali-bold.woff2) format('woff2');
   unicode-range: U+0980-09FF, U+1CD0-1CF9, U+200C-200D, U+20B9;
 }
 @font-face {
@@ -226,7 +226,7 @@
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url(fonts/noto-sans-cyrillic.woff2) format('woff2');
+  src: url(fonts/noto-sans-cyrillic-black.woff2) format('woff2');
   unicode-range: U+0400-04FF, U+0500-052F, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
 }
 @font-face {
@@ -234,7 +234,7 @@
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url(fonts/noto-sans-arabic.woff2) format('woff2');
+  src: url(fonts/noto-sans-arabic-bold.woff2) format('woff2');
   unicode-range: U+0600-06FF, U+0750-077F, U+0870-088E, U+08A0-08FF, U+FB50-FDFF, U+FE70-FEFF;
 }
 @font-face {
@@ -242,7 +242,7 @@
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url(fonts/noto-sans-devanagari.woff2) format('woff2');
+  src: url(fonts/noto-sans-devanagari-bold.woff2) format('woff2');
   unicode-range: U+0900-097F, U+1CD0-1CFF, U+A830-A839, U+A8E0-A8FF;
 }
 @font-face {
@@ -250,7 +250,7 @@
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url(fonts/noto-sans-bengali.woff2) format('woff2');
+  src: url(fonts/noto-sans-bengali-bold.woff2) format('woff2');
   unicode-range: U+0980-09FF, U+1CD0-1CF9, U+200C-200D, U+20B9;
 }
 @font-face {
@@ -258,7 +258,7 @@
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url(fonts/noto-sans-cyrillic.woff2) format('woff2');
+  src: url(fonts/noto-sans-cyrillic-black.woff2) format('woff2');
   unicode-range: U+0400-04FF, U+0500-052F, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
 }
 @font-face {
@@ -266,7 +266,7 @@
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url(fonts/noto-sans-arabic.woff2) format('woff2');
+  src: url(fonts/noto-sans-arabic-bold.woff2) format('woff2');
   unicode-range: U+0600-06FF, U+0750-077F, U+0870-088E, U+08A0-08FF, U+FB50-FDFF, U+FE70-FEFF;
 }
 @font-face {
@@ -274,7 +274,7 @@
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url(fonts/noto-sans-devanagari.woff2) format('woff2');
+  src: url(fonts/noto-sans-devanagari-bold.woff2) format('woff2');
   unicode-range: U+0900-097F, U+1CD0-1CFF, U+A830-A839, U+A8E0-A8FF;
 }
 @font-face {
@@ -282,7 +282,7 @@
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url(fonts/noto-sans-bengali.woff2) format('woff2');
+  src: url(fonts/noto-sans-bengali-bold.woff2) format('woff2');
   unicode-range: U+0980-09FF, U+1CD0-1CF9, U+200C-200D, U+20B9;
 }
 @font-face {

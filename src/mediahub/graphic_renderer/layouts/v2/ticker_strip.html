@@ -166,7 +166,9 @@
 }
 .tk__score-result .tk__tag { color: var(--mh-primary); opacity: 0.72; }
 .tk__tag {
-  font-family: var(--mh-font-body, 'Inter',sans-serif); font-weight: 700; font-size: 16px;
+  font-family: var(--mh-font-body, 'Inter',sans-serif); font-weight: 700;
+  font-variation-settings: 'wght' var(--mh-wght-meta, 700);
+  font-size: 16px;
   letter-spacing: 0.24em; text-transform: uppercase; color: var(--mh-accent);
   margin-bottom: 12px;
 }
@@ -208,6 +210,7 @@
 }
 .tk__hero-val {
   font-family: var(--mh-font-kicker, 'Space Grotesk','Inter',sans-serif); font-weight: 700;
+  font-variation-settings: 'wght' var(--mh-wght-kicker, 700);
   font-size: 26px; line-height: 1.1; color: var(--mh-on-primary);
 }
 /* the highlight block collapses entirely when no hero stat is supplied,
