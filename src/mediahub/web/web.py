@@ -3929,6 +3929,111 @@ REACTION_EMOJI: tuple[str, ...] = ("👍", "❤️", "🔥")
 REACTION_MAX_REACTORS_PER_CARD = 500
 
 
+# --- F11: unique per-card ids ------------------------------------------------
+# One swim can yield several ranked achievements (a PB + a medal from the same
+# race, or the double-registered milestone / club-record detectors), so their
+# ``swim_id`` values collide. Interactive workflow state is keyed per
+# ``(run_id, card_id)``, so two rows sharing a card_id would make an approve /
+# reject / caption-edit on one silently apply to its twin, and the per-tab
+# counts would double-count the single state. These helpers assign each ranked
+# achievement a UNIQUE card id, mirroring the export-stub bridge
+# (``pipeline_v4``) and the content pack so every surface agrees: the first
+# occurrence of a base id keeps it verbatim (back-compat with workflow state
+# persisted before this fix), and each later duplicate gets a deterministic
+# ``~n`` suffix. A run with no duplicate swim_ids is keyed byte-identically to
+# before, so existing persisted runs load and read unchanged.
+
+
+def _card_base_id_for(ach: dict) -> str:
+    """The base (pre-dedup) card id for one achievement dict: its ``swim_id``,
+    or the synthetic ``sp:type:event`` id the spotlight / reaction surfaces
+    mint for an aggregate row that has no single swim."""
+    return str(
+        (ach or {}).get("swim_id")
+        or f"sp:{(ach or {}).get('type', '')}:{(ach or {}).get('event', '')}"
+    )
+
+
+def _unique_card_ids(ranked, base_fn=None) -> list[str]:
+    """Index-aligned unique per-card ids for ``ranked`` (a list of ranked
+    achievements). The first occurrence of a base id keeps it verbatim; each
+    later duplicate gets a ``~n`` suffix (n = 2, 3, …). ``base_fn(ach)``
+    derives the base id (default: the bare ``swim_id``, or ``""`` when absent —
+    matching the historic ``a.get("swim_id", "")`` default so non-duplicate
+    rows key exactly as before)."""
+    seen: dict[str, int] = {}
+    out: list[str] = []
+    for ra in ranked or []:
+        ach = ra.get("achievement") or {}
+        base = str((base_fn(ach) if base_fn else ach.get("swim_id")) or "")
+        if not base:
+            out.append("")
+            continue
+        n = seen.get(base, 0) + 1
+        seen[base] = n
+        out.append(base if n == 1 else f"{base}~{n}")
+    return out
+
+
+def _base_card_id(card_id: str) -> str:
+    """Strip a ``~n`` dedup suffix to recover the underlying base id. A twin
+    concerns the same athlete / swim as its first occurrence, so content-based
+    gates (consent, brand-lock, review tasks) and the render routes resolve on
+    the shared base id. Ids without a ``~n`` suffix — the overwhelming
+    majority, and every id minted before this fix — are returned unchanged."""
+    return re.sub(r"~\d+$", "", str(card_id or ""))
+
+
+def _dom_card_uuid(card_id: str) -> str:
+    """A DOM/JS-id-safe slug for a card id. Neutralises the id's structural
+    separators (``:`` ``,``) plus the ``~`` dedup suffix so a twin's element id
+    / data-attribute stays a valid, collision-free identifier. Ids with none
+    of those characters (every id before this fix) slug byte-identically to the
+    old inline ``.replace(":", "_").replace(",", "_")``."""
+    return str(card_id).replace(":", "_").replace(",", "_").replace("~", "_")
+
+
+def _resolve_card_ra(ranked, card_id):
+    """Return the ranked achievement whose unique per-card id equals
+    ``card_id`` — honouring the ``~n`` dedup suffix so a duplicate twin
+    resolves to its own occurrence, while a bare swim_id still resolves to the
+    first occurrence (back-compat with every existing card-id link). Also
+    matches a legacy ra-level ``id``. Returns ``None`` when nothing matches.
+    For a non-duplicate id this returns exactly what the old
+    ``ach.get("swim_id") == card_id`` scan did (the first match)."""
+    if not card_id:
+        return None
+    for ra, uid in zip(ranked or [], _unique_card_ids(ranked)):
+        if uid and uid == card_id:
+            return ra
+        rid = ra.get("id")
+        if rid and str(rid) == str(card_id):
+            return ra
+    return None
+
+
+def _safe_to_post_or_cautious(value) -> dict:
+    """A card's ``safe_to_post`` verdict, or a CAUTIOUS fallback when it is
+    missing.
+
+    F51: ``derive_safe_to_post`` is attached to a ranked achievement inside a
+    swallow-all ``try/except`` in the ranker, and the schema omits the key
+    entirely when it never ran — so a run persisted while the recommender
+    import failed, or any legacy/hand-migrated run, carries no verdict.
+    Defaulting a missing verdict to ``{"level": "safe"}`` would present a green
+    safety signal that no code ever computed. Default to ``needs_review``
+    instead and flag the gap (``missing``) so it surfaces rather than silently
+    reads as safe. A real verdict (a dict carrying a ``level``) is returned
+    unchanged."""
+    if isinstance(value, dict) and value.get("level"):
+        return value
+    return {
+        "level": "needs_review",
+        "reason": "No safety verdict was computed for this card — defaulted to needs review.",
+        "missing": True,
+    }
+
+
 def _run_card_id_set(run_data: dict) -> set[str]:
     """Every card id this run's surfaces can emit reactions for.
 
@@ -3950,6 +4055,15 @@ def _run_card_id_set(run_data: dict) -> set[str]:
         rid = ra.get("id")
         if rid:
             out.add(str(rid))
+    # F11: a duplicate swim_id's later occurrences are keyed on the ``~n``
+    # deduped id by the review / spotlight surfaces, so the reaction strip on a
+    # twin row posts that id — accept it. (For the first occurrence the deduped
+    # id equals the bare id already added above, so this only widens the set.)
+    out.update(
+        cid
+        for cid in _unique_card_ids(rr.get("ranked_achievements") or [], base_fn=_card_base_id_for)
+        if cid
+    )
     for c in (run_data or {}).get("cards") or []:
         for k in ("swim_id", "id", "card_id"):
             v = c.get(k)
@@ -7511,7 +7625,7 @@ def _render_card_creative_toolbar(
     run's already-rendered PNGs and MP4s without a re-render; empty keeps the
     legacy hidden-empty panels. Pairs with `_card_creative_js()` on the host
     page. `card_id_raw` is the swim_id."""
-    card_uuid = str(card_id_raw).replace(":", "_").replace(",", "_")
+    card_uuid = _dom_card_uuid(card_id_raw)
     _caption_url = url_for("api_live_caption", run_id=run_id, swim_id=card_id_raw)
     _create_graphic_url = url_for("api_create_graphic", run_id=run_id, card_id=card_id_raw)
     _motion_url = url_for("api_card_motion", run_id=run_id, card_id=card_id_raw)
@@ -22785,7 +22899,9 @@ def _card_content_type(run_id: str, card_id: str, run_data=None) -> str:
         run_data = run_data if run_data is not None else (_load_run(run_id) or {})
         from mediahub.compliance.gate import card_athlete, find_card_in_run
 
-        card = find_card_in_run(run_data, card_id)
+        # F11: resolve the shared card content on the base id so a ~n twin
+        # inherits the same per-type approver rule as its first occurrence.
+        card = find_card_in_run(run_data, _base_card_id(card_id))
         if not card:
             return ""
         name, age = card_athlete(card)
@@ -23313,12 +23429,15 @@ def _load_run_for_card(run_id: str, card_id: str):
     if run_data is None:
         return None, None
     rr = run_data.get("recognition_report") or {}
-    for ra in rr.get("ranked_achievements") or []:
-        ach = ra.get("achievement") or {}
-        if ach.get("swim_id") == card_id or ra.get("id") == card_id:
-            return run_data, ra
+    # F11: ~n-aware so a duplicate twin resolves to its own occurrence; a bare
+    # swim_id still resolves to the first (byte-identical to the old scan).
+    ra = _resolve_card_ra(rr.get("ranked_achievements") or [], card_id)
+    if ra is not None:
+        return run_data, ra
     for c in run_data.get("cards") or []:
-        if c.get("swim_id") == card_id or c.get("id") == card_id:
+        # Persisted stub cards serialise their id as ``card_id`` (a ~n twin
+        # among them), so match that too or a twin stub 404s.
+        if c.get("swim_id") == card_id or c.get("id") == card_id or c.get("card_id") == card_id:
             return run_data, {"achievement": c}
     return run_data, None
 
@@ -28126,15 +28245,13 @@ def _card_export_assets(run_id: str, card_id: str, run_data: dict, *, caption_ov
     """
     rr = (run_data or {}).get("recognition_report") or {}
     ranked = rr.get("ranked_achievements") or []
-    target = None
-    for ra in ranked:
-        ach = ra.get("achievement") or {}
-        if ach.get("swim_id") == card_id or ra.get("id") == card_id:
-            target = ra
-            break
+    # F11: ~n-aware (a duplicate twin exports its own occurrence); a bare
+    # swim_id still resolves to the first (byte-identical to the old scan).
+    target = _resolve_card_ra(ranked, card_id)
     if target is None:
         for c in (run_data or {}).get("cards") or []:
-            if c.get("swim_id") == card_id or c.get("id") == card_id:
+            # Persisted stub cards serialise their id as ``card_id``.
+            if c.get("swim_id") == card_id or c.get("id") == card_id or c.get("card_id") == card_id:
                 target = {"achievement": c}
                 break
     if target is None:
@@ -28499,15 +28616,13 @@ def _assemble_card_motion_inputs(run_id: str, card_id: str):
 
     rr = run_data.get("recognition_report") or {}
     ranked = rr.get("ranked_achievements") or []
-    target = None
-    for ra in ranked:
-        ach = ra.get("achievement") or {}
-        if ach.get("swim_id") == card_id or ra.get("id") == card_id:
-            target = ra
-            break
+    # F11: ~n-aware (a duplicate twin resolves to its own occurrence); a bare
+    # swim_id still resolves to the first (byte-identical to the old scan).
+    target = _resolve_card_ra(ranked, card_id)
     if target is None:
         for c in run_data.get("cards") or []:
-            if c.get("swim_id") == card_id or c.get("id") == card_id:
+            # Persisted stub cards serialise their id as ``card_id``.
+            if c.get("swim_id") == card_id or c.get("id") == card_id or c.get("card_id") == card_id:
                 target = {"achievement": c}
                 break
     if target is None:
@@ -29862,11 +29977,14 @@ def _compose_spotlight_caption(run_id: str, swimmer_key: str, tone: str = ""):
         wf_states = {}
 
     # Filter to approved/posted; treat absence as not-selected.
+    # F11: key on the same unique ~n-deduped ids the spotlight review approves
+    # under, so a duplicate swim_id's twin is read independently (keying on the
+    # bare swim_id would read one twin's state for both). Non-duplicate runs
+    # key exactly as before.
+    _sp_post_ids = _unique_card_ids(pack["ranked_achievements"], base_fn=_card_base_id_for)
     approved: list[dict] = []
-    for ra in pack["ranked_achievements"]:
-        a = ra.get("achievement", {})
-        cid = a.get("swim_id") or f"sp:{a.get('type', '')}:{a.get('event', '')}"
-        st = wf_states.get(cid)
+    for _i, ra in enumerate(pack["ranked_achievements"]):
+        st = wf_states.get(_sp_post_ids[_i])
         if st and getattr(getattr(st, "status", None), "value", "") in ("approved", "posted"):
             approved.append(ra)
 
@@ -30580,11 +30698,15 @@ def _assemble_spotlight_reel_inputs(pack_id: str, rec: dict):
             wf_states = ws.load(run_id)
     except Exception:
         wf_states = {}
+    # F11: key on the same unique ~n-deduped ids the spotlight review approves
+    # under (a duplicate swim_id's twin is read independently). Non-duplicate
+    # runs key exactly as before.
+    _sp_reel_ids = _unique_card_ids(
+        pack.get("ranked_achievements") or [], base_fn=_card_base_id_for
+    )
     approved = []
-    for ra in pack.get("ranked_achievements") or []:
-        a = ra.get("achievement", {})
-        cid = a.get("swim_id") or f"sp:{a.get('type', '')}:{a.get('event', '')}"
-        st = wf_states.get(cid)
+    for _i, ra in enumerate(pack.get("ranked_achievements") or []):
+        st = wf_states.get(_sp_reel_ids[_i])
         if st and getattr(getattr(st, "status", None), "value", "") in ("approved", "posted"):
             approved.append(ra)
     if not approved:
@@ -31096,6 +31218,10 @@ def _api_card_action(profile_id, run_id, card_id, action, payload):
             status = CardStatus(status_str)
         except (ValueError, NameError):
             return {"error": "bad_request", "message": f"invalid status: {status_str}"}, 400
+        # F11: content-resolving gates key on the shared base id (a ~n twin is
+        # the same athlete/swim/design), so a twin approved by its unique id
+        # can't slip past consent. Non-duplicate cards: base == card_id.
+        _content_card_id = _base_card_id(card_id)
         # Consent gate — the legal/safeguarding rule; identical to the route.
         if status in (CardStatus.APPROVED, CardStatus.POSTED):
             from mediahub.compliance.gate import (
@@ -31103,18 +31229,18 @@ def _api_card_action(profile_id, run_id, card_id, action, payload):
                 find_card_in_run,
             )
 
-            card = find_card_in_run(run_data, card_id)
+            card = find_card_in_run(run_data, _content_card_id)
             reason = consent_block_reason_for_card(run_data.get("profile_id", ""), card)
             if reason:
                 return {"error": "consent_blocked", "message": reason}, 403
         # Brand-lock gate.
         if status in (CardStatus.APPROVED, CardStatus.POSTED):
-            brand_reason = _brand_lock_block_reason(run_id, card_id)
+            brand_reason = _brand_lock_block_reason(run_id, _content_card_id)
             if brand_reason:
                 return {"error": "brand_locked", "message": brand_reason}, 403
         # Open-review-task gate.
         if status == CardStatus.APPROVED:
-            task_reason = _open_tasks_block_reason(run_id, card_id)
+            task_reason = _open_tasks_block_reason(run_id, _content_card_id)
             if task_reason:
                 return {"error": "tasks_open", "message": task_reason}, 403
         # Group-approval rule — recorded under the token owner's identity,
@@ -34510,6 +34636,13 @@ def create_app() -> Flask:
         # page never inserted — so it's removed here (dead-code sweep), leaving
         # one source of truth for the card render.
         ranked_achs = rr.get("ranked_achievements") or []
+        # F11: a run-wide, index-aligned unique id per ranked achievement, so
+        # two rows that share a swim_id get distinct per-(run_id, card_id)
+        # workflow state instead of colliding. Computed once over the FULL list
+        # (before any pagination/filter slice) so the ~n suffixes are stable.
+        # Non-duplicate runs key exactly as before (first occurrence == bare
+        # swim_id), so persisted workflow state still resolves.
+        _card_ids = _unique_card_ids(ranked_achs)
 
         # --- UI 1.6 · Animated results/data charts from this run's real data.
         # Two first-party build-on-scroll figures (web/charts.py): a quality-band
@@ -34978,13 +35111,25 @@ def create_app() -> Flask:
         # in queue" — with server-side pagination the DOM only holds one page
         # of rows, so the bulk approve must not scrape it.
         _queued_card_ids: list[str] = []
-        for _ra in ranked_achs:
-            _cid = (_ra.get("achievement") or {}).get("swim_id", "")
+        _seen_queue_base: set[str] = set()
+        for _idx, _ra in enumerate(ranked_achs):
+            _cid = _card_ids[_idx]
             _cst = _wf_states.get(_cid)
             _cst_val = _cst.status.value if _cst else "queue"
             _wf_card_counts[_cst_val] = _wf_card_counts.get(_cst_val, 0) + 1
             if _cst_val == "queue" and _cid:
-                _queued_card_ids.append(str(_cid))
+                # F11: "Approve all in queue" posts each id to the BULK route,
+                # whose consent / brand-lock / task gates resolve the card via
+                # find_card_in_run — which only knows the base swim_id. Emit the
+                # base id (deduped) so a consent-blocked duplicate twin can never
+                # slip past those gates in bulk; the twin's own ~n state stays
+                # individually approvable on its row (that path is base-gated
+                # here in web.py). For a non-duplicate run this is the bare
+                # swim_id, so the list is unchanged.
+                _qbase = _base_card_id(str(_cid))
+                if _qbase not in _seen_queue_base:
+                    _seen_queue_base.add(_qbase)
+                    _queued_card_ids.append(_qbase)
         _n_queue_cards = _wf_card_counts.get("queue", 0)
         _n_approved_cards = _wf_card_counts.get("approved", 0)
         _n_rejected_cards = _wf_card_counts.get("rejected", 0)
@@ -35121,13 +35266,14 @@ def create_app() -> Flask:
         _indexed_achs = list(enumerate(ranked_achs))
         if _wf_filter:
 
-            def _row_wf_status(_ra: dict) -> str:
-                _cid = (_ra.get("achievement") or {}).get("swim_id", "")
-                _cst = _wf_states.get(_cid)
+            def _row_wf_status(_i: int) -> str:
+                # Key on the same run-wide deduped id the row + counts use, so
+                # filtering agrees with the tab badges for duplicate swim_ids.
+                _cst = _wf_states.get(_card_ids[_i])
                 return _cst.status.value if _cst else "queue"
 
             _indexed_achs = [
-                (_i, _ra) for _i, _ra in _indexed_achs if _row_wf_status(_ra) == _wf_filter
+                (_i, _ra) for _i, _ra in _indexed_achs if _row_wf_status(_i) == _wf_filter
             ]
         try:
             _pg = int(request.args.get("page", "1") or "1")
@@ -35196,8 +35342,22 @@ def create_app() -> Flask:
             post_type = _h(ra.get("suggested_post_type", ""))
             _trace_url = url_for("api_swim_trace", run_id=run_id, swim_id=a.get("swim_id", "x"))
 
-            # V7: workflow state for this card
-            card_id_raw = a.get("swim_id", "")
+            # V7: workflow state for this card.
+            # F11: ``card_id_raw`` is this row's UNIQUE identity (the ~n-deduped
+            # id) — it keys the workflow state (approve/reject/caption-edit via
+            # the in-app /api/workflow route, which base-gates consent),
+            # reactions, the row's DOM id and the inspector's data-card-id, so a
+            # duplicate swim_id's twin decides independently. ``_render_card_id``
+            # is the bare swim_id, used for (a) the render/preview routes
+            # (graphic/caption/thumb, resolved against the shared recognition
+            # report) so the twin still resolves, and (b) the bulk-select
+            # checkbox, whose ids flow to the BULK approve route whose consent
+            # gate resolves on the base swim_id — emitting a ~n id there would
+            # let a consent-blocked twin slip past. For a non-duplicate row the
+            # two ids are identical, so every URL + attribute is byte-identical
+            # to before.
+            card_id_raw = _card_ids[_why_idx]
+            _render_card_id = a.get("swim_id", "")
             wf_state = _wf_states.get(card_id_raw)
             wf_status = wf_state.status.value if wf_state else "queue"
 
@@ -35223,7 +35383,7 @@ def create_app() -> Flask:
             # Content builder (post-approval). Review stays pure triage:
             # Approve / Reject only. `card_uuid` is still needed below for
             # the "Why this card?" anchor + filter data attributes.
-            card_uuid = card_id_raw.replace(":", "_").replace(",", "_")
+            card_uuid = _dom_card_uuid(card_id_raw)
 
             # V9: "Why this card?" &mdash; plain-English, source-grounded reasoning.
             # Lazy: a 150+ card meet would otherwise fire 300+ blocking LLM
@@ -35238,14 +35398,16 @@ def create_app() -> Flask:
             # existing create-graphic + live-caption + workflow routes for THIS
             # card via the data-* attributes. Lightweight: no markup is rendered
             # per card beyond the button itself.
-            _insp_graphic_url = url_for("api_create_graphic", run_id=run_id, card_id=card_id_raw)
-            _insp_caption_url = url_for("api_live_caption", run_id=run_id, swim_id=card_id_raw)
+            _insp_graphic_url = url_for(
+                "api_create_graphic", run_id=run_id, card_id=_render_card_id
+            )
+            _insp_caption_url = url_for("api_live_caption", run_id=run_id, swim_id=_render_card_id)
             # M29 (UX-1) — see before approve: a lazy, cached thumbnail of the
             # card's actual graphic. The <img> stays empty until it scrolls
             # into view (IntersectionObserver script below), then loads from
             # the thumb route — an existing render is served as-is; a first
             # render happens once and is cached per card.
-            _thumb_url = url_for("api_card_thumb", run_id=run_id, card_id=card_id_raw)
+            _thumb_url = url_for("api_card_thumb", run_id=run_id, card_id=_render_card_id)
             # UI2.2: athlete avatar + hover tooltip (name · club · meet haul).
             # Decorative here — the row already shows the name/event/band as
             # text — so the chip stays aria-hidden and out of the tab order.
@@ -35295,7 +35457,7 @@ def create_app() -> Flask:
             ach_rows_html_wf += f"""
 <div class="ach-row" data-type="{a.get("type", "")}" data-conf="{conf_label}" data-swimmer="{_h(a.get("swimmer_name", ""))}" data-event="{_h(a.get("event", ""))}" data-band="{band}" data-post="{ra.get("suggested_post_type", "")}" data-status="{wf_status}" data-status-initial="{wf_status}">
   <div style="display:flex;align-items:flex-start;gap:14px;padding:14px 0;border-bottom:1px solid var(--border)">
-    <label class="mh-row-check-wrap" title="Select card"><input type="checkbox" class="mh-row-check" name="card_ids" value="{_h(card_id_raw)}" aria-label="Select this card"></label>
+    <label class="mh-row-check-wrap" title="Select card"><input type="checkbox" class="mh-row-check" name="card_ids" value="{_h(_render_card_id)}" aria-label="Select this card"></label>
     <div style="min-width:28px;text-align:center;color:var(--ink-muted);font-size:13px;padding-top:2px">#{rank}</div>
     <div class="mh-thumb-wrap" style="flex:0 0 76px">
       <img class="mh-card-thumb" data-thumb-src="{_h(_thumb_url)}" alt=""
@@ -42880,6 +43042,22 @@ function mhAnDigest(btn) {{
         # UI 1.25 — one indexed query for every card's reaction tally.
         _react_counts = _reaction_counts_for_run(run_id)
 
+        # F11: a unique per-row id so a duplicate swim_id (or two aggregate rows
+        # sharing an sp:type:event key) get independent workflow state instead
+        # of colliding. Keyed by object identity because the same ``ra`` dicts
+        # flow through the approved/other splits below; the first occurrence
+        # keeps its bare id (back-compat), later duplicates get a ~n suffix.
+        _sp_card_ids = {
+            id(ra): uid
+            for ra, uid in zip(
+                pack["ranked_achievements"],
+                _unique_card_ids(pack["ranked_achievements"], base_fn=_card_base_id_for),
+            )
+        }
+
+        def _sp_card_id(ra: dict) -> str:
+            return _sp_card_ids.get(id(ra)) or _card_base_id_for(ra.get("achievement") or {})
+
         # Render achievements with the same approve strip the meet recap
         # uses (_render_wf_actions): outline "Approve" until approved,
         # filled "Approved ✓" after, Re-queue to undo. Approved rows are
@@ -42900,7 +43078,10 @@ function mhAnDigest(btn) {{
             angle = _h(_humanise(a.get("angle_hint", "") or ""))
             event = _h(a.get("event", ""))
             atype = _h(_humanise(a.get("type", "")))
-            card_id_raw = a.get("swim_id") or f"sp:{a.get('type', '')}:{a.get('event', '')}"
+            # Row identity (workflow state / reactions / DOM) on the unique
+            # ~n-deduped id; the graphic button below keeps the bare swim_id so
+            # it still resolves in the recognition report.
+            card_id_raw = _sp_card_id(ra)
             card_id_safe = _h(card_id_raw)
 
             wf = wf_states.get(card_id_raw)
@@ -42970,9 +43151,7 @@ function mhAnDigest(btn) {{
 </div>"""
 
         def _sp_status(ra: dict) -> str:
-            a = ra.get("achievement", {})
-            cid = a.get("swim_id") or f"sp:{a.get('type', '')}:{a.get('event', '')}"
-            wf = wf_states.get(cid)
+            wf = wf_states.get(_sp_card_id(ra))
             return wf.status.value if wf else "queue"
 
         _approved_ras = [
@@ -47830,7 +48009,7 @@ what you're doing, what they should do.</p>
             event = _h(ach.get("event", ""))
             headline = _h(ach.get("headline", ""))
             card_id_raw = card.get("_card_id") or ach.get("swim_id", "")
-            card_uuid = str(card_id_raw).replace(":", "_").replace(",", "_")
+            card_uuid = _dom_card_uuid(card_id_raw)
             _dl_url = url_for("api_card_download", run_id=run_id, card_id=card_id_raw)
             # B-2 — ONE primary export per card. The ZIP link only goes live
             # once this card has a rendered graphic; before that it is
@@ -48130,7 +48309,7 @@ what you're doing, what they should do.</p>
                 _missing_btns = ""
                 for _nm, _cid in _missing[:12]:
                     _first = _h(_nm.split(" ")[0])
-                    _cuid = str(_cid).replace(":", "_").replace(",", "_")
+                    _cuid = _dom_card_uuid(_cid)
                     _photo_url = url_for("api_card_photo_upload", run_id=run_id, card_id=_cid)
                     _create_url = url_for("api_create_graphic", run_id=run_id, card_id=_cid)
                     _oc = _h(
@@ -48569,6 +48748,15 @@ function mhCertificatesJob(a) {{
             denied = _role_denied_json(_perms.CAP_APPROVE, run_id)
             if denied:
                 return denied
+            # F11: the content-resolving gates below key on the SHARED base id
+            # (a ~n twin is the same athlete/swim/design as its first
+            # occurrence, so consent, brand-lock and review-task decisions are
+            # identical). Without this, a twin approved under its ~n id would
+            # miss the consent gate (find_card_in_run can't resolve ~n) and
+            # bypass it. For a non-duplicate card base == card_id, so behaviour
+            # is byte-identical. The per-card approval STATE below (group vote,
+            # ledger, stored status) stays keyed on the unique card_id.
+            _content_card_id = _base_card_id(card_id)
             # Consent gate: a card featuring an opted-out or no-consent
             # athlete can never be APPROVED (or marked POSTED). One shared
             # decision function — same rule as pack build + publish gate.
@@ -48579,7 +48767,7 @@ function mhCertificatesJob(a) {{
                 )
 
                 run_data = _load_run(run_id) or {}
-                card = find_card_in_run(run_data, card_id)
+                card = find_card_in_run(run_data, _content_card_id)
                 reason = consent_block_reason_for_card(run_data.get("profile_id", ""), card)
                 if reason:
                     log.info("consent gate blocked approval run=%s card=%s", run_id, card_id)
@@ -48587,14 +48775,14 @@ function mhCertificatesJob(a) {{
             # 1.12 brand-lock gate: a kit may lock palette/fonts/logo so a
             # volunteer can't ship off-brand. Opt-in — no locks → no effect.
             if status in (CardStatus.APPROVED, CardStatus.POSTED):
-                brand_reason = _brand_lock_block_reason(run_id, card_id)
+                brand_reason = _brand_lock_block_reason(run_id, _content_card_id)
                 if brand_reason:
                     log.info("brand-lock gate blocked approval run=%s card=%s", run_id, card_id)
                     return jsonify({"error": "brand_locked", "reason": brand_reason}), 403
             # 1.18 task gate: an open review task ("check lane-4 name") holds the
             # card until it's resolved. Reject/requeue stay allowed.
             if status == CardStatus.APPROVED:
-                task_reason = _open_tasks_block_reason(run_id, card_id)
+                task_reason = _open_tasks_block_reason(run_id, _content_card_id)
                 if task_reason:
                     log.info("task gate blocked approval run=%s card=%s", run_id, card_id)
                     return jsonify({"error": "tasks_open", "reason": task_reason}), 403
@@ -49362,7 +49550,7 @@ function tiRegenerate(btn) {{
                 cap_full = _h(item.get("caption_full_brief") or "")
                 card_id_raw = ach.get("swim_id") or item.get("card_id") or ""
                 card_id = _h(card_id_raw)
-                card_uuid = str(card_id_raw).replace(":", "_").replace(",", "_")
+                card_uuid = _dom_card_uuid(card_id_raw)
                 band = _h(item.get("quality_band") or "")
                 prio = item.get("priority", 0)
                 n_ach = item.get("n_achievements", 0)
@@ -52095,7 +52283,7 @@ voice, and queues them for one-click approval.</p>
             "achievement": ach,
             "post_angle": ach.get("post_angle"),
             "meet_name": (run_data.get("meet") or {}).get("name") or run_data.get("meet_name", ""),
-            "safe_to_post": card["ra"].get("safe_to_post") or {"level": "safe"},
+            "safe_to_post": _safe_to_post_or_cautious(card["ra"].get("safe_to_post")),
         }
         demo_prof = _demo.ensure_demo_profile()
         brand_kit = demo_prof.get_brand_kit()
