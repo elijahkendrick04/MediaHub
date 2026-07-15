@@ -35,6 +35,8 @@ from mediahub.creative_brief.generator import CreativeBrief, generate
 from mediahub.graphic_renderer.render import (
     _band_top_fraction,
     _duotone_defs_svg,
+    _sticker_outline_css,
+    _wash_defs_svg,
     darken,
     resolved_role_vars_for_brief,
 )
@@ -307,8 +309,87 @@ def test_untreated_cards_attach_no_filter_props(photo_env):
         photo_treatment="cutout",
     )
     props = motion._card_to_props(_card(1), variation_seed=2, brief=brief, brand_kit=BRAND)
-    for key in ("duotoneShadow", "duotoneHighlight", "halftoneTile"):
+    for key in (
+        "duotoneShadow",
+        "duotoneHighlight",
+        "halftoneTile",
+        "stickerInk",
+        "stickerRadius",
+        "washTint",
+        "washMix",
+    ):
         assert key not in props
+
+
+# ===========================================================================
+# B5 — die-cut sticker contour (render._sticker_outline_css)
+# ===========================================================================
+
+
+def test_sticker_props_carry_the_stills_ink_and_radius(photo_env):
+    """A sticker-treated card on a CUTOUT-mode archetype passes the resolved
+    on-ground ink and the exact radius the still computed
+    (round(min(w,h)·(0.003 + 0.004·strength))), so the TSX rebuilds the same
+    8-direction contour the still painted on img.athlete-cutout."""
+    brief = _full_brief(
+        layout_template="spotlight_disc",  # cutout-mode → a real silhouette
+        sourced_asset_ids=["a1"],
+        photo_treatment="sticker",
+        decoration_strength=0.8,
+    )
+    expected_vars = resolved_role_vars_for_brief(CreativeBrief.from_dict(brief), BRAND)
+    props = motion._card_to_props(_card(1), variation_seed=2, brief=brief, brand_kit=BRAND)
+    assert props["cutoutSrc"].startswith("data:image/png;base64,")  # cutout exists
+    assert props["stickerInk"] == expected_vars["--mh-on-primary"]
+    # Story cut is 1080×1920 → min(w,h)=1080; radius = round(1080·(0.003+0.004·0.8)).
+    assert props["stickerRadius"] == max(3, int(round(1080 * (0.003 + 0.004 * 0.8))))
+    # The still's CSS uses the SAME radius maths on its own 1080-min geometry:
+    # the (dx, dy) = (r, 0) axis shadow renders "<r>px 0px 0 <ink>".
+    still_css = _sticker_outline_css(1080, 1350, 0.8)
+    assert f"{props['stickerRadius']}px 0px 0 var(--mh-on-primary)" in still_css
+
+
+def test_sticker_needs_a_real_cutout(photo_env):
+    """A photo-mode archetype has no alpha silhouette — the still's cutout_ok
+    gate skips the sticker (a full-bleed rectangle would paint a box halo), so
+    no sticker props attach on the motion side either."""
+    brief = _full_brief(
+        layout_template="full_bleed_photo_lower_third",  # photo-mode → no cutout
+        sourced_asset_ids=["a1"],
+        photo_treatment="sticker",
+    )
+    props = motion._card_to_props(_card(1), variation_seed=2, brief=brief, brand_kit=BRAND)
+    assert props["cutoutSrc"] == ""
+    assert "stickerInk" not in props and "stickerRadius" not in props
+
+
+def test_tsx_sticker_contour_mirrors_the_still_eight_directions():
+    """The TSX stickerContourFilter builds the identical 8-direction zero-blur
+    drop-shadow stack (±r on axes, ±d on diagonals, d = round(r·0.7071)) that
+    render._sticker_outline_css paints, in the passed on-ground ink."""
+    src = _src("sprint/layers/photo_filters.tsx")
+    assert "export function stickerContourFilter" in src
+    # Eight offsets: the four axis pairs and the four diagonals.
+    for pair in (
+        "[r, 0]",
+        "[-r, 0]",
+        "[0, r]",
+        "[0, -r]",
+        "[d, d]",
+        "[d, -d]",
+        "[-d, d]",
+        "[-d, -d]",
+    ):
+        assert pair in src
+    # Same diagonal-offset maths as the still (r·0.7071, floored at 2).
+    assert "r * 0.7071" in src and "Math.max(2" in src
+    # Zero-blur drop-shadow in the passed ink; gated on a real cutout.
+    assert "drop-shadow(${dx}px ${dy}px 0 ${ink})" in src
+    assert "!card.cutoutSrc" in src
+    # cutout.tsx applies it, replacing the grounded depth shadow (like exactGrade).
+    cut = _src("sprint/layers/cutout.tsx")
+    assert "stickerContourFilter(card)" in cut
+    assert "exactGrade ||\n            sticker ||" in cut
 
 
 def test_photo_scale_mirrors_the_stills_crop_intent(photo_env):

@@ -102,6 +102,13 @@ export const cardSchema = z.object({
   // M10 real halftone — the mask tile px (round(14 + 18·decoration_strength),
   // the still's _v2_photo_treatment_assets). 0 = no halftone.
   halftoneTile: z.number().default(0),
+  // B5 die-cut sticker contour — the resolved on-ground ink hex + the radius px
+  // the still computed (render._sticker_outline_css: round(min(w,h)·(0.003 +
+  // 0.004·decoration_strength))), so the cutout's 8-direction outline is byte-
+  // identical to the still's `img.athlete-cutout { filter }`. Empty/0 = no
+  // sticker (the cutout keeps its grounded depth shadow, byte-identical).
+  stickerInk: z.string().default(""),
+  stickerRadius: z.number().default(0),
   // M11 data weight — the still's secondary-stat chip row (label/value pairs
   // already selected + trimmed by the still's own tables) and the honest
   // proportional PB bars, with the exact ink hex the still's bay uses.

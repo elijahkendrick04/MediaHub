@@ -631,9 +631,14 @@ def _decoration_strength_of(brief: Optional[dict]) -> float:
 
 
 def _photo_treatment_mirror_props(
-    brief: Optional[dict], root_vars: dict[str, str], has_photo: bool
+    brief: Optional[dict],
+    root_vars: dict[str, str],
+    has_photo: bool,
+    *,
+    has_cutout: bool = False,
+    format_name: str = DEFAULT_MOTION_FORMAT,
 ) -> dict[str, Any]:
-    """The exact-mirror photo-grade props for a v2 card (M10 parity).
+    """The exact-mirror photo-grade props for a v2 card (M10 + B5/C5 parity).
 
     duotone → ``duotoneShadow``/``duotoneHighlight``: the two ink hexes the
     still's SVG filter ramps between, computed by the SAME maths
@@ -644,7 +649,18 @@ def _photo_treatment_mirror_props(
     halftone → ``halftoneTile``: the mask tile px from ``decoration_strength``
     (``round(14 + 18·clamp(s, 0, 1))`` — ``render._v2_photo_treatment_assets``).
 
-    Attached ONLY for a v2 archetype with a sourced photo and one of these two
+    sticker → ``stickerInk``/``stickerRadius`` (B5): the resolved on-ground ink
+    and the die-cut contour radius ``round(min(w,h)·(0.003 + 0.004·strength))``
+    (``render._sticker_outline_css``). Emitted ONLY when a real cutout exists —
+    the still's ``cutout_ok`` gate — since a full-bleed rectangle would paint a
+    box halo. ``format_name`` sizes the radius against this cut's geometry.
+
+    wash → ``washTint``/``washMix`` (C5): the deep brand tint
+    (``render.darken(--mh-primary, 0.20)``) and the arithmetic mix fraction
+    ``0.18 + 0.24·strength`` the still's ``_wash_defs_svg`` composites, so the
+    motion side rebuilds the identical brand colour-wash filter.
+
+    Attached ONLY for a v2 archetype with a sourced photo and one of these
     treatments — every other card's props (and cache key) stay byte-identical.
     """
     b = brief if isinstance(brief, dict) else {}
@@ -667,6 +683,23 @@ def _photo_treatment_mirror_props(
     if treatment == "halftone":
         strength = _decoration_strength_of(b)
         return {"halftoneTile": int(round(14 + 18 * max(0.0, min(1.0, strength))))}
+    if treatment == "sticker":
+        ink = root_vars.get("--mh-on-primary")
+        if not ink or not has_cutout:
+            return {}
+        s = max(0.0, min(1.0, _decoration_strength_of(b)))
+        width, height = motion_format_size(format_name)
+        radius = max(3, int(round(min(width, height) * (0.003 + 0.004 * s))))
+        return {"stickerInk": str(ink), "stickerRadius": radius}
+    if treatment == "wash":
+        try:
+            from mediahub.graphic_renderer.render import darken
+
+            tint = darken(root_vars.get("--mh-primary", "#0A2540"), 0.20)
+        except Exception:
+            return {}
+        s = max(0.0, min(1.0, _decoration_strength_of(b)))
+        return {"washTint": tint, "washMix": round(0.18 + 0.24 * s, 4)}
     return {}
 
 
@@ -1133,8 +1166,19 @@ def _card_to_props(
     crop_scale = 0.0 if footage is not None else _photo_crop_scale_for_brief(b, format_name)
     if crop_scale > 1.0:
         props["photoScale"] = crop_scale
-    # M10 true-brand duotone / real halftone parameters (exact still mirror).
-    props.update(_photo_treatment_mirror_props(b, root_vars, bool(photo_uri)))
+    # M10 true-brand duotone / real halftone + B5 sticker contour + C5 brand
+    # colour-wash parameters (exact still mirror). ``has_cutout`` gates the
+    # sticker contour (the still's cutout_ok gate); ``format_name`` sizes its
+    # radius against this cut's geometry.
+    props.update(
+        _photo_treatment_mirror_props(
+            b,
+            root_vars,
+            bool(photo_uri),
+            has_cutout=bool(cutout_uri),
+            format_name=format_name,
+        )
+    )
     # M11 data weight: secondary-stat chips + honest proportional PB bars for
     # the data-led archetypes, with the exact ink hex the still's bay uses.
     stat_chips = _stat_chips_for_brief(b)

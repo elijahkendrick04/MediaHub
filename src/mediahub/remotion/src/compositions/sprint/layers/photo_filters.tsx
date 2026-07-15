@@ -57,6 +57,12 @@ type TreatmentCard = {
   duotoneShadow?: string;
   duotoneHighlight?: string;
   halftoneTile?: number;
+  // B5 die-cut sticker contour — the resolved on-ground ink + radius px the
+  // still computed (render._sticker_outline_css); only set for a sticker-
+  // treated card with a real cutout.
+  stickerInk?: string;
+  stickerRadius?: number;
+  cutoutSrc?: string;
 };
 
 // The still's exact held halftone grade (render._v2_photo_treatment_assets):
@@ -124,6 +130,35 @@ export const PhotoFilterDefs: React.FC<{ card: TreatmentCard }> = ({ card }) => 
     </svg>
   );
 };
+
+// B5 die-cut sticker contour (exact mirror of render._sticker_outline_css): the
+// eight zero-blur drop-shadows that trace the cutout's alpha silhouette in the
+// card's resolved on-ground ink — the classic Canva/Bleacher-Report sticker
+// edge that also hides matting fringe. The radius is passed from Python
+// (round(min(w,h)*(0.003+0.004*strength))); the diagonal offset d = max(2,
+// round(r·0.7071)) is rebuilt here byte-identically to the still. Returns ""
+// unless the card carries the sticker params AND a real cutout — a full-bleed
+// rectangle would paint a box halo (the still's cutout_ok gate), so untreated
+// cards keep their grounded depth shadow untouched.
+export function stickerContourFilter(card: TreatmentCard): string {
+  const ink = (card.stickerInk || "").trim();
+  const r = Math.round(card.stickerRadius || 0);
+  if (!ink || r < 1 || !card.cutoutSrc) {
+    return "";
+  }
+  const d = Math.max(2, Math.round(r * 0.7071));
+  const offs: Array<[number, number]> = [
+    [r, 0],
+    [-r, 0],
+    [0, r],
+    [0, -r],
+    [d, d],
+    [d, -d],
+    [-d, d],
+    [-d, -d],
+  ];
+  return offs.map(([dx, dy]) => `drop-shadow(${dx}px ${dy}px 0 ${ink})`).join(" ");
+}
 
 // The still's exact-mirror grade for the card, or "" when no exact mirror
 // applies. Static — the still's SVG filter has no develop-in, so the exact

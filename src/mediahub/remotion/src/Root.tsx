@@ -50,6 +50,8 @@ const defaultCard = {
   duotoneShadow: "",
   duotoneHighlight: "",
   halftoneTile: 0,
+  stickerInk: "",
+  stickerRadius: 0,
   statChips: [] as { label: string; value: string }[],
   statInk: "",
   pbBars: null as null | { prev: string; now: string; nowPct: number; caption: string },
