@@ -60,6 +60,11 @@ CROP_INTENTS: tuple[str, ...] = (
     "centered",
     "full_bleed",
     "original",
+    # E2 (Canva gap analysis) — hand the crop to the smartcrop-style scorer:
+    # multi-scale candidate scoring picks the zoom, rule-of-thirds placement is
+    # the default (centred for symmetric archetypes), and a distant subject is
+    # punched in. Deterministic; executed by ``saliency.smart_focus``.
+    "smart",
 )
 
 # Emphasis angles the deterministic ranker can surface (thesis §5.3.1 #4).

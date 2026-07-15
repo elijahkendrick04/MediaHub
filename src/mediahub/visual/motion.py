@@ -341,6 +341,21 @@ def _photo_data_uri_for_brief(brief: Optional[dict]) -> str:
     return _photo_data_uri_for_path(_photo_asset_path_for_brief(brief))
 
 
+def _archetype_is_symmetric(brief: Optional[dict]) -> bool:
+    """True when the brief's v2 archetype is a centred composition (E2).
+
+    Mirrors the still renderer so the smart-crop scorer keeps the disc/medal
+    spotlight cards dead-centre on both surfaces.
+    """
+    try:
+        from mediahub.graphic_renderer.archetypes import is_symmetric
+
+        b = brief if isinstance(brief, dict) else {}
+        return is_symmetric(str(b.get("layout_template") or ""))
+    except Exception:
+        return False
+
+
 def _photo_focus_for_brief(brief: Optional[dict], format_name: str = DEFAULT_MOTION_FORMAT) -> str:
     """Saliency ``object-position`` for the brief's photo, steered per cut.
 
@@ -353,13 +368,36 @@ def _photo_focus_for_brief(brief: Optional[dict], format_name: str = DEFAULT_MOT
     ``""`` when the brief sourced no photo (the TSX then uses its own
     neutral default). The ``story`` default resolves to the 9:16 ratio, so a
     default-cut render is byte-identical to the pre-format behaviour.
+
+    E2: a ``smart`` crop intent (director-set or the ``MEDIAHUB_SMART_CROP``
+    operator default) routes through the smartcrop scorer so the video's
+    focal point matches the still's smart crop; every other intent keeps the
+    plain saliency focus, byte-identical.
     """
     p = _photo_asset_path_for_brief(brief)
     if p is None:
         return ""
     try:
-        from mediahub.graphic_renderer.saliency import focus_position_for_format
+        from mediahub.graphic_renderer.saliency import (
+            focus_position_for_format,
+            smart_focus_for_format,
+        )
 
+        b = brief if isinstance(brief, dict) else {}
+        from mediahub.graphic_renderer.render import (
+            _existing_cutout_for,
+            effective_crop_intent,
+        )
+
+        if effective_crop_intent(str(b.get("crop_intent") or "")) == "smart" and _is_v2_archetype(
+            str(b.get("layout_template") or "")
+        ):
+            mask = _existing_cutout_for(p, profile_id=str(b.get("profile_id") or "default"))
+            pos = smart_focus_for_format(
+                p, format_name, symmetric=_archetype_is_symmetric(b), mask_path=mask
+            ).get("--mh-photo-pos", "")
+            if pos:
+                return pos
         return focus_position_for_format(p, format_name)
     except Exception:
         return ""
@@ -783,23 +821,33 @@ def _photo_crop_scale_for_brief(brief: Optional[dict], format_name: str) -> floa
     Runs the still's own deterministic translation of the director's crop
     intent (``render._crop_intent_vars`` — saliency/alpha-bbox maths, never
     taste) against the sourced photo, using a previously-gated cutout as the
-    subject mask exactly like the still's photo-mode path. Only
-    ``tight_portrait`` currently emits a scale; every other card returns 0.0
-    so the prop is never attached and cache keys stay byte-identical.
+    subject mask exactly like the still's photo-mode path. ``tight_portrait``
+    and the E2 ``smart`` scorer (director-set or the ``MEDIAHUB_SMART_CROP``
+    operator default, resolved via ``effective_crop_intent``) emit a punch-in
+    scale; every other card returns 0.0 so the prop is never attached and cache
+    keys stay byte-identical.
     """
     b = brief if isinstance(brief, dict) else {}
-    intent = str(b.get("crop_intent") or "").strip()
-    if not intent or not _is_v2_archetype(str(b.get("layout_template") or "")):
+    if not _is_v2_archetype(str(b.get("layout_template") or "")):
         return 0.0
     p = _photo_asset_path_for_brief(b)
     if p is None:
         return 0.0
     try:
-        from mediahub.graphic_renderer.render import _crop_intent_vars, _existing_cutout_for
+        from mediahub.graphic_renderer.render import (
+            _crop_intent_vars,
+            _existing_cutout_for,
+            effective_crop_intent,
+        )
 
+        intent = effective_crop_intent(str(b.get("crop_intent") or ""))
+        if not intent:
+            return 0.0
         width, height = motion_format_size(format_name)
         mask = _existing_cutout_for(p, profile_id=str(b.get("profile_id") or "default"))
-        intent_vars = _crop_intent_vars(intent, p, mask, width, height)
+        intent_vars = _crop_intent_vars(
+            intent, p, mask, width, height, symmetric=_archetype_is_symmetric(b)
+        )
         scale = intent_vars.get("--mh-photo-scale", "")
         return float(scale) if scale else 0.0
     except Exception:
