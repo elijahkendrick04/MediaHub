@@ -76,6 +76,11 @@ const defaultCard = {
   wghtKicker: 0,
   wghtMeta: 0,
   wghtData: 0,
+  frameShape: "",
+  frameRadius: "",
+  frameTornFreq: 0,
+  frameTornScale: 0,
+  frameTornSeed: 0,
 };
 
 export const RemotionRoot: React.FC = () => {

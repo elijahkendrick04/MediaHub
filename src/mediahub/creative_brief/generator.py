@@ -224,6 +224,14 @@ class CreativeBrief:
     # subject). Stamped from graphic_renderer.archetypes.photo_mode() when a v2
     # archetype is chosen, so the motion render can mirror the same source.
     photo_mode: str = ""
+    # E4 (Canva gap analysis) — the shaped photo frame for the windowed
+    # archetypes (design_spec.PHOTO_FRAME_SHAPES: arch / blob / torn_edge).
+    # Executed by the still renderer (render._photo_frame_shape_assets) only on
+    # photo_passepartout / spotlight_disc / full_height_portrait_split, and
+    # mirrored as static geometry in the motion scenes. "" / "rect" (the
+    # default) keeps the raw rectangular window, so every legacy card renders
+    # byte-identically.
+    photo_frame_shape: str = ""
     # M11 (STILLS-5) — the director's validated secondary stats (STAT_KEY names,
     # each verified present in hero_stat_options). The data-led archetypes
     # render them as the {{STAT_CHIPS}} row; empty (the default) collapses.
@@ -997,6 +1005,9 @@ def apply_design_spec(brief: CreativeBrief, spec) -> CreativeBrief:
     # word the card never contains) leaves the card byte-identical.
     brief.emphasis_word = getattr(spec, "emphasis_word", "") or ""
     brief.emphasis_style = getattr(spec, "emphasis_style", "") or ""
+    # E4 — carry the director's shaped photo frame. The renderer only executes it
+    # on the three windowed archetypes; "" / "rect" leaves the card byte-identical.
+    brief.photo_frame_shape = getattr(spec, "photo_frame_shape", "") or ""
     # Mood-keyed style pack (G1.28): re-key the decorative pack to the mood's
     # curated preset bundle so the decoration matches the feeling the director
     # chose. This is the same selection ``generate()``'s v2 pack block makes for
