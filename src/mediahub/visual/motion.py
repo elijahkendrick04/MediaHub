@@ -566,12 +566,23 @@ def _motion_roles_from_vars(root_vars: dict[str, str]) -> dict[str, str]:
     exactly the pre-parity behaviour."""
     if not root_vars:
         return {}
-    return {
+    out = {
         "roleGround": str(root_vars.get("--mh-primary") or ""),
         "roleSurface": str(root_vars.get("--mh-surface") or ""),
         "roleAccent": str(root_vars.get("--mh-accent") or ""),
         "roleOnGround": str(root_vars.get("--mh-on-primary") or ""),
     }
+    # F9 (Canva gap analysis) — medal chrome parity: forward the resolved
+    # specular ramp so the motion medal scene paints the same gradient-clipped
+    # numeral / bevelled chip. Present only on a gate-passing medal card, so a
+    # non-medal card keeps byte-identical props.
+    ramp = str(root_vars.get("--mh-medal-ramp") or "")
+    if ramp:
+        out["roleMedalRamp"] = ramp
+    numeral_ramp = str(root_vars.get("--mh-medal-numeral-ramp") or "")
+    if numeral_ramp:
+        out["roleMedalNumeralRamp"] = numeral_ramp
+    return out
 
 
 def _archetype_photo_mode(brief: Optional[dict]) -> str:
@@ -1124,6 +1135,14 @@ def _card_to_props(
         props["photoSrcs"] = photo_srcs
     if mesh_bg:
         props["meshBg"] = mesh_bg
+    # F9 medal chrome (still parity): the resolved specular ramp, attached only
+    # on a gate-passing medal card so non-medal cards keep byte-identical props.
+    medal_ramp = roles.get("roleMedalRamp", "")
+    if medal_ramp:
+        props["roleMedalRamp"] = medal_ramp
+    medal_numeral_ramp = roles.get("roleMedalNumeralRamp", "")
+    if medal_numeral_ramp:
+        props["roleMedalNumeralRamp"] = medal_numeral_ramp
     # F7 overlap accent (still parity): the seeded badge/tab/rule/tape the still
     # straddles across an anchor. Attached only for a decorated card, so a
     # bare/legacy card keeps byte-identical props (and cache key).

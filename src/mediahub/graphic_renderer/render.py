@@ -1893,6 +1893,19 @@ _MEDAL_ACCENTS = {
     "bronze": {"accent": "#E2A26A", "accent_deep": "#7E481B", "badge": "BRONZE"},
 }
 
+# F9 (Canva gap analysis) — which v2 archetype result element takes medal chrome,
+# and how. ``numeral`` selectors get the gradient-clipped specular ramp (the
+# result glyphs BECOME the metal, APCA-gated on the ramp's darkest stop vs the
+# ground by the resolver); ``chip`` selectors get the ramp fill + bevel + rim.
+# Only the big-numeral / medal-spotlight layouts are mapped, so chrome lands
+# where it reads as an achievement grammar (shinier = bigger medal) rather than
+# on every card. Absent archetype → skipped → byte-identical.
+_MEDAL_CHROME_SELECTORS: dict[str, dict[str, str]] = {
+    "big_number_dominant": {"numeral": ".bn__result"},
+    "cornerstone_numeral": {"numeral": ".cn__num"},
+    "centered_medal_spotlight": {"chip": ".cm__result"},
+}
+
 
 def _localized_overrides_css(language: str) -> str:
     """RTL text-direction CSS for a right-to-left target language (1.24).
@@ -4433,6 +4446,31 @@ def resolved_role_vars_for_brief(brief, brand_kit=None) -> dict[str, str]:
         for metal in (_MEDAL_ACCENTS[tier]["accent"], _MEDAL_ACCENTS[tier]["accent_deep"]):
             if is_legible(metal, ground) and is_legible(ground, metal):
                 root_vars = {**root_vars, "--mh-accent": metal}
+                # F9 (Canva gap analysis) — metallic chrome. Derive a
+                # deterministic 7-stop specular ramp from the chosen medal tint
+                # (fixed offsets — same tint → same ramp) and emit it as
+                # ``--mh-medal-ramp``. The accent gate above already proved the
+                # metal is legible BOTH ways against the ground, so the ramp's
+                # bright body + a bevelled chip's dark ground-colour text are
+                # legible by construction; the per-selector NUMERAL gate (a
+                # gradient-clipped glyph sitting straight on the ground) is
+                # applied at the still injection site (darkest stop vs ground).
+                # A non-medal card never reaches here → byte-identical render.
+                # ``--mh-medal-ramp`` (chip/bevel) is always emitted; the
+                # ``--mh-medal-numeral-ramp`` twin is emitted ONLY when the
+                # ramp's darkest stop clears the APCA gate against the ground
+                # (the gradient-clipped glyph sits straight on it) — so the
+                # numeral downgrades to flat on a dark ground while the chip
+                # (rim + bright body + dark ground-colour text) still reads.
+                # Archetype-independent so the motion mirror gates identically.
+                try:
+                    from mediahub.graphic_renderer import medal_chrome as _mc
+
+                    root_vars["--mh-medal-ramp"] = _mc.medal_ramp_css(metal)
+                    if is_legible(_mc.darkest_ramp_stop(metal), ground, min_lc=45.0):
+                        root_vars["--mh-medal-numeral-ramp"] = root_vars["--mh-medal-ramp"]
+                except Exception:
+                    pass
                 break
     return root_vars
 
@@ -4992,6 +5030,26 @@ def _fill_v2_archetype(
     _disp = _display_font_stack_for_pair(getattr(brief, "typography_pair", "") or "")
     if _disp:
         root_vars["--mh-font-display"] = _disp
+
+    # F9 (Canva gap analysis) — medal chrome. When the resolver emitted a legible
+    # ``--mh-medal-ramp`` (a medal card that cleared the APCA gate) AND this
+    # archetype declares a chrome-eligible result selector, paint the numeral
+    # with the gradient-clipped specular ramp and the result chip with the bevel.
+    # A non-medal card carries no ramp var → no injection → byte-identical; an
+    # archetype without a mapped selector is skipped so the effect only lands
+    # where it reads well (the big-numeral / medal-spotlight layouts).
+    if root_vars.get("--mh-medal-ramp") and archetype in _MEDAL_CHROME_SELECTORS:
+        from mediahub.graphic_renderer import medal_chrome as _mc
+
+        _sel = _MEDAL_CHROME_SELECTORS[archetype]
+        # NUMERAL: gradient-clipped glyphs on the ground — only when the
+        # resolver's numeral-safe gate passed (darkest stop legible vs ground).
+        if _sel.get("numeral") and root_vars.get("--mh-medal-numeral-ramp"):
+            extra_css += _mc.medal_numeral_css(_sel["numeral"])
+        # CHIP: rim-bordered bevelled pill — always (accent gate covers the
+        # dark ground-colour text on the bright ramp body).
+        if _sel.get("chip"):
+            extra_css += _mc.medal_chip_css(_sel["chip"])
 
     root_block = "\n:root{" + "".join(f"{k}:{v};" for k, v in root_vars.items()) + "}\n"
     # F7/F8 shared v2 component utilities (overlap anchors + panel silhouettes).

@@ -162,6 +162,13 @@ export const cardSchema = z.object({
   roleSurface: z.string().default(""),
   roleAccent: z.string().default(""),
   roleOnGround: z.string().default(""),
+  // F9 medal chrome (still parity): the resolved specular ramp CSS
+  // (linear-gradient(...)). roleMedalRamp fills the bevelled result chip;
+  // roleMedalNumeralRamp is the gate-passing twin that gradient-clips the mega
+  // result numeral (emitted only when the ramp's darkest stop clears APCA vs
+  // the ground). Empty = no chrome (non-medal / dark-ground numeral), byte-equiv.
+  roleMedalRamp: z.string().default(""),
+  roleMedalNumeralRamp: z.string().default(""),
   // Subtitle/caption burn-in track (R1.3): a JSON string of the APCA-gated,
   // frame-timed caption cues built by visual/subtitle_burn.py and painted by
   // sprint/layers/captions.tsx. Empty = no captions (byte-identical render).
@@ -2047,11 +2054,31 @@ const HeroScene: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
 };
 
 // Poster scene — the number (or the name) IS the story, centred, minimal.
+// F9 medal chrome: gradient-clip a numeral with the resolved specular ramp so
+// the video reads as polished metal like the still. Empty ramp → no override
+// (the numeral keeps its role colour), byte-equivalent to the pre-F9 scene.
+function medalNumeralStyle(ramp: string): React.CSSProperties {
+  if (!ramp) {
+    return {};
+  }
+  return {
+    backgroundImage: ramp,
+    WebkitBackgroundClip: "text",
+    backgroundClip: "text",
+    WebkitTextFillColor: "transparent",
+    color: "transparent",
+  };
+}
+
 const PosterScene: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
   const { card, roles, anim, width, ts } = ctx;
   const isQuote = card.archetype === "quote_led_recap";
   const megaIsResult = Boolean(ctx.resultFinal);
   const mega = megaIsResult ? ctx.result : ctx.surnameText;
+  // Medal chrome on the mega RESULT numeral only (parity with the still's
+  // gradient-clipped .bn__result / .cn__num — uses the gate-passing numeral
+  // ramp, so a dark-ground numeral stays flat exactly like the still).
+  const megaChrome = megaIsResult ? medalNumeralStyle(card.roleMedalNumeralRamp || "") : {};
   // Fit against the FINAL value so the size never wobbles mid-count.
   const megaSize = fitLinePx(
     megaIsResult ? ctx.resultFinal : ctx.surnameText,
@@ -2115,6 +2142,7 @@ const PosterScene: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
             transform: `translateY(${anim.heroY}px) scale(${anim.heroScale})`,
             fontVariantNumeric: "tabular-nums",
             textTransform: "uppercase",
+            ...megaChrome,
           }}
         />
         <div
@@ -2316,6 +2344,21 @@ const LowerThirdScene: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
 const SpotlightScene: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
   const { card, roles, anim, width, height, ts } = ctx;
   const ringSize = Math.round(Math.min(width, height) * 0.34);
+  // F9 medal chrome: on a medal card the result reads as a bevelled ramp chip
+  // (parity with the still's .cm__result pill). Empty ramp → plain accent
+  // numeral, byte-equivalent to before.
+  const medalRamp = card.roleMedalRamp || "";
+  const chipChrome: React.CSSProperties = medalRamp
+    ? {
+        display: "inline-block",
+        padding: `${Math.round(16 * ts)}px ${Math.round(40 * ts)}px`,
+        borderRadius: 999,
+        background: medalRamp,
+        color: roles.ground,
+        boxShadow: "inset 0 1px 0 rgba(255,255,255,0.28), inset 0 -2px 4px rgba(0,0,0,0.5)",
+        border: "1px solid rgba(255,255,255,0.28)",
+      }
+    : {};
   const place = placeDisplay(card.place || "");
   return (
     <>
@@ -2432,6 +2475,7 @@ const SpotlightScene: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
             fontVariantNumeric: "tabular-nums",
             opacity: anim.resultOpacity,
             transform: `scale(${anim.resultScale})`,
+            ...chipChrome,
           }}
         >
           {ctx.result}
