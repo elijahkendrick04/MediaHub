@@ -40,7 +40,7 @@
 }
 
 /* top lockup — kicker + first name */
-.ms__top { position: absolute; left: 64px; top: 84px; right: 64px; z-index: 3; display: flex; flex-direction: column; gap: 16px; }
+.ms__top { position: absolute; left: 64px; top: 84px; right: 64px; z-index: 3; display: flex; flex-direction: column; gap: var(--mh-sp-4); }
 .ms__kicker { display: inline-flex; align-items: center; gap: 14px; font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 800; font-size: 26px; letter-spacing: 0.24em; text-transform: uppercase; color: var(--mh-accent); }
 /* Kicker signature: a bare tracked label, no tick — the mega surname is the
    loud element here, so the kicker stays quiet. */
@@ -48,12 +48,12 @@
 .ms__first { font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 700; font-size: 52px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--mh-on-primary); }
 
 /* bottom lockup — event, result chip, brand */
-.ms__bottom { position: absolute; left: 64px; right: 64px; bottom: 84px; z-index: 3; display: flex; align-items: flex-end; justify-content: space-between; gap: 32px; }
+.ms__bottom { position: absolute; left: 64px; right: 64px; bottom: 84px; z-index: 3; display: flex; align-items: flex-end; justify-content: space-between; gap: var(--mh-sp-6); }
 .ms__meta { min-width: 0; display: flex; flex-direction: column; gap: 10px; }
 .ms__event { font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 600; font-size: 32px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--mh-on-primary); }
 .ms__result { display: inline-block; align-self: flex-start; padding: 14px 26px; background: var(--mh-accent); color: var(--mh-primary); font-family: 'JetBrains Mono','Space Grotesk',monospace; font-feature-settings: "tnum"; font-weight: 700; font-size: var(--mh-fit-result-px, 80px); font-variation-settings: var(--mh-axes-result, normal); line-height: 0.9; }
 .ms__stat { font-family: 'Inter',sans-serif; font-weight: 600; font-size: 24px; color: var(--mh-on-primary); opacity: 0.84; }
-.ms__brand { flex: 0 0 auto; display: flex; flex-direction: column; align-items: flex-end; gap: 12px; text-align: right; }
+.ms__brand { flex: 0 0 auto; display: flex; flex-direction: column; align-items: flex-end; gap: var(--mh-sp-3); text-align: right; }
 .ms__id { display: flex; align-items: center; gap: 14px; }
 .ms__logo { height: 58px; width: auto; }
 .ms__logo img, .ms__logo svg { height: 100%; width: auto; object-fit: contain; display: block; }

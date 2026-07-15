@@ -61,6 +61,35 @@ LAYOUTS_DIR = Path(__file__).parent / "layouts"
 _BASE_CSS_PATH = LAYOUTS_DIR / "_base.css"
 _TEXT_LED_FILL_CSS_PATH = LAYOUTS_DIR / "_text_led_fill.css"
 _SHARED_CSS_PATH = LAYOUTS_DIR / "_shared.css"
+# F1 (systemic floor) — the shared component/token sheet. Carries the
+# spacing-scale-built lockup/footer/logo component classes that layouts opt into
+# instead of re-declaring a near-identical footer block each. Named ``_tokens``
+# to avoid colliding with the composition-decoration track's ``_components.css``.
+_TOKENS_CSS_PATH = LAYOUTS_DIR / "_tokens.css"
+
+# F1 — the spacing token scale. ``--mh-sp-1..-9`` = round(min(w,h) * k / 1080)
+# for these multipliers, so the scale is the fixed 4/8/12/16/24/32/48/64/96 px
+# ramp at any 1080-wide portrait/square/story canvas (min(w,h)==1080 for all of
+# them → byte-identical) and shrinks proportionally on a shorter (landscape)
+# short-edge. Consumed as ``var(--mh-sp-3)`` etc.; unused, it paints nothing.
+_SPACING_STEPS: tuple[int, ...] = (4, 8, 12, 16, 24, 32, 48, 64, 96)
+
+
+def _spacing_scale_css(width: int, height: int) -> str:
+    """A ``:root{}`` block publishing the ``--mh-sp-*`` spacing scale.
+
+    Deterministic pure function of the canvas short edge. At every certified
+    1080-wide format the values are the exact historic px literals
+    (4/8/12/16/24/32/48/64/96), so a layout that swaps ``16px`` for
+    ``var(--mh-sp-3)`` renders byte-identical there; on a landscape canvas the
+    scale tracks the (smaller) short edge so spacing stays proportional.
+    """
+    short = min(int(width), int(height))
+    decls = "".join(
+        f"--mh-sp-{i}:{int(round(short * k / 1080))}px;"
+        for i, k in enumerate(_SPACING_STEPS, start=1)
+    )
+    return ":root{" + decls + "}\n"
 
 
 # ---------------------------------------------------------------------------
@@ -2026,6 +2055,20 @@ def _common_replacements(
             "url(fonts/", f"url({(_SHARED_CSS_PATH.parent / 'fonts').as_uri()}/"
         )
     base_css = shared_css + "\n" + base_css + "\n" + text_led_css
+
+    # F1 (systemic floor) — publish the spacing-token scale, then load the shared
+    # component/token sheet. The scale is emitted first (a :root{} block) so the
+    # component classes and any layout can consume ``var(--mh-sp-N)``. Both are
+    # inert until referenced: an unused custom property paints nothing and an
+    # unused ``.mh-lockup`` class matches no element, so every legacy render is
+    # byte-identical. ``_tokens.css`` carries no @font-face and no absolute path,
+    # so it needs no url() rewrite.
+    base_css = base_css + "\n" + _spacing_scale_css(width, height)
+    try:
+        if _TOKENS_CSS_PATH.exists():
+            base_css = base_css + "\n" + _read_text(_TOKENS_CSS_PATH)
+    except Exception:
+        pass
 
     # 1.9 — inline this org's UPLOADED custom fonts (typography.font_intake) as
     # self-hosted file:// @font-face, so a club's own brand typeface renders on
@@ -4027,8 +4070,7 @@ def _sticker_outline_css(width: int, height: int, strength: float) -> str:
         )
     )
     return (
-        "\n/* --- B5 die-cut sticker contour --- */\n"
-        f"img.athlete-cutout {{ filter: {shadows}; }}\n"
+        f"\n/* --- B5 die-cut sticker contour --- */\nimg.athlete-cutout {{ filter: {shadows}; }}\n"
     )
 
 
