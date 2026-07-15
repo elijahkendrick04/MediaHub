@@ -6,29 +6,19 @@ Each request's "Due" date was plain text with only open/clock-stopped/completed
 tags — nothing turned red or said "overdue" when the deadline passed, the exact
 failure GDPR penalises.
 """
+
 from __future__ import annotations
 
-import importlib
 from datetime import datetime, timedelta, timezone
 
 import pytest
 
 
 @pytest.fixture
-def env(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    (tmp_path / "club_profiles").mkdir(parents=True, exist_ok=True)
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
+def env(app, monkeypatch):
     from mediahub.web.club_profile import ClubProfile, save_profile
 
     save_profile(ClubProfile(profile_id="t", display_name="Test club", brand_voice_summary="Hi"))
-    app = wm.create_app()
-    app.config["TESTING"] = True
     return app, monkeypatch
 
 

@@ -16,9 +16,9 @@ This is the comprehensive guard for the feature. It covers:
 * that the strip — and the JS/CSS that enhance it — actually reach the review
   and content-builder pages, with counts rendered server-side on first paint.
 """
+
 from __future__ import annotations
 
-import importlib
 import json
 import sys
 import uuid
@@ -36,6 +36,7 @@ THUMB, HEART, FIRE = "👍", "❤️", "🔥"
 # ---------------------------------------------------------------------------
 # Fixtures / helpers
 # ---------------------------------------------------------------------------
+
 
 def _seed_run(tmp_path, wm, profile_id, run_payload):
     """Write run JSON to disk and insert a matching DB row (owned by profile_id)."""
@@ -96,30 +97,20 @@ def _make_run_payload(profile_id, swim_ids):
 
 
 @pytest.fixture
-def env(tmp_path, monkeypatch):
+def env(app, web_module, tmp_path):
     """Booted app with one pinned org (org-test) and a test client."""
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    for sub in ("runs_v4", "uploads_v4", "club_profiles"):
-        (tmp_path / sub).mkdir(parents=True, exist_ok=True)
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-    importlib.reload(cp)
-    importlib.reload(wm)
+    wm = web_module
+    app.config["ENFORCE_ORG_GATE"] = True
 
     from mediahub.web.club_profile import ClubProfile, save_profile
-    save_profile(ClubProfile(
-        profile_id="org-test",
-        display_name="Test Club",
-        brand_voice_summary="Clear and energetic.",
-    ))
 
-    app = wm.create_app()
-    app.config["TESTING"] = True
-    app.config["ENFORCE_ORG_GATE"] = True
+    save_profile(
+        ClubProfile(
+            profile_id="org-test",
+            display_name="Test Club",
+            brand_voice_summary="Clear and energetic.",
+        )
+    )
 
     with app.test_client() as client:
         r = client.post("/api/organisation/active", data={"profile_id": "org-test"})
@@ -143,13 +134,16 @@ def _toggle(client, run_id, card_id, emoji, reactor):
 # Render strip + allowlist (pure)
 # ---------------------------------------------------------------------------
 
+
 class TestRenderStrip:
     def test_allowlist_is_exactly_the_three(self):
         import mediahub.web.web as wm
+
         assert wm.REACTION_EMOJI == (THUMB, HEART, FIRE)
 
     def test_one_button_per_emoji(self):
         import mediahub.web.web as wm
+
         html = wm._render_reactions("run1", "card:1", {})
         assert html.count("mh-react-btn") == 3
         for emoji in (THUMB, HEART, FIRE):
@@ -157,6 +151,7 @@ class TestRenderStrip:
 
     def test_count_hidden_at_zero_shown_when_positive(self):
         import mediahub.web.web as wm
+
         html = wm._render_reactions("run1", "c", {"c": {THUMB: 4}})
         # The reacted emoji shows its count un-hidden…
         assert ">4</span>" in html
@@ -166,6 +161,7 @@ class TestRenderStrip:
 
     def test_run_and_card_ids_on_every_button(self):
         import mediahub.web.web as wm
+
         html = wm._render_reactions("RUN9", "CARD9", {})
         # Run id rides on each of the 3 buttons.
         assert html.count('data-mh-react-run="RUN9"') == 3
@@ -178,12 +174,14 @@ class TestRenderStrip:
         crafted id can never break out into markup (defence-in-depth; engine
         ids are tame, but the render must never trust them)."""
         import mediahub.web.web as wm
+
         html = wm._render_reactions("r", '"><script>x</script>', {})
         assert "<script>x" not in html
         assert "&lt;script&gt;" in html or "&gt;&lt;script" in html
 
     def test_accessible_group_and_pressed_state(self):
         import mediahub.web.web as wm
+
         html = wm._render_reactions("r", "c", {})
         assert 'role="group"' in html
         assert 'aria-label="Quick reactions"' in html
@@ -193,6 +191,7 @@ class TestRenderStrip:
 # ---------------------------------------------------------------------------
 # DB table + tally helper
 # ---------------------------------------------------------------------------
+
 
 class TestStorage:
     def test_table_exists(self, env):
@@ -220,6 +219,7 @@ class TestStorage:
 # ---------------------------------------------------------------------------
 # Toggle API — the core behaviour
 # ---------------------------------------------------------------------------
+
 
 class TestToggleApi:
     def test_react_then_count_one(self, env):
@@ -265,9 +265,9 @@ class TestToggleApi:
         the toggle never lets one client inflate a single emoji past 1."""
         run_id = _seed(env)
         c = env["client"]
-        _toggle(c, run_id, "s1", THUMB, "r-1")          # on  -> 1
-        _toggle(c, run_id, "s1", THUMB, "r-1")          # off -> 0
-        r = _toggle(c, run_id, "s1", THUMB, "r-1")      # on  -> 1
+        _toggle(c, run_id, "s1", THUMB, "r-1")  # on  -> 1
+        _toggle(c, run_id, "s1", THUMB, "r-1")  # off -> 0
+        r = _toggle(c, run_id, "s1", THUMB, "r-1")  # on  -> 1
         assert r.get_json()["counts"][THUMB] == 1
 
     def test_reactions_are_per_card(self, env):
@@ -286,6 +286,7 @@ class TestToggleApi:
 # Validation
 # ---------------------------------------------------------------------------
 
+
 class TestValidation:
     def test_unknown_emoji_rejected(self, env):
         run_id = _seed(env)
@@ -300,9 +301,7 @@ class TestValidation:
 
     def test_missing_reactor_rejected(self, env):
         run_id = _seed(env)
-        r = env["client"].post(
-            f"/api/runs/{run_id}/card/s1/reactions", json={"emoji": THUMB}
-        )
+        r = env["client"].post(f"/api/runs/{run_id}/card/s1/reactions", json={"emoji": THUMB})
         assert r.status_code == 400
         assert r.get_json()["error"] == "invalid reactor_id"
 
@@ -381,6 +380,7 @@ class TestValidation:
 # Tenant isolation / IDOR
 # ---------------------------------------------------------------------------
 
+
 class TestTenantIsolation:
     def test_toggle_on_other_org_run_is_404(self, env):
         run_id = _seed(env, ["s1"], owner="other-org")
@@ -402,6 +402,7 @@ class TestTenantIsolation:
 # ---------------------------------------------------------------------------
 # Per-run read (load-time reconcile / "my reactions")
 # ---------------------------------------------------------------------------
+
 
 class TestRunReactionsRead:
     def test_returns_counts_and_mine(self, env):
@@ -428,7 +429,7 @@ class TestRunReactionsRead:
         r = c.get(f"/api/runs/{run_id}/reactions?reactor_id=bob")
         body = r.get_json()
         assert body["counts"]["s1"][THUMB] == 1  # bob sees the public tally
-        assert body["mine"] == {}                # but holds no reactions himself
+        assert body["mine"] == {}  # but holds no reactions himself
 
     def test_no_reactor_arg_returns_counts_only(self, env):
         run_id = _seed(env, ["s1"])
@@ -451,6 +452,7 @@ class TestRunReactionsRead:
 # Deletion cascade — a deleted run leaves no reactions behind
 # ---------------------------------------------------------------------------
 
+
 class TestDeletionCascade:
     def test_delete_run_clears_reactions(self, env):
         run_id = _seed(env, ["s1"])
@@ -464,6 +466,7 @@ class TestDeletionCascade:
 # ---------------------------------------------------------------------------
 # Render integration — strip + JS/CSS on the live pages
 # ---------------------------------------------------------------------------
+
 
 class TestPageIntegration:
     def test_review_page_renders_strip(self, env):

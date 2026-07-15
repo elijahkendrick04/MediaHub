@@ -19,29 +19,14 @@ These tests pin down:
 
 from __future__ import annotations
 
-import importlib
-
 import pytest
 
 _TEST_ORG = "test-org"
 
 
 @pytest.fixture()
-def app(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    for sub in ("runs", "uploads", "club_profiles"):
-        (tmp_path / sub).mkdir(parents=True, exist_ok=True)
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
-
-    application = wm.create_app()
+def app(web_module):
+    application = web_module.create_app()
     application.config["TESTING"] = True
 
     from mediahub.web.club_profile import ClubProfile, save_profile
@@ -145,10 +130,10 @@ class TestSignedInHome:
     def test_omits_the_marketing_explainer(self, app):
         body = _get(app, "/", pinned=True)
         # None of the explainer sections leak onto the workspace home.
-        assert ">THE ENGINE</text>" not in body          # diagram
-        assert "From a results sheet" not in body          # io headline
-        assert "Real sample output" not in body            # bento
-        assert "Club committees" not in body               # audience
+        assert ">THE ENGINE</text>" not in body  # diagram
+        assert "From a results sheet" not in body  # io headline
+        assert "Real sample output" not in body  # bento
+        assert "Club committees" not in body  # audience
         assert '<section class="mh-section mh-faq"' not in body  # FAQ
 
     def test_keeps_the_create_focused_final_cta(self, app):

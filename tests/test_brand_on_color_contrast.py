@@ -15,9 +15,9 @@ binding: **button-text ink ≥ WCAG 2.x AA (4.5:1) against its resolved backgrou
 for every representative club palette** — so the dark-brand failure can never
 recur for the next navy / maroon / dark-green club onboarded.
 """
+
 from __future__ import annotations
 
-import importlib
 import re
 
 import pytest
@@ -32,17 +32,17 @@ AA = 4.5
 # near-white / near-black extremes.
 CORPUS = {
     "lane-yellow (default brand)": "#D4FF3A",
-    "navy (signed-out default)":   "#0E2A47",
-    "swansea maroon":              "#A30D2D",
-    "royal blue":                  "#1D4ED8",
-    "forest green":                "#14532D",
-    "sheffield red":               "#EE2737",
-    "teal":                        "#0F766E",
-    "violet":                      "#6D28D9",
-    "near-white brand":            "#F5F2E8",
-    "near-black brand":            "#0A0B11",
-    "orange":                      "#EA580C",
-    "sky":                         "#38BDF8",
+    "navy (signed-out default)": "#0E2A47",
+    "swansea maroon": "#A30D2D",
+    "royal blue": "#1D4ED8",
+    "forest green": "#14532D",
+    "sheffield red": "#EE2737",
+    "teal": "#0F766E",
+    "violet": "#6D28D9",
+    "near-white brand": "#F5F2E8",
+    "near-black brand": "#0A0B11",
+    "orange": "#EA580C",
+    "sky": "#38BDF8",
 }
 
 
@@ -78,25 +78,14 @@ class TestBrandOnColorHelper:
 
 
 @pytest.fixture
-def fresh_app(tmp_path, monkeypatch):
+def fresh_app(app, web_module, monkeypatch):
     """Clean app + isolated DATA_DIR so the seed block renders against a
     throwaway profile store (mirrors tests/test_default_theme.py)."""
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
     monkeypatch.delenv("MEDIAHUB_ADAPTIVE_THEME", raising=False)
-    for sub in ("runs_v4", "uploads_v4", "club_profiles"):
-        (tmp_path / sub).mkdir(parents=True, exist_ok=True)
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
     from mediahub.theming.theme_store import _read_cached
-    importlib.reload(cp)
-    importlib.reload(wm)
+
     _read_cached.cache_clear()
-    app = wm.create_app()
-    app.config["TESTING"] = True
-    return app, wm
+    return app, web_module
 
 
 def _on_primary_from_body(body: str) -> str:
@@ -113,19 +102,23 @@ class TestSeedBlockEmitsLegibleOnColor:
         assert 'id="mh-theme-seed"' in body
         ink = _on_primary_from_body(body)
         # The signed-out default seed is navy #0E2A47 (BrandKit.generic_default).
-        assert wcag2_ratio(ink, "#0E2A47") >= AA, (
-            "signed-out landing CTA still fails contrast — the headline bug"
-        )
+        assert (
+            wcag2_ratio(ink, "#0E2A47") >= AA
+        ), "signed-out landing CTA still fails contrast — the headline bug"
 
     def test_dark_brand_club_cta_is_legible(self, fresh_app):
         app, wm = fresh_app
         from mediahub.web.club_profile import ClubProfile, save_profile
+
         seed = "#A30D2D"  # a dark maroon club brand
         prof = ClubProfile(profile_id="maroon-club", display_name="Maroon SC")
         prof.brand_primary = seed
         prof.brand_palette_extracted = {"primary": seed}
-        prof.brand_kit = {"profile_id": "maroon-club", "display_name": "Maroon SC",
-                          "primary_colour": seed}
+        prof.brand_kit = {
+            "profile_id": "maroon-club",
+            "display_name": "Maroon SC",
+            "primary_colour": seed,
+        }
         save_profile(prof)
         with app.test_client() as c:
             with c.session_transaction() as s:

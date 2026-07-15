@@ -37,7 +37,6 @@ closes the untested ownerless seam for the ``compliance.dsr`` engine.
 
 from __future__ import annotations
 
-import importlib
 import json
 import time
 import uuid
@@ -84,22 +83,15 @@ def _seed_ownerless_run(runs_dir: Path, run_id: str, athlete: str) -> None:
 
 
 @pytest.fixture
-def shared_instance(tmp_path, monkeypatch):
+def shared_instance(app, tmp_path, monkeypatch):
     """A shared instance: a signed-up stranger owning the BOUND org
-    ``org-gamma``, plus one ownerless legacy run holding the orphan athlete."""
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
+    ``org-gamma``, plus one ownerless legacy run holding the orphan athlete.
+
+    Uses the canonical ``app`` fixture (fresh ``create_app()`` on an isolated
+    per-test DATA_DIR, ``TESTING=True`` + a secret key already set) — the app's
+    org-ready gate stays on its TESTING bypass so the athlete-rights routes
+    actually run; this test is about run isolation, not the gate."""
     monkeypatch.delenv("STRIPE_SECRET_KEY", raising=False)
-    for d in ("runs_v4", "uploads_v4", "club_profiles"):
-        (tmp_path / d).mkdir(parents=True, exist_ok=True)
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
 
     from mediahub.web.club_profile import ClubProfile, save_profile
 
@@ -114,12 +106,6 @@ def shared_instance(tmp_path, monkeypatch):
     UserStore().create(STRANGER_EMAIL, PASSWORD)
     MembershipStore().add(STRANGER_EMAIL, "org-gamma", role=ROLE_OWNER)  # BOUND
 
-    app = wm.create_app()
-    app.config["TESTING"] = True
-    # Leave the org-ready gate on its TESTING bypass so the athlete-rights
-    # routes actually run; this test is about run isolation, not the gate.
-    if not app.secret_key:
-        app.secret_key = "test-secret"
     return {"app": app, "run_orphan": run_orphan, "runs_dir": tmp_path / "runs_v4"}
 
 
@@ -161,9 +147,9 @@ def test_dsr_erasure_must_not_mutate_an_ownerless_run(shared_instance):
 
     after = json.loads(run_file.read_text())
     # SECURE expectation: the ownerless run is untouched by org-gamma's erasure.
-    assert after["recognition_report"]["ranked_achievements"], (
-        "org-gamma erased an ownerless run it does not own (finding #111)"
-    )
+    assert after["recognition_report"][
+        "ranked_achievements"
+    ], "org-gamma erased an ownerless run it does not own (finding #111)"
     assert after["cards"], "org-gamma stripped cards from an ownerless run (finding #111)"
 
 
@@ -182,9 +168,9 @@ def test_dsr_export_must_not_disclose_an_ownerless_run(shared_instance):
 
     disclosed = {r.get("run_id") for r in export.get("runs", [])}
     # SECURE expectation: the ownerless run is NOT among the disclosed runs.
-    assert shared_instance["run_orphan"] not in disclosed, (
-        "org-gamma's SAR export disclosed an ownerless run it does not own (finding #111)"
-    )
+    assert (
+        shared_instance["run_orphan"] not in disclosed
+    ), "org-gamma's SAR export disclosed an ownerless run it does not own (finding #111)"
 
 
 def test_tenant_runs_flag_gates_ownerless_inclusion(tmp_path, monkeypatch):
