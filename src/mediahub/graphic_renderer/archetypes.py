@@ -129,6 +129,9 @@ _CUTOUT_MODE_ARCHETYPES: frozenset[str] = frozenset(
         "relay_collage",
         "poster_name_behind",
         "band_break",
+        # E5 (Canva gap analysis) — the pop-out: the cutout is clipped inside a
+        # brand shape frame with a second pixel-aligned paint escaping the top.
+        "frame_breakout",
     }
 )
 

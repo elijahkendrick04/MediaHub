@@ -707,6 +707,7 @@ function sceneForArchetype(archetype: string): SceneMode {
     case "centered_medal_spotlight":
     case "photo_passepartout":
     case "spotlight_disc":
+    case "frame_breakout":
       return "spotlight";
     case "editorial_numbers_grid":
     case "stat_stack_sidebar":

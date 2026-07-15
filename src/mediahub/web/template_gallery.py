@@ -73,6 +73,7 @@ CATEGORY_BY_ARCHETYPE: dict[str, str] = {
     "vertical_split": "photo",  # R1.2 — identity over a photo field, result below
     "poster_name_behind": "photo",  # M12 — cutout standing over a mega name plane
     "band_break": "photo",  # M12 — cutout crossing the broadcast band
+    "frame_breakout": "photo",  # E5 — cutout breaking out of a brand shape frame
     # Data-led — the figures are the structural hero; no photo needed.
     "big_number_dominant": "data",
     "editorial_numbers_grid": "data",
@@ -143,6 +144,8 @@ _DISPLAY_ORDER: tuple[str, ...] = (
     # M12 — the layered-depth pair (cutout over type / cutout crossing the band).
     "poster_name_behind",
     "band_break",
+    # E5 — the pop-out: cutout breaking out of a brand shape frame.
+    "frame_breakout",
 )
 
 # Friendly card titles (the snake_case slug is shown separately for
@@ -182,6 +185,7 @@ _TITLE: dict[str, str] = {
     "marquee_crawl": "Marquee Crawl",
     "poster_name_behind": "Name Behind",
     "band_break": "Band Break",
+    "frame_breakout": "Frame Breakout",
 }
 
 # Short fallback "what it is" blurb, used only if an archetype's notes file is
@@ -222,6 +226,7 @@ _FALLBACK_SUMMARY: dict[str, str] = {
     "marquee_crawl": "A wall of repeating-fact ribbons behind one pinned plate carrying name and result.",
     "poster_name_behind": "A mega surname on the ground plane with the athlete cutout standing over it.",
     "band_break": "A broadcast band crossed by the athlete — head and shoulders break its top edge.",
+    "frame_breakout": "A cutout clipped inside a brand shape frame with the head breaking out above it.",
 }
 
 _CARD_SUMMARY_MAX = 180
@@ -722,6 +727,19 @@ _SVG: dict[str, str] = {
         '<rect class="ik2" x="10" y="88" width="56" height="9" rx="1"/>'
         '<rect class="ac" x="82" y="100" width="28" height="14" rx="1"/>'
     ),
+    # Photo-led — the cutout breaks out of a brand shape frame (E5): disc ring +
+    # photo circle, with the head escaping ABOVE the frame's top edge.
+    "frame_breakout": (
+        '<rect class="gd" x="0" y="0" width="120" height="150" rx="3"/>'
+        '<rect class="ac" x="14" y="12" width="26" height="8" rx="1"/>'
+        '<circle class="ac" cx="60" cy="62" r="34"/>'
+        '<circle class="sf" cx="60" cy="62" r="30"/>'
+        '<path class="ph" d="M60 90 A30 30 0 0 1 30 62 A30 30 0 0 1 90 62 Z"/>'
+        '<ellipse class="ph" cx="60" cy="30" rx="12" ry="15"/>'
+        '<rect class="ik2" x="34" y="104" width="52" height="9" rx="1"/>'
+        '<rect class="ac" x="42" y="118" width="36" height="12" rx="1"/>'
+        '<rect class="ik" x="40" y="136" width="40" height="5" rx="1"/>'
+    ),
 }
 
 # Generic placeholder schematic for any future archetype that has no bespoke
@@ -866,7 +884,7 @@ def _card(entry: dict, *, active: str) -> str:
         when_html = (
             '<p class="mh-arch-when">'
             '<span class="mh-arch-when-label">Best for</span> '
-            f'{_e(entry["when"])}</p>'
+            f"{_e(entry['when'])}</p>"
         )
     return (
         f'<article class="{cls}" data-category="{_e(entry["category"])}">'
@@ -875,7 +893,7 @@ def _card(entry: dict, *, active: str) -> str:
         '<div class="mh-arch-head">'
         f'<h3 class="mh-arch-title">{_e(entry["title"])}</h3>'
         f'<span class="mh-arch-tag" data-cat="{_e(entry["category"])}">'
-        f'{_e(entry["category_label"])}</span>'
+        f"{_e(entry['category_label'])}</span>"
         "</div>"
         f'<code class="mh-arch-slug">{_e(entry["name"])}</code>'
         f'<p class="mh-arch-summary">{_e(entry["summary"])}</p>'
@@ -948,9 +966,7 @@ def render_gallery_body(
     cards = "".join(_card(e, active=active) for e in entries)
     grid = f'<div class="mh-arch-grid" id="mh-arch-grid">{cards}</div>'
 
-    empty = (
-        '<p class="mh-arch-empty" id="mh-arch-empty" hidden>' "No templates in this category.</p>"
-    )
+    empty = '<p class="mh-arch-empty" id="mh-arch-empty" hidden>No templates in this category.</p>'
 
     cta = (
         '<div class="mh-arch-cta">'

@@ -4990,6 +4990,31 @@ def _fill_v2_archetype(
                 root_vars["--mh-break-solid"] = f"{solid * 100:.1f}%"
                 root_vars["--mh-break-fade"] = f"{fade * 100:.1f}%"
 
+    # E5 (Canva gap analysis) — frame_breakout's seeded frame shape. A
+    # deterministic pick (salt='breakout') among a circle and an arch (tall
+    # ellipse) framing, each with its own ring/breakout-floor. The layout's own
+    # CSS defaults already render the first (circle) framing, so a card with no
+    # stable key keeps that default — byte-identical.
+    if archetype_name == "frame_breakout":
+        _fb_key = str(
+            getattr(brief, "variation_signature", "") or getattr(brief, "id", "") or ""
+        ).strip()
+        if _fb_key:
+            from mediahub.graphic_renderer.style_packs import _seed_for as _fb_seed
+
+            _framings = (
+                # (clip-path, frame-r, frame-cy, breakout-floor, ring-display)
+                ("circle(40% at 50% 60%)", "40%", "60%", "78%", "block"),
+                ("circle(37% at 50% 55%)", "37%", "55%", "74%", "block"),
+                ("ellipse(37% 46% at 50% 56%)", "37%", "56%", "86%", "none"),
+            )
+            _clip, _fr, _fcy, _floor, _ring = _framings[_fb_seed(_fb_key, salt="breakout") % 3]
+            root_vars["--mh-frame-clip"] = _clip
+            root_vars["--mh-frame-r"] = _fr
+            root_vars["--mh-frame-cy"] = _fcy
+            root_vars["--mh-breakout-floor"] = _floor
+            root_vars["--mh-ring-display"] = _ring
+
     # 1.9 — apply per-slot text effects to the finalised slot values (AFTER the
     # multi-line balancer has settled RESULT_VALUE / ATHLETE_SURNAME_DISPLAY).
     # Empty (the default) is a no-op, so a card with no effects is byte-identical.
