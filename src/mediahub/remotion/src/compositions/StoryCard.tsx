@@ -116,6 +116,11 @@ export const cardSchema = z.object({
   // keeps v1 briefs byte-identical.
   washTint: z.string().default(""),
   washMix: z.number().default(0),
+  // E6 style-pack ground focus — the resolved saliency focus [fx, fy] in
+  // percent, recentring the vignette/spotlight ground ellipse on the subject.
+  // null (photo-less cards / non-subject grounds) keeps the fixed centre,
+  // byte-identical to the pre-E6 render.
+  packGroundFocus: z.array(z.number()).nullable().default(null),
   // M11 data weight — the still's secondary-stat chip row (label/value pairs
   // already selected + trimmed by the still's own tables) and the honest
   // proportional PB bars, with the exact ink hex the still's bay uses.
@@ -1258,12 +1263,26 @@ function parseStylePack(id: string): ParsedPack | null {
   return { ground, texture, accentGeo, bold: density === "bold" };
 }
 
-function packGroundGradient(ground: string, a: number): string | null {
+function packGroundGradient(
+  ground: string,
+  a: number,
+  focus: readonly number[] | null = null,
+): string | null {
+  // E6 — the two subject-framing grounds recentre their ellipse on the
+  // saliency focus [fx, fy] when the card carries a photo; null keeps the
+  // historic fixed centre (byte-identical), mirroring style_packs._ground_layer.
+  const hasFocus = Array.isArray(focus) && focus.length === 2;
   switch (ground) {
-    case "vignette":
-      return `radial-gradient(115% 95% at 50% 45%, rgba(0,0,0,0) 52%, rgba(0,0,0,${a}) 100%)`;
-    case "spotlight":
-      return `radial-gradient(60% 50% at 50% 38%, rgba(0,0,0,0) 0%, rgba(0,0,0,${a}) 100%)`;
+    case "vignette": {
+      const fx = hasFocus ? focus[0] : 50;
+      const fy = hasFocus ? focus[1] : 45;
+      return `radial-gradient(115% 95% at ${fx}% ${fy}%, rgba(0,0,0,0) 52%, rgba(0,0,0,${a}) 100%)`;
+    }
+    case "spotlight": {
+      const fx = hasFocus ? focus[0] : 50;
+      const fy = hasFocus ? focus[1] : 38;
+      return `radial-gradient(60% 50% at ${fx}% ${fy}%, rgba(0,0,0,0) 0%, rgba(0,0,0,${a}) 100%)`;
+    }
     case "top_fade":
       return `linear-gradient(180deg, rgba(0,0,0,${a}) 0%, rgba(0,0,0,0) 44%)`;
     case "bottom_fade":
@@ -1657,7 +1676,11 @@ const StylePackGroundLayer: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
   if (!pack) {
     return null;
   }
-  const ground = packGroundGradient(pack.ground, pack.bold ? 0.34 : 0.24);
+  const ground = packGroundGradient(
+    pack.ground,
+    pack.bold ? 0.34 : 0.24,
+    ctx.card.packGroundFocus,
+  );
   if (!ground) {
     return null;
   }

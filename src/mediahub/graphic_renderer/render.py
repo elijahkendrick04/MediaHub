@@ -4027,8 +4027,7 @@ def _sticker_outline_css(width: int, height: int, strength: float) -> str:
         )
     )
     return (
-        "\n/* --- B5 die-cut sticker contour --- */\n"
-        f"img.athlete-cutout {{ filter: {shadows}; }}\n"
+        f"\n/* --- B5 die-cut sticker contour --- */\nimg.athlete-cutout {{ filter: {shadows}; }}\n"
     )
 
 
@@ -4416,7 +4415,53 @@ def resolved_role_vars_for_brief(brief, brand_kit=None) -> dict[str, str]:
     return root_vars
 
 
-def _v2_style_pack_overlay(brief, width: int, height: int) -> str:
+# E6 — parse a CSS object-position value ("50% 30%", "center 28%", "left top")
+# into (fx, fy) percentages, so a style pack's vignette/spotlight ground can be
+# recentred on the saliency focus. None when the value can't be parsed to two
+# axes — the ground then keeps its fixed centre (byte-identical).
+_FOCUS_X_KW = {"left": 0.0, "center": 50.0, "centre": 50.0, "right": 100.0}
+_FOCUS_Y_KW = {"top": 0.0, "center": 50.0, "centre": 50.0, "bottom": 100.0}
+
+
+def _parse_focus_pos(pos: str) -> Optional[tuple[float, float]]:
+    toks = str(pos or "").split()
+    if len(toks) != 2:
+        return None
+
+    def _axis(tok: str, kw: dict[str, float]) -> Optional[float]:
+        t = tok.strip().lower()
+        if t in kw:
+            return kw[t]
+        if t.endswith("%"):
+            try:
+                return max(0.0, min(100.0, float(t[:-1])))
+            except ValueError:
+                return None
+        return None
+
+    fx = _axis(toks[0], _FOCUS_X_KW)
+    fy = _axis(toks[1], _FOCUS_Y_KW)
+    if fx is None or fy is None:
+        return None
+    return (fx, fy)
+
+
+def _pack_ground_focus(
+    athlete_path, mask_path, width: int, height: int
+) -> Optional[tuple[float, float]]:
+    """The saliency focus ``(fx, fy)`` for the style pack ground (E6), or None.
+
+    None whenever there is no photo — so photo-less cards keep the fixed
+    vignette/spotlight centres and render byte-identically.
+    """
+    if not athlete_path:
+        return None
+    return _parse_focus_pos(_v2_photo_position(athlete_path, width, height, mask_path))
+
+
+def _v2_style_pack_overlay(
+    brief, width: int, height: int, *, focus: Optional[tuple[float, float]] = None
+) -> str:
     """The injected overlay markup for the brief's v2 style pack (or "").
 
     Resolves ``brief.style_pack`` (a ``graphic_renderer.style_packs`` pack id)
@@ -4424,6 +4469,9 @@ def _v2_style_pack_overlay(brief, width: int, height: int) -> str:
     pack id → "" (the undecorated card), so every legacy/flag-off brief renders
     exactly as before. Any failure degrades silently to the bare card — a pack
     is decoration, never load-bearing.
+
+    ``focus`` (E6): the card's resolved saliency focus, recentring the
+    vignette/spotlight ground on the subject; None keeps the fixed centres.
     """
     pack_id = (getattr(brief, "style_pack", "") or "").strip()
     if not pack_id:
@@ -4434,7 +4482,7 @@ def _v2_style_pack_overlay(brief, width: int, height: int) -> str:
         pack = _sp.style_pack_from_id(pack_id)
         if pack is None:
             return ""
-        return _sp.pack_overlay_html(pack, width=width, height=height)
+        return _sp.pack_overlay_html(pack, width=width, height=height, focus=focus)
     except Exception:
         return ""
 
@@ -4608,7 +4656,11 @@ def _fill_v2_archetype(
     # overlay that turns the v2 archetypes into thousands of distinct, brand-safe
     # templates (``graphic_renderer.style_packs``). The bare pack (and any
     # legacy brief with no ``style_pack``) yields "", i.e. the undecorated card.
-    repl["ACCENT_DECORATION"] = _v2_style_pack_overlay(brief, width, height)
+    # E6 — recentre the pack's vignette/spotlight ground on the athlete's
+    # saliency focus (None for a photo-less card, so the fixed centres and the
+    # overlay HTML stay byte-identical for those).
+    _pack_focus = _pack_ground_focus(athlete_path, cutout_mask_path, width, height)
+    repl["ACCENT_DECORATION"] = _v2_style_pack_overlay(brief, width, height, focus=_pack_focus)
 
     # Tier A baseline → director's APCA-gated colour-role assignment → medal
     # tint (the metal IS the information, gated the same way). One resolver,

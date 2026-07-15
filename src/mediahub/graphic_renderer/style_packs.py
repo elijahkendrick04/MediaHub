@@ -826,20 +826,35 @@ def _texture_layer_html(texture: str, bold: bool) -> str:
     )
 
 
-def _ground_layer(ground: str, alpha: float) -> str:
+def _ground_layer(ground: str, alpha: float, focus: tuple[float, float] | None = None) -> str:
     """A darken-only atmospheric overlay (CSS ``background`` value), or ''.
 
     All gradients fade to fully transparent, so the lit area keeps the
     archetype's own ground; only edges/surrounds darken — which never lowers
     contrast for light copy and stays gentle enough for dark copy.
+
+    ``focus`` (E6): when the card carries a photo, the resolved saliency focus
+    ``(fx, fy)`` in percent recentres the two subject-framing grounds —
+    ``vignette`` and ``spotlight`` — so their ellipse sits on the athlete
+    rather than the fixed frame centre. ``None`` (photo-less cards, or any
+    other ground) keeps the historic fixed centres, so those renders are
+    byte-identical.
     """
     a = round(alpha, 3)
     if ground == "flat":
         return ""
     if ground == "vignette":
-        return f"radial-gradient(115% 95% at 50% 45%, rgba(0,0,0,0) 52%, rgba(0,0,0,{a}) 100%)"
+        fx, fy = focus if focus is not None else (50.0, 45.0)
+        return (
+            f"radial-gradient(115% 95% at {fx:.0f}% {fy:.0f}%, "
+            f"rgba(0,0,0,0) 52%, rgba(0,0,0,{a}) 100%)"
+        )
     if ground == "spotlight":
-        return f"radial-gradient(60% 50% at 50% 38%, rgba(0,0,0,0) 0%, rgba(0,0,0,{a}) 100%)"
+        fx, fy = focus if focus is not None else (50.0, 38.0)
+        return (
+            f"radial-gradient(60% 50% at {fx:.0f}% {fy:.0f}%, "
+            f"rgba(0,0,0,0) 0%, rgba(0,0,0,{a}) 100%)"
+        )
     if ground == "top_fade":
         return f"linear-gradient(180deg, rgba(0,0,0,{a}) 0%, rgba(0,0,0,0) 44%)"
     if ground == "bottom_fade":
@@ -909,13 +924,23 @@ def _ground_layer(ground: str, alpha: float) -> str:
     return ""
 
 
-def pack_overlay_html(pack: StylePack, *, width: int, height: int) -> str:
+def pack_overlay_html(
+    pack: StylePack,
+    *,
+    width: int,
+    height: int,
+    focus: tuple[float, float] | None = None,
+) -> str:
     """Build the overlay markup for ``pack`` (the ``{{ACCENT_DECORATION}}`` fill).
 
     Returns ``""`` for the bare pack so an undecorated card is byte-identical to
     the no-pack render. Geometry paints in ``var(--mh-accent)`` (defined in the
     injected ``:root{}``); ground/texture use neutral alphas. Everything is
     absolute + ``pointer-events:none``, clipped to the card root.
+
+    ``focus`` (E6): the card's resolved saliency focus ``(fx, fy)`` in percent,
+    recentring the ``vignette`` / ``spotlight`` ground on the subject. ``None``
+    (photo-less cards) keeps the fixed centres — byte-identical.
     """
     if pack.is_bare:
         return ""
@@ -923,7 +948,7 @@ def pack_overlay_html(pack: StylePack, *, width: int, height: int) -> str:
     layers: list[str] = []
 
     # 1) Ground atmosphere (z-index 1: above the root fill, below content).
-    ground_css = _ground_layer(pack.ground, alpha=(0.34 if bold else 0.24))
+    ground_css = _ground_layer(pack.ground, alpha=(0.34 if bold else 0.24), focus=focus)
     if ground_css:
         layers.append(
             f'<div style="position:absolute;inset:0;z-index:1;pointer-events:none;'

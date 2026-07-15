@@ -630,6 +630,35 @@ def _decoration_strength_of(brief: Optional[dict]) -> float:
         return 0.5
 
 
+def _pack_ground_focus_prop(
+    brief: Optional[dict], photo_pos: str, has_photo: bool
+) -> Optional[list[int]]:
+    """The style pack's vignette/spotlight ground focus ``[fx, fy]`` (E6), or None.
+
+    Mirrors the still's ``render._pack_ground_focus``: only the two
+    subject-framing grounds recentre, and only when the card carries a photo —
+    so every other card (and photo-less vignette/spotlight cards) keeps a
+    byte-identical prop dict and the fixed ground centre. The fractions come
+    from the SAME saliency focus the photo uses (``photoPos``), parsed by the
+    still's own ``_parse_focus_pos`` so the two surfaces agree.
+    """
+    if not has_photo:
+        return None
+    b = brief if isinstance(brief, dict) else {}
+    ground = (str(b.get("style_pack") or "").strip().split("-") or [""])[0]
+    if ground not in ("vignette", "spotlight"):
+        return None
+    try:
+        from mediahub.graphic_renderer.render import _parse_focus_pos
+
+        fr = _parse_focus_pos(photo_pos)
+    except Exception:
+        return None
+    if fr is None:
+        return None
+    return [round(fr[0]), round(fr[1])]
+
+
 def _photo_treatment_mirror_props(
     brief: Optional[dict],
     root_vars: dict[str, str],
@@ -1179,6 +1208,14 @@ def _card_to_props(
             format_name=format_name,
         )
     )
+    # E6 (Canva gap analysis): recentre the pack's vignette/spotlight ground on
+    # the subject. Attached ONLY when the pack ground is vignette/spotlight AND
+    # the card carries a photo — every other card keeps a byte-identical prop
+    # dict (and cache key), and photo-less vignette/spotlight cards keep the
+    # fixed centre exactly like the still.
+    ground_focus = _pack_ground_focus_prop(b, props.get("photoPos", ""), bool(photo_uri))
+    if ground_focus is not None:
+        props["packGroundFocus"] = ground_focus
     # M11 data weight: secondary-stat chips + honest proportional PB bars for
     # the data-led archetypes, with the exact ink hex the still's bay uses.
     stat_chips = _stat_chips_for_brief(b)
