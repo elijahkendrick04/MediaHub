@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-07-13 · `05b4adea7` · Signed-out top bar + animated About page; remove ⌘K search (#1249)
+**Last updated:** 2026-07-15 · `b041449e4` · Merge pull request #1281 from elijahkendrick04/claude/pbfix-engine-guard-r9zdos
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1227,14 +1227,16 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
-| 2026-07-13 | `3142b2510` | test: render /studio signed-in for the Create-nav-active check |
-| 2026-07-13 | `30dd7cdd0` | style: ruff-format the new About walkthrough (pre-commit hygiene) |
-| 2026-07-13 | `acac1d616` | feat(web): signed-out top bar + animated About page; remove ⌘K search |
-| 2026-07-12 | `001defedc` | Remove the deep-review backlog doc now the findings are shipped |
-| 2026-07-12 | `934b4dc69` | test: add direct ranker_v3 unit tests + share motion-focus image fixture |
-| 2026-07-12 | `7897b1766` | fix(web): owner-bind from-url job status (IDOR) + dedup storage-inventory scan |
-| 2026-07-12 | `6b321d103` | Fix six deterministic-engine accuracy bugs (review batch 15) |
-| 2026-07-12 | `2f038264f` | security(ssrf): route web-fetch surfaces through the hardened door (#34/#120/#124/#126/#127) |
-| 2026-07-12 | `deb76a13c` | chore(hygiene): dependency/CI/docs cleanup from deep review (#10, #135–#137, #141–#143) |
-| 2026-07-12 | `ed8cbfa59` | Stop the interpreter smoke test polluting the real working tree (deep-review #128) |
+| 2026-07-14 | `21485a36f` | fix(recommender): remove dead output & unreachable paths (F26, F29, F32) |
+| 2026-07-14 | `1be315782` | fix(v5-report): register Phase W detectors once (F10) + drop ghost pb_likely (F57) |
+| 2026-07-14 | `5ad1e4679` | docs(system-map): fix nonexistent upload_post handler name |
+| 2026-07-14 | `a700e33fa` | Broaden F02 detector tests: 3+ same-meet swims & magnitude coverage |
+| 2026-07-14 | `342ab3823` | Fix engine-boundary guard to protect the real ranker paths (F17) |
+| 2026-07-14 | `7cd1fc9ee` | harden(pb_bridge): restrict time fields to ASCII digits (re.ASCII) |
+| 2026-07-14 | `fd6381bf7` | Document deliberate online-baseline prior for the surviving PB swim |
+| 2026-07-14 | `4214c3400` | docs: align ranking/detector docs with real code; drop 0-byte stub modules |
+| 2026-07-14 | `0714916ea` | Fix same-meet & zero-time false PBs in V5 PB detectors (F02, F56) |
+| 2026-07-14 | `f6bcc30e9` | style(pb_bridge): apply ruff-format (collapse comment spacing, 60**position) |
+| 2026-07-14 | `f83e2da4c` | fix(pb_bridge): round-trip every parse_pbs time format; stop treating ':' as a decimal (F50) |
+| 2026-07-14 | `be0df5720` | docs: PB ranker fix worklist & parallel-session dispatch plan |
 <!-- /ROADMAP:ACTIVITY -->
