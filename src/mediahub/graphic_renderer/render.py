@@ -4672,6 +4672,175 @@ def _glass_role_vars(root_vars: dict[str, str]) -> dict[str, str]:
     }
 
 
+# --------------------------------------------------------------------------- #
+# B7 (Canva gap analysis) — photo-adaptive scrim alpha.
+#
+# A fixed-alpha scrim can be defeated by a bright or busy photo region: the
+# headline "technically" sits on a 0.40 ribbon but the sky behind it blows the
+# ink out. Canva-grade pipelines guarantee post-composite legibility. This
+# deterministic PIL pre-pass samples the GRADED photo region that lands under
+# the over-photo text (the cover-crop bottom band, pinned by the saliency
+# object-position), takes the adverse (brightest, for light ink) percentile
+# luminance, and steps the scrim alpha up from the archetype's authored floor
+# until the ink clears APCA Lc≥60 against the scrim-over-sample composite. The
+# chosen alpha rides --mh-scrim-alpha (fallback = the current constant, so a
+# photo-less card — or a card whose authored floor already clears — is
+# byte-identical). Same photo + crop → same alpha.
+# --------------------------------------------------------------------------- #
+
+# archetype → (scrim base colour hex or None=use primary, authored floor alpha).
+_SCRIM_PLAN: dict[str, tuple[Optional[str], float]] = {
+    "broadcast_scorebug": ("#000000", 0.55),
+    "full_bleed_photo_lower_third": ("#000000", 0.40),
+    "magazine_cover": (None, 0.62),
+}
+_SCRIM_MAX_ALPHA = 0.90
+_SCRIM_BAND = 0.45  # bottom fraction of the visible crop the text sits over
+
+
+def _pos_fraction(token: str, axis: str) -> float:
+    """A CSS object-position token → its 0..1 alignment fraction."""
+    t = (token or "").strip().lower()
+    if t.endswith("%"):
+        try:
+            return max(0.0, min(1.0, float(t[:-1]) / 100.0))
+        except ValueError:
+            return 0.5
+    return {
+        "left": 0.0,
+        "right": 1.0,
+        "top": 0.0,
+        "bottom": 1.0,
+        "center": 0.5,
+    }.get(t, 0.5)
+
+
+def _parse_object_position(pos: str) -> tuple[float, float]:
+    """Parse ``--mh-photo-pos`` ("center 24%", "50% 30%", "left top") → (fx, fy)."""
+    toks = (pos or "").strip().split()
+    if not toks:
+        return 0.5, 0.5
+    if len(toks) == 1:
+        # a single keyword sets that axis; the other stays centred.
+        if toks[0].lower() in ("top", "bottom"):
+            return 0.5, _pos_fraction(toks[0], "y")
+        return _pos_fraction(toks[0], "x"), 0.5
+    return _pos_fraction(toks[0], "x"), _pos_fraction(toks[1], "y")
+
+
+def _cover_bottom_band_luma(img, width: int, height: int, pos: str) -> Optional[int]:
+    """The adverse (95th-percentile) luma 0..255 of the text region of ``img``.
+
+    Models ``object-fit: cover`` + the resolved ``object-position`` to find which
+    pixels of the source land in the bottom band of the frame, then samples that
+    region. Returns ``None`` on any failure (caller keeps the authored scrim).
+    """
+    try:
+        pw, ph = img.size
+        if pw <= 0 or ph <= 0:
+            return None
+        s = max(width / pw, height / ph)
+        sw, sh = pw * s, ph * s
+        fx, fy = _parse_object_position(pos)
+        vx = (sw - width) * fx  # visible window origin in scaled px
+        vy = (sh - height) * fy
+        by0 = vy + height * (1.0 - _SCRIM_BAND)
+        by1 = vy + height
+        # scaled → source pixels, clamped to the image.
+        left = max(0, int(vx / s))
+        right = min(pw, int(round((vx + width) / s)))
+        top = max(0, int(by0 / s))
+        bot = min(ph, int(round(by1 / s)))
+        if right - left < 2 or bot - top < 2:
+            return None
+        crop = img.crop((left, top, right, bot)).convert("L")
+        crop.thumbnail((48, 48))
+        vals = sorted(crop.getdata())
+        if not vals:
+            return None
+        idx = min(len(vals) - 1, int(round(0.95 * (len(vals) - 1))))
+        return int(vals[idx])
+    except Exception:
+        return None
+
+
+def _scrim_alpha_for_luma(luma: int, ink_hex: str, base_hex: str, floor: float) -> float:
+    """Least alpha ≥ ``floor`` making ``ink`` clear APCA over ``base``-scrim-over-photo.
+
+    The sampled region is treated as an achromatic ``luma`` grey (APCA is
+    luminance-driven); the scrim ``base_hex`` composited over it at each candidate
+    alpha is closed-form. Never drops below the authored ``floor`` (so a photo the
+    baseline already handled is unchanged); caps at 0.90.
+    """
+    from mediahub.quality.compliance import LC_SUPPORT, is_legible
+
+    try:
+        br, bg, bb = _hex_to_rgb(base_hex)
+    except Exception:
+        br = bg = bb = 0
+    a = round(max(0.0, min(floor, _SCRIM_MAX_ALPHA)), 2)
+    while a <= _SCRIM_MAX_ALPHA + 1e-6:
+        cr = int(round(br * a + luma * (1.0 - a)))
+        cg = int(round(bg * a + luma * (1.0 - a)))
+        cb = int(round(bb * a + luma * (1.0 - a)))
+        comp = _rgb_to_hex((cr, cg, cb))
+        if is_legible(ink_hex, comp, min_lc=LC_SUPPORT):
+            return a
+        a = round(a + 0.05, 2)
+    return round(min(_SCRIM_MAX_ALPHA, max(floor, _SCRIM_MAX_ALPHA)), 2)
+
+
+def _photo_scrim_plan(
+    archetype: str,
+    athlete_path,
+    brief,
+    root_vars: dict[str, str],
+    width: int,
+    height: int,
+    pos: str,
+) -> Optional[tuple[float, int]]:
+    """(chosen alpha, region luma) for a photo-led scrim archetype, or ``None``.
+
+    Returns ``None`` — keep the authored scrim, byte-identical — for a non-scrim
+    archetype, a photo-less card, a dark (non-light) ink (a black scrim can't help
+    it), or any load/grade failure. Applies the same photo-adjust recipe the render
+    bakes in, so the sampled pixels match what ships.
+    """
+    if archetype not in _SCRIM_PLAN or not athlete_path:
+        return None
+    ink = root_vars.get("--mh-on-primary") or ""
+    if not _is_brand_hex(ink) or _rel_luminance(ink) <= 0.5:
+        return None  # the black/primary scrim only protects a LIGHT ink
+    base_hex, floor = _SCRIM_PLAN[archetype]
+    if base_hex is None:
+        base_hex = root_vars.get("--mh-primary") or "#0A2540"
+    try:
+        from PIL import Image
+
+        from mediahub.graphic_renderer import photo_adjust as _photo_adjust
+
+        img = Image.open(athlete_path)
+        img.load()
+        if img.mode not in ("RGB", "L"):
+            img = img.convert("RGB")
+        try:
+            recipe = _photo_adjust.recipe_for(
+                explicit=getattr(brief, "photo_adjust", "") or "",
+                treatment=getattr(brief, "photo_treatment", "") or "",
+            )
+            if recipe is not None and not recipe.is_noop():
+                img = recipe.apply(img)
+        except Exception:
+            pass
+        luma = _cover_bottom_band_luma(img, width, height, pos)
+    except Exception:
+        return None
+    if luma is None:
+        return None
+    alpha = _scrim_alpha_for_luma(luma, ink, base_hex, floor)
+    return alpha, luma
+
+
 def _fill_v2_archetype(
     brief,
     width,
@@ -4998,6 +5167,27 @@ def _fill_v2_archetype(
     repl["STAT_CHIPS"] = (
         _stat_chips_html(brief, chip_ink, glass=glass_on and bool(athlete_path)) if chip_ink else ""
     )
+
+    # B7 — photo-adaptive scrim: raise the over-photo scrim alpha until the
+    # light ink clears APCA against the actual pixels behind it. Emits
+    # --mh-scrim-alpha (consumed by this archetype's scrim rule with the authored
+    # constant as the var() fallback) and stashes the region-luminance + chosen
+    # alpha note for the explainability sidecar. Photo-less cards emit nothing.
+    _scrim = _photo_scrim_plan(
+        archetype_name,
+        athlete_path,
+        brief,
+        root_vars,
+        width,
+        height,
+        root_vars.get("--mh-photo-pos", "") or "",
+    )
+    if _scrim is not None:
+        _scrim_alpha, _scrim_luma = _scrim
+        root_vars["--mh-scrim-alpha"] = f"{_scrim_alpha:.2f}"
+        repl["_SCRIM_NOTE"] = (
+            f"scrim adapted to photo (region luma {_scrim_luma}/255 → alpha {_scrim_alpha:.2f})"
+        )
     bars_ink = _PB_BARS_ARCHETYPES.get(archetype_name)
     repl["PB_BARS"] = _pb_bars_html(brief, bars_ink) if bars_ink else ""
 
@@ -5602,6 +5792,12 @@ def render_brief(
     # so the reason rides the visual's trace — never a silent substitution.
     if _cutout_note:
         _safety_notes.append(_cutout_note)
+
+    # B7 explainability: record the photo-adaptive scrim decision (region luma +
+    # chosen alpha) so the "why this design" trail shows the legibility guarantee.
+    _scrim_note = repl.get("_SCRIM_NOTE") if isinstance(repl, dict) else None
+    if _scrim_note:
+        _safety_notes.append(_scrim_note)
 
     visual = GeneratedVisual(
         id=visual_id,

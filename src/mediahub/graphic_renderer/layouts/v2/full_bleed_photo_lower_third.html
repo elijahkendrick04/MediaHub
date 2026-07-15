@@ -38,9 +38,11 @@
   object-position: var(--mh-photo-pos, center 26%);
   display: block;
 }
+/* B7: the bottom scrim alpha adapts to the pixels behind it (--mh-scrim-alpha),
+   with the authored 0.40 as the byte-identical fallback. */
 .fb__grad {
   position: absolute; inset: 0; z-index: 1; pointer-events: none;
-  background: linear-gradient(180deg, rgba(0,0,0,0) 44%, rgba(0,0,0,0.12) 62%, rgba(0,0,0,0.40) 100%);
+  background: linear-gradient(180deg, rgba(0,0,0,0) 44%, rgba(0,0,0,0.12) 62%, rgba(0,0,0,var(--mh-scrim-alpha,0.40)) 100%);
 }
 
 /* kicker top-left, brand chip top-right — both over the photo */

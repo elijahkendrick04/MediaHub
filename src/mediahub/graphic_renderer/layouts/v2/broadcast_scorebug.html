@@ -32,8 +32,10 @@
 
 .bg__stage { position: absolute; inset: 0; z-index: 0; }
 .bg__stage img { width: 100%; height: 100%; object-fit: cover; object-position: var(--mh-photo-pos, center 24%); display: block; }
+/* B7: the bottom scrim alpha adapts to the pixels under the name
+   (--mh-scrim-alpha), with the authored 0.55 as the byte-identical fallback. */
 .bg__scrim { position: absolute; inset: 0; z-index: 1; pointer-events: none;
-  background: linear-gradient(180deg, rgba(0,0,0,0.34) 0%, rgba(0,0,0,0) 26%, rgba(0,0,0,0) 50%, rgba(0,0,0,0.55) 100%); }
+  background: linear-gradient(180deg, rgba(0,0,0,0.34) 0%, rgba(0,0,0,0) 26%, rgba(0,0,0,0) 50%, rgba(0,0,0,var(--mh-scrim-alpha,0.55)) 100%); }
 
 /* top broadcast ribbon */
 .bg__ribbon {

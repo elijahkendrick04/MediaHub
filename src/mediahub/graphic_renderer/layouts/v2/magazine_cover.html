@@ -109,12 +109,15 @@
 }
 /* a gradient scrim from the lower-left lifts the headline off the photo
    so primary-derived text stays legible over a bright image. */
+/* B7: the mid-scrim brand-primary coverage adapts to the pixels under the
+   headline (--mh-scrim-alpha mapped to the color-mix %), authored 0.62 as the
+   byte-identical fallback. The scrim stays brand-primary (never black). */
 .mc__scrim {
   position: absolute; inset: 0; z-index: 1;
   background: linear-gradient(
     7deg,
     var(--mh-primary) 6%,
-    color-mix(in srgb, var(--mh-primary) 62%, transparent) 34%,
+    color-mix(in srgb, var(--mh-primary) calc(var(--mh-scrim-alpha, 0.62) * 100%), transparent) 34%,
     transparent 60%
   );
 }
