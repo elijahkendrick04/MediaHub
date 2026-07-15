@@ -6,45 +6,28 @@ Groups achievements per swimmer and decides the recommended post format.
 from __future__ import annotations
 
 from collections import defaultdict
-from typing import Optional
 
 from .schema import (
     RankedAchievement, ContentRecommendation, QualityBand, PostType
 )
 
-# V7.3: SafeToPost 
-try:
-    from recognition.schema import SafeToPost
-except Exception:
-    class SafeToPost:
-        def __init__(self, level, reason):
-            self.level = level
-            self.reason = reason
-        def to_dict(self):
-            return {"level": self.level, "reason": self.reason}
 
-
-def derive_safe_to_post(achievement, ranked_factors=None, pb_decision=None):
+def derive_safe_to_post(achievement):
     """
     Derive a SafeToPost level for an achievement.
-    
+
     Returns SafeToPost(level, reason).
     """
+    from mediahub.recognition.schema import SafeToPost
+
     conf = getattr(achievement, "confidence", 0.5)
     uncertainty_notes = getattr(achievement, "uncertainty_notes", []) or []
     atype = getattr(achievement, "type", "")
-    
-    # do_not_post if confidence very low OR explicit suppression
+
+    # do_not_post if confidence very low
     if conf < 0.4:
         return SafeToPost("do_not_post", "Evidence is weak or ambiguous.")
-    
-    pb_status = None
-    if pb_decision is not None:
-        pb_status = getattr(pb_decision, "status", None) or (pb_decision.get("status") if isinstance(pb_decision, dict) else None)
-    
-    if pb_status == "SUPPRESSED_NEEDS_VERIFICATION":
-        return SafeToPost("do_not_post", "Swimmer identity could not be verified.")
-    
+
     # needs_review if uncertainty notes OR medium confidence
     if uncertainty_notes:
         return SafeToPost("needs_review", "; ".join(uncertainty_notes[:2]))
@@ -79,30 +62,23 @@ def recommend_post_type(
     - One elite + several strong → main-feed athlete spotlight
     - One strong → story or recap mention
     - Only nice → recap roll-up
-    - Meet-level standouts (biggest drop, top-of-field) → headline meet recap
+    - 3+ elite/strong performances → headline meet recap (prepended)
     """
     recs: list[ContentRecommendation] = []
 
     # Group by swimmer (using swimmer_id)
     by_swimmer: dict[str, list[RankedAchievement]] = defaultdict(list)
-    meet_level: list[RankedAchievement] = []
-
     for ra in ranked_achievements:
-        a = ra.achievement
-        # Meet-level achievements have swimmer_id == club_code or "meet"
-        if a.type in ("biggest_drop_candidate", "multi_pb_weekend") and "relay" not in a.swimmer_id:
-            meet_level.append(ra)
-        by_swimmer[a.swimmer_id].append(ra)
+        by_swimmer[ra.achievement.swimmer_id].append(ra)
 
     # Per-swimmer recommendations
-    for swimmer_id, swimmer_ras in by_swimmer.items():
+    for swimmer_ras in by_swimmer.values():
         if not swimmer_ras:
             continue
 
         swimmer_name = swimmer_ras[0].achievement.swimmer_name
         bands = [ra.quality_band for ra in swimmer_ras]
         types = [ra.achievement.type for ra in swimmer_ras]
-        best_priority = max(ra.priority for ra in swimmer_ras)
 
         elite_count = sum(1 for b in bands if b == QualityBand.ELITE)
         strong_count = sum(1 for b in bands if b == QualityBand.STRONG)
