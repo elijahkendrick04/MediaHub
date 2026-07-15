@@ -33858,15 +33858,13 @@ def create_app() -> Flask:
 
     # ---- RE-RUN A FAILED RUN FROM ITS SAVED FILE -----------------------
     @app.route("/runs/<run_id>/rerun", methods=["POST"])
+    @require_run
     def rerun_run(run_id):
         """D-6: re-launch a run from its server-persisted input file instead of
         forcing a full re-upload. The launch bytes are kept beside every run
         (``input.bin`` + ``resume.json``), so a poolside volunteer who no longer
         has the original file can retry in one click. Starts a fresh run so the
         failed run's record is preserved for diagnosis."""
-        run_data = _load_run(run_id)
-        if not _can_access_run(run_id, run_data, _active_profile_id()):
-            return jsonify({"error": "run_not_found"}), 404
         loaded = _load_run_input(run_id)
         if not loaded:
             # The saved file isn't on disk (an old run, or a best-effort write
@@ -33894,19 +33892,22 @@ def create_app() -> Flask:
 
     # ---- PROGRESS ------------------------------------------------------
     @app.route("/runs/<run_id>")
-    def run_status(run_id):
-        _status_url = url_for("api_status", run_id=run_id)
-        _review_url = url_for("review", run_id=run_id)
-        # Tenant gate: prevent the progress page from acting as an
-        # existence oracle for runs owned by a different org.
-        if not _can_access_run(run_id, _load_run(run_id), _active_profile_id()):
-            return _recovery_page(
+    @require_run(
+        deny=lambda: (
+            _recovery_page(
                 "Run not found",
                 "This run isn't on disk or in memory. It may have been deleted from /privacy, or the URL might be from a different deployment.",
                 eyebrow="Run status",
                 primary_cta=("Open activity", url_for("activity_page")),
                 secondary_cta=("Upload a new file", url_for("upload")),
             )
+        )
+    )
+    def run_status(run_id):
+        _status_url = url_for("api_status", run_id=run_id)
+        _review_url = url_for("review", run_id=run_id)
+        # Tenant gate: prevent the progress page from acting as an
+        # existence oracle for runs owned by a different org.
         # If the run already finished (e.g. user refreshes /runs/<id>
         # post-completion, or bookmarks the URL), skip the holding pen
         # and send them straight to the review queue. Same for error.
@@ -34201,18 +34202,19 @@ def create_app() -> Flask:
 
     # ---- REVIEW (V5 Recognition UI) ------------------------------------
     @app.route("/review/<run_id>")
-    def review(run_id):
-        data = _load_run(run_id)
-        if not _can_access_run(run_id, data, _active_profile_id()):
-            data = None
-        if not data:
-            return _recovery_page(
+    @require_run(
+        deny=lambda: (
+            _recovery_page(
                 "Run not found",
                 "This run isn't on disk. It may have been deleted from /privacy, or the URL might be from a different deployment.",
                 primary_cta=("Open activity", url_for("activity_page")),
                 secondary_cta=("Back to home", url_for("home")),
             )
-
+        ),
+        require_exists=True,
+    )
+    def review(run_id, run_data):
+        data = run_data
         meet = data.get("meet") or {}
         cards = data.get("cards") or []
         trust = data.get("trust") or {}
@@ -36196,7 +36198,19 @@ function copyWhyCard(btn, taId) {{
         return _layout(_review_title, body, active="home", dock=_review_dock)
 
     @app.route("/runs/<run_id>/results")
-    def run_results_table(run_id):
+    @require_run(
+        deny=lambda: (
+            _recovery_page(
+                "Run not found",
+                "This run isn't on disk. It may have been deleted from /privacy, or the URL might be from a different deployment.",
+                eyebrow="Results table",
+                primary_cta=("Open activity", url_for("activity_page")),
+                secondary_cta=("Back to home", url_for("home")),
+            )
+        ),
+        require_exists=True,
+    )
+    def run_results_table(run_id, run_data):
         """UI 1.12 — Wope-style sortable/filterable parsed-results table.
 
         A flat, scannable grid of every individual swim in the run, each with a
@@ -36205,18 +36219,7 @@ function copyWhyCard(btn, taId) {{
         sparklines are drawn client-side on ``<canvas>`` from an embedded series
         payload, so the page stays fully usable without JavaScript.
         """
-        data = _load_run(run_id)
-        if not _can_access_run(run_id, data, _active_profile_id()):
-            data = None
-        if not data:
-            return _recovery_page(
-                "Run not found",
-                "This run isn't on disk. It may have been deleted from /privacy, or the URL might be from a different deployment.",
-                eyebrow="Results table",
-                primary_cta=("Open activity", url_for("activity_page")),
-                secondary_cta=("Back to home", url_for("home")),
-            )
-
+        data = run_data
         meet = data.get("meet") or {}
         _review_url = url_for("review", run_id=run_id)
 
@@ -36504,18 +36507,20 @@ function copyWhyCard(btn, taId) {{
     # ---- V6 PB AUDIT ROUTES ----------------------------------------
 
     @app.route("/audit/<run_id>")
-    def pb_audit_page(run_id):
-        """Full PB audit page with per-swimmer drill-down."""
-        data = _load_run(run_id)
-        if not _can_access_run(run_id, data, _active_profile_id()):
-            data = None
-        if not data:
-            return _recovery_page(
+    @require_run(
+        deny=lambda: (
+            _recovery_page(
                 "Run not found",
                 "This run isn't on disk. It may have been deleted from /privacy, or the URL might be from a different deployment.",
                 primary_cta=("Open activity", url_for("activity_page")),
                 secondary_cta=("Back to home", url_for("home")),
             )
+        ),
+        require_exists=True,
+    )
+    def pb_audit_page(run_id, run_data):
+        """Full PB audit page with per-swimmer drill-down."""
+        data = run_data
         pb_audit = data.get("pb_audit") or {}
         if not pb_audit:
             empty_body = (
@@ -36664,18 +36669,20 @@ function copyWhyCard(btn, taId) {{
         return _layout("PB Audit", body, active="")
 
     @app.route("/audit/<run_id>/verify/<path:swimmer_key>", methods=["GET", "POST"])
-    def pb_verify_form(run_id, swimmer_key):
-        """Form to enter correct ASA number for a needs-verification swimmer."""
-        data = _load_run(run_id)
-        if not _can_access_run(run_id, data, _active_profile_id()):
-            data = None
-        if not data:
-            return _recovery_page(
+    @require_run(
+        deny=lambda: (
+            _recovery_page(
                 "Run not found",
                 "This run isn't on disk. It may have been deleted from /privacy, or the URL might be from a different deployment.",
                 primary_cta=("Open activity", url_for("activity_page")),
                 secondary_cta=("Back to home", url_for("home")),
             )
+        ),
+        require_exists=True,
+    )
+    def pb_verify_form(run_id, swimmer_key, run_data):
+        """Form to enter correct ASA number for a needs-verification swimmer."""
+        data = run_data
         _review_url = url_for("review", run_id=run_id)
         _audit_url = url_for("pb_audit_page", run_id=run_id)
 
@@ -36774,11 +36781,10 @@ function copyWhyCard(btn, taId) {{
         return _layout("Verify swimmer", body, active="")
 
     @app.route("/audit/<run_id>/ignore/<path:swimmer_key>", methods=["POST"])
+    @require_run(deny=lambda: (redirect(url_for("home"))))
     def pb_ignore(run_id, swimmer_key):
         """Mark 'ignore PBs for this swimmer in this meet'."""
         # Refuse to mutate corrections for a run that isn't ours.
-        if not _can_access_run(run_id, _load_run(run_id), _active_profile_id()):
-            return redirect(url_for("home"))
         reason = request.form.get("reason", "User requested ignore")
         from swim_content_pb.corrections import CorrectionsStore
 
@@ -36787,18 +36793,20 @@ function copyWhyCard(btn, taId) {{
         return redirect(url_for("pb_audit_page", run_id=run_id))
 
     @app.route("/audit/<run_id>/ground-truth", methods=["GET", "POST"])
-    def pb_ground_truth(run_id):
-        """Upload a CSV of expected outcomes and run the ground-truth harness."""
-        data = _load_run(run_id)
-        if not _can_access_run(run_id, data, _active_profile_id()):
-            data = None
-        if not data:
-            return _recovery_page(
+    @require_run(
+        deny=lambda: (
+            _recovery_page(
                 "Run not found",
                 "This run isn't on disk. It may have been deleted from /privacy, or the URL might be from a different deployment.",
                 primary_cta=("Open activity", url_for("activity_page")),
                 secondary_cta=("Back to home", url_for("home")),
             )
+        ),
+        require_exists=True,
+    )
+    def pb_ground_truth(run_id, run_data):
+        """Upload a CSV of expected outcomes and run the ground-truth harness."""
+        data = run_data
         _audit_url = url_for("pb_audit_page", run_id=run_id)
         _action_url = url_for("pb_ground_truth", run_id=run_id)
 
@@ -36862,18 +36870,19 @@ function copyWhyCard(btn, taId) {{
 
     # ---- GROUND TRUTH --------------------------------------------------
     @app.route("/ground-truth/<run_id>", methods=["GET", "POST"])
-    def ground_truth(run_id):
-        data = _load_run(run_id)
-        if not _can_access_run(run_id, data, _active_profile_id()):
-            data = None
-        if not data:
-            return _recovery_page(
+    @require_run(
+        deny=lambda: (
+            _recovery_page(
                 "Run not found",
                 "This run isn't on disk. It may have been deleted from /privacy, or the URL might be from a different deployment.",
                 primary_cta=("Open activity", url_for("activity_page")),
                 secondary_cta=("Back to home", url_for("home")),
             )
-
+        ),
+        require_exists=True,
+    )
+    def ground_truth(run_id, run_data):
+        data = run_data
         rep_html = ""
         if request.method == "POST":
             text = request.form.get("moments", "")
@@ -48534,10 +48543,9 @@ function mhCertificatesJob(a) {{
 
     # ---- Workflow API --------------------------------------------------
     @app.route("/api/workflow/<run_id>/<card_id>", methods=["POST"])
+    @require_run(deny=lambda: (jsonify({"error": "run not found"}), 404))
     def api_workflow_set(run_id, card_id):
         """Set workflow status or edits for a card."""
-        if not _can_access_run(run_id, _load_run(run_id), _active_profile_id()):
-            return jsonify({"error": "run not found"}), 404
         ws = _get_wf_store()
         if ws is None:
             return jsonify({"error": "workflow not available"}), 503
@@ -48914,12 +48922,16 @@ function mhCertificatesJob(a) {{
     # on-brand without requiring an extra config step.
 
     @app.route("/runs/<run_id>/pack/<pack_id>")
+    @require_run(
+        deny=lambda: (
+            _layout("Not found", '<div class="empty">Repurpose pack not found.</div>'),
+            404,
+        )
+    )
     def turn_into_pack_view(run_id, pack_id):
         """Render a saved Turn-Into pack with the 8 artefacts."""
         # Turn-Into packs are namespaced under <run_id>/<pack_id> on
         # disk, so the run's owner check is the right gate.
-        if not _can_access_run(run_id, _load_run(run_id), _active_profile_id()):
-            return _layout("Not found", '<div class="empty">Repurpose pack not found.</div>'), 404
         from mediahub.turn_into import load_pack
 
         pack = load_pack(run_id, pack_id, base_dir=DATA_DIR / "turn_into_packs")
@@ -52850,14 +52862,17 @@ voice, and queues them for one-click approval.</p>
         return _layout("Export & convert", body)
 
     @app.route("/export/<run_id>")
-    def export_run_tool_page(run_id: str):
-        """The bulk-export tool for one run: pick formats, run it, download/share."""
-        run_data = _load_run(run_id)
-        if not _can_access_run(run_id, run_data, _active_profile_id()):
-            return _layout(
+    @require_run(
+        deny=lambda: (
+            _layout(
                 "Export",
                 '<div class="empty">That meet isn\'t available to export.</div>',
-            ), 404
+            ),
+            404,
+        )
+    )
+    def export_run_tool_page(run_id: str, run_data):
+        """The bulk-export tool for one run: pick formats, run it, download/share."""
         from mediahub import export_engine as ee
 
         meet = (run_data or {}).get("meet") or {}
@@ -54663,9 +54678,8 @@ voice, and queues them for one-click approval.</p>
     # ---- W.12: print exports on the pack ------------------------------------
 
     @app.route("/pack/<run_id>/certificates.zip")
+    @require_run(deny=lambda: (abort(404)))
     def pack_certificates_zip(run_id: str):
-        if not _can_access_run(run_id, _load_run(run_id), _active_profile_id()):
-            abort(404)
         import io as _io
 
         # D-12: serve a ZIP a finished background job already built
@@ -54736,6 +54750,7 @@ voice, and queues them for one-click approval.</p>
         )
 
     @app.route("/pack/<run_id>/print/separations.json")
+    @require_run(deny=lambda: (abort(404)))
     def pack_print_separations(run_id: str):
         """G1.17: the CMYK separations report for a run's brand colours.
 
@@ -54743,8 +54758,6 @@ voice, and queues them for one-click approval.</p>
         role's hex + uncalibrated CMYK percentages, the default print geometry,
         and whether the server can do a true DeviceCMYK conversion.
         """
-        if not _can_access_run(run_id, _load_run(run_id), _active_profile_id()):
-            abort(404)
         from mediahub.graphic_renderer.print_export import (
             cmyk_separations,
             geometry_for,
