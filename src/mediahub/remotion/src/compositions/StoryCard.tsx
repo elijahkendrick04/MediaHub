@@ -1172,6 +1172,8 @@ const PACK_ACCENT_GEOS = new Set([
   "none", "corner_ticks", "side_rule", "baseline_rule", "frame", "wedge", "ring", "corner_blocks",
   "double_rule", "dot_row", "cross_ticks", "corner_arc",
   "hexagons", "deco_corners", "wave_rule", "spiral_flourish", "glitch_divider",
+  // F8 large motifs (mirror style_packs.ACCENT_GEOS).
+  "speed_band", "corner_burst", "blob", "variable_halftone",
 ]);
 
 type ParsedPack = { ground: string; texture: string; accentGeo: string; bold: boolean };
@@ -1546,9 +1548,79 @@ function packAccentGeometry(
         </>
       );
     }
+    // --- F8 large-motif class (mirrors style_packs._accent_geometry_html) --
+    // Painted at z-index 4 (behind content) at capped alpha — background energy,
+    // not a margin mark. Fixed (unseeded) geometry so still and motion match.
+    case "speed_band": {
+      const op = bold ? 0.28 : 0.2;
+      const bar = Math.max(4, Math.round(m * 0.01 * mult));
+      const gap = bar * 3;
+      const bandH = Math.round(height * 0.34);
+      const taper = "linear-gradient(0deg, black 0%, transparent 100%)";
+      return (
+        <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, height: bandH, zIndex: 4, opacity: op, background: `repeating-linear-gradient(115deg, ${accent} 0 ${bar}px, transparent ${bar}px ${bar + gap}px)`, WebkitMaskImage: taper, maskImage: taper }} />
+      );
+    }
+    case "corner_burst": {
+      const op = bold ? 0.26 : 0.18;
+      const size = Math.round(m * 0.62);
+      const spoke = bold ? 4 : 3;
+      const fade = "radial-gradient(100% 100% at 100% 0%, black 0%, transparent 72%)";
+      return (
+        <div style={{ position: "absolute", right: 0, top: 0, width: size, height: size, zIndex: 4, opacity: op, background: `repeating-conic-gradient(from 198deg at 100% 0%, ${accent} 0deg ${spoke}deg, transparent ${spoke}deg 12deg)`, WebkitMaskImage: fade, maskImage: fade }} />
+      );
+    }
+    case "blob": {
+      const op = bold ? 0.22 : 0.16;
+      const size = Math.round(m * 0.44 * mult);
+      const off = Math.round(m * 0.03);
+      const d = "M50 6 C70 6 86 16 90 36 C94 56 84 76 66 88 C48 100 26 96 14 80 C2 64 6 40 20 24 C30 12 40 6 50 6 Z";
+      return (
+        <svg viewBox="0 0 100 100" preserveAspectRatio="none" style={{ position: "absolute", left: off, bottom: off, width: size, height: size, zIndex: 4, opacity: op }}>
+          <path d={d} style={{ fill: accent }} />
+        </svg>
+      );
+    }
+    case "variable_halftone": {
+      const op = bold ? 0.3 : 0.22;
+      const size = Math.round(m * 0.52);
+      return (
+        <div style={{ position: "absolute", right: 0, bottom: 0, width: size, height: size, zIndex: 4, opacity: op }}>
+          <svg viewBox="0 0 100 100" preserveAspectRatio="none" style={{ width: "100%", height: "100%", display: "block" }}>
+            {packHalftoneDots(accent, sec)}
+          </svg>
+        </div>
+      );
+    }
     default:
       return null;
   }
+}
+
+// F8 variable-halftone lattice — mirrors style_packs._variable_halftone_svg so
+// the still and the video draw the same fading dot wedge (fixed grid + maths).
+function packHalftoneDots(accent: string, sec: string): React.ReactNode[] {
+  const cols = 10;
+  const rows = 10;
+  const step = 100 / cols;
+  const rMax = step * 0.52;
+  const dots: React.ReactNode[] = [];
+  for (let row = 0; row < rows; row++) {
+    for (let col = 0; col < cols; col++) {
+      const cx = (col + (row % 2 ? 0.5 : 0)) * step + step * 0.25;
+      const cy = row * step + step * 0.5;
+      const dx = (100 - cx) / 100;
+      const dy = (100 - cy) / 100;
+      const dist = Math.sqrt(dx * dx + dy * dy) / 1.41421356;
+      const r = rMax * Math.max(0, 1 - dist);
+      if (r < 0.35) {
+        continue;
+      }
+      const fill = (row + col) % 2 === 0 ? accent : sec;
+      dots.push(<circle key={`${row}-${col}`} cx={cx.toFixed(2)} cy={cy.toFixed(2)} r={r.toFixed(2)} style={{ fill }} />);
+    }
+  }
+  return dots;
 }
 
 // A smooth horizontal sine as alternating cubic-bézier humps, in px units
