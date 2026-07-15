@@ -61,6 +61,10 @@ LAYOUTS_DIR = Path(__file__).parent / "layouts"
 _BASE_CSS_PATH = LAYOUTS_DIR / "_base.css"
 _TEXT_LED_FILL_CSS_PATH = LAYOUTS_DIR / "_text_led_fill.css"
 _SHARED_CSS_PATH = LAYOUTS_DIR / "_shared.css"
+# F7/F8 (Canva gap analysis) — shared v2 component utilities (overlap anchors +
+# physical-panel silhouettes). Injected into v2 BASE_CSS only; inert until a
+# layout opts in, so an un-migrated archetype's pixels are unchanged.
+_COMPONENTS_CSS_PATH = LAYOUTS_DIR / "_components.css"
 
 
 # ---------------------------------------------------------------------------
@@ -392,6 +396,21 @@ class RenderResult:
 
 def _read_text(p: Path) -> str:
     return p.read_text(encoding="utf-8")
+
+
+@lru_cache(maxsize=1)
+def _components_css() -> str:
+    """The shared v2 component utilities (F7 anchors + F8 panel silhouettes).
+
+    Read once; wrapped in a comment banner. Missing file → "" (the utilities are
+    inert until a layout opts in, so an absent sheet just leaves those layouts
+    un-migrated). Injected into v2 BASE_CSS only.
+    """
+    try:
+        css = _read_text(_COMPONENTS_CSS_PATH) if _COMPONENTS_CSS_PATH.exists() else ""
+    except OSError:
+        css = ""
+    return ("\n/* --- v2 component utilities (F7/F8) --- */\n" + css + "\n") if css else ""
 
 
 def _hex_to_rgb(c: str) -> tuple[int, int, int]:
@@ -2155,6 +2174,9 @@ def _common_replacements(
         "BASE_CSS": base_css,
         "WATER_PATTERN": _background_pattern_for(bg_style),
         "ACCENT_DECORATION": accent_overlay_html,
+        # F7 overlap-accent slot default — "" so any layout carrying the anchor
+        # token strips it cleanly; _fill_v2_archetype overrides for v2 cards.
+        "OVERLAP_ACCENT": "",
         "NOISE_PATTERN": _noise_pattern_data_uri(),
         "AI_BG_URI": ai_bg_uri or "",
         "ATHLETE_FULL_NAME": html_escape(full_name),
@@ -4027,8 +4049,7 @@ def _sticker_outline_css(width: int, height: int, strength: float) -> str:
         )
     )
     return (
-        "\n/* --- B5 die-cut sticker contour --- */\n"
-        f"img.athlete-cutout {{ filter: {shadows}; }}\n"
+        f"\n/* --- B5 die-cut sticker contour --- */\nimg.athlete-cutout {{ filter: {shadows}; }}\n"
     )
 
 
@@ -4439,6 +4460,36 @@ def _v2_style_pack_overlay(brief, width: int, height: int) -> str:
         return ""
 
 
+def _v2_overlap_accent(brief, width: int, height: int) -> str:
+    """The seeded overlap-accent element for the ``{{OVERLAP_ACCENT}}`` slot (F7).
+
+    Emitted only for a *decorated* card (one that resolved a NON-BARE style
+    pack) with a stable card key, so a bare / legacy brief fills the slot with
+    "" — byte-identical to the pre-F7 render. The accent is seeded independently
+    of the pack (salt='overlap'), so its axis varies on its own. Any failure
+    degrades to "".
+    """
+    pack_id = (getattr(brief, "style_pack", "") or "").strip()
+    if not pack_id:
+        return ""
+    card_key = str(
+        getattr(brief, "variation_signature", "") or getattr(brief, "id", "") or ""
+    ).strip()
+    if not card_key:
+        return ""
+    try:
+        from mediahub.graphic_renderer import style_packs as _sp
+
+        pack = _sp.style_pack_from_id(pack_id)
+        # The bare (undecorated) card carries no decoration, so it gets no
+        # overlap accent either — the "absent" path stays byte-identical.
+        if pack is None or pack.is_bare:
+            return ""
+        return _sp.overlap_accent_for_card(card_key, width=width, height=height)
+    except Exception:
+        return ""
+
+
 # 1.9 — per-slot text effects ride the substituted text VALUE (archetype-
 # agnostic), so no v2 template is edited and an empty effect map leaves every
 # card byte-identical. This maps a design-spec text-effect slot to the repl key
@@ -4609,6 +4660,14 @@ def _fill_v2_archetype(
     # templates (``graphic_renderer.style_packs``). The bare pack (and any
     # legacy brief with no ``style_pack``) yields "", i.e. the undecorated card.
     repl["ACCENT_DECORATION"] = _v2_style_pack_overlay(brief, width, height)
+
+    # F7 (Canva gap analysis) — the seeded OVERLAP accent that STRADDLES a
+    # declared anchor (a badge/tab/rule/tape crossing a photo/panel edge). Only
+    # a decorated card (a resolved style pack) with a stable card key gets one,
+    # and only layouts that declare an ``mh-anchor--*`` slot render it; a bare /
+    # legacy card, or an un-anchored layout, fills the slot with "" —
+    # byte-identical. Seeded independently of the pack (salt='overlap').
+    repl["OVERLAP_ACCENT"] = _v2_overlap_accent(brief, width, height)
 
     # Tier A baseline → director's APCA-gated colour-role assignment → medal
     # tint (the metal IS the information, gated the same way). One resolver,
@@ -4935,7 +4994,10 @@ def _fill_v2_archetype(
         root_vars["--mh-font-display"] = _disp
 
     root_block = "\n:root{" + "".join(f"{k}:{v};" for k, v in root_vars.items()) + "}\n"
-    repl["BASE_CSS"] = base_repl.get("BASE_CSS", "") + root_block + extra_css
+    # F7/F8 shared v2 component utilities (overlap anchors + panel silhouettes).
+    # Inert until a layout opts in, so an un-migrated archetype's pixels are
+    # unchanged.
+    repl["BASE_CSS"] = base_repl.get("BASE_CSS", "") + _components_css() + root_block + extra_css
     return repl
 
 

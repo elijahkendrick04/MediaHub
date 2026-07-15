@@ -111,7 +111,7 @@
   font-size: 26px; line-height: 1.14; text-transform: uppercase;
   color: var(--mh-on-primary); overflow-wrap: anywhere;
 }
-.ps__result-wrap { margin-top: 40px; }
+.ps__result-wrap { margin-top: 40px; position: relative; }
 .ps__result-lab {
   font-family: 'Inter',sans-serif; font-weight: 800;
   font-size: 16px; letter-spacing: 0.28em; text-transform: uppercase;
@@ -167,6 +167,7 @@
     <div class="ps__surname">{{ATHLETE_SURNAME_DISPLAY}}</div>
     <div class="ps__event">{{EVENT_NAME}}</div>
     <div class="ps__result-wrap">
+      <div class="mh-anchor mh-anchor--panel-tr">{{OVERLAP_ACCENT}}</div>
       <div class="ps__result-lab">Result</div>
       <div class="ps__result">{{RESULT_VALUE}}</div>
       <div class="ps__hero">

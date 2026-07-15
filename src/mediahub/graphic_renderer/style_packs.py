@@ -1194,6 +1194,105 @@ def _spiral_points(*, steps: int = 72, turns: float = 2.4, max_r: float = 44.0) 
     return " ".join(pts)
 
 
+# ---------------------------------------------------------------------------
+# F7 (Canva gap analysis) — overlap accents that STRADDLE a declared anchor.
+#
+# Canva output reads rich because a foreground accent crosses a midground edge
+# (a badge half-off a photo, a tab over a panel corner, tape holding a seam) —
+# overlap + shadow is what the eye reads as art direction rather than clip-art.
+# The layouts mark overlap-safe edges with ``mh-anchor--*`` classes (positioned
+# by ``layouts/_components.css``); this module supplies the seeded accent that is
+# dropped INTO one anchor via the ``{{OVERLAP_ACCENT}}`` slot. The axis is seeded
+# INDEPENDENTLY of the four-lever pack (salt='overlap' on the same ``_seed_for``
+# walk) so it varies on its own, and an absent card key / un-anchored layout
+# renders byte-identically (empty slot).
+# ---------------------------------------------------------------------------
+
+# Closed shape vocabulary + the seeded rotation set (fixed, per the dossier).
+OVERLAP_SHAPES: tuple[str, ...] = ("badge", "tab", "rule", "tape")
+_OVERLAP_ROTATIONS: tuple[int, ...] = (-4, -2, 2, 4)
+
+
+def overlap_accent_for(card_key: Optional[str]) -> Optional[tuple[str, int]]:
+    """The seeded ``(shape, rotation)`` overlap accent for a card, or ``None``.
+
+    Deterministic per card (same key → same accent), independent of the pack
+    axis (salt='overlap'). ``None`` for a missing key so the no-key path stays
+    byte-identical.
+    """
+    if not card_key:
+        return None
+    seed = _seed_for(card_key, salt="overlap")
+    shape = OVERLAP_SHAPES[seed % len(OVERLAP_SHAPES)]
+    rotation = _OVERLAP_ROTATIONS[(seed // 7) % len(_OVERLAP_ROTATIONS)]
+    return shape, rotation
+
+
+def overlap_accent_html(shape: str, rotation: int, *, width: int, height: int) -> str:
+    """The overlap-accent element dropped into a declared anchor's slot.
+
+    Positioned ``left:50%;top:50%;translate(-50%,-50%)`` so it straddles the
+    anchor point, with the seeded ``rotation`` and ``z-index:15`` (between the
+    midground and the icon overlay's z80). Brand-colour-only (``--mh-accent`` /
+    ``--mh-primary``); the washi ``tape`` multiplies over whatever it crosses.
+    Returns ``""`` for an unknown shape so a bad value injects nothing.
+    """
+    m = min(width, height)
+    z = "z-index:15;pointer-events:none;"
+    base = f"position:absolute;left:50%;top:50%;{z}"
+    tf = f"transform:translate(-50%,-50%) rotate({int(rotation)}deg);"
+    shadow = "box-shadow:0 6px 16px rgba(0,0,0,0.28);"
+    if shape == "badge":
+        d = int(m * 0.14)
+        ring = max(3, int(m * 0.006))
+        return (
+            f'<div style="{base}{tf}width:{d}px;height:{d}px;border-radius:50%;'
+            f"background:var(--mh-accent);border:{ring}px solid var(--mh-primary);"
+            f'{shadow}"></div>'
+        )
+    if shape == "tab":
+        w = int(m * 0.20)
+        h = int(m * 0.075)
+        return (
+            f'<div style="{base}{tf}width:{w}px;height:{h}px;'
+            f'background:var(--mh-accent);{shadow}"></div>'
+        )
+    if shape == "rule":
+        w = int(m * 0.24)
+        h = max(6, int(m * 0.018))
+        return (
+            f'<div style="{base}{tf}width:{w}px;height:{h}px;'
+            f'background:var(--mh-accent);{shadow}"></div>'
+        )
+    if shape == "tape":
+        # A washi-tape strip: accent at 0.6 alpha, multiply-blended over the
+        # layer it crosses, with serrated (zig-zag) ends.
+        w = int(m * 0.26)
+        h = int(m * 0.06)
+        clip = (
+            "polygon(0 18%,4% 0,8% 18%,12% 0,100% 0,96% 82%,100% 100%,"
+            "96% 82%,92% 100%,88% 82%,0 82%)"
+        )
+        return (
+            f'<div style="{base}{tf}width:{w}px;height:{h}px;'
+            f"background:var(--mh-accent);opacity:0.60;mix-blend-mode:multiply;"
+            f"-webkit-clip-path:{clip};clip-path:{clip};"
+            f'box-shadow:0 2px 8px rgba(0,0,0,0.18);"></div>'
+        )
+    return ""
+
+
+def overlap_accent_for_card(card_key: Optional[str], *, width: int, height: int) -> str:
+    """The full overlap-accent element for a card (or ``""``) — the slot fill.
+
+    Convenience wrapper the renderer drops straight into ``{{OVERLAP_ACCENT}}``.
+    """
+    picked = overlap_accent_for(card_key)
+    if not picked:
+        return ""
+    return overlap_accent_html(picked[0], picked[1], width=width, height=height)
+
+
 __all__ = [
     "GROUNDS",
     "TEXTURES",
@@ -1216,4 +1315,8 @@ __all__ = [
     "pick_mood_pack_avoiding",
     "pick_mood_pack_for_card",
     "pack_overlay_html",
+    "OVERLAP_SHAPES",
+    "overlap_accent_for",
+    "overlap_accent_html",
+    "overlap_accent_for_card",
 ]

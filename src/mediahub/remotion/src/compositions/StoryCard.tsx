@@ -146,6 +146,11 @@ export const cardSchema = z.object({
   // ground / texture / accent-geometry overlay over the scene so a card's
   // video carries the still's exact decorative treatment. Empty = bare.
   stylePack: z.string().default(""),
+  // F7 overlap accent (still parity): "shape:rotation" (e.g. "tab:-4"), the
+  // seeded badge/tab/rule/tape the still straddles across a declared anchor.
+  // The motion pack layer paints the same shape at a fixed overlap-safe corner.
+  // Empty = no overlap accent (bare/legacy card), byte-equivalent.
+  overlapAccent: z.string().default(""),
   // The design-spec director's motion language for this card
   // (design_spec.MOTION_INTENTS). Empty = the mood/seed default programme.
   motionIntent: z.string().default(""),
@@ -1675,6 +1680,17 @@ const StylePackLayer: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
   if (geo) {
     children.push(<React.Fragment key="geo">{geo}</React.Fragment>);
   }
+  // F7 overlap accent (still parity): the seeded badge/tab/rule/tape the still
+  // straddles across a declared anchor. The motion side has no per-layout
+  // anchor geometry, so it paints the same shape at a fixed overlap-safe corner
+  // (upper-right, straddling the card's top-right third) — the mirror the
+  // parity contract asks for.
+  const overlap = packOverlapAccent(
+    ctx.card.overlapAccent || "", width, height, accent, roles.ground || "#0A2540",
+  );
+  if (overlap) {
+    children.push(<React.Fragment key="overlap">{overlap}</React.Fragment>);
+  }
 
   return (
     <div style={{ position: "absolute", inset: 0, overflow: "hidden", pointerEvents: "none", opacity: enter }}>
@@ -1682,6 +1698,47 @@ const StylePackLayer: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
     </div>
   );
 };
+
+// F7 overlap accent — mirrors style_packs.overlap_accent_html. Placed at a
+// fixed overlap-safe point (72% across, 20% down) so it straddles the upper-
+// right composition edge like the still's anchored accent. Parses "shape:rot".
+function packOverlapAccent(
+  id: string, width: number, height: number, accent: string, ground: string,
+): React.ReactNode {
+  const parts = (id || "").split(":");
+  if (parts.length !== 2) {
+    return null;
+  }
+  const shape = parts[0];
+  const rotation = parseInt(parts[1], 10);
+  if (!Number.isFinite(rotation) || !["badge", "tab", "rule", "tape"].includes(shape)) {
+    return null;
+  }
+  const m = Math.min(width, height);
+  const base: React.CSSProperties = {
+    position: "absolute",
+    left: "72%",
+    top: "20%",
+    zIndex: 15,
+    transform: `translate(-50%,-50%) rotate(${rotation}deg)`,
+    boxShadow: "0 6px 16px rgba(0,0,0,0.28)",
+  };
+  if (shape === "badge") {
+    const d = Math.round(m * 0.14);
+    return <div style={{ ...base, width: d, height: d, borderRadius: "50%", background: accent, border: `${Math.max(3, Math.round(m * 0.006))}px solid ${ground}` }} />;
+  }
+  if (shape === "tab") {
+    return <div style={{ ...base, width: Math.round(m * 0.2), height: Math.round(m * 0.075), background: accent }} />;
+  }
+  if (shape === "rule") {
+    return <div style={{ ...base, width: Math.round(m * 0.24), height: Math.max(6, Math.round(m * 0.018)), background: accent }} />;
+  }
+  // tape — accent at 0.6 alpha, multiply-blended, serrated ends.
+  const clip = "polygon(0 18%,4% 0,8% 18%,12% 0,100% 0,96% 82%,100% 100%,96% 82%,92% 100%,88% 82%,0 82%)";
+  return (
+    <div style={{ ...base, width: Math.round(m * 0.26), height: Math.round(m * 0.06), background: accent, opacity: 0.6, mixBlendMode: "multiply", WebkitClipPath: clip, clipPath: clip, boxShadow: "0 2px 8px rgba(0,0,0,0.18)" }} />
+  );
+}
 
 const LogoChip: React.FC<{ ctx: SceneCtx; size?: number }> = ({ ctx, size = 140 }) => {
   const { brand, anim, width, ts } = ctx;
