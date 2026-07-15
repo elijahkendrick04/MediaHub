@@ -135,9 +135,7 @@ def _detect_course(text: str) -> Optional[str]:
 # The bare distance would otherwise slip past _detect_course (which requires the
 # word "pool"); scoped to the whole stripped cell so a genuine event row like
 # "50m Freestyle 24.10" (which carries a stroke) is never mistaken for a heading.
-_COURSE_LENGTH_ONLY_RE = re.compile(
-    r"^\s*(?:(50)|(25))\s*m?(?:\s*pool)?\s*$", re.IGNORECASE
-)
+_COURSE_LENGTH_ONLY_RE = re.compile(r"^\s*(?:(50)|(25))\s*m?(?:\s*pool)?\s*$", re.IGNORECASE)
 
 
 def _section_course(text: str) -> Optional[str]:
