@@ -102,6 +102,25 @@ export const cardSchema = z.object({
   // M10 real halftone — the mask tile px (round(14 + 18·decoration_strength),
   // the still's _v2_photo_treatment_assets). 0 = no halftone.
   halftoneTile: z.number().default(0),
+  // B5 die-cut sticker contour — the resolved on-ground ink hex + the radius px
+  // the still computed (render._sticker_outline_css: round(min(w,h)·(0.003 +
+  // 0.004·decoration_strength))), so the cutout's 8-direction outline is byte-
+  // identical to the still's `img.athlete-cutout { filter }`. Empty/0 = no
+  // sticker (the cutout keeps its grounded depth shadow, byte-identical).
+  stickerInk: z.string().default(""),
+  stickerRadius: z.number().default(0),
+  // C5 brand colour-wash — the deep brand tint (render.darken(--mh-primary,
+  // 0.20)) + the arithmetic mix fraction (0.18 + 0.24·decoration_strength) the
+  // still's _wash_defs_svg composites, so photo_filters rebuilds the identical
+  // SVG wash. Empty/0 = the approximate saturate grade (or no grade), which
+  // keeps v1 briefs byte-identical.
+  washTint: z.string().default(""),
+  washMix: z.number().default(0),
+  // E6 style-pack ground focus — the resolved saliency focus [fx, fy] in
+  // percent, recentring the vignette/spotlight ground ellipse on the subject.
+  // null (photo-less cards / non-subject grounds) keeps the fixed centre,
+  // byte-identical to the pre-E6 render.
+  packGroundFocus: z.array(z.number()).nullable().default(null),
   // M11 data weight — the still's secondary-stat chip row (label/value pairs
   // already selected + trimmed by the still's own tables) and the honest
   // proportional PB bars, with the exact ink hex the still's bay uses.
@@ -981,6 +1000,58 @@ function countUpDisplay(text: string, progress: number): string {
   return text;
 }
 
+// A5 (Canva gap analysis) parity — kern the result numeral's intra-numeric
+// separators exactly as the still's render._kern_numeric_seps / _SEP_CSS do:
+// every "." / ":" that sits BETWEEN two digits (the same `(?<=\d)[.:](?=\d)`
+// contract) is wrapped in a cell carrying margin:0 -0.10em, so the motion
+// result numeral holds the identical tightened spacing the approved still
+// painted. Digit runs stay bare text between the separator cells. Returns the
+// plain string node when nothing was wrapped (a value with no such separator,
+// or a non-numeric "DQ"/"—") so those renders are byte-identical to the
+// un-kerned output. Pure — no frame/random input; countUpDisplay feeds a fresh
+// string each frame and the kerning re-derives identically, so both the mid-
+// count frames and the HELD frame carry the same spacing as the still.
+function kernNumeric(text: string): React.ReactNode {
+  const t = text || "";
+  if (t.length < 3 || (t.indexOf(".") < 0 && t.indexOf(":") < 0)) {
+    return t;
+  }
+  const isDigit = (c: string): boolean => c >= "0" && c <= "9";
+  const nodes: React.ReactNode[] = [];
+  let buf = "";
+  let wrapped = 0;
+  for (let i = 0; i < t.length; i++) {
+    const c = t[i];
+    const isSep =
+      (c === "." || c === ":") &&
+      i > 0 &&
+      isDigit(t[i - 1]) &&
+      i + 1 < t.length &&
+      isDigit(t[i + 1]);
+    if (isSep) {
+      if (buf) {
+        nodes.push(buf);
+        buf = "";
+      }
+      nodes.push(
+        <span key={`sep-${i}`} className="mh-sep" style={{ margin: "0 -0.10em" }}>
+          {c}
+        </span>,
+      );
+      wrapped += 1;
+    } else {
+      buf += c;
+    }
+  }
+  if (!wrapped) {
+    return t;
+  }
+  if (buf) {
+    nodes.push(buf);
+  }
+  return <>{nodes}</>;
+}
+
 // Display ordinal for a numeric placing ("1" → "1ST"); non-numeric values
 // pass through untouched — never invent a placing that wasn't detected.
 function placeDisplay(place: string): string {
@@ -1028,7 +1099,7 @@ const KineticLine: React.FC<{
               marginRight: "0.28em",
             }}
           >
-            {w}
+            {kernNumeric(w)}
           </span>
         );
       })}
@@ -1247,12 +1318,26 @@ function parseStylePack(id: string): ParsedPack | null {
   return { ground, texture, accentGeo, bold: density === "bold" };
 }
 
-function packGroundGradient(ground: string, a: number): string | null {
+function packGroundGradient(
+  ground: string,
+  a: number,
+  focus: readonly number[] | null = null,
+): string | null {
+  // E6 — the two subject-framing grounds recentre their ellipse on the
+  // saliency focus [fx, fy] when the card carries a photo; null keeps the
+  // historic fixed centre (byte-identical), mirroring style_packs._ground_layer.
+  const hasFocus = Array.isArray(focus) && focus.length === 2;
   switch (ground) {
-    case "vignette":
-      return `radial-gradient(115% 95% at 50% 45%, rgba(0,0,0,0) 52%, rgba(0,0,0,${a}) 100%)`;
-    case "spotlight":
-      return `radial-gradient(60% 50% at 50% 38%, rgba(0,0,0,0) 0%, rgba(0,0,0,${a}) 100%)`;
+    case "vignette": {
+      const fx = hasFocus ? focus[0] : 50;
+      const fy = hasFocus ? focus[1] : 45;
+      return `radial-gradient(115% 95% at ${fx}% ${fy}%, rgba(0,0,0,0) 52%, rgba(0,0,0,${a}) 100%)`;
+    }
+    case "spotlight": {
+      const fx = hasFocus ? focus[0] : 50;
+      const fy = hasFocus ? focus[1] : 38;
+      return `radial-gradient(60% 50% at ${fx}% ${fy}%, rgba(0,0,0,0) 0%, rgba(0,0,0,${a}) 100%)`;
+    }
     case "top_fade":
       return `linear-gradient(180deg, rgba(0,0,0,${a}) 0%, rgba(0,0,0,0) 44%)`;
     case "bottom_fade":
@@ -1724,7 +1809,11 @@ const StylePackGroundLayer: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
   if (!pack) {
     return null;
   }
-  const ground = packGroundGradient(pack.ground, pack.bold ? 0.34 : 0.24);
+  const ground = packGroundGradient(
+    pack.ground,
+    pack.bold ? 0.34 : 0.24,
+    ctx.card.packGroundFocus,
+  );
   if (!ground) {
     return null;
   }
@@ -2075,7 +2164,7 @@ const HeroScene: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
           textAlign: layout.textAlign,
         }}
       >
-        {ctx.result || "—"}
+        {kernNumeric(ctx.result || "—")}
       </div>
 
       {/* Measured emphasis line (e.g. "−0.42s on PB") — only real data. */}
@@ -2217,7 +2306,7 @@ const PosterScene: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
             letterSpacing: "0.06em",
           }}
         >
-          {megaIsResult ? ctx.event : ctx.result}
+          {megaIsResult ? ctx.event : kernNumeric(ctx.result)}
         </div>
         {card.heroStat ? (
           <div
@@ -2351,7 +2440,7 @@ const LowerThirdScene: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
               fontVariantNumeric: "tabular-nums",
             }}
           >
-            {ctx.result}
+            {kernNumeric(ctx.result)}
           </span>
           {card.heroStat ? (
             <span
@@ -2665,7 +2754,7 @@ const SpotlightScene: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
             ...chipChrome,
           }}
         >
-          {ctx.result}
+          {kernNumeric(ctx.result)}
         </div>
       </div>
 
@@ -2765,7 +2854,10 @@ const GridScene: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
                   lineHeight: 1.02,
                 }}
               >
-                {t.value}
+                {/* A5 parity — only the hero RESULT tile kerns its numeral
+                    (the still kerns RESULT_VALUE alone); other tiles' values,
+                    incl. the heroStat "0.42"-style figure, stay un-kerned. */}
+                {t.hero ? kernNumeric(t.value) : t.value}
               </div>
             </div>
           );
@@ -2846,7 +2938,7 @@ const TickerScene: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
           transformOrigin: "left center",
         }}
       >
-        {ctx.result}
+        {kernNumeric(ctx.result)}
       </div>
 
       {/* The accent ticker band. */}
@@ -3077,7 +3169,7 @@ const SplitScene: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
           textAlign: "right",
         }}
       >
-        {ctx.result}
+        {kernNumeric(ctx.result)}
       </div>
       {card.heroStat ? (
         <div
@@ -3193,7 +3285,7 @@ const MagazineScene: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
       >
         {[
           ctx.firstName && `${ctx.firstName} ${ctx.surnameText}`.trim(),
-          ctx.event && ctx.result ? `${ctx.event} — ${ctx.result}` : ctx.event || ctx.result,
+          ctx.event && ctx.result ? `${ctx.event} — ${kernNumeric(ctx.result)}` : ctx.event || ctx.result,
           card.heroStat,
         ]
           .filter(Boolean)

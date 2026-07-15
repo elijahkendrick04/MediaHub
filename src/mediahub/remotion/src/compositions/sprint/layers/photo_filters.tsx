@@ -57,6 +57,17 @@ type TreatmentCard = {
   duotoneShadow?: string;
   duotoneHighlight?: string;
   halftoneTile?: number;
+  // B5 die-cut sticker contour — the resolved on-ground ink + radius px the
+  // still computed (render._sticker_outline_css); only set for a sticker-
+  // treated card with a real cutout.
+  stickerInk?: string;
+  stickerRadius?: number;
+  cutoutSrc?: string;
+  // C5 brand colour-wash — the deep brand tint hex (render.darken(--mh-primary,
+  // 0.20)) + the arithmetic mix fraction (0.18 + 0.24·strength) the still's
+  // _wash_defs_svg composites; only set for a wash-treated v2 card.
+  washTint?: string;
+  washMix?: number;
 };
 
 // The still's exact held halftone grade (render._v2_photo_treatment_assets):
@@ -96,34 +107,111 @@ export function duotoneFilterId(card: TreatmentCard): string {
   return `mh-duotone-${s}-${h}`;
 }
 
-// The zero-size SVG defs carrying the real duotone filter — the exact markup
-// of the still's _duotone_defs_svg (sRGB interpolation, luminance matrix,
-// per-channel tableValues "(shadow/255).toFixed(4) (highlight/255).toFixed(4)").
+// The still's wash saturation constant (render._wash_defs_svg default 0.4,
+// formatted ".2f").
+const WASH_SATURATION = "0.40";
+
+// True when the card carries the exact-mirror C5 wash parameters.
+function washActive(card: TreatmentCard): boolean {
+  return Boolean(card.photoSrc && card.washTint && (card.washMix || 0) > 0);
+}
+
+// The mix fraction clamped exactly as the still does (max(0, min(0.6, mix))).
+function washMixClamped(card: TreatmentCard): number {
+  return Math.max(0, Math.min(0.6, card.washMix || 0));
+}
+
+// Per-(tint, mix) filter id — same reason as duotone's: two reel beats can be
+// mounted at once with different resolved washes, so a shared id would let one
+// card's tint paint the other's photo.
+export function washFilterId(card: TreatmentCard): string {
+  const t = (card.washTint || "").replace("#", "");
+  const m = Math.round(washMixClamped(card) * 1000);
+  return `mh-wash-${t}-${m}`;
+}
+
+// The zero-size SVG defs carrying the real exact-mirror filter for the card:
+//   • duotone — the exact markup of the still's _duotone_defs_svg (sRGB
+//     interpolation, luminance matrix, per-channel tableValues
+//     "(shadow/255).toFixed(4) (highlight/255).toFixed(4)");
+//   • wash (C5) — the still's _wash_defs_svg arithmetic recipe: saturate the
+//     source, flood the resolved brand tint clipped to SourceAlpha, then
+//     feComposite arithmetic mix (k2 = 1-m desaturated source, k3 = m tint).
 // Rendered by every photo paint site next to its <img>; null unless the card
-// carries the duotone parameters, so untreated cards stay byte-identical.
+// carries one treatment's parameters, so untreated cards stay byte-identical.
 export const PhotoFilterDefs: React.FC<{ card: TreatmentCard }> = ({ card }) => {
-  if (!duotoneActive(card)) {
-    return null;
+  if (duotoneActive(card)) {
+    const sh = hexChannels(card.duotoneShadow || "");
+    const hi = hexChannels(card.duotoneHighlight || "");
+    if (!sh || !hi) {
+      return null;
+    }
+    const t = (lo: number, hiC: number) => `${(lo / 255).toFixed(4)} ${(hiC / 255).toFixed(4)}`;
+    return (
+      <svg width="0" height="0" style={{ position: "absolute" }} aria-hidden>
+        <filter id={duotoneFilterId(card)} colorInterpolationFilters="sRGB">
+          <feColorMatrix type="matrix" values={DUOTONE_LUMA} />
+          <feComponentTransfer>
+            <feFuncR type="table" tableValues={t(sh[0], hi[0])} />
+            <feFuncG type="table" tableValues={t(sh[1], hi[1])} />
+            <feFuncB type="table" tableValues={t(sh[2], hi[2])} />
+          </feComponentTransfer>
+        </filter>
+      </svg>
+    );
   }
-  const sh = hexChannels(card.duotoneShadow || "");
-  const hi = hexChannels(card.duotoneHighlight || "");
-  if (!sh || !hi) {
-    return null;
+  if (washActive(card)) {
+    const m = washMixClamped(card);
+    return (
+      <svg width="0" height="0" style={{ position: "absolute" }} aria-hidden>
+        <filter id={washFilterId(card)} colorInterpolationFilters="sRGB">
+          <feColorMatrix type="saturate" values={WASH_SATURATION} result="mh-w-desat" />
+          <feFlood floodColor={card.washTint} result="mh-w-tint" />
+          <feComposite in="mh-w-tint" in2="SourceAlpha" operator="in" result="mh-w-clip" />
+          <feComposite
+            in="mh-w-desat"
+            in2="mh-w-clip"
+            operator="arithmetic"
+            k1={0}
+            k2={Number((1 - m).toFixed(3))}
+            k3={Number(m.toFixed(3))}
+            k4={0}
+          />
+        </filter>
+      </svg>
+    );
   }
-  const t = (lo: number, hiC: number) => `${(lo / 255).toFixed(4)} ${(hiC / 255).toFixed(4)}`;
-  return (
-    <svg width="0" height="0" style={{ position: "absolute" }} aria-hidden>
-      <filter id={duotoneFilterId(card)} colorInterpolationFilters="sRGB">
-        <feColorMatrix type="matrix" values={DUOTONE_LUMA} />
-        <feComponentTransfer>
-          <feFuncR type="table" tableValues={t(sh[0], hi[0])} />
-          <feFuncG type="table" tableValues={t(sh[1], hi[1])} />
-          <feFuncB type="table" tableValues={t(sh[2], hi[2])} />
-        </feComponentTransfer>
-      </filter>
-    </svg>
-  );
+  return null;
 };
+
+// B5 die-cut sticker contour (exact mirror of render._sticker_outline_css): the
+// eight zero-blur drop-shadows that trace the cutout's alpha silhouette in the
+// card's resolved on-ground ink — the classic Canva/Bleacher-Report sticker
+// edge that also hides matting fringe. The radius is passed from Python
+// (round(min(w,h)*(0.003+0.004*strength))); the diagonal offset d = max(2,
+// round(r·0.7071)) is rebuilt here byte-identically to the still. Returns ""
+// unless the card carries the sticker params AND a real cutout — a full-bleed
+// rectangle would paint a box halo (the still's cutout_ok gate), so untreated
+// cards keep their grounded depth shadow untouched.
+export function stickerContourFilter(card: TreatmentCard): string {
+  const ink = (card.stickerInk || "").trim();
+  const r = Math.round(card.stickerRadius || 0);
+  if (!ink || r < 1 || !card.cutoutSrc) {
+    return "";
+  }
+  const d = Math.max(2, Math.round(r * 0.7071));
+  const offs: Array<[number, number]> = [
+    [r, 0],
+    [-r, 0],
+    [0, r],
+    [0, -r],
+    [d, d],
+    [d, -d],
+    [-d, d],
+    [-d, -d],
+  ];
+  return offs.map(([dx, dy]) => `drop-shadow(${dx}px ${dy}px 0 ${ink})`).join(" ");
+}
 
 // The still's exact-mirror grade for the card, or "" when no exact mirror
 // applies. Static — the still's SVG filter has no develop-in, so the exact
@@ -131,6 +219,11 @@ export const PhotoFilterDefs: React.FC<{ card: TreatmentCard }> = ({ card }) => 
 export function photoExactGradeFor(card: TreatmentCard): string {
   if (duotoneActive(card)) {
     return `url(#${duotoneFilterId(card)})`;
+  }
+  if (washActive(card)) {
+    // C5 exact mirror — the still's SVG arithmetic wash, replacing the
+    // approximate saturate(0.55) grade whenever motion.py passed the params.
+    return `url(#${washFilterId(card)})`;
   }
   if (card.photoSrc && (card.halftoneTile || 0) > 0) {
     return HALFTONE_FILTER;
@@ -218,10 +311,10 @@ function baseStackFor(treatment: string): FilterStack | null {
         sepia: 0,
       };
     case "wash":
-      // C5 brand colour-wash: the still runs a partial desaturation + a deep
-      // brand-tint mix (render._wash_defs_svg). The motion grade carries the
-      // desaturation half; the tint mix needs the resolved tint hex plumbed
-      // into the props before it can mirror exactly (roadmap).
+      // C5 brand colour-wash APPROXIMATION — the desaturation half only. This
+      // is the FALLBACK for v1 briefs / cards without the resolved tint: when
+      // motion.py passed washTint/washMix the exact SVG mirror above
+      // (photoExactGradeFor) takes over and this is never reached.
       return {
         brightness: 0.98,
         contrast: 1.02,

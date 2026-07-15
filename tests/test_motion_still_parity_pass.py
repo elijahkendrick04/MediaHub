@@ -35,6 +35,8 @@ from mediahub.creative_brief.generator import CreativeBrief, generate
 from mediahub.graphic_renderer.render import (
     _band_top_fraction,
     _duotone_defs_svg,
+    _sticker_outline_css,
+    _wash_defs_svg,
     darken,
     resolved_role_vars_for_brief,
 )
@@ -307,8 +309,149 @@ def test_untreated_cards_attach_no_filter_props(photo_env):
         photo_treatment="cutout",
     )
     props = motion._card_to_props(_card(1), variation_seed=2, brief=brief, brand_kit=BRAND)
-    for key in ("duotoneShadow", "duotoneHighlight", "halftoneTile"):
+    for key in (
+        "duotoneShadow",
+        "duotoneHighlight",
+        "halftoneTile",
+        "stickerInk",
+        "stickerRadius",
+        "washTint",
+        "washMix",
+    ):
         assert key not in props
+
+
+# ===========================================================================
+# B5 — die-cut sticker contour (render._sticker_outline_css)
+# ===========================================================================
+
+
+def test_sticker_props_carry_the_stills_ink_and_radius(photo_env):
+    """A sticker-treated card on a CUTOUT-mode archetype passes the resolved
+    on-ground ink and the exact radius the still computed
+    (round(min(w,h)·(0.003 + 0.004·strength))), so the TSX rebuilds the same
+    8-direction contour the still painted on img.athlete-cutout."""
+    brief = _full_brief(
+        layout_template="spotlight_disc",  # cutout-mode → a real silhouette
+        sourced_asset_ids=["a1"],
+        photo_treatment="sticker",
+        decoration_strength=0.8,
+    )
+    expected_vars = resolved_role_vars_for_brief(CreativeBrief.from_dict(brief), BRAND)
+    props = motion._card_to_props(_card(1), variation_seed=2, brief=brief, brand_kit=BRAND)
+    assert props["cutoutSrc"].startswith("data:image/png;base64,")  # cutout exists
+    assert props["stickerInk"] == expected_vars["--mh-on-primary"]
+    # Story cut is 1080×1920 → min(w,h)=1080; radius = round(1080·(0.003+0.004·0.8)).
+    assert props["stickerRadius"] == max(3, int(round(1080 * (0.003 + 0.004 * 0.8))))
+    # The still's CSS uses the SAME radius maths on its own 1080-min geometry:
+    # the (dx, dy) = (r, 0) axis shadow renders "<r>px 0px 0 <ink>".
+    still_css = _sticker_outline_css(1080, 1350, 0.8)
+    assert f"{props['stickerRadius']}px 0px 0 var(--mh-on-primary)" in still_css
+
+
+def test_sticker_needs_a_real_cutout(photo_env):
+    """A photo-mode archetype has no alpha silhouette — the still's cutout_ok
+    gate skips the sticker (a full-bleed rectangle would paint a box halo), so
+    no sticker props attach on the motion side either."""
+    brief = _full_brief(
+        layout_template="full_bleed_photo_lower_third",  # photo-mode → no cutout
+        sourced_asset_ids=["a1"],
+        photo_treatment="sticker",
+    )
+    props = motion._card_to_props(_card(1), variation_seed=2, brief=brief, brand_kit=BRAND)
+    assert props["cutoutSrc"] == ""
+    assert "stickerInk" not in props and "stickerRadius" not in props
+
+
+def test_tsx_sticker_contour_mirrors_the_still_eight_directions():
+    """The TSX stickerContourFilter builds the identical 8-direction zero-blur
+    drop-shadow stack (±r on axes, ±d on diagonals, d = round(r·0.7071)) that
+    render._sticker_outline_css paints, in the passed on-ground ink."""
+    src = _src("sprint/layers/photo_filters.tsx")
+    assert "export function stickerContourFilter" in src
+    # Eight offsets: the four axis pairs and the four diagonals.
+    for pair in (
+        "[r, 0]",
+        "[-r, 0]",
+        "[0, r]",
+        "[0, -r]",
+        "[d, d]",
+        "[d, -d]",
+        "[-d, d]",
+        "[-d, -d]",
+    ):
+        assert pair in src
+    # Same diagonal-offset maths as the still (r·0.7071, floored at 2).
+    assert "r * 0.7071" in src and "Math.max(2" in src
+    # Zero-blur drop-shadow in the passed ink; gated on a real cutout.
+    assert "drop-shadow(${dx}px ${dy}px 0 ${ink})" in src
+    assert "!card.cutoutSrc" in src
+    # cutout.tsx applies it, replacing the grounded depth shadow (like exactGrade).
+    cut = _src("sprint/layers/cutout.tsx")
+    assert "stickerContourFilter(card)" in cut
+    assert "exactGrade ||\n            sticker ||" in cut
+
+
+# ===========================================================================
+# C5 — brand colour-wash (render._wash_defs_svg)
+# ===========================================================================
+
+
+def test_wash_props_carry_the_stills_tint_and_mix(photo_env):
+    """A wash-treated v2 card passes the deep brand tint (darken(--mh-primary,
+    0.20)) and the arithmetic mix fraction (0.18 + 0.24·strength) the still's
+    _wash_defs_svg composites, so the TSX rebuilds the identical filter."""
+    brief = _full_brief(
+        layout_template="full_bleed_photo_lower_third",
+        sourced_asset_ids=["a1"],
+        photo_treatment="wash",
+        decoration_strength=0.5,
+    )
+    expected_vars = resolved_role_vars_for_brief(CreativeBrief.from_dict(brief), BRAND)
+    props = motion._card_to_props(_card(1), variation_seed=2, brief=brief, brand_kit=BRAND)
+    assert props["washTint"] == darken(expected_vars["--mh-primary"], 0.20)
+    assert props["washMix"] == round(0.18 + 0.24 * 0.5, 4)
+    assert "duotoneShadow" not in props and "halftoneTile" not in props
+
+
+def test_tsx_wash_rebuilds_the_still_arithmetic_filter():
+    """photo_filters rebuilds render._wash_defs_svg's structure verbatim: a
+    saturate feColorMatrix, a feFlood of the brand tint clipped to SourceAlpha,
+    then the feComposite arithmetic mix (k2 = 1-m source, k3 = m tint). The
+    exact mirror suppresses the approximate saturate-only grade."""
+    src = _src("sprint/layers/photo_filters.tsx")
+    assert "export function washFilterId" in src
+    assert 'type="saturate"' in src and "values={WASH_SATURATION}" in src
+    assert 'WASH_SATURATION = "0.40"' in src  # still's default 0.4 formatted .2f
+    assert "feFlood floodColor={card.washTint}" in src
+    assert 'in2="SourceAlpha"' in src and 'operator="in"' in src
+    assert 'operator="arithmetic"' in src
+    assert "k2={Number((1 - m).toFixed(3))}" in src and "k3={Number(m.toFixed(3))}" in src
+    # The exact url(#wash) grade wins before the approximate saturate stack.
+    grade_fn = src.split("export function photoExactGradeFor", 1)[1]
+    assert "washActive(card)" in grade_fn
+    assert grade_fn.index("washFilterId") < grade_fn.index("HALFTONE_FILTER")
+
+
+def test_wash_mix_matches_the_still_clamp(photo_env):
+    """The still clamps mix to [0, 0.6]; the motion mix (0.18–0.42 across the
+    strength range) sits inside it, and the emitted value equals the still's.
+    (strength 0.0 resolves to the shared 0.5 default via ``float(... or 0.5)``,
+    so the boundaries exercised here use non-falsy strengths.)"""
+    for strength, expected in ((0.5, 0.30), (1.0, 0.42)):
+        brief = _full_brief(
+            layout_template="full_bleed_photo_lower_third",
+            sourced_asset_ids=["a1"],
+            photo_treatment="wash",
+            decoration_strength=strength,
+        )
+        props = motion._card_to_props(_card(1), variation_seed=2, brief=brief, brand_kit=BRAND)
+        assert props["washMix"] == round(expected, 4)
+        # The still's _wash_defs_svg emits the same 1-m / m arithmetic constants.
+        vars_ = resolved_role_vars_for_brief(CreativeBrief.from_dict(brief), BRAND)
+        still_svg = _wash_defs_svg(darken(vars_["--mh-primary"], 0.20), props["washMix"])
+        assert f'k2="{1 - props["washMix"]:.3f}"' in still_svg
+        assert f'k3="{props["washMix"]:.3f}"' in still_svg
 
 
 def test_photo_scale_mirrors_the_stills_crop_intent(photo_env):
