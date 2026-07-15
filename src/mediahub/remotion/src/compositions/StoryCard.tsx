@@ -930,6 +930,58 @@ function countUpDisplay(text: string, progress: number): string {
   return text;
 }
 
+// A5 (Canva gap analysis) parity — kern the result numeral's intra-numeric
+// separators exactly as the still's render._kern_numeric_seps / _SEP_CSS do:
+// every "." / ":" that sits BETWEEN two digits (the same `(?<=\d)[.:](?=\d)`
+// contract) is wrapped in a cell carrying margin:0 -0.10em, so the motion
+// result numeral holds the identical tightened spacing the approved still
+// painted. Digit runs stay bare text between the separator cells. Returns the
+// plain string node when nothing was wrapped (a value with no such separator,
+// or a non-numeric "DQ"/"—") so those renders are byte-identical to the
+// un-kerned output. Pure — no frame/random input; countUpDisplay feeds a fresh
+// string each frame and the kerning re-derives identically, so both the mid-
+// count frames and the HELD frame carry the same spacing as the still.
+function kernNumeric(text: string): React.ReactNode {
+  const t = text || "";
+  if (t.length < 3 || (t.indexOf(".") < 0 && t.indexOf(":") < 0)) {
+    return t;
+  }
+  const isDigit = (c: string): boolean => c >= "0" && c <= "9";
+  const nodes: React.ReactNode[] = [];
+  let buf = "";
+  let wrapped = 0;
+  for (let i = 0; i < t.length; i++) {
+    const c = t[i];
+    const isSep =
+      (c === "." || c === ":") &&
+      i > 0 &&
+      isDigit(t[i - 1]) &&
+      i + 1 < t.length &&
+      isDigit(t[i + 1]);
+    if (isSep) {
+      if (buf) {
+        nodes.push(buf);
+        buf = "";
+      }
+      nodes.push(
+        <span key={`sep-${i}`} className="mh-sep" style={{ margin: "0 -0.10em" }}>
+          {c}
+        </span>,
+      );
+      wrapped += 1;
+    } else {
+      buf += c;
+    }
+  }
+  if (!wrapped) {
+    return t;
+  }
+  if (buf) {
+    nodes.push(buf);
+  }
+  return <>{nodes}</>;
+}
+
 // Display ordinal for a numeric placing ("1" → "1ST"); non-numeric values
 // pass through untouched — never invent a placing that wasn't detected.
 function placeDisplay(place: string): string {
@@ -977,7 +1029,7 @@ const KineticLine: React.FC<{
               marginRight: "0.28em",
             }}
           >
-            {w}
+            {kernNumeric(w)}
           </span>
         );
       })}
@@ -1889,7 +1941,7 @@ const HeroScene: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
           textAlign: layout.textAlign,
         }}
       >
-        {ctx.result || "—"}
+        {kernNumeric(ctx.result || "—")}
       </div>
 
       {/* Measured emphasis line (e.g. "−0.42s on PB") — only real data. */}
@@ -2010,7 +2062,7 @@ const PosterScene: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
             letterSpacing: "0.06em",
           }}
         >
-          {megaIsResult ? ctx.event : ctx.result}
+          {megaIsResult ? ctx.event : kernNumeric(ctx.result)}
         </div>
         {card.heroStat ? (
           <div
@@ -2144,7 +2196,7 @@ const LowerThirdScene: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
               fontVariantNumeric: "tabular-nums",
             }}
           >
-            {ctx.result}
+            {kernNumeric(ctx.result)}
           </span>
           {card.heroStat ? (
             <span
@@ -2305,7 +2357,7 @@ const SpotlightScene: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
             transform: `scale(${anim.resultScale})`,
           }}
         >
-          {ctx.result}
+          {kernNumeric(ctx.result)}
         </div>
       </div>
 
@@ -2405,7 +2457,10 @@ const GridScene: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
                   lineHeight: 1.02,
                 }}
               >
-                {t.value}
+                {/* A5 parity — only the hero RESULT tile kerns its numeral
+                    (the still kerns RESULT_VALUE alone); other tiles' values,
+                    incl. the heroStat "0.42"-style figure, stay un-kerned. */}
+                {t.hero ? kernNumeric(t.value) : t.value}
               </div>
             </div>
           );
@@ -2486,7 +2541,7 @@ const TickerScene: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
           transformOrigin: "left center",
         }}
       >
-        {ctx.result}
+        {kernNumeric(ctx.result)}
       </div>
 
       {/* The accent ticker band. */}
@@ -2717,7 +2772,7 @@ const SplitScene: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
           textAlign: "right",
         }}
       >
-        {ctx.result}
+        {kernNumeric(ctx.result)}
       </div>
       {card.heroStat ? (
         <div
@@ -2833,7 +2888,7 @@ const MagazineScene: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
       >
         {[
           ctx.firstName && `${ctx.firstName} ${ctx.surnameText}`.trim(),
-          ctx.event && ctx.result ? `${ctx.event} — ${ctx.result}` : ctx.event || ctx.result,
+          ctx.event && ctx.result ? `${ctx.event} — ${kernNumeric(ctx.result)}` : ctx.event || ctx.result,
           card.heroStat,
         ]
           .filter(Boolean)
