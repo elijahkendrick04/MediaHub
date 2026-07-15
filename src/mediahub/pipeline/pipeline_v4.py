@@ -108,6 +108,15 @@ class PipelineRunV4:
     # V3 outputs
     detector_summary: dict = field(default_factory=dict)
     cards: list = field(default_factory=list)
+    # Which ranking authority produced `cards` above (ADR-0032). V5 recognition
+    # is canonical: whenever it yields ranked achievements, `cards` are derived
+    # from them (in V5 priority order) on every parse path. The legacy V3
+    # rank_cards output is used only as the fallback when V5 recognition is
+    # unavailable or empty.
+    #   "v5"        — derived from V5 ranked_achievements (canonical)
+    #   "v3-legacy" — fell back to the legacy V3 rank_cards output
+    #   "none"      — no cards produced
+    cards_order_source: str = "none"
     self_check: Optional[dict] = None
     standards_meta: dict = field(default_factory=dict)
 
@@ -222,6 +231,47 @@ def _v5_ranked_to_v3_stubs(
             )
         )
     return stubs
+
+
+def _reconcile_review_cards(
+    v3_cards: list,
+    ranked_achievements: Optional[list],
+    meet_results: Optional[list] = None,
+) -> tuple[list, str]:
+    """Pick the canonical review-queue cards and record their ranking authority.
+
+    ADR-0032 makes V5 recognition the single canonical ranking authority. The
+    pipeline runs two rankers whose orderings disagree on PB-vs-gold: the legacy
+    V3 ``rank_cards`` (which scores a confirmed PB above a gold) and V5
+    ``rank_achievements`` (which ranks the gold first). Every acted-upon surface
+    — the review list, the content pack, exports, the reel — already reads the
+    V5 ``ranked_achievements``, so the V3 card ordering must not be surfaced as a
+    second, contradictory review queue.
+
+    Policy — **V5-first / V3-fallback** (deliberately NOT "always V5"):
+
+    * When V5 recognition yielded ranked achievements, derive the cards from
+      them (in V5 priority order) via the V5→V3 stub bridge — on every parse
+      path. Interpreter runs already had an empty ``v3_cards`` here, so they are
+      unaffected; the member-id (HY3/SDIF) path — the only one where the V3
+      detector emits cards — now agrees with the recognition report instead of
+      contradicting it.
+    * When V5 recognition is unavailable (the report build does online
+      meet-identity research that can fail, leaving ``recognition_report`` None)
+      or returned zero achievements, keep the rich V3 ``rank_cards`` output as
+      the honest fallback, so a V5 failure never regresses a run to "0 content
+      cards".
+
+    Returns ``(cards, cards_order_source)`` where ``cards_order_source`` is
+    ``"v5"`` (derived from ``ranked_achievements``), ``"v3-legacy"`` (fell back
+    to the V3 cards) or ``"none"`` (neither ranker produced any card).
+    """
+    ranked = ranked_achievements or []
+    if ranked:
+        return _v5_ranked_to_v3_stubs(ranked, meet_results), "v5"
+    if v3_cards:
+        return list(v3_cards), "v3-legacy"
+    return [], "none"
 
 
 def run_pipeline_v4(
@@ -642,25 +692,49 @@ def run_pipeline_v4(
         except Exception as exc:
             step(f"child-policy transform failed (content left untransformed): {exc}")
 
-    # 13. Bridge V5 → V3 stubs when V3 produced no cards.
-    # The V3 detector path is intentionally skipped for interpreter-parsed
-    # runs (swimmers have no ASA IDs), so run.cards is empty. V5 recognition
-    # does the heavy lifting and its ranked_achievements are the real output.
-    # Synthesise minimal ContentCard stubs so exports, review-page stats, and
-    # the trust report all reflect the actual V5 findings rather than showing
-    # "No content cards were generated."
-    if not run.cards and run.recognition_report:
-        _ranked = run.recognition_report.get("ranked_achievements") or []
-        if _ranked:
-            run.cards = _v5_ranked_to_v3_stubs(_ranked, meet.results)
-            run.trust = build_trust_report(
-                meet=meet,
-                profile=profile or _ephemeral_profile(effective_filter),
-                cards=run.cards,
-                pb_snapshots=pb_snapshots,
-                standards_meta=run.standards_meta,
-            )
-            step(f"V3 stubs synthesised from {len(run.cards)} V5 achievements.")
+    # 13. Canonical review-queue cards come from V5 recognition (ADR-0032).
+    #
+    # Two rankers run above: the V3 chain (detect_v3 → grouper → rank_cards)
+    # populated `run.cards` at step 10, and V5 rank_achievements produced
+    # `recognition_report["ranked_achievements"]` at step 12. Their orderings
+    # DISAGREE on PB-vs-gold (V3 scores a confirmed PB above a gold; V5 ranks
+    # the gold first and bands it ELITE), so surfacing the V3 order as the
+    # review queue made it contradict the recognition report on member-id
+    # (HY3/SDIF) runs — the one input class where the V3 detector produces
+    # cards. V5 is the single canonical authority (every acted-upon surface —
+    # review list, content pack, export, reel — already reads
+    # ranked_achievements), so whenever V5 recognition yielded ranked
+    # achievements we derive `run.cards` from them, in V5 priority order, on
+    # EVERY parse path. Interpreter runs already had an empty `run.cards`
+    # here, so they stay byte-identical; the member-id path now agrees too.
+    #
+    # V5-first / V3-fallback (NOT "always V5"): when V5 recognition is
+    # unavailable (recognition_report is None — the report build does online
+    # meet-identity research that can fail) or returns zero achievements, the
+    # rich V3 cards from step 10 are kept as the honest fallback, so a V5
+    # failure never regresses a member-id run to "0 content cards". The V3
+    # detector chain also keeps feeding detector_summary and self_check as an
+    # independent deterministic cross-check.
+    #
+    # Trust is rebuilt from the V5-derived cards (not the rich V3 cards):
+    # run.cards and run.trust must describe the same card set for the
+    # card_id-keyed review-page join, and the rich V3 cards bypass the
+    # Children's-Code identity transform applied to ranked_achievements at
+    # step 12b — feeding them to the trust surface would leak untransformed
+    # under-18 identity.
+    _ranked = (run.recognition_report or {}).get("ranked_achievements") or []
+    run.cards, run.cards_order_source = _reconcile_review_cards(
+        run.cards, _ranked, meet.results
+    )
+    if run.cards_order_source == "v5":
+        run.trust = build_trust_report(
+            meet=meet,
+            profile=profile or _ephemeral_profile(effective_filter),
+            cards=run.cards,
+            pb_snapshots=pb_snapshots,
+            standards_meta=run.standards_meta,
+        )
+        step(f"V3 stubs synthesised from {len(run.cards)} V5 achievements.")
 
     run.finished_at = datetime.now(timezone.utc).isoformat()
     return run
