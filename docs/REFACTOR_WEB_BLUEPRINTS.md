@@ -84,6 +84,23 @@ that ordering is the whole point of this doc:
   on the monolith and re-`create_app()` by hand. Moving code between modules
   changes what `importlib.reload(web)` rebuilds, so template/route relocations
   ripple into hundreds of files.
+  - **Status: done.** The canonical `app`/`client`/`web_module` fixtures +
+    autouse `_isolate_data_dir` (Stage 3) are on `main`, and every test file
+    that reloaded the `web.py` monolith has been migrated onto them across
+    batched follow-up PRs — including the final "judgment batch" of files whose
+    reload also picked up an env var (each such flag was verified read *live*
+    inside a function, not at `web.py` import, so `monkeypatch.setenv` before
+    `create_app()` reproduces the behaviour without the reload; provider-key
+    `delenv`s and other honest-error setups were kept verbatim). Assertion
+    counts were held identical per file. **One** web.py reload is deliberately
+    retained: a single test in `tests/test_public_wall.py` asserts the
+    import-time `RUNS_DIR` constant re-derives from a `RUNS_DIR` env var pointing
+    *outside* `DATA_DIR/runs_v4` — a state the canonical fixtures structurally
+    cannot represent, so it stays a genuine load-bearing reload. The ~30 test
+    files that still call `importlib.reload` reload *non-web* modules
+    (`club_profile`, `imagine_usage`, `secrets_store`, `uptime`, `presenter`,
+    the interpreter, …) for their own module-state isolation and are out of
+    scope for #130.
 - **#129 — implementation-detail asserts.** **207 test files** assert on literal
   `mh-*` CSS class strings, raw HTML tags, and hardcoded URL paths pulled from
   `web.py`'s f-string templates (0 use a stable `data-testid` today). A pure
@@ -243,7 +260,7 @@ capture, and the full suite.
 | 1 | 147 closure-free helpers hoisted by the fixpoint engine (3 rounds). |
 | 2 | Tenant spine extracted: `_active_profile_id` & friends module-level; `app.config` → `current_app.config`; the six request hooks converted to explicit `app.before_request(...)`/`after_request`/`teardown_request` registration at identical positions; gate semantics unchanged. |
 | 1b | Last non-route captures cleared: constants module-level; per-app mutable state (`_auth_attempts`, complaint throttle, icon cache) on `app.extensions` via `_app_state()` (per-app isolation preserved); `_login_idle_seconds()` / `_preview_render_timeout()` read env per call. |
-| 3 | Landed on `main` in parallel (canonical `app`/`client`/`web_module` fixtures + `tests/_semantic.py`, findings #129/#130) — this PR contributes `tests/_helpers.py::web_surface_src()` and repairs the source-scan tests the carve exposed. Bulk migration of the remaining reload-preamble files is incremental follow-up. |
+| 3 | Landed on `main` in parallel (canonical `app`/`client`/`web_module` fixtures + `tests/_semantic.py`, findings #129/#130) — this PR contributes `tests/_helpers.py::web_surface_src()` and repairs the source-scan tests the carve exposed. Bulk migration of the reload-preamble files was completed as batched follow-up PRs: all files that reloaded the `web.py` monolith are on the canonical fixtures, leaving exactly one deliberate load-bearing reload (`test_public_wall.py`, `RUNS_DIR` outside `DATA_DIR/runs_v4`). See §3. |
 | 4 | `routes_api_runs.py` (74), `routes_organisation.py` (29), `routes_media_library.py` (32), `routes_video.py` (19) — handlers carved out with `W.<name>` call-time references (the `@require_run` tenant guard moves with its handlers as `@W.require_run`); registered via `register(app)` with ORIGINAL endpoint names (ADR-0031). |
 
 `web.py`: 69.6k → ~55.9k lines. `create_app`: 48.5k lines / 464 routes +
