@@ -635,11 +635,19 @@ def generate_json(
         return parsed
     # The provider answered but the output didn't parse as JSON. Don't let that be
     # silently indistinguishable from an empty result at the ~20 call sites — log
-    # it (a head snippet, never the whole blob) before falling back.
+    # it (a head snippet, never the whole blob) AND record a ledger row so the
+    # usage log can tell "model returned garbage" apart from "empty result".
+    head = (raw or "")[:120]
     log.warning(
         "generate_json: provider output was not parseable JSON (%d chars); using fallback. head=%r",
         len(raw or ""),
-        (raw or "")[:120],
+        head,
+    )
+    _log_call(
+        provider=_preferred_provider(),
+        ok=False,
+        error_kind="json_parse",
+        error_message=head,
     )
     return fallback if fallback is not None else {}
 

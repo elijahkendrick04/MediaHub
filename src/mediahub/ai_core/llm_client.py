@@ -365,7 +365,11 @@ class OpenAICompatClient:
             raise OpenAICompatError(
                 f"HTTP {r.status_code} from {_host(endpoint)}: {(r.text or '')[:240]}"
             )
-        return [row.get("embedding") for row in (r.json().get("data") or [])]
+        rows = list(r.json().get("data") or [])
+        # OpenAI-compatible providers may return embedding rows out of order;
+        # honour each row's ``index`` so vector i always maps to input i.
+        rows.sort(key=lambda row: row.get("index", 0))
+        return [row.get("embedding") for row in rows]
 
 
 # ---------------------------------------------------------------------------
