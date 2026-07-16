@@ -1,38 +1,32 @@
 """Stage J1 — the MEDIAHUB_ADAPTIVE_THEME feature-flag contract."""
-from __future__ import annotations
 
-import importlib
-import os
-from pathlib import Path
+from __future__ import annotations
 
 import pytest
 
 
 @pytest.fixture
-def fresh_app(tmp_path, monkeypatch):
-    """Clean Flask app + isolated DATA_DIR + reloaded modules.
+def fresh_app(web_module):
+    """Clean Flask app + isolated DATA_DIR via the canonical fixtures.
 
-    Reload is critical because ``_default_theme_json_cached`` is
-    module-level ``lru_cache``d — without a reload between tests
-    the J2 cache would leak the previous test's DATA_DIR value.
+    ``web_module`` (through conftest's ``_isolate_data_dir``) repoints the
+    shared ``web.py`` at this test's DATA_DIR and clears its per-run caches —
+    including the module-level ``lru_cache``d default-theme lookup that a
+    reload used to reset, so the J2 cache no longer leaks a prior test's
+    DATA_DIR. ``theme_store._read_cached`` is keyed on ``(path, mtime_ns)``
+    and self-clears on every write/delete, so it needs no explicit clear here.
+
+    The ``MEDIAHUB_ADAPTIVE_THEME`` flag is read live inside
+    ``_adaptive_theme_enabled()`` (never at import time), so each test flips
+    it in its own body via ``monkeypatch.setenv`` before the request/call
+    that reads it — monkeypatch auto-undoes it, keeping the on/off cases
+    isolated without a reload.
     """
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR",
-                        str(tmp_path / "club_profiles"))
-    (tmp_path / "runs_v4").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "uploads_v4").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "club_profiles").mkdir(parents=True, exist_ok=True)
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-    from mediahub.theming.theme_store import _read_cached
-    importlib.reload(cp)
-    importlib.reload(wm)
-    _read_cached.cache_clear()
-    app = wm.create_app()
+    app = web_module.create_app()
     app.config["TESTING"] = True
-    return app, wm
+    if not app.secret_key:
+        app.secret_key = "test-secret-key"
+    return app, web_module
 
 
 class TestFlagDefault:
@@ -54,8 +48,7 @@ class TestFlagDefault:
 
 
 class TestFlagDisabled:
-    @pytest.mark.parametrize("value", ["0", "false", "FALSE", "off", "OFF",
-                                        "no", "NO"])
+    @pytest.mark.parametrize("value", ["0", "false", "FALSE", "off", "OFF", "no", "NO"])
     def test_off_values(self, fresh_app, monkeypatch, value):
         _app, wm = fresh_app
         monkeypatch.setenv("MEDIAHUB_ADAPTIVE_THEME", value)
@@ -75,18 +68,16 @@ class TestSeedBlockRespectsFlag:
         monkeypatch.delenv("MEDIAHUB_ADAPTIVE_THEME", raising=False)
         with app.test_client() as c:
             body = c.get("/status").get_data(as_text=True)
-        assert 'id="mh-theme-seed"' in body, (
-            "seed override missing when flag enabled (default)"
-        )
+        assert 'id="mh-theme-seed"' in body, "seed override missing when flag enabled (default)"
 
     def test_seed_block_absent_when_disabled(self, fresh_app, monkeypatch):
         app, _wm = fresh_app
         monkeypatch.setenv("MEDIAHUB_ADAPTIVE_THEME", "0")
         with app.test_client() as c:
             body = c.get("/status").get_data(as_text=True)
-        assert 'id="mh-theme-seed"' not in body, (
-            "seed override leaked when flag disabled (rollback broken)"
-        )
+        assert (
+            'id="mh-theme-seed"' not in body
+        ), "seed override leaked when flag disabled (rollback broken)"
 
 
 class TestAuditPanelIndependentOfFlag:
@@ -96,13 +87,17 @@ class TestAuditPanelIndependentOfFlag:
     def test_audit_panel_renders_when_flag_off(self, fresh_app, monkeypatch):
         app, _wm = fresh_app
         from mediahub.web.club_profile import ClubProfile, save_profile
+
         prof = ClubProfile(profile_id="flag-off-audit", display_name="X")
         prof.brand_primary = "#06D6A0"
         prof.brand_voice_summary = "Energetic"
         prof.brand_keywords = ["test"]
         prof.brand_palette_extracted = {"primary": "#06D6A0"}
-        prof.brand_kit = {"profile_id": "flag-off-audit",
-                          "display_name": "X", "primary_colour": "#06D6A0"}
+        prof.brand_kit = {
+            "profile_id": "flag-off-audit",
+            "display_name": "X",
+            "primary_colour": "#06D6A0",
+        }
         save_profile(prof)
 
         monkeypatch.setenv("MEDIAHUB_ADAPTIVE_THEME", "0")
@@ -115,15 +110,16 @@ class TestAuditPanelIndependentOfFlag:
         # But the inline seed override is suppressed.
         assert 'id="mh-theme-seed"' not in body
 
-    def test_theme_store_writes_when_flag_off(self, fresh_app, monkeypatch,
-                                                tmp_path):
+    def test_theme_store_writes_when_flag_off(self, fresh_app, monkeypatch, tmp_path):
         """ensure_derived_palette() writes to disk regardless of the
         visible-cascade flag — the theme store is independent."""
         _app, _wm = fresh_app
         monkeypatch.setenv("MEDIAHUB_ADAPTIVE_THEME", "0")
         from mediahub.brand.kit import BrandKit
         from mediahub.theming.theme_store import theme_path
-        BrandKit(profile_id="flag-off-store", display_name="X",
-                  primary_colour="#06D6A0").ensure_derived_palette()
+
+        BrandKit(
+            profile_id="flag-off-store", display_name="X", primary_colour="#06D6A0"
+        ).ensure_derived_palette()
         # Disk file exists even with flag off — Stage G is unaffected.
         assert theme_path("flag-off-store").is_file()
