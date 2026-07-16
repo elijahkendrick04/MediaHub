@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import importlib
 import json
 from types import SimpleNamespace
 
@@ -485,21 +484,10 @@ def test_rights_ledger_shares_data_db_with_audio(tmp_path):
 # web routes
 # --------------------------------------------------------------------------- #
 @pytest.fixture
-def app_env(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    for sub in ("runs_v4", "uploads_v4", "club_profiles"):
-        (tmp_path / sub).mkdir(parents=True, exist_ok=True)
+def app_env(web_module, tmp_path, monkeypatch):
     for var in ("PEXELS_API_KEY", "PIXABAY_API_KEY", "GEMINI_API_KEY", "ANTHROPIC_API_KEY"):
         monkeypatch.delenv(var, raising=False)
 
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
     # Point the media-library store singleton at tmp so the import lands there
     # (its default DB is package-local) — keeps the repo's data.db untouched.
     import mediahub.media_library.store as mls
@@ -507,9 +495,9 @@ def app_env(tmp_path, monkeypatch):
     mls._default_store = mls.MediaLibraryStore(
         db_path=tmp_path / "data.db", uploads_dir=tmp_path / "uploads_v4" / "media_library"
     )
-    app = wm.create_app()
+    app = web_module.create_app()
     app.config["TESTING"] = True
-    return app, wm, tmp_path
+    return app, web_module, tmp_path
 
 
 def _signin(client, profile_id="alpha", name="Alpha SC"):
