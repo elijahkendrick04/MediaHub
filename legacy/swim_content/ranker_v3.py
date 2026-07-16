@@ -4,8 +4,7 @@ Ranker V3 — context-aware scoring with explanations.
 Each ContentCard ends with:
   - score (0-100)
   - score_reasons: short bullets the user reads on the card
-  - bucket: 'queue' | 'recap' | 'archive'  ('needs_confirmation' is a
-    RESERVED bucket — see the note below; no live producer reaches it)
+  - bucket: 'queue' | 'recap' | 'archive'
   - suggested_format: see cards.FMT_*
 
 Scoring rules (transparent and adjustable):
@@ -19,19 +18,6 @@ Base scores by card type:
   weekend_in_numbers    base 45
   recap_only            base 25
 
-RESERVED / currently-unreachable — the needs_confirmation path:
-  No producer in the live pipeline emits a TYPE_NEEDS_CONFIRMATION card or
-  sets ContentCard.needs_confirmation, so none of the following fire in
-  practice. They are kept (not deleted) because TYPE_NEEDS_CONFIRMATION and
-  the surrounding branches are still referenced by cards.py / captions_v3.py /
-  grouper.py; a future producer could revive this path. Until then, treat the
-  needs_confirmation base score, the -15 flag penalty, the needs_confirmation
-  bucket, and the FMT_HOLD format below as a reserved (inactive) sink, not an
-  active scoring rule:
-    - needs_confirmation  base 30   (TYPE_NEEDS_CONFIRMATION)
-    - -15                 needs_confirmation flag set
-    - bucket              needs_confirmation  (-> FMT_HOLD)
-
 Modifiers per card:
   +10  national-level qualifier hit inside the window
   +6   university-level (BUCS) qualifier hit inside the window
@@ -44,7 +30,6 @@ Modifiers per card:
   +5   spotlight covers >=3 notable events (distinct distance/stroke/course)
   +5   same-stroke gold dominance (2 golds = "doubles up", 3+ = "clean sweep")
   -10  card has only LIKELY_PBs and no medal/qualifier
-  (the -15 needs_confirmation penalty is RESERVED / unreachable — see above)
 
 Anti-spam (defensive safety-net):
   After scoring, if a swimmer has a SPOTLIGHT card, each of their STANDOUT
@@ -61,8 +46,6 @@ Buckets:
   >= 65         queue
   40 - 64       recap
   < 40          archive
-  (needs_confirmation is a RESERVED bucket — see the note above; no live
-   producer sets the flag, so a card never routes here in practice)
 
 We also cap the queue at 20 cards, demoting overflow to recap.
 """
@@ -74,8 +57,8 @@ from typing import Optional
 from .cards import (
     ContentCard, Claim,
     TYPE_STANDOUT, TYPE_SPOTLIGHT, TYPE_PB_ROUNDUP, TYPE_PODIUM_ROUNDUP,
-    TYPE_QUAL_ALERT, TYPE_WEEKEND_NUMBERS, TYPE_RECAP, TYPE_NEEDS_CONFIRMATION,
-    FMT_FEED, FMT_STORY, FMT_SPOTLIGHT, FMT_RECAP, FMT_NUMBERS, FMT_HOLD, FMT_ARCHIVE,
+    TYPE_QUAL_ALERT, TYPE_WEEKEND_NUMBERS, TYPE_RECAP,
+    FMT_FEED, FMT_STORY, FMT_SPOTLIGHT, FMT_RECAP, FMT_NUMBERS, FMT_ARCHIVE,
 )
 
 
@@ -86,7 +69,6 @@ _BASE_SCORE = {
     TYPE_PODIUM_ROUNDUP: 55,
     TYPE_STANDOUT: 40,
     TYPE_WEEKEND_NUMBERS: 45,
-    TYPE_NEEDS_CONFIRMATION: 30,
     TYPE_RECAP: 25,
 }
 
@@ -122,10 +104,6 @@ def _qual_hits(card: ContentCard) -> list[tuple[str, bool]]:
 
 
 def _suggested_format(card: ContentCard) -> str:
-    # RESERVED / inactive: no live producer sets the needs_confirmation bucket,
-    # so this branch is currently unreachable. Kept for a future producer.
-    if card.bucket == "needs_confirmation":
-        return FMT_HOLD
     if card.bucket == "archive":
         return FMT_ARCHIVE
     if card.card_type == TYPE_SPOTLIGHT:
@@ -154,7 +132,6 @@ def score_card(card: ContentCard) -> ContentCard:
         TYPE_PODIUM_ROUNDUP: "podium roundup",
         TYPE_STANDOUT: "individual swim",
         TYPE_WEEKEND_NUMBERS: "weekend stats",
-        TYPE_NEEDS_CONFIRMATION: "needs confirmation",
     }.get(card.card_type, card.card_type)
     reasons.append(f"Base for {type_label} (+{_BASE_SCORE.get(card.card_type, 30)})")
 
@@ -231,14 +208,6 @@ def score_card(card: ContentCard) -> ContentCard:
         score -= 10
         reasons.append("Only a likely (unverified) PB — needs evidence (-10)")
 
-    # Needs-confirmation flag explicit penalty.
-    # RESERVED / inactive: no live producer sets card.needs_confirmation, so
-    # this penalty never fires in the current pipeline. Kept for a future
-    # producer (see the module docstring's reserved-path note).
-    if card.needs_confirmation:
-        score -= 15
-        reasons.append("Card flagged as needing human confirmation (-15)")
-
     # Clamp
     score = max(0, min(100, score))
     card.score = score
@@ -252,11 +221,6 @@ def _spotlight_owners(cards: list[ContentCard]) -> set[str]:
 
 
 def _bucket_for_score(card: ContentCard, score: int) -> str:
-    # RESERVED / inactive: no live producer sets card.needs_confirmation, so a
-    # card never routes into the needs_confirmation bucket in practice. Kept for
-    # a future producer (see the module docstring's reserved-path note).
-    if card.needs_confirmation:
-        return "needs_confirmation"
     if score >= 65:
         return "queue"
     if score >= 40:
@@ -302,6 +266,6 @@ def rank_cards(cards: list[ContentCard], *, queue_cap: int = 20) -> list[Content
             c.score_reasons.append(f"Queue cap reached at {queue_cap}; moved to recap")
 
     # 5) sort cards by bucket then score
-    bucket_rank = {"queue": 0, "needs_confirmation": 1, "recap": 2, "archive": 3}
+    bucket_rank = {"queue": 0, "recap": 1, "archive": 2}
     cards.sort(key=lambda x: (bucket_rank.get(x.bucket, 9), -x.score, x.card_id))
     return cards

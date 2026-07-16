@@ -15,7 +15,7 @@ diagnosis (docs/PB_RANKER_DIAGNOSIS.md) found latent:
           (2 = "doubles up", 3+ = "clean sweep"), and the >=3-notable bonus
           counts distinct EVENTS (prelim + final of one event is not two).
   * F53 — the previously-unasserted spotlight multi-event bonus, sweep bonus,
-          FMT_STORY assignment, and the needs_confirmation base score.
+          and FMT_STORY assignment.
 
 They call the real ``rank_cards`` and assert the stable contract (scores,
 ordering, buckets, formats, and the user-visible reason strings).
@@ -29,7 +29,6 @@ from swim_content.cards import (
     FMT_RECAP,
     FMT_SPOTLIGHT,
     FMT_STORY,
-    TYPE_NEEDS_CONFIRMATION,
     TYPE_QUAL_ALERT,
     TYPE_SPOTLIGHT,
     TYPE_STANDOUT,
@@ -75,7 +74,7 @@ def _claim(
     )
 
 
-def _card(cid, ctype, *, swimmer=None, claims=None, needs=False) -> ContentCard:
+def _card(cid, ctype, *, swimmer=None, claims=None) -> ContentCard:
     return ContentCard(
         card_id=cid,
         card_type=ctype,
@@ -83,7 +82,6 @@ def _card(cid, ctype, *, swimmer=None, claims=None, needs=False) -> ContentCard:
         primary_swimmer=swimmer,
         swimmer_names=[swimmer] if swimmer else [],
         claims=list(claims or []),
-        needs_confirmation=needs,
     )
 
 
@@ -324,17 +322,6 @@ def test_queue_bucket_standout_is_suggested_as_a_story():
     assert by["story"].suggested_format == FMT_STORY
 
 
-def test_needs_confirmation_type_base_score_is_thirty():
-    """The needs_confirmation base (30) — the one base score the sibling suite
-    never asserts numerically."""
-    by = _by_id(rank_cards([
-        _card("nc", TYPE_NEEDS_CONFIRMATION, swimmer="Q", needs=True),
-    ]))
-    # base 30 - 15 needs-confirmation penalty = 15
-    assert by["nc"].score == 15
-    assert by["nc"].bucket == "needs_confirmation"
-
-
 def test_score_is_clamped_to_one_hundred():
     """A maximal spotlight (70 + 12 + 8 + 10 + 5 breadth + 5 sweep = 110) clamps
     to 100, never exceeds it."""
@@ -387,6 +374,6 @@ def test_composite_pipeline_no_unintended_threshold_crossings():
     assert by["F_likely_only"].bucket == "archive"
 
     # Final order obeys (bucket, -score, card_id).
-    bucket_rank = {"queue": 0, "needs_confirmation": 1, "recap": 2, "archive": 3}
+    bucket_rank = {"queue": 0, "recap": 1, "archive": 2}
     keys = [(bucket_rank[c.bucket], -c.score, c.card_id) for c in ranked]
     assert keys == sorted(keys)

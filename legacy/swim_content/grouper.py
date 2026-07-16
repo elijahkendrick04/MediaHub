@@ -39,7 +39,7 @@ from typing import Iterable
 from .cards import (
     Claim, ContentCard, CaptionVariants,
     TYPE_STANDOUT, TYPE_SPOTLIGHT, TYPE_PB_ROUNDUP, TYPE_QUAL_ALERT,
-    TYPE_PODIUM_ROUNDUP, TYPE_WEEKEND_NUMBERS, TYPE_RECAP, TYPE_NEEDS_CONFIRMATION,
+    TYPE_PODIUM_ROUNDUP, TYPE_WEEKEND_NUMBERS, TYPE_RECAP,
 )
 from .evidence import Evidence, evidence_from_meet
 

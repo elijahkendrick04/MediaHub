@@ -169,11 +169,7 @@ def _evaluate_card(card, pb_snapshots: dict) -> ClaimTrust:
         safe = SAFE_REVIEW
         reasons.append("Verifiable but no headline-strength claim.")
 
-    if card.bucket == "needs_confirmation":
-        safe = SAFE_HOLD
-        confidence = "low"
-        reasons.append("Card is queued in 'needs confirmation' bucket.")
-    elif card.bucket == "archive":
+    if card.bucket == "archive":
         safe = SAFE_HOLD
         reasons.append("Card was archived by the ranker — not strong enough to post.")
 
