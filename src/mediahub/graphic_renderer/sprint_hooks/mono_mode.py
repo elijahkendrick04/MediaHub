@@ -146,11 +146,28 @@ _LIGHT_RAMP = {
 }
 
 
+# A neutral grey specular ramp (light-dark-light) — the mono stand-in for the
+# F9 medal chrome, carrying no brand hue.
+_MONO_MEDAL_RAMP = (
+    "linear-gradient(135deg, #6E6E6E 0%, #9A9A9A 18%, #B4B4B4 36%, "
+    "#E6E6E6 50%, #B4B4B4 64%, #8A8A8A 82%, #6E6E6E 100%)"
+)
+
+
 def _hex_to_rgb(value: str) -> tuple[int, int, int]:
     h = value.lstrip("#")
     if len(h) == 3:
         h = "".join(ch + ch for ch in h)
     return (int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16))
+
+
+def _mono_rgb_triple(value: str) -> str:
+    """``"r,g,b"`` for a mono ramp hex — the flattened --mh-surface-rgb (B6)."""
+    try:
+        r, g, b = _hex_to_rgb(value)
+        return f"{r},{g},{b}"
+    except Exception:
+        return "24,24,24"
 
 
 def _relative_luminance(value: str) -> float:
@@ -231,7 +248,15 @@ _ROLE_DECL_RE = re.compile(
 # lit/shaded stops of the brand primary — so a mono card must rewrite them too
 # or the brand colour leaks straight past the role remap.
 _DERIVED_DECL_RE = re.compile(
-    r"(?<![\w-])(--mh-(?:ground-gradient|surface-2|lift|ink-secondary|secondary-vis|shadow-rgb))"
+    r"(?<![\w-])(--mh-(?:ground-gradient|surface-container|surface-raised|surface-2|lift"
+    r"|accent-container|on-accent-container|ink-secondary|secondary-vis|shadow-rgb"
+    r"|surface-rgb"
+    # F9 medal chrome: the specular ramp vars embed the medal-tint hexes, so a
+    # mono card must rewrite them to a neutral grey specular or the gold/silver
+    # leaks past the role remap (the global grayscale would desaturate the pixels
+    # anyway, but rewriting keeps the token itself brand-free — the B3 precedent).
+    r"|medal-numeral-ramp|medal-ramp"
+    r"))"
     r"\s*:\s*[^;}]+"
 )
 
@@ -249,9 +274,25 @@ def _rewrite_role_decls(html: str, ramp: dict[str, str]) -> str:
         "--mh-ground-gradient": ramp.get("--mh-primary", "#111111"),
         "--mh-surface-2": ramp.get("--mh-surface", "#181818"),
         "--mh-lift": ramp.get("--mh-surface", "#181818"),
+        # C1 tonal-container tokens embed brand-derived hexes; flatten them to
+        # the mono surface (containers/raised) and mono ink (on-accent-container)
+        # so the container layering stays legible in grey and no hue leaks past.
+        "--mh-surface-container": ramp.get("--mh-surface", "#181818"),
+        "--mh-surface-raised": ramp.get("--mh-surface", "#181818"),
+        "--mh-accent-container": ramp.get("--mh-surface", "#181818"),
+        "--mh-on-accent-container": ramp.get("--mh-on-primary", "#F4F4F4"),
         "--mh-ink-secondary": ramp.get("--mh-secondary", "#B4B4B4"),
         "--mh-secondary-vis": ramp.get("--mh-secondary", "#B4B4B4"),
         "--mh-shadow-rgb": "10,10,10",
+        # B6 — the glass fill's surface RGB triple carries the brand-derived
+        # surface, so flatten it to the mono surface's grey (the --mh-glass-bg
+        # var() reference then follows automatically; --mh-glass-ink already
+        # rides var(--mh-on-primary), remapped above).
+        "--mh-surface-rgb": _mono_rgb_triple(ramp.get("--mh-surface", "#181818")),
+        # F9 medal chrome — a neutral grey specular so a medal card still reads
+        # as polished metal in mono, with no brand hue in the token.
+        "--mh-medal-ramp": _MONO_MEDAL_RAMP,
+        "--mh-medal-numeral-ramp": _MONO_MEDAL_RAMP,
     }
 
     def _sub_derived(m: "re.Match[str]") -> str:

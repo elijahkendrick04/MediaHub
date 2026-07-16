@@ -47,6 +47,9 @@ FAMILIES = {
     "Space Grotesk": ("Space+Grotesk:wght@300..700", "space-grotesk"),
     "Inter":         ("Inter:opsz,wght@14..32,100..900", "inter"),
     "JetBrains Mono": ("JetBrains+Mono:wght@100..800", "jetbrains-mono"),
+    # D5 (Canva gap analysis) — the serif display register. Variable wght cut;
+    # mirrored into remotion/public/fonts + src/fonts.ts for still↔motion parity.
+    "Playfair Display": ("Playfair+Display:wght@400..900", "playfair-display"),
 }
 _LATIN = ("U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, "
           "U+2000-206F, U+2074, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, "

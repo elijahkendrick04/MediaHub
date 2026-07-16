@@ -324,7 +324,12 @@ def test_explain_reports_resolved_roles_pack_and_archetype():
 
 def test_explain_flags_illegible_role_swap_via_the_compliance_gate():
     # Push every slot to the accent role — a same-hue ground/headline collapse the
-    # APCA gate will reject, so the brand defaults stand and the user is told.
+    # APCA gate cannot accept as-is, so the user is told a legibility adjustment
+    # happened. C6 (Canva gap analysis) changed HOW: rather than discard the whole
+    # swap, the gate now REPAIRS the failing role(s) to a legible tone and says so
+    # (design_editor.explain surfaces --mh-repair-note). Either message ("set
+    # aside" or "repaired") mentions legibility — the honest-feedback contract this
+    # test pins is unchanged; only the remedy became less destructive.
     p = DE.coerce_params(
         {
             "palette": {"primary": "#101820", "secondary": "#101820", "accent": "#101820"},

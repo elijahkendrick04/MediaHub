@@ -41,7 +41,7 @@
   align-items: center;
   background: var(--mh-ground-gradient, var(--mh-primary));
   color: var(--mh-on-primary);
-  font-family: 'Inter', system-ui, sans-serif;
+  font-family: var(--mh-font-body, 'Inter', system-ui, sans-serif);
   -webkit-font-smoothing: antialiased;
   padding: 110px 70px 80px;
   text-align: center;
@@ -52,34 +52,37 @@
   display: inline-flex; align-items: center; gap: 12px;
   padding: 12px 26px; border-radius: 999px;
   background: var(--mh-accent); color: var(--mh-primary);
-  font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 800;
+  font-family: var(--mh-font-kicker, 'Space Grotesk','Inter',sans-serif); font-weight: 800;
   font-size: 22px; letter-spacing: 0.16em; text-transform: uppercase;
   margin-bottom: 56px; max-width: 100%; overflow-wrap: anywhere;
 }
 
-/* the concentric dial — fixed-size, children centred via inset+margin */
-.rr__dial { position: relative; width: 540px; height: 540px; max-width: 100%; flex: 0 0 auto; }
+/* the concentric dial — sized from the canvas short edge, children centred via
+   inset+margin. F2: --rr-dial = half the short edge = exactly 540px at a
+   1080-wide format (byte-identical); the concentric rings derive from it so the
+   whole assembly scales as one unit on a smaller canvas. */
+.rr__dial { position: relative; --rr-dial: calc(var(--mh-short, 1080px) / 2); width: var(--rr-dial); height: var(--rr-dial); max-width: 100%; flex: 0 0 auto; }
 .rr__dial > * { position: absolute; inset: 0; margin: auto; border-radius: 50%; }
 .rr__ticks {
-  width: 540px; height: 540px;
+  width: var(--rr-dial); height: var(--rr-dial);
   background: repeating-conic-gradient(
     var(--mh-outline) 0deg 1.3deg, transparent 1.3deg 15deg);
   opacity: 0.85;
 }
-.rr__tickmask { width: 492px; height: 492px; background: var(--mh-primary); }
+.rr__tickmask { width: calc(var(--rr-dial) * 41 / 45); height: calc(var(--rr-dial) * 41 / 45); background: var(--mh-primary); }
 .rr__ring {
-  width: 452px; height: 452px;
+  width: calc(var(--rr-dial) * 113 / 135); height: calc(var(--rr-dial) * 113 / 135);
   border: 16px solid var(--mh-accent);
   background: var(--mh-primary);
 }
 .rr__core {
-  width: 388px; height: 388px;
+  width: calc(var(--rr-dial) * 97 / 135); height: calc(var(--rr-dial) * 97 / 135);
   display: flex; flex-direction: column;
   align-items: center; justify-content: center;
   padding: 30px;
 }
 .rr__core-lab {
-  font-family: 'Inter',sans-serif; font-weight: 800;
+  font-family: var(--mh-font-body, 'Inter',sans-serif); font-weight: 800;
   font-size: 18px; letter-spacing: 0.34em; text-transform: uppercase;
   color: var(--mh-on-primary); opacity: 0.7; margin-bottom: 12px;
 }
@@ -96,7 +99,7 @@
 
 .rr__below { margin-top: 52px; width: 100%; }
 .rr__first {
-  font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 700;
+  font-family: var(--mh-font-kicker, 'Space Grotesk','Inter',sans-serif); font-weight: 700;
   font-size: 36px; letter-spacing: 0.02em; text-transform: uppercase;
   color: var(--mh-accent); margin-bottom: 2px;
   overflow-wrap: anywhere;
@@ -112,7 +115,7 @@
 .rr__event {
   margin-top: 16px; padding-top: 16px;
   display: inline-block; border-top: 4px solid var(--mh-accent);
-  font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 600;
+  font-family: var(--mh-font-kicker, 'Space Grotesk','Inter',sans-serif); font-weight: 600;
   font-size: 27px; line-height: 1.12; text-transform: uppercase;
   color: var(--mh-on-primary); opacity: 0.92;
   overflow-wrap: anywhere;
@@ -128,18 +131,18 @@
 .rr__foot {
   margin-top: auto; padding-top: 30px; width: 100%;
   border-top: 2px solid var(--mh-outline);
-  display: flex; align-items: center; justify-content: space-between; gap: 24px;
+  display: flex; align-items: center; justify-content: space-between; gap: var(--mh-sp-5);
   text-align: left;
 }
 .rr__logo { height: 54px; width: auto; }
 .rr__logo img, .rr__logo svg { height: 100%; width: auto; object-fit: contain; display: block; }
 .rr__meta { display: flex; flex-direction: column; min-width: 0; }
 .rr__meet {
-  font-family: 'Inter',sans-serif; font-weight: 600; font-size: 20px;
+  font-family: var(--mh-font-body, 'Inter',sans-serif); font-weight: 600; font-size: 20px;
   color: var(--mh-on-primary); opacity: 0.85; overflow-wrap: anywhere;
 }
 .rr__club {
-  font-family: 'Inter',sans-serif; font-weight: 800; font-size: 19px;
+  font-family: var(--mh-font-body, 'Inter',sans-serif); font-weight: 800; font-size: 19px;
   text-transform: uppercase; color: var(--mh-on-primary);
   overflow-wrap: anywhere;
 }

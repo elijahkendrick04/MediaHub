@@ -572,6 +572,17 @@ def explain(params: StudioParams) -> dict[str, Any]:
                 "Your colour-role swap was set aside to keep the text legible — "
                 "the deterministic contrast gate kept the brand-default roles."
             )
+        elif resolved.get("--mh-repair-note"):
+            # C6 (Canva gap analysis) — per-slot contrast repair: rather than
+            # discard the whole swap when one slot fails the gate, the resolver
+            # nudges only the failing role(s) to a legible tone of the SAME
+            # assigned colour and keeps the rest of the swap. Tell the user their
+            # swap was honoured but adjusted, so the repair is never silent.
+            notices.append(
+                "Your colour-role swap was applied, with the affected role(s) "
+                "nudged to a legible tone — the deterministic contrast gate "
+                "repaired the swap instead of discarding it."
+            )
 
     if params.pack_eased:
         notices.append(

@@ -29,7 +29,9 @@
 .sd {
   /* geometry knobs — the seam angle depends only on --slant and the
      canvas width, so it is identical across both portrait ratios */
-  --wedge-h: 690px;   /* height of the data band, anchored to the bottom */
+  /* F2: the data-band height is 23/36 of the short edge = exactly 690px at a
+     1080-wide format (byte-identical), tracking the canvas below that. */
+  --wedge-h: calc(var(--mh-short, 1080px) * 23 / 36);   /* height of the data band, anchored to the bottom */
   --slant: 184px;     /* vertical drop of the diagonal, left edge to right */
   --seam: 14px;       /* thickness of the accent edge along the diagonal  */
   --pad: 78px;        /* horizontal inset for wedge content               */
@@ -41,7 +43,7 @@
   isolation: isolate;
   background: var(--mh-surface);
   color: var(--mh-on-primary);
-  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  font-family: var(--mh-font-body, 'Inter', system-ui, -apple-system, sans-serif);
   -webkit-font-smoothing: antialiased;
 }
 .sd *, .sd *::before, .sd *::after { box-sizing: border-box; }
@@ -91,7 +93,7 @@
   left: 0; right: 0; bottom: 0;
   z-index: 4;
   height: var(--wedge-h);
-  padding: calc(var(--slant) + 48px) var(--pad) 56px;
+  padding: calc(var(--slant) + var(--mh-sp-7)) var(--pad) 56px;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
@@ -100,7 +102,7 @@
 
 .sd__kicker {
   display: inline-flex; align-items: center; gap: 14px;
-  font-family: 'Space Grotesk', 'Inter', sans-serif;
+  font-family: var(--mh-font-kicker, 'Space Grotesk', 'Inter', sans-serif);
   font-weight: 700;
   font-size: 23px;
   letter-spacing: 0.22em;
@@ -114,7 +116,7 @@
 
 .sd__first {
   margin-top: 22px;
-  font-family: 'Space Grotesk', 'Inter', sans-serif;
+  font-family: var(--mh-font-kicker, 'Space Grotesk', 'Inter', sans-serif);
   font-weight: 700;
   font-size: 30px;
   letter-spacing: 0.10em;
@@ -134,7 +136,7 @@
 }
 .sd__event {
   margin-top: 14px;
-  font-family: 'Space Grotesk', 'Inter', sans-serif;
+  font-family: var(--mh-font-kicker, 'Space Grotesk', 'Inter', sans-serif);
   font-weight: 600;
   font-size: 30px;
   letter-spacing: 0.05em;
@@ -153,7 +155,7 @@
 }
 .sd__result { display: flex; flex-direction: column; }
 .sd__result-lab {
-  font-family: 'Inter', sans-serif;
+  font-family: var(--mh-font-body, 'Inter', sans-serif);
   font-weight: 600;
   font-size: 15px;
   letter-spacing: 0.26em;
@@ -173,7 +175,7 @@
 .sd__stat {
   text-align: right;
   max-width: 42%;
-  font-family: 'Space Grotesk', 'Inter', sans-serif;
+  font-family: var(--mh-font-kicker, 'Space Grotesk', 'Inter', sans-serif);
   font-weight: 700;
   font-size: 28px;
   line-height: 1.12;
@@ -186,7 +188,7 @@
   display: flex;
   align-items: flex-end;
   justify-content: space-between;
-  gap: 24px;
+  gap: var(--mh-sp-5);
 }
 .sd__brand { display: flex; align-items: center; gap: 18px; }
 .sd__logo { height: 66px; width: auto; flex: 0 0 auto; }
@@ -194,7 +196,7 @@
 .sd__logo svg { height: 100%; width: auto; object-fit: contain; display: block; }
 .sd__brand-text { display: flex; flex-direction: column; line-height: 1.16; }
 .sd__club {
-  font-family: 'Inter', sans-serif;
+  font-family: var(--mh-font-body, 'Inter', sans-serif);
   font-weight: 800;
   font-size: 26px;
   letter-spacing: 0.01em;
@@ -202,13 +204,13 @@
   color: var(--mh-on-primary);
 }
 .sd__meet {
-  font-family: 'Inter', sans-serif;
+  font-family: var(--mh-font-body, 'Inter', sans-serif);
   font-weight: 500;
   font-size: 17px;
   letter-spacing: 0.04em;
   color: var(--mh-on-primary);
   opacity: 0.78;
-  margin-top: 4px;
+  margin-top: var(--mh-sp-1);
 }
 .sd__sponsor { flex: 0 0 auto; }
 </style>

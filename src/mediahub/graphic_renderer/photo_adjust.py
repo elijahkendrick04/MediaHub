@@ -54,7 +54,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
-from PIL import Image, ImageEnhance, ImageFilter, ImageOps
+from PIL import Image, ImageChops, ImageEnhance, ImageFilter, ImageOps
 
 __all__ = [
     "AdjustStep",
@@ -67,15 +67,19 @@ __all__ = [
     "brightness",
     "levels",
     "auto_contrast",
+    "tint_overlay",
     "adjust_image",
     "adjust_bytes",
     "adjust_to_data_uri",
     "recipe_for",
+    "resolve_recipe",
     "get_preset",
     "is_enabled",
     "ENV_VAR",
     "AUTO_PRESET",
     "AUTO_RECIPE_VERSION",
+    "HOUSE_INTENSITY_BAND",
+    "PRESET_TINTS",
     "measure_photo",
     "auto_recipe",
 ]
@@ -103,7 +107,51 @@ _BOUNDS: Dict[str, Tuple[float, float]] = {
     "levels_point": (0.0, 255.0),
     "gamma": (0.2, 5.0),
     "cutoff": (0.0, 49.0),
+    # E4 (Canva gap analysis) — the brand colour-cast overlay. Opacity is
+    # deliberately capped low: this is a *graded* cast (the Clarendon-signature
+    # unifier), never a colour dump that hides the photograph.
+    "tint_opacity": (0.0, 0.5),
 }
+
+# E4 — the tinted-overlay blend modes. A subset of PIL's Chops blends chosen
+# for photo grading: soft_light is the house cast (a gentle, hue-preserving
+# lift), overlay is punchier, multiply deepens, screen lifts. Older Pillow
+# builds lack soft_light/overlay/hard_light — the resolver below degrades to a
+# plain alpha blend so the op stays available on every host.
+_TINT_MODES: Dict[str, str] = {
+    "soft_light": "soft_light",
+    "overlay": "overlay",
+    "multiply": "multiply",
+    "screen": "screen",
+}
+_DEFAULT_TINT_MODE = "soft_light"
+
+
+def _parse_hex(value: object) -> Optional[Tuple[int, int, int]]:
+    """Parse a ``#RGB`` / ``#RRGGBB`` string to an ``(r, g, b)`` tuple, or None.
+
+    Only a literal hex colour is accepted — the tint hex must come from the
+    card's RESOLVED role tokens or the photo palette (never an invented
+    decorative colour), and this parser is the last gate keeping anything else
+    out of the pixel path. Anything unparseable yields None so the op no-ops.
+    """
+    if not isinstance(value, str):
+        return None
+    h = value.strip().lstrip("#")
+    if len(h) == 3:
+        h = "".join(ch + ch for ch in h)
+    if len(h) != 6:
+        return None
+    try:
+        return (int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16))
+    except ValueError:
+        return None
+
+
+def _norm_hex(value: object) -> str:
+    """Canonicalise a colour to ``#RRGGBB`` (upper), or ``""`` if unparseable."""
+    rgb = _parse_hex(value)
+    return "#%02X%02X%02X" % rgb if rgb is not None else ""
 
 
 def _clamp(value: float, lo: float, hi: float) -> float:
@@ -249,6 +297,42 @@ def auto_contrast(img: Image.Image, cutoff: float = 0.0) -> Image.Image:
     return _merge_alpha(rgb, alpha)
 
 
+def tint_overlay(
+    img: Image.Image,
+    hex: str = "",
+    opacity: float = 0.0,
+    mode: str = _DEFAULT_TINT_MODE,
+) -> Image.Image:
+    """Blend a solid brand-derived colour over the visible RGB (E4).
+
+    The Clarendon-signature move: a translucent colour cast that unifies the
+    shadow hues of mixed club photography so a pack of phone shots reads as one
+    graded set. ``hex`` MUST be a resolved role / photo-palette colour (parsed
+    by :func:`_parse_hex`; an unparseable value no-ops). ``mode`` is a blend
+    from :data:`_TINT_MODES`; ``opacity`` (0–0.5) is the strength of the cast
+    over the original. Alpha-preserving — the cast rides the visible RGB and the
+    original alpha is re-attached untouched, so a cutout silhouette never shifts.
+    """
+    rgbtuple = _parse_hex(hex)
+    op = _clamp(opacity, *_BOUNDS["tint_opacity"])
+    if rgbtuple is None or op <= 0:
+        return img
+    rgb, alpha = _split_alpha(img)
+    solid = Image.new("RGB", rgb.size, rgbtuple)
+    blend_fn = getattr(ImageChops, _TINT_MODES.get(mode, _DEFAULT_TINT_MODE), None)
+    if callable(blend_fn):
+        try:
+            cast = blend_fn(rgb, solid)
+        except (ValueError, OSError):
+            cast = solid
+    else:
+        # Older Pillow without soft_light/overlay: a plain colour layer, still
+        # bounded by the opacity blend below — a graded cast, not a flood.
+        cast = solid
+    graded = Image.blend(rgb, cast, op)
+    return _merge_alpha(graded, alpha)
+
+
 # Dispatch table: op name → callable(rgb_or_img, **params). The apply loop in
 # :func:`adjust_image` splits alpha once and feeds the RGB working image here,
 # so each op operates band-correctly without re-splitting per step.
@@ -259,6 +343,7 @@ _OPS: Dict[str, Callable[..., Image.Image]] = {
     "brightness": brightness,
     "levels": levels,
     "auto_contrast": auto_contrast,
+    "tint_overlay": tint_overlay,
 }
 
 
@@ -291,6 +376,12 @@ def _coerce_params(op: str, params: Dict[str, Any]) -> Dict[str, Any]:
         }
     if op == "auto_contrast":
         return {"cutoff": round(_clamp(p.get("cutoff", 0.0), *_BOUNDS["cutoff"]), 4)}
+    if op == "tint_overlay":
+        return {
+            "hex": _norm_hex(p.get("hex", "")),
+            "opacity": round(_clamp(p.get("opacity", 0.0), *_BOUNDS["tint_opacity"]), 4),
+            "mode": p.get("mode") if p.get("mode") in _TINT_MODES else _DEFAULT_TINT_MODE,
+        }
     return {}
 
 
@@ -332,6 +423,8 @@ class AdjustStep:
             return f"levels [{p['black']}–{p['white']}] γ{p['gamma']:g}"
         if self.op == "auto_contrast":
             return f"auto-contrast (cut {p['cutoff']:g}%)"
+        if self.op == "tint_overlay":
+            return f"tint {p['hex'] or '—'} @{p['opacity']:g} ({p['mode']})"
         return self.op
 
 
@@ -346,9 +439,16 @@ class PhotoRecipe:
 
     name: str = ""
     steps: Tuple[AdjustStep, ...] = ()
+    # E4 — a single strength knob (1.0 = full recipe, the default and
+    # byte-identical to before this field existed). Values below 1.0 lerp every
+    # op toward identity at apply time, so one house look flexes across every
+    # source. Resolved into the house band by :func:`resolve_recipe`; the
+    # dataclass itself only bounds it to a sane [0, 1].
+    intensity: float = 1.0
 
     def __post_init__(self) -> None:
         self.steps = tuple(s for s in self.steps if isinstance(s, AdjustStep) and s.valid)
+        self.intensity = _clamp(self.intensity, 0.0, 1.0)
 
     # --- construction --------------------------------------------------- #
 
@@ -380,7 +480,8 @@ class PhotoRecipe:
                 for s in data.get("steps", [])
                 if isinstance(s, dict)
             )
-            return cls(name=str(data.get("name", "")), steps=steps)
+            intensity = data.get("intensity", 1.0)
+            return cls(name=str(data.get("name", "")), steps=steps, intensity=intensity)
         except Exception:
             return None
 
@@ -395,24 +496,45 @@ class PhotoRecipe:
         return len(self.steps) == 0 and self.name != AUTO_PRESET
 
     def to_dict(self) -> Dict[str, Any]:
-        return {"name": self.name, "steps": [s.to_dict() for s in self.steps]}
+        d: Dict[str, Any] = {"name": self.name, "steps": [s.to_dict() for s in self.steps]}
+        # Emit intensity only when it moves the effect, so a full-strength
+        # recipe serialises to the exact pre-intensity shape (byte-identical
+        # persisted state / cache salt).
+        if self.intensity != 1.0:
+            d["intensity"] = round(self.intensity, 4)
+        return d
 
     def describe(self) -> List[str]:
         """Plain-English step list for the why-this-design explainability sidecar."""
-        return [s.describe() for s in self.steps]
+        steps = [s.describe() for s in self.steps]
+        if self.intensity != 1.0:
+            steps.append(f"intensity ×{self.intensity:g}")
+        return steps
 
     def signature(self) -> str:
-        """Stable 12-hex digest of the *effect* (steps only, not the name).
+        """Stable 12-hex digest of the *effect* (steps + intensity, not the name).
 
         Two recipes with identical steps share a signature even if named
         differently — exactly what a render-stage cache key (G1.24) wants.
         The ``auto`` sentinel signs its ALGORITHM VERSION instead (its steps
         are computed per image; the asset cache already keys on the image
-        bytes, so version + image uniquely determine the output).
+        bytes, so version + image uniquely determine the output). A tint step
+        and the intensity knob fold into the digest automatically (the tint via
+        its baked step params, the intensity as a signed field when non-default),
+        so ``(preset, tint, intensity)`` triples never collide in the cache.
         """
         if self.name == AUTO_PRESET and not self.steps:
             return hashlib.sha256(AUTO_RECIPE_VERSION.encode("utf-8")).hexdigest()[:12]
-        payload = json.dumps([s.to_dict() for s in self.steps], sort_keys=True)
+        steps_payload = [s.to_dict() for s in self.steps]
+        if self.intensity != 1.0:
+            payload = json.dumps(
+                {"steps": steps_payload, "intensity": round(self.intensity, 4)},
+                sort_keys=True,
+            )
+        else:
+            # Full-strength: sign the bare step list so every pre-intensity
+            # recipe keeps its historic signature (cache-stable).
+            payload = json.dumps(steps_payload, sort_keys=True)
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:12]
 
     def __hash__(self) -> int:  # usable as a dict/cache key
@@ -421,7 +543,9 @@ class PhotoRecipe:
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, PhotoRecipe):
             return NotImplemented
-        return [s.to_dict() for s in self.steps] == [s.to_dict() for s in other.steps]
+        return [s.to_dict() for s in self.steps] == [
+            s.to_dict() for s in other.steps
+        ] and self.intensity == other.intensity
 
 
 # --------------------------------------------------------------------------- #
@@ -496,6 +620,91 @@ def get_preset(name: str) -> Optional[PhotoRecipe]:
     if not name:
         return None
     return PRESETS.get(str(name).strip().lower())
+
+
+# --------------------------------------------------------------------------- #
+# E4 — preset tint slots + intensity house band.
+#
+# The static presets above are colour-cast-free (a preset can't carry a brand
+# hex, which isn't known until a card resolves its roles). Instead each preset
+# that wants the Clarendon-signature cast declares HOW — (opacity, blend mode)
+# — and :func:`resolve_recipe` bakes a ``tint_overlay`` step with the card's
+# resolved brand hex when one is supplied. "punchy"/"vivid" earn the deep-brand
+# cast (the house "pop"); "editorial" stays clean, the rest carry no cast.
+# --------------------------------------------------------------------------- #
+
+PRESET_TINTS: Dict[str, Dict[str, Any]] = {
+    "punchy": {"opacity": 0.14, "mode": "soft_light"},
+    "vivid": {"opacity": 0.16, "mode": "soft_light"},
+}
+
+# Intensity is clamped into this band whenever it is explicitly engaged, so a
+# house look is always a *graded* nudge (never off, never a caricature). A
+# caller that leaves intensity unset gets the full-strength recipe (1.0), which
+# is byte-identical to the pre-intensity behaviour.
+HOUSE_INTENSITY_BAND: Tuple[float, float] = (0.4, 0.8)
+
+
+def _is_punchy_source(measured: Optional[Dict[str, float]]) -> bool:
+    """True when a photo already reads high-contrast / high-saturation.
+
+    Used to auto-lower the applied intensity so the house grade never
+    double-punches an already-punchy source (the E1 measurement is the input).
+    """
+    if not measured:
+        return False
+    std = float(measured.get("std", 0.0))
+    sat = float(measured.get("sat", 0.0))
+    return std >= 70.0 or sat >= 0.62
+
+
+def resolve_recipe(
+    preset: Union[PhotoRecipe, str, None],
+    *,
+    tint_hex: str = "",
+    intensity: Optional[float] = None,
+    measured: Optional[Dict[str, float]] = None,
+) -> Optional[PhotoRecipe]:
+    """Resolve a preset into a concrete, card-specific recipe (E4).
+
+    * ``tint_hex`` — a card's resolved role / photo-palette colour. When the
+      preset declares a tint slot (:data:`PRESET_TINTS`) and a parseable hex is
+      given, a bounded ``tint_overlay`` step is appended.
+    * ``intensity`` — ``None`` keeps the recipe full-strength (byte-identical);
+      a float is clamped into :data:`HOUSE_INTENSITY_BAND` and auto-lowered when
+      ``measured`` reports an already-punchy source.
+
+    Returns ``None`` for an unknown preset, the untouched recipe when neither a
+    tint nor an intensity applies (byte-identical), else a new recipe folding
+    both into its steps + intensity (so :meth:`PhotoRecipe.signature` stays a
+    correct cache key).
+    """
+    base = preset if isinstance(preset, PhotoRecipe) else get_preset(preset or "")
+    if base is None:
+        return None
+
+    steps = list(base.steps)
+    tint = PRESET_TINTS.get(base.name)
+    clean_hex = _norm_hex(tint_hex)
+    if tint and clean_hex:
+        steps.append(
+            AdjustStep(
+                "tint_overlay",
+                {"hex": clean_hex, "opacity": tint["opacity"], "mode": tint["mode"]},
+            )
+        )
+
+    resolved_intensity = base.intensity
+    if intensity is not None:
+        lo, hi = HOUSE_INTENSITY_BAND
+        resolved_intensity = _clamp(intensity, lo, hi)
+        if _is_punchy_source(measured):
+            resolved_intensity = _clamp(resolved_intensity * 0.7, lo, hi)
+
+    if len(steps) == len(base.steps) and resolved_intensity == base.intensity:
+        # Nothing was folded in — hand back the base untouched (byte-identical).
+        return base
+    return PhotoRecipe(name=base.name, steps=tuple(steps), intensity=resolved_intensity)
 
 
 # --------------------------------------------------------------------------- #
@@ -604,12 +813,39 @@ def _as_recipe(recipe: Union[PhotoRecipe, str, None]) -> Optional[PhotoRecipe]:
     return None
 
 
+def _lerp_step_params(op: str, params: Dict[str, Any], t: float) -> Dict[str, Any]:
+    """Lerp one op's params toward its identity by ``t`` (E4).
+
+    ``t == 1.0`` returns the params unchanged (byte-identical passthrough);
+    ``t == 0.0`` returns the op's no-op parameters. The enhance factors,
+    sharpen amount, levels window/gamma and tint opacity all interpolate toward
+    identity; ``auto_contrast`` (a hard histogram stretch with no clean
+    identity blend) is intentionally left untouched by the knob.
+    """
+    if t == 1.0:
+        return params
+    p = dict(params)
+    if op in ("contrast", "saturation", "brightness"):
+        p["factor"] = 1.0 + (p.get("factor", 1.0) - 1.0) * t
+    elif op == "sharpen":
+        p["amount"] = p.get("amount", 1.0) * t
+    elif op == "levels":
+        p["black"] = p.get("black", 0) * t
+        p["white"] = 255.0 - (255.0 - p.get("white", 255)) * t
+        p["gamma"] = 1.0 + (p.get("gamma", 1.0) - 1.0) * t
+    elif op == "tint_overlay":
+        p["opacity"] = p.get("opacity", 0.0) * t
+    return p
+
+
 def adjust_image(img: Image.Image, recipe: Union[PhotoRecipe, str, None]) -> Image.Image:
     """Apply ``recipe`` to a PIL image. Alpha-preserving and deterministic.
 
     The alpha channel is split off once and re-attached after every step, so a
     cutout's mask is byte-identical to the input. A ``None``/no-op recipe
-    returns the image unchanged.
+    returns the image unchanged. The recipe's ``intensity`` (default 1.0)
+    lerps every op toward identity before it runs, so a full-strength recipe is
+    byte-identical to the pre-intensity behaviour.
     """
     r = _as_recipe(recipe)
     if r is None or r.is_noop():
@@ -619,11 +855,16 @@ def adjust_image(img: Image.Image, recipe: Union[PhotoRecipe, str, None]) -> Ima
         r = auto_recipe(img)
         if r.is_noop():
             return img
+    t = r.intensity
     rgb, alpha = _split_alpha(img)
     for step in r.steps:
         # Each op is alpha-aware too, but we feed it the already-split RGB so the
-        # split happens once per recipe rather than once per step.
-        rgb = step.apply(rgb)
+        # split happens once per recipe rather than once per step. The intensity
+        # knob re-coerces the lerped params through AdjustStep so clamps hold.
+        applied = (
+            step if t == 1.0 else AdjustStep(step.op, _lerp_step_params(step.op, step.params, t))
+        )
+        rgb = applied.apply(rgb)
     return _merge_alpha(rgb, alpha)
 
 
@@ -733,6 +974,8 @@ def recipe_for(
     explicit: str = "",
     treatment: str = "",
     env: bool = True,
+    tint_hex: str = "",
+    intensity: Optional[float] = None,
 ) -> Optional[PhotoRecipe]:
     """Resolve the photo-adjust recipe a render should apply, or ``None``.
 
@@ -748,11 +991,20 @@ def recipe_for(
 
     The ``none`` preset resolves to a real (no-op) recipe so a caller can force
     "explicitly off" past a global env default.
+
+    E4: ``tint_hex`` (a resolved brand/photo-palette colour) bakes the preset's
+    declared colour cast; ``intensity`` engages the house strength band. Both
+    default to *off*, so a call without them is byte-identical to before.
     """
+    base: Optional[PhotoRecipe] = None
     for token in (explicit, treatment):
-        r = get_preset(token)
-        if r is not None:
-            return r
-    if env:
-        return get_preset(os.environ.get(ENV_VAR, ""))
-    return None
+        base = get_preset(token)
+        if base is not None:
+            break
+    if base is None and env:
+        base = get_preset(os.environ.get(ENV_VAR, ""))
+    if base is None:
+        return None
+    if not tint_hex and intensity is None:
+        return base  # byte-identical to the pre-E4 return
+    return resolve_recipe(base, tint_hex=tint_hex, intensity=intensity)

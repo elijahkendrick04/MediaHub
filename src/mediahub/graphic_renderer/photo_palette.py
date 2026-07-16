@@ -322,6 +322,86 @@ def extract_palette(
     return PhotoPalette(tuple(swatches))
 
 
+# --------------------------------------------------------------------------- #
+# C4 (Canva gap analysis) — Android-Palette semantic swatch classification
+# --------------------------------------------------------------------------- #
+# The six Material/Vibrant.js target roles. Each entry is
+# ((sat_target, sat_min, sat_max), (light_target, light_min, light_max)) in the
+# HSL space AOSP uses. Weights and target constants are the public AOSP
+# ``androidx.palette.graphics.Target`` values — reproduced verbatim so the same
+# photo always yields the same role assignment (deterministic, no tuning).
+_TARGET_WEIGHT_SAT = 0.24
+_TARGET_WEIGHT_LUMA = 0.52
+_TARGET_WEIGHT_POP = 0.24
+
+# Iteration order matters: a swatch that wins a role is not reused for a later
+# one, exactly like AOSP's ``mUsedColors`` exclusion. This is AOSP's default
+# target insertion order.
+_PALETTE_TARGETS: tuple[tuple[str, tuple[float, float, float], tuple[float, float, float]], ...] = (
+    ("light_vibrant", (1.0, 0.35, 1.0), (0.74, 0.55, 1.0)),
+    ("vibrant", (1.0, 0.35, 1.0), (0.50, 0.30, 0.70)),
+    ("dark_vibrant", (1.0, 0.35, 1.0), (0.26, 0.00, 0.45)),
+    ("light_muted", (0.30, 0.00, 0.40), (0.74, 0.55, 1.0)),
+    ("muted", (0.30, 0.00, 0.40), (0.50, 0.30, 0.70)),
+    ("dark_muted", (0.30, 0.00, 0.40), (0.26, 0.00, 0.45)),
+)
+
+SEMANTIC_ROLES: tuple[str, ...] = tuple(name for name, _s, _l in _PALETTE_TARGETS)
+
+
+def _hsl(rgb: tuple[int, int, int]) -> tuple[float, float]:
+    """(saturation, lightness) in 0..1 — the HSL axes AOSP scores against."""
+    import colorsys
+
+    r, g, b = rgb
+    _h, light, sat = colorsys.rgb_to_hls(r / 255.0, g / 255.0, b / 255.0)
+    return sat, light
+
+
+def classify_swatches(palette: PhotoPalette) -> dict[str, Optional[Swatch]]:
+    """Assign the extracted swatches to Android-Palette semantic roles (C4).
+
+    Returns ``{role: Swatch | None}`` for every role in :data:`SEMANTIC_ROLES`
+    (``vibrant`` / ``muted`` / ``dark_vibrant`` / ``dark_muted`` /
+    ``light_vibrant`` / ``light_muted``). Scoring is the verbatim AOSP
+    ``Target`` formula — a weighted blend of saturation-distance, lightness-
+    distance and population, with each swatch eligible only inside its target's
+    HSL window and never reused across roles. Deterministic: the same palette
+    always yields the same assignment; an empty palette yields all-``None``.
+    """
+    result: dict[str, Optional[Swatch]] = {name: None for name in SEMANTIC_ROLES}
+    swatches = list(palette.swatches)
+    if not swatches:
+        return result
+    max_pop = max((s.weight for s in swatches), default=0.0) or 1.0
+    hsl = {id(s): _hsl(s.rgb) for s in swatches}
+    used: set[int] = set()
+
+    for role, (sat_t, sat_lo, sat_hi), (lum_t, lum_lo, lum_hi) in _PALETTE_TARGETS:
+        best: Optional[Swatch] = None
+        best_score = -1.0
+        for s in swatches:
+            if id(s) in used:
+                continue
+            sat, lum = hsl[id(s)]
+            if not (sat_lo <= sat <= sat_hi and lum_lo <= lum <= lum_hi):
+                continue
+            score = (
+                _TARGET_WEIGHT_SAT * (1.0 - abs(sat - sat_t))
+                + _TARGET_WEIGHT_LUMA * (1.0 - abs(lum - lum_t))
+                + _TARGET_WEIGHT_POP * (s.weight / max_pop)
+            )
+            # Hex tiebreak keeps the pick fully deterministic across equal scores.
+            if score > best_score or (
+                score == best_score and best is not None and s.hex < best.hex
+            ):
+                best, best_score = s, score
+        if best is not None:
+            result[role] = best
+            used.add(id(best))
+    return result
+
+
 def tint_toward(base_hex: str, target_hex: str, amount: float) -> str:
     """Mix ``base_hex`` toward ``target_hex`` by ``amount`` (0..1) in sRGB.
 
@@ -335,4 +415,11 @@ def tint_toward(base_hex: str, target_hex: str, amount: float) -> str:
     return _rgb_to_hex((br + (tr - br) * a, bg + (tg - bg) * a, bb + (tb - bb) * a))
 
 
-__all__ = ["Swatch", "PhotoPalette", "extract_palette", "tint_toward"]
+__all__ = [
+    "Swatch",
+    "PhotoPalette",
+    "extract_palette",
+    "tint_toward",
+    "classify_swatches",
+    "SEMANTIC_ROLES",
+]
