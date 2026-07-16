@@ -88,6 +88,62 @@ def _cache_dir() -> Path:
     return d
 
 
+# --- motion cache eviction (deep-review #71) -------------------------------
+# The motion cache (DATA_DIR/motion_cache/<hash>.mp4 + sidecars) previously grew
+# without bound: unlike the still-PNG cache (graphic_renderer/render_cache.py,
+# capped at 512) it had no prune, so on a bounded Render persistent disk it
+# trended to exhaustion — after which every render write failed. Mirror that
+# LRU prune here: bound the number of cached MP4s, evicting the oldest by mtime
+# and sweeping each evicted key's sidecars. Cache hits touch the MP4's mtime so
+# hot entries survive the sweep.
+_DEFAULT_MOTION_CACHE_MAX = 256
+
+
+def _motion_cache_max() -> int:
+    try:
+        n = int(os.environ.get("MEDIAHUB_MOTION_CACHE_MAX", str(_DEFAULT_MOTION_CACHE_MAX)))
+    except (TypeError, ValueError):
+        return _DEFAULT_MOTION_CACHE_MAX
+    return max(1, n)
+
+
+def _touch_cache_hit(cached: Path) -> None:
+    """Refresh a cached entry's mtime so the LRU prune keeps hot renders."""
+    try:
+        os.utime(cached, None)
+    except OSError:
+        pass
+
+
+def _prune_motion_cache(d: Optional[Path] = None) -> None:
+    """Bound the motion cache to ``_motion_cache_max()`` MP4s, oldest first.
+
+    Each evicted ``<hash>.mp4`` takes its sidecars with it (the ``<hash>.json``
+    manifest, ``<hash>.poster.png`` poster, ``<hash>.audio.json`` record). The
+    ``props/`` subdir is keyed by output-stem, not cache-hash, so it is left
+    alone. Best-effort: a prune failure must never fail a successful render.
+    """
+    d = d or _cache_dir()
+    cap = _motion_cache_max()
+    try:
+        entries = list(d.glob("*.mp4"))
+    except OSError:
+        return
+    if len(entries) <= cap:
+        return
+    try:
+        entries.sort(key=lambda p: p.stat().st_mtime)
+    except OSError:
+        return
+    for p in entries[: len(entries) - cap]:
+        # Sweep the MP4 and every sidecar sharing its 24-hex-char stem.
+        for sib in d.glob(f"{p.stem}.*"):
+            try:
+                sib.unlink()
+            except OSError:
+                pass
+
+
 def node_available() -> bool:
     """Return True if a `node` binary is on PATH."""
     return shutil.which("node") is not None
@@ -2115,6 +2171,7 @@ def render_story_card(
     cache_key = _content_hash(cache_payload, kind="story")
     cached = _cache_dir() / f"{cache_key}.mp4"
     if cached.exists() and cached.stat().st_size > 1024:
+        _touch_cache_hit(cached)  # LRU recency (#71)
         # Re-publish the cached MP4 at the caller-requested path. The
         # finishing pass is idempotent: it retries a previously-failed
         # audio attach and backfills a missing poster sidecar.
@@ -2160,6 +2217,7 @@ def render_story_card(
     elif foot_reason:
         story_manifest["footage"] = {"used": False, "reason": foot_reason}
     _write_render_manifest(cached, story_manifest)
+    _prune_motion_cache()  # bound the cache after a cold write (#71)
     published = _publish(cached, out_path)
     return published if published.exists() else cached
 
@@ -2904,6 +2962,7 @@ def _render_reel_one_format(
     cache_key = _content_hash(cache_payload, kind="reel")
     cached = _cache_dir() / f"{cache_key}.mp4"
     if cached.exists() and cached.stat().st_size > 1024:
+        _touch_cache_hit(cached)  # LRU recency (#71)
         audio_rec = _finish_cached_video(
             cached,
             kind="reel",
@@ -3009,6 +3068,7 @@ def _render_reel_one_format(
             ),
         },
     )
+    _prune_motion_cache()  # bound the cache after a cold write (#71)
     published = _publish(cached, out_path)
     return published if published.exists() else cached
 
