@@ -19,9 +19,6 @@
   <a class="btab {% if bucket=='queue' %}active{% endif %}" href="{{ url_for('dashboard_v3', run_id=run_id, bucket='queue') }}">
     Queue <span class="bcount">{{ counts.queue }}</span>
   </a>
-  <a class="btab {% if bucket=='needs_confirmation' %}active{% endif %}" href="{{ url_for('dashboard_v3', run_id=run_id, bucket='needs_confirmation') }}">
-    Needs confirmation <span class="bcount">{{ counts.needs_confirmation }}</span>
-  </a>
   <a class="btab {% if bucket=='recap' %}active{% endif %}" href="{{ url_for('dashboard_v3', run_id=run_id, bucket='recap') }}">
     Recap mentions <span class="bcount">{{ counts.recap }}</span>
   </a>

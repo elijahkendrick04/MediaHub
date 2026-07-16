@@ -115,20 +115,18 @@ guarantees a total order). Each achievement is stamped with a 1-based `rank`.
 
 `score_card` gives each `ContentCard` a base score by card type (`_BASE_SCORE`:
 spotlight 70, qual_alert 70, pb_roundup 65, podium_roundup 55,
-weekend_in_numbers 45, standout 40, needs_confirmation 30, recap 25), then
-applies fixed integer modifiers:
+weekend_in_numbers 45, standout 40, recap 25), then applies fixed integer
+modifiers:
 
 - **+10 / +6 / +4** — national / university (BUCS) / other qualifying-standard hit
 - **+12 / +5** — confirmed / likely PB
 - **+8 / +4 / +2** — best medal on the card (gold / silver / bronze; highest tier only)
 - **+5 / +5** — spotlight covering ≥3 notable swims / same-stroke "clean sweep"
 - **−10** — likely-PB-only card (no medal, no qualifier)
-- **−15** — card flagged `needs_confirmation`
 
 The score is clamped to `0…100`. `rank_cards` then buckets by the final score —
-**queue** (≥65), **recap** (40–64), **archive** (<40), or
-**needs_confirmation** — assigns a suggested format, and sorts by
-`(bucket, -score, card_id)`.
+**queue** (≥65), **recap** (40–64), or **archive** (<40) — assigns a suggested
+format, and sorts by `(bucket, -score, card_id)`.
 
 ## Per-club tuning
 

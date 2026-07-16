@@ -137,8 +137,31 @@ def _detect_course(text: str) -> Optional[str]:
 # "50m Freestyle 24.10" (which carries a stroke) is never mistaken for a heading.
 _COURSE_LENGTH_ONLY_RE = re.compile(r"^\s*(?:(50)|(25))\s*m?(?:\s*pool)?\s*$", re.IGNORECASE)
 
+# A standalone "pool" token — weak corroboration that a page is organised by
+# pool/course rather than by distance. LC/SC / Long/Short Course / "…m pool" are
+# already caught by _LC_RE / _SC_RE; this covers a bare "Pool" mention the task
+# also lists as a course signal.
+_POOL_TOKEN_RE = re.compile(r"\bpool\b", re.IGNORECASE)
 
-def _section_course(text: str) -> Optional[str]:
+
+def _page_corroborates_course(page_text: Optional[str]) -> bool:
+    """True if ``page_text`` carries any explicit course signal.
+
+    A *bare* pool-length heading ("50m"/"25m") is a weak, ambiguous marker: on a
+    distance-organised PB table a "50m" distance-GROUP heading is not a course
+    marker at all (the F09 residual). We only let such a heading flip the running
+    section course when the surrounding page corroborates a course reading — it
+    names a course somewhere ("Long/Short Course", "LC"/"SC", "…m pool", or a
+    bare "pool"). Never fabricates a PB either way; this only governs a label.
+    """
+    if not page_text:
+        return False
+    return bool(
+        _LC_RE.search(page_text) or _SC_RE.search(page_text) or _POOL_TOKEN_RE.search(page_text)
+    )
+
+
+def _section_course(text: str, page_text: Optional[str] = None) -> Optional[str]:
     """Course implied by a *section-heading* row/line, else ``None``.
 
     A heading is a row/line that is (mostly) just a course marker — "Long
@@ -148,6 +171,15 @@ def _section_course(text: str) -> Optional[str]:
     a page laid out as an LC heading + its data rows, then an SC heading + its
     data rows, so the two sections file under distinct courses instead of both
     flattening to the page/default course).
+
+    ``page_text`` is the surrounding page's free text, used only to gate the
+    *bare* pool-length case: a whole-cell "50m"/"25m" flips the running course
+    solely when the page elsewhere corroborates a course reading (F09 residual —
+    a distance-GROUP "50m" heading on a distance-organised table must not be
+    misread as an LC marker). Word/abbreviation course headings ("Long Course",
+    "LC", "…m pool") are unambiguous and never need corroboration. When
+    ``page_text`` is omitted (``None``) the historical length→course mapping is
+    preserved so callers asking about a heading in isolation are unchanged.
 
     Returns ``None`` for any row that carries a swim time — a data row resolves
     its own course (inline marker → section → page → "LC") and must never be
@@ -159,7 +191,7 @@ def _section_course(text: str) -> Optional[str]:
     if c is not None:
         return c
     m = _COURSE_LENGTH_ONLY_RE.match(text or "")
-    if m:
+    if m and (page_text is None or _page_corroborates_course(page_text)):
         return "LC" if m.group(1) else "SC"
     return None
 
@@ -259,7 +291,7 @@ def _heuristic_extract_pbs(page: ProfilePage) -> list[PBRow]:
     for table in page.tables:
         for row in table:
             row_text = " ".join(row)
-            sec = _section_course(row_text)
+            sec = _section_course(row_text, page.text)
             if sec is not None:
                 section_course = sec
             time_matches = _extract_times(row_text)
@@ -288,7 +320,7 @@ def _heuristic_extract_pbs(page: ProfilePage) -> list[PBRow]:
         section_course = None
         lines = page.text.split("\n")
         for line in lines:
-            sec = _section_course(line)
+            sec = _section_course(line, page.text)
             if sec is not None:
                 section_course = sec
             time_matches = _extract_times(line)

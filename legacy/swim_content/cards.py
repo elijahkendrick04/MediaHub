@@ -9,7 +9,6 @@ Cards are the unit of human approval. A card can be:
   - 'qual_alert'           qualifying-standard hit(s)
   - 'weekend_in_numbers'   stat summary for the meet
   - 'recap_only'           verifiable but not strong enough for a standalone post
-  - 'needs_confirmation'   information looks notable but cannot be verified yet
   - 'archive'              filtered out of the main queue
 
 Cards carry:
@@ -35,7 +34,6 @@ TYPE_PB_ROUNDUP = "pb_roundup"
 TYPE_QUAL_ALERT = "qual_alert"
 TYPE_WEEKEND_NUMBERS = "weekend_in_numbers"
 TYPE_RECAP = "recap_only"
-TYPE_NEEDS_CONFIRMATION = "needs_confirmation"
 TYPE_ARCHIVE = "archive"
 
 # Suggested formats
@@ -44,7 +42,6 @@ FMT_STORY = "story"
 FMT_SPOTLIGHT = "athlete_spotlight"
 FMT_RECAP = "recap_mention"
 FMT_NUMBERS = "weekend_in_numbers"
-FMT_HOLD = "hold_for_confirmation"
 FMT_ARCHIVE = "archive"
 
 
@@ -93,8 +90,7 @@ class ContentCard:
     score_reasons: list[str] = field(default_factory=list)
     confidence: str = "medium"      # high | medium | low
     suggested_format: str = FMT_FEED
-    needs_confirmation: bool = False
-    bucket: str = "queue"           # queue | recap | needs_confirmation | archive
+    bucket: str = "queue"           # queue | recap | archive
     approved: Optional[bool] = None # None | True | False
     user_caption: Optional[str] = None  # final edited caption when approved
 
