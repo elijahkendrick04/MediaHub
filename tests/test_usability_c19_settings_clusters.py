@@ -11,28 +11,16 @@ retitled from "Operations & data" to plain "Settings".
 
 from __future__ import annotations
 
-import importlib
 import re
 
 import pytest
 
+from mediahub.web.club_profile import ClubProfile, save_profile
+
 
 @pytest.fixture
-def client(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    (tmp_path / "club_profiles").mkdir(parents=True, exist_ok=True)
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
-    from mediahub.web.club_profile import ClubProfile, save_profile
-
+def client(app):
     save_profile(ClubProfile(profile_id="club-a", display_name="Club A"))
-    app = wm.create_app()
-    app.config.update(TESTING=True, SECRET_KEY="x")
     c = app.test_client()
     with c.session_transaction() as s:
         s["active_profile_id"] = "club-a"
@@ -62,9 +50,7 @@ def test_hero_says_settings(settings_html):
 
 
 def test_four_headed_clusters_render_in_order(settings_html):
-    heads = re.findall(
-        r'<h2 class="mh-settings-cluster-head"[^>]*>([^<]+)</h2>', settings_html
-    )
+    heads = re.findall(r'<h2 class="mh-settings-cluster-head"[^>]*>([^<]+)</h2>', settings_html)
     assert heads == [
         "Your club",
         "Content &amp; brand",
@@ -83,9 +69,9 @@ def test_four_headed_clusters_render_in_order(settings_html):
 def test_every_surviving_tile_present_exactly_once(settings_html):
     all_titles = [t for titles in CLUSTERS.values() for t in titles]
     for title in all_titles:
-        assert settings_html.count(f'<h3 style="margin:0">{title}</h3>') == 1, (
-            f"tile {title!r} should appear exactly once"
-        )
+        assert (
+            settings_html.count(f'<h3 style="margin:0">{title}</h3>') == 1
+        ), f"tile {title!r} should appear exactly once"
     # No extra tiles snuck in (non-operator: 16 tile anchors in total).
     anchors = re.findall(r'class="mh-template mh-glow-border', settings_html)
     assert len(anchors) == len(all_titles)
@@ -101,9 +87,9 @@ def test_each_tile_sits_in_its_cluster(settings_html):
     for (key, start), end in zip(bounds.items(), ends):
         section = settings_html[start:end]
         for title in CLUSTERS[key]:
-            assert f'<h3 style="margin:0">{title}</h3>' in section, (
-                f"tile {title!r} missing from the {key!r} cluster"
-            )
+            assert (
+                f'<h3 style="margin:0">{title}</h3>' in section
+            ), f"tile {title!r} missing from the {key!r} cluster"
 
 
 def test_coming_soon_strip_is_compact_and_last(settings_html):

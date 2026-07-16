@@ -9,7 +9,6 @@ stopped) and offers the export via a persistent download link.
 
 from __future__ import annotations
 
-import importlib
 import json
 
 import pytest
@@ -18,24 +17,10 @@ ATHLETE = "Eira Hughes"
 
 
 @pytest.fixture
-def client(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    (tmp_path / "club_profiles").mkdir(parents=True, exist_ok=True)
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
+def client(app):
     from mediahub.web.club_profile import ClubProfile, save_profile
 
     save_profile(ClubProfile(profile_id="clubx", display_name="Club X"))
-    app = wm.create_app()
-    app.config["TESTING"] = True
-    if not app.secret_key:
-        app.secret_key = "x"
     c = app.test_client()
     with c.session_transaction() as s:
         s["active_profile_id"] = "clubx"

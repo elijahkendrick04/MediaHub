@@ -8,21 +8,6 @@ tooling on the marketing landing).
 
 from __future__ import annotations
 
-import importlib
-
-import pytest
-
-
-@pytest.fixture
-def client(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    import mediahub.web.web as wm
-
-    importlib.reload(wm)
-    app = wm.create_app()
-    app.config.update(TESTING=True, SECRET_KEY="x")
-    return app.test_client()
-
 
 def test_landing_footer_has_no_developer_access_link(client):
     html = client.get("/").get_data(as_text=True)
