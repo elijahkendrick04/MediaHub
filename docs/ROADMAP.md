@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-07-15 · `b041449e4` · Merge pull request #1281 from elijahkendrick04/claude/pbfix-engine-guard-r9zdos
+**Last updated:** 2026-07-15 · `61d9574bc` · Merge pull request #1291 from elijahkendrick04/claude/pb-ranker-diagnosis-339i7t
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1227,16 +1227,16 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-07-15 | `8b241964b` | style(pb_discovery): ruff-format the F09 course regex (single line) |
+| 2026-07-15 | `eea74caa4` | fix(pb-ranker): close 5 verified gaps left by the P1–P14 fix sessions |
+| 2026-07-15 | `57cf4c2e7` | security: fix 7 latent bugs surfaced by the finding #18 migration |
+| 2026-07-15 | `8437e9b34` | fix(web): route bulk-select checkbox ids to the base swim_id (F11 consent safety) |
+| 2026-07-15 | `fd20f7edf` | style(pipeline): satisfy ruff-format (collapse reconcile call to one line) |
+| 2026-07-15 | `a8f977612` | fix(v5-ranker): repair tables, maths, crash & factor contract (P6, 21 issues) |
+| 2026-07-15 | `368fee494` | Fix V3 content-ranker scoring/explainability defects; remove dead V1 ranker (P7) |
+| 2026-07-15 | `116d74c81` | fix(pipeline): make V5 recognition the canonical ranking authority (F16, ADR-0032) |
+| 2026-07-15 | `848a3f27d` | fix(recognition): make official_pb_confirmed fireable on real PB paths (F18) |
+| 2026-07-14 | `9ac15cdef` | style(web): ruff-format the F11 helpers (line length) |
+| 2026-07-14 | `81136f227` | fix(web): unique per-card workflow-state keying + cautious safe_to_post (F11, F51) |
 | 2026-07-14 | `21485a36f` | fix(recommender): remove dead output & unreachable paths (F26, F29, F32) |
-| 2026-07-14 | `1be315782` | fix(v5-report): register Phase W detectors once (F10) + drop ghost pb_likely (F57) |
-| 2026-07-14 | `5ad1e4679` | docs(system-map): fix nonexistent upload_post handler name |
-| 2026-07-14 | `a700e33fa` | Broaden F02 detector tests: 3+ same-meet swims & magnitude coverage |
-| 2026-07-14 | `342ab3823` | Fix engine-boundary guard to protect the real ranker paths (F17) |
-| 2026-07-14 | `7cd1fc9ee` | harden(pb_bridge): restrict time fields to ASCII digits (re.ASCII) |
-| 2026-07-14 | `fd6381bf7` | Document deliberate online-baseline prior for the surviving PB swim |
-| 2026-07-14 | `4214c3400` | docs: align ranking/detector docs with real code; drop 0-byte stub modules |
-| 2026-07-14 | `0714916ea` | Fix same-meet & zero-time false PBs in V5 PB detectors (F02, F56) |
-| 2026-07-14 | `f6bcc30e9` | style(pb_bridge): apply ruff-format (collapse comment spacing, 60**position) |
-| 2026-07-14 | `f83e2da4c` | fix(pb_bridge): round-trip every parse_pbs time format; stop treating ':' as a decimal (F50) |
-| 2026-07-14 | `be0df5720` | docs: PB ranker fix worklist & parallel-session dispatch plan |
 <!-- /ROADMAP:ACTIVITY -->
