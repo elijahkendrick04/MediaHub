@@ -429,24 +429,12 @@ def test_pool_disabled_when_killswitch_off(pool_env, monkeypatch):
 
 
 @pytest.fixture
-def web_app(tmp_path, monkeypatch):
-    import importlib
+def web_app(web_module, tmp_path, monkeypatch):
     import uuid as _uuid
 
     monkeypatch.setenv("MEDIAHUB_GEN_V2", "1")
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    for d in ("runs_v4", "uploads_v4", "club_profiles"):
-        (tmp_path / d).mkdir(parents=True, exist_ok=True)
 
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
-
+    wm = web_module
     run_id = "run-tb-" + _uuid.uuid4().hex[:8]
     run_payload = {
         "run_id": run_id,
