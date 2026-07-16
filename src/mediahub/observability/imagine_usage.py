@@ -35,8 +35,28 @@ from typing import Optional
 
 log = logging.getLogger(__name__)
 
-DATA_DIR = Path(os.environ.get("DATA_DIR", str(Path(__file__).resolve().parents[1])))
-DB_PATH = DATA_DIR / "data.db"
+
+def _db_path() -> Path:
+    """Resolve ``DATA_DIR/data.db`` at CALL time (deep-review #101).
+
+    Freezing this at import let a late ``DATA_DIR`` (set after this module was
+    imported) split writes across two DBs; resolving per call keeps every store
+    on one DB. Mirrors ``feature_quota._db_path`` / ``approval_telemetry._db_path``.
+    """
+    data_dir = Path(os.environ.get("DATA_DIR", str(Path(__file__).resolve().parents[1])))
+    return data_dir / "data.db"
+
+
+def __getattr__(name: str):
+    # Back-compat: ``DATA_DIR`` / ``DB_PATH`` were module-level constants. Serve
+    # them lazily so external readers always see the current DATA_DIR, never an
+    # import-time freeze.
+    if name == "DB_PATH":
+        return _db_path()
+    if name == "DATA_DIR":
+        return _db_path().parent
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 _PRUNE_THRESHOLD = 30_000
 _PRUNE_TARGET = 27_000
@@ -66,11 +86,12 @@ CREATE INDEX IF NOT EXISTS idx_imagine_uses_ts
 
 
 def _connect() -> sqlite3.Connection:
+    p = _db_path()
     try:
-        DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+        p.parent.mkdir(parents=True, exist_ok=True)
     except OSError:
         pass
-    conn = sqlite3.connect(str(DB_PATH))
+    conn = sqlite3.connect(str(p))
     conn.row_factory = sqlite3.Row
     try:
         conn.execute("PRAGMA journal_mode=WAL")
@@ -93,7 +114,10 @@ def _ensure_schema() -> None:
         log.warning("imagine_usage: schema bootstrap OS error: %s", exc)
 
 
-_ensure_schema()
+# No import-time schema bootstrap (deep-review #101): building the schema at
+# import created it in the default-DATA_DIR DB, which a late DATA_DIR then
+# diverges from. Each write calls _ensure_schema() first (targeting the lazily
+# resolved DB); every read degrades gracefully on a missing table.
 
 
 def _maybe_prune(conn: sqlite3.Connection) -> None:
@@ -236,5 +260,6 @@ __all__ = [
     "count_for_org",
     "usage_for_org",
     "MONTHLY_WINDOW_HOURS",
-    "DB_PATH",
+    # DB_PATH remains accessible (served lazily via __getattr__) but is no longer
+    # a star-exported constant — it resolves per access now (#101).
 ]
