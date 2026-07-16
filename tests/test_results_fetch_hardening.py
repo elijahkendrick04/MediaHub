@@ -7,7 +7,6 @@ re-fetch stages a brand-new run rather than mutating a finished one.
 
 from __future__ import annotations
 
-import importlib
 import json
 import re
 
@@ -15,23 +14,14 @@ import pytest
 
 
 @pytest.fixture
-def app_mod(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
+def app_mod(app, web_module, monkeypatch):
+    # MEDIAHUB_RESULTS_FETCH_ENABLED is live-read in a web.py helper at request
+    # time (not at import / create_app), so setting it here — after the canonical
+    # ``app``/``web_module`` fixtures have built the isolated app — enables the
+    # results-from-a-link surface for every test. The disable test overrides it
+    # with its own monkeypatch.setenv (auto-undone), no reload needed.
     monkeypatch.setenv("MEDIAHUB_RESULTS_FETCH_ENABLED", "1")
-    for sub in ("runs_v4", "uploads_v4", "club_profiles"):
-        (tmp_path / sub).mkdir(parents=True, exist_ok=True)
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
-    app = wm.create_app()
-    app.config["TESTING"] = True
-    app.secret_key = "test"
-    return app, wm
+    return app, web_module
 
 
 def _make_zip_html() -> bytes:
