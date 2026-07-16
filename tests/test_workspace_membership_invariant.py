@@ -22,7 +22,6 @@ decided in ADR-0014:
 
 from __future__ import annotations
 
-import importlib
 import json
 import re
 import sys
@@ -116,23 +115,13 @@ def _seed_run(
 
 
 @pytest.fixture
-def shared_instance(tmp_path, monkeypatch):
+def shared_instance(web_module, tmp_path, monkeypatch):
     """A shared-instance world: bound org (alpha), unbound org (beta), a
     signed-up owner, a signed-up stranger with their own org (gamma), an
     alpha-owned run, and an ownerless legacy run."""
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
     monkeypatch.delenv("STRIPE_SECRET_KEY", raising=False)
-    for d in ("runs_v4", "uploads_v4", "club_profiles"):
-        (tmp_path / d).mkdir(parents=True, exist_ok=True)
 
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
+    wm = web_module
 
     from mediahub.web.club_profile import ClubProfile, save_profile
 
@@ -206,21 +195,10 @@ def shared_instance(tmp_path, monkeypatch):
 
 
 @pytest.fixture
-def legacy_instance(tmp_path, monkeypatch):
+def legacy_instance(web_module, tmp_path):
     """A no-accounts deployment: orgs exist, nobody has signed up. Everything
     must behave exactly as before PC.3."""
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    for d in ("runs_v4", "uploads_v4", "club_profiles"):
-        (tmp_path / d).mkdir(parents=True, exist_ok=True)
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
+    wm = web_module
 
     from mediahub.web.club_profile import ClubProfile, save_profile
 
@@ -560,7 +538,9 @@ class TestInviteFirstClaimPath:
         # A1 (org-access audit): the invited signup lands DIRECTLY on their
         # freshly-bound club, never on the picker.
         with app.test_client() as c:
-            r = c.post("/signup", data={"email": PILOT_EMAIL, "password": PASSWORD, "accept_terms": "1"})
+            r = c.post(
+                "/signup", data={"email": PILOT_EMAIL, "password": PASSWORD, "accept_terms": "1"}
+            )
             assert r.status_code in (302, 303)
             assert "/make" in r.headers["Location"]
             with c.session_transaction() as s:
@@ -656,7 +636,10 @@ class TestMembersPage:
         assert m.invited_by == OWNER_EMAIL
         assert m.invited_via_profile_id == "org-alpha"
         with app.test_client() as c:
-            c.post("/signup", data={"email": "volunteer@cluba.org", "password": PASSWORD, "accept_terms": "1"})
+            c.post(
+                "/signup",
+                data={"email": "volunteer@cluba.org", "password": PASSWORD, "accept_terms": "1"},
+            )
         assert ms.is_active_member("volunteer@cluba.org", "org-alpha") is True
         # The new member can now pin the bound org.
         with app.test_client() as c:

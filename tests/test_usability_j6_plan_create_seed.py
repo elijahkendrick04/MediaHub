@@ -9,7 +9,6 @@ other tools keep plain links, and the hero copy says only what's true.
 
 from __future__ import annotations
 
-import importlib
 import re
 from urllib.parse import unquote_plus
 
@@ -19,21 +18,10 @@ import pytest
 
 
 @pytest.fixture()
-def client(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    (tmp_path / "club_profiles").mkdir(parents=True, exist_ok=True)
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
+def client(app):
     from mediahub.web.club_profile import ClubProfile, save_profile
 
     save_profile(ClubProfile(profile_id="club-a", display_name="Club A"))
-    app = wm.create_app()
-    app.config.update(TESTING=True, SECRET_KEY="x")
     c = app.test_client()
     with c.session_transaction() as s:
         s["active_profile_id"] = "club-a"
@@ -77,11 +65,7 @@ def _plan_html(client, monkeypatch):
 
 def test_free_text_create_link_carries_the_idea(client, monkeypatch):
     html = _plan_html(client, monkeypatch)
-    hrefs = [
-        _htmllib.unescape(m)
-        for m in re.findall(r'href="([^"]+)"', html)
-        if "seed=" in m
-    ]
+    hrefs = [_htmllib.unescape(m) for m in re.findall(r'href="([^"]+)"', html) if "seed=" in m]
     assert hrefs, "no Create link carried a seed"
     seeded = unquote_plus(hrefs[0])
     assert seeded.startswith("/free-text?")
@@ -112,10 +96,8 @@ def test_free_text_landing_prefills_from_seed(client):
 
 
 def test_seed_is_escaped_and_capped(client):
-    long_seed = "x" * 600 + '<script>alert(1)</script>'
-    page = client.get("/free-text", query_string={"seed": long_seed}).get_data(
-        as_text=True
-    )
+    long_seed = "x" * 600 + "<script>alert(1)</script>"
+    page = client.get("/free-text", query_string={"seed": long_seed}).get_data(as_text=True)
     assert "<script>alert(1)</script>" not in page
     m = re.search(r'<textarea id="ft-prompt"[^>]*>([^<]*)</textarea>', page)
     assert m
