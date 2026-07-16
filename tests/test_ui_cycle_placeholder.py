@@ -27,7 +27,6 @@ mirroring tests/test_activity_count_up.py and tests/test_browser_cascade.py.
 from __future__ import annotations
 
 import html as _html
-import importlib
 import os
 import re
 import sys
@@ -98,22 +97,17 @@ def _static_placeholder(html: str, field_id: str) -> str:
 
 
 @pytest.fixture
-def app_mod(tmp_path, monkeypatch):
-    """Isolated Flask app + one ready profile; research console enabled."""
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
+def app_mod(web_module, monkeypatch):
+    """Isolated Flask app + one ready profile; research console enabled.
+
+    Rides the canonical ``web_module`` fixture for per-test DATA_DIR isolation
+    (globals repointed + caches cleared, no reload). ``MEDIAHUB_RESEARCH_UI`` is
+    read live in ``web.py`` at request time, so setting it here (monkeypatch,
+    auto-undone per test) turns the /web-research query box on for this test only.
+    """
+    wm = web_module
     # /web-research is opt-in; turn it on so its query box is reachable here.
     monkeypatch.setenv("MEDIAHUB_RESEARCH_UI", "1")
-    for sub in ("runs_v4", "uploads_v4", "club_profiles"):
-        (tmp_path / sub).mkdir(parents=True, exist_ok=True)
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
 
     app = wm.create_app()
     app.config["TESTING"] = True  # gate bypassed → every page renders
