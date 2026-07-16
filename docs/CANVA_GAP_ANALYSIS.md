@@ -126,7 +126,7 @@ shipped, remainder noted · **[ROADMAP]** specified, not yet built.
 | F3 | Layout admission review → automated archetype lint (margins, overlaps, single dominant element, empty-slot collapse). | `tests/test_archetype_lint.py` parametrised over the catalog. | **[SHIPPED]** (static hex/font lints always-on; rendered structural sweep opt-in via `MEDIAHUB_ARCHETYPE_LINT=1`) |
 | F4 | Content-fit layout pick (long name → multiline-capable layout; data-rich → stat-slot layout). | `score_archetype(card)` eligibility filter in front of the existing seeded walk. | **[SHIPPED]** |
 | F5 | Post-compose sanity: no silent font substitution, no >1.5× raster upscale, sRGB-pinned exports. | `document.fonts.check` assertion + naturalWidth guard + `--force-color-profile=srgb`. | **[SHIPPED]** |
-| F6 | Measured layout scoring (whitespace band, centroid balance, collision reject) picking among K candidate packs. | Deterministic evaluate()-based scorer over the seeded candidate walk. | **[ROADMAP]** |
+| F6 | Measured layout scoring (whitespace band, centroid balance, collision reject) picking among K candidate packs. | Deterministic evaluate()-based scorer over the seeded candidate walk. | **[SHIPPED]** (`graphic_renderer/layout_score.py` — O'Donovan-style energy scorer over the current pack + next K−1 of the seeded/mood walk; a `getBoundingClientRect` sweep per candidate scores text-collision hard-reject + whitespace band + importance-weighted centroid + edge alignment + saliency clearance, ships the argmax; opt-in `MEDIAHUB_LAYOUT_SCORE`, byte-identical off, switches only on a measured win) |
 | F7 | Decoration that overlaps content edges (anchored badges/tabs/tape with seeded rotation). | Declarative overlap anchors in layouts + an overlap accent class in style packs. | **[SHIPPED]** (still + motion) |
 | F8 | Physical panel silhouettes (ticket stubs, notches, perforation) and large expressive motifs (speed bands, bursts, variable halftone). | Component CSS + new `ACCENT_GEOS` motif class (weight-capped). | **[SHIPPED]** |
 | F9 | Medal chrome: specular ramps + bevels so gold visibly outranks silver. | Deterministic 7-stop ramp from the medal tint, gradient-clipped numerals + bevelled chips behind the APCA gate. | **[SHIPPED]** (still + motion) |
@@ -141,11 +141,12 @@ the house rules: deterministic (same brief + seed → same PNG), brand-locked
 ink meets ground, self-hosted fonts only, no generative pixels, and
 byte-identical output wherever a lever is absent.
 
-The canva-roadmap build wave has since closed nearly all of the outstanding
-rows: all of A–E's depth/colour/typography/photo levers ship (A5, B5–B7, C1,
-C4, C9, C10, D5–D9, E2–E6), and the systemic floor now carries the archetype
-lint (F3), content-fit archetype scoring (F4), the render-time floor (F5) and
-the decoration/motif/medal-chrome levers (F7–F9). What remains, honestly:
+The canva-roadmap build wave has since closed all of the outstanding rows:
+all of A–E's depth/colour/typography/photo levers ship (A5, B5–B7, C1, C4, C9,
+C10, D5–D9, E2–E6), and the systemic floor now carries the archetype lint (F3),
+content-fit archetype scoring (F4), the render-time floor (F5), the
+decoration/motif/medal-chrome levers (F7–F9), and the measured layout-energy
+scorer (F6). What remains is remainder-only refinement of already-shipped rows:
 
 - **[PARTIAL]** — **C6** (per-slot contrast repair shipped; gate-surviving
   permutation enumeration for the seed walk remains), **F1** (spacing scale +
@@ -155,6 +156,12 @@ the decoration/motif/medal-chrome levers (F7–F9). What remains, honestly:
   earlier **C3** (`--mh-secondary` deployed on a first archetype slice) and
   **D4** (effect vocabulary + guidance shipped; `subtle/standard/loud`
   intensity tiers roadmap).
-- **[ROADMAP]** — **F6** (measured layout scoring over K candidate packs) is
-  the sole fully-unbuilt row; its concrete build lives in the corresponding gap
-  dossier (workflow run `wf_821d999c-70e`).
+- **[SHIPPED]** — **F6** (measured layout scoring over K candidate packs) now
+  ships as a deterministic, opt-in (`MEDIAHUB_LAYOUT_SCORE`) layout-energy
+  scorer: for each candidate pack the card's real HTML is composed and swept for
+  element geometry, scored on the O'Donovan-style energy terms (text-collision
+  hard-reject, whitespace band, importance-weighted centroid balance, edge
+  alignment, saliency clearance), and the argmax is shipped. It only reorders
+  the choice among brand-safe, in-catalog packs, is byte-identical when off, and
+  switches away from the director's pack only on a measured improvement.
+  (`graphic_renderer/layout_score.py`; `tests/test_layout_score*.py`.)

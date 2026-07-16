@@ -3806,6 +3806,84 @@ def _produce_png(html: str, output_path: Path, size: tuple[int, int], dpr: int) 
             browser.close()
 
 
+def measure_html_geometry(
+    htmls: list[str], size: tuple[int, int], *, output_dir: Path, dpr: int = 1
+) -> Optional[list[Optional[dict]]]:
+    """F6 — measure each candidate HTML's element geometry in one browser pass.
+
+    Runs :data:`layout_score.MEASURE_JS` (a single ``getBoundingClientRect``
+    sweep, no screenshot) over every html and returns one geometry dict per
+    input (or ``None`` for a candidate that failed to measure). The whole call
+    returns ``None`` when Playwright is unavailable so the caller can degrade to
+    the director's current pack — F6 is a ranking aid, never load-bearing.
+
+    Deliberately self-contained: it launches its own one-shot Chromium and never
+    touches ``_render_on_context`` (the single source of render pixels) or the
+    G1.24 PNG cache, so enabling F6 cannot change a single rendered pixel of a
+    card whose winning pack is the one the director already chose. Geometry is
+    measured at ``dpr=1`` — ``device_scale_factor`` only changes raster
+    resolution, not the CSS-pixel box layout ``getBoundingClientRect`` reports,
+    so the boxes match the real render exactly.
+    """
+    if not htmls:
+        return []
+    try:
+        from playwright.sync_api import sync_playwright  # type: ignore
+    except Exception as e:  # pragma: no cover - environment-dependent
+        log.debug("F6 layout scoring skipped — Playwright unavailable: %s", e)
+        return None
+
+    from mediahub.graphic_renderer.layout_score import MEASURE_JS
+
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    results: list[Optional[dict]] = []
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(args=_CHROMIUM_LAUNCH_ARGS)
+            try:
+                ctx = _new_render_context(browser, size, dpr)
+                for html in htmls:
+                    page_path = output_dir / (
+                        f"_f6cand.{os.getpid()}-{uuid.uuid4().hex[:8]}.render.html"
+                    )
+                    geom: Optional[dict] = None
+                    page = ctx.new_page()
+                    try:
+                        page_path.write_text(html, encoding="utf-8")
+                        page.goto(page_path.as_uri(), wait_until="networkidle", timeout=30_000)
+                        try:
+                            page.evaluate(
+                                "() => (document.fonts && document.fonts.ready) "
+                                "? document.fonts.ready.then(() => true) : true"
+                            )
+                        except Exception:
+                            try:
+                                page.wait_for_timeout(200)
+                            except Exception:
+                                pass
+                        geom = page.evaluate(MEASURE_JS)
+                    except Exception as exc:
+                        log.debug("F6 candidate measure failed: %s", exc)
+                        geom = None
+                    finally:
+                        try:
+                            page.close()
+                        except Exception:
+                            pass
+                        try:
+                            page_path.unlink()
+                        except OSError:
+                            pass
+                    results.append(geom)
+            finally:
+                browser.close()
+    except Exception as exc:  # pragma: no cover - environment-dependent
+        log.warning("F6 layout scoring pass failed: %s", exc)
+        return None
+    return results
+
+
 def render_html_to_png(
     html: str,
     output_path: str | Path,
@@ -6338,6 +6416,7 @@ def render_brief(
     image_format: str = "png",
     quality=None,
     language: str = "",
+    _html_only: bool = False,
 ) -> RenderResult:
     """Render a CreativeBrief into a single still. Returns RenderResult.
 
@@ -6378,6 +6457,74 @@ def render_brief(
             # Fallback to text-led recap if family is unknown
             family = "text_led_recap"
             template_path = LAYOUTS_DIR / f"{family}.html"
+
+    # F6 — measured layout scoring over K candidate style packs. Opt-in
+    # (MEDIAHUB_LAYOUT_SCORE); OFF by default so this whole block is skipped and
+    # the director's pack ships unchanged (byte-identical to pre-F6). When on, we
+    # compose each candidate pack's real HTML through this same path
+    # (_html_only=True), measure the composed geometry in one browser pass, and
+    # switch to a sibling pack only when it beats the current one on the
+    # deterministic layout-energy score. Packs are pure decoration overlays —
+    # the --mh-* colour roles do NOT depend on the pack — so this only reorders
+    # the choice among brand-safe, in-catalog, APCA-legible packs; it never
+    # invents colour, geometry, or type. See graphic_renderer/layout_score.py.
+    _layout_score_record = None
+    if not _html_only and _v2_archetype and (getattr(brief, "style_pack", "") or "").strip():
+        try:
+            import dataclasses as _dc
+
+            from mediahub.graphic_renderer import layout_score as _layout_score
+
+            if _layout_score.enabled():
+                _cand_ids = _layout_score.candidate_pack_ids(brief)
+                if len(_cand_ids) > 1:
+
+                    def _compose_for_pack(_pid: str) -> str:
+                        _b = _dc.replace(brief, style_pack=_pid)
+                        return render_brief(
+                            _b,
+                            output_dir=output_dir,
+                            size=size,
+                            format_name=format_name,
+                            athlete_path=athlete_path,
+                            venue_path=venue_path,
+                            logo_path=logo_path,
+                            bg_photo_path=bg_photo_path,
+                            brand_kit=brand_kit,
+                            sponsor_name=sponsor_name,
+                            sponsor_logo_path=sponsor_logo_path,
+                            venue_attribution=venue_attribution,
+                            skip_cutout=skip_cutout,
+                            watermark_text=watermark_text,
+                            photo_pos_override=photo_pos_override,
+                            image_format=image_format,
+                            quality=quality,
+                            language=language,
+                            _html_only=True,
+                        )  # type: ignore[return-value]
+
+                    _cand_htmls = [_compose_for_pack(pid) for pid in _cand_ids]
+                    _geoms = measure_html_geometry(
+                        _cand_htmls, (width, height), output_dir=output_dir
+                    )
+                    if _geoms is not None:
+                        _rec = _layout_score.choose(
+                            list(zip(_cand_ids, _geoms)),
+                            archetype=family,
+                            current_id=_cand_ids[0],
+                        )
+                        _layout_score_record = _rec
+                        if _rec.get("changed") and _rec.get("winner"):
+                            brief = _dc.replace(brief, style_pack=_rec["winner"])
+                            log.info(
+                                "F6 layout scorer: %s -> %s (%s)",
+                                _rec.get("current"),
+                                _rec.get("winner"),
+                                family,
+                            )
+        except Exception as exc:  # F6 is a ranking aid, never load-bearing
+            log.debug("F6 layout scoring skipped: %s", exc)
+            _layout_score_record = None
 
     # G1.25 — server-side photo adjustment stack (deterministic PIL recipes).
     # Resolve the recipe once; ``None`` (the default) keeps the un-adjusted
@@ -6727,6 +6874,14 @@ def render_brief(
         ),
     )
 
+    # F6 — the layout scorer composes each candidate pack's HTML through this
+    # same path with ``_html_only=True`` and measures the string, so it stops
+    # here with the fully-composed markup and never screenshots, writes a file,
+    # or embeds metadata. Purely internal (leading underscore); the public
+    # contract still returns a RenderResult.
+    if _html_only:
+        return html  # type: ignore[return-value]
+
     # Output path — the file extension follows the requested image format
     # (G1.14): PNG by default, else WebP/AVIF/JPEG.
     visual_id = "v_" + uuid.uuid4().hex[:12]
@@ -6856,6 +7011,7 @@ def render_brief(
                     html,
                     _inspect_ctx,
                     image_path=athlete_path or bg_photo_path or venue_path,
+                    layout_score=_layout_score_record,
                 ),
             )
     except Exception as e:
