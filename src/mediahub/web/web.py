@@ -42988,7 +42988,18 @@ function mhAnDigest(btn) {{
 
     # ---- /spotlight/<run_id>/<swimmer_key> &mdash; spotlight view -------------
     @app.route("/spotlight/<run_id>/<path:swimmer_key>")
-    def spotlight_view(run_id, swimmer_key):
+    @require_run(
+        deny=lambda: (
+            _recovery_page(
+                "Run not found",
+                "This run isn't on disk. It may have been deleted from /privacy, or the URL might be from a different deployment.",
+                primary_cta=("Open activity", url_for("activity_page")),
+                secondary_cta=("Back to home", url_for("home")),
+            )
+        ),
+        require_exists=True,
+    )
+    def spotlight_view(run_id, swimmer_key, run_data):
         try:
             from mediahub.club_platform.athlete_spotlight import build_spotlight_pack
         except ImportError:
@@ -43003,16 +43014,9 @@ function mhAnDigest(btn) {{
                 code=501,
             )
 
-        run_data = _load_run(run_id)
-        if not _can_access_run(run_id, run_data, _active_profile_id()):
-            run_data = None
-        if not run_data:
-            return _recovery_page(
-                "Run not found",
-                "This run isn't on disk. It may have been deleted from /privacy, or the URL might be from a different deployment.",
-                primary_cta=("Open activity", url_for("activity_page")),
-                secondary_cta=("Back to home", url_for("home")),
-            )
+        # run_data is loaded once and tenant-gated by @require_run (finding
+        # #18); require_exists routes a missing/foreign run to the "Run not
+        # found" recovery deny above before the body runs.
 
         # A malformed run_data shape would otherwise bubble out of
         # build_spotlight_pack and 500 the page; treat it as "no pack"
