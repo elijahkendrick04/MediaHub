@@ -14,7 +14,6 @@ change:
 
 from __future__ import annotations
 
-import importlib
 import io
 import json
 import sys
@@ -589,23 +588,19 @@ class TestRunGraphicDefenseInDepth:
             f"pinned to beta; got {resp.status_code} {resp.data!r}"
         )
 
-    def test_same_session_can_render_run_graphic(self, two_org_app, monkeypatch):
+    def test_same_session_can_render_run_graphic(self, two_org_app, web_module, monkeypatch):
         app, tmp_path = two_org_app
         self._seed_run(tmp_path, "run_alpha_1", "alpha")
 
         # Stub the visual generator so we don't have to set up the
         # full creative-brief + renderer stack just to check the gate.
-        import mediahub.web.web as wm
+        wm = web_module
 
         def _fake_visual(item, brand_kit, **kwargs):
             return {"visuals": [], "brief": None, "errors": []}
 
-        monkeypatch.setattr(wm, "_v8_create_visual_for_item", _fake_visual, raising=False)
-        # Also patch into create_app's closure: the route resolves the
-        # symbol at module import time. Re-create the app for this test.
-        import importlib
-
-        importlib.reload(wm)
+        # The create-graphic route resolves _v8_create_visual_for_item from the
+        # module namespace, so patch it before building the app for this test.
         monkeypatch.setattr(wm, "_v8_create_visual_for_item", _fake_visual, raising=False)
         app2 = wm.create_app()
         app2.config["TESTING"] = True
