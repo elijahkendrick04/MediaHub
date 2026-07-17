@@ -64,9 +64,13 @@ _CANONICAL_STROKE_TO_CODE: dict[str, str] = {
 }
 
 
-def _stroke_code(stroke: Optional[str]) -> str:
+def _stroke_code(stroke: Optional[str]) -> Optional[str]:
+    # Unresolved input (missing, or a label the ontology map does not cover)
+    # returns None — never a silent "FR" guess. The caller stores an honest-empty
+    # stroke and flags the swim for review, so PB/medal comparison never runs
+    # under a fabricated event key.
     if not stroke:
-        return "FR"
+        return None
     s = stroke.strip().lower()
     if s in _CANONICAL_STROKE_TO_CODE:
         return _CANONICAL_STROKE_TO_CODE[s]
@@ -74,12 +78,13 @@ def _stroke_code(stroke: Optional[str]) -> str:
     for key, code in _CANONICAL_STROKE_TO_CODE.items():
         if key in s:
             return code
-    return "FR"
+    return None
 
 
-def _course_code(course: Optional[str]) -> str:
+def _course_code(course: Optional[str]) -> Optional[str]:
+    # Unresolved input returns None — never a silent "LC" guess (see _stroke_code).
     if not course:
-        return "LC"
+        return None
     c = course.strip().upper()
     if c in ("LC", "SC", "Y"):
         return c
@@ -87,7 +92,7 @@ def _course_code(course: Optional[str]) -> str:
         return "LC"
     if "SHORT" in c:
         return "SC"
-    return "LC"
+    return None
 
 
 def _gender_code(gender: Optional[str]) -> str:
@@ -356,7 +361,7 @@ def interpreted_to_canonical(
     meet = Meet(
         name=interpreted.meet_name or "(unknown)",
         venue=interpreted.venue,
-        course=course_default,
+        course=course_default or "LC",
         start_date=start_date,
         end_date=end_date,
         host_club_code=None,
@@ -375,6 +380,10 @@ def interpreted_to_canonical(
     # at the single seam every parse path funnels through.
     seen_result_keys: set[tuple] = set()
     duplicate_rows_dropped = 0
+    # Swims whose stroke or course could not be resolved: kept in the meet for an
+    # honest count/provenance, but with empty ("") stroke/course so no PB/medal
+    # comparison runs under a guessed event key. Surfaced as a needs-review warning.
+    unresolved_event_swims = 0
 
     for event in interpreted.events or []:
         # A relay event ("4 x 100m Freestyle Relay") is not an individual swim.
@@ -387,6 +396,10 @@ def interpreted_to_canonical(
         ev_distance = _coerce_distance(event.distance_m)
         ev_stroke = _stroke_code(event.stroke)
         ev_course = _course_code(event.course) if event.course else course_default
+        # Either code unresolved ⇒ we cannot classify this event; the swim is
+        # stored with empty stroke/course (an unmatchable PB key) and counted so a
+        # meet-level needs-review warning can be raised after the loop.
+        ev_unresolved = ev_stroke is None or ev_course is None
         ev_gender = _gender_code(event.gender)
         ev_age_band = event.age_band or ""
         ev_final_label, ev_final_rank = _detect_final_round(event.raw_header)
@@ -458,8 +471,8 @@ def interpreted_to_canonical(
                 swimmer_key=swimmer_key,
                 club_code=club_code or None,
                 distance=ev_distance,
-                stroke=ev_stroke,
-                course=ev_course,
+                stroke=ev_stroke or "",
+                course=ev_course or "",
                 gender=ev_gender,
                 age_band=ev_age_band,
                 finals_time_cs=time_cs,
@@ -492,6 +505,8 @@ def interpreted_to_canonical(
                 continue
             seen_result_keys.add(ident)
             meet.results.append(result)
+            if ev_unresolved:
+                unresolved_event_swims += 1
 
     if duplicate_rows_dropped:
         meet.add_warning(
@@ -500,6 +515,15 @@ def interpreted_to_canonical(
             "— the source repeated identical swims (e.g. an event header "
             "reprinted across a page break).",
             severity="info",
+        )
+
+    if unresolved_event_swims:
+        meet.add_warning(
+            "unresolved_event",
+            f"{unresolved_event_swims} swim(s) had an unrecognised stroke or "
+            "course and were left unclassified (no event bucket). Their PB "
+            "comparison was skipped and they need review against the source file.",
+            severity="warn",
         )
 
     return meet
