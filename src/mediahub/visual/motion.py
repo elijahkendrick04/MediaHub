@@ -33,6 +33,7 @@ import math
 import os
 import shutil
 import subprocess
+import threading
 from dataclasses import is_dataclass, asdict
 from pathlib import Path
 from typing import Any, Callable, ContextManager, Optional
@@ -126,7 +127,10 @@ def _prune_motion_cache(d: Optional[Path] = None) -> None:
     d = d or _cache_dir()
     cap = _motion_cache_max()
     try:
-        entries = list(d.glob("*.mp4"))
+        # Skip in-flight atomic-render temp files (".<stem>.<pid>.<tid>.tmp.mp4",
+        # #73) — they are hidden dotfiles, whereas a real cache entry is a bare
+        # 24-hex-char stem, so they must never count toward the cap or be evicted.
+        entries = [p for p in d.glob("*.mp4") if not p.name.startswith(".")]
     except OSError:
         return
     if len(entries) <= cap:
@@ -2054,6 +2058,17 @@ def _run_remotion(
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
+    # Render into a unique per-process/thread temp file in the same directory,
+    # then atomically os.replace it into out_path (deep-review #73). render.js
+    # writes its MP4 incrementally, so pointing it straight at the shared cache
+    # slot let two concurrent same-key renders — or a reader on the cache-hit path
+    # (`cached.exists() and size > 1024`) — observe a torn, half-written file. The
+    # atomic same-filesystem rename means out_path only ever flips from absent to
+    # a complete MP4 (or from one complete MP4 to another). (The opt-in
+    # parallel-segment reel composite and the ffmpeg fallback engine write the
+    # slot through their own ffmpeg invocations; they are separate follow-ups.)
+    tmp_out = out_path.with_name(f".{out_path.stem}.{os.getpid()}.{threading.get_ident()}.tmp.mp4")
+
     # Write props to a temp file alongside the cache; cheap and lets us tail
     # the JSON if a render fails.
     props_dir = _cache_dir() / "props"
@@ -2069,7 +2084,7 @@ def _run_remotion(
         "--props",
         str(props_path),
         "--output",
-        str(out_path),
+        str(tmp_out),
     ]
     if duration_sec is not None:
         cmd.extend(["--duration", str(duration_sec)])
@@ -2084,15 +2099,21 @@ def _run_remotion(
         # subprocess.run would SIGKILL only node and reparent Chromium to init).
         proc = run_capture(cmd, cwd=str(REMOTION_DIR), timeout=timeout)
     except subprocess.TimeoutExpired as e:
+        tmp_out.unlink(missing_ok=True)
         raise RuntimeError(f"Remotion render timed out after {timeout}s") from e
 
     if proc.returncode != 0:
+        tmp_out.unlink(missing_ok=True)
         stderr = (proc.stderr or "").strip().splitlines()
         tail = "\n".join(stderr[-15:]) if stderr else "(no stderr)"
         # Keep props_path on failure — it's the render's input, useful to reproduce.
         raise RuntimeError(f"Remotion render failed (exit {proc.returncode}):\n{tail}")
-    if not out_path.exists() or out_path.stat().st_size < 1024:
+    if not tmp_out.exists() or tmp_out.stat().st_size < 1024:
+        tmp_out.unlink(missing_ok=True)
         raise RuntimeError(f"Remotion reported success but {out_path} is missing or empty")
+    # Atomic publish: the completed MP4 flips into the cache slot in one rename,
+    # so a concurrent same-key render or cache-hit reader never sees a torn file.
+    os.replace(tmp_out, out_path)
     # Success: drop the props sidecar so it doesn't accumulate one-per-MP4 forever
     # (it was never pruned). Failed renders keep theirs for debugging (above).
     props_path.unlink(missing_ok=True)
