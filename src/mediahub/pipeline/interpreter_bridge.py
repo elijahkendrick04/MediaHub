@@ -377,6 +377,13 @@ def interpreted_to_canonical(
     duplicate_rows_dropped = 0
 
     for event in interpreted.events or []:
+        # A relay event ("4 x 100m Freestyle Relay") is not an individual swim.
+        # The free-text inducer reuses individual distance/stroke vocabulary for
+        # relay headers, so without this guard a relay leg would seed a bogus
+        # individual RaceResult (e.g. "100m Freestyle") and pollute PB / medal
+        # detection (finding #65). Relays are not modelled as individual results.
+        if getattr(event, "is_relay", False):
+            continue
         ev_distance = _coerce_distance(event.distance_m)
         ev_stroke = _stroke_code(event.stroke)
         ev_course = _course_code(event.course) if event.course else course_default
