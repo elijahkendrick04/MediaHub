@@ -82,6 +82,40 @@ def _parse_pb_date(value) -> date | None:
         return None
 
 
+def _parse_meet_date(value) -> date | None:
+    """Parse a meet start/end date for the Rule 0 window.
+
+    Accepts ISO ``YYYY-MM-DD`` (the pb_discovery / canonical contract) and the
+    ambiguous ``xx/xx/yyyy`` display strings the HY3/SDIF interpreter parsers
+    emit (``interpreter/hytek_parser.py`` / ``sdif_parser.py`` ``_format_date``:
+    US ``mm/dd`` and UK ``dd/mm`` orderings are indistinguishable in the string
+    alone). Strict ISO parsing rejected every ``xx/xx/yyyy`` value, leaving Rule
+    0 (the strongest PB confirmation) permanently inert for natively-parsed
+    meets.
+
+    Deterministic and LLM-free: try ISO first, then read ``xx/xx/yyyy``
+    day-first, falling back to month-first only when the day-first reading is an
+    impossible date. A day or month > 12 disambiguates the ordering exactly; a
+    genuinely ambiguous both-<=12 value is read day-first — a documented,
+    reproducible default. Returns ``None`` for empty / unrecognised input.
+    """
+    iso = _parse_iso_date(value)
+    if iso is not None:
+        return iso
+    if not value:
+        return None
+    m = re.match(r"^\s*(\d{1,2})[./-](\d{1,2})[./-](\d{4})", str(value))
+    if not m:
+        return None
+    a, b, year = int(m.group(1)), int(m.group(2)), int(m.group(3))
+    for day, month in ((a, b), (b, a)):  # day-first, then month-first
+        try:
+            return date(year, month, day)
+        except ValueError:
+            continue
+    return None
+
+
 def _cs_to_str(cs) -> str:
     if cs is None:
         return "—"
@@ -249,8 +283,8 @@ class OfficialPBDetector(AchievementDetector):
         """
         if not getattr(history, "has_data", False):
             return None
-        meet_start = _parse_iso_date(getattr(ctx, "start_date", None))
-        meet_end = _parse_iso_date(getattr(ctx, "end_date", None)) or meet_start
+        meet_start = _parse_meet_date(getattr(ctx, "start_date", None))
+        meet_end = _parse_meet_date(getattr(ctx, "end_date", None)) or meet_start
         if meet_start is None:
             return None
         try:
