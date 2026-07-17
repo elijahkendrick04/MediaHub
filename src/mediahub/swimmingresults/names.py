@@ -129,10 +129,14 @@ def _levenshtein(a: str, b: str) -> int:
     return prev[-1]
 
 
-def _close(a: str, b: str) -> bool:
+def _close(a: str, b: str, *, max_budget: int | None = None) -> bool:
     """A conservative single-token similarity: nickname-equal, or one a prefix
     of the other (≥3 chars, e.g. "ben"/"benjamin"), or within a small edit
-    distance scaled to length (handles "Eleanor"/"Elanor", "Sophie"/"Sofie")."""
+    distance scaled to length (handles "Eleanor"/"Elanor", "Sophie"/"Sofie").
+
+    ``max_budget`` caps the length-scaled edit budget. Surname matching passes
+    ``max_budget=1`` (deep-review #53) so a two-edit surname like Wilson/Watson
+    is NOT treated as the same family, while first names keep the wider budget."""
     if not a or not b:
         return False
     if a == b:
@@ -147,6 +151,8 @@ def _close(a: str, b: str) -> bool:
     # caller's club+age narrowing and unique-match requirement are the real
     # guard against collapsing two genuinely different people.
     budget = 1 if len(long) <= 4 else 2
+    if max_budget is not None:
+        budget = min(budget, max_budget)
     return _levenshtein(a, b) <= budget
 
 
@@ -167,7 +173,9 @@ def name_match(first_a: str, last_a: str, first_b: str, last_b: str) -> bool:
     # overlap). A surname mismatch is a hard no.
     la_toks, lb_toks = set(la.split()), set(lb.split())
     surname_ok = (
-        la == lb or bool(la_toks & lb_toks) or _close(la.replace(" ", ""), lb.replace(" ", ""))
+        la == lb
+        or bool(la_toks & lb_toks)
+        or _close(la.replace(" ", ""), lb.replace(" ", ""), max_budget=1)
     )
     if not surname_ok:
         return False
@@ -178,7 +186,7 @@ def name_match(first_a: str, last_a: str, first_b: str, last_b: str) -> bool:
 
 def surname_match(last_a: str, last_b: str) -> bool:
     """True if two surnames plausibly denote the same family name — exact (folded),
-    a shared token (double-barrelled), or a small typo away ("Gallahger" /
+    a shared token (double-barrelled), or a single typo away ("Galagher" /
     "Gallagher"). No nickname list involved: surnames are stable, so this lets the
     matcher lean on surname + age + time instead of a hand-maintained first-name
     dictionary."""
@@ -189,7 +197,7 @@ def surname_match(last_a: str, last_b: str) -> bool:
         return True
     if set(la.split()) & set(lb.split()):
         return True
-    return _close(la.replace(" ", ""), lb.replace(" ", ""))
+    return _close(la.replace(" ", ""), lb.replace(" ", ""), max_budget=1)
 
 
 def first_lead(name: str) -> str:

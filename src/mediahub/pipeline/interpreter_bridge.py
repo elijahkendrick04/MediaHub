@@ -138,6 +138,31 @@ def _time_to_cs(time_str: Optional[str]) -> Optional[int]:
     return cs if cs > 0 else None
 
 
+# Non-numeric time-column markers -> canonical (dq, status). Only "DQ" is an
+# actual disqualification; DNS/NS/DNC are non-starts (the swimmer never raced),
+# SCR/WD are scratches/withdrawals, and DNF is a did-not-finish -- none of them
+# is a DQ, so collapsing them all to "dq" erased the distinction (deep-review
+# #51). Every one of them still has finals_time_cs=None, so the shared
+# `dq or finals_time_cs is None` gate the detectors use keeps them out of PB /
+# record / milestone detection exactly as before; only the human-facing status
+# label changes. Any unknown/blank marker stays the conservative "dq".
+_NO_TIME_MARKER_STATUS: dict[str, tuple[bool, str]] = {
+    "DQ": (True, "dq"),
+    "DNS": (False, "dns"),
+    "NS": (False, "dns"),
+    "DNC": (False, "dns"),
+    "DNF": (False, "dnf"),
+    "SCR": (False, "scratch"),
+    "WD": (False, "scratch"),
+}
+
+
+def _no_time_status(marker: Optional[str]) -> tuple[bool, str]:
+    """Map a non-numeric time-column marker to (dq, canonical status)."""
+    key = (marker or "").strip().upper()
+    return _NO_TIME_MARKER_STATUS.get(key, (True, "dq"))
+
+
 # ---------------------------------------------------------------------------
 # Name + club helpers
 # ---------------------------------------------------------------------------
@@ -362,6 +387,9 @@ def interpreted_to_canonical(
 
         for swim in event.swims or []:
             time_cs = _time_to_cs(swim.time)
+            race_dq, race_status = (
+                (False, "completed") if time_cs is not None else _no_time_status(swim.time)
+            )
             club_name = (swim.club or "").strip()
             club_code = _club_code(club_name)
 
@@ -431,8 +459,8 @@ def interpreted_to_canonical(
                 seed_time_cs=None,
                 place=place_int,
                 round=swim_round,
-                dq=time_cs is None,
-                status="completed" if time_cs else "dq",
+                dq=race_dq,
+                status=race_status,
                 swim_date=start_date,
                 splits=[],
                 extra={
