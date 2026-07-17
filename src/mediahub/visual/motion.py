@@ -1515,10 +1515,59 @@ def _card_to_props(
     return props
 
 
+_RENDERER_GENERATION: Optional[str] = None
+
+
+def renderer_generation() -> str:
+    """A short content fingerprint of the Remotion renderer sources (deep-review
+    #74). The per-composition revisions (STORY/REEL_COMPOSITION_REVISION) must be
+    bumped BY HAND when a composition changes; a change to SHARED renderer code
+    (``render.js``, ``Root.tsx``, shared components, ``fonts.ts``) or a Remotion
+    version bump that nobody remembered to bump the revision for would otherwise
+    keep serving a stale cached MP4. Folding this fingerprint into every cache key
+    invalidates the cache automatically on ANY renderer-source change.
+
+    Content-hashed (not mtime) so it is STABLE across redeploys of unchanged
+    source — the persistent motion cache survives a redeploy that didn't touch the
+    renderer. Memoised (computed once per process). Falls back to a fixed token if
+    the sources can't be read, so a render never fails on fingerprinting.
+    """
+    global _RENDERER_GENERATION
+    if _RENDERER_GENERATION is not None:
+        return _RENDERER_GENERATION
+    h = hashlib.sha256()
+    try:
+        files = [RENDER_SCRIPT, REMOTION_DIR / "package.json"]
+        src_dir = REMOTION_DIR / "src"
+        if src_dir.is_dir():
+            files += sorted(
+                p
+                for p in src_dir.rglob("*")
+                if p.is_file() and p.suffix in (".tsx", ".ts", ".js", ".css")
+            )
+        for p in files:
+            try:
+                h.update(p.relative_to(REMOTION_DIR).as_posix().encode("utf-8"))
+                h.update(b"\0")
+                h.update(p.read_bytes())
+            except OSError:
+                continue
+        _RENDERER_GENERATION = h.hexdigest()[:12]
+    except Exception:
+        _RENDERER_GENERATION = "r0"
+    return _RENDERER_GENERATION
+
+
 def _content_hash(payload: dict, *, kind: str) -> str:
     """Stable hash for the cache key. Serialises with sort_keys so call-site
-    ordering doesn't bust the cache."""
-    blob = json.dumps({"kind": kind, **payload}, sort_keys=True, default=str)
+    ordering doesn't bust the cache. The renderer-source fingerprint (#74) is
+    folded in here so it applies uniformly to every key — a renderer change busts
+    the whole motion cache without any per-call-site edit."""
+    blob = json.dumps(
+        {"kind": kind, "_rgen": renderer_generation(), **payload},
+        sort_keys=True,
+        default=str,
+    )
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:24]
 
 
