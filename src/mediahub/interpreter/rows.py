@@ -9,6 +9,7 @@ No swim-vocabulary literals.
 
 from __future__ import annotations
 
+import datetime
 import logging
 import re
 
@@ -57,8 +58,12 @@ def _normalise_yob(raw: str) -> tuple[int | None, float]:
         return int(s), 0.90
     if re.match(r"^\d{2}$", s):
         yr = int(s)
-        # Disambiguate 2-digit year: assume born between 1940-current
-        year_4 = 2000 + yr if yr <= 30 else 1900 + yr
+        # Disambiguate a 2-digit year by pivoting on the current year: a
+        # year-of-birth is never in the future, so a 2-digit year that would
+        # land ahead of this year belongs to the 1900s.
+        year_4 = 2000 + yr
+        if year_4 > datetime.date.today().year:
+            year_4 = 1900 + yr
         return year_4, 0.70
     return None, 0.0
 
