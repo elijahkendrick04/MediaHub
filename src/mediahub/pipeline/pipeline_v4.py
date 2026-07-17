@@ -24,10 +24,10 @@ from datetime import datetime, timezone
 from typing import Optional, Callable
 
 from swim_content.quals_registry import (
-    load_registry,
     stale_standards,
     relevant_standards,
 )
+from mediahub.standards import standards_for_profile
 from swim_content.detector_v3 import detect_v3
 from swim_content.grouper import group_claims_into_cards
 from swim_content.evidence_aggregate import attach_evidence_from_claims
@@ -552,8 +552,8 @@ def run_pipeline_v4(
         run.pb_fetch_ok = sum(1 for s in pb_snapshots.values() if getattr(s, "fetch_ok", False))
         run.pb_fetch_failed = max(0, len(our_keys) - run.pb_fetch_ok)
 
-    # 9. Standards
-    standards = load_registry()
+    # 9. Standards (season packs + this profile's important_standards filter)
+    standards = standards_for_profile(profile)
     stale = stale_standards(standards)
     primary_code = ""
     if profile and profile.club_codes:
