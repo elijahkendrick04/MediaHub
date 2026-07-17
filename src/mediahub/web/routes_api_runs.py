@@ -385,6 +385,7 @@ def api_live_caption(run_id, swim_id, run_data):
 
         _gov_org = "" if W._auth.is_dev_operator() else (run_profile_id or "")
         _gov_ok = False
+        _gov_reservation = None  # atomic quota reservation (deep-review #95)
         _gov_plan = W._auth.current_plan()
         if _gov_org and not _gov_perms.can_use_feature(
             W._active_role(_gov_org), _gov_features.FEATURE_CAPTION, plan=_gov_plan
@@ -406,7 +407,12 @@ def api_live_caption(run_id, swim_id, run_data):
             ), 403
         if _gov_org:
             try:
-                _gov_quota.enforce(_gov_org, _gov_features.FEATURE_CAPTION, plan=_gov_plan)
+                # Atomic reserve (deep-review #95): takes the slot up front so
+                # concurrent requests at the limit can't all pass. Finalised in
+                # the finally below (record-parity), guaranteed on every exit.
+                _gov_reservation = _gov_quota.reserve(
+                    _gov_org, _gov_features.FEATURE_CAPTION, plan=_gov_plan
+                )
             except _gov_quota.QuotaExceeded as _qe:
                 return jsonify(
                     {
@@ -706,9 +712,10 @@ def api_live_caption(run_id, swim_id, run_data):
             # success counts toward quota, a failed attempt is logged but
             # not charged. Best-effort; never affects the response.
             if _gov_org:
-                _gov_quota.record(
+                _gov_quota.finalize(
                     _gov_org,
                     _gov_features.FEATURE_CAPTION,
+                    _gov_reservation,
                     ok=_gov_ok,
                     detail=f"tone={tone}",
                 )
@@ -1089,11 +1096,28 @@ def api_card_translate(run_id, card_id, run_data):
                 ),
             }
         ), 403
+    # Atomic reserve-before-work (deep-review #95): take the slot up front so
+    # concurrent requests at the limit can't all pass. Released (finalize ok=False)
+    # on every non-success exit below and finalised ok=True on success, so a
+    # metered reservation is never leaked.
+    _t_reservation = None
     if _gov_org:
         try:
-            _gov_quota.enforce(_gov_org, _gov_features.FEATURE_TRANSLATE, plan=_gov_plan)
+            _t_reservation = _gov_quota.reserve(
+                _gov_org, _gov_features.FEATURE_TRANSLATE, plan=_gov_plan
+            )
         except _gov_quota.QuotaExceeded as _qe:
             return jsonify({"error": "quota_reached", "message": str(_qe)}), 200
+
+    def _release_translate_slot():
+        if _gov_org:
+            _gov_quota.finalize(
+                _gov_org,
+                _gov_features.FEATURE_TRANSLATE,
+                _t_reservation,
+                ok=False,
+                detail=f"lang={target}",
+            )
 
     from mediahub.media_ai.llm import is_available as _llm_available
 
@@ -1101,6 +1125,7 @@ def api_card_translate(run_id, card_id, run_data):
         # Honest "no provider" — 200 + an error body, matching the sibling
         # caption/assist routes (and the route's own transient path); the
         # review UI branches on the `error` field, not the status code.
+        _release_translate_slot()
         return jsonify(
             {
                 "error": "no_key",
@@ -1119,6 +1144,7 @@ def api_card_translate(run_id, card_id, run_data):
     try:
         variant = translate_card_slots(slots, target, source_language=source_language)
     except _CUE:
+        _release_translate_slot()
         return jsonify(
             {
                 "error": "no_key",
@@ -1126,6 +1152,7 @@ def api_card_translate(run_id, card_id, run_data):
             }
         ), 200
     except Exception:
+        _release_translate_slot()
         return jsonify(
             {
                 "error": "transient",
@@ -1133,11 +1160,15 @@ def api_card_translate(run_id, card_id, run_data):
             }
         ), 200
 
-    # One real translation produced — count it toward the org's quota
-    # (operator exempt). Best-effort; never affects the response.
+    # One real translation produced — finalise the reserved slot (deep-review #95;
+    # operator exempt). Best-effort; never affects the response.
     if _gov_org:
-        _gov_quota.record(
-            _gov_org, _gov_features.FEATURE_TRANSLATE, ok=True, detail=f"lang={target}"
+        _gov_quota.finalize(
+            _gov_org,
+            _gov_features.FEATURE_TRANSLATE,
+            _t_reservation,
+            ok=True,
+            detail=f"lang={target}",
         )
 
     # Persist on the card so approving the card approves the pair.

@@ -118,9 +118,16 @@ def feature_scope(
     org = (org_id if org_id is not None else current_org_id()) or None
     pl = (plan if plan is not None else current_plan()) or None
 
+    # Atomic reserve-before-work (deep-review #95): reserve() takes the quota slot
+    # up front with an atomic INSERT-if-under-limit, so N concurrent requests at
+    # the limit can no longer all pass a read-then-act gate. It raises
+    # QuotaExceeded when at the limit, and returns a reservation id (metered) or
+    # None (unmetered / metering-only / fail-open). The reservation is finalised
+    # in the finally below — guaranteed by the context manager even on early exit,
+    # so a reserved slot is never leaked.
+    reservation: Optional[int] = None
     if enforce and org:
-        # Raises QuotaExceeded only when a limit is set and reached.
-        quota.enforce(org, feature, plan=pl, org_override=org_override)
+        reservation = quota.reserve(org, feature, plan=pl, org_override=org_override)
 
     scope = FeatureScope(feature, org, pl)
     if not org:
@@ -137,9 +144,13 @@ def feature_scope(
         err = exc
         raise
     finally:
-        quota.record(
+        # finalize() updates the reservation (release on failure) when one was
+        # taken, or records a plain usage row when it was not (unmetered /
+        # metering-only) — so behaviour is unchanged for those paths.
+        quota.finalize(
             org,
             feature,
+            reservation,
             ok=ok,
             provider=scope.provider,
             model=scope.model,
