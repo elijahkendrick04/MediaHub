@@ -109,6 +109,15 @@ slice (`test_render_engine_parity.py`) is the template. Extend into:
 `test_gen_v2_tier_a.py` assembly assertions (run the "clean assembly" checks
 under v1 too, guarded for the legacy shape).
 
+**Phase 1 — shipped so far:** `test_render_engine_parity.py` (the template) and
+`test_gen_v2_tier_a.py::test_assembly_is_clean_on_both_engines` — the
+clean-assembly invariant (no placeholder survives, real content lands) now runs
+under *both* engines from one body, with the v2 role-token / autofit injection
+asserted on the production path and the legacy shape guarded. No prior
+assertion was dropped; the v1 path is added coverage. The other v2-pinned tests
+in that file assert genuinely v2-specific behaviour (autofit px vars, medal
+role tinting), so they stay v2-only rather than being force-parametrised.
+
 **Phase 2 — generator-driven, real render (high value, CI-gated on Chromium).**
 `test_render_cache.py`, `test_svg_export.py`, `test_g1_14_output_formats.py`,
 `test_g13_landscape_formats.py`. These currently render a legacy fallback under
