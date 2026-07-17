@@ -69,7 +69,6 @@ _TAGS = re.compile(r"<[^>]+>", re.S)
 _WS = re.compile(r"\s+")
 _ROW = re.compile(r"<tr[^>]*>(.*?)</tr>", re.S | re.I)
 _CELL = re.compile(r"<t[dh][^>]*>(.*?)</t[dh]>", re.S | re.I)
-_TABLE = re.compile(r"<table[^>]*>(.*?)</table>", re.S | re.I)
 _RNK_SJ = re.compile(r'class=["\']rnk_sj["\'][^>]*>(.*?)</p>', re.I | re.S)
 
 
@@ -216,13 +215,10 @@ def parse_personal_best(html: str, tiref: str) -> PBPage:
         if tm and course:
             entries.extend(_rows(tm.group(1), course))
 
-    # Fallback: no course headings found → assume the two tables are LC then SC.
-    if not entries:
-        tables = _TABLE.findall(html or "")
-        if tables:
-            entries.extend(_rows(tables[0], "LC"))
-        if len(tables) >= 2:
-            entries.extend(_rows(tables[1], "SC"))
+    # No positional course fallback: a table whose LC/SC course cannot be
+    # resolved from a heading is ambiguous, and guessing (e.g. first table = LC)
+    # can turn an LC time into a wrong PB against an SC baseline. Per the module
+    # docstring such entries are dropped, never silently defaulted.
 
     # Keep only the fastest per (distance, stroke, course) — defensive; the page
     # is already best-per-event, but a malformed table shouldn't double-count.
