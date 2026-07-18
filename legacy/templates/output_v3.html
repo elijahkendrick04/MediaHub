@@ -25,11 +25,6 @@
       <p class="muted">includes everything in the queue plus anything you approved</p>
     </div>
     <div class="vcard">
-      <h3>Needs confirmation</h3>
-      <p class="big-number">{{ pack.needs_confirmation|length }}</p>
-      <p class="muted">notable but lacks pre-meet evidence</p>
-    </div>
-    <div class="vcard">
       <h3>Recap mentions</h3>
       <p class="big-number">{{ pack.recap|length }}</p>
       <p class="muted">good for end-of-meet roundups, not standalone posts</p>
@@ -90,7 +85,6 @@
 {% endmacro %}
 
 {{ render_section("Ready to post", pack.ready_to_post) }}
-{{ render_section("Needs confirmation", pack.needs_confirmation) }}
 {{ render_section("Recap mentions", pack.recap) }}
 
 {% endblock %}

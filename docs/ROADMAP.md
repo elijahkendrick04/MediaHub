@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-07-13 · `05b4adea7` · Signed-out top bar + animated About page; remove ⌘K search (#1249)
+**Last updated:** 2026-07-17 · `ee1943c65` · build(deps): bump actions/setup-node from 6 to 7 (#1313) [skip render]
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1227,14 +1227,16 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
-| 2026-07-13 | `3142b2510` | test: render /studio signed-in for the Create-nav-active check |
-| 2026-07-13 | `30dd7cdd0` | style: ruff-format the new About walkthrough (pre-commit hygiene) |
-| 2026-07-13 | `acac1d616` | feat(web): signed-out top bar + animated About page; remove ⌘K search |
-| 2026-07-12 | `001defedc` | Remove the deep-review backlog doc now the findings are shipped |
-| 2026-07-12 | `934b4dc69` | test: add direct ranker_v3 unit tests + share motion-focus image fixture |
-| 2026-07-12 | `7897b1766` | fix(web): owner-bind from-url job status (IDOR) + dedup storage-inventory scan |
-| 2026-07-12 | `6b321d103` | Fix six deterministic-engine accuracy bugs (review batch 15) |
-| 2026-07-12 | `2f038264f` | security(ssrf): route web-fetch surfaces through the hardened door (#34/#120/#124/#126/#127) |
-| 2026-07-12 | `deb76a13c` | chore(hygiene): dependency/CI/docs cleanup from deep review (#10, #135–#137, #141–#143) |
-| 2026-07-12 | `ed8cbfa59` | Stop the interpreter smoke test polluting the real working tree (deep-review #128) |
+| 2026-07-17 | `ef3c96ec9` | build(deps): bump actions/setup-node from 6 to 7 |
+| 2026-07-17 | `c09ce763e` | test: migrate 8 club-a fixtures off importlib.reload onto conftest app (#130) |
+| 2026-07-17 | `ca21317d3` | test: run the tier-A clean-assembly invariant on both render engines (#132) |
+| 2026-07-17 | `eddd67555` | test: stop test_motion_format_focus paying for a cutout model fetch (#133) |
+| 2026-07-17 | `1e5262732` | deep-review #95: atomic quota reserve (fix check-then-act concurrency hole) |
+| 2026-07-17 | `de7ec52a5` | deep-review #59: feed season standards packs + profile filter into qual detection |
+| 2026-07-17 | `01f109c1f` | deep-review #73: publish motion renders atomically (fix cache-slot race) |
+| 2026-07-17 | `135242d71` | deep-review #52 + #64: strict stroke/course codes — no fabricated FR/LC guess |
+| 2026-07-17 | `fe8985d6d` | deep-review #69: pivot 2-digit years on the current year (no frozen constant) |
+| 2026-07-17 | `8913b5eda` | test(#65): add trailing newline (pre-commit end-of-file-fixer) |
+| 2026-07-17 | `a1796c0bf` | deep-review #65: model relays and exclude them from individual PB/medal detection |
+| 2026-07-17 | `bc979e662` | deep-review #60: make OfficialPBDetector Rule 0 work on HY3/SDIF native runs |
 <!-- /ROADMAP:ACTIVITY -->

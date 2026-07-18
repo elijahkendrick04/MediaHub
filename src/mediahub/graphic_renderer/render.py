@@ -43,7 +43,7 @@ from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Iterator, Optional
+from typing import Any, Iterator, NamedTuple, Optional
 
 from . import render_cache as _render_cache
 from .sprint_hooks import RenderHookCtx as _RenderHookCtx
@@ -61,6 +61,78 @@ LAYOUTS_DIR = Path(__file__).parent / "layouts"
 _BASE_CSS_PATH = LAYOUTS_DIR / "_base.css"
 _TEXT_LED_FILL_CSS_PATH = LAYOUTS_DIR / "_text_led_fill.css"
 _SHARED_CSS_PATH = LAYOUTS_DIR / "_shared.css"
+# F1 (systemic floor) — the shared component/token sheet. Carries the
+# spacing-scale-built lockup/footer/logo component classes that layouts opt into
+# instead of re-declaring a near-identical footer block each. Named ``_tokens``
+# to avoid colliding with the composition-decoration track's ``_components.css``.
+_TOKENS_CSS_PATH = LAYOUTS_DIR / "_tokens.css"
+
+# F1 — the spacing token scale. ``--mh-sp-1..-9`` = round(min(w,h) * k / 1080)
+# for these multipliers, so the scale is the fixed 4/8/12/16/24/32/48/64/96 px
+# ramp at any 1080-wide portrait/square/story canvas (min(w,h)==1080 for all of
+# them → byte-identical) and shrinks proportionally on a shorter (landscape)
+# short-edge. Consumed as ``var(--mh-sp-3)`` etc.; unused, it paints nothing.
+_SPACING_STEPS: tuple[int, ...] = (4, 8, 12, 16, 24, 32, 48, 64, 96)
+
+
+def _spacing_scale_css(width: int, height: int) -> str:
+    """A ``:root{}`` block publishing the ``--mh-sp-*`` spacing scale.
+
+    Deterministic pure function of the canvas short edge. At every certified
+    1080-wide format the values are the exact historic px literals
+    (4/8/12/16/24/32/48/64/96), so a layout that swaps ``16px`` for
+    ``var(--mh-sp-3)`` renders byte-identical there; on a landscape canvas the
+    scale tracks the (smaller) short edge so spacing stays proportional.
+    """
+    short = min(int(width), int(height))
+    decls = "".join(
+        f"--mh-sp-{i}:{int(round(short * k / 1080))}px;"
+        for i, k in enumerate(_SPACING_STEPS, start=1)
+    )
+    return ":root{" + decls + "}\n"
+
+
+def _round8(x: float) -> int:
+    """Snap to the nearest 8px — the module the geometry context is built on."""
+    return int(round(x / 8.0)) * 8
+
+
+def _geometry_scale_css(width: int, height: int) -> str:
+    """A ``:root{}`` block publishing the F2 geometry context.
+
+    Deterministic pure function of the canvas short edge, so a layout that
+    expresses a fixed dimension as a fraction of the geometry — e.g. a
+    ``calc(var(--mh-short) * 31 / 54)`` medal ring — tracks the canvas instead
+    of freezing a 1080-tuned pixel count.
+
+    * ``--mh-short``  — the short edge in px (``min(w,h)``); the base every other
+      geometry token and every migrated offender scales from.
+    * ``--mh-margin`` — ``round8(0.06 * short)`` — the outer safe inset.
+    * ``--mh-gutter`` — ``round8(0.02 * short)`` — the tight inter-column gutter.
+    * ``--mh-col``    — a 12-column module, ``(short - 2*margin) / 12``, left as a
+      ``calc`` so it stays exact.
+
+    At every certified 1080-wide format ``short == 1080``, so the tokens resolve
+    to the exact historic pixel counts and any offender migrated with an
+    exact-ratio coefficient renders byte-identical; a shorter canvas scales the
+    whole geometry down together.
+    """
+    short = min(int(width), int(height))
+    margin = _round8(0.06 * short)
+    gutter = _round8(0.02 * short)
+    decls = (
+        f"--mh-short:{short}px;"
+        f"--mh-margin:{margin}px;"
+        f"--mh-gutter:{gutter}px;"
+        "--mh-col:calc((var(--mh-short) - var(--mh-margin) * 2) / 12);"
+    )
+    return ":root{" + decls + "}\n"
+
+
+# F7/F8 (Canva gap analysis) — shared v2 component utilities (overlap anchors +
+# physical-panel silhouettes). Injected into v2 BASE_CSS only; inert until a
+# layout opts in, so an un-migrated archetype's pixels are unchanged.
+_COMPONENTS_CSS_PATH = LAYOUTS_DIR / "_components.css"
 
 
 # ---------------------------------------------------------------------------
@@ -116,6 +188,17 @@ class RenderEncodeError(RuntimeError):
     or silently downgrade the format the caller asked for — if the deployment's
     Pillow can't encode the requested codec, the operator gets a clear error
     instead of a lie on disk.
+    """
+
+
+class RenderError(RuntimeError):
+    """Raised when a render cannot be produced faithfully (F5 render-time floor).
+
+    The honest-error principle applied to the pixel stage: if a brand typeface a
+    card references never loaded, the card would silently fall back to a system
+    sans — an off-brand lie. Rather than ship that, the render fails loudly so the
+    operator sees a real error and fixes the font, exactly as the AI surfaces
+    surface ``ClaudeUnavailableError`` instead of a fabricated caption.
     """
 
 
@@ -394,6 +477,21 @@ def _read_text(p: Path) -> str:
     return p.read_text(encoding="utf-8")
 
 
+@lru_cache(maxsize=1)
+def _components_css() -> str:
+    """The shared v2 component utilities (F7 anchors + F8 panel silhouettes).
+
+    Read once; wrapped in a comment banner. Missing file → "" (the utilities are
+    inert until a layout opts in, so an absent sheet just leaves those layouts
+    un-migrated). Injected into v2 BASE_CSS only.
+    """
+    try:
+        css = _read_text(_COMPONENTS_CSS_PATH) if _COMPONENTS_CSS_PATH.exists() else ""
+    except OSError:
+        css = ""
+    return ("\n/* --- v2 component utilities (F7/F8) --- */\n" + css + "\n") if css else ""
+
+
 def _hex_to_rgb(c: str) -> tuple[int, int, int]:
     c = (c or "#000000").lstrip("#")
     if len(c) == 3:
@@ -441,18 +539,79 @@ def _mix_hex(a: str, b: str, t: float) -> str:
     return _rgb_to_hex((ar + (br - ar) * t, ag + (bg - ag) * t, ab_ + (bb - ab_) * t))
 
 
+_ICC_MIME = {
+    "png": "image/png",
+    "jpg": "image/jpeg",
+    "jpeg": "image/jpeg",
+    "webp": "image/webp",
+    "svg": "image/svg+xml",
+    "gif": "image/gif",
+}
+# Raster formats that can carry an embedded ICC profile worth normalising.
+_ICC_RASTER = {"png", "jpg", "jpeg", "webp"}
+
+
+def _srgb_normalised_bytes(raw: bytes, suffix: str) -> bytes:
+    """F5: convert a NON-sRGB-profiled photo to sRGB, else return the bytes as-is.
+
+    A wide-gamut source (Display P3, Adobe RGB) carries an embedded ICC profile;
+    Chromium honours it, so the club's brand hues and the photo's colours would
+    shift versus the sRGB the rest of the card is authored in. We transform such
+    a photo into sRGB once, at the inline seam, via Pillow's ImageCms (Little
+    CMS) and drop the now-redundant profile so the render is colour-accurate.
+
+    Byte-identical for the common case: a photo with NO embedded profile, or one
+    already described as sRGB, is returned untouched — only a genuinely
+    off-sRGB profile triggers a re-encode. Any failure (Pillow/ImageCms absent,
+    an unreadable profile) falls back to the original bytes, never a crash.
+    """
+    if suffix not in _ICC_RASTER or Image is None:
+        return raw
+    try:
+        from io import BytesIO
+
+        from PIL import ImageCms  # type: ignore
+
+        with Image.open(BytesIO(raw)) as im:
+            icc = im.info.get("icc_profile")
+            if not icc:
+                return raw  # no embedded profile → already treated as sRGB
+            src = ImageCms.ImageCmsProfile(BytesIO(icc))
+            try:
+                desc = (ImageCms.getProfileDescription(src) or "").lower()
+            except Exception:
+                desc = ""
+            if "srgb" in desc:
+                return raw  # already sRGB — leave the file byte-identical
+            im.load()
+            mode = "RGBA" if (im.mode in ("RGBA", "LA") or "transparency" in im.info) else "RGB"
+            converted = ImageCms.profileToProfile(
+                im, src, ImageCms.createProfile("sRGB"), outputMode=mode
+            )
+            buf = BytesIO()
+            fmt = {"jpg": "JPEG", "jpeg": "JPEG", "png": "PNG", "webp": "WEBP"}[suffix]
+            save_kwargs = {"format": fmt}
+            if fmt == "JPEG":
+                save_kwargs.update(quality=95, subsampling=0)
+                if converted.mode == "RGBA":
+                    converted = converted.convert("RGB")
+            converted.save(buf, **save_kwargs)  # no icc_profile → tagged sRGB
+            return buf.getvalue()
+    except Exception:
+        return raw
+
+
 def _encode_img_data_uri(p: Path) -> str:
-    """Read an image from disk and return a base64 ``data:`` URI (the raw work)."""
+    """Read an image from disk and return a base64 ``data:`` URI (the raw work).
+
+    F5: a non-sRGB-profiled raster is normalised to sRGB here (see
+    :func:`_srgb_normalised_bytes`) so Chromium can't colour-shift it away from
+    the sRGB the card is authored in.
+    """
     raw = p.read_bytes()
     suffix = p.suffix.lower().lstrip(".")
-    mime = {
-        "png": "image/png",
-        "jpg": "image/jpeg",
-        "jpeg": "image/jpeg",
-        "webp": "image/webp",
-        "svg": "image/svg+xml",
-        "gif": "image/gif",
-    }.get(suffix, "application/octet-stream")
+    raw = _srgb_normalised_bytes(raw, suffix)
+    mime = _ICC_MIME.get(suffix, "application/octet-stream")
     return f"data:{mime};base64,{base64.b64encode(raw).decode('ascii')}"
 
 
@@ -463,9 +622,10 @@ def _img_to_data_uri(path: str | Path) -> str:
     unchanged file is read and base64-encoded once per process — the returned
     text is byte-identical to a direct encode. A genuine read error still
     surfaces, exactly as before, because the cache falls through to the encoder
-    for any file it can't ``stat``.
+    for any file it can't ``stat``. The ``srgb`` salt domain-separates the F5
+    ICC→sRGB normalisation from any pre-F5 cached encode of the same file.
     """
-    return _render_cache.asset_data_uri(path, loader=_encode_img_data_uri)
+    return _render_cache.asset_data_uri(path, loader=_encode_img_data_uri, salt="srgb")
 
 
 # ----- Background generators (SVG data URIs, no network) -------------------
@@ -803,26 +963,23 @@ def _typography_overrides_css(pair: str) -> str:
     return _TYPOGRAPHY_OVERRIDES.get((pair or "").lower(), "")
 
 
-# Display/headline face per typography_pair for the v2 archetypes. Mirrors the
-# motion renderer's fontStackFor (remotion StoryCard.tsx) so the posted still
-# and the reel show the SAME headline face for a given pair — closing the
-# still↔motion typography gap where the still always rendered Anton regardless
-# of the director's pick. Only the pairs whose face differs from the Anton
-# default appear here; anton/druk/oswald all resolve to Anton on both surfaces,
-# so they return "" and each archetype's own `var(--mh-font-display, 'Anton'…)`
-# fallback stands — keeping those renders byte-identical.
-_PAIR_DISPLAY_FONT: dict[str, str] = {
-    "bebas-grotesk": "'Bebas Neue','Oswald','Impact','Arial Narrow',sans-serif",
-    "bowlby-inter": "'Bowlby One','Anton','Impact',sans-serif",
-    "archivo-inter": "'Space Grotesk','Archivo','Inter','Helvetica Neue',Arial,sans-serif",
-}
-
-
+# Display/headline face per typography_pair for the v2 archetypes. D5 (Canva
+# gap analysis): the mapping is sourced from the curated pairing table
+# (``graphic_renderer.type_pairs``) — each pairing is an atomic (display,
+# kicker, body, data) quadruple, and this helper surfaces its display stack.
+# Parity contract unchanged: the display stack per pairing mirrors the motion
+# renderer's fontStackFor (remotion StoryCard.tsx) so the posted still and the
+# reel show the SAME headline face for a given pair. Pairs that resolve to the
+# Anton default (anton/druk/oswald) return "" so each archetype's own
+# `var(--mh-font-display, 'Anton'…)` fallback stands — keeping those renders
+# byte-identical.
 def _display_font_stack_for_pair(pair: str) -> str:
     """CSS font stack for the display/headline role for this typography_pair,
     or "" when it resolves to the Anton default. Parity contract: matches
     fontStackFor in the motion renderer."""
-    return _PAIR_DISPLAY_FONT.get((pair or "").lower(), "")
+    from mediahub.graphic_renderer.type_pairs import pairing_for
+
+    return pairing_for(pair).display
 
 
 # ---------------------------------------------------------------------------
@@ -1004,6 +1161,28 @@ def _accent_decoration_html(
             f'<div style="position:absolute;right:72px;bottom:{int(height * 0.20)}px;'
             f"width:{size}px;height:{size}px;border-radius:50%;border:{w}px solid {color};"
             f'z-index:11;pointer-events:none;"></div>'
+        )
+    if style == "glass_chip":
+        # B6 — a frosted-glass margin pill (the v1 / motion-parity execution of
+        # the treatment; the v2 archetypes glass their own modules via the
+        # --mh-glass-* tokens). Surface tint rides --mh-surface-rgb (fallback for
+        # the standalone/test call); the mirror lives at
+        # remotion/.../sprint/accents/glass_chip.tsx.
+        pill_w = int(m * 0.20 * (0.7 + s))
+        pill_h = max(24, int(m * 0.055))
+        tab_w = max(4, int(m * 0.006))
+        return (
+            f'<div style="position:absolute;left:{int(width * 0.06)}px;'
+            f"bottom:{int(height * 0.12)}px;width:{pill_w}px;height:{pill_h}px;"
+            f"border-radius:{pill_h // 2}px;overflow:hidden;"
+            f"background:rgba(var(--mh-surface-rgb,20,24,33),0.30);"
+            f"-webkit-backdrop-filter:blur(12px) saturate(140%);"
+            f"backdrop-filter:blur(12px) saturate(140%);"
+            f"border:1px solid rgba(255,255,255,0.16);"
+            f"box-shadow:var(--mh-elev-3,0 6px 20px rgba(10,12,16,0.26));"
+            f'z-index:11;pointer-events:none;">'
+            f'<div style="position:absolute;left:0;top:0;bottom:0;width:{tab_w}px;'
+            f'background:{color};"></div></div>'
         )
     return ""
 
@@ -1874,6 +2053,19 @@ _MEDAL_ACCENTS = {
     "bronze": {"accent": "#E2A26A", "accent_deep": "#7E481B", "badge": "BRONZE"},
 }
 
+# F9 (Canva gap analysis) — which v2 archetype result element takes medal chrome,
+# and how. ``numeral`` selectors get the gradient-clipped specular ramp (the
+# result glyphs BECOME the metal, APCA-gated on the ramp's darkest stop vs the
+# ground by the resolver); ``chip`` selectors get the ramp fill + bevel + rim.
+# Only the big-numeral / medal-spotlight layouts are mapped, so chrome lands
+# where it reads as an achievement grammar (shinier = bigger medal) rather than
+# on every card. Absent archetype → skipped → byte-identical.
+_MEDAL_CHROME_SELECTORS: dict[str, dict[str, str]] = {
+    "big_number_dominant": {"numeral": ".bn__result"},
+    "cornerstone_numeral": {"numeral": ".cn__num"},
+    "centered_medal_spotlight": {"chip": ".cm__result"},
+}
+
 
 def _localized_overrides_css(language: str) -> str:
     """RTL text-direction CSS for a right-to-left target language (1.24).
@@ -2027,6 +2219,24 @@ def _common_replacements(
         )
     base_css = shared_css + "\n" + base_css + "\n" + text_led_css
 
+    # F1 (systemic floor) — publish the spacing-token scale, then load the shared
+    # component/token sheet. The scale is emitted first (a :root{} block) so the
+    # component classes and any layout can consume ``var(--mh-sp-N)``. Both are
+    # inert until referenced: an unused custom property paints nothing and an
+    # unused ``.mh-lockup`` class matches no element, so every legacy render is
+    # byte-identical. ``_tokens.css`` carries no @font-face and no absolute path,
+    # so it needs no url() rewrite.
+    base_css = base_css + "\n" + _spacing_scale_css(width, height)
+    # F2 — the geometry context (short/margin/gutter/col). Same inert-until-used
+    # contract as the spacing scale: an unreferenced custom property paints
+    # nothing, so this is byte-identical for every legacy layout.
+    base_css = base_css + "\n" + _geometry_scale_css(width, height)
+    try:
+        if _TOKENS_CSS_PATH.exists():
+            base_css = base_css + "\n" + _read_text(_TOKENS_CSS_PATH)
+    except Exception:
+        pass
+
     # 1.9 — inline this org's UPLOADED custom fonts (typography.font_intake) as
     # self-hosted file:// @font-face, so a club's own brand typeface renders on
     # its cards. Byte-identical when the org has no uploads (empty CSS), and never
@@ -2155,6 +2365,9 @@ def _common_replacements(
         "BASE_CSS": base_css,
         "WATER_PATTERN": _background_pattern_for(bg_style),
         "ACCENT_DECORATION": accent_overlay_html,
+        # F7 overlap-accent slot default — "" so any layout carrying the anchor
+        # token strips it cleanly; _fill_v2_archetype overrides for v2 cards.
+        "OVERLAP_ACCENT": "",
         "NOISE_PATTERN": _noise_pattern_data_uri(),
         "AI_BG_URI": ai_bg_uri or "",
         "ATHLETE_FULL_NAME": html_escape(full_name),
@@ -2957,7 +3170,16 @@ def _apply(template: str, replacements: dict[str, str]) -> str:
 
 # Chromium launch flags shared by the one-shot path and every pooled browser, so
 # a warm pooled render is byte-identical to a cold one-shot render.
-_CHROMIUM_LAUNCH_ARGS = ["--no-sandbox", "--font-render-hinting=none"]
+# F5 (render-time floor): pin the rasteriser's colour profile to sRGB so a card
+# renders the same regardless of the host display profile and so the brand hexes
+# hit the pixels exactly. This flag changes output bytes, so it is folded into
+# the PNG cache salt (render_cache._launch_args_salt) — a deploy that adds/removes
+# it naturally ages out pre-flag cache entries instead of serving stale renders.
+_CHROMIUM_LAUNCH_ARGS = [
+    "--no-sandbox",
+    "--font-render-hinting=none",
+    "--force-color-profile=srgb",
+]
 
 
 def _renderer_net_locked() -> bool:
@@ -2997,6 +3219,83 @@ def _new_render_context(browser, size: tuple[int, int], dpr: int):
     if _renderer_net_locked():
         ctx.route("**/*", _renderer_route_guard)
     return ctx
+
+
+# F5 render-time floor: a single in-page sweep run AFTER document.fonts.ready and
+# BEFORE the screenshot. It (a) checks every font family actually used by rendered
+# text is loaded — a miss means the card silently fell back to a system sans, an
+# off-brand lie we refuse to ship; (b) measures each photo's source pixels against
+# its rendered box × DPR, recording >1.5× upscales; and (c) clamps a crop-intent
+# zoom (--mh-photo-scale) so it never magnifies a photo beyond its native
+# resolution. The clamp only mutates the DOM when a genuine over-zoom exists, so a
+# card with adequate-resolution photography (and every photo-less card) is
+# byte-identical.
+_RENDER_FLOOR_JS = r"""
+(dpr) => {
+  const GENERIC = new Set(['serif','sans-serif','monospace','cursive','fantasy',
+    'system-ui','ui-sans-serif','ui-serif','ui-monospace','-apple-system',
+    'blinkmacsystemfont','math','emoji','inherit','initial','unset']);
+  // (a) used font families → any that failed to load
+  const used = new Set();
+  for (const el of document.querySelectorAll('*')) {
+    const cs = getComputedStyle(el);
+    if (cs.display === 'none' || cs.visibility === 'hidden') continue;
+    let hasText = false;
+    for (const n of el.childNodes) if (n.nodeType === 3 && n.textContent.trim()) hasText = true;
+    if (!hasText) continue;
+    const first = (cs.fontFamily || '').split(',')[0].trim().replace(/^["']|["']$/g, '');
+    if (first && !GENERIC.has(first.toLowerCase())) used.add(first);
+  }
+  const missing = [];
+  for (const fam of used) {
+    try { if (!document.fonts.check('32px "' + fam + '"')) missing.push(fam); }
+    catch (e) { /* malformed shorthand — ignore */ }
+  }
+  // (b) photo upscale guard + (c) native crop-zoom clamp
+  const upscales = [];
+  let clamped = null;
+  for (const img of document.querySelectorAll('img')) {
+    const nat = img.naturalWidth || 0;
+    const r = img.getBoundingClientRect();
+    if (nat < 1 || r.width < 1) continue;
+    // current crop-intent zoom on this element (identity if none)
+    let scale = 1;
+    const m = getComputedStyle(img).transform;
+    if (m && m !== 'none') {
+      const p = m.match(/matrix\(([^)]+)\)/);
+      if (p) { const a = parseFloat(p[1].split(',')[0]); if (a > 0) scale = a; }
+    }
+    const sampled = r.width * dpr * scale;           // device px drawn from the source
+    const ratio = sampled / nat;
+    if (ratio > 1.5) upscales.push({w: Math.round(r.width), nat: nat, ratio: +ratio.toFixed(2)});
+    // clamp the shared --mh-photo-scale so the zoom never exceeds native
+    if (scale > 1) {
+      const maxScale = Math.max(1, nat / (r.width * dpr));
+      if (scale > maxScale + 1e-3) {
+        const ns = Math.max(1, maxScale);
+        document.documentElement.style.setProperty('--mh-photo-scale', ns.toFixed(3));
+        clamped = {from: +scale.toFixed(2), to: +ns.toFixed(2)};
+      }
+    }
+  }
+  return {missing, upscales, clamped};
+}
+"""
+
+# Sidecar suffix the floor sweep drops its non-fatal notes into, for render_brief
+# to fold into the visual's safety_notes. Written next to the output PNG so both
+# the pooled and one-shot paths (which share output_path) reach the same file.
+_RENDER_NOTES_SUFFIX = ".rendernotes.json"
+
+
+def _font_strict_enabled() -> bool:
+    """True unless the F5 raise-on-missing-font gate is disabled.
+
+    Opt-out kill switch ``MEDIAHUB_RENDER_FONT_STRICT=0`` for an environment
+    where a genuine font is unavailable and an honest error is worse than a
+    fallback; on (the default) a missing brand face fails the render loudly.
+    """
+    return _flag("MEDIAHUB_RENDER_FONT_STRICT", "1")
 
 
 def _render_on_context(ctx, html: str, output_path: Path, size: tuple[int, int], dpr: int) -> int:
@@ -3049,12 +3348,59 @@ def _render_on_context(ctx, html: str, output_path: Path, size: tuple[int, int],
                 page.wait_for_timeout(400)
             except Exception:
                 pass
+        # F5 render-time floor — one sweep between fonts.ready and the screenshot.
+        # Fatal: a referenced brand font that never loaded (raise, never ship a
+        # silent system-sans fallback). Non-fatal: photo upscale notes → sidecar;
+        # a native crop-zoom clamp mutates --mh-photo-scale in place before the
+        # shot. Any sweep failure is swallowed so it can never sink a render that
+        # would otherwise succeed — except the deliberate RenderError.
+        _floor_notes: list[str] = []
+        try:
+            _floor = page.evaluate(_RENDER_FLOOR_JS, dpr)
+        except RenderError:
+            raise
+        except Exception:
+            _floor = None
+        if _floor:
+            _missing = [str(f) for f in (_floor.get("missing") or []) if f]
+            if _missing and _font_strict_enabled():
+                raise RenderError(
+                    "font(s) referenced by this card did not load, so text would "
+                    "fall back to a system typeface: " + ", ".join(sorted(set(_missing)))
+                )
+            for up in _floor.get("upscales") or []:
+                try:
+                    _floor_notes.append(
+                        "photo upscaled {:.1f}× beyond native ({}px source in a {}px slot)".format(
+                            float(up["ratio"]), int(up["nat"]), int(up["w"])
+                        )
+                    )
+                except (KeyError, TypeError, ValueError):
+                    continue
+            _cl = _floor.get("clamped")
+            if _cl:
+                try:
+                    _floor_notes.append(
+                        "crop zoom clamped to native ({:.2f}× → {:.2f}×)".format(
+                            float(_cl["from"]), float(_cl["to"])
+                        )
+                    )
+                except (KeyError, TypeError, ValueError):
+                    pass
         png = page.screenshot(
             full_page=False,
             type="png",
             omit_background=False,
             clip={"x": 0, "y": 0, "width": width, "height": height},
         )
+        # Drop the non-fatal notes beside the output for render_brief to read.
+        if _floor_notes:
+            try:
+                output_path.with_suffix(output_path.suffix + _RENDER_NOTES_SUFFIX).write_text(
+                    json.dumps(_floor_notes), encoding="utf-8"
+                )
+            except OSError:
+                pass
     finally:
         # Close the page (NOT the context) so a pooled context stays warm for
         # the next render while per-render page memory is released immediately.
@@ -3460,6 +3806,84 @@ def _produce_png(html: str, output_path: Path, size: tuple[int, int], dpr: int) 
             browser.close()
 
 
+def measure_html_geometry(
+    htmls: list[str], size: tuple[int, int], *, output_dir: Path, dpr: int = 1
+) -> Optional[list[Optional[dict]]]:
+    """F6 — measure each candidate HTML's element geometry in one browser pass.
+
+    Runs :data:`layout_score.MEASURE_JS` (a single ``getBoundingClientRect``
+    sweep, no screenshot) over every html and returns one geometry dict per
+    input (or ``None`` for a candidate that failed to measure). The whole call
+    returns ``None`` when Playwright is unavailable so the caller can degrade to
+    the director's current pack — F6 is a ranking aid, never load-bearing.
+
+    Deliberately self-contained: it launches its own one-shot Chromium and never
+    touches ``_render_on_context`` (the single source of render pixels) or the
+    G1.24 PNG cache, so enabling F6 cannot change a single rendered pixel of a
+    card whose winning pack is the one the director already chose. Geometry is
+    measured at ``dpr=1`` — ``device_scale_factor`` only changes raster
+    resolution, not the CSS-pixel box layout ``getBoundingClientRect`` reports,
+    so the boxes match the real render exactly.
+    """
+    if not htmls:
+        return []
+    try:
+        from playwright.sync_api import sync_playwright  # type: ignore
+    except Exception as e:  # pragma: no cover - environment-dependent
+        log.debug("F6 layout scoring skipped — Playwright unavailable: %s", e)
+        return None
+
+    from mediahub.graphic_renderer.layout_score import MEASURE_JS
+
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    results: list[Optional[dict]] = []
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(args=_CHROMIUM_LAUNCH_ARGS)
+            try:
+                ctx = _new_render_context(browser, size, dpr)
+                for html in htmls:
+                    page_path = output_dir / (
+                        f"_f6cand.{os.getpid()}-{uuid.uuid4().hex[:8]}.render.html"
+                    )
+                    geom: Optional[dict] = None
+                    page = ctx.new_page()
+                    try:
+                        page_path.write_text(html, encoding="utf-8")
+                        page.goto(page_path.as_uri(), wait_until="networkidle", timeout=30_000)
+                        try:
+                            page.evaluate(
+                                "() => (document.fonts && document.fonts.ready) "
+                                "? document.fonts.ready.then(() => true) : true"
+                            )
+                        except Exception:
+                            try:
+                                page.wait_for_timeout(200)
+                            except Exception:
+                                pass
+                        geom = page.evaluate(MEASURE_JS)
+                    except Exception as exc:
+                        log.debug("F6 candidate measure failed: %s", exc)
+                        geom = None
+                    finally:
+                        try:
+                            page.close()
+                        except Exception:
+                            pass
+                        try:
+                            page_path.unlink()
+                        except OSError:
+                            pass
+                    results.append(geom)
+            finally:
+                browser.close()
+    except Exception as exc:  # pragma: no cover - environment-dependent
+        log.warning("F6 layout scoring pass failed: %s", exc)
+        return None
+    return results
+
+
 def render_html_to_png(
     html: str,
     output_path: str | Path,
@@ -3607,6 +4031,66 @@ def _legible_accent(primary: str) -> str:
     return "#FFFFFF" if dark else "#0B0B0C"  # last resort: maximum contrast
 
 
+def _derived_accent_enabled(brand_kit) -> bool:
+    """True when the operator has opted into the C10 derived companion accent.
+
+    Per-club via the BrandKit ``allow_derived_accent`` flag, or globally via the
+    ``MEDIAHUB_DERIVED_ACCENT`` env switch. Default OFF — a derived accent
+    introduces a hue the club never uploaded, so it is always an explicit choice.
+    """
+    if os.environ.get("MEDIAHUB_DERIVED_ACCENT", "").strip().lower() in ("1", "true", "yes", "on"):
+        return True
+    return bool(getattr(brand_kit, "allow_derived_accent", False))
+
+
+def _companion_accent_for(primary: str, brand_kit, *extra_colours: str):
+    """The C10 hue-arithmetic companion accent for a thin palette, or ``None``.
+
+    Gated behind the operator opt-in (:func:`_derived_accent_enabled`). Every
+    other brand-adjacent colour (the resolved secondary and the brief-palette
+    accent) is fed to ``theming.companion.derive_companion_accent`` so its
+    brandability + distinctness gate returns ``None`` for any club that actually
+    has a second brand colour — the companion only ever fires for a genuinely
+    one-colour club that opted in. Deterministic; never raises.
+    """
+    if not _derived_accent_enabled(brand_kit):
+        return None
+    try:
+        from mediahub.theming.companion import derive_companion_accent
+
+        return derive_companion_accent(primary, [c for c in extra_colours if c])
+    except Exception:
+        return None
+
+
+def _companion_accent_note(brief, brand_kit) -> str:
+    """The explainability note when a C10 companion accent was actually painted.
+
+    Re-runs the exact accent-resolution decision ``_mh_role_vars`` makes and
+    returns the companion's provenance only when it genuinely filled the accent
+    (opt-in on, no real accent, secondary illegible, thin palette, no medal tint
+    overriding). ``""`` otherwise, so a non-derived card records nothing.
+    """
+    if not _derived_accent_enabled(brand_kit) or _detect_medal_tier(brief):
+        return ""
+    palette = dict(getattr(brief, "palette", None) or {})
+    primary = getattr(brand_kit, "primary_colour", None) if brand_kit is not None else None
+    if not _is_brand_hex(primary):
+        primary = palette.get("primary")
+    if not _is_brand_hex(primary):
+        return ""
+    # A real brand-kit accent always wins — the companion never fired.
+    if _is_brand_hex(getattr(brand_kit, "accent_colour", None) if brand_kit is not None else None):
+        return ""
+    secondary = getattr(brand_kit, "secondary_colour", None) if brand_kit is not None else None
+    if not _is_brand_hex(secondary):
+        secondary = palette.get("secondary")
+    if not _is_brand_hex(secondary):
+        secondary = darken(primary, 0.40)
+    companion = _companion_accent_for(primary, brand_kit, secondary, palette.get("accent"))
+    return f"accent {companion.hex} — {companion.provenance}" if companion is not None else ""
+
+
 def _fit_one_line_px(
     text: str,
     box_w: float,
@@ -3616,12 +4100,18 @@ def _fit_one_line_px(
     weight,
     min_px: int,
     max_px: int,
+    vertical: bool = False,
 ) -> int:
     """Largest int px at which ``text`` fits on **one line** in ``box_w`` (≤ ``box_h``).
 
     The v2 hero slots render with ``white-space: nowrap``, so they must be sized
     single-line. ``autofit.fit_font_px`` word-*wraps* to measure, which over-sizes
     a multi-word surname ("Van Dyk") that then overflows on the one forced line.
+
+    D7 (Canva gap analysis) — a ``vertical=True`` run (``writing-mode:vertical-rl``,
+    a rotated spine) reads DOWN the box, so its available line length is the box
+    HEIGHT and its size cap is the box WIDTH: the two axes swap. Chromium renders
+    ``writing-mode`` deterministically, so the fit stays reproducible.
     """
     from mediahub.graphic_renderer.autofit import em_width
 
@@ -3630,7 +4120,11 @@ def _fit_one_line_px(
     ew = em_width(text, font_family=font_family, weight=weight)
     if ew <= 0:
         return max_px
-    px = min(int(box_w / ew), int(box_h))
+    if vertical:
+        # The run travels along the box's HEIGHT; the glyph size is capped by width.
+        px = min(int(box_h / ew), int(box_w))
+    else:
+        px = min(int(box_w / ew), int(box_h))
     return max(min_px, min(max_px, px))
 
 
@@ -3717,7 +4211,18 @@ def _mh_role_vars(palette: dict, brand_kit=None) -> dict[str, str]:
     # Without this, a single-colour kit (accent=None, secondary=#000000 by the
     # BrandKit default) collapses the accent to black and hides the result time.
     if not _is_brand_hex(accent):
-        accent = palette.get("accent")
+        # C10: for a genuinely thin palette AND the operator opt-in, a
+        # hue-arithmetic complementary companion (a real second colour, not the
+        # synthetic white/tint fallback) fills the accent. The resolved secondary
+        # and the brief-palette accent feed its thinness gate, so a club that has
+        # a second brand colour keeps it (the companion returns None). Off by
+        # default, so this whole branch is byte-identical to before.
+        palette_accent = palette.get("accent")
+        companion = _companion_accent_for(primary, brand_kit, secondary, palette_accent)
+        if companion is not None:
+            accent = companion.hex
+        elif _is_brand_hex(palette_accent):
+            accent = palette_accent
     if not _is_brand_hex(accent):
         from mediahub.quality.compliance import is_legible
 
@@ -3841,6 +4346,26 @@ def _v2_photo_position(athlete_path, width: int = 1080, height: int = 1350, mask
 # Intents that keep today's saliency framing untouched (no vars emitted).
 _CROP_INTENT_NOOPS = frozenset({"", "original", "full_bleed", "wide_action"})
 
+# E2 — operator switch turning the smartcrop scorer on for undirected photo
+# cards. Unset (the default) keeps today's saliency framing, byte-identical.
+_SMART_CROP_ENV = "MEDIAHUB_SMART_CROP"
+
+
+def effective_crop_intent(intent: str) -> str:
+    """The crop intent a render (still or motion) should execute.
+
+    A director-set intent passes straight through. When none is set and the
+    operator enabled the smart-crop default (``MEDIAHUB_SMART_CROP``), an
+    undirected photo card resolves to ``"smart"`` so the scorer frames it;
+    otherwise ``""`` (today's saliency framing, byte-identical). Shared by the
+    still fill and the motion prop builder so both surfaces agree on the intent.
+    """
+    intent = (intent or "").strip()
+    if intent:
+        return intent
+    raw = os.environ.get(_SMART_CROP_ENV, "").strip().lower()
+    return "smart" if raw in ("1", "true", "yes", "on") else ""
+
 
 def _subject_bbox_fractions(mask_path) -> Optional[tuple[float, float, float, float]]:
     """Subject bounding box as ``(left, top, w, h)`` fractions of the image,
@@ -3878,7 +4403,7 @@ def _subject_bbox_fractions(mask_path) -> Optional[tuple[float, float, float, fl
 
 
 def _crop_intent_vars(
-    intent: str, athlete_path, mask_path, width: int, height: int
+    intent: str, athlete_path, mask_path, width: int, height: int, symmetric: bool = False
 ) -> dict[str, str]:
     """The ``--mh-photo-*`` overrides that execute a director crop intent (M10).
 
@@ -3886,6 +4411,11 @@ def _crop_intent_vars(
     window's ``object-position`` / scale — derived from the same saliency maths
     the default focus uses, never from taste:
 
+    * ``smart`` (E2) — the smartcrop scorer: multi-scale candidate scoring
+      picks the zoom, rule-of-thirds placement is the default (centred when
+      ``symmetric``), a distant subject is punched in. Emits ``--mh-photo-pos``
+      and, only on a punch-in, ``--mh-photo-scale``; byte-identical to today's
+      framing when the scorer agrees with the largest crop.
     * ``tight_portrait`` — head-accurate focus + a bounded scale-up derived
       from the subject's alpha-bbox (shrink the crop toward the subject).
     * ``centered``       — the geometric centre, exactly as named.
@@ -3897,6 +4427,18 @@ def _crop_intent_vars(
     intent = (intent or "").strip()
     if intent in _CROP_INTENT_NOOPS or not athlete_path:
         return {}
+    if intent == "smart":
+        try:
+            from mediahub.graphic_renderer import saliency as _sal
+
+            return _sal.smart_focus(
+                athlete_path,
+                f"{int(width)}:{int(height)}",
+                symmetric=symmetric,
+                mask_path=mask_path,
+            )
+        except Exception:
+            return {}
     if intent == "centered":
         return {"--mh-photo-pos": "50% 50%"}
     base_pos = _v2_photo_position(athlete_path, width, height, mask_path)
@@ -4027,8 +4569,7 @@ def _sticker_outline_css(width: int, height: int, strength: float) -> str:
         )
     )
     return (
-        "\n/* --- B5 die-cut sticker contour --- */\n"
-        f"img.athlete-cutout {{ filter: {shadows}; }}\n"
+        f"\n/* --- B5 die-cut sticker contour --- */\nimg.athlete-cutout {{ filter: {shadows}; }}\n"
     )
 
 
@@ -4083,6 +4624,139 @@ def _v2_photo_treatment_assets(
 
 
 # --------------------------------------------------------------------------- #
+# E4 (Canva gap analysis) — shaped photo frames for the windowed archetypes
+# --------------------------------------------------------------------------- #
+
+# The three windowed-photo archetypes the ``photo_frame_shape`` lever dresses,
+# mapped to the selectors it re-styles: ``window`` is the photo well (its own
+# fill/border/box-shadow is dropped so the shape + offset echo take over),
+# ``media`` are the elements that must clip to the shape (the ``arch``/``blob``
+# border-radius rides them; ``torn_edge`` displaces the whole window subtree via
+# one window-level filter, so it needs no per-media rule), and ``img_lift`` is
+# the in-flow ``<img>`` that must be raised above the shaped surface pseudo so
+# the photo isn't hidden behind it (empty where the layout already positions its
+# media with an explicit z-index).
+# Selectors are prefixed with the archetype ROOT class (``.pp`` / ``.di`` /
+# ``.ps``) so the shape rules out-specify the layout's own window rules (border,
+# overflow, background, box-shadow, the disc's ``border-radius:50%``) regardless
+# of source order — the shape CSS rides at the top of the injected ``:root``
+# block, ahead of the layout's ``<style>`` body.
+_WINDOWED_SHAPE_ARCHETYPES: dict[str, dict[str, object]] = {
+    "photo_passepartout": {
+        "root": ".pp",
+        "window": ".pp__window",
+        "media": (".pp__window img",),
+        "img_lift": ".pp__window img",
+    },
+    "spotlight_disc": {
+        "root": ".di",
+        "window": ".di__disc",
+        "media": (".di__disc img",),
+        "img_lift": ".di__disc img",
+    },
+    "full_height_portrait_split": {
+        "root": ".ps",
+        "window": ".ps__photo",
+        "media": (".ps__photo-img img", ".ps__scrim", ".ps__watermark"),
+        "img_lift": "",
+    },
+}
+
+
+def _photo_frame_shape_card_key(brief, archetype: str) -> str:
+    """A stable per-card key for the seeded shapes (blob radius / torn tear).
+
+    Prefers the content-item id (stable across a card's re-renders), falls back
+    to the brief id, then the surname — folded with the archetype so the two
+    windowed archetypes on one card draw independent silhouettes. Mirrored by
+    ``motion.py`` so the reel's shape matches the still's exactly.
+    """
+    base = (
+        str(getattr(brief, "content_item_id", "") or "")
+        or str(getattr(brief, "id", "") or "")
+        or str((getattr(brief, "text_layers", None) or {}).get("athlete_surname") or "")
+    )
+    return f"{base}|{archetype}"
+
+
+def _photo_frame_shape_assets(brief, archetype: str, width: int, height: int) -> tuple[str, str]:
+    """``(css, defs_html)`` for the card's ``photo_frame_shape`` lever (E4).
+
+    A non-rect shape on one of the three windowed archetypes reshapes the photo
+    window and pairs it with the classic offset accent echo (the same shape in
+    ``var(--mh-accent)`` shifted ~12px behind). ``rect`` — and any brief on any
+    other archetype, or with the lever absent — returns ``("", "")`` so the card
+    is byte-identical to the pre-lever render. All colour comes from the resolved
+    ``--mh-accent`` / ``--mh-surface`` role tokens; the shapes are pure geometry.
+    Deterministic: the ``blob`` radius and the ``torn_edge`` filter are seeded
+    from the card key, so the same brief + seed yields the same PNG.
+    """
+    from mediahub.graphic_renderer import photo_frame as _pf
+
+    shape = (getattr(brief, "photo_frame_shape", "") or "").strip().lower()
+    cfg = _WINDOWED_SHAPE_ARCHETYPES.get(archetype)
+    if cfg is None or shape in ("", "rect") or shape not in _pf.PHOTO_FRAME_SHAPES:
+        return "", ""
+
+    root = str(cfg["root"])
+    win = f"{root} {cfg['window']}"
+    media: tuple[str, ...] = tuple(f"{root} {sel}" for sel in cfg["media"])  # type: ignore[arg-type]
+    img_lift = f"{root} {cfg['img_lift']}" if cfg["img_lift"] else ""
+    # ~12px offset at 1080, scaled with the short edge so every cut echoes the
+    # shape by the same relative amount.
+    off = max(8, int(round(min(width, height) * 0.011)))
+    card_key = _photo_frame_shape_card_key(brief, archetype)
+
+    # The window loses its own fill / keyline / elevation (the echo carries the
+    # accent now) and becomes an unclipped, isolated stacking context so the
+    # offset echo can peek out behind the photo (clipped only by the card edge).
+    # ``min-width/height: 0`` is load-bearing: a flex item with ``overflow:
+    # visible`` reverts to ``min-*: auto`` (content-sized), which would let the
+    # photo grow the window past its flex basis and crush the caption/column —
+    # pinning the minima to 0 keeps the flex geometry byte-for-byte as the rect
+    # window sized it, so only the shape + echo change.
+    win_reset = (
+        "overflow: visible; min-width: 0; min-height: 0; background: transparent;"
+        " border: none; box-shadow: none; position: relative; z-index: 2;"
+        " isolation: isolate;"
+    )
+
+    defs = ""
+    if shape == "torn_edge":
+        # One window-level displacement filter tears the entire window subtree
+        # (surface pseudo, photo, echo) along one seeded noise field — so it
+        # composes over any photo grade already on the <img> instead of fighting
+        # it for the single `filter` slot.
+        defs = _pf.torn_filter_svg(card_key)
+        shape_decl = f" filter: url(#{_pf.TORN_FILTER_ID});"
+        css = (
+            f"\n/* --- E4 photo frame shape: torn_edge ({archetype}) --- */\n"
+            f"{win} {{ {win_reset}{shape_decl} }}\n"
+            f'{win}::before {{ content: ""; position: absolute; inset: 0; z-index: 0;'
+            f" background: var(--mh-surface); }}\n"
+            f'{win}::after {{ content: ""; position: absolute; inset: 0; z-index: -1;'
+            f" background: var(--mh-accent); transform: translate({off}px, {off}px); }}\n"
+        )
+    else:
+        radius = _pf.frame_radius(shape, card_key)
+        r = f"border-radius: {radius};"
+        media_css = "".join(f"{sel} {{ {r} }}\n" for sel in media)
+        css = (
+            f"\n/* --- E4 photo frame shape: {shape} ({archetype}) --- */\n"
+            f"{win} {{ {win_reset} {r} }}\n"
+            f'{win}::before {{ content: ""; position: absolute; inset: 0; z-index: 0;'
+            f" background: var(--mh-surface); {r} }}\n"
+            f'{win}::after {{ content: ""; position: absolute; inset: 0; z-index: -1;'
+            f" background: var(--mh-accent); transform: translate({off}px, {off}px); {r} }}\n"
+            f"{media_css}"
+        )
+    if img_lift:
+        # Raise the in-flow photo above the shaped surface pseudo (::before, z0).
+        css += f"{img_lift} {{ position: relative; z-index: 1; }}\n"
+    return css, defs
+
+
+# --------------------------------------------------------------------------- #
 # M11 — stat chips + honest proportional PB bars
 # --------------------------------------------------------------------------- #
 
@@ -4133,7 +4807,7 @@ _STAT_CHIP_ARCHETYPES: dict[str, str] = {
 }
 
 
-def _stat_chips_html(brief, ink_var: str) -> str:
+def _stat_chips_html(brief, ink_var: str, *, glass: bool = False) -> str:
     """The rendered secondary-stat chip row for a data-led archetype (M11).
 
     One geometry across every archetype (visual continuity per the data-graphics
@@ -4141,7 +4815,16 @@ def _stat_chips_html(brief, ink_var: str) -> str:
     (JetBrains Mono, tnum). Only verified facts appear — each chip's value comes
     from ``hero_stat_options``, so a stat the detectors never measured cannot
     render. Empty ``secondary_stats`` → ``""`` (the slot collapses).
+
+    ``glass`` (B6) frosts the chips over a photo: the ``mh-glass`` recipe replaces
+    the hairline border with the brand-tinted backdrop-blur panel. Off by default,
+    so a non-glass row is byte-identical.
     """
+    chip_open = (
+        '<div class="mh-glass" style="padding:18px 24px;min-width:0">'
+        if glass
+        else '<div style="border:1px solid var(--mh-outline);padding:18px 24px;min-width:0">'
+    )
     keys = [k for k in (getattr(brief, "secondary_stats", None) or []) if k]
     opts = getattr(brief, "hero_stat_options", None) or {}
     hero_key = None  # never chip the fact already carried by the hero line
@@ -4159,8 +4842,8 @@ def _stat_chips_html(brief, ink_var: str) -> str:
             continue
         value = _chip_value(key, str(opts[key]))
         cells.append(
-            '<div style="border:1px solid var(--mh-outline);padding:18px 24px;min-width:0">'
-            "<div style=\"font-family:'Inter',sans-serif;font-weight:700;font-size:17px;"
+            chip_open
+            + "<div style=\"font-family:'Inter',sans-serif;font-weight:700;font-size:17px;"
             "letter-spacing:0.22em;text-transform:uppercase;color:var(--mh-accent);"
             'margin-bottom:8px">' + html_escape(label) + "</div>"
             "<div style=\"font-family:'JetBrains Mono','Space Grotesk',monospace;"
@@ -4389,7 +5072,200 @@ def _apply_role_assignment(root_vars: dict[str, str], assignment: dict) -> dict[
     cand["--mh-outline"] = (
         "rgba(255,255,255,0.20)" if cand["--mh-on-primary"] == "#FFFFFF" else "rgba(0,0,0,0.20)"
     )
-    return cand if check_roles(cand).passes else root_vars
+    report = check_roles(cand)
+    if report.passes:
+        return cand
+    # C6 (Canva gap analysis) — per-slot contrast repair. Rather than discard the
+    # whole art direction because one pair is illegible, step ONLY the failing
+    # slot(s) through tonal blends of the SAME assigned colour toward legibility
+    # (Canva "automatically adjusts text colours to keep them readable"). Ship the
+    # repaired set only if it now clears the full gate; otherwise fall back to the
+    # brand-safe baseline exactly as before (legibility still beats art direction).
+    repaired = _repair_failing_slots(cand, report.failures)
+    if check_roles(repaired).passes:
+        repaired["--mh-repair-note"] = "repaired-" + "+".join(sorted(set(report.failures)))
+        return repaired
+    return root_vars
+
+
+# C6 — the text/background pair each scored failure implicates, and how to repair
+# it: a text pair nudges its INK toward the guaranteed-legible on-colour; the two
+# accent pairs nudge the ACCENT away from the ground until it reads both as text
+# on the ground and as a chip behind ground-coloured text.
+def _repair_text_on(text: str, bg: str) -> str:
+    """Step ``text`` toward the guaranteed-legible ink for ``bg`` until it reads.
+
+    Blends in eighths (the same 1/8 ladder as ``gradient_mesh._legible_floor``),
+    preserving as much of the assigned hue as legibility allows. Deterministic.
+    """
+    from mediahub.quality.compliance import is_legible
+
+    if not (_is_brand_hex(text) and _is_brand_hex(bg)):
+        return text
+    if is_legible(text, bg):
+        return text
+    anchor = _on_color(bg)
+    for i in range(1, 9):
+        cand = _mix_hex(text, anchor, i / 8.0)
+        if is_legible(cand, bg):
+            return cand
+    return anchor
+
+
+def _repair_accent_on(accent: str, ground: str) -> str:
+    """Step ``accent`` toward its legible pole until it reads BOTH ways on ``ground``.
+
+    Mirrors ``_legible_accent``'s two-direction test (kicker text on the ground
+    AND the result chip behind ground-coloured text), but preserves the director's
+    assigned accent hue instead of re-deriving from the primary. Deterministic.
+    """
+    from mediahub.quality.compliance import is_legible
+
+    if not (_is_brand_hex(accent) and _is_brand_hex(ground)):
+        return accent
+    if is_legible(accent, ground) and is_legible(ground, accent):
+        return accent
+    pole = "#FFFFFF" if _rel_luminance(ground) < 0.45 else "#0B0B0C"
+    for i in range(1, 9):
+        cand = _mix_hex(accent, pole, i / 8.0)
+        if is_legible(cand, ground) and is_legible(ground, cand):
+            return cand
+    return pole
+
+
+def _repair_failing_slots(cand: dict[str, str], failures: list[str]) -> dict[str, str]:
+    """Return a copy of ``cand`` with each failing scored pair's slot repaired (C6)."""
+    repaired = dict(cand)
+    for pair in failures:
+        if pair == "name_on_ground":
+            repaired["--mh-on-primary"] = _repair_text_on(
+                repaired["--mh-on-primary"], repaired["--mh-primary"]
+            )
+        elif pair == "text_on_surface":
+            repaired["--mh-on-surface"] = _repair_text_on(
+                repaired["--mh-on-surface"], repaired["--mh-surface"]
+            )
+        elif pair in ("accent_on_ground", "chip_text_on_accent"):
+            repaired["--mh-accent"] = _repair_accent_on(
+                repaired["--mh-accent"], repaired["--mh-primary"]
+            )
+    # The headline ink may have moved — re-pick the hairline outline pole from
+    # the (unchanged) ground luminance so it still separates from the surface.
+    repaired["--mh-outline"] = (
+        "rgba(255,255,255,0.20)"
+        if _rel_luminance(repaired["--mh-primary"]) <= 0.42
+        else "rgba(0,0,0,0.20)"
+    )
+    return repaired
+
+
+# ---------------------------------------------------------------------------
+# C1 + C9 (Canva gap analysis) — the tonal-container bridge + mood tone table
+# ---------------------------------------------------------------------------
+# C1 pulls Material-style container / raised / accent-container tones out of the
+# brand seed (via ``theming.palette.tonal_pick``, the same HCT engine
+# ``derive_palette`` runs) so layouts can build container/lift layering from one
+# colour instead of a single flat fill. C9 lets the card's MOOD move ONLY those
+# derived tones (surface tone offset, accent-container chroma, plus scrim/mesh
+# hints) — the confirmed brand hexes never shift, every moved tone is re-gated,
+# and a neutral / absent / minimal mood is byte-identical to the C1-only output.
+
+
+class _MoodTonePlan(NamedTuple):
+    surface_tone_delta: int  # tone steps added to the container base tone
+    accent_chroma_mult: float  # multiplier on the accent-container chroma
+    scrim_alpha: Optional[float]  # photo-scrim alpha hint (None → not emitted)
+    mesh_intensity: Optional[float]  # gradient-mesh intensity hint (None → not emitted)
+
+
+# Identity plan — no derived tone moves. neutral / minimal / unknown resolve here,
+# so those cards keep the exact C1-only tokens (byte-identical rendered output).
+_MOOD_IDENTITY = _MoodTonePlan(0, 1.0, None, None)
+
+# The 12 design_spec.MOODS → derived-tone offsets. Pinned by
+# ``tests/test_canva_gap_upgrades.py::test_mood_tone_table_matches_moods``.
+_MOOD_TONE_PLANS: dict[str, _MoodTonePlan] = {
+    "neutral": _MOOD_IDENTITY,
+    "minimal": _MOOD_IDENTITY,  # dossier: "minimal pins everything at baseline"
+    "explosive": _MoodTonePlan(4, 1.15, 0.42, 0.90),
+    "electric": _MoodTonePlan(3, 1.12, 0.40, 0.85),
+    "calm": _MoodTonePlan(-3, 0.85, 0.30, 0.40),
+    "fierce": _MoodTonePlan(2, 1.10, 0.48, 0.70),
+    "celebratory": _MoodTonePlan(5, 1.15, 0.38, 0.95),  # lifts surface, raises mesh
+    "stoic": _MoodTonePlan(-8, 0.75, 0.32, 0.30),  # drops surface, mutes container
+    "precise": _MoodTonePlan(0, 0.95, 0.34, 0.50),
+    "warm": _MoodTonePlan(2, 1.05, 0.36, 0.60),
+    "bold": _MoodTonePlan(3, 1.18, 0.44, 0.80),
+    "triumphant": _MoodTonePlan(5, 1.12, 0.40, 0.90),
+}
+
+
+def _mood_tone_plan(mood: str) -> _MoodTonePlan:
+    """Resolve a brief's free-text mood to its derived-tone plan (C9).
+
+    ``brief.mood`` is one or two words; the first recognised MOODS token wins.
+    Anything unrecognised (or empty) falls to the identity plan so the card is
+    byte-identical to the C1-only output.
+    """
+    for word in (mood or "").lower().split():
+        plan = _MOOD_TONE_PLANS.get(word)
+        if plan is not None:
+            return plan
+    return _MOOD_IDENTITY
+
+
+def _bridge_tonal_tokens(root_vars: dict[str, str], plan: _MoodTonePlan) -> dict[str, str]:
+    """Emit the C1 container / raised / accent-container tokens (C9 mood-shifted).
+
+    Fixed-tone-distance picks off the FINAL resolved roles, each re-verified
+    through the APCA gate with a fall-back to the existing tokens so a pairing
+    that can't clear the gate degrades to the flat baseline. Returns only the new
+    tokens (the caller merges them); an unparseable primary/accent yields ``{}``
+    so nothing changes.
+    """
+    primary = root_vars.get("--mh-primary")
+    accent = root_vars.get("--mh-accent")
+    if not (_is_brand_hex(primary) and _is_brand_hex(accent)):
+        return {}
+    from mediahub.theming.palette import tonal_pick
+    from mediahub.quality.compliance import is_legible
+
+    dark = _rel_luminance(primary) <= 0.42
+    d = plan.surface_tone_delta
+    if dark:
+        container_tone, raised_tone, ac_tone, on_ac_tone = 20 + d, 25 + d, 30, 90
+    else:
+        container_tone, raised_tone, ac_tone, on_ac_tone = 90 + d, 94 + d, 90, 10
+
+    # The surface family carries surface ink; the fixed tone distance keeps it
+    # legible by construction, but re-gate and fall back to --mh-surface-2 anyway.
+    surf_ink = root_vars.get("--mh-on-surface") or _on_color(root_vars.get("--mh-surface", primary))
+    surface_2 = root_vars.get("--mh-surface-2") or darken(primary, 0.30)
+    container = tonal_pick(primary, container_tone)
+    if not (_is_brand_hex(surf_ink) and is_legible(surf_ink, container)):
+        container = surface_2
+    raised = tonal_pick(primary, raised_tone)
+    if not (_is_brand_hex(surf_ink) and is_legible(surf_ink, raised)):
+        raised = container
+
+    ac = tonal_pick(accent, ac_tone, chroma_scale=plan.accent_chroma_mult)
+    on_ac = tonal_pick(accent, on_ac_tone)
+    if not (_is_brand_hex(on_ac) and is_legible(on_ac, ac)):
+        ac, on_ac = accent, _on_color(accent)
+
+    out = {
+        "--mh-surface-container": container,
+        "--mh-surface-raised": raised,
+        "--mh-accent-container": ac,
+        "--mh-on-accent-container": on_ac,
+    }
+    # C9 mood-only hints: emitted ONLY when the mood moves them, so a neutral /
+    # absent / minimal mood keeps the C1-only token set (byte-identical output).
+    if plan.scrim_alpha is not None:
+        out["--mh-scrim-alpha"] = f"{plan.scrim_alpha:.2f}"
+    if plan.mesh_intensity is not None:
+        out["--mh-mesh-intensity"] = f"{plan.mesh_intensity:.2f}"
+    return out
 
 
 def resolved_role_vars_for_brief(brief, brand_kit=None) -> dict[str, str]:
@@ -4412,11 +5288,92 @@ def resolved_role_vars_for_brief(brief, brand_kit=None) -> dict[str, str]:
         for metal in (_MEDAL_ACCENTS[tier]["accent"], _MEDAL_ACCENTS[tier]["accent_deep"]):
             if is_legible(metal, ground) and is_legible(ground, metal):
                 root_vars = {**root_vars, "--mh-accent": metal}
+                # F9 (Canva gap analysis) — metallic chrome. Derive a
+                # deterministic 7-stop specular ramp from the chosen medal tint
+                # (fixed offsets — same tint → same ramp) and emit it as
+                # ``--mh-medal-ramp``. The accent gate above already proved the
+                # metal is legible BOTH ways against the ground, so the ramp's
+                # bright body + a bevelled chip's dark ground-colour text are
+                # legible by construction; the per-selector NUMERAL gate (a
+                # gradient-clipped glyph sitting straight on the ground) is
+                # applied at the still injection site (darkest stop vs ground).
+                # A non-medal card never reaches here → byte-identical render.
+                # ``--mh-medal-ramp`` (chip/bevel) is always emitted; the
+                # ``--mh-medal-numeral-ramp`` twin is emitted ONLY when the
+                # ramp's darkest stop clears the APCA gate against the ground
+                # (the gradient-clipped glyph sits straight on it) — so the
+                # numeral downgrades to flat on a dark ground while the chip
+                # (rim + bright body + dark ground-colour text) still reads.
+                # Archetype-independent so the motion mirror gates identically.
+                try:
+                    from mediahub.graphic_renderer import medal_chrome as _mc
+
+                    root_vars["--mh-medal-ramp"] = _mc.medal_ramp_css(metal)
+                    if is_legible(_mc.darkest_ramp_stop(metal), ground, min_lc=45.0):
+                        root_vars["--mh-medal-numeral-ramp"] = root_vars["--mh-medal-ramp"]
+                except Exception:
+                    pass
                 break
+    # C1 + C9 (Canva gap analysis) — bridge the tonal engine onto the FINAL
+    # resolved roles: Material-style container / raised / accent-container tones,
+    # optionally mood-shifted (only DERIVED tones move; the confirmed brand hexes
+    # never shift). Emitted here so both the still fill AND the motion role
+    # forwarding pick them up from one resolver. Byte-identical rendered output
+    # for archetypes that don't consume the tokens (an unused CSS var paints
+    # nothing) and for a neutral / absent mood.
+    root_vars.update(
+        _bridge_tonal_tokens(root_vars, _mood_tone_plan(getattr(brief, "mood", "") or ""))
+    )
     return root_vars
 
 
-def _v2_style_pack_overlay(brief, width: int, height: int) -> str:
+# E6 — parse a CSS object-position value ("50% 30%", "center 28%", "left top")
+# into (fx, fy) percentages, so a style pack's vignette/spotlight ground can be
+# recentred on the saliency focus. None when the value can't be parsed to two
+# axes — the ground then keeps its fixed centre (byte-identical).
+_FOCUS_X_KW = {"left": 0.0, "center": 50.0, "centre": 50.0, "right": 100.0}
+_FOCUS_Y_KW = {"top": 0.0, "center": 50.0, "centre": 50.0, "bottom": 100.0}
+
+
+def _parse_focus_pos(pos: str) -> Optional[tuple[float, float]]:
+    toks = str(pos or "").split()
+    if len(toks) != 2:
+        return None
+
+    def _axis(tok: str, kw: dict[str, float]) -> Optional[float]:
+        t = tok.strip().lower()
+        if t in kw:
+            return kw[t]
+        if t.endswith("%"):
+            try:
+                return max(0.0, min(100.0, float(t[:-1])))
+            except ValueError:
+                return None
+        return None
+
+    fx = _axis(toks[0], _FOCUS_X_KW)
+    fy = _axis(toks[1], _FOCUS_Y_KW)
+    if fx is None or fy is None:
+        return None
+    return (fx, fy)
+
+
+def _pack_ground_focus(
+    athlete_path, mask_path, width: int, height: int
+) -> Optional[tuple[float, float]]:
+    """The saliency focus ``(fx, fy)`` for the style pack ground (E6), or None.
+
+    None whenever there is no photo — so photo-less cards keep the fixed
+    vignette/spotlight centres and render byte-identically.
+    """
+    if not athlete_path:
+        return None
+    return _parse_focus_pos(_v2_photo_position(athlete_path, width, height, mask_path))
+
+
+def _v2_style_pack_overlay(
+    brief, width: int, height: int, *, focus: Optional[tuple[float, float]] = None
+) -> str:
     """The injected overlay markup for the brief's v2 style pack (or "").
 
     Resolves ``brief.style_pack`` (a ``graphic_renderer.style_packs`` pack id)
@@ -4424,6 +5381,9 @@ def _v2_style_pack_overlay(brief, width: int, height: int) -> str:
     pack id → "" (the undecorated card), so every legacy/flag-off brief renders
     exactly as before. Any failure degrades silently to the bare card — a pack
     is decoration, never load-bearing.
+
+    ``focus`` (E6): the card's resolved saliency focus, recentring the
+    vignette/spotlight ground on the subject; None keeps the fixed centres.
     """
     pack_id = (getattr(brief, "style_pack", "") or "").strip()
     if not pack_id:
@@ -4434,7 +5394,37 @@ def _v2_style_pack_overlay(brief, width: int, height: int) -> str:
         pack = _sp.style_pack_from_id(pack_id)
         if pack is None:
             return ""
-        return _sp.pack_overlay_html(pack, width=width, height=height)
+        return _sp.pack_overlay_html(pack, width=width, height=height, focus=focus)
+    except Exception:
+        return ""
+
+
+def _v2_overlap_accent(brief, width: int, height: int) -> str:
+    """The seeded overlap-accent element for the ``{{OVERLAP_ACCENT}}`` slot (F7).
+
+    Emitted only for a *decorated* card (one that resolved a NON-BARE style
+    pack) with a stable card key, so a bare / legacy brief fills the slot with
+    "" — byte-identical to the pre-F7 render. The accent is seeded independently
+    of the pack (salt='overlap'), so its axis varies on its own. Any failure
+    degrades to "".
+    """
+    pack_id = (getattr(brief, "style_pack", "") or "").strip()
+    if not pack_id:
+        return ""
+    card_key = str(
+        getattr(brief, "variation_signature", "") or getattr(brief, "id", "") or ""
+    ).strip()
+    if not card_key:
+        return ""
+    try:
+        from mediahub.graphic_renderer import style_packs as _sp
+
+        pack = _sp.style_pack_from_id(pack_id)
+        # The bare (undecorated) card carries no decoration, so it gets no
+        # overlap accent either — the "absent" path stays byte-identical.
+        if pack is None or pack.is_bare:
+            return ""
+        return _sp.overlap_accent_for_card(card_key, width=width, height=height)
     except Exception:
         return ""
 
@@ -4465,7 +5455,14 @@ def _unescape_basic(s: str) -> str:
     )
 
 
-def _apply_text_effects_to_repl(repl: dict, effects: dict, root_vars: dict) -> None:
+def _apply_text_effects_to_repl(
+    repl: dict,
+    effects: dict,
+    root_vars: dict,
+    *,
+    emphasis_word: str = "",
+    emphasis_style: str = "",
+) -> None:
     """Wrap effect-bearing slot values in APCA-policed effect spans / curve SVG.
 
     Mutates ``repl`` in place. Reads the card's resolved role colours from
@@ -4473,6 +5470,14 @@ def _apply_text_effects_to_repl(repl: dict, effects: dict, root_vars: dict) -> N
     included), and the renderer-side APCA gate downgrades an illegible effect to a
     safe outline. Unknown slots/effects are ignored and an empty slot value is
     skipped — so this can only decorate, never break, a card.
+
+    D6 — when ``emphasis_word`` is given, the FIRST slot (in a fixed scan order)
+    whose value contains it as a whole word gets that word wrapped in an
+    APCA-gated ``mh-em`` span (the two-tone headline). The emphasis is applied
+    *before* the slot effects so an effect span nests cleanly around it, and a
+    slot that is being replaced by a curve SVG is skipped (the SVG lays raw text,
+    so a span would leak literally). A word the card never contains produces no
+    emphasis — byte-identical.
     """
     try:
         from mediahub.graphic_renderer import text_effects as _fx
@@ -4485,6 +5490,29 @@ def _apply_text_effects_to_repl(repl: dict, effects: dict, root_vars: dict) -> N
         on_accent = _on_color(accent)
     except Exception:
         on_accent = "#FFFFFF"
+
+    word = (emphasis_word or "").strip()
+    if word:
+        curve_slots = {s for s, e in effects.items() if str(e).strip().lower() == "curve"}
+        try:
+            em_res = _fx.emphasis_css(
+                emphasis_style, ground=ground, accent=accent, on_accent=on_accent
+            )
+        except Exception:
+            em_res = None
+        if em_res is not None and em_res.style:
+            for slot in ("headline", "kicker", "event", "meta", "result"):
+                if slot in curve_slots:
+                    continue
+                key = _TEXT_EFFECT_SLOT_KEYS.get(slot)
+                value = repl.get(key) or ""
+                if not value:
+                    continue
+                new_value = _fx.emphasise_value(value, word, em_res)
+                if new_value != value:
+                    repl[key] = new_value
+                    break
+
     for slot, effect in effects.items():
         key = _TEXT_EFFECT_SLOT_KEYS.get(str(slot).strip().lower())
         if not key:
@@ -4560,6 +5588,257 @@ def _kern_numeric_seps(value_html: str) -> tuple[str, int]:
     return ("".join(parts), count) if count else (value_html, 0)
 
 
+# --------------------------------------------------------------------------- #
+# B6 (Canva gap analysis) — frosted-glass chips over photos.
+#
+# The director opts in via the accent_treatment "glass_chip"; the still then
+# emits --mh-glass-* tokens consumed (with the chip's OPAQUE value as the CSS
+# var() fallback) by the broadcast_scorebug module, the lower-third result chip
+# and the photo-led stat-chip row, so a card WITHOUT the treatment is
+# byte-identical. The fill is the resolved --mh-surface at a gate-chosen alpha:
+# a translucent dark panel does NOT protect its ink over a bright photo region,
+# so the nominal 0.30 is floored UP in 0.05 steps until every chip ink clears
+# APCA against the fill composited over BOTH pure white and pure black — the
+# worst backdrops a photo can present behind the blur. If no glassy alpha clears
+# (a dark accent on dark glass, say), no tokens are emitted and the chip keeps
+# its opaque fill. Pure deterministic maths on the resolved roles.
+# --------------------------------------------------------------------------- #
+
+_GLASS_NOMINAL_ALPHA = 0.30
+_GLASS_MAX_ALPHA = 0.85
+
+
+def _composite_over(fill_hex: str, alpha: float, base_hex: str) -> str:
+    """``fill_hex`` at ``alpha`` over an opaque ``base_hex`` → the flat sRGB hex."""
+    fr, fg, fb = _hex_to_rgb(fill_hex)
+    br, bg, bb = _hex_to_rgb(base_hex)
+    return _rgb_to_hex(
+        (
+            int(round(fr * alpha + br * (1.0 - alpha))),
+            int(round(fg * alpha + bg * (1.0 - alpha))),
+            int(round(fb * alpha + bb * (1.0 - alpha))),
+        )
+    )
+
+
+def _glass_role_vars(root_vars: dict[str, str]) -> dict[str, str]:
+    """The ``--mh-glass-*`` tokens for a glass_chip card, or ``{}`` when unsafe.
+
+    Steps the fill alpha up from the nominal 0.30 until the chip inks
+    (``--mh-on-primary`` for the lower-third result / stat values, ``--mh-accent``
+    for the scorebug result numeral) clear APCA against the resolved surface
+    composited over pure white AND pure black. The threshold is ``LC_LARGE`` —
+    the same bar the engine's own role gate (compliance._ROLE_PAIRS) holds the
+    result numeral / accent chip to. Returns ``{}`` — meaning "keep the opaque
+    fill" — when no alpha ≤ 0.85 clears both, or the roles are unparseable.
+    ``--mh-glass-ink`` rides ``var(--mh-on-primary)`` (never a raw hex) so mono
+    mode's role remap flows straight through it.
+    """
+    from mediahub.quality.compliance import LC_LARGE, is_legible
+
+    surface = root_vars.get("--mh-surface") or ""
+    on_primary = root_vars.get("--mh-on-primary") or ""
+    if not (_is_brand_hex(surface) and _is_brand_hex(on_primary)):
+        return {}
+    inks = [i for i in (on_primary, root_vars.get("--mh-accent") or "") if _is_brand_hex(i)]
+    try:
+        r, g, b = _hex_to_rgb(surface)
+    except Exception:
+        return {}
+    chosen: Optional[float] = None
+    alpha = _GLASS_NOMINAL_ALPHA
+    while alpha <= _GLASS_MAX_ALPHA + 1e-6:
+        over_white = _composite_over(surface, alpha, "#FFFFFF")
+        over_black = _composite_over(surface, alpha, "#000000")
+        if all(
+            is_legible(ink, over_white, min_lc=LC_LARGE)
+            and is_legible(ink, over_black, min_lc=LC_LARGE)
+            for ink in inks
+        ):
+            chosen = alpha
+            break
+        alpha = round(alpha + 0.05, 2)
+    if chosen is None:
+        return {}
+    return {
+        "--mh-surface-rgb": f"{r},{g},{b}",
+        "--mh-glass-bg": f"rgba(var(--mh-surface-rgb),{chosen:.2f})",
+        "--mh-glass-border": "1px solid rgba(255,255,255,0.16)",
+        "--mh-glass-filter": "blur(12px) saturate(140%)",
+        "--mh-glass-shadow": "var(--mh-elev-3,0 6px 20px rgba(10,12,16,0.26))",
+        "--mh-glass-ink": "var(--mh-on-primary)",
+    }
+
+
+# --------------------------------------------------------------------------- #
+# B7 (Canva gap analysis) — photo-adaptive scrim alpha.
+#
+# A fixed-alpha scrim can be defeated by a bright or busy photo region: the
+# headline "technically" sits on a 0.40 ribbon but the sky behind it blows the
+# ink out. Canva-grade pipelines guarantee post-composite legibility. This
+# deterministic PIL pre-pass samples the GRADED photo region that lands under
+# the over-photo text (the cover-crop bottom band, pinned by the saliency
+# object-position), takes the adverse (brightest, for light ink) percentile
+# luminance, and steps the scrim alpha up from the archetype's authored floor
+# until the ink clears APCA Lc≥60 against the scrim-over-sample composite. The
+# chosen alpha rides --mh-scrim-alpha (fallback = the current constant, so a
+# photo-less card — or a card whose authored floor already clears — is
+# byte-identical). Same photo + crop → same alpha.
+# --------------------------------------------------------------------------- #
+
+# archetype → (scrim base colour hex or None=use primary, authored floor alpha).
+_SCRIM_PLAN: dict[str, tuple[Optional[str], float]] = {
+    "broadcast_scorebug": ("#000000", 0.55),
+    "full_bleed_photo_lower_third": ("#000000", 0.40),
+    "magazine_cover": (None, 0.62),
+}
+_SCRIM_MAX_ALPHA = 0.90
+_SCRIM_BAND = 0.45  # bottom fraction of the visible crop the text sits over
+
+
+def _pos_fraction(token: str, axis: str) -> float:
+    """A CSS object-position token → its 0..1 alignment fraction."""
+    t = (token or "").strip().lower()
+    if t.endswith("%"):
+        try:
+            return max(0.0, min(1.0, float(t[:-1]) / 100.0))
+        except ValueError:
+            return 0.5
+    return {
+        "left": 0.0,
+        "right": 1.0,
+        "top": 0.0,
+        "bottom": 1.0,
+        "center": 0.5,
+    }.get(t, 0.5)
+
+
+def _parse_object_position(pos: str) -> tuple[float, float]:
+    """Parse ``--mh-photo-pos`` ("center 24%", "50% 30%", "left top") → (fx, fy)."""
+    toks = (pos or "").strip().split()
+    if not toks:
+        return 0.5, 0.5
+    if len(toks) == 1:
+        # a single keyword sets that axis; the other stays centred.
+        if toks[0].lower() in ("top", "bottom"):
+            return 0.5, _pos_fraction(toks[0], "y")
+        return _pos_fraction(toks[0], "x"), 0.5
+    return _pos_fraction(toks[0], "x"), _pos_fraction(toks[1], "y")
+
+
+def _cover_bottom_band_luma(img, width: int, height: int, pos: str) -> Optional[int]:
+    """The adverse (95th-percentile) luma 0..255 of the text region of ``img``.
+
+    Models ``object-fit: cover`` + the resolved ``object-position`` to find which
+    pixels of the source land in the bottom band of the frame, then samples that
+    region. Returns ``None`` on any failure (caller keeps the authored scrim).
+    """
+    try:
+        pw, ph = img.size
+        if pw <= 0 or ph <= 0:
+            return None
+        s = max(width / pw, height / ph)
+        sw, sh = pw * s, ph * s
+        fx, fy = _parse_object_position(pos)
+        vx = (sw - width) * fx  # visible window origin in scaled px
+        vy = (sh - height) * fy
+        by0 = vy + height * (1.0 - _SCRIM_BAND)
+        by1 = vy + height
+        # scaled → source pixels, clamped to the image.
+        left = max(0, int(vx / s))
+        right = min(pw, int(round((vx + width) / s)))
+        top = max(0, int(by0 / s))
+        bot = min(ph, int(round(by1 / s)))
+        if right - left < 2 or bot - top < 2:
+            return None
+        crop = img.crop((left, top, right, bot)).convert("L")
+        crop.thumbnail((48, 48))
+        vals = sorted(crop.getdata())
+        if not vals:
+            return None
+        idx = min(len(vals) - 1, int(round(0.95 * (len(vals) - 1))))
+        return int(vals[idx])
+    except Exception:
+        return None
+
+
+def _scrim_alpha_for_luma(luma: int, ink_hex: str, base_hex: str, floor: float) -> float:
+    """Least alpha ≥ ``floor`` making ``ink`` clear APCA over ``base``-scrim-over-photo.
+
+    The sampled region is treated as an achromatic ``luma`` grey (APCA is
+    luminance-driven); the scrim ``base_hex`` composited over it at each candidate
+    alpha is closed-form. Never drops below the authored ``floor`` (so a photo the
+    baseline already handled is unchanged); caps at 0.90.
+    """
+    from mediahub.quality.compliance import LC_SUPPORT, is_legible
+
+    try:
+        br, bg, bb = _hex_to_rgb(base_hex)
+    except Exception:
+        br = bg = bb = 0
+    a = round(max(0.0, min(floor, _SCRIM_MAX_ALPHA)), 2)
+    while a <= _SCRIM_MAX_ALPHA + 1e-6:
+        cr = int(round(br * a + luma * (1.0 - a)))
+        cg = int(round(bg * a + luma * (1.0 - a)))
+        cb = int(round(bb * a + luma * (1.0 - a)))
+        comp = _rgb_to_hex((cr, cg, cb))
+        if is_legible(ink_hex, comp, min_lc=LC_SUPPORT):
+            return a
+        a = round(a + 0.05, 2)
+    return round(min(_SCRIM_MAX_ALPHA, max(floor, _SCRIM_MAX_ALPHA)), 2)
+
+
+def _photo_scrim_plan(
+    archetype: str,
+    athlete_path,
+    brief,
+    root_vars: dict[str, str],
+    width: int,
+    height: int,
+    pos: str,
+) -> Optional[tuple[float, int]]:
+    """(chosen alpha, region luma) for a photo-led scrim archetype, or ``None``.
+
+    Returns ``None`` — keep the authored scrim, byte-identical — for a non-scrim
+    archetype, a photo-less card, a dark (non-light) ink (a black scrim can't help
+    it), or any load/grade failure. Applies the same photo-adjust recipe the render
+    bakes in, so the sampled pixels match what ships.
+    """
+    if archetype not in _SCRIM_PLAN or not athlete_path:
+        return None
+    ink = root_vars.get("--mh-on-primary") or ""
+    if not _is_brand_hex(ink) or _rel_luminance(ink) <= 0.5:
+        return None  # the black/primary scrim only protects a LIGHT ink
+    base_hex, floor = _SCRIM_PLAN[archetype]
+    if base_hex is None:
+        base_hex = root_vars.get("--mh-primary") or "#0A2540"
+    try:
+        from PIL import Image
+
+        from mediahub.graphic_renderer import photo_adjust as _photo_adjust
+
+        img = Image.open(athlete_path)
+        img.load()
+        if img.mode not in ("RGB", "L"):
+            img = img.convert("RGB")
+        try:
+            recipe = _photo_adjust.recipe_for(
+                explicit=getattr(brief, "photo_adjust", "") or "",
+                treatment=getattr(brief, "photo_treatment", "") or "",
+            )
+            if recipe is not None and not recipe.is_noop():
+                img = recipe.apply(img)
+        except Exception:
+            pass
+        luma = _cover_bottom_band_luma(img, width, height, pos)
+    except Exception:
+        return None
+    if luma is None:
+        return None
+    alpha = _scrim_alpha_for_luma(luma, ink, base_hex, floor)
+    return alpha, luma
+
+
 def _fill_v2_archetype(
     brief,
     width,
@@ -4608,7 +5887,19 @@ def _fill_v2_archetype(
     # overlay that turns the v2 archetypes into thousands of distinct, brand-safe
     # templates (``graphic_renderer.style_packs``). The bare pack (and any
     # legacy brief with no ``style_pack``) yields "", i.e. the undecorated card.
-    repl["ACCENT_DECORATION"] = _v2_style_pack_overlay(brief, width, height)
+    # E6 — recentre the pack's vignette/spotlight ground on the athlete's
+    # saliency focus (None for a photo-less card, so the fixed centres and the
+    # overlay HTML stay byte-identical for those).
+    _pack_focus = _pack_ground_focus(athlete_path, cutout_mask_path, width, height)
+    repl["ACCENT_DECORATION"] = _v2_style_pack_overlay(brief, width, height, focus=_pack_focus)
+
+    # F7 (Canva gap analysis) — the seeded OVERLAP accent that STRADDLES a
+    # declared anchor (a badge/tab/rule/tape crossing a photo/panel edge). Only
+    # a decorated card (a resolved style pack) with a stable card key gets one,
+    # and only layouts that declare an ``mh-anchor--*`` slot render it; a bare /
+    # legacy card, or an un-anchored layout, fills the slot with "" —
+    # byte-identical. Seeded independently of the pack (salt='overlap').
+    repl["OVERLAP_ACCENT"] = _v2_overlap_accent(brief, width, height)
 
     # Tier A baseline → director's APCA-gated colour-role assignment → medal
     # tint (the metal IS the information, gated the same way). One resolver,
@@ -4626,6 +5917,20 @@ def _fill_v2_archetype(
     root_vars.update(
         _elevation_vars(root_vars.get("--mh-primary", "#0A2540"), scale=min(width, height) / 1080)
     )
+
+    # B6 (Canva gap analysis) — frosted-glass chips. The director opts in with
+    # the accent_treatment "glass_chip"; when the ink clears APCA against the
+    # tinted fill over the worst-case backdrops the resolver emits the
+    # --mh-glass-* tokens that the scorebug module / lower-third result chip
+    # consume (with their opaque values as var() fallbacks) and that turn on the
+    # photo-led stat chips. A gate miss (or any other accent) emits nothing, so
+    # those chips stay opaque and every non-glass card is byte-identical.
+    glass_on = False
+    if (getattr(brief, "accent_style", "") or "") == "glass_chip":
+        _glass = _glass_role_vars(root_vars)
+        if _glass:
+            root_vars.update(_glass)
+            glass_on = True
 
     # B3 (Canva gap analysis) — surfaces read as lit material, not flat hex:
     # a 4.5% lit→shaded vertical micro-gradient on the brand ground, emitted
@@ -4722,6 +6027,23 @@ def _fill_v2_archetype(
     root_vars["--mh-track-mega-name"] = "%.4fem" % _tracking_for_px(fit_mega_name_px, "display")
     root_vars["--mh-track-result"] = "%.4fem" % _tracking_for_px(fit_result_px, "numeral")
     root_vars["--mh-track-mega-result"] = "%.4fem" % _tracking_for_px(fit_mega_result_px, "numeral")
+
+    # D8 (Canva gap analysis) — density/mood-coherent supporting weight register.
+    # The style-pack density lever + the director's mood pick a kicker/meta/data
+    # weight (over the shipped variable axes) the migrated layouts consume via
+    # font-variation-settings with their historic weight as the fallback. Emitted
+    # ONLY when a bold pack or a non-neutral mood spends the register, so a
+    # standard-density / neutral-mood card (and every legacy/brief-less render)
+    # keeps every layout on its historic weight — byte-identical. Mirrored into
+    # the Remotion props (motion.py) for still↔motion parity.
+    from mediahub.graphic_renderer.autofit import weight_register_for as _weight_register_for
+
+    _pack_density = ((getattr(brief, "style_pack", "") or "").strip().split("-") or [""])[-1]
+    _wght_register = _weight_register_for(_pack_density, getattr(brief, "mood", "") or "")
+    if _wght_register:
+        root_vars["--mh-wght-kicker"] = str(_wght_register["kicker"])
+        root_vars["--mh-wght-meta"] = str(_wght_register["meta"])
+        root_vars["--mh-wght-data"] = str(_wght_register["data"])
     # G1.12 — Multi-line hero & split-result fitting. The archetypes below carry
     # the surname / result in ONE dominant autofit slot. When a compound or
     # double-barrelled surname, or a split-time result ("1:45.23 / 50.12"), will
@@ -4833,9 +6155,14 @@ def _fill_v2_archetype(
     # adjustments. A manual crop (the inspector override) always wins; the
     # scale rule is emitted ONLY when a scale applies, so every undirected /
     # default-intent card keeps byte-identical HTML.
-    _intent = (getattr(brief, "crop_intent", "") or "").strip()
+    _intent = effective_crop_intent(getattr(brief, "crop_intent", "") or "")
     if _intent and athlete_path and not _sanitise_photo_pos(photo_pos_override):
-        intent_vars = _crop_intent_vars(_intent, athlete_path, cutout_mask_path, width, height)
+        from mediahub.graphic_renderer.archetypes import is_symmetric as _is_symmetric
+
+        _symmetric = _is_symmetric(getattr(brief, "layout_template", "") or "")
+        intent_vars = _crop_intent_vars(
+            _intent, athlete_path, cutout_mask_path, width, height, symmetric=_symmetric
+        )
         root_vars.update(intent_vars)
         if "--mh-photo-scale" in intent_vars:
             extra_css += (
@@ -4861,12 +6188,52 @@ def _fill_v2_archetype(
     if treatment_defs:
         repl["ACCENT_DECORATION"] = treatment_defs + (repl.get("ACCENT_DECORATION") or "")
 
+    # E4 (Canva gap analysis) — shaped photo frames (arch / blob / torn_edge) on
+    # the three windowed archetypes, paired with the offset accent echo. CSS
+    # rides BASE_CSS; the torn-edge SVG filter def rides the {{ACCENT_DECORATION}}
+    # slot (like the duotone def above). ``rect`` / the lever absent / any other
+    # archetype emits neither, so those cards are byte-identical. Independent of a
+    # photo: the shape frames the surface fallback too (the no-photo grace).
+    shape_css, shape_defs = _photo_frame_shape_assets(
+        brief, getattr(brief, "layout_template", "") or "", width, height
+    )
+    if shape_css:
+        extra_css += shape_css
+    if shape_defs:
+        repl["ACCENT_DECORATION"] = shape_defs + (repl.get("ACCENT_DECORATION") or "")
+
     # M11 — data weight: the secondary-stat chip row and the honest
     # before/after PB bars for the data-led archetypes. Both collapse to ""
     # (and inject nothing) when the facts aren't there.
     archetype_name = getattr(brief, "layout_template", "") or ""
     chip_ink = _STAT_CHIP_ARCHETYPES.get(archetype_name)
-    repl["STAT_CHIPS"] = _stat_chips_html(brief, chip_ink) if chip_ink else ""
+    # B6 — glass the stat chips only when the treatment is on AND there is a
+    # photo behind them (photo-led card); a chip-row on a flat ground keeps its
+    # hairline treatment (glass over an opaque ground reads as a muddy box).
+    repl["STAT_CHIPS"] = (
+        _stat_chips_html(brief, chip_ink, glass=glass_on and bool(athlete_path)) if chip_ink else ""
+    )
+
+    # B7 — photo-adaptive scrim: raise the over-photo scrim alpha until the
+    # light ink clears APCA against the actual pixels behind it. Emits
+    # --mh-scrim-alpha (consumed by this archetype's scrim rule with the authored
+    # constant as the var() fallback) and stashes the region-luminance + chosen
+    # alpha note for the explainability sidecar. Photo-less cards emit nothing.
+    _scrim = _photo_scrim_plan(
+        archetype_name,
+        athlete_path,
+        brief,
+        root_vars,
+        width,
+        height,
+        root_vars.get("--mh-photo-pos", "") or "",
+    )
+    if _scrim is not None:
+        _scrim_alpha, _scrim_luma = _scrim
+        root_vars["--mh-scrim-alpha"] = f"{_scrim_alpha:.2f}"
+        repl["_SCRIM_NOTE"] = (
+            f"scrim adapted to photo (region luma {_scrim_luma}/255 → alpha {_scrim_alpha:.2f})"
+        )
     bars_ink = _PB_BARS_ARCHETYPES.get(archetype_name)
     repl["PB_BARS"] = _pb_bars_html(brief, bars_ink) if bars_ink else ""
 
@@ -4893,12 +6260,68 @@ def _fill_v2_archetype(
                 root_vars["--mh-break-solid"] = f"{solid * 100:.1f}%"
                 root_vars["--mh-break-fade"] = f"{fade * 100:.1f}%"
 
+    # E5 (Canva gap analysis) — frame_breakout's seeded frame shape. A
+    # deterministic pick (salt='breakout') among a circle and an arch (tall
+    # ellipse) framing, each with its own ring/breakout-floor. The layout's own
+    # CSS defaults already render the first (circle) framing, so a card with no
+    # stable key keeps that default — byte-identical.
+    if archetype_name == "frame_breakout":
+        _fb_key = str(
+            getattr(brief, "variation_signature", "") or getattr(brief, "id", "") or ""
+        ).strip()
+        if _fb_key:
+            from mediahub.graphic_renderer.style_packs import _seed_for as _fb_seed
+
+            _framings = (
+                # (clip-path, frame-r, frame-cy, breakout-floor, ring-display)
+                ("circle(40% at 50% 60%)", "40%", "60%", "78%", "block"),
+                ("circle(37% at 50% 55%)", "37%", "55%", "74%", "block"),
+                ("ellipse(37% 46% at 50% 56%)", "37%", "56%", "86%", "none"),
+            )
+            _clip, _fr, _fcy, _floor, _ring = _framings[_fb_seed(_fb_key, salt="breakout") % 3]
+            root_vars["--mh-frame-clip"] = _clip
+            root_vars["--mh-frame-r"] = _fr
+            root_vars["--mh-frame-cy"] = _fcy
+            root_vars["--mh-breakout-floor"] = _floor
+            root_vars["--mh-ring-display"] = _ring
+
+    # D7 (Canva gap analysis) — poster_spine's vertical surname. The rail runs
+    # DOWN the left margin (writing-mode:vertical-rl), so the run is fitted with
+    # the axes swapped (vertical=True): its length is the rail HEIGHT and its
+    # size cap is the rail WIDTH. Only this archetype emits the var, so every
+    # other card is byte-identical.
+    if archetype_name == "poster_spine":
+        _display_family_sp = (
+            (_display_font_stack_for_pair(getattr(brief, "typography_pair", "") or "") or "Anton")
+            .split(",")[0]
+            .strip("'\" ")
+        )
+        spine_px = _fit_one_line_px(
+            surname or "X",
+            width * 0.235,
+            height * 0.84,
+            font_family=_display_family_sp,
+            weight=400,
+            min_px=64,
+            max_px=int(width * 0.235),
+            vertical=True,
+        )
+        root_vars["--mh-fit-spine-px"] = "%dpx" % spine_px
+
     # 1.9 — apply per-slot text effects to the finalised slot values (AFTER the
     # multi-line balancer has settled RESULT_VALUE / ATHLETE_SURNAME_DISPLAY).
     # Empty (the default) is a no-op, so a card with no effects is byte-identical.
     effects = getattr(brief, "text_effects", None) or {}
-    if effects:
-        _apply_text_effects_to_repl(repl, effects, root_vars)
+    emphasis_word = getattr(brief, "emphasis_word", "") or ""
+    emphasis_style = getattr(brief, "emphasis_style", "") or ""
+    if effects or emphasis_word:
+        _apply_text_effects_to_repl(
+            repl,
+            effects,
+            root_vars,
+            emphasis_word=emphasis_word,
+            emphasis_style=emphasis_style,
+        )
 
     # A5 (Canva gap analysis) — kern the result numeral's separators and spend
     # the recovered width on a larger fit. Runs after effects so an effect span
@@ -4925,17 +6348,46 @@ def _fill_v2_archetype(
                         int(_mmax), int(round(fit_mega_result_px * factor))
                     )
 
-    # Typography pair → display/headline face (still↔motion parity). The v2
-    # archetypes read the headline font as `var(--mh-font-display, 'Anton'…)`,
-    # so setting this var swaps every headline to the pair's face at once;
-    # anton/druk/oswald resolve to "" and leave the Anton fallback in place,
-    # keeping those (and every brief-less) render byte-identical.
-    _disp = _display_font_stack_for_pair(getattr(brief, "typography_pair", "") or "")
-    if _disp:
-        root_vars["--mh-font-display"] = _disp
+    # Typography pairing → per-register font vars (D5, Canva gap analysis).
+    # The pairing table (``type_pairs``) binds an atomic (display, kicker,
+    # body, data) quadruple: the v2 archetypes read their registers as
+    # `var(--mh-font-display, 'Anton'…)` / `var(--mh-font-kicker, 'Space
+    # Grotesk'…)` / `var(--mh-font-body, 'Inter'…)`, so one pairing swaps every
+    # register coherently. The data register is locked to JetBrains Mono (no
+    # var is ever emitted for it). Pairs that keep a register on its default
+    # emit nothing for it — anton/druk/oswald emit nothing at all, keeping
+    # those (and every brief-less) render byte-identical. Display parity with
+    # the motion renderer's fontStackFor is pinned by
+    # tests/test_typography_pairings.py.
+    from mediahub.graphic_renderer.type_pairs import font_vars_for_pair as _font_vars_for_pair
+
+    root_vars.update(_font_vars_for_pair(getattr(brief, "typography_pair", "") or ""))
+
+    # F9 (Canva gap analysis) — medal chrome. When the resolver emitted a legible
+    # ``--mh-medal-ramp`` (a medal card that cleared the APCA gate) AND this
+    # archetype declares a chrome-eligible result selector, paint the numeral
+    # with the gradient-clipped specular ramp and the result chip with the bevel.
+    # A non-medal card carries no ramp var → no injection → byte-identical; an
+    # archetype without a mapped selector is skipped so the effect only lands
+    # where it reads well (the big-numeral / medal-spotlight layouts).
+    if root_vars.get("--mh-medal-ramp") and archetype in _MEDAL_CHROME_SELECTORS:
+        from mediahub.graphic_renderer import medal_chrome as _mc
+
+        _sel = _MEDAL_CHROME_SELECTORS[archetype]
+        # NUMERAL: gradient-clipped glyphs on the ground — only when the
+        # resolver's numeral-safe gate passed (darkest stop legible vs ground).
+        if _sel.get("numeral") and root_vars.get("--mh-medal-numeral-ramp"):
+            extra_css += _mc.medal_numeral_css(_sel["numeral"])
+        # CHIP: rim-bordered bevelled pill — always (accent gate covers the
+        # dark ground-colour text on the bright ramp body).
+        if _sel.get("chip"):
+            extra_css += _mc.medal_chip_css(_sel["chip"])
 
     root_block = "\n:root{" + "".join(f"{k}:{v};" for k, v in root_vars.items()) + "}\n"
-    repl["BASE_CSS"] = base_repl.get("BASE_CSS", "") + root_block + extra_css
+    # F7/F8 shared v2 component utilities (overlap anchors + panel silhouettes).
+    # Inert until a layout opts in, so an un-migrated archetype's pixels are
+    # unchanged.
+    repl["BASE_CSS"] = base_repl.get("BASE_CSS", "") + _components_css() + root_block + extra_css
     return repl
 
 
@@ -4964,6 +6416,7 @@ def render_brief(
     image_format: str = "png",
     quality=None,
     language: str = "",
+    _html_only: bool = False,
 ) -> RenderResult:
     """Render a CreativeBrief into a single still. Returns RenderResult.
 
@@ -5005,6 +6458,74 @@ def render_brief(
             family = "text_led_recap"
             template_path = LAYOUTS_DIR / f"{family}.html"
 
+    # F6 — measured layout scoring over K candidate style packs. Opt-in
+    # (MEDIAHUB_LAYOUT_SCORE); OFF by default so this whole block is skipped and
+    # the director's pack ships unchanged (byte-identical to pre-F6). When on, we
+    # compose each candidate pack's real HTML through this same path
+    # (_html_only=True), measure the composed geometry in one browser pass, and
+    # switch to a sibling pack only when it beats the current one on the
+    # deterministic layout-energy score. Packs are pure decoration overlays —
+    # the --mh-* colour roles do NOT depend on the pack — so this only reorders
+    # the choice among brand-safe, in-catalog, APCA-legible packs; it never
+    # invents colour, geometry, or type. See graphic_renderer/layout_score.py.
+    _layout_score_record = None
+    if not _html_only and _v2_archetype and (getattr(brief, "style_pack", "") or "").strip():
+        try:
+            import dataclasses as _dc
+
+            from mediahub.graphic_renderer import layout_score as _layout_score
+
+            if _layout_score.enabled():
+                _cand_ids = _layout_score.candidate_pack_ids(brief)
+                if len(_cand_ids) > 1:
+
+                    def _compose_for_pack(_pid: str) -> str:
+                        _b = _dc.replace(brief, style_pack=_pid)
+                        return render_brief(
+                            _b,
+                            output_dir=output_dir,
+                            size=size,
+                            format_name=format_name,
+                            athlete_path=athlete_path,
+                            venue_path=venue_path,
+                            logo_path=logo_path,
+                            bg_photo_path=bg_photo_path,
+                            brand_kit=brand_kit,
+                            sponsor_name=sponsor_name,
+                            sponsor_logo_path=sponsor_logo_path,
+                            venue_attribution=venue_attribution,
+                            skip_cutout=skip_cutout,
+                            watermark_text=watermark_text,
+                            photo_pos_override=photo_pos_override,
+                            image_format=image_format,
+                            quality=quality,
+                            language=language,
+                            _html_only=True,
+                        )  # type: ignore[return-value]
+
+                    _cand_htmls = [_compose_for_pack(pid) for pid in _cand_ids]
+                    _geoms = measure_html_geometry(
+                        _cand_htmls, (width, height), output_dir=output_dir
+                    )
+                    if _geoms is not None:
+                        _rec = _layout_score.choose(
+                            list(zip(_cand_ids, _geoms)),
+                            archetype=family,
+                            current_id=_cand_ids[0],
+                        )
+                        _layout_score_record = _rec
+                        if _rec.get("changed") and _rec.get("winner"):
+                            brief = _dc.replace(brief, style_pack=_rec["winner"])
+                            log.info(
+                                "F6 layout scorer: %s -> %s (%s)",
+                                _rec.get("current"),
+                                _rec.get("winner"),
+                                family,
+                            )
+        except Exception as exc:  # F6 is a ranking aid, never load-bearing
+            log.debug("F6 layout scoring skipped: %s", exc)
+            _layout_score_record = None
+
     # G1.25 — server-side photo adjustment stack (deterministic PIL recipes).
     # Resolve the recipe once; ``None`` (the default) keeps the un-adjusted
     # inline so the render is byte-identical. When a recipe is set it bakes
@@ -5018,6 +6539,18 @@ def render_brief(
             explicit=getattr(brief, "photo_adjust", "") or "",
             treatment=getattr(brief, "photo_treatment", "") or "",
         )
+        # E4 — the Clarendon-signature cast: a preset that declares a tint slot
+        # (punchy/vivid) bakes a bounded overlay of the card's own DEEP brand
+        # primary, so a pack of mixed club photos reads as one graded set. The
+        # hex is the card's resolved role colour (never an invented decorative
+        # colour); every other preset (and the default no-preset path) is
+        # byte-identical.
+        if _photo_recipe is not None and _photo_recipe.name in _photo_adjust.PRESET_TINTS:
+            _primary = resolved_role_vars_for_brief(brief, brand_kit).get("--mh-primary", "")
+            if _primary:
+                _photo_recipe = _photo_adjust.resolve_recipe(
+                    _photo_recipe, tint_hex=darken(_primary, 0.25)
+                )
     except Exception:
         _photo_recipe = None
 
@@ -5341,6 +6874,14 @@ def render_brief(
         ),
     )
 
+    # F6 — the layout scorer composes each candidate pack's HTML through this
+    # same path with ``_html_only=True`` and measures the string, so it stops
+    # here with the fully-composed markup and never screenshots, writes a file,
+    # or embeds metadata. Purely internal (leading underscore); the public
+    # contract still returns a RenderResult.
+    if _html_only:
+        return html  # type: ignore[return-value]
+
     # Output path — the file extension follows the requested image format
     # (G1.14): PNG by default, else WebP/AVIF/JPEG.
     visual_id = "v_" + uuid.uuid4().hex[:12]
@@ -5358,7 +6899,26 @@ def render_brief(
         encode_kwargs["image_format"] = image_format
     if quality is not None:
         encode_kwargs["quality"] = quality
+    # F5: clear any stale render-notes sidecar so a cache-hit render (which never
+    # re-runs the in-page floor sweep) can't inherit a previous card's notes.
+    _notes_sidecar = out_path.with_suffix(out_path.suffix + _RENDER_NOTES_SUFFIX)
+    try:
+        _notes_sidecar.unlink()
+    except OSError:
+        pass
     bytes_written = render_html_to_png(html, out_path, (width, height), **encode_kwargs)
+    # F5: fold the floor sweep's non-fatal notes (photo upscales, crop-zoom
+    # clamp) into this render's explainability trail, then remove the sidecar.
+    _render_floor_notes: list[str] = []
+    try:
+        _render_floor_notes = [str(n) for n in json.loads(_notes_sidecar.read_text("utf-8")) if n]
+    except (OSError, ValueError, TypeError):
+        _render_floor_notes = []
+    finally:
+        try:
+            _notes_sidecar.unlink()
+        except OSError:
+            pass
 
     # G1.16: stamp the exported card with its own credit chain — photographer,
     # copyright, credit, caption — so attribution survives the re-share that
@@ -5451,6 +7011,7 @@ def render_brief(
                     html,
                     _inspect_ctx,
                     image_path=athlete_path or bg_photo_path or venue_path,
+                    layout_score=_layout_score_record,
                 ),
             )
     except Exception as e:
@@ -5460,6 +7021,9 @@ def render_brief(
     # this card's pixels, say so on the visual — the recipe changed the
     # deliverable, so the "why this design" trail must record it.
     _safety_notes = list(brief.safety_notes or [])
+    # F5: render-time floor observations (photo upscales, crop-zoom clamp) —
+    # the pixels shipped differ from a naive render, so the trail records why.
+    _safety_notes.extend(_render_floor_notes)
     if _recipe_applied and _photo_recipe is not None and not _photo_recipe.is_noop():
         _safety_notes.append(
             "photo adjusted ({}): {}".format(
@@ -5471,6 +7035,17 @@ def render_brief(
     # so the reason rides the visual's trace — never a silent substitution.
     if _cutout_note:
         _safety_notes.append(_cutout_note)
+
+    # C10 explainability: when the accent is a derived companion (a hue the club
+    # never uploaded), the decision trace must say so and name its provenance.
+    _companion_note = _companion_accent_note(brief, brand_kit)
+    if _companion_note:
+        _safety_notes.append(_companion_note)
+    # B7 explainability: record the photo-adaptive scrim decision (region luma +
+    # chosen alpha) so the "why this design" trail shows the legibility guarantee.
+    _scrim_note = repl.get("_SCRIM_NOTE") if isinstance(repl, dict) else None
+    if _scrim_note:
+        _safety_notes.append(_scrim_note)
 
     visual = GeneratedVisual(
         id=visual_id,

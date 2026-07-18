@@ -17,15 +17,17 @@ import html as _htmllib
 import pytest
 
 
-@pytest.fixture()
+@pytest.fixture
 def client(app):
+    """Isolated app via the shared conftest fixtures (no ``importlib.reload``)
+    with a saved, active ``club-a`` profile — #130 fixture-sprawl migration."""
     from mediahub.web.club_profile import ClubProfile, save_profile
 
     save_profile(ClubProfile(profile_id="club-a", display_name="Club A"))
-    c = app.test_client()
-    with c.session_transaction() as s:
-        s["active_profile_id"] = "club-a"
-    return c
+    with app.test_client() as c:
+        with c.session_transaction() as s:
+            s["active_profile_id"] = "club-a"
+        yield c
 
 
 _PLAN = {
@@ -65,7 +67,11 @@ def _plan_html(client, monkeypatch):
 
 def test_free_text_create_link_carries_the_idea(client, monkeypatch):
     html = _plan_html(client, monkeypatch)
-    hrefs = [_htmllib.unescape(m) for m in re.findall(r'href="([^"]+)"', html) if "seed=" in m]
+    hrefs = [
+        _htmllib.unescape(m)
+        for m in re.findall(r'href="([^"]+)"', html)
+        if "seed=" in m
+    ]
     assert hrefs, "no Create link carried a seed"
     seeded = unquote_plus(hrefs[0])
     assert seeded.startswith("/free-text?")
@@ -96,8 +102,10 @@ def test_free_text_landing_prefills_from_seed(client):
 
 
 def test_seed_is_escaped_and_capped(client):
-    long_seed = "x" * 600 + "<script>alert(1)</script>"
-    page = client.get("/free-text", query_string={"seed": long_seed}).get_data(as_text=True)
+    long_seed = "x" * 600 + '<script>alert(1)</script>'
+    page = client.get("/free-text", query_string={"seed": long_seed}).get_data(
+        as_text=True
+    )
     assert "<script>alert(1)</script>" not in page
     m = re.search(r'<textarea id="ft-prompt"[^>]*>([^<]*)</textarea>', page)
     assert m

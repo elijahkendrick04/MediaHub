@@ -33,6 +33,7 @@ import math
 import os
 import shutil
 import subprocess
+import threading
 from dataclasses import is_dataclass, asdict
 from pathlib import Path
 from typing import Any, Callable, ContextManager, Optional
@@ -86,6 +87,65 @@ def _cache_dir() -> Path:
     d = _data_dir() / "motion_cache"
     d.mkdir(parents=True, exist_ok=True)
     return d
+
+
+# --- motion cache eviction (deep-review #71) -------------------------------
+# The motion cache (DATA_DIR/motion_cache/<hash>.mp4 + sidecars) previously grew
+# without bound: unlike the still-PNG cache (graphic_renderer/render_cache.py,
+# capped at 512) it had no prune, so on a bounded Render persistent disk it
+# trended to exhaustion — after which every render write failed. Mirror that
+# LRU prune here: bound the number of cached MP4s, evicting the oldest by mtime
+# and sweeping each evicted key's sidecars. Cache hits touch the MP4's mtime so
+# hot entries survive the sweep.
+_DEFAULT_MOTION_CACHE_MAX = 256
+
+
+def _motion_cache_max() -> int:
+    try:
+        n = int(os.environ.get("MEDIAHUB_MOTION_CACHE_MAX", str(_DEFAULT_MOTION_CACHE_MAX)))
+    except (TypeError, ValueError):
+        return _DEFAULT_MOTION_CACHE_MAX
+    return max(1, n)
+
+
+def _touch_cache_hit(cached: Path) -> None:
+    """Refresh a cached entry's mtime so the LRU prune keeps hot renders."""
+    try:
+        os.utime(cached, None)
+    except OSError:
+        pass
+
+
+def _prune_motion_cache(d: Optional[Path] = None) -> None:
+    """Bound the motion cache to ``_motion_cache_max()`` MP4s, oldest first.
+
+    Each evicted ``<hash>.mp4`` takes its sidecars with it (the ``<hash>.json``
+    manifest, ``<hash>.poster.png`` poster, ``<hash>.audio.json`` record). The
+    ``props/`` subdir is keyed by output-stem, not cache-hash, so it is left
+    alone. Best-effort: a prune failure must never fail a successful render.
+    """
+    d = d or _cache_dir()
+    cap = _motion_cache_max()
+    try:
+        # Skip in-flight atomic-render temp files (".<stem>.<pid>.<tid>.tmp.mp4",
+        # #73) — they are hidden dotfiles, whereas a real cache entry is a bare
+        # 24-hex-char stem, so they must never count toward the cap or be evicted.
+        entries = [p for p in d.glob("*.mp4") if not p.name.startswith(".")]
+    except OSError:
+        return
+    if len(entries) <= cap:
+        return
+    try:
+        entries.sort(key=lambda p: p.stat().st_mtime)
+    except OSError:
+        return
+    for p in entries[: len(entries) - cap]:
+        # Sweep the MP4 and every sidecar sharing its 24-hex-char stem.
+        for sib in d.glob(f"{p.stem}.*"):
+            try:
+                sib.unlink()
+            except OSError:
+                pass
 
 
 def node_available() -> bool:
@@ -341,6 +401,21 @@ def _photo_data_uri_for_brief(brief: Optional[dict]) -> str:
     return _photo_data_uri_for_path(_photo_asset_path_for_brief(brief))
 
 
+def _archetype_is_symmetric(brief: Optional[dict]) -> bool:
+    """True when the brief's v2 archetype is a centred composition (E2).
+
+    Mirrors the still renderer so the smart-crop scorer keeps the disc/medal
+    spotlight cards dead-centre on both surfaces.
+    """
+    try:
+        from mediahub.graphic_renderer.archetypes import is_symmetric
+
+        b = brief if isinstance(brief, dict) else {}
+        return is_symmetric(str(b.get("layout_template") or ""))
+    except Exception:
+        return False
+
+
 def _photo_focus_for_brief(brief: Optional[dict], format_name: str = DEFAULT_MOTION_FORMAT) -> str:
     """Saliency ``object-position`` for the brief's photo, steered per cut.
 
@@ -353,13 +428,36 @@ def _photo_focus_for_brief(brief: Optional[dict], format_name: str = DEFAULT_MOT
     ``""`` when the brief sourced no photo (the TSX then uses its own
     neutral default). The ``story`` default resolves to the 9:16 ratio, so a
     default-cut render is byte-identical to the pre-format behaviour.
+
+    E2: a ``smart`` crop intent (director-set or the ``MEDIAHUB_SMART_CROP``
+    operator default) routes through the smartcrop scorer so the video's
+    focal point matches the still's smart crop; every other intent keeps the
+    plain saliency focus, byte-identical.
     """
     p = _photo_asset_path_for_brief(brief)
     if p is None:
         return ""
     try:
-        from mediahub.graphic_renderer.saliency import focus_position_for_format
+        from mediahub.graphic_renderer.saliency import (
+            focus_position_for_format,
+            smart_focus_for_format,
+        )
 
+        b = brief if isinstance(brief, dict) else {}
+        from mediahub.graphic_renderer.render import (
+            _existing_cutout_for,
+            effective_crop_intent,
+        )
+
+        if effective_crop_intent(str(b.get("crop_intent") or "")) == "smart" and _is_v2_archetype(
+            str(b.get("layout_template") or "")
+        ):
+            mask = _existing_cutout_for(p, profile_id=str(b.get("profile_id") or "default"))
+            pos = smart_focus_for_format(
+                p, format_name, symmetric=_archetype_is_symmetric(b), mask_path=mask
+            ).get("--mh-photo-pos", "")
+            if pos:
+                return pos
         return focus_position_for_format(p, format_name)
     except Exception:
         return ""
@@ -566,12 +664,37 @@ def _motion_roles_from_vars(root_vars: dict[str, str]) -> dict[str, str]:
     exactly the pre-parity behaviour."""
     if not root_vars:
         return {}
-    return {
+    out = {
         "roleGround": str(root_vars.get("--mh-primary") or ""),
         "roleSurface": str(root_vars.get("--mh-surface") or ""),
         "roleAccent": str(root_vars.get("--mh-accent") or ""),
         "roleOnGround": str(root_vars.get("--mh-on-primary") or ""),
     }
+    # C1 (Canva gap analysis): the tonal container / raised / accent-container
+    # tokens ride the SAME resolver into the motion props so a scene can paint
+    # the still's exact container layering. Each is forwarded only when resolved
+    # (an empty value never enters the map), so a brief without them contributes
+    # nothing new — keeping the brief-less seed-permutation fallback intact.
+    for src, dst in (
+        ("--mh-surface-container", "roleSurfaceContainer"),
+        ("--mh-surface-raised", "roleSurfaceRaised"),
+        ("--mh-accent-container", "roleAccentContainer"),
+        ("--mh-on-accent-container", "roleOnAccentContainer"),
+    ):
+        value = str(root_vars.get(src) or "")
+        if value:
+            out[dst] = value
+    # F9 (Canva gap analysis) — medal chrome parity: forward the resolved
+    # specular ramp so the motion medal scene paints the same gradient-clipped
+    # numeral / bevelled chip. Present only on a gate-passing medal card, so a
+    # non-medal card keeps byte-identical props.
+    ramp = str(root_vars.get("--mh-medal-ramp") or "")
+    if ramp:
+        out["roleMedalRamp"] = ramp
+    numeral_ramp = str(root_vars.get("--mh-medal-numeral-ramp") or "")
+    if numeral_ramp:
+        out["roleMedalNumeralRamp"] = numeral_ramp
+    return out
 
 
 def _archetype_photo_mode(brief: Optional[dict]) -> str:
@@ -614,6 +737,37 @@ def _is_v2_archetype(name: str) -> bool:
         return False
 
 
+def _overlap_accent_for_brief(brief: Optional[dict]) -> str:
+    """The still's seeded overlap accent as ``"shape:rotation"`` (F7), or ``""``.
+
+    Mirrors ``render._v2_overlap_accent``: only a decorated card (a NON-BARE
+    style pack) with a stable card key gets one, seeded independently of the pack
+    (salt='overlap'). Attached only when non-empty, so a bare/legacy card keeps
+    byte-identical props. The motion side paints the same shape + rotation in the
+    pack layer.
+    """
+    if not isinstance(brief, dict):
+        return ""
+    pack_id = str(brief.get("style_pack") or "").strip()
+    if not pack_id:
+        return ""
+    key = str(brief.get("variation_signature") or brief.get("id") or "").strip()
+    if not key:
+        return ""
+    try:
+        from mediahub.graphic_renderer import style_packs as _sp
+
+        pack = _sp.style_pack_from_id(pack_id)
+        if pack is None or pack.is_bare:
+            return ""
+        picked = _sp.overlap_accent_for(key)
+        if not picked:
+            return ""
+        return f"{picked[0]}:{picked[1]}"
+    except Exception:
+        return ""
+
+
 # The v2 archetypes whose motion scenes paint the cutout as layered depth
 # planes themselves (M12 twins). They take the decoration-scaled depth
 # treatment and (band_break) the alpha-derived band placement props.
@@ -630,10 +784,44 @@ def _decoration_strength_of(brief: Optional[dict]) -> float:
         return 0.5
 
 
+def _pack_ground_focus_prop(
+    brief: Optional[dict], photo_pos: str, has_photo: bool
+) -> Optional[list[int]]:
+    """The style pack's vignette/spotlight ground focus ``[fx, fy]`` (E6), or None.
+
+    Mirrors the still's ``render._pack_ground_focus``: only the two
+    subject-framing grounds recentre, and only when the card carries a photo —
+    so every other card (and photo-less vignette/spotlight cards) keeps a
+    byte-identical prop dict and the fixed ground centre. The fractions come
+    from the SAME saliency focus the photo uses (``photoPos``), parsed by the
+    still's own ``_parse_focus_pos`` so the two surfaces agree.
+    """
+    if not has_photo:
+        return None
+    b = brief if isinstance(brief, dict) else {}
+    ground = (str(b.get("style_pack") or "").strip().split("-") or [""])[0]
+    if ground not in ("vignette", "spotlight"):
+        return None
+    try:
+        from mediahub.graphic_renderer.render import _parse_focus_pos
+
+        fr = _parse_focus_pos(photo_pos)
+    except Exception:
+        return None
+    if fr is None:
+        return None
+    return [round(fr[0]), round(fr[1])]
+
+
 def _photo_treatment_mirror_props(
-    brief: Optional[dict], root_vars: dict[str, str], has_photo: bool
+    brief: Optional[dict],
+    root_vars: dict[str, str],
+    has_photo: bool,
+    *,
+    has_cutout: bool = False,
+    format_name: str = DEFAULT_MOTION_FORMAT,
 ) -> dict[str, Any]:
-    """The exact-mirror photo-grade props for a v2 card (M10 parity).
+    """The exact-mirror photo-grade props for a v2 card (M10 + B5/C5 parity).
 
     duotone → ``duotoneShadow``/``duotoneHighlight``: the two ink hexes the
     still's SVG filter ramps between, computed by the SAME maths
@@ -644,7 +832,18 @@ def _photo_treatment_mirror_props(
     halftone → ``halftoneTile``: the mask tile px from ``decoration_strength``
     (``round(14 + 18·clamp(s, 0, 1))`` — ``render._v2_photo_treatment_assets``).
 
-    Attached ONLY for a v2 archetype with a sourced photo and one of these two
+    sticker → ``stickerInk``/``stickerRadius`` (B5): the resolved on-ground ink
+    and the die-cut contour radius ``round(min(w,h)·(0.003 + 0.004·strength))``
+    (``render._sticker_outline_css``). Emitted ONLY when a real cutout exists —
+    the still's ``cutout_ok`` gate — since a full-bleed rectangle would paint a
+    box halo. ``format_name`` sizes the radius against this cut's geometry.
+
+    wash → ``washTint``/``washMix`` (C5): the deep brand tint
+    (``render.darken(--mh-primary, 0.20)``) and the arithmetic mix fraction
+    ``0.18 + 0.24·strength`` the still's ``_wash_defs_svg`` composites, so the
+    motion side rebuilds the identical brand colour-wash filter.
+
+    Attached ONLY for a v2 archetype with a sourced photo and one of these
     treatments — every other card's props (and cache key) stay byte-identical.
     """
     b = brief if isinstance(brief, dict) else {}
@@ -667,6 +866,23 @@ def _photo_treatment_mirror_props(
     if treatment == "halftone":
         strength = _decoration_strength_of(b)
         return {"halftoneTile": int(round(14 + 18 * max(0.0, min(1.0, strength))))}
+    if treatment == "sticker":
+        ink = root_vars.get("--mh-on-primary")
+        if not ink or not has_cutout:
+            return {}
+        s = max(0.0, min(1.0, _decoration_strength_of(b)))
+        width, height = motion_format_size(format_name)
+        radius = max(3, int(round(min(width, height) * (0.003 + 0.004 * s))))
+        return {"stickerInk": str(ink), "stickerRadius": radius}
+    if treatment == "wash":
+        try:
+            from mediahub.graphic_renderer.render import darken
+
+            tint = darken(root_vars.get("--mh-primary", "#0A2540"), 0.20)
+        except Exception:
+            return {}
+        s = max(0.0, min(1.0, _decoration_strength_of(b)))
+        return {"washTint": tint, "washMix": round(0.18 + 0.24 * s, 4)}
     return {}
 
 
@@ -745,6 +961,51 @@ def _pb_bars_for_brief(brief: Optional[dict]) -> Optional[dict]:
     return {"prev": prev_str, "now": new_str, "nowPct": round(new_pct, 1), "caption": caption}
 
 
+def _photo_frame_shape_mirror_props(brief: Optional[dict]) -> dict:
+    """E4 parity — the shaped photo frame the still painted, as motion props.
+
+    Returns ``{}`` for ``rect`` / the lever absent / an archetype the still
+    doesn't shape, so those cards keep a byte-identical prop dict (and cache
+    key). Otherwise forwards the shape token plus the EXACT geometry the still
+    computed from the same seeded card key (``render._photo_frame_shape_card_key``
+    + ``graphic_renderer.photo_frame``): the ``border-radius`` string for
+    ``arch``/``blob``, or the three ``feTurbulence``/``feDisplacementMap``
+    numbers for ``torn_edge`` — so the motion scene renders the identical
+    silhouette the reviewer approved on the still.
+    """
+    b = brief if isinstance(brief, dict) else {}
+    archetype = str(b.get("layout_template") or "")
+    try:
+        from mediahub.graphic_renderer import photo_frame as _pf
+        from mediahub.graphic_renderer.render import (
+            _WINDOWED_SHAPE_ARCHETYPES,
+            _photo_frame_shape_card_key,
+        )
+    except Exception:
+        return {}
+    shape = str(b.get("photo_frame_shape") or "").strip().lower()
+    if archetype not in _WINDOWED_SHAPE_ARCHETYPES or shape in ("", "rect"):
+        return {}
+    if shape not in _pf.PHOTO_FRAME_SHAPES:
+        return {}
+
+    class _B:  # a tiny attr view so the still's key helper reads the dict brief
+        content_item_id = str(b.get("content_item_id") or "")
+        id = str(b.get("id") or "")
+        text_layers = b.get("text_layers") if isinstance(b.get("text_layers"), dict) else {}
+
+    card_key = _photo_frame_shape_card_key(_B(), archetype)
+    props: dict = {"frameShape": shape}
+    if shape == "torn_edge":
+        freq, scale, seed = _pf.torn_params(card_key)
+        props["frameTornFreq"] = float(freq)
+        props["frameTornScale"] = float(scale)
+        props["frameTornSeed"] = int(seed)
+    else:
+        props["frameRadius"] = _pf.frame_radius(shape, card_key)
+    return props
+
+
 def _stat_ink_for_brief(brief: Optional[dict], root_vars: dict[str, str]) -> str:
     """The resolved hex of the ink var the still's chip row / PB bars use for
     this archetype (``--mh-on-surface`` or ``--mh-on-primary``), or ``""``."""
@@ -768,23 +1029,33 @@ def _photo_crop_scale_for_brief(brief: Optional[dict], format_name: str) -> floa
     Runs the still's own deterministic translation of the director's crop
     intent (``render._crop_intent_vars`` — saliency/alpha-bbox maths, never
     taste) against the sourced photo, using a previously-gated cutout as the
-    subject mask exactly like the still's photo-mode path. Only
-    ``tight_portrait`` currently emits a scale; every other card returns 0.0
-    so the prop is never attached and cache keys stay byte-identical.
+    subject mask exactly like the still's photo-mode path. ``tight_portrait``
+    and the E2 ``smart`` scorer (director-set or the ``MEDIAHUB_SMART_CROP``
+    operator default, resolved via ``effective_crop_intent``) emit a punch-in
+    scale; every other card returns 0.0 so the prop is never attached and cache
+    keys stay byte-identical.
     """
     b = brief if isinstance(brief, dict) else {}
-    intent = str(b.get("crop_intent") or "").strip()
-    if not intent or not _is_v2_archetype(str(b.get("layout_template") or "")):
+    if not _is_v2_archetype(str(b.get("layout_template") or "")):
         return 0.0
     p = _photo_asset_path_for_brief(b)
     if p is None:
         return 0.0
     try:
-        from mediahub.graphic_renderer.render import _crop_intent_vars, _existing_cutout_for
+        from mediahub.graphic_renderer.render import (
+            _crop_intent_vars,
+            _existing_cutout_for,
+            effective_crop_intent,
+        )
 
+        intent = effective_crop_intent(str(b.get("crop_intent") or ""))
+        if not intent:
+            return 0.0
         width, height = motion_format_size(format_name)
         mask = _existing_cutout_for(p, profile_id=str(b.get("profile_id") or "default"))
-        intent_vars = _crop_intent_vars(intent, p, mask, width, height)
+        intent_vars = _crop_intent_vars(
+            intent, p, mask, width, height, symmetric=_archetype_is_symmetric(b)
+        )
         scale = intent_vars.get("--mh-photo-scale", "")
         return float(scale) if scale else 0.0
     except Exception:
@@ -1086,6 +1357,18 @@ def _card_to_props(
         "roleAccent": roles.get("roleAccent", ""),
         "roleOnGround": roles.get("roleOnGround", ""),
     }
+    # C1 (Canva gap analysis): the resolved tonal-container roles ride into the
+    # props so a motion scene can mirror the still's container layering. Attached
+    # only when the resolver emitted them (every real brief with a parseable
+    # palette), so a brief-less card keeps a byte-identical prop dict.
+    for _role_key in (
+        "roleSurfaceContainer",
+        "roleSurfaceRaised",
+        "roleAccentContainer",
+        "roleOnAccentContainer",
+    ):
+        if roles.get(_role_key):
+            props[_role_key] = roles[_role_key]
     # M20: extra linked-athlete photos for the multi-panel archetypes, only
     # attached when at least one resolved — an empty list never touches the
     # prop dict, so single-photo cards keep byte-identical cache keys.
@@ -1093,6 +1376,20 @@ def _card_to_props(
         props["photoSrcs"] = photo_srcs
     if mesh_bg:
         props["meshBg"] = mesh_bg
+    # F9 medal chrome (still parity): the resolved specular ramp, attached only
+    # on a gate-passing medal card so non-medal cards keep byte-identical props.
+    medal_ramp = roles.get("roleMedalRamp", "")
+    if medal_ramp:
+        props["roleMedalRamp"] = medal_ramp
+    medal_numeral_ramp = roles.get("roleMedalNumeralRamp", "")
+    if medal_numeral_ramp:
+        props["roleMedalNumeralRamp"] = medal_numeral_ramp
+    # F7 overlap accent (still parity): the seeded badge/tab/rule/tape the still
+    # straddles across an anchor. Attached only for a decorated card, so a
+    # bare/legacy card keeps byte-identical props (and cache key).
+    overlap_accent = _overlap_accent_for_brief(b)
+    if overlap_accent:
+        props["overlapAccent"] = overlap_accent
     # LEFTOVER-1 (UI 1.18 → motion): a manual crop persisted in the card's
     # inspector overrides wins over the saliency focus — the same
     # ``photo_pos`` value the still honours, validated by the still's own
@@ -1133,8 +1430,47 @@ def _card_to_props(
     crop_scale = 0.0 if footage is not None else _photo_crop_scale_for_brief(b, format_name)
     if crop_scale > 1.0:
         props["photoScale"] = crop_scale
-    # M10 true-brand duotone / real halftone parameters (exact still mirror).
-    props.update(_photo_treatment_mirror_props(b, root_vars, bool(photo_uri)))
+    # M10 true-brand duotone / real halftone + B5 sticker contour + C5 brand
+    # colour-wash parameters (exact still mirror). ``has_cutout`` gates the
+    # sticker contour (the still's cutout_ok gate); ``format_name`` sizes its
+    # radius against this cut's geometry.
+    props.update(
+        _photo_treatment_mirror_props(
+            b,
+            root_vars,
+            bool(photo_uri),
+            has_cutout=bool(cutout_uri),
+            format_name=format_name,
+        )
+    )
+    # D8 (Canva gap analysis): the still's density/mood-coherent supporting weight
+    # register (kicker/meta/data), mirrored so the reel's labels/meta/data carry
+    # the same weights the still painted. Attached ONLY when the still spent the
+    # register (a bold pack or a non-neutral mood); a standard/neutral card omits
+    # it and keeps byte-identical props + cache key.
+    try:
+        from mediahub.graphic_renderer.autofit import weight_register_for as _weight_register_for
+
+        _density = ((str(b.get("style_pack") or "")).strip().split("-") or [""])[-1]
+        _wr = _weight_register_for(_density, str(b.get("mood") or ""))
+        if _wr:
+            props["wghtKicker"] = int(_wr["kicker"])
+            props["wghtMeta"] = int(_wr["meta"])
+            props["wghtData"] = int(_wr["data"])
+    except Exception:
+        pass
+    # E4 shaped photo frame (arch / blob / torn_edge) — the exact seeded geometry
+    # the still painted, so the reel's window silhouette matches its still. {}
+    # for rect / other archetypes → byte-identical props + cache key.
+    props.update(_photo_frame_shape_mirror_props(b))
+    # E6 (Canva gap analysis): recentre the pack's vignette/spotlight ground on
+    # the subject. Attached ONLY when the pack ground is vignette/spotlight AND
+    # the card carries a photo — every other card keeps a byte-identical prop
+    # dict (and cache key), and photo-less vignette/spotlight cards keep the
+    # fixed centre exactly like the still.
+    ground_focus = _pack_ground_focus_prop(b, props.get("photoPos", ""), bool(photo_uri))
+    if ground_focus is not None:
+        props["packGroundFocus"] = ground_focus
     # M11 data weight: secondary-stat chips + honest proportional PB bars for
     # the data-led archetypes, with the exact ink hex the still's bay uses.
     stat_chips = _stat_chips_for_brief(b)
@@ -1183,10 +1519,59 @@ def _card_to_props(
     return props
 
 
+_RENDERER_GENERATION: Optional[str] = None
+
+
+def renderer_generation() -> str:
+    """A short content fingerprint of the Remotion renderer sources (deep-review
+    #74). The per-composition revisions (STORY/REEL_COMPOSITION_REVISION) must be
+    bumped BY HAND when a composition changes; a change to SHARED renderer code
+    (``render.js``, ``Root.tsx``, shared components, ``fonts.ts``) or a Remotion
+    version bump that nobody remembered to bump the revision for would otherwise
+    keep serving a stale cached MP4. Folding this fingerprint into every cache key
+    invalidates the cache automatically on ANY renderer-source change.
+
+    Content-hashed (not mtime) so it is STABLE across redeploys of unchanged
+    source — the persistent motion cache survives a redeploy that didn't touch the
+    renderer. Memoised (computed once per process). Falls back to a fixed token if
+    the sources can't be read, so a render never fails on fingerprinting.
+    """
+    global _RENDERER_GENERATION
+    if _RENDERER_GENERATION is not None:
+        return _RENDERER_GENERATION
+    h = hashlib.sha256()
+    try:
+        files = [RENDER_SCRIPT, REMOTION_DIR / "package.json"]
+        src_dir = REMOTION_DIR / "src"
+        if src_dir.is_dir():
+            files += sorted(
+                p
+                for p in src_dir.rglob("*")
+                if p.is_file() and p.suffix in (".tsx", ".ts", ".js", ".css")
+            )
+        for p in files:
+            try:
+                h.update(p.relative_to(REMOTION_DIR).as_posix().encode("utf-8"))
+                h.update(b"\0")
+                h.update(p.read_bytes())
+            except OSError:
+                continue
+        _RENDERER_GENERATION = h.hexdigest()[:12]
+    except Exception:
+        _RENDERER_GENERATION = "r0"
+    return _RENDERER_GENERATION
+
+
 def _content_hash(payload: dict, *, kind: str) -> str:
     """Stable hash for the cache key. Serialises with sort_keys so call-site
-    ordering doesn't bust the cache."""
-    blob = json.dumps({"kind": kind, **payload}, sort_keys=True, default=str)
+    ordering doesn't bust the cache. The renderer-source fingerprint (#74) is
+    folded in here so it applies uniformly to every key — a renderer change busts
+    the whole motion cache without any per-call-site edit."""
+    blob = json.dumps(
+        {"kind": kind, "_rgen": renderer_generation(), **payload},
+        sort_keys=True,
+        default=str,
+    )
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:24]
 
 
@@ -1225,6 +1610,7 @@ def _card_manifest_axes(card_props: dict) -> dict:
     return {
         "archetype": card_props.get("archetype") or "",
         "style_pack": card_props.get("stylePack") or "",
+        "overlap_accent": card_props.get("overlapAccent") or "",
         "motion_intent": card_props.get("motionIntent") or "",
         "accent_style": card_props.get("accentStyle") or "",
         "photo_treatment": card_props.get("photoTreatment") or "",
@@ -1239,6 +1625,7 @@ def _card_manifest_axes(card_props: dict) -> dict:
         "has_footage": bool(card_props.get("videoSrc")),
         "photo_mode": card_props.get("photoMode") or "",
         "photo_focus": card_props.get("photoPos") or "",
+        "frame_shape": card_props.get("frameShape") or "",
         "hero_stat": card_props.get("heroStat") or "",
         "stat_chips": len(card_props.get("statChips") or []),
         "has_pb_bars": bool(card_props.get("pbBars")),
@@ -1671,6 +2058,17 @@ def _run_remotion(
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
+    # Render into a unique per-process/thread temp file in the same directory,
+    # then atomically os.replace it into out_path (deep-review #73). render.js
+    # writes its MP4 incrementally, so pointing it straight at the shared cache
+    # slot let two concurrent same-key renders — or a reader on the cache-hit path
+    # (`cached.exists() and size > 1024`) — observe a torn, half-written file. The
+    # atomic same-filesystem rename means out_path only ever flips from absent to
+    # a complete MP4 (or from one complete MP4 to another). (The opt-in
+    # parallel-segment reel composite and the ffmpeg fallback engine write the
+    # slot through their own ffmpeg invocations; they are separate follow-ups.)
+    tmp_out = out_path.with_name(f".{out_path.stem}.{os.getpid()}.{threading.get_ident()}.tmp.mp4")
+
     # Write props to a temp file alongside the cache; cheap and lets us tail
     # the JSON if a render fails.
     props_dir = _cache_dir() / "props"
@@ -1686,7 +2084,7 @@ def _run_remotion(
         "--props",
         str(props_path),
         "--output",
-        str(out_path),
+        str(tmp_out),
     ]
     if duration_sec is not None:
         cmd.extend(["--duration", str(duration_sec)])
@@ -1701,15 +2099,21 @@ def _run_remotion(
         # subprocess.run would SIGKILL only node and reparent Chromium to init).
         proc = run_capture(cmd, cwd=str(REMOTION_DIR), timeout=timeout)
     except subprocess.TimeoutExpired as e:
+        tmp_out.unlink(missing_ok=True)
         raise RuntimeError(f"Remotion render timed out after {timeout}s") from e
 
     if proc.returncode != 0:
+        tmp_out.unlink(missing_ok=True)
         stderr = (proc.stderr or "").strip().splitlines()
         tail = "\n".join(stderr[-15:]) if stderr else "(no stderr)"
         # Keep props_path on failure — it's the render's input, useful to reproduce.
         raise RuntimeError(f"Remotion render failed (exit {proc.returncode}):\n{tail}")
-    if not out_path.exists() or out_path.stat().st_size < 1024:
+    if not tmp_out.exists() or tmp_out.stat().st_size < 1024:
+        tmp_out.unlink(missing_ok=True)
         raise RuntimeError(f"Remotion reported success but {out_path} is missing or empty")
+    # Atomic publish: the completed MP4 flips into the cache slot in one rename,
+    # so a concurrent same-key render or cache-hit reader never sees a torn file.
+    os.replace(tmp_out, out_path)
     # Success: drop the props sidecar so it doesn't accumulate one-per-MP4 forever
     # (it was never pruned). Failed renders keep theirs for debugging (above).
     props_path.unlink(missing_ok=True)
@@ -1837,6 +2241,7 @@ def render_story_card(
     cache_key = _content_hash(cache_payload, kind="story")
     cached = _cache_dir() / f"{cache_key}.mp4"
     if cached.exists() and cached.stat().st_size > 1024:
+        _touch_cache_hit(cached)  # LRU recency (#71)
         # Re-publish the cached MP4 at the caller-requested path. The
         # finishing pass is idempotent: it retries a previously-failed
         # audio attach and backfills a missing poster sidecar.
@@ -1882,6 +2287,7 @@ def render_story_card(
     elif foot_reason:
         story_manifest["footage"] = {"used": False, "reason": foot_reason}
     _write_render_manifest(cached, story_manifest)
+    _prune_motion_cache()  # bound the cache after a cold write (#71)
     published = _publish(cached, out_path)
     return published if published.exists() else cached
 
@@ -2626,6 +3032,7 @@ def _render_reel_one_format(
     cache_key = _content_hash(cache_payload, kind="reel")
     cached = _cache_dir() / f"{cache_key}.mp4"
     if cached.exists() and cached.stat().st_size > 1024:
+        _touch_cache_hit(cached)  # LRU recency (#71)
         audio_rec = _finish_cached_video(
             cached,
             kind="reel",
@@ -2731,6 +3138,7 @@ def _render_reel_one_format(
             ),
         },
     )
+    _prune_motion_cache()  # bound the cache after a cold write (#71)
     published = _publish(cached, out_path)
     return published if published.exists() else cached
 

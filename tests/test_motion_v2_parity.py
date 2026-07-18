@@ -20,6 +20,7 @@ Covers the reel-side catch-up with the Gen v2 still engine:
 No Node needed: real renders stay behind the existing integration gates;
 everything here is pure-Python shaping or TSX source contracts.
 """
+
 from __future__ import annotations
 
 import json
@@ -62,8 +63,11 @@ def _card(i: int = 1) -> dict:
 def _full_brief(**overrides) -> dict:
     """A persisted-shape brief dict (CreativeBrief.to_dict())."""
     brief = generate(
-        {"id": "swim-parity-1", "post_angle": "confirmed_official_pb",
-         "achievement": _card(1)["achievement"]},
+        {
+            "id": "swim-parity-1",
+            "post_angle": "confirmed_official_pb",
+            "achievement": _card(1)["achievement"],
+        },
         None,
         BRAND,
         profile_id="parity",
@@ -103,8 +107,14 @@ def test_card_props_forward_motion_intent_and_photo_axes():
 
 def test_card_props_without_brief_keep_new_axes_empty():
     props = motion._card_to_props(_card(1), variation_seed=3)
-    for key in ("motionIntent", "photoPos", "roleGround", "roleSurface",
-                "roleAccent", "roleOnGround"):
+    for key in (
+        "motionIntent",
+        "photoPos",
+        "roleGround",
+        "roleSurface",
+        "roleAccent",
+        "roleOnGround",
+    ):
         assert props[key] == "", key
 
 
@@ -121,9 +131,7 @@ def _motion_source_corpus() -> str:
     sprint = comp / "sprint"
     if sprint.is_dir():
         parts.extend(
-            p.read_text()
-            for p in sorted(sprint.rglob("*"))
-            if p.suffix in {".ts", ".tsx"}
+            p.read_text() for p in sorted(sprint.rglob("*")) if p.suffix in {".ts", ".tsx"}
         )
     return "\n".join(parts)
 
@@ -147,9 +155,7 @@ def test_tsx_executes_every_motion_intent():
 
 
 def test_card_props_carry_resolved_still_roles():
-    props = motion._card_to_props(
-        _card(1), variation_seed=2, brief=_full_brief(), brand_kit=BRAND
-    )
+    props = motion._card_to_props(_card(1), variation_seed=2, brief=_full_brief(), brand_kit=BRAND)
     # The resolver starts from the BrandKit's canonical colours.
     assert props["roleGround"] == "#0E2A47"
     assert props["roleAccent"]  # accent resolved (brand or legible tint)
@@ -164,9 +170,7 @@ def test_resolved_roles_match_the_still_renderer_exactly():
     brief_dict = _full_brief()
     brief = CreativeBrief.from_dict(brief_dict)
     expected = resolved_role_vars_for_brief(brief, BRAND)
-    props = motion._card_to_props(
-        _card(1), variation_seed=2, brief=brief_dict, brand_kit=BRAND
-    )
+    props = motion._card_to_props(_card(1), variation_seed=2, brief=brief_dict, brand_kit=BRAND)
     assert props["roleGround"] == expected["--mh-primary"]
     assert props["roleSurface"] == expected["--mh-surface"]
     assert props["roleAccent"] == expected["--mh-accent"]
@@ -325,6 +329,36 @@ def test_count_up_settles_on_the_verbatim_value():
     assert "resultFinal" in src
 
 
+def test_result_numeral_kerning_mirrors_the_still():
+    """A5 (Canva gap analysis) parity — the motion result numeral kerns its
+    intra-numeric separators with the SAME cell the still's _kern_numeric_seps /
+    _SEP_CSS paints (margin:0 -0.10em on each ':'/'.' between two digits), so a
+    time like "1:02.45" holds identical spacing on the video and the approved
+    still. Source-contract level (no Node needed)."""
+    from mediahub.graphic_renderer import render as _r
+
+    # The still's separator cell margin the motion side must match exactly.
+    assert "-0.10em" in _r._SEP_CSS
+    assert "mh-sep" in _r._SEP_CSS
+    # The still only kerns separators sitting BETWEEN two digits.
+    kerned, n = _r._kern_numeric_seps("1:02.45")
+    assert n == 2 and 'class="mh-sep"' in kerned
+    # A value with no intra-numeric separator is returned untouched (byte-safe).
+    assert _r._kern_numeric_seps("DQ") == ("DQ", 0)
+
+    src = (motion.REMOTION_DIR / "src" / "compositions" / "StoryCard.tsx").read_text()
+    # The helper exists and paints the identical cell margin + class.
+    assert "function kernNumeric" in src
+    assert 'margin: "0 -0.10em"' in src
+    assert 'className="mh-sep"' in src
+    # It is applied to the standalone hero result display and to the count-up
+    # word row (so both the mid-count frames and the held frame carry it).
+    assert "kernNumeric(ctx.result)" in src
+    assert "{kernNumeric(w)}" in src
+    # Same digit-between-separator rule the still uses (isDigit on both sides).
+    assert "isDigit(t[i - 1])" in src and "isDigit(t[i + 1])" in src
+
+
 def test_reel_cover_chips_count_up_honestly():
     src = (motion.REMOTION_DIR / "src" / "compositions" / "MeetReel.tsx").read_text()
     # Chips count up to totals derived only from the honest reelStats.
@@ -366,9 +400,7 @@ def test_reel_render_writes_manifest_with_per_card_axes(tmp_path, monkeypatch):
         return out
 
     with mock.patch.object(motion, "_run_remotion", side_effect=_fake_run):
-        motion.render_meet_reel(
-            [_card(1), _card(2)], BRAND, tmp_path / "out" / "reel.mp4"
-        )
+        motion.render_meet_reel([_card(1), _card(2)], BRAND, tmp_path / "out" / "reel.mp4")
     manifests = list(motion._cache_dir().glob("*.json"))
     assert manifests
     data = json.loads(manifests[0].read_text())

@@ -37,7 +37,7 @@
   display: flex; flex-direction: column; align-items: center;
   background: var(--mh-ground-gradient, var(--mh-primary));
   color: var(--mh-on-primary);
-  font-family: 'Inter', system-ui, sans-serif;
+  font-family: var(--mh-font-body, 'Inter', system-ui, sans-serif);
   -webkit-font-smoothing: antialiased;
   padding: 96px 70px 80px;
   text-align: center;
@@ -45,7 +45,7 @@
 .rl *, .rl *::before, .rl *::after { box-sizing: border-box; }
 
 .rl__label {
-  font-family: 'Space Grotesk', 'Inter', sans-serif; font-weight: 800;
+  font-family: var(--mh-font-kicker, 'Space Grotesk', 'Inter', sans-serif); font-weight: 800;
   font-size: 26px; letter-spacing: 0.22em; text-transform: uppercase;
   color: var(--mh-accent); margin-bottom: 44px;
   max-width: 100%; overflow-wrap: anywhere;
@@ -79,7 +79,7 @@
   gap: 10px;
 }
 .rl__eye-event {
-  font-family: 'Space Grotesk', 'Inter', sans-serif; font-weight: 700;
+  font-family: var(--mh-font-kicker, 'Space Grotesk', 'Inter', sans-serif); font-weight: 700;
   font-size: 22px; letter-spacing: 0.08em; text-transform: uppercase;
   color: var(--mh-on-primary); opacity: 0.82; overflow-wrap: anywhere;
 }
@@ -94,7 +94,7 @@
 /* name seated below the target */
 .rl__below { margin-top: 52px; width: 100%; }
 .rl__first {
-  font-family: 'Space Grotesk', 'Inter', sans-serif; font-weight: 700;
+  font-family: var(--mh-font-kicker, 'Space Grotesk', 'Inter', sans-serif); font-weight: 700;
   font-size: 38px; letter-spacing: 0.06em; text-transform: uppercase;
   color: var(--mh-accent); margin-bottom: 2px; overflow-wrap: anywhere;
 }
@@ -107,7 +107,7 @@
 }
 .rl__stat {
   margin-top: 16px;
-  font-family: 'Space Grotesk', 'Inter', sans-serif; font-weight: 800;
+  font-family: var(--mh-font-kicker, 'Space Grotesk', 'Inter', sans-serif); font-weight: 800;
   font-size: 24px; letter-spacing: 0.08em; text-transform: uppercase;
   color: var(--mh-accent); overflow-wrap: anywhere;
 }
@@ -116,18 +116,18 @@
 .rl__foot {
   margin-top: auto; padding-top: 30px; width: 100%;
   border-top: 2px solid var(--mh-outline);
-  display: flex; align-items: center; justify-content: space-between; gap: 24px;
+  display: flex; align-items: center; justify-content: space-between; gap: var(--mh-sp-5);
   text-align: left;
 }
 .rl__logo { height: 54px; width: auto; flex: 0 0 auto; }
 .rl__logo img, .rl__logo svg { height: 100%; width: auto; object-fit: contain; display: block; }
 .rl__meta { display: flex; flex-direction: column; min-width: 0; }
 .rl__meet {
-  font-family: 'Inter', sans-serif; font-weight: 600; font-size: 20px;
+  font-family: var(--mh-font-body, 'Inter', sans-serif); font-weight: 600; font-size: 20px;
   color: var(--mh-on-primary); opacity: 0.85; overflow-wrap: anywhere;
 }
 .rl__club {
-  font-family: 'Inter', sans-serif; font-weight: 800; font-size: 19px;
+  font-family: var(--mh-font-body, 'Inter', sans-serif); font-weight: 800; font-size: 19px;
   text-transform: uppercase; color: var(--mh-on-primary); overflow-wrap: anywhere;
 }
 .rl__sponsor { flex: 0 0 auto; }

@@ -42,7 +42,7 @@
   display: flex;
   background: var(--mh-ground-gradient, var(--mh-primary));
   color: var(--mh-on-primary);
-  font-family: 'Inter', system-ui, sans-serif;
+  font-family: var(--mh-font-body, 'Inter', system-ui, sans-serif);
   -webkit-font-smoothing: antialiased;
 }
 .ss *, .ss *::before, .ss *::after { box-sizing: border-box; }
@@ -73,7 +73,7 @@
 
 .ss__kicker {
   display: flex; align-items: center; gap: 18px;
-  font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 700;
+  font-family: var(--mh-font-kicker, 'Space Grotesk','Inter',sans-serif); font-weight: 700;
   font-size: 27px; letter-spacing: 0.26em; text-transform: uppercase;
   color: var(--mh-accent);
   margin-bottom: 28px;
@@ -84,7 +84,7 @@
 }
 
 .ss__first {
-  font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 700;
+  font-family: var(--mh-font-kicker, 'Space Grotesk','Inter',sans-serif); font-weight: 700;
   font-size: 48px; letter-spacing: 0.02em; text-transform: uppercase;
   color: var(--mh-accent); margin-bottom: 2px;
 }
@@ -111,15 +111,16 @@
 .ss__ledger { display: flex; flex-direction: column; gap: 30px; }
 .ss__field { display: flex; flex-direction: column; }
 .ss__lab {
-  font-family: 'Inter',sans-serif; font-weight: 700; font-size: 17px;
+  font-family: var(--mh-font-body, 'Inter',sans-serif); font-weight: 700; font-size: 17px;
   letter-spacing: 0.24em; text-transform: uppercase;
   color: var(--mh-accent); margin-bottom: 10px;
 }
 .ss__event {
-  font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 600;
+  font-family: var(--mh-font-kicker, 'Space Grotesk','Inter',sans-serif); font-weight: 600;
   font-size: 34px; text-transform: uppercase; color: var(--mh-on-primary);
 }
 .ss__result {
+  position: relative;
   font-family: 'JetBrains Mono','Space Grotesk',monospace;
   font-feature-settings: "tnum"; font-weight: 700;
   font-size: var(--mh-fit-result-px, 92px); font-variation-settings: var(--mh-axes-result, normal); line-height: 0.9;
@@ -128,10 +129,15 @@
 
 /* ---- right rail ---- */
 .ss__rail {
-  flex: 0 0 320px;
+  /* F2: the stat rail is 8/27 of the short edge = exactly 320px at a 1080-wide
+     format (byte-identical), scaling with the canvas below that. */
+  flex: 0 0 calc(var(--mh-short, 1080px) * 8 / 27);
   position: relative;
   display: flex; flex-direction: column;
-  background: var(--mh-surface);
+  /* C1: the scoreboard rail rides the tonal surface-container so it reads as a
+     lit panel stepped off the ground rather than the same deep surface fill;
+     falls back to --mh-surface where the token is absent. */
+  background: var(--mh-surface-container, var(--mh-surface));
   color: var(--mh-on-surface);
   border-left: 10px solid var(--mh-accent);
   padding: 92px 40px 84px;
@@ -139,22 +145,22 @@
 .ss__rail-top { display: flex; flex-direction: column; gap: 38px; }
 .ss__chip { display: flex; flex-direction: column; }
 .ss__chip-lab {
-  font-family: 'Inter',sans-serif; font-weight: 700; font-size: 15px;
+  font-family: var(--mh-font-body, 'Inter',sans-serif); font-weight: 700; font-size: 15px;
   letter-spacing: 0.22em; text-transform: uppercase;
   color: var(--mh-accent); margin-bottom: 10px;
 }
 .ss__chip-val {
-  font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 600;
+  font-family: var(--mh-font-kicker, 'Space Grotesk','Inter',sans-serif); font-weight: 600;
   font-size: 27px; line-height: 1.14; color: var(--mh-on-surface);
 }
 /* the emphasis chip collapses entirely when no hero stat is supplied */
 .ss__hero:has(.ss__chip-val:empty) { display: none; }
 
 .ss__rail-foot { margin-top: auto; padding-top: 34px; border-top: 2px solid var(--mh-outline); }
-.ss__logo { height: 64px; width: auto; margin-bottom: 16px; }
+.ss__logo { height: 64px; width: auto; margin-bottom: var(--mh-sp-4); }
 .ss__logo img, .ss__logo svg { height: 100%; width: auto; object-fit: contain; display: block; }
 .ss__club {
-  font-family: 'Inter',sans-serif; font-weight: 800; font-size: 21px;
+  font-family: var(--mh-font-body, 'Inter',sans-serif); font-weight: 800; font-size: 21px;
   line-height: 1.18; text-transform: uppercase; color: var(--mh-on-surface);
 }
 .ss__sponsor { margin-top: 20px; }
@@ -176,7 +182,7 @@
       </div>
       <div class="ss__field">
         <div class="ss__lab">Result</div>
-        <div class="ss__result">{{RESULT_VALUE}}</div>
+        <div class="ss__result">{{RESULT_VALUE}}<div class="mh-anchor mh-anchor--panel-tr">{{OVERLAP_ACCENT}}</div></div>
       </div>
     </div>
     {{STAT_CHIPS}}

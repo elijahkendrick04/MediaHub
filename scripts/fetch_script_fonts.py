@@ -50,48 +50,65 @@ _ctx.verify_mode = ssl.CERT_NONE
 _MARK_START = "/* === non-Latin script fonts (1.24 localisation) — generated === */"
 _MARK_END = "/* === end non-Latin script fonts === */"
 
-# script slug -> (css2 family query, gstatic subset name, woff2 slug,
-#                 standalone family name, unicode-range)
+# script slug -> per-script config. Each carries BOTH a regular (400) cut and a
+# heavy DISPLAY cut (D9, Canva gap analysis): a non-Latin hero name aliased to a
+# condensed display face (Anton/Bebas/Bowlby) used to fall back to Noto Sans 400,
+# flattening the very weight/width contrast that defines the card. We now
+# self-host the heavy cut (Black 900 where the family carries it, else Bold 700)
+# and alias THAT under the display family names, keeping the 400 cut under the
+# body/data families. Fields:
+#   query_400     — css2 family+weight query for the regular cut
+#   query_display — css2 family+weight query for the heavy display cut
+#   subset        — gstatic subset name to pick out of the css2 response
+#   slug_400      — regular woff2 filename stem
+#   slug_display  — heavy woff2 filename stem
+#   family        — the standalone family name (selectable directly)
+#   urange        — the unicode-range this script covers
 SCRIPTS = {
-    "cyrillic": (
-        "Noto+Sans:wght@400",
-        "cyrillic",
-        "noto-sans-cyrillic",
-        "Noto Sans",
-        "U+0400-04FF, U+0500-052F, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F",
-    ),
-    "arabic": (
-        "Noto+Sans+Arabic:wght@400",
-        "arabic",
-        "noto-sans-arabic",
-        "Noto Sans Arabic",
-        "U+0600-06FF, U+0750-077F, U+0870-088E, U+08A0-08FF, U+FB50-FDFF, U+FE70-FEFF",
-    ),
-    "devanagari": (
-        "Noto+Sans+Devanagari:wght@400",
-        "devanagari",
-        "noto-sans-devanagari",
-        "Noto Sans Devanagari",
-        "U+0900-097F, U+1CD0-1CFF, U+A830-A839, U+A8E0-A8FF",
-    ),
-    "bengali": (
-        "Noto+Sans+Bengali:wght@400",
-        "bengali",
-        "noto-sans-bengali",
-        "Noto Sans Bengali",
-        "U+0980-09FF, U+1CD0-1CF9, U+200C-200D, U+20B9",
-    ),
+    "cyrillic": {
+        "query_400": "Noto+Sans:wght@400",
+        "query_display": "Noto+Sans:wght@900",
+        "subset": "cyrillic",
+        "slug_400": "noto-sans-cyrillic",
+        "slug_display": "noto-sans-cyrillic-black",
+        "family": "Noto Sans",
+        "urange": "U+0400-04FF, U+0500-052F, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F",
+    },
+    "arabic": {
+        "query_400": "Noto+Sans+Arabic:wght@400",
+        "query_display": "Noto+Sans+Arabic:wght@700",
+        "subset": "arabic",
+        "slug_400": "noto-sans-arabic",
+        "slug_display": "noto-sans-arabic-bold",
+        "family": "Noto Sans Arabic",
+        "urange": "U+0600-06FF, U+0750-077F, U+0870-088E, U+08A0-08FF, U+FB50-FDFF, U+FE70-FEFF",
+    },
+    "devanagari": {
+        "query_400": "Noto+Sans+Devanagari:wght@400",
+        "query_display": "Noto+Sans+Devanagari:wght@700",
+        "subset": "devanagari",
+        "slug_400": "noto-sans-devanagari",
+        "slug_display": "noto-sans-devanagari-bold",
+        "family": "Noto Sans Devanagari",
+        "urange": "U+0900-097F, U+1CD0-1CFF, U+A830-A839, U+A8E0-A8FF",
+    },
+    "bengali": {
+        "query_400": "Noto+Sans+Bengali:wght@400",
+        "query_display": "Noto+Sans+Bengali:wght@700",
+        "subset": "bengali",
+        "slug_400": "noto-sans-bengali",
+        "slug_display": "noto-sans-bengali-bold",
+        "family": "Noto Sans Bengali",
+        "urange": "U+0980-09FF, U+1CD0-1CF9, U+200C-200D, U+20B9",
+    },
 }
 
-# The six Latin brand families that should gain a per-glyph non-Latin fallback.
-BRAND_FAMILIES = (
-    "Bebas Neue",
-    "Anton",
-    "Bowlby One",
-    "Space Grotesk",
-    "Inter",
-    "JetBrains Mono",
-)
+# The three heavy DISPLAY brand families — a non-Latin glyph in one of these
+# aliases to the heavy Noto cut so a Cyrillic/Arabic/… hero keeps its poster
+# weight. The three BODY/DATA families keep the regular Noto 400 cut (their
+# Latin registers are book weight, so a 400 non-Latin fallback is correct).
+DISPLAY_FAMILIES = ("Bebas Neue", "Anton", "Bowlby One")
+BODY_FAMILIES = ("Space Grotesk", "Inter", "JetBrains Mono")
 
 
 def _get(url: str) -> bytes:
@@ -136,24 +153,43 @@ def _face(family: str, slug: str, urange: str) -> str:
 def build_block() -> str:
     """The full marked @font-face block (standalone families + brand fallbacks)."""
     lines = [_MARK_START]
-    # Standalone families, selectable directly by the renderer.
-    for _slug, (_q, _sub, woff_slug, family, urange) in SCRIPTS.items():
-        lines.append(_face(family, woff_slug, urange))
-    # Per-glyph fallback: every brand family falls back to the right Noto face
-    # for each non-Latin range, so translated text in a brand-styled element
-    # renders correctly with no template change.
-    for brand in BRAND_FAMILIES:
-        for _slug, (_q, _sub, woff_slug, _family, urange) in SCRIPTS.items():
-            lines.append(_face(brand, woff_slug, urange))
+    # Standalone families (Noto Sans, Noto Sans Arabic, …), selectable directly
+    # by the renderer — always the regular 400 cut.
+    for cfg in SCRIPTS.values():
+        lines.append(_face(cfg["family"], cfg["slug_400"], cfg["urange"]))
+    # Per-glyph fallback: each brand family falls back to the right Noto face for
+    # every non-Latin range so translated text in a brand-styled element renders
+    # with no template change. D9: the heavy DISPLAY families alias the Black/Bold
+    # cut (poster weight preserved across scripts); the BODY families keep 400.
+    for brand in DISPLAY_FAMILIES:
+        for cfg in SCRIPTS.values():
+            lines.append(_face(brand, cfg["slug_display"], cfg["urange"]))
+    for brand in BODY_FAMILIES:
+        for cfg in SCRIPTS.values():
+            lines.append(_face(brand, cfg["slug_400"], cfg["urange"]))
     lines.append(_MARK_END)
     return "\n".join(lines)
 
 
+def _fetch(query: str, subset: str, slug: str) -> None:
+    """Download one subset woff2 to ``fonts/<slug>.woff2`` if not already present.
+
+    Skip-if-exists keeps the committed regular cuts byte-stable across re-runs
+    (Google may re-subset over time) while still fetching any newly-added cut.
+    """
+    dest = FONTS / f"{slug}.woff2"
+    if dest.exists():
+        print(f"  (have)  fonts/{slug}.woff2")
+        return
+    url = _subset_woff2_url(query, subset)
+    dest.write_bytes(_get(url))
+    print(f"  fetched fonts/{slug}.woff2")
+
+
 def main() -> None:
-    for _slug, (query, subset, woff_slug, family, _urange) in SCRIPTS.items():
-        url = _subset_woff2_url(query, subset)
-        (FONTS / f"{woff_slug}.woff2").write_bytes(_get(url))
-        print(f"  {family:22} -> fonts/{woff_slug}.woff2")
+    for cfg in SCRIPTS.values():
+        _fetch(cfg["query_400"], cfg["subset"], cfg["slug_400"])
+        _fetch(cfg["query_display"], cfg["subset"], cfg["slug_display"])
 
     css = SHARED.read_text(encoding="utf-8")
     block = build_block()

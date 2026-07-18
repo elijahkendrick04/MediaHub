@@ -36,12 +36,11 @@ from flask import (
 from mediahub.web import web as W
 
 
-def api_status(run_id):
+@W.require_run(deny=lambda: (jsonify({"status": "unknown", "error": "Run not found"}), 404))
+def api_status(run_id, run_data):
     # Tenant gate: status polling would otherwise let a foreign org
     # infer when another org's pipeline finishes.
-    _run_data = W._load_run(run_id)
-    if not W._can_access_run(run_id, _run_data, W._active_profile_id()):
-        return jsonify({"status": "unknown", "error": "Run not found"}), 404
+    _run_data = run_data
 
     def _n_achievements_from_run(rd):
         """Extract achievement count from a loaded run dict (or 0)."""
@@ -124,7 +123,8 @@ def api_status(run_id):
     return jsonify(payload)
 
 
-def api_why_card(run_id, ach_index):
+@W.require_run(deny=lambda: (("Run not found", 404)), require_exists=True)
+def api_why_card(run_id, ach_index, run_data):
     """Build one card's "Why this card?" reasoning on demand.
 
     The review page renders these lazily (placeholder + this fetch) so
@@ -132,9 +132,7 @@ def api_why_card(run_id, ach_index):
     whole page render. ``ach_index`` is the position in the persisted
     ``ranked_achievements`` list, which is stable for a finished run.
     """
-    data = W._load_run(run_id)
-    if not W._can_access_run(run_id, data, W._active_profile_id()) or not data:
-        return ("Run not found", 404)
+    data = run_data
     rr = data.get("recognition_report") or {}
     ranked = rr.get("ranked_achievements") or []
     if ach_index < 0 or ach_index >= len(ranked):
@@ -155,10 +153,9 @@ def api_why_card(run_id, ach_index):
     return current_app.response_class(html, mimetype="text/html")
 
 
-def api_recognition(run_id):
-    data = W._load_run(run_id)
-    if not W._can_access_run(run_id, data, W._active_profile_id()):
-        return jsonify({"error": "not found"}), 404
+@W.require_run(deny=lambda: (jsonify({"error": "not found"}), 404))
+def api_recognition(run_id, run_data):
+    data = run_data
     if not data:
         return jsonify({"error": "not found"}), 404
     rr = data.get("recognition_report")
@@ -172,10 +169,9 @@ def api_recognition(run_id):
     return jsonify(rr)
 
 
-def api_swim_trace(run_id, swim_id):
-    data = W._load_run(run_id)
-    if not W._can_access_run(run_id, data, W._active_profile_id()):
-        return jsonify({"error": "not found"}), 404
+@W.require_run(deny=lambda: (jsonify({"error": "not found"}), 404))
+def api_swim_trace(run_id, swim_id, run_data):
+    data = run_data
     if not data:
         return jsonify({"error": "not found"}), 404
     rr = data.get("recognition_report") or {}
@@ -194,7 +190,8 @@ def api_swim_trace(run_id, swim_id):
     return jsonify({"error": "trace not found", "swim_id": swim_id_dec}), 404
 
 
-def api_live_caption(run_id, swim_id):
+@W.require_run(deny=lambda: (jsonify({"error": "run not found"}), 404))
+def api_live_caption(run_id, swim_id, run_data):
     """
     V8 Live Caption endpoint.
 
@@ -216,9 +213,7 @@ def api_live_caption(run_id, swim_id):
     swim_id_dec = _up.unquote(swim_id)
 
     # Load run data
-    data = W._load_run(run_id)
-    if not W._can_access_run(run_id, data, W._active_profile_id()):
-        return jsonify({"error": "run not found"}), 404
+    data = run_data
     if not data:
         return jsonify({"error": "run not found"}), 404
 
@@ -390,6 +385,7 @@ def api_live_caption(run_id, swim_id):
 
         _gov_org = "" if W._auth.is_dev_operator() else (run_profile_id or "")
         _gov_ok = False
+        _gov_reservation = None  # atomic quota reservation (deep-review #95)
         _gov_plan = W._auth.current_plan()
         if _gov_org and not _gov_perms.can_use_feature(
             W._active_role(_gov_org), _gov_features.FEATURE_CAPTION, plan=_gov_plan
@@ -411,7 +407,12 @@ def api_live_caption(run_id, swim_id):
             ), 403
         if _gov_org:
             try:
-                _gov_quota.enforce(_gov_org, _gov_features.FEATURE_CAPTION, plan=_gov_plan)
+                # Atomic reserve (deep-review #95): takes the slot up front so
+                # concurrent requests at the limit can't all pass. Finalised in
+                # the finally below (record-parity), guaranteed on every exit.
+                _gov_reservation = _gov_quota.reserve(
+                    _gov_org, _gov_features.FEATURE_CAPTION, plan=_gov_plan
+                )
             except _gov_quota.QuotaExceeded as _qe:
                 return jsonify(
                     {
@@ -711,9 +712,10 @@ def api_live_caption(run_id, swim_id):
             # success counts toward quota, a failed attempt is logged but
             # not charged. Best-effort; never affects the response.
             if _gov_org:
-                _gov_quota.record(
+                _gov_quota.finalize(
                     _gov_org,
                     _gov_features.FEATURE_CAPTION,
+                    _gov_reservation,
                     ok=_gov_ok,
                     detail=f"tone={tone}",
                 )
@@ -755,7 +757,8 @@ def api_live_caption(run_id, swim_id):
         )
 
 
-def api_caption_assist(run_id, swim_id):
+@W.require_run(deny=lambda: (jsonify({"error": "run not found"}), 404), require_exists=True)
+def api_caption_assist(run_id, swim_id, run_data):
     """Inline caption assist: REVISE an existing caption (shorter / punchier /
     add the time / tidy / custom) via the existing writer's `requirements`
     channel. Never invents facts — it only nudges wording. Mirrors
@@ -764,10 +767,7 @@ def api_caption_assist(run_id, swim_id):
     from datetime import datetime
     from datetime import timezone as _tz
 
-    data = W._load_run(run_id)
-    if not W._can_access_run(run_id, data, W._active_profile_id()) or not data:
-        return jsonify({"error": "run not found"}), 404
-
+    data = run_data
     payload = request.get_json(silent=True) or {}
     # Server-side length caps: the 140-char maxlength is client-only, so an
     # oversized body would otherwise be embedded verbatim in the provider
@@ -901,7 +901,8 @@ def api_caption_assist(run_id, swim_id):
     )
 
 
-def api_caption_platforms(run_id, swim_id):
+@W.require_run(deny=lambda: (jsonify({"error": "run not found"}), 404), require_exists=True)
+def api_caption_platforms(run_id, swim_id, run_data):
     """Adapt one caption into per-platform variants (feed / story / X /
     LinkedIn) via ai_caption.generate_platform_variants.
 
@@ -913,10 +914,7 @@ def api_caption_platforms(run_id, swim_id):
     from datetime import datetime
     from datetime import timezone as _tz
 
-    data = W._load_run(run_id)
-    if not W._can_access_run(run_id, data, W._active_profile_id()) or not data:
-        return jsonify({"error": "run not found"}), 404
-
+    data = run_data
     payload = request.get_json(silent=True) or {}
     # Server-side length cap: the client caption is ~280 chars; anything
     # much larger is truncated before it reaches the provider prompt.
@@ -1015,7 +1013,8 @@ def api_caption_platforms(run_id, swim_id):
     return jsonify({"variants": variants, "live": True, "generated_at": now_iso})
 
 
-def api_card_translate(run_id, card_id):
+@W.require_run(deny=lambda: (jsonify({"error": "run not found"}), 404), require_exists=True)
+def api_card_translate(run_id, card_id, run_data):
     """1.24 localisation — translate a card's text into a target language.
 
     POST body: {lang: "cy"|"en-US"|…, caption: str, alt_text?: str,
@@ -1030,9 +1029,7 @@ def api_card_translate(run_id, card_id):
     """
     import urllib.parse as _up
 
-    data = W._load_run(run_id)
-    if not W._can_access_run(run_id, data, W._active_profile_id()) or not data:
-        return jsonify({"error": "run not found"}), 404
+    data = run_data
     # Translating produces content for review — an edit-class action.
     denied = W._role_denied_json(W._perms.CAP_EDIT, run_id)
     if denied:
@@ -1099,11 +1096,28 @@ def api_card_translate(run_id, card_id):
                 ),
             }
         ), 403
+    # Atomic reserve-before-work (deep-review #95): take the slot up front so
+    # concurrent requests at the limit can't all pass. Released (finalize ok=False)
+    # on every non-success exit below and finalised ok=True on success, so a
+    # metered reservation is never leaked.
+    _t_reservation = None
     if _gov_org:
         try:
-            _gov_quota.enforce(_gov_org, _gov_features.FEATURE_TRANSLATE, plan=_gov_plan)
+            _t_reservation = _gov_quota.reserve(
+                _gov_org, _gov_features.FEATURE_TRANSLATE, plan=_gov_plan
+            )
         except _gov_quota.QuotaExceeded as _qe:
             return jsonify({"error": "quota_reached", "message": str(_qe)}), 200
+
+    def _release_translate_slot():
+        if _gov_org:
+            _gov_quota.finalize(
+                _gov_org,
+                _gov_features.FEATURE_TRANSLATE,
+                _t_reservation,
+                ok=False,
+                detail=f"lang={target}",
+            )
 
     from mediahub.media_ai.llm import is_available as _llm_available
 
@@ -1111,6 +1125,7 @@ def api_card_translate(run_id, card_id):
         # Honest "no provider" — 200 + an error body, matching the sibling
         # caption/assist routes (and the route's own transient path); the
         # review UI branches on the `error` field, not the status code.
+        _release_translate_slot()
         return jsonify(
             {
                 "error": "no_key",
@@ -1129,6 +1144,7 @@ def api_card_translate(run_id, card_id):
     try:
         variant = translate_card_slots(slots, target, source_language=source_language)
     except _CUE:
+        _release_translate_slot()
         return jsonify(
             {
                 "error": "no_key",
@@ -1136,6 +1152,7 @@ def api_card_translate(run_id, card_id):
             }
         ), 200
     except Exception:
+        _release_translate_slot()
         return jsonify(
             {
                 "error": "transient",
@@ -1143,11 +1160,15 @@ def api_card_translate(run_id, card_id):
             }
         ), 200
 
-    # One real translation produced — count it toward the org's quota
-    # (operator exempt). Best-effort; never affects the response.
+    # One real translation produced — finalise the reserved slot (deep-review #95;
+    # operator exempt). Best-effort; never affects the response.
     if _gov_org:
-        _gov_quota.record(
-            _gov_org, _gov_features.FEATURE_TRANSLATE, ok=True, detail=f"lang={target}"
+        _gov_quota.finalize(
+            _gov_org,
+            _gov_features.FEATURE_TRANSLATE,
+            _t_reservation,
+            ok=True,
+            detail=f"lang={target}",
         )
 
     # Persist on the card so approving the card approves the pair.
@@ -1161,14 +1182,13 @@ def api_card_translate(run_id, card_id):
     return jsonify({"ok": True, **variant})
 
 
-def api_cards(run_id):
+@W.require_run(deny=lambda: (jsonify({"error": "not found"}), 404))
+def api_cards(run_id, run_data):
     # Tenant gate BEFORE the in_progress short-circuit — otherwise a foreign
     # org polling another org's run_id learns it exists and when it finishes.
     # _run_owner_id falls back to the runs DB row, so ownership resolves even
     # mid-pipeline before the JSON is written (same basis api_status relies on).
-    data = W._load_run(run_id)
-    if not W._can_access_run(run_id, data, W._active_profile_id()):
-        return jsonify({"error": "not found"}), 404
+    data = run_data
     if W._run_state(run_id) == "in_progress":
         return jsonify({"error": "in_progress", "retry_after": 4}), 202
     if not data:
@@ -1176,21 +1196,19 @@ def api_cards(run_id):
     return jsonify(data.get("cards", []))
 
 
-def api_trust(run_id):
-    data = W._load_run(run_id)
-    if not W._can_access_run(run_id, data, W._active_profile_id()):
-        return jsonify({"error": "not found"}), 404
+@W.require_run(deny=lambda: (jsonify({"error": "not found"}), 404))
+def api_trust(run_id, run_data):
+    data = run_data
     if not data:
         return jsonify({"error": "not found"}), 404
     return jsonify(data.get("trust", {}))
 
 
-def api_export(run_id):
+@W.require_run(deny=lambda: (jsonify({"error": "not found"}), 404))
+def api_export(run_id, run_data):
     # Tenant gate BEFORE the in_progress short-circuit (see api_cards) so a
     # foreign org can't use the 202 to learn a run exists / when it finishes.
-    data = W._load_run(run_id)
-    if not W._can_access_run(run_id, data, W._active_profile_id()):
-        return jsonify({"error": "not found"}), 404
+    data = run_data
     if W._run_state(run_id) == "in_progress":
         return jsonify({"error": "in_progress", "retry_after": 4}), 202
     if not data:
@@ -1198,7 +1216,8 @@ def api_export(run_id):
     return jsonify(data)
 
 
-def api_card_download(run_id, card_id):
+@W.require_run
+def api_card_download(run_id, card_id, run_data):
     """Download a card's caption + visual as a ZIP for manual posting.
 
     Clubs grab a ZIP containing the caption text and the generated
@@ -1209,9 +1228,6 @@ def api_card_download(run_id, card_id):
     from flask import send_file
     import zipfile
 
-    run_data = W._load_run(run_id)
-    if not W._can_access_run(run_id, run_data, W._active_profile_id()):
-        return jsonify({"error": "run_not_found"}), 404
     if run_data is None:
         return jsonify({"error": "run_not_found"}), 404
 
@@ -1463,7 +1479,8 @@ def api_promote_swim(run_id):
     return redirect(url_for("review", run_id=run_id) + "?promoted=1#mh-all-swims")
 
 
-def api_cards_bulk_status(run_id):
+@W.require_run(deny=lambda: (jsonify({"error": "run not found"}), 404))
+def api_cards_bulk_status(run_id, run_data):
     """UI 1.9 — apply one workflow status to many cards at once.
 
     Content-negotiated: a fetch() JSON call gets a per-card result list back;
@@ -1472,9 +1489,6 @@ def api_cards_bulk_status(run_id):
     athletes) can block a single approval without aborting the whole batch —
     the same rule the single-card route enforces.
     """
-    run_data = W._load_run(run_id)
-    if not W._can_access_run(run_id, run_data, W._active_profile_id()):
-        return jsonify({"error": "run not found"}), 404
     ws = W._get_wf_store()
     if ws is None:
         return jsonify({"error": "workflow not available"}), 503
@@ -1617,7 +1631,8 @@ def api_cards_bulk_status(run_id):
     return redirect(url_for("review", run_id=run_id))
 
 
-def api_cards_bulk_export(run_id):
+@W.require_run(deny=lambda: (jsonify({"error": "run not found"}), 404))
+def api_cards_bulk_export(run_id, run_data):
     """UI 1.9 — download the selected cards as one JSON file.
 
     Scoped sibling of the per-run /export (which dumps the whole run): a
@@ -1625,9 +1640,6 @@ def api_cards_bulk_export(run_id):
     card's live workflow status folded in. Always a native attachment
     download, so it works with or without JS.
     """
-    run_data = W._load_run(run_id)
-    if not W._can_access_run(run_id, run_data, W._active_profile_id()):
-        return jsonify({"error": "run not found"}), 404
     ids = W._bulk_ids_from_request(request, "ids", "card_ids")
     if not ids:
         if W._req_wants_json(request):
@@ -1674,7 +1686,8 @@ def api_cards_bulk_export(run_id):
     )
 
 
-def api_cards_bulk_download(run_id):
+@W.require_run(deny=lambda: (jsonify({"error": "run not found"}), 404))
+def api_cards_bulk_download(run_id, run_data):
     """F-5 — download the selected cards' postable content as one ZIP.
 
     The reviewer's content companion to the JSON "Export data" dump: each
@@ -1686,9 +1699,6 @@ def api_cards_bulk_download(run_id):
     from flask import send_file
     import zipfile
 
-    run_data = W._load_run(run_id)
-    if not W._can_access_run(run_id, run_data, W._active_profile_id()):
-        return jsonify({"error": "run not found"}), 404
     ids = W._bulk_ids_from_request(request, "ids", "card_ids")
     if not ids:
         if W._req_wants_json(request):
@@ -1739,7 +1749,8 @@ def api_cards_bulk_download(run_id):
     return send_file(buf, mimetype="application/zip", as_attachment=True, download_name=fname)
 
 
-def api_card_reaction_toggle(run_id, card_id):
+@W.require_run(deny=lambda: (jsonify({"error": "run not found"}), 404), require_exists=True)
+def api_card_reaction_toggle(run_id, card_id, run_data):
     """Toggle one emoji reaction on a card for an anonymous reactor.
 
     Body (JSON): ``{"emoji": "👍|❤️|🔥", "reactor_id": "<anon client id>"}``.
@@ -1754,10 +1765,6 @@ def api_card_reaction_toggle(run_id, card_id):
     cast on a run another organisation owns; a genuinely missing run 404s
     too, so a ghost id never accretes orphan reaction rows.
     """
-    run_data = W._load_run(run_id)
-    if run_data is None or not W._can_access_run(run_id, run_data, W._active_profile_id()):
-        return jsonify({"error": "run not found"}), 404
-
     payload = request.get_json(silent=True) or {}
     emoji = payload.get("emoji", "")
     reactor = str(payload.get("reactor_id") or "").strip()
@@ -1837,6 +1844,7 @@ def api_card_reaction_toggle(run_id, card_id):
     return jsonify({"ok": True, "counts": counts, "mine": mine})
 
 
+@W.require_run(deny=lambda: (jsonify({"error": "run not found"}), 404), require_exists=True)
 def api_run_reactions(run_id):
     """Reaction state for a whole run, for the review/builder page on load.
 
@@ -1849,10 +1857,6 @@ def api_run_reactions(run_id):
          "counts": {"<card_id>": {"👍": 2, ...}, ...},
          "mine":   {"<card_id>": ["👍", ...], ...}}
     """
-    run_data = W._load_run(run_id)
-    if run_data is None or not W._can_access_run(run_id, run_data, W._active_profile_id()):
-        return jsonify({"error": "run not found"}), 404
-
     reactor = str(request.args.get("reactor_id") or "").strip()
     counts: dict[str, dict[str, int]] = {}
     mine: dict[str, list[str]] = {}
@@ -1880,7 +1884,8 @@ def api_run_reactions(run_id):
     return jsonify({"ok": True, "counts": counts, "mine": mine})
 
 
-def api_turn_into(run_id):
+@W.require_run(deny=lambda: (jsonify({"error": "run not found"}), 404))
+def api_turn_into(run_id, run_data):
     """Generate a Turn-Into pack (up to 8 artefacts) from this run.
 
     Body (JSON, all optional):
@@ -1890,9 +1895,6 @@ def api_turn_into(run_id):
     With async=True, returns { job_id, status_url } immediately. Poll
     GET /api/runs/<run_id>/turn-into-status/<job_id> for result.
     """
-    run_data = W._load_run(run_id)
-    if not W._can_access_run(run_id, run_data, W._active_profile_id()):
-        return jsonify({"error": "run not found"}), 404
     if not run_data:
         return jsonify({"error": "run not found"}), 404
 
@@ -2000,10 +2002,9 @@ def api_turn_into(run_id):
     return jsonify({"ok": True, **{k: v for k, v in job.items() if k != "pack" and k != "status"}})
 
 
+@W.require_run(deny=lambda: (jsonify({"status": "not_found", "error": "job not found"}), 404))
 def api_turn_into_status(run_id: str, job_id: str):
     """Poll Turn-Into job status. Returns { status: running|done|error, ... }."""
-    if not W._can_access_run(run_id, W._load_run(run_id), W._active_profile_id()):
-        return jsonify({"status": "not_found", "error": "job not found"}), 404
     # In-memory first (fast, same-worker), then the shared disk record:
     # with --workers 2 the poll often lands on a different worker than
     # the one that created the job, so the on-disk copy is what keeps
@@ -2028,6 +2029,7 @@ def api_turn_into_status(run_id: str, job_id: str):
     )
 
 
+@W.require_run(deny=lambda: (jsonify({"error": "pack not found"}), 404))
 def api_turn_into_edit_caption(run_id, pack_id):
     """Inline-edit a caption within a saved pack.
 
@@ -2041,9 +2043,16 @@ def api_turn_into_edit_caption(run_id, pack_id):
         "text":           str,
       }
     """
-    if not W._can_access_run(run_id, W._load_run(run_id), W._active_profile_id()):
-        return jsonify({"error": "pack not found"}), 404
     from mediahub.turn_into import load_pack, save_pack
+
+    # Editing a persisted pack caption is an edit-class action — gate it the
+    # same way every sibling caption-mutating route does (api_card_translate,
+    # api_card_revisions_restore, api_card_locks POST), so a narrowed
+    # Viewer/Reviewer seat in the owning org can't rewrite pack captions here
+    # when it can't anywhere else.
+    denied = W._role_denied_json(W._perms.CAP_EDIT, run_id)
+    if denied:
+        return denied
 
     base = W.DATA_DIR / "turn_into_packs"
     pack = load_pack(run_id, pack_id, base_dir=base)
@@ -2179,7 +2188,12 @@ def api_card_photo_upload(run_id: str, card_id: str):
             try:
                 run_data = json.loads(run_json.read_text())
             except Exception as e:
-                return jsonify({"error": f"run_load_failed: {e}"}), 500
+                # A corrupt run file must not leak its existence (or the raw
+                # exception text) to a caller that has not passed the tenant
+                # gate below: answer exactly like a missing run. The operator
+                # still gets the detail in the server log.
+                W.log.warning("run_load_failed run=%s: %s", run_id, e)
+                return jsonify({"error": "run_not_found"}), 404
         else:
             return jsonify({"error": "run_not_found"}), 404
     if not W._can_access_run(run_id, run_data, W._active_profile_id()):
@@ -2359,6 +2373,8 @@ def api_card_photo_confirm(run_id: str, card_id: str):
     run_data, target = W._load_run_for_card(run_id, card_id)
     if not W._can_access_run(run_id, run_data, W._active_profile_id()):
         return jsonify({"error": "run_not_found"}), 404
+    if run_data is None:
+        return jsonify({"error": "run_not_found"}), 404
     if target is None:
         return jsonify({"error": "card_not_found"}), 404
     athlete = str((target.get("achievement") or {}).get("swimmer_name") or "").strip()
@@ -2391,6 +2407,8 @@ def api_card_clip_unlink(run_id: str, card_id: str):
         return jsonify({"error": "v8_unavailable"}), 503
     run_data, target = W._load_run_for_card(run_id, card_id)
     if not W._can_access_run(run_id, run_data, W._active_profile_id()):
+        return jsonify({"error": "run_not_found"}), 404
+    if run_data is None:
         return jsonify({"error": "run_not_found"}), 404
     if target is None:
         return jsonify({"error": "card_not_found"}), 404
@@ -2509,13 +2527,11 @@ def api_venue_import(run_id: str):
     )
 
 
-def api_element_suggestions(run_id: str, card_id: str):
+@W.require_run
+def api_element_suggestions(run_id: str, card_id: str, run_data):
     """Suggest elements that fit this card's moment (deterministic + AI blend)."""
     from mediahub.elements import search as _el_search
 
-    run_data = W._load_run(run_id)
-    if not W._can_access_run(run_id, run_data, W._active_profile_id()):
-        return jsonify({"error": "run_not_found"}), 404
     profile_id = (run_data or {}).get("profile_id") or W._active_profile_id()
     facts = W._card_context_facts(run_data, card_id)
     role_vars = W._elements_role_vars(profile_id)
@@ -2528,7 +2544,8 @@ def api_element_suggestions(run_id: str, card_id: str):
     )
 
 
-def api_card_elements(run_id: str, card_id: str):
+@W.require_run
+def api_card_elements(run_id: str, card_id: str, run_data):
     """List, add, remove or clear the library elements painted on a card.
 
     Placements live on the card's persisted CreativeBrief (`elements` field);
@@ -2537,10 +2554,6 @@ def api_card_elements(run_id: str, card_id: str):
     from flask import request as _req
     from mediahub.elements.catalog import get_element as _get_element
     from mediahub.elements.models import ElementPlacement
-
-    run_data = W._load_run(run_id)
-    if not W._can_access_run(run_id, run_data, W._active_profile_id()):
-        return jsonify({"error": "run_not_found"}), 404
 
     bdict = W._latest_brief_for_card(run_id, card_id)
     if not bdict:
@@ -2610,7 +2623,12 @@ def api_create_graphic(run_id: str, card_id: str):
             try:
                 run_data = json.loads(run_json.read_text())
             except Exception as e:
-                return jsonify({"error": f"run_load_failed: {e}"}), 500
+                # A corrupt run file must not leak its existence (or the raw
+                # exception text) to a caller that has not passed the tenant
+                # gate below: answer exactly like a missing run. The operator
+                # still gets the detail in the server log.
+                W.log.warning("run_load_failed run=%s: %s", run_id, e)
+                return jsonify({"error": "run_not_found"}), 404
         else:
             return jsonify({"error": "run_not_found"}), 404
     # Tenant isolation: even though the per-profile gate below
@@ -3369,7 +3387,12 @@ def api_regenerate_variants(run_id: str, card_id: str):
             try:
                 run_data = json.loads(run_json.read_text())
             except Exception as e:
-                return jsonify({"error": f"run_load_failed: {e}"}), 500
+                # A corrupt run file must not leak its existence (or the raw
+                # exception text) to a caller that has not passed the tenant
+                # gate below: answer exactly like a missing run. The operator
+                # still gets the detail in the server log.
+                W.log.warning("run_load_failed run=%s: %s", run_id, e)
+                return jsonify({"error": "run_not_found"}), 404
         else:
             return jsonify({"error": "run_not_found"}), 404
     if not W._can_access_run(run_id, run_data, W._active_profile_id()):
@@ -3996,7 +4019,12 @@ def api_card_motion_file(run_id: str, card_id: str):
             try:
                 run_data = json.loads(run_json.read_text())
             except Exception as e:
-                return jsonify({"error": f"run_load_failed: {e}"}), 500
+                # A corrupt run file must not leak its existence (or the raw
+                # exception text) to a caller that has not passed the tenant
+                # gate below: answer exactly like a missing run. The operator
+                # still gets the detail in the server log.
+                W.log.warning("run_load_failed run=%s: %s", run_id, e)
+                return jsonify({"error": "run_not_found"}), 404
         else:
             return jsonify({"error": "run_not_found"}), 404
     if not W._can_access_run(run_id, run_data, W._active_profile_id()):
@@ -4083,6 +4111,8 @@ def api_card_thumb(run_id: str, card_id: str):
 
     run_data, target = W._load_run_for_card(run_id, card_id)
     if not W._can_access_run(run_id, run_data, W._active_profile_id()):
+        return jsonify({"error": "run_not_found"}), 404
+    if run_data is None:
         return jsonify({"error": "run_not_found"}), 404
     if target is None:
         return jsonify({"error": "card_not_found"}), 404
@@ -5098,7 +5128,12 @@ def api_run_reel_file(run_id: str):
             try:
                 run_data = json.loads(run_json.read_text())
             except Exception as e:
-                return jsonify({"error": f"run_load_failed: {e}"}), 500
+                # A corrupt run file must not leak its existence (or the raw
+                # exception text) to a caller that has not passed the tenant
+                # gate below: answer exactly like a missing run. The operator
+                # still gets the detail in the server log.
+                W.log.warning("run_load_failed run=%s: %s", run_id, e)
+                return jsonify({"error": "run_not_found"}), 404
         else:
             return jsonify({"error": "run_not_found"}), 404
     if not W._can_access_run(run_id, run_data, W._active_profile_id()):
@@ -5172,7 +5207,12 @@ def api_run_reel_manifest(run_id: str):
             try:
                 run_data = json.loads(run_json.read_text())
             except Exception as e:
-                return jsonify({"error": f"run_load_failed: {e}"}), 500
+                # A corrupt run file must not leak its existence (or the raw
+                # exception text) to a caller that has not passed the tenant
+                # gate below: answer exactly like a missing run. The operator
+                # still gets the detail in the server log.
+                W.log.warning("run_load_failed run=%s: %s", run_id, e)
+                return jsonify({"error": "run_not_found"}), 404
         else:
             return jsonify({"error": "run_not_found"}), 404
     if not W._can_access_run(run_id, run_data, W._active_profile_id()):
@@ -5229,6 +5269,8 @@ def api_run_render_all_job(run_id: str):
         return jsonify({"error": "v8_unavailable"}), 503
     run_data = W._load_run(run_id)
     if not W._can_access_run(run_id, run_data, W._active_profile_id()):
+        return jsonify({"error": "run_not_found"}), 404
+    if run_data is None:
         return jsonify({"error": "run_not_found"}), 404
 
     raw_profile_id = (run_data or {}).get("profile_id", "")
@@ -5447,17 +5489,14 @@ def api_run_render_all_job(run_id: str):
     )
 
 
-def api_run_bulk_export(run_id: str):
+@W.require_run
+def api_run_bulk_export(run_id: str, run_data):
     """Kick a background bulk export of a run's cards × formats → one ZIP.
 
     Mirrors the reel job: render in a daemon thread, poll for the outcome,
     download the finished ZIP from the file route (whose link unifies with
     the 1.18 share tokens).
     """
-    run_data = W._load_run(run_id)
-    if not W._can_access_run(run_id, run_data, W._active_profile_id()):
-        return jsonify({"error": "run_not_found"}), 404
-
     body = request.get_json(silent=True) or {}
     raw_formats = body.get("formats") or ["jpg"]
     if not isinstance(raw_formats, list):
@@ -5986,7 +6025,12 @@ def api_card_voiceover(run_id: str, card_id: str):
             try:
                 run_data = json.loads(run_json.read_text())
             except Exception as e:
-                return jsonify({"error": f"run_load_failed: {e}"}), 500
+                # A corrupt run file must not leak its existence (or the raw
+                # exception text) to a caller that has not passed the tenant
+                # gate below: answer exactly like a missing run. The operator
+                # still gets the detail in the server log.
+                W.log.warning("run_load_failed run=%s: %s", run_id, e)
+                return jsonify({"error": "run_not_found"}), 404
         else:
             return jsonify({"error": "run_not_found"}), 404
     if not W._can_access_run(run_id, run_data, W._active_profile_id()):
@@ -6143,6 +6187,7 @@ def api_venue_search(run_id: str):
         return jsonify({"error": str(e), "results": []}), 500
 
 
+@W.require_run
 def api_run_certificates_job(run_id: str):
     """D-12: build the certificates ZIP in the background; ``202`` +
     ``{job_id, poll_url}``.
@@ -6154,8 +6199,6 @@ def api_run_certificates_job(run_id: str):
     request thread; the worker reports "Rendering certificate N of M"
     via the shared poll route, and completion carries the download URL
     served by the existing (equally gated) GET route."""
-    if not W._can_access_run(run_id, W._load_run(run_id), W._active_profile_id()):
-        return jsonify({"error": "run_not_found"}), 404
     data, pid, prof, approved = W._certificates_approved_for(run_id)
     if data is None:
         return jsonify({"error": "run_not_found"}), 404

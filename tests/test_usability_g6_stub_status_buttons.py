@@ -15,14 +15,17 @@ from __future__ import annotations
 import pytest
 
 
-@pytest.fixture()
-def client(client):
+@pytest.fixture
+def client(app):
+    """Isolated app via the shared conftest fixtures (no ``importlib.reload``)
+    with a saved, active ``club-a`` profile — #130 fixture-sprawl migration."""
     from mediahub.web.club_profile import ClubProfile, save_profile
 
     save_profile(ClubProfile(profile_id="club-a", display_name="Club A"))
-    with client.session_transaction() as s:
-        s["active_profile_id"] = "club-a"
-    return client
+    with app.test_client() as c:
+        with c.session_transaction() as s:
+            s["active_profile_id"] = "club-a"
+        yield c
 
 
 def _save_pack(profile_id="club-a"):

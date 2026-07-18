@@ -249,6 +249,7 @@ def design_explainability(
     ctx: Any,
     *,
     image_path: Optional[Union[str, Path]] = None,
+    layout_score: Optional[dict] = None,
 ) -> dict:
     """Assemble the *why-this-design* sidecar dict for a finished card.
 
@@ -257,6 +258,12 @@ def design_explainability(
     from ``html`` (focus, fitted sizes, and — when ``image_path`` is given — the
     saliency crop box). JSON-serialisable; the same payload the overlay embeds and
     :func:`write_sidecar` can persist beside a PNG.
+
+    ``layout_score`` (F6): when the measured layout scorer ran, its decision
+    record — the winning pack, whether it changed the director's pick, and the
+    per-candidate energy-term breakdown — is folded into the ``layout`` block so
+    the sidecar explains *why this pack* won the candidate walk. ``None`` (the
+    default, and every flag-off render) omits the key entirely.
     """
     brief = getattr(ctx, "brief", None)
     width = int(getattr(ctx, "width", 0) or 0)
@@ -281,6 +288,8 @@ def design_explainability(
             else None
         ),
     }
+    if layout_score is not None:
+        layout["score"] = layout_score
 
     return {
         "schema": SCHEMA,

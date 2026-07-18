@@ -9,7 +9,6 @@ ranker's stable contract directly:
   * base scores per card type,
   * the medal / PB / qualifier weighting hierarchy,
   * the likely-PB-only penalty,
-  * the needs-confirmation penalty + bucket,
   * anti-spam demotion of a standalone when the swimmer has a spotlight,
   * the queue cap demoting the lowest-scoring overflow to recap,
   * and that every ranked card comes back with populated
@@ -30,10 +29,8 @@ from swim_content.cards import (
     Claim,
     ContentCard,
     FMT_ARCHIVE,
-    FMT_HOLD,
     FMT_RECAP,
     FMT_SPOTLIGHT,
-    TYPE_NEEDS_CONFIRMATION,
     TYPE_PB_ROUNDUP,
     TYPE_PODIUM_ROUNDUP,
     TYPE_QUAL_ALERT,
@@ -44,7 +41,7 @@ from swim_content.cards import (
 )
 from swim_content.ranker_v3 import rank_cards
 
-_VALID_BUCKETS = {"queue", "recap", "needs_confirmation", "archive"}
+_VALID_BUCKETS = {"queue", "recap", "archive"}
 
 
 # --------------------------------------------------------------------------- #
@@ -66,7 +63,7 @@ def _claim(
     """A fully-populated ``Claim`` of the given kind.
 
     ``level`` (for ``qual_hit`` claims) rides in ``extra`` exactly where the
-    ranker reads it (``_qual_hit_levels`` → ``c.extra.get("level")``).
+    ranker reads it (``_qual_hits`` → ``c.extra.get("level")``).
     """
     extra: dict = {}
     if level is not None:
@@ -94,7 +91,6 @@ def _card(
     *,
     swimmer: str | None = None,
     claims: list[Claim] | None = None,
-    needs_confirmation: bool = False,
 ) -> ContentCard:
     return ContentCard(
         card_id=card_id,
@@ -103,7 +99,6 @@ def _card(
         primary_swimmer=swimmer,
         swimmer_names=[swimmer] if swimmer else [],
         claims=list(claims or []),
-        needs_confirmation=needs_confirmation,
     )
 
 
@@ -305,30 +300,6 @@ def test_qualifier_level_weighting_orders_national_over_bucs_over_open():
 
 
 # --------------------------------------------------------------------------- #
-# Needs-confirmation penalty + bucket
-# --------------------------------------------------------------------------- #
-
-
-def test_needs_confirmation_flag_penalises_and_holds():
-    """The needs_confirmation flag forces the needs_confirmation bucket + hold
-    format and applies the -15 penalty regardless of other bonuses."""
-    card = _card(
-        "hold",
-        TYPE_STANDOUT,
-        swimmer="Q Query",
-        claims=[_claim("gold", swimmer="Q Query")],
-        needs_confirmation=True,
-    )
-    by = _by_id(rank_cards([card]))
-    held = by["hold"]
-    # 40 + 8 (gold) - 15 = 33.
-    assert held.score == 33
-    assert held.bucket == "needs_confirmation"
-    assert held.suggested_format == FMT_HOLD
-    assert any("human confirmation" in r for r in held.score_reasons)
-
-
-# --------------------------------------------------------------------------- #
 # Anti-spam: a spotlight demotes the same swimmer's standalone
 # --------------------------------------------------------------------------- #
 
@@ -453,13 +424,6 @@ def test_rank_cards_populates_fields_and_returns_sorted():
             "ord", TYPE_STANDOUT, swimmer="Cy Watts", claims=[_claim("final", swimmer="Cy Watts")]
         ),
         _card(
-            "hold",
-            TYPE_NEEDS_CONFIRMATION,
-            swimmer="Di Fox",
-            claims=[_claim("pb_likely", swimmer="Di Fox")],
-            needs_confirmation=True,
-        ),
-        _card(
             "likely",
             TYPE_STANDOUT,
             swimmer="Ed Kane",
@@ -479,6 +443,6 @@ def test_rank_cards_populates_fields_and_returns_sorted():
         assert c.suggested_format, f"{c.card_id} has no suggested format"
 
     # Sort invariant: keys are non-decreasing across the returned list.
-    bucket_rank = {"queue": 0, "needs_confirmation": 1, "recap": 2, "archive": 3}
+    bucket_rank = {"queue": 0, "recap": 1, "archive": 2}
     keys = [(bucket_rank[c.bucket], -c.score, c.card_id) for c in ranked]
     assert keys == sorted(keys)

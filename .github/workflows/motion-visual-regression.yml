@@ -60,7 +60,7 @@ jobs:
           python-version: "3.12"
           cache: pip
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           # Match the production image (Dockerfile installs Node 22) so this
           # job pixel-diffs Remotion output on the SAME Node prod renders on.

@@ -105,6 +105,14 @@ class InterpretedEvent:
     swims: list[InterpretedSwim] = field(default_factory=list)
     confidence: float = 0.0
     raw_header: str = ""
+    # True when the event header describes a RELAY ("4 x 100m Freestyle Relay").
+    # The free-text inducer reuses individual distance/stroke vocabulary for relay
+    # headers, so a relay would otherwise be modelled as a bogus individual event
+    # (e.g. "100m Freestyle") whose legs could seed individual PB / medal detection
+    # (finding #65). The canonical bridge skips events flagged here. Structured
+    # parsers (HY3/SDIF/LENEX) leave this False — they carry distinct relay stroke
+    # codes and are out of scope for this flag.
+    is_relay: bool = False
 
 
 @dataclass

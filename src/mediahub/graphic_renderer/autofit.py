@@ -59,6 +59,7 @@ __all__ = [
     "fit_balanced",
     "fit_balanced_px",
     "tracking_for_px",
+    "weight_register_for",
     # Variable-font axis optimisation (G1.9)
     "FontAxes",
     "AxisPlan",
@@ -214,6 +215,122 @@ _FAMILY_SCALE: dict[str, float] = {
     "bowlby one": 1.22,
 }
 
+# D5 (Canva gap analysis) — measured per-family character tables. A single
+# flat multiplier over the Helvetica table cannot model a serif's glyph
+# proportions (Playfair's ``I`` is ~25% wider *relative to its caps* than
+# Helvetica's, so an I-heavy run under-estimates and can overflow). For the
+# serif display face the advance of every ASCII glyph is measured offline with
+# fontTools over the shipped ``layouts/fonts/playfair-display.woff2`` (wght
+# 400, the weight the display slots render) and inflated by a fixed +2%
+# safety margin, so the estimate errs wide per glyph — the never-overflow
+# contract by construction. Kerning/ligature corrections are DISABLED for
+# char-table families (see ``_kern_ligature_em``): the Helvetica-calibrated
+# kern values do not transfer to a serif, and applying them could tighten the
+# estimate below the real rendered width. Chars outside the table (accented
+# Latin) fall through to the class default. Keys are normalised first-family
+# names, values advance widths in em.
+_FAMILY_CHAR_EM: dict[str, dict[str, float]] = {
+    # fmt: off
+    "playfair display": {
+        " ": 0.254,
+        "!": 0.268,
+        '"': 0.304,
+        "#": 0.65,
+        "$": 0.534,
+        "%": 0.757,
+        "&": 0.854,
+        "'": 0.193,
+        "(": 0.3,
+        ")": 0.3,
+        "*": 0.502,
+        "+": 0.599,
+        ",": 0.267,
+        "-": 0.509,
+        ".": 0.258,
+        "/": 0.38,
+        "0": 0.612,
+        "1": 0.378,
+        "2": 0.489,
+        "3": 0.461,
+        "4": 0.504,
+        "5": 0.424,
+        "6": 0.528,
+        "7": 0.415,
+        "8": 0.531,
+        "9": 0.52,
+        ":": 0.272,
+        ";": 0.291,
+        "<": 0.621,
+        "=": 0.66,
+        ">": 0.621,
+        "?": 0.469,
+        "@": 0.896,
+        "A": 0.643,
+        "B": 0.636,
+        "C": 0.702,
+        "D": 0.738,
+        "E": 0.622,
+        "F": 0.581,
+        "G": 0.718,
+        "H": 0.773,
+        "I": 0.346,
+        "J": 0.333,
+        "K": 0.669,
+        "L": 0.6,
+        "M": 0.889,
+        "N": 0.721,
+        "O": 0.756,
+        "P": 0.597,
+        "Q": 0.756,
+        "R": 0.661,
+        "S": 0.551,
+        "T": 0.634,
+        "U": 0.696,
+        "V": 0.643,
+        "W": 0.924,
+        "X": 0.647,
+        "Y": 0.603,
+        "Z": 0.606,
+        "[": 0.302,
+        "\\": 0.38,
+        "]": 0.302,
+        "^": 0.547,
+        "_": 0.603,
+        "`": 0.289,
+        "a": 0.508,
+        "b": 0.575,
+        "c": 0.496,
+        "d": 0.593,
+        "e": 0.517,
+        "f": 0.339,
+        "g": 0.539,
+        "h": 0.6,
+        "i": 0.299,
+        "j": 0.273,
+        "k": 0.561,
+        "l": 0.292,
+        "m": 0.906,
+        "n": 0.609,
+        "o": 0.559,
+        "p": 0.593,
+        "q": 0.575,
+        "r": 0.454,
+        "s": 0.456,
+        "t": 0.362,
+        "u": 0.593,
+        "v": 0.499,
+        "w": 0.786,
+        "x": 0.53,
+        "y": 0.515,
+        "z": 0.486,
+        "{": 0.311,
+        "|": 0.227,
+        "}": 0.311,
+        "~": 0.662,
+    },
+    # fmt: on
+}
+
 # Family-name -> profile class. Names are normalised (lowercased, de-quoted, the
 # first family in a CSS stack). Anything unrecognised falls back to "sans".
 _CONDENSED_FAMILIES = frozenset(
@@ -336,10 +453,71 @@ def _weight_factor(weight: int | str) -> float:
     return 1.0 + (numeric - 400) / 100.0 * 0.012
 
 
-def _char_em(ch: str, profile: str, scale: float) -> float:
-    """Advance width of one character in em units."""
+# D9 (Canva gap analysis) — per-script advance widths for the self-hosted
+# non-Latin faces. A non-Latin glyph is rendered by a Noto fallback (see the
+# unicode-range blocks in layouts/_shared.css), NOT by the aliased Latin family,
+# so scaling the flat 0.556 default by a condensed family's 0.60 table scale
+# badly UNDER-measured it (a heavy Devanagari run under a condensed scale
+# estimated ~0.33em and could overflow). These are approximate Noto advance
+# averages (measured offline, inflated to err WIDE so the never-overflow contract
+# holds), returned directly and unscaled for a codepoint in the covered ranges.
+# Latin / uncovered codepoints return ``None`` so the char-table path is
+# unchanged and Latin cards stay byte-identical. Ordered (range_lo, range_hi, em).
+_SCRIPT_ADVANCE_EM: tuple[tuple[int, int, float], ...] = (
+    # Cyrillic (+ supplement / Extended-A/B) — Noto Sans Cyrillic.
+    (0x0400, 0x052F, 0.74),
+    (0x2DE0, 0x2DFF, 0.74),
+    (0xA640, 0xA69F, 0.74),
+    # Arabic (+ supplement / presentation forms) — Noto Sans Arabic.
+    (0x0600, 0x06FF, 0.62),
+    (0x0750, 0x077F, 0.62),
+    (0x0870, 0x08FF, 0.62),
+    (0xFB50, 0xFDFF, 0.62),
+    (0xFE70, 0xFEFF, 0.62),
+    # Devanagari — Noto Sans Devanagari (wide conjunct glyphs).
+    (0x0900, 0x097F, 0.85),
+    (0x1CD0, 0x1CFF, 0.85),
+    (0xA830, 0xA8FF, 0.85),
+    # Bengali — Noto Sans Bengali.
+    (0x0980, 0x09FF, 0.80),
+)
+
+
+def _script_default_em(ch: str) -> float | None:
+    """The per-script advance (em) for a self-hosted non-Latin glyph, or ``None``.
+
+    ``None`` for Latin / uncovered codepoints so the char-table path is untouched
+    and every Latin card is byte-identical.
+    """
+    cp = ord(ch)
+    if cp < 0x0400:  # fast path: ASCII / Latin-1 fall through unchanged
+        return None
+    for lo, hi, em in _SCRIPT_ADVANCE_EM:
+        if lo <= cp <= hi:
+            return em
+    return None
+
+
+def _char_em(
+    ch: str, profile: str, scale: float, char_table: dict[str, float] | None = None
+) -> float:
+    """Advance width of one character in em units.
+
+    ``char_table`` is a measured per-family table (D5) consulted first — a
+    listed glyph returns its real (margin-inflated) advance directly, unscaled.
+    A non-Latin glyph (D9) rendered by a self-hosted Noto fallback then returns
+    its per-script advance directly — unscaled by the Latin family's table scale,
+    since it is not the family that actually paints the glyph.
+    """
+    if char_table is not None:
+        measured = char_table.get(ch)
+        if measured is not None:
+            return measured
     if profile == "mono":
         return _MONO_EM
+    script_em = _script_default_em(ch)
+    if script_em is not None:
+        return script_em
     return _SANS_EM.get(ch, _DEFAULT_EM) * scale
 
 
@@ -547,7 +725,14 @@ def em_width(text: str, *, font_family: str = "Inter", weight: int | str = 400) 
     profile = _classify_family(font_family)
     scale = _table_scale(font_family)
     factor = _weight_factor(weight)
-    advance = sum(_char_em(ch, profile, scale) for ch in text)
+    char_table = _FAMILY_CHAR_EM.get(_first_family(font_family))
+    advance = sum(_char_em(ch, profile, scale, char_table) for ch in text)
+    if char_table is not None:
+        # Measured-table family (D5): the Helvetica-calibrated kern/ligature
+        # corrections do not transfer (a serif kerns more gently), and the
+        # table's per-glyph margin already errs wide — apply no tightening so
+        # the estimate stays a safe upper bound on the rendered width.
+        return advance * factor
     correction = _kern_ligature_em(text, profile, scale, advance)
     return (advance + correction) * factor
 
@@ -557,9 +742,12 @@ def kern_ligature_em(text: str, *, font_family: str = "Inter", weight: int | str
 
     Explainability handle for the G1.11 correction: ``em_width(t)`` equals the
     bare advance sum **plus** this value (both already including the weight
-    factor). ``0.0`` for monospace, empty or single-character input.
+    factor). ``0.0`` for monospace, empty or single-character input — and for
+    measured-char-table families (D5), whose estimates carry no kern model.
     """
     if not text:
+        return 0.0
+    if _first_family(font_family) in _FAMILY_CHAR_EM:
         return 0.0
     profile = _classify_family(font_family)
     scale = _table_scale(font_family)
@@ -794,6 +982,8 @@ _FONT_AXES: dict[str, FontAxes] = {
     "inter": FontAxes(wght=(100, 900), opsz=(14.0, 32.0)),
     "space grotesk": FontAxes(wght=(300, 700)),
     "jetbrains mono": FontAxes(wght=(100, 800)),
+    # D5 — the serif display register ships as a genuine variable face.
+    "playfair display": FontAxes(wght=(400, 900)),
 }
 
 # How light the weight axis may be traded for fit. Lighter advances narrower,
@@ -1175,3 +1365,70 @@ def tracking_for_px(px: float, register: str = "display") -> float:
     t = (float(px) - lo_px) / (hi_px - lo_px)
     t = 0.0 if t < 0 else 1.0 if t > 1 else t
     return round(lo_tr + (hi_tr - lo_tr) * t, 4)
+
+
+# --------------------------------------------------------------------------- #
+# D8 (Canva gap analysis) — density/mood-coherent weight register.
+#
+# Canva's hierarchy guidance pairs every size jump with a weight jump (Inter
+# 400↔800, not 400↔600) so hierarchy survives thumbnail downscaling. MediaHub
+# ships three genuine variable faces but quantises weight to 400/500/600/700/800
+# with 700 dominant. This maps the style-pack DENSITY lever + the director's MOOD
+# to a supporting weight register — kicker (Space Grotesk), meta (Inter body),
+# data (JetBrains Mono) — emitted by the renderer as --mh-wght-* vars the migrated
+# layouts consume via font-variation-settings, with their historic weight as the
+# var() fallback. Pure deterministic maths on already-shipped axes.
+#
+# The DEFAULT case (standard density + neutral/absent mood) returns None: the
+# renderer then emits no weight var at all, so every migrated layout keeps its
+# fallback weight and every legacy / brief-less card stays byte-identical. Only a
+# bold pack or a non-neutral mood spends the register.
+# --------------------------------------------------------------------------- #
+
+# Base register (used only when the register is spent). Kicker/data sit at their
+# historic weights; meta lifts so the Inter body 400 ↔ meta contrast widens.
+_WGHT_BASE = {"kicker": 600, "meta": 620, "data": 700}
+# Bold density intensifies whatever is present (Space Grotesk caps at 700).
+_WGHT_BOLD = {"kicker": 680, "meta": 760, "data": 760}
+# Mood deltas — loud moods push heavier, quiet moods lift toward an airy register.
+_WGHT_LOUD = frozenset({"explosive", "electric", "fierce", "bold", "triumphant", "celebratory"})
+_WGHT_QUIET = frozenset({"calm", "stoic", "minimal", "precise", "warm"})
+_WGHT_MOOD_DELTA = {
+    "loud": {"kicker": 40, "meta": 60, "data": 30},
+    "quiet": {"kicker": -70, "meta": -90, "data": -30},
+}
+# Per-register clamps = the shipped variable face's real axis range (see
+# _FONT_AXES): kicker→Space Grotesk 300–700, meta→Inter 100–900, data→JetBrains
+# Mono 100–800. Keeps every emitted weight instanceable, never a faked axis.
+_WGHT_CLAMP = {"kicker": (300, 700), "meta": (100, 900), "data": (100, 800)}
+
+
+def _mood_bucket(mood: str) -> str:
+    m = (mood or "").strip().lower()
+    if m in _WGHT_LOUD:
+        return "loud"
+    if m in _WGHT_QUIET:
+        return "quiet"
+    return "neutral"
+
+
+def weight_register_for(density: str, mood: str) -> dict[str, int] | None:
+    """The ``{kicker, meta, data}`` supporting weight register, or ``None``.
+
+    Returns ``None`` for the default case (``density`` != ``"bold"`` and a
+    neutral/absent ``mood``) so the caller emits no override and the card stays
+    byte-identical. Otherwise returns the density base adjusted by the mood
+    bucket, each register clamped to its variable face's real axis range —
+    deterministic, no randomness, no LLM.
+    """
+    d = (density or "").strip().lower()
+    bucket = _mood_bucket(mood)
+    if d != "bold" and bucket == "neutral":
+        return None
+    base = dict(_WGHT_BOLD if d == "bold" else _WGHT_BASE)
+    delta = _WGHT_MOOD_DELTA.get(bucket, {})
+    out: dict[str, int] = {}
+    for reg, value in base.items():
+        lo, hi = _WGHT_CLAMP[reg]
+        out[reg] = int(max(lo, min(hi, value + delta.get(reg, 0))))
+    return out

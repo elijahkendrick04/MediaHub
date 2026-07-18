@@ -808,3 +808,91 @@ class TestRequireRunDecorator:
             return "ok"
 
         assert my_view.__name__ == "my_view"
+
+
+# ---------------------------------------------------------------------------
+# @require_run migration — batch 2 (finding #18). 38 more run-scoped handlers
+# had their copy-pasted _can_access_run guard replaced by @require_run, across
+# web.py and the routes_api_runs.py blueprint module (finding #15). We drive
+# every route of every migrated endpoint off the url_map: for the FOREIGN org
+# the tenant gate (now the decorator) must fire before any body code, so the
+# response is never 2xx and never leaks Alpha's data — whatever each handler's
+# deny shape (404 json / recovery page / 302 redirect / abort). A dropped
+# @require_run on any of them turns its foreign probe 2xx and reddens here.
+# ---------------------------------------------------------------------------
+
+_BATCH2_ENDPOINTS = [
+    "api_caption_assist", "api_caption_platforms", "api_card_download",
+    "api_card_elements", "api_card_reaction_toggle", "api_card_translate",
+    "api_cards", "api_cards_bulk_download", "api_cards_bulk_export",
+    "api_cards_bulk_status", "api_element_suggestions", "api_export",
+    "api_live_caption", "api_recognition", "api_run_bulk_export",
+    "api_run_certificates_job", "api_run_reactions", "api_status",
+    "api_swim_trace", "api_trust", "api_turn_into", "api_turn_into_edit_caption",
+    "api_turn_into_status", "api_why_card", "api_workflow_set",
+    "export_run_tool_page", "ground_truth", "pack_certificates_zip",
+    "pack_print_separations", "pb_audit_page", "pb_ground_truth", "pb_ignore",
+    "pb_verify_form", "rerun_run", "review", "run_results_table", "run_status",
+    "turn_into_pack_view",
+]
+
+_B2_PARAM_FILL = {
+    "swimmer_key": "alpha-athlete-001", "swim_id": "swim-alpha-1",
+    "pack_id": "pk0000000000", "job_id": "0" * 32, "job": "0" * 32,
+    "token": _TOKEN, "brief_id": "brief-probe", "task_id": "task0000",
+    "ach_index": "0", "idx": "0", "n": "1", "fmt": "feed_portrait",
+}
+
+
+def _batch2_urls(two_orgs):
+    import mediahub.web.web as wm
+
+    app = wm.create_app()
+    app.config["TESTING"] = True
+    rid, cid = two_orgs["run_id"], "card-alpha-1"
+    out = []
+    with app.test_request_context():
+        from flask import url_for
+        for rule in app.url_map.iter_rules():
+            if rule.endpoint not in _BATCH2_ENDPOINTS:
+                continue
+            args = {}
+            for a in rule.arguments:
+                args[a] = rid if a == "run_id" else (cid if a == "card_id"
+                          else _B2_PARAM_FILL.get(a, "probe-dummy"))
+            try:
+                url = url_for(rule.endpoint, **args)
+            except Exception:
+                continue
+            for m in sorted(rule.methods & {"GET", "POST", "PUT", "DELETE", "PATCH"}):
+                out.append((rule.endpoint, m, url))
+    return out
+
+
+class TestRequireRunBatch2ForeignDenied:
+    def test_every_migrated_endpoint_denies_foreign_org(self, two_orgs):
+        c = two_orgs["client"]
+        _pin(c, "org-beta")
+        checked, failures = 0, []
+        for ep, method, url in _batch2_urls(two_orgs):
+            r = c.open(url, method=method, json={} if method != "GET" else None)
+            checked += 1
+            body = r.get_data(as_text=True)
+            leak = "Alpha Athlete" in body or "SECRET ALPHA" in body
+            if (200 <= r.status_code < 300) or leak:
+                failures.append((ep, method, url, r.status_code, leak))
+        assert not failures, f"foreign org not denied on: {failures}"
+        assert checked >= 38, f"only {checked} routes probed"
+
+    def test_owner_reaches_body_on_read_endpoints(self, two_orgs):
+        c = two_orgs["client"]
+        _pin(c, "org-alpha")
+        reads = {"api_cards", "api_status", "api_trust", "api_recognition",
+                 "review", "run_status", "api_card_elements", "api_run_reactions"}
+        for ep, method, url in _batch2_urls(two_orgs):
+            if ep not in reads or method != "GET":
+                continue
+            r = c.get(url)
+            if r.status_code == 404:
+                body = r.get_json(silent=True) or {}
+                assert body.get("error") != "run_not_found", (ep, url)

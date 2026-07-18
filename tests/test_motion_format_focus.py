@@ -79,6 +79,26 @@ def corner_subject(tmp_path_factory) -> Path:
     return _corner_subject(d)
 
 
+@pytest.fixture(autouse=True, scope="module")
+def _no_bg_remover():
+    """Report no background remover for this module — the real per-test cost sink.
+
+    These tests exercise per-format photo *focus* (``photoPos``), not cutout
+    synthesis. Left un-stubbed, the first ``_card_to_props`` that resolves a
+    cutout calls ``get_bg_remover()``, which tries to fetch the u2net ONNX model
+    over the network — many seconds of 403 retry/back-off in a sandbox with no
+    cached model — before falling back to a passthrough alpha the matte gate
+    then rejects (so the resolved cutout is ``""`` anyway). Reporting no remover
+    reaches that identical ``""`` cutout with zero network cost, so every
+    ``photoPos`` / ``photoSrc`` assertion is byte-identical while the module
+    stops paying for a model download it never tests. The saliency maths itself
+    is already cheap and its one input image is shared via ``corner_subject`` —
+    the download attempt, not the maths, was the recompute (#133).
+    """
+    with mock.patch("mediahub.media_ai.providers.get_bg_remover", return_value=None):
+        yield
+
+
 def _card(i: int = 1) -> dict:
     return {
         "id": f"c{i}",

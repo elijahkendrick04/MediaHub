@@ -63,6 +63,34 @@ def test_protected_engine_guard_intact():
     assert "_touches_protected" in inspect.getsource(gitops.implement_until_green)
 
 
+def test_protected_paths_all_point_at_something_real():
+    """Every PROTECTED entry must resolve to a real path on disk. F17: the guard
+    pinned ``legacy/swim_content_v5/ranker_v3.py`` — a path that has never existed —
+    so the substring-``"ranker"`` check above stayed green while ``_touches_protected``
+    matched NEITHER real ranker, leaving the deterministic ranking maths editable by
+    the self-merging bot. A phantom protected path is a silent hole in the boundary,
+    so pin the invariant: dir entries (trailing ``/``) are real dirs, file entries
+    are real files."""
+    for entry in gitops.PROTECTED:
+        path = REPO_ROOT / entry
+        if entry.endswith("/"):
+            assert path.is_dir(), f"protected dir {entry!r} does not exist — phantom guard"
+        else:
+            assert path.is_file(), f"protected file {entry!r} does not exist — phantom guard"
+
+
+def test_protected_covers_both_live_rankers():
+    """The two LIVE rankers — V5 ``rank_achievements`` (re-exported at
+    src/mediahub/recognition/__init__.py) and V3 ``rank_cards`` (imported at
+    src/mediahub/pipeline/pipeline_v4.py) — must both trip ``_touches_protected`` so a
+    bot diff editing ranking maths ABORTS instead of self-merging to prod (F17)."""
+    for ranker in ("legacy/swim_content_v5/ranker.py", "legacy/swim_content/ranker_v3.py"):
+        assert (REPO_ROOT / ranker).is_file(), f"live ranker {ranker} moved — update the guard"
+        assert gitops._touches_protected([ranker]) == [ranker], (
+            f"live ranker {ranker} is NOT guarded — the bot could edit ranking maths and "
+            "self-merge it to production (F17)")
+
+
 # --- the ground-truth oracle must not be rewritten by the bot (PR #637/#645) -
 def test_golden_oracle_and_calibration_guards_wired():
     """Two anti-cheat guards the fixer must keep:

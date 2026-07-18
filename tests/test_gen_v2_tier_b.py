@@ -271,26 +271,38 @@ def test_legible_role_assignment_is_honoured():
     assert check_roles(got).passes
 
 
-def test_partial_assignment_that_breaks_a_pair_is_rejected_atomically():
+def test_partial_assignment_that_breaks_a_pair_is_repaired_then_ships():
+    # C6 (Canva gap analysis): this behaviour intentionally changed. Ground→gold
+    # while the accent stays gold makes accent==ground (Lc 0); the OLD engine
+    # discarded the whole art direction. The C6 per-slot repair now keeps the
+    # director's gold ground and steps ONLY the failing accent to legibility
+    # (Canva "adjusts colours to keep them readable") — so the card SHIPS legibly
+    # instead of reverting, with a repair note recording what was fixed.
     from mediahub.graphic_renderer.render import resolved_role_vars_for_brief
+    from mediahub.quality.compliance import check_roles
 
     baseline = resolved_role_vars_for_brief(_bare_brief(), NAVY_GOLD)
-    # Ground→gold while the accent stays gold makes accent==ground (Lc 0):
-    # the gate must reject the WHOLE assignment, not ship a half-legal card.
     brief = _bare_brief(colour_role_assignment={"ground": "secondary"})
     got = resolved_role_vars_for_brief(brief, NAVY_GOLD)
-    assert got == baseline
+    assert got != baseline
+    assert got["--mh-primary"] == baseline["--mh-secondary"]  # director's gold ground kept
+    assert got["--mh-accent"] != baseline["--mh-accent"]  # only the failing slot moved
+    assert check_roles(got).passes  # the shipped card is always legible
+    assert "accent" in got.get("--mh-repair-note", "")
 
 
-def test_illegible_role_assignment_falls_back_to_brand_defaults():
+def test_unrepairable_headline_assignment_repairs_the_ink_and_ships():
+    # C6: a headline painted in the ground colour can never read; the repair
+    # steps that ink toward the guaranteed-legible on-colour and ships it
+    # (legibility still beats art direction, but per-slot, not all-or-nothing).
     from mediahub.graphic_renderer.render import resolved_role_vars_for_brief
+    from mediahub.quality.compliance import check_roles, is_legible
 
-    baseline = resolved_role_vars_for_brief(_bare_brief(), NAVY_GOLD)
-    # Painting the headline in the same colour as the ground can never read;
-    # the gate must reject the whole assignment and keep the safe baseline.
     brief = _bare_brief(colour_role_assignment={"headline": "primary"})
     got = resolved_role_vars_for_brief(brief, NAVY_GOLD)
-    assert got == baseline
+    assert is_legible(got["--mh-on-primary"], got["--mh-primary"])
+    assert check_roles(got).passes
+    assert got.get("--mh-repair-note", "").startswith("repaired-name_on_ground")
 
 
 # ---------------------------------------------------------------------------
@@ -345,11 +357,12 @@ def _fake_render_all_formats(brief, *, output_dir, formats=None, **kw):
 def test_pool_without_provider_returns_ranked_deterministic_shortlist(pool_env):
     from mediahub.content_pack_visual import integration
 
-    with mock.patch.object(
-        ai_director, "ai_design_specs", return_value=None
-    ) as director, mock.patch(
-        "mediahub.graphic_renderer.variants.render_all_formats",
-        side_effect=_fake_render_all_formats,
+    with (
+        mock.patch.object(ai_director, "ai_design_specs", return_value=None) as director,
+        mock.patch(
+            "mediahub.graphic_renderer.variants.render_all_formats",
+            side_effect=_fake_render_all_formats,
+        ),
     ):
         pool = integration.create_candidate_pool_for_item(
             dict(ITEM),
@@ -389,9 +402,12 @@ def test_pool_with_mocked_director_marks_ai_candidates(pool_env):
             token_roles=list(TOKEN_ROLES),
         ),
     ]
-    with mock.patch.object(ai_director, "ai_design_specs", return_value=specs), mock.patch(
-        "mediahub.graphic_renderer.variants.render_all_formats",
-        side_effect=_fake_render_all_formats,
+    with (
+        mock.patch.object(ai_director, "ai_design_specs", return_value=specs),
+        mock.patch(
+            "mediahub.graphic_renderer.variants.render_all_formats",
+            side_effect=_fake_render_all_formats,
+        ),
     ):
         pool = integration.create_candidate_pool_for_item(
             dict(ITEM),
@@ -467,14 +483,15 @@ def web_app(web_module, tmp_path, monkeypatch):
 
 def test_route_returns_additive_shortlist_with_legacy_fields(web_app):
     app, run_id = web_app
-    with mock.patch.object(ai_director, "ai_design_specs", return_value=None), mock.patch(
-        "mediahub.graphic_renderer.variants.render_all_formats",
-        side_effect=_fake_render_all_formats,
+    with (
+        mock.patch.object(ai_director, "ai_design_specs", return_value=None),
+        mock.patch(
+            "mediahub.graphic_renderer.variants.render_all_formats",
+            side_effect=_fake_render_all_formats,
+        ),
     ):
         with app.test_client() as client:
-            resp = client.post(
-                f"/api/runs/{run_id}/cards/swim-tb-1/create-graphic?candidates=4"
-            )
+            resp = client.post(f"/api/runs/{run_id}/cards/swim-tb-1/create-graphic?candidates=4")
     assert resp.status_code == 200, resp.get_data(as_text=True)[:400]
     body = resp.get_json()
     assert body["ok"] is True
@@ -496,21 +513,20 @@ def test_regenerate_variants_sync_yields_three_distinct_archetypes(web_app):
     mutually-distinct variants (distinct by construction, no re-roll guard).
     """
     app, run_id = web_app
-    with mock.patch.object(ai_director, "ai_design_specs", return_value=None), mock.patch(
-        "mediahub.graphic_renderer.variants.render_all_formats",
-        side_effect=_fake_render_all_formats,
+    with (
+        mock.patch.object(ai_director, "ai_design_specs", return_value=None),
+        mock.patch(
+            "mediahub.graphic_renderer.variants.render_all_formats",
+            side_effect=_fake_render_all_formats,
+        ),
     ):
         with app.test_client() as client:
-            resp = client.post(
-                f"/api/runs/{run_id}/cards/swim-tb-1/regenerate-variants?sync=1"
-            )
+            resp = client.post(f"/api/runs/{run_id}/cards/swim-tb-1/regenerate-variants?sync=1")
     assert resp.status_code == 200, resp.get_data(as_text=True)[:400]
     body = resp.get_json()
     variants = body.get("variants") or []
     assert len(variants) == 3
-    archetypes = [
-        (v.get("variation_signature") or "").split("|", 1)[0] for v in variants
-    ]
+    archetypes = [(v.get("variation_signature") or "").split("|", 1)[0] for v in variants]
     assert len(set(archetypes)) == 3
     assert all(a in list_archetypes() for a in archetypes)
     assert all(v.get("visual") for v in variants)

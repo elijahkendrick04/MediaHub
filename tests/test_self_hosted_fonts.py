@@ -46,9 +46,9 @@ class TestWebFontAssets:
 
     def test_fraunces_is_variable(self):
         css = FONTS_CSS.read_text()
-        assert re.search(
-            r"font-family: 'Fraunces';[^}]*font-weight: 400 900;", css, re.S
-        ), "Fraunces must be self-hosted as a variable font (font-weight: 400 900)"
+        assert re.search(r"font-family: 'Fraunces';[^}]*font-weight: 400 900;", css, re.S), (
+            "Fraunces must be self-hosted as a variable font (font-weight: 400 900)"
+        )
 
     def test_metric_tuned_fallback_exists(self):
         css = FONTS_CSS.read_text()
@@ -96,9 +96,9 @@ class TestWebRenderedHead:
         with app.test_client() as c:
             resp = c.get(f"/static/fonts/{font_file}")
         assert resp.status_code == 200
-        assert (
-            "font/woff2" in resp.content_type
-        ), f"{font_file}: expected font/woff2 Content-Type, got {resp.content_type!r}"
+        assert "font/woff2" in resp.content_type, (
+            f"{font_file}: expected font/woff2 Content-Type, got {resp.content_type!r}"
+        )
         cd = resp.headers.get("Content-Disposition", "")
         assert "attachment" not in cd, f"{font_file}: woff2 must not be served as an attachment"
 
@@ -111,6 +111,7 @@ _RENDER_PY = _ROOT / "src" / "mediahub" / "graphic_renderer" / "render.py"
 class TestRendererFonts:
     def test_renderer_woff2_present(self):
         names = {p.name for p in (_RL / "fonts").glob("*.woff2")}
+        # playfair-display joined as the serif display register (D5).
         for slug in (
             "bebas-neue",
             "anton",
@@ -118,6 +119,7 @@ class TestRendererFonts:
             "space-grotesk",
             "inter",
             "jetbrains-mono",
+            "playfair-display",
         ):
             assert f"{slug}.woff2" in names, f"missing renderer font {slug}.woff2"
 
@@ -158,6 +160,7 @@ class TestRemotionFonts:
     def test_brand_woff2_bundled_in_public(self):
         pub = _REMOTION / "public" / "fonts"
         names = {p.name for p in pub.glob("*.woff2")}
+        # playfair-display joined as the serif display register (D5).
         for slug in (
             "bebas-neue",
             "anton",
@@ -165,6 +168,7 @@ class TestRemotionFonts:
             "space-grotesk",
             "inter",
             "jetbrains-mono",
+            "playfair-display",
         ):
             assert f"{slug}.woff2" in names, f"missing bundled reel font {slug}.woff2"
 
