@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-07-17 · `4868ee31e` · Merge pull request #1311 from elijahkendrick04/claude/fixture-sprawl-130-conftest
+**Last updated:** 2026-07-17 · `ee1943c65` · build(deps): bump actions/setup-node from 6 to 7 (#1313) [skip render]
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1227,6 +1227,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-07-17 | `ef3c96ec9` | build(deps): bump actions/setup-node from 6 to 7 |
 | 2026-07-17 | `c09ce763e` | test: migrate 8 club-a fixtures off importlib.reload onto conftest app (#130) |
 | 2026-07-17 | `ca21317d3` | test: run the tier-A clean-assembly invariant on both render engines (#132) |
 | 2026-07-17 | `eddd67555` | test: stop test_motion_format_focus paying for a cutout model fetch (#133) |
@@ -1238,5 +1239,4 @@ list and the auto table below, not here.
 | 2026-07-17 | `8913b5eda` | test(#65): add trailing newline (pre-commit end-of-file-fixer) |
 | 2026-07-17 | `a1796c0bf` | deep-review #65: model relays and exclude them from individual PB/medal detection |
 | 2026-07-17 | `bc979e662` | deep-review #60: make OfficialPBDetector Rule 0 work on HY3/SDIF native runs |
-| 2026-07-17 | `485a2e3d0` | deep-review #57: drop unresolvable-course rows instead of positionally guessing |
 <!-- /ROADMAP:ACTIVITY -->
