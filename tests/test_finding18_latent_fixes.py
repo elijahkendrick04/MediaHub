@@ -9,7 +9,6 @@ owns a run; a pinned org-beta session is the foreign prober).
 """
 from __future__ import annotations
 
-import importlib
 import json
 import sys
 import uuid
@@ -26,19 +25,8 @@ sys.path.insert(0, str(_ROOT))
 # ---------------------------------------------------------------------------
 
 @pytest.fixture
-def two_orgs(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    for d in ("runs_v4", "uploads_v4", "club_profiles"):
-        (tmp_path / d).mkdir(parents=True, exist_ok=True)
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
+def two_orgs(web_module):
+    wm = web_module
 
     from mediahub.web.club_profile import ClubProfile, save_profile
 
@@ -64,7 +52,7 @@ def two_orgs(tmp_path, monkeypatch):
         },
         "parse_warnings": [], "self_check": {}, "detector_summary": {}, "dispatch_log": {},
     }
-    (tmp_path / "runs_v4" / f"{run_id}.json").write_text(json.dumps(run_payload))
+    (wm.RUNS_DIR / f"{run_id}.json").write_text(json.dumps(run_payload))
     conn = wm._db()
     conn.execute(
         "INSERT OR REPLACE INTO runs (id, created_at, status, profile_id, "
@@ -342,19 +330,8 @@ _CAP_VIEWER = "viewer@cap-alpha.org"
 
 
 @pytest.fixture
-def bound_pack_world(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    for d in ("runs_v4", "uploads_v4", "club_profiles"):
-        (tmp_path / d).mkdir(parents=True, exist_ok=True)
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
+def bound_pack_world(web_module, tmp_path):
+    wm = web_module
 
     from mediahub.web import tenancy as t
     from mediahub.web.auth import UserStore
@@ -370,7 +347,7 @@ def bound_pack_world(tmp_path, monkeypatch):
     run_id = "run-alpha-" + uuid.uuid4().hex[:8]
     run_payload = {"run_id": run_id, "profile_id": "org-alpha", "profile_display": "Org Alpha",
                    "meet": {"name": "SECRET ALPHA INVITATIONAL"}, "cards": []}
-    (tmp_path / "runs_v4" / f"{run_id}.json").write_text(json.dumps(run_payload))
+    (wm.RUNS_DIR / f"{run_id}.json").write_text(json.dumps(run_payload))
     conn = wm._db()
     conn.execute(
         "INSERT OR REPLACE INTO runs (id, created_at, status, profile_id, "
