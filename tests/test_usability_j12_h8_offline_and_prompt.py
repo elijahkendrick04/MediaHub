@@ -12,29 +12,22 @@ It now stashes the prompt too and pre-fills the textarea.
 
 from __future__ import annotations
 
-import importlib
-
 import pytest
 
 
 @pytest.fixture
-def env(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
+def env(web_module, monkeypatch):
+    # MEDIAHUB_SCHEDULER is read live via scheduler._enabled() inside create_app(),
+    # not at import time, so it must be set before create_app() is called below.
+    # Storage-path isolation comes from the canonical web_module fixture.
     monkeypatch.setenv("MEDIAHUB_SCHEDULER", "0")
-    (tmp_path / "club_profiles").mkdir(parents=True, exist_ok=True)
     for var in ("GEMINI_API_KEY", "GOOGLE_API_KEY", "ANTHROPIC_API_KEY", "MEDIAHUB_LLM_PROVIDER"):
         monkeypatch.delenv(var, raising=False)
 
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
     from mediahub.web.club_profile import ClubProfile, save_profile
 
     save_profile(ClubProfile(profile_id="club-a", display_name="Club A"))
-    app = wm.create_app()
+    app = web_module.create_app()
     app.config.update(TESTING=True, SECRET_KEY="x")
     c = app.test_client()
     with c.session_transaction() as s:

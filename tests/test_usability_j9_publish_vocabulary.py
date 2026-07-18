@@ -22,7 +22,6 @@ Pinned here:
 
 from __future__ import annotations
 
-import importlib
 import json
 import pathlib
 import sys
@@ -115,32 +114,21 @@ ORG = "org-j9"
 
 
 @pytest.fixture
-def world(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
+def world(tmp_path, monkeypatch, web_module):
     monkeypatch.setenv("MEDIAHUB_SCHEDULER", "0")
-    for sub in ("runs_v4", "club_profiles"):
-        (tmp_path / sub).mkdir(parents=True, exist_ok=True)
     for var in ("GEMINI_API_KEY", "GOOGLE_API_KEY", "ANTHROPIC_API_KEY", "MEDIAHUB_LLM_PROVIDER"):
         monkeypatch.delenv(var, raising=False)
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
 
     from mediahub.web.club_profile import ClubProfile, save_profile
 
     save_profile(ClubProfile(profile_id=ORG, display_name="J9 Swimming Club"))
-    app = wm.create_app()
+    app = web_module.create_app()
     app.config["TESTING"] = True
     client = app.test_client()
     with client.session_transaction() as sess:
         sess["active_profile_id"] = ORG
         sess["login_seen_at"] = 2**62
-    return {"client": client, "wm": wm, "tmp": tmp_path}
+    return {"client": client, "wm": web_module, "tmp": tmp_path}
 
 
 def _seed_approved_run(world, run_id="j9run0001"):

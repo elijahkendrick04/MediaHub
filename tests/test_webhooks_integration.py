@@ -7,7 +7,6 @@ CRUD is scope-gated and tenant-isolated.
 
 from __future__ import annotations
 
-import importlib
 import json
 import sqlite3
 
@@ -38,10 +37,7 @@ def _seed_run(runs_dir, db_path, run_id, profile_id):
 
 
 @pytest.fixture
-def world(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
+def world(web_module, tmp_path, monkeypatch):
     monkeypatch.setenv("MEDIAHUB_SCHEDULER", "0")
 
     from mediahub.api_public import _db as api_db
@@ -49,12 +45,6 @@ def world(tmp_path, monkeypatch):
 
     api_db._initialized.clear()
     wh_db._initialized.clear()
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
 
     # Deliver synchronously + capture, so the assertion is deterministic.
     from mediahub.webhooks import delivery
@@ -68,12 +58,13 @@ def world(tmp_path, monkeypatch):
 
     save_profile(ClubProfile(profile_id="org-a", display_name="Org A SC"))
 
-    wm.app.config["TESTING"] = True
+    app = web_module.create_app()
+    app.config["TESTING"] = True
 
     from mediahub.api_public.tokens import ApiTokenStore
 
     class W:
-        client = wm.app.test_client()
+        client = app.test_client()
 
         @staticmethod
         def token(scopes):

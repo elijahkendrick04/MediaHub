@@ -10,9 +10,9 @@ Pins:
      lives on the builder only). The grouped page keeps its per-card
      motion-video button.
 """
+
 from __future__ import annotations
 
-import importlib
 import io
 import json
 import sys
@@ -26,30 +26,22 @@ sys.path.insert(0, str(_ROOT))
 
 
 @pytest.fixture
-def app_with_run(tmp_path, monkeypatch):
+def app_with_run(app, tmp_path):
     """Fresh DATA_DIR, a seeded ready org, and one fake run."""
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    (tmp_path / "runs_v4").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "uploads_v4").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "club_profiles").mkdir(parents=True, exist_ok=True)
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-    importlib.reload(cp)
-    importlib.reload(wm)
+    app.config["ENFORCE_ORG_GATE"] = True
 
     # Seed a branded, ready profile so the gate lifts.
     from mediahub.web.club_profile import ClubProfile, save_profile
-    save_profile(ClubProfile(
-        profile_id="city-aquatics",
-        display_name="City Aquatics",
-        brand_voice_summary="Inclusive community club.",
-        brand_primary="#0066cc",
-        brand_logo_url="https://city-aquatics.example/logo.png",
-    ))
+
+    save_profile(
+        ClubProfile(
+            profile_id="city-aquatics",
+            display_name="City Aquatics",
+            brand_voice_summary="Inclusive community club.",
+            brand_primary="#0066cc",
+            brand_logo_url="https://city-aquatics.example/logo.png",
+        )
+    )
 
     # Seed a fake run that the newsletter endpoint can read.
     run_id = "test_run_newsletter"
@@ -64,27 +56,26 @@ def app_with_run(tmp_path, monkeypatch):
         },
         "recognition_report": {
             "n_achievements": 1,
-            "ranked_achievements": [{
-                "rank": 1,
-                "priority": 0.95,
-                "achievement": {
-                    "swim_id": "swim-1",
-                    "swimmer_name": "Emma Davies",
-                    "event": "100m Freestyle",
-                    "time": "58.21",
-                    "type": "pb_confirmed",
-                    "headline": "First sub-60 in the 100 free",
-                    "pb": True,
-                },
-                "factors": [],
-            }],
+            "ranked_achievements": [
+                {
+                    "rank": 1,
+                    "priority": 0.95,
+                    "achievement": {
+                        "swim_id": "swim-1",
+                        "swimmer_name": "Emma Davies",
+                        "event": "100m Freestyle",
+                        "time": "58.21",
+                        "type": "pb_confirmed",
+                        "headline": "First sub-60 in the 100 free",
+                        "pb": True,
+                    },
+                    "factors": [],
+                }
+            ],
         },
     }
     (tmp_path / "runs_v4" / f"{run_id}.json").write_text(json.dumps(run))
 
-    app = wm.create_app()
-    app.config["TESTING"] = True
-    app.config["ENFORCE_ORG_GATE"] = True
     with app.test_client() as c:
         c.post("/api/organisation/active", data={"profile_id": "city-aquatics"})
         yield c, run_id
@@ -94,12 +85,15 @@ def app_with_run(tmp_path, monkeypatch):
 # 1. Newsletter endpoint
 # ---------------------------------------------------------------------------
 
+
 class TestNewsletterEndpoint:
     def test_html_default(self, app_with_run, monkeypatch):
         # Stub build_parent_newsletter so we don't hit the LLM in test.
         from mediahub.turn_into import templates as ti
+
         monkeypatch.setattr(
-            ti, "build_parent_newsletter",
+            ti,
+            "build_parent_newsletter",
             lambda meet, ranked, **kw: {
                 "type": "parent_newsletter",
                 "title": f"{meet.get('name','Meet')} — meet update",
@@ -110,7 +104,9 @@ class TestNewsletterEndpoint:
                         "Emma went sub-60 in the 100 free."
                     ),
                 },
-                "cards": [], "html": "", "notes": [],
+                "cards": [],
+                "html": "",
+                "notes": [],
             },
         )
 
@@ -131,12 +127,17 @@ class TestNewsletterEndpoint:
 
     def test_text_format(self, app_with_run, monkeypatch):
         from mediahub.turn_into import templates as ti
+
         monkeypatch.setattr(
-            ti, "build_parent_newsletter",
+            ti,
+            "build_parent_newsletter",
             lambda meet, ranked, **kw: {
-                "type": "parent_newsletter", "title": "x",
+                "type": "parent_newsletter",
+                "title": "x",
                 "captions": {"plain_text": "Hello parents."},
-                "cards": [], "html": "", "notes": [],
+                "cards": [],
+                "html": "",
+                "notes": [],
             },
         )
         c, run_id = app_with_run
@@ -147,8 +148,10 @@ class TestNewsletterEndpoint:
 
     def test_text_download_has_disposition(self, app_with_run, monkeypatch):
         from mediahub.turn_into import templates as ti
+
         monkeypatch.setattr(
-            ti, "build_parent_newsletter",
+            ti,
+            "build_parent_newsletter",
             lambda meet, ranked, **kw: {
                 "type": "parent_newsletter",
                 "captions": {"plain_text": "x"},
@@ -163,8 +166,10 @@ class TestNewsletterEndpoint:
 
     def test_zip_format(self, app_with_run, monkeypatch):
         from mediahub.turn_into import templates as ti
+
         monkeypatch.setattr(
-            ti, "build_parent_newsletter",
+            ti,
+            "build_parent_newsletter",
             lambda meet, ranked, **kw: {
                 "type": "parent_newsletter",
                 "captions": {"plain_text": "Plain body content here."},
@@ -199,6 +204,7 @@ class TestNewsletterEndpoint:
 # ---------------------------------------------------------------------------
 # 2. UI surfacing on the grouped pack page
 # ---------------------------------------------------------------------------
+
 
 class TestPackPageSurfacesExports:
     def test_builder_has_newsletter_buttons(self, app_with_run):

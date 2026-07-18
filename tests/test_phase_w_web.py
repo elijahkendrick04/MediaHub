@@ -8,7 +8,6 @@ W.11/W.13 caption bundle response, and org isolation on every new surface.
 
 from __future__ import annotations
 
-import importlib
 import json
 import sys
 import uuid
@@ -92,19 +91,8 @@ def _run_payload(run_id: str, profile_id: str) -> dict:
 
 
 @pytest.fixture
-def env(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    for sub in ("runs_v4", "uploads_v4", "club_profiles"):
-        (tmp_path / sub).mkdir(parents=True, exist_ok=True)
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
+def env(tmp_path, web_module):
+    wm = web_module
 
     from mediahub.web.club_profile import ClubProfile, save_profile
 
@@ -676,6 +664,8 @@ class TestLiveMeet:
     def test_action_requires_org(self, env):
         c = env["client"]
         assert self._create(c).status_code == 403
+
+
 # W.8 — Season wraps surface (audit regressions)
 # ---------------------------------------------------------------------------
 

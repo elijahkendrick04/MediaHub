@@ -8,7 +8,6 @@ name again (finding F1).
 
 from __future__ import annotations
 
-import importlib
 import json
 from pathlib import Path
 
@@ -18,16 +17,8 @@ REPO = Path(__file__).resolve().parents[1]
 
 
 @pytest.fixture
-def wall_app(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
+def wall_app(web_module, tmp_path):
+    wm = web_module
 
     from mediahub.web.club_profile import ClubProfile, save_profile
 
@@ -105,7 +96,13 @@ def test_public_wall_has_no_third_party_resources(wall_app):
     c = wall_app.test_client()
     for path in ("/wall/token-org-a-secret", "/wall/token-org-a-secret/embed"):
         html = c.get(path).get_data(as_text=True)
-        for fragment in ("googletagmanager", "google-analytics", "fonts.googleapis", "gstatic", "<script src=\"http"):
+        for fragment in (
+            "googletagmanager",
+            "google-analytics",
+            "fonts.googleapis",
+            "gstatic",
+            '<script src="http',
+        ):
             assert fragment not in html, f"{path} references third-party resource {fragment}"
 
 

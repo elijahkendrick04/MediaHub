@@ -5,17 +5,12 @@ M27 (?poster=1 on the asset file route), and the clip-unlink affordance.
 
 from __future__ import annotations
 
-import importlib
 import io
 import json
-import sys
 from pathlib import Path
 from unittest import mock
 
 import pytest
-
-_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(_ROOT))
 
 
 def _run_payload(profile_id: str) -> dict:
@@ -43,19 +38,8 @@ def _run_payload(profile_id: str) -> dict:
 
 
 @pytest.fixture
-def app_env(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    for d in ("runs_v4", "uploads_v4", "club_profiles"):
-        (tmp_path / d).mkdir(parents=True, exist_ok=True)
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
+def app_env(web_module, tmp_path):
+    wm = web_module
 
     from mediahub.media_library import store as mls
 
@@ -82,8 +66,16 @@ def _pin(client, pid):
     client.post("/api/organisation/active", data={"profile_id": pid})
 
 
-def _add_footage(store, tmp_path, *, asset_id="ft_1", profile_id="alpha",
-                 permission="approved_by_club", meta=None, links=True):
+def _add_footage(
+    store,
+    tmp_path,
+    *,
+    asset_id="ft_1",
+    profile_id="alpha",
+    permission="approved_by_club",
+    meta=None,
+    links=True,
+):
     from mediahub.media_library.models import MediaAsset
 
     src = tmp_path / f"{asset_id}.mp4"
@@ -114,7 +106,12 @@ def _make_project(store, tmp_path, *, source_path, profile_id="alpha", status="d
         id="",
         profile_id=profile_id,
         name="Race cut",
-        edl=EDL(width=1080, height=1920, fps=30, clips=[Clip(source=str(source_path), in_ms=0, out_ms=4000)]),
+        edl=EDL(
+            width=1080,
+            height=1920,
+            fps=30,
+            clips=[Clip(source=str(source_path), in_ms=0, out_ms=4000)],
+        ),
         source_asset_id="ft_1",
         format_name="story",
     )
@@ -138,8 +135,14 @@ class TestCardClipUpload:
         monkeypatch.setattr(
             "mediahub.video.probe.probe_clip",
             lambda p: ClipProbe(
-                duration_ms=9000, width=1280, height=720, fps=30.0,
-                has_video=True, has_audio=True, video_codec="h264", audio_codec="aac",
+                duration_ms=9000,
+                width=1280,
+                height=720,
+                fps=30.0,
+                has_video=True,
+                has_audio=True,
+                video_codec="h264",
+                audio_codec="aac",
             ),
         )
         # Poster extraction would shell FFmpeg against fake bytes — keep it
@@ -149,15 +152,22 @@ class TestCardClipUpload:
         from mediahub.media_library.models import MediaAsset
 
         fake_frame = MediaAsset(
-            id="ma_frame", filename="frame.jpg", path=str(tmp_path / "frame.jpg"),
-            type="athlete_action", permission_status="needs_approval",
+            id="ma_frame",
+            filename="frame.jpg",
+            path=str(tmp_path / "frame.jpg"),
+            type="athlete_action",
+            permission_status="needs_approval",
         )
         with app.test_client() as c:
             _pin(c, "alpha")
-            with mock.patch("mediahub.video.best_frame.extract_best_frame", return_value=fake_frame):
+            with mock.patch(
+                "mediahub.video.best_frame.extract_best_frame", return_value=fake_frame
+            ):
                 r = c.post(
                     "/api/runs/r1/cards/swim-1/photo",
-                    data={"photo": (io.BytesIO(b"\x00\x00\x00\x18ftypmp42" + b"v" * 4096), "race.mp4")},
+                    data={
+                        "photo": (io.BytesIO(b"\x00\x00\x00\x18ftypmp42" + b"v" * 4096), "race.mp4")
+                    },
                     content_type="multipart/form-data",
                 )
         assert r.status_code == 200, r.get_json()
@@ -436,8 +446,12 @@ class TestPosterRoute:
 
     def test_poster_tenant_gated(self, app_env):
         app, wm, tmp_path, store = app_env
-        _add_footage(store, tmp_path, profile_id="beta",
-                     meta={"duration_ms": 9000, "poster": "ft_1.poster.png"})
+        _add_footage(
+            store,
+            tmp_path,
+            profile_id="beta",
+            meta={"duration_ms": 9000, "poster": "ft_1.poster.png"},
+        )
         with app.test_client() as c:
             _pin(c, "alpha")
             r = c.get("/api/media-library/file/ft_1?poster=1")

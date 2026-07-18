@@ -10,7 +10,6 @@ formats over tiny real PNGs, exactly as the renderer would have written them.
 
 from __future__ import annotations
 
-import importlib
 import json
 import struct
 import time
@@ -27,7 +26,9 @@ def _make_png(width: int, height: int, *, fill: int = 0xC0) -> bytes:
 
     def chunk(typ: bytes, data: bytes) -> bytes:
         body = typ + data
-        return struct.pack(">I", len(data)) + body + struct.pack(">I", zlib.crc32(body) & 0xFFFFFFFF)
+        return (
+            struct.pack(">I", len(data)) + body + struct.pack(">I", zlib.crc32(body) & 0xFFFFFFFF)
+        )
 
     ihdr = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)
     raw = (b"\x00" + bytes([fill, 0x30, 0x80]) * width) * height
@@ -35,29 +36,27 @@ def _make_png(width: int, height: int, *, fill: int = 0xC0) -> bytes:
 
 
 @pytest.fixture
-def client(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
+def client(web_module, monkeypatch, tmp_path):
+    # MEDIAHUB_SCHEDULER is read fresh inside create_app() via
+    # scheduler._enabled() (start_scheduler no-ops under pytest regardless),
+    # not at web.py import time — so it must be set before create_app() runs,
+    # but the canonical web_module fixture's reload-free isolation already
+    # covers it.
     monkeypatch.setenv("MEDIAHUB_SCHEDULER", "0")
-    for sub in ("runs_v4", "uploads_v4", "club_profiles"):
-        (tmp_path / sub).mkdir(parents=True, exist_ok=True)
 
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
-
+    wm = web_module
     app = wm.create_app()
     app.config["TESTING"] = True
     app.config["ENFORCE_ORG_GATE"] = True
 
     from mediahub.web.club_profile import ClubProfile, save_profile
 
-    save_profile(ClubProfile(profile_id="club-a", display_name="Club A", brand_voice_summary="Friendly."))
-    save_profile(ClubProfile(profile_id="club-b", display_name="Club B", brand_voice_summary="Serious."))
+    save_profile(
+        ClubProfile(profile_id="club-a", display_name="Club A", brand_voice_summary="Friendly.")
+    )
+    save_profile(
+        ClubProfile(profile_id="club-b", display_name="Club B", brand_voice_summary="Serious.")
+    )
 
     with app.test_client() as c:
         yield c, wm, tmp_path
@@ -188,7 +187,9 @@ class TestQuickAction:
         _pin(c, "club-a")
         aid = _add_asset(wm, tmp, "club-a")
         _pin(c, "club-b")
-        resp = c.post(f"/api/media-library/{aid}/quick-action", json={"action": "convert", "format": "png"})
+        resp = c.post(
+            f"/api/media-library/{aid}/quick-action", json={"action": "convert", "format": "png"}
+        )
         assert resp.status_code == 403
 
     def test_missing_asset_404(self, client):
@@ -203,7 +204,10 @@ class TestBulkExport:
         c, wm, tmp = client
         _seed_run(tmp / "runs_v4", "run-a1", "club-a")
         _pin(c, "club-a")
-        kick = c.post("/api/runs/run-a1/bulk-export", json={"formats": ["jpg", "webp"], "options": {"quality": 80}})
+        kick = c.post(
+            "/api/runs/run-a1/bulk-export",
+            json={"formats": ["jpg", "webp"], "options": {"quality": 80}},
+        )
         assert kick.status_code == 202
         kj = kick.get_json()
         assert kj["ok"] and kj["job_id"]
@@ -298,9 +302,7 @@ class TestBulkExport:
         assert resp.status_code == 400
         assert resp.get_json()["error"] == "no_valid_formats"
         # a non-dict options blob falls back to defaults; the job still kicks
-        resp = c.post(
-            "/api/runs/run-a1/bulk-export", json={"formats": ["jpg"], "options": "junk"}
-        )
+        resp = c.post("/api/runs/run-a1/bulk-export", json={"formats": ["jpg"], "options": "junk"})
         assert resp.status_code == 202
         assert _wait_done(c, resp.get_json()["poll_url"])["status"] == "done"
         # same guard on the quick-action route

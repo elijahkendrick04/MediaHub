@@ -6,26 +6,26 @@ operational=True, so a deployment with no heartbeat (or a broken observability
 layer) showed a green dot and "Everything is running normally" — telling a
 volunteer all was well during an outage the system simply couldn't see.
 """
-from __future__ import annotations
 
-import importlib
+from __future__ import annotations
 
 import pytest
 
 
 @pytest.fixture
-def app(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    # Reload the uptime module too, not just web: its DB_PATH is bound at import
-    # time, so without this reload the "no heartbeat" premise leaks a populated
-    # DB from a prior test (module-level global) and the test becomes
-    # order-dependent. Rebind it to this test's fresh DATA_DIR.
+def app(web_module, tmp_path, monkeypatch):
+    # web.py is already isolated onto this test's DATA_DIR by the shared
+    # ``web_module`` fixture. The uptime store binds ``DB_PATH`` at import time
+    # and the canonical fixtures never reload it, so repoint its path globals at
+    # this test's fresh DATA_DIR — otherwise the "no heartbeat" premise would
+    # leak a populated DB from a prior test (module-level global) and the test
+    # would become order-dependent.
     import mediahub.observability.uptime as upt
-    import mediahub.web.web as wm
 
-    importlib.reload(upt)
-    importlib.reload(wm)
-    application = wm.create_app()
+    monkeypatch.setattr(upt, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(upt, "DB_PATH", tmp_path / "data.db")
+
+    application = web_module.create_app()
     application.config["TESTING"] = True
     return application
 

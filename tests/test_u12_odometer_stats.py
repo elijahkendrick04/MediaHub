@@ -17,9 +17,9 @@ Three layers of assertion, mirroring tests/test_activity_count_up.py:
      ghosting-regression guard). Skips when Playwright / the pinned Chromium
      build is absent, matching tests/test_browser_cascade.py.
 """
+
 from __future__ import annotations
 
-import importlib
 import os
 import re
 import sys
@@ -30,10 +30,7 @@ import pytest
 _ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_ROOT))
 
-_SKIP_BROWSER = (
-    os.environ.get("MEDIAHUB_SKIP_BROWSER_TESTS", "").lower()
-    in ("1", "true", "yes")
-)
+_SKIP_BROWSER = os.environ.get("MEDIAHUB_SKIP_BROWSER_TESTS", "").lower() in ("1", "true", "yes")
 from tests._pw_chromium import resolve_prebaked_chromium
 
 _PINNED_CHROMIUM = resolve_prebaked_chromium()
@@ -43,6 +40,7 @@ _THEME_CSS = _ROOT / "src" / "mediahub" / "web" / "static" / "theme" / "theme-co
 def _playwright_available() -> bool:
     try:
         import playwright.sync_api  # noqa: F401
+
         return True
     except ImportError:
         return False
@@ -54,6 +52,7 @@ def _chromium_available() -> bool:
 
 def _launch_browser():
     from playwright.sync_api import sync_playwright
+
     pw = sync_playwright().start()
     browser = pw.chromium.launch(
         executable_path=str(_PINNED_CHROMIUM),
@@ -64,38 +63,29 @@ def _launch_browser():
 
 
 # Expected zero-padded display strings for the seeded fixture.
-EXP_ORGS = "02"     # 2 organisations, pad 2
-EXP_RUNS = "005"    # 5 runs, pad 3 (single significant digit + leading zeros)
+EXP_ORGS = "02"  # 2 organisations, pad 2
+EXP_RUNS = "005"  # 5 runs, pad 3 (single significant digit + leading zeros)
 EXP_MOMENTS = "1234"  # 1234 moments, pad 3 expanded to 4 digits
 
 
 # ── fixture ──────────────────────────────────────────────────────────────────
 
+
 @pytest.fixture
-def home_app(tmp_path, monkeypatch):
+def home_app(app, web_module):
     """Isolated Flask app: 2 orgs, 5 runs, SUM(n_achievements) = 1234."""
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    for sub in ("runs_v4", "uploads_v4", "club_profiles"):
-        (tmp_path / sub).mkdir(parents=True, exist_ok=True)
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-    importlib.reload(cp)
-    importlib.reload(wm)
-
-    app = wm.create_app()
-    app.config["TESTING"] = True
+    wm = web_module
 
     from mediahub.web.club_profile import ClubProfile, save_profile
+
     for pid in ("org-a", "org-b"):  # 2 organisations -> "02"
-        save_profile(ClubProfile(
-            profile_id=pid,
-            display_name=pid.upper(),
-            brand_voice_summary="Testing.",
-        ))
+        save_profile(
+            ClubProfile(
+                profile_id=pid,
+                display_name=pid.upper(),
+                brand_voice_summary="Testing.",
+            )
+        )
 
     conn = wm._db()
     # 5 runs whose n_standout (the deduped standout-swim figure the hero now
@@ -129,6 +119,7 @@ def _get_home(app) -> str:
 
 # ── server-side: markup ───────────────────────────────────────────────────────
 
+
 class TestOdometerServerMarkup:
     def test_three_odometers_rendered(self, home_app):
         app, _ = home_app
@@ -143,7 +134,10 @@ class TestOdometerServerMarkup:
         assert 'data-mh-count="2"' in body
         assert 'data-mh-count-pad="2"' in body
         # Padded text content + clean aria-label + role for assistive tech.
-        assert f'aria-label="2" data-mh-count="2" data-mh-odometer data-mh-count-pad="2">{EXP_ORGS}</b>' in body
+        assert (
+            f'aria-label="2" data-mh-count="2" data-mh-odometer data-mh-count-pad="2">{EXP_ORGS}</b>'
+            in body
+        )
         assert 'role="img"' in body
 
     def test_runs_odometer_padded(self, home_app):
@@ -157,7 +151,9 @@ class TestOdometerServerMarkup:
         count, never the ~0 n_cards and never the inflated raw detections."""
         app, _ = home_app
         body = _get_home(app)
-        assert f'data-mh-count="1234" data-mh-odometer data-mh-count-pad="3">{EXP_MOMENTS}</b>' in body
+        assert (
+            f'data-mh-count="1234" data-mh-odometer data-mh-count-pad="3">{EXP_MOMENTS}</b>' in body
+        )
         assert "standout swims found" in body
         assert "moments detected" not in body
         # The honest source means the figure is NOT 0 even though n_cards is 0.
@@ -174,27 +170,17 @@ class TestOdometerServerMarkup:
         assert found, "no odometer elements parsed from home page"
         for raw, pad, shown in found:
             expected = f"{int(raw):0{int(pad)}d}"
-            assert shown == expected, (
-                f"odometer count={raw} pad={pad} shows {shown!r}, expected {expected!r}"
-            )
+            assert (
+                shown == expected
+            ), f"odometer count={raw} pad={pad} shows {shown!r}, expected {expected!r}"
 
 
 class TestOdometerServerEdges:
-    def test_singular_labels(self, tmp_path, monkeypatch):
+    def test_singular_labels(self, app, web_module):
         """1 org / 1 run / 1 moment use singular nouns."""
-        monkeypatch.setenv("DATA_DIR", str(tmp_path))
-        monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-        monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-        monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-        for sub in ("runs_v4", "uploads_v4", "club_profiles"):
-            (tmp_path / sub).mkdir(parents=True, exist_ok=True)
-        import mediahub.web.club_profile as cp
-        import mediahub.web.web as wm
-        importlib.reload(cp)
-        importlib.reload(wm)
-        app = wm.create_app()
-        app.config["TESTING"] = True
+        wm = web_module
         from mediahub.web.club_profile import ClubProfile, save_profile
+
         save_profile(ClubProfile(profile_id="solo", display_name="Solo", brand_voice_summary="x"))
         conn = wm._db()
         conn.execute(
@@ -216,20 +202,8 @@ class TestOdometerServerEdges:
         assert "</b> standout swim found</span>" in body
         assert "</b> standout swims found</span>" not in body
 
-    def test_fresh_deployment_hides_odometers(self, tmp_path, monkeypatch):
+    def test_fresh_deployment_hides_odometers(self, app):
         """No orgs + no runs -> no odometers, and the page still renders."""
-        monkeypatch.setenv("DATA_DIR", str(tmp_path))
-        monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-        monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-        monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-        for sub in ("runs_v4", "uploads_v4", "club_profiles"):
-            (tmp_path / sub).mkdir(parents=True, exist_ok=True)
-        import mediahub.web.club_profile as cp
-        import mediahub.web.web as wm
-        importlib.reload(cp)
-        importlib.reload(wm)
-        app = wm.create_app()
-        app.config["TESTING"] = True
         with app.test_client() as c:
             resp = c.get("/")
         body = resp.get_data(as_text=True)
@@ -240,6 +214,7 @@ class TestOdometerServerEdges:
 
 
 # ── static assets: JS + CSS ───────────────────────────────────────────────────
+
 
 class TestOdometerAssetsPresent:
     def test_renderer_js_in_page(self, home_app):
@@ -255,8 +230,7 @@ class TestOdometerAssetsPresent:
 
     def test_reel_css_present(self):
         css = _THEME_CSS.read_text(encoding="utf-8")
-        for cls in (".mh-odo--live", ".mh-odo-col", ".mh-odo-clip",
-                    ".mh-odo-strip", ".mh-odo-d"):
+        for cls in (".mh-odo--live", ".mh-odo-col", ".mh-odo-clip", ".mh-odo-strip", ".mh-odo-d"):
             assert cls in css, f"missing odometer rule {cls}"
         # The clip must hide overflow (only one digit visible) and the column
         # must collapse to a single line (the ghosting fix).
@@ -264,6 +238,7 @@ class TestOdometerAssetsPresent:
 
 
 # ── browser-side: animation behaviour ─────────────────────────────────────────
+
 
 @pytest.mark.skipif(_SKIP_BROWSER, reason="MEDIAHUB_SKIP_BROWSER_TESTS set")
 @pytest.mark.skipif(not _playwright_available(), reason="playwright not installed")

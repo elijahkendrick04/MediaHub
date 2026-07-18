@@ -9,44 +9,28 @@ think their upload disappeared.
 This file pins the fix: after configure POST, the run row in the
 SQLite ``runs`` table has ``profile_id`` == the active session profile.
 """
+
 from __future__ import annotations
 
-import importlib
 import io
-import sys
 from pathlib import Path
 
 import pytest
 
-_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(_ROOT))
-
 
 @pytest.fixture
-def gated_client(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    (tmp_path / "runs_v4").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "uploads_v4").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "club_profiles").mkdir(parents=True, exist_ok=True)
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-    importlib.reload(cp)
-    importlib.reload(wm)
-
-    app = wm.create_app()
-    app.config["TESTING"] = True
+def gated_client(app, tmp_path):
     app.config["ENFORCE_ORG_GATE"] = True
 
     from mediahub.web.club_profile import ClubProfile, save_profile
-    save_profile(ClubProfile(
-        profile_id="wycombe",
-        display_name="Wycombe District Swimming Club",
-        brand_voice_summary="A friendly club.",
-    ))
+
+    save_profile(
+        ClubProfile(
+            profile_id="wycombe",
+            display_name="Wycombe District Swimming Club",
+            brand_voice_summary="A friendly club.",
+        )
+    )
     with app.test_client() as c:
         c.post("/api/organisation/active", data={"profile_id": "wycombe"})
         yield c, app, tmp_path
@@ -95,6 +79,7 @@ class TestRunPinsActiveProfile:
 
         # Step 3: the runs DB row must now carry profile_id = "wycombe".
         import sqlite3
+
         conn = sqlite3.connect(str(tmp_path / "data.db"))
         conn.row_factory = sqlite3.Row
         row = conn.execute(

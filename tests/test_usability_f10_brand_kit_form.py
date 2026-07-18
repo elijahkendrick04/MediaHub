@@ -10,32 +10,22 @@ is reported instead of a blanket success.
 
 from __future__ import annotations
 
-import importlib
-
 import pytest
 
 
 @pytest.fixture
-def client(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    (tmp_path / "club_profiles").mkdir(parents=True, exist_ok=True)
+def client(app, monkeypatch):
     for var in ("GEMINI_API_KEY", "GOOGLE_API_KEY", "ANTHROPIC_API_KEY"):
         monkeypatch.delenv(var, raising=False)
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
+    from mediahub.web.club_profile import ClubProfile, save_profile
 
-    importlib.reload(cp)
-    importlib.reload(wm)
-    cp.save_profile(
-        cp.ClubProfile(profile_id="brandclub", display_name="Brand Club", brand_primary="#0E2A47")
+    save_profile(
+        ClubProfile(profile_id="brandclub", display_name="Brand Club", brand_primary="#0E2A47")
     )
-    app = wm.create_app()
-    app.config["TESTING"] = True
-    c = app.test_client()
-    with c.session_transaction() as s:
-        s["active_profile_id"] = "brandclub"
-    return c
+    with app.test_client() as c:
+        with c.session_transaction() as s:
+            s["active_profile_id"] = "brandclub"
+        yield c
 
 
 def _make_kit(client, name="Gala"):

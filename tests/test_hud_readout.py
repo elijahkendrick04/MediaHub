@@ -21,9 +21,9 @@ Two layers of assertion:
 
 Mirrors the skip/launch pattern in tests/test_activity_count_up.py.
 """
+
 from __future__ import annotations
 
-import importlib
 import os
 import re
 import sys
@@ -35,9 +35,7 @@ import pytest
 _ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_ROOT))
 
-_SKIP_BROWSER = (
-    os.environ.get("MEDIAHUB_SKIP_BROWSER_TESTS", "").lower() in ("1", "true", "yes")
-)
+_SKIP_BROWSER = os.environ.get("MEDIAHUB_SKIP_BROWSER_TESTS", "").lower() in ("1", "true", "yes")
 from tests._pw_chromium import resolve_prebaked_chromium
 
 _PINNED_CHROMIUM = resolve_prebaked_chromium()
@@ -85,23 +83,8 @@ def _launch_browser():
 
 
 @pytest.fixture
-def hud_app(tmp_path, monkeypatch):
+def hud_app(app):
     """Minimal isolated MediaHub app (no org pinned — the chrome is public)."""
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    for sub in ("runs_v4", "uploads_v4", "club_profiles"):
-        (tmp_path / sub).mkdir(parents=True, exist_ok=True)
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
-
-    app = wm.create_app()
-    app.config["TESTING"] = True
     return app
 
 

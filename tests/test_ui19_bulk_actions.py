@@ -11,9 +11,9 @@ progressive JS enhancement":
   * and the rendered HTML actually carrying the checkboxes / select-all / bulk
     bar / form wiring (a 200 shell would otherwise pass a status-only check).
 """
+
 from __future__ import annotations
 
-import importlib
 import io
 import json
 import sys
@@ -31,48 +31,46 @@ sys.path.insert(0, str(_ROOT))
 # Fixtures + seeding helpers
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
-def env(tmp_path, monkeypatch):
+def env(app, client, web_module, tmp_path):
     """Fresh DATA_DIR with two saved orgs; session pinned to org-test."""
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    for sub in ("runs_v4", "uploads_v4", "club_profiles"):
-        (tmp_path / sub).mkdir(parents=True, exist_ok=True)
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-    importlib.reload(cp)
-    importlib.reload(wm)
-
     from mediahub.web.club_profile import ClubProfile, save_profile
+
     save_profile(ClubProfile(profile_id="org-test", display_name="Test Club"))
     save_profile(ClubProfile(profile_id="org-other", display_name="Other Club"))
 
-    app = wm.create_app()
-    app.config["TESTING"] = True
     # Gate bypassed under TESTING (web.py:_gate_until_org_ready) — these tests
     # exercise the bulk actions + active-profile scoping, not the setup gate.
-
-    with app.test_client() as client:
-        r = client.post("/api/organisation/active", data={"profile_id": "org-test"})
-        assert r.status_code == 200, r.get_json()
-        yield {"client": client, "wm": wm, "tmp_path": tmp_path, "app": app}
+    r = client.post("/api/organisation/active", data={"profile_id": "org-test"})
+    assert r.status_code == 200, r.get_json()
+    return {"client": client, "wm": web_module, "tmp_path": tmp_path, "app": app}
 
 
-def _seed_asset(tmp_path, profile_id="org-test", *, filename="p.jpg",
-                permission_status="approved_by_club", approval_status="draft",
-                safe_for_minors=True, body=b"\xff\xd8\xff\xe0\x00\x10JFIF\x00"):
+def _seed_asset(
+    tmp_path,
+    profile_id="org-test",
+    *,
+    filename="p.jpg",
+    permission_status="approved_by_club",
+    approval_status="draft",
+    safe_for_minors=True,
+    body=b"\xff\xd8\xff\xe0\x00\x10JFIF\x00",
+):
     from mediahub.media_library.store import get_store
     from mediahub.media_library.models import MediaAsset
 
     p = tmp_path / f"{profile_id}_{uuid.uuid4().hex[:6]}_{filename}"
     p.write_bytes(body)
     asset = MediaAsset(
-        id="", filename=filename, path=str(p), type="athlete_photo",
-        profile_id=profile_id, permission_status=permission_status,
-        approval_status=approval_status, safe_for_minors=safe_for_minors,
+        id="",
+        filename=filename,
+        path=str(p),
+        type="athlete_photo",
+        profile_id=profile_id,
+        permission_status=permission_status,
+        approval_status=approval_status,
+        safe_for_minors=safe_for_minors,
     )
     return get_store().save(asset).id, p
 
@@ -134,34 +132,38 @@ def _seed_run(tmp_path, wm, profile_id, swim_ids):
 # Module-level request helpers
 # ===========================================================================
 
+
 class TestRequestHelpers:
     def test_bulk_ids_dedup_and_order_json(self, env):
         wm = env["wm"]
         with env["app"].test_request_context(json={"ids": ["a", "b", "a", "", "c"]}):
             from flask import request
+
             assert wm._bulk_ids_from_request(request, "ids", "asset_ids") == ["a", "b", "c"]
 
     def test_bulk_ids_from_form_multiselect(self, env):
         wm = env["wm"]
-        with env["app"].test_request_context(
-            method="POST", data={"card_ids": ["x", "y", "y"]}
-        ):
+        with env["app"].test_request_context(method="POST", data={"card_ids": ["x", "y", "y"]}):
             from flask import request
+
             assert wm._bulk_ids_from_request(request, "ids", "card_ids") == ["x", "y"]
 
     def test_wants_json_negotiation(self, env):
         wm = env["wm"]
         with env["app"].test_request_context(json={"ids": []}):
             from flask import request
+
             assert wm._req_wants_json(request) is True
         with env["app"].test_request_context(method="POST", data={"ids": "z"}):
             from flask import request
+
             assert wm._req_wants_json(request) is False
 
 
 # ===========================================================================
 # Media library — bulk delete
 # ===========================================================================
+
 
 class TestMediaBulkDelete:
     def test_json_deletes_selected(self, env):
@@ -175,6 +177,7 @@ class TestMediaBulkDelete:
         assert body["ok"] is True and body["n_ok"] == 2
         assert set(body["deleted"]) == {a1, a2}
         from mediahub.media_library.store import get_store
+
         s = get_store()
         assert s.get(a1) is None and s.get(a2) is None
         assert s.get(a3) is not None  # untouched
@@ -187,6 +190,7 @@ class TestMediaBulkDelete:
         assert r.status_code == 302
         assert "/media-library" in r.headers["Location"]
         from mediahub.media_library.store import get_store
+
         assert get_store().get(a1) is None
 
     def test_empty_selection_json_400(self, env):
@@ -205,6 +209,7 @@ class TestMediaBulkDelete:
         forbidden = [x for x in body["results"] if x["id"] == theirs][0]
         assert forbidden["ok"] is False and forbidden["error"] == "forbidden"
         from mediahub.media_library.store import get_store
+
         assert get_store().get(theirs) is not None  # not reachable cross-org
         assert ppath.exists()
 
@@ -220,6 +225,7 @@ class TestMediaBulkDelete:
 # Media library — bulk approve (+ safeguarding skip)
 # ===========================================================================
 
+
 class TestMediaBulkApprove:
     def test_sets_approval_status(self, env):
         c, tp = env["client"], env["tmp_path"]
@@ -228,6 +234,7 @@ class TestMediaBulkApprove:
         r = c.post("/api/media-library/bulk-approve", json={"ids": [a1, a2]})
         assert r.status_code == 200 and r.get_json()["n_ok"] == 2
         from mediahub.media_library.store import get_store
+
         s = get_store()
         assert s.get(a1).approval_status == "approved"
         assert s.get(a2).approval_status == "approved"
@@ -246,6 +253,7 @@ class TestMediaBulkApprove:
         assert body["n_ok"] == 1 and body["n_skipped"] == 3
         assert body["approved"] == [ok]
         from mediahub.media_library.store import get_store
+
         s = get_store()
         # The three safeguarding-flagged assets stay un-promoted.
         assert s.get(consent).approval_status != "approved"
@@ -260,6 +268,7 @@ class TestMediaBulkApprove:
 # ===========================================================================
 # Media library — bulk export (ZIP of originals)
 # ===========================================================================
+
 
 class TestMediaBulkExport:
     def test_zip_contains_selected_originals(self, env):
@@ -288,9 +297,7 @@ class TestMediaBulkExport:
         assert zf.read(zf.namelist()[0]) == b"mine"
 
     def test_nothing_exportable_404(self, env):
-        r = env["client"].post(
-            "/api/media-library/bulk-export", json={"ids": ["ma_missing"]}
-        )
+        r = env["client"].post("/api/media-library/bulk-export", json={"ids": ["ma_missing"]})
         assert r.status_code == 404
         assert r.get_json()["error"] == "nothing_to_export"
 
@@ -302,6 +309,7 @@ class TestMediaBulkExport:
 # ===========================================================================
 # Review queue — bulk status (approve / reject)
 # ===========================================================================
+
 
 class TestReviewBulkStatus:
     def test_bulk_approve_multiple(self, env):
@@ -316,6 +324,7 @@ class TestReviewBulkStatus:
         assert body["ok"] is True and body["n_ok"] == 2 and body["n_blocked"] == 0
         assert body["summary"]["approved"] == 2
         from mediahub.workflow.status import CardStatus
+
         states = wm._get_wf_store().load(run_id)
         assert states["s0"].status == CardStatus.APPROVED
         assert states["s2"].status == CardStatus.APPROVED
@@ -340,6 +349,7 @@ class TestReviewBulkStatus:
         )
         assert r.status_code == 302 and f"/review/{run_id}" in r.headers["Location"]
         from mediahub.workflow.status import CardStatus
+
         states = wm._get_wf_store().load(run_id)
         assert states["s0"].status == CardStatus.APPROVED
 
@@ -382,6 +392,7 @@ class TestReviewBulkStatus:
         )
         assert r.status_code == 404
         from mediahub.workflow.status import CardStatus
+
         states = wm._get_wf_store().load(run_id)
         assert "s0" not in states or states["s0"].status != CardStatus.APPROVED
 
@@ -406,6 +417,7 @@ class TestReviewBulkStatus:
         blocked = [x for x in body["results"] if x["id"] == "s_blocked"][0]
         assert blocked["ok"] is False and blocked["error"] == "consent_blocked"
         from mediahub.workflow.status import CardStatus
+
         states = wm._get_wf_store().load(run_id)
         assert states["s_ok"].status == CardStatus.APPROVED
         assert "s_blocked" not in states or states["s_blocked"].status != CardStatus.APPROVED
@@ -450,6 +462,7 @@ class TestReviewBulkStatus:
 # Review queue — bulk export (selected cards as JSON)
 # ===========================================================================
 
+
 class TestReviewBulkExport:
     def test_exports_only_selected_cards(self, env):
         c, tp, wm = env["client"], env["tmp_path"], env["wm"]
@@ -468,6 +481,7 @@ class TestReviewBulkExport:
         c, tp, wm = env["client"], env["tmp_path"], env["wm"]
         run_id = _seed_run(tp, wm, "org-test", ["s0", "s1"])
         from mediahub.workflow.status import CardStatus
+
         wm._get_wf_store().set_status(run_id, "s0", CardStatus.APPROVED)
         r = c.post(f"/api/runs/{run_id}/cards/bulk-export", json={"ids": ["s0", "s1"]})
         cards = {card["card_id"]: card for card in json.loads(r.data)["cards"]}
@@ -491,16 +505,17 @@ class TestReviewBulkExport:
 # Rendered HTML — the progressive-enhancement scaffolding is actually present
 # ===========================================================================
 
+
 class TestMediaLibraryHtml:
     def test_page_has_multiselect_scaffolding(self, env):
         c, tp = env["client"], env["tmp_path"]
         aid, _ = _seed_asset(tp)
         body = c.get("/media-library").get_data(as_text=True)
-        assert 'id="mh-ml-bulk"' in body                      # wrapping form
-        assert 'data-mh-bulkbar="media"' in body              # bulk bar
-        assert 'id="mh-ml-all"' in body                       # select-all
-        assert 'class="mh-row-check"' in body                 # per-row checkbox
-        assert f'value="{aid}"' in body                       # checkbox carries id
+        assert 'id="mh-ml-bulk"' in body  # wrapping form
+        assert 'data-mh-bulkbar="media"' in body  # bulk bar
+        assert 'id="mh-ml-all"' in body  # select-all
+        assert 'class="mh-row-check"' in body  # per-row checkbox
+        assert f'value="{aid}"' in body  # checkbox carries id
         assert "/api/media-library/bulk-delete" in body
         assert "/api/media-library/bulk-approve" in body
         assert "/api/media-library/bulk-export" in body
@@ -516,7 +531,7 @@ class TestMediaLibraryHtml:
         # unpredictable submission). The first </form> after the bulk form opens
         # is the bulk form's own close, so its inner slice must hold no <form.
         start = body.index('id="mh-ml-bulk"')
-        inner = body[start:body.index("</form>", start)]
+        inner = body[start : body.index("</form>", start)]
         assert "<form" not in inner, "bulk form must not contain a nested form"
 
 
@@ -540,6 +555,7 @@ class TestReviewHtml:
         JS must paint it by its actual server status (In queue), not flip it to
         Approved, and must not count it in the 'Approved N' toast."""
         import mediahub.web.web as webmod
+
         js = webmod._BULK_ACTIONS_JS
         # Cards are painted by their real per-card status, not the action's.
         assert "r.status || status" in js

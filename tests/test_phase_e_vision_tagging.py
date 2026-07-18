@@ -12,9 +12,9 @@
   provider it answers 503 and the library page shows the untagged badge and
   a disabled button with plain copy.
 """
+
 from __future__ import annotations
 
-import importlib
 import io
 import json
 import sys
@@ -55,9 +55,7 @@ class TestDescribePhotoVision:
             }
         )
         with mock.patch.object(d, "_extract_json_block", wraps=d._extract_json_block):
-            with mock.patch(
-                "mediahub.media_ai.llm.generate_vision", return_value=raw
-            ) as gv:
+            with mock.patch("mediahub.media_ai.llm.generate_vision", return_value=raw) as gv:
                 out = d.describe_photo_vision("/tmp/x.jpg", roster=["Eira Hughes", "Bo Li"])
         # Roster canonical casing wins; invented names are dropped.
         assert out["athletes"] == ["Eira Hughes"]
@@ -81,18 +79,14 @@ class TestDescribePhotoVision:
     def test_junk_model_output_yields_empty_result_not_crash(self):
         import mediahub.media_library.describe as d
 
-        with mock.patch(
-            "mediahub.media_ai.llm.generate_vision", return_value="not json at all"
-        ):
+        with mock.patch("mediahub.media_ai.llm.generate_vision", return_value="not json at all"):
             out = d.describe_photo_vision("/tmp/x.jpg", roster=["A B"])
         assert out == d.empty_vision_result()
 
     def test_unknown_asset_type_and_bad_confidence_are_coerced(self):
         import mediahub.media_library.describe as d
 
-        raw = json.dumps(
-            {"asset_type": "selfie", "confidence": "very", "has_face": "yes"}
-        )
+        raw = json.dumps({"asset_type": "selfie", "confidence": "very", "has_face": "yes"})
         with mock.patch("mediahub.media_ai.llm.generate_vision", return_value=raw):
             out = d.describe_photo_vision("/tmp/x.jpg")
         assert out["asset_type"] == "other"
@@ -118,15 +112,16 @@ class TestStoreHelpers:
     def _store(self, tmp_path):
         from mediahub.media_library.store import MediaLibraryStore
 
-        return MediaLibraryStore(
-            db_path=tmp_path / "data.db", uploads_dir=tmp_path / "uploads"
-        )
+        return MediaLibraryStore(db_path=tmp_path / "data.db", uploads_dir=tmp_path / "uploads")
 
     def _asset(self, store, **kw):
         from mediahub.media_library.models import MediaAsset
 
         defaults = dict(
-            id="", filename="a.jpg", path="/tmp/a.jpg", type="athlete_action",
+            id="",
+            filename="a.jpg",
+            path="/tmp/a.jpg",
+            type="athlete_action",
             profile_id="alpha",
         )
         defaults.update(kw)
@@ -166,25 +161,16 @@ class TestStoreHelpers:
 
 
 @pytest.fixture
-def app_env(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
+def app_env(web_module, tmp_path, monkeypatch):
     for k in ("GEMINI_API_KEY", "GOOGLE_API_KEY", "ANTHROPIC_API_KEY"):
         monkeypatch.delenv(k, raising=False)
-    for d in ("runs_v4", "uploads_v4", "club_profiles"):
-        (tmp_path / d).mkdir(parents=True, exist_ok=True)
 
     import mediahub.media_library.store as mls
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
 
-    importlib.reload(cp)
-    importlib.reload(wm)
     # The media store is a module-level singleton; drop it so each test's
     # DATA_DIR gets a fresh DB instead of accumulating across tests.
     mls._default_store = None
+    wm = web_module
     app = wm.create_app()
     app.config["TESTING"] = True
 
@@ -273,11 +259,13 @@ class TestAutotagAtUpload:
             "has_face": True,
             "confidence": 0.7,
         }
-        with mock.patch("mediahub.media_ai.llm.is_available", return_value=True), \
-             mock.patch(
-                 "mediahub.media_library.describe.describe_photo_vision",
-                 return_value=vision,
-             ):
+        with (
+            mock.patch("mediahub.media_ai.llm.is_available", return_value=True),
+            mock.patch(
+                "mediahub.media_library.describe.describe_photo_vision",
+                return_value=vision,
+            ),
+        ):
             with app.test_client() as c:
                 c.post("/api/organisation/active", data={"profile_id": "alpha"})
                 resp = _upload(c, 1)
@@ -337,11 +325,13 @@ class TestDescribeJob:
                 "has_face": False,
                 "confidence": 0.5,
             }
-            with mock.patch("mediahub.media_ai.llm.is_available", return_value=True), \
-                 mock.patch(
-                     "mediahub.media_library.describe.describe_photo_vision",
-                     return_value=vision,
-                 ):
+            with (
+                mock.patch("mediahub.media_ai.llm.is_available", return_value=True),
+                mock.patch(
+                    "mediahub.media_library.describe.describe_photo_vision",
+                    return_value=vision,
+                ),
+            ):
                 resp = c.post("/api/media-library/describe-job")
                 assert resp.status_code == 202
                 body = resp.get_json()
@@ -363,11 +353,13 @@ class TestDescribeJob:
         with app.test_client() as c:
             c.post("/api/organisation/active", data={"profile_id": "alpha"})
             _upload(c, 1)
-            with mock.patch("mediahub.media_ai.llm.is_available", return_value=True), \
-                 mock.patch(
-                     "mediahub.media_library.describe.describe_photo_vision",
-                     side_effect=ClaudeUnavailableError("vision call failed"),
-                 ):
+            with (
+                mock.patch("mediahub.media_ai.llm.is_available", return_value=True),
+                mock.patch(
+                    "mediahub.media_library.describe.describe_photo_vision",
+                    side_effect=ClaudeUnavailableError("vision call failed"),
+                ),
+            ):
                 resp = c.post("/api/media-library/describe-job")
                 assert resp.status_code == 202
                 body = resp.get_json()
@@ -410,15 +402,16 @@ class TestPhotoConfirmWriteBack:
         store = wm._v8_get_media_store()
         asset = store.save(
             MediaAsset(
-                id="", filename="a.jpg", path=str(tmp_path / "a.jpg"),
-                type="athlete_action", profile_id="alpha",
+                id="",
+                filename="a.jpg",
+                path=str(tmp_path / "a.jpg"),
+                type="athlete_action",
+                profile_id="alpha",
             )
         )
         with app.test_client() as c:
             c.post("/api/organisation/active", data={"profile_id": "alpha"})
-            resp = c.post(
-                "/api/runs/r1/cards/swim-1/photo-confirm", json={"asset_id": asset.id}
-            )
+            resp = c.post("/api/runs/r1/cards/swim-1/photo-confirm", json={"asset_id": asset.id})
         assert resp.status_code == 200
         assert resp.get_json()["athlete"] == "Eira Hughes"
         got = store.get(asset.id)

@@ -15,7 +15,6 @@ HY-TEK-style printout, meet-identity research stubbed, PB fetch disabled.
 
 from __future__ import annotations
 
-import importlib
 import io
 import json
 import time
@@ -70,14 +69,10 @@ def _make_printout() -> bytes:
 
 
 @pytest.fixture
-def web_env(tmp_path, monkeypatch):
+def web_env(web_module, app, monkeypatch):
     # The production default: var unset → Gen Engine v2 on. This runs after the
     # conftest autouse pin, exactly as conftest's docstring prescribes.
     monkeypatch.delenv("MEDIAHUB_GEN_V2", raising=False)
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    import mediahub.web.web as wm
-
-    importlib.reload(wm)
 
     # Keep "Researching meet identity…" offline + instant (purely additive
     # enrichment the pipeline already treats as best-effort).
@@ -87,9 +82,7 @@ def web_env(tmp_path, monkeypatch):
         raise RuntimeError("offline (test)")
 
     monkeypatch.setattr(_ident, "discover_meet_identity", _no_research, raising=False)
-    app = wm.create_app()
-    app.config["TESTING"] = True
-    return wm, app
+    return web_module, app
 
 
 def _wait_terminal(wm, run_id: str, timeout: float = 120.0) -> dict:
@@ -152,6 +145,6 @@ def test_upload_process_review_under_v2_default(web_env):
     r = c.get(f"/review/{run_id}")
     assert r.status_code == 200, r.data[:300]
     review = r.get_data(as_text=True)
-    assert any(last in review for _first, last, _age in _SWIMMERS), (
-        "review page rendered no swimmer from the meet"
-    )
+    assert any(
+        last in review for _first, last, _age in _SWIMMERS
+    ), "review page rendered no swimmer from the meet"

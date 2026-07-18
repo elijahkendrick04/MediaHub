@@ -2,12 +2,11 @@
 
 Covers auth (bearer), scope enforcement, tenant isolation / IDOR, the
 consent-gate parity on approval, rate limiting, and the read/write surface.
-Uses the same reload-with-temp-DATA_DIR isolation the rest of the web suite uses.
+Uses the shared conftest ``web_module`` fixture for per-test DATA_DIR isolation.
 """
 
 from __future__ import annotations
 
-import importlib
 import json
 import sqlite3
 
@@ -64,28 +63,22 @@ def _seed_run(runs_dir, db_path, run_id, profile_id, *, approved=False):
 
 
 @pytest.fixture
-def world(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
+def world(web_module, tmp_path, monkeypatch):
+    # MEDIAHUB_SCHEDULER is read fresh inside create_app() (scheduler._enabled()),
+    # not at web.py import time, so it just needs to land before create_app() runs.
     monkeypatch.setenv("MEDIAHUB_SCHEDULER", "0")
 
     from mediahub.api_public import _db as api_db
 
     api_db._initialized.clear()
 
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
-
     from mediahub.web.club_profile import ClubProfile, save_profile
 
     save_profile(ClubProfile(profile_id="org-a", display_name="Org A SC"))
     save_profile(ClubProfile(profile_id="org-b", display_name="Org B SC"))
 
-    wm.app.config["TESTING"] = True
+    app = web_module.create_app()
+    app.config["TESTING"] = True
     runs_dir = tmp_path / "runs_v4"
     db_path = tmp_path / "data.db"
 
@@ -98,8 +91,10 @@ def world(tmp_path, monkeypatch):
         return secret
 
     class W:
-        client = wm.app.test_client()
-        seed = staticmethod(lambda rid, pid="org-a", **kw: _seed_run(runs_dir, db_path, rid, pid, **kw))
+        client = app.test_client()
+        seed = staticmethod(
+            lambda rid, pid="org-a", **kw: _seed_run(runs_dir, db_path, rid, pid, **kw)
+        )
         token = staticmethod(mint)
 
     return W()
@@ -226,9 +221,7 @@ def test_bearer_api_is_csrf_exempt(world):
         world.seed("runaaaaaaa11", "org-a")
         tok = world.token("org-a", scopes=["cards:approve"])
         # Empty body (no JSON content-type) + no CSRF token: must reach the route.
-        r = world.client.post(
-            "/api/v1/runs/runaaaaaaa11/cards/swim-1/approve", headers=_h(tok)
-        )
+        r = world.client.post("/api/v1/runs/runaaaaaaa11/cards/swim-1/approve", headers=_h(tok))
         assert r.status_code == 200
         assert r.get_json().get("error") != "csrf"
     finally:
@@ -334,8 +327,10 @@ def test_api_group_approval_vote_is_marked_api_token(world):
     # A default kit with an active 2-approver rule + a bound workspace (two
     # active members) is what makes the group rule apply.
     prof = load_profile("org-a")
-    upsert_kit(prof, BrandKitRef(kit_id="govkit", name="Gov", role="event",
-                                 approver_rule={"min_approvers": 2}))
+    upsert_kit(
+        prof,
+        BrandKitRef(kit_id="govkit", name="Gov", role="event", approver_rule={"min_approvers": 2}),
+    )
     set_default_kit(prof, "govkit")
     save_profile(prof)
     ms = _tenancy.MembershipStore()

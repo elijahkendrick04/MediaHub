@@ -30,7 +30,6 @@ What is asserted here:
 
 from __future__ import annotations
 
-import importlib
 import json
 import os
 import re
@@ -204,23 +203,10 @@ def test_variant_batch_feeds_real_progress():
 # B. Pages
 # =========================================================================== #
 @pytest.fixture
-def page_html(tmp_path, monkeypatch):
+def page_html(web_module, client):
     """Render review / pack / grouped-pack for one owned run, returning their
     HTML. Modelled on tests/test_reel_job_async.py's app_env."""
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    for d in ("runs_v4", "uploads_v4", "club_profiles"):
-        (tmp_path / d).mkdir(parents=True, exist_ok=True)
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
-    app = wm.create_app()
-    app.config["TESTING"] = True
+    wm = web_module
 
     from mediahub.web.club_profile import ClubProfile, save_profile
 
@@ -257,12 +243,12 @@ def page_html(tmp_path, monkeypatch):
     (wm.RUNS_DIR / "r1.json").write_text(json.dumps(run), encoding="utf-8")
 
     out = {}
-    with app.test_client() as c:
-        c.post("/api/organisation/active", data={"profile_id": "alpha"})
-        for url in ("/review/r1", "/pack/r1", "/pack/r1/grouped"):
-            resp = c.get(url)
-            assert resp.status_code == 200, f"{url} -> {resp.status_code}"
-            out[url] = resp.get_data(as_text=True)
+    c = client
+    c.post("/api/organisation/active", data={"profile_id": "alpha"})
+    for url in ("/review/r1", "/pack/r1", "/pack/r1/grouped"):
+        resp = c.get(url)
+        assert resp.status_code == 200, f"{url} -> {resp.status_code}"
+        out[url] = resp.get_data(as_text=True)
     return out
 
 

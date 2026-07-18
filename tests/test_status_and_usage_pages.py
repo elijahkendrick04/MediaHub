@@ -9,13 +9,12 @@ Pins:
     real numbers from the llm_usage log
   * heartbeats are recorded on /healthz and /health hits
 
-The harness pattern mirrors test_activity_schedule_summary.py — fresh
-DATA_DIR, module reload, run with the org gate enforced.
+The harness uses the shared web fixtures (conftest's ``app`` / ``client``) —
+fresh per-test DATA_DIR, no module reload, run with the org gate enforced.
 """
 
 from __future__ import annotations
 
-import importlib
 import sys
 from pathlib import Path
 
@@ -26,27 +25,21 @@ sys.path.insert(0, str(_ROOT))
 
 
 @pytest.fixture
-def fresh_app(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    (tmp_path / "runs_v4").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "uploads_v4").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "club_profiles").mkdir(parents=True, exist_ok=True)
-
-    import mediahub.web.club_profile as cp
+def fresh_app(app, tmp_path, monkeypatch):
+    # The shared ``app`` fixture (conftest) already points DATA_DIR — and web.py's
+    # path globals — at this test's tmp_path and rebuilds the schema, replacing the
+    # old per-test DATA_DIR setenv + web/club_profile reload. The two observability
+    # stores capture DATA_DIR / DB_PATH at *import* time, though, and the shared
+    # fixtures don't reset them, so repoint them at this test's DATA_DIR here (the
+    # equivalent of the reload they used to get) and recreate their schema.
     import mediahub.observability.uptime as upt
     import mediahub.observability.llm_usage as llmu
-    import mediahub.web.web as wm
 
-    importlib.reload(cp)
-    importlib.reload(upt)
-    importlib.reload(llmu)
-    importlib.reload(wm)
+    for _mod in (upt, llmu):
+        monkeypatch.setattr(_mod, "DATA_DIR", tmp_path)
+        monkeypatch.setattr(_mod, "DB_PATH", tmp_path / "data.db")
+        _mod._ensure_schema()
 
-    app = wm.create_app()
-    app.config["TESTING"] = True
     app.config["ENFORCE_ORG_GATE"] = True
 
     with app.test_client() as c:
@@ -220,9 +213,9 @@ class TestHeartbeatDrainResilience:
         flaky.put((True, "first", 1.0, None))
         flaky.put((True, "second", 1.0, None))
 
-        assert done.wait(timeout=5.0), (
-            f"drain thread died after task_done() ValueError — only recorded {recorded}"
-        )
+        assert done.wait(
+            timeout=5.0
+        ), f"drain thread died after task_done() ValueError — only recorded {recorded}"
         assert recorded[:2] == ["first", "second"]
         assert t.is_alive()
 
@@ -342,9 +335,7 @@ class TestOperatorStatusHonestyAndResilience:
         assert "Traceback" not in body
         # Falls back to the honest public status section.
         assert (
-            "Website operational" in body
-            or "Website down" in body
-            or "Status unavailable" in body
+            "Website operational" in body or "Website down" in body or "Status unavailable" in body
         )
 
 
@@ -456,9 +447,7 @@ class TestSettingsSystemStatusCardReachable:
         landing = c.get("/settings")
         assert landing.status_code == 200
         html = landing.get_data(as_text=True)
-        m = re.search(
-            r'<a href="([^"]+)"[^>]*>(?:(?!</a>).)*?System status', html, re.S
-        )
+        m = re.search(r'<a href="([^"]+)"[^>]*>(?:(?!</a>).)*?System status', html, re.S)
         assert m is not None, "System status card missing from Settings landing"
         href = m.group(1)
         # The card targets the public /status, not the gated members surface.
@@ -469,7 +458,5 @@ class TestSettingsSystemStatusCardReachable:
         assert followed.status_code == 200
         body = followed.get_data(as_text=True)
         assert (
-            "Website operational" in body
-            or "Website down" in body
-            or "Status unavailable" in body
+            "Website operational" in body or "Website down" in body or "Status unavailable" in body
         )

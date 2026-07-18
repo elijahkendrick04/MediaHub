@@ -5,9 +5,9 @@ Covers the pure HTML helpers (caption-assist buttons driven from
 route-level check that the ``to_pdf`` quick action now dispatches (parity with
 the ACTIONS catalogue) rather than returning ``bad_action``.
 """
+
 from __future__ import annotations
 
-import importlib
 import sys
 from pathlib import Path
 
@@ -67,22 +67,7 @@ def test_colour_accessibility_panel_empty_when_no_roles():
 
 
 @pytest.fixture
-def app_ctx(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    for sub in ("runs_v4", "uploads_v4", "club_profiles"):
-        (tmp_path / sub).mkdir(parents=True, exist_ok=True)
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
-    app = wm.create_app()
-    app.config["TESTING"] = True
-
+def app_ctx(app, tmp_path):
     from mediahub.web.club_profile import ClubProfile, save_profile
 
     save_profile(ClubProfile(profile_id="alpha", display_name="Alpha SC"))

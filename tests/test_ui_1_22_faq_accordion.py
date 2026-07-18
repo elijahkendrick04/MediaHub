@@ -80,23 +80,8 @@ def _chromium_available() -> bool:
 # signed-out and the pinned-org hero variants (the FAQ must show in both).
 # --------------------------------------------------------------------------- #
 @pytest.fixture
-def app(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    for sub in ("runs", "uploads", "club_profiles"):
-        (tmp_path / sub).mkdir(parents=True, exist_ok=True)
-
-    import importlib
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
-
-    application = wm.create_app()
+def app(web_module):
+    application = web_module.create_app()
     application.config["TESTING"] = True
 
     from mediahub.web.club_profile import ClubProfile, save_profile
@@ -186,8 +171,7 @@ class TestRevealLinesElId:
     def test_no_el_id_is_byte_identical(self):
         # The FAQ reuse must not perturb every other reveal-lines headline.
         assert (
-            webmod._reveal_lines(["a"])
-            == '<h2 class="mh-section-title mh-reveal-lines">'
+            webmod._reveal_lines(["a"]) == '<h2 class="mh-section-title mh-reveal-lines">'
             '<span class="mh-line">a</span></h2>'
         )
         assert "id=" not in webmod._reveal_lines(["a"])
@@ -245,14 +229,10 @@ class TestFaqOnPage:
 
     def test_each_row_has_question_text_and_answer(self, app):
         sec = _faq_section(_about(app))
-        questions = re.findall(
-            r'<span class="mh-faq-q-text">(.*?)</span>', sec, flags=re.S
-        )
+        questions = re.findall(r'<span class="mh-faq-q-text">(.*?)</span>', sec, flags=re.S)
         assert len(questions) == 7
         assert all(q.strip() for q in questions), "an FAQ question is empty"
-        answers = re.findall(
-            r'<div class="mh-faq-a-inner"><p>(.*?)</p>', sec, flags=re.S
-        )
+        answers = re.findall(r'<div class="mh-faq-a-inner"><p>(.*?)</p>', sec, flags=re.S)
         assert len(answers) == 7
         assert all(len(a.strip()) > 40 for a in answers), "an FAQ answer is too thin"
 
@@ -363,17 +343,13 @@ class TestFaqCss:
         block = _faq_css_block(_theme_css(app))
         assert "grid-template-rows: 0fr" in block
         assert "transition: grid-template-rows" in block
-        assert re.search(
-            r"\.mh-faq-item\[open\] \.mh-faq-a \{\s*grid-template-rows: 1fr;", block
-        )
+        assert re.search(r"\.mh-faq-item\[open\] \.mh-faq-a \{\s*grid-template-rows: 1fr;", block)
         # the inner wrapper clips while the row collapses
         assert re.search(r"\.mh-faq-a-inner \{[^}]*overflow: hidden", block)
 
     def test_marker_collapses_to_a_minus_on_open(self, app):
         block = _faq_css_block(_theme_css(app))
-        assert re.search(
-            r"\.mh-faq-item\[open\] \.mh-faq-icon::after \{[^}]*scaleY\(0\)", block
-        )
+        assert re.search(r"\.mh-faq-item\[open\] \.mh-faq-icon::after \{[^}]*scaleY\(0\)", block)
 
     def test_question_uses_brand_display_font(self, app):
         block = _faq_css_block(_theme_css(app))

@@ -9,28 +9,11 @@ browser (client-side, same-origin), so these tests cover the server contract:
     (api / webhooks / static / downloads / JSON probes / the tool itself),
   * the rendered page carries the audit shell + the checks the engine runs.
 """
+
 from __future__ import annotations
 
-import importlib
 import json
 import re
-
-import pytest
-
-
-@pytest.fixture()
-def app(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    for sub in ("club_profiles", "runs_v4", "media"):
-        (tmp_path / sub).mkdir(parents=True, exist_ok=True)
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
-    application = wm.create_app()
-    application.config["TESTING"] = True
-    return application
 
 
 def _operator_get(app, path):
@@ -105,12 +88,12 @@ def test_targets_have_label_and_url(app):
 def test_audit_engine_covers_the_parity_checks(app):
     html = _operator_get(app, "/tools/mobile-parity").get_data(as_text=True)
     # Each mobile-parity check must be wired into the shipped engine.
-    assert "scrollWidth" in html          # horizontal overflow
-    assert "viewport" in html             # viewport meta
+    assert "scrollWidth" in html  # horizontal overflow
+    assert "viewport" in html  # viewport meta
     assert "getBoundingClientRect" in html  # touch-target sizing
-    assert "mh-nav-toggle" in html        # navigation reachability
+    assert "mh-nav-toggle" in html  # navigation reachability
     # Self-correcting on the two false-positive classes the audit found.
-    assert "contentType" in html          # skips non-HTML JSON probes
+    assert "contentType" in html  # skips non-HTML JSON probes
     assert "WCAG 2.5.8" in html or "inline" in html  # exempts inline links
 
 

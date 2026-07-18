@@ -12,7 +12,6 @@ surface's assets exist.
 from __future__ import annotations
 
 import base64
-import importlib
 import re
 from pathlib import Path
 
@@ -54,24 +53,6 @@ class TestWebFontAssets:
     def test_metric_tuned_fallback_exists(self):
         css = FONTS_CSS.read_text()
         assert "Hanken Grotesk Fallback" in css and "size-adjust" in css
-
-
-@pytest.fixture
-def app(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    for sub in ("runs_v4", "uploads_v4", "club_profiles"):
-        (tmp_path / sub).mkdir(parents=True, exist_ok=True)
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
-    a = wm.create_app()
-    a.config["TESTING"] = True
-    return a
 
 
 class TestWebRenderedHead:

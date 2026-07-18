@@ -10,7 +10,6 @@ toast was a dead end.
 
 from __future__ import annotations
 
-import importlib
 import json
 
 import pytest
@@ -19,28 +18,12 @@ ORG = "org-c12"
 
 
 @pytest.fixture
-def env(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    for sub in ("runs_v4", "uploads_v4", "club_profiles"):
-        (tmp_path / sub).mkdir(parents=True, exist_ok=True)
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
-
+def env(client, web_module, tmp_path):
     from mediahub.web.club_profile import ClubProfile, save_profile
 
     save_profile(ClubProfile(profile_id=ORG, display_name="Test Club"))
-    app = wm.create_app()
-    app.config["TESTING"] = True
-    c = app.test_client()
-    assert c.post("/api/organisation/active", data={"profile_id": ORG}).status_code == 200
-    return {"client": c, "wm": wm, "tmp": tmp_path}
+    assert client.post("/api/organisation/active", data={"profile_id": ORG}).status_code == 200
+    return {"client": client, "wm": web_module, "tmp": tmp_path}
 
 
 def _seed_run_with_brief(tmp_path, run_id="run-c12", card_id="swim-1"):
@@ -88,9 +71,7 @@ def test_browse_only_elements_page_explains_and_routes_to_card_flow(env):
 
 def test_card_context_page_keeps_add_flow_and_links_back_to_card(env):
     run_id, card_id = _seed_run_with_brief(env["tmp"])
-    html = env["client"].get(f"/elements?run_id={run_id}&card_id={card_id}").get_data(
-        as_text=True
-    )
+    html = env["client"].get(f"/elements?run_id={run_id}&card_id={card_id}").get_data(as_text=True)
     # Context line still there…
     assert "Adding to <strong>" in html
     # …the explainer hero is not (it's for browse-only visits)…

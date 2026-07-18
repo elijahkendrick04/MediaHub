@@ -11,9 +11,9 @@ Alpha's URLs. The expected outcome is "not found" (404 or empty body),
 never the leaked content. Then we re-pin Alpha to prove the owner still
 gets her own data — i.e. the fix didn't lock the legitimate user out.
 """
+
 from __future__ import annotations
 
-import importlib
 import json
 import sys
 import uuid
@@ -29,30 +29,27 @@ sys.path.insert(0, str(_ROOT))
 # Fixture: two orgs, one Alpha-owned run + draft pack, fresh DATA_DIR.
 # ---------------------------------------------------------------------------
 
-@pytest.fixture
-def two_orgs(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    (tmp_path / "runs_v4").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "uploads_v4").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "club_profiles").mkdir(parents=True, exist_ok=True)
 
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-    importlib.reload(cp)
-    importlib.reload(wm)
+@pytest.fixture
+def two_orgs(web_module, tmp_path):
+    wm = web_module
 
     from mediahub.web.club_profile import ClubProfile, save_profile
-    save_profile(ClubProfile(
-        profile_id="org-alpha", display_name="Org Alpha",
-        brand_voice_summary="Bold, energetic, club-focused.",
-    ))
-    save_profile(ClubProfile(
-        profile_id="org-beta", display_name="Org Beta",
-        brand_voice_summary="Calm and considered.",
-    ))
+
+    save_profile(
+        ClubProfile(
+            profile_id="org-alpha",
+            display_name="Org Alpha",
+            brand_voice_summary="Bold, energetic, club-focused.",
+        )
+    )
+    save_profile(
+        ClubProfile(
+            profile_id="org-beta",
+            display_name="Org Beta",
+            brand_voice_summary="Calm and considered.",
+        )
+    )
 
     # Alpha-owned run JSON + matching DB row so /review, /pack, /privacy
     # can all find it.
@@ -62,29 +59,38 @@ def two_orgs(tmp_path, monkeypatch):
         "profile_id": "org-alpha",
         "profile_display": "Org Alpha",
         "meet": {"name": "SECRET ALPHA INVITATIONAL"},
-        "cards": [{
-            "card_id": "card-alpha-1",
-            "swim_id": "swim-alpha-1",
-            "swimmer_name": "Alpha Athlete",
-            "event": "100m freestyle",
-            "headline": "Alpha-only PB",
-            "id": "card-alpha-1",
-        }],
+        "cards": [
+            {
+                "card_id": "card-alpha-1",
+                "swim_id": "swim-alpha-1",
+                "swimmer_name": "Alpha Athlete",
+                "event": "100m freestyle",
+                "headline": "Alpha-only PB",
+                "id": "card-alpha-1",
+            }
+        ],
         "trust": {"score": 0.92},
         "recognition_report": {
-            "ranked_achievements": [{
-                "achievement": {
-                    "swim_id": "swim-alpha-1",
-                    "swimmer_name": "Alpha Athlete",
-                    "event": "100m freestyle",
-                    "headline": "Alpha-only secret achievement",
-                },
-            }],
-            "n_elite": 1, "n_strong": 0, "n_story": 0,
-            "n_achievements": 1, "n_swims_analysed": 1,
+            "ranked_achievements": [
+                {
+                    "achievement": {
+                        "swim_id": "swim-alpha-1",
+                        "swimmer_name": "Alpha Athlete",
+                        "event": "100m freestyle",
+                        "headline": "Alpha-only secret achievement",
+                    },
+                }
+            ],
+            "n_elite": 1,
+            "n_strong": 0,
+            "n_story": 0,
+            "n_achievements": 1,
+            "n_swims_analysed": 1,
         },
-        "parse_warnings": [], "self_check": {},
-        "detector_summary": {}, "dispatch_log": {},
+        "parse_warnings": [],
+        "self_check": {},
+        "detector_summary": {},
+        "dispatch_log": {},
     }
     (tmp_path / "runs_v4" / f"{run_id}.json").write_text(json.dumps(run_payload))
     conn = wm._db()
@@ -98,11 +104,11 @@ def two_orgs(tmp_path, monkeypatch):
 
     # Alpha-owned draft pack with the new profile_id stamp.
     from mediahub.club_platform.stub_pack_store import save_pack
+
     pack = save_pack(
         "free_text",
         {"free_text": "ALPHA SECRET DRAFT"},
-        [{"platform": "instagram", "caption": "Alpha-only secret caption",
-          "confidence": 0.9}],
+        [{"platform": "instagram", "caption": "Alpha-only secret caption", "confidence": 0.9}],
         profile_id="org-alpha",
     )
 
@@ -127,6 +133,7 @@ def _pin(client, profile_id):
 # ---------------------------------------------------------------------------
 # Read leaks — Beta probing Alpha's URLs must not return Alpha's content
 # ---------------------------------------------------------------------------
+
 
 class TestForeignReadDenied:
     def test_review_returns_recovery_page_not_alpha_data(self, two_orgs):
@@ -261,6 +268,7 @@ class TestForeignReadDenied:
 # Write/mutate leaks — Beta must not be able to modify Alpha's data
 # ---------------------------------------------------------------------------
 
+
 class TestForeignMutateDenied:
     def test_draft_card_status_refuses_foreign_org(self, two_orgs):
         c = two_orgs["client"]
@@ -289,6 +297,7 @@ class TestForeignMutateDenied:
 # run or draft would be silent data loss.
 # ---------------------------------------------------------------------------
 
+
 class TestForeignDestructiveBlocked:
     def test_privacy_delete_run_does_not_delete_alpha_run(self, two_orgs, tmp_path):
         c = two_orgs["client"]
@@ -312,6 +321,7 @@ class TestForeignDestructiveBlocked:
 # Owner positive control — Alpha must still get her own data after the fix.
 # Without these tests we'd never notice if the guard was over-strict.
 # ---------------------------------------------------------------------------
+
 
 class TestOwnerStillHasAccess:
     def test_alpha_can_open_her_own_review(self, two_orgs):
@@ -352,6 +362,7 @@ class TestOwnerStillHasAccess:
 # ?run_id= surfaced another club's full swimmer roster (PII).
 # ---------------------------------------------------------------------------
 
+
 class TestSpotlightTenantScoped:
     def test_beta_spotlight_dropdown_omits_alpha_meet(self, two_orgs):
         c = two_orgs["client"]
@@ -382,17 +393,23 @@ class TestSpotlightTenantScoped:
 # data) must remain accessible. Otherwise we'd orphan historical data.
 # ---------------------------------------------------------------------------
 
+
 class TestLegacyOrphansStillAccessible:
     def test_run_without_profile_id_is_readable_by_anyone(self, two_orgs, tmp_path):
         import mediahub.web.web as wm
+
         legacy_id = "legacy-run-" + uuid.uuid4().hex[:8]
-        (tmp_path / "runs_v4" / f"{legacy_id}.json").write_text(json.dumps({
-            "run_id": legacy_id,
-            "profile_id": "",
-            "meet": {"name": "Legacy meet"},
-            "cards": [],
-            "recognition_report": {},
-        }))
+        (tmp_path / "runs_v4" / f"{legacy_id}.json").write_text(
+            json.dumps(
+                {
+                    "run_id": legacy_id,
+                    "profile_id": "",
+                    "meet": {"name": "Legacy meet"},
+                    "cards": [],
+                    "recognition_report": {},
+                }
+            )
+        )
         # DB row with no profile_id either.
         conn = wm._db()
         conn.execute(
@@ -710,17 +727,8 @@ class TestRequireRunBatch1:
 # _can_access_run, which we stub, so no session wiring is needed.
 # ---------------------------------------------------------------------------
 
+
 class TestRequireRunDecorator:
-    @pytest.fixture
-    def app(self, tmp_path, monkeypatch):
-        monkeypatch.setenv("DATA_DIR", str(tmp_path))
-        import mediahub.web.web as wm
-
-        importlib.reload(wm)
-        application = wm.create_app()
-        application.config["TESTING"] = True
-        return application
-
     def test_injects_run_data_only_when_declared(self, app, monkeypatch):
         import mediahub.web.web as wm
 

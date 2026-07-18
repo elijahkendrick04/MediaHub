@@ -21,26 +21,7 @@ real boundary because operator sign-in is password-protected
 
 from __future__ import annotations
 
-import importlib
-import sys
-from pathlib import Path
-
 import pytest
-
-_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(_ROOT))
-
-
-@pytest.fixture
-def app(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("SECRET_KEY", "test-secret-key-for-signed-sessions")
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
-    return wm.create_app()
 
 
 @pytest.fixture

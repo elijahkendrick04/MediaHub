@@ -10,9 +10,6 @@ layer, so everything here is offline.
 from __future__ import annotations
 
 import json
-import os
-import tempfile
-from pathlib import Path
 from unittest import mock
 
 import pytest
@@ -101,9 +98,7 @@ def test_ai_report_goes_through_longform_generate():
         return "First para about the gala.\n\nSecond para with detail."
 
     with mock.patch("mediahub.media_ai.llm.generate", side_effect=fake_generate):
-        art = build_club_report(
-            _meet_summary(), _ranked(), None, None, None, deterministic=False
-        )
+        art = build_club_report(_meet_summary(), _ranked(), None, None, None, deterministic=False)
 
     assert art["captions"]["default"].startswith("First para about the gala.")
     # The brief fed to the model carries the verified facts, not vibes.
@@ -124,9 +119,7 @@ def test_ai_report_falls_back_when_provider_unavailable():
         "mediahub.media_ai.llm.generate",
         side_effect=ClaudeUnavailableError("no key"),
     ):
-        art = build_club_report(
-            _meet_summary(), _ranked(), None, None, None, deterministic=False
-        )
+        art = build_club_report(_meet_summary(), _ranked(), None, None, None, deterministic=False)
     # Package convention: the pack never crashes — deterministic copy ships.
     assert "Spring Open 2026" in art["captions"]["default"]
     assert "Alice Lee" in art["captions"]["default"]
@@ -138,9 +131,7 @@ def test_ai_report_falls_back_when_provider_unavailable():
 def test_newsletter_envelope_deterministic_fallbacks():
     from mediahub.turn_into.templates import build_parent_newsletter
 
-    art = build_parent_newsletter(
-        _meet_summary(), _ranked(), None, None, None, deterministic=True
-    )
+    art = build_parent_newsletter(_meet_summary(), _ranked(), None, None, None, deterministic=True)
     caps = art["captions"]
     assert "subject" in caps and "preheader" in caps
     assert 0 < len(caps["subject"]) <= 60
@@ -154,12 +145,18 @@ def test_newsletter_envelope_deterministic_fallbacks():
 def test_newsletter_envelope_uses_ai_subject_when_available():
     from mediahub.turn_into.templates import build_parent_newsletter
 
-    with mock.patch(
-        "mediahub.web.ai_caption.call_claude",
-        side_effect=lambda system, user, max_tokens=400, **kw: "Body text from AI.",
-    ), mock.patch(
-        "mediahub.media_ai.llm.generate_json",
-        return_value={"subject": "PBs galore at Spring Open", "preheader": "Two podiums and more inside."},
+    with (
+        mock.patch(
+            "mediahub.web.ai_caption.call_claude",
+            side_effect=lambda system, user, max_tokens=400, **kw: "Body text from AI.",
+        ),
+        mock.patch(
+            "mediahub.media_ai.llm.generate_json",
+            return_value={
+                "subject": "PBs galore at Spring Open",
+                "preheader": "Two podiums and more inside.",
+            },
+        ),
     ):
         art = build_parent_newsletter(
             _meet_summary(), _ranked(), None, None, None, deterministic=False
@@ -172,12 +169,15 @@ def test_newsletter_envelope_survives_subject_call_failure():
     from mediahub.media_ai.llm import ClaudeUnavailableError
     from mediahub.turn_into.templates import build_parent_newsletter
 
-    with mock.patch(
-        "mediahub.web.ai_caption.call_claude",
-        side_effect=lambda system, user, max_tokens=400, **kw: "Body text from AI.",
-    ), mock.patch(
-        "mediahub.media_ai.llm.generate_json",
-        side_effect=ClaudeUnavailableError("no key"),
+    with (
+        mock.patch(
+            "mediahub.web.ai_caption.call_claude",
+            side_effect=lambda system, user, max_tokens=400, **kw: "Body text from AI.",
+        ),
+        mock.patch(
+            "mediahub.media_ai.llm.generate_json",
+            side_effect=ClaudeUnavailableError("no key"),
+        ),
     ):
         art = build_parent_newsletter(
             _meet_summary(), _ranked(), None, None, None, deterministic=False
@@ -190,37 +190,23 @@ def test_newsletter_envelope_survives_subject_call_failure():
 # --- pack + web view ----------------------------------------------------------
 
 
-def test_pack_view_renders_club_report_artefact():
-    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
-        os.environ["DATA_DIR"] = tmp
-        os.environ["RUNS_DIR"] = tmp + "/runs_v4"
-        os.environ["UPLOADS_DIR"] = tmp + "/uploads_v4"
-        Path(tmp + "/runs_v4").mkdir(parents=True, exist_ok=True)
-        import importlib
+def test_pack_view_renders_club_report_artefact(client, tmp_path):
+    run = {
+        "run_id": "run-cr",
+        "meet": _meet_summary(),
+        "recognition_report": {"ranked_achievements": _ranked()},
+    }
+    (tmp_path / "runs_v4" / "run-cr.json").write_text(json.dumps(run))
 
-        import mediahub.web.web as wm
+    r = client.post("/api/runs/run-cr/turn-into", json={"deterministic": True})
+    assert r.status_code == 200, r.get_data(as_text=True)[:300]
+    data = r.get_json()
+    assert "club_report" not in (data.get("skipped") or [])
 
-        importlib.reload(wm)
-        app = wm.create_app()
-        app.config["TESTING"] = True
-
-        run = {
-            "run_id": "run-cr",
-            "meet": _meet_summary(),
-            "recognition_report": {"ranked_achievements": _ranked()},
-        }
-        Path(tmp + "/runs_v4/run-cr.json").write_text(json.dumps(run))
-
-        client = app.test_client()
-        r = client.post("/api/runs/run-cr/turn-into", json={"deterministic": True})
-        assert r.status_code == 200, r.get_data(as_text=True)[:300]
-        data = r.get_json()
-        assert "club_report" not in (data.get("skipped") or [])
-
-        body = client.get(data["pack_url"]).get_data(as_text=True)
-        assert "Club website report" in body
-        # The email envelope renders as editable caption blocks.
-        assert "Subject" in body and "Preheader" in body
+    body = client.get(data["pack_url"]).get_data(as_text=True)
+    assert "Club website report" in body
+    # The email envelope renders as editable caption blocks.
+    assert "Subject" in body and "Preheader" in body
 
 
 if __name__ == "__main__":  # pragma: no cover

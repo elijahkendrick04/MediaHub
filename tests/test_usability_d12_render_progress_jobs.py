@@ -15,7 +15,6 @@ Two surfaces regressed by the audit:
 
 from __future__ import annotations
 
-import importlib
 import io
 import json
 import pathlib
@@ -63,19 +62,8 @@ def _run_payload(run_id: str, profile_id: str) -> dict:
 
 
 @pytest.fixture
-def env(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    for sub in ("runs_v4", "uploads_v4", "club_profiles"):
-        (tmp_path / sub).mkdir(parents=True, exist_ok=True)
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
+def env(client, web_module, tmp_path):
+    wm = web_module
 
     from mediahub.web.club_profile import ClubProfile, save_profile
 
@@ -101,10 +89,7 @@ def env(tmp_path, monkeypatch):
 
     WorkflowStore(tmp_path / "runs_v4").set_status(run_id, "swim-1", CardStatus.APPROVED)
 
-    app = wm.create_app()
-    app.config["TESTING"] = True
-    with app.test_client() as c:
-        yield {"client": c, "run_id": run_id, "tmp": tmp_path, "wm": wm}
+    return {"client": client, "run_id": run_id, "tmp": tmp_path, "wm": wm}
 
 
 def _pin(client, profile_id):
@@ -135,7 +120,7 @@ def test_grouped_motion_uses_job_poll_button(env):
     if "generateMotion" not in page:
         pytest.skip("v7.3 grouped pack unavailable in this environment")
     # The new button drives the shared job + poll idiom…
-    assert "onclick=\"generateMotion(this," in page
+    assert 'onclick="generateMotion(this,' in page
     # …into a per-card motion panel mounted on this page…
     assert 'class="motion-panel"' in page
     # …with the shared client block actually present (progress + poll).

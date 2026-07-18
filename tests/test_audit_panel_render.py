@@ -3,9 +3,9 @@
 Tests both the standalone helper _theme_audit_panel_html() and the
 integration via /organisation/setup.
 """
+
 from __future__ import annotations
 
-import importlib
 import sys
 from pathlib import Path
 
@@ -17,35 +17,25 @@ sys.path.insert(0, str(_ROOT))
 
 
 @pytest.fixture
-def app_client(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    (tmp_path / "runs_v4").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "uploads_v4").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "club_profiles").mkdir(parents=True, exist_ok=True)
+def app_client(client, web_module):
     import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-    importlib.reload(cp)
-    importlib.reload(wm)
     from mediahub.theming.theme_store import _read_cached
+
     _read_cached.cache_clear()
-    app = wm.create_app()
-    app.config["TESTING"] = True
-    with app.test_client() as c:
-        yield c, wm, cp
+    yield client, web_module, cp
 
 
 def _seed_profile(cp, *, profile_id="h-test", primary="#06D6A0"):
     from mediahub.web.club_profile import ClubProfile
+
     prof = ClubProfile(profile_id=profile_id, display_name="H Audit Test")
     prof.brand_primary = primary
     prof.brand_voice_summary = "Energetic"
     prof.brand_keywords = ["club", "test"]
     prof.brand_palette_extracted = {"primary": primary}
     prof.brand_kit = {
-        "profile_id": profile_id, "display_name": "H Audit Test",
+        "profile_id": profile_id,
+        "display_name": "H Audit Test",
         "primary_colour": primary,
     }
     cp.save_profile(prof)
@@ -67,21 +57,33 @@ class TestPanelHelperStandalone:
     def test_minimal_theme_renders_details_block(self, app_client):
         client, wm, _ = app_client
         with wm.create_app().test_request_context():
-            html = wm._theme_audit_panel_html({
-                "seed_hex": "#0E2A47",
-                "seed_source": "hex",
-                "seed_hct": [256.0, 27.0, 17.0],
-                "palettes": {"primary": {"hue": 256, "chroma": 27,
-                                          "tones": {"400": "#406088"}}},
-                "quality_detail": {"contrast": [], "adjacency": [],
-                                    "status_distance": [], "cvd": [],
-                                    "warnings": [], "errors": []},
-                "harmonic_fit": {"template": "I", "rotation": 0.0,
-                                  "energy": 0.0, "hue_count": 1,
-                                  "template_bands": []},
-                "decision_trace": ["seed: #0E2A47 accepted"],
-                "was_repaired": False,
-            })
+            html = wm._theme_audit_panel_html(
+                {
+                    "seed_hex": "#0E2A47",
+                    "seed_source": "hex",
+                    "seed_hct": [256.0, 27.0, 17.0],
+                    "palettes": {
+                        "primary": {"hue": 256, "chroma": 27, "tones": {"400": "#406088"}}
+                    },
+                    "quality_detail": {
+                        "contrast": [],
+                        "adjacency": [],
+                        "status_distance": [],
+                        "cvd": [],
+                        "warnings": [],
+                        "errors": [],
+                    },
+                    "harmonic_fit": {
+                        "template": "I",
+                        "rotation": 0.0,
+                        "energy": 0.0,
+                        "hue_count": 1,
+                        "template_bands": [],
+                    },
+                    "decision_trace": ["seed: #0E2A47 accepted"],
+                    "was_repaired": False,
+                }
+            )
             assert "<details" in html
             assert "Why does my theme look like this?" in html
             assert "#0E2A47" in html
@@ -152,17 +154,24 @@ class TestPanelEscapesUserInput:
         trace line cannot inject script tags."""
         client, wm, _ = app_client
         with wm.create_app().test_request_context():
-            html = wm._theme_audit_panel_html({
-                "seed_hex": "#000000",
-                "seed_source": "hex",
-                "seed_hct": [0.0, 0.0, 0.0],
-                "palettes": {},
-                "quality_detail": {"contrast": [], "adjacency": [],
-                                    "status_distance": [], "cvd": [],
-                                    "warnings": [], "errors": []},
-                "harmonic_fit": None,
-                "decision_trace": ["<script>alert(1)</script>"],
-                "was_repaired": False,
-            })
+            html = wm._theme_audit_panel_html(
+                {
+                    "seed_hex": "#000000",
+                    "seed_source": "hex",
+                    "seed_hct": [0.0, 0.0, 0.0],
+                    "palettes": {},
+                    "quality_detail": {
+                        "contrast": [],
+                        "adjacency": [],
+                        "status_distance": [],
+                        "cvd": [],
+                        "warnings": [],
+                        "errors": [],
+                    },
+                    "harmonic_fit": None,
+                    "decision_trace": ["<script>alert(1)</script>"],
+                    "was_repaired": False,
+                }
+            )
         assert "<script>alert(1)</script>" not in html
         assert "&lt;script&gt;" in html

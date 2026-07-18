@@ -11,26 +11,14 @@ result flags the blocked rows.
 
 from __future__ import annotations
 
-import importlib
-
 import pytest
 
 
 @pytest.fixture
-def client(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
+def client(web_module, tmp_path, monkeypatch):
+    wm = web_module
     monkeypatch.setenv("MEDIAHUB_SCHEDULER", "0")
-    for sub in ("runs_v4", "uploads_v4", "club_profiles"):
-        (tmp_path / sub).mkdir(parents=True, exist_ok=True)
 
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
     from mediahub.media_library import store as _mlstore
 
     _mlstore._default_store = _mlstore.MediaLibraryStore(
@@ -55,8 +43,12 @@ def _seed(store_mod, pid="alpha", perm="needs_parental_consent", atype="athlete_
     from mediahub.media_library.models import MediaAsset
 
     a = MediaAsset(
-        id="", filename="p.jpg", path="/tmp/p.jpg", type=atype,
-        profile_id=pid, permission_status=perm,
+        id="",
+        filename="p.jpg",
+        path="/tmp/p.jpg",
+        type=atype,
+        profile_id=pid,
+        permission_status=perm,
     )
     return store_mod._default_store.save(a).id
 
@@ -78,9 +70,7 @@ def test_permission_writer_records_consent(client):
 def test_blocked_status_reports_not_usable(client):
     c, store_mod = client
     aid = _seed(store_mod, perm="approved_by_club")
-    r = c.post(
-        f"/api/media-library/{aid}/permission", json={"permission_status": "do_not_use"}
-    )
+    r = c.post(f"/api/media-library/{aid}/permission", json={"permission_status": "do_not_use"})
     assert r.get_json()["usable"] is False
 
 

@@ -12,9 +12,9 @@ MUST invalidate the instant a profile is mutated mid-request. These tests
 lock in both the perf win (one disk read) and — the security-critical part —
 that a save or delete within a request is observed by the very next read.
 """
+
 from __future__ import annotations
 
-import importlib
 import json
 import sys
 from pathlib import Path
@@ -27,26 +27,14 @@ sys.path.insert(0, str(_ROOT))
 
 
 @pytest.fixture
-def env(tmp_path, monkeypatch):
+def env(app, web_module):
     """A fresh DATA_DIR, one unbound (anonymous-usable) profile, and an app."""
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    (tmp_path / "club_profiles").mkdir(parents=True, exist_ok=True)
-
     import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
 
     pid = "org-memo"
     cp.save_profile(cp.ClubProfile(profile_id=pid, display_name="Before Edit"))
 
-    app = wm.create_app()
-    app.config["TESTING"] = True
-    return {"app": app, "pid": pid, "cp": cp, "wm": wm}
+    return {"app": app, "pid": pid, "cp": cp, "wm": web_module}
 
 
 def _pin(pid):
@@ -56,6 +44,7 @@ def _pin(pid):
 # ---------------------------------------------------------------------------
 # Perf: one disk read per request, however many times it is resolved.
 # ---------------------------------------------------------------------------
+
 
 def test_active_profile_reads_disk_once_per_request(env, monkeypatch):
     app, pid, wm = env["app"], env["pid"], env["wm"]
@@ -68,9 +57,9 @@ def test_active_profile_reads_disk_once_per_request(env, monkeypatch):
         _pin(pid)
         # Simulate the real per-request resolution volume: the two
         # before_request hooks + a handler, each hitting the active profile.
-        assert app.active_profile_id() == pid          # hook 1 (governance)
-        assert app.active_profile().display_name == "Before Edit"   # hook 2 (gate)
-        assert app.active_profile().display_name == "Before Edit"   # handler
+        assert app.active_profile_id() == pid  # hook 1 (governance)
+        assert app.active_profile().display_name == "Before Edit"  # hook 2 (gate)
+        assert app.active_profile().display_name == "Before Edit"  # handler
 
     assert calls == [pid], f"expected a single disk read, got {len(calls)}: {calls}"
 
@@ -87,6 +76,7 @@ def test_cache_is_populated_on_flask_g(env):
 # ---------------------------------------------------------------------------
 # Security-critical: a mid-request mutation MUST be observed by the next read.
 # ---------------------------------------------------------------------------
+
 
 def test_profile_save_within_request_is_observed(env):
     app, pid, cp = env["app"], env["pid"], env["cp"]
@@ -164,6 +154,7 @@ def test_disk_change_between_requests_is_seen(env):
 # ---------------------------------------------------------------------------
 # The legacy-secrets scrub now runs once at startup, not per profile load.
 # ---------------------------------------------------------------------------
+
 
 def test_startup_scrubs_legacy_secrets_json(tmp_path, monkeypatch):
     import mediahub.web.secrets_store as ss

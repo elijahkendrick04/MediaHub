@@ -14,9 +14,9 @@ Two surfaces are tested here:
 Integration tests for the rendered HTML live in
 ``tests/test_responsive_meta.py``.
 """
+
 from __future__ import annotations
 
-import importlib
 import re
 
 import pytest
@@ -30,16 +30,13 @@ import pytest
 @pytest.fixture(scope="module")
 def guardrails_css() -> str:
     from mediahub.web.responsive_guardrails import RESPONSIVE_GUARDRAILS_CSS
+
     return RESPONSIVE_GUARDRAILS_CSS
 
 
-@pytest.fixture(scope="module")
-def base_css() -> str:
-    # Reload web module so the test sees the latest BASE_CSS even if other
-    # tests in the same session re-bound the symbol.
-    import mediahub.web.web as wm
-    importlib.reload(wm)
-    return wm.BASE_CSS
+@pytest.fixture
+def base_css(web_module) -> str:
+    return web_module.BASE_CSS
 
 
 # ---------------------------------------------------------------------------
@@ -91,7 +88,8 @@ class TestTouchTargetCompliance:
         # so it never affects desktop layouts.
         coarse_block = re.search(
             r"@media\s*\(pointer:\s*coarse\)\s*\{[^}]*?min-height:\s*var\(--mh-touch-min\)",
-            guardrails_css, re.DOTALL,
+            guardrails_css,
+            re.DOTALL,
         )
         assert coarse_block is not None, "touch-min rule not scoped to pointer:coarse"
 
@@ -140,9 +138,7 @@ class TestFluidTypography:
         assert m is not None
         floor, ceiling = float(m.group(1)), float(m.group(2))
         ratio = ceiling / floor
-        assert ratio <= 2.5, (
-            f"step {step} ratio {ratio:.2f} exceeds WCAG-safe 2.5× max"
-        )
+        assert ratio <= 2.5, f"step {step} ratio {ratio:.2f} exceeds WCAG-safe 2.5× max"
 
 
 class TestSafeAreaInsets:
@@ -150,8 +146,10 @@ class TestSafeAreaInsets:
 
     def test_safe_area_tokens_defined(self, guardrails_css):
         for tok in (
-            "--mh-safe-top", "--mh-safe-right",
-            "--mh-safe-bottom", "--mh-safe-left",
+            "--mh-safe-top",
+            "--mh-safe-right",
+            "--mh-safe-bottom",
+            "--mh-safe-left",
         ):
             assert tok in guardrails_css, f"missing {tok}"
 
@@ -230,10 +228,13 @@ class TestDefensiveCSS:
     def test_media_defensive_defaults(self, guardrails_css):
         # img, video, etc. should never overflow their container.
         # The canonical defensive defaults from Andy Bell's modern reset.
-        assert re.search(
-            r"img,\s*picture,\s*video,\s*canvas,\s*svg",
-            guardrails_css,
-        ) is not None
+        assert (
+            re.search(
+                r"img,\s*picture,\s*video,\s*canvas,\s*svg",
+                guardrails_css,
+            )
+            is not None
+        )
         assert "max-width: 100%" in guardrails_css
 
     def test_flex_grid_children_min_width_zero(self, guardrails_css):
@@ -258,20 +259,21 @@ class TestFormFactorBreakpoints:
 class TestProgressiveEnhancementGates:
     """Modern features must be behind @supports so they degrade gracefully."""
 
-    @pytest.mark.parametrize("feature_query", [
-        "@supports (height: 100dvh)",
-        "@supports (text-wrap: balance)",
-        "@supports (text-wrap: pretty)",
-        "@supports (padding: max(0px))",
-        "@supports (text-size-adjust: 100%)",
-        "@supports (scrollbar-gutter: stable)",
-        "@supports (color-scheme: dark)",
-        "@supports selector(:focus-visible)",
-    ])
+    @pytest.mark.parametrize(
+        "feature_query",
+        [
+            "@supports (height: 100dvh)",
+            "@supports (text-wrap: balance)",
+            "@supports (text-wrap: pretty)",
+            "@supports (padding: max(0px))",
+            "@supports (text-size-adjust: 100%)",
+            "@supports (scrollbar-gutter: stable)",
+            "@supports (color-scheme: dark)",
+            "@supports selector(:focus-visible)",
+        ],
+    )
     def test_feature_gated_with_supports(self, guardrails_css, feature_query):
-        assert feature_query in guardrails_css, (
-            f"missing @supports gate for: {feature_query}"
-        )
+        assert feature_query in guardrails_css, f"missing @supports gate for: {feature_query}"
 
 
 class TestPrintStylesheet:
@@ -294,35 +296,64 @@ class TestExistingBrandTokensPreserved:
     """The brand colour palette is design contract. These tests fail
     loudly if a future PR accidentally drops one of them."""
 
-    @pytest.mark.parametrize("token", [
-        # Surfaces
-        "--bg:", "--bg-deep:", "--surface:", "--surface-2:", "--surface-3:",
-        # Ink
-        "--ink:", "--ink-dim:", "--ink-muted:", "--ink-faint:",
-        # Signature accents — must never disappear
-        "--lane:", "--lane-h:", "--lane-deep:", "--lane-ink:",
-        "--medal:", "--medal-h:", "--medal-deep:", "--medal-ink:",
-        # Semantic colours
-        "--good:", "--warn:", "--bad:", "--info:",
-        # Type stacks
-        "--font-display:", "--font-serif:", "--font-body:", "--font-mono:",
-        # Spacing scale
-        "--sp-1:", "--sp-4:", "--sp-7:", "--sp-10:",
-        # Radii
-        "--radius:", "--radius-pill:",
-        # Shadows
-        "--shadow-1:", "--shadow-2:", "--shadow-3:",
-        # Legacy aliases that downstream rules depend on
-        "--accent:", "--panel:", "--border:",
-    ])
+    @pytest.mark.parametrize(
+        "token",
+        [
+            # Surfaces
+            "--bg:",
+            "--bg-deep:",
+            "--surface:",
+            "--surface-2:",
+            "--surface-3:",
+            # Ink
+            "--ink:",
+            "--ink-dim:",
+            "--ink-muted:",
+            "--ink-faint:",
+            # Signature accents — must never disappear
+            "--lane:",
+            "--lane-h:",
+            "--lane-deep:",
+            "--lane-ink:",
+            "--medal:",
+            "--medal-h:",
+            "--medal-deep:",
+            "--medal-ink:",
+            # Semantic colours
+            "--good:",
+            "--warn:",
+            "--bad:",
+            "--info:",
+            # Type stacks
+            "--font-display:",
+            "--font-serif:",
+            "--font-body:",
+            "--font-mono:",
+            # Spacing scale
+            "--sp-1:",
+            "--sp-4:",
+            "--sp-7:",
+            "--sp-10:",
+            # Radii
+            "--radius:",
+            "--radius-pill:",
+            # Shadows
+            "--shadow-1:",
+            "--shadow-2:",
+            "--shadow-3:",
+            # Legacy aliases that downstream rules depend on
+            "--accent:",
+            "--panel:",
+            "--border:",
+        ],
+    )
     def test_token_present(self, base_css, token):
         assert token in base_css, f"critical brand token {token!r} missing"
 
     def test_existing_breakpoints_preserved(self, base_css):
         # These were the original responsive breakpoints — the guardrails
         # layer ADDS new ones (320, 1920, 2400) and must never remove them.
-        for bp in ("max-width: 860px", "max-width: 720px",
-                   "max-width: 480px", "min-width: 760px"):
+        for bp in ("max-width: 860px", "max-width: 720px", "max-width: 480px", "min-width: 760px"):
             assert bp in base_css, f"original breakpoint {bp!r} removed"
 
 
