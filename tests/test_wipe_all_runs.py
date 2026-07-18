@@ -38,6 +38,13 @@ def _seed(data: Path) -> None:
     conn.execute("CREATE TABLE runs(id TEXT, profile_id TEXT, status TEXT)")
     conn.execute("CREATE TABLE card_reactions(run_id TEXT)")
     conn.execute("INSERT INTO runs VALUES('r1','orgA','done')")
+    # Same shape as content_pack_visual.visual_index.ensure_schema — the app's
+    # _delete_run cascades this table, so the wipe's DB sweep must clear it too.
+    conn.execute(
+        "CREATE TABLE visual_index(vid TEXT PRIMARY KEY, run_id TEXT NOT NULL, "
+        "brief_id TEXT NOT NULL)"
+    )
+    conn.execute("INSERT INTO visual_index VALUES('vid-abc','r1','b1')")
     conn.commit()
     conn.close()
 
@@ -56,6 +63,16 @@ def test_refuses_source_tree(monkeypatch):
         mod.main([])
 
 
+def test_refuses_src_mediahub(monkeypatch):
+    # web.py's *actual* fallback when DATA_DIR is unset is src/mediahub (the
+    # package dir), so dev runtime data accumulates there — the guard must
+    # refuse it, not just the repo root and src/.
+    monkeypatch.setenv("DATA_DIR", str(_REPO / "src" / "mediahub"))
+    mod = _load()
+    with pytest.raises(SystemExit):
+        mod.main([])
+
+
 def test_dry_run_deletes_nothing(tmp_path, monkeypatch):
     data = tmp_path / "data"
     _seed(data)
@@ -64,8 +81,10 @@ def test_dry_run_deletes_nothing(tmp_path, monkeypatch):
     monkeypatch.delenv("UPLOADS_DIR", raising=False)
     assert _load().main([]) == 0
     assert (data / "runs_v4" / "r1.json").exists()
-    n = sqlite3.connect(str(data / "data.db")).execute("SELECT count(*) FROM runs").fetchone()[0]
-    assert n == 1
+    conn = sqlite3.connect(str(data / "data.db"))
+    assert conn.execute("SELECT count(*) FROM runs").fetchone()[0] == 1
+    assert conn.execute("SELECT count(*) FROM visual_index").fetchone()[0] == 1
+    conn.close()
 
 
 def test_yes_wipes_runs_but_keeps_brand(tmp_path, monkeypatch):
@@ -78,8 +97,12 @@ def test_yes_wipes_runs_but_keeps_brand(tmp_path, monkeypatch):
     # run data gone
     assert list((data / "runs_v4").glob("*")) == []
     assert list((data / "uploads_v4").glob("*")) == []
-    n = sqlite3.connect(str(data / "data.db")).execute("SELECT count(*) FROM runs").fetchone()[0]
-    assert n == 0
+    conn = sqlite3.connect(str(data / "data.db"))
+    assert conn.execute("SELECT count(*) FROM runs").fetchone()[0] == 0
+    # vid→run_id index rows must not survive the wipe (parity with the app's
+    # _delete_run cascade, which also clears visual_index).
+    assert conn.execute("SELECT count(*) FROM visual_index").fetchone()[0] == 0
+    conn.close()
     # org/brand config preserved
     assert (data / "brand_kits" / "orgA.json").read_text() == "brand"
 

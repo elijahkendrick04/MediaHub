@@ -2,6 +2,9 @@
 
 #103 delete_org / org_export_zip cover the analytics + assistant-memory stores
      (they used to survive deletion and be absent from the takeout).
+#104 convert_file's atomic cache-slot write keeps the real target suffix on the
+     temp sibling — a bare ".tmp" final suffix broke muxer inference for every
+     FFmpeg-backed conversion (video→gif/webm/mp4, audio extract, audio→audio).
 #105 erasure / org_lifecycle _data_dir fall back to the package root (the tree
      the app actually writes to), not a cwd-relative "data".
 #110 retention.run_purge tolerates a naive security-log timestamp instead of
@@ -106,6 +109,81 @@ def test_run_purge_tolerates_naive_security_log_timestamp(monkeypatch, tmp_path)
     kept = (log_dir / "events.jsonl").read_text()
     assert "keep-naive" in kept
     assert "drop-aged" not in kept
+
+
+# ── #104 atomic cache-slot write keeps the target suffix ────────────────────
+
+
+def test_cache_slot_write_path_keeps_target_suffix(monkeypatch, tmp_path):
+    """FFmpeg infers its output muxer from the extension (no arg builder passes
+    an output ``-f``), so the per-writer temp sibling for an ``out=None`` cache
+    write must end in the real target suffix — a bare ``.tmp`` made every
+    FFmpeg-backed conversion fail. FFmpeg-free: _dispatch is monkeypatched."""
+    monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))
+    from mediahub.export_engine import cache as ec
+    from mediahub.export_engine import engine as engine_mod
+
+    src = tmp_path / "clip.mp4"
+    src.write_bytes(b"not a real video; _dispatch is stubbed")
+
+    seen: list = []
+
+    def _capture(src_path, key, scat, out_path, opts):
+        seen.append(out_path)
+        out_path.write_bytes(b"gif bytes")
+        return "video→gif"
+
+    monkeypatch.setattr(engine_mod, "_dispatch", _capture)
+    res = engine_mod.convert_file(src, "gif")
+
+    (write_path,) = seen
+    # The temp sibling ends in the real target suffix, in the same dir as the
+    # final slot (so os.replace stays an atomic same-filesystem rename), and is
+    # not the final slot itself (the atomicity win from PR #1215 is preserved).
+    assert write_path.suffix == ".gif"
+    assert write_path.parent == res.path.parent
+    assert write_path != res.path
+    assert res.path.suffix == ".gif"
+    assert res.path.is_file() and res.from_cache is False
+    # The temp was replaced into place, not left behind.
+    leftovers = [p for p in ec.cache_dir().rglob("*") if p.is_file() and ".tmp" in p.name]
+    assert leftovers == []
+
+
+def test_convert_file_cache_path_video_to_gif_live(monkeypatch, tmp_path):
+    """End-to-end: convert_file(clip, "gif") with ``out=None`` (the documented
+    default cache path) renders cold, then hits the cache — this exact call
+    shape raised TranscodeError before the suffix-preserving temp fix."""
+    import subprocess
+
+    from mediahub.visual.reel_ffmpeg import ffmpeg_exe
+
+    if not ffmpeg_exe():
+        pytest.skip("no FFmpeg binary available")
+
+    monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))
+    from mediahub.export_engine import cache as ec
+    from mediahub.export_engine import convert_file
+
+    clip = tmp_path / "clip.mp4"
+    subprocess.run(
+        [
+            ffmpeg_exe(), "-y", "-hide_banner", "-loglevel", "error",
+            "-f", "lavfi", "-i", "testsrc=size=320x240:rate=15:duration=1",
+            str(clip),
+        ],
+        check=True,
+    )
+
+    cold = convert_file(clip, "gif")
+    assert cold.from_cache is False
+    assert cold.path.suffix == ".gif"
+    assert cold.path.is_file() and cold.size_bytes > 0
+    assert ec.cache_dir() in cold.path.parents
+
+    hit = convert_file(clip, "gif")
+    assert hit.from_cache is True
+    assert hit.path == cold.path
 
 
 # ── #112 toggle_reaction round-trips ────────────────────────────────────────

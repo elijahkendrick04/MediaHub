@@ -8,7 +8,7 @@ by the operator against a real deployment (e.g. a Render shell where
 **not** touch club/org profiles, brand kits, or the media library.
 
 What it removes (for every run, every org), reusing the app's own cascade:
-  * the run record (``runs`` DB rows + ``card_reactions``),
+  * the run record (``runs`` DB rows + ``card_reactions`` + ``visual_index``),
   * the run JSON + its sidecar dir (visuals, motion, briefs, caption history),
     the ``<id>__workflow.json`` approvals file, and ``turn_into_packs/<id>``,
   * the per-run erasure cascade (``privacy.run_deletion_cascade``: per-run PB
@@ -71,9 +71,17 @@ def _resolve_paths() -> tuple[Path, Path, Path, Path]:
             "persistent data disk (e.g. DATA_DIR=/var/data) and re-run."
         )
     data_dir = Path(raw).resolve()
-    # Guard: never operate on the source tree (web.py falls back to the repo
-    # root when DATA_DIR is unset; a fat-fingered run must not delete fixtures).
-    if data_dir == _REPO_ROOT or data_dir == (_REPO_ROOT / "src").resolve():
+    # Guard: never operate on the source tree. web.py's fallback when DATA_DIR
+    # is unset is ``src/mediahub`` (the package dir — ``_SRC_ROOT =
+    # Path(__file__).resolve().parents[1]``), so that is where dev runtime data
+    # accumulates by default; refuse it along with the repo root and ``src/``
+    # so a fat-fingered run can't delete dev fixtures. A DATA_DIR *inside* the
+    # checkout (e.g. ``./data``, the documented dev value) stays valid.
+    if data_dir in (
+        _REPO_ROOT,
+        (_REPO_ROOT / "src").resolve(),
+        (_REPO_ROOT / "src" / "mediahub").resolve(),
+    ):
         sys.exit(
             f"Refusing to run: DATA_DIR ({data_dir}) resolves to the source tree. "
             "Set it to the deployment's data disk."
@@ -297,14 +305,14 @@ def main(argv: list[str] | None = None) -> int:
     if db_path.exists():
         try:
             conn = sqlite3.connect(str(db_path))
-            for tbl in ("runs", "card_reactions"):
+            for tbl in ("runs", "card_reactions", "visual_index"):
                 try:
                     conn.execute(f"DELETE FROM {tbl}")
                 except sqlite3.Error:
                     pass  # table may not exist on an older schema
             conn.commit()
             conn.close()
-            print("  cleared runs / card_reactions tables")
+            print("  cleared runs / card_reactions / visual_index tables")
         except sqlite3.Error as exc:
             print(f"  ! DB clear failed: {exc}", file=sys.stderr)
             errors += 1
