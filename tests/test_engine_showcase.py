@@ -164,15 +164,15 @@ class TestHomeShowcase:
         # disagree on how many moments that file produced, a volunteer reading
         # the page gets two different answers to "how much content will I get
         # from my results file?" in the same scroll.
-        body = _home(client)
+        body = _about(client)
         carousel = re.search(r"(\d+) swims read.{0,20}?(\d+) moments ranked", body)
-        assert carousel, "carousel demo meter text not found on the home page"
+        assert carousel, "carousel demo meter text not found on the about page"
         carousel_swims, carousel_moments = int(carousel.group(1)), int(carousel.group(2))
 
         bento = re.search(
             r'font-size="68"[^>]*>(\d+)</text>.*?FROM (\d+) SWIMS READ', body, re.S
         )
-        assert bento, "bento 'detected & ranked' stat not found on the home page"
+        assert bento, "bento 'detected & ranked' stat not found on the about page"
         bento_moments, bento_swims = int(bento.group(1)), int(bento.group(2))
 
         assert carousel_swims == bento_swims, (
