@@ -155,7 +155,10 @@ def run_purge(
     runs_dir = _runs_dir()
     if runs_dir.exists():
         for path in sorted(runs_dir.glob("*.json")):
-            if path.name.endswith("__workflow.json"):
+            if "__" in path.name:
+                # Per-run sidecar files (<run_id>__workflow.json, __approvals.json,
+                # __pronunciations.json, ...) are swept with their run below and
+                # must never be parsed as run files of their own.
                 continue
             try:
                 run = json.loads(path.read_text())
@@ -291,7 +294,18 @@ def _delete_run_fallback(run_id: str, json_path: Path) -> None:
     """Filesystem cascade matching web._delete_run for scheduler-only contexts."""
     json_path.unlink(missing_ok=True)
     shutil.rmtree(json_path.parent / run_id, ignore_errors=True)
-    (json_path.parent / f"{run_id}__workflow.json").unlink(missing_ok=True)
+    # Sweep the whole <run_id>__* sidecar family (workflow store, approvals
+    # ledger with approver emails + .lock/.corrupt companions, pronunciation
+    # map with athlete names) so no personal data outlives the erasure —
+    # mirrors web._delete_run.
+    if run_id:
+        import glob as _glob  # noqa: PLC0415
+
+        for side in json_path.parent.glob(f"{_glob.escape(run_id)}__*"):
+            try:
+                side.unlink()
+            except OSError:
+                pass
     shutil.rmtree(_data_dir() / "turn_into_packs" / run_id, ignore_errors=True)
     shutil.rmtree(_uploads_dir() / run_id, ignore_errors=True)
     try:

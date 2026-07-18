@@ -101,6 +101,43 @@ def test_purge_deletes_aged_runs_and_keeps_fresh(data_dir):
     assert (data_dir / "uploads_v4" / "new-run").exists()
 
 
+def test_purge_sweeps_full_sidecar_family_prefix_safe(data_dir):
+    """Aged-out runs lose every <run_id>__* sidecar (approvals ledger carries
+    approver emails, pronunciations carry athlete names), while a sibling run
+    sharing the id as a prefix keeps its own sidecars untouched."""
+    from mediahub.compliance.retention import run_purge
+
+    _seed_run(data_dir, "old-run", age_days=800)
+    _seed_run(data_dir, "old-run2", age_days=5)
+    runs = data_dir / "runs_v4"
+    (runs / "old-run__approvals.json").write_text('{"emails": ["a@b.c"]}')
+    (runs / "old-run__approvals.json.lock").write_text("")
+    (runs / "old-run__pronunciations.json").write_text("{}")
+    (runs / "old-run2__approvals.json").write_text('{"emails": ["d@e.f"]}')
+
+    report = run_purge()
+    assert report["runs_deleted"] == ["old-run"]
+    assert not list(runs.glob("old-run__*"))
+    assert (runs / "old-run2.json").exists()
+    assert (runs / "old-run2__approvals.json").exists()
+    assert (runs / "old-run2__workflow.json").exists()
+
+
+def test_purge_never_parses_sidecars_as_runs(data_dir):
+    """A sidecar .json (even a stale one with no parent run) must not be
+    treated as a phantom run file by the enumeration loop."""
+    from mediahub.compliance.retention import run_purge
+
+    runs = data_dir / "runs_v4"
+    runs.mkdir(parents=True, exist_ok=True)
+    (runs / "ghost__approvals.json").write_text('{"emails": ["x@y.z"]}')
+    (runs / "ghost__workflow.json").write_text("{}")
+
+    report = run_purge()
+    assert report["runs_deleted"] == []
+    assert report["errors"] == []
+
+
 def test_purge_respects_tenant_tightened_window(data_dir):
     from mediahub.compliance.retention import run_purge
     from mediahub.web.club_profile import ClubProfile, save_profile
