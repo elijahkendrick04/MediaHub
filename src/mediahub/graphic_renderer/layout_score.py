@@ -55,10 +55,19 @@ __all__ = [
     "enabled",
     "candidate_count",
     "candidate_pack_ids",
+    "DECISION_SIZE",
     "MEASURE_JS",
     "score_geometry",
     "choose",
 ]
+
+# The canonical decision geometry: the v2 archetype certification anchor
+# (1080×1350 feed_portrait — the primary cut every archetype must read well at).
+# Candidates are always composed and measured at THIS geometry, whatever cut is
+# being rendered, so every format of a card computes the identical winner — a
+# card stays one design across its cuts, and parallel per-format renders can
+# only benign-race to the same deterministic value.
+DECISION_SIZE = (1080, 1350)
 
 
 # --------------------------------------------------------------------------- #
@@ -113,11 +122,21 @@ def candidate_pack_ids(
 
     F6 must respect *whichever picker chose the card*: a mood card walks its
     small curated mood bundle (so a geometrically-tidy but off-mood pack can
-    never override the director's feeling), and every other card walks the full
-    deterministic catalog order. In both cases the current pack is candidate #0
-    (so it wins ties and a no-improvement card stays byte-identical), and the
-    walk steps forward past ``recent`` ids exactly like
+    never override the director's feeling), and every other card samples the
+    full deterministic catalog order. In both cases the current pack is
+    candidate #0 (so it wins ties and a no-improvement card stays
+    byte-identical), and later candidates skip ``recent`` ids exactly like
     ``style_packs.pick_style_pack_avoiding``.
+
+    **Strided sampling.** The catalog is sorted quiet → busy, so the packs
+    *adjacent* to the current one are near-duplicates (same ground, trailing
+    density/texture variants) — measuring those would choose among visually
+    identical candidates and learn nothing. The walk therefore samples the pool
+    at ``n/k`` strides from the current pack's position: candidates span the
+    ground/texture space (a genuinely different treatment can rescue a card
+    whose current ground buries its focus), while staying fully deterministic —
+    same current pack + same pool → same candidate list. A small pool (a mood
+    bundle) degrades naturally to the plain forward walk.
 
     An empty / unknown ``brief.style_pack`` yields ``[]`` — a legacy / bare card
     has no pack to score, so F6 no-ops and the render is unchanged.
@@ -146,20 +165,19 @@ def candidate_pack_ids(
 
     start = pool_ids.index(current)
     avoid = {str(r).strip().lower() for r in recent if r}
-    out: list[str] = []
-    seen: set[str] = set()
+    out: list[str] = [current]
+    seen: set[str] = {current}
     n = len(pool_ids)
-    for off in range(n):
-        cid = pool_ids[(start + off) % n]
-        if cid in seen:
-            continue
-        # The current pack (offset 0) is always eligible; later candidates skip
-        # recently-used looks so a content pack still varies pack-to-pack.
-        if off != 0 and cid in avoid:
-            continue
-        seen.add(cid)
-        out.append(cid)
-        if len(out) >= k:
+    # Deterministic strided sample: the j-th candidate sits j·n/k past the
+    # current pack (wrapping), stepping forward past duplicates / recent ids.
+    for j in range(1, k):
+        base = (start + (j * n) // k) % n
+        for probe in range(n):
+            cid = pool_ids[(base + probe) % n]
+            if cid in seen or cid in avoid:
+                continue
+            seen.add(cid)
+            out.append(cid)
             break
     return out
 

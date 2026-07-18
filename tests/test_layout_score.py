@@ -115,6 +115,19 @@ def test_candidates_anchor_unknown_current_at_zero():
     assert cands[0] == "not-a-real-pack-id"
 
 
+def test_candidates_are_ground_diverse():
+    # The catalog is sorted quiet→busy, so ADJACENT packs share a ground; the
+    # strided walk must sample across the pool so the scorer chooses among
+    # genuinely different treatments, not four density variants of one look.
+    from mediahub.graphic_renderer import style_packs as sp
+
+    packs = sp.list_style_packs()
+    for idx in (50, len(packs) // 2, (3 * len(packs)) // 4):
+        walk = ls.candidate_pack_ids(_Brief(style_pack=packs[idx].id), k=4)
+        grounds = {pid.split("-")[0] for pid in walk}
+        assert len(grounds) >= 2, f"walk from {packs[idx].id} is not ground-diverse: {walk}"
+
+
 # --------------------------------------------------------------------------- #
 # Geometry fixtures + the measurement JS contract
 # --------------------------------------------------------------------------- #

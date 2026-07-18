@@ -252,6 +252,121 @@ def test_bare_pack_card_is_untouched_on_or_off(monkeypatch, tmp_path):
 
 
 # --------------------------------------------------------------------------- #
+# Elevation invariants: winner persistence, format coherence, canonical
+# geometry, mesh-background re-sync, always-on explainability note
+# --------------------------------------------------------------------------- #
+
+
+def test_winner_is_persisted_onto_the_callers_brief(monkeypatch, tmp_path):
+    # A measured switch must reach the CALLER's brief — that one write is what
+    # keeps the stored brief, later formats, and the motion mirror (which reads
+    # brief.style_pack for its pack overlay / ground / density register) on the
+    # pack the still actually shipped.
+    monkeypatch.setenv("MEDIAHUB_LAYOUT_SCORE", "1")
+    monkeypatch.setattr(ls, "candidate_pack_ids", lambda brief, *a, **k: [_PACK_A, _PACK_B])
+    monkeypatch.setattr(R, "measure_html_geometry", lambda htmls, size, **kw: [_DRIFT, _CLEAN])
+    b = _brief(pack=_PACK_A)
+    _capture_html(monkeypatch, tmp_path, b)
+    assert b.style_pack == _PACK_B, "the winning pack must persist on the caller's brief"
+    rec = getattr(b, "layout_score", None)
+    assert rec and rec["changed"] and rec["winner"] == _PACK_B
+    assert rec.get("decided_at", "").startswith("feed_portrait@")
+    assert rec.get("signature_pack_stale") is True
+    assert getattr(b, "_layout_scored", False) is True
+
+
+def test_second_render_reuses_the_decision(monkeypatch, tmp_path):
+    # One decision per card: after the first render decides, a second render of
+    # the SAME brief (another format of the card) must reuse the stored record
+    # rather than re-measuring — so all cuts of a card agree by construction.
+    monkeypatch.setenv("MEDIAHUB_LAYOUT_SCORE", "1")
+    monkeypatch.setattr(ls, "candidate_pack_ids", lambda brief, *a, **k: [_PACK_A, _PACK_B])
+    calls = {"n": 0}
+
+    def _measure_once(htmls, size, **kw):
+        calls["n"] += 1
+        return [_DRIFT, _CLEAN]
+
+    monkeypatch.setattr(R, "measure_html_geometry", _measure_once)
+    b = _brief(pack=_PACK_A)
+    _capture_html(monkeypatch, tmp_path, b)
+    assert calls["n"] == 1 and b.style_pack == _PACK_B
+
+    def _boom(*a, **k):  # pragma: no cover - must not re-measure
+        raise AssertionError("F6 re-measured an already-decided brief")
+
+    monkeypatch.setattr(R, "measure_html_geometry", _boom)
+    captured: dict = {}
+
+    def _fake_png(html, output_path, size):  # noqa: ARG001
+        captured["html"] = html
+        Path(output_path).write_bytes(b"\x89PNG\r\n\x1a\n")
+        return 8
+
+    monkeypatch.setattr(R, "render_html_to_png", _fake_png)
+    R.render_brief(b, output_dir=tmp_path, size=(1080, 1920), format_name="story")
+    assert b.style_pack == _PACK_B, "the stored decision must survive the second format"
+
+
+def test_decision_is_made_at_canonical_geometry(monkeypatch, tmp_path):
+    # Whatever cut is being rendered, candidates are measured at the v2
+    # certification anchor — so every format computes the identical winner.
+    monkeypatch.setenv("MEDIAHUB_LAYOUT_SCORE", "1")
+    monkeypatch.setattr(ls, "candidate_pack_ids", lambda brief, *a, **k: [_PACK_A, _PACK_B])
+    seen = {}
+
+    def _measure(htmls, size, **kw):
+        seen["size"] = size
+        return [_CLEAN, _DRIFT]
+
+    monkeypatch.setattr(R, "measure_html_geometry", _measure)
+    captured: dict = {}
+
+    def _fake_png(html, output_path, size):  # noqa: ARG001
+        captured["html"] = html
+        Path(output_path).write_bytes(b"\x89PNG\r\n\x1a\n")
+        return 8
+
+    monkeypatch.setattr(R, "render_html_to_png", _fake_png)
+    R.render_brief(
+        _brief(pack=_PACK_A), output_dir=tmp_path, size=(1080, 1920), format_name="story"
+    )
+    assert seen["size"] == ls.DECISION_SIZE
+
+
+def test_swap_onto_a_mesh_pack_resyncs_background(monkeypatch, tmp_path):
+    # The generator keys background_style='gradient_mesh' to a mesh-ground pack
+    # at generation time; a render-time swap must re-run that sync so the mesh
+    # engine paints (or stops painting) coherently with the winning pack.
+    mesh_pack = "gradient_mesh-none-none-standard"
+    monkeypatch.setenv("MEDIAHUB_LAYOUT_SCORE", "1")
+    monkeypatch.setattr(ls, "candidate_pack_ids", lambda brief, *a, **k: [_PACK_A, mesh_pack])
+    monkeypatch.setattr(R, "measure_html_geometry", lambda htmls, size, **kw: [_DRIFT, _CLEAN])
+    b = _brief(pack=_PACK_A)
+    b.background_style = "water"
+    _capture_html(monkeypatch, tmp_path, b)
+    assert b.style_pack == mesh_pack
+    assert b.background_style == "gradient_mesh", "mesh coupling must follow the winning pack"
+
+
+def test_switch_lands_in_safety_notes(monkeypatch, tmp_path):
+    # Always-on explainability: a pack switch must be visible on the visual's
+    # safety-notes trail even with the opt-in G1.30 sidecar off.
+    monkeypatch.setenv("MEDIAHUB_LAYOUT_SCORE", "1")
+    monkeypatch.setattr(ls, "candidate_pack_ids", lambda brief, *a, **k: [_PACK_A, _PACK_B])
+    monkeypatch.setattr(R, "measure_html_geometry", lambda htmls, size, **kw: [_DRIFT, _CLEAN])
+
+    def _fake_png(html, output_path, size):  # noqa: ARG001
+        Path(output_path).write_bytes(b"\x89PNG\r\n\x1a\n")
+        return 8
+
+    monkeypatch.setattr(R, "render_html_to_png", _fake_png)
+    res = R.render_brief(_brief(pack=_PACK_A), output_dir=tmp_path, size=(1080, 1350))
+    notes = list(res.visual.safety_notes or [])
+    assert any("layout scorer switched" in n for n in notes), notes
+
+
+# --------------------------------------------------------------------------- #
 # Chromium-gated end-to-end smoke
 # --------------------------------------------------------------------------- #
 

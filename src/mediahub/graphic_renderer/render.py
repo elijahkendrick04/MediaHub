@@ -3827,6 +3827,18 @@ def measure_html_geometry(
     """
     if not htmls:
         return []
+
+    width, height = size
+    # Geometry cache (mirrors G1.24): the sweep is a pure function of
+    # (candidate HTML, canvas size) within one renderer environment, and box
+    # geometry is CSS-pixel — DPR-independent — so the key pins dpr=1. A full
+    # cache hit answers without launching a browser at all, which is the common
+    # case for re-renders of an unchanged card.
+    keys = [_render_cache.png_cache_key(h, width, height, 1) for h in htmls]
+    results: list[Optional[dict]] = [_render_cache.get_cached_geometry(k) for k in keys]
+    if all(g is not None for g in results):
+        return results
+
     try:
         from playwright.sync_api import sync_playwright  # type: ignore
     except Exception as e:  # pragma: no cover - environment-dependent
@@ -3837,13 +3849,14 @@ def measure_html_geometry(
 
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    results: list[Optional[dict]] = []
     try:
         with sync_playwright() as p:
             browser = p.chromium.launch(args=_CHROMIUM_LAUNCH_ARGS)
             try:
                 ctx = _new_render_context(browser, size, dpr)
-                for html in htmls:
+                for i, html in enumerate(htmls):
+                    if results[i] is not None:
+                        continue
                     page_path = output_dir / (
                         f"_f6cand.{os.getpid()}-{uuid.uuid4().hex[:8]}.render.html"
                     )
@@ -3851,7 +3864,13 @@ def measure_html_geometry(
                     page = ctx.new_page()
                     try:
                         page_path.write_text(html, encoding="utf-8")
-                        page.goto(page_path.as_uri(), wait_until="networkidle", timeout=30_000)
+                        # "load", not "networkidle": the card HTML is fully
+                        # inlined (data: URIs + file:// fonts), so networkidle
+                        # only adds its fixed idle-silence floor per candidate.
+                        # The one real readiness gate — fonts parsed and ready,
+                        # which text box metrics depend on — is awaited
+                        # explicitly below.
+                        page.goto(page_path.as_uri(), wait_until="load", timeout=30_000)
                         try:
                             page.evaluate(
                                 "() => (document.fonts && document.fonts.ready) "
@@ -3875,7 +3894,9 @@ def measure_html_geometry(
                             page_path.unlink()
                         except OSError:
                             pass
-                    results.append(geom)
+                    results[i] = geom
+                    if geom is not None:
+                        _render_cache.store_geometry(keys[i], geom)
             finally:
                 browser.close()
     except Exception as exc:  # pragma: no cover - environment-dependent
@@ -6468,8 +6489,30 @@ def render_brief(
     # the --mh-* colour roles do NOT depend on the pack — so this only reorders
     # the choice among brand-safe, in-catalog, APCA-legible packs; it never
     # invents colour, geometry, or type. See graphic_renderer/layout_score.py.
-    _layout_score_record = None
-    if not _html_only and _v2_archetype and (getattr(brief, "style_pack", "") or "").strip():
+    #
+    # The decision is made ONCE per card and persisted onto the caller's brief:
+    #
+    #   * **Canonical geometry.** Candidates are composed and measured at the v2
+    #     certification anchor (1080×1350 feed_portrait) regardless of the
+    #     requested cut, so every format of a card computes the IDENTICAL winner
+    #     — a card is one design across its cuts, and parallel format renders
+    #     (variants.render_all_formats) can only benign-race to the same value.
+    #   * **Winner persistence (still↔motion parity).** The winning pack is
+    #     written back to the caller's brief (``brief.style_pack``), its
+    #     mesh-ground/background coupling re-synced, and the decision record
+    #     stamped as ``brief.layout_score`` — so the persisted brief, the G1.30
+    #     sidecar, later formats, and the Remotion motion mirror (which reads
+    #     ``style_pack`` for its pack overlay, ground, and density register) all
+    #     agree with the still that shipped. A ``_layout_scored`` marker makes
+    #     subsequent renders of the same brief reuse the stored decision.
+    _layout_score_record = getattr(brief, "layout_score", None)
+    if (
+        not _html_only
+        and _v2_archetype
+        and (getattr(brief, "style_pack", "") or "").strip()
+        and not getattr(brief, "_layout_scored", False)
+    ):
+        _layout_score_record = None
         try:
             import dataclasses as _dc
 
@@ -6478,14 +6521,26 @@ def render_brief(
             if _layout_score.enabled():
                 _cand_ids = _layout_score.candidate_pack_ids(brief)
                 if len(_cand_ids) > 1:
+                    _dec_w, _dec_h = _layout_score.DECISION_SIZE
 
                     def _compose_for_pack(_pid: str) -> str:
                         _b = _dc.replace(brief, style_pack=_pid)
+                        # Honest candidate: re-key the mesh-ground coupling for
+                        # THIS pack, so a mesh-ground candidate is measured with
+                        # its mesh painted (and a non-mesh one without).
+                        try:
+                            from mediahub.creative_brief.generator import (
+                                _sync_background_style_with_pack,
+                            )
+
+                            _sync_background_style_with_pack(_b)
+                        except Exception:
+                            pass
                         return render_brief(
                             _b,
                             output_dir=output_dir,
-                            size=size,
-                            format_name=format_name,
+                            size=(_dec_w, _dec_h),
+                            format_name="feed_portrait",
                             athlete_path=athlete_path,
                             venue_path=venue_path,
                             logo_path=logo_path,
@@ -6505,7 +6560,7 @@ def render_brief(
 
                     _cand_htmls = [_compose_for_pack(pid) for pid in _cand_ids]
                     _geoms = measure_html_geometry(
-                        _cand_htmls, (width, height), output_dir=output_dir
+                        _cand_htmls, (_dec_w, _dec_h), output_dir=output_dir
                     )
                     if _geoms is not None:
                         _rec = _layout_score.choose(
@@ -6513,15 +6568,38 @@ def render_brief(
                             archetype=family,
                             current_id=_cand_ids[0],
                         )
+                        _rec["decided_at"] = f"feed_portrait@{_dec_w}x{_dec_h}"
+                        # The variation_signature keeps its generation-time
+                        # ``sp:<original>`` token DELIBERATELY: it seeds the F7
+                        # overlap accent, and candidates were measured with that
+                        # seed — rewriting it would change the shipped still
+                        # away from the measured one. The record makes the
+                        # staleness explicit for auditors instead.
+                        if _rec.get("changed"):
+                            _rec["signature_pack_stale"] = True
                         _layout_score_record = _rec
                         if _rec.get("changed") and _rec.get("winner"):
-                            brief = _dc.replace(brief, style_pack=_rec["winner"])
+                            # Persist onto the CALLER's brief — the load-bearing
+                            # write that keeps every later consumer (other
+                            # formats, the stored brief, the motion mirror) on
+                            # the winning pack.
+                            brief.style_pack = _rec["winner"]
+                            try:
+                                from mediahub.creative_brief.generator import (
+                                    _sync_background_style_with_pack,
+                                )
+
+                                _sync_background_style_with_pack(brief)
+                            except Exception:
+                                pass
                             log.info(
                                 "F6 layout scorer: %s -> %s (%s)",
                                 _rec.get("current"),
                                 _rec.get("winner"),
                                 family,
                             )
+                        brief.layout_score = _rec
+                        brief._layout_scored = True
         except Exception as exc:  # F6 is a ranking aid, never load-bearing
             log.debug("F6 layout scoring skipped: %s", exc)
             _layout_score_record = None
@@ -7024,6 +7102,21 @@ def render_brief(
     # F5: render-time floor observations (photo upscales, crop-zoom clamp) —
     # the pixels shipped differ from a naive render, so the trail records why.
     _safety_notes.extend(_render_floor_notes)
+    # F6: a measured pack switch changed the shipped decoration — the trail
+    # records the swap (and its measured margin) even when the opt-in G1.30
+    # sidecar is off, so a reviewer can always answer "why does this card wear
+    # a different pack than the director chose?".
+    if _layout_score_record and _layout_score_record.get("changed"):
+        try:
+            _safety_notes.append(
+                "layout scorer switched style pack {} -> {} (measured score {})".format(
+                    _layout_score_record.get("current"),
+                    _layout_score_record.get("winner"),
+                    _layout_score_record.get("winner_total"),
+                )
+            )
+        except Exception:
+            pass
     if _recipe_applied and _photo_recipe is not None and not _photo_recipe.is_noop():
         _safety_notes.append(
             "photo adjusted ({}): {}".format(
