@@ -97,6 +97,20 @@ def can_convert(source: str | Path, fmt: str) -> bool:
     return normalise_key(fmt) in CONVERSIONS.get(cat, frozenset())
 
 
+def _cache_slot_tmp(out_path: Path) -> Path:
+    """A per-writer temp sibling for a cache-slot write that keeps the real
+    target suffix: ``<name>.<pid>.<tid>.tmp<suffix>``.
+
+    FFmpeg infers its output muxer from the file extension (none of the
+    video/audio arg builders pass an output ``-f``), so a bare ``.tmp`` final
+    suffix would make every FFmpeg-backed conversion fail. The extra dotted
+    parts can never collide with a real 32-hex cache-slot name, and
+    :func:`cache.maybe_gc`'s age sweep collects any orphan regardless of name.
+    """
+    tmp = unique_tmp(out_path)
+    return tmp.with_name(tmp.name + out_path.suffix)
+
+
 def _dispatch(src: Path, key: str, scat: str, out: Path, opts: ExportOptions) -> str:
     """Run the right adapter for (source family → target key). Returns a note."""
     # --- raster image → raster image -----------------------------------
@@ -209,10 +223,12 @@ def convert_file(
     # and os.replace it into place only once it is whole. This closes the two
     # windows the unlink-on-failure guard can't: a SIGKILL/OOM that never runs the
     # except (leaving a partial file the next request's is_file()+size>0 gate would
-    # serve), and two identical concurrent renders racing the same slot. A
-    # caller-specified ``out`` is written directly — the caller owns that path.
+    # serve), and two identical concurrent renders racing the same slot. The temp
+    # sibling keeps the real target suffix (see _cache_slot_tmp) so FFmpeg can
+    # still infer its output muxer from the extension. A caller-specified ``out``
+    # is written directly — the caller owns that path.
     to_cache_slot = out is None
-    write_path = unique_tmp(out_path) if to_cache_slot else out_path
+    write_path = _cache_slot_tmp(out_path) if to_cache_slot else out_path
     try:
         note = _dispatch(src_path, key, scat, write_path, opts)
     except BaseException:

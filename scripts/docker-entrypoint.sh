@@ -49,15 +49,24 @@ fi
 #                       second worker OOM-killed almost immediately.
 #                       Don't go higher on a single CPU: extra workers
 #                       only contend for the same core.
-#   --worker-class gthread  Gunicorn's default worker class is `sync`, which
-#                       ignores --threads entirely (one connection at a
-#                       time per worker process). Without this flag the
-#                       box only ever serves 2 concurrent requests total
-#                       (one per --workers process); a couple of in-flight
-#                       renders then starve every other route — including
-#                       /health — until Render's edge gives up and returns
-#                       502. gthread is what makes --threads below actually
-#                       take effect.
+#   --worker-class gthread  Explicitness only — this flag changes nothing
+#                       at runtime. Gunicorn (>=19; requirements.txt pins
+#                       >=26) auto-promotes the `sync` default to gthread
+#                       whenever --threads > 1, so the previous command
+#                       (--workers 2 --threads 4, no --worker-class)
+#                       already ran gthread with 2*4 = 8 concurrent
+#                       request slots. The flag is kept so the worker
+#                       class is stated here instead of implied by the
+#                       promotion rule (tests/test_gunicorn_worker_class.py
+#                       pins both the flag and the no-op fact).
+#                       NOTE: adding this flag did NOT fix the production
+#                       /health 502 (autotest finding bfff9fa5d517) —
+#                       that root cause is still undiagnosed. Candidate
+#                       leads: near-simultaneous worker recycles at
+#                       --max-requests 200 (+jitter 50), long renders
+#                       saturating all 8 threads within --timeout 300,
+#                       and cold-boot/deploy windows; correlate via the
+#                       %(M)s request times in the access log below.
 #   --threads 4         gthread workers share memory across threads,
 #                       so 4 concurrent requests share one process.
 #   --timeout 300       Pipeline runs can take 60s+; cap at 5 min so a

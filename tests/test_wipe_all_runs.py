@@ -32,12 +32,28 @@ def _seed(data: Path) -> None:
     (data / "runs_v4" / "r1.json").write_text('{"profile_id":"orgA","status":"done"}')
     (data / "runs_v4" / "r1").mkdir()
     (data / "runs_v4" / "r1" / "card.png").write_text("png")
+    # Full per-run sidecar family (approvals ledger carries approver EMAILS,
+    # incl. its .lock/.corrupt companions) + one orphan sidecar whose parent
+    # run predates the family sweep — the wipe must erase every one of these.
+    (data / "runs_v4" / "r1__workflow.json").write_text("{}")
+    (data / "runs_v4" / "r1__approvals.json").write_text('{"emails":["a@b.c"]}')
+    (data / "runs_v4" / "r1__approvals.json.corrupt").write_text('{"emails":["a@b.c"]}')
+    (data / "runs_v4" / "r1__approvals.lock").write_text("")
+    (data / "runs_v4" / "r1__pronunciations.json").write_text('{"Aoife":"EE-fa"}')
+    (data / "runs_v4" / "ghost__approvals.json").write_text('{"emails":["x@y.z"]}')
     (data / "uploads_v4" / "meet.hy3").write_text("x")
     (data / "brand_kits" / "orgA.json").write_text("brand")  # must survive
     conn = sqlite3.connect(str(data / "data.db"))
     conn.execute("CREATE TABLE runs(id TEXT, profile_id TEXT, status TEXT)")
     conn.execute("CREATE TABLE card_reactions(run_id TEXT)")
     conn.execute("INSERT INTO runs VALUES('r1','orgA','done')")
+    # Same shape as content_pack_visual.visual_index.ensure_schema — the app's
+    # _delete_run cascades this table, so the wipe's DB sweep must clear it too.
+    conn.execute(
+        "CREATE TABLE visual_index(vid TEXT PRIMARY KEY, run_id TEXT NOT NULL, "
+        "brief_id TEXT NOT NULL)"
+    )
+    conn.execute("INSERT INTO visual_index VALUES('vid-abc','r1','b1')")
     conn.commit()
     conn.close()
 
@@ -56,6 +72,16 @@ def test_refuses_source_tree(monkeypatch):
         mod.main([])
 
 
+def test_refuses_src_mediahub(monkeypatch):
+    # web.py's *actual* fallback when DATA_DIR is unset is src/mediahub (the
+    # package dir), so dev runtime data accumulates there — the guard must
+    # refuse it, not just the repo root and src/.
+    monkeypatch.setenv("DATA_DIR", str(_REPO / "src" / "mediahub"))
+    mod = _load()
+    with pytest.raises(SystemExit):
+        mod.main([])
+
+
 def test_dry_run_deletes_nothing(tmp_path, monkeypatch):
     data = tmp_path / "data"
     _seed(data)
@@ -64,8 +90,10 @@ def test_dry_run_deletes_nothing(tmp_path, monkeypatch):
     monkeypatch.delenv("UPLOADS_DIR", raising=False)
     assert _load().main([]) == 0
     assert (data / "runs_v4" / "r1.json").exists()
-    n = sqlite3.connect(str(data / "data.db")).execute("SELECT count(*) FROM runs").fetchone()[0]
-    assert n == 1
+    conn = sqlite3.connect(str(data / "data.db"))
+    assert conn.execute("SELECT count(*) FROM runs").fetchone()[0] == 1
+    assert conn.execute("SELECT count(*) FROM visual_index").fetchone()[0] == 1
+    conn.close()
 
 
 def test_yes_wipes_runs_but_keeps_brand(tmp_path, monkeypatch):
@@ -78,10 +106,31 @@ def test_yes_wipes_runs_but_keeps_brand(tmp_path, monkeypatch):
     # run data gone
     assert list((data / "runs_v4").glob("*")) == []
     assert list((data / "uploads_v4").glob("*")) == []
-    n = sqlite3.connect(str(data / "data.db")).execute("SELECT count(*) FROM runs").fetchone()[0]
-    assert n == 0
+    conn = sqlite3.connect(str(data / "data.db"))
+    assert conn.execute("SELECT count(*) FROM runs").fetchone()[0] == 0
+    # vid→run_id index rows must not survive the wipe (parity with the app's
+    # _delete_run cascade, which also clears visual_index).
+    assert conn.execute("SELECT count(*) FROM visual_index").fetchone()[0] == 0
+    conn.close()
     # org/brand config preserved
     assert (data / "brand_kits" / "orgA.json").read_text() == "brand"
+
+
+def test_sidecars_never_enumerated_and_fully_wiped(tmp_path, monkeypatch, capsys):
+    """Sidecar files must not inflate the run count as phantom run ids, and
+    the wipe must leave runs_v4 with no <id>__* file at all — the whole
+    family (.lock/.corrupt included) plus orphans from pre-sweep deletions."""
+    data = tmp_path / "data"
+    _seed(data)
+    monkeypatch.setenv("DATA_DIR", str(data))
+    monkeypatch.delenv("RUNS_DIR", raising=False)
+    monkeypatch.delenv("UPLOADS_DIR", raising=False)
+    assert _load().main(["--yes"]) == 0
+    out = capsys.readouterr().out
+    assert "runs found  : 1 " in out  # r1 only; sidecars are not phantom runs
+    assert "removed 1 run(s)" in out
+    assert list((data / "runs_v4").glob("*__*")) == []
+    assert list((data / "runs_v4").glob("*")) == []
 
 
 def test_keep_uploads_flag(tmp_path, monkeypatch):
