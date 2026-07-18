@@ -5,41 +5,24 @@ mark-all-read, signed-out safety (an empty payload, never a 403 the poll has to
 special-case), multi-tenant isolation, server-built deep links, the ?unread /
 ?limit query params, and the bell rendering only when signed in.
 """
-from __future__ import annotations
 
-import importlib
+from __future__ import annotations
 
 import pytest
 
 
 @pytest.fixture
-def app_ctx(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    (tmp_path / "runs_v4").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "club_profiles").mkdir(parents=True, exist_ok=True)
-
+def app_ctx(web_module):
     import mediahub.notify.inbox as ib
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(ib)
-    importlib.reload(cp)
-    importlib.reload(wm)
 
     from mediahub.web.club_profile import ClubProfile, save_profile
 
-    save_profile(
-        ClubProfile(profile_id="org-a", display_name="Org A", brand_voice_summary="Bold.")
-    )
-    save_profile(
-        ClubProfile(profile_id="org-b", display_name="Org B", brand_voice_summary="Calm.")
-    )
+    save_profile(ClubProfile(profile_id="org-a", display_name="Org A", brand_voice_summary="Bold."))
+    save_profile(ClubProfile(profile_id="org-b", display_name="Org B", brand_voice_summary="Calm."))
 
-    app = wm.create_app()
+    app = web_module.create_app()
     app.config["TESTING"] = True
-    return {"wm": wm, "ib": ib, "client": app.test_client()}
+    return {"wm": web_module, "ib": ib, "client": app.test_client()}
 
 
 def _pin(client, pid):

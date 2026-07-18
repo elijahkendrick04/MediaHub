@@ -8,7 +8,6 @@ erasure cascade dropping a run's threads.
 
 from __future__ import annotations
 
-import importlib
 import json
 import sys
 import uuid
@@ -31,8 +30,14 @@ def _seed_run(runs_dir: Path, run_id: str, profile_id: str):
         "profile_id": profile_id,
         "meet": {"name": "Alpha Invitational"},
         "cards": [
-            {"card_id": "card-1", "id": "card-1", "swim_id": "card-1",
-             "swimmer_name": "Adult Swimmer", "event": "100 Free", "headline": "PB"}
+            {
+                "card_id": "card-1",
+                "id": "card-1",
+                "swim_id": "card-1",
+                "swimmer_name": "Adult Swimmer",
+                "event": "100 Free",
+                "headline": "PB",
+            }
         ],
         "recognition_report": {"n_swims_analysed": 1},
     }
@@ -40,18 +45,8 @@ def _seed_run(runs_dir: Path, run_id: str, profile_id: str):
 
 
 @pytest.fixture
-def world(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    for d in ("runs_v4", "club_profiles"):
-        (tmp_path / d).mkdir(parents=True, exist_ok=True)
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
+def world(web_module, tmp_path):
+    wm = web_module
 
     from mediahub.web.club_profile import ClubProfile, save_profile
 
@@ -117,7 +112,9 @@ def test_reviewer_can_comment_viewer_cannot(world):
 def test_mention_notifies_target_member(world):
     run_id = world["run_id"]
     c = _act_as(world["app"], OWNER)
-    r = c.post(_comments_url(run_id), json={"card_id": "card-1", "body": "ping @reviewer please check"})
+    r = c.post(
+        _comments_url(run_id), json={"card_id": "card-1", "body": "ping @reviewer please check"}
+    )
     assert r.status_code == 201
     assert r.get_json()["comment"]["mentions"] == [REVIEWER]
     from mediahub.notify import inbox as _inbox
@@ -133,16 +130,23 @@ def test_open_task_blocks_then_unblocks_approval(world):
     run_id = world["run_id"]
     c = _act_as(world["app"], OWNER)
     # raise a task on the card
-    rt = c.post(_comments_url(run_id), json={"card_id": "card-1", "body": "check lane 4 name", "kind": "task"})
+    rt = c.post(
+        _comments_url(run_id),
+        json={"card_id": "card-1", "body": "check lane 4 name", "kind": "task"},
+    )
     assert rt.status_code == 201
     task_id = rt.get_json()["comment"]["id"]
     # approval is now blocked
-    ra = c.post(f"/api/workflow/{run_id}/card-1", json={"action": "set_status", "status": "approved"})
+    ra = c.post(
+        f"/api/workflow/{run_id}/card-1", json={"action": "set_status", "status": "approved"}
+    )
     assert ra.status_code == 403, ra.get_data(as_text=True)
     assert ra.get_json()["error"] == "tasks_open"
     # resolve the task → approval succeeds
     c.post(f"{_comments_url(run_id)}/{task_id}", json={"action": "complete"})
-    ra2 = c.post(f"/api/workflow/{run_id}/card-1", json={"action": "set_status", "status": "approved"})
+    ra2 = c.post(
+        f"/api/workflow/{run_id}/card-1", json={"action": "set_status", "status": "approved"}
+    )
     assert ra2.status_code == 200, ra2.get_data(as_text=True)
     assert ra2.get_json()["status"] == "approved"
 
@@ -163,7 +167,9 @@ def test_task_assignment_notifies_assignee(world):
 def test_reactions_toggle_via_route(world):
     run_id = world["run_id"]
     c = _act_as(world["app"], OWNER)
-    cid = c.post(_comments_url(run_id), json={"card_id": "card-1", "body": "x"}).get_json()["comment"]["id"]
+    cid = c.post(_comments_url(run_id), json={"card_id": "card-1", "body": "x"}).get_json()[
+        "comment"
+    ]["id"]
     r = c.post(f"{_comments_url(run_id)}/{cid}", json={"action": "react", "emoji": "👍"})
     assert r.status_code == 200 and r.get_json()["on"] is True
     assert "👍" in r.get_json()["reactions"]
@@ -173,7 +179,9 @@ def test_author_scoped_delete(world):
     run_id = world["run_id"]
     # reviewer posts
     rev = _act_as(world["app"], REVIEWER)
-    cid = rev.post(_comments_url(run_id), json={"card_id": "card-1", "body": "mine"}).get_json()["comment"]["id"]
+    cid = rev.post(_comments_url(run_id), json={"card_id": "card-1", "body": "mine"}).get_json()[
+        "comment"
+    ]["id"]
     # owner is a manager (approve/manage) → may delete anyone's
     owner = _act_as(world["app"], OWNER)
     r = owner.post(f"{_comments_url(run_id)}/{cid}", json={"action": "delete"})

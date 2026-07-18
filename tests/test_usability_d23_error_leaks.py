@@ -11,7 +11,6 @@ server-side only.
 
 from __future__ import annotations
 
-import importlib
 import io
 import json
 
@@ -24,27 +23,13 @@ LEAK = "SECRET-TRACEBACK-zx9q"
 
 
 @pytest.fixture
-def world(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    for d in ("runs_v4", "club_profiles"):
-        (tmp_path / d).mkdir(parents=True, exist_ok=True)
-
-    import mediahub.web.club_profile as cp
+def world(app, web_module, tmp_path):
     import mediahub.web.demo_try as dt
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(dt)
-    importlib.reload(wm)
 
     from mediahub.web.club_profile import ClubProfile, save_profile
 
     save_profile(ClubProfile(profile_id=ORG, display_name="D23 SC"))
-    app = wm.create_app()
-    app.config.update(TESTING=True, SECRET_KEY="x")
-    return {"app": app, "wm": wm, "dt": dt, "tmp": tmp_path}
+    return {"app": app, "wm": web_module, "dt": dt, "tmp": tmp_path}
 
 
 # --- the shared helper --------------------------------------------------------

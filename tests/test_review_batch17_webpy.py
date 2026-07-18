@@ -19,36 +19,25 @@ nested-present recovery that ``_load_run`` intentionally declines to provide).
 
 from __future__ import annotations
 
-import importlib
 import re
 
 import pytest
 
 
 @pytest.fixture
-def app_mod(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
+def app_mod(web_module, tmp_path, monkeypatch):
+    # Read live inside ``_results_url_enabled()`` (a function body, not at import),
+    # so setting it here — before the request — suffices; monkeypatch auto-undoes.
     monkeypatch.setenv("MEDIAHUB_RESULTS_FETCH_ENABLED", "1")
-    for sub in ("runs_v4", "uploads_v4", "club_profiles"):
-        (tmp_path / sub).mkdir(parents=True, exist_ok=True)
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
 
     from mediahub.web.club_profile import ClubProfile, save_profile
 
     save_profile(ClubProfile(profile_id="org-alpha", display_name="Org Alpha"))
     save_profile(ClubProfile(profile_id="org-beta", display_name="Org Beta"))
 
-    app = wm.create_app()
+    app = web_module.create_app()
     app.config["TESTING"] = True
-    return app, wm, tmp_path
+    return app, web_module, tmp_path
 
 
 def _pin(client, profile_id):

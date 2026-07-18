@@ -12,7 +12,6 @@ Covers the first build of the Mobile PWA:
 
 from __future__ import annotations
 
-import importlib
 import io
 import sys
 from pathlib import Path
@@ -21,6 +20,7 @@ import pytest
 
 _ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_ROOT))
+
 
 def _tiny_jpeg() -> bytes:
     """A real, decodable JPEG — ingest verifies uploads actually decode."""
@@ -35,30 +35,17 @@ _JPEG = _tiny_jpeg()
 
 
 @pytest.fixture
-def app(tmp_path, monkeypatch):
+def app(web_module):
     """Fresh app with one saved, active-able org, mirroring the media-library
     isolation tests."""
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    (tmp_path / "runs_v4").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "uploads_v4").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "club_profiles").mkdir(parents=True, exist_ok=True)
-
     import mediahub.media_library.store as mls
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
 
     # The media store is a process-level singleton keyed at first construction;
     # reset it so each test gets a fresh DB at its own tmp_path (otherwise asset
     # counts leak between tests).
     mls._default_store = None
 
-    importlib.reload(cp)
-    importlib.reload(wm)
-
-    application = wm.create_app()
+    application = web_module.create_app()
     application.config["TESTING"] = True
 
     from mediahub.web.club_profile import ClubProfile, save_profile
@@ -207,7 +194,7 @@ def test_library_page_exposes_camera_capture_and_downscale(app):
     c = app.test_client()
     _pin(c)
     html = c.get("/media-library").get_data(as_text=True)
-    assert 'data-mh-capture-form' in html
+    assert "data-mh-capture-form" in html
     assert 'id="ml-capture"' in html and 'capture="environment"' in html
     assert 'id="ml-capture-btn"' in html
     assert "js/mobile-capture.js" in html

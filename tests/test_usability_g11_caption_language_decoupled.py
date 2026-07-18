@@ -13,25 +13,13 @@ picker carries a muted note pointing at the Interface language control.
 
 from __future__ import annotations
 
-import importlib
 import re
 
 import pytest
 
 
 @pytest.fixture
-def app(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    (tmp_path / "runs_v4").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "club_profiles").mkdir(parents=True, exist_ok=True)
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
+def app(web_module):
     from mediahub.web.club_profile import ClubProfile, save_profile
 
     save_profile(ClubProfile(profile_id="cy-club", display_name="CY Club", language="cy"))
@@ -39,7 +27,7 @@ def app(tmp_path, monkeypatch):
         ClubProfile(profile_id="ency-club", display_name="Bilingual Club", language="en+cy")
     )
 
-    app = wm.create_app()
+    app = web_module.create_app()
     app.config["TESTING"] = True
     app.config["SECRET_KEY"] = "test-secret"
     return app

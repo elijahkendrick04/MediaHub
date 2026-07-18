@@ -9,53 +9,39 @@ This guards against the leak described in the spec:
   "say we have three people using the website. The recent runs should
    only show the recent runs of the specific organisation, full stop."
 """
-from __future__ import annotations
 
-import importlib
-import sys
-import uuid
-from pathlib import Path
+from __future__ import annotations
 
 import pytest
 
-_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(_ROOT))
-
 
 @pytest.fixture
-def gated_client(tmp_path, monkeypatch):
-    """Fresh DATA_DIR with the org gate enforced. Reloads the web module
-    so module-level DB_PATH / RUNS_DIR re-resolve against tmp_path."""
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    (tmp_path / "runs_v4").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "uploads_v4").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "club_profiles").mkdir(parents=True, exist_ok=True)
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-    importlib.reload(cp)
-    importlib.reload(wm)
-
-    app = wm.create_app()
-    app.config["TESTING"] = True
+def gated_client(app, web_module):
+    """Fresh DATA_DIR with the org gate enforced, seeded with two clubs and
+    five runs. Uses the canonical shared fixtures (isolated per-test DATA_DIR,
+    no module reload)."""
     app.config["ENFORCE_ORG_GATE"] = True
 
     # Seed two organisations on disk so we have multi-tenant data.
     from mediahub.web.club_profile import ClubProfile, save_profile
-    save_profile(ClubProfile(
-        profile_id="club-a", display_name="Club A",
-        brand_voice_summary="A friendly club.",
-    ))
-    save_profile(ClubProfile(
-        profile_id="club-b", display_name="Club B",
-        brand_voice_summary="A serious club.",
-    ))
+
+    save_profile(
+        ClubProfile(
+            profile_id="club-a",
+            display_name="Club A",
+            brand_voice_summary="A friendly club.",
+        )
+    )
+    save_profile(
+        ClubProfile(
+            profile_id="club-b",
+            display_name="Club B",
+            brand_voice_summary="A serious club.",
+        )
+    )
 
     # Seed five runs across the two clubs in the SQLite store.
-    conn = wm._db()
+    conn = web_module._db()
     for run_id, profile_id, meet in [
         ("run-a1", "club-a", "Club A meet 1"),
         ("run-a2", "club-a", "Club A meet 2"),
@@ -79,6 +65,7 @@ def gated_client(tmp_path, monkeypatch):
 # ---------------------------------------------------------------------------
 # 1. /activity is scoped to the pinned org
 # ---------------------------------------------------------------------------
+
 
 class TestActivityScoping:
     def _pin(self, client, profile_id: str):
@@ -119,10 +106,14 @@ class TestActivityScoping:
         else's table."""
         c, _ = gated_client
         from mediahub.web.club_profile import ClubProfile, save_profile
-        save_profile(ClubProfile(
-            profile_id="club-c", display_name="Club C",
-            brand_voice_summary="A new club.",
-        ))
+
+        save_profile(
+            ClubProfile(
+                profile_id="club-c",
+                display_name="Club C",
+                brand_voice_summary="A new club.",
+            )
+        )
         self._pin(c, "club-c")
         resp = c.get("/activity")
         assert resp.status_code == 200
@@ -136,6 +127,7 @@ class TestActivityScoping:
 # ---------------------------------------------------------------------------
 # 2. /home is stripped to banner + how-it-works only
 # ---------------------------------------------------------------------------
+
 
 class TestHomeIsStripped:
     def test_home_has_no_engine_live_badge(self, gated_client):
@@ -207,6 +199,7 @@ class TestHomeIsStripped:
 # ---------------------------------------------------------------------------
 # 3. Top nav consolidates Activity under Settings
 # ---------------------------------------------------------------------------
+
 
 class TestSettingsExposesActivityInNav:
     def test_settings_link_in_top_nav(self, gated_client):

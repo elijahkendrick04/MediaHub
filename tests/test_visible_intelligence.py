@@ -11,9 +11,9 @@ coverage missed (per the audit):
      actually injects the explainer text into the LLM system prompt as
      `_extra_instructions`.
 """
+
 from __future__ import annotations
 
-import importlib
 import json
 import sys
 from pathlib import Path
@@ -29,18 +29,21 @@ sys.path.insert(0, str(_ROOT))
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _ranked_achievement(swim_id: str = "swim-1") -> dict:
     """Minimal achievement shape that survives the explainer build."""
     return {
         "rank": 1,
         "priority": 0.95,
-        "factors": [{
-            "name": "pb_magnitude_seconds",
-            "value": 0.5,
-            "weight": 1.0,
-            "reason": "PB by 0.5s",
-            "plain_summary": "Confirmed PB by 0.5 seconds.",
-        }],
+        "factors": [
+            {
+                "name": "pb_magnitude_seconds",
+                "value": 0.5,
+                "weight": 1.0,
+                "reason": "PB by 0.5s",
+                "plain_summary": "Confirmed PB by 0.5 seconds.",
+            }
+        ],
         "achievement": {
             "swim_id": swim_id,
             "swimmer_name": "Emma Davies",
@@ -49,11 +52,13 @@ def _ranked_achievement(swim_id: str = "swim-1") -> dict:
             "type": "pb_confirmed",
             "pb": True,
             "headline": "First sub-60 in the 100 free",
-            "evidence": [{
-                "label": "result line",
-                "raw_text": "100 FR  58.21  PB",
-                "file_offset": None,
-            }],
+            "evidence": [
+                {
+                    "label": "result line",
+                    "raw_text": "100 FR  58.21  PB",
+                    "file_offset": None,
+                }
+            ],
         },
     }
 
@@ -62,14 +67,15 @@ def _ranked_achievement(swim_id: str = "swim-1") -> dict:
 # 1. <details open> — explainer is default-visible
 # ---------------------------------------------------------------------------
 
+
 class TestDetailsOpenByDefault:
     def test_renders_details_open_attribute(self):
         from mediahub.web.web import _render_why_this_card
         from flask import Flask
+
         # Need an app context for url_for() in the AI-error block path.
         app = Flask(__name__)
-        app.add_url_rule("/settings", endpoint="settings_page",
-                         view_func=lambda: "")
+        app.add_url_rule("/settings", endpoint="settings_page", view_func=lambda: "")
         app.add_url_rule(
             "/api/runs/<run_id>/swim/<swim_id>/caption",
             endpoint="api_live_caption",
@@ -82,8 +88,7 @@ class TestDetailsOpenByDefault:
         # Phase 1.4 invariant. Allow either attribute syntax (`open`
         # alone or `open=""`).
         assert "<details open" in html, (
-            "explainer must default to <details open …> so reasoning "
-            "is visible without a click"
+            "explainer must default to <details open …> so reasoning " "is visible without a click"
         )
 
 
@@ -91,13 +96,14 @@ class TestDetailsOpenByDefault:
 # 2. "Use in next caption" button is gated on run_id
 # ---------------------------------------------------------------------------
 
+
 class TestUseInCaptionButtonRender:
     def _render(self, run_id: str) -> str:
         from mediahub.web.web import _render_why_this_card
         from flask import Flask
+
         app = Flask(__name__)
-        app.add_url_rule("/settings", endpoint="settings_page",
-                         view_func=lambda: "")
+        app.add_url_rule("/settings", endpoint="settings_page", view_func=lambda: "")
         app.add_url_rule(
             "/api/runs/<run_id>/swim/<swim_id>/caption",
             endpoint="api_live_caption",
@@ -138,22 +144,11 @@ class TestUseInCaptionButtonRender:
 # 3. include_why=1 injects explainer text into the LLM prompt
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
-def caption_endpoint_client(tmp_path, monkeypatch):
+def caption_endpoint_client(client, tmp_path):
     """Build a TESTING app + seeded run so we can POST to the caption
     endpoint. The org gate is bypassed under TESTING."""
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    for sub in ("runs_v4", "uploads_v4", "club_profiles"):
-        (tmp_path / sub).mkdir(parents=True, exist_ok=True)
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-    importlib.reload(cp)
-    importlib.reload(wm)
-
     run = {
         "run_id": "r1",
         "profile_id": "x",
@@ -163,16 +158,14 @@ def caption_endpoint_client(tmp_path, monkeypatch):
         },
     }
     (tmp_path / "runs_v4" / "r1.json").write_text(json.dumps(run))
-
-    app = wm.create_app()
-    app.config["TESTING"] = True
-    with app.test_client() as c:
-        yield c
+    return client
 
 
 class TestIncludeWhyInjectsExplanation:
     def test_extra_instructions_reaches_system_prompt(
-        self, caption_endpoint_client, monkeypatch,
+        self,
+        caption_endpoint_client,
+        monkeypatch,
     ):
         c = caption_endpoint_client
         captured: dict = {}
@@ -187,7 +180,8 @@ class TestIncludeWhyInjectsExplanation:
         # the explainer's internal LLM was reachable.
         monkeypatch.setattr("mediahub.media_ai.llm.is_available", lambda: True)
         monkeypatch.setattr(
-            "mediahub.web.ai_caption.call_claude", fake_call,
+            "mediahub.web.ai_caption.call_claude",
+            fake_call,
         )
         monkeypatch.setattr(
             "mediahub.web.web._build_card_explanation",
@@ -198,9 +192,7 @@ class TestIncludeWhyInjectsExplanation:
             },
         )
 
-        resp = c.post(
-            "/api/runs/r1/swim/swim-1/caption?tone=ai&include_why=1&n_variants=1"
-        )
+        resp = c.post("/api/runs/r1/swim/swim-1/caption?tone=ai&include_why=1&n_variants=1")
         assert resp.status_code == 200
         sys_prompt = captured.get("system", "")
         # The endpoint surfaces _extra_instructions via the existing
@@ -211,7 +203,9 @@ class TestIncludeWhyInjectsExplanation:
         )
 
     def test_no_include_why_no_extra_instructions(
-        self, caption_endpoint_client, monkeypatch,
+        self,
+        caption_endpoint_client,
+        monkeypatch,
     ):
         c = caption_endpoint_client
         captured: dict = {}
@@ -222,7 +216,8 @@ class TestIncludeWhyInjectsExplanation:
 
         monkeypatch.setattr("mediahub.media_ai.llm.is_available", lambda: True)
         monkeypatch.setattr(
-            "mediahub.web.ai_caption.call_claude", fake_call,
+            "mediahub.web.ai_caption.call_claude",
+            fake_call,
         )
 
         resp = c.post("/api/runs/r1/swim/swim-1/caption?tone=ai&n_variants=1")
@@ -232,7 +227,9 @@ class TestIncludeWhyInjectsExplanation:
         assert "Additional requirement" not in sys_prompt
 
     def test_include_why_explanation_text_in_prompt(
-        self, caption_endpoint_client, monkeypatch,
+        self,
+        caption_endpoint_client,
+        monkeypatch,
     ):
         """The explainer's grounded headline must literally appear in
         the injected extra-instructions — not just the section header.
@@ -243,8 +240,7 @@ class TestIncludeWhyInjectsExplanation:
         monkeypatch.setattr("mediahub.media_ai.llm.is_available", lambda: True)
         monkeypatch.setattr(
             "mediahub.web.ai_caption.call_claude",
-            lambda system, user, max_tokens=400, **_:
-                captured.update(system=system) or "ok",
+            lambda system, user, max_tokens=400, **_: captured.update(system=system) or "ok",
         )
         monkeypatch.setattr(
             "mediahub.web.web._build_card_explanation",
@@ -256,16 +252,16 @@ class TestIncludeWhyInjectsExplanation:
         )
         c.post("/api/runs/r1/swim/swim-1/caption?tone=ai&include_why=1&n_variants=1")
         sys_prompt = captured.get("system", "")
-        assert "first sub-60" in sys_prompt, (
-            "explainer headline must literally land in the prompt"
-        )
-        assert "Confirmed PB" in sys_prompt, (
-            "explainer bullets must be injected as grounded reasons"
-        )
+        assert "first sub-60" in sys_prompt, "explainer headline must literally land in the prompt"
+        assert (
+            "Confirmed PB" in sys_prompt
+        ), "explainer bullets must be injected as grounded reasons"
         assert "Weave in at least one" in sys_prompt
 
     def test_fallback_explainer_text_NOT_injected(
-        self, caption_endpoint_client, monkeypatch,
+        self,
+        caption_endpoint_client,
+        monkeypatch,
     ):
         """Bug-fix pin: when the explainer falls back to its
         "AI explanation unavailable" or "Generated for: ranked top-N"
@@ -277,8 +273,7 @@ class TestIncludeWhyInjectsExplanation:
         monkeypatch.setattr("mediahub.media_ai.llm.is_available", lambda: True)
         monkeypatch.setattr(
             "mediahub.web.ai_caption.call_claude",
-            lambda system, user, max_tokens=400, **_:
-                captured.update(system=system) or "ok",
+            lambda system, user, max_tokens=400, **_: captured.update(system=system) or "ok",
         )
         # Force the explainer into its fallback shape.
         monkeypatch.setattr(
@@ -297,12 +292,13 @@ class TestIncludeWhyInjectsExplanation:
         # And the "Additional requirement" section should be absent
         # (or at least not carrying the fallback text).
         assert "Additional requirement" not in sys_prompt, (
-            "fallback explainer shouldn't trigger the extra-requirement "
-            "channel at all"
+            "fallback explainer shouldn't trigger the extra-requirement " "channel at all"
         )
 
     def test_fallback_generated_for_NOT_injected(
-        self, caption_endpoint_client, monkeypatch,
+        self,
+        caption_endpoint_client,
+        monkeypatch,
     ):
         """Same bug-fix pin, second fallback shape."""
         c = caption_endpoint_client
@@ -310,8 +306,7 @@ class TestIncludeWhyInjectsExplanation:
         monkeypatch.setattr("mediahub.media_ai.llm.is_available", lambda: True)
         monkeypatch.setattr(
             "mediahub.web.ai_caption.call_claude",
-            lambda system, user, max_tokens=400, **_:
-                captured.update(system=system) or "ok",
+            lambda system, user, max_tokens=400, **_: captured.update(system=system) or "ok",
         )
         monkeypatch.setattr(
             "mediahub.web.web._build_card_explanation",
@@ -331,13 +326,16 @@ class TestIncludeWhyInjectsExplanation:
 # 4. PAR-1 approval loop: stored approved captions reach the live prompt
 # ---------------------------------------------------------------------------
 
+
 class TestApprovedVoiceReachesPrompt:
     """End-to-end pin for the PAR-1 few-shot loop: a caption a human approved
     (persisted in web/caption_examples under DATA_DIR) is injected into the
     live caption endpoint's system prompt as a voice example."""
 
     def test_stored_example_injected_as_voice_example(
-        self, caption_endpoint_client, monkeypatch,
+        self,
+        caption_endpoint_client,
+        monkeypatch,
     ):
         c = caption_endpoint_client
         from mediahub.web.caption_examples import append_example
@@ -349,8 +347,8 @@ class TestApprovedVoiceReachesPrompt:
         monkeypatch.setattr("mediahub.media_ai.llm.is_available", lambda: True)
         monkeypatch.setattr(
             "mediahub.web.ai_caption.call_claude",
-            lambda system, user, max_tokens=400, **_:
-                captured.update(system=system) or "a fresh caption",
+            lambda system, user, max_tokens=400, **_: captured.update(system=system)
+            or "a fresh caption",
         )
         monkeypatch.setattr(
             "mediahub.web.web._build_card_explanation",

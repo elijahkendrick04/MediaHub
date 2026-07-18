@@ -21,7 +21,6 @@ scoped to the members-page fixes only.
 
 from __future__ import annotations
 
-import importlib
 import sys
 from pathlib import Path
 
@@ -35,21 +34,9 @@ OWNER = "owner@club-a.org"
 
 
 @pytest.fixture
-def members_world(tmp_path, monkeypatch):
+def members_world(web_module, monkeypatch):
     """A bound single-owner workspace, signed in and pinned as the owner."""
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
     monkeypatch.delenv("STRIPE_SECRET_KEY", raising=False)
-    for d in ("runs_v4", "uploads_v4", "club_profiles"):
-        (tmp_path / d).mkdir(parents=True, exist_ok=True)
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
 
     from mediahub.web.auth import UserStore
     from mediahub.web.club_profile import ClubProfile, save_profile
@@ -61,9 +48,9 @@ def members_world(tmp_path, monkeypatch):
     UserStore().create(OWNER, PASSWORD)
     t.MembershipStore().add(OWNER, "club-a", role=t.ROLE_OWNER)  # bound workspace
 
-    app = wm.create_app()
+    app = web_module.create_app()
     app.config["TESTING"] = True
-    return {"app": app, "wm": wm}
+    return {"app": app, "wm": web_module}
 
 
 def _owner_client(app):
@@ -425,7 +412,7 @@ def test_sole_owner_controls_are_disabled(members_world):
     assert "· sole owner" in html
     # Remove is a disabled button with the reason, not a live form.
     assert "Make another member an owner before removing" in html
-    assert 'disabled' in html
+    assert "disabled" in html
     # No live Update/Remove control targets the sole owner.
     assert f"Update role for {OWNER}" not in html
 
@@ -479,7 +466,9 @@ def test_heading_matches_the_team_members_tile(members_world):
 
 
 def test_open_workspace_copy_is_plain_english(members_world):
-    html = _anon_open_client(members_world["app"]).get("/organisation/members").get_data(as_text=True)
+    html = (
+        _anon_open_client(members_world["app"]).get("/organisation/members").get_data(as_text=True)
+    )
     assert "pre-multi-tenant" not in html  # jargon gone (L11)
     assert "it has no members yet" in html
     # The CTA no longer promises a non-existent owner to "log in as" (L3).
@@ -494,8 +483,7 @@ def test_pill_has_a_global_base_rule():
     from pathlib import Path
 
     css = (
-        Path(__file__).resolve().parents[1]
-        / "src/mediahub/web/static/theme/theme-components.css"
+        Path(__file__).resolve().parents[1] / "src/mediahub/web/static/theme/theme-components.css"
     ).read_text(encoding="utf-8")
     # A bare `.pill { ... }` base rule now exists (previously only the scoped
     # `.mh-profile-card .meta-line .pill` did), so status/token/webhook pills

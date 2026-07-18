@@ -11,7 +11,6 @@ never loosen it.
 
 from __future__ import annotations
 
-import importlib
 import json
 
 import pytest
@@ -60,17 +59,7 @@ def _seed_run(runs_dir, run_id, profile_id):
 
 
 @pytest.fixture
-def consent_wall(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
-
+def consent_wall(web_module, tmp_path):
     from mediahub.web.club_profile import ClubProfile, save_profile
 
     save_profile(
@@ -83,9 +72,9 @@ def consent_wall(tmp_path, monkeypatch):
     )
     _seed_run(tmp_path / "runs_v4", "run-a-1", "org-a")
 
-    app = wm.create_app()
+    app = web_module.create_app()
     app.config["TESTING"] = True
-    conn = wm._db()
+    conn = web_module._db()
     conn.execute(
         "INSERT OR REPLACE INTO runs (id, created_at, status, profile_id, meet_name, file_name) "
         "VALUES (?, datetime('now'), 'done', ?, ?, ?)",

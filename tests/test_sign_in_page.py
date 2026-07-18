@@ -12,9 +12,9 @@ Pins the new /sign-in page:
     a Create CTA — previously it 302'd to /organisation/setup, which
     made the home page "Sign in" button look broken.
 """
+
 from __future__ import annotations
 
-import importlib
 import sys
 from pathlib import Path
 
@@ -25,40 +25,30 @@ sys.path.insert(0, str(_ROOT))
 
 
 @pytest.fixture
-def app_no_profiles(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    for d in ("runs_v4", "uploads_v4", "club_profiles"):
-        (tmp_path / d).mkdir(parents=True, exist_ok=True)
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-    importlib.reload(cp)
-    importlib.reload(wm)
-
-    app = wm.create_app()
-    app.config["TESTING"] = True
+def app_no_profiles(client, app, tmp_path):
     app.config["ENFORCE_ORG_GATE"] = True
-    with app.test_client() as c:
-        yield c, app, tmp_path
+    yield client, app, tmp_path
 
 
 @pytest.fixture
 def app_two_profiles(app_no_profiles):
     c, app, tmp_path = app_no_profiles
     from mediahub.web.club_profile import ClubProfile, save_profile
-    save_profile(ClubProfile(
-        profile_id="wycombe",
-        display_name="Wycombe District Swimming Club",
-        brand_voice_summary="Friendly competitive club.",
-        brand_capture_status="ok_heuristic",
-    ))
-    save_profile(ClubProfile(
-        profile_id="other",
-        display_name="Other Club",
-    ))
+
+    save_profile(
+        ClubProfile(
+            profile_id="wycombe",
+            display_name="Wycombe District Swimming Club",
+            brand_voice_summary="Friendly competitive club.",
+            brand_capture_status="ok_heuristic",
+        )
+    )
+    save_profile(
+        ClubProfile(
+            profile_id="other",
+            display_name="Other Club",
+        )
+    )
     return c, app, tmp_path
 
 

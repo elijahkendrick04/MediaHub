@@ -33,9 +33,9 @@ Two layers, mirroring tests/test_hud_readout.py and tests/test_spring_microinter
 The Playwright tier skips when Playwright or the pinned Chromium build is absent,
 matching tests/test_hud_readout.py.
 """
+
 from __future__ import annotations
 
-import importlib
 import json
 import os
 import re
@@ -112,21 +112,8 @@ def _chromium_available() -> bool:
 
 
 @pytest.fixture
-def world(tmp_path, monkeypatch):
+def world(web_module, tmp_path):
     """Isolated MediaHub app + one ready org + one seeded review run."""
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    for sub in ("runs_v4", "uploads_v4", "club_profiles"):
-        (tmp_path / sub).mkdir(parents=True, exist_ok=True)
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
-
     from mediahub.web.club_profile import ClubProfile, save_profile
 
     save_profile(
@@ -147,9 +134,9 @@ def world(tmp_path, monkeypatch):
         )
     )
 
-    app = wm.create_app()
+    app = web_module.create_app()
     app.config["TESTING"] = True  # org gate bypassed → every page renders
-    return types.SimpleNamespace(app=app, wm=wm, tmp=tmp_path)
+    return types.SimpleNamespace(app=app, wm=web_module, tmp=tmp_path)
 
 
 def _get(world, path: str, *, profile: str | None = "riverbend") -> str:
@@ -208,7 +195,9 @@ def _nav_map(html: str) -> dict[str, str]:
 
 
 class TestOverlayShipsGlobally:
-    @pytest.mark.parametrize("path", ["/", "/login", "/pricing", "/sign-in", "/status", "/settings"])
+    @pytest.mark.parametrize(
+        "path", ["/", "/login", "/pricing", "/sign-in", "/status", "/settings"]
+    )
     def test_overlay_on_every_layout_page(self, world, path):
         html = _get(world, path)
         assert _OVERLAY in html, f"shortcuts overlay missing on {path}"
@@ -238,15 +227,19 @@ class TestOverlayShipsGlobally:
 
     def test_general_group_lists_question_and_esc(self, home_html):
         # The two universal keys are always documented.
-        block = home_html[home_html.find('data-mh-shortcuts-group="general"'):]
+        block = home_html[home_html.find('data-mh-shortcuts-group="general"') :]
         block = block[: block.find("</section>")]
         assert "<kbd>?</kbd>" in block
         assert "<kbd>Esc</kbd>" in block
 
     def test_close_button_wired_for_openmodal(self, home_html):
         # MH.openModal wires any [data-mh-modal-close] inside the dialog.
-        block = home_html[home_html.find(_OVERLAY):]
-        block = block[: block.find("</div>\n{% if dock %}") + 50] if "{% if dock %}" in block else block[:4000]
+        block = home_html[home_html.find(_OVERLAY) :]
+        block = (
+            block[: block.find("</div>\n{% if dock %}") + 50]
+            if "{% if dock %}" in block
+            else block[:4000]
+        )
         assert "data-mh-modal-close" in home_html
         assert "mh-kbd-overlay-close" in home_html
 
@@ -333,9 +326,9 @@ class TestEngineShips:
         early-return under reduced motion — the keys still work; only the CSS
         entrance animation is suppressed (and the scroll falls back to instant)."""
         src = _bind_shortcuts_src(home_html)
-        assert "if (prefersReduced) return" not in src, (
-            "shortcuts must stay functional under reduced motion"
-        )
+        assert (
+            "if (prefersReduced) return" not in src
+        ), "shortcuts must stay functional under reduced motion"
         # It is still motion-aware: the focus-ring scroll honours the flag.
         assert "prefersReduced ? 'auto' : 'smooth'" in src
 
@@ -374,9 +367,9 @@ class TestCssContract:
         assert m, "missing reduced-motion animation:none override for the overlay"
 
     def test_braces_balanced(self, components_css):
-        assert components_css.count("{") == components_css.count("}"), (
-            "unbalanced braces in theme-components.css after the UI 1.28 section"
-        )
+        assert components_css.count("{") == components_css.count(
+            "}"
+        ), "unbalanced braces in theme-components.css after the UI 1.28 section"
 
     def test_in_assembled_base_css(self):
         import mediahub.web.web as wm

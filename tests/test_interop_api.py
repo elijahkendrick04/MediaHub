@@ -2,27 +2,18 @@
 
 from __future__ import annotations
 
-import importlib
-
 import pytest
 
 
 @pytest.fixture
-def world(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
+def world(web_module, monkeypatch):
+    # MEDIAHUB_SCHEDULER is read fresh inside create_app() (scheduler._enabled()),
+    # not at web.py import time, so it just needs to land before create_app() runs.
     monkeypatch.setenv("MEDIAHUB_SCHEDULER", "0")
 
     from mediahub.api_public import _db as api_db
 
     api_db._initialized.clear()
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
 
     from mediahub.web.club_profile import ClubProfile, load_profile, save_profile
 
@@ -35,7 +26,9 @@ def world(tmp_path, monkeypatch):
         )
     )
     save_profile(ClubProfile(profile_id="org-b", display_name="Org B SC"))
-    wm.app.config["TESTING"] = True
+
+    app = web_module.create_app()
+    app.config["TESTING"] = True
 
     from mediahub.api_public.tokens import ApiTokenStore
     from mediahub.brand import kits as K
@@ -43,7 +36,7 @@ def world(tmp_path, monkeypatch):
     kid = K.default_kit_id(load_profile("org-a"))
 
     class W:
-        client = wm.app.test_client()
+        client = app.test_client()
         kit_id = kid
 
         @staticmethod
@@ -94,7 +87,9 @@ def test_svg_import_sanitises_and_stores(world):
         '<script>alert(1)</script><rect width="3" height="3"/></svg>'
     ).encode()
     r = world.client.post(
-        "/api/v1/media/import-svg?filename=logo.svg", headers=h, data=dirty,
+        "/api/v1/media/import-svg?filename=logo.svg",
+        headers=h,
+        data=dirty,
         content_type="image/svg+xml",
     )
     assert r.status_code == 201

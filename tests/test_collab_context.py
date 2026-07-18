@@ -2,24 +2,17 @@
 
 from __future__ import annotations
 
-import importlib
-import sys
-from pathlib import Path
-
 import pytest
-
-_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(_ROOT))
 
 
 @pytest.fixture
-def env(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    (tmp_path / "club_profiles").mkdir(parents=True, exist_ok=True)
-    import mediahub.web.club_profile as cp
+def env(_isolate_data_dir, tmp_path):
+    """Isolated DATA_DIR + club-profiles dir for a Team Context test.
 
-    importlib.reload(cp)
+    Reproduces the old ``setenv(DATA_DIR / SWIM_CONTENT_PROFILES_DIR)`` +
+    ``importlib.reload(club_profile)`` setup via the canonical
+    ``_isolate_data_dir`` fixture (no reload — ``club_profile`` / ``collab`` /
+    ``assistant.memory`` all read the storage env vars at call time)."""
     return tmp_path
 
 

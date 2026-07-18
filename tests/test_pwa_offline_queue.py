@@ -17,7 +17,6 @@ Coverage:
 
 from __future__ import annotations
 
-import importlib
 import json
 import sys
 import uuid
@@ -27,33 +26,6 @@ import pytest
 
 _ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_ROOT))
-
-
-def _fresh_app(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    (tmp_path / "runs_v4").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "uploads_v4").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "club_profiles").mkdir(parents=True, exist_ok=True)
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
-    app = wm.create_app()
-    app.config["TESTING"] = True
-    return app, wm
-
-
-@pytest.fixture
-def client(tmp_path, monkeypatch):
-    app, _ = _fresh_app(tmp_path, monkeypatch)
-    if not app.secret_key:
-        app.secret_key = "test-secret"
-    return app.test_client()
 
 
 @pytest.fixture
@@ -123,7 +95,7 @@ def test_sw_preserves_network_first_get_shell(sw_body):
 def test_offline_queue_client_script_served(client):
     body = client.get("/static/js/offline-queue.js").get_data(as_text=True)
     assert "mediahub-queue" in body
-    assert "addEventListener(\"online\"" in body or "addEventListener('online'" in body
+    assert 'addEventListener("online"' in body or "addEventListener('online'" in body
     assert "mediahub-queue-replay" in body
     assert "mediahub-queue-status" in body
 
@@ -153,9 +125,7 @@ def test_indicator_css_present(client):
 
 
 @pytest.fixture
-def approval_world(tmp_path, monkeypatch):
-    app, wm = _fresh_app(tmp_path, monkeypatch)
-
+def approval_world(app, web_module, tmp_path):
     from mediahub.web.club_profile import ClubProfile, save_profile
 
     save_profile(
@@ -189,7 +159,7 @@ def approval_world(tmp_path, monkeypatch):
         },
     }
     (tmp_path / "runs_v4" / f"{run_id}.json").write_text(json.dumps(payload))
-    conn = wm._db()
+    conn = web_module._db()
     conn.execute(
         "INSERT OR REPLACE INTO runs (id, created_at, status, profile_id, "
         "meet_name, file_name) VALUES (?, datetime('now'), 'done', ?, ?, ?)",

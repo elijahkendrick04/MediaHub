@@ -16,7 +16,6 @@ be the user's confirmed manual accent, not the extracted AI pick.
 
 from __future__ import annotations
 
-import importlib
 import io
 import sys
 from pathlib import Path
@@ -33,20 +32,7 @@ _MANUAL_ACCENT = "#34e2e4"  # the user's confirmation override — must win
 
 
 @pytest.fixture
-def app(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    for sub in ("runs_v4", "uploads_v4", "club_profiles", "data"):
-        (tmp_path / sub).mkdir(parents=True, exist_ok=True)
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
-
+def app(web_module):
     from mediahub.web.club_profile import ClubProfile, save_profile
 
     # An org that has BOTH an AI-extracted palette and a confirmed manual
@@ -72,9 +58,7 @@ def app(tmp_path, monkeypatch):
         )
     )
 
-    wm.RUNS_DIR = tmp_path / "runs_v4"
-    wm.UPLOADS_DIR = tmp_path / "uploads_v4"
-    a = wm.create_app()
+    a = web_module.create_app()
     a.config["TESTING"] = True
     return a
 

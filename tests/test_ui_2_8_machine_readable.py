@@ -29,7 +29,6 @@ This module pins the whole feature:
 
 from __future__ import annotations
 
-import importlib
 import json
 import sys
 import uuid
@@ -218,21 +217,11 @@ class TestCodeblockRendering:
 # Integration — a seeded run rendered through the real /review route
 # ===========================================================================
 @pytest.fixture
-def mr_app(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    for d in ("runs_v4", "uploads_v4", "club_profiles"):
-        (tmp_path / d).mkdir(parents=True, exist_ok=True)
+def mr_app(web_module, client, monkeypatch):
     for env in ("ANTHROPIC_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY"):
         monkeypatch.delenv(env, raising=False)
 
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
+    wm = web_module
 
     from mediahub.web.club_profile import ClubProfile, save_profile
 
@@ -297,7 +286,7 @@ def mr_app(tmp_path, monkeypatch):
         # A secret that must never reach the page (proves the whitelist end-to-end).
         "ANTHROPIC_API_KEY": "sk-end-to-end-should-never-appear",
     }
-    (tmp_path / "runs_v4" / f"{run_id}.json").write_text(json.dumps(run_payload))
+    (wm.RUNS_DIR / f"{run_id}.json").write_text(json.dumps(run_payload))
 
     wm._init_db()
     conn = wm._db()
@@ -309,13 +298,9 @@ def mr_app(tmp_path, monkeypatch):
     conn.commit()
     conn.close()
 
-    app = wm.create_app()
-    app.config["TESTING"] = True
-
-    with app.test_client() as c:
-        with c.session_transaction() as sess:
-            sess["active_profile_id"] = "riverside"
-        yield {"client": c, "run_id": run_id}
+    with client.session_transaction() as sess:
+        sess["active_profile_id"] = "riverside"
+    yield {"client": client, "run_id": run_id}
 
 
 class TestReviewWiring:

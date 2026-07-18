@@ -5,9 +5,9 @@ an empty or skeleton body, making a status-only check meaningless.  These tests
 prove that /review/<run_id> actually renders the achievement card data (swimmer
 names, events, headlines) in its body, not just a 200 shell.
 """
+
 from __future__ import annotations
 
-import importlib
 import json
 import sys
 import uuid
@@ -22,6 +22,7 @@ sys.path.insert(0, str(_ROOT))
 # ---------------------------------------------------------------------------
 # Fixture helpers
 # ---------------------------------------------------------------------------
+
 
 def _seed_run(tmp_path, wm, profile_id, run_payload):
     """Write run JSON to disk and insert a matching DB row."""
@@ -40,42 +41,31 @@ def _seed_run(tmp_path, wm, profile_id, run_payload):
 
 
 @pytest.fixture
-def review_env(tmp_path, monkeypatch):
+def review_env(app, web_module, tmp_path):
     """Fresh DATA_DIR with one club profile and a test client."""
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    (tmp_path / "runs_v4").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "uploads_v4").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "club_profiles").mkdir(parents=True, exist_ok=True)
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-    importlib.reload(cp)
-    importlib.reload(wm)
+    app.config["ENFORCE_ORG_GATE"] = True
 
     from mediahub.web.club_profile import ClubProfile, save_profile
-    save_profile(ClubProfile(
-        profile_id="org-test",
-        display_name="Test Club",
-        brand_voice_summary="Clear and energetic.",
-    ))
 
-    app = wm.create_app()
-    app.config["TESTING"] = True
-    app.config["ENFORCE_ORG_GATE"] = True
+    save_profile(
+        ClubProfile(
+            profile_id="org-test",
+            display_name="Test Club",
+            brand_voice_summary="Clear and energetic.",
+        )
+    )
 
     with app.test_client() as client:
         # Pin the session to org-test
         r = client.post("/api/organisation/active", data={"profile_id": "org-test"})
         assert r.status_code == 200, r.get_json()
-        yield {"client": client, "wm": wm, "tmp_path": tmp_path}
+        yield {"client": client, "wm": web_module, "tmp_path": tmp_path}
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_run_payload(profile_id, achievements):
     """Build a minimal but realistic run payload with the given achievements."""
@@ -133,6 +123,7 @@ def _make_run_payload(profile_id, achievements):
 # Tests: body actually contains card data
 # ---------------------------------------------------------------------------
 
+
 class TestReviewBodyContainsCardData:
     """A 200 from /review/<run_id> must render the achievement content, not a skeleton."""
 
@@ -141,9 +132,17 @@ class TestReviewBodyContainsCardData:
         tmp_path = review_env["tmp_path"]
         client = review_env["client"]
 
-        payload = _make_run_payload("org-test", [
-            {"swim_id": "s1", "swimmer_name": "Jane Smith", "event": "200m Butterfly", "headline": "PB set"},
-        ])
+        payload = _make_run_payload(
+            "org-test",
+            [
+                {
+                    "swim_id": "s1",
+                    "swimmer_name": "Jane Smith",
+                    "event": "200m Butterfly",
+                    "headline": "PB set",
+                },
+            ],
+        )
         run_id = _seed_run(tmp_path, wm, "org-test", payload)
 
         r = client.get(f"/review/{run_id}")
@@ -156,9 +155,17 @@ class TestReviewBodyContainsCardData:
         tmp_path = review_env["tmp_path"]
         client = review_env["client"]
 
-        payload = _make_run_payload("org-test", [
-            {"swim_id": "s2", "swimmer_name": "Jane Smith", "event": "200m Butterfly", "headline": "PB set"},
-        ])
+        payload = _make_run_payload(
+            "org-test",
+            [
+                {
+                    "swim_id": "s2",
+                    "swimmer_name": "Jane Smith",
+                    "event": "200m Butterfly",
+                    "headline": "PB set",
+                },
+            ],
+        )
         run_id = _seed_run(tmp_path, wm, "org-test", payload)
 
         r = client.get(f"/review/{run_id}")
@@ -174,34 +181,50 @@ class TestReviewBodyContainsCardData:
         tmp_path = review_env["tmp_path"]
         client = review_env["client"]
 
-        payload = _make_run_payload("org-test", [
-            {"swim_id": "s3", "swimmer_name": "Tom Jones", "event": "100m Backstroke", "headline": "Club record"},
-        ])
+        payload = _make_run_payload(
+            "org-test",
+            [
+                {
+                    "swim_id": "s3",
+                    "swimmer_name": "Tom Jones",
+                    "event": "100m Backstroke",
+                    "headline": "Club record",
+                },
+            ],
+        )
         run_id = _seed_run(tmp_path, wm, "org-test", payload)
 
         r = client.get(f"/review/{run_id}")
         assert r.status_code == 200
         body = r.get_data(as_text=True)
-        assert "100m Backstroke" in body, (
-            "/review body must contain the event name from ranked_achievements"
-        )
+        assert (
+            "100m Backstroke" in body
+        ), "/review body must contain the event name from ranked_achievements"
 
     def test_headline_present_in_body(self, review_env):
         wm = review_env["wm"]
         tmp_path = review_env["tmp_path"]
         client = review_env["client"]
 
-        payload = _make_run_payload("org-test", [
-            {"swim_id": "s4", "swimmer_name": "Sam Lee", "event": "50m Freestyle", "headline": "UNIQUE_HEADLINE_XYZ"},
-        ])
+        payload = _make_run_payload(
+            "org-test",
+            [
+                {
+                    "swim_id": "s4",
+                    "swimmer_name": "Sam Lee",
+                    "event": "50m Freestyle",
+                    "headline": "UNIQUE_HEADLINE_XYZ",
+                },
+            ],
+        )
         run_id = _seed_run(tmp_path, wm, "org-test", payload)
 
         r = client.get(f"/review/{run_id}")
         assert r.status_code == 200
         body = r.get_data(as_text=True)
-        assert "UNIQUE_HEADLINE_XYZ" in body, (
-            "/review body must contain the achievement headline from ranked_achievements"
-        )
+        assert (
+            "UNIQUE_HEADLINE_XYZ" in body
+        ), "/review body must contain the achievement headline from ranked_achievements"
 
     def test_ach_row_element_present(self, review_env):
         """The .ach-row DOM element is the card container — its presence confirms cards rendered."""
@@ -209,17 +232,25 @@ class TestReviewBodyContainsCardData:
         tmp_path = review_env["tmp_path"]
         client = review_env["client"]
 
-        payload = _make_run_payload("org-test", [
-            {"swim_id": "s5", "swimmer_name": "Alex Brown", "event": "400m IM", "headline": "Season best"},
-        ])
+        payload = _make_run_payload(
+            "org-test",
+            [
+                {
+                    "swim_id": "s5",
+                    "swimmer_name": "Alex Brown",
+                    "event": "400m IM",
+                    "headline": "Season best",
+                },
+            ],
+        )
         run_id = _seed_run(tmp_path, wm, "org-test", payload)
 
         r = client.get(f"/review/{run_id}")
         assert r.status_code == 200
         body = r.get_data(as_text=True)
-        assert 'class="ach-row"' in body, (
-            "/review body must contain .ach-row elements confirming achievement cards rendered"
-        )
+        assert (
+            'class="ach-row"' in body
+        ), "/review body must contain .ach-row elements confirming achievement cards rendered"
 
     def test_data_swimmer_attribute_matches_payload(self, review_env):
         """data-swimmer on .ach-row must match the swimmer name from the run payload."""
@@ -227,17 +258,25 @@ class TestReviewBodyContainsCardData:
         tmp_path = review_env["tmp_path"]
         client = review_env["client"]
 
-        payload = _make_run_payload("org-test", [
-            {"swim_id": "s6", "swimmer_name": "Riley Park", "event": "200m Breaststroke", "headline": "New PB"},
-        ])
+        payload = _make_run_payload(
+            "org-test",
+            [
+                {
+                    "swim_id": "s6",
+                    "swimmer_name": "Riley Park",
+                    "event": "200m Breaststroke",
+                    "headline": "New PB",
+                },
+            ],
+        )
         run_id = _seed_run(tmp_path, wm, "org-test", payload)
 
         r = client.get(f"/review/{run_id}")
         assert r.status_code == 200
         body = r.get_data(as_text=True)
-        assert 'data-swimmer="Riley Park"' in body, (
-            "data-swimmer attribute on .ach-row must match the swimmer name from the run"
-        )
+        assert (
+            'data-swimmer="Riley Park"' in body
+        ), "data-swimmer attribute on .ach-row must match the swimmer name from the run"
 
     def test_multiple_achievements_all_rendered(self, review_env):
         """Every achievement in ranked_achievements must appear in the body."""
@@ -246,9 +285,24 @@ class TestReviewBodyContainsCardData:
         client = review_env["client"]
 
         achievements = [
-            {"swim_id": "s7a", "swimmer_name": "Swimmer Alpha", "event": "100m Free", "headline": "PB Alpha"},
-            {"swim_id": "s7b", "swimmer_name": "Swimmer Beta", "event": "200m Back", "headline": "PB Beta"},
-            {"swim_id": "s7c", "swimmer_name": "Swimmer Gamma", "event": "50m Fly", "headline": "PB Gamma"},
+            {
+                "swim_id": "s7a",
+                "swimmer_name": "Swimmer Alpha",
+                "event": "100m Free",
+                "headline": "PB Alpha",
+            },
+            {
+                "swim_id": "s7b",
+                "swimmer_name": "Swimmer Beta",
+                "event": "200m Back",
+                "headline": "PB Beta",
+            },
+            {
+                "swim_id": "s7c",
+                "swimmer_name": "Swimmer Gamma",
+                "event": "50m Fly",
+                "headline": "PB Gamma",
+            },
         ]
         payload = _make_run_payload("org-test", achievements)
         run_id = _seed_run(tmp_path, wm, "org-test", payload)
@@ -257,12 +311,12 @@ class TestReviewBodyContainsCardData:
         assert r.status_code == 200
         body = r.get_data(as_text=True)
         for ach in achievements:
-            assert ach["swimmer_name"] in body, (
-                f"Swimmer '{ach['swimmer_name']}' from ranked_achievements missing from /review body"
-            )
-            assert ach["headline"] in body, (
-                f"Headline '{ach['headline']}' from ranked_achievements missing from /review body"
-            )
+            assert (
+                ach["swimmer_name"] in body
+            ), f"Swimmer '{ach['swimmer_name']}' from ranked_achievements missing from /review body"
+            assert (
+                ach["headline"] in body
+            ), f"Headline '{ach['headline']}' from ranked_achievements missing from /review body"
 
     def test_meet_name_present_in_body(self, review_env):
         """Meet name must appear in the page — basic sanity before card assertions."""
@@ -270,17 +324,23 @@ class TestReviewBodyContainsCardData:
         tmp_path = review_env["tmp_path"]
         client = review_env["client"]
 
-        payload = _make_run_payload("org-test", [
-            {"swim_id": "s8", "swimmer_name": "Any Swimmer", "event": "100m Free", "headline": "PB"},
-        ])
+        payload = _make_run_payload(
+            "org-test",
+            [
+                {
+                    "swim_id": "s8",
+                    "swimmer_name": "Any Swimmer",
+                    "event": "100m Free",
+                    "headline": "PB",
+                },
+            ],
+        )
         run_id = _seed_run(tmp_path, wm, "org-test", payload)
 
         r = client.get(f"/review/{run_id}")
         assert r.status_code == 200
         body = r.get_data(as_text=True)
-        assert "BODY CONTENT TEST INVITATIONAL" in body, (
-            "/review body must contain the meet name"
-        )
+        assert "BODY CONTENT TEST INVITATIONAL" in body, "/review body must contain the meet name"
 
     def test_run_with_no_achievements_shows_empty_state_not_crash(self, review_env):
         """A run with an empty ranked_achievements list must render an empty-state page, not crash."""
@@ -332,8 +392,12 @@ class TestReviewProgressUsesRankedTotal:
         wm = review_env["wm"]
         client = review_env["client"]
         achievements = [
-            {"swim_id": f"swim-{i}", "swimmer_name": f"Swimmer {i}",
-             "event": "100m Freestyle", "headline": f"PB for Swimmer {i}"}
+            {
+                "swim_id": f"swim-{i}",
+                "swimmer_name": f"Swimmer {i}",
+                "event": "100m Freestyle",
+                "headline": f"PB for Swimmer {i}",
+            }
             for i in range(4)
         ]
         payload = _make_run_payload("org-test", achievements)
@@ -341,6 +405,7 @@ class TestReviewProgressUsesRankedTotal:
 
         # Approve exactly ONE card via the same store the route reads.
         from mediahub.workflow.status import CardStatus
+
         ws = wm._get_wf_store()
         ws.set_status(run_id, "card-swim-0", CardStatus.APPROVED)
         # The store only knows the 1 card we touched ...
@@ -407,15 +472,15 @@ class TestReviewLegacyPbAuditHasRerunButton:
         assert r.status_code == 200
         body = r.get_data(as_text=True)
 
-        assert "per-swimmer audit" in body, (
-            "Legacy PB warning text must be present in the review page"
-        )
-        assert "upload/configure" in body, (
-            "Legacy PB warning must include a link to upload/configure for re-run"
-        )
-        assert run_id in body, (
-            "The configure link must embed the run_id so the user is taken to the right run"
-        )
+        assert (
+            "per-swimmer audit" in body
+        ), "Legacy PB warning text must be present in the review page"
+        assert (
+            "upload/configure" in body
+        ), "Legacy PB warning must include a link to upload/configure for re-run"
+        assert (
+            run_id in body
+        ), "The configure link must embed the run_id so the user is taken to the right run"
 
     def test_warning_falls_back_to_upload_when_input_missing(self, review_env):
         """When input.bin is gone, the warning card falls back to the upload page."""
@@ -431,12 +496,12 @@ class TestReviewLegacyPbAuditHasRerunButton:
         assert r.status_code == 200
         body = r.get_data(as_text=True)
 
-        assert "per-swimmer audit" in body, (
-            "Legacy PB warning text must be present even without input.bin"
-        )
-        assert "/upload" in body, (
-            "Fallback must link to the upload page when input.bin is not on disk"
-        )
+        assert (
+            "per-swimmer audit" in body
+        ), "Legacy PB warning text must be present even without input.bin"
+        assert (
+            "/upload" in body
+        ), "Fallback must link to the upload page when input.bin is not on disk"
 
 
 class TestBulkApproveButtonVisibility:
@@ -451,14 +516,19 @@ class TestBulkApproveButtonVisibility:
         wm = review_env["wm"]
         client = review_env["client"]
         achievements = [
-            {"swim_id": f"swim-{i}", "swimmer_name": f"Swimmer {i}",
-             "event": "100m Freestyle", "headline": f"PB #{i}"}
+            {
+                "swim_id": f"swim-{i}",
+                "swimmer_name": f"Swimmer {i}",
+                "event": "100m Freestyle",
+                "headline": f"PB #{i}",
+            }
             for i in range(3)
         ]
         payload = _make_run_payload("org-test", achievements)
         run_id = _seed_run(review_env["tmp_path"], wm, "org-test", payload)
 
         from mediahub.workflow.status import CardStatus
+
         ws = wm._get_wf_store()
         ws.set_status(run_id, "swim-0", CardStatus.APPROVED)
         ws.set_status(run_id, "swim-1", CardStatus.APPROVED)
@@ -474,21 +544,28 @@ class TestBulkApproveButtonVisibility:
         # Note: the JS always references getElementById('mh-bulk-approve'), so we
         # check for the HTML attribute id="mh-bulk-approve" (double-quote form),
         # which only appears when the button element is actually rendered.
-        assert 'id="mh-bulk-approve"' not in body, "Approve all button must be hidden when fully reviewed"
-        assert 'Approve all in queue' not in body
+        assert (
+            'id="mh-bulk-approve"' not in body
+        ), "Approve all button must be hidden when fully reviewed"
+        assert "Approve all in queue" not in body
 
     def test_bulk_approve_visible_when_cards_remain(self, review_env):
         wm = review_env["wm"]
         client = review_env["client"]
         achievements = [
-            {"swim_id": f"swim-{i}", "swimmer_name": f"Swimmer {i}",
-             "event": "100m Freestyle", "headline": f"PB #{i}"}
+            {
+                "swim_id": f"swim-{i}",
+                "swimmer_name": f"Swimmer {i}",
+                "event": "100m Freestyle",
+                "headline": f"PB #{i}",
+            }
             for i in range(3)
         ]
         payload = _make_run_payload("org-test", achievements)
         run_id = _seed_run(review_env["tmp_path"], wm, "org-test", payload)
 
         from mediahub.workflow.status import CardStatus
+
         ws = wm._get_wf_store()
         # Approve only 1 of 3 — two still in queue.
         ws.set_status(run_id, "swim-0", CardStatus.APPROVED)
@@ -498,15 +575,21 @@ class TestBulkApproveButtonVisibility:
         body = r.get_data(as_text=True)
 
         # Button element must be present while unreviewed cards remain.
-        assert 'id="mh-bulk-approve"' in body, "Approve all button must appear when cards are pending"
-        assert 'Approve all in queue' in body
+        assert (
+            'id="mh-bulk-approve"' in body
+        ), "Approve all button must appear when cards are pending"
+        assert "Approve all in queue" in body
 
     def test_bulk_approve_visible_with_no_workflow_state(self, review_env):
         wm = review_env["wm"]
         client = review_env["client"]
         achievements = [
-            {"swim_id": f"swim-{i}", "swimmer_name": f"Swimmer {i}",
-             "event": "100m Freestyle", "headline": f"PB #{i}"}
+            {
+                "swim_id": f"swim-{i}",
+                "swimmer_name": f"Swimmer {i}",
+                "event": "100m Freestyle",
+                "headline": f"PB #{i}",
+            }
             for i in range(3)
         ]
         payload = _make_run_payload("org-test", achievements)
@@ -519,7 +602,7 @@ class TestBulkApproveButtonVisibility:
 
         # Button element must be present when nothing has been reviewed yet.
         assert 'id="mh-bulk-approve"' in body, "Approve all button must appear at 0% reviewed"
-        assert 'Approve all in queue' in body
+        assert "Approve all in queue" in body
 
 
 class TestApprovedCardHasDownloadLink:
@@ -537,13 +620,21 @@ class TestApprovedCardHasDownloadLink:
         client = review_env["client"]
         tmp_path = review_env["tmp_path"]
 
-        payload = _make_run_payload("org-test", [
-            {"swim_id": "swim-dl", "swimmer_name": "Tom Davies",
-             "event": "100m Free", "headline": "PB set"},
-        ])
+        payload = _make_run_payload(
+            "org-test",
+            [
+                {
+                    "swim_id": "swim-dl",
+                    "swimmer_name": "Tom Davies",
+                    "event": "100m Free",
+                    "headline": "PB set",
+                },
+            ],
+        )
         run_id = _seed_run(tmp_path, wm, "org-test", payload)
 
         from mediahub.workflow.status import CardStatus
+
         ws = wm._get_wf_store()
         ws.set_status(run_id, "swim-dl", CardStatus.APPROVED)
 
@@ -564,10 +655,17 @@ class TestApprovedCardHasDownloadLink:
         client = review_env["client"]
         tmp_path = review_env["tmp_path"]
 
-        payload = _make_run_payload("org-test", [
-            {"swim_id": "swim-nodl", "swimmer_name": "Sam Lee",
-             "event": "50m Free", "headline": "Season best"},
-        ])
+        payload = _make_run_payload(
+            "org-test",
+            [
+                {
+                    "swim_id": "swim-nodl",
+                    "swimmer_name": "Sam Lee",
+                    "event": "50m Free",
+                    "headline": "Season best",
+                },
+            ],
+        )
         run_id = _seed_run(tmp_path, wm, "org-test", payload)
         # No workflow state — card is implicitly in queue.
 
@@ -575,6 +673,6 @@ class TestApprovedCardHasDownloadLink:
         assert r.status_code == 200
         body = r.get_data(as_text=True)
 
-        assert f"/card/swim-nodl/download" not in body, (
-            "A queued card must not show a download link — download is only for approved cards."
-        )
+        assert (
+            f"/card/swim-nodl/download" not in body
+        ), "A queued card must not show a download link — download is only for approved cards."

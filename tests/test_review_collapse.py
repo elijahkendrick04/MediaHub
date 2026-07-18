@@ -13,9 +13,9 @@ The complementary invariant — that a *focused / eager* single-card render keep
 tests/test_visible_intelligence.py and must stay green; this file only governs
 the lazy review list.
 """
+
 from __future__ import annotations
 
-import importlib
 import json
 import uuid
 
@@ -23,21 +23,11 @@ import pytest
 
 
 @pytest.fixture
-def review_app(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    for sub in ("runs_v4", "uploads_v4", "club_profiles"):
-        (tmp_path / sub).mkdir(parents=True, exist_ok=True)
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-    importlib.reload(cp)
-    importlib.reload(wm)
+def review_app(web_module, tmp_path):
+    wm = web_module
     from mediahub.web.club_profile import ClubProfile, save_profile
-    save_profile(ClubProfile(profile_id="org-x", display_name="Org X",
-                             brand_voice_summary="Bold."))
+
+    save_profile(ClubProfile(profile_id="org-x", display_name="Org X", brand_voice_summary="Bold."))
 
     def _ach(i):
         return {
@@ -59,15 +49,22 @@ def review_app(tmp_path, monkeypatch):
     run_id = "run-x-" + uuid.uuid4().hex[:8]
     n = 6
     payload = {
-        "run_id": run_id, "profile_id": "org-x", "profile_display": "Org X",
+        "run_id": run_id,
+        "profile_id": "org-x",
+        "profile_display": "Org X",
         "meet": {"name": "Regional LC Champs"},
         "our_swim_count": n,
         "recognition_report": {
             "ranked_achievements": [_ach(i) for i in range(n)],
-            "n_elite": 1, "n_strong": 0, "n_story": n - 1,
-            "n_achievements": n, "n_swims_analysed": n,
+            "n_elite": 1,
+            "n_strong": 0,
+            "n_story": n - 1,
+            "n_achievements": n,
+            "n_swims_analysed": n,
         },
-        "cards": [], "parse_warnings": [], "self_check": {},
+        "cards": [],
+        "parse_warnings": [],
+        "self_check": {},
     }
     (tmp_path / "runs_v4" / f"{run_id}.json").write_text(json.dumps(payload))
     conn = wm._db()
@@ -77,7 +74,8 @@ def review_app(tmp_path, monkeypatch):
         "VALUES (?, datetime('now'), 'done', ?, ?, ?, 0, ?)",
         (run_id, "org-x", "Regional LC Champs", n, "x.hy3"),
     )
-    conn.commit(); conn.close()
+    conn.commit()
+    conn.close()
 
     app = wm.create_app()
     app.config["TESTING"] = True

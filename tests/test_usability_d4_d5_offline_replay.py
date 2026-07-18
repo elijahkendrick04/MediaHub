@@ -14,26 +14,6 @@ stranded the queue. The client now drains on load when online and offers a
 
 from __future__ import annotations
 
-import importlib
-
-import pytest
-
-
-@pytest.fixture
-def client(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    (tmp_path / "club_profiles").mkdir(parents=True, exist_ok=True)
-
-    import mediahub.web.web as wm
-
-    importlib.reload(wm)
-    app = wm.create_app()
-    app.config["TESTING"] = True
-    app.secret_key = app.secret_key or "test-secret"
-    return app.test_client()
-
-
 # --- D-4: the service worker inspects replay outcomes ------------------------
 
 

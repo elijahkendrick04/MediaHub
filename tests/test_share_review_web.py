@@ -7,7 +7,6 @@ Revoke and expiry kill access; the erasure cascade drops shares.
 
 from __future__ import annotations
 
-import importlib
 import json
 import sys
 import uuid
@@ -57,18 +56,8 @@ def _stage_visual(runs_dir: Path, run_id: str, card_id: str):
 
 
 @pytest.fixture
-def world(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    for d in ("runs_v4", "club_profiles"):
-        (tmp_path / d).mkdir(parents=True, exist_ok=True)
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
+def world(web_module, tmp_path):
+    wm = web_module
 
     from mediahub.web.club_profile import ClubProfile, save_profile
 
@@ -170,9 +159,7 @@ def test_view_only_link_refuses_comment(world):
     run_id = world["run_id"]
     share = _create_share(world["app"], run_id, perm="view")
     anon = world["app"].test_client()
-    r = anon.post(
-        f"/share/{share['token']}/comment", data={"card_id": "card-1", "body": "hi"}
-    )
+    r = anon.post(f"/share/{share['token']}/comment", data={"card_id": "card-1", "body": "hi"})
     assert r.status_code == 404  # view-only links have no comment route access
 
 

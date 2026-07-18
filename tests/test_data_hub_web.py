@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import importlib
 import io
 import json
 
@@ -10,24 +9,13 @@ import pytest
 
 
 @pytest.fixture
-def app_env(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    for sub in ("runs_v4", "uploads_v4", "club_profiles"):
-        (tmp_path / sub).mkdir(parents=True, exist_ok=True)
+def app_env(app, web_module, tmp_path, monkeypatch):
+    # ``app`` / ``web_module`` (conftest) already point DATA_DIR + the derived
+    # storage dirs at this test's ``tmp_path`` and build a TESTING app. Keep the
+    # no-provider setup so the AI honest-error surfaces stay deterministic.
     for var in ("GEMINI_API_KEY", "GOOGLE_API_KEY", "ANTHROPIC_API_KEY", "MEDIAHUB_LLM_PROVIDER"):
         monkeypatch.delenv(var, raising=False)
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
-    app = wm.create_app()
-    app.config["TESTING"] = True
-    return app, wm, tmp_path
+    return app, web_module, tmp_path
 
 
 def _make_profile(pid="club-a"):

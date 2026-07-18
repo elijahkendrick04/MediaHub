@@ -23,31 +23,13 @@ For an operator with no ready organisation both used to 302 to
 
 from __future__ import annotations
 
-import importlib
-import sys
-from pathlib import Path
-
 import pytest
-
-_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(_ROOT))
 
 
 @pytest.fixture
-def gated_app(tmp_path, monkeypatch):
+def gated_app(app):
     """App with the first-run org gate ACTIVE (ENFORCE_ORG_GATE) and no
     organisation on disk -- the exact state a fresh-deployment operator sees."""
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    (tmp_path / "club_profiles").mkdir(parents=True, exist_ok=True)
-    monkeypatch.setenv("SECRET_KEY", "test-secret-key-for-signed-sessions")
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
-    app = wm.create_app()
-    app.config["TESTING"] = True
     app.config["ENFORCE_ORG_GATE"] = True
     return app
 

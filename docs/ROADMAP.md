@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-07-15 · `61d9574bc` · Merge pull request #1291 from elijahkendrick04/claude/pb-ranker-diagnosis-339i7t
+**Last updated:** 2026-07-17 · `ee1943c65` · build(deps): bump actions/setup-node from 6 to 7 (#1313) [skip render]
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1227,16 +1227,16 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
-| 2026-07-15 | `8b241964b` | style(pb_discovery): ruff-format the F09 course regex (single line) |
-| 2026-07-15 | `eea74caa4` | fix(pb-ranker): close 5 verified gaps left by the P1–P14 fix sessions |
-| 2026-07-15 | `57cf4c2e7` | security: fix 7 latent bugs surfaced by the finding #18 migration |
-| 2026-07-15 | `8437e9b34` | fix(web): route bulk-select checkbox ids to the base swim_id (F11 consent safety) |
-| 2026-07-15 | `fd20f7edf` | style(pipeline): satisfy ruff-format (collapse reconcile call to one line) |
-| 2026-07-15 | `a8f977612` | fix(v5-ranker): repair tables, maths, crash & factor contract (P6, 21 issues) |
-| 2026-07-15 | `368fee494` | Fix V3 content-ranker scoring/explainability defects; remove dead V1 ranker (P7) |
-| 2026-07-15 | `116d74c81` | fix(pipeline): make V5 recognition the canonical ranking authority (F16, ADR-0032) |
-| 2026-07-15 | `848a3f27d` | fix(recognition): make official_pb_confirmed fireable on real PB paths (F18) |
-| 2026-07-14 | `9ac15cdef` | style(web): ruff-format the F11 helpers (line length) |
-| 2026-07-14 | `81136f227` | fix(web): unique per-card workflow-state keying + cautious safe_to_post (F11, F51) |
-| 2026-07-14 | `21485a36f` | fix(recommender): remove dead output & unreachable paths (F26, F29, F32) |
+| 2026-07-17 | `ef3c96ec9` | build(deps): bump actions/setup-node from 6 to 7 |
+| 2026-07-17 | `c09ce763e` | test: migrate 8 club-a fixtures off importlib.reload onto conftest app (#130) |
+| 2026-07-17 | `ca21317d3` | test: run the tier-A clean-assembly invariant on both render engines (#132) |
+| 2026-07-17 | `eddd67555` | test: stop test_motion_format_focus paying for a cutout model fetch (#133) |
+| 2026-07-17 | `1e5262732` | deep-review #95: atomic quota reserve (fix check-then-act concurrency hole) |
+| 2026-07-17 | `de7ec52a5` | deep-review #59: feed season standards packs + profile filter into qual detection |
+| 2026-07-17 | `01f109c1f` | deep-review #73: publish motion renders atomically (fix cache-slot race) |
+| 2026-07-17 | `135242d71` | deep-review #52 + #64: strict stroke/course codes — no fabricated FR/LC guess |
+| 2026-07-17 | `fe8985d6d` | deep-review #69: pivot 2-digit years on the current year (no frozen constant) |
+| 2026-07-17 | `8913b5eda` | test(#65): add trailing newline (pre-commit end-of-file-fixer) |
+| 2026-07-17 | `a1796c0bf` | deep-review #65: model relays and exclude them from individual PB/medal detection |
+| 2026-07-17 | `bc979e662` | deep-review #60: make OfficialPBDetector Rule 0 work on HY3/SDIF native runs |
 <!-- /ROADMAP:ACTIVITY -->

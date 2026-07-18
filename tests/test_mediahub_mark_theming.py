@@ -10,6 +10,7 @@ in. (This deliberately overrides the earlier Stage-F3 "all authored marks
 re-skin" rule for the logo only.) Uploaded SVGs are NEVER touched — the
 serve route returns bytes byte-for-byte.
 """
+
 from __future__ import annotations
 
 import importlib
@@ -26,22 +27,13 @@ sys.path.insert(0, str(_ROOT))
 
 
 @pytest.fixture
-def app_client(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    (tmp_path / "runs_v4").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "uploads_v4").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "club_profiles").mkdir(parents=True, exist_ok=True)
+def app_client(app, web_module, tmp_path):
+    # DATA_DIR isolation + web-module reset come from the canonical fixtures
+    # (conftest.py), replacing the old setenv + importlib.reload preamble.
     import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-    importlib.reload(cp)
-    importlib.reload(wm)
-    app = wm.create_app()
-    app.config["TESTING"] = True
+
     with app.test_client() as c:
-        yield c, wm, cp, tmp_path
+        yield c, web_module, cp, tmp_path
 
 
 def _topnav_svg(body: str) -> str:
@@ -89,9 +81,7 @@ class TestTopnavSVG:
         client, _, _, _ = app_client
         body = client.get("/status").get_data(as_text=True)
         svg = _topnav_svg(body)
-        assert 'fill="currentColor"' in svg, (
-            "paper-cream bar should bind to currentColor"
-        )
+        assert 'fill="currentColor"' in svg, "paper-cream bar should bind to currentColor"
 
     def test_brand_bar_is_pinned_lane_yellow(self, app_client):
         # The lane-yellow bar is MediaHub's fixed identity, not the club's primary.
@@ -123,9 +113,7 @@ class TestFooterSVG:
         svg = _footer_svg(body)
         # All three bars use currentColor (different opacities).
         cc_count = svg.count('fill="currentColor"')
-        assert cc_count >= 3, (
-            f"footer SVG should have ≥ 3 currentColor fills, got {cc_count}"
-        )
+        assert cc_count >= 3, f"footer SVG should have ≥ 3 currentColor fills, got {cc_count}"
 
 
 class TestUploadedSVGBytesPreserved:
@@ -147,6 +135,7 @@ class TestUploadedSVGBytesPreserved:
         # brand.logos store_logo() API.
         from mediahub.web.club_profile import ClubProfile
         from mediahub.brand.logos import store_logo
+
         prof = ClubProfile(profile_id="svg-roundtrip", display_name="SVG Test")
         cp.save_profile(prof)
 

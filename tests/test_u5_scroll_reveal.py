@@ -33,7 +33,6 @@ Three layers of assertion, mirroring tests/test_activity_count_up.py:
 
 from __future__ import annotations
 
-import importlib
 import os
 import re
 import sys
@@ -73,23 +72,10 @@ def _chromium_available() -> bool:
 # Fixtures
 # --------------------------------------------------------------------------- #
 @pytest.fixture
-def app(tmp_path, monkeypatch):
+def app(web_module):
     """Isolated Flask app with one saved, ready organisation (for the pinned
     hero variant). Mirrors tests/test_activity_count_up.py."""
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    for sub in ("runs_v4", "uploads_v4", "club_profiles"):
-        (tmp_path / sub).mkdir(parents=True, exist_ok=True)
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
-
-    application = wm.create_app()
+    application = web_module.create_app()
     application.config["TESTING"] = True
 
     from mediahub.web.club_profile import ClubProfile, save_profile
@@ -141,22 +127,18 @@ class TestRevealLinesHelper:
         assert html.startswith('<h2 class="mh-section-title mh-reveal-lines">')
         assert html.endswith("</h2>")
         assert html.count('<span class="mh-line">') == 2
-        assert "<span class=\"mh-line\">First line</span>" in html
-        assert "<span class=\"mh-line\">Second line</span>" in html
+        assert '<span class="mh-line">First line</span>' in html
+        assert '<span class="mh-line">Second line</span>' in html
 
     def test_custom_tag_and_class(self):
-        html = webmod._reveal_lines(
-            ["A", "B", "C"], tag="h2", cls="mh-promise-title"
-        )
+        html = webmod._reveal_lines(["A", "B", "C"], tag="h2", cls="mh-promise-title")
         assert 'class="mh-promise-title mh-reveal-lines"' in html
         assert html.count('<span class="mh-line">') == 3
 
     def test_editorial_accent_fragment_preserved_verbatim(self):
         # lines are TRUSTED HTML fragments (static product copy) — the helper
         # must not double-escape the <em class="editorial"> accent markup.
-        html = webmod._reveal_lines(
-            ["plain", '<em class="editorial">gold word</em>']
-        )
+        html = webmod._reveal_lines(["plain", '<em class="editorial">gold word</em>'])
         assert '<em class="editorial">gold word</em>' in html
         assert "&lt;em" not in html
 
@@ -271,8 +253,8 @@ class TestRevealLinesCss:
         css = _theme_css(app)
         block = css.split(".mh-js .mh-reveal-lines > *", 1)[1].split("}", 1)[0]
         assert "opacity: 0" in block
-        assert "translateY(0.5em)" in block       # em-relative rise
-        assert "display: block" not in block       # layout lives in the ungated rule
+        assert "translateY(0.5em)" in block  # em-relative rise
+        assert "display: block" not in block  # layout lives in the ungated rule
 
     def test_is_in_reveals(self, app):
         css = _theme_css(app)
@@ -401,15 +383,11 @@ class TestRevealLinesBrowser:
             browser.close()
             pw.stop()
         assert initial, "no reveal lines rendered"
-        assert any(not s["isIn"] for s in initial), (
-            "expected some below-fold lines to start hidden before any scroll"
-        )
-        assert not deepest_before["isIn"], (
-            "deepest line should start hidden below the fold"
-        )
-        assert deepest_after["isIn"], (
-            "deepest line did not reveal after being scrolled into view"
-        )
+        assert any(
+            not s["isIn"] for s in initial
+        ), "expected some below-fold lines to start hidden before any scroll"
+        assert not deepest_before["isIn"], "deepest line should start hidden below the fold"
+        assert deepest_after["isIn"], "deepest line did not reveal after being scrolled into view"
 
     def test_no_js_lines_stack_vertically(self, app):
         # Regression guard: with JavaScript disabled (.mh-js never added) the
@@ -432,9 +410,9 @@ class TestRevealLinesBrowser:
             pw.stop()
         assert len(boxes) >= 2 and all(boxes), "reveal-lines block has < 2 measurable lines"
         # Line 2 sits clearly below line 1 → stacked, not inline run-on text.
-        assert boxes[1]["y"] >= boxes[0]["y"] + boxes[0]["height"] * 0.5, (
-            f"no-JS reveal lines did not stack vertically: {boxes}"
-        )
+        assert (
+            boxes[1]["y"] >= boxes[0]["y"] + boxes[0]["height"] * 0.5
+        ), f"no-JS reveal lines did not stack vertically: {boxes}"
 
     def test_nothing_stays_stuck_hidden(self, app):
         # Even with NO scroll, content can never be permanently hidden. The

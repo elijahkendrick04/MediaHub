@@ -9,31 +9,22 @@ meet picker to add/remove items.
 
 from __future__ import annotations
 
-import importlib
-
 import pytest
 
 
 @pytest.fixture
-def app_env(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
+def app_env(web_module, monkeypatch):
+    # MEDIAHUB_SCHEDULER is read fresh by mediahub.scheduler._enabled() each time
+    # start_scheduler() runs inside create_app() — no reload needed for it to take
+    # effect, so it's set here, before create_app() is called below.
     monkeypatch.setenv("MEDIAHUB_SCHEDULER", "0")
-    (tmp_path / "runs_v4").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "club_profiles").mkdir(parents=True, exist_ok=True)
 
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
     from mediahub.web.club_profile import ClubProfile, save_profile
 
     save_profile(
         ClubProfile(profile_id="club-a", display_name="Riverside SC", brand_voice_summary="x")
     )
-    return wm
+    return web_module
 
 
 def _client(wm):

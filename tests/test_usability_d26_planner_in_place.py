@@ -12,28 +12,14 @@ test_usability_d24_blackout_warning_persists.py for its own pins).
 
 from __future__ import annotations
 
-import importlib
-
 import pytest
 
 
 @pytest.fixture
-def client(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    (tmp_path / "club_profiles").mkdir(parents=True, exist_ok=True)
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
+def client(app):
     from mediahub.web.club_profile import ClubProfile, save_profile
 
-    save_profile(
-        ClubProfile(profile_id="club-a", display_name="Club A", org_type="swimming_club")
-    )
-    app = wm.create_app()
+    save_profile(ClubProfile(profile_id="club-a", display_name="Club A", org_type="swimming_club"))
     app.config.update(TESTING=True, SECRET_KEY="x")
     c = app.test_client()
     with c.session_transaction() as s:
@@ -56,9 +42,7 @@ def test_calendar_mutations_have_no_reload_and_revert_on_error(client):
     from mediahub.club_platform.stub_pack_store import save_pack, set_planned_date
 
     save_pack("free_text", {"free_text": "hi"}, [{"caption": "Hi"}], profile_id="club-a")
-    planned = save_pack(
-        "free_text", {"free_text": "yo"}, [{"caption": "Yo"}], profile_id="club-a"
-    )
+    planned = save_pack("free_text", {"free_text": "yo"}, [{"caption": "Yo"}], profile_id="club-a")
     set_planned_date(planned["pack_id"], "2026-06-10")
 
     html = client.get("/plan/calendar?m=2026-06").get_data(as_text=True)
@@ -97,9 +81,7 @@ def test_calendar_revert_uses_the_server_confirmed_prev_date(client):
     from mediahub.club_platform.stub_pack_store import save_pack, set_planned_date
 
     save_pack("free_text", {"free_text": "hi"}, [{"caption": "Hi"}], profile_id="club-a")
-    planned = save_pack(
-        "free_text", {"free_text": "yo"}, [{"caption": "Yo"}], profile_id="club-a"
-    )
+    planned = save_pack("free_text", {"free_text": "yo"}, [{"caption": "Yo"}], profile_id="club-a")
     set_planned_date(planned["pack_id"], "2026-06-10")
 
     html = client.get("/plan/calendar?m=2026-06").get_data(as_text=True)

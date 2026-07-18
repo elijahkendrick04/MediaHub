@@ -30,9 +30,9 @@ tests/test_activity_count_up.py (Playwright behaviour):
 The Playwright class skips when Playwright or a usable Chromium build is
 absent, matching tests/test_activity_count_up.py.
 """
+
 from __future__ import annotations
 
-import importlib
 import os
 import re
 import sys
@@ -52,6 +52,7 @@ sys.path.insert(0, str(_ROOT))
 @pytest.fixture(scope="module")
 def components_css() -> str:
     from mediahub.web.theme_tokens import THEME_COMPONENTS_CSS
+
     return THEME_COMPONENTS_CSS
 
 
@@ -62,27 +63,6 @@ def spring_css(components_css: str) -> str:
     idx = components_css.find(marker)
     assert idx != -1, "UI 1.4 spring banner missing from theme-components.css"
     return components_css[idx:]
-
-
-@pytest.fixture
-def fresh_client(tmp_path, monkeypatch):
-    """A clean app with isolated DATA_DIR (pattern from test_responsive_meta)."""
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    for sub in ("runs_v4", "uploads_v4", "club_profiles"):
-        (tmp_path / sub).mkdir(parents=True, exist_ok=True)
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-    importlib.reload(cp)
-    importlib.reload(wm)
-
-    app = wm.create_app()
-    app.config["TESTING"] = True
-    with app.test_client() as c:
-        yield c
 
 
 # Public, always-reachable HTML routes (no org gate). The spring engine lives
@@ -124,9 +104,9 @@ class TestSpringCssContract:
             r".*?transform:\s*\n?\s*translate3d\(var\(--mh-mag-x",
             re.DOTALL,
         )
-        assert pattern.search(spring_css), (
-            "composed transform is not inside the no-preference media block"
-        )
+        assert pattern.search(
+            spring_css
+        ), "composed transform is not inside the no-preference media block"
 
     def test_hover_active_specificity_variants(self, spring_css):
         # :hover / :active variants raise specificity so the JS keeps ownership
@@ -142,20 +122,21 @@ class TestSpringCssContract:
         assert m, "spring rule declares no transition list"
         transition = m.group(1)
         assert "background" in transition, "expected colour/shadow feedback to transition"
-        assert "transform" not in transition, (
-            "transform must NOT be transitioned — the JS spring owns it"
-        )
+        assert (
+            "transform" not in transition
+        ), "transform must NOT be transitioned — the JS spring owns it"
 
     def test_components_css_braces_balanced(self, components_css):
-        assert components_css.count("{") == components_css.count("}"), (
-            "unbalanced braces in theme-components.css after the spring section"
-        )
+        assert components_css.count("{") == components_css.count(
+            "}"
+        ), "unbalanced braces in theme-components.css after the spring section"
 
     def test_in_assembled_cascade_before_guardrails(self):
         """The spring CSS must be inside the assembled BASE_CSS, ahead of the
         responsive guardrails (which must remain the final layer)."""
         import mediahub.web.web as wm
         from mediahub.web.responsive_guardrails import RESPONSIVE_GUARDRAILS_CSS
+
         assert ".mh-spring" in wm.BASE_CSS
         spring_at = wm.BASE_CSS.find("UI 1.4 — TACTILE SPRING-PHYSICS")
         guardrails_at = wm.BASE_CSS.find(RESPONSIVE_GUARDRAILS_CSS[:200])
@@ -170,56 +151,56 @@ class TestSpringCssContract:
 
 class TestSpringJsShips:
     @pytest.mark.parametrize("route", _PUBLIC_HTML_ROUTES)
-    def test_engine_present(self, fresh_client, route):
-        body = fresh_client.get(route).get_data(as_text=True)
+    def test_engine_present(self, client, route):
+        body = client.get(route).get_data(as_text=True)
         assert "function bindSpring()" in body, f"bindSpring missing on {route}"
         assert "MH.bindSpring = bindSpring;" in body, f"not exposed on {route}"
 
-    def test_reduced_motion_early_return(self, fresh_client):
-        body = fresh_client.get("/").get_data(as_text=True)
+    def test_reduced_motion_early_return(self, client):
+        body = client.get("/").get_data(as_text=True)
         # Reuses the shared prefersReduced flag the reveals/counters use.
         assert "if (prefersReduced) return;" in body
 
-    def test_capability_guards(self, fresh_client):
-        body = fresh_client.get("/").get_data(as_text=True)
+    def test_capability_guards(self, client):
+        body = client.get("/").get_data(as_text=True)
         assert "'PointerEvent' in window" in body
         assert "'requestAnimationFrame' in window" in body
 
-    def test_fine_pointer_only_magnetic(self, fresh_client):
-        body = fresh_client.get("/").get_data(as_text=True)
+    def test_fine_pointer_only_magnetic(self, client):
+        body = client.get("/").get_data(as_text=True)
         assert "(hover: hover) and (pointer: fine)" in body
 
-    def test_writes_all_three_custom_properties(self, fresh_client):
-        body = fresh_client.get("/").get_data(as_text=True)
+    def test_writes_all_three_custom_properties(self, client):
+        body = client.get("/").get_data(as_text=True)
         for prop in ("'--mh-press'", "'--mh-mag-x'", "'--mh-mag-y'"):
             assert prop in body, f"JS never writes {prop}"
 
-    def test_magnetic_tracks_pointer(self, fresh_client):
-        body = fresh_client.get("/").get_data(as_text=True)
+    def test_magnetic_tracks_pointer(self, client):
+        body = client.get("/").get_data(as_text=True)
         assert "pointermove" in body
         assert "getBoundingClientRect" in body
         assert "pointerleave" in body
 
-    def test_press_and_release_handlers(self, fresh_client):
-        body = fresh_client.get("/").get_data(as_text=True)
+    def test_press_and_release_handlers(self, client):
+        body = client.get("/").get_data(as_text=True)
         assert "pointerdown" in body
         assert "pointerup" in body
         assert "pointercancel" in body
 
-    def test_keyboard_parity(self, fresh_client):
-        body = fresh_client.get("/").get_data(as_text=True)
+    def test_keyboard_parity(self, client):
+        body = client.get("/").get_data(as_text=True)
         assert "keydown" in body and "keyup" in body
         assert "'Enter'" in body and "'Spacebar'" in body
 
-    def test_toggle_pop_and_has_fallback(self, fresh_client):
-        body = fresh_client.get("/").get_data(as_text=True)
+    def test_toggle_pop_and_has_fallback(self, client):
+        body = client.get("/").get_data(as_text=True)
         # Toggles bind the label and "pop" on change; :has() is wrapped so old
         # engines fall back to the explicit .mh-choice labels.
         assert "label:has(> input[type=checkbox])" in body
         assert "'change'" in body
 
-    def test_target_selector_covers_named_surfaces(self, fresh_client):
-        body = fresh_client.get("/").get_data(as_text=True)
+    def test_target_selector_covers_named_surfaces(self, client):
+        body = client.get("/").get_data(as_text=True)
         # primary buttons (not secondary/ghost/danger), template cards, opt-in,
         # and toggle labels — the three surfaces the roadmap names.
         assert ".btn:not(.secondary):not(.ghost):not(.danger)" in body
@@ -227,8 +208,8 @@ class TestSpringJsShips:
         assert "[data-mh-spring]" in body
         assert "label.mh-choice" in body
 
-    def test_progressive_enhancement_gate_present(self, fresh_client):
-        body = fresh_client.get("/").get_data(as_text=True)
+    def test_progressive_enhancement_gate_present(self, client):
+        body = client.get("/").get_data(as_text=True)
         # The .mh-spring CSS is gated on html.mh-js — set by the early script.
         assert "classList.add('mh-js')" in body
 
@@ -238,7 +219,9 @@ class TestSpringJsShips:
 # ---------------------------------------------------------------------------
 
 _SKIP_BROWSER = os.environ.get("MEDIAHUB_SKIP_BROWSER_TESTS", "").lower() in (
-    "1", "true", "yes",
+    "1",
+    "true",
+    "yes",
 )
 from tests._pw_chromium import resolve_prebaked_chromium
 
@@ -248,6 +231,7 @@ _PINNED_CHROMIUM = resolve_prebaked_chromium()
 def _playwright_available() -> bool:
     try:
         import playwright.sync_api  # noqa: F401
+
         return True
     except ImportError:
         return False
@@ -261,6 +245,7 @@ def _browser_available() -> bool:
     # Fall back to whatever Chromium Playwright resolves (no launch needed).
     try:
         from playwright.sync_api import sync_playwright
+
         with sync_playwright() as p:
             ep = p.chromium.executable_path
         return bool(ep) and Path(ep).is_file()
@@ -276,9 +261,7 @@ def _launch(pw):
 
 
 # The primary-button selector the engine binds (mirrors SEL_FULL in web.py).
-_PRIMARY_BTN = (
-    ".btn:not(.secondary):not(.ghost):not(.danger):not(.mh-wf-approve):not(.loading)"
-)
+_PRIMARY_BTN = ".btn:not(.secondary):not(.ghost):not(.danger):not(.mh-wf-approve):not(.loading)"
 
 # Reads the *rendered* transform (proves JS prop -> CSS composition end to end):
 # DOMMatrix.a = scaleX, .e = translateX(px), .f = translateY(px). Works for both
@@ -295,16 +278,17 @@ _READ_MATRIX = """(sel) => {
 @pytest.mark.skipif(not _playwright_available(), reason="playwright not installed")
 @pytest.mark.skipif(not _browser_available(), reason="no usable Chromium build")
 class TestSpringBrowser:
-    def _home_html(self, fresh_client) -> str:
-        resp = fresh_client.get("/")
+    def _home_html(self, client) -> str:
+        resp = client.get("/")
         assert resp.status_code == 200
         return resp.get_data(as_text=True)
 
-    def test_primary_surfaces_get_bound(self, fresh_client):
+    def test_primary_surfaces_get_bound(self, client):
         """Under a fine pointer with motion allowed, the engine adds .mh-spring
         to a primary button and a template card."""
         from playwright.sync_api import sync_playwright
-        html = self._home_html(fresh_client)
+
+        html = self._home_html(client)
         pw = sync_playwright().start()
         browser = _launch(pw)
         try:
@@ -322,10 +306,11 @@ class TestSpringBrowser:
             browser.close()
             pw.stop()
 
-    def test_press_dips_then_springs_back(self, fresh_client):
+    def test_press_dips_then_springs_back(self, client):
         """pointerdown dips the rendered scale below 1; pointerup returns it."""
         from playwright.sync_api import sync_playwright
-        html = self._home_html(fresh_client)
+
+        html = self._home_html(client)
         pw = sync_playwright().start()
         browser = _launch(pw)
         try:
@@ -365,11 +350,12 @@ class TestSpringBrowser:
         assert pressed["a"] > 0.85, f"press dip is a squash, not restrained (a={pressed['a']})"
         assert settled["a"] > 0.99, f"scale did not spring back (a={settled['a']})"
 
-    def test_magnetic_pull_tracks_then_releases(self, fresh_client):
+    def test_magnetic_pull_tracks_then_releases(self, client):
         """A pointermove offset to the right pulls the element right (bounded by
         the restrained cap); pointerleave returns it to centre."""
         from playwright.sync_api import sync_playwright
-        html = self._home_html(fresh_client)
+
+        html = self._home_html(client)
         pw = sync_playwright().start()
         browser = _launch(pw)
         try:
@@ -412,11 +398,12 @@ class TestSpringBrowser:
         assert pulled["e"] <= 6.5, f"magnetic pull exceeds the restrained cap (e={pulled['e']})"
         assert abs(released["e"]) < 0.6, f"did not return to centre (e={released['e']})"
 
-    def test_reduced_motion_binds_nothing(self, fresh_client):
+    def test_reduced_motion_binds_nothing(self, client):
         """Under prefers-reduced-motion: reduce, bindSpring() returns early and
         no surface gets .mh-spring — the press/magnetic layer is fully off."""
         from playwright.sync_api import sync_playwright
-        html = self._home_html(fresh_client)
+
+        html = self._home_html(client)
         pw = sync_playwright().start()
         browser = _launch(pw)
         try:
@@ -430,15 +417,14 @@ class TestSpringBrowser:
             pw.stop()
 
         assert btn is not None, "no primary .btn on the page"
-        assert "mh-spring" not in btn["cls"], (
-            "spring bound despite prefers-reduced-motion: reduce"
-        )
+        assert "mh-spring" not in btn["cls"], "spring bound despite prefers-reduced-motion: reduce"
 
-    def test_toggle_label_is_bound(self, fresh_client):
+    def test_toggle_label_is_bound(self, client):
         """A toggle (label wrapping a checkbox / radio, or .mh-choice) is
         spring-bound for the press-pop, when one is present on the page."""
         from playwright.sync_api import sync_playwright
-        html = self._home_html(fresh_client)
+
+        html = self._home_html(client)
         pw = sync_playwright().start()
         browser = _launch(pw)
         try:

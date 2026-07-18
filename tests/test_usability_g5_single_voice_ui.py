@@ -10,7 +10,6 @@ textarea, one Analyse voice button, and one preview panel.
 
 from __future__ import annotations
 
-import importlib
 import sys
 from pathlib import Path
 
@@ -25,22 +24,14 @@ _WEB_SRC = web_surface_src()
 
 
 @pytest.fixture
-def env(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    (tmp_path / "club_profiles").mkdir(parents=True, exist_ok=True)
+def env(app):
     import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
 
-    importlib.reload(cp)
-    importlib.reload(wm)
     prof = cp.ClubProfile(profile_id="otters", display_name="Otters SC")
     prof.voice_examples = ["Great swim from the squad tonight", "PB city at the gala"]
     prof.voice_profile = {"sentence_length_avg": 6.0, "characteristic_openers": ["Great"]}
     cp.save_profile(prof)
 
-    app = wm.create_app()
-    app.config["TESTING"] = True
     return app, cp
 
 
@@ -94,9 +85,7 @@ def test_in_form_analyse_still_analyses_and_saves(env, monkeypatch):
     app, cp = env
     import mediahub.brand.voice_imitation as vi
 
-    monkeypatch.setattr(
-        vi, "analyse_examples", lambda examples, **kw: {"sentence_length_avg": 9.5}
-    )
+    monkeypatch.setattr(vi, "analyse_examples", lambda examples, **kw: {"sentence_length_avg": 9.5})
     with app.test_client() as c:
         with c.session_transaction() as s:
             s["active_profile_id"] = "otters"

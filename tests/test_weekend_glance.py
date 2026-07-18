@@ -21,9 +21,9 @@ These tests pin three layers:
 It also guards the no-LLM contract (the module must import no provider client)
 and the CSS contract in ``theme-components.css``.
 """
+
 from __future__ import annotations
 
-import importlib
 import json
 import re
 import sys
@@ -42,9 +42,7 @@ from mediahub.web.weekend_glance import (  # noqa: E402
     render_weekend_glance_html,
 )
 
-CSS_PATH = (
-    _ROOT / "src" / "mediahub" / "web" / "static" / "theme" / "theme-components.css"
-)
+CSS_PATH = _ROOT / "src" / "mediahub" / "web" / "static" / "theme" / "theme-components.css"
 MODULE_PATH = _ROOT / "src" / "mediahub" / "web" / "weekend_glance.py"
 
 
@@ -52,8 +50,16 @@ MODULE_PATH = _ROOT / "src" / "mediahub" / "web" / "weekend_glance.py"
 # Helpers
 # --------------------------------------------------------------------------- #
 
-def _ach(swimmer="Jane Smith", event="100m Free", headline="A headline",
-         type="pb_confirmed", rank=1, post_angle=None, raw_facts=None):
+
+def _ach(
+    swimmer="Jane Smith",
+    event="100m Free",
+    headline="A headline",
+    type="pb_confirmed",
+    rank=1,
+    post_angle=None,
+    raw_facts=None,
+):
     a = {"swimmer_name": swimmer, "event": event, "headline": headline, "type": type}
     if post_angle is not None:
         a["post_angle"] = post_angle
@@ -75,6 +81,7 @@ def _run(meet="Spring Invitational", ranked=None, n_analysed=10, n_achievements=
 # build_weekend_glance — emptiness / defensiveness
 # --------------------------------------------------------------------------- #
 
+
 class TestBuildEmptiness:
     def test_none_for_empty_dict(self):
         assert build_weekend_glance({}) is None
@@ -90,9 +97,10 @@ class TestBuildEmptiness:
         assert build_weekend_glance(bad) is None
 
     def test_none_when_ranked_not_a_list(self):
-        assert build_weekend_glance(
-            {"recognition_report": {"ranked_achievements": {"not": "a list"}}}
-        ) is None
+        assert (
+            build_weekend_glance({"recognition_report": {"ranked_achievements": {"not": "a list"}}})
+            is None
+        )
 
     def test_does_not_raise_on_malformed_entries(self):
         ranked = [None, 5, "x", {}, {"achievement": None}, _ach()]
@@ -108,28 +116,43 @@ class TestBuildEmptiness:
 # PB / medal / record classification
 # --------------------------------------------------------------------------- #
 
+
 class TestClassification:
-    @pytest.mark.parametrize("type", [
-        "pb_confirmed", "pb_likely", "official_pb_confirmed",
-        "pb_cache", "multi_pb_weekend",
-    ])
+    @pytest.mark.parametrize(
+        "type",
+        [
+            "pb_confirmed",
+            "pb_likely",
+            "official_pb_confirmed",
+            "pb_cache",
+            "multi_pb_weekend",
+        ],
+    )
     def test_pb_types_counted(self, type):
         g = build_weekend_glance(_run(ranked=[_ach(type=type)]))
         assert g.n_pbs == 1
         assert g.n_medals == 0
 
-    @pytest.mark.parametrize("angle", [
-        "confirmed_official_pb", "pb_improvement", "likely_pb",
-    ])
+    @pytest.mark.parametrize(
+        "angle",
+        [
+            "confirmed_official_pb",
+            "pb_improvement",
+            "likely_pb",
+        ],
+    )
     def test_pb_post_angle_counted_even_if_type_blank(self, angle):
         g = build_weekend_glance(_run(ranked=[_ach(type="", post_angle=angle)]))
         assert g.n_pbs == 1
 
-    @pytest.mark.parametrize("type,colour,g,s,b", [
-        ("medal_gold", "gold", 1, 0, 0),
-        ("medal_silver", "silver", 0, 1, 0),
-        ("medal_bronze", "bronze", 0, 0, 1),
-    ])
+    @pytest.mark.parametrize(
+        "type,colour,g,s,b",
+        [
+            ("medal_gold", "gold", 1, 0, 0),
+            ("medal_silver", "silver", 0, 1, 0),
+            ("medal_bronze", "bronze", 0, 0, 1),
+        ],
+    )
     def test_medal_types_counted_and_coloured(self, type, colour, g, s, b):
         gl = build_weekend_glance(_run(ranked=[_ach(type=type, headline="X")]))
         assert gl.n_medals == 1
@@ -138,32 +161,53 @@ class TestClassification:
 
     def test_medal_from_raw_facts_place(self):
         # No medal token on the type — the detector's place stamp drives it.
-        gl = build_weekend_glance(_run(ranked=[
-            _ach(type="final_appearance", raw_facts={"place": 1}),
-        ]))
+        gl = build_weekend_glance(
+            _run(
+                ranked=[
+                    _ach(type="final_appearance", raw_facts={"place": 1}),
+                ]
+            )
+        )
         assert gl.n_medals == 1 and gl.n_golds == 1
         assert gl.top_moments[0].kind == "gold"
 
     def test_medal_from_raw_facts_medal_field(self):
-        gl = build_weekend_glance(_run(ranked=[
-            _ach(type="x", raw_facts={"medal": "bronze"}),
-        ]))
+        gl = build_weekend_glance(
+            _run(
+                ranked=[
+                    _ach(type="x", raw_facts={"medal": "bronze"}),
+                ]
+            )
+        )
         assert gl.n_medals == 1 and gl.n_bronzes == 1
 
     def test_medal_and_pb_combo_counts_as_both(self):
-        gl = build_weekend_glance(_run(ranked=[
-            _ach(type="medal_and_pb_combo", post_angle="medal_and_pb_combo",
-                 raw_facts={"place": 1, "medal": "gold"}),
-        ]))
+        gl = build_weekend_glance(
+            _run(
+                ranked=[
+                    _ach(
+                        type="medal_and_pb_combo",
+                        post_angle="medal_and_pb_combo",
+                        raw_facts={"place": 1, "medal": "gold"},
+                    ),
+                ]
+            )
+        )
         assert gl.n_pbs == 1  # contains "pb"
         assert gl.n_medals == 1 and gl.n_golds == 1
         # Medal outranks PB for the single headline chip.
         assert gl.top_moments[0].kind == "gold"
 
-    @pytest.mark.parametrize("type", [
-        "first_sub_barrier", "biggest_drop_candidate", "fastest_since",
-        "return_to_form", "club_debut",
-    ])
+    @pytest.mark.parametrize(
+        "type",
+        [
+            "first_sub_barrier",
+            "biggest_drop_candidate",
+            "fastest_since",
+            "return_to_form",
+            "club_debut",
+        ],
+    )
     def test_milestones_not_padded_into_pb_tally(self, type):
         """Honesty: '4 personal bests' must mean four literal PBs — milestones
         that are not strict PBs are standout moments, not PB count."""
@@ -197,18 +241,24 @@ class TestClassification:
 # Lede sentence (fixed template, deterministic)
 # --------------------------------------------------------------------------- #
 
+
 class TestLede:
     def test_pbs_and_medals(self):
-        g = build_weekend_glance(_run(
-            ranked=[_ach(type="pb_confirmed"), _ach(type="medal_gold", raw_facts={"place": 1})],
-            n_analysed=24,
-        ))
+        g = build_weekend_glance(
+            _run(
+                ranked=[_ach(type="pb_confirmed"), _ach(type="medal_gold", raw_facts={"place": 1})],
+                n_analysed=24,
+            )
+        )
         assert g.lede_stats == "1 personal best and 1 medal across 24 analysed swims."
 
     def test_plural_pbs_and_medals(self):
-        ranked = [_ach(type="pb_confirmed"), _ach(type="pb_likely"),
-                  _ach(type="medal_gold", raw_facts={"place": 1}),
-                  _ach(type="medal_silver", raw_facts={"place": 2})]
+        ranked = [
+            _ach(type="pb_confirmed"),
+            _ach(type="pb_likely"),
+            _ach(type="medal_gold", raw_facts={"place": 1}),
+            _ach(type="medal_silver", raw_facts={"place": 2}),
+        ]
         g = build_weekend_glance(_run(ranked=ranked, n_analysed=2))
         assert g.lede_stats == "2 personal bests and 2 medals across 2 analysed swims."
 
@@ -246,8 +296,7 @@ class TestLede:
     def test_records_lead_the_lede(self):
         # A record-breaking meet must not read like a dull one: the record count
         # leads the lede, ahead of PBs/medals.
-        ranked = [_ach(type="club_record", post_angle="club_record"),
-                  _ach(type="pb_confirmed")]
+        ranked = [_ach(type="club_record", post_angle="club_record"), _ach(type="pb_confirmed")]
         g = build_weekend_glance(_run(ranked=ranked, n_analysed=12, n_achievements=2))
         assert g.n_records == 1
         assert g.lede_stats == "1 club record and 1 personal best across 12 analysed swims."
@@ -269,13 +318,14 @@ class TestLede:
     def test_lede_carries_no_unescaped_meet_name(self):
         # The lede the builder stores never contains the meet name — that is
         # composed (and escaped) at render time, so injection cannot ride in.
-        g = build_weekend_glance(_run(meet='<b>x</b>', ranked=[_ach(type="pb_confirmed")]))
+        g = build_weekend_glance(_run(meet="<b>x</b>", ranked=[_ach(type="pb_confirmed")]))
         assert "<b>" not in g.lede_stats
 
 
 # --------------------------------------------------------------------------- #
 # Meet name handling
 # --------------------------------------------------------------------------- #
+
 
 class TestMeetName:
     @pytest.mark.parametrize("name", ["", "  ", "(unknown meet)", "unknown", "Unknown Meet"])
@@ -291,6 +341,7 @@ class TestMeetName:
 # --------------------------------------------------------------------------- #
 # Ranking, top-N, de-duplication, fallbacks
 # --------------------------------------------------------------------------- #
+
 
 class TestMomentsShape:
     def test_sorted_by_rank_ascending(self):
@@ -316,22 +367,38 @@ class TestMomentsShape:
         assert g.n_pbs == 1
 
     def test_dedup_leading_swimmer_name(self):
-        g = build_weekend_glance(_run(ranked=[
-            _ach(swimmer="Tom Davies", headline="Tom Davies wins gold medal (1st) in 100m Free",
-                 type="medal_gold", raw_facts={"place": 1}),
-        ]))
+        g = build_weekend_glance(
+            _run(
+                ranked=[
+                    _ach(
+                        swimmer="Tom Davies",
+                        headline="Tom Davies wins gold medal (1st) in 100m Free",
+                        type="medal_gold",
+                        raw_facts={"place": 1},
+                    ),
+                ]
+            )
+        )
         assert g.top_moments[0].sub == "Wins gold medal (1st) in 100m Free"
 
     def test_dedup_noop_when_name_absent(self):
-        g = build_weekend_glance(_run(ranked=[
-            _ach(swimmer="Tom Davies", headline="New club record in the 100m Free"),
-        ]))
+        g = build_weekend_glance(
+            _run(
+                ranked=[
+                    _ach(swimmer="Tom Davies", headline="New club record in the 100m Free"),
+                ]
+            )
+        )
         assert g.top_moments[0].sub == "New club record in the 100m Free"
 
     def test_sub_falls_back_to_event_when_headline_blank(self):
-        g = build_weekend_glance(_run(ranked=[
-            _ach(swimmer="Tom", event="100m Free", headline="", type="pb_confirmed"),
-        ]))
+        g = build_weekend_glance(
+            _run(
+                ranked=[
+                    _ach(swimmer="Tom", event="100m Free", headline="", type="pb_confirmed"),
+                ]
+            )
+        )
         assert g.top_moments[0].sub == "100m Free"
 
     def test_moment_carries_kind_label(self):
@@ -353,11 +420,14 @@ class TestCountFallbacks:
         assert g.n_achievements == 2
 
     def test_garbage_counts_degrade_to_zero(self):
-        run = {"meet": {"name": "M"}, "recognition_report": {
-            "ranked_achievements": [_ach()],
-            "n_swims_analysed": "not-a-number",
-            "n_achievements": None,
-        }}
+        run = {
+            "meet": {"name": "M"},
+            "recognition_report": {
+                "ranked_achievements": [_ach()],
+                "n_swims_analysed": "not-a-number",
+                "n_achievements": None,
+            },
+        }
         g = build_weekend_glance(run)
         assert g.n_analysed == 0
         # n_achievements falls back to len(ranked) when not a valid int.
@@ -368,13 +438,22 @@ class TestCountFallbacks:
 # Renderer — structure
 # --------------------------------------------------------------------------- #
 
+
 class TestRenderStructure:
     def _html(self, **kw):
-        ranked = kw.pop("ranked", [
-            _ach(swimmer="Jane Smith", type="pb_confirmed", headline="PB in 200m Fly", rank=1),
-            _ach(swimmer="Tom Davies", type="medal_gold", raw_facts={"place": 1},
-                 headline="Tom Davies wins gold (1st)", rank=2),
-        ])
+        ranked = kw.pop(
+            "ranked",
+            [
+                _ach(swimmer="Jane Smith", type="pb_confirmed", headline="PB in 200m Fly", rank=1),
+                _ach(
+                    swimmer="Tom Davies",
+                    type="medal_gold",
+                    raw_facts={"place": 1},
+                    headline="Tom Davies wins gold (1st)",
+                    rank=2,
+                ),
+            ],
+        )
         return render_weekend_glance_html(build_weekend_glance(_run(ranked=ranked, **kw)))
 
     def test_render_none_is_empty_string(self):
@@ -395,7 +474,7 @@ class TestRenderStructure:
         html = self._html(n_analysed=24)
         # PBs / Medals / Standout swims / Swims analysed
         assert html.count('class="stat') >= 4
-        assert 'data-mh-count=' in html
+        assert "data-mh-count=" in html
         for label in ("PBs", "Medals", "Standout swims", "Swims analysed"):
             assert f">{label}<" in html
 
@@ -416,16 +495,16 @@ class TestRenderStructure:
         assert "See all" not in html
 
     def test_medal_breakdown_title(self):
-        html = self._html(ranked=[
-            _ach(type="medal_gold", raw_facts={"place": 1}, rank=1),
-            _ach(type="medal_silver", raw_facts={"place": 2}, rank=2),
-        ])
+        html = self._html(
+            ranked=[
+                _ach(type="medal_gold", raw_facts={"place": 1}, rank=1),
+                _ach(type="medal_silver", raw_facts={"place": 2}, rank=2),
+            ]
+        )
         assert 'title="1 gold · 1 silver"' in html
 
     def test_no_moments_block_when_top_n_zero(self):
-        html = render_weekend_glance_html(
-            build_weekend_glance(_run(ranked=[_ach()]), top_n=0)
-        )
+        html = render_weekend_glance_html(build_weekend_glance(_run(ranked=[_ach()]), top_n=0))
         assert "mh-glance-moments" not in html
         # but the stat band is still there
         assert "Weekend at a glance" in html
@@ -435,6 +514,7 @@ class TestRenderStructure:
 # Renderer — escaping / XSS
 # --------------------------------------------------------------------------- #
 
+
 class TestRenderEscaping:
     # The meet name (composed into the lede) is the only dynamic field the
     # panel renders now — the moments preview that surfaced swimmer / headline /
@@ -442,9 +522,14 @@ class TestRenderEscaping:
     # builder still computes (and escapes-at-render-for any future consumer)
     # those fields; here we pin the one field the panel actually outputs.
     def test_meet_name_escaped_in_lede(self):
-        html = render_weekend_glance_html(build_weekend_glance(_run(
-            meet='<b>EVIL</b>', ranked=[_ach(type="pb_confirmed")],
-        )))
+        html = render_weekend_glance_html(
+            build_weekend_glance(
+                _run(
+                    meet="<b>EVIL</b>",
+                    ranked=[_ach(type="pb_confirmed")],
+                )
+            )
+        )
         assert "<b>EVIL</b>" not in html
         assert "&lt;b&gt;EVIL&lt;/b&gt;" in html
 
@@ -453,19 +538,31 @@ class TestRenderEscaping:
 # No-LLM contract + CSS contract
 # --------------------------------------------------------------------------- #
 
+
 class TestContracts:
     def test_module_imports_no_llm_client(self):
         """UI 1.30's mandate: no new LLM call. The module must not pull in any
         provider client / LLM wrapper — checked on the actual import statements
         (the docstring is free to *say* "no LLM call")."""
         import_lines = [
-            ln.strip() for ln in MODULE_PATH.read_text(encoding="utf-8").splitlines()
+            ln.strip()
+            for ln in MODULE_PATH.read_text(encoding="utf-8").splitlines()
             if ln.strip().startswith(("import ", "from "))
         ]
         blob = "\n".join(import_lines).lower()
-        for needle in ("media_ai", "ai_core", "anthropic", "genai", "gemini",
-                       "replicate", ".llm", "media_ai.llm"):
-            assert needle not in blob, f"weekend_glance must import no LLM client (found {needle!r})"
+        for needle in (
+            "media_ai",
+            "ai_core",
+            "anthropic",
+            "genai",
+            "gemini",
+            "replicate",
+            ".llm",
+            "media_ai.llm",
+        ):
+            assert (
+                needle not in blob
+            ), f"weekend_glance must import no LLM client (found {needle!r})"
 
     def test_css_rules_present(self):
         css = CSS_PATH.read_text(encoding="utf-8")
@@ -509,6 +606,7 @@ class TestContracts:
 # Integration — the real /review route
 # --------------------------------------------------------------------------- #
 
+
 def _seed_run(tmp_path, wm, profile_id, run_payload):
     run_id = run_payload["run_id"]
     (tmp_path / "runs_v4" / f"{run_id}.json").write_text(json.dumps(run_payload))
@@ -525,34 +623,21 @@ def _seed_run(tmp_path, wm, profile_id, run_payload):
 
 
 @pytest.fixture
-def review_env(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    (tmp_path / "runs_v4").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "uploads_v4").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "club_profiles").mkdir(parents=True, exist_ok=True)
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-    importlib.reload(cp)
-    importlib.reload(wm)
-
+def review_env(app, client, web_module, tmp_path):
     from mediahub.web.club_profile import ClubProfile, save_profile
-    save_profile(ClubProfile(
-        profile_id="org-test",
-        display_name="Test Club",
-        brand_voice_summary="Clear and energetic.",
-    ))
 
-    app = wm.create_app()
-    app.config["TESTING"] = True
+    save_profile(
+        ClubProfile(
+            profile_id="org-test",
+            display_name="Test Club",
+            brand_voice_summary="Clear and energetic.",
+        )
+    )
+
     app.config["ENFORCE_ORG_GATE"] = True
-    with app.test_client() as client:
-        r = client.post("/api/organisation/active", data={"profile_id": "org-test"})
-        assert r.status_code == 200, r.get_json()
-        yield {"client": client, "wm": wm, "tmp_path": tmp_path}
+    r = client.post("/api/organisation/active", data={"profile_id": "org-test"})
+    assert r.status_code == 200, r.get_json()
+    yield {"client": client, "wm": web_module, "tmp_path": tmp_path}
 
 
 def _review_payload(profile_id, ranked, meet="GLANCE TEST INVITATIONAL", n_analysed=20):
@@ -582,10 +667,21 @@ def _review_payload(profile_id, ranked, meet="GLANCE TEST INVITATIONAL", n_analy
 class TestReviewIntegration:
     def test_panel_appears_on_review(self, review_env):
         ranked = [
-            _ach(swimmer="Jane Smith", event="200m Fly", headline="PB in 200m Fly",
-                 type="pb_confirmed", rank=1),
-            _ach(swimmer="Tom Davies", event="100m Free", headline="Tom Davies wins gold (1st)",
-                 type="medal_gold", rank=2, raw_facts={"place": 1}),
+            _ach(
+                swimmer="Jane Smith",
+                event="200m Fly",
+                headline="PB in 200m Fly",
+                type="pb_confirmed",
+                rank=1,
+            ),
+            _ach(
+                swimmer="Tom Davies",
+                event="100m Free",
+                headline="Tom Davies wins gold (1st)",
+                type="medal_gold",
+                rank=2,
+                raw_facts={"place": 1},
+            ),
         ]
         payload = _review_payload("org-test", ranked, n_analysed=18)
         run_id = _seed_run(review_env["tmp_path"], review_env["wm"], "org-test", payload)
@@ -629,7 +725,7 @@ class TestReviewIntegration:
         # preview, which surfaced swimmer names, was removed). It must still
         # HTML-escape the meet name it composes into the headline.
         ranked = [_ach(swimmer="Jane Smith", type="pb_confirmed", rank=1)]
-        payload = _review_payload("org-test", ranked, meet='<script>alert(1)</script>')
+        payload = _review_payload("org-test", ranked, meet="<script>alert(1)</script>")
         run_id = _seed_run(review_env["tmp_path"], review_env["wm"], "org-test", payload)
 
         body = review_env["client"].get(f"/review/{run_id}").get_data(as_text=True)
@@ -638,7 +734,7 @@ class TestReviewIntegration:
         # review page is out of this feature's scope).
         start = body.find('<section class="card mh-glance')
         assert start != -1
-        panel = body[start:body.find("</section>", start)]
+        panel = body[start : body.find("</section>", start)]
         assert "<script>alert(1)</script>" not in panel
         assert "&lt;script&gt;" in panel
 
@@ -647,25 +743,34 @@ class TestReviewIntegration:
         renders its achievements rather than 500-ing."""
         wm = review_env["wm"]
         monkeypatch.setattr(
-            wm, "_build_weekend_glance",
+            wm,
+            "_build_weekend_glance",
             lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom")),
         )
-        ranked = [_ach(swimmer="Jane Smith", event="200m Fly", headline="PB set",
-                       type="pb_confirmed", rank=1)]
+        ranked = [
+            _ach(
+                swimmer="Jane Smith",
+                event="200m Fly",
+                headline="PB set",
+                type="pb_confirmed",
+                rank=1,
+            )
+        ]
         payload = _review_payload("org-test", ranked)
         run_id = _seed_run(review_env["tmp_path"], wm, "org-test", payload)
 
         r = review_env["client"].get(f"/review/{run_id}")
         assert r.status_code == 200
         body = r.get_data(as_text=True)
-        assert 'id="mh-glance-h"' not in body    # panel suppressed
-        assert "Jane Smith" in body             # but the page still rendered cards
+        assert 'id="mh-glance-h"' not in body  # panel suppressed
+        assert "Jane Smith" in body  # but the page still rendered cards
         assert "Top achievements" in body
 
 
 # --------------------------------------------------------------------------- #
 # Dataclass sanity
 # --------------------------------------------------------------------------- #
+
 
 class TestDataclasses:
     def test_glance_is_frozen(self):

@@ -9,9 +9,9 @@ they don't match.
 This test seeds two organisations with one run each, signs in as
 tenant A, and asserts that A cannot delete B's run.
 """
+
 from __future__ import annotations
 
-import importlib
 import json
 import sys
 from pathlib import Path
@@ -24,30 +24,19 @@ sys.path.insert(0, str(_ROOT))
 
 
 @pytest.fixture
-def gated_client(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    (tmp_path / "runs_v4").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "uploads_v4").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "club_profiles").mkdir(parents=True, exist_ok=True)
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-    importlib.reload(cp)
-    importlib.reload(wm)
-
-    app = wm.create_app()
-    app.config["TESTING"] = True
+def gated_client(app, web_module, tmp_path):
     app.config["ENFORCE_ORG_GATE"] = True
 
     from mediahub.web.club_profile import ClubProfile, save_profile
+
     for pid, name in (("club-a", "Club A"), ("club-b", "Club B")):
-        save_profile(ClubProfile(
-            profile_id=pid, display_name=name,
-            brand_voice_summary=f"{name} voice.",
-        ))
+        save_profile(
+            ClubProfile(
+                profile_id=pid,
+                display_name=name,
+                brand_voice_summary=f"{name} voice.",
+            )
+        )
 
     # Seed one run per club, both on disk and in the DB so _delete_run
     # has something to clean up if the guard is missing.
@@ -56,10 +45,16 @@ def gated_client(tmp_path, monkeypatch):
         ("run-a-001", "club-a", "Club A meet"),
         ("run-b-001", "club-b", "Club B meet"),
     ):
-        (runs_dir / f"{run_id}.json").write_text(json.dumps({
-            "run_id": run_id, "profile_id": pid, "meet_name": meet,
-        }))
-        conn = wm._db()
+        (runs_dir / f"{run_id}.json").write_text(
+            json.dumps(
+                {
+                    "run_id": run_id,
+                    "profile_id": pid,
+                    "meet_name": meet,
+                }
+            )
+        )
+        conn = web_module._db()
         conn.execute(
             "INSERT INTO runs (id, created_at, finished_at, status, profile_id, "
             "meet_name, file_name, our_swims, n_cards, n_queue, error) "
@@ -67,7 +62,8 @@ def gated_client(tmp_path, monkeypatch):
             "1, 1, 0, NULL)",
             (run_id, pid, meet),
         )
-        conn.commit(); conn.close()
+        conn.commit()
+        conn.close()
 
     with app.test_client() as c:
         yield c, app, tmp_path
@@ -88,6 +84,7 @@ def _run_in_db(wm, run_id: str) -> bool:
 def test_owner_can_delete_own_run(gated_client):
     c, _, tmp = gated_client
     import mediahub.web.web as wm
+
     _pin(c, "club-a")
     assert (tmp / "runs_v4" / "run-a-001.json").exists()
     resp = c.post("/privacy/run/run-a-001/delete", follow_redirects=False)
@@ -99,6 +96,7 @@ def test_owner_can_delete_own_run(gated_client):
 def test_other_tenant_cannot_delete_run(gated_client):
     c, _, tmp = gated_client
     import mediahub.web.web as wm
+
     _pin(c, "club-a")
     # Confirm pre-state: B's run exists
     assert (tmp / "runs_v4" / "run-b-001.json").exists()

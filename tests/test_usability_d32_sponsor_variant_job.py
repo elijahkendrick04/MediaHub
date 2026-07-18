@@ -16,7 +16,6 @@ pipeline plus an LLM caption call before any HTML returned (30–90s cold), said
 
 from __future__ import annotations
 
-import importlib
 import json
 import time
 import re
@@ -26,22 +25,7 @@ import pytest
 
 
 @pytest.fixture
-def gated_app(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    for sub in ("runs_v4", "uploads_v4", "club_profiles"):
-        (tmp_path / sub).mkdir(parents=True, exist_ok=True)
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
-
-    app = wm.create_app()
-    app.config["TESTING"] = True
+def gated_app(app, tmp_path):
     return app, tmp_path
 
 
@@ -107,9 +91,7 @@ def _fake_visual(tmp_path, calls=None):
             calls["n"] = calls.get("n", 0) + 1
             calls["kwargs"] = kwargs
         return {
-            "visuals": [
-                {"id": "vis1", "format_name": "feed_portrait", "file_path": str(png)}
-            ],
+            "visuals": [{"id": "vis1", "format_name": "feed_portrait", "file_path": str(png)}],
             "errors": [],
         }
 
@@ -150,9 +132,7 @@ def test_shell_returns_immediately_no_sync_render_or_llm(gated_app, monkeypatch)
     assert caption_calls["n"] == 0
 
 
-def test_job_completes_with_image_and_caption_then_page_serves_cache(
-    gated_app, monkeypatch
-):
+def test_job_completes_with_image_and_caption_then_page_serves_cache(gated_app, monkeypatch):
     app, tmp = gated_app
     import mediahub.web.web as wm
 

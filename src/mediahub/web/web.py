@@ -4186,11 +4186,24 @@ def _delete_run(run_id: str) -> bool:
             shutil.rmtree(side_dir, ignore_errors=True)
         except Exception:  # noqa: BLE001
             log.warning("could not remove run sidecar dir for %s", run_id)
-    # Workflow approvals live in their own sidecar file, not the dir above.
-    try:
-        (RUNS_DIR / f"{run_id}__workflow.json").unlink(missing_ok=True)
-    except Exception:  # noqa: BLE001
-        pass
+    # Per-run sidecar FILES beside the run JSON, not the dir above: the
+    # workflow store (<run_id>__workflow.json), the group-approver ledger
+    # (<run_id>__approvals.json + its .lock/.corrupt companions — these
+    # carry approver EMAIL addresses), and the pronunciation map
+    # (<run_id>__pronunciations.json, athlete names). Sweep the whole
+    # <run_id>__* family so no personal data outlives the erasure and a
+    # future sidecar can't be forgotten.
+    if run_id:
+        try:
+            import glob as _glob  # noqa: PLC0415
+
+            for side in RUNS_DIR.glob(f"{_glob.escape(run_id)}__*"):
+                try:
+                    side.unlink()
+                except OSError:
+                    pass
+        except Exception:  # noqa: BLE001
+            pass
     # Derivative ("turn into") packs generated from this run.
     try:
         import shutil  # noqa: PLC0415
