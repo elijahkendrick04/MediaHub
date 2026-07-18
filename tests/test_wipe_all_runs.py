@@ -32,6 +32,15 @@ def _seed(data: Path) -> None:
     (data / "runs_v4" / "r1.json").write_text('{"profile_id":"orgA","status":"done"}')
     (data / "runs_v4" / "r1").mkdir()
     (data / "runs_v4" / "r1" / "card.png").write_text("png")
+    # Full per-run sidecar family (approvals ledger carries approver EMAILS,
+    # incl. its .lock/.corrupt companions) + one orphan sidecar whose parent
+    # run predates the family sweep — the wipe must erase every one of these.
+    (data / "runs_v4" / "r1__workflow.json").write_text("{}")
+    (data / "runs_v4" / "r1__approvals.json").write_text('{"emails":["a@b.c"]}')
+    (data / "runs_v4" / "r1__approvals.json.corrupt").write_text('{"emails":["a@b.c"]}')
+    (data / "runs_v4" / "r1__approvals.lock").write_text("")
+    (data / "runs_v4" / "r1__pronunciations.json").write_text('{"Aoife":"EE-fa"}')
+    (data / "runs_v4" / "ghost__approvals.json").write_text('{"emails":["x@y.z"]}')
     (data / "uploads_v4" / "meet.hy3").write_text("x")
     (data / "brand_kits" / "orgA.json").write_text("brand")  # must survive
     conn = sqlite3.connect(str(data / "data.db"))
@@ -105,6 +114,23 @@ def test_yes_wipes_runs_but_keeps_brand(tmp_path, monkeypatch):
     conn.close()
     # org/brand config preserved
     assert (data / "brand_kits" / "orgA.json").read_text() == "brand"
+
+
+def test_sidecars_never_enumerated_and_fully_wiped(tmp_path, monkeypatch, capsys):
+    """Sidecar files must not inflate the run count as phantom run ids, and
+    the wipe must leave runs_v4 with no <id>__* file at all — the whole
+    family (.lock/.corrupt included) plus orphans from pre-sweep deletions."""
+    data = tmp_path / "data"
+    _seed(data)
+    monkeypatch.setenv("DATA_DIR", str(data))
+    monkeypatch.delenv("RUNS_DIR", raising=False)
+    monkeypatch.delenv("UPLOADS_DIR", raising=False)
+    assert _load().main(["--yes"]) == 0
+    out = capsys.readouterr().out
+    assert "runs found  : 1 " in out  # r1 only; sidecars are not phantom runs
+    assert "removed 1 run(s)" in out
+    assert list((data / "runs_v4").glob("*__*")) == []
+    assert list((data / "runs_v4").glob("*")) == []
 
 
 def test_keep_uploads_flag(tmp_path, monkeypatch):

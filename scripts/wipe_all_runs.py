@@ -50,6 +50,7 @@ in-flight worker can't re-persist a run mid-wipe.
 from __future__ import annotations
 
 import argparse
+import glob as _glob
 import os
 import shutil
 import sqlite3
@@ -111,7 +112,10 @@ def _all_run_ids(db_path: Path, runs_dir: Path) -> dict[str, str]:
     if runs_dir.is_dir():
         for p in runs_dir.glob("*.json"):
             rid = p.stem
-            if rid.endswith("__workflow"):
+            if "__" in rid:
+                # Per-run sidecars (<run_id>__workflow.json, __approvals.json,
+                # __pronunciations.json, ...) are swept with their run and must
+                # never be enumerated as phantom run ids of their own.
                 continue
             ids.setdefault(rid, "")
     return ids
@@ -134,7 +138,15 @@ def _owner_profile_id(run_id: str, runs_dir: Path, fallback: str) -> str:
 def _delete_run_files(run_id: str, runs_dir: Path, data_dir: Path) -> None:
     """Remove a run's files exactly like web._delete_run (minus the DB rows)."""
     (runs_dir / f"{run_id}.json").unlink(missing_ok=True)
-    (runs_dir / f"{run_id}__workflow.json").unlink(missing_ok=True)
+    # Whole <run_id>__* sidecar family (workflow store, approvals ledger with
+    # approver emails + its .lock/.corrupt companions, pronunciation map) —
+    # mirrors web._delete_run so no personal data outlives the wipe.
+    if run_id:
+        for side in runs_dir.glob(f"{_glob.escape(run_id)}__*"):
+            try:
+                side.unlink()
+            except OSError:
+                pass
     shutil.rmtree(runs_dir / run_id, ignore_errors=True)
     shutil.rmtree(data_dir / "turn_into_packs" / run_id, ignore_errors=True)
 
@@ -299,7 +311,18 @@ def main(argv: list[str] | None = None) -> int:
     if cascade_errors:
         print(f"  ! erasure cascade failed for {cascade_errors}/{deleted} run(s)")
         errors += 1
-    print(f"  removed {deleted} run(s) + sidecars")
+    # Orphan sidecars: <id>__* files whose parent run was deleted before the
+    # sidecar-family sweep existed. This wipes ALL run data, so none survive.
+    orphans = 0
+    if runs_dir.is_dir():
+        for side in runs_dir.glob("*__*"):
+            if side.is_file():
+                try:
+                    side.unlink()
+                    orphans += 1
+                except OSError:
+                    pass
+    print(f"  removed {deleted} run(s) + sidecars" + (f" (+{orphans} orphan sidecar file(s))" if orphans else ""))
 
     # DB rows: clear the run tables wholesale (catches any straggler rows).
     if db_path.exists():

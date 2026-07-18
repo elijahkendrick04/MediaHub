@@ -124,18 +124,44 @@ def test_purge_sweeps_full_sidecar_family_prefix_safe(data_dir):
 
 
 def test_purge_never_parses_sidecars_as_runs(data_dir):
-    """A sidecar .json (even a stale one with no parent run) must not be
-    treated as a phantom run file by the enumeration loop."""
+    """A sidecar .json — even one aged far past the retention window with no
+    parent run — must never be treated as a phantom run file by the
+    enumeration loop. (Aged orphans ARE removed, but via the explicit orphan
+    sweep, never as runs.)"""
     from mediahub.compliance.retention import run_purge
 
     runs = data_dir / "runs_v4"
     runs.mkdir(parents=True, exist_ok=True)
-    (runs / "ghost__approvals.json").write_text('{"emails": ["x@y.z"]}')
-    (runs / "ghost__workflow.json").write_text("{}")
+    old = time.time() - 800 * 86400
+    for name in ("ghost__approvals.json", "ghost__workflow.json"):
+        p = runs / name
+        p.write_text('{"emails": ["x@y.z"]}')
+        os.utime(p, (old, old))
 
     report = run_purge()
-    assert report["runs_deleted"] == []
+    assert report["runs_deleted"] == []  # reverting the "__" guard breaks this
     assert report["errors"] == []
+    # The aged, parentless sidecars are still erased — as orphans.
+    assert report["orphan_sidecars_deleted"] == 2
+    assert not list(runs.glob("ghost__*"))
+
+
+def test_orphan_sweep_spares_live_runs_and_fresh_files(data_dir):
+    """The orphan-sidecar sweep only removes aged files whose parent run json
+    is gone: a live run's sidecars survive regardless of age, and a fresh
+    orphan survives the 1-day write-race grace."""
+    from mediahub.compliance.retention import run_purge
+
+    _seed_run(data_dir, "live-run", age_days=5)
+    runs = data_dir / "runs_v4"
+    old = time.time() - 800 * 86400
+    os.utime(runs / "live-run__workflow.json", (old, old))
+    (runs / "fresh-ghost__approvals.json").write_text('{"emails": ["a@b.c"]}')
+
+    report = run_purge()
+    assert report["orphan_sidecars_deleted"] == 0
+    assert (runs / "live-run__workflow.json").exists()
+    assert (runs / "fresh-ghost__approvals.json").exists()
 
 
 def test_purge_respects_tenant_tightened_window(data_dir):

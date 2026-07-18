@@ -144,6 +144,7 @@ def run_purge(
     report: dict = {
         "ran_at": now.replace(microsecond=0).isoformat(),
         "runs_deleted": [],
+        "orphan_sidecars_deleted": 0,
         "upload_dirs_deleted": [],
         "upload_files_deleted": 0,
         "pb_cache_files_deleted": 0,
@@ -177,6 +178,26 @@ def run_purge(
                 report["runs_deleted"].append(run_id)
             except Exception as e:
                 report["errors"].append(f"run {run_id}: {e}")
+
+        # 1b. Orphan sidecars: <id>__* files whose parent <id>.json is gone —
+        # runs deleted before the sidecar-family sweep existed left their
+        # approvals ledgers (approver emails) and pronunciation maps behind
+        # with no remaining deletion path. A 1-day grace guards against
+        # racing a run mid-write; live runs' sidecars are never touched.
+        one_day_ago = (now - timedelta(days=1)).timestamp()
+        for side in sorted(runs_dir.glob("*__*")):
+            if not side.is_file():
+                continue
+            parent_id = side.name.split("__", 1)[0]
+            if not parent_id or (runs_dir / f"{parent_id}.json").exists():
+                continue
+            try:
+                if side.stat().st_mtime >= one_day_ago:
+                    continue
+                side.unlink()
+                report["orphan_sidecars_deleted"] += 1
+            except OSError as e:
+                report["errors"].append(f"orphan sidecar {side.name}: {e}")
 
     # 2. Raw uploads (shorter window; also catches dirs orphaned of their run).
     uploads = _uploads_dir()
