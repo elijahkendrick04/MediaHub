@@ -10,7 +10,6 @@ an inline ``data:`` URI, falling back to an honest placeholder, never a blank.
 
 from __future__ import annotations
 
-import importlib
 import json
 from datetime import date
 
@@ -18,22 +17,14 @@ import pytest
 
 
 @pytest.fixture
-def app_env(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
+def app_env(tmp_path, monkeypatch, web_module):
+    # MEDIAHUB_SCHEDULER is read fresh inside create_app() (scheduler._enabled()),
+    # not at import time, so it must be set before create_app() is called here.
     monkeypatch.setenv("MEDIAHUB_SCHEDULER", "0")
-    for sub in ("runs_v4", "club_profiles"):
-        (tmp_path / sub).mkdir(parents=True, exist_ok=True)
     for var in ("GEMINI_API_KEY", "GOOGLE_API_KEY", "ANTHROPIC_API_KEY"):
         monkeypatch.delenv(var, raising=False)
 
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
-    app = wm.create_app()
+    app = web_module.create_app()
     app.config["TESTING"] = True
     return app, tmp_path
 

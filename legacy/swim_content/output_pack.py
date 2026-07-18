@@ -27,10 +27,9 @@ def assemble_pack(
     meet_name: str,
     club_name: str,
 ) -> dict:
-    """Return a dict with keys: ready_to_post, needs_confirmation, recap, archive, summary."""
+    """Return a dict with keys: ready_to_post, recap, archive, summary."""
     by_bucket: dict[str, list[ContentCard]] = {
         "ready_to_post": [],
-        "needs_confirmation": [],
         "recap": [],
         "archive": [],
     }
@@ -59,7 +58,6 @@ def assemble_pack(
     }
     return {
         "ready_to_post": by_bucket["ready_to_post"],
-        "needs_confirmation": by_bucket["needs_confirmation"],
         "recap": by_bucket["recap"],
         "archive": by_bucket["archive"],
         "summary": summary,
@@ -74,7 +72,6 @@ def render_text_pack(pack: dict) -> str:
     lines.append(f"Generated {s['generated_at']}")
     lines.append("")
     for label, key in [("Ready to post", "ready_to_post"),
-                        ("Needs confirmation", "needs_confirmation"),
                         ("Recap mentions", "recap")]:
         cards: list[ContentCard] = pack[key]
         if not cards:
@@ -117,7 +114,6 @@ def render_json_pack(pack: dict) -> str:
     serial = {
         "summary": pack["summary"],
         "ready_to_post": [c.to_dict() for c in pack["ready_to_post"]],
-        "needs_confirmation": [c.to_dict() for c in pack["needs_confirmation"]],
         "recap": [c.to_dict() for c in pack["recap"]],
     }
     return json.dumps(serial, indent=2, default=str)
@@ -131,7 +127,6 @@ def render_zip_bytes(pack: dict) -> bytes:
         z.writestr("content_pack.txt", render_text_pack(pack))
         # Per-card files for easy paste-and-go
         for label, key in [("ready_to_post", "ready_to_post"),
-                            ("needs_confirmation", "needs_confirmation"),
                             ("recap", "recap")]:
             for i, c in enumerate(pack[key], start=1):
                 fname = f"{label}/{i:02d}_{_safe(c.headline)}.txt"

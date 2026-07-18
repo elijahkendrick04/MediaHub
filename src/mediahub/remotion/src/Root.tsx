@@ -50,6 +50,11 @@ const defaultCard = {
   duotoneShadow: "",
   duotoneHighlight: "",
   halftoneTile: 0,
+  stickerInk: "",
+  stickerRadius: 0,
+  washTint: "",
+  washMix: 0,
+  packGroundFocus: null as number[] | null,
   statChips: [] as { label: string; value: string }[],
   statInk: "",
   pbBars: null as null | { prev: string; now: string; nowPct: number; caption: string },
@@ -63,6 +68,9 @@ const defaultCard = {
   // A valid sample pack so the studio preview demonstrates the style-pack
   // overlay; production passes the still's real pack id (or "" for bare).
   stylePack: "vignette-grain-corner_ticks-standard",
+  overlapAccent: "",
+  roleMedalRamp: "",
+  roleMedalNumeralRamp: "",
   motionIntent: "",
   roleGround: "",
   roleSurface: "",
@@ -71,6 +79,16 @@ const defaultCard = {
   captionsJson: "",
   inReel: false,
   meshBg: "",
+  // D8 register weight vars mirrored from the still's --mh-wght-* (0 = leave the
+  // static cut untouched, matching the schema defaults in StoryCard.tsx).
+  wghtKicker: 0,
+  wghtMeta: 0,
+  wghtData: 0,
+  frameShape: "",
+  frameRadius: "",
+  frameTornFreq: 0,
+  frameTornScale: 0,
+  frameTornSeed: 0,
 };
 
 export const RemotionRoot: React.FC = () => {

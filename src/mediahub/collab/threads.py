@@ -243,7 +243,12 @@ def add_comment(
 
     _ensure_schema(db_path)
     conn = _connect(db_path)
+    # Drive the transaction explicitly so the per-card cap COUNT and the INSERT
+    # are one atomic unit — BEGIN IMMEDIATE takes the write lock up front, closing
+    # the TOCTOU where two concurrent adds both pass the cap and exceed it.
+    conn.isolation_level = None
     try:
+        conn.execute("BEGIN IMMEDIATE")
         thread_id = cid
         parent = (parent_id or "").strip()
         if parent:
@@ -292,7 +297,7 @@ def add_comment(
                 now,
             ),
         )
-        conn.commit()
+        conn.execute("COMMIT")
     finally:
         conn.close()
     return CollabComment(
@@ -558,13 +563,16 @@ def toggle_reaction(
             )
             conn.commit()
             return False
-        conn.execute(
-            "INSERT INTO collab_reactions(comment_id,emoji,author_email,created_at) "
+        # INSERT OR IGNORE, not a bare INSERT: two concurrent toggles both miss
+        # the SELECT above, and a plain INSERT would then raise IntegrityError on
+        # the (comment_id, emoji, author_email) PK for the loser (an uncaught 500).
+        cur = conn.execute(
+            "INSERT OR IGNORE INTO collab_reactions(comment_id,emoji,author_email,created_at) "
             "VALUES(?,?,?,?)",
             (comment_id, emoji, author, time.time()),
         )
         conn.commit()
-        return True
+        return cur.rowcount > 0
     finally:
         conn.close()
 

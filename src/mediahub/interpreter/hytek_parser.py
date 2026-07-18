@@ -128,6 +128,22 @@ def _is_dq_e2(line: str) -> bool:
     return bool(_E2_DQ_RE.match(line))
 
 
+def _e2_round_hint(round_code: str) -> Optional[str]:
+    """Map a Hy-Tek E2 round code (col 2) to a structural round hint.
+
+    The E2 round code is ``F`` (finals), ``P`` (prelim/heat) or ``S`` (swim-off).
+    Only a final is the medal-awarding round, so a prelim or swim-off is marked
+    ``"prelim"`` — the canonical bridge (`pipeline.interpreter_bridge`) then reads
+    it as a heat, which keeps a prelim/swim-off place-1 from surfacing as a
+    fabricated medal (the medal detector awards medals only from finals). A blank
+    or ``F`` code — or any unrecognised code — stays ``None`` (read as a timed
+    final), so a genuine timed-final result keeps its medal. Structural only: it
+    records which round marker the row carried, not swim semantics.
+    """
+    code = (round_code or "").strip().upper()
+    return "prelim" if code in ("P", "S") else None
+
+
 # ---------------------------------------------------------------------------
 # Athlete cache built from D1 records
 # ---------------------------------------------------------------------------
@@ -271,6 +287,7 @@ def _parse_e2(line: str) -> dict:
                 place = v
     return {
         "round": _safe_str(line, 2, 1),
+        "round_hint": _e2_round_hint(_safe_str(line, 2, 1)),
         "finals_time": finals_time,
         "course_code": _safe_str(line, 11, 1) if len(line) > 11 else "",
         "place": place,
@@ -458,17 +475,20 @@ def parse_hy3(data: bytes) -> InterpretedMeet:
                 field_confidence=field_conf,
                 asa_id=(ath_rec.get("member_id") or None),
                 age=ath_rec.get("age"),
+                round_hint=e2.get("round_hint"),
             )
             ev.swims.append(swim)
             pending_e1 = None  # consumed
 
     events = list(events_by_key.values())
 
-    # Overall confidence: mean of event confidences weighted by # of swims
+    # Overall confidence: mean of event confidences weighted by # of swims.
+    # No lower floor — a broken parse (most fields failing) must read as broken
+    # rather than being clamped up to a misleading >=0.5 (#67).
     if events:
         total_swims = sum(len(e.swims) for e in events) or 1
         overall = sum(e.confidence * (len(e.swims) / total_swims) for e in events if e.swims)
-        overall = round(min(0.99, max(0.5, overall)), 3) if total_swims > 0 else 0.0
+        overall = round(min(0.99, overall), 3) if total_swims > 0 else 0.0
     else:
         overall = 0.0
 

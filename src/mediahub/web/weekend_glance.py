@@ -73,7 +73,7 @@ class WeekendGlance:
 
     meet_name: str  # "" when the pipeline had no real name
     n_analysed: int  # swims the engine looked at
-    n_achievements: int  # standout moments detected
+    n_achievements: int  # raw ranked detections (one swim can emit several)
     n_pbs: int
     n_medals: int
     n_golds: int
@@ -85,6 +85,11 @@ class WeekendGlance:
     # from the detector's own ``record`` token (no heuristic, no re-derivation) —
     # a record is counted even when it's also a medal/PB, so the tally is honest.
     n_records: int = 0
+    # Distinct standout SWIMS (recognition.swim_tiers: best band elite/strong,
+    # plus human-promoted highlights, deduped per swim) — the honest headline
+    # figure the stat tile shows. Raw n_achievements stays for consumers that
+    # want the full detection tally.
+    n_standout: int = 0
 
 
 # --------------------------------------------------------------------------- #
@@ -179,10 +184,19 @@ def build_weekend_glance(run_data: dict, *, top_n: int = 3) -> Optional[WeekendG
         meet_name = ""
 
     n_analysed = _safe_int(rr.get("n_swims_analysed", run_data.get("our_swim_count", 0)))
-    # The "standout moments" count and the jump link both describe the ranked
-    # list shown directly below the panel, so base them on what is actually
-    # there (== the ranker's n_achievements, but immune to a stale/odd count).
+    # Raw ranked-detection tally — describes the ranked list shown directly
+    # below the panel (== the ranker's n_achievements, but immune to a
+    # stale/odd count). NOT the headline: one swim can emit several of these.
     n_listed = len(ranked)
+    # The honest headline: distinct standout SWIMS, deduped per swim. Kept
+    # deterministic (pure classification over the same report dict) and
+    # fail-soft — a malformed report reads as zero rather than an error.
+    try:
+        from mediahub.recognition.swim_tiers import n_standout_for_report
+
+        n_standout = int(n_standout_for_report(rr))
+    except Exception:
+        n_standout = 0
 
     n_pbs = n_golds = n_silvers = n_bronzes = n_medals = n_records = 0
     moments: list[GlanceMoment] = []
@@ -247,20 +261,21 @@ def build_weekend_glance(run_data: dict, *, top_n: int = 3) -> Optional[WeekendG
         n_golds=n_golds,
         n_silvers=n_silvers,
         n_bronzes=n_bronzes,
-        lede_stats=_build_lede_stats(n_pbs, n_medals, n_listed, n_analysed, n_records),
+        lede_stats=_build_lede_stats(n_pbs, n_medals, n_standout, n_analysed, n_records),
         top_moments=top_moments,
         n_records=n_records,
+        n_standout=n_standout,
     )
 
 
 def _build_lede_stats(
-    n_pbs: int, n_medals: int, n_achievements: int, n_analysed: int, n_records: int = 0
+    n_pbs: int, n_medals: int, n_standout: int, n_analysed: int, n_records: int = 0
 ) -> str:
     """A fixed factual sentence (no meet name, no user-supplied text — safe to
     embed without escaping). E.g. "3 club records, 4 personal bests and 2 medals
     across 24 analysed swims." Records lead when present (the biggest story of
-    the weekend); falls back to a standout-moment count when there are no
-    records, PBs or medals."""
+    the weekend); falls back to the deduped standout-swim count when there are
+    no records, PBs or medals."""
     parts: list[str] = []
     if n_records:
         parts.append(_plural(n_records, "club record"))
@@ -268,7 +283,7 @@ def _build_lede_stats(
         parts.append(_plural(n_pbs, "personal best"))
     if n_medals:
         parts.append(_plural(n_medals, "medal"))
-    stats = _join_and(parts) or _plural(max(n_achievements, 0), "standout moment")
+    stats = _join_and(parts) or _plural(max(n_standout, 0), "standout swim")
     if n_analysed > 0:
         return f"{stats} across {_plural(n_analysed, 'analysed swim')}."
     return f"{stats}."
@@ -335,8 +350,8 @@ def render_weekend_glance_html(glance: Optional[WeekendGlance]) -> str:
         f'<div class="v" data-mh-count="{glance.n_pbs}">{glance.n_pbs}</div></div>'
         f'<div class="stat medal"{medal_title}><div class="l">Medals</div>'
         f'<div class="v" data-mh-count="{glance.n_medals}">{glance.n_medals}</div></div>'
-        f'<div class="stat"><div class="l">Standout moments</div>'
-        f'<div class="v" data-mh-count="{glance.n_achievements}">{glance.n_achievements}</div></div>'
+        f'<div class="stat"><div class="l">Standout swims</div>'
+        f'<div class="v" data-mh-count="{glance.n_standout}">{glance.n_standout}</div></div>'
         f'<div class="stat"><div class="l">Swims analysed</div>'
         f'<div class="v" data-mh-count="{glance.n_analysed}">{glance.n_analysed}</div></div>'
     )

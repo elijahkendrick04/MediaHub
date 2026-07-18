@@ -38,7 +38,7 @@
   isolation: isolate;
   background: radial-gradient(115% 85% at 50% 10%, var(--mh-surface) 0%, var(--mh-primary) 76%);
   color: var(--mh-on-primary);
-  font-family: 'Inter', system-ui, sans-serif;
+  font-family: var(--mh-font-body, 'Inter', system-ui, sans-serif);
   -webkit-font-smoothing: antialiased;
 }
 .pnb *, .pnb *::before, .pnb *::after { box-sizing: border-box; }
@@ -50,7 +50,7 @@
   text-align: center;
   font-family: var(--mh-font-display, 'Anton', 'Bebas Neue', Impact, sans-serif);
   font-weight: 400; font-size: var(--mh-fit-mega-name-px, 280px);
-  line-height: 0.84; letter-spacing: -0.03em; text-transform: uppercase;
+  line-height: 0.84; letter-spacing: var(--mh-track-mega-name, -0.03em); text-transform: uppercase;
   color: var(--mh-on-primary); white-space: nowrap; opacity: 0.94;
 }
 
@@ -76,7 +76,7 @@
 }
 .pnb__meta { min-width: 0; display: flex; flex-direction: column; gap: 10px; }
 .pnb__event {
-  font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 600;
+  font-family: var(--mh-font-kicker, 'Space Grotesk','Inter',sans-serif); font-weight: 600;
   font-size: 30px; letter-spacing: 0.05em; text-transform: uppercase;
   color: var(--mh-on-surface); overflow-wrap: anywhere;
 }
@@ -87,13 +87,13 @@
   font-weight: 700; font-size: var(--mh-fit-result-px, 78px);
   font-variation-settings: var(--mh-axes-result, normal); line-height: 0.9;
 }
-.pnb__stat { font-family: 'Inter',sans-serif; font-weight: 600; font-size: 23px; color: var(--mh-on-surface); opacity: 0.84; }
-.pnb__brand { flex: 0 0 auto; display: flex; flex-direction: column; align-items: flex-end; gap: 12px; text-align: right; }
+.pnb__stat { font-family: var(--mh-font-body, 'Inter',sans-serif); font-weight: 600; font-size: 23px; color: var(--mh-on-surface); opacity: 0.84; }
+.pnb__brand { flex: 0 0 auto; display: flex; flex-direction: column; align-items: flex-end; gap: var(--mh-sp-3); text-align: right; }
 .pnb__id { display: flex; align-items: center; gap: 14px; }
 .pnb__logo { height: 54px; width: auto; }
 .pnb__logo img, .pnb__logo svg { height: 100%; width: auto; object-fit: contain; display: block; }
-.pnb__club { font-family: 'Inter',sans-serif; font-weight: 800; font-size: 21px; text-transform: uppercase; color: var(--mh-on-surface); }
-.pnb__meet { font-family: 'Inter',sans-serif; font-weight: 500; font-size: 18px; color: var(--mh-on-surface); opacity: 0.72; overflow-wrap: anywhere; }
+.pnb__club { font-family: var(--mh-font-body, 'Inter',sans-serif); font-weight: 800; font-size: 21px; text-transform: uppercase; color: var(--mh-on-surface); }
+.pnb__meet { font-family: var(--mh-font-body, 'Inter',sans-serif); font-weight: 500; font-size: 18px; color: var(--mh-on-surface); opacity: 0.72; overflow-wrap: anywhere; }
 .pnb__sponsor { flex: 0 0 auto; }
 
 /* kicker — top-left, over every plane */
@@ -102,13 +102,13 @@
   display: inline-flex; align-items: center;
   padding: 14px 22px;
   background: var(--mh-accent); color: var(--mh-primary);
-  font-family: 'Space Grotesk','Inter',sans-serif;
+  font-family: var(--mh-font-kicker, 'Space Grotesk','Inter',sans-serif);
   font-weight: 800; font-size: 25px; letter-spacing: 0.16em; text-transform: uppercase;
 }
 .pnb__kicker:empty { display: none; }
 .pnb__first {
   position: absolute; top: 140px; left: 60px; z-index: 4;
-  font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 700;
+  font-family: var(--mh-font-kicker, 'Space Grotesk','Inter',sans-serif); font-weight: 700;
   font-size: 34px; letter-spacing: 0.06em; text-transform: uppercase;
   color: var(--mh-on-primary);
 }
@@ -145,6 +145,7 @@
   <div class="pnb__first">{{ATHLETE_FIRST_NAME}}</div>
 
   <div class="pnb__band">
+    <div class="mh-anchor mh-anchor--panel-tr">{{OVERLAP_ACCENT}}</div>
     <div class="pnb__meta">
       <div class="pnb__event">{{EVENT_NAME}}</div>
       <div class="pnb__result">{{RESULT_VALUE}}</div>

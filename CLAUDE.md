@@ -23,10 +23,12 @@ The system should not become a manual agency or a Canva template shop. The defen
 
 ```
 src/mediahub/          — Main Python package (~43 sub-packages)
-  web/web.py           — Flask monolith (~22,500 lines, 114 routes)
+  web/web.py           — Flask monolith (~69,000 lines, ~465 routes)
   web/club_profile.py  — ClubProfile dataclass + persistence
   media_ai/llm.py      — Cloud LLM wrapper (Gemini/Claude with provider failover)
-  ai_core/             — Provider-agnostic LLM client + bounded ask_with_tools loop (Cap 1)
+  ai_core/             — Provider-agnostic LLM client + bounded ask_with_tools loop (Cap 1);
+                         gemini_transport.py is the single Gemini REST transport + overload
+                         breaker shared by both LLM wrappers (finding #43 convergence)
   club_platform/       — Content types, stubs, athlete spotlight
   brand/               — BrandKit, tone system
   workflow/            — CardStatus, WorkflowStore, content pack, schedule, audit log
@@ -120,7 +122,7 @@ Removing or replacing existing routes and data structures is allowed when an upd
 2. **No dangling links.** Confirm no `url_for()`, template link, or JS call still points at a removed route.
 3. **Callers migrated.** Confirm every caller from the breakage map now uses the replacement.
 4. **Imports resolve.** Import the app and affected modules — no `ImportError` / `NameError` / `AttributeError`.
-5. **Full test suite.** Run `python -m pytest tests/ -q` — expect ~3,500+ passed (see *Running Tests* for the current count), with no *new* failures.
+5. **Full test suite.** Run `python -m pytest tests/ -q` — expect ~13,000+ passed (see *Running Tests* for the current count), with no *new* failures.
 6. **No test cheating.** Confirm no test was deleted, skipped, or weakened just to go green.
 7. **Route works.** Exercise each affected route end-to-end (request → expected response/status).
 8. **Templates render.** Confirm affected pages render with no undefined-variable / missing-field errors.
@@ -230,9 +232,10 @@ A key committed to the repo is a leak even if later removed.
 All test files pass. Run the full suite with no ignores:
 
 ```bash
-# Full suite (current expectation: ~3,500+ passed; skips vary by environment —
+# Full suite (current expectation: ~13,000+ passed; skips vary by environment —
 # 1 in the dev sandbox, more where corpus ZIPs / sample PDFs / optional deps
-# are absent). Last refreshed 2026-06-09: 3,576 passed, 1 skipped.
+# are absent). The pass count grows as tests are added (~10,900 test functions
+# across ~840 files, expanded by parametrisation) — treat the figure as approximate.
 python -m pytest tests/ -q
 ```
 
@@ -244,11 +247,12 @@ Previously-fixed files (now part of the passing suite):
 - `tests/test_pb_discovery.py` — all mock.patch targets updated to canonical `mediahub.*` paths; real ledger pollution cleared
 - `tests/test_corpus_recovery.py` — swim-count gate now scales with corpus size (`min(30_000, max(1_000, captured * 600))`) instead of a flat 30k
 
-## Web interaction (browser automation MCP servers)
+## Web interaction (browser automation + web-search MCP servers)
 
-Four browser-driving MCP servers are wired into `.mcp.json` and pre-approved in
-`.claude/settings.json`, so they auto-start and run without per-call prompts in
-every session in this repo. Full reference: `docs/WEB_INTERACTION.md`.
+Four browser-driving MCP servers plus one dedicated **keyless** web-search server
+are wired into `.mcp.json` and pre-approved in `.claude/settings.json`, so they
+auto-start and run without per-call prompts in every session in this repo. Full
+reference: `docs/WEB_INTERACTION.md`.
 
 - **`playwright`** (primary, always works) — the remote container prebakes the
   matching Chromium at `/opt/pw-browsers`, so navigate / snapshot / click / type
@@ -263,14 +267,25 @@ every session in this repo. Full reference: `docs/WEB_INTERACTION.md`.
   anti-bot resilience. OPTIONAL: inert until `BROWSERBASE_API_KEY` +
   `BROWSERBASE_PROJECT_ID` are set in `.env` (keys are env-only — never hardcode).
 
-When to use vs. the built-ins: `WebFetch`/`WebSearch` are read-only — use them
-for research. The moment a task needs to click, log in, fill a form, drive a
-multi-step flow, or check the *running* app's behaviour, use a browser server
-(default: `playwright`). For logged-in-session parity (driving a real
-authenticated Chrome over CDP or a persistent profile), see the recipes in
-`docs/WEB_INTERACTION.md`. Browser automation never bypasses the human-approval
-rule: nothing gets published to an external/social account without explicit
-human approval (see "External integrations").
+A dedicated **web-search** server is also wired in for *finding* things on the
+open web (browser automation *operates* pages — it's the wrong tool for search):
+
+- **`ddg-search`** (`@oevortex/ddg_search`) — **keyless** DuckDuckGo web search;
+  no API key, no account, no card. Works out of the box. Chosen because it's the
+  one keyless search MCP that reliably returns real results from the deployment
+  egress (the keyed searchers — Exa/Tavily/Brave/Firecrawl — and the other
+  keyless candidates were tested and ruled out; see `docs/WEB_INTERACTION.md`).
+  If a key is later acceptable, Tavily's no-card free tier is the easiest upgrade.
+
+When to use vs. the built-ins: `WebFetch`/`WebSearch` handle quick read-only
+lookups. For finding sources on the open web, prefer **`ddg-search`** — more
+robust than scraping a results page. The moment a task needs to click, log in,
+fill a form, drive a multi-step flow, or check the *running* app's behaviour, use
+a **browser server** (default: `playwright`). For logged-in-session parity
+(driving a real authenticated Chrome over CDP or a persistent profile), see the
+recipes in `docs/WEB_INTERACTION.md`. These servers never bypass the
+human-approval rule: nothing gets published to an external/social account without
+explicit human approval (see "External integrations").
 
 ## Contributor / engineering setup
 
@@ -388,6 +403,29 @@ roadmap bot relies on to read `roadmap: <ID> <status>` directives. The two
 self-merging bots (`roadmap-autoupdate.yml`, the `autotest` CI fixer in
 `gitops.py`) use `gh pr merge --merge`; the roadmap bot keeps its `[skip render]`
 marker on the merge-commit subject via `--subject`.
+
+**Assistant PR watching & auto-merge (maintainer standing preference,
+2026-07-14).** When Claude opens a PR, drive it to merge *hands-off* — the
+maintainer does not want to click-approve recurring reminders:
+
+- **Auto-merge on green, no per-PR ask.** Once a PR Claude opened is fully
+  green, merge it (merge commit) without asking. This is the default; only
+  pause if the maintainer said "don't merge / hold" for that specific PR, or
+  it's an intentional draft.
+- **Prefer GitHub-native auto-merge.** Enable auto-merge (`enable_pr_auto_merge`,
+  merge method `merge`) right after opening the PR so GitHub merges it
+  server-side the instant required checks pass — no polling, no wake-ups.
+- **Do NOT schedule recurring self-check-ins to poll a PR.** No hourly (or any
+  cadence) `send_later` / `ScheduleWakeup` timers just to re-check CI — those
+  are what the maintainer asked to stop. Rely on GitHub-native auto-merge plus
+  the webhook PR subscription (which already pushes CI *failures* and review
+  comments instantly). If native auto-merge is genuinely unavailable (repo
+  setting off, or no required checks), poll on a *short* interval only while
+  checks are actively running and stop the moment it merges — never idle
+  hour-long waits, and never leave a standing recurring timer.
+- On a CI failure event, diagnose and push a fix on the branch; auto-merge then
+  carries it the rest of the way once green.
+
 The product is delivered to customers as a hosted web application — there is
 no customer-facing self-host or local-install path. This is a deliberate,
 decided commercial principle (hosted-only; no free or capped self-host tier) —

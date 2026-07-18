@@ -69,7 +69,6 @@ _TAGS = re.compile(r"<[^>]+>", re.S)
 _WS = re.compile(r"\s+")
 _ROW = re.compile(r"<tr[^>]*>(.*?)</tr>", re.S | re.I)
 _CELL = re.compile(r"<t[dh][^>]*>(.*?)</t[dh]>", re.S | re.I)
-_TABLE = re.compile(r"<table[^>]*>(.*?)</table>", re.S | re.I)
 _RNK_SJ = re.compile(r'class=["\']rnk_sj["\'][^>]*>(.*?)</p>', re.I | re.S)
 
 
@@ -112,12 +111,24 @@ def time_to_cs(s: str) -> Optional[int]:
     return None
 
 
+def _expand_year(yy: int) -> int:
+    """Expand a 2-digit year, pivoting on the current year so a parsed swim
+    date is never in the future (a result cannot be set in a year yet to come);
+    4-digit years pass through unchanged."""
+    if yy >= 100:
+        return yy
+    yr = 2000 + yy
+    if yr > date.today().year:
+        yr = 1900 + yy
+    return yr
+
+
 def _parse_date(s: str) -> str:
     s = (s or "").strip()
     m = re.fullmatch(r"(\d{2})/(\d{2})/(\d{2,4})", s)
     if m:
         dd, mm, yy = int(m.group(1)), int(m.group(2)), int(m.group(3))
-        yr = 2000 + yy if yy < 100 else yy
+        yr = _expand_year(yy)
         try:
             return date(yr, mm, dd).isoformat()
         except ValueError:
@@ -127,7 +138,7 @@ def _parse_date(s: str) -> str:
         mon = _MONTHS.get(m.group(2).lower())
         if mon:
             dd, yy = int(m.group(1)), int(m.group(3))
-            yr = 2000 + yy if yy < 100 else yy
+            yr = _expand_year(yy)
             try:
                 return date(yr, mon, dd).isoformat()
             except ValueError:
@@ -216,13 +227,10 @@ def parse_personal_best(html: str, tiref: str) -> PBPage:
         if tm and course:
             entries.extend(_rows(tm.group(1), course))
 
-    # Fallback: no course headings found → assume the two tables are LC then SC.
-    if not entries:
-        tables = _TABLE.findall(html or "")
-        if tables:
-            entries.extend(_rows(tables[0], "LC"))
-        if len(tables) >= 2:
-            entries.extend(_rows(tables[1], "SC"))
+    # No positional course fallback: a table whose LC/SC course cannot be
+    # resolved from a heading is ambiguous, and guessing (e.g. first table = LC)
+    # can turn an LC time into a wrong PB against an SC baseline. Per the module
+    # docstring such entries are dropped, never silently defaulted.
 
     # Keep only the fastest per (distance, stroke, course) — defensive; the page
     # is already best-per-event, but a malformed table shouldn't double-count.

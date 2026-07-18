@@ -262,6 +262,91 @@ def record(
     )
 
 
+def reserve(
+    org_id: str,
+    feature: object,
+    *,
+    plan: object = None,
+    org_override: Optional[int] = None,
+) -> Optional[int]:
+    """Atomically reserve a metered slot BEFORE the work runs (deep-review #95).
+
+    Replaces the check-then-act ``enforce()`` + ``record()`` split for concurrency
+    safety: an atomic INSERT-if-under-limit means N concurrent requests at
+    ``limit - 1`` can no longer all pass the gate. Raises :class:`QuotaExceeded`
+    when the org is at the limit. Returns a reservation id to hand to
+    :func:`finalize` when a metered slot was taken, or ``None`` when the feature
+    is unmetered (the caller still calls :func:`finalize`, which records normally
+    on a ``None`` reservation).
+
+    Fails OPEN on any DB error — a transient hiccup never wrongly blocks a paying
+    club (matching ``check()``'s fail-open read).
+    """
+    if not org_id:
+        return None
+    feat = features.normalise(feature)
+    # Generative imagery is metered in its own ledger (imagine_usage); its own
+    # reservation path is out of scope for #95's governance-quota fix.
+    if feat == features.FEATURE_IMAGINE:
+        return None
+    pl = _norm_plan(plan)
+    limit = limit_for(pl, feat, org_override=org_override)
+    if limit < 0:
+        return None  # unmetered — nothing to reserve
+    try:
+        rid = feature_quota.reserve_use(
+            org_id=org_id,
+            feature=feat,
+            limit=limit,
+            window_hours=feature_quota.MONTHLY_WINDOW_HOURS,
+        )
+    except Exception as exc:  # pragma: no cover - fail open on DB failure
+        log.warning("governance.quota: reserve failed (fail-open): %s", exc)
+        return None
+    if rid is None:
+        # At the limit — the atomic insert reserved nothing.
+        used = _used(org_id, feat, None)
+        raise QuotaExceeded(feat, used, limit)
+    return rid
+
+
+def finalize(
+    org_id: str,
+    feature: object,
+    reservation: Optional[int],
+    *,
+    ok: bool = True,
+    provider: Optional[str] = None,
+    model: Optional[str] = None,
+    detail: Optional[str] = None,
+    error: Optional[BaseException] = None,
+) -> None:
+    """Finalize a :func:`reserve` outcome (deep-review #95).
+
+    With a reservation id: update the reserved row — attach metadata on success,
+    or release it (``ok=0``) on failure so a failed billed call is not charged to
+    quota. Without one (unmetered, fail-open, or the imagine ledger): fall back to
+    a plain :func:`record` so metering is unchanged. Best-effort.
+    """
+    if not org_id:
+        return
+    feat = features.normalise(feature)
+    if reservation is None:
+        record(org_id, feature, ok=ok, provider=provider, model=model, detail=detail, error=error)
+        return
+    if feat == features.FEATURE_IMAGINE:
+        return
+    feature_quota.finalize_use(
+        reservation,
+        ok=ok,
+        provider=provider,
+        model=model,
+        detail=detail,
+        error_kind=type(error).__name__ if error is not None else None,
+        error_message=str(error)[:500] if error is not None else None,
+    )
+
+
 __all__ = [
     "UNLIMITED",
     "WARN_FRACTION",
@@ -272,4 +357,6 @@ __all__ = [
     "check",
     "enforce",
     "record",
+    "reserve",
+    "finalize",
 ]

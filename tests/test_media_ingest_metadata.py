@@ -5,9 +5,9 @@ measurements (dimensions / orientation / dominant colours / quality metrics),
 bake EXIF orientation into the pixels, write canonical asset types, and stamp
 ``linked_meet_ids`` when the upload happens from an accessible run context.
 """
+
 from __future__ import annotations
 
-import importlib
 import io
 import json
 import sys
@@ -24,32 +24,17 @@ _ORIENTATION_TAG = 0x0112
 
 
 @pytest.fixture
-def app_env(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    for d in ("runs_v4", "uploads_v4", "club_profiles"):
-        (tmp_path / d).mkdir(parents=True, exist_ok=True)
-
+def app_env(app, web_module, tmp_path):
     import mediahub.media_library.store as mls
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
 
     # Reset the process-level store singleton so each test gets a fresh DB.
     mls._default_store = None
-
-    importlib.reload(cp)
-    importlib.reload(wm)
-
-    app = wm.create_app()
-    app.config["TESTING"] = True
 
     from mediahub.web.club_profile import ClubProfile, save_profile
 
     save_profile(ClubProfile(profile_id="alpha", display_name="Alpha SC"))
     save_profile(ClubProfile(profile_id="beta", display_name="Beta SC"))
-    return app, wm, tmp_path
+    return app, web_module, tmp_path
 
 
 def _write_run(wm, run_id: str, profile_id: str = "alpha") -> None:
@@ -253,9 +238,7 @@ class TestBackfill:
         clip = tmp_path / "clip.mp4"
         clip.write_bytes(b"\x00" * 64)
         store.save(
-            MediaAsset(
-                id="", filename="clip.mp4", path=str(clip), type="footage", profile_id="a"
-            )
+            MediaAsset(id="", filename="clip.mp4", path=str(clip), type="footage", profile_id="a")
         )
         assert store.backfill_measurements(profile_id="a") == 0
 

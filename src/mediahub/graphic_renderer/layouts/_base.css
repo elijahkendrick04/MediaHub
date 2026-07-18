@@ -437,3 +437,27 @@ body {
 
 .story-safe-top { position: absolute; inset: 0 0 auto 0; height: 22%; pointer-events: none; z-index: 2; }
 .story-safe-bot { position: absolute; inset: auto 0 0 0; height: 16%; pointer-events: none; z-index: 2; }
+
+/* ------------------------------------------------------------------
+   Frosted-glass chip (Canva gap analysis B6)
+
+   The "current-generation" text-on-photo treatment: a translucent,
+   brand-tinted panel the viewer can see the photo *through* (a stronger
+   elevation cue than opacity), with a light glass edge that catches the
+   global light. Opt-in via the design-spec accent_treatment "glass_chip";
+   the renderer emits the --mh-glass-* tokens ONLY when the treatment is
+   requested AND the chip ink clears APCA against the tinted fill composited
+   over the pure-white AND pure-black worst-case backdrops
+   (render._glass_role_vars). The fill is the resolved --mh-surface at a
+   gate-chosen alpha (>= 0.30), floored up until legible. Absent tokens →
+   the class falls back to the nominal 0.30 recipe; a chip that consumes
+   --mh-glass-bg with its OPAQUE value as the fallback is byte-identical
+   when glass is off.
+   ------------------------------------------------------------------ */
+.mh-glass {
+  background: var(--mh-glass-bg, rgba(var(--mh-surface-rgb, 20,24,33), 0.30));
+  -webkit-backdrop-filter: var(--mh-glass-filter, blur(12px) saturate(140%));
+  backdrop-filter: var(--mh-glass-filter, blur(12px) saturate(140%));
+  border: var(--mh-glass-border, 1px solid rgba(255,255,255,0.16));
+  box-shadow: var(--mh-glass-shadow, var(--mh-elev-3, 0 6px 20px rgba(10,12,16,0.26)));
+}

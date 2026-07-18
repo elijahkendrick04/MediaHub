@@ -16,7 +16,6 @@ prompts:
 
 from __future__ import annotations
 
-import importlib
 import pathlib
 
 import pytest
@@ -25,27 +24,13 @@ ORG = "org-c11"
 
 
 @pytest.fixture
-def env(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    for sub in ("runs_v4", "club_profiles"):
-        (tmp_path / sub).mkdir(parents=True, exist_ok=True)
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
-
+def env(client, web_module, tmp_path):
     from mediahub.web.club_profile import ClubProfile, save_profile
 
     save_profile(ClubProfile(profile_id=ORG, display_name="Test Club"))
-    app = wm.create_app()
-    app.config["TESTING"] = True
-    c = app.test_client()
+    c = client
     assert c.post("/api/organisation/active", data={"profile_id": ORG}).status_code == 200
-    return {"client": c, "wm": wm, "tmp": tmp_path}
+    return {"client": c, "wm": web_module, "tmp": tmp_path}
 
 
 def test_sponsor_post_get_redirects_to_seeded_free_text(env):

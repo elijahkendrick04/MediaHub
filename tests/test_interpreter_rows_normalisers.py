@@ -120,14 +120,19 @@ class TestNormaliseYob:
         assert c == pytest.approx(conf)
 
     def test_two_digit_year_disambiguation(self) -> None:
-        # Years 00–30 → 2000s; 31–99 → 1900s.
+        # 2-digit years pivot on the current year: a year-of-birth is never in
+        # the future, so a 2-digit year that would land ahead of this year
+        # belongs to the 1900s.
+        import datetime
+
+        this_year = datetime.date.today().year
         v, c = _normalise_yob("05")
         assert v == 2005
         assert c == pytest.approx(0.70)
         v, _ = _normalise_yob("85")
         assert v == 1985
         v, _ = _normalise_yob("30")
-        assert v == 2030
+        assert v == (2030 if 2030 <= this_year else 1930)
         v, _ = _normalise_yob("31")
         assert v == 1931
 

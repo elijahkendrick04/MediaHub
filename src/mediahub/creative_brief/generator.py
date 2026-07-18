@@ -68,7 +68,11 @@ _MOOD_PHOTO_RECIPES: dict[str, str] = {
     "calm": "soft",
     "warm": "soft",
 }
-_DEFAULT_PHOTO_RECIPE = "natural"
+# E1 (Canva gap analysis): briefs without a curated mood look get the MEASURED
+# auto-enhance (photo_adjust.auto_recipe — corrects only what each photo's
+# statistics justify) instead of the old blind fixed "natural" nudge. Healthy
+# photos pass through byte-identical; mood-keyed curated looks are unchanged.
+_DEFAULT_PHOTO_RECIPE = "auto"
 
 
 def _photo_recipe_for_mood(mood: str) -> str:
@@ -193,6 +197,13 @@ class CreativeBrief:
     # (graphic_renderer.text_effects), APCA-policed at apply time. Empty (the
     # default) means no effects, so every legacy card renders byte-identically.
     text_effects: dict[str, str] = field(default_factory=dict)
+    # D6 — the optional per-word emphasis the director named for this card (the
+    # two-tone headline). ``emphasis_word`` is fact-gated at apply time (kept only
+    # when it whole-word matches a slot's actual value); ``emphasis_style`` picks
+    # the treatment (design_spec.EMPHASIS_STYLES). Empty word (the default) ⇒ no
+    # emphasis, so every legacy card renders byte-identically.
+    emphasis_word: str = ""
+    emphasis_style: str = ""
     # 1.10 — brand-token-recolourable library elements painted on this card. Each
     # entry is an ``elements.models.ElementPlacement`` dict (element_id + position
     # + scale + rotation + opacity); the ``sprint_hooks/elements`` hook resolves
@@ -213,6 +224,14 @@ class CreativeBrief:
     # subject). Stamped from graphic_renderer.archetypes.photo_mode() when a v2
     # archetype is chosen, so the motion render can mirror the same source.
     photo_mode: str = ""
+    # E4 (Canva gap analysis) — the shaped photo frame for the windowed
+    # archetypes (design_spec.PHOTO_FRAME_SHAPES: arch / blob / torn_edge).
+    # Executed by the still renderer (render._photo_frame_shape_assets) only on
+    # photo_passepartout / spotlight_disc / full_height_portrait_split, and
+    # mirrored as static geometry in the motion scenes. "" / "rect" (the
+    # default) keeps the raw rectangular window, so every legacy card renders
+    # byte-identically.
+    photo_frame_shape: str = ""
     # M11 (STILLS-5) — the director's validated secondary stats (STAT_KEY names,
     # each verified present in hero_stat_options). The data-led archetypes
     # render them as the {{STAT_CHIPS}} row; empty (the default) collapses.
@@ -512,8 +531,12 @@ def generate(
             else 0,
         )
     else:
+        # C6 (Canva gap analysis): gate the seed walk so it only lands on
+        # colour-role permutations that clear the APCA gate — never on a
+        # colourway the renderer would have to bounce. Byte-identical for kits
+        # whose permutations are all legible (the common case).
         palette = _apply_palette_seed(
-            base_primary, base_secondary, base_accent, variation_seed or 0
+            base_primary, base_secondary, base_accent, variation_seed or 0, gate=True
         )
 
     # Brand / sponsor instructions
@@ -755,6 +778,24 @@ def generate(
                     _pick_pool = sorted(_v2_archetypes.type_archetypes())
                     _director_names = _pick_pool or _names
                 _pick_pool = _pick_pool or None
+            # F4 (systemic floor): content-fit eligibility. Filter the pick pool
+            # (and the director's catalog) to the archetypes that can comfortably
+            # hold THIS card's shape — a long surname or a stat-heavy card is
+            # routed to a layout built for it before the seed picks within it. A
+            # no-op for ordinary content (every archetype stays eligible → the
+            # pool, and the pick, are byte-identical); disabled by
+            # MEDIAHUB_ARCHETYPE_FIT=0. Degrades to the full pool rather than
+            # emptying it, so a card always has somewhere to land.
+            if _names:
+                _fit_card = _v2_archetypes.fit_features_from_layers(
+                    brief.text_layers or {},
+                    has_photo=bool(photo_facts and photo_facts.get("has_photo")),
+                    n_stats=len(getattr(brief, "secondary_stats", None) or []),
+                )
+                _pick_pool = _v2_archetypes.eligible_archetypes(
+                    _fit_card, _pick_pool if _pick_pool is not None else _names
+                )
+                _director_names = _v2_archetypes.eligible_archetypes(_fit_card, _director_names)
             _spec = None
             if _names and use_ai_director:
                 try:
@@ -838,6 +879,28 @@ def generate(
             brief.style_pack = _pack.id
     except Exception:
         log.debug("gen-v2 style-pack selection skipped", exc_info=True)
+
+    # D5 (Canva gap analysis) — curated typography pairing. The old default
+    # left every card on anton-inter; now the no-seed bulk path (the way
+    # production packs render) draws a per-card pairing from the mood-keyed
+    # subset of the curated quadruple table (``graphic_renderer.type_pairs``),
+    # keyed to the same card id the archetype/pack walks hash — stable per
+    # card, varied across a pack, still deterministic. Explicit-seed callers
+    # (?variation_seed / ?stable re-renders) and explicit profiles keep their
+    # pinned pair byte-identically, as does the v1 engine under the kill
+    # switch.
+    try:
+        if _v2_on and variation_profile is None and variation_seed is None:
+            from mediahub.graphic_renderer.type_pairs import pick_pair_for_card
+
+            _pair_key = str(
+                content_item.get("id") or content_item.get("swim_id") or ach.get("swim_id") or ""
+            )
+            brief.typography_pair = pick_pair_for_card(
+                (brief.mood or "").strip(), _pair_key or None
+            ).id
+    except Exception:
+        log.debug("gen-v2 typography-pair selection skipped", exc_info=True)
 
     # G1.8: a pack with the gradient_mesh ground triggers the real mesh engine.
     _sync_background_style_with_pack(brief)
@@ -937,6 +1000,14 @@ def apply_design_spec(brief: CreativeBrief, spec) -> CreativeBrief:
         brief.text_effects = dict(spec.text_effects_map())
     except Exception:
         brief.text_effects = {}
+    # D6 — carry the director's per-word emphasis. The renderer fact-gates the
+    # word against the slot's actual value at apply time, so an empty word (or a
+    # word the card never contains) leaves the card byte-identical.
+    brief.emphasis_word = getattr(spec, "emphasis_word", "") or ""
+    brief.emphasis_style = getattr(spec, "emphasis_style", "") or ""
+    # E4 — carry the director's shaped photo frame. The renderer only executes it
+    # on the three windowed archetypes; "" / "rect" leaves the card byte-identical.
+    brief.photo_frame_shape = getattr(spec, "photo_frame_shape", "") or ""
     # Mood-keyed style pack (G1.28): re-key the decorative pack to the mood's
     # curated preset bundle so the decoration matches the feeling the director
     # chose. This is the same selection ``generate()``'s v2 pack block makes for
@@ -956,6 +1027,20 @@ def apply_design_spec(brief: CreativeBrief, spec) -> CreativeBrief:
                 brief.style_pack = _sp.pick_mood_pack_for_card(brief.mood, _key).id
     except Exception:
         log.debug("gen-v2 mood style-pack re-key skipped", exc_info=True)
+    # D5 — mirror of the style-pack re-key for the typography pairing: the
+    # director's mood re-draws the pairing from its mood subset so the type
+    # register matches the chosen feeling on the pre-computed-spec paths too.
+    # Same guard (a selected pack marks the v2 engine active) and the same
+    # archetype-folded key, so distinct candidates for one card spread across
+    # the subset. Direct callers / the legacy engine stay byte-identical.
+    try:
+        if brief.style_pack and (spec.mood or "").strip():
+            from mediahub.graphic_renderer.type_pairs import pick_pair_for_card
+
+            _key = f"{brief.content_item_id}|{brief.layout_template}"
+            brief.typography_pair = pick_pair_for_card(spec.mood, _key).id
+    except Exception:
+        log.debug("gen-v2 mood typography-pair re-key skipped", exc_info=True)
     _sync_background_style_with_pack(brief)
     _stamp_signature(brief)
     return brief
@@ -1233,7 +1318,44 @@ _PALETTE_PERMUTATIONS: list[tuple[int, int, int]] = [
 ]
 
 
-def _apply_palette_seed(primary: str, secondary: str, accent: str, seed: int) -> dict[str, str]:
+def _permutation_is_legible(colors: tuple[str, str, str], perm: tuple[int, int, int]) -> bool:
+    """True when a permutation's ground/accent pair clears the APCA gate both ways.
+
+    C6 (Canva gap analysis): the permuted accent must read as a kicker on the
+    permuted ground AND as a chip behind ground-coloured text — the same
+    two-direction test the renderer's accent repair uses. A gate import failure
+    (or a non-hex colour) is treated as legible so gating never *removes* a
+    permutation the renderer could still handle.
+    """
+    p_idx, _s_idx, a_idx = perm
+    ground, accent = colors[p_idx], colors[a_idx]
+    try:
+        from mediahub.quality.compliance import is_legible
+
+        return is_legible(accent, ground) and is_legible(ground, accent)
+    except Exception:
+        return True
+
+
+def gate_surviving_seeds(primary: str, secondary: str, accent: str) -> list[int]:
+    """The 1-based seeds whose colour-role permutation clears the APCA gate (C6).
+
+    Deterministic and order-preserving over ``_PALETTE_PERMUTATIONS``. Used to
+    remap the seed walk onto only the legible permutations, so a seed never lands
+    on a colourway the gate would bounce. Empty only if EVERY permutation fails
+    (a pathological all-illegible kit) — the caller then keeps the raw seed.
+    """
+    colors = (primary, secondary, accent)
+    return [
+        i + 1
+        for i, perm in enumerate(_PALETTE_PERMUTATIONS)
+        if _permutation_is_legible(colors, perm)
+    ]
+
+
+def _apply_palette_seed(
+    primary: str, secondary: str, accent: str, seed: int, *, gate: bool = False
+) -> dict[str, str]:
     """Permute role assignments based on the seed.
 
     The actual hex values come from the club's BrandKit and are NEVER
@@ -1243,9 +1365,20 @@ def _apply_palette_seed(primary: str, secondary: str, accent: str, seed: int) ->
     integer maps to a consistent visual permutation.
 
     seed == 0 -> identity (legacy default).
+
+    ``gate=True`` (C6) remaps the seed onto only the gate-surviving permutations
+    (:func:`gate_surviving_seeds`) so a seed can never select an illegible
+    colourway. When every permutation survives — the common case, and every
+    single-/two-colour legible kit — the survivor list is the full list and the
+    mapping is byte-identical to the ungated walk, preserving the legacy seed
+    contract; only a kit with a genuinely illegible permutation is remapped.
     """
     if seed <= 0:
         return {"primary": primary, "secondary": secondary, "accent": accent}
+    if gate:
+        survivors = gate_surviving_seeds(primary, secondary, accent)
+        if survivors:
+            seed = survivors[(seed - 1) % len(survivors)]
     colors = (primary, secondary, accent)
     p_idx, s_idx, a_idx = _PALETTE_PERMUTATIONS[(seed - 1) % len(_PALETTE_PERMUTATIONS)]
     return {

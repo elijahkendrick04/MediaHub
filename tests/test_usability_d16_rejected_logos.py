@@ -8,30 +8,10 @@ and surfaced as a warning list above the grid.
 
 from __future__ import annotations
 
-import importlib
 import io
 
-import pytest
 
-
-@pytest.fixture
-def app_env(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    (tmp_path / "club_profiles").mkdir(parents=True, exist_ok=True)
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
-    app = wm.create_app()
-    app.config.update(TESTING=True, SECRET_KEY="x")
-    return app, wm
-
-
-def test_stashed_rejections_render_and_clear(app_env):
-    app, _wm = app_env
+def test_stashed_rejections_render_and_clear(app):
     from mediahub.web.club_profile import ClubProfile, save_profile
 
     save_profile(ClubProfile(profile_id="club-a", display_name="Club A"))
@@ -51,8 +31,7 @@ def test_stashed_rejections_render_and_clear(app_env):
     assert "crest.bmp" not in html2
 
 
-def test_manual_setup_rejected_logo_is_surfaced(app_env, monkeypatch):
-    app, _wm = app_env
+def test_manual_setup_rejected_logo_is_surfaced(app, monkeypatch):
     import mediahub.brand.logos as _logos_mod
 
     def _reject(*a, **k):

@@ -26,6 +26,7 @@ import os
 from dataclasses import dataclass, field
 from typing import Optional
 
+from mediahub.ai_core.prompt_guard import SYSTEM_GUARD, delimit_untrusted, scan
 from mediahub.web_research import verify
 from mediahub.web_research.safe_fetch import safe_fetch
 from mediahub.web_research.search import WebResearcher
@@ -34,7 +35,6 @@ log = logging.getLogger(__name__)
 
 DEFAULT_MAX_ROUNDS = 4
 DEFAULT_MAX_TOKENS = 1200
-_INCOMPLETE_MARKER = "still gathering evidence"
 
 _SYSTEM = (
     "You are a meticulous web researcher. Answer the user's question using ONLY "
@@ -43,7 +43,7 @@ _SYSTEM = (
     "official / authoritative sources. Never invent facts, names, times, or "
     "numbers — if the sources don't support a claim, say what you could and could "
     "not verify. When done, give a concise answer and list the source URLs you "
-    "actually used. Be efficient: a few targeted searches and fetches, not many."
+    "actually used. Be efficient: a few targeted searches and fetches, not many.\n\n" + SYSTEM_GUARD
 )
 
 _TOOLS = [
@@ -101,6 +101,13 @@ def _max_tokens() -> int:
         return DEFAULT_MAX_TOKENS
 
 
+def _as_data(text: str) -> str:
+    """Fence scraped tool output as untrusted DATA (prompt-injection guard): the
+    system prompt tells the model never to follow instructions inside the fence,
+    and a scan hit flags the block so it's called out explicitly."""
+    return delimit_untrusted(text, flagged=bool(scan(text)))
+
+
 def deep_research(
     question: str, *, max_rounds: Optional[int] = None, provider: Optional[str] = None
 ) -> ResearchResult:
@@ -140,11 +147,11 @@ def deep_research(
             for i, r in enumerate(results, 1):
                 _record(r.url)
                 lines.append(f"{i}. {r.title}\n   {r.url}\n   {r.snippet}".rstrip())
-            return "\n".join(lines)
+            return _as_data("\n".join(lines))
         if name == "fetch_url":
             url = (args.get("url") or "").strip()
             _record(url)
-            return safe_fetch(url) or "(could not fetch or parse this page)"
+            return _as_data(safe_fetch(url) or "(could not fetch or parse this page)")
         return f"(unknown tool: {name})"
 
     rounds = max_rounds if max_rounds is not None else _max_rounds()
@@ -159,7 +166,9 @@ def deep_research(
         provider=provider,
     )
     answer = (convo.text or "").strip()
-    complete = bool(answer) and _INCOMPLETE_MARKER not in answer.lower()
+    # Completeness is the round-cap flag, not a substring of the answer — a real
+    # answer that merely contains "still gathering evidence" must not be discarded.
+    complete = bool(answer) and not getattr(convo, "exhausted", False)
     log.info(
         "deep_research: complete=%s rounds<=%d tool_calls=%d sources=%d",
         complete,

@@ -4,6 +4,7 @@ test_turn_into.py — deterministic-mode tests for the Turn-Into engine.
 All tests run with ``deterministic=True`` so they never call the LLM and the
 pack contents are stable.
 """
+
 from __future__ import annotations
 
 import json
@@ -11,6 +12,8 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+
+import pytest
 
 
 def _tempdir() -> "tempfile.TemporaryDirectory[str]":
@@ -101,6 +104,7 @@ def _run_data() -> dict:
 
 def _profile(sponsor: str = "", notes: str = ""):
     from mediahub.web.club_profile import ClubProfile
+
     return ClubProfile(
         profile_id="test-profile",
         display_name="Test Club",
@@ -116,10 +120,19 @@ class TestTurnIntoStructure(unittest.TestCase):
 
     def test_pack_has_required_top_level_keys(self):
         from mediahub.turn_into import turn_meet_into_pack
+
         pack = turn_meet_into_pack(_run_data(), _profile(), deterministic=True)
-        for key in ("pack_id", "run_id", "generated_at", "meet_name",
-                    "profile_id", "voice_tone", "deterministic",
-                    "artefacts", "skipped"):
+        for key in (
+            "pack_id",
+            "run_id",
+            "generated_at",
+            "meet_name",
+            "profile_id",
+            "voice_tone",
+            "deterministic",
+            "artefacts",
+            "skipped",
+        ):
             self.assertIn(key, pack, f"missing pack key: {key}")
         self.assertTrue(pack["deterministic"])
         self.assertEqual(pack["run_id"], "test-run")
@@ -127,21 +140,31 @@ class TestTurnIntoStructure(unittest.TestCase):
 
     def test_pack_with_no_sponsor_or_next_meet_produces_6_artefacts(self):
         from mediahub.turn_into import turn_meet_into_pack
+
         pack = turn_meet_into_pack(_run_data(), _profile(), deterministic=True)
         types = [a["type"] for a in pack["artefacts"]]
         # Always present: 6 artefacts (no sponsor, no next meet)
-        self.assertEqual(set(types), {
-            "meet_recap", "swimmer_spotlight", "data_thread",
-            "parent_newsletter", "club_report", "coach_quote",
-        })
+        self.assertEqual(
+            set(types),
+            {
+                "meet_recap",
+                "swimmer_spotlight",
+                "data_thread",
+                "parent_newsletter",
+                "club_report",
+                "coach_quote",
+            },
+        )
         skip_types = [s["type"] for s in pack["skipped"]]
         self.assertIn("sponsor_thank_you", skip_types)
         self.assertIn("next_meet_preview", skip_types)
 
     def test_pack_with_sponsor_only_includes_sponsor(self):
         from mediahub.turn_into import turn_meet_into_pack
+
         pack = turn_meet_into_pack(
-            _run_data(), _profile(sponsor="Acme Sports"),
+            _run_data(),
+            _profile(sponsor="Acme Sports"),
             deterministic=True,
         )
         types = [a["type"] for a in pack["artefacts"]]
@@ -152,6 +175,7 @@ class TestTurnIntoStructure(unittest.TestCase):
 
     def test_pack_with_next_meet_in_notes_produces_preview(self):
         from mediahub.turn_into import turn_meet_into_pack
+
         pack = turn_meet_into_pack(
             _run_data(),
             _profile(notes="Next meet: Nationals 2026 — 2026-06-10"),
@@ -164,6 +188,7 @@ class TestTurnIntoStructure(unittest.TestCase):
 
     def test_full_profile_produces_all_eight(self):
         from mediahub.turn_into import turn_meet_into_pack
+
         pack = turn_meet_into_pack(
             _run_data(),
             _profile(sponsor="Acme Sports", notes="Next meet: Nationals — 2026-06-10"),
@@ -171,15 +196,24 @@ class TestTurnIntoStructure(unittest.TestCase):
         )
         self.assertEqual(len(pack["artefacts"]), 8)
         types = [a["type"] for a in pack["artefacts"]]
-        self.assertEqual(set(types), {
-            "meet_recap", "swimmer_spotlight", "data_thread",
-            "parent_newsletter", "club_report", "sponsor_thank_you",
-            "coach_quote", "next_meet_preview",
-        })
+        self.assertEqual(
+            set(types),
+            {
+                "meet_recap",
+                "swimmer_spotlight",
+                "data_thread",
+                "parent_newsletter",
+                "club_report",
+                "sponsor_thank_you",
+                "coach_quote",
+                "next_meet_preview",
+            },
+        )
         self.assertEqual(pack["skipped"], [])
 
     def test_pack_never_exceeds_8_artefacts(self):
         from mediahub.turn_into import turn_meet_into_pack
+
         pack = turn_meet_into_pack(
             _run_data(),
             _profile(sponsor="Acme Sports", notes="Next meet: Nationals — 2026-06-10"),
@@ -193,6 +227,7 @@ class TestArtefactPlatformVariants(unittest.TestCase):
 
     def setUp(self):
         from mediahub.turn_into import turn_meet_into_pack
+
         self.pack = turn_meet_into_pack(
             _run_data(),
             _profile(sponsor="Acme Sports", notes="Next meet: Nationals — 2026-06-10"),
@@ -235,13 +270,15 @@ class TestArtefactPlatformVariants(unittest.TestCase):
         self.assertGreater(len(spot["cards"]), 0)
         self.assertLessEqual(len(spot["cards"]), 3)
         names = [c["swimmer"] for c in spot["cards"]]
-        self.assertEqual(len(names), len(set(names)),
-                         "spotlight should produce one card per distinct swimmer")
+        self.assertEqual(
+            len(names), len(set(names)), "spotlight should produce one card per distinct swimmer"
+        )
 
 
 class TestSkippedNotes(unittest.TestCase):
     def test_skipped_entries_have_type_and_reason(self):
         from mediahub.turn_into import turn_meet_into_pack
+
         pack = turn_meet_into_pack(_run_data(), _profile(), deterministic=True)
         self.assertGreater(len(pack["skipped"]), 0)
         for s in pack["skipped"]:
@@ -255,6 +292,7 @@ class TestPackStorage(unittest.TestCase):
 
     def test_save_load_roundtrip(self):
         from mediahub.turn_into import turn_meet_into_pack, save_pack, load_pack, list_packs
+
         with _tempdir() as tmp:
             os.environ["DATA_DIR"] = tmp
             try:
@@ -273,6 +311,7 @@ class TestPackStorage(unittest.TestCase):
 
     def test_old_packs_preserved_when_regenerating(self):
         from mediahub.turn_into import turn_meet_into_pack, save_pack, list_packs
+
         with _tempdir() as tmp:
             os.environ["DATA_DIR"] = tmp
             try:
@@ -294,17 +333,18 @@ class TestVoiceProfileUsage(unittest.TestCase):
         from mediahub.voice.profile import VoiceProfile
         from mediahub.voice.store import save_voice_profile
         from mediahub.turn_into import turn_meet_into_pack
+
         with _tempdir() as tmp:
             base = Path(tmp)
             vp = VoiceProfile(profile_id="test-profile", sign_off="—Test SC")
             save_voice_profile(vp, base_dir=base)
             # Point voice loader at our tempdir by monkey-patching the default dir.
             import mediahub.voice.store as vs
+
             orig_dir = vs._DEFAULT_DIR
             vs._DEFAULT_DIR = base
             try:
-                pack = turn_meet_into_pack(_run_data(), _profile(),
-                                           deterministic=True)
+                pack = turn_meet_into_pack(_run_data(), _profile(), deterministic=True)
             finally:
                 vs._DEFAULT_DIR = orig_dir
             recap = next(a for a in pack["artefacts"] if a["type"] == "meet_recap")
@@ -314,74 +354,86 @@ class TestVoiceProfileUsage(unittest.TestCase):
 class TestWebRoutes(unittest.TestCase):
     """Integration test via the Flask test client."""
 
-    def _make_app(self, tmp: str):
-        os.environ["DATA_DIR"] = tmp
-        os.environ["RUNS_DIR"] = tmp + "/runs_v4"
-        os.environ["UPLOADS_DIR"] = tmp + "/uploads_v4"
-        Path(tmp + "/runs_v4").mkdir(parents=True, exist_ok=True)
-        # Reset cached singletons in web module so DATA_DIR re-resolves.
-        import importlib
-        import mediahub.web.web as wm
-        importlib.reload(wm)
-        app = wm.create_app()
+    @pytest.fixture(autouse=True)
+    def _wire_web(self, web_module, tmp_path):
+        """Bind the shared, DATA_DIR-isolated web module and this test's
+        tmp_path onto the instance.
+
+        The ``web_module`` fixture (via ``_isolate_data_dir``) has already
+        pointed DATA_DIR / RUNS_DIR / UPLOADS_DIR at ``tmp_path`` and repointed
+        the module's path globals + cleared its per-run caches — the surgical,
+        no-reload equivalent of the old ``importlib.reload(web)``.
+        unittest.TestCase can't take fixture arguments directly, so this autouse
+        fixture stashes them on ``self``."""
+        self._wm = web_module
+        self._tmp = tmp_path
+
+    def _make_app(self):
+        app = self._wm.create_app()
         # Bypass the first-run organisation gate — these tests assert
         # behaviour of downstream routes and don't seed a profile.
         app.config["TESTING"] = True
         return app
 
     def test_post_turn_into_then_view_pack(self):
-        with _tempdir() as tmp:
-            app = self._make_app(tmp)
-            Path(tmp + "/runs_v4/run-x.json").write_text(json.dumps({
-                **_run_data(), "run_id": "run-x",
-            }))
-            client = app.test_client()
-            r = client.post("/api/runs/run-x/turn-into",
-                            json={"deterministic": True})
-            self.assertEqual(r.status_code, 200)
-            data = r.get_json()
-            self.assertTrue(data["ok"])
-            self.assertEqual(data["n_artefacts"], 6)
-            self.assertIn("sponsor_thank_you", data["skipped"])
-            # View the rendered pack page
-            r2 = client.get(data["pack_url"])
-            self.assertEqual(r2.status_code, 200)
-            body = r2.get_data(as_text=True)
-            # J-4: the one user-facing name for the feature is "Repurpose pack".
-            self.assertIn("Repurpose pack", body)
-            self.assertIn("DRAFT", body)
-            self.assertIn("X thread", body)
+        tmp = str(self._tmp)
+        app = self._make_app()
+        Path(tmp + "/runs_v4/run-x.json").write_text(
+            json.dumps(
+                {
+                    **_run_data(),
+                    "run_id": "run-x",
+                }
+            )
+        )
+        client = app.test_client()
+        r = client.post("/api/runs/run-x/turn-into", json={"deterministic": True})
+        self.assertEqual(r.status_code, 200)
+        data = r.get_json()
+        self.assertTrue(data["ok"])
+        self.assertEqual(data["n_artefacts"], 6)
+        self.assertIn("sponsor_thank_you", data["skipped"])
+        # View the rendered pack page
+        r2 = client.get(data["pack_url"])
+        self.assertEqual(r2.status_code, 200)
+        body = r2.get_data(as_text=True)
+        # J-4: the one user-facing name for the feature is "Repurpose pack".
+        self.assertIn("Repurpose pack", body)
+        self.assertIn("DRAFT", body)
+        self.assertIn("X thread", body)
 
     def test_edit_caption_persists(self):
-        with _tempdir() as tmp:
-            app = self._make_app(tmp)
-            Path(tmp + "/runs_v4/run-y.json").write_text(json.dumps({
-                **_run_data(), "run_id": "run-y",
-            }))
-            client = app.test_client()
-            r = client.post("/api/runs/run-y/turn-into",
-                            json={"deterministic": True})
-            pid = r.get_json()["pack_id"]
-            r2 = client.post(
-                f"/api/runs/run-y/turn-into/{pid}/caption",
-                json={"artefact_index": 0, "caption_key": "default",
-                      "text": "My edited recap."},
+        tmp = str(self._tmp)
+        app = self._make_app()
+        Path(tmp + "/runs_v4/run-y.json").write_text(
+            json.dumps(
+                {
+                    **_run_data(),
+                    "run_id": "run-y",
+                }
             )
-            self.assertEqual(r2.status_code, 200)
-            from mediahub.turn_into import load_pack
-            pack = load_pack("run-y", pid, base_dir=Path(tmp) / "turn_into_packs")
-            self.assertEqual(pack["artefacts"][0]["captions"]["default"],
-                             "My edited recap.")
+        )
+        client = app.test_client()
+        r = client.post("/api/runs/run-y/turn-into", json={"deterministic": True})
+        pid = r.get_json()["pack_id"]
+        r2 = client.post(
+            f"/api/runs/run-y/turn-into/{pid}/caption",
+            json={"artefact_index": 0, "caption_key": "default", "text": "My edited recap."},
+        )
+        self.assertEqual(r2.status_code, 200)
+        from mediahub.turn_into import load_pack
+
+        pack = load_pack("run-y", pid, base_dir=Path(tmp) / "turn_into_packs")
+        self.assertEqual(pack["artefacts"][0]["captions"]["default"], "My edited recap.")
 
     def test_existing_routes_still_200(self):
-        with _tempdir() as tmp:
-            app = self._make_app(tmp)
-            client = app.test_client()
-            # /settings now redirects to home (operator-config rewrite);
-            # the routes here are the ones that still render 200.
-            for path in ("/upload", "/organisation"):
-                r = client.get(path)
-                self.assertEqual(r.status_code, 200, f"{path} != 200")
+        app = self._make_app()
+        client = app.test_client()
+        # /settings now redirects to home (operator-config rewrite);
+        # the routes here are the ones that still render 200.
+        for path in ("/upload", "/organisation"):
+            r = client.get(path)
+            self.assertEqual(r.status_code, 200, f"{path} != 200")
 
     def test_async_status_survives_cross_worker_poll(self):
         """Regression: with gunicorn --workers 2 the status poll often
@@ -389,62 +441,70 @@ class TestWebRoutes(unittest.TestCase):
         The job must still resolve from the shared on-disk record instead
         of the spurious 'job not found' the user saw in the UI."""
         import time as _time
-        import mediahub.web.web as wm
-        with _tempdir() as tmp:
-            app = self._make_app(tmp)
-            Path(tmp + "/runs_v4/run-z.json").write_text(json.dumps({
-                **_run_data(), "run_id": "run-z",
-            }))
-            client = app.test_client()
-            r = client.post("/api/runs/run-z/turn-into",
-                            json={"deterministic": True, "async": True})
-            self.assertEqual(r.status_code, 200)
-            body = r.get_json()
-            self.assertEqual(body["status"], "running")
-            job_id = body["job_id"]
-            status_url = body["status_url"]
 
-            # Wait for the background (deterministic) generation to finish.
-            deadline = _time.time() + 5.0
-            done = None
-            while _time.time() < deadline:
-                jr = wm._ti_job_read(job_id)
-                if jr and jr.get("status") == "done":
-                    done = jr
-                    break
-                _time.sleep(0.05)
-            self.assertIsNotNone(done, "job never completed on disk")
+        wm = self._wm
+        tmp = str(self._tmp)
+        app = self._make_app()
+        Path(tmp + "/runs_v4/run-z.json").write_text(
+            json.dumps(
+                {
+                    **_run_data(),
+                    "run_id": "run-z",
+                }
+            )
+        )
+        client = app.test_client()
+        r = client.post("/api/runs/run-z/turn-into", json={"deterministic": True, "async": True})
+        self.assertEqual(r.status_code, 200)
+        body = r.get_json()
+        self.assertEqual(body["status"], "running")
+        job_id = body["job_id"]
+        status_url = body["status_url"]
 
-            # Simulate the poll landing on the *other* worker: that worker
-            # has nothing in its in-memory cache for this job_id.
-            wm._turn_into_jobs.pop(job_id, None)
-            self.assertNotIn(job_id, wm._turn_into_jobs)
+        # Wait for the background (deterministic) generation to finish.
+        deadline = _time.time() + 5.0
+        done = None
+        while _time.time() < deadline:
+            jr = wm._ti_job_read(job_id)
+            if jr and jr.get("status") == "done":
+                done = jr
+                break
+            _time.sleep(0.05)
+        self.assertIsNotNone(done, "job never completed on disk")
 
-            r2 = client.get(status_url)
-            self.assertEqual(r2.status_code, 200,
-                             "cross-worker status poll must not 404")
-            data = r2.get_json()
-            self.assertEqual(data["status"], "done")
-            self.assertTrue(data.get("pack_url"))
+        # Simulate the poll landing on the *other* worker: that worker
+        # has nothing in its in-memory cache for this job_id.
+        wm._turn_into_jobs.pop(job_id, None)
+        self.assertNotIn(job_id, wm._turn_into_jobs)
+
+        r2 = client.get(status_url)
+        self.assertEqual(r2.status_code, 200, "cross-worker status poll must not 404")
+        data = r2.get_json()
+        self.assertEqual(data["status"], "done")
+        self.assertTrue(data.get("pack_url"))
 
     def test_status_rejects_mismatched_run(self):
         """A job_id created under one run must not resolve via another
         run's status URL — defensive guard on the shared disk record."""
-        import mediahub.web.web as wm
-        with _tempdir() as tmp:
-            app = self._make_app(tmp)
-            for rid in ("run-a", "run-b"):
-                Path(tmp + f"/runs_v4/{rid}.json").write_text(json.dumps({
-                    **_run_data(), "run_id": rid,
-                }))
-            client = app.test_client()
-            r = client.post("/api/runs/run-a/turn-into",
-                            json={"deterministic": True, "async": True})
-            job_id = r.get_json()["job_id"]
-            # Force the disk path (the record carries run_id="run-a").
-            wm._turn_into_jobs.pop(job_id, None)
-            r2 = client.get(f"/api/runs/run-b/turn-into-status/{job_id}")
-            self.assertEqual(r2.status_code, 404)
+        wm = self._wm
+        tmp = str(self._tmp)
+        app = self._make_app()
+        for rid in ("run-a", "run-b"):
+            Path(tmp + f"/runs_v4/{rid}.json").write_text(
+                json.dumps(
+                    {
+                        **_run_data(),
+                        "run_id": rid,
+                    }
+                )
+            )
+        client = app.test_client()
+        r = client.post("/api/runs/run-a/turn-into", json={"deterministic": True, "async": True})
+        job_id = r.get_json()["job_id"]
+        # Force the disk path (the record carries run_id="run-a").
+        wm._turn_into_jobs.pop(job_id, None)
+        r2 = client.get(f"/api/runs/run-b/turn-into-status/{job_id}")
+        self.assertEqual(r2.status_code, 404)
 
 
 class TestArtefactsAreAIMade(unittest.TestCase):
@@ -457,6 +517,7 @@ class TestArtefactsAreAIMade(unittest.TestCase):
 
     def test_all_artefacts_reach_the_llm(self):
         from unittest import mock
+
         os.environ["MEDIAHUB_TURNINTO_PARALLEL"] = "0"
         try:
             captured: list[str] = []
@@ -469,18 +530,19 @@ class TestArtefactsAreAIMade(unittest.TestCase):
                 captured.append(prompt)
                 return "AI-LONGFORM :: " + prompt.splitlines()[0][:40]
 
-            with mock.patch("mediahub.web.ai_caption.call_claude",
-                            side_effect=fake_call), \
-                 mock.patch("mediahub.media_ai.llm.generate",
-                            side_effect=fake_longform), \
-                 mock.patch("mediahub.media_ai.llm.generate_json",
-                            return_value={"subject": "AI-SUBJECT line",
-                                          "preheader": "AI-PREHEADER line"}):
+            with (
+                mock.patch("mediahub.web.ai_caption.call_claude", side_effect=fake_call),
+                mock.patch("mediahub.media_ai.llm.generate", side_effect=fake_longform),
+                mock.patch(
+                    "mediahub.media_ai.llm.generate_json",
+                    return_value={"subject": "AI-SUBJECT line", "preheader": "AI-PREHEADER line"},
+                ),
+            ):
                 from mediahub.turn_into import turn_meet_into_pack
+
                 pack = turn_meet_into_pack(
                     _run_data(),
-                    _profile(sponsor="Acme Sports",
-                             notes="Next meet: Nationals — 2026-06-10"),
+                    _profile(sponsor="Acme Sports", notes="Next meet: Nationals — 2026-06-10"),
                     deterministic=False,
                 )
         finally:
@@ -510,8 +572,9 @@ class TestArtefactsAreAIMade(unittest.TestCase):
         self.assertTrue(by["data_thread"]["captions"]["linkedin"].startswith("AI-WRITTEN"))
         # Per-swimmer spotlight captions (these always worked, but assert
         # they still do).
-        self.assertTrue(all(v.startswith("AI-WRITTEN")
-                            for v in by["swimmer_spotlight"]["captions"].values()))
+        self.assertTrue(
+            all(v.startswith("AI-WRITTEN") for v in by["swimmer_spotlight"]["captions"].values())
+        )
 
         # The model actually received real meet context for the aggregate
         # briefs (not the empty prose that used to trigger the fallback).
@@ -522,19 +585,22 @@ class TestArtefactsAreAIMade(unittest.TestCase):
 
     def test_artefacts_carry_ai_source_marker(self):
         from unittest import mock
+
         os.environ["MEDIAHUB_TURNINTO_PARALLEL"] = "0"
         try:
-            with mock.patch("mediahub.web.ai_caption.call_claude",
-                            return_value="AI-WRITTEN copy"), \
-                 mock.patch("mediahub.media_ai.llm.generate",
-                            return_value="AI-LONGFORM copy"), \
-                 mock.patch("mediahub.media_ai.llm.generate_json",
-                            return_value={"subject": "S", "preheader": "P"}):
+            with (
+                mock.patch("mediahub.web.ai_caption.call_claude", return_value="AI-WRITTEN copy"),
+                mock.patch("mediahub.media_ai.llm.generate", return_value="AI-LONGFORM copy"),
+                mock.patch(
+                    "mediahub.media_ai.llm.generate_json",
+                    return_value={"subject": "S", "preheader": "P"},
+                ),
+            ):
                 from mediahub.turn_into import turn_meet_into_pack
+
                 pack = turn_meet_into_pack(
                     _run_data(),
-                    _profile(sponsor="Acme Sports",
-                             notes="Next meet: Nationals — 2026-06-10"),
+                    _profile(sponsor="Acme Sports", notes="Next meet: Nationals — 2026-06-10"),
                     deterministic=False,
                 )
         finally:
@@ -547,20 +613,20 @@ class TestArtefactsAreAIMade(unittest.TestCase):
         AI-written: the artefact is marked source='fallback' and its notes say
         why (the review UI badges these)."""
         from unittest import mock
+
         os.environ["MEDIAHUB_TURNINTO_PARALLEL"] = "0"
         try:
             boom = RuntimeError("provider down")
-            with mock.patch("mediahub.web.ai_caption.call_claude",
-                            side_effect=boom), \
-                 mock.patch("mediahub.media_ai.llm.generate",
-                            side_effect=boom), \
-                 mock.patch("mediahub.media_ai.llm.generate_json",
-                            side_effect=boom):
+            with (
+                mock.patch("mediahub.web.ai_caption.call_claude", side_effect=boom),
+                mock.patch("mediahub.media_ai.llm.generate", side_effect=boom),
+                mock.patch("mediahub.media_ai.llm.generate_json", side_effect=boom),
+            ):
                 from mediahub.turn_into import turn_meet_into_pack
+
                 pack = turn_meet_into_pack(
                     _run_data(),
-                    _profile(sponsor="Acme Sports",
-                             notes="Next meet: Nationals — 2026-06-10"),
+                    _profile(sponsor="Acme Sports", notes="Next meet: Nationals — 2026-06-10"),
                     deterministic=False,
                 )
         finally:
@@ -582,6 +648,7 @@ class TestArtefactsAreAIMade(unittest.TestCase):
 
     def test_aggregate_briefs_are_non_empty(self):
         from mediahub.turn_into.templates import _narrate_brief
+
         cases = [
             ("meet_recap", {"meet": "M"}),
             ("thread_intro", {"meet": "M", "n_top": 3}),

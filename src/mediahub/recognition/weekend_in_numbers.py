@@ -7,6 +7,22 @@ build_weekend_in_numbers(report_dict) -> dict (card-compatible)
 from __future__ import annotations
 
 
+def _swim_key(a: dict, index: int) -> str:
+    """A stable per-swim identity for de-duping same-swim achievements.
+
+    A PB and its magnitude/official-PB derivatives (and a final's
+    ``final_appearance`` + ``heat_to_final``) are separate achievements on ONE
+    swim whose ``swim_id`` differs only in a trailing ``:type`` suffix — so the
+    prefix (the id minus its last ``:``-segment) identifies the underlying swim.
+    When an achievement carries no ``swim_id`` (older or synthetic reports) a
+    per-row sentinel is returned so nothing is de-duped (current behaviour).
+    """
+    sid = str(a.get("swim_id") or "")
+    if sid:
+        return sid.rsplit(":", 1)[0]
+    return f"__row_{index}__"
+
+
 def build_weekend_in_numbers(report: dict) -> dict:
     """
     Generate a single 'meet by the numbers' card from the recognition report dict.
@@ -36,15 +52,26 @@ def build_weekend_in_numbers(report: dict) -> dict:
     # PBs per swimmer
     pb_by_swimmer: dict[str, int] = {}
 
-    for ra in ranked:
+    # One PB / one final per underlying swim: pb_confirmed, pb_magnitude_* and
+    # official_pb* are derivatives of the SAME swim (documented at
+    # pipeline_v4.py), as are final_appearance + heat_to_final — counting each
+    # separately over-reported the published totals 2-3x (#55). De-dupe by the
+    # swim-id prefix so each swim contributes at most once to each tally.
+    pb_swim_keys: set[str] = set()
+    final_swim_keys: set[str] = set()
+
+    for idx, ra in enumerate(ranked):
         a = ra.get("achievement", {}) if isinstance(ra, dict) else {}
         atype = a.get("type", "")
         swimmer = a.get("swimmer_name", "")
         raw = a.get("raw_facts", {})
 
         if "pb_confirmed" in atype or "pb_magnitude" in atype or "official_pb" in atype:
-            n_pbs += 1
-            pb_by_swimmer[swimmer] = pb_by_swimmer.get(swimmer, 0) + 1
+            pb_key = _swim_key(a, idx)
+            if pb_key not in pb_swim_keys:
+                pb_swim_keys.add(pb_key)
+                n_pbs += 1
+                pb_by_swimmer[swimmer] = pb_by_swimmer.get(swimmer, 0) + 1
 
         if "medal_gold" == atype:
             n_gold += 1
@@ -56,7 +83,10 @@ def build_weekend_in_numbers(report: dict) -> dict:
             n_relay_medals += 1
 
         if "final_appearance" in atype or "heat_to_final" in atype:
-            n_finals += 1
+            final_key = _swim_key(a, idx)
+            if final_key not in final_swim_keys:
+                final_swim_keys.add(final_key)
+                n_finals += 1
 
         if "top_of_field" in atype:
             n_top_field += 1

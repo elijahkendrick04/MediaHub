@@ -14,7 +14,6 @@ surfaced via MH.toast, and no empty catch remains in shareRevoke.
 
 from __future__ import annotations
 
-import importlib
 import json
 import pathlib
 import uuid
@@ -26,18 +25,8 @@ OWNER = "owner@cluba.org"
 
 
 @pytest.fixture
-def world(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    for d in ("runs_v4", "club_profiles"):
-        (tmp_path / d).mkdir(parents=True, exist_ok=True)
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
+def world(web_module, tmp_path):
+    wm = web_module
 
     from mediahub.web.club_profile import ClubProfile, save_profile
 
@@ -118,9 +107,9 @@ def test_list_includes_run_wide_tokens_with_expiry(world):
 
 def test_revoke_reports_outcome_the_client_can_toast(world):
     c, run_id = world["client"], world["run_id"]
-    token = c.post(
-        f"/api/runs/{run_id}/shares", json={"card_id": "", "perm": "view"}
-    ).get_json()["share"]["token"]
+    token = c.post(f"/api/runs/{run_id}/shares", json={"card_id": "", "perm": "view"}).get_json()[
+        "share"
+    ]["token"]
 
     # Unknown token: ok response but revoked=false — the client toasts this.
     r_bad = c.post(f"/api/runs/{run_id}/shares/not-a-real-token/revoke")
@@ -152,7 +141,10 @@ def test_share_panel_lists_whole_meet_links():
 
 def test_share_revoke_surfaces_failures_no_empty_catch():
     # The old fire-and-forget chain is gone…
-    assert ".then(function(r){return r.json();}).then(function(){ shareLoad(cardId); }).catch(function(){});" not in _SRC
+    assert (
+        ".then(function(r){return r.json();}).then(function(){ shareLoad(cardId); }).catch(function(){});"
+        not in _SRC
+    )
     # …replaced by an outcome read + toast on every failure path.
     assert "res.j.revoked === false" in _SRC
     assert "Could not revoke that link" in _SRC

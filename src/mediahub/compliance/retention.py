@@ -33,6 +33,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable, Optional
 
+from mediahub._atomic_io import atomic_write_text
+
 log = logging.getLogger(__name__)
 
 DEFAULTS = {
@@ -142,6 +144,7 @@ def run_purge(
     report: dict = {
         "ran_at": now.replace(microsecond=0).isoformat(),
         "runs_deleted": [],
+        "orphan_sidecars_deleted": 0,
         "upload_dirs_deleted": [],
         "upload_files_deleted": 0,
         "pb_cache_files_deleted": 0,
@@ -153,7 +156,10 @@ def run_purge(
     runs_dir = _runs_dir()
     if runs_dir.exists():
         for path in sorted(runs_dir.glob("*.json")):
-            if path.name.endswith("__workflow.json"):
+            if "__" in path.name:
+                # Per-run sidecar files (<run_id>__workflow.json, __approvals.json,
+                # __pronunciations.json, ...) are swept with their run below and
+                # must never be parsed as run files of their own.
                 continue
             try:
                 run = json.loads(path.read_text())
@@ -172,6 +178,26 @@ def run_purge(
                 report["runs_deleted"].append(run_id)
             except Exception as e:
                 report["errors"].append(f"run {run_id}: {e}")
+
+        # 1b. Orphan sidecars: <id>__* files whose parent <id>.json is gone —
+        # runs deleted before the sidecar-family sweep existed left their
+        # approvals ledgers (approver emails) and pronunciation maps behind
+        # with no remaining deletion path. A 1-day grace guards against
+        # racing a run mid-write; live runs' sidecars are never touched.
+        one_day_ago = (now - timedelta(days=1)).timestamp()
+        for side in sorted(runs_dir.glob("*__*")):
+            if not side.is_file():
+                continue
+            parent_id = side.name.split("__", 1)[0]
+            if not parent_id or (runs_dir / f"{parent_id}.json").exists():
+                continue
+            try:
+                if side.stat().st_mtime >= one_day_ago:
+                    continue
+                side.unlink()
+                report["orphan_sidecars_deleted"] += 1
+            except OSError as e:
+                report["errors"].append(f"orphan sidecar {side.name}: {e}")
 
     # 2. Raw uploads (shorter window; also catches dirs orphaned of their run).
     uploads = _uploads_dir()
@@ -241,20 +267,33 @@ def run_purge(
     cutoff = _age_cutoff(days, now)
     log_path = _data_dir() / "security_log" / "events.jsonl"
     if cutoff is not None and log_path.exists():
-        kept, dropped = [], 0
-        for line in log_path.read_text(encoding="utf-8").splitlines():
-            try:
-                ts = datetime.fromisoformat(json.loads(line).get("ts", ""))
-            except Exception:
-                kept.append(line)
-                continue
-            if ts < cutoff:
-                dropped += 1
-            else:
-                kept.append(line)
-        if dropped:
-            log_path.write_text("\n".join(kept) + ("\n" if kept else ""), encoding="utf-8")
-            report["security_log_lines_dropped"] = dropped
+        # Hold the security-log lock across read→filter→write so a concurrent
+        # record_event() append isn't dropped, and rewrite atomically so a crash
+        # can't lose the whole log. record_event() is called AFTER this block, so
+        # holding its (non-reentrant) lock only here can't deadlock.
+        from .security_log import _LOCK as _sec_lock  # noqa: PLC0415
+
+        with _sec_lock:
+            kept, dropped = [], 0
+            for line in log_path.read_text(encoding="utf-8").splitlines():
+                try:
+                    ts = datetime.fromisoformat(json.loads(line).get("ts", ""))
+                    # A naive timestamp is UTC; comparing it to the aware cutoff
+                    # must not raise (which used to abort the whole purge) — do the
+                    # comparison INSIDE the try so a bad/naive line just survives.
+                    if ts.tzinfo is None:
+                        ts = ts.replace(tzinfo=timezone.utc)
+                    aged = ts < cutoff
+                except Exception:
+                    kept.append(line)
+                    continue
+                if aged:
+                    dropped += 1
+                else:
+                    kept.append(line)
+            if dropped:
+                atomic_write_text(log_path, "\n".join(kept) + ("\n" if kept else ""))
+                report["security_log_lines_dropped"] = dropped
 
     try:
         from .security_log import record_event
@@ -276,7 +315,18 @@ def _delete_run_fallback(run_id: str, json_path: Path) -> None:
     """Filesystem cascade matching web._delete_run for scheduler-only contexts."""
     json_path.unlink(missing_ok=True)
     shutil.rmtree(json_path.parent / run_id, ignore_errors=True)
-    (json_path.parent / f"{run_id}__workflow.json").unlink(missing_ok=True)
+    # Sweep the whole <run_id>__* sidecar family (workflow store, approvals
+    # ledger with approver emails + .lock/.corrupt companions, pronunciation
+    # map with athlete names) so no personal data outlives the erasure —
+    # mirrors web._delete_run.
+    if run_id:
+        import glob as _glob  # noqa: PLC0415
+
+        for side in json_path.parent.glob(f"{_glob.escape(run_id)}__*"):
+            try:
+                side.unlink()
+            except OSError:
+                pass
     shutil.rmtree(_data_dir() / "turn_into_packs" / run_id, ignore_errors=True)
     shutil.rmtree(_uploads_dir() / run_id, ignore_errors=True)
     try:

@@ -6,32 +6,20 @@ link from the nav, home, or Create hub. C-7: the consent registry and the
 athlete-rights (DSR) tracker — the two pages a safeguarding officer needs most
 — were reachable only by typing the URL.
 """
-from __future__ import annotations
 
-import importlib
+from __future__ import annotations
 
 import pytest
 
 
 @pytest.fixture
-def client(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    for d in ("runs_v4", "club_profiles"):
-        (tmp_path / d).mkdir(parents=True, exist_ok=True)
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
-    app = wm.create_app()
-    app.config["TESTING"] = True
+def client(app):
     app.config["ENFORCE_ORG_GATE"] = True
     from mediahub.web.club_profile import ClubProfile, save_profile
 
-    save_profile(ClubProfile(profile_id="t", display_name="Test club", brand_voice_summary="Friendly."))
+    save_profile(
+        ClubProfile(profile_id="t", display_name="Test club", brand_voice_summary="Friendly.")
+    )
     with app.test_client() as c:
         c.post("/api/organisation/active", data={"profile_id": "t"})
         yield c

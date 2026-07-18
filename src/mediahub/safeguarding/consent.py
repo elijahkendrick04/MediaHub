@@ -440,6 +440,16 @@ def import_csv(
     return {"imported": ok, "skipped": skipped}
 
 
+def _csv_safe(value) -> str:
+    """Neutralise CSV formula injection at export time: a cell beginning with
+    ``=``, ``+``, ``-``, ``@`` or a leading tab/CR is executed as a formula when
+    the sheet is opened in Excel/Sheets. Prefix a single quote so an athlete
+    name or free-text note can't run as a formula. Export-only — stored values
+    are untouched."""
+    s = "" if value is None else str(value)
+    return "'" + s if s[:1] in ("=", "+", "-", "@", "\t", "\r") else s
+
+
 def export_csv(profile_id: str, db_path: Optional[Path] = None) -> str:
     """Welfare-officer export: every active athlete with consent state,
     including athletes with no record (state ``unknown``)."""
@@ -451,14 +461,15 @@ def export_csv(profile_id: str, db_path: Optional[Path] = None) -> str:
         row = consent.get(rec.athlete_id)
         if row:
             w.writerow(
-                [
+                _csv_safe(c)
+                for c in (
                     rec.canonical_name,
                     row["level"],
                     row["note"],
                     row["updated_at"],
                     row["updated_by"],
-                ]
+                )
             )
         else:
-            w.writerow([rec.canonical_name, "unknown", "", "", ""])
+            w.writerow([_csv_safe(rec.canonical_name), "unknown", "", "", ""])
     return buf.getvalue()

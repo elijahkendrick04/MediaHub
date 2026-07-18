@@ -15,12 +15,15 @@ path), so it can never escape the audit directory.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
+
+log = logging.getLogger(__name__)
 
 _SAFE = re.compile(r"[^A-Za-z0-9_.-]")
 _LOCK = threading.Lock()
@@ -124,11 +127,18 @@ class AuditLog:
             with _LOCK:
                 with open(self._path(org_id), "a", encoding="utf-8") as fh:
                     fh.write(line + "\n")
-        except Exception:
-            pass  # never let auditing break the run
+        except Exception as exc:
+            # Never let auditing break the run — but a lost audit write (read-only
+            # FS / full disk) must not be fully silent, or the "immutable audit
+            # trail" degrades with no signal.
+            log.warning("autonomy audit write failed for org %s: %s", org_id, exc)
 
     def read(self, org_id: str, *, limit: int = 200) -> list[dict]:
         """Read recent audit entries for an org (oldest→newest within the tail)."""
+        # limit<=0 means "no rows"; guard before the slice so limit=0 doesn't
+        # become lines[0:] (everything) — the opposite of the intent.
+        if limit <= 0:
+            return []
         path = self._path(org_id)
         if not path.exists():
             return []

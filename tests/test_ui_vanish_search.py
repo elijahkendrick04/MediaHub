@@ -30,7 +30,6 @@ tests/test_u12_odometer_stats.py:
 from __future__ import annotations
 
 import html as _html
-import importlib
 import os
 import re
 import sys
@@ -96,12 +95,8 @@ def _overlay_text(html: str) -> str:
 
 def _input_attr(html: str, attr: str):
     """Read one attribute off the #mh-activity-search input (either tag order)."""
-    after = re.search(
-        r'id="mh-activity-search"[^>]*?\s%s="([^"]*)"' % re.escape(attr), html
-    )
-    before = re.search(
-        r'\s%s="([^"]*)"[^>]*?\sid="mh-activity-search"' % re.escape(attr), html
-    )
+    after = re.search(r'id="mh-activity-search"[^>]*?\s%s="([^"]*)"' % re.escape(attr), html)
+    before = re.search(r'\s%s="([^"]*)"[^>]*?\sid="mh-activity-search"' % re.escape(attr), html)
     m = after or before
     return _html.unescape(m.group(1)) if m else None
 
@@ -110,25 +105,9 @@ def _input_attr(html: str, attr: str):
 
 
 @pytest.fixture
-def app_mod(tmp_path, monkeypatch):
+def app_mod(app, web_module):
     """Isolated Flask app + one ready profile with one run (so /activity renders
     its search toolbar)."""
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    for sub in ("runs_v4", "uploads_v4", "club_profiles"):
-        (tmp_path / sub).mkdir(parents=True, exist_ok=True)
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
-
-    app = wm.create_app()
-    app.config["TESTING"] = True  # gate bypassed → every page renders
-
     from mediahub.web.club_profile import ClubProfile, save_profile
 
     save_profile(
@@ -140,7 +119,7 @@ def app_mod(tmp_path, monkeypatch):
     )
 
     # The /activity search toolbar only renders once the org has ≥1 run.
-    conn = wm._db()
+    conn = web_module._db()
     conn.execute(
         "INSERT INTO runs (id, created_at, finished_at, status, profile_id, "
         "meet_name, file_name, our_swims, n_cards, n_queue, n_achievements, error) "
@@ -149,7 +128,7 @@ def app_mod(tmp_path, monkeypatch):
     )
     conn.commit()
     conn.close()
-    return app, wm
+    return app, web_module
 
 
 def _get(app, path: str) -> str:
@@ -358,22 +337,14 @@ class TestVanishSearchBrowser:
             page.add_style_tag(content=css)
             page.add_script_tag(content=js)
             page.wait_for_timeout(80)
-            before = page.eval_on_selector(
-                ".mh-vanish__ph", "el => getComputedStyle(el).opacity"
-            )
+            before = page.eval_on_selector(".mh-vanish__ph", "el => getComputedStyle(el).opacity")
             page.fill("#mh-activity-search", "county finals")
             page.wait_for_timeout(350)  # let the opacity transition settle
-            typing = page.eval_on_selector(
-                ".mh-vanish", "el => el.classList.contains('is-typing')"
-            )
-            during = page.eval_on_selector(
-                ".mh-vanish__ph", "el => getComputedStyle(el).opacity"
-            )
+            typing = page.eval_on_selector(".mh-vanish", "el => el.classList.contains('is-typing')")
+            during = page.eval_on_selector(".mh-vanish__ph", "el => getComputedStyle(el).opacity")
             page.fill("#mh-activity-search", "")
             page.wait_for_timeout(350)
-            after = page.eval_on_selector(
-                ".mh-vanish__ph", "el => getComputedStyle(el).opacity"
-            )
+            after = page.eval_on_selector(".mh-vanish__ph", "el => getComputedStyle(el).opacity")
         finally:
             browser.close()
             pw.stop()
@@ -397,9 +368,7 @@ class TestVanishSearchBrowser:
             page.add_script_tag(content=js)
             page.wait_for_timeout(3500)  # longer than a rotation interval
             text = page.eval_on_selector(".mh-vanish__ph", "el => el.textContent")
-            opacity = page.eval_on_selector(
-                ".mh-vanish__ph", "el => getComputedStyle(el).opacity"
-            )
+            opacity = page.eval_on_selector(".mh-vanish__ph", "el => getComputedStyle(el).opacity")
         finally:
             browser.close()
             pw.stop()
@@ -420,17 +389,13 @@ class TestVanishSearchBrowser:
             page.set_content(body)
             page.add_style_tag(content=css)  # CSS only — bindVanish never injected
             page.wait_for_timeout(80)
-            before = page.eval_on_selector(
-                ".mh-vanish__ph", "el => getComputedStyle(el).opacity"
-            )
+            before = page.eval_on_selector(".mh-vanish__ph", "el => getComputedStyle(el).opacity")
             typing_before = page.eval_on_selector(
                 ".mh-vanish", "el => el.classList.contains('is-typing')"
             )
             page.fill("#mh-activity-search", "county finals")
             page.wait_for_timeout(350)
-            after = page.eval_on_selector(
-                ".mh-vanish__ph", "el => getComputedStyle(el).opacity"
-            )
+            after = page.eval_on_selector(".mh-vanish__ph", "el => getComputedStyle(el).opacity")
             typing_after = page.eval_on_selector(
                 ".mh-vanish", "el => el.classList.contains('is-typing')"
             )
@@ -470,6 +435,6 @@ class TestVanishSearchBrowser:
 
         # The rotating placeholder starts to the right of the search icon, so the
         # two never overlap.
-        assert geo["ph"] >= geo["iconRight"], (
-            f"overlay (left={geo['ph']}) overlaps the icon (right={geo['iconRight']})"
-        )
+        assert (
+            geo["ph"] >= geo["iconRight"]
+        ), f"overlay (left={geo['ph']}) overlaps the icon (right={geo['iconRight']})"

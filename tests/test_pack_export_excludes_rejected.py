@@ -8,9 +8,9 @@ parent complaint) still shipped — only the "every format + manifest" ZIP
 filtered it. Three buttons, three different rules. This pins one rule: rejected
 cards are excluded everywhere.
 """
+
 from __future__ import annotations
 
-import importlib
 import io
 import json
 import struct
@@ -30,7 +30,9 @@ def _make_png(width: int, height: int) -> bytes:
 
     def chunk(typ: bytes, data: bytes) -> bytes:
         body = typ + data
-        return struct.pack(">I", len(data)) + body + struct.pack(">I", zlib.crc32(body) & 0xFFFFFFFF)
+        return (
+            struct.pack(">I", len(data)) + body + struct.pack(">I", zlib.crc32(body) & 0xFFFFFFFF)
+        )
 
     ihdr = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)
     raw = (b"\x00" + bytes([0xFF, 0, 0]) * width) * height
@@ -41,28 +43,23 @@ def _write_card(visuals_dir: Path, brief_id: str, content_item_id: str) -> None:
     bdir = visuals_dir / brief_id
     bdir.mkdir(parents=True, exist_ok=True)
     (bdir / "visual.json").write_text(
-        json.dumps({"id": f"v_{brief_id}", "content_item_id": content_item_id, "format": "feed_portrait"}),
+        json.dumps(
+            {"id": f"v_{brief_id}", "content_item_id": content_item_id, "format": "feed_portrait"}
+        ),
         encoding="utf-8",
     )
     (bdir / "feed_portrait.png").write_bytes(_make_png(108, 135))
 
 
 @pytest.fixture
-def env(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    (tmp_path / "runs_v4").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "club_profiles").mkdir(parents=True, exist_ok=True)
-    import mediahub.web.web as wm
-
-    importlib.reload(wm)
-    app = wm.create_app()
-    app.config["TESTING"] = True
+def env(app, web_module, tmp_path):
+    wm = web_module
 
     run_id = "runR"
     runs = tmp_path / "runs_v4"
-    (runs / f"{run_id}.json").write_text(json.dumps({"recognition_report": {"ranked_achievements": []}}))
+    (runs / f"{run_id}.json").write_text(
+        json.dumps({"recognition_report": {"ranked_achievements": []}})
+    )
     vdir = runs / run_id / "visuals"
     _write_card(vdir, "briefA", "cardA")
     _write_card(vdir, "briefB", "cardB")

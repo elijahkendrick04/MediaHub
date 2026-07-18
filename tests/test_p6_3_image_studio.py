@@ -13,7 +13,6 @@ Two layers:
 
 from __future__ import annotations
 
-import importlib
 import io
 
 import pytest
@@ -135,12 +134,7 @@ def test_dims_render_when_known_and_omit_when_not():
 
 
 @pytest.fixture
-def app_env(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    for d in ("uploads_v4", "club_profiles", "runs_v4"):
-        (tmp_path / d).mkdir(parents=True, exist_ok=True)
+def app_env(app, web_module, tmp_path, monkeypatch):
     for var in (
         "GEMINI_API_KEY",
         "GOOGLE_API_KEY",
@@ -153,32 +147,25 @@ def app_env(tmp_path, monkeypatch):
     ):
         monkeypatch.delenv(var, raising=False)
 
-    import mediahub.web.secrets_store as ss
     import mediahub.observability.imagine_usage as iu
     import mediahub.media_library.store as st
 
-    importlib.reload(ss)
-    importlib.reload(iu)
+    # imagine_usage captures DB_PATH from DATA_DIR at import; the old reload
+    # recomputed it per test. Repoint it surgically at this test's isolated
+    # data.db so the per-org usage ledger the route writes and the assertions
+    # read stay isolated (the shared web fixtures don't touch this module).
+    monkeypatch.setattr(iu, "DB_PATH", tmp_path / "data.db")
     st._default_store = st.MediaLibraryStore(
         db_path=tmp_path / "data.db",
         uploads_dir=tmp_path / "uploads_v4" / "media_library",
     )
 
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
     from mediahub.web.club_profile import ClubProfile, save_profile
 
     save_profile(ClubProfile(profile_id="club-x", display_name="Club X"))
     save_profile(ClubProfile(profile_id="club-y", display_name="Club Y"))
 
-    app = wm.create_app()
-    app.config["TESTING"] = True
-    if not app.secret_key:
-        app.secret_key = "test-secret"
-    return app, wm, tmp_path, iu, st
+    return app, web_module, tmp_path, iu, st
 
 
 def _client(app, profile_id="club-x"):

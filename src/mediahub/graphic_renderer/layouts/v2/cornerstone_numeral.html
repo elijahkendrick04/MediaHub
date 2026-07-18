@@ -22,9 +22,9 @@
   width: {{WIDTH}}px;
   height: {{HEIGHT}}px;
   overflow: hidden;
-  background: var(--mh-primary);
+  background: var(--mh-ground-gradient, var(--mh-primary));
   color: var(--mh-on-primary);
-  font-family: 'Inter', system-ui, sans-serif;
+  font-family: var(--mh-font-body, 'Inter', system-ui, sans-serif);
   -webkit-font-smoothing: antialiased;
   display: flex;
   flex-direction: column;
@@ -37,10 +37,10 @@
   position: relative; z-index: 2;
   display: flex; align-items: flex-start; justify-content: space-between; gap: 24px;
 }
-.cn__id { display: flex; flex-direction: column; gap: 16px; }
+.cn__id { display: flex; flex-direction: column; gap: var(--mh-sp-4); }
 .cn__kicker {
   display: inline-flex; align-items: center; gap: 14px;
-  font-family: 'Space Grotesk', 'Inter', sans-serif;
+  font-family: var(--mh-font-kicker, 'Space Grotesk', 'Inter', sans-serif);
   font-weight: 700; font-size: 25px; letter-spacing: 0.24em;
   text-transform: uppercase; color: var(--mh-accent);
 }
@@ -54,12 +54,12 @@
 .cn__brand { display: flex; align-items: center; gap: 14px; flex: 0 0 auto; }
 .cn__logo { height: 60px; width: auto; }
 .cn__logo img, .cn__logo svg { height: 100%; width: auto; object-fit: contain; display: block; }
-.cn__club { font-family: 'Inter', sans-serif; font-weight: 800; font-size: 22px; text-transform: uppercase; color: var(--mh-on-primary); text-align: right; }
+.cn__club { font-family: var(--mh-font-body, 'Inter', sans-serif); font-weight: 800; font-size: 22px; text-transform: uppercase; color: var(--mh-on-primary); text-align: right; }
 
 /* the cornerstone — numeral hard against the lower-left, event on its baseline */
 .cn__hero { position: relative; z-index: 2; }
 .cn__event {
-  font-family: 'Space Grotesk', 'Inter', sans-serif;
+  font-family: var(--mh-font-kicker, 'Space Grotesk', 'Inter', sans-serif);
   font-weight: 600; font-size: 34px; letter-spacing: 0.05em;
   text-transform: uppercase; color: var(--mh-on-primary); margin-bottom: 8px;
 }
@@ -67,7 +67,7 @@
   font-family: 'JetBrains Mono', 'Space Grotesk', monospace;
   font-feature-settings: "tnum";
   font-weight: 700; font-size: var(--mh-fit-mega-result-px, 220px); font-variation-settings: var(--mh-axes-mega-result, normal);
-  line-height: 0.82; letter-spacing: -0.035em; color: var(--mh-accent);
+  line-height: 0.82; letter-spacing: var(--mh-track-mega-result, -0.035em); color: var(--mh-accent);
   white-space: nowrap;
 }
 .cn__row {
@@ -75,8 +75,8 @@
   display: flex; align-items: flex-end; justify-content: space-between; gap: 24px;
   border-top: 2px solid var(--mh-outline); padding-top: 24px;
 }
-.cn__stat { font-family: 'Inter', sans-serif; font-weight: 600; font-size: 26px; color: var(--mh-on-primary); opacity: 0.84; }
-.cn__meet { font-family: 'Inter', sans-serif; font-weight: 500; font-size: 19px; color: var(--mh-on-primary); opacity: 0.72; }
+.cn__stat { font-family: var(--mh-font-body, 'Inter', sans-serif); font-weight: 600; font-size: 26px; color: var(--mh-on-primary); opacity: 0.84; }
+.cn__meet { font-family: var(--mh-font-body, 'Inter', sans-serif); font-weight: 500; font-size: 19px; color: var(--mh-on-primary); opacity: 0.72; }
 .cn__sponsor { flex: 0 0 auto; }
 </style>
 </head>

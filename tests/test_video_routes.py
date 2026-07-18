@@ -9,32 +9,14 @@ paths run everywhere.
 
 from __future__ import annotations
 
-import importlib
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
 
-_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(_ROOT))
-
 
 @pytest.fixture
-def app(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    for sub in ("runs_v4", "uploads_v4", "club_profiles"):
-        (tmp_path / sub).mkdir(parents=True, exist_ok=True)
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
-
+def app(web_module, tmp_path):
     # Isolate the per-process singletons onto this test's tmp dirs so footage
     # uploads + projects don't leak between tests (the media-library store binds
     # a fixed DB by design — repoint it here for test hygiene only).
@@ -48,7 +30,7 @@ def app(tmp_path, monkeypatch):
 
     _vproj._store = None
 
-    application = wm.create_app()
+    application = web_module.create_app()
     application.config["TESTING"] = True
 
     from mediahub.web.club_profile import ClubProfile, save_profile

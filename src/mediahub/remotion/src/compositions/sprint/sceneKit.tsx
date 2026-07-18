@@ -44,6 +44,71 @@ export function withAlpha(hex: string, a: number): string {
   return `${h.slice(0, 7)}${v.toString(16).padStart(2, "0")}`;
 }
 
+// The still renderer's hue-tinted shadow colour (graphic_renderer/elevation.py
+// shadow_rgb): keep the resolved ground's hue, drop saturation to 40% (+0.12,
+// capped 0.45), floor lightness into 0.06–0.14 — so motion shadows carry the
+// brand's cast exactly like the approved still's, never neutral black.
+// Same HLS maths, same constants; parity is byte-level on the emitted triple.
+export function shadowRgb(groundHex: string): string {
+  const h = (groundHex || "").trim().replace(/^#/, "");
+  const full = h.length === 3 ? h.split("").map((c) => c + c).join("") : h;
+  if (!/^[0-9a-fA-F]{6}$/.test(full)) {
+    return "10,12,16";
+  }
+  const r = parseInt(full.slice(0, 2), 16) / 255;
+  const g = parseInt(full.slice(2, 4), 16) / 255;
+  const b = parseInt(full.slice(4, 6), 16) / 255;
+  // rgb → hls (Python colorsys convention)
+  const maxc = Math.max(r, g, b);
+  const minc = Math.min(r, g, b);
+  const l = (maxc + minc) / 2;
+  let hDeg = 0;
+  let s = 0;
+  if (maxc !== minc) {
+    const d = maxc - minc;
+    s = l > 0.5 ? d / (2 - maxc - minc) : d / (maxc + minc);
+    if (maxc === r) {
+      hDeg = ((g - b) / d) % 6;
+    } else if (maxc === g) {
+      hDeg = (b - r) / d + 2;
+    } else {
+      hDeg = (r - g) / d + 4;
+    }
+    hDeg /= 6;
+    if (hDeg < 0) {
+      hDeg += 1;
+    }
+  }
+  const s2 = Math.min(0.45, s * 0.4 + 0.12);
+  const l2 = Math.max(0.06, Math.min(0.14, l * 0.25));
+  // hls → rgb (colorsys convention)
+  const hue = (m1: number, m2: number, hh: number): number => {
+    let t = hh;
+    if (t < 0) {
+      t += 1;
+    }
+    if (t > 1) {
+      t -= 1;
+    }
+    if (t < 1 / 6) {
+      return m1 + (m2 - m1) * 6 * t;
+    }
+    if (t < 1 / 2) {
+      return m2;
+    }
+    if (t < 2 / 3) {
+      return m1 + (m2 - m1) * (2 / 3 - t) * 6;
+    }
+    return m1;
+  };
+  const m2 = l2 <= 0.5 ? l2 * (1 + s2) : l2 + s2 - l2 * s2;
+  const m1 = 2 * l2 - m2;
+  const r2 = Math.round(hue(m1, m2, hDeg + 1 / 3) * 255);
+  const g2 = Math.round(hue(m1, m2, hDeg) * 255);
+  const b2 = Math.round(hue(m1, m2, hDeg - 1 / 3) * 255);
+  return `${r2},${g2},${b2}`;
+}
+
 // Deterministic single-line fit: shrink a base size until the estimated line
 // width (chars × an average heavy-display glyph ratio) fits the box. The cheap
 // TSX cousin of the still renderer's measured autofit — long surnames shrink
@@ -346,6 +411,9 @@ export const StatChipsBlock: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
               fontFamily: "'JetBrains Mono', monospace",
               fontVariantNumeric: "tabular-nums",
               fontWeight: 700,
+              // D8 — the still's data-register weight (0 ⇒ omit, byte-identical).
+              fontVariationSettings:
+                card.wghtData && card.wghtData > 0 ? `'wght' ${Math.round(card.wghtData)}` : undefined,
               fontSize: Math.round(17 * ts),
               color: valueInk,
               padding: `0 ${Math.round(10 * ts)}px`,
@@ -412,6 +480,11 @@ export const StatChipsBlock: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
                     fontFamily: "'JetBrains Mono', 'Space Grotesk', monospace",
                     fontVariantNumeric: "tabular-nums",
                     fontWeight: 700,
+                    // D8 — the still's data-register weight (0 ⇒ omit, byte-identical).
+                    fontVariationSettings:
+                      card.wghtData && card.wghtData > 0
+                        ? `'wght' ${Math.round(card.wghtData)}`
+                        : undefined,
                     fontSize: Math.round(30 * ts),
                     lineHeight: 1.05,
                     color: ink,

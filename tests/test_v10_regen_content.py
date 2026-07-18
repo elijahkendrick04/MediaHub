@@ -236,7 +236,7 @@ def test_medal_card_drops_redundant_gold_pill():
 
 def test_variant_job_store_roundtrips_via_disk(tmp_path, monkeypatch):
     """Jobs persist as files so a poll landing on ANOTHER gunicorn worker
-    (Procfile runs --workers 2) still finds the job. The in-memory dict
+    (docker-entrypoint.sh runs --workers 2) still finds the job. The in-memory dict
     this replaces 404'd half the polls with job_not_found."""
     from mediahub.web import web as web_mod
 

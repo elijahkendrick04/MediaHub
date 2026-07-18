@@ -13,7 +13,6 @@ accepted upload format instead of just .hy3/zip.
 
 from __future__ import annotations
 
-import importlib
 import json
 import re
 
@@ -21,21 +20,11 @@ import pytest
 
 
 @pytest.fixture()
-def env(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    (tmp_path / "club_profiles").mkdir(parents=True, exist_ok=True)
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
+def env(app, tmp_path):
     from mediahub.web.club_profile import ClubProfile, save_profile
 
     save_profile(ClubProfile(profile_id="club-a", display_name="Club A"))
     save_profile(ClubProfile(profile_id="club-b", display_name="Club B"))
-    app = wm.create_app()
     app.config.update(TESTING=True, SECRET_KEY="x")
     return app, tmp_path
 
@@ -206,10 +195,19 @@ def test_intro_mark_seen_writes_the_sidecar_atomically():
     marks must never interleave into a torn sidecar that drops every
     previously-seen slug. The reader already fails soft — this pins the
     writer."""
+    import ast
     import pathlib
 
     src = pathlib.Path("src/mediahub/web/web.py").read_text(encoding="utf-8")
-    body = src.split("def _intro_mark_seen(", 1)[1].split("\n    @app.route", 1)[0]
+    # Locate the function body by AST rather than by its position relative to
+    # the next route decorator — _intro_mark_seen is module-level since the
+    # create_app de-closure (finding #15), so positional slicing would sweep
+    # in unrelated code.
+    tree = ast.parse(src)
+    fn = next(
+        n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "_intro_mark_seen"
+    )
+    body = "\n".join(src.splitlines()[fn.lineno - 1 : fn.end_lineno])
     assert 'tmp = p.with_suffix(f".{uuid.uuid4().hex[:8]}.tmp")' in body
     assert "os.replace(tmp, p)" in body
     # Best-effort tmp cleanup on failure, and no straight write_text on the

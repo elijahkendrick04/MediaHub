@@ -150,10 +150,11 @@ def test_parse_personal_best_extracts_events_with_course():
 
 
 def test_parse_drops_entry_without_resolvable_course():
-    # No course heading anywhere → fallback assumes first table is LC.
+    # No course heading anywhere → the row is ambiguous and is dropped, never
+    # defaulted to LC (guessing course can create a wrong PB baseline).
     html = "<table><tr><td>50 Freestyle</td><td>29.00</td><td>x</td><td>x</td><td>01/01/24</td></tr></table>"
     page = parse_personal_best(html, "9")
-    assert [f"{e.distance}{e.stroke}{e.course}" for e in page.entries] == ["50FRLC"]
+    assert page.entries == []
 
 
 # --------------------------------------------------------------------------- #
@@ -168,6 +169,8 @@ def test_parse_drops_entry_without_resolvable_course():
         ("Sam", "Jones", "Samuel", "Jones", True),        # nickname
         ("Ben", "Carter", "Benjamin", "Carter", True),    # prefix
         ("Sophie", "Lee", "Sofie", "Lee", True),          # 1-edit spelling
+        ("Freddie", "Smith", "Frederick", "Smith", True),  # #68: freddie↔frederick
+        ("Freya", "Smith", "Freddie", "Smith", False),     # #68: freya is NOT freddie
         ("Holly", "Greenslade", "Holly", "Greenwood", False),  # surname differs
         ("John", "Smith", "Jane", "Smith", False),        # distinct first names
         ("", "Smith", "John", "Smith", False),            # missing name

@@ -22,8 +22,11 @@ raises :class:`ExportUnavailable`; an impossible conversion raises
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from pathlib import Path
+
+from mediahub._atomic_io import unique_tmp
 
 from . import cache as _cache
 from . import images as _images
@@ -92,6 +95,20 @@ def target_formats_for(source: str | Path) -> list[ExportFormat]:
 def can_convert(source: str | Path, fmt: str) -> bool:
     cat = source if source in CONVERSIONS else source_category(source)
     return normalise_key(fmt) in CONVERSIONS.get(cat, frozenset())
+
+
+def _cache_slot_tmp(out_path: Path) -> Path:
+    """A per-writer temp sibling for a cache-slot write that keeps the real
+    target suffix: ``<name>.<pid>.<tid>.tmp<suffix>``.
+
+    FFmpeg infers its output muxer from the file extension (none of the
+    video/audio arg builders pass an output ``-f``), so a bare ``.tmp`` final
+    suffix would make every FFmpeg-backed conversion fail. The extra dotted
+    parts can never collide with a real 32-hex cache-slot name, and
+    :func:`cache.maybe_gc`'s age sweep collects any orphan regardless of name.
+    """
+    tmp = unique_tmp(out_path)
+    return tmp.with_name(tmp.name + out_path.suffix)
 
 
 def _dispatch(src: Path, key: str, scat: str, out: Path, opts: ExportOptions) -> str:
@@ -202,17 +219,26 @@ def convert_file(
             note="cache hit",
         )
 
+    # For the content-addressed cache slot, encode into a per-writer temp sibling
+    # and os.replace it into place only once it is whole. This closes the two
+    # windows the unlink-on-failure guard can't: a SIGKILL/OOM that never runs the
+    # except (leaving a partial file the next request's is_file()+size>0 gate would
+    # serve), and two identical concurrent renders racing the same slot. The temp
+    # sibling keeps the real target suffix (see _cache_slot_tmp) so FFmpeg can
+    # still infer its output muxer from the extension. A caller-specified ``out``
+    # is written directly — the caller owns that path.
+    to_cache_slot = out is None
+    write_path = _cache_slot_tmp(out_path) if to_cache_slot else out_path
     try:
-        note = _dispatch(src_path, key, scat, out_path, opts)
+        note = _dispatch(src_path, key, scat, write_path, opts)
     except BaseException:
-        # A killed/failed encode (FFmpeg timeout, OOM) must not leave a partial
-        # file in the content-addressed cache slot — the next identical request
-        # would pass the is_file()+size>0 check and serve the corrupt output.
-        out_path.unlink(missing_ok=True)
+        write_path.unlink(missing_ok=True)
         raise
-    if not out_path.is_file() or out_path.stat().st_size == 0:
-        out_path.unlink(missing_ok=True)
+    if not write_path.is_file() or write_path.stat().st_size == 0:
+        write_path.unlink(missing_ok=True)
         raise ExportError(f"conversion produced no output for {key!r}")
+    if to_cache_slot:
+        os.replace(write_path, out_path)
     return ExportResult(
         path=out_path,
         fmt=key,

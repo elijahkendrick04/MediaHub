@@ -352,7 +352,9 @@ def test_matte_fallback_marks_photo_flat_and_traces(monkeypatch, tmp_path):
 def test_mood_maps_to_photo_recipe(monkeypatch):
     monkeypatch.delenv("MEDIAHUB_PHOTO_ADJUST", raising=False)
     b = _brief()
-    assert b.photo_adjust == "natural"
+    # E1 (Canva gap analysis): un-mooded briefs now default to the MEASURED
+    # auto-enhance instead of the blind fixed "natural" nudge.
+    assert b.photo_adjust == "auto"
     for mood, preset in (
         ("celebratory", "punchy"),
         ("explosive", "punchy"),
@@ -360,7 +362,7 @@ def test_mood_maps_to_photo_recipe(monkeypatch):
         ("precise", "editorial"),
         ("calm", "soft"),
         ("warm", "soft"),
-        ("neutral", "natural"),
+        ("neutral", "auto"),
     ):
         spec = normalise(
             {"archetype": "big_number_dominant", "mood": mood},
@@ -402,9 +404,10 @@ def test_graded_render_records_the_grade_and_changes_bytes(monkeypatch, tmp_path
     photo = _photo(tmp_path)
     brief = _brief()
     brief.layout_template = "full_bleed_photo_lower_third"
-    assert brief.photo_adjust == "natural"
+    # E1 (Canva gap analysis): the un-mooded default is the measured auto-enhance.
+    assert brief.photo_adjust == "auto"
     html, res = _render_html(monkeypatch, tmp_path, brief, athlete_path=str(photo), out="graded")
-    assert any(n.startswith("photo adjusted (natural)") for n in res.visual.safety_notes)
+    assert any(n.startswith("photo adjusted (auto)") for n in res.visual.safety_notes)
     assert _inlined_photo_bytes(html) != photo.read_bytes()  # pixels really graded
 
 
@@ -635,10 +638,12 @@ def test_poster_name_behind_layers_and_depth(monkeypatch, tmp_path):
     html = _one(0.2, "pnb1")
     # plane order: name plane (z1) under athlete (z2) under band (z3)
     assert html.index("pnb__name-plane") < html.index("pnb__athlete") < html.index("pnb__band")
-    m = re.search(r"--mh-cutout-depth:[^;]*drop-shadow\(0 (\d+)px", html)
+    # Non-greedy so the FIRST drop-shadow (the strength-scaled key layer) is
+    # captured — B4 added a fixed 2px contact layer after it.
+    m = re.search(r"--mh-cutout-depth:[^;]*?drop-shadow\(0 (\d+)px", html)
     assert m
     strong = _one(0.9, "pnb2")
-    m2 = re.search(r"--mh-cutout-depth:[^;]*drop-shadow\(0 (\d+)px", strong)
+    m2 = re.search(r"--mh-cutout-depth:[^;]*?drop-shadow\(0 (\d+)px", strong)
     assert int(m2.group(1)) > int(m.group(1))  # depth scales with decoration strength
 
 

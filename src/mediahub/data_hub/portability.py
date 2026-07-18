@@ -322,13 +322,22 @@ def _row_display(table: DataTable, row: dict, key: str) -> str:
     return cell.display if cell.display else ("" if cell.value is None else str(cell.value))
 
 
+def _csv_safe(value: str) -> str:
+    """Neutralise spreadsheet formula injection at export time: a cell beginning
+    with ``=``, ``+``, ``-``, ``@`` or a leading tab/CR runs as a formula in
+    Excel/Sheets. Org-table content is largely user-imported, so prefix a single
+    quote on export. Export-only — the stored cell value is untouched."""
+    s = value or ""
+    return "'" + s if s[:1] in ("=", "+", "-", "@", "\t", "\r") else s
+
+
 def export_csv(table: DataTable) -> str:
     """Render a table to CSV text (header titles + display values)."""
     buf = io.StringIO()
     writer = csv.writer(buf)
     writer.writerow([c.title for c in table.columns])
     for row in table.rows:
-        writer.writerow([_row_display(table, row, c.key) for c in table.columns])
+        writer.writerow([_csv_safe(_row_display(table, row, c.key)) for c in table.columns])
     return buf.getvalue()
 
 
@@ -345,7 +354,7 @@ def export_xlsx(table: DataTable) -> bytes:
     ws.title = (table.title or "Sheet")[:31]
     ws.append([c.title for c in table.columns])
     for row in table.rows:
-        ws.append([_row_display(table, row, c.key) for c in table.columns])
+        ws.append([_csv_safe(_row_display(table, row, c.key)) for c in table.columns])
     out = io.BytesIO()
     wb.save(out)
     return out.getvalue()

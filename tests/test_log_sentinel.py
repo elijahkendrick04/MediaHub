@@ -283,7 +283,11 @@ def test_daily_cap_and_cooldown_block(monkeypatch):
 def test_boot_grace_blocks(monkeypatch):
     monkeypatch.setenv("MEDIAHUB_SENTINEL_AUTOFIX", "1")
     monkeypatch.setenv("MEDIAHUB_SENTINEL_AUTOFIX_WORKER_TIMEOUT", "1")
-    # default grace is 600s and the test process started moments ago
+    # Pin the module's boot epoch to "just now": the gate compares process
+    # uptime to the 600s grace default, so relying on the REAL process start
+    # made this fail whenever the whole suite ran longer than the grace
+    # window in one process (a >10-minute single-process pytest run).
+    monkeypatch.setattr(playbook, "_PROCESS_START", time.time())
     allowed, reason = playbook.action_decision(
         "worker_timeout", last_acted_epoch=0.0, actions_today=0
     )
@@ -565,27 +569,28 @@ def test_notification_delivery_via_webhook(tmp_path, monkeypatch):
 # --- /healthz/sentinel route: audit tail is operator-only -----------------------
 
 
-def _sentinel_app(tmp_path, monkeypatch):
-    """A fresh app whose DATA_DIR carries a seeded sentinel audit tail."""
-    import importlib
-    import mediahub.web.web as wm
+def _sentinel_app(web_module, monkeypatch):
+    """A fresh app whose DATA_DIR carries a seeded sentinel audit tail.
 
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    d = str(tmp_path)
+    ``web_module`` is the shared, already-imported ``mediahub.web.web`` whose
+    ``DATA_DIR`` the autouse ``_isolate_data_dir`` fixture has repointed at this
+    test's private dir (the same dir the ``/healthz/sentinel`` route reads via
+    ``DATA_DIR``), so seeding the audit tail there needs no reload.
+    """
+    d = str(web_module.DATA_DIR)
     st.append_audit(
         {"kind": "finding", "issue_id": "worker_timeout",
          "evidence": ["[CRITICAL] WORKER TIMEOUT (pid:90) 1.2.3.4 /make"]},
         d,
     )
     st.write_status({"configured": True, "last_poll_ok": True, "findings": []}, d)
-    importlib.reload(wm)
-    app = wm.create_app()
+    app = web_module.create_app()
     app.config["TESTING"] = True
     return app
 
 
-def test_healthz_sentinel_hides_audit_tail_from_anonymous(tmp_path, monkeypatch):
-    app = _sentinel_app(tmp_path, monkeypatch)
+def test_healthz_sentinel_hides_audit_tail_from_anonymous(web_module, monkeypatch):
+    app = _sentinel_app(web_module, monkeypatch)
     c = app.test_client()
     body = c.get("/healthz/sentinel").get_json()
     assert body["ok"] is True
@@ -596,8 +601,8 @@ def test_healthz_sentinel_hides_audit_tail_from_anonymous(tmp_path, monkeypatch)
     assert "WORKER TIMEOUT" not in json.dumps(body)
 
 
-def test_healthz_sentinel_shows_audit_tail_to_operator(tmp_path, monkeypatch):
-    app = _sentinel_app(tmp_path, monkeypatch)
+def test_healthz_sentinel_shows_audit_tail_to_operator(web_module, monkeypatch):
+    app = _sentinel_app(web_module, monkeypatch)
     c = app.test_client()
     with c.session_transaction() as s:
         s["dev_operator"] = True

@@ -221,12 +221,19 @@ def add_comment(
 
     _ensure_schema(db_path)
     conn = _connect(db_path)
+    # Drive the transaction explicitly so the cap check and the insert are one
+    # atomic unit. Autocommit at the driver level (isolation_level=None) lets
+    # BEGIN IMMEDIATE take the write lock up front, closing the TOCTOU where two
+    # concurrent adds each pass the COUNT gate and together exceed the cap.
+    conn.isolation_level = None
     try:
+        conn.execute("BEGIN IMMEDIATE")
         row = conn.execute(
             "SELECT COUNT(*) AS c FROM reel_review_comments WHERE run_id=? AND target=?",
             (run_id, tgt),
         ).fetchone()
         if int(row["c"]) >= MAX_COMMENTS_PER_TARGET:
+            conn.execute("ROLLBACK")
             raise ReelCommentError("too many comments on this reel")
         conn.execute(
             "INSERT INTO reel_review_comments"
@@ -234,7 +241,7 @@ def add_comment(
             " VALUES(?,?,?,?,?,?,?,?,?)",
             (cid, run_id, tgt, ts, bd, au, 0, now, now),
         )
-        conn.commit()
+        conn.execute("COMMIT")
     finally:
         conn.close()
     return ReelComment(cid, run_id, tgt, ts, bd, au, False, now, now)

@@ -63,6 +63,42 @@ def _corner_subject(tmp_path: Path, name: str = "subj.png") -> Path:
     return p
 
 
+@pytest.fixture(scope="module")
+def corner_subject(tmp_path_factory) -> Path:
+    """The corner-subject frame, generated ONCE for the whole module.
+
+    Every test drives the *same* deterministic (seeded RNG) off-centre-subject
+    image, so its saliency focus is identical whether the image is built once or
+    thirteen times. Generating it (numpy RNG fill + PNG encode) a single time —
+    instead of per test via ``_corner_subject(tmp_path)`` — removes the module's
+    main redundant cost without touching a single assertion: tests that need
+    their own ``tmp_path`` for ``DATA_DIR`` / output paths still take it, they
+    just share this one input photo.
+    """
+    d = tmp_path_factory.mktemp("corner_subject")
+    return _corner_subject(d)
+
+
+@pytest.fixture(autouse=True, scope="module")
+def _no_bg_remover():
+    """Report no background remover for this module — the real per-test cost sink.
+
+    These tests exercise per-format photo *focus* (``photoPos``), not cutout
+    synthesis. Left un-stubbed, the first ``_card_to_props`` that resolves a
+    cutout calls ``get_bg_remover()``, which tries to fetch the u2net ONNX model
+    over the network — many seconds of 403 retry/back-off in a sandbox with no
+    cached model — before falling back to a passthrough alpha the matte gate
+    then rejects (so the resolved cutout is ``""`` anyway). Reporting no remover
+    reaches that identical ``""`` cutout with zero network cost, so every
+    ``photoPos`` / ``photoSrc`` assertion is byte-identical while the module
+    stops paying for a model download it never tests. The saliency maths itself
+    is already cheap and its one input image is shared via ``corner_subject`` —
+    the download attempt, not the maths, was the recompute (#133).
+    """
+    with mock.patch("mediahub.media_ai.providers.get_bg_remover", return_value=None):
+        yield
+
+
 def _card(i: int = 1) -> dict:
     return {
         "id": f"c{i}",
@@ -104,8 +140,8 @@ def test_format_ratios_match_motion_pixel_sizes():
 # --------------------------------------------------------------------------- #
 
 
-def test_photo_focus_for_brief_is_format_aware(tmp_path):
-    p = _corner_subject(tmp_path)
+def test_photo_focus_for_brief_is_format_aware(corner_subject):
+    p = corner_subject
     with mock.patch.object(motion, "_photo_asset_path_for_brief", return_value=p):
         b = _brief()
         story = motion._photo_focus_for_brief(b, "story")
@@ -118,8 +154,8 @@ def test_photo_focus_for_brief_is_format_aware(tmp_path):
         assert story != landscape
 
 
-def test_photo_focus_default_is_story_and_byte_identical_to_legacy(tmp_path):
-    p = _corner_subject(tmp_path)
+def test_photo_focus_default_is_story_and_byte_identical_to_legacy(corner_subject):
+    p = corner_subject
     with mock.patch.object(motion, "_photo_asset_path_for_brief", return_value=p):
         b = _brief()
         # No format arg defaults to the story cut …
@@ -128,8 +164,8 @@ def test_photo_focus_default_is_story_and_byte_identical_to_legacy(tmp_path):
         assert motion._photo_focus_for_brief(b) == saliency.focus_position(str(p), "9:16")
 
 
-def test_photo_focus_for_brief_unknown_format_falls_back_to_story(tmp_path):
-    p = _corner_subject(tmp_path)
+def test_photo_focus_for_brief_unknown_format_falls_back_to_story(corner_subject):
+    p = corner_subject
     with mock.patch.object(motion, "_photo_asset_path_for_brief", return_value=p):
         b = _brief()
         assert motion._photo_focus_for_brief(b, "feed_square") == motion._photo_focus_for_brief(
@@ -144,8 +180,8 @@ def test_photo_focus_for_brief_no_photo_is_empty_for_every_format():
         assert motion._photo_focus_for_brief({"photo_treatment": "no-photo"}, fmt) == ""
 
 
-def test_photo_focus_for_brief_swallows_saliency_errors(tmp_path):
-    p = _corner_subject(tmp_path)
+def test_photo_focus_for_brief_swallows_saliency_errors(corner_subject):
+    p = corner_subject
     with (
         mock.patch.object(motion, "_photo_asset_path_for_brief", return_value=p),
         mock.patch(
@@ -162,8 +198,8 @@ def test_photo_focus_for_brief_swallows_saliency_errors(tmp_path):
 # --------------------------------------------------------------------------- #
 
 
-def test_card_to_props_photo_pos_varies_by_format(tmp_path):
-    p = _corner_subject(tmp_path)
+def test_card_to_props_photo_pos_varies_by_format(corner_subject):
+    p = corner_subject
     with mock.patch.object(motion, "_photo_asset_path_for_brief", return_value=p):
         b = _brief()
         positions = {
@@ -176,8 +212,8 @@ def test_card_to_props_photo_pos_varies_by_format(tmp_path):
         assert motion._card_to_props(_card(1), brief=b)["photoPos"] == positions["story"]
 
 
-def test_card_to_props_default_format_preserves_legacy_photo_pos(tmp_path):
-    p = _corner_subject(tmp_path)
+def test_card_to_props_default_format_preserves_legacy_photo_pos(corner_subject):
+    p = corner_subject
     with mock.patch.object(motion, "_photo_asset_path_for_brief", return_value=p):
         props = motion._card_to_props(_card(1), brief=_brief())
         assert props["photoPos"] == saliency.focus_position(str(p), "9:16")
@@ -217,8 +253,8 @@ def _capture_story(tmp_path, monkeypatch, fmt: str, photo: Path) -> dict:
     return captured
 
 
-def test_render_story_card_plumbs_format_into_photo_pos(tmp_path, monkeypatch):
-    p = _corner_subject(tmp_path)
+def test_render_story_card_plumbs_format_into_photo_pos(tmp_path, monkeypatch, corner_subject):
+    p = corner_subject
     story = _capture_story(tmp_path, monkeypatch, "story", p)
     landscape = _capture_story(tmp_path, monkeypatch, "landscape", p)
 
@@ -232,9 +268,9 @@ def test_render_story_card_plumbs_format_into_photo_pos(tmp_path, monkeypatch):
     assert sp != lp
 
 
-def test_render_meet_reel_plumbs_format_into_each_card(tmp_path, monkeypatch):
+def test_render_meet_reel_plumbs_format_into_each_card(tmp_path, monkeypatch, corner_subject):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    p = _corner_subject(tmp_path)
+    p = corner_subject
     captured: dict = {}
 
     def _fake_run(*, composition_id, props, out_path, duration_sec=None, size=None, timeout=600):
@@ -263,12 +299,12 @@ def test_render_meet_reel_plumbs_format_into_each_card(tmp_path, monkeypatch):
         assert beat["photoPos"] == expected
 
 
-def test_format_specific_cards_get_distinct_cache_keys(tmp_path, monkeypatch):
+def test_format_specific_cards_get_distinct_cache_keys(corner_subject):
     """The per-format photoPos rides in the card payload, so the four cuts of a
     photo-bearing card hash to four different cache keys — no cut clobbers
     another's cached MP4. (Size already differs; this confirms photoPos doesn't
     accidentally collapse the focus back to one value.)"""
-    p = _corner_subject(tmp_path)
+    p = corner_subject
     with mock.patch.object(motion, "_photo_asset_path_for_brief", return_value=p):
         b = _brief()
         positions = {
@@ -284,8 +320,8 @@ def test_format_specific_cards_get_distinct_cache_keys(tmp_path, monkeypatch):
 # --------------------------------------------------------------------------- #
 
 
-def test_manifest_axes_record_photo_focus(tmp_path):
-    p = _corner_subject(tmp_path)
+def test_manifest_axes_record_photo_focus(corner_subject):
+    p = corner_subject
     with mock.patch.object(motion, "_photo_asset_path_for_brief", return_value=p):
         props = motion._card_to_props(_card(1), brief=_brief(), format_name="landscape")
     axes = motion._card_manifest_axes(props)
@@ -311,16 +347,16 @@ def _reel_base(p: Path, n: int = 2):
     return cards, briefs
 
 
-def test_apply_format_photo_focus_story_is_identity(tmp_path):
-    p = _corner_subject(tmp_path)
+def test_apply_format_photo_focus_story_is_identity(corner_subject):
+    p = corner_subject
     cards, briefs = _reel_base(p)
     # The story cut returns the very same list object — no work, byte-identical
     # cache key, embedded photoSrc/cutoutSrc bytes untouched.
     assert motion._apply_format_photo_focus(cards, briefs, "story") is cards
 
 
-def test_apply_format_photo_focus_resolves_per_cut(tmp_path):
-    p = _corner_subject(tmp_path)
+def test_apply_format_photo_focus_resolves_per_cut(corner_subject):
+    p = corner_subject
     cards, briefs = _reel_base(p)
     with mock.patch.object(motion, "_photo_asset_path_for_brief", return_value=p):
         out = motion._apply_format_photo_focus(cards, briefs, "landscape")
@@ -332,8 +368,8 @@ def test_apply_format_photo_focus_resolves_per_cut(tmp_path):
     assert out[0]["photoSrc"] == cards[0]["photoSrc"]
 
 
-def test_apply_format_photo_focus_does_not_mutate_input(tmp_path):
-    p = _corner_subject(tmp_path)
+def test_apply_format_photo_focus_does_not_mutate_input(corner_subject):
+    p = corner_subject
     cards, briefs = _reel_base(p)
     before = [c["photoPos"] for c in cards]
     with mock.patch.object(motion, "_photo_asset_path_for_brief", return_value=p):

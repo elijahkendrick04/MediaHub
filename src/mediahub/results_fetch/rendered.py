@@ -14,6 +14,16 @@ Security is enforced at the browser layer, not hoped for:
 
   * **SSRF** — every request the page makes is checked; private/loopback/metadata
     hosts and non-http(s) schemes are aborted (reusing ``safe_fetch``'s validator).
+  * **DNS pinning (anti-rebinding)** — before each navigation the target host is
+    resolved to ONE validated public IP (``safe_fetch.resolve_safe_ip``) and
+    Chromium's own resolver is pinned to it with ``--host-resolver-rules`` so the
+    browser cannot re-resolve the host to an internal address between our check
+    and its connection (the DNS-rebinding TOCTOU that Tier A closed at the socket
+    layer, closed here at the browser layer). The pin covers the top-level
+    navigation, its same-host redirects, and its same-host subresources. See
+    ``docs/adr/0030-tier-b-chromium-dns-pinning.md`` for the residual (off-scope
+    subresources on *other* public hosts re-resolve and are only re-validated,
+    not IP-pinned).
   * **Scope** — top-level/sub-document *navigations* are pinned to the validated
     same-origin path-prefix scope; off-scope asset requests are allowed read-only
     but never recorded as crawl targets.
@@ -35,7 +45,7 @@ from dataclasses import dataclass, field
 from typing import Callable, Optional
 from urllib.parse import urlparse
 
-from mediahub.web_research.safe_fetch import is_url_safe
+from mediahub.web_research.safe_fetch import is_url_safe, resolve_safe_ip
 
 from .fetch import FetchedPage, FetchLimits, _normalise_content_type
 
@@ -151,19 +161,15 @@ class RenderedBackend:
     alive and lets the render counter enforce a hard per-crawl ceiling.
 
     ``page_provider`` is the test seam: a zero-arg callable returning a
-    page-like object. When supplied, no real browser is launched, so the
-    routing/capture/budget logic can be unit-tested without Chromium.
-    ``host_safe`` defaults to the production SSRF validator and is injectable
-    for the same reason.
+    page-like object. When supplied, no real browser is launched (so DNS
+    pinning is a no-op — there is no resolver to pin), which lets the
+    routing/capture/budget logic be unit-tested without Chromium.
+    ``host_safe`` (per-request SSRF gate, URL→bool) and ``resolve_ip``
+    (per-navigation pin source, host→validated-IP-or-None) both default to the
+    production ``safe_fetch`` primitives and are injectable for the same reason.
     """
 
     tier = "rendered"
-
-    # A host's SSRF verdict is cached only briefly: a host that resolved to a
-    # public IP at first check must not stay trusted forever if its DNS is later
-    # repointed at a private/loopback/metadata address (DNS rebinding). Entries
-    # expire after this many seconds and are re-validated on next use.
-    _safe_cache_ttl_s = 60.0
 
     def __init__(
         self,
@@ -171,18 +177,22 @@ class RenderedBackend:
         *,
         page_provider: Optional[Callable[[], object]] = None,
         host_safe: Callable[[str], bool] = is_url_safe,
+        resolve_ip: Callable[[str], Optional[str]] = resolve_safe_ip,
     ) -> None:
         self.limits = limits or FetchLimits()
         self._page_provider = page_provider
         self._host_safe = host_safe
+        self._resolve_ip = resolve_ip
         self._pw = None
         self._browser = None
         self.renders_done = 0
         self.budget_hit = False
         self._deadline: Optional[float] = None
-        # host -> (verdict, monotonic_expiry). Entries older than the TTL are
-        # discarded and re-validated so a DNS-rebound host can't stay trusted.
-        self._safe_cache: dict[str, tuple[bool, float]] = {}
+        # The host + validated IP the running browser's resolver is pinned to
+        # (``--host-resolver-rules``). Set per navigation from ``resolve_ip``; a
+        # change of host tears the browser down so it relaunches re-pinned.
+        self._pinned_host: Optional[str] = None
+        self._pinned_ip: Optional[str] = None
         # Recycle the headless browser every N renders. A Chromium that has
         # rendered many heavy JS pages on a memory-tight host can wedge so a
         # later new_context/new_page blocks forever (the crawl appears stuck at
@@ -199,6 +209,28 @@ class RenderedBackend:
     def __exit__(self, *exc) -> None:
         self.close()
 
+    @staticmethod
+    def _host_resolver_rule(host: str, ip: str) -> str:
+        """The ``--host-resolver-rules`` arg pinning ``host``'s resolution to
+        ``ip``.
+
+        ``MAP <host> <ip>`` remaps *only* ``host`` (every port — the replacement
+        carries no port, so Chromium preserves the request's) to the pre-validated
+        ``ip``; hosts that match no rule fall through to normal resolution, so a
+        page's legit cross-host CDN/subresource fetches are unaffected. IPv6
+        replacements are bracketed so the address is not mis-parsed as host:port.
+        """
+        repl = f"[{ip}]" if ":" in ip else ip
+        return f"--host-resolver-rules=MAP {host} {repl}"
+
+    def _launch_args(self) -> list[str]:
+        """Chromium launch args: the graphic_renderer convention plus, when a
+        navigation host is pinned, the ``--host-resolver-rules`` DNS pin."""
+        args = ["--no-sandbox", "--disable-dev-shm-usage"]
+        if self._pinned_host and self._pinned_ip:
+            args.append(self._host_resolver_rule(self._pinned_host, self._pinned_ip))
+        return args
+
     def _ensure_browser(self) -> None:
         if self._browser is not None or self._page_provider is not None:
             return
@@ -209,10 +241,13 @@ class RenderedBackend:
         self._pw = sync_playwright().start()
         # Same launch convention as graphic_renderer/render.py (headless chromium,
         # --no-sandbox); the bundled-chromium path is resolved via
-        # PLAYWRIGHT_BROWSERS_PATH in the deployed image.
-        self._browser = self._pw.chromium.launch(args=["--no-sandbox", "--disable-dev-shm-usage"])
+        # PLAYWRIGHT_BROWSERS_PATH in the deployed image. The DNS pin (if any) for
+        # this navigation's host is baked into the args (_launch_args).
+        self._browser = self._pw.chromium.launch(args=self._launch_args())
 
-    def close(self) -> None:
+    def _teardown_browser(self) -> None:
+        """Close + drop the browser/playwright handles (best-effort). Shared by
+        ``close``, the periodic recycle, and the re-pin on a host change."""
         for obj, meth in ((self._browser, "close"), (self._pw, "stop")):
             if obj is not None:
                 try:
@@ -221,6 +256,11 @@ class RenderedBackend:
                     pass
         self._browser = None
         self._pw = None
+
+    def close(self) -> None:
+        self._teardown_browser()
+        self._pinned_host = None
+        self._pinned_ip = None
 
     def _acquire_page(self):
         """Return ``(page, cleanup)``; uses the injected provider in tests."""
@@ -239,14 +279,47 @@ class RenderedBackend:
     # -- decisions (pure; unit-tested directly) ----------------------------
 
     def _host_ok(self, url: str) -> bool:
+        """SSRF gate for one request the page makes.
+
+        The navigation host is already resolved + IP-pinned for this render
+        (``_apply_navigation_pin``), so it is trusted without re-resolving —
+        Chromium is locked to the validated IP regardless of what its DNS now
+        returns. Every *other* host is re-validated fresh on each call: there is
+        deliberately no verdict cache, so a host that flips to internal (DNS
+        rebinding) can never ride a stale "safe" verdict (finding #125).
+        """
         host = (urlparse(url).hostname or "").lower()
-        now = time.monotonic()
-        entry = self._safe_cache.get(host)
-        if entry is not None and now < entry[1]:
-            return entry[0]
-        verdict = bool(self._host_safe(url))
-        self._safe_cache[host] = (verdict, now + self._safe_cache_ttl_s)
-        return verdict
+        if host and host == self._pinned_host:
+            return True
+        return bool(self._host_safe(url))
+
+    def _apply_navigation_pin(self, url: str) -> bool:
+        """Resolve ``url``'s host to ONE validated public IP and pin the browser
+        to it for this navigation; return ``False`` to refuse the navigation.
+
+        A host already pinned for this backend is accepted immediately: the
+        running browser is locked to its validated IP via ``--host-resolver-rules``
+        and cannot rebind, so re-resolving it would do no security work — it would
+        only risk fail-closing a legitimate same-host page on a transient resolver
+        blip. Only a *new* host is resolved: refusal (``False``) then means it is
+        unresolvable or *any* current resolution is an internal/reserved IP — a
+        rebinding host that now points inward is caught here, before the browser
+        connects. A new host tears the running browser down so the next
+        ``_acquire_page`` relaunches with ``--host-resolver-rules`` re-pinned to it
+        (``_launch_args``).
+        """
+        host = (urlparse(url).hostname or "").lower()
+        if not host:
+            return False
+        if host == self._pinned_host:
+            return True  # already resolved + IP-pinned; the browser cannot rebind
+        ip = self._resolve_ip(host)
+        if ip is None:
+            return False
+        self._teardown_browser()  # running browser (if any) is pinned to another host
+        self._pinned_host = host
+        self._pinned_ip = ip
+        return True
 
     def route_decision(self, url: str, resource_type: str, scope: Scope) -> str:
         """``"continue"`` or ``"abort"`` for one request the page makes.
@@ -311,24 +384,23 @@ class RenderedBackend:
         return False
 
     def _recycle_browser(self) -> None:
-        """Close + drop the browser so the next render relaunches a fresh one.
+        """Close + drop the browser so the next render relaunches a fresh one
+        (re-pinned to the current host via ``_launch_args``).
 
         Frees memory accumulated over a long crawl; no-op under the injected
         test page-provider (no real browser to recycle).
         """
         if self._page_provider is not None or self._browser is None:
             return
-        for obj, meth in ((self._browser, "close"), (self._pw, "stop")):
-            if obj is not None:
-                try:
-                    getattr(obj, meth)()
-                except Exception:  # pragma: no cover - best-effort teardown
-                    pass
-        self._browser = None
-        self._pw = None
+        self._teardown_browser()
 
     def fetch(self, url: str) -> Optional[RenderedPage]:
         if not self._host_ok(url):
+            return None
+        # Pin Chromium's resolver to this host's validated IP before it connects
+        # (anti DNS-rebinding). Only meaningful with a real browser; the injected
+        # test page has no resolver, so the pin is skipped there.
+        if self._page_provider is None and not self._apply_navigation_pin(url):
             return None
         if self._budget_blocks_render():
             return None

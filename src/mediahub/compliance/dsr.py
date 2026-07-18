@@ -32,6 +32,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
+from mediahub._atomic_io import atomic_write_text
+
 from .consent import ConsentRegistry, athlete_key
 from .store import JsonlLedger
 
@@ -167,9 +169,19 @@ class DsrRequestLog:
 # --------------------------------------------------------------------------
 
 
-def _tenant_runs(profile_id: str) -> list[Path]:
-    """Run JSON files owned by this tenant (legacy unowned runs included —
-    they pre-date multi-tenancy and belong to the single org that made them)."""
+def _tenant_runs(profile_id: str, *, include_ownerless: bool = True) -> list[Path]:
+    """Run JSON files this tenant may act on under a DSR request.
+
+    A run owned by this tenant (``owner == profile_id``) is always included.
+    Ownerless runs (legacy / pre-multi-tenancy, ``profile_id == ""``) are
+    included only when ``include_ownerless`` is set. The caller decides that
+    from the SAME ADR-0014 rule the run routes use (``_ownerless_run_readable``):
+    the operator and single-tenant / anonymous (pilot) sessions keep today's
+    reach over legacy data, while a signed-in *regular* tenant on a shared
+    instance is confined to its own runs — an ownerless run may be another
+    club's legacy data (finding #111). Defaults to ``True`` so direct/library
+    callers, tests, and the single-org legacy path are unchanged; the web
+    routes pass the gated value."""
     out = []
     runs_dir = _runs_dir()
     if not runs_dir.exists():
@@ -181,9 +193,33 @@ def _tenant_runs(profile_id: str) -> list[Path]:
             owner = json.loads(p.read_text()).get("profile_id", "")
         except Exception:
             continue
-        if owner == profile_id or not owner:
+        if owner == profile_id or (include_ownerless and not owner):
             out.append(p)
     return out
+
+
+def _tenant_pbs_dirs(profile_id: str, cache_root: Path, *, include_ownerless: bool) -> list[Path]:
+    """``pbs/<run_id>/`` cache dirs under ``cache_root`` for this tenant's runs.
+
+    Unlike the global ``swimmers/`` warm cache (keyed by ``md5(name|club)`` with
+    no tenant dimension), ``pbs/`` is keyed by run id — ``pb_discovery.cache``'s
+    ``RunCache`` writes ``discovered/pbs/<_safe(run_id)>/`` — so it carries the
+    run's tenant attribution. The SAR export and the erasure sweep confine the
+    ``pbs/`` walk to the tenant's own runs (the finding #111 rule applied one
+    layer down) instead of reading or deleting every tenant's PB cache. A run's
+    flat file is ``<run_id>.json``, so its stem is the run id the cache was
+    keyed under; ``include_ownerless`` follows the same gate as the run walk."""
+    from mediahub.pb_discovery.cache import _safe
+
+    pbs_root = cache_root / "pbs"
+    if not pbs_root.exists():
+        return []
+    dirs = []
+    for path in _tenant_runs(profile_id, include_ownerless=include_ownerless):
+        d = pbs_root / _safe(path.stem)
+        if d.exists():
+            dirs.append(d)
+    return dirs
 
 
 def _athlete_entries_in_run(run: dict, key: str) -> tuple[list[dict], list[str]]:
@@ -308,8 +344,12 @@ def _redact_rows_for_subject(node: object, pattern: re.Pattern) -> tuple[object,
 # --------------------------------------------------------------------------
 
 
-def export_athlete(profile_id: str, athlete_name: str) -> dict:
-    """Everything held about one athlete, machine-readable (Arts 15 + 20)."""
+def export_athlete(profile_id: str, athlete_name: str, *, include_ownerless: bool = True) -> dict:
+    """Everything held about one athlete, machine-readable (Arts 15 + 20).
+
+    ``include_ownerless`` gates whether legacy ownerless runs are read (see
+    ``_tenant_runs``); the web route passes the ADR-0014 value so a signed-in
+    regular tenant cannot disclose another club's ownerless data."""
     key = athlete_key(athlete_name)
     report: dict = {
         "athlete_name": athlete_name,
@@ -326,7 +366,7 @@ def export_athlete(profile_id: str, athlete_name: str) -> dict:
         ],
     }
 
-    for path in _tenant_runs(profile_id):
+    for path in _tenant_runs(profile_id, include_ownerless=include_ownerless):
         try:
             run = json.loads(path.read_text())
         except Exception:
@@ -364,23 +404,32 @@ def export_athlete(profile_id: str, athlete_name: str) -> dict:
     ):
         if not cache_root.exists():
             continue
-        for sub in ("swimmers", "pbs", "search_cache"):
-            d = cache_root / sub
+        # swimmers/ + search_cache/ are global public-reference caches with no
+        # tenant dimension (keyed by md5(name|club) / query hash); pbs/ is
+        # run-keyed, so confine it to this tenant's own runs — the finding #111
+        # rule one layer down — rather than reading every tenant's PB cache.
+        scan_dirs = [cache_root / "swimmers", cache_root / "search_cache"]
+        scan_dirs += _tenant_pbs_dirs(profile_id, cache_root, include_ownerless=include_ownerless)
+        for d in scan_dirs:
             if not d.exists():
                 continue
             for f in d.rglob("*.json"):
                 if _file_mentions(f, key):
+                    # Path is relative to the cache root so the export never
+                    # leaks the DATA_DIR filesystem layout; rows_redacted is
+                    # always present so the SAR never implies false completeness.
+                    rel = str(f.relative_to(cache_root))
                     try:
                         content, dropped = _redact_rows_for_subject(
                             json.loads(f.read_text()), _name_pattern(key)
                         )
-                        entry: dict = {"path": str(f), "content": content}
-                        if dropped:
-                            # Rows about other data subjects removed before export.
-                            entry["rows_redacted"] = dropped
-                        report["pb_caches"].append(entry)
+                        report["pb_caches"].append(
+                            {"path": rel, "content": content, "rows_redacted": dropped}
+                        )
                     except Exception:
-                        report["pb_caches"].append({"path": str(f), "content": "unparseable"})
+                        report["pb_caches"].append(
+                            {"path": rel, "content": "unparseable", "rows_redacted": 0}
+                        )
 
     try:
         from mediahub.memory import store as memory_store
@@ -431,8 +480,20 @@ def _memory_rows_matching(memory_store, tenant_id: str, key: str) -> list[dict]:
 # --------------------------------------------------------------------------
 
 
-def erase_athlete(profile_id: str, athlete_name: str, *, recorded_by: str = "") -> dict:
+def erase_athlete(
+    profile_id: str,
+    athlete_name: str,
+    *,
+    recorded_by: str = "",
+    include_ownerless: bool = True,
+) -> dict:
     """Remove one athlete from every reachable store; report residuals.
+
+    ``include_ownerless`` gates whether legacy ownerless runs are mutated (see
+    ``_tenant_runs``); the web route passes the ADR-0014 value so a signed-in
+    regular tenant cannot rewrite another club's ownerless data. The privacy
+    cascade below is already strict (``!= profile_id``), so it never reaches
+    ownerless runs regardless.
 
     ONE erasure engine, two layers: the UK-legal cascade
     (``mediahub.privacy.erasure`` — runs/cards/rendered assets, PB caches,
@@ -465,7 +526,7 @@ def erase_athlete(profile_id: str, athlete_name: str, *, recorded_by: str = "") 
     }
 
     # 1. Runs: drop the athlete's achievements/cards, redact remaining mentions.
-    for path in _tenant_runs(profile_id):
+    for path in _tenant_runs(profile_id, include_ownerless=include_ownerless):
         try:
             run = json.loads(path.read_text())
         except Exception:
@@ -499,7 +560,7 @@ def erase_athlete(profile_id: str, athlete_name: str, *, recorded_by: str = "") 
             run["cards"] = kept_cards
         report["names_redacted"] += _redact_names_deep(run, key)
         report["names_redacted"] += _redact_text_deep(run, athlete_name)
-        path.write_text(json.dumps(run))
+        atomic_write_text(path, json.dumps(run))
         run_id = run.get("run_id", path.stem)
         report["runs_touched"].append(run_id)
 
@@ -531,7 +592,7 @@ def erase_athlete(profile_id: str, athlete_name: str, *, recorded_by: str = "") 
                     removed = before - len(wf)
                     if removed:
                         report["workflow_entries_removed"] += removed
-                        wf_path.write_text(json.dumps(wf))
+                        atomic_write_text(wf_path, json.dumps(wf))
             except Exception:
                 report["residuals"].append(f"workflow sidecar unreadable: {wf_path}")
 
@@ -544,7 +605,7 @@ def erase_athlete(profile_id: str, athlete_name: str, *, recorded_by: str = "") 
                         pack = json.loads(f.read_text())
                         report["names_redacted"] += _redact_names_deep(pack, key)
                         report["names_redacted"] += _redact_text_deep(pack, athlete_name)
-                        f.write_text(json.dumps(pack))
+                        atomic_write_text(f, json.dumps(pack))
                     except Exception:
                         try:
                             f.unlink()
@@ -568,12 +629,16 @@ def erase_athlete(profile_id: str, athlete_name: str, *, recorded_by: str = "") 
     except Exception as e:
         report["residuals"].append(f"privacy cascade unavailable: {e}")
 
-    # 2. PB caches (per-run, warm, and raw search HTML).
+    # 2. PB caches (per-run, warm, and search). swimmers/search_cache/meets are
+    #    global public-reference caches; pbs/ is run-keyed, so confine it to this
+    #    tenant's own runs (finding #111) — a signed-in regular tenant must not
+    #    delete another club's PB cache.
     for cache_root in (_data_dir() / "data" / "discovered", _data_dir() / "discovered"):
         if not cache_root.exists():
             continue
-        for sub in ("swimmers", "pbs", "search_cache", "meets"):
-            d = cache_root / sub
+        scan_dirs = [cache_root / "swimmers", cache_root / "search_cache", cache_root / "meets"]
+        scan_dirs += _tenant_pbs_dirs(profile_id, cache_root, include_ownerless=include_ownerless)
+        for d in scan_dirs:
             if not d.exists():
                 continue
             for f in list(d.rglob("*.json")):
@@ -729,8 +794,14 @@ def _count_mentions(node: object, key: str) -> int:
 # --------------------------------------------------------------------------
 
 
-def rectify_athlete_name(profile_id: str, old_name: str, new_name: str) -> dict:
-    """Correct an athlete's name across runs, media links and consent records."""
+def rectify_athlete_name(
+    profile_id: str, old_name: str, new_name: str, *, include_ownerless: bool = True
+) -> dict:
+    """Correct an athlete's name across runs, media links and consent records.
+
+    ``include_ownerless`` gates whether legacy ownerless runs are renamed (see
+    ``_tenant_runs``); the web route passes the ADR-0014 value so a signed-in
+    regular tenant cannot rewrite another club's ownerless data."""
     key = athlete_key(old_name)
     new_clean = re.sub(r"\s+", " ", (new_name or "").strip())
     if not key or not new_clean:
@@ -751,14 +822,14 @@ def rectify_athlete_name(profile_id: str, old_name: str, new_name: str) -> dict:
                 n += _rename_deep(item)
         return n
 
-    for path in _tenant_runs(profile_id):
+    for path in _tenant_runs(profile_id, include_ownerless=include_ownerless):
         try:
             run = json.loads(path.read_text())
         except Exception:
             continue
         changed = _rename_deep(run)
         if changed:
-            path.write_text(json.dumps(run))
+            atomic_write_text(path, json.dumps(run))
             report["runs_touched"].append(run.get("run_id", path.stem))
             report["fields_updated"] += changed
 
@@ -803,32 +874,19 @@ def rectify_athlete_name(profile_id: str, old_name: str, new_name: str) -> dict:
 def erase_user_account(email: str) -> bool:
     """Remove every trace of a user account from the append-only ledger.
 
-    The one place a rewrite (not an append) is correct: erasing the account
-    email from disk requires dropping its lines. Membership of the ledger is
-    operator-controller data (ROPA B1), so this is an operator action.
+    Delegates to :meth:`UserStore.delete` — the single, canonical account-erasure
+    path — so this shares its guarantees instead of re-implementing them: it takes
+    ``_LEDGER_LOCK`` (so it can't race a concurrent signup and silently erase the
+    new account) and rewrites via a temp + ``os.replace`` (so a crash mid-write
+    can't destroy every account). Membership of the ledger is operator-controller
+    data (ROPA B1), so this is an operator action. Returns True when a record was
+    removed.
     """
     norm = (email or "").strip().lower()
     if not norm:
         return False
-    users_path = _data_dir() / "users.jsonl"
-    if not users_path.exists():
-        return False
-    kept_lines = []
-    found = False
-    for line in users_path.read_text().splitlines():
-        try:
-            rec = json.loads(line)
-        except json.JSONDecodeError:
-            kept_lines.append(line)
-            continue
-        if str(rec.get("email", "")).strip().lower() == norm:
-            found = True
-        else:
-            kept_lines.append(line)
-    if found:
-        users_path.write_text("\n".join(kept_lines) + ("\n" if kept_lines else ""))
-        try:
-            os.chmod(users_path, 0o600)
-        except OSError:
-            pass
-    return found
+    from mediahub.web.auth import UserStore  # noqa: PLC0415
+
+    # No path arg: UserStore resolves the SAME ledger signups write to
+    # (auth._users_path()), so erasure targets the real account store.
+    return UserStore().delete(email)

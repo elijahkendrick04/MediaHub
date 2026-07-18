@@ -10,25 +10,12 @@ naming setup as the main editor.
 
 from __future__ import annotations
 
-import importlib
-
 import pytest
 
 
 @pytest.fixture
-def make_client(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
+def make_client(web_module, monkeypatch):
     monkeypatch.setenv("MEDIAHUB_SCHEDULER", "0")
-    (tmp_path / "runs_v4").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "club_profiles").mkdir(parents=True, exist_ok=True)
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
 
     def _make(*, ready: bool):
         from mediahub.web.club_profile import ClubProfile, save_profile
@@ -37,7 +24,7 @@ def make_client(tmp_path, monkeypatch):
         if ready:
             prof.brand_keywords = ["fast", "friendly"]  # a brand signal → is_ready()
         save_profile(prof)
-        app = wm.create_app()
+        app = web_module.create_app()
         app.config["TESTING"] = True
         c = app.test_client()
         with c.session_transaction() as s:
@@ -79,8 +66,8 @@ def test_entry_points_link_to_setup_not_legacy(make_client):
     # substring appears somewhere on the page.
     m = re.search(r'<a\b[^>]*\bhref="([^"]+)"[^>]*>\s*Edit profile\s*</a>', home)
     assert m is not None, "no 'Edit profile' CTA found on the signed-in home"
-    assert m.group(1).endswith("/organisation/setup"), (
-        f"Edit-profile CTA points at {m.group(1)!r}, not the canonical setup page"
-    )
+    assert m.group(1).endswith(
+        "/organisation/setup"
+    ), f"Edit-profile CTA points at {m.group(1)!r}, not the canonical setup page"
     # And it does NOT point at the demoted legacy /organisation editor.
     assert not m.group(1).endswith("/organisation")

@@ -8,7 +8,6 @@ org's stores and nothing cross-tenant.
 
 from __future__ import annotations
 
-import importlib
 import io
 import json
 import zipfile
@@ -24,9 +23,7 @@ def _seed_run(runs_dir, run_id, profile_id, swimmer):
                 "run_id": run_id,
                 "profile_id": profile_id,
                 "meet_name": "Test Gala",
-                "cards": [
-                    {"card_id": "c1", "name": swimmer, "caption": f"{swimmer} swam well"}
-                ],
+                "cards": [{"card_id": "c1", "name": swimmer, "caption": f"{swimmer} swam well"}],
             }
         )
     )
@@ -37,18 +34,10 @@ def _seed_run(runs_dir, run_id, profile_id, swimmer):
 
 
 @pytest.fixture
-def org_world(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
+def org_world(web_module, tmp_path, monkeypatch):
+    wm = web_module
 
     import mediahub.media_library.store as mls
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
 
     from mediahub.web.club_profile import ClubProfile, save_profile
 

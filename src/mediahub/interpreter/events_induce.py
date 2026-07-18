@@ -40,6 +40,25 @@ _AGE_BAND_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Relay-header detection (finding #65). A relay header ("4 x 100m Freestyle
+# Relay") reuses the same distance + stroke vocabulary as an individual event, so
+# without this flag it is induced as a bogus individual event ("100m Freestyle")
+# whose legs then seed individual PB / medal detection. Two precise deterministic
+# signals, each requiring the relay marker adjacent to the event descriptor so a
+# meet name that merely contains "Relays" (e.g. "Manchester Relays 100m Free") is
+# never misflagged:
+#   * an "N x DIST" leg count ("4 x 100", "4x50", "4×100"); or
+#   * "<distance|stroke> relay" ("Freestyle Relay", "50m Relay").
+_RELAY_STROKE_WORD = (
+    r"(?:free(?:style)?|back(?:stroke)?|breast(?:stroke)?|butt?erfly|fly|medley|i\.?m\.?)"
+)
+_RELAY_DIST_TOKEN = r"(?:\d{2,4}\s*m)"
+_RELAY_HEADER_RE = re.compile(
+    r"\b\d+\s*[x×]\s*\d"  # "N x DIST" leg count
+    r"|(?:" + _RELAY_DIST_TOKEN + "|" + _RELAY_STROKE_WORD + r")\s+relays?\b",
+    re.IGNORECASE,
+)
+
 
 @dataclass
 class _EventContext:
@@ -252,6 +271,7 @@ def induce_events(
                 swims=[],
                 confidence=score,
                 raw_header=text,
+                is_relay=bool(_RELAY_HEADER_RE.search(text)),
             )
             events.append(ev)
             log.debug("Event detected (conf=%.2f): %s", score, text[:80])

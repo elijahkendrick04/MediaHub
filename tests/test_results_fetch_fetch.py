@@ -1,19 +1,15 @@
 """Tests for results_fetch Tier A (static) + Tier B (rendered) + escalation.
 
-Everything here runs offline: the static backend's HTTP is mocked, the SSRF
-validator is stubbed for redirect cases (real loopback refusal is exercised
-without a network), and the rendered backend is driven through a fake
-Playwright page so no Chromium is launched. The security-critical decisions —
-SSRF refusal, content-type allowlist, byte caps, browser-level scope
-interception, network-capture filtering/caps, and the hard render budget — are
-each asserted directly.
+Everything here runs offline: the static backend's pinned transport
+(``_pinned_open``) is mocked, so redirect / allowlist / cap cases need no DNS
+(real loopback refusal is still exercised without a network), and the rendered
+backend is driven through a fake Playwright page so no Chromium is launched. The
+security-critical decisions — SSRF refusal, content-type allowlist, byte caps,
+browser-level scope interception, network-capture filtering/caps, and the hard
+render budget — are each asserted directly.
 """
 
 from __future__ import annotations
-
-import time
-
-import pytest
 
 from mediahub.results_fetch import (
     ReadResult,
@@ -40,41 +36,51 @@ from mediahub.results_fetch.rendered import (
 # ---------------------------------------------------------------------------
 
 
-class FakeResponse:
-    """Minimal stand-in for a streamed ``requests`` response."""
+class FakePinnedResponse:
+    """Minimal stand-in for a pinned urllib3 response (``preload_content=False``).
 
-    def __init__(self, status_code=200, headers=None, body=b"", location=None):
-        self.status_code = status_code
+    Exposes exactly what ``StaticBackend.fetch`` / ``_read_capped`` touch:
+    ``.status`` (int), case-insensitive-ish ``.headers`` (a plain dict is fine —
+    the code probes both ``Location``/``location`` and ``Content-Type``),
+    ``.stream(amt)`` and ``.close()``."""
+
+    def __init__(self, status=200, headers=None, body=b"", location=None):
+        self.status = status
         self.headers = headers or {}
         if location is not None:
             self.headers["Location"] = location
         self._body = body
         self.closed = False
 
-    def iter_content(self, chunk_size=65536):
-        for i in range(0, len(self._body), chunk_size):
-            yield self._body[i : i + chunk_size]
+    def stream(self, amt=65536, decode_content=None):
+        for i in range(0, len(self._body), amt):
+            yield self._body[i : i + amt]
 
     def close(self):
         self.closed = True
 
 
-def _install_requests(monkeypatch, handler):
-    """Patch ``requests.Session.get`` — StaticBackend fetches through one pooled,
-    keep-alive session (a fresh ``requests.get`` per page would re-handshake)."""
-    import requests
+class FakePool:
+    """Stand-in for the urllib3 connection pool returned alongside a response."""
 
-    def fake_get(self, url, **kwargs):  # bound method: self is the Session
-        return handler(url, kwargs)
+    def __init__(self):
+        self.closed = False
 
-    monkeypatch.setattr(requests.Session, "get", fake_get)
+    def close(self):
+        self.closed = True
 
 
-def _allow_all_hosts(monkeypatch):
-    """Stub the SSRF validator so redirect/allowlist tests need no DNS."""
-    monkeypatch.setattr(
-        fetchmod, "is_url_safe", lambda url: "internal" not in url and "127.0.0.1" not in url
-    )
+def _install_pinned(monkeypatch, handler):
+    """Patch ``fetch._pinned_open`` — StaticBackend now pins every hop to the
+    SSRF-validated IP via ``safe_fetch._pinned_open`` (one resolution, used for
+    the connection too), instead of a validate-then-reconnect. ``handler(url)``
+    returns a ``FakePinnedResponse`` or raises ``ValueError`` to model a hop the
+    SSRF guard refuses (unresolvable / internal IP / non-http(s) scheme)."""
+
+    def fake_open(url, *, timeout):
+        return handler(url), FakePool()
+
+    monkeypatch.setattr(fetchmod, "_pinned_open", fake_open)
 
 
 class FakeRequest:
@@ -102,8 +108,9 @@ class FakePage:
     verbatim. Tracks whether it was closed.
     """
 
-    def __init__(self, *, url="https://x", dom="<html></html>", text="hi",
-                 shot=b"jpg", responses=None):
+    def __init__(
+        self, *, url="https://x", dom="<html></html>", text="hi", shot=b"jpg", responses=None
+    ):
         self._url = url
         self._dom = dom
         self._text = text
@@ -171,11 +178,10 @@ def test_static_refuses_loopback_without_network():
 
 
 def test_static_fetches_html_and_extracts_text(monkeypatch):
-    _allow_all_hosts(monkeypatch)
     html = b"<html><body><table><tr><td>1</td><td>Ada</td><td>58.21</td></tr></table></body></html>"
-    _install_requests(
+    _install_pinned(
         monkeypatch,
-        lambda url, kw: FakeResponse(200, {"Content-Type": "text/html; charset=utf-8"}, html),
+        lambda url: FakePinnedResponse(200, {"Content-Type": "text/html; charset=utf-8"}, html),
     )
     page = StaticBackend().fetch("https://results.example/heat1.htm")
     assert page is not None
@@ -186,47 +192,44 @@ def test_static_fetches_html_and_extracts_text(monkeypatch):
 
 
 def test_static_redirect_to_internal_is_refused(monkeypatch):
-    """A public URL that 302s to an internal host is refused at the next hop."""
-    _allow_all_hosts(monkeypatch)
+    """A public URL that 302s to an internal host is refused at the next hop:
+    ``_pinned_open`` raises before any byte is read from the internal target."""
 
-    def handler(url, kw):
+    def handler(url):
         if "internal" in url:
-            pytest.fail("internal host should never be requested")
-        return FakeResponse(302, {}, location="http://internal.svc/admin")
+            raise ValueError("unsafe_url")  # the SSRF guard refuses the pinned open
+        return FakePinnedResponse(302, location="http://internal.svc/admin")
 
-    _install_requests(monkeypatch, handler)
+    _install_pinned(monkeypatch, handler)
     assert StaticBackend().fetch("https://public.example/start") is None
 
 
 def test_static_follows_safe_redirect(monkeypatch):
-    _allow_all_hosts(monkeypatch)
     final = b"<html><body>" + b"x" * 500 + b"</body></html>"
 
-    def handler(url, kw):
+    def handler(url):
         if url.endswith("/start"):
-            return FakeResponse(302, {}, location="https://public.example/final.htm")
-        return FakeResponse(200, {"Content-Type": "text/html"}, final)
+            return FakePinnedResponse(302, location="https://public.example/final.htm")
+        return FakePinnedResponse(200, {"Content-Type": "text/html"}, final)
 
-    _install_requests(monkeypatch, handler)
+    _install_pinned(monkeypatch, handler)
     page = StaticBackend().fetch("https://public.example/start")
     assert page is not None and page.final_url.endswith("/final.htm")
 
 
 def test_static_rejects_disallowed_content_type(monkeypatch):
-    _allow_all_hosts(monkeypatch)
-    _install_requests(
+    _install_pinned(
         monkeypatch,
-        lambda url, kw: FakeResponse(200, {"Content-Type": "video/mp4"}, b"\x00\x00\x00 ftyp"),
+        lambda url: FakePinnedResponse(200, {"Content-Type": "video/mp4"}, b"\x00\x00\x00 ftyp"),
     )
     assert StaticBackend().fetch("https://x.example/clip") is None
 
 
 def test_static_sniffs_pdf_when_mislabelled(monkeypatch):
-    _allow_all_hosts(monkeypatch)
     pdf = b"%PDF-1.7\n" + b"x" * 100
-    _install_requests(
+    _install_pinned(
         monkeypatch,
-        lambda url, kw: FakeResponse(200, {"Content-Type": "application/octet-stream"}, pdf),
+        lambda url: FakePinnedResponse(200, {"Content-Type": "application/octet-stream"}, pdf),
     )
     page = StaticBackend().fetch("https://x.example/results")
     assert page is not None and page.content_type == "application/pdf"
@@ -234,18 +237,16 @@ def test_static_sniffs_pdf_when_mislabelled(monkeypatch):
 
 
 def test_static_enforces_byte_cap(monkeypatch):
-    _allow_all_hosts(monkeypatch)
     limits = FetchLimits(max_page_bytes=1024)
     big = b"<html>" + b"a" * 4096 + b"</html>"
-    _install_requests(
-        monkeypatch, lambda url, kw: FakeResponse(200, {"Content-Type": "text/html"}, big)
+    _install_pinned(
+        monkeypatch, lambda url: FakePinnedResponse(200, {"Content-Type": "text/html"}, big)
     )
     assert StaticBackend(limits).fetch("https://x.example/big") is None
 
 
 def test_static_non_200_returns_none(monkeypatch):
-    _allow_all_hosts(monkeypatch)
-    _install_requests(monkeypatch, lambda url, kw: FakeResponse(404, {}, b"nope"))
+    _install_pinned(monkeypatch, lambda url: FakePinnedResponse(404, {}, b"nope"))
     assert StaticBackend().fetch("https://x.example/missing") is None
 
 
@@ -264,7 +265,9 @@ def test_count_result_shaped_tokens_is_sport_agnostic():
 
 def _html_page(body_text, *, content_type="text/html"):
     raw = f"<html><body>{body_text}</body></html>".encode()
-    return FetchedPage(content=raw, final_url="https://x", content_type=content_type, text=body_text)
+    return FetchedPage(
+        content=raw, final_url="https://x", content_type=content_type, text=body_text
+    )
 
 
 def test_trigger_thin_body():
@@ -428,9 +431,11 @@ def test_route_allows_data_uri_blocks_file_scheme():
     assert rb.route_decision("ftp://x/y", "xhr", scope) == "abort"
 
 
-def test_safe_cache_expires_and_revalidates_after_ttl():
-    """The SSRF host-safety cache must not trust a host forever: after the TTL
-    it re-validates, so a host that flips to unsafe (DNS rebinding) is caught."""
+def test_host_ok_revalidates_every_call_no_stale_cache():
+    """#125: the SSRF host gate keeps NO verdict cache. Every check of a
+    non-pinned host re-runs the validator, so a host that flips to unsafe (DNS
+    rebinding) is caught on the very next request — never riding a stale 'safe'
+    verdict for a TTL window."""
     calls: list[str] = []
 
     def _host_safe(u):
@@ -439,20 +444,153 @@ def test_safe_cache_expires_and_revalidates_after_ttl():
         return len(calls) == 1
 
     rb = RenderedBackend(host_safe=_host_safe)
-    rb._safe_cache_ttl_s = 30.0
+    url = "https://cdn.other/app.js"  # a non-pinned (cross-host) subresource
 
-    url = "https://site.test/results/"
-    # First call validates and caches "safe".
-    assert rb._host_ok(url) is True
-    # Within TTL: served from cache, validator not re-run.
-    assert rb._host_ok(url) is True
-    assert len(calls) == 1
-
-    # Force the cached entry past its TTL and confirm re-validation flips it.
-    host, (_verdict, _expiry) = next(iter(rb._safe_cache.items()))
-    rb._safe_cache[host] = (True, time.monotonic() - 1.0)
+    assert rb._host_ok(url) is True  # first check: validator says safe
+    assert rb._host_ok(url) is False  # re-validated immediately, no cache → flips
     assert rb._host_ok(url) is False
-    assert len(calls) == 2
+    assert len(calls) == 3  # validator invoked every single time
+
+
+def test_host_ok_trusts_pinned_host_without_revalidating():
+    """The one host the browser is IP-pinned to for this navigation is trusted
+    without re-resolving — Chromium is locked to the validated IP regardless of
+    what DNS now returns, so re-validating it would only add a needless lookup
+    (and could fail-closed on a mid-render rebind of the attacker's own host)."""
+    calls: list[str] = []
+    rb = RenderedBackend(host_safe=lambda u: calls.append(u) or True)
+    rb._pinned_host = "site.test"
+    rb._pinned_ip = "203.0.113.7"
+
+    # Same-host request: trusted, validator never consulted.
+    assert rb._host_ok("https://site.test/api/r.json") is True
+    assert calls == []
+    # A different host still goes through the validator.
+    assert rb._host_ok("https://cdn.other/app.js") is True
+    assert calls == ["https://cdn.other/app.js"]
+
+
+# ---------------------------------------------------------------------------
+# Rendered backend — DNS pinning (anti-rebinding at the browser layer, #125)
+# ---------------------------------------------------------------------------
+
+
+def test_host_resolver_rule_pins_host_to_validated_ip():
+    """The launch flag maps ONLY the target host to the validated IP; the
+    replacement carries no port (Chromium keeps the request's), and an IPv6
+    address is bracketed so it is not mis-parsed as host:port."""
+    assert (
+        RenderedBackend._host_resolver_rule("site.test", "93.184.216.34")
+        == "--host-resolver-rules=MAP site.test 93.184.216.34"
+    )
+    assert (
+        RenderedBackend._host_resolver_rule("site.test", "2606:2800:220:1::10")
+        == "--host-resolver-rules=MAP site.test [2606:2800:220:1::10]"
+    )
+
+
+def test_launch_args_carry_the_pin_only_when_pinned():
+    rb = RenderedBackend()
+    base = ["--no-sandbox", "--disable-dev-shm-usage"]
+    # Unpinned: just the base convention, no resolver rule.
+    assert rb._launch_args() == base
+    # Pinned: the base plus exactly one --host-resolver-rules pin.
+    rb._pinned_host = "site.test"
+    rb._pinned_ip = "93.184.216.34"
+    assert rb._launch_args() == base + ["--host-resolver-rules=MAP site.test 93.184.216.34"]
+
+
+def test_apply_navigation_pin_sets_validated_ip():
+    rb = RenderedBackend(resolve_ip=lambda host: "93.184.216.34")
+    assert rb._apply_navigation_pin("https://site.test/results/") is True
+    assert rb._pinned_host == "site.test"
+    assert rb._pinned_ip == "93.184.216.34"
+    # And that pin is what would be baked into the Chromium launch.
+    assert "--host-resolver-rules=MAP site.test 93.184.216.34" in rb._launch_args()
+
+
+def test_apply_navigation_pin_refuses_rebound_internal_host():
+    """When the host re-resolves to an internal/reserved IP (or is
+    unresolvable), resolve_ip returns None → the navigation is refused and
+    nothing is pinned."""
+    rb = RenderedBackend(resolve_ip=lambda host: None)
+    assert rb._apply_navigation_pin("https://rebind.test/results/") is False
+    assert rb._pinned_host is None and rb._pinned_ip is None
+
+
+def test_apply_navigation_pin_relaunches_on_host_change_keeps_on_same_host():
+    """A host change drops the running browser (its --host-resolver-rules no
+    longer cover the new host) so the next acquire relaunches re-pinned; a
+    same-host navigation keeps the existing browser and pin (no churn)."""
+    rb = RenderedBackend(resolve_ip=lambda host: "203.0.113.9")
+    rb._apply_navigation_pin("https://a.test/x/")
+    sentinel = object()
+    rb._browser = sentinel  # pretend a browser is live, pinned to a.test
+
+    # Same host → keep the browser and the pin untouched.
+    assert rb._apply_navigation_pin("https://a.test/y/") is True
+    assert rb._browser is sentinel
+    assert rb._pinned_host == "a.test"
+
+    # Different host → tear the browser down and re-pin to the new host.
+    assert rb._apply_navigation_pin("https://b.test/z/") is True
+    assert rb._browser is None
+    assert rb._pinned_host == "b.test"
+
+
+def test_apply_navigation_pin_same_host_does_not_re_resolve():
+    """An already-pinned host is accepted WITHOUT re-resolving: the browser is
+    locked to the validated IP via --host-resolver-rules and can't rebind, so
+    re-resolving would only risk fail-closing a legit same-host page on a
+    transient resolver blip. The resolver is called once (first nav), never again
+    for the same host — and would refuse even a same-host page if it were."""
+    calls: list[str] = []
+
+    def _resolve(host):
+        calls.append(host)
+        return "203.0.113.9" if len(calls) == 1 else None  # blip on every later call
+
+    rb = RenderedBackend(resolve_ip=_resolve)
+    assert rb._apply_navigation_pin("https://a.test/p1/") is True  # first nav resolves + pins
+    assert calls == ["a.test"]
+    # Same host again, mid-crawl resolver blip (would return None) — still accepted,
+    # because the pin already guarantees the connection IP; resolver not consulted.
+    assert rb._apply_navigation_pin("https://a.test/p2/") is True
+    assert rb._apply_navigation_pin("https://a.test/p3/") is True
+    assert calls == ["a.test"]  # never re-resolved the pinned host
+    assert (rb._pinned_host, rb._pinned_ip) == ("a.test", "203.0.113.9")
+
+
+def test_apply_navigation_pin_uses_real_resolve_safe_ip_by_default(monkeypatch):
+    """The security-critical default wiring (resolve_ip=resolve_safe_ip) is
+    exercised end to end: with a host that resolves to a public IP the pin is
+    derived through the REAL resolve_safe_ip; a host resolving to an internal IP
+    is refused. Guards against signature/default drift on the pin path."""
+    import mediahub.web_research.safe_fetch as sf
+
+    # Public resolution → pinned to that IP via the real resolve_safe_ip.
+    monkeypatch.setattr(sf, "_resolved_ips", lambda host: ["93.184.216.34"])
+    rb = RenderedBackend()  # production defaults: resolve_ip=resolve_safe_ip
+    assert rb._apply_navigation_pin("https://real.example/results/") is True
+    assert rb._pinned_ip == "93.184.216.34"
+    assert "--host-resolver-rules=MAP real.example 93.184.216.34" in rb._launch_args()
+
+    # Internal resolution → real resolve_safe_ip returns None → refused.
+    monkeypatch.setattr(sf, "_resolved_ips", lambda host: ["10.0.0.5"])
+    rb2 = RenderedBackend()
+    assert rb2._apply_navigation_pin("https://rebind.example/results/") is False
+    assert rb2._pinned_host is None
+
+
+def test_fetch_refuses_rebinding_host_at_browser_layer():
+    """End-to-end #125 proof (no real browser): the up-front host check passes
+    (attacker's DNS returned a public IP — a stale verdict would say 'safe'),
+    but the per-navigation re-resolve now points internal (resolve_ip → None),
+    so fetch refuses BEFORE Chromium ever launches or navigates."""
+    rb = RenderedBackend(host_safe=lambda u: True, resolve_ip=lambda host: None)
+    assert rb.fetch("https://rebind.test/results/") is None
+    assert rb.renders_done == 0  # never launched, never navigated
+    assert rb._pinned_host is None
 
 
 # ---------------------------------------------------------------------------
@@ -466,11 +604,17 @@ def test_capture_keeps_inscope_json_filters_the_rest():
     captures: list[CapturedResponse] = []
     totals = [0]
 
-    keep = FakeNetworkResponse("https://site.test/api/r.json", "xhr", "application/json", b'{"a":1}')
+    keep = FakeNetworkResponse(
+        "https://site.test/api/r.json", "xhr", "application/json", b'{"a":1}'
+    )
     wrong_type = FakeNetworkResponse("https://site.test/page", "xhr", "text/html", b"<html>")
-    wrong_rtype = FakeNetworkResponse("https://site.test/x.json", "stylesheet", "application/json", b"{}")
+    wrong_rtype = FakeNetworkResponse(
+        "https://site.test/x.json", "stylesheet", "application/json", b"{}"
+    )
     off_host = FakeNetworkResponse("https://cdn.other/r.json", "fetch", "application/json", b"{}")
-    plus_json = FakeNetworkResponse("https://site.test/api/v", "fetch", "application/ld+json", b'{"x":2}')
+    plus_json = FakeNetworkResponse(
+        "https://site.test/api/v", "fetch", "application/ld+json", b'{"x":2}'
+    )
 
     for r in (keep, wrong_type, wrong_rtype, off_host, plus_json):
         rb._maybe_capture(r, scope, captures, totals)
@@ -486,9 +630,13 @@ def test_capture_enforces_per_body_and_total_caps():
     captures: list[CapturedResponse] = []
     totals = [0]
 
-    too_big = FakeNetworkResponse("https://site.test/big.json", "xhr", "application/json", b"x" * 50)
+    too_big = FakeNetworkResponse(
+        "https://site.test/big.json", "xhr", "application/json", b"x" * 50
+    )
     ok1 = FakeNetworkResponse("https://site.test/a.json", "xhr", "application/json", b"x" * 8)
-    ok2_over_total = FakeNetworkResponse("https://site.test/b.json", "xhr", "application/json", b"x" * 8)
+    ok2_over_total = FakeNetworkResponse(
+        "https://site.test/b.json", "xhr", "application/json", b"x" * 8
+    )
 
     rb._maybe_capture(too_big, scope, captures, totals)  # over per-body cap → skip
     rb._maybe_capture(ok1, scope, captures, totals)  # 8 ≤ 15 → keep
@@ -522,7 +670,9 @@ def test_render_refuses_internal_host():
 
 def test_fetch_through_fake_page_captures_and_reads():
     scope_url = "https://site.test/results/"
-    keep = FakeNetworkResponse("https://site.test/api/r.json", "xhr", "application/json", b'{"ok":1}')
+    keep = FakeNetworkResponse(
+        "https://site.test/api/r.json", "xhr", "application/json", b'{"ok":1}'
+    )
     skip = FakeNetworkResponse("https://cdn.other/r.json", "xhr", "application/json", b"{}")
     fake = FakePage(
         url="https://site.test/results/",

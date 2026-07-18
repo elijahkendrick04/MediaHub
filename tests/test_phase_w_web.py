@@ -8,7 +8,6 @@ W.11/W.13 caption bundle response, and org isolation on every new surface.
 
 from __future__ import annotations
 
-import importlib
 import json
 import sys
 import uuid
@@ -92,19 +91,8 @@ def _run_payload(run_id: str, profile_id: str) -> dict:
 
 
 @pytest.fixture
-def env(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    for sub in ("runs_v4", "uploads_v4", "club_profiles"):
-        (tmp_path / sub).mkdir(parents=True, exist_ok=True)
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
+def env(tmp_path, web_module):
+    wm = web_module
 
     from mediahub.web.club_profile import ClubProfile, save_profile
 
@@ -274,6 +262,41 @@ class TestRecordsFlow:
         summary = preference_summary("org-alpha", min_events=1)
         assert summary["total_events"] >= 1
         assert any(a["post_angle"] == "club_record" for a in summary["angles"])
+
+    def test_web_approval_stamps_human_actor(self, env):
+        """Finding #116: a web approval records the signed-in member's email as
+        the actor — the human half of 'distinguish agent from human' — in both
+        the durable workflow state and the approval telemetry (never an
+        ``api-token:`` marker, which is reserved for the public-API path)."""
+        from mediahub.observability.approval_telemetry import _connect
+        from mediahub.workflow.store import WorkflowStore
+
+        c = env["client"]
+        with c.session_transaction() as s:
+            s["active_profile_id"] = "org-alpha"
+            s["user_email"] = "coach@org-alpha.test"
+        r = c.post(
+            f"/api/workflow/{env['run_id']}/swim-1",
+            json={"action": "set_status", "status": "approved"},
+        )
+        assert r.status_code == 200 and r.get_json()["ok"]
+
+        state = WorkflowStore(env["tmp"] / "runs_v4").load(env["run_id"])["swim-1"]
+        assert state.actor == "coach@org-alpha.test"
+        assert not state.actor.startswith("api-token:")
+
+        conn = _connect()
+        try:
+            row = conn.execute(
+                "SELECT via, actor FROM approval_events WHERE run_id=? AND card_id='swim-1'"
+                " AND action='approved'",
+                (env["run_id"],),
+            ).fetchone()
+        finally:
+            conn.close()
+        assert row is not None
+        assert row["actor"] == "coach@org-alpha.test"
+        assert row["via"] == "web"
 
 
 # ---------------------------------------------------------------------------
@@ -641,6 +664,8 @@ class TestLiveMeet:
     def test_action_requires_org(self, env):
         c = env["client"]
         assert self._create(c).status_code == 403
+
+
 # W.8 — Season wraps surface (audit regressions)
 # ---------------------------------------------------------------------------
 

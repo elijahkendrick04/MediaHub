@@ -325,7 +325,12 @@ def _render_html(monkeypatch, brief):
     monkeypatch.setattr(R, "render_html_to_png", _fake_png)
     with tempfile.TemporaryDirectory() as d:
         R.render_brief(brief, output_dir=d, size=(1080, 1350))
-    return captured["html"]
+    # A5 (Canva gap analysis) wraps intra-numeric separators in kern cells;
+    # strip them so this file's string assertions keep testing LINE layout
+    # (the balancer), which is what G1.12 is about — not the kern markup.
+    import re as _re
+
+    return _re.sub(r'<span class="mh-sep">([.:])</span>', r"\1", captured["html"])
 
 
 def _var_px(html, var):

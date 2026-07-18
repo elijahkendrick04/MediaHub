@@ -9,21 +9,6 @@ real buttons: an install action and a separate Dismiss.
 
 from __future__ import annotations
 
-import importlib
-
-import pytest
-
-
-@pytest.fixture
-def client(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    import mediahub.web.web as wm
-
-    importlib.reload(wm)
-    app = wm.create_app()
-    app.config["TESTING"] = True
-    return app.test_client()
-
 
 def test_install_chip_has_two_real_buttons(client):
     js = client.get("/static/js/pwa-install.js").get_data(as_text=True)

@@ -24,9 +24,9 @@
   width: {{WIDTH}}px;
   height: {{HEIGHT}}px;
   overflow: hidden;
-  background: var(--mh-primary);
+  background: var(--mh-ground-gradient, var(--mh-primary));
   color: var(--mh-on-primary);
-  font-family: 'Inter', system-ui, sans-serif;
+  font-family: var(--mh-font-body, 'Inter', system-ui, sans-serif);
   -webkit-font-smoothing: antialiased;
   display: flex;
   flex-direction: column;
@@ -54,8 +54,9 @@
 .bn__top { position: relative; z-index: 2; display: flex; flex-direction: column; gap: 18px; }
 .bn__kicker {
   display: inline-flex; align-items: center; gap: 16px;
-  font-family: 'Space Grotesk', 'Inter', sans-serif;
-  font-weight: 700; font-size: 26px; letter-spacing: 0.24em;
+  font-family: var(--mh-font-kicker, 'Space Grotesk', 'Inter', sans-serif);
+  font-weight: 700; font-variation-settings: 'wght' var(--mh-wght-kicker, 700);
+  font-size: 26px; letter-spacing: 0.24em;
   text-transform: uppercase; color: var(--mh-accent);
 }
 .bn__tick { width: 46px; height: 6px; border-radius: 3px; background: var(--mh-accent); }
@@ -74,34 +75,34 @@
   font-weight: 700;
   font-size: var(--mh-fit-mega-result-px, 240px); font-variation-settings: var(--mh-axes-mega-result, normal);
   line-height: 0.86;
-  letter-spacing: -0.03em;
+  letter-spacing: var(--mh-track-mega-result, -0.03em);
   color: var(--mh-accent);
   white-space: nowrap;
 }
 .bn__event {
   margin-top: 18px;
-  font-family: 'Space Grotesk', 'Inter', sans-serif;
+  font-family: var(--mh-font-kicker, 'Space Grotesk', 'Inter', sans-serif);
   font-weight: 600; font-size: 36px; letter-spacing: 0.04em;
   text-transform: uppercase; color: var(--mh-on-primary);
 }
 .bn__stat {
   margin-top: 8px;
-  font-family: 'Inter', sans-serif; font-weight: 600; font-size: 26px;
+  font-family: var(--mh-font-body, 'Inter', sans-serif); font-weight: 600; font-size: 26px;
   color: var(--mh-on-primary); opacity: 0.82;
 }
 
 /* foot brand row, separated by an accent hairline */
 .bn__foot {
   position: relative; z-index: 2;
-  display: flex; align-items: flex-end; justify-content: space-between; gap: 24px;
+  display: flex; align-items: flex-end; justify-content: space-between; gap: var(--mh-sp-5);
   padding-top: 30px; border-top: 2px solid var(--mh-outline);
 }
 .bn__brand { display: flex; align-items: center; gap: 18px; }
 .bn__logo { height: 64px; width: auto; }
 .bn__logo img, .bn__logo svg { height: 100%; width: auto; object-fit: contain; display: block; }
 .bn__brand-text { display: flex; flex-direction: column; line-height: 1.16; }
-.bn__club { font-family: 'Inter', sans-serif; font-weight: 800; font-size: 25px; text-transform: uppercase; color: var(--mh-on-primary); }
-.bn__meet { font-family: 'Inter', sans-serif; font-weight: 500; font-size: 17px; color: var(--mh-on-primary); opacity: 0.74; margin-top: 4px; }
+.bn__club { font-family: var(--mh-font-body, 'Inter', sans-serif); font-weight: 800; font-size: 25px; text-transform: uppercase; color: var(--mh-on-primary); }
+.bn__meet { font-family: var(--mh-font-body, 'Inter', sans-serif); font-weight: 500; font-variation-settings: 'wght' var(--mh-wght-meta, 500); font-size: 17px; color: var(--mh-on-primary); opacity: 0.74; margin-top: var(--mh-sp-1); }
 .bn__sponsor { flex: 0 0 auto; }
 </style>
 </head>

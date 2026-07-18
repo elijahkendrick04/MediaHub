@@ -15,16 +15,15 @@ label following the pinned meet's own date.
 
 from __future__ import annotations
 
-import importlib
 import json
 from datetime import date
 from pathlib import Path
 
 import pytest
 
-_WEB_SRC = (
-    Path(__file__).resolve().parents[1] / "src" / "mediahub" / "web" / "web.py"
-).read_text(encoding="utf-8")
+_WEB_SRC = (Path(__file__).resolve().parents[1] / "src" / "mediahub" / "web" / "web.py").read_text(
+    encoding="utf-8"
+)
 
 
 # ---- engine: gather_facts run pinning -------------------------------------
@@ -77,8 +76,11 @@ class TestGatherFactsRunPinning:
         rd = _make_run(data_dir, "run1", "club-a", "2026-06-12", "Maya", "s1")
         _make_run(data_dir, "run2", "club-a", "2026-06-20", "Tom", "s2")
         facts = gather_facts(
-            "club-a", start=date(2026, 6, 1), end=date(2026, 6, 30),
-            runs_dir=rd, run_id="run2",
+            "club-a",
+            start=date(2026, 6, 1),
+            end=date(2026, 6, 30),
+            runs_dir=rd,
+            run_id="run2",
         )
         titles = " ".join(r["title"] for r in facts.recaps)
         assert "Tom" in titles and "Maya" not in titles
@@ -88,8 +90,11 @@ class TestGatherFactsRunPinning:
 
         rd = _make_run(data_dir, "r_may", "club-a", "2026-05-20", "Maya", "s1")
         facts = gather_facts(
-            "club-a", start=date(2026, 6, 1), end=date(2026, 6, 30),
-            runs_dir=rd, run_id="r_may",
+            "club-a",
+            start=date(2026, 6, 1),
+            end=date(2026, 6, 30),
+            runs_dir=rd,
+            run_id="r_may",
         )
         assert len(facts.recaps) == 1
         # The period follows the pinned meet's own date, not the range picker.
@@ -101,8 +106,11 @@ class TestGatherFactsRunPinning:
 
         rd = _make_run(data_dir, "run1", "club-b", "2026-06-12", "Maya", "s1")
         facts = gather_facts(
-            "club-a", start=date(2026, 6, 1), end=date(2026, 6, 30),
-            runs_dir=rd, run_id="run1",
+            "club-a",
+            start=date(2026, 6, 1),
+            end=date(2026, 6, 30),
+            runs_dir=rd,
+            run_id="run1",
         )
         assert facts.recaps == []
 
@@ -112,7 +120,10 @@ class TestGatherFactsRunPinning:
         rd = _make_run(data_dir, "run1", "club-a", "2026-06-12", "Maya", "s1")
         _make_run(data_dir, "run2", "club-a", "2026-06-20", "Tom", "s2")
         facts = gather_facts(
-            "club-a", start=date(2026, 6, 1), end=date(2026, 6, 30), runs_dir=rd,
+            "club-a",
+            start=date(2026, 6, 1),
+            end=date(2026, 6, 30),
+            runs_dir=rd,
         )
         titles = " ".join(r["title"] for r in facts.recaps)
         assert "Tom" in titles and "Maya" in titles
@@ -122,26 +133,19 @@ class TestGatherFactsRunPinning:
 
 
 @pytest.fixture
-def app_env(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
+def app_env(tmp_path, monkeypatch, web_module):
+    # MEDIAHUB_SCHEDULER is read fresh inside create_app() (scheduler._enabled()),
+    # not at import time, so it must be set before create_app() is called here.
+    # Storage-path isolation comes from the canonical web_module fixture.
     monkeypatch.setenv("MEDIAHUB_SCHEDULER", "0")
-    for sub in ("runs_v4", "club_profiles"):
-        (tmp_path / sub).mkdir(parents=True, exist_ok=True)
     for var in ("GEMINI_API_KEY", "GOOGLE_API_KEY", "ANTHROPIC_API_KEY", "MEDIAHUB_LLM_PROVIDER"):
         monkeypatch.delenv(var, raising=False)
 
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
-    if not wm._email_design_ok:
+    if not web_module._email_design_ok:
         pytest.skip("email_design not available")
-    app = wm.create_app()
+    app = web_module.create_app()
     app.config["TESTING"] = True
-    return app, wm, tmp_path
+    return app, web_module, tmp_path
 
 
 def _login(client, pid="club-a"):
@@ -199,8 +203,12 @@ class TestGenerateWithRunId:
         self._seed_disk_run(tmp, "run2", "club-a", "Tom", "s2")
         r = c.post(
             "/api/newsletters/generate",
-            json={"format": "meet_digest", "range": "this_month",
-                  "with_ai": False, "run_id": "run2"},
+            json={
+                "format": "meet_digest",
+                "range": "this_month",
+                "with_ai": False,
+                "run_id": "run2",
+            },
         )
         assert r.status_code == 200, r.get_data(as_text=True)
         j = r.get_json()
@@ -215,8 +223,12 @@ class TestGenerateWithRunId:
         self._seed_disk_run(tmp, "run-b", "club-b", "Maya", "s1")
         r = c.post(
             "/api/newsletters/generate",
-            json={"format": "meet_digest", "range": "this_month",
-                  "with_ai": False, "run_id": "run-b"},
+            json={
+                "format": "meet_digest",
+                "range": "this_month",
+                "with_ai": False,
+                "run_id": "run-b",
+            },
         )
         assert r.status_code == 404
         assert r.get_json()["error"] == "run_not_found"
@@ -245,8 +257,12 @@ class TestGenerateWithRunId:
         # A bogus run_id on a non-digest format is ignored, never a 404.
         r = c.post(
             "/api/newsletters/generate",
-            json={"format": "monthly_roundup", "range": "this_month",
-                  "with_ai": False, "run_id": "does-not-exist"},
+            json={
+                "format": "monthly_roundup",
+                "range": "this_month",
+                "with_ai": False,
+                "run_id": "does-not-exist",
+            },
         )
         assert r.status_code == 200
         assert r.get_json()["ok"] is True

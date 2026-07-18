@@ -78,32 +78,23 @@ class TestNoDeprecatedGeminiDefault:
             f"Update to gemini-2.5-flash. Offenders: {real_offenders}"
         )
 
-    def test_main_llm_default_is_current(self):
-        """media_ai/llm.py must default to a non-deprecated model."""
-        from mediahub.media_ai import llm
-        # Reach into the module-level constant.
+    def test_default_model_is_current(self):
+        """The shared Gemini transport must default to a non-deprecated
+        model. Since the finding-#43 convergence BOTH wrappers resolve
+        the model through ``gemini_transport.gemini_model()`` per call —
+        the historical failure mode (one wrapper's default updated, the
+        parallel copy missed, production 'Gemini tool HTTP 404') can no
+        longer split across modules."""
         import os
-        # Force-resolve the default by temporarily clearing the env var.
-        # The default lives in the function body of _call_gemini via
-        # _GEMINI_MODEL constant.
-        assert llm._GEMINI_MODEL != DEPRECATED_MODEL, (
-            f"media_ai.llm._GEMINI_MODEL still defaults to "
-            f"{DEPRECATED_MODEL!r}"
-        )
 
-    def test_ai_core_llm_default_is_current(self):
-        """ai_core/llm.py (the tool-use path) must also default to a
-        non-deprecated model. This is the path that produced the
-        production 'Gemini tool HTTP 404' error."""
-        from mediahub.ai_core import llm as ai_core_llm
-        import os
-        # _gemini_model() reads from env with a hardcoded default.
+        from mediahub.ai_core import gemini_transport
+
         # Clear the env so we see the literal default.
         env_backup = os.environ.pop("MEDIAHUB_GEMINI_MODEL", None)
         try:
-            default = ai_core_llm._gemini_model()
+            default = gemini_transport.gemini_model()
             assert default != DEPRECATED_MODEL, (
-                f"ai_core.llm._gemini_model() default is still "
+                f"gemini_transport.gemini_model() default is still "
                 f"{DEPRECATED_MODEL!r} (deprecated by Google May 2026)"
             )
         finally:
@@ -111,8 +102,7 @@ class TestNoDeprecatedGeminiDefault:
                 os.environ["MEDIAHUB_GEMINI_MODEL"] = env_backup
 
     @pytest.mark.parametrize("module_path,target", [
-        ("src/mediahub/media_ai/llm.py", "_GEMINI_MODEL"),
-        ("src/mediahub/ai_core/llm.py", "_gemini_model"),
+        ("src/mediahub/ai_core/gemini_transport.py", "gemini_model"),
     ])
     def test_default_in_source_text_matches_current(self, module_path, target):
         """Source-level safety net: grep the file for the deprecated

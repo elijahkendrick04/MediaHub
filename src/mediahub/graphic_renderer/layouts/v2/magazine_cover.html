@@ -60,9 +60,9 @@
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  background: var(--mh-primary);
+  background: var(--mh-ground-gradient, var(--mh-primary));
   color: var(--mh-on-primary);
-  font-family: 'Inter', system-ui, sans-serif;
+  font-family: var(--mh-font-body, 'Inter', system-ui, sans-serif);
   -webkit-font-smoothing: antialiased;
 }
 .mc *, .mc *::before, .mc *::after { box-sizing: border-box; }
@@ -88,7 +88,7 @@
 }
 .mc__issue {
   text-align: right; flex: 0 0 auto;
-  font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 700;
+  font-family: var(--mh-font-kicker, 'Space Grotesk','Inter',sans-serif); font-weight: 700;
   font-size: 17px; letter-spacing: 0.18em; text-transform: uppercase;
   color: var(--mh-accent); line-height: 1.3;
   overflow-wrap: anywhere; max-width: 40%;
@@ -109,12 +109,15 @@
 }
 /* a gradient scrim from the lower-left lifts the headline off the photo
    so primary-derived text stays legible over a bright image. */
+/* B7: the mid-scrim brand-primary coverage adapts to the pixels under the
+   headline (--mh-scrim-alpha mapped to the color-mix %), authored 0.62 as the
+   byte-identical fallback. The scrim stays brand-primary (never black). */
 .mc__scrim {
   position: absolute; inset: 0; z-index: 1;
   background: linear-gradient(
     7deg,
     var(--mh-primary) 6%,
-    color-mix(in srgb, var(--mh-primary) 62%, transparent) 34%,
+    color-mix(in srgb, var(--mh-primary) calc(var(--mh-scrim-alpha, 0.62) * 100%), transparent) 34%,
     transparent 60%
   );
 }
@@ -130,7 +133,7 @@
 .mc__kicker {
   display: inline-flex; align-items: center; gap: 12px;
   margin-bottom: 16px;
-  font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 700;
+  font-family: var(--mh-font-kicker, 'Space Grotesk','Inter',sans-serif); font-weight: 700;
   font-size: 22px; letter-spacing: 0.16em; text-transform: uppercase;
   /* primary-on-accent is the resolver's APCA-gated legible pair (the
      accent role can resolve to any brand colour incl. white, so on-primary
@@ -141,7 +144,7 @@
   overflow-wrap: anywhere;
 }
 .mc__first {
-  font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 700;
+  font-family: var(--mh-font-kicker, 'Space Grotesk','Inter',sans-serif); font-weight: 700;
   font-size: 46px; line-height: 0.98; letter-spacing: 0.01em;
   text-transform: uppercase; color: var(--mh-accent); margin-bottom: 2px;
   white-space: normal; overflow-wrap: anywhere; word-break: break-word;
@@ -152,7 +155,7 @@
      headline sits in the left ~67% of the canvas, so scale to 0.74 and
      allow wrapping so a long/space-less name never clips the photo. */
   font-size: calc(var(--mh-fit-mega-name-px, 200px) * 0.62);
-  line-height: 0.84; letter-spacing: -0.015em; text-transform: uppercase;
+  line-height: 0.84; letter-spacing: var(--mh-track-mega-name, -0.015em); text-transform: uppercase;
   color: var(--mh-on-primary);
   white-space: normal; overflow-wrap: anywhere; word-break: break-word;
   max-width: 100%;
@@ -168,12 +171,12 @@
 }
 .mc__line { display: flex; flex-direction: column; align-items: flex-end; }
 .mc__line-lab {
-  font-family: 'Inter',sans-serif; font-weight: 800; font-size: 14px;
+  font-family: var(--mh-font-body, 'Inter',sans-serif); font-weight: 800; font-size: 14px;
   letter-spacing: 0.2em; text-transform: uppercase;
   color: var(--mh-accent); margin-bottom: 7px;
 }
 .mc__line-val {
-  font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 600;
+  font-family: var(--mh-font-kicker, 'Space Grotesk','Inter',sans-serif); font-weight: 600;
   font-size: 27px; line-height: 1.1; text-transform: uppercase;
   color: var(--mh-on-primary);
   overflow-wrap: anywhere; word-break: break-word;
@@ -196,7 +199,7 @@
   border: 7px solid var(--mh-primary);
 }
 .mc__star-tag {
-  font-family: 'Inter',sans-serif; font-weight: 800; font-size: 16px;
+  font-family: var(--mh-font-body, 'Inter',sans-serif); font-weight: 800; font-size: 16px;
   letter-spacing: 0.18em; text-transform: uppercase;
   color: var(--mh-primary); opacity: 0.82; margin-bottom: 8px;
   overflow-wrap: anywhere;
@@ -207,7 +210,7 @@
   /* result autofit box is ~52% of canvas; the burst is ~274px, so scale
      to 0.30 and let it break rather than clip the circle. */
   font-size: calc(var(--mh-fit-result-px, 92px) * 0.30); font-variation-settings: var(--mh-axes-result, normal);
-  line-height: 0.9; letter-spacing: -0.01em; color: var(--mh-primary);
+  line-height: 0.9; letter-spacing: var(--mh-track-result, -0.01em); color: var(--mh-primary);
   white-space: normal; overflow-wrap: anywhere; word-break: break-word;
   max-width: 100%;
 }
@@ -217,15 +220,15 @@
   position: relative; z-index: 4;
   flex: 0 0 auto;
   display: flex; align-items: center; justify-content: space-between;
-  gap: 24px;
-  padding: 24px 56px 50px;
+  gap: var(--mh-sp-5);
+  padding: var(--mh-sp-5) 56px 50px;
   background: var(--mh-primary);
 }
 .mc__foot-left { display: flex; align-items: center; gap: 20px; min-width: 0; }
 .mc__logo { height: 56px; width: auto; flex: 0 0 auto; }
 .mc__logo img, .mc__logo svg { height: 100%; width: auto; object-fit: contain; display: block; }
 .mc__club {
-  font-family: 'Inter',sans-serif; font-weight: 800; font-size: 18px;
+  font-family: var(--mh-font-body, 'Inter',sans-serif); font-weight: 800; font-size: 18px;
   line-height: 1.16; text-transform: uppercase; color: var(--mh-on-primary);
   overflow-wrap: anywhere; word-break: break-word;
 }
@@ -273,7 +276,7 @@
     </div>
 
     <div class="mc__star">
-      <div class="mc__star-tag">{{ACCENT_DECORATION}}</div>
+      <div class="mc__star-tag">Result</div>
       <div class="mc__star-val">{{RESULT_VALUE}}</div>
     </div>
   </div>
@@ -286,6 +289,8 @@
     <div class="mc__barcode"></div>
     <div class="mc__sponsor">{{SPONSOR_BLOCK}}</div>
   </div>
+
+  {{ACCENT_DECORATION}}
 
 </div>
 </body>

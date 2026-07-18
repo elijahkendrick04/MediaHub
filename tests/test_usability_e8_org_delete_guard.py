@@ -5,7 +5,6 @@ happened (it used to bounce silently).
 
 from __future__ import annotations
 
-import importlib
 import pathlib
 
 import pytest
@@ -14,21 +13,13 @@ _SRC = pathlib.Path("src/mediahub/web/web.py").read_text(encoding="utf-8")
 
 
 @pytest.fixture
-def client(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
+def client(web_module, monkeypatch):
     monkeypatch.setenv("MEDIAHUB_SCHEDULER", "0")
-    (tmp_path / "club_profiles").mkdir(parents=True, exist_ok=True)
 
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
     from mediahub.web.club_profile import ClubProfile, save_profile
 
     save_profile(ClubProfile(profile_id="club-a", display_name="Otters SC"))
-    app = wm.create_app()
+    app = web_module.create_app()
     app.config.update(TESTING=True, SECRET_KEY="x")
     return app.test_client()
 

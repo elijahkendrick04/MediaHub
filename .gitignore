@@ -129,3 +129,7 @@ logs/
 # M23 footage-beat trim cache — runtime MP4 trims served to Remotion via
 # staticFile(); count-capped (visual/footage.py prunes) and never committed.
 src/mediahub/remotion/public/footage_cache/
+
+# Runtime state must never land inside the source tree (a render/test run with
+# an unset DATA_DIR once wrote log-sentinel state under layouts/) — repo-tidy.
+src/**/data/

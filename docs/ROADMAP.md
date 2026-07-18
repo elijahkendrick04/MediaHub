@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-07-12 · `b597df6dd` · Restrict "Switch organisation" to the dev operator only (#1182)
+**Last updated:** 2026-07-17 · `ee1943c65` · build(deps): bump actions/setup-node from 6 to 7 (#1313) [skip render]
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -146,6 +146,7 @@ second sport on Phases 1–3 — the swimming wedge is sold before we broaden
 - **RP.2** · Repo-private fast-track (pre-flight) — Trim CI Actions-minutes and ship it BEFORE the flip (the one real cost: a private repo on Free gets 2,000 min/mo, and today's `autotest` every 6 h × 70 min + `dependabot-automerge` every 30 min + daily contract would burn that in days; the nightly Lighthouse + cross-browser sweeps were **removed 2026-07-08** — see docs/adr/0021 — trimming that slice already): `autotest` 6 h → daily, automerge 30 min → 4–6 h, add `concurrency: cancel-in-progress` on the push/PR suites · ❌ **NOT STARTED**
 - **RP.3** · Repo-private fast-track (pre-flight) — Keep `main` protection alive on private: classic protected-branches are **public-only on the Free plan**, so migrate `main`'s protection to a repository **ruleset** (free on private) and verify the three self-merging bots (autotest fixer, `roadmap-autoupdate`, `dependabot-automerge`) and the `claude/*` app-token PRs all still merge under it — else the flip silently drops branch protection and the bot-merge model breaks · ❌ **NOT STARTED**
 - **RP.4** · Repo-private fast-track (pre-flight) — Make "private repo" read true in the docs + leave no dangling public dependency: update `DATA_MAP` §6 + `OPEN_LEGAL_QUESTIONS` Q13 with the honest public-window dates, keep the CI security gates (gitleaks/bandit/semgrep/pip-audit) that replace GitHub's free public-repo secret-scanning (the Upptime status-page caveat is moot — Upptime was **removed 2026-07-08**, see docs/adr/0021) · ❌ **NOT STARTED**
+- **RP.5** · Repo-private fast-track (pre-flight, before real customers) — Enforce operator-credential rotation (deep-review #26 / ADR-0022 / residual R12): (1) generate a hash from a long random passphrase and set `MEDIAHUB_DEV_PASSWORD_HASH` in Render (the baked-in default in `web/auth.py` is offline-crackable while the repo is public — RP.1–RP.4 shrink this, this closes it); (2) flip `env_check`'s production check from a *warning* to a hard boot-refusal (`warnings.append` → `errors.append`, ~1 line) so a fresh deploy can never silently run the shipped default; (3) update ADR-0022 status → enforced and clear R12. Staged as a warning today so the in-dev Render deploy still boots · ❌ **NOT STARTED**
 - **1.25** · Phase 1 (Product) — Pro editor & round-trip: layers/align/guides/page management as validated spec patches, vector node/boolean ops, curves/levels recipes, layered SVG/PSD export-import; deep darkroom/DTP stays a round-trip non-goal · ❌ **NOT STARTED**
 - **1.26** · Phase 1 (Product) — Ollama local LLM provider behind the existing `ai_core.llm` interface · ❌ **NOT STARTED**
 - **1.27** · Phase 1 (Product) — Satori graphics fast-path (~100× lighter than headless Chromium; rides the reel-engine seam P0.1 shipped) · ❌ **NOT STARTED**
@@ -853,7 +854,7 @@ Why this workstream jumped to the head of the founder list:
   the **US** (per the DPA's subprocessor register); an EU/UK box simplifies
   F.4's transfer-mechanism homework.
 - **The move is already cheap to execute.** The deploy is one Dockerfile
-  (compose + `fly.toml` templates exist), all state lives under `DATA_DIR`,
+  (a compose template exists), all state lives under `DATA_DIR`,
   and PC.14 shipped daily backups with a restore drill rehearsed on every
   test run — restoring a production backup onto a new box *is* the
   migration. 3.1 packages the remainder: reverse-proxy TLS template,
@@ -1226,14 +1227,16 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
-| 2026-07-12 | `1127b5c46` | fix(engine): native-path time parse rejects bare mm:ss instead of a 100x error |
-| 2026-07-12 | `7b3b9d41d` | Restrict "Switch organisation" to the dev operator only |
-| 2026-07-12 | `fbb4cabc2` | Fix CI: governance empty-state assertion + resilient palette reachability guard |
-| 2026-07-12 | `799769382` | Drop dangling "Slide remote" row from the ⌘K command palette |
-| 2026-07-12 | `f9d256d57` | fix(nav): drop the dead 'Slide remote' command-palette row |
-| 2026-07-12 | `2b9815ce7` | Reduce reading load + honest render progress + Help FAQ-first (follow-up) |
-| 2026-07-12 | `043b571d4` | Move "Leave organisation" from nav org-menu to Settings → Account |
-| 2026-07-12 | `6a52397a9` | fix(engine): identity resolver no longer assigns a ruled-out swimmer's PB record |
-| 2026-07-12 | `a2b214648` | fix(log_sentinel): redact secrets/PII from evidence; best-effort audit writes |
-| 2026-07-12 | `0adbad2b0` | fix(security): review batch 2 — verified prod-reachable security fixes |
+| 2026-07-17 | `ef3c96ec9` | build(deps): bump actions/setup-node from 6 to 7 |
+| 2026-07-17 | `c09ce763e` | test: migrate 8 club-a fixtures off importlib.reload onto conftest app (#130) |
+| 2026-07-17 | `ca21317d3` | test: run the tier-A clean-assembly invariant on both render engines (#132) |
+| 2026-07-17 | `eddd67555` | test: stop test_motion_format_focus paying for a cutout model fetch (#133) |
+| 2026-07-17 | `1e5262732` | deep-review #95: atomic quota reserve (fix check-then-act concurrency hole) |
+| 2026-07-17 | `de7ec52a5` | deep-review #59: feed season standards packs + profile filter into qual detection |
+| 2026-07-17 | `01f109c1f` | deep-review #73: publish motion renders atomically (fix cache-slot race) |
+| 2026-07-17 | `135242d71` | deep-review #52 + #64: strict stroke/course codes — no fabricated FR/LC guess |
+| 2026-07-17 | `fe8985d6d` | deep-review #69: pivot 2-digit years on the current year (no frozen constant) |
+| 2026-07-17 | `8913b5eda` | test(#65): add trailing newline (pre-commit end-of-file-fixer) |
+| 2026-07-17 | `a1796c0bf` | deep-review #65: model relays and exclude them from individual PB/medal detection |
+| 2026-07-17 | `bc979e662` | deep-review #60: make OfficialPBDetector Rule 0 work on HY3/SDIF native runs |
 <!-- /ROADMAP:ACTIVITY -->

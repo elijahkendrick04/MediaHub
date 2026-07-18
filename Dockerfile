@@ -1,7 +1,7 @@
 # MediaHub — production Docker image
 # Build:  docker build -t mediahub:latest .
 # Run:    docker run -p 5000:5000 --env-file .env mediahub:latest
-FROM python:3.14-slim AS base
+FROM python:3.12-slim AS base
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
@@ -11,7 +11,8 @@ ENV PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app/src
 
 # System deps:
-#  - libpangocairo / fonts: WeasyPrint (graphic_renderer fallback)
+#  - libffi-dev: CFFI build dep for argon2-cffi / bcrypt password hashing
+#  - fonts-liberation: base fonts for Chromium/Playwright text rendering
 #  - libnss3 / libxss1 / libgbm1: Chromium/Playwright runtime
 #  - poppler-utils: PDF parsing in interpreter
 #  - tesseract-ocr: W.10 OCR fallback engine for scanned/photographed
@@ -29,7 +30,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     tesseract-ocr \
     espeak-ng \
     libgl1 \
-    libpango-1.0-0 libpangocairo-1.0-0 libcairo2 libffi-dev \
+    libffi-dev \
     libnss3 libxss1 libgbm1 libasound2 libatk-bridge2.0-0 libatk1.0-0 \
     libcups2 libdrm2 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 \
     libxshmfence1 libxkbcommon0 \
@@ -60,7 +61,7 @@ COPY requirements.txt /app/requirements.txt
 RUN pip install --upgrade pip \
  && pip install -r /app/requirements.txt \
  && pip install gunicorn \
- && pip install "pytesseract>=0.3.10" "pypdfium2>=4"
+ && pip install "pytesseract>=0.3.13" "pypdfium2>=5.11.0"
 
 # Fail the build LOUDLY if the sqlite-vec extension can't load in this image
 # (Capability 2 / semantic memory). It is a young v0.1.x C extension; a load
@@ -87,8 +88,9 @@ RUN retry python -c "from rembg import new_session; new_session('u2net')" \
 #      at runtime — Render's runtime HOME may differ from /root.
 #   2. playwright version is pinned in requirements.txt so the Chromium
 #      revision Playwright expects matches what `playwright install`
-#      downloads. Drifting major versions broke runtime discovery in
-#      May 2026; the pin (>=1.56,<1.58) keeps build + runtime aligned.
+#      downloads. Drifting versions broke runtime discovery before; the
+#      pin (>=1.61.0,<1.62 — Chromium revision 1228 / Chromium 149) keeps
+#      build + runtime aligned.
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 RUN retry playwright install --with-deps chromium
 

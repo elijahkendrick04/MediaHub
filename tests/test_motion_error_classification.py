@@ -14,9 +14,9 @@ These tests pin:
   * The classification function maps known error strings correctly.
   * The route returns the right kind + user_message for each class.
 """
+
 from __future__ import annotations
 
-import importlib
 import sys
 from pathlib import Path
 from unittest.mock import patch
@@ -28,30 +28,20 @@ sys.path.insert(0, str(_ROOT))
 
 
 @pytest.fixture
-def gated_app(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    for d in ("runs_v4", "uploads_v4", "club_profiles"):
-        (tmp_path / d).mkdir(parents=True, exist_ok=True)
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-    importlib.reload(cp)
-    importlib.reload(wm)
-
-    app = wm.create_app()
-    app.config["TESTING"] = True
+def gated_app(app, client, tmp_path):
     app.config["ENFORCE_ORG_GATE"] = True
 
     from mediahub.web.club_profile import ClubProfile, save_profile
-    save_profile(ClubProfile(
-        profile_id="t", display_name="T", brand_voice_summary="Friendly.",
-    ))
-    with app.test_client() as c:
-        c.post("/api/organisation/active", data={"profile_id": "t"})
-        yield c, app, tmp_path
+
+    save_profile(
+        ClubProfile(
+            profile_id="t",
+            display_name="T",
+            brand_voice_summary="Friendly.",
+        )
+    )
+    client.post("/api/organisation/active", data={"profile_id": "t"})
+    yield client, app, tmp_path
 
 
 def _seed_minimal_run(tmp_path: Path) -> str:
@@ -61,20 +51,27 @@ def _seed_minimal_run(tmp_path: Path) -> str:
     import json
     import sqlite3
     import uuid
+
     run_id = uuid.uuid4().hex[:12]
     run_dir = tmp_path / "runs_v4" / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
     payload = {
         "run_id": run_id,
-        "cards": [{
-            "swim_id": "alpha", "id": "alpha",
-            "result": {}, "athlete": {},
-        }],
-        "recognition_report": {
-            "ranked_achievements": [{
-                "achievement": {"swim_id": "alpha"},
+        "cards": [
+            {
+                "swim_id": "alpha",
                 "id": "alpha",
-            }],
+                "result": {},
+                "athlete": {},
+            }
+        ],
+        "recognition_report": {
+            "ranked_achievements": [
+                {
+                    "achievement": {"swim_id": "alpha"},
+                    "id": "alpha",
+                }
+            ],
         },
     }
     (run_dir / "run.json").write_text(json.dumps(payload))

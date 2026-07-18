@@ -7,40 +7,24 @@ Bug b07572c63c13: 'live:judged-6-runs' was the only signal available to the
 user_brain judge; adding n_achievements to the status payload gives the
 run-status poller the count it needs to render a plain-English outcome.
 """
+
 from __future__ import annotations
 
-import importlib
 import json
 import uuid
-from pathlib import Path
 
 import pytest
 
 
 @pytest.fixture
-def status_app(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    (tmp_path / "runs_v4").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "uploads_v4").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "club_profiles").mkdir(parents=True, exist_ok=True)
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-    importlib.reload(cp)
-    importlib.reload(wm)
-
+def status_app(client, web_module, tmp_path):
     from mediahub.web.club_profile import ClubProfile, save_profile
+
     save_profile(ClubProfile(profile_id="org-test", display_name="Test Club"))
 
-    app = wm.create_app()
-    app.config["TESTING"] = True
-    client = app.test_client()
     client.post("/api/organisation/active", data={"profile_id": "org-test"})
 
-    yield {"client": client, "wm": wm, "tmp_path": tmp_path}
+    yield {"client": client, "wm": web_module, "tmp_path": tmp_path}
 
 
 def _seed_run(fix, n_achievements: int) -> str:
@@ -56,7 +40,9 @@ def _seed_run(fix, n_achievements: int) -> str:
         "trust": {},
         "recognition_report": {
             "n_achievements": n_achievements,
-            "n_elite": 0, "n_strong": 0, "n_story": 0,
+            "n_elite": 0,
+            "n_strong": 0,
+            "n_story": 0,
             "n_swims_analysed": 10,
             "ranked_achievements": [],
         },

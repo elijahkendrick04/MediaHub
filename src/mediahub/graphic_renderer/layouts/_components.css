@@ -1,0 +1,95 @@
+/* ===================================================================
+   _components.css — shared v2 component utilities (Canva gap analysis F7/F8).
+
+   Injected into every v2 archetype's BASE_CSS by the renderer (scoped to v2,
+   so v1 cards are untouched). Two families:
+
+   1. Overlap anchors (F7) — zero-size markers a layout places at an overlap-safe
+      edge of a photo well / result panel (which must be position:relative). The
+      renderer drops the seeded overlap accent (badge / tab / rule / tape) into
+      the {{OVERLAP_ACCENT}} slot inside one anchor; the accent straddles the
+      anchor point (translate(-50%,-50%)) and crosses the edge — the "art
+      direction, not clip-art" cue. An un-anchored layout / absent accent is
+      byte-identical (the slot fills with the empty string).
+
+   2. Physical-object panel silhouettes (F8) — opt-in classes a layout adds to a
+      panel so the *shape itself* is decoration (ticket stub, punched notches,
+      perforation), at zero content cost. Pure clip-path / mask / border, so the
+      panel keeps its role-token fill and stays brand-locked and mono-safe.
+
+   These classes are inert until a layout opts in, so injecting the sheet never
+   changes an un-migrated archetype's pixels.
+   =================================================================== */
+
+/* --- F7 overlap anchors ------------------------------------------------- */
+
+/* A zero-size marker placed at an overlap-safe edge of a position:relative
+   parent. isolation:isolate scopes the washi-tape multiply blend to the anchor
+   group so it only darkens the layer it crosses. */
+.mh-anchor {
+  position: absolute;
+  width: 0;
+  height: 0;
+  z-index: 15;
+  isolation: isolate;
+  pointer-events: none;
+}
+.mh-anchor--photo-tr, .mh-anchor--panel-tr { top: 0; right: 0; }
+.mh-anchor--photo-tl, .mh-anchor--panel-tl { top: 0; left: 0; }
+.mh-anchor--photo-br, .mh-anchor--panel-br { bottom: 0; right: 0; }
+.mh-anchor--photo-bl, .mh-anchor--panel-bl { bottom: 0; left: 0; }
+/* A seam anchor rides the mid-point of its parent's left edge (the boundary the
+   layout put it against). */
+.mh-anchor--seam { top: 50%; left: 0; }
+
+/* --- F8 physical-object panel silhouettes ------------------------------- */
+
+/* Ticket stub: 45deg-notched top-right + bottom-left corners, notch size
+   driven by --mh-notch (default 18px). The panel keeps its own fill. */
+.mh-panel--ticket {
+  --mh-notch: 18px;
+  clip-path: polygon(
+    0 0,
+    calc(100% - var(--mh-notch)) 0,
+    100% var(--mh-notch),
+    100% 100%,
+    var(--mh-notch) 100%,
+    0 calc(100% - var(--mh-notch))
+  );
+}
+
+/* Punched notches: two semicircular bites from the left and right edges (the
+   css-tricks notched-box mask). Neutral mask colours only (shape, not colour). */
+.mh-panel--punched {
+  --mh-punch: 14px;
+  -webkit-mask:
+    radial-gradient(circle var(--mh-punch) at 0 50%, transparent 98%, #000) 0 / 100% 100% no-repeat,
+    radial-gradient(circle var(--mh-punch) at 100% 50%, transparent 98%, #000) 0 / 100% 100% no-repeat;
+  -webkit-mask-composite: source-in;
+  mask:
+    radial-gradient(circle var(--mh-punch) at 0 50%, transparent 98%, #000) 0 / 100% 100% no-repeat,
+    radial-gradient(circle var(--mh-punch) at 100% 50%, transparent 98%, #000) 0 / 100% 100% no-repeat;
+  mask-composite: intersect;
+}
+
+/* Perforation rule: a dashed column just inside one edge (a matchday-ticket
+   tear line). Paints the role hairline, so it stays brand-locked. */
+.mh-panel--perf {
+  position: relative;
+}
+.mh-panel--perf::before {
+  content: "";
+  position: absolute;
+  top: 8%;
+  bottom: 8%;
+  left: var(--mh-perf-x, 26px);
+  width: 2px;
+  background: repeating-linear-gradient(
+    180deg,
+    var(--mh-outline) 0,
+    var(--mh-outline) 8px,
+    transparent 8px,
+    transparent 16px
+  );
+  pointer-events: none;
+}

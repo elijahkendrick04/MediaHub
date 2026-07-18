@@ -9,9 +9,9 @@ honest-skips when Schemathesis isn't present.
 This catches the class of bug the AI judges can't (a serialisation/validation 5xx
 on an /api route) and feeds it straight to the deterministic oracle, not the judges.
 """
+
 from __future__ import annotations
 
-import importlib
 import sys
 from pathlib import Path
 
@@ -22,35 +22,28 @@ sys.path.insert(0, str(_ROOT))
 
 
 @pytest.fixture
-def app(tmp_path, monkeypatch):
+def app(web_module):
     """A booted MediaHub app with a seeded+pinned org, mirroring the autotest
     finder's signed-in sweep so org-gated routes execute their real handler."""
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    for sub in ("runs_v4", "uploads_v4", "club_profiles"):
-        (tmp_path / sub).mkdir(parents=True, exist_ok=True)
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-    importlib.reload(cp)
-    importlib.reload(wm)
     from mediahub.web.club_profile import ClubProfile, save_profile
-    save_profile(ClubProfile(profile_id="contract-org", display_name="Contract Org",
-                             brand_voice_summary="x"))
-    application = wm.create_app()
+
+    save_profile(
+        ClubProfile(profile_id="contract-org", display_name="Contract Org", brand_voice_summary="x")
+    )
+    application = web_module.create_app()
     application.config["TESTING"] = True
     return application
 
 
 def _no_arg_get_routes(app):
     from autotest import openapi
+
     return openapi.get_routes(app, no_arg_only=True)
 
 
 def test_spec_enumerates_health_and_status(app):
     from autotest import openapi
+
     paths = openapi.build_spec(app)["paths"]
     # The known no-auth endpoints must be in the contract.
     assert "/healthz" in paths
@@ -67,7 +60,7 @@ def test_no_get_route_returns_5xx(app):
         for path in routes:
             try:
                 resp = c.get(path)
-            except Exception as exc:                       # an unhandled raise == a crash
+            except Exception as exc:  # an unhandled raise == a crash
                 server_errors.append(f"{path} raised {type(exc).__name__}: {exc}")
                 continue
             if resp.status_code >= 500:
@@ -83,8 +76,9 @@ def test_health_endpoints_ok_without_org(app):
 
 
 def test_schemathesis_finds_no_server_errors(app):
-    schemathesis = pytest.importorskip("schemathesis")   # honest-skip when absent
+    schemathesis = pytest.importorskip("schemathesis")  # honest-skip when absent
     from autotest import openapi
+
     spec = openapi.build_spec(app)
     with app.test_client() as c:
         c.post("/api/organisation/active", data={"profile_id": "contract-org"})
@@ -94,7 +88,7 @@ def test_schemathesis_finds_no_server_errors(app):
     # and a genuine server error still surfaces.
     failures: list[str] = []
     try:
-        schema = schemathesis.from_dict(spec, app=app)   # WSGI app target
+        schema = schemathesis.from_dict(spec, app=app)  # WSGI app target
         operations = list(schema.get_all_operations())
     except Exception as exc:
         pytest.skip(f"schemathesis schema API unavailable here: {type(exc).__name__}: {exc}")
@@ -102,14 +96,18 @@ def test_schemathesis_finds_no_server_errors(app):
         try:
             case = operation.ok().make_case()
         except Exception:
-            continue                                     # an operation we can't build a case for
+            continue  # an operation we can't build a case for
         try:
             response = case.call_wsgi()
             code = response.status_code
         except Exception as exc:
-            failures.append(f"{getattr(case, 'method', '?')} {getattr(case, 'path', '?')} "
-                            f"raised {type(exc).__name__}: {exc}")
+            failures.append(
+                f"{getattr(case, 'method', '?')} {getattr(case, 'path', '?')} "
+                f"raised {type(exc).__name__}: {exc}"
+            )
             continue
         if code >= 500:
-            failures.append(f"{getattr(case, 'method', '?')} {getattr(case, 'path', '?')} -> {code}")
+            failures.append(
+                f"{getattr(case, 'method', '?')} {getattr(case, 'path', '?')} -> {code}"
+            )
     assert not failures, "Schemathesis contract failures (real 5xx):\n" + "\n".join(failures)

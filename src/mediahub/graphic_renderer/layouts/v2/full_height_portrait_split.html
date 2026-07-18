@@ -38,9 +38,9 @@
   height: {{HEIGHT}}px;
   overflow: hidden;
   display: flex;
-  background: var(--mh-primary);
+  background: var(--mh-ground-gradient, var(--mh-primary));
   color: var(--mh-on-primary);
-  font-family: 'Inter', system-ui, sans-serif;
+  font-family: var(--mh-font-body, 'Inter', system-ui, sans-serif);
   -webkit-font-smoothing: antialiased;
 }
 .ps *, .ps *::before, .ps *::after { box-sizing: border-box; }
@@ -84,7 +84,7 @@
 }
 .ps__kicker {
   display: flex; align-items: center; gap: 12px;
-  font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 700;
+  font-family: var(--mh-font-kicker, 'Space Grotesk','Inter',sans-serif); font-weight: 700;
   font-size: 21px; letter-spacing: 0.2em; text-transform: uppercase;
   color: var(--mh-accent); margin-bottom: 28px;
 }
@@ -93,27 +93,27 @@
   background: var(--mh-accent); flex: 0 0 auto;
 }
 .ps__first {
-  font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 700;
+  font-family: var(--mh-font-kicker, 'Space Grotesk','Inter',sans-serif); font-weight: 700;
   font-size: 36px; letter-spacing: 0.01em; text-transform: uppercase;
   color: var(--mh-accent); margin-bottom: 2px; overflow-wrap: anywhere;
 }
 .ps__surname {
   font-family: var(--mh-font-display, 'Anton','Bebas Neue',Impact,sans-serif); font-weight: 400;
   font-size: calc(var(--mh-fit-surname-px, 132px) * 0.5);
-  line-height: 0.88; letter-spacing: -0.01em; text-transform: uppercase;
+  line-height: 0.88; letter-spacing: var(--mh-track-surname, -0.01em); text-transform: uppercase;
   color: var(--mh-on-primary);
   white-space: normal; overflow-wrap: anywhere; word-break: break-word;
 }
 .ps__event {
   margin-top: 28px; padding-top: 22px;
   border-top: 4px solid var(--mh-accent);
-  font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 600;
+  font-family: var(--mh-font-kicker, 'Space Grotesk','Inter',sans-serif); font-weight: 600;
   font-size: 26px; line-height: 1.14; text-transform: uppercase;
   color: var(--mh-on-primary); overflow-wrap: anywhere;
 }
-.ps__result-wrap { margin-top: 40px; }
+.ps__result-wrap { margin-top: 40px; position: relative; }
 .ps__result-lab {
-  font-family: 'Inter',sans-serif; font-weight: 800;
+  font-family: var(--mh-font-body, 'Inter',sans-serif); font-weight: 800;
   font-size: 16px; letter-spacing: 0.28em; text-transform: uppercase;
   color: var(--mh-accent); margin-bottom: 8px;
 }
@@ -122,7 +122,7 @@
   font-feature-settings: "tnum"; font-weight: 700;
   font-size: calc(var(--mh-fit-result-px, 92px) * 0.62);
   font-variation-settings: var(--mh-axes-result, normal);
-  line-height: 0.9; letter-spacing: -0.02em;
+  line-height: 0.9; letter-spacing: var(--mh-track-result, -0.02em);
   color: var(--mh-on-primary);
   white-space: normal; overflow-wrap: anywhere; word-break: break-word;
 }
@@ -139,15 +139,15 @@
   border-top: 2px solid var(--mh-outline);
 }
 .ps__meet {
-  font-family: 'Inter',sans-serif; font-weight: 600; font-size: 19px;
+  font-family: var(--mh-font-body, 'Inter',sans-serif); font-weight: 600; font-size: 19px;
   color: var(--mh-on-primary); opacity: 0.82; margin-bottom: 14px;
   overflow-wrap: anywhere;
 }
-.ps__lockup { display: flex; align-items: center; gap: 16px; }
+.ps__lockup { display: flex; align-items: center; gap: var(--mh-sp-4); }
 .ps__logo { height: 50px; width: auto; flex: 0 0 auto; }
 .ps__logo img, .ps__logo svg { height: 100%; width: auto; object-fit: contain; display: block; }
 .ps__club {
-  font-family: 'Inter',sans-serif; font-weight: 800; font-size: 18px;
+  font-family: var(--mh-font-body, 'Inter',sans-serif); font-weight: 800; font-size: 18px;
   text-transform: uppercase; color: var(--mh-on-primary); overflow-wrap: anywhere;
 }
 .ps__sponsor { margin-top: 14px; }
@@ -167,6 +167,7 @@
     <div class="ps__surname">{{ATHLETE_SURNAME_DISPLAY}}</div>
     <div class="ps__event">{{EVENT_NAME}}</div>
     <div class="ps__result-wrap">
+      <div class="mh-anchor mh-anchor--panel-tr">{{OVERLAP_ACCENT}}</div>
       <div class="ps__result-lab">Result</div>
       <div class="ps__result">{{RESULT_VALUE}}</div>
       <div class="ps__hero">

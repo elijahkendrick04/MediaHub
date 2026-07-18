@@ -21,7 +21,6 @@ Presentation surgery only — no export route changed.
 
 from __future__ import annotations
 
-import importlib
 import json
 import pathlib
 import re
@@ -65,29 +64,18 @@ def _run_payload(profile_id: str, n: int = 3) -> dict:
 
 
 @pytest.fixture
-def app_env(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    for d in ("runs_v4", "uploads_v4", "club_profiles"):
-        (tmp_path / d).mkdir(parents=True, exist_ok=True)
-
+def app_env(app, web_module, tmp_path):
     import mediahub.media_library.store as mls
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
 
-    importlib.reload(cp)
-    importlib.reload(wm)
     mls._default_store = None
-    app = wm.create_app()
-    app.config["TESTING"] = True
 
     from mediahub.web.club_profile import ClubProfile, save_profile
 
     save_profile(ClubProfile(profile_id="alpha", display_name="Alpha SC"))
-    (wm.RUNS_DIR / "r1.json").write_text(json.dumps(_run_payload("alpha")), encoding="utf-8")
-    return app, wm, tmp_path
+    (web_module.RUNS_DIR / "r1.json").write_text(
+        json.dumps(_run_payload("alpha")), encoding="utf-8"
+    )
+    return app, web_module, tmp_path
 
 
 def _approve(tmp_path, *card_ids):
@@ -275,9 +263,7 @@ class TestInPageUnGate:
         assert "data-mh-title-ready" in helper
 
     def test_create_graphic_success_path_calls_the_helper(self):
-        body = _SRC.split("function createGraphic(btn, createUrl", 1)[1].split(
-            "\nfunction ", 1
-        )[0]
+        body = _SRC.split("function createGraphic(btn, createUrl", 1)[1].split("\nfunction ", 1)[0]
         assert "if (window.mhExportGatesEnable) window.mhExportGatesEnable(cardId);" in body
         # Guarded call — never a bare invocation that breaks the grouped page.
         assert body.count("window.mhExportGatesEnable(") == body.count(

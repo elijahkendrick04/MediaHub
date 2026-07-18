@@ -23,7 +23,6 @@ engine is never recomputed here.
 
 from __future__ import annotations
 
-import importlib
 import json
 
 import pytest
@@ -34,19 +33,6 @@ from mediahub.web import web as webmod
 # =========================================================================== #
 # Fixtures
 # =========================================================================== #
-@pytest.fixture
-def client(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    runs = tmp_path / "runs"
-    runs.mkdir(parents=True, exist_ok=True)
-    monkeypatch.setattr(webmod, "DATA_DIR", tmp_path, raising=False)
-    monkeypatch.setattr(webmod, "RUNS_DIR", runs, raising=False)
-    app = webmod.app
-    app.config["TESTING"] = True
-    with app.test_client() as c:
-        yield c
-
-
 def _write_run(run_id, payload):
     (webmod.RUNS_DIR / f"{run_id}.json").write_text(json.dumps(payload), encoding="utf-8")
 
@@ -162,9 +148,7 @@ class TestCardFacts:
         pb = self._kinds_for(webmod._card_facts(_ach(type="pb_confirmed", pb=True)), "pb")
         assert "personal best" in pb and "pb" in pb
         # A non-PB card must not advertise a PB marker.
-        not_pb = self._kinds_for(
-            webmod._card_facts(_ach(type="medal_silver", pb=False)), "pb"
-        )
+        not_pb = self._kinds_for(webmod._card_facts(_ach(type="medal_silver", pb=False)), "pb")
         assert "personal best" not in not_pb and "pb" not in not_pb
 
     def test_medal_markers_gated_by_type(self):
@@ -178,17 +162,13 @@ class TestCardFacts:
         assert "gold" not in plain and "medal" not in plain
 
     def test_record_markers_gated_by_type(self):
-        rec = self._kinds_for(
-            webmod._card_facts(_ach(type="club_record", pb=False)), "pb"
-        )
+        rec = self._kinds_for(webmod._card_facts(_ach(type="club_record", pb=False)), "pb")
         assert "club record" in rec and "record" in rec
         plain = self._kinds_for(webmod._card_facts(_ach(type="pb_confirmed")), "pb")
         assert "record" not in plain
 
     def test_first_marker_gated_by_type(self):
-        first = self._kinds_for(
-            webmod._card_facts(_ach(type="first_sub_60", pb=True)), "pb"
-        )
+        first = self._kinds_for(webmod._card_facts(_ach(type="first_sub_60", pb=True)), "pb")
         assert "first" in first
         plain = self._kinds_for(webmod._card_facts(_ach(type="pb_confirmed")), "pb")
         assert "first" not in plain
@@ -225,9 +205,7 @@ class TestCardFacts:
 # =========================================================================== #
 class TestFocusFactsHtml:
     def test_each_kind_wrapped_with_class(self):
-        html = webmod._focus_facts_html(
-            "Emma swam a personal best 58.21 in the 100m Free", _ach()
-        )
+        html = webmod._focus_facts_html("Emma swam a personal best 58.21 in the 100m Free", _ach())
         assert '<span class="mh-fact mh-fact--athlete">Emma</span>' in html
         assert '<span class="mh-fact mh-fact--pb">personal best</span>' in html
         assert '<span class="mh-fact mh-fact--time">58.21</span>' in html
@@ -281,16 +259,12 @@ class TestFocusFactsHtml:
         assert "mh-fact--athlete" in html
 
     def test_clock_time_format_matches(self):
-        html = webmod._focus_facts_html(
-            "splits to 1:02.34 on the day", _ach(time="1:02.34")
-        )
+        html = webmod._focus_facts_html("splits to 1:02.34 on the day", _ach(time="1:02.34"))
         assert '<span class="mh-fact mh-fact--time">1:02.34</span>' in html
 
     def test_xss_escaped_only_spans_are_markup(self):
-        a = _ach(swimmer_name='<b>Emma</b>')
-        html = webmod._focus_facts_html(
-            "<script>alert(1)</script> by <b>Emma</b> 58.21", a
-        )
+        a = _ach(swimmer_name="<b>Emma</b>")
+        html = webmod._focus_facts_html("<script>alert(1)</script> by <b>Emma</b> 58.21", a)
         assert "<script>alert(1)" not in html
         assert "&lt;script&gt;alert(1)&lt;/script&gt;" in html
         # the only literal "<span" tags are the highlight spans
@@ -322,13 +296,13 @@ class TestSourceGrounding:
     def test_stray_number_not_lit_as_time(self):
         # "2026" looks time-ish but is not the card's result → never highlighted.
         html = webmod._focus_facts_html("back in 2026 Emma swam 58.21", _ach())
-        assert "mh-fact--time\">2026" not in html
+        assert 'mh-fact--time">2026' not in html
         assert '<span class="mh-fact mh-fact--time">58.21</span>' in html
 
     def test_medal_word_not_lit_on_non_medal_card(self):
         # The caption mentions gold, but the card is a PB, not a medal.
         html = webmod._focus_facts_html("she won gold in spirit", _ach(type="pb_confirmed"))
-        assert "mh-fact--pb\">gold" not in html
+        assert 'mh-fact--pb">gold' not in html
 
     def test_helper_never_calls_llm(self, monkeypatch):
         import mediahub.ai_core as ai_core
@@ -358,7 +332,7 @@ class TestWhyInner:
         assert '<span class="mh-fact mh-fact--time">58.21</span>' in html
         assert '<span class="mh-fact mh-fact--event">100m Freestyle</span>' in html
         # bullets get the same treatment
-        assert "mh-fact--pb\">PB</span>" in html
+        assert 'mh-fact--pb">PB</span>' in html
 
     def test_copy_payload_stays_plain_text(self):
         # The hidden "Copy reasoning" textarea must carry clean text, not spans.
@@ -437,22 +411,12 @@ class TestStylesShip:
 # Try-demo content pack — the public caption surface highlights too
 # =========================================================================== #
 @pytest.fixture
-def demo_world(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-
-    import mediahub.web.club_profile as cp
+def demo_world(web_module, tmp_path, monkeypatch):
     import mediahub.web.demo_try as dt
-    import mediahub.web.web as wm
 
-    importlib.reload(cp)
-    importlib.reload(dt)
-    importlib.reload(wm)
-
-    app = wm.create_app()
+    app = web_module.create_app()
     app.config["TESTING"] = True
-    return {"app": app, "wm": wm, "dt": dt, "tmp": tmp_path, "mp": monkeypatch}
+    return {"app": app, "wm": web_module, "dt": dt, "tmp": tmp_path, "mp": monkeypatch}
 
 
 def _seed_demo_run(world, run_id):

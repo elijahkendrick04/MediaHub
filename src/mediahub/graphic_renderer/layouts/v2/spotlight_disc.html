@@ -23,7 +23,7 @@
   overflow: hidden;
   background: radial-gradient(85% 60% at 50% 34%, var(--mh-surface) 0%, var(--mh-primary) 72%);
   color: var(--mh-on-primary);
-  font-family: 'Inter', system-ui, sans-serif;
+  font-family: var(--mh-font-body, 'Inter', system-ui, sans-serif);
   -webkit-font-smoothing: antialiased;
   display: flex; flex-direction: column; align-items: center;
   padding: 84px 72px;
@@ -31,27 +31,27 @@
 }
 .di *, .di *::before, .di *::after { box-sizing: border-box; }
 
-.di__kicker { position: relative; z-index: 2; display: inline-flex; align-items: center; gap: 14px; font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 800; font-size: 26px; letter-spacing: 0.22em; text-transform: uppercase; color: var(--mh-accent); }
+.di__kicker { position: relative; z-index: 2; display: inline-flex; align-items: center; gap: 14px; font-family: var(--mh-font-kicker, 'Space Grotesk','Inter',sans-serif); font-weight: 800; font-size: 26px; letter-spacing: 0.22em; text-transform: uppercase; color: var(--mh-accent); }
 
 .di__disc-wrap { position: relative; z-index: 2; margin: 56px 0 48px; flex: 0 0 auto; }
 .di__disc {
   width: 560px; height: 560px; max-width: 72vw; border-radius: 50%; overflow: hidden;
   background: var(--mh-surface); border: 8px solid var(--mh-accent);
-  box-shadow: 0 24px 60px rgba(0,0,0,0.45);
+  box-shadow: var(--mh-elev-5, 0 24px 60px rgba(0,0,0,0.45));
 }
 .di__disc img { width: 100%; height: 100%; object-fit: cover; object-position: var(--mh-photo-pos, center 30%); display: block; }
 
 .di__name { position: relative; z-index: 2; font-family: var(--mh-font-display, 'Anton','Bebas Neue',Impact,sans-serif); font-weight: 400; font-size: var(--mh-fit-surname-px, 120px); line-height: 0.86; text-transform: uppercase; color: var(--mh-on-primary); white-space: nowrap; }
-.di__event { position: relative; z-index: 2; margin-top: 14px; font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 600; font-size: 30px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--mh-on-primary); }
+.di__event { position: relative; z-index: 2; margin-top: 14px; font-family: var(--mh-font-kicker, 'Space Grotesk','Inter',sans-serif); font-weight: 600; font-size: 30px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--mh-on-primary); }
 .di__result { position: relative; z-index: 2; margin-top: 22px; display: inline-block; padding: 16px 30px; background: var(--mh-accent); color: var(--mh-primary); font-family: 'JetBrains Mono','Space Grotesk',monospace; font-feature-settings: "tnum"; font-weight: 700; font-size: var(--mh-fit-result-px, 84px); font-variation-settings: var(--mh-axes-result, normal); line-height: 0.9; }
-.di__stat { position: relative; z-index: 2; margin-top: 16px; font-family: 'Inter',sans-serif; font-weight: 600; font-size: 24px; color: var(--mh-on-primary); opacity: 0.82; }
+.di__stat { position: relative; z-index: 2; margin-top: 16px; font-family: var(--mh-font-body, 'Inter',sans-serif); font-weight: 600; font-size: 24px; color: var(--mh-on-primary); opacity: 0.82; }
 
-.di__foot { position: relative; z-index: 2; margin-top: auto; padding-top: 40px; width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 24px; }
+.di__foot { position: relative; z-index: 2; margin-top: auto; padding-top: 40px; width: 100%; display: flex; align-items: center; justify-content: space-between; gap: var(--mh-sp-5); }
 .di__brand { display: flex; align-items: center; gap: 14px; }
 .di__logo { height: 56px; width: auto; }
 .di__logo img, .di__logo svg { height: 100%; width: auto; object-fit: contain; display: block; }
-.di__club { font-family: 'Inter',sans-serif; font-weight: 800; font-size: 22px; text-transform: uppercase; color: var(--mh-on-primary); }
-.di__meet { font-family: 'Inter',sans-serif; font-weight: 500; font-size: 18px; color: var(--mh-on-primary); opacity: 0.72; }
+.di__club { font-family: var(--mh-font-body, 'Inter',sans-serif); font-weight: 800; font-size: 22px; text-transform: uppercase; color: var(--mh-on-primary); }
+.di__meet { font-family: var(--mh-font-body, 'Inter',sans-serif); font-weight: 500; font-size: 18px; color: var(--mh-on-primary); opacity: 0.72; }
 .di__sponsor { flex: 0 0 auto; }
 </style>
 </head>
@@ -62,6 +62,7 @@
 
   <div class="di__disc-wrap">
     <div class="di__disc">{{ATHLETE_IMG_BLOCK}}</div>
+    <div class="mh-anchor mh-anchor--photo-tr">{{OVERLAP_ACCENT}}</div>
   </div>
 
   <div class="di__name">{{ATHLETE_SURNAME_DISPLAY}}</div>

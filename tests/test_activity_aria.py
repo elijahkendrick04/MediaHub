@@ -4,9 +4,9 @@ Guards against the axe-core 'aria-required-children' violation on /activity:
   - The .mh-segmented nav has role="tablist"
   - Every <a> inside it must carry role="tab" and aria-selected
 """
+
 from __future__ import annotations
 
-import importlib
 import sys
 from pathlib import Path
 
@@ -17,31 +17,20 @@ sys.path.insert(0, str(_ROOT))
 
 
 @pytest.fixture
-def activity_client(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    (tmp_path / "runs_v4").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "uploads_v4").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "club_profiles").mkdir(parents=True, exist_ok=True)
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-    importlib.reload(cp)
-    importlib.reload(wm)
-
-    app = wm.create_app()
-    app.config["TESTING"] = True
+def activity_client(app, web_module):
     app.config["ENFORCE_ORG_GATE"] = True
 
     from mediahub.web.club_profile import ClubProfile, save_profile
-    save_profile(ClubProfile(
-        profile_id="club-a", display_name="Club A",
-        brand_voice_summary="A friendly club.",
-    ))
 
-    conn = wm._db()
+    save_profile(
+        ClubProfile(
+            profile_id="club-a",
+            display_name="Club A",
+            brand_voice_summary="A friendly club.",
+        )
+    )
+
+    conn = web_module._db()
     conn.execute(
         "INSERT INTO runs (id, created_at, finished_at, status, profile_id, "
         "meet_name, file_name, our_swims, n_cards, n_queue, error) "
@@ -77,9 +66,12 @@ class TestActivityTablistAria:
         body = resp.get_data(as_text=True)
         assert 'aria-selected="false"' in body
 
-    def test_status_filter_tab_selected_true_on_active_filter(self, activity_client, tmp_path, monkeypatch):
+    def test_status_filter_tab_selected_true_on_active_filter(
+        self, activity_client, tmp_path, monkeypatch
+    ):
         """When ?status=error is applied the Failed tab carries aria-selected="true"."""
         import mediahub.web.web as wm
+
         conn = wm._db()
         conn.execute(
             "INSERT INTO runs (id, created_at, finished_at, status, profile_id, "

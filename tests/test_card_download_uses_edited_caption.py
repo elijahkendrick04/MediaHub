@@ -11,9 +11,9 @@ The fix resolves the caption from the same approved/active source as the
 run-level export, with the persisted human edit as an approval-independent
 fallback, and the headline only as a last resort.
 """
+
 from __future__ import annotations
 
-import importlib
 import io
 import json
 import sys
@@ -27,19 +27,8 @@ sys.path.insert(0, str(_ROOT))
 
 
 @pytest.fixture
-def env(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    for sub in ("runs_v4", "uploads_v4", "club_profiles"):
-        (tmp_path / sub).mkdir(parents=True, exist_ok=True)
-    import mediahub.web.web as wm
-
-    importlib.reload(wm)
-    app = wm.create_app()
-    app.config["TESTING"] = True
-    return app, wm, tmp_path
+def env(app, web_module, tmp_path):
+    return app, web_module, tmp_path
 
 
 def _seed_run(runs_dir: Path, run_id: str, headline: str) -> None:

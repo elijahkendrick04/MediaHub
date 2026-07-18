@@ -73,6 +73,15 @@ class MilestoneDetector(AchievementDetector):
         swimmer_name = (extra or {}).get("swimmer_name", "") or getattr(history, "swimmer_name", "")
         alias = normalise_name(swimmer_name)
         athlete_ctx = ctx_map.get(alias)
+        if not athlete_ctx:
+            # Unknown to a non-empty registry: could be a genuine first-timer OR a
+            # veteran whose logged name drifted (nickname / spelling drift) and so
+            # didn't resolve. We cannot tell the two apart from the registry alone,
+            # so fire nothing rather than a confident false "First gala" for a
+            # name-drift veteran (#61). A confirmed club debut requires the athlete
+            # to be KNOWN to the registry WITH zero prior races (a populated entry
+            # whose prior_races == 0), which the branches below still honour.
+            return []
 
         own = _own_completed_swims(swim, all_results)
         try:
@@ -89,9 +98,9 @@ class MilestoneDetector(AchievementDetector):
         except StopIteration:
             return []
 
-        prior_races = int(athlete_ctx["prior_races"]) if athlete_ctx else 0
-        prior_events = set(athlete_ctx["prior_events"]) if athlete_ctx else set()
-        athlete_id = athlete_ctx.get("athlete_id") if athlete_ctx else None
+        prior_races = int(athlete_ctx["prior_races"])
+        prior_events = set(athlete_ctx["prior_events"])
+        athlete_id = athlete_ctx.get("athlete_id")
         race_number = prior_races + ordinal + 1
         evt_label = _event_label(swim)
 
@@ -169,7 +178,7 @@ class MilestoneDetector(AchievementDetector):
             )
 
         # First time racing this event (known athlete only — debuts covered above).
-        if athlete_ctx and prior_races > 0 and _event_key(swim) not in prior_events:
+        if prior_races > 0 and _event_key(swim) not in prior_events:
             out.append(
                 Achievement(
                     type="first_event_swim",

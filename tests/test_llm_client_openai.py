@@ -279,6 +279,28 @@ def test_embeddings(monkeypatch):
     assert client.embeddings(["a", "b"]) == [[0.1, 0.2], [0.3, 0.4]]
 
 
+def test_embeddings_reorders_by_index(monkeypatch):
+    """A provider that returns rows out of order must not mis-pair vectors:
+    embeddings() honours each row's ``index`` so vector i maps to input i."""
+
+    def fake_post(url, json=None, headers=None, timeout=None, **kw):
+        # data intentionally shuffled; index says the true position.
+        return _FakeResp(
+            200,
+            {
+                "data": [
+                    {"index": 2, "embedding": [0.5, 0.6]},
+                    {"index": 0, "embedding": [0.1, 0.2]},
+                    {"index": 1, "embedding": [0.3, 0.4]},
+                ]
+            },
+        )
+
+    monkeypatch.setattr(requests, "post", fake_post)
+    client = lc.OpenAICompatClient(["https://a/v1"], "k", default_model="emb")
+    assert client.embeddings(["a", "b", "c"]) == [[0.1, 0.2], [0.3, 0.4], [0.5, 0.6]]
+
+
 # --- env helpers ------------------------------------------------------------
 
 def test_endpoints_from_env(monkeypatch):

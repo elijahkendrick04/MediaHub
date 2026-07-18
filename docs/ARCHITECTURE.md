@@ -41,7 +41,7 @@ publishes JSON status to `/api/runs/<id>/status`).
 | `mediahub.voice` | Learned caption voice styles | `voice.learned.render.render_caption()` |
 | `mediahub.brand` | Club brand kit (colours, fonts, tone) | `brand.kit.BrandKit` |
 | `mediahub.workflow` | Card status + queue persistence | `workflow.store.WorkflowStore` |
-| `mediahub.graphic_renderer` | HTML/CSS templates → PNG via Playwright/WeasyPrint | `graphic_renderer.render.render_brief` |
+| `mediahub.graphic_renderer` | HTML/CSS templates → PNG via Playwright (Chromium) | `graphic_renderer.render.render_brief` |
 | `mediahub.creative_brief` | LLM-driven creative direction for graphics | `creative_brief.generator.generate` |
 | `mediahub.media_ai` | LLM + cutout providers (Anthropic, Replicate, PhotoRoom, rembg) | `media_ai.generate` |
 | `mediahub.media_library` | User-uploaded media assets + asset tags | `media_library.store.MediaLibraryStore` |
