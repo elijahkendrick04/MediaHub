@@ -13,8 +13,9 @@ source level, plus a check that the console route wires up the return URL.
 from __future__ import annotations
 
 import pathlib
+from tests._helpers import web_surface_src
 
-_SRC = pathlib.Path("src/mediahub/web/web.py").read_text(encoding="utf-8")
+_SRC = web_surface_src()
 
 
 def test_console_has_confirmed_end_button():

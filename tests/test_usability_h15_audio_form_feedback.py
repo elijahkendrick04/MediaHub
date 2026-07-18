@@ -16,6 +16,7 @@ the machine body.
 from __future__ import annotations
 
 import pytest
+from tests._helpers import web_surface_src
 
 
 @pytest.fixture
@@ -180,9 +181,7 @@ class TestEarlyReturnsUseBanners:
         """audio_unavailable responses never carry str(e) to the customer."""
         from pathlib import Path
 
-        src = (
-            Path(__file__).resolve().parents[1] / "src" / "mediahub" / "web" / "web.py"
-        ).read_text(encoding="utf-8")
+        src = web_surface_src()
         audio_region = src[
             src.index("def api_audio_library") : src.index("def api_audio_voice_consent")
         ]

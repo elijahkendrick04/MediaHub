@@ -15,6 +15,7 @@ import pathlib
 import uuid
 
 import pytest
+from tests._helpers import web_surface_src
 
 
 @pytest.fixture
@@ -88,11 +89,11 @@ def test_grouped_page_links_to_shared_composer(env):
 
 def test_composer_anchor_exists_on_builder_source():
     # The link target is the composer card's real id on the Content builder.
-    src = pathlib.Path("src/mediahub/web/web.py").read_text(encoding="utf-8")
+    src = web_surface_src()
     assert 'id="mh-reel-composer"' in src
 
 
-_SRC = pathlib.Path("src/mediahub/web/web.py").read_text(encoding="utf-8")
+_SRC = web_surface_src()
 
 
 def test_no_drifted_reel_generator_left_in_source():

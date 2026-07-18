@@ -1032,6 +1032,21 @@ def web_manifest():
     return current_app.response_class(json.dumps(manifest), mimetype="application/manifest+json")
 
 
+# Installable-PWA service worker. Network-first so the app is always fresh
+# online; falls back to cache (then a tiny offline page) only when the
+# network is unavailable — so a stale cache can never be served to an online
+# user. Only same-origin /static/ assets are opportunistically cached.
+#
+# Offline-tolerant approval queue (roadmap 1.22): POSTs to /api/workflow/
+# (approve / reject / caption-edit — the actions a volunteer takes on the
+# bus) are intercepted. Online they pass straight through; offline they are
+# persisted to IndexedDB and a Background Sync is registered, then replayed
+# when the connection returns. The workflow API is idempotent (re-approving
+# is a no-op), so a replay never double-applies. It is NOT, however, always
+# a success: a consent/brand/task gate can refuse an approval (403) and the
+# group-approver rule can hold it as a vote (200 status:'queue'). D-4:
+# drainQueue inspects each replay's body and reports those outcomes to the
+# client instead of silently dropping them and claiming "All changes synced".
 def service_worker():
     """Serve the service worker from the app root so it can control the whole
     scope (via Service-Worker-Allowed)."""
@@ -1591,6 +1606,20 @@ def healthz_governance():
     return W._layout("AI governance · usage", body, active="")
 
 
+# Operator-facing LLM usage dashboard. Lives under /healthz/* (same
+# trust boundary as /healthz/deps — an operations endpoint, not a
+# user-facing surface) so it's reachable without going through the
+# org-setup gate. Single-instance operators see their own usage;
+# there is no tenant aggregation because each MediaHub deployment
+# belongs to one operator.
+#
+# Surfaces:
+#   1. Today's LLM call count, broken down by provider.
+#   2. Rough USD cost estimate from public list pricing.
+#   3. Gemini free-tier headroom (1,500 req/day ceiling).
+#   4. Most recent LLM error message (so the operator can diagnose
+#      a quietly-failing provider without grepping logs).
+#   5. 7-day posting-log roll-up.
 def healthz_usage():
     """Operator-only: LLM call counts, token totals, cost estimates,
     free-tier headroom and the last raw provider error. Same gate as its

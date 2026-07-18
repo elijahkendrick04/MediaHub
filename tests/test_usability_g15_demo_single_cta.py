@@ -14,13 +14,17 @@ source level.
 from __future__ import annotations
 
 import pathlib
+import re
+from tests._helpers import web_surface_src
 
-_SRC = pathlib.Path("src/mediahub/web/web.py").read_text(encoding="utf-8")
+_SRC = web_surface_src()
 
 
 def test_single_cta_chosen_by_auth_state():
     # One cta_html, chosen by whether a profile is active.
-    assert "if _active_profile() is not None:" in _SRC
+    # The handler lives on the carved surface, where module globals read as
+    # W.<name> — accept either spelling of the auth-state branch.
+    assert re.search(r"if (?:W\.)?_active_profile\(\) is not None:", _SRC)
     assert "try_demo_claim" in _SRC
     # The footer renders the single chosen CTA, not both buttons.
     assert "{cta_html}" in _SRC

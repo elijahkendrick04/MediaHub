@@ -13,8 +13,9 @@ from __future__ import annotations
 import pathlib
 
 import pytest
+from tests._helpers import web_surface_src
 
-_SRC = pathlib.Path("src/mediahub/web/web.py").read_text(encoding="utf-8")
+_SRC = web_surface_src()
 
 
 # --- Source-level pins (the confirm is client-side JS in the template) -------

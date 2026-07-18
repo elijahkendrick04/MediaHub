@@ -13,8 +13,8 @@ POST to the plan-inputs endpoint before it POSTs to the plan-generate endpoint.
 from __future__ import annotations
 
 from pathlib import Path
+from tests._helpers import web_surface_src
 
-_WEB = Path(__file__).resolve().parents[1] / "src" / "mediahub" / "web" / "web.py"
 
 
 def _generate_fn_body(src: str) -> str:
@@ -24,7 +24,7 @@ def _generate_fn_body(src: str) -> str:
 
 
 def test_generate_saves_inputs_before_generating():
-    src = _WEB.read_text(encoding="utf-8")
+    src = web_surface_src()
     body = _generate_fn_body(src)
     # Both endpoints are referenced inside the function...
     assert "api_plan_inputs" in body, "generate must save inputs first (H-7)"

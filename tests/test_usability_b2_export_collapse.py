@@ -28,6 +28,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from tests._helpers import web_surface_src
 
 _ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_ROOT))
@@ -224,7 +225,7 @@ class TestExportDisclosure:
 # Source-level: the scattered blocks are gone, routes untouched
 # ---------------------------------------------------------------------------
 
-_SRC = pathlib.Path("src/mediahub/web/web.py").read_text(encoding="utf-8")
+_SRC = web_surface_src()
 
 
 def test_old_scattered_export_blocks_are_gone():
@@ -272,7 +273,8 @@ class TestInPageUnGate:
 
     def test_pack_page_ships_the_helper_script(self):
         assert "_PACK_EXPORT_GATE_JS = " in _SRC
-        assert "{_PACK_EXPORT_GATE_JS}" in _SRC
+        # On the carved surface the interpolation reads {W._PACK_EXPORT_GATE_JS}.
+        assert re.search(r"\{(?:W\.)?_PACK_EXPORT_GATE_JS\}", _SRC)
 
     def test_gated_controls_carry_the_gate_marker(self, app_env, tmp_path):
         app, wm, _ = app_env

@@ -57,3 +57,13 @@ If a surface ever needs Blueprint-only machinery (per-surface
 `before_request`, url_prefix mounting, `static_folder`), migrate that surface
 to a real Blueprint **together with** a repo-wide endpoint-name rewrite and a
 url_for/`request.endpoint`/gate-set audit — as its own PR.
+
+## Completion note (2026-07-18)
+
+Stage 5 finished the carve: the remaining 311 routes moved into seven more
+`add_url_rule` surface modules (`routes_auth`, `routes_site`, `routes_review`,
+`routes_planner`, `routes_creative`, `routes_api_misc`, `routes_operator`)
+under this ADR's pattern — original endpoint names, `W.<name>` call-time
+references, `current_app` for the captured `app`. All 464 routes now live in
+eleven surface modules; `create_app` is wiring only. The url_map snapshot
+(rules, endpoint names, methods) stayed byte-identical at every step.
