@@ -1,7 +1,14 @@
 # ADR 0019 — Password-protect the operator developer sign-in
 
 - **Status:** accepted (2026-06-12) — supersedes
-  [ADR-0018](0018-public-passwordless-operator-signin.md).
+  [ADR-0018](0018-public-passwordless-operator-signin.md). **To be amended by
+  [ADR-0022](0022-require-operator-credential-rotation.md)** (decided 2026-07-13,
+  enforcement staged): because the repo is public the shipped default hash is
+  offline-crackable, so at go-live the "zero deployment config" boot property
+  below is dropped in production — it will refuse to boot until
+  `MEDIAHUB_DEV_PASSWORD_HASH` is rotated (roadmap RP.5). During development it
+  is a warning only, so this ADR's zero-config boot still holds for now.
+  Everything else in this ADR stands.
 - **Context:** ADR-0018 made `/developer` public and passwordless at the
   operator's request. The operator then reversed that the same day: *"password
   protect the developer login at the bottom of the page."* A specific username

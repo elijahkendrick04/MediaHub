@@ -42,9 +42,9 @@
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  background: var(--mh-primary);
+  background: var(--mh-ground-gradient, var(--mh-primary));
   color: var(--mh-on-primary);
-  font-family: 'Inter', system-ui, sans-serif;
+  font-family: var(--mh-font-body, 'Inter', system-ui, sans-serif);
   -webkit-font-smoothing: antialiased;
 }
 .vs *, .vs *::before, .vs *::after { box-sizing: border-box; }
@@ -75,21 +75,21 @@
   display: inline-flex; align-items: center; gap: 14px;
   padding: 13px 26px;
   background: var(--mh-accent); color: var(--mh-primary);
-  font-family: 'Space Grotesk', 'Inter', sans-serif;
+  font-family: var(--mh-font-kicker, 'Space Grotesk', 'Inter', sans-serif);
   font-weight: 800; font-size: 25px; letter-spacing: 0.14em; text-transform: uppercase;
   border-radius: 6px; max-width: 100%; overflow: hidden;
 }
-.vs__id { display: flex; flex-direction: column; gap: 4px; }
+.vs__id { display: flex; flex-direction: column; gap: var(--mh-sp-1); }
 .vs__first {
-  font-family: 'Space Grotesk', 'Inter', sans-serif;
+  font-family: var(--mh-font-kicker, 'Space Grotesk', 'Inter', sans-serif);
   font-weight: 700; font-size: 40px; letter-spacing: 0.08em; text-transform: uppercase;
   color: var(--mh-on-primary);
   max-width: 100%; overflow-wrap: anywhere; word-break: break-word;
 }
 .vs__surname {
-  font-family: 'Anton', 'Bebas Neue', Impact, sans-serif;
+  font-family: var(--mh-font-display, 'Anton', 'Bebas Neue', Impact, sans-serif);
   font-weight: 400; font-size: var(--mh-fit-surname-px, 132px);
-  line-height: 0.86; letter-spacing: -0.02em; text-transform: uppercase;
+  line-height: 0.86; letter-spacing: var(--mh-track-surname, -0.02em); text-transform: uppercase;
   color: var(--mh-on-primary); white-space: nowrap;
 }
 
@@ -97,7 +97,7 @@
 .vs__seam {
   flex: 0 0 auto; height: 12px;
   background: var(--mh-accent);
-  box-shadow: 0 0 40px rgba(0,0,0,0.35);
+  box-shadow: var(--mh-elev-3, 0 0 40px rgba(0,0,0,0.35));
   position: relative; z-index: 3;
 }
 
@@ -112,7 +112,7 @@
 }
 .vs__result-wrap { display: flex; flex-direction: column; gap: 14px; }
 .vs__event {
-  font-family: 'Space Grotesk', 'Inter', sans-serif;
+  font-family: var(--mh-font-kicker, 'Space Grotesk', 'Inter', sans-serif);
   font-weight: 600; font-size: 36px; letter-spacing: 0.05em; text-transform: uppercase;
   color: var(--mh-on-surface); opacity: 0.9;
   overflow-wrap: anywhere;
@@ -121,30 +121,30 @@
   font-family: 'JetBrains Mono', 'Space Grotesk', monospace; font-feature-settings: "tnum";
   font-weight: 700; font-size: var(--mh-fit-result-px, 132px);
   font-variation-settings: var(--mh-axes-result, normal);
-  line-height: 0.92; letter-spacing: -0.02em; color: var(--mh-on-surface);
+  line-height: 0.92; letter-spacing: var(--mh-track-result, -0.02em); color: var(--mh-on-surface);
   white-space: nowrap;
 }
 .vs__stat {
-  font-family: 'Space Grotesk', 'Inter', sans-serif; font-weight: 800;
+  font-family: var(--mh-font-kicker, 'Space Grotesk', 'Inter', sans-serif); font-weight: 800;
   font-size: 30px; letter-spacing: 0.06em; text-transform: uppercase;
   color: var(--mh-accent);
 }
 .vs__stat:empty { display: none; }
 
 .vs__foot {
-  display: flex; align-items: flex-end; justify-content: space-between; gap: 24px;
+  display: flex; align-items: flex-end; justify-content: space-between; gap: var(--mh-sp-5);
 }
-.vs__brand { display: flex; align-items: center; gap: 16px; min-width: 0; }
+.vs__brand { display: flex; align-items: center; gap: var(--mh-sp-4); min-width: 0; }
 .vs__logo { height: 56px; width: auto; flex: 0 0 auto; }
 .vs__logo img, .vs__logo svg { height: 100%; width: auto; object-fit: contain; display: block; }
 .vs__brand-text { display: flex; flex-direction: column; line-height: 1.14; min-width: 0; }
 .vs__club {
-  font-family: 'Inter', sans-serif; font-weight: 800; font-size: 22px;
+  font-family: var(--mh-font-body, 'Inter', sans-serif); font-weight: 800; font-size: 22px;
   text-transform: uppercase; color: var(--mh-on-surface); overflow-wrap: anywhere;
 }
 .vs__meet {
-  font-family: 'Inter', sans-serif; font-weight: 500; font-size: 18px;
-  color: var(--mh-on-surface); opacity: 0.72; margin-top: 4px; overflow-wrap: anywhere;
+  font-family: var(--mh-font-body, 'Inter', sans-serif); font-weight: 500; font-size: 18px;
+  color: var(--mh-on-surface); opacity: 0.72; margin-top: var(--mh-sp-1); overflow-wrap: anywhere;
 }
 .vs__sponsor { flex: 0 0 auto; }
 </style>

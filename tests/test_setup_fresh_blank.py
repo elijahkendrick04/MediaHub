@@ -12,27 +12,14 @@ Fix: the link carries ?fresh=1, and the setup route renders a blank form
 
 from __future__ import annotations
 
-import importlib
-import sys
-from pathlib import Path
 
-_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(_ROOT))
-
-
-def _make_app(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    for sub in ("runs_v4", "uploads_v4", "club_profiles", "data"):
-        (tmp_path / sub).mkdir(parents=True, exist_ok=True)
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
+def _make_app(web_module, tmp_path):
+    # DATA_DIR / RUNS_DIR / UPLOADS_DIR / profiles-dir isolation (all under this
+    # test's tmp_path) plus the one-time web.py import come from the ``web_module``
+    # fixture (which pulls in ``_isolate_data_dir``) — this test just needs one
+    # extra 'data' subdir and a pre-seeded active org.
+    wm = web_module
+    (tmp_path / "data").mkdir(parents=True, exist_ok=True)
 
     from mediahub.web.club_profile import ClubProfile, save_profile
 
@@ -64,8 +51,8 @@ def _client_with_active(app):
     return c
 
 
-def test_default_setup_prefills_active_org(tmp_path, monkeypatch):
-    app = _make_app(tmp_path, monkeypatch)
+def test_default_setup_prefills_active_org(web_module, tmp_path):
+    app = _make_app(web_module, tmp_path)
     c = _client_with_active(app)
     body = c.get("/organisation/setup").data.decode("utf-8", errors="ignore")
     # Sanity: without ?fresh the active org IS pre-filled / previewed.
@@ -73,8 +60,8 @@ def test_default_setup_prefills_active_org(tmp_path, monkeypatch):
     assert 'value="https://existing-club.example"' in body
 
 
-def test_fresh_setup_is_blank(tmp_path, monkeypatch):
-    app = _make_app(tmp_path, monkeypatch)
+def test_fresh_setup_is_blank(web_module, tmp_path):
+    app = _make_app(web_module, tmp_path)
     c = _client_with_active(app)
     body = c.get("/organisation/setup?fresh=1").data.decode("utf-8", errors="ignore")
     # The active org's data must NOT pre-fill the blank "create new" form.
@@ -90,9 +77,9 @@ def test_fresh_setup_is_blank(tmp_path, monkeypatch):
     assert 'name="display_name"' in body
 
 
-def test_create_new_link_uses_fresh(tmp_path, monkeypatch):
+def test_create_new_link_uses_fresh(web_module, tmp_path):
     """The sign-in page's create-new card must point at the blank form."""
-    app = _make_app(tmp_path, monkeypatch)
+    app = _make_app(web_module, tmp_path)
     c = app.test_client()  # signed out — sign-in page lists profiles
     body = c.get("/sign-in").data.decode("utf-8", errors="ignore")
     assert "Create new organisation" in body

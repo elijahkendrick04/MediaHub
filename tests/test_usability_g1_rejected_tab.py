@@ -22,7 +22,6 @@ This file pins the fix:
 
 from __future__ import annotations
 
-import importlib
 import json
 import re
 import sys
@@ -30,33 +29,20 @@ import types
 from pathlib import Path
 
 import pytest
+from tests._helpers import web_surface_src
 
 _ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_ROOT))
 
-_WEB_SRC = (_ROOT / "src" / "mediahub" / "web" / "web.py").read_text(encoding="utf-8")
+_WEB_SRC = web_surface_src()
 
 
 # --------------------------------------------------------------------------- #
 # Fixtures (modelled on tests/test_ui_2_4_clientside_tabs.py)
 # --------------------------------------------------------------------------- #
 @pytest.fixture
-def world(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    (tmp_path / "runs_v4").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "club_profiles").mkdir(parents=True, exist_ok=True)
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
-
-    app = wm.create_app()
-    app.config["TESTING"] = True
-    return types.SimpleNamespace(app=app, wm=wm, tmp=tmp_path)
+def world(app, web_module, tmp_path):
+    return types.SimpleNamespace(app=app, wm=web_module, tmp=tmp_path)
 
 
 def _save_org(world, pid="riverbend", name="Riverbend SC"):
@@ -162,9 +148,7 @@ class TestRejectedTab:
         pid = _save_org(world)
         _seed_run(world, "g1run00003", profile_id=pid)
         html = _review(world, "g1run00003", pid)
-        assert (
-            '#ach-list[data-wf-filter="rejected"] .ach-row:not([data-status="rejected"])' in html
-        )
+        assert '#ach-list[data-wf-filter="rejected"] .ach-row:not([data-status="rejected"])' in html
 
     def test_counts_reflect_rejected_state(self, world):
         from mediahub.workflow.status import CardStatus

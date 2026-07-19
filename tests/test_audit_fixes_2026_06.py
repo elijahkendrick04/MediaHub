@@ -8,6 +8,7 @@ Covers, under the *enforced* org gate (the real signed-out condition):
   I5 — the /upload step-1 submit must not be permanently disabled and must
        carry an inline no-file validation message.
 """
+
 from __future__ import annotations
 
 import sys
@@ -20,20 +21,7 @@ sys.path.insert(0, str(_ROOT))
 
 
 @pytest.fixture
-def gated_client(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    for d in ("runs_v4", "uploads_v4", "club_profiles"):
-        (tmp_path / d).mkdir(parents=True, exist_ok=True)
-    import importlib
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-    importlib.reload(cp)
-    importlib.reload(wm)
-    app = wm.create_app()
-    app.config["TESTING"] = True
+def gated_client(app):
     app.config["ENFORCE_ORG_GATE"] = True  # gate ACTIVE: no ready org
     with app.test_client() as c:
         yield c
@@ -52,7 +40,10 @@ class TestI1ServiceWorkerExemptFromGate:
     def test_gated_content_route_still_redirects(self, gated_client):
         # Control: a real content route must still be gated.
         r = gated_client.get("/make")
-        assert r.status_code in (301, 302), "content routes must still redirect when no org is ready"
+        assert r.status_code in (
+            301,
+            302,
+        ), "content routes must still redirect when no org is ready"
 
 
 class TestI3NoDoubleEscapedEntities:
@@ -67,6 +58,7 @@ class TestI5UploadValidation:
         # Need the gate to allow /upload: temporarily disable enforcement so we
         # can inspect the rendered upload form markup itself.
         import mediahub.web.web as wm
+
         app = wm.create_app()
         app.config["TESTING"] = True  # gate bypassed -> /upload renders
         with app.test_client() as c:
@@ -74,6 +66,7 @@ class TestI5UploadValidation:
         assert "mh-upload-submit" in body
         # The submit button must not ship permanently disabled.
         import re
+
         m = re.search(r'<button[^>]*id="mh-upload-submit"[^>]*>', body)
         assert m, "upload submit button not found"
         assert "disabled" not in m.group(0), "submit must not be hard-disabled"

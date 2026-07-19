@@ -311,8 +311,23 @@ def create_task(
 ) -> ScheduledTask:
     if schedule_kind not in SCHEDULE_KINDS:
         raise ValueError(f"unsupported schedule kind: {schedule_kind}")
-    # Validate the expression up front so a bad cron can't silently never fire.
-    if schedule_kind != "once":
+    # Validate the expression up front so a malformed schedule can't be accepted
+    # and then silently never fire (due_slot_utc swallows a bad expr to None).
+    if schedule_kind == "once":
+        try:
+            datetime.fromisoformat((schedule_expr or "").strip())
+        except ValueError as e:
+            raise ValueError(f"invalid 'once' datetime: {schedule_expr!r}") from e
+    elif schedule_kind == "cron":
+        cron = _to_cron("cron", schedule_expr)
+        try:
+            from croniter import croniter  # noqa: PLC0415
+        except Exception:
+            croniter = None  # croniter absent — skip (matches the fire path's tolerance)
+        if croniter is not None and not croniter.is_valid(cron):
+            raise ValueError(f"invalid cron expression: {schedule_expr!r}")
+    else:
+        # daily/weekly/monthly are validated by _to_cron's int()/split() parsing.
         _to_cron(schedule_kind, schedule_expr)
     _ensure_schema(db_path)
     now = _iso(_now_utc())

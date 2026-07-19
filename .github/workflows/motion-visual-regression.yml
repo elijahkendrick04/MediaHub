@@ -12,14 +12,13 @@
 # only when motion-affecting files change — so the expensive render happens
 # exactly when the pixels might have moved.
 #
-# NOT a required check (yet). Remotion is pinned only to ^4.0.0 and its
-# package-lock isn't committed, so a CI `npm install` can resolve a newer patch
-# that pins a different headless-Chrome build; the per-channel + ratio tolerances
-# absorb sub-pixel AA, but a genuine Chrome bump can still shift enough to redden
-# this. Treat a red as "look at the diff": a real regression → fix it; expected
-# churn (or a Chrome bump) → re-capture with `python scripts/motion_vr.py capture`
-# and commit the reviewed baselines. Promote to a required check via branch
-# protection once the toolchain is pinned.
+# NOT a required check. Remotion is exact-pinned (4.0.485 across the @remotion/*
+# packages + react) and the ~106 KB package-lock.json is committed, so `npm ci`
+# reinstalls the identical tree every run and the render is reproducible; the
+# per-channel + ratio tolerances still absorb sub-pixel AA across CI runners.
+# Treat a red as "look at the diff": a real regression → fix it; expected churn
+# (or a deliberate Remotion bump) → re-capture with
+# `python scripts/motion_vr.py capture` and commit the reviewed baselines.
 
 name: Motion visual-regression
 
@@ -61,11 +60,13 @@ jobs:
           python-version: "3.12"
           cache: pip
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
-          node-version: "20"
+          # Match the production image (Dockerfile installs Node 22) so this
+          # job pixel-diffs Remotion output on the SAME Node prod renders on.
+          node-version: "22"
           cache: npm
-          cache-dependency-path: src/mediahub/remotion/package.json
+          cache-dependency-path: src/mediahub/remotion/package-lock.json
 
       - name: Install Pillow (the only runtime dep the diff needs)
         run: |
@@ -74,17 +75,18 @@ jobs:
 
       - name: Install Remotion (Node side of the harness)
         working-directory: src/mediahub/remotion
-        run: npm install --no-audit --no-fund
+        run: npm ci --no-audit --no-fund
 
       - name: Render reference frames and pixel-diff against committed baselines
         env:
-          # The baselines are byte-reproducible on a pinned Remotion (it pins its
-          # own headless-Chrome; fonts are self-hosted; no RNG/clock). CI resolves
-          # Remotion via `npm install` (^4.0.0, no committed lock), so a patch bump
-          # can shift sub-pixel rasterisation a touch — give the cross-env check a
-          # wider margin than the local default (2%) while still tripping on a real
-          # scene break (a wrong fill / dropped layer / collapsed transition moves
-          # well into double digits).
+          # The baselines are byte-reproducible on the pinned Remotion (it pins
+          # its own headless-Chrome; fonts are self-hosted; no RNG/clock). CI
+          # installs the exact committed tree via `npm ci` (package-lock.json,
+          # Remotion 4.0.485), so the toolchain is identical run-to-run — the
+          # wider-than-local margin (2% local default) only absorbs cross-runner
+          # GPU/AA differences while still tripping on a real scene break (a wrong
+          # fill / dropped layer / collapsed transition moves well into double
+          # digits).
           MEDIAHUB_MOTION_VR_MAX_DIFF: "0.04"
         run: python scripts/motion_vr.py check --write-diffs --out motion_vr_out
 

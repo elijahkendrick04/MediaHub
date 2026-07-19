@@ -33,7 +33,6 @@ Three layers of assertion, mirroring tests/test_activity_count_up.py:
 
 from __future__ import annotations
 
-import importlib
 import os
 import re
 import sys
@@ -73,23 +72,10 @@ def _chromium_available() -> bool:
 # Fixtures
 # --------------------------------------------------------------------------- #
 @pytest.fixture
-def app(tmp_path, monkeypatch):
+def app(web_module):
     """Isolated Flask app with one saved, ready organisation (for the pinned
     hero variant). Mirrors tests/test_activity_count_up.py."""
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    for sub in ("runs_v4", "uploads_v4", "club_profiles"):
-        (tmp_path / sub).mkdir(parents=True, exist_ok=True)
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
-
-    application = wm.create_app()
+    application = web_module.create_app()
     application.config["TESTING"] = True
 
     from mediahub.web.club_profile import ClubProfile, save_profile
@@ -115,6 +101,16 @@ def _home(application, *, pinned: bool = False) -> str:
         return resp.get_data(as_text=True)
 
 
+def _about(application) -> str:
+    # The marketing explainer sections (pipeline, engine bento, audience,
+    # promise, FAQ) now live on the public /about tour, not the deliberately
+    # brief signed-out home. Fetch the page that actually carries them.
+    with application.test_client() as c:
+        resp = c.get("/about")
+        assert resp.status_code == 200, f"GET /about → {resp.status_code}"
+        return resp.get_data(as_text=True)
+
+
 def _theme_css(application) -> str:
     with application.test_client() as c:
         resp = c.get("/static/theme/theme-components.css")
@@ -131,22 +127,18 @@ class TestRevealLinesHelper:
         assert html.startswith('<h2 class="mh-section-title mh-reveal-lines">')
         assert html.endswith("</h2>")
         assert html.count('<span class="mh-line">') == 2
-        assert "<span class=\"mh-line\">First line</span>" in html
-        assert "<span class=\"mh-line\">Second line</span>" in html
+        assert '<span class="mh-line">First line</span>' in html
+        assert '<span class="mh-line">Second line</span>' in html
 
     def test_custom_tag_and_class(self):
-        html = webmod._reveal_lines(
-            ["A", "B", "C"], tag="h2", cls="mh-promise-title"
-        )
+        html = webmod._reveal_lines(["A", "B", "C"], tag="h2", cls="mh-promise-title")
         assert 'class="mh-promise-title mh-reveal-lines"' in html
         assert html.count('<span class="mh-line">') == 3
 
     def test_editorial_accent_fragment_preserved_verbatim(self):
         # lines are TRUSTED HTML fragments (static product copy) — the helper
         # must not double-escape the <em class="editorial"> accent markup.
-        html = webmod._reveal_lines(
-            ["plain", '<em class="editorial">gold word</em>']
-        )
+        html = webmod._reveal_lines(["plain", '<em class="editorial">gold word</em>'])
         assert '<em class="editorial">gold word</em>' in html
         assert "&lt;em" not in html
 
@@ -176,23 +168,25 @@ class TestHomeSignedOut:
         assert '<h2 class="mh-section-title mh-reveal-lines">' in body
 
     def test_line_spans_two_per_headline(self, app):
-        # Each reveal-lines headline is split into exactly two editorial lines
-        # (the U.10 "See it work" demo section, bento, audience, promise,
-        # UI 1.22 FAQ, final-CTA) → 12 line spans.
-        body = _home(app)
-        assert body.count('<span class="mh-line">') == 12
+        # Each reveal-lines headline is split into exactly two editorial lines.
+        # These sections now live on the /about tour: the U.10 "See it work"
+        # demo section, the "Step by step" walkthrough, bento, audience,
+        # promise, UI 1.22 FAQ, final-CTA → 14 line spans.
+        body = _about(app)
+        assert body.count('<span class="mh-line">') == 14
 
     def test_section_eyebrows_and_ledes_reveal_on_scroll(self, app):
-        body = _home(app)
+        body = _about(app)
         # The content-section eyebrows reveal (were static before): the U.10
-        # "See it work" demo section, bento, audience, UI 1.22 FAQ.
-        assert body.count("mh-section-eyebrow-strip mh-reveal") == 4
+        # "See it work" demo section, the "Step by step" walkthrough, bento,
+        # audience, UI 1.22 FAQ — all now on the /about tour.
+        assert body.count("mh-section-eyebrow-strip mh-reveal") == 5
         # Promise lede + final-CTA sub reveal as their own blocks.
         assert "mh-promise-lede mh-reveal" in body
         assert "mh-final-cta-sub mh-reveal" in body
 
     def test_rows_keep_their_group_stagger(self, app):
-        body = _home(app)
+        body = _about(app)
         # The card rows + the promise list stagger via .mh-reveal-group.
         assert "mh-bento mh-reveal-group" in body
         assert "mh-audience-row mh-reveal-group" in body
@@ -201,7 +195,7 @@ class TestHomeSignedOut:
         assert '<section class="mh-section mh-reveal">' not in body
 
     def test_headline_copy_and_accents_intact(self, app):
-        body = _home(app)
+        body = _about(app)
         # The marketing copy survived the split into lines …
         for frag in (
             "A results sheet in.",
@@ -259,8 +253,8 @@ class TestRevealLinesCss:
         css = _theme_css(app)
         block = css.split(".mh-js .mh-reveal-lines > *", 1)[1].split("}", 1)[0]
         assert "opacity: 0" in block
-        assert "translateY(0.5em)" in block       # em-relative rise
-        assert "display: block" not in block       # layout lives in the ungated rule
+        assert "translateY(0.5em)" in block  # em-relative rise
+        assert "display: block" not in block  # layout lives in the ungated rule
 
     def test_is_in_reveals(self, app):
         css = _theme_css(app)
@@ -389,15 +383,11 @@ class TestRevealLinesBrowser:
             browser.close()
             pw.stop()
         assert initial, "no reveal lines rendered"
-        assert any(not s["isIn"] for s in initial), (
-            "expected some below-fold lines to start hidden before any scroll"
-        )
-        assert not deepest_before["isIn"], (
-            "deepest line should start hidden below the fold"
-        )
-        assert deepest_after["isIn"], (
-            "deepest line did not reveal after being scrolled into view"
-        )
+        assert any(
+            not s["isIn"] for s in initial
+        ), "expected some below-fold lines to start hidden before any scroll"
+        assert not deepest_before["isIn"], "deepest line should start hidden below the fold"
+        assert deepest_after["isIn"], "deepest line did not reveal after being scrolled into view"
 
     def test_no_js_lines_stack_vertically(self, app):
         # Regression guard: with JavaScript disabled (.mh-js never added) the
@@ -420,9 +410,9 @@ class TestRevealLinesBrowser:
             pw.stop()
         assert len(boxes) >= 2 and all(boxes), "reveal-lines block has < 2 measurable lines"
         # Line 2 sits clearly below line 1 → stacked, not inline run-on text.
-        assert boxes[1]["y"] >= boxes[0]["y"] + boxes[0]["height"] * 0.5, (
-            f"no-JS reveal lines did not stack vertically: {boxes}"
-        )
+        assert (
+            boxes[1]["y"] >= boxes[0]["y"] + boxes[0]["height"] * 0.5
+        ), f"no-JS reveal lines did not stack vertically: {boxes}"
 
     def test_nothing_stays_stuck_hidden(self, app):
         # Even with NO scroll, content can never be permanently hidden. The

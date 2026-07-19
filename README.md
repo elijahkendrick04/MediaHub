@@ -4,7 +4,7 @@
 
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/)
 [![Flask](https://img.shields.io/badge/flask-3.x-green.svg)](https://flask.palletsprojects.com/)
-[![Tests](https://img.shields.io/badge/tests-8374%20passing-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-13k%20passing-brightgreen.svg)](tests/)
 [![Docker](https://img.shields.io/badge/docker-ready-blue.svg)](Dockerfile)
 
 > **New here and not a coder?** Start with **[START_HERE.md](START_HERE.md)** — a
@@ -17,9 +17,9 @@
 > medals); more sports and more "decide-and-post-for-me" automation are on the way
 > (see the [roadmap](docs/ROADMAP.md)).
 
-**The direction.** MediaHub is becoming a multi-sport, multi-tenant content-strategy brain: it fuses a team's own signals (past posts, brand voice), external signals (fixtures, results, news), and direct input (goals, blackout dates) into a ranked content plan, gated by a **per-content-type autonomy toggle**, on a stack with **no mandatory paid dependencies**. The plan is in [`docs/ROADMAP.md`](docs/ROADMAP.md) (phases in priority order — build-first: rebrand → second sport → go-to-market are deliberately last; everything already shipped is recorded in [`docs/ROADMAP_BUILT.md`](docs/ROADMAP_BUILT.md)); the strategy docs are linked below. Results ingestion is one spoke among many — not the product's identity.
+**The direction.** MediaHub is becoming a multi-sport, multi-tenant content-strategy brain: it fuses a team's own signals (past posts, brand voice), external signals (fixtures, results, news), and direct input (goals, blackout dates) into a ranked content plan. Every piece is gated by a **per-content-type autonomy toggle**, and the stack carries **no mandatory paid dependencies**. The plan is in [`docs/ROADMAP.md`](docs/ROADMAP.md) (phases in priority order — build-first: rebrand → second sport → go-to-market are deliberately last; everything already shipped is recorded in [`docs/ROADMAP_BUILT.md`](docs/ROADMAP_BUILT.md)); the strategy docs are linked below. Results ingestion is one spoke among many — not the product's identity.
 
-**What ships today (the swimming wedge).** MediaHub ingests raw competition data — Hy-Tek HY3 ZIPs, SDIF/CL2 files, exported PDFs, scraped HTML result pages — and produces a curated stream of posts ready for Instagram / Facebook / TikTok: athlete spotlights, weekend recaps, meet previews, and a one-click "turn this meet into eight assets" pack. Behind the posts sits the club-intelligence layer that keeps them accurate and on-brand: cross-meet athlete identity, a club-records book, qualifying-time standards ("made Counties!"), month/season recaps, a club Q&A that answers questions over the club's own results, per-athlete photo/name consent (safeguarding), a UK/EU data-protection rights engine, and multi-tenant workspaces so clubs don't see each other's data. It is a cloud-hosted SaaS that customers access via a web browser; the engine runs on the operator's managed deployment, with AI captioning and image processing handled through cloud APIs. Human approval is required before anything is published.
+**What ships today (the swimming wedge).** MediaHub ingests raw competition data — Hy-Tek HY3 ZIPs, SDIF/CL2 files, exported PDFs, scraped HTML result pages — and produces a curated stream of posts ready for Instagram / Facebook / TikTok: athlete spotlights, weekend recaps, meet previews, and a one-click "turn this meet into eight assets" pack. Behind the posts sits the club-intelligence layer that keeps them accurate and on-brand. That layer includes cross-meet athlete identity, a club-records book, qualifying-time standards ("made Counties!"), month/season recaps, a club Q&A that answers questions over the club's own results, per-athlete photo/name consent (safeguarding), a UK/EU data-protection rights engine, and multi-tenant workspaces so clubs don't see each other's data. It is a cloud-hosted SaaS that customers access via a web browser; the engine runs on the operator's managed deployment, with AI captioning and image processing handled through cloud APIs. Human approval is required before anything is published.
 
 ---
 
@@ -154,7 +154,7 @@ sport_profiles/     sport config + per-post-type autonomy levels
 ```
 legacy/   read-only historical packages (V1–V5 + early V6) — newer code still borrows from here
 data/     ontology, voices, brand kits, sport profiles, standards, discovered-PB cache
-tests/    pytest suite — 8,450 tests (8,374 pass; rest skip without Playwright/Chromium or optional corpora)
+tests/    pytest suite — ~13,100 tests (the large majority pass; the rest skip without Playwright/Chromium, Node/Remotion, or optional corpora)
 docs/     long-form documentation (see the table above)
 samples/ + sample_data/   tiny representative meet corpus
 scripts/  build + maintenance scripts

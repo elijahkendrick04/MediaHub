@@ -323,7 +323,18 @@ def _match_one(
         t for t, info in roster.items() if surname_match(last, split_full_name(info["name"])[1])
     ]
     plausible = [t for t in surname_cands if _time_plausible(meet_times, _times_of(roster[t]))]
-    pool = plausible or surname_cands
+    # Only ever consider the TIME-PLAUSIBLE same-surname candidates. Falling back
+    # to the ruled-out ones (the old ``plausible or surname_cands``) assigns a
+    # *different* swimmer's official record as this swimmer's PB baseline — the
+    # meet time is implausibly fast for every same-surname candidate, so this is
+    # most likely a different person. When the surname matched but nobody is
+    # time-plausible, return an honest miss and do NOT drop to the fuzzy step
+    # below (which ignores the time check and would re-grab that ruled-out
+    # swimmer). A genuinely unmatched surname (empty ``surname_cands``) still
+    # flows through to the nickname/spelling fuzzy fallback.
+    if surname_cands and not plausible:
+        return None
+    pool = plausible
     if len(set(pool)) == 1:
         return pool[0]
     if len(pool) > 1:

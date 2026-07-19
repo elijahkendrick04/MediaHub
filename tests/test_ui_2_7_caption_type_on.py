@@ -263,8 +263,10 @@ class TestCaptionWiring:
         assert "window.MH && typeof MH.typeOn === 'function'" in caption_js
 
     def test_variant_swaps_render_plainly(self, caption_js):
-        # clicking a variant pill re-renders WITHOUT the reveal flag
-        assert "_renderActive(parseInt(btn.dataset.idx, 10) || 0)" in caption_js
+        # clicking a variant pill computes the index and re-renders WITHOUT the
+        # reveal flag (single-arg _renderActive → no type-on animation)
+        assert "var pi = parseInt(btn.dataset.idx, 10) || 0;" in caption_js
+        assert "_renderActive(pi);" in caption_js
         # exactly one call site actually types on — the fresh-generation render
         assert caption_js.count("MH.typeOn(") == 1
 

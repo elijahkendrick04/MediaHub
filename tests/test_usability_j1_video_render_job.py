@@ -11,26 +11,13 @@ existing project file URL, so the tile flips to the preview.
 
 from __future__ import annotations
 
-import importlib
 import time
 
 import pytest
 
 
 @pytest.fixture
-def app(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    for sub in ("runs_v4", "uploads_v4", "club_profiles"):
-        (tmp_path / sub).mkdir(parents=True, exist_ok=True)
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
+def app(web_module, tmp_path):
     from mediahub.media_library import store as _mls
 
     _mls._default_store = _mls.MediaLibraryStore(
@@ -40,7 +27,7 @@ def app(tmp_path, monkeypatch):
     from mediahub.video import projects as _vproj
 
     _vproj._store = None
-    application = wm.create_app()
+    application = web_module.create_app()
     application.config["TESTING"] = True
     from mediahub.web.club_profile import ClubProfile, save_profile
 
@@ -211,13 +198,9 @@ def test_all_video_job_kinds_in_allowlist(app):
     application, _tmp, _store = app
     import mediahub.web.web as wm
 
-    for i, kind in enumerate(
-        ("video-render", "video-clip", "video-reel", "video-stabilize")
-    ):
+    for i, kind in enumerate(("video-render", "video-clip", "video-reel", "video-stabilize")):
         jid = format(i, "x").rjust(32, "0")
-        wm._variant_job_save(
-            {"id": jid, "kind": kind, "status": "running", "owner_pid": "alpha"}
-        )
+        wm._variant_job_save({"id": jid, "kind": kind, "status": "running", "owner_pid": "alpha"})
         with application.test_client() as c:
             _pin(c, "alpha")
             r = c.get(f"/api/reel-jobs/{jid}")
@@ -288,9 +271,7 @@ def test_reel_job_completes(app, monkeypatch):
     monkeypatch.setattr("mediahub.video.reel_builder.make_reel", _fake_reel)
     with application.test_client() as c:
         _pin(c, "alpha")
-        r = c.post(
-            "/api/video/reel-job", json={"asset_ids": ["ft_1", "ft_2"], "format": "story"}
-        )
+        r = c.post("/api/video/reel-job", json={"asset_ids": ["ft_1", "ft_2"], "format": "story"})
         assert r.status_code == 202, r.get_data(as_text=True)
         j = _poll_until(c, r.get_json()["poll_url"], "done")
         assert j["status"] == "done", j
@@ -324,9 +305,7 @@ def test_stabilize_job_foreign_profile_404(app):
     proj = _make_project("alpha")
     with application.test_client() as c:
         _pin(c, "beta")
-        assert (
-            c.post(f"/api/video/projects/{proj.id}/stabilize-job", json={}).status_code == 404
-        )
+        assert c.post(f"/api/video/projects/{proj.id}/stabilize-job", json={}).status_code == 404
 
 
 # --- Adversarial-review fixes (guarded at the source level: JS behaviours) ----

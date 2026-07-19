@@ -9,31 +9,18 @@ the misdirecting "review page" copy is gone.
 
 from __future__ import annotations
 
-import importlib
-
 import pytest
+from tests._helpers import web_surface_src
 
 
 @pytest.fixture
-def export_html(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    (tmp_path / "club_profiles").mkdir(parents=True, exist_ok=True)
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
+def export_html(client):
     from mediahub.web.club_profile import ClubProfile, save_profile
 
     save_profile(ClubProfile(profile_id="club-a", display_name="Club A"))
-    app = wm.create_app()
-    app.config.update(TESTING=True, SECRET_KEY="x")
-    c = app.test_client()
-    with c.session_transaction() as s:
+    with client.session_transaction() as s:
         s["active_profile_id"] = "club-a"
-    return c.get("/export").get_data(as_text=True)
+    return client.get("/export").get_data(as_text=True)
 
 
 def test_misdirecting_review_copy_gone(export_html):
@@ -49,7 +36,7 @@ def test_hub_points_at_the_real_export_path(export_html):
 def test_source_lists_recent_runs_via_export_tool():
     import pathlib
 
-    src = pathlib.Path("src/mediahub/web/web.py").read_text(encoding="utf-8")
+    src = web_surface_src()
     # The hub queries the profile's recent done runs and links to export_run_tool_page.
     assert 'url_for("export_run_tool_page", run_id=r["id"])' in src
     assert "WHERE profile_id = ? AND status = 'done'" in src

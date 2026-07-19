@@ -26,36 +26,14 @@ sys.path.insert(0, str(_ROOT))
 
 
 @pytest.fixture
-def isolated_profiles(tmp_path, monkeypatch):
-    """Redirect the profile store + DATA_DIR under tmp_path so the gate
-    sees a clean slate. The web module is reloaded so its module-level
-    DB_PATH / RUNS_DIR globals re-resolve against the fresh tmp dir
-    (they're cached at first import)."""
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    (tmp_path / "runs_v4").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "uploads_v4").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "club_profiles").mkdir(parents=True, exist_ok=True)
-    import importlib
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
-    yield tmp_path
-
-
-@pytest.fixture
-def gated_client(isolated_profiles, monkeypatch):
+def gated_client(app):
     """A test client with TESTING=True but ENFORCE_ORG_GATE=True so the
     gate is actually active (the gate is bypassed under plain TESTING
-    mode by default so the existing test suite isn't disturbed)."""
-    import mediahub.web.web as wm
+    mode by default so the existing test suite isn't disturbed).
 
-    app = wm.create_app()
-    app.config["TESTING"] = True
+    Rides the canonical ``app`` fixture (fresh ``create_app()`` on an
+    isolated per-test DATA_DIR — no ``importlib.reload``); only the
+    gate-enforcement flag is layered on here."""
     app.config["ENFORCE_ORG_GATE"] = True
     with app.test_client() as c:
         yield c, app

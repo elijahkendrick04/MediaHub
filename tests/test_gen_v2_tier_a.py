@@ -53,6 +53,9 @@ _ALLOWED_PLACEHOLDERS = {
     # M14 — matte-gate fallback marker for the layered cutout archetypes
     # (" mh-photo-flat" when the original photo honestly ships instead).
     "PHOTO_FLAT_CLASS",
+    # F7 (Canva gap analysis) — the seeded overlap accent that straddles a
+    # declared mh-anchor edge (badge/tab/rule/tape); "" for a bare/legacy card.
+    "OVERLAP_ACCENT",
 }
 
 
@@ -390,25 +393,48 @@ def _render_html(monkeypatch, tmp_path, brief):
 
 
 @pytest.mark.parametrize("seed", range(6))
-def test_v2_assembly_is_clean_for_every_archetype(monkeypatch, tmp_path, seed):
-    monkeypatch.setenv("MEDIAHUB_GEN_V2", "1")
+def test_assembly_is_clean_on_both_engines(render_engine, monkeypatch, tmp_path, seed):
+    """Clean HTML assembly on BOTH still engines (deep-review #132 parity).
+
+    v2 is the production default engine, but the suite historically pinned the
+    legacy v1 path, so the production render was under-tested. This runs the
+    clean-assembly invariant from one body under each engine (``render_engine``
+    parametrises v1/v2):
+
+    * **Engine-invariant** — no raw ``{{…}}`` placeholder survives and the real
+      meet name lands, on *either* engine.
+    * **v2 (production)** — the generator picks a real ``layouts/v2`` archetype
+      and the render injects the brand role tokens + autofit vars.
+    * **v1 (legacy)** — the generator keeps a legacy family and the v2
+      role-token block is absent (the legacy shape, guarded so parity can't
+      silently start emitting it).
+
+    No assertion the v2-only test made is dropped; the legacy path adds coverage.
+    """
     brief = _brief(seed=seed)
     html = _render_html(monkeypatch, tmp_path, brief)
-    # no raw placeholders survive
+    # No raw placeholders survive — engine-invariant.
     assert "{{" not in html and "}}" not in html
-    # the brand role tokens + autofit vars were injected
-    assert ":root{" in html
-    for token in (
-        "--mh-primary:",
-        "--mh-accent:",
-        "--mh-on-primary:",
-        "--mh-fit-surname-px:",
-        "--mh-fit-result-px:",
-        "--mh-photo-pos:",
-    ):
-        assert token in html, f"{brief.layout_template} missing {token}"
-    # real content made it in
+    # Real content made it in — engine-invariant.
     assert "Manchester Open" in html
+    if render_engine == "v2":
+        # The production engine chose a real v2 archetype …
+        assert brief.layout_template in archetypes.list_archetypes()
+        # … and injected the brand role tokens + autofit vars.
+        assert ":root{" in html
+        for token in (
+            "--mh-primary:",
+            "--mh-accent:",
+            "--mh-on-primary:",
+            "--mh-fit-surname-px:",
+            "--mh-fit-result-px:",
+            "--mh-photo-pos:",
+        ):
+            assert token in html, f"{brief.layout_template} missing {token}"
+    else:
+        # Legacy engine: a legacy family, none of the v2 role-token block.
+        assert brief.layout_template not in archetypes.list_archetypes()
+        assert "--mh-fit-surname-px:" not in html
 
 
 def test_autofit_shrinks_a_long_surname(monkeypatch, tmp_path):

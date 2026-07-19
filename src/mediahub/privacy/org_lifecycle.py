@@ -46,7 +46,10 @@ log = logging.getLogger(__name__)
 
 
 def _data_dir() -> Path:
-    return Path(os.environ.get("DATA_DIR", "data"))
+    # Fall back to the package root (src/mediahub) — the SAME default the web
+    # layer uses — so with DATA_DIR unset the org cascade/export touches the tree
+    # the app actually writes to, not a cwd-relative "data".
+    return Path(os.environ.get("DATA_DIR", str(Path(__file__).resolve().parents[1])))
 
 
 def _db_path() -> Path:
@@ -266,6 +269,29 @@ def delete_org(
     except OSError:
         pass
 
+    # 8b. First-party analytics post-metrics + assistant standing prefs — both are
+    # org-scoped stores that used to survive workspace deletion (and were absent
+    # from the takeout). Resolve each store's own path helper so sanitisation
+    # matches exactly.
+    try:
+        from mediahub.analytics import store as _analytics
+
+        ap = _analytics._path(pid, _data_dir())
+        if ap.exists():
+            ap.unlink()
+            report["analytics_deleted"] = True
+    except Exception:
+        log.warning("org delete: analytics sweep failed", exc_info=True)
+    try:
+        from mediahub.assistant import memory as _assistant_memory
+
+        mp = _assistant_memory._path(pid)
+        if mp.exists():
+            mp.unlink()
+            report["assistant_memory_deleted"] = True
+    except Exception:
+        log.warning("org delete: assistant-memory sweep failed", exc_info=True)
+
     # 9. Org-scoped collab collections (folders over runs/packs) — the runs are
     # already gone above; drop the empty groupings too.
     try:
@@ -459,6 +485,25 @@ def org_export_zip(profile_id: str, out_path: Path, *, media_store=None) -> dict
             except OSError:
                 pass
 
+        # First-party analytics post-metrics + assistant standing prefs — the two
+        # org-scoped stores that used to be absent from the takeout.
+        try:
+            from mediahub.analytics import store as _analytics
+
+            ap = _analytics._path(pid, data_dir)
+            if ap.exists():
+                zf.writestr("analytics.json", ap.read_text(encoding="utf-8"))
+        except Exception:
+            log.warning("org export: analytics export failed", exc_info=True)
+        try:
+            from mediahub.assistant import memory as _assistant_memory
+
+            mp = _assistant_memory._path(pid)
+            if mp.exists():
+                zf.writestr("assistant_memory.json", mp.read_text(encoding="utf-8"))
+        except Exception:
+            log.warning("org export: assistant-memory export failed", exc_info=True)
+
         # Memberships (who can sign in to this workspace).
         try:
             from mediahub.web.tenancy import MembershipStore
@@ -479,7 +524,8 @@ def org_export_zip(profile_id: str, out_path: Path, *, media_store=None) -> dict
             "(parsed results, cards, captions + per-card approval states), media/ "
             "+ media_assets.json, consent_registry.csv + athletes.json, "
             "sponsor_exposure.jsonl, club_records.json, "
-            "corrections.json, audit_log.jsonl, memberships.json.\n\n"
+            "corrections.json, audit_log.jsonl, analytics.json, "
+            "assistant_memory.json, memberships.json.\n\n"
             "Not included: billing records (held by Stripe — accessible from "
             "Billing → Manage billing), and other members' account data.\n"
         )

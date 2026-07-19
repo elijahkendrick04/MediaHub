@@ -25,9 +25,9 @@ tests/test_activity_count_up.py + tests/test_browser_cascade.py):
        • a Create tile shows its poster;
        • prefers-reduced-motion suppresses the follower entirely (never built).
 """
+
 from __future__ import annotations
 
-import importlib
 import os
 import sys
 from pathlib import Path
@@ -37,9 +37,7 @@ import pytest
 _ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_ROOT))
 
-_SKIP_BROWSER = (
-    os.environ.get("MEDIAHUB_SKIP_BROWSER_TESTS", "").lower() in ("1", "true", "yes")
-)
+_SKIP_BROWSER = os.environ.get("MEDIAHUB_SKIP_BROWSER_TESTS", "").lower() in ("1", "true", "yes")
 from tests._pw_chromium import resolve_prebaked_chromium
 
 _PINNED_CHROMIUM = resolve_prebaked_chromium()
@@ -74,31 +72,15 @@ def _launch_browser():
 
 
 @pytest.fixture
-def hp_app(tmp_path, monkeypatch):
+def hp_app(app, tmp_path):
     """A fresh Flask app + one active profile (org gate off — these tests are
     about the preview UI, not the gate)."""
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    for d in ("runs_v4", "uploads_v4", "club_profiles"):
-        (tmp_path / d).mkdir(parents=True, exist_ok=True)
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
-
-    app = wm.create_app()
-    app.config["TESTING"] = True
-
     # The media store is a module-level singleton (store._default_store) bound
     # to the DATA_DIR present when it was first built — it does NOT pick up the
-    # per-test monkeypatched DATA_DIR on reload, so assets leak between tests.
-    # Bind a fresh, empty store to this test's tmp dir so emptiness / counts
-    # are deterministic. Both the page (_v8_get_media_store) and _seed_asset
-    # resolve through this same get_store() singleton.
+    # per-test DATA_DIR, so assets leak between tests. Bind a fresh, empty store
+    # to this test's tmp dir so emptiness / counts are deterministic. Both the
+    # page (_v8_get_media_store) and _seed_asset resolve through this same
+    # get_store() singleton.
     import mediahub.media_library.store as _mls
 
     _mls._default_store = _mls.MediaLibraryStore(db_path=tmp_path / "media_library.db")
@@ -172,12 +154,12 @@ class TestLayoutFollowerContract:
     def test_js_gates_on_fine_pointer_and_motion(self, hp_app):
         app, _ = hp_app
         body = self._any_page(app)
-        assert "(hover: hover) and (pointer: fine)" in body, (
-            "follower must only run on hover-capable, fine-pointer devices"
-        )
-        assert "prefers-reduced-motion: reduce" in body, (
-            "follower must bail under prefers-reduced-motion"
-        )
+        assert (
+            "(hover: hover) and (pointer: fine)" in body
+        ), "follower must only run on hover-capable, fine-pointer devices"
+        assert (
+            "prefers-reduced-motion: reduce" in body
+        ), "follower must bail under prefers-reduced-motion"
         assert "template.mh-hp-tpl" in body, "JS must read the host's <template>"
         assert "aria-hidden" in body  # the follower wrapper is decorative
 
@@ -213,9 +195,9 @@ class TestMediaLibraryRows:
         assert '<img class="mh-hp-img"' in body
         # the floating frame shows the SAME asset's full image
         file_url = f"/api/media-library/file/{aid}"
-        assert body.count(file_url) >= 2, (
-            "both the 60px chip and the full preview should point at the asset"
-        )
+        assert (
+            body.count(file_url) >= 2
+        ), "both the 60px chip and the full preview should point at the asset"
         # caption surfaces the athlete + type
         assert "Eira Hughes" in body
         # Legacy "athlete_photo" canonicalises to athlete_action on read
@@ -286,9 +268,7 @@ class TestCreateTiles:
         for m in re.finditer(r'<a [^>]*class="(mh-template[^"]*)"', body):
             cls = m.group(1)
             if "is-disabled" in cls:
-                assert "mh-hp" not in cls, (
-                    f"a disabled tile got a preview host: {cls!r}"
-                )
+                assert "mh-hp" not in cls, f"a disabled tile got a preview host: {cls!r}"
 
 
 # ── 4. Browser-side (Playwright) ─────────────────────────────────────────────
@@ -374,9 +354,9 @@ class TestFollowerBrowser:
             self._point_at(page, rows.nth(0))
             page.wait_for_timeout(450)
             assert self._visible(page), "follower not visible after hovering a row"
-            assert self._front_src(page) == tpl_srcs[0], (
-                "front layer must show the hovered row's photo"
-            )
+            assert (
+                self._front_src(page) == tpl_srcs[0]
+            ), "front layer must show the hovered row's photo"
 
             # follower is positioned (transform set away from the origin)
             transform = page.evaluate(
@@ -387,9 +367,9 @@ class TestFollowerBrowser:
             # sweep to row 1 → cross-dissolve: other layer takes over with row-1
             self._point_at(page, rows.nth(1))
             page.wait_for_timeout(450)
-            assert self._front_src(page) == tpl_srcs[1], (
-                "cross-dissolve did not load the next photo"
-            )
+            assert (
+                self._front_src(page) == tpl_srcs[1]
+            ), "cross-dissolve did not load the next photo"
             # both layers now populated (proves two-layer dissolve, not reuse)
             populated = page.evaluate(
                 "() => document.querySelectorAll('.mh-hp-layer img.mh-hp-img').length"
@@ -399,9 +379,7 @@ class TestFollowerBrowser:
             # move off every host (top-left corner, no .mh-hp) → follower hides
             page.mouse.move(2, 2)
             page.wait_for_timeout(250)
-            assert not self._visible(page), (
-                "follower should hide once the pointer leaves all hosts"
-            )
+            assert not self._visible(page), "follower should hide once the pointer leaves all hosts"
         finally:
             browser.close()
             pw.stop()

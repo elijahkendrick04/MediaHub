@@ -9,33 +9,20 @@ the poller when `live=false`).
 
 from __future__ import annotations
 
-import importlib
 import json
-import pathlib
 import uuid
 
 import pytest
 
+from mediahub.web.club_profile import ClubProfile, save_profile
+
 
 @pytest.fixture
-def client(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    (tmp_path / "runs_v4").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "club_profiles").mkdir(parents=True, exist_ok=True)
+def client(app, tmp_path, monkeypatch):
     for var in ("GEMINI_API_KEY", "GOOGLE_API_KEY", "ANTHROPIC_API_KEY"):
         monkeypatch.delenv(var, raising=False)
 
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
-    from mediahub.web.club_profile import ClubProfile, save_profile
-
     save_profile(ClubProfile(profile_id="club-a", display_name="Club A"))
-    app = wm.create_app()
     app.config["TESTING"] = True
     c = app.test_client()
     with c.session_transaction() as s:

@@ -1,0 +1,42 @@
+"""C-8 / C-13 — surface orphaned, phone-relevant destinations.
+
+C-13: the media library (camera capture, PWA share-target) was missing from the
+mobile bottom nav. C-8: the public achievements wall's only link was buried in
+Organisation-settings prose — it gets a Create tile.
+"""
+
+from __future__ import annotations
+
+import pytest
+
+
+@pytest.fixture
+def client(web_module, monkeypatch):
+    monkeypatch.setenv("MEDIAHUB_SCHEDULER", "0")
+
+    from mediahub.web.club_profile import ClubProfile, save_profile
+
+    save_profile(
+        ClubProfile(profile_id="club-a", display_name="Riverside SC", brand_voice_summary="x")
+    )
+    app = web_module.create_app()
+    app.config["TESTING"] = True
+    c = app.test_client()
+    with c.session_transaction() as s:
+        s["active_profile_id"] = "club-a"
+    return c
+
+
+def test_media_in_mobile_bottom_nav(client):
+    html = client.get("/").get_data(as_text=True)
+    # The mobile bottom nav now includes the media library.
+    assert 'class="mh-bottomnav"' in html
+    bottom = html.split('class="mh-bottomnav"', 1)[1].split("</nav>", 1)[0]
+    assert "/media-library" in bottom
+    assert ">Media\n" in bottom or ">Media<" in bottom or "Media" in bottom
+
+
+def test_public_wall_has_create_tile(client):
+    html = client.get("/make").get_data(as_text=True)
+    assert "Public wall" in html
+    assert "/organisation/public-wall" in html or "public-wall" in html

@@ -1,11 +1,11 @@
 """G-12 — reloading the presenter console must not desync the live audience.
 
 document_present called create_session on every page load, so any reload
-(accidental refresh, laptop lid-close/wake) minted a new session with a NEW
-pairing code; the already-open audience view and paired phone kept polling the
-OLD session while the reloaded console drove the NEW one, so Next/Prev silently
-stopped moving the projector. The console now resumes the existing live session
-for the same deck+owner, keeping the code and audience URL stable across reloads.
+(accidental refresh, laptop lid-close/wake) minted a new session; the already-open
+audience view kept polling the OLD session while the reloaded console drove the NEW
+one, so Next/Prev silently stopped moving the projector. The console now resumes
+the existing live session for the same deck+owner, keeping the session and audience
+URL stable across reloads.
 """
 
 from __future__ import annotations
@@ -16,20 +16,12 @@ import pytest
 
 
 @pytest.fixture
-def app_env(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
+def app_env(web_module, monkeypatch):
+    # MEDIAHUB_SCHEDULER is read fresh by mediahub.scheduler._enabled() each time
+    # start_scheduler() runs inside create_app() — no reload needed for it to take
+    # effect, so it's set here, before create_app() is called below.
     monkeypatch.setenv("MEDIAHUB_SCHEDULER", "0")
-    (tmp_path / "runs_v4").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "club_profiles").mkdir(parents=True, exist_ok=True)
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
-    app = wm.create_app()
+    app = web_module.create_app()
     app.config["TESTING"] = True
     return app
 
@@ -95,10 +87,8 @@ def test_console_reload_keeps_the_same_code(app_env):
     assert r2.status_code == 200
     s2 = _pres.get_live_for(spec.doc_id, "club-a")
 
-    # Same session, same pairing code across the reload — no remint.
+    # Same session across the reload — no remint.
     assert s2.session_id == s1.session_id
-    assert s2.pairing_code == s1.pairing_code
-    assert s1.pairing_code in r2.get_data(as_text=True)
     # Exactly one live session for this deck (not one per reload).
     live = [s for s in _pres._iter_live() if s.doc_id == spec.doc_id]
     assert len(live) == 1

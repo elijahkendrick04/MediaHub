@@ -101,12 +101,23 @@ def list_runs(profile_id: str, *, limit: int = 50, offset: int = 0) -> dict:
     conn = _db.connect()
     try:
         try:
-            rows = conn.execute(
-                "SELECT id, created_at, finished_at, status, meet_name, our_swims, "
-                "n_achievements, error, file_name FROM runs "
-                "WHERE profile_id=? ORDER BY created_at DESC LIMIT ? OFFSET ?",
-                (profile_id, limit, offset),
-            ).fetchall()
+            try:
+                rows = conn.execute(
+                    "SELECT id, created_at, finished_at, status, meet_name, our_swims, "
+                    "n_achievements, n_standout, error, file_name FROM runs "
+                    "WHERE profile_id=? ORDER BY created_at DESC LIMIT ? OFFSET ?",
+                    (profile_id, limit, offset),
+                ).fetchall()
+            except Exception:
+                # A data.db from before the n_standout migration ran (the web
+                # app adds the column at startup) — fall back rather than
+                # reading a real run list as empty.
+                rows = conn.execute(
+                    "SELECT id, created_at, finished_at, status, meet_name, our_swims, "
+                    "n_achievements, error, file_name FROM runs "
+                    "WHERE profile_id=? ORDER BY created_at DESC LIMIT ? OFFSET ?",
+                    (profile_id, limit, offset),
+                ).fetchall()
         except Exception:
             # runs table not yet created in this DATA_DIR — honest empty list.
             rows = []
@@ -120,6 +131,9 @@ def list_runs(profile_id: str, *, limit: int = 50, offset: int = 0) -> dict:
                     "meet_name": r["meet_name"],
                     "swim_count": r["our_swims"],
                     "achievement_count": r["n_achievements"],
+                    # Distinct standout swims (deduped) — the honest headline
+                    # figure. NULL for rows persisted before the column existed.
+                    "standout_count": (r["n_standout"] if "n_standout" in r.keys() else None),
                     "file_name": r["file_name"],
                     "error": r["error"],
                 }
@@ -148,8 +162,20 @@ def get_run(profile_id: str, run_id: str) -> dict:
         "swim_count": data.get("our_swim_count"),
         "parsed_swim_count": data.get("parsed_swim_count"),
         "achievement_count": rec.get("n_achievements") or len(rec.get("ranked_achievements") or []),
+        "standout_count": _standout_count(rec),
         "error": data.get("error"),
     }
+
+
+def _standout_count(rec: dict) -> int:
+    """Distinct standout swims for a recognition-report dict (deduped;
+    recognition.swim_tiers). Fail-soft: a malformed report reads as 0."""
+    try:
+        from mediahub.recognition.swim_tiers import n_standout_for_report
+
+        return int(n_standout_for_report(rec if isinstance(rec, dict) else None))
+    except Exception:
+        return 0
 
 
 def _card_id_of(entry: dict) -> str:
@@ -251,11 +277,15 @@ def set_card_status(
     *,
     notes: Optional[str] = None,
     actor_email: str = "",
+    actor: str = "",
 ) -> tuple[dict, int]:
     """Approve / reject / requeue a card — through the SAME gates as the UI.
 
     ``actor_email`` (the token owner) is recorded as the approver so a group-
-    approval rule is enforced against a real identity, never bypassed."""
+    approval rule is enforced against a real identity, never bypassed. ``actor``
+    (finding #116) is the machine-distinguishable audit label — e.g.
+    ``api-token:<token_id>`` — stamped onto the durable workflow state and the
+    approval telemetry so an agent's approval is never mistaken for a human's."""
     if _card_action is None:
         raise unavailable("Card actions are not available in this context.")
     payload = {
@@ -263,19 +293,34 @@ def set_card_status(
         "status": status,
         "notes": notes,
         "_actor_email": actor_email,
+        "_actor": actor,
     }
     return _card_action(profile_id, run_id, card_id, "set_status", payload)
 
 
 def edit_card(
-    profile_id: str, run_id: str, card_id: str, edits: dict, *, actor_email: str = ""
+    profile_id: str,
+    run_id: str,
+    card_id: str,
+    edits: dict,
+    *,
+    actor_email: str = "",
+    actor: str = "",
 ) -> tuple[dict, int]:
-    """Edit a card's caption overrides — through the same gates as the UI."""
+    """Edit a card's caption overrides — through the same gates as the UI.
+
+    ``actor`` is the machine-distinguishable audit label (finding #116), as in
+    :func:`set_card_status`."""
     if _card_action is None:
         raise unavailable("Card actions are not available in this context.")
     if not isinstance(edits, dict):
         raise bad_request("`edits` must be an object of caption overrides.")
-    payload = {"action": "set_edits", "edits": edits, "_actor_email": actor_email}
+    payload = {
+        "action": "set_edits",
+        "edits": edits,
+        "_actor_email": actor_email,
+        "_actor": actor,
+    }
     return _card_action(profile_id, run_id, card_id, "set_edits", payload)
 
 

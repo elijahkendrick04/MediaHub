@@ -24,8 +24,11 @@ import os
 from urllib.parse import urlparse
 
 # A domain counts as authoritative once it has EARNED at least this trust score
-# in the learned ledger (context_engine.trust). Nothing is hardcoded.
+# in the learned ledger (context_engine.trust) over at least a minimum number of
+# recorded attempts — so a site can't reach "authoritative" from 3 clean parses
+# (the smoothed score hits 0.8 at 3/3). Nothing is hardcoded.
 _LEARNED_TRUST_THRESHOLD = 0.8
+_LEARNED_TRUST_MIN_ATTEMPTS = 10
 
 
 def configured_domains() -> tuple[str, ...]:
@@ -45,27 +48,33 @@ def _matches(host: str, domains: tuple[str, ...]) -> bool:
     return any(host == d or host.endswith("." + d) for d in domains)
 
 
-def _learned_score(host: str) -> float:
-    """Empirical trust score for this host from the learned ledger (0.0 on any
-    error or when the ledger is unavailable)."""
+def _learned_authoritative(host: str) -> bool:
+    """Whether the learned ledger confers authority on this host: a high enough
+    smoothed score over enough recorded attempts (False on any error / unavailable
+    ledger)."""
     try:
         from mediahub.context_engine import trust
 
-        return float(trust.score_domain(host))
+        return trust.is_learned_authority(
+            host,
+            min_score=_LEARNED_TRUST_THRESHOLD,
+            min_attempts=_LEARNED_TRUST_MIN_ATTEMPTS,
+        )
     except Exception:
-        return 0.0
+        return False
 
 
 def is_authority_source(url: str, domains: tuple[str, ...] | None = None) -> bool:
     """True if ``url``'s host is operator-declared authoritative OR has earned a
-    high trust score in the learned ledger. No domains are hardcoded."""
+    high trust score in the learned ledger over enough attempts. No domains are
+    hardcoded."""
     host = _host(url)
     if not host:
         return False
     doms = domains if domains is not None else configured_domains()
     if doms and _matches(host, doms):
         return True
-    return _learned_score(host) >= _LEARNED_TRUST_THRESHOLD
+    return _learned_authoritative(host)
 
 
 def authority_sources(urls, domains: tuple[str, ...] | None = None) -> list[str]:

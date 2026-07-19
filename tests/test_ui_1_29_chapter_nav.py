@@ -1,13 +1,13 @@
 """UI 1.29 — Sticky chaptered scroll-spy nav (Linear-inspired).
 
-The long home page carries a side "chapter" rail that lists its sections and
+The long /about page carries a side "chapter" rail that lists its sections and
 highlights the one currently in view as the reader scrolls. The rail is
 server-rendered by ``_layout(chapters=…)``; the active state is driven by an
 IntersectionObserver in ``MH.bindChapterNav`` (pure JS, no library); the
 positioning is pure CSS ``position: sticky``.
 
 These tests pin:
-  - the rail renders on the home page as an accessible ``<nav>`` with an
+  - the rail renders on the /about page as an accessible ``<nav>`` with an
     ordered list of in-page anchor links, one per page section;
   - integrity: every rail link points at a section ``id`` that actually exists
     on the page, every chaptered section is linked, and the rail order matches
@@ -81,15 +81,19 @@ def client(tmp_path, monkeypatch):
 
 
 @pytest.fixture
-def home_html(client):
-    r = client.get("/")
+def about_html(client):
+    # The chaptered scroll-spy rail now lives on the public /about page (the
+    # signed-out home was deliberately shortened and no longer carries the rail
+    # or the moved explainer sections).
+    r = client.get("/about")
     assert r.status_code == 200
     return r.get_data(as_text=True)
 
 
-# The chapters the home page is expected to expose, in document order.
+# The chapters the /about page is expected to expose, in document order.
 EXPECTED_CHAPTERS = [
     ("mh-ch-overview", "Overview"),
+    ("mh-ch-flow", "Step by step"),
     ("mh-ch-how", "How it works"),
     ("mh-ch-engine", "What it does"),
     ("mh-ch-audience", "Who it&#39;s for"),  # apostrophe is HTML-escaped
@@ -105,35 +109,35 @@ def _nav_block(html: str) -> str:
         html,
         re.DOTALL,
     )
-    assert m, "chapter-nav element not found on the home page"
+    assert m, "chapter-nav element not found on the /about page"
     return m.group(0)
 
 
 # --------------------------------------------------------------------------- #
-# The rail renders, accessibly, on the long home page
+# The rail renders, accessibly, on the long /about page
 # --------------------------------------------------------------------------- #
 class TestRailRenders:
-    def test_nav_element_present_and_labelled(self, home_html):
-        nav = _nav_block(home_html)
+    def test_nav_element_present_and_labelled(self, about_html):
+        nav = _nav_block(about_html)
         assert 'aria-label="On this page"' in nav
         assert "data-mh-chapnav" in nav
         # An ordered list — the chapters have a meaningful sequence.
         assert '<ol class="mh-chapter-nav-list">' in nav
         assert nav.count("<li>") == len(EXPECTED_CHAPTERS)
 
-    def test_eyebrow_label(self, home_html):
-        nav = _nav_block(home_html)
+    def test_eyebrow_label(self, about_html):
+        nav = _nav_block(about_html)
         assert "mh-chapter-nav-eyebrow" in nav
         assert "On this page" in nav
 
-    def test_every_expected_chapter_link(self, home_html):
-        nav = _nav_block(home_html)
+    def test_every_expected_chapter_link(self, about_html):
+        nav = _nav_block(about_html)
         for anchor, label in EXPECTED_CHAPTERS:
             assert f'href="#{anchor}" data-mh-chap' in nav, anchor
             assert f'<span class="mh-chapter-label">{label}</span>' in nav, label
 
-    def test_chapters_are_numbered(self, home_html):
-        nav = _nav_block(home_html)
+    def test_chapters_are_numbered(self, about_html):
+        nav = _nav_block(about_html)
         # Numbered 01..09, decorative (hidden from assistive tech).
         for i in range(1, len(EXPECTED_CHAPTERS) + 1):
             assert (
@@ -145,31 +149,31 @@ class TestRailRenders:
 # Integrity: links resolve, sections exist, order matches the document
 # --------------------------------------------------------------------------- #
 class TestRailIntegrity:
-    def test_no_dangling_links(self, home_html):
-        nav = _nav_block(home_html)
+    def test_no_dangling_links(self, about_html):
+        nav = _nav_block(about_html)
         hrefs = re.findall(r'href="#(mh-ch-[a-z-]+)"', nav)
-        ids = re.findall(r'id="(mh-ch-[a-z-]+)"', home_html)
+        ids = re.findall(r'id="(mh-ch-[a-z-]+)"', about_html)
         assert hrefs, "no chapter links found"
         # Every link target is a real element id somewhere on the page.
         for h in hrefs:
             assert h in ids, f"chapter link #{h} has no matching section id"
 
-    def test_every_chaptered_section_is_linked(self, home_html):
-        nav = _nav_block(home_html)
+    def test_every_chaptered_section_is_linked(self, about_html):
+        nav = _nav_block(about_html)
         hrefs = set(re.findall(r'href="#(mh-ch-[a-z-]+)"', nav))
-        section_ids = set(re.findall(r'id="(mh-ch-[a-z-]+)"', home_html))
+        section_ids = set(re.findall(r'id="(mh-ch-[a-z-]+)"', about_html))
         assert section_ids == hrefs
 
-    def test_rail_order_matches_document_order(self, home_html):
-        nav = _nav_block(home_html)
+    def test_rail_order_matches_document_order(self, about_html):
+        nav = _nav_block(about_html)
         link_order = re.findall(r'href="#(mh-ch-[a-z-]+)"', nav)
         # Section ids in the order they appear in the body (after the nav).
-        body = home_html[home_html.index("</nav>") :]
+        body = about_html[about_html.index("</nav>") :]
         section_order = re.findall(r'id="(mh-ch-[a-z-]+)"', body)
         assert link_order == section_order == [c[0] for c in EXPECTED_CHAPTERS]
 
-    def test_section_ids_are_unique(self, home_html):
-        body = home_html[home_html.index("</nav>") :]
+    def test_section_ids_are_unique(self, about_html):
+        body = about_html[about_html.index("</nav>") :]
         ids = re.findall(r'id="(mh-ch-[a-z-]+)"', body)
         assert len(ids) == len(set(ids)), f"duplicate chapter section id: {ids}"
 
@@ -178,63 +182,63 @@ class TestRailIntegrity:
 # Scroll-spy behaviour (JS) ships and is wired for accessibility
 # --------------------------------------------------------------------------- #
 class TestScrollSpyJS:
-    def test_binding_present(self, home_html):
-        assert "MH.bindChapterNav = bindChapterNav;" in home_html
-        assert "function bindChapterNav()" in home_html
+    def test_binding_present(self, about_html):
+        assert "MH.bindChapterNav = bindChapterNav;" in about_html
+        assert "function bindChapterNav()" in about_html
 
-    def test_uses_intersection_observer(self, home_html):
+    def test_uses_intersection_observer(self, about_html):
         # The roadmap item specifies a pure-JS IntersectionObserver spy.
-        assert "new IntersectionObserver" in home_html
-        assert "data-mh-chapnav" in home_html
-        assert "a[data-mh-chap]" in home_html
+        assert "new IntersectionObserver" in about_html
+        assert "data-mh-chapnav" in about_html
+        assert "a[data-mh-chap]" in about_html
 
-    def test_sets_aria_current_on_active(self, home_html):
-        assert "aria-current" in home_html
-        assert "is-active" in home_html
+    def test_sets_aria_current_on_active(self, about_html):
+        assert "aria-current" in about_html
+        assert "is-active" in about_html
 
-    def test_reduced_motion_aware_scroll(self, home_html):
+    def test_reduced_motion_aware_scroll(self, about_html):
         # Click smooth-scrolls, but honours prefers-reduced-motion.
-        assert "prefersReduced ? 'auto' : 'smooth'" in home_html
+        assert "prefersReduced ? 'auto' : 'smooth'" in about_html
 
-    def test_graceful_without_intersection_observer(self, home_html):
+    def test_graceful_without_intersection_observer(self, about_html):
         # Falls back to a single static activation when IO is unavailable.
-        assert "'IntersectionObserver' in window" in home_html
+        assert "'IntersectionObserver' in window" in about_html
 
-    def test_bound_on_dom_ready(self, home_html):
-        assert "bindChapterNav();" in home_html
+    def test_bound_on_dom_ready(self, about_html):
+        assert "bindChapterNav();" in about_html
 
 
 # --------------------------------------------------------------------------- #
 # Sticky CSS ships and is a desktop-only, reduced-motion-safe enhancement
 # --------------------------------------------------------------------------- #
 class TestStickyCSS:
-    def test_sticky_positioning(self, home_html):
-        assert ".mh-chapter-nav {" in home_html
-        assert "position: sticky;" in home_html
+    def test_sticky_positioning(self, about_html):
+        assert ".mh-chapter-nav {" in about_html
+        assert "position: sticky;" in about_html
 
-    def test_hidden_until_wide_desktop(self, home_html):
+    def test_hidden_until_wide_desktop(self, about_html):
         # Hidden by default; the grid + rail appear only at >= 1240px.
-        assert ".mh-chapter-nav { display: none; }" in home_html
-        assert "@media (min-width: 1240px)" in home_html
-        assert "main.wrap.mh-has-chapnav {" in home_html
+        assert ".mh-chapter-nav { display: none; }" in about_html
+        assert "@media (min-width: 1240px)" in about_html
+        assert "main.wrap.mh-has-chapnav {" in about_html
 
-    def test_hidden_attribute_beats_desktop_display_block(self, home_html):
+    def test_hidden_attribute_beats_desktop_display_block(self, about_html):
         # The JS guard sets [hidden] when no chapter ids resolve; this rule must
         # win over the >=1240px display:block or an empty rail would still show.
-        assert ".mh-chapter-nav[hidden] { display: none; }" in home_html
+        assert ".mh-chapter-nav[hidden] { display: none; }" in about_html
 
-    def test_active_marker_styling(self, home_html):
-        assert ".mh-chapter-nav a.is-active {" in home_html
+    def test_active_marker_styling(self, about_html):
+        assert ".mh-chapter-nav a.is-active {" in about_html
         # Active link uses the brand "lane" accent.
-        assert "border-left-color: var(--lane);" in home_html
+        assert "border-left-color: var(--lane);" in about_html
 
-    def test_anchor_scroll_offset_clears_masthead(self, home_html):
+    def test_anchor_scroll_offset_clears_masthead(self, about_html):
         # So a #hash jump (even with JS off) lands below the sticky header.
-        assert 'main.wrap.mh-has-chapnav [id^="mh-ch-"] { scroll-margin-top: 84px; }' in home_html
+        assert 'main.wrap.mh-has-chapnav [id^="mh-ch-"] { scroll-margin-top: 84px; }' in about_html
 
-    def test_content_wrapped_for_grid(self, home_html):
-        assert '<div class="mh-chapnav-content">' in home_html
-        assert '<main class="wrap mh-has-chapnav"' in home_html
+    def test_content_wrapped_for_grid(self, about_html):
+        assert '<div class="mh-chapnav-content">' in about_html
+        assert '<main class="wrap mh-has-chapnav"' in about_html
 
 
 # --------------------------------------------------------------------------- #
@@ -305,11 +309,11 @@ class TestScrollSpyBrowser:
             "els => els.map(e => e.getAttribute('href'))",
         )
 
-    def test_scroll_spy_tracks_sections(self, home_html):
+    def test_scroll_spy_tracks_sections(self, about_html):
         pw, browser = _launch_browser()
         try:
             page = browser.new_page(viewport={"width": 1340, "height": 900})
-            page.set_content(home_html, wait_until="domcontentloaded")
+            page.set_content(about_html, wait_until="domcontentloaded")
             page.wait_for_timeout(400)
 
             # Rail is visible on a wide desktop viewport.
@@ -336,11 +340,11 @@ class TestScrollSpyBrowser:
             browser.close()
             pw.stop()
 
-    def test_click_scrolls_and_activates(self, home_html):
+    def test_click_scrolls_and_activates(self, about_html):
         pw, browser = _launch_browser()
         try:
             page = browser.new_page(viewport={"width": 1340, "height": 900})
-            page.set_content(home_html, wait_until="domcontentloaded")
+            page.set_content(about_html, wait_until="domcontentloaded")
             page.wait_for_timeout(400)
 
             # Clicking a chapter that sits inside a section taller than the
@@ -358,11 +362,11 @@ class TestScrollSpyBrowser:
             browser.close()
             pw.stop()
 
-    def test_rail_hidden_on_narrow_viewport(self, home_html):
+    def test_rail_hidden_on_narrow_viewport(self, about_html):
         pw, browser = _launch_browser()
         try:
             page = browser.new_page(viewport={"width": 900, "height": 900})
-            page.set_content(home_html, wait_until="domcontentloaded")
+            page.set_content(about_html, wait_until="domcontentloaded")
             page.wait_for_timeout(200)
             assert (
                 page.eval_on_selector(".mh-chapter-nav", "el => getComputedStyle(el).display")

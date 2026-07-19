@@ -133,8 +133,8 @@ class TestOutroCtaVariants:
         i_follow = fn.find('kind: "follow"')
         assert -1 < i_sponsor < i_next < i_follow, "CTA priority order is wrong"
         # Sponsor / next-meet are only emitted when actually supplied (honest).
-        assert "const s = (sponsor || \"\").trim();" in fn and "if (s) {" in fn
-        assert "const nm = (nextMeet || \"\").trim();" in fn and "if (nm) {" in fn
+        assert 'const s = (sponsor || "").trim();' in fn and "if (s) {" in fn
+        assert 'const nm = (nextMeet || "").trim();' in fn and "if (nm) {" in fn
         # Follow handle reads off the brand, never invented.
         assert "brand.shortName || brand.displayName" in fn
 
@@ -236,9 +236,7 @@ class TestRenderMeetReelThread:
         assert cap["props"].get("sponsor") == "Acme Corp"
 
     def test_next_meet_flows_into_the_props(self, tmp_path, monkeypatch):
-        cap = _render_reel_capture(
-            tmp_path, monkeypatch, [_card(1)], next_meet="County Champs"
-        )
+        cap = _render_reel_capture(tmp_path, monkeypatch, [_card(1)], next_meet="County Champs")
         assert cap["props"].get("nextMeet") == "County Champs"
 
     def test_both_ride_together_and_are_whitespace_trimmed(self, tmp_path, monkeypatch):
@@ -289,27 +287,14 @@ class TestRenderMeetReelThread:
 # 5) Web wiring — the reel route sources the sponsor from the real profile
 # =========================================================================== #
 @pytest.fixture
-def reel_app(tmp_path, monkeypatch):
-    import importlib
-
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    for d in ("runs_v4", "uploads_v4", "club_profiles"):
-        (tmp_path / d).mkdir(parents=True, exist_ok=True)
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
-    app = wm.create_app()
-    app.config["TESTING"] = True
+def reel_app(app, web_module, tmp_path):
+    wm = web_module
 
     from mediahub.web.club_profile import ClubProfile, save_profile
 
-    save_profile(ClubProfile(profile_id="sponsored", display_name="Sponsored SC", sponsor_name="Speedo"))
+    save_profile(
+        ClubProfile(profile_id="sponsored", display_name="Sponsored SC", sponsor_name="Speedo")
+    )
     save_profile(ClubProfile(profile_id="plain", display_name="Plain SC"))
 
     def _run(rid: str, pid: str) -> None:

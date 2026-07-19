@@ -10,7 +10,6 @@ tab is titled by the meet.
 
 from __future__ import annotations
 
-import importlib
 import json
 
 import pytest
@@ -19,23 +18,10 @@ ORG = "c"
 
 
 @pytest.fixture
-def review_html(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    for sub in ("runs_v4", "club_profiles"):
-        (tmp_path / sub).mkdir(parents=True, exist_ok=True)
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
+def review_html(app, web_module, tmp_path):
     from mediahub.web.club_profile import ClubProfile, save_profile
 
     save_profile(ClubProfile(profile_id=ORG, display_name="Club"))
-    app = wm.create_app()
-    app.config.update(TESTING=True, SECRET_KEY="x")
     payload = {
         "run_id": "r1",
         "profile_id": ORG,
@@ -57,7 +43,7 @@ def review_html(tmp_path, monkeypatch):
         },
     }
     (tmp_path / "runs_v4" / "r1.json").write_text(json.dumps(payload))
-    conn = wm._db()
+    conn = web_module._db()
     conn.execute(
         "INSERT OR REPLACE INTO runs (id,created_at,status,profile_id,meet_name,file_name) "
         "VALUES ('r1',datetime('now'),'done',?,'Spring Gala','s.hy3')",

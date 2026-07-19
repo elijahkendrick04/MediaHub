@@ -14,7 +14,6 @@ in Welsh under ``?lang=cy`` while ``?lang=en`` stays byte-for-byte English.
 
 from __future__ import annotations
 
-import importlib
 import json
 import uuid
 
@@ -22,28 +21,14 @@ import pytest
 
 
 @pytest.fixture
-def env(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    for sub in ("runs_v4", "club_profiles"):
-        (tmp_path / sub).mkdir(parents=True, exist_ok=True)
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
-
+def env(web_module, app, client):
     from mediahub.web.club_profile import ClubProfile, save_profile
 
     save_profile(ClubProfile(profile_id="org-test", display_name="Test Club"))
-    app = wm.create_app()
-    app.config["TESTING"] = True
-    app.config["SECRET_KEY"] = "test-secret"
-    c = app.test_client()
-    assert c.post("/api/organisation/active", data={"profile_id": "org-test"}).status_code == 200
-    return {"client": c, "wm": wm, "app": app}
+    assert (
+        client.post("/api/organisation/active", data={"profile_id": "org-test"}).status_code == 200
+    )
+    return {"client": client, "wm": web_module, "app": app}
 
 
 def _seed_run(env, swim_ids):
@@ -118,7 +103,6 @@ class TestWelshChrome:
         # Account menu
         assert "Drafftiau" in html  # Drafts
         assert "Cymorth" in html  # Help
-        assert "Rheolydd sleidiau" in html  # Slide remote
         assert "clwb" in html  # Data'r clwb (apostrophe is _h-escaped)
         # Notifications header (panel title)
         assert "Hysbysiadau" in html
@@ -134,10 +118,14 @@ class TestWelshChrome:
     def test_signed_out_chrome_is_welsh(self, env):
         app = env["app"]
         html = app.test_client().get("/?lang=cy").get_data(as_text=True)
+        assert "Amdanom ni" in html  # About (signed-out marketing nav)
         assert "Prisiau" in html  # Pricing
         assert "Cofrestru" in html  # Sign up
         assert "Mewngofnodi" in html  # Log in
-        assert "Llyfrgell cyfryngau" in html
+        assert "Gosodiadau" in html  # Settings (far-right for signed-out)
+        # Feature links (e.g. Media library / Llyfrgell cyfryngau) are signed-in
+        # only now, so they must NOT appear in the signed-out chrome.
+        assert "Llyfrgell cyfryngau" not in html
 
     def test_english_chrome_unchanged(self, env):
         html = env["client"].get("/?lang=en").get_data(as_text=True)
@@ -145,7 +133,6 @@ class TestWelshChrome:
         assert ">My Season</a>" in html
         assert ">Drafts</a>" in html
         assert ">Help</a>" in html
-        assert ">Slide remote</a>" in html
         assert "Hafan" not in html
         assert "Llyfrgell" not in html
 

@@ -34,7 +34,7 @@
 import React from "react";
 import { Easing, interpolate, spring, useCurrentFrame, useVideoConfig } from "remotion";
 import type { SceneComponent } from "../registry";
-import { fitLine, withAlpha } from "../sceneKit";
+import { fitLine, shadowRgb, withAlpha } from "../sceneKit";
 import { PhotoFilterDefs, photoExactGradeFor, photoHalftoneMaskFor } from "../layers/photo_filters";
 
 const ANTON = "'Anton', 'Bebas Neue', Impact, sans-serif";
@@ -98,8 +98,12 @@ const Scene: SceneComponent = ({ ctx }) => {
   const dBlur = Math.round(24 + 30 * s);
   const glow = Math.round(8 + 22 * s);
   const glowA = (0.18 + 0.2 * s) * cutEnter;
+  // B4 parity: the still's key + contact layers in the hue-tinted shadow
+  // colour (render._cutout_depth_filter / elevation.shadow_rgb).
+  const sRgb = shadowRgb(roles.ground);
   const depthFilter =
-    `drop-shadow(0 ${dy}px ${dBlur}px rgba(0,0,0,${(0.45 * cutEnter).toFixed(3)})) ` +
+    `drop-shadow(0 ${dy}px ${dBlur}px rgba(${sRgb},${(0.45 * cutEnter).toFixed(3)})) ` +
+    `drop-shadow(0 2px 5px rgba(${sRgb},${(0.38 * cutEnter).toFixed(3)})) ` +
     `drop-shadow(0 0 ${glow}px ${withAlpha(roles.accent, glowA)})`;
   // M10 grade parity: the still's duotone/halftone REPLACES the depth filter
   // on the cutout img (img.athlete-cutout specificity).

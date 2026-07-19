@@ -21,7 +21,7 @@ import threading
 import time
 from typing import Optional
 
-from .parse import time_to_cs
+from .parse import _expand_year, time_to_cs
 from .transport import SR_BASE, SRFetchError, fetch
 
 log = logging.getLogger(__name__)
@@ -68,7 +68,7 @@ def _row_date_iso(s: str) -> str:
     if not m:
         return ""
     d, mo, y = int(m.group(1)), int(m.group(2)), int(m.group(3))
-    y = 2000 + y if y < 100 else y
+    y = _expand_year(y)
     try:
         from datetime import date as _date
 

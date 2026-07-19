@@ -43,9 +43,9 @@
   height: {{HEIGHT}}px;
   overflow: hidden;
   isolation: isolate;
-  background: var(--mh-primary);
+  background: var(--mh-ground-gradient, var(--mh-primary));
   color: var(--mh-on-primary);
-  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  font-family: var(--mh-font-body, 'Inter', system-ui, -apple-system, sans-serif);
   -webkit-font-smoothing: antialiased;
 }
 .rc *, .rc *::before, .rc *::after { box-sizing: border-box; }
@@ -97,7 +97,7 @@
   padding: 13px 22px;
   background: var(--mh-accent);
   color: var(--mh-primary);
-  font-family: 'Space Grotesk', 'Inter', sans-serif;
+  font-family: var(--mh-font-kicker, 'Space Grotesk', 'Inter', sans-serif);
   font-weight: 700;
   font-size: 21px;
   letter-spacing: 0.2em;
@@ -133,19 +133,19 @@
   padding: 0 var(--pad);
   background: var(--mh-accent);
   color: var(--mh-primary);
-  box-shadow: 0 16px 40px rgba(0,0,0,0.32);
+  box-shadow: var(--mh-elev-4, 0 16px 40px rgba(0,0,0,0.32));
 }
 .rc__first {
-  font-family: 'Space Grotesk', 'Inter', sans-serif;
+  font-family: var(--mh-font-kicker, 'Space Grotesk', 'Inter', sans-serif);
   font-weight: 700; font-size: 26px; letter-spacing: 0.16em;
   text-transform: uppercase; margin-bottom: 2px;
 }
 .rc__first:empty { display: none; }
 .rc__surname {
-  font-family: 'Anton', 'Bebas Neue', Impact, sans-serif;
+  font-family: var(--mh-font-display, 'Anton', 'Bebas Neue', Impact, sans-serif);
   font-weight: 400;
   font-size: var(--mh-fit-surname-px, 116px);
-  line-height: 0.9; letter-spacing: -0.02em;
+  line-height: 0.9; letter-spacing: var(--mh-track-surname, -0.02em);
   text-transform: uppercase;
   overflow-wrap: anywhere;
 }
@@ -166,12 +166,12 @@
 }
 .rc__event-wrap { min-width: 0; }
 .rc__lab {
-  font-family: 'Space Grotesk', 'Inter', sans-serif;
+  font-family: var(--mh-font-kicker, 'Space Grotesk', 'Inter', sans-serif);
   font-weight: 600; font-size: 15px; letter-spacing: 0.26em;
   text-transform: uppercase; color: var(--mh-accent); margin-bottom: 8px;
 }
 .rc__event {
-  font-family: 'Space Grotesk', 'Inter', sans-serif;
+  font-family: var(--mh-font-kicker, 'Space Grotesk', 'Inter', sans-serif);
   font-weight: 600; font-size: 34px; line-height: 1.08;
   letter-spacing: 0.02em; text-transform: uppercase;
   color: var(--mh-on-surface); overflow-wrap: anywhere;
@@ -182,7 +182,7 @@
   font-weight: 700;
   font-size: var(--mh-fit-result-px, 88px);
   font-variation-settings: var(--mh-axes-result, normal);
-  line-height: 0.9; letter-spacing: -0.02em;
+  line-height: 0.9; letter-spacing: var(--mh-track-result, -0.02em);
   white-space: nowrap; color: var(--mh-accent); text-align: right;
 }
 .rc__result:empty { display: none; }
@@ -193,7 +193,7 @@
 }
 .rc__hero {
   display: inline-flex; align-items: center; gap: 12px;
-  font-family: 'Space Grotesk', 'Inter', sans-serif;
+  font-family: var(--mh-font-kicker, 'Space Grotesk', 'Inter', sans-serif);
   font-weight: 700; font-size: 21px; line-height: 1.15;
   color: var(--mh-on-surface); overflow-wrap: anywhere; min-width: 0;
 }
@@ -208,7 +208,7 @@
   overflow-wrap: anywhere;
 }
 .rc__meet:empty { display: none; }
-.rc__sponsor { margin-top: 16px; }
+.rc__sponsor { margin-top: var(--mh-sp-4); }
 .rc__sponsor:empty { display: none; }
 </style>
 </head>

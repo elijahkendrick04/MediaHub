@@ -25,7 +25,7 @@
   overflow: hidden;
   background: var(--mh-surface);
   color: var(--mh-on-surface);
-  font-family: 'Inter', system-ui, sans-serif;
+  font-family: var(--mh-font-body, 'Inter', system-ui, sans-serif);
   -webkit-font-smoothing: antialiased;
   display: flex; flex-direction: column;
   padding: 80px 76px;
@@ -36,23 +36,23 @@
   display: flex; align-items: center; justify-content: space-between; gap: 20px;
   padding-bottom: 26px; border-bottom: 3px solid var(--mh-on-surface);
 }
-.eg__brand { display: flex; align-items: center; gap: 16px; }
+.eg__brand { display: flex; align-items: center; gap: var(--mh-sp-4); }
 .eg__logo { height: 56px; width: auto; }
 .eg__logo img, .eg__logo svg { height: 100%; width: auto; object-fit: contain; display: block; }
-.eg__club { font-family: 'Inter', sans-serif; font-weight: 800; font-size: 24px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--mh-on-surface); }
-.eg__meet { font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 600; font-size: 21px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--mh-accent); }
+.eg__club { font-family: var(--mh-font-body, 'Inter', sans-serif); font-weight: 800; font-size: 24px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--mh-on-surface); }
+.eg__meet { font-family: var(--mh-font-kicker, 'Space Grotesk','Inter',sans-serif); font-weight: 600; font-size: 21px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--mh-accent); }
 
 .eg__head { margin-top: 40px; }
 .eg__kicker {
-  font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 700;
+  font-family: var(--mh-font-kicker, 'Space Grotesk','Inter',sans-serif); font-weight: 700;
   font-size: 25px; letter-spacing: 0.22em; text-transform: uppercase;
   color: var(--mh-accent);
 }
 .eg__name {
   margin-top: 14px;
-  font-family: 'Anton','Bebas Neue',Impact,sans-serif; font-weight: 400;
+  font-family: var(--mh-font-display, 'Anton','Bebas Neue',Impact,sans-serif); font-weight: 400;
   font-size: var(--mh-fit-surname-px, 120px); line-height: 0.88;
-  letter-spacing: -0.005em; text-transform: uppercase; color: var(--mh-on-surface);
+  letter-spacing: var(--mh-track-surname, -0.005em); text-transform: uppercase; color: var(--mh-on-surface);
 }
 
 /* the grid: 2 columns, hairline-ruled cells, grows to fill */
@@ -70,12 +70,12 @@
 }
 .eg__cell--wide { grid-column: 1 / -1; }
 .eg__lab {
-  font-family: 'Inter', sans-serif; font-weight: 700; font-size: 18px;
+  font-family: var(--mh-font-body, 'Inter', sans-serif); font-weight: 700; font-size: 18px;
   letter-spacing: 0.24em; text-transform: uppercase; color: var(--mh-accent);
   margin-bottom: 12px;
 }
 .eg__val {
-  font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 700;
+  font-family: var(--mh-font-kicker, 'Space Grotesk','Inter',sans-serif); font-weight: 700;
   font-size: 46px; line-height: 1.0; color: var(--mh-on-surface);
 }
 .eg__val--mono {
@@ -86,7 +86,7 @@
 .eg__foot {
   margin-top: 30px; display: flex; align-items: center; justify-content: space-between; gap: 20px;
 }
-.eg__tag { font-family: 'Inter', sans-serif; font-weight: 600; font-size: 20px; color: var(--mh-on-surface); opacity: 0.7; }
+.eg__tag { font-family: var(--mh-font-body, 'Inter', sans-serif); font-weight: 600; font-size: 20px; color: var(--mh-on-surface); opacity: 0.7; }
 .eg__sponsor { flex: 0 0 auto; }
 </style>
 </head>

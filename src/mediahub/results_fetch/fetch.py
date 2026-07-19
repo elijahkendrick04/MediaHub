@@ -27,16 +27,22 @@ from __future__ import annotations
 
 import os
 import re
-import threading
+import time
 from dataclasses import dataclass, field
 from typing import Optional, Protocol, runtime_checkable
 from urllib.parse import urljoin, urlparse
 
-# Reuse the project's single hardened outbound door. ``is_url_safe`` resolves the
-# host and refuses private/loopback/link-local/metadata IPs and non-http(s)
-# schemes; we call it on every redirect hop so a public URL can't 302 us onto an
-# internal one. Imported read-only — safe_fetch is never modified.
-from mediahub.web_research.safe_fetch import is_url_safe
+# Reuse the project's single hardened outbound door. ``_pinned_open`` resolves +
+# validates the host (refusing private/loopback/link-local/metadata IPs and
+# non-http(s) schemes) and PINS the TCP connection to that exact IP — the
+# ``Host`` header + TLS SNI carry the original hostname — so a rebinding
+# resolver can't pass the check with a public IP and then aim the socket at an
+# internal one. We drive it per redirect hop (following manually so the final
+# URL is tracked for provenance), re-validating + re-pinning every hop. This is
+# the per-hop primitive ``safe_fetch.pinned_stream_get`` itself wraps; we use it
+# directly only so the redirect-resolved ``final_url`` survives for the crawler.
+# Imported read-only — safe_fetch is never modified.
+from mediahub.web_research.safe_fetch import _pinned_open
 
 __all__ = [
     "FetchLimits",
@@ -310,33 +316,28 @@ class FetchBackend(Protocol):
 # Tier A — static backend
 # ---------------------------------------------------------------------------
 
-_HEADERS = {
-    "User-Agent": "MediaHubResults/1.0 (+https://github.com/)",
-    "Accept": (
-        "text/html,application/xhtml+xml,application/pdf,application/json,"
-        "text/csv,text/plain,application/zip,*/*;q=0.5"
-    ),
-    "Accept-Language": "en-GB,en;q=0.9",
-}
-
 _REDIRECT_CODES = frozenset({301, 302, 303, 307, 308})
 
-# Keep-alive connection-pool size. A results crawl hits one host many times, so a
-# pooled session reuses TCP+TLS connections (a fresh ``requests.get`` per page
-# pays a full handshake every time). Sized comfortably above the crawl's default
-# static-fetch concurrency so parallel read-ahead never starves on connections.
-_POOL_MAXSIZE = 24
 
+def _read_capped(response, cap: int, timeout: float) -> Optional[bytes]:
+    """Stream up to ``cap`` bytes off a pinned urllib3 response; ``None`` if the
+    body exceeds the cap, the stream errors, or the total-read deadline passes.
 
-def _read_capped(response, cap: int) -> Optional[bytes]:
-    """Stream up to ``cap`` bytes; ``None`` if the body exceeds the cap."""
+    Besides the byte cap, a monotonic TOTAL-read deadline (mirroring
+    ``safe_fetch._pinned_get``) bounds the whole read. The socket timeout only
+    fires *between* chunks, so without this a server dribbling one byte per
+    sub-timeout window keeps the loop alive effectively forever (slowloris);
+    the deadline aborts it."""
     out = bytearray()
+    deadline = time.monotonic() + max(timeout * 3.0, timeout + 5.0)
     try:
-        for chunk in response.iter_content(chunk_size=64 * 1024):
+        for chunk in response.stream(64 * 1024):
             if not chunk:
                 continue
             out.extend(chunk)
             if len(out) > cap:
+                return None
+            if time.monotonic() > deadline:
                 return None
     except Exception:
         return None
@@ -345,95 +346,62 @@ def _read_capped(response, cap: int) -> Optional[bytes]:
 
 @dataclass
 class StaticBackend:
-    """Tier A: SSRF-validated HTTP GET, allowlisted, byte-capped. Never raises.
+    """Tier A: SSRF-hardened HTTP GET, allowlisted, byte-capped. Never raises.
 
-    Mirrors ``safe_fetch``'s philosophy — manual redirect following with the host
-    re-validated at every hop — but returns raw *bytes* (not stripped text) so a
-    PDF/CSV/JSON/XLSX/image download survives intact for the interpreter.
-
-    One backend == one crawl: a single pooled, keep-alive ``requests.Session`` is
-    shared across every page (and across the crawl's parallel read-ahead threads —
-    a Session is safe for concurrent requests), so repeated hits on the same host
-    reuse connections instead of re-handshaking TCP+TLS each time. ``fetch`` itself
-    is unchanged in behaviour: same SSRF re-validation, same allowlist, same byte
-    cap — only the transport is pooled.
+    Every hop is routed through the project's single hardened door
+    (``safe_fetch._pinned_open``): the host is resolved + validated and the TCP
+    connection is made to *that* IP (``Host`` header + TLS SNI carry the original
+    name), so a rebinding resolver can't pass the check with a public IP and then
+    point the fetch at an internal one. Redirects are followed manually,
+    re-validating + re-pinning every hop, and the body is streamed under a hard
+    byte cap with a total-read deadline. Returns raw *bytes* (not stripped text)
+    so a PDF/CSV/JSON/XLSX/image download survives intact for the interpreter.
     """
 
     limits: FetchLimits = field(default_factory=FetchLimits)
     tier: str = "static"
-    _session: object = field(default=None, init=False, repr=False, compare=False)
-    _session_lock: threading.Lock = field(
-        default_factory=threading.Lock, init=False, repr=False, compare=False
-    )
-
-    def _get_session(self):
-        """The shared keep-alive session, built once (thread-safe), or ``None``
-        when ``requests`` is unavailable so the caller falls back gracefully."""
-        sess = self._session
-        if sess is not None:
-            return sess
-        with self._session_lock:
-            if self._session is None:
-                try:
-                    import requests  # noqa: PLC0415
-                    from requests.adapters import HTTPAdapter  # noqa: PLC0415
-                except Exception:  # pragma: no cover - requests is a hard dependency
-                    return None
-                s = requests.Session()
-                adapter = HTTPAdapter(pool_connections=4, pool_maxsize=_POOL_MAXSIZE, max_retries=0)
-                s.mount("http://", adapter)
-                s.mount("https://", adapter)
-                s.headers.update(_HEADERS)
-                self._session = s
-            return self._session
 
     def close(self) -> None:
-        """Release the pooled connections. Idempotent; safe to call once a crawl
-        finishes. A new ``fetch`` after close lazily rebuilds the session."""
-        sess = self._session
-        self._session = None
-        if sess is not None:
-            try:
-                sess.close()
-            except Exception:  # pragma: no cover - best-effort teardown
-                pass
+        """No-op teardown. The pinned transport opens (and closes) a fresh
+        connection pool per hop, so a crawl holds no shared session to release;
+        kept so callers can tear the backend down uniformly."""
 
     def fetch(self, url: str) -> Optional[FetchedPage]:
-        session = self._get_session()
-        if session is None:  # pragma: no cover - requests is a hard dependency
-            return None
-
         current = (url or "").strip()
         for _ in range(max(1, self.limits.static_max_hops)):
-            if not is_url_safe(current):
-                return None
             try:
-                resp = session.get(
-                    current,
-                    timeout=self.limits.static_timeout_s,
-                    allow_redirects=False,  # follow manually, re-validating each hop
-                    stream=True,
-                )
+                # Resolve + validate + PIN this hop's connection to the validated
+                # IP (defeats the validate-then-reconnect DNS-rebinding TOCTOU).
+                # Redirects are NOT followed here — each hop is re-validated below.
+                resp, pool = _pinned_open(current, timeout=self.limits.static_timeout_s)
             except Exception:
+                # ValueError("unsafe_url") for a refused host/scheme, or any
+                # transport error — Tier A never raises.
                 return None
             try:
-                if resp.status_code in _REDIRECT_CODES:
-                    loc = resp.headers.get("Location")
+                status = int(resp.status)
+                if status in _REDIRECT_CODES:
+                    loc = resp.headers.get("Location") or resp.headers.get("location")
                     if not loc:
                         return None
                     current = urljoin(current, loc)
                     continue
-                if resp.status_code != 200:
+                if status != 200:
                     return None
-                body = _read_capped(resp, self.limits.max_page_bytes)
+                content_type_hdr = resp.headers.get("Content-Type", "")
+                body = _read_capped(resp, self.limits.max_page_bytes, self.limits.static_timeout_s)
             finally:
                 try:
                     resp.close()
                 except Exception:
                     pass
+                try:
+                    pool.close()
+                except Exception:
+                    pass
             if body is None or not body:
                 return None
-            ctype = _sniff_content_type(resp.headers.get("Content-Type", ""), body, current)
+            ctype = _sniff_content_type(content_type_hdr, body, current)
             if ctype is None:
                 return None
             text = visible_text(body) if ctype in _HTML_TYPES else None

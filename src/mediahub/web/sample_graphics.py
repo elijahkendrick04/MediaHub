@@ -286,8 +286,12 @@ def feed_graphic_svg() -> str:
 
 # --------------------------------------------------------------------------- #
 # 4. Detected & ranked — landscape intelligence read-out (the moat).
-#    A "12 moments" stat + three ranked rows whose score bars are *truthfully*
-#    proportional to the content-worthiness score shown beside them.
+#    A "3 moments" stat + three ranked rows whose score bars are *truthfully*
+#    proportional to the content-worthiness score shown beside them. The "42
+#    swims read" demo meet and its moment count must stay in lockstep with the
+#    "See it in action" carousel (``_hero_product_demo`` in web.py), which
+#    walks the same fixed demo meet through generate/review/approve — two
+#    different totals for one file reads as the product contradicting itself.
 # --------------------------------------------------------------------------- #
 def detected_ranked_svg() -> str:
     w, h = 380, 230
@@ -320,7 +324,7 @@ def detected_ranked_svg() -> str:
             f'font-size="12" style="font-variant-numeric:tabular-nums">{score:.2f}</text>'
         )
     return (
-        _open(w, h, "Detected and ranked — 12 moments scored by content-worthiness")
+        _open(w, h, "Detected and ranked — 3 moments scored by content-worthiness")
         + f'<rect width="{w}" height="{h}" fill="var(--surface,#14171F)"/>'
         + _grid(w, h, step=38, op=0.04)
         # header
@@ -331,7 +335,7 @@ def detected_ranked_svg() -> str:
         'font-size="10" letter-spacing="1.5">CONTENT-WORTHINESS</text>'
         # big stat
          + '<text x="26" y="86" class="mhg-d mhg-i" font-size="68" '
-        'letter-spacing="-3">12</text>'
+        'letter-spacing="-3">3</text>'
         + '<text x="120" y="66" class="mhg-d mhg-i" font-size="20">MOMENTS</text>'
         + '<text x="120" y="84" class="mhg-m mhg-dim" font-size="10" '
         'letter-spacing="1">FROM 42 SWIMS READ</text>'
@@ -340,7 +344,7 @@ def detected_ranked_svg() -> str:
         'stroke="currentColor" stroke-width="1" style="opacity:0.12"/>'
         + body
         + '<text x="28" y="218" class="mhg-m mhg-ft" font-size="9" '
-        'letter-spacing="1.5">5 PBS &#183; 3 MEDALS &#183; 1 CLUB RECORD &#183; EXPLAINABLE</text>'
+        'letter-spacing="1.5">1 PB &#183; 1 MEDAL &#183; 1 FIRST-TIME &#183; EXPLAINABLE</text>'
         + "</svg>"
     )
 

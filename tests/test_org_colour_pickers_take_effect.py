@@ -10,33 +10,22 @@ brand_palette_manual (the winning slot) and recomputes the derived theme.
 """
 from __future__ import annotations
 
-import importlib
-import sys
-from pathlib import Path
-
 import pytest
-
-_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(_ROOT))
 
 
 @pytest.fixture
-def env(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    (tmp_path / "club_profiles").mkdir(parents=True, exist_ok=True)
+def env(web_module):
+    # DATA_DIR isolation + one-time web.py import come from the autouse
+    # ``_isolate_data_dir`` fixture in conftest.py.
     import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
 
-    importlib.reload(cp)
-    importlib.reload(wm)
     # A club that went through AI setup: an extracted palette, no manual override.
     prof = cp.ClubProfile(profile_id="otters", display_name="Otters SC")
     prof.brand_palette_extracted = {"primary": "#111111", "secondary": "#222222"}
     cp.save_profile(prof)
     assert prof.get_brand_kit().primary_colour.lower() == "#111111"
 
-    app = wm.create_app()
+    app = web_module.create_app()
     app.config["TESTING"] = True
     return app, cp
 

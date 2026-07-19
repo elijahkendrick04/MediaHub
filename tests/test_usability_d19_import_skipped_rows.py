@@ -10,26 +10,6 @@ reason) are now listed on the page after import.
 
 from __future__ import annotations
 
-import importlib
-
-import pytest
-
-
-@pytest.fixture
-def app_env(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    (tmp_path / "club_profiles").mkdir(parents=True, exist_ok=True)
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
-    app = wm.create_app()
-    app.config.update(TESTING=True, SECRET_KEY="x")
-    return app
-
 
 def _client(app, pid="club-a"):
     from mediahub.web.club_profile import ClubProfile, save_profile
@@ -41,8 +21,8 @@ def _client(app, pid="club-a"):
     return c
 
 
-def test_consent_import_lists_skipped_rows(app_env):
-    c = _client(app_env)
+def test_consent_import_lists_skipped_rows(app):
+    c = _client(app)
     # One unreadable level → skipped, with the swimmer named.
     r = c.post(
         "/athletes/action",
@@ -57,8 +37,8 @@ def test_consent_import_lists_skipped_rows(app_env):
     assert "Ada Lovelace" not in c.get("/athletes").get_data(as_text=True)
 
 
-def test_records_import_lists_skipped_rows(app_env):
-    c = _client(app_env)
+def test_records_import_lists_skipped_rows(app):
+    c = _client(app)
     # Too few columns → skipped with its row number.
     r = c.post(
         "/records/action",

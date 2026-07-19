@@ -16,31 +16,18 @@ notice whenever it cancels a browser POST so the discard can never be silent.
 """
 from __future__ import annotations
 
-import importlib
-import sys
-from pathlib import Path
-
 import pytest
-
-_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(_ROOT))
 
 
 @pytest.fixture
-def gated_env(tmp_path, monkeypatch):
-    """App with ENFORCE_ORG_GATE=True and no active org in a clean tmp dir."""
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    for d in ("runs_v4", "uploads_v4", "club_profiles"):
-        (tmp_path / d).mkdir(parents=True, exist_ok=True)
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
+def gated_env(web_module):
+    """App with ENFORCE_ORG_GATE=True and no active org in a clean tmp dir.
 
-    importlib.reload(cp)
-    importlib.reload(wm)
-    app = wm.create_app()
+    DATA_DIR isolation + one-time web.py import come from the autouse
+    ``_isolate_data_dir`` fixture in conftest.py."""
+    import mediahub.web.club_profile as cp
+
+    app = web_module.create_app()
     app.config["TESTING"] = True
     app.config["ENFORCE_ORG_GATE"] = True
     return app, cp

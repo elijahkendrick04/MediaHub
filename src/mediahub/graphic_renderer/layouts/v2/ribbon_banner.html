@@ -37,9 +37,9 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  background: var(--mh-primary);
+  background: var(--mh-ground-gradient, var(--mh-primary));
   color: var(--mh-on-primary);
-  font-family: 'Inter', system-ui, sans-serif;
+  font-family: var(--mh-font-body, 'Inter', system-ui, sans-serif);
   -webkit-font-smoothing: antialiased;
   padding: 92px 80px 80px;
   text-align: center;
@@ -54,7 +54,7 @@
   margin: 0 auto; padding: 24px 76px;
   background: var(--mh-accent); color: var(--mh-primary);
   clip-path: polygon(0 0, 100% 0, 93% 50%, 100% 100%, 0 100%, 7% 50%);
-  font-family: 'Anton','Bebas Neue',Impact,sans-serif; font-weight: 400;
+  font-family: var(--mh-font-display, 'Anton','Bebas Neue',Impact,sans-serif); font-weight: 400;
   font-size: 50px; line-height: 0.94; letter-spacing: 0.01em;
   text-transform: uppercase;
   overflow-wrap: anywhere; word-break: break-word;
@@ -70,21 +70,21 @@
 .rb__tail--r { right: calc(50% - 96px); }
 
 .rb__first {
-  font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 700;
+  font-family: var(--mh-font-kicker, 'Space Grotesk','Inter',sans-serif); font-weight: 700;
   font-size: 34px; letter-spacing: 0.04em; text-transform: uppercase;
   color: var(--mh-accent); margin-bottom: 2px; overflow-wrap: anywhere;
 }
 .rb__surname {
-  font-family: 'Anton','Bebas Neue',Impact,sans-serif; font-weight: 400;
+  font-family: var(--mh-font-display, 'Anton','Bebas Neue',Impact,sans-serif); font-weight: 400;
   font-size: calc(var(--mh-fit-surname-px, 132px) * 0.66);
-  line-height: 0.88; letter-spacing: -0.01em; text-transform: uppercase;
+  line-height: 0.88; letter-spacing: var(--mh-track-surname, -0.01em); text-transform: uppercase;
   color: var(--mh-on-primary);
   white-space: normal; overflow-wrap: anywhere; word-break: break-word;
 }
 
 .rb__result-wrap { margin-top: 40px; }
 .rb__result-lab {
-  font-family: 'Inter',sans-serif; font-weight: 800;
+  font-family: var(--mh-font-body, 'Inter',sans-serif); font-weight: 800;
   font-size: 17px; letter-spacing: 0.3em; text-transform: uppercase;
   color: var(--mh-accent); margin-bottom: 8px;
 }
@@ -93,7 +93,7 @@
   font-feature-settings: "tnum"; font-weight: 700;
   font-size: calc(var(--mh-fit-result-px, 92px) * 0.78);
   font-variation-settings: var(--mh-axes-result, normal);
-  line-height: 0.9; letter-spacing: -0.02em;
+  line-height: 0.9; letter-spacing: var(--mh-track-result, -0.02em);
   color: var(--mh-on-primary);
   white-space: normal; overflow-wrap: anywhere; word-break: break-word;
 }
@@ -101,7 +101,7 @@
   margin-top: 22px;
   display: inline-block; padding-top: 16px;
   border-top: 4px solid var(--mh-accent);
-  font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 600;
+  font-family: var(--mh-font-kicker, 'Space Grotesk','Inter',sans-serif); font-weight: 600;
   font-size: 26px; line-height: 1.12; text-transform: uppercase;
   color: var(--mh-on-primary); opacity: 0.92; overflow-wrap: anywhere;
 }
@@ -116,19 +116,19 @@
 .rb__foot {
   margin-top: auto; padding-top: 30px; width: 100%;
   border-top: 2px solid var(--mh-outline);
-  display: flex; align-items: center; justify-content: space-between; gap: 24px;
+  display: flex; align-items: center; justify-content: space-between; gap: var(--mh-sp-5);
   text-align: left;
 }
-.rb__foot-id { display: flex; align-items: center; gap: 16px; min-width: 0; }
+.rb__foot-id { display: flex; align-items: center; gap: var(--mh-sp-4); min-width: 0; }
 .rb__logo { height: 52px; width: auto; flex: 0 0 auto; }
 .rb__logo img, .rb__logo svg { height: 100%; width: auto; object-fit: contain; display: block; }
 .rb__meta { display: flex; flex-direction: column; min-width: 0; }
 .rb__meet {
-  font-family: 'Inter',sans-serif; font-weight: 600; font-size: 19px;
+  font-family: var(--mh-font-body, 'Inter',sans-serif); font-weight: 600; font-size: 19px;
   color: var(--mh-on-primary); opacity: 0.82; overflow-wrap: anywhere;
 }
 .rb__club {
-  font-family: 'Inter',sans-serif; font-weight: 800; font-size: 19px;
+  font-family: var(--mh-font-body, 'Inter',sans-serif); font-weight: 800; font-size: 19px;
   text-transform: uppercase; color: var(--mh-on-primary); overflow-wrap: anywhere;
 }
 .rb__sponsor { flex: 0 0 auto; }

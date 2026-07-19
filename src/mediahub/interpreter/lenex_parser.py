@@ -81,6 +81,15 @@ _MAX_LENEX_BYTES = MAX_MEMBER_UNCOMPRESSED_BYTES
 # needs_review so "why no card for this swimmer?" stays explainable.
 _NON_FINISH_STATUS = frozenset({"DSQ", "DNS", "DNF", "WDR", "SICK"})
 
+# LENEX EVENT ``round`` codes that are NOT the medal-awarding final: heats/prelims
+# (PRE), semifinals (SEM), quarterfinals (QUA) and swim-offs (SOP/SOS). Like the
+# status set above these are format codes, not swim vocabulary. A result in one
+# of these rounds is marked round_hint="prelim" so the canonical bridge reads it
+# as a heat — keeping a non-final place-1 from surfacing as a fabricated medal.
+# Finals (FIN), timed finals (TIM), fastest-heats finals (FHT), a blank round and
+# any unrecognised code stay None (read as a timed final).
+_PRELIM_ROUNDS = frozenset({"PRE", "SEM", "QUA", "SOP", "SOS"})
+
 # ``<LENEX`` root tag followed by whitespace, ``>`` or ``/`` (so e.g. a
 # hypothetical <LENEXTRAS> tag does not match).
 _LENEX_TAG_RE = re.compile(rb"<\s*lenex[\s>/]", re.IGNORECASE)
@@ -258,6 +267,19 @@ def _gender(raw: Optional[str]) -> Optional[str]:
     return g if g in ("M", "F", "X") else None  # LENEX "A" (all) → None
 
 
+def _round_hint(raw: Optional[str]) -> Optional[str]:
+    """Map a LENEX EVENT ``round`` code to a structural round hint.
+
+    Returns ``"prelim"`` for a heat/semi/quarter/swim-off round (see
+    ``_PRELIM_ROUNDS``) so the bridge reads it as a heat; ``None`` for a final /
+    timed final / blank / unrecognised code (read as a timed final). Structural
+    only — no swim semantics leak into this parsing layer.
+    """
+    if not raw:
+        return None
+    return "prelim" if raw.strip().upper() in _PRELIM_ROUNDS else None
+
+
 def _athlete_name(ath: ET.Element) -> str:
     first = _attr(ath, "firstname") or ""
     last = _attr(ath, "lastname") or ""
@@ -349,6 +371,7 @@ def _index_events(meet_el: ET.Element) -> tuple[dict[str, dict], list[str]]:
                 "distance": _to_int(_attr(style, "distance")),
                 "stroke": _canon_stroke(_attr(style, "stroke"), relaycount),
                 "course": _canon_course(_attr(ev, "course")),
+                "round_hint": _round_hint(_attr(ev, "round")),
                 "session_date": s_date,
             }
     return index, dates
@@ -534,6 +557,7 @@ def parse_lenex(data: bytes) -> InterpretedMeet:
                     confidence=round(sum(field_conf.values()) / len(field_conf), 3),
                     raw_row=raw_row,
                     field_confidence=field_conf,
+                    round_hint=info.get("round_hint"),
                 )
                 swims_by_event.setdefault(info["event_id"], []).append(swim)
 
@@ -571,12 +595,13 @@ def parse_lenex(data: bytes) -> InterpretedMeet:
             }
         )
 
-    # Overall confidence: same convention as parse_hy3/parse_sdif — mean
-    # of event confidences weighted by swim share, clamped to [0.5, 0.99].
+    # Overall confidence: same convention as parse_hy3/parse_sdif — mean of event
+    # confidences weighted by swim share, capped at 0.99 with no lower floor so a
+    # broken parse reads as broken rather than clamped up to a misleading >=0.5 (#67).
     if events:
         total_swims = sum(len(e.swims) for e in events) or 1
         overall = sum(e.confidence * (len(e.swims) / total_swims) for e in events if e.swims)
-        overall = round(min(0.99, max(0.5, overall)), 3)
+        overall = round(min(0.99, overall), 3)
     else:
         overall = 0.0
 

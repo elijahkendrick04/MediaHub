@@ -9,12 +9,12 @@
 
 from __future__ import annotations
 
-import importlib
 import pathlib
 import re
 import time
 
 import pytest
+from tests._helpers import web_surface_src
 
 
 class _Resp:
@@ -23,26 +23,14 @@ class _Resp:
 
 
 @pytest.fixture
-def app_world(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
+def app_world(app, web_module, monkeypatch):
     monkeypatch.delenv("RESEND_API_KEY", raising=False)
     monkeypatch.delenv("MEDIAHUB_EMAIL_FROM", raising=False)
 
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
-    app = wm.create_app()
-    app.config["TESTING"] = True
-    if not app.secret_key:
-        app.secret_key = "x"
     from mediahub.web.auth import UserStore
 
     UserStore().create("coach@club.org", "original-password-1")
-    return {"app": app, "wm": wm}
+    return {"app": app, "wm": web_module}
 
 
 @pytest.fixture
@@ -112,7 +100,7 @@ def test_signup_without_email_seam_gives_honest_flash(app_world):
 
 
 def test_progress_page_reassures_run_survives_leaving():
-    src = pathlib.Path("src/mediahub/web/web.py").read_text(encoding="utf-8")
+    src = web_surface_src()
     assert "You can leave this page" in src
     assert "it finishes on Home" in src
     assert "the run keeps going on our server" in src

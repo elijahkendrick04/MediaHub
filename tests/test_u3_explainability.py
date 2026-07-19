@@ -324,7 +324,7 @@ class TestNearMiss:
     def test_hint_leads_with_close_calls(self):
         h = webmod._render_near_miss_hint(5, 2)
         assert "5 swims" in h and "2 were close calls" in h
-        assert "#mh-not-generated" in h
+        assert "#mh-all-swims" in h
 
     def test_hint_singular_and_no_close_calls(self):
         assert "1 swim" in webmod._render_near_miss_hint(1, 0)
@@ -385,13 +385,15 @@ class TestReviewRenderIntegration:
         # D4 — the key
         assert "How to read these cards" in body
         assert "Written by AI" in body
-        # D3 — why-not surface
+        # D3 — why-not surface (now the ranked all-swims panel: every swim a
+        # row, close calls flagged, unflagged swims promotable to a highlight)
         assert "Almost a PB" in body
         assert "Possible PB — unconfirmed" in body
-        assert "<th>Why not</th>" in body
-        assert 'id="mh-not-generated"' in body
+        assert "<th>What we saw</th>" in body
+        assert 'id="mh-all-swims"' in body
         assert "2 close calls" in body
         assert "were close calls" in body  # the discoverability hint
+        assert "Create highlight" in body  # the promotion affordance
 
     def test_no_traces_means_no_hint(self, client):
         _write_run("r2", _run_payload("r2", traces=[]))
@@ -423,13 +425,14 @@ class TestReviewRenderIntegration:
         assert "How to read these cards" in body
         assert '<div class="mh-nearmiss-hint"' not in body
 
-    def test_not_generated_table_shows_truncation_notice_over_40(self, client):
-        # A big meet can have far more than 40 no-achievement swims. The table
-        # leads with the 40 closest, but the copy promises nothing was silently
-        # dropped — so an honest "showing the 40 leading close calls of N" notice
-        # must render when the list is truncated.
+    def test_all_swims_table_renders_every_swim_uncapped(self, client):
+        # The old "Not generated" panel truncated at the 40 leading close
+        # calls; the all-swims panel replaces it and must render EVERY
+        # analysed swim ("show all the swims" is the product promise), so a
+        # 55-swim meet gets 55 rows and no truncation notice.
         traces = [
             {
+                "swim_id": f"k{i}:50FRSC:F",
                 "swimmer_name": f"Swimmer {i}",
                 "event": "50 Free",
                 "time_str": "30.00",
@@ -441,36 +444,23 @@ class TestReviewRenderIntegration:
         ]
         _write_run("r7", _run_payload("r7", ranked=[], traces=traces))
         body = _review_body(client, "r7")
-        assert "Showing the 40 leading close calls of 55" in body
-        assert "every swim is in the run trace JSON" in body
-
-    def test_not_generated_table_no_notice_at_or_below_40(self, client):
-        traces = [
-            {
-                "swimmer_name": f"Swimmer {i}",
-                "event": "50 Free",
-                "time_str": "30.00",
-                "achievement_count": 0,
-                "near_miss_category": "lower_priority",
-                "summary": "outranked",
-            }
-            for i in range(40)
-        ]
-        _write_run("r8", _run_payload("r8", ranked=[], traces=traces))
-        body = _review_body(client, "r8")
         assert "leading close calls of" not in body
+        panel = body.split('id="mh-all-swims"', 1)[1]
+        for i in range(55):
+            assert f"Swimmer {i}<" in panel or f"Swimmer {i}</td>" in panel
+        assert "55 analysed" in body
 
     def test_only_outranked_traces_hint_and_panel(self, client):
         # Traces present but no close calls: the hint says so honestly and the
-        # "Not generated" panel does NOT auto-open (close calls are the signal).
-        traces = [{"swimmer_name": "A", "event": "50 Free", "time_str": "30.00",
+        # all-swims panel does NOT auto-open (close calls are the signal).
+        traces = [{"swim_id": "kA:50FRSC:F", "swimmer_name": "A", "event": "50 Free",
+                   "time_str": "30.00",
                    "achievement_count": 0, "near_miss_category": "lower_priority",
                    "summary": "outranked by stronger swims"}]
         _write_run("r6", _run_payload("r6", ranked=[], traces=traces))
         body = _review_body(client, "r6")
         assert "none were close calls" in body
-        assert "Outranked" in body
-        after_anchor = body.split('id="mh-not-generated"', 1)[1][:80]
+        after_anchor = body.split('id="mh-all-swims"', 1)[1][:80]
         assert "<details open" not in after_anchor  # collapsed when no close calls
 
     def test_confidence_filter_still_works(self, client):

@@ -210,7 +210,7 @@ def test_director_prompt_offers_the_accent_pack():
 
 
 def test_photo_treatments_vocabulary_and_default():
-    assert PHOTO_TREATMENTS == ("cutout", "duotone", "halftone", "vignette")
+    assert PHOTO_TREATMENTS == ("cutout", "duotone", "halftone", "vignette", "wash", "sticker")
     assert DEFAULT_PHOTO_TREATMENT in PHOTO_TREATMENTS
     # Structural decisions are NOT art direction — never offered to the model.
     assert "no-photo" not in PHOTO_TREATMENTS

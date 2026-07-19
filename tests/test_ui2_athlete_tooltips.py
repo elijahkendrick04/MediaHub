@@ -16,9 +16,9 @@ This module pins the whole feature:
   4. Safety — every value shown is HTML-escaped; the effect fails safe and
      introduces no CDN dependency.
 """
+
 from __future__ import annotations
 
-import importlib
 import json
 import sys
 import uuid
@@ -105,10 +105,10 @@ class TestKitJs:
         # Slice the whole bindTooltip body (up to the next section comment) —
         # not the first nested `function`, which would truncate it early.
         start = _UI_KIT_JS.index("function bindTooltip")
-        body = _UI_KIT_JS[start:_UI_KIT_JS.index("Scroll progress", start)]
-        assert "if (REDUCE) return" in body, (
-            "bindTooltip must early-return under prefers-reduced-motion"
-        )
+        body = _UI_KIT_JS[start : _UI_KIT_JS.index("Scroll progress", start)]
+        assert (
+            "if (REDUCE) return" in body
+        ), "bindTooltip must early-return under prefers-reduced-motion"
         # Uses rAF + passive listeners like the rest of the kit.
         assert "requestAnimationFrame" in body
         assert "{ passive: true }" in body
@@ -120,20 +120,19 @@ class TestKitJs:
 @pytest.fixture(scope="module")
 def web():
     import mediahub.web.web as wm
+
     return wm
 
 
 class TestAvatarHelper:
     def test_initials(self, web):
         assert web._avatar_initials("Maya Patel") == "MP"
-        assert web._avatar_initials("Cher") == "CH"      # single token → 2 letters
+        assert web._avatar_initials("Cher") == "CH"  # single token → 2 letters
         assert web._avatar_initials("  ") == "?"
         assert web._avatar_initials("aiko van der berg") == "AB"  # first+last
 
     def test_focusable_exposes_aria_label_and_is_tabbable(self, web):
-        h = web._athlete_avatar(
-            "Maya Patel", club="Riverside SC", stat="3 moments", focusable=True
-        )
+        h = web._athlete_avatar("Maya Patel", club="Riverside SC", stat="3 moments", focusable=True)
         assert 'class="mh-tooltip"' in h
         assert 'tabindex="0"' in h
         assert 'role="img"' in h
@@ -149,7 +148,7 @@ class TestAvatarHelper:
 
     def test_meta_line_omitted_when_empty(self, web):
         h = web._athlete_avatar("Solo Swimmer")
-        assert "mh-tooltip__meta" not in h          # no club, no stat
+        assert "mh-tooltip__meta" not in h  # no club, no stat
         assert "mh-tooltip__sep" not in h
 
     def test_separator_only_when_both_club_and_stat(self, web):
@@ -181,22 +180,14 @@ class TestAvatarHelper:
 # Integration — a seeded run rendered through the real Flask routes
 # ===========================================================================
 @pytest.fixture
-def tip_app(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    for d in ("runs_v4", "uploads_v4", "club_profiles"):
-        (tmp_path / d).mkdir(parents=True, exist_ok=True)
+def tip_app(tmp_path, monkeypatch, web_module):
     for env in ("ANTHROPIC_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY"):
         monkeypatch.delenv(env, raising=False)
 
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-    importlib.reload(cp)
-    importlib.reload(wm)
+    wm = web_module
 
     from mediahub.web.club_profile import ClubProfile, save_profile
+
     save_profile(ClubProfile(profile_id="riverside", display_name="Riverside SC"))
 
     run_id = "run-tip-" + uuid.uuid4().hex[:8]
@@ -214,7 +205,9 @@ def tip_app(tmp_path, monkeypatch):
                 "confidence_label": "high",
                 "confidence": 0.95,
             },
-            "rank": 1, "priority": 9.0, "quality_band": "elite",
+            "rank": 1,
+            "priority": 9.0,
+            "quality_band": "elite",
             "suggested_post_type": "feed",
         },
         {
@@ -228,7 +221,9 @@ def tip_app(tmp_path, monkeypatch):
                 "confidence_label": "medium",
                 "confidence": 0.7,
             },
-            "rank": 2, "priority": 6.0, "quality_band": "strong",
+            "rank": 2,
+            "priority": 6.0,
+            "quality_band": "strong",
             "suggested_post_type": "story",
         },
         {
@@ -242,7 +237,9 @@ def tip_app(tmp_path, monkeypatch):
                 "confidence_label": "high",
                 "confidence": 0.9,
             },
-            "rank": 3, "priority": 5.0, "quality_band": "strong",
+            "rank": 3,
+            "priority": 5.0,
+            "quality_band": "strong",
             "suggested_post_type": "story",
         },
     ]
@@ -257,11 +254,16 @@ def tip_app(tmp_path, monkeypatch):
         "recognition_report": {
             "meet_name": "Spring Invitational",
             "ranked_achievements": achievements,
-            "n_elite": 1, "n_strong": 2, "n_story": 0,
-            "n_achievements": 3, "n_swims_analysed": 3,
+            "n_elite": 1,
+            "n_strong": 2,
+            "n_story": 0,
+            "n_achievements": 3,
+            "n_swims_analysed": 3,
         },
-        "parse_warnings": [], "self_check": {},
-        "detector_summary": {}, "dispatch_log": {},
+        "parse_warnings": [],
+        "self_check": {},
+        "detector_summary": {},
+        "dispatch_log": {},
     }
     (tmp_path / "runs_v4" / f"{run_id}.json").write_text(json.dumps(run_payload))
 

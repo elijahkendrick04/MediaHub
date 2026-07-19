@@ -53,7 +53,7 @@
   isolation: isolate;
   background: var(--mh-surface);
   color: var(--mh-on-primary);
-  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  font-family: var(--mh-font-body, 'Inter', system-ui, -apple-system, sans-serif);
   -webkit-font-smoothing: antialiased;
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -108,7 +108,7 @@
   padding: 14px 22px;
   background: var(--mh-accent);
   color: var(--mh-primary);
-  font-family: 'Space Grotesk', 'Inter', sans-serif;
+  font-family: var(--mh-font-kicker, 'Space Grotesk', 'Inter', sans-serif);
   font-weight: 700;
   font-size: 22px;
   letter-spacing: 0.20em;
@@ -131,13 +131,13 @@
   text-align: right;
   padding: var(--pad);
 }
-.duo__id { display: flex; flex-direction: column; align-items: flex-end; gap: 16px; }
+.duo__id { display: flex; flex-direction: column; align-items: flex-end; gap: var(--mh-sp-4); }
 .duo__logo { height: 62px; width: auto; }
 .duo__logo img,
 .duo__logo svg { height: 100%; width: auto; object-fit: contain; display: block; }
 .duo__logo:empty { display: none; }
 .duo__club {
-  font-family: 'Inter', sans-serif;
+  font-family: var(--mh-font-body, 'Inter', sans-serif);
   font-weight: 800;
   font-size: 24px;
   letter-spacing: 0.02em;
@@ -146,7 +146,7 @@
   overflow-wrap: anywhere;
 }
 .duo__meet {
-  font-family: 'Inter', sans-serif;
+  font-family: var(--mh-font-body, 'Inter', sans-serif);
   font-weight: 500;
   font-size: 17px;
   letter-spacing: 0.05em;
@@ -159,7 +159,7 @@
 /* the scoreline ledger, anchored to the bay's foot */
 .duo__ledger { display: flex; flex-direction: column; align-items: flex-end; }
 .duo__lab {
-  font-family: 'Space Grotesk', 'Inter', sans-serif;
+  font-family: var(--mh-font-kicker, 'Space Grotesk', 'Inter', sans-serif);
   font-weight: 600;
   font-size: 16px;
   letter-spacing: 0.26em;
@@ -168,7 +168,7 @@
   margin-bottom: 10px;
 }
 .duo__event {
-  font-family: 'Space Grotesk', 'Inter', sans-serif;
+  font-family: var(--mh-font-kicker, 'Space Grotesk', 'Inter', sans-serif);
   font-weight: 600;
   font-size: 30px;
   line-height: 1.12;
@@ -189,7 +189,7 @@
   /* the bay is half the canvas, so scale the full-canvas autofit var */
   font-size: calc(var(--mh-fit-result-px, 96px) * 0.72); font-variation-settings: var(--mh-axes-result, normal);
   line-height: 0.9;
-  letter-spacing: -0.02em;
+  letter-spacing: var(--mh-track-result, -0.02em);
   white-space: nowrap;
   color: var(--mh-accent);
 }
@@ -198,7 +198,7 @@
   display: inline-flex;
   align-items: center;
   gap: 12px;
-  font-family: 'Space Grotesk', 'Inter', sans-serif;
+  font-family: var(--mh-font-kicker, 'Space Grotesk', 'Inter', sans-serif);
   font-weight: 700;
   font-size: 24px;
   line-height: 1.15;
@@ -234,10 +234,10 @@
   background: var(--mh-accent);
   color: var(--mh-primary);
   padding: 34px 64px 42px;
-  box-shadow: 0 18px 48px rgba(0,0,0,0.30);
+  box-shadow: var(--mh-elev-4, 0 18px 48px rgba(0,0,0,0.30));
 }
 .duo__first {
-  font-family: 'Space Grotesk', 'Inter', sans-serif;
+  font-family: var(--mh-font-kicker, 'Space Grotesk', 'Inter', sans-serif);
   font-weight: 700;
   font-size: 28px;
   letter-spacing: 0.14em;
@@ -245,11 +245,11 @@
   margin-bottom: 8px;
 }
 .duo__surname {
-  font-family: 'Anton', 'Bebas Neue', Impact, sans-serif;
+  font-family: var(--mh-font-display, 'Anton', 'Bebas Neue', Impact, sans-serif);
   font-weight: 400;
   font-size: var(--mh-fit-surname-px, 132px);
   line-height: 0.9;
-  letter-spacing: -0.02em;
+  letter-spacing: var(--mh-track-surname, -0.02em);
   text-transform: uppercase;
   /* the autofit var sizes this to one line; wrapping is the safety net for a
      name beyond the fit floor — the band grows downward without collision */

@@ -42,7 +42,7 @@
 import React from "react";
 import { Easing, interpolate, spring, useCurrentFrame, useVideoConfig } from "remotion";
 import type { SceneComponent } from "../registry";
-import { fitLine, withAlpha } from "../sceneKit";
+import { fitLine, shadowRgb, withAlpha } from "../sceneKit";
 
 const ANTON = "'Anton', 'Bebas Neue', Impact, sans-serif";
 const GROTESK = "'Space Grotesk', 'Inter', sans-serif";
@@ -95,10 +95,14 @@ const Scene: SceneComponent = ({ ctx }) => {
   const chipIn = interpolate(frame, [at(0.3), at(0.36)], [0, 1], clamp);
   const footIn = interpolate(frame, [at(0.36), at(0.46)], [0, 1], clamp);
 
-  // The still's decoration-scaled depth treatment on the body plane.
+  // The still's decoration-scaled depth treatment on the body plane — key +
+  // contact layers in the hue-tinted shadow colour (B4 parity with
+  // render._cutout_depth_filter / elevation.shadow_rgb).
   const s = Math.max(0, Math.min(1, card.decorationStrength ?? 0.5));
+  const sRgb = shadowRgb(roles.ground);
   const depthFilter =
-    `drop-shadow(0 ${Math.round(10 + 14 * s)}px ${Math.round(24 + 30 * s)}px rgba(0,0,0,0.45)) ` +
+    `drop-shadow(0 ${Math.round(10 + 14 * s)}px ${Math.round(24 + 30 * s)}px rgba(${sRgb},0.45)) ` +
+    `drop-shadow(0 2px 5px rgba(${sRgb},0.38)) ` +
     `drop-shadow(0 0 ${Math.round(8 + 22 * s)}px ${withAlpha(roles.accent, 0.18 + 0.2 * s)})`;
 
   // The still's hairline --mh-outline, resolved Python-side and passed on the

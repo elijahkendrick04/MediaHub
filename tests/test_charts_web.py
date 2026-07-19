@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import importlib
 import json
 import xml.etree.ElementTree as ET
 
@@ -10,24 +9,10 @@ import pytest
 
 
 @pytest.fixture
-def app_env(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    for sub in ("runs_v4", "uploads_v4", "club_profiles"):
-        (tmp_path / sub).mkdir(parents=True, exist_ok=True)
+def app_env(app, web_module, tmp_path, monkeypatch):
     for var in ("GEMINI_API_KEY", "GOOGLE_API_KEY", "ANTHROPIC_API_KEY"):
         monkeypatch.delenv(var, raising=False)
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
-    app = wm.create_app()
-    app.config["TESTING"] = True
-    return app, wm, tmp_path
+    return app, web_module, tmp_path
 
 
 def _seed_run(tmp_path, run_id="run-1"):
@@ -40,16 +25,44 @@ def _seed_run(tmp_path, run_id="run-1"):
                 "meet": {"name": "County Champs"},
                 "canonical_meet": {
                     "name": "County Champs",
-                    "swimmers": {"s1": {"first_name": "Alex", "last_name": "Smith"}, "s2": {"first_name": "Jo", "last_name": "Lee"}},
+                    "swimmers": {
+                        "s1": {"first_name": "Alex", "last_name": "Smith"},
+                        "s2": {"first_name": "Jo", "last_name": "Lee"},
+                    },
                     "results": [{"swimmer_key": "s1"}, {"swimmer_key": "s2"}],
                 },
                 "recognition_report": {
                     "meet_name": "County Champs",
                     "n_swims_analysed": 12,
                     "ranked_achievements": [
-                        {"achievement": {"type": "pb_confirmed", "swimmer_name": "Alex Smith", "swimmer_id": "s1", "event": "100m Free", "swim_id": "a1", "raw_facts": {"drop_seconds": 1.4}}},
-                        {"achievement": {"type": "medal_gold", "swimmer_name": "Alex Smith", "swimmer_id": "s1", "event": "100m Free", "swim_id": "a1"}},
-                        {"achievement": {"type": "medal_silver", "swimmer_name": "Jo Lee", "swimmer_id": "s2", "event": "200m Free", "swim_id": "a2"}},
+                        {
+                            "achievement": {
+                                "type": "pb_confirmed",
+                                "swimmer_name": "Alex Smith",
+                                "swimmer_id": "s1",
+                                "event": "100m Free",
+                                "swim_id": "a1",
+                                "raw_facts": {"drop_seconds": 1.4},
+                            }
+                        },
+                        {
+                            "achievement": {
+                                "type": "medal_gold",
+                                "swimmer_name": "Alex Smith",
+                                "swimmer_id": "s1",
+                                "event": "100m Free",
+                                "swim_id": "a1",
+                            }
+                        },
+                        {
+                            "achievement": {
+                                "type": "medal_silver",
+                                "swimmer_name": "Jo Lee",
+                                "swimmer_id": "s2",
+                                "event": "200m Free",
+                                "swim_id": "a2",
+                            }
+                        },
                     ],
                 },
             }
@@ -151,7 +164,11 @@ def test_recommend_with_mocked_ai(app_env, monkeypatch):
     monkeypatch.setattr(
         _llm,
         "generate_json",
-        lambda *a, **k: {"chart_id": "pbs_per_swimmer", "headline": "PBs everywhere", "reason": "broadest story"},
+        lambda *a, **k: {
+            "chart_id": "pbs_per_swimmer",
+            "headline": "PBs everywhere",
+            "reason": "broadest story",
+        },
     )
     with app.test_client() as c:
         r = c.post(f"/api/runs/{rid}/charts/recommend")

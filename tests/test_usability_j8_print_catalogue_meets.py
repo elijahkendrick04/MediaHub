@@ -15,28 +15,18 @@ read differently.
 
 from __future__ import annotations
 
-import importlib
 import json
 import pathlib
 import uuid
 
 import pytest
+from tests._helpers import web_surface_src
 
 
 @pytest.fixture
-def env(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    for sub in ("runs_v4", "uploads_v4", "club_profiles"):
-        (tmp_path / sub).mkdir(parents=True, exist_ok=True)
+def env(client, web_module, tmp_path):
+    wm = web_module
 
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
     from mediahub.web.club_profile import ClubProfile, save_profile
 
     save_profile(ClubProfile(profile_id="org-alpha", display_name="Org Alpha"))
@@ -91,12 +81,9 @@ def env(tmp_path, monkeypatch):
 
     WorkflowStore(tmp_path / "runs_v4").set_status(run_id, "swim-1", CardStatus.APPROVED)
 
-    app = wm.create_app()
-    app.config["TESTING"] = True
-    with app.test_client() as c:
-        r = c.post("/api/organisation/active", data={"profile_id": "org-alpha"})
-        assert r.status_code == 200
-        yield {"client": c, "run_id": run_id, "wm": wm}
+    r = client.post("/api/organisation/active", data={"profile_id": "org-alpha"})
+    assert r.status_code == 200
+    yield {"client": client, "run_id": run_id, "wm": wm}
 
 
 def test_print_catalogue_lists_recent_meets_with_tool_links(env):
@@ -146,7 +133,7 @@ def test_pack_page_print_buttons_read_differently(env):
 # Source-level
 # ---------------------------------------------------------------------------
 
-_SRC = pathlib.Path("src/mediahub/web/web.py").read_text(encoding="utf-8")
+_SRC = web_surface_src()
 
 
 def test_owner_vocabulary_not_run():

@@ -2,33 +2,12 @@
 
 from __future__ import annotations
 
-import importlib
 import json
 from pathlib import Path
 from unittest import mock
 
-import pytest
-
 from mediahub.ai_core.llm import ToolConversation
 from mediahub.creative_brief.generator import CreativeBrief
-
-
-@pytest.fixture
-def app_env(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    for sub in ("runs_v4", "uploads_v4", "club_profiles"):
-        (tmp_path / sub).mkdir(parents=True, exist_ok=True)
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
-    app = wm.create_app()
-    app.config["TESTING"] = True
-    return app, wm, tmp_path
 
 
 def _seed_run(tmp_path: Path, run_id: str = "runA") -> str:
@@ -68,31 +47,27 @@ def _seed_brief(tmp_path: Path, run_id: str, card_id: str = "c1"):
 # ---------------------------------------------------------------------------
 
 
-def test_assistant_unknown_run_404(app_env):
-    app, wm, tmp_path = app_env
+def test_assistant_unknown_run_404(app):
     with app.test_client() as c:
         r = c.post("/api/runs/nope/card/c1/assistant", json={"message": "hi"})
     assert r.status_code == 404
 
 
-def test_assistant_empty_message_400(app_env):
-    app, wm, tmp_path = app_env
+def test_assistant_empty_message_400(app, tmp_path):
     run_id = _seed_run(tmp_path)
     with app.test_client() as c:
         r = c.post(f"/api/runs/{run_id}/card/c1/assistant", json={"message": "   "})
     assert r.status_code == 400 and r.get_json()["error"] == "empty_message"
 
 
-def test_assistant_no_brief_409(app_env):
-    app, wm, tmp_path = app_env
+def test_assistant_no_brief_409(app, tmp_path):
     run_id = _seed_run(tmp_path)  # no brief seeded
     with app.test_client() as c:
         r = c.post(f"/api/runs/{run_id}/card/c1/assistant", json={"message": "make it navy"})
     assert r.status_code == 409 and r.get_json()["error"] == "no_design"
 
 
-def test_assistant_turn_applies_and_persists(app_env):
-    app, wm, tmp_path = app_env
+def test_assistant_turn_applies_and_persists(app, tmp_path):
     run_id = _seed_run(tmp_path)
     _seed_brief(tmp_path, run_id)
 
@@ -113,8 +88,7 @@ def test_assistant_turn_applies_and_persists(app_env):
     assert len(briefs) == 2  # original + edited version
 
 
-def test_assistant_no_provider_is_honest_200(app_env):
-    app, wm, tmp_path = app_env
+def test_assistant_no_provider_is_honest_200(app, tmp_path):
     run_id = _seed_run(tmp_path)
     _seed_brief(tmp_path, run_id)
     from mediahub.ai_core import ProviderNotConfigured
@@ -135,8 +109,7 @@ def test_assistant_no_provider_is_honest_200(app_env):
 # ---------------------------------------------------------------------------
 
 
-def test_suggestions_returns_chips(app_env):
-    app, wm, tmp_path = app_env
+def test_suggestions_returns_chips(app, tmp_path):
     run_id = _seed_run(tmp_path)
     with app.test_client() as c:
         r = c.get(f"/api/runs/{run_id}/card/c1/assistant/suggestions")
@@ -144,8 +117,7 @@ def test_suggestions_returns_chips(app_env):
     assert isinstance(r.get_json()["suggestions"], list) and r.get_json()["suggestions"]
 
 
-def test_memory_remember_list_delete(app_env):
-    app, wm, tmp_path = app_env
+def test_memory_remember_list_delete(app):
     with app.test_client() as c:
         post = c.post("/api/assistant/memory", json={"text": "Never show times for 8-and-unders"})
         assert post.status_code == 200 and post.get_json()["ok"]
@@ -158,19 +130,17 @@ def test_memory_remember_list_delete(app_env):
         assert empty_post.status_code == 400
 
 
-def test_transcribe_honest_error_503(app_env):
-    app, wm, tmp_path = app_env
+def test_transcribe_honest_error_503(app):
     with app.test_client() as c:
         r = c.post("/api/assistant/transcribe", data=b"audio", content_type="audio/webm")
     assert r.status_code == 503 and r.get_json()["error"] == "asr_unavailable"
 
 
-def test_transcribe_empty_audio_is_400_not_500(app_env, monkeypatch):
+def test_transcribe_empty_audio_is_400_not_500(app, monkeypatch):
     """A configured provider with an empty upload is a client condition (400),
     not an unhandled 500. ``transcribe_audio`` raises ``ValueError('audio is
     empty')`` once a provider is set; the route must turn that into an honest
     400 rather than letting it fall through to the global 500 handler."""
-    app, wm, tmp_path = app_env
     monkeypatch.setenv("MEDIAHUB_ASR_PROVIDER", "faster-whisper")
     with app.test_client() as c:
         r = c.post("/api/assistant/transcribe", data=b"", content_type="audio/webm")

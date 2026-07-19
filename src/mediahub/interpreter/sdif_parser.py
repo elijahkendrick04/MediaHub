@@ -225,22 +225,26 @@ def _parse_d0(line: str) -> dict:
     # Date of swim mmddyyyy
     date_swam = _format_date(_safe_str(line, 79, 8))
 
-    # Times: corpus-verified positions.
+    # Times: corpus-verified positions. Seed at 88:96 and finals at 115:123 are
+    # the anchors the corpus verified; the SDIF D0 prelim field sits between them
+    # (spec cols 98-105 → 0-indexed 97:105, after the 1-char seed-course flag).
     seed_time = _parse_sdif_time(line[88:96]) if len(line) > 96 else None
+    prelim_time = _parse_sdif_time(line[97:105]) if len(line) > 105 else None
     finals_time = _parse_sdif_time(line[115:123]) if len(line) > 123 else None
     finals_course_raw = _safe_str(line, 123, 1) if len(line) > 123 else ""
 
     # QA-018: a disqualified swim has its result replaced by a "DQ" marker in
     # the prelim/finals time-code region (the finals field reads "DQ"/"DQS",
-    # not a time). Void the result so the swim bridges to dq=True /
-    # finals_time_cs=None and is excluded from PB / time-drop / medal / barrier /
-    # biggest-drop / possible-PB detection ALIKE — the same single exclusion the
-    # HY3 'Q' code and a PDF 'DQ' row feed (QA-013). Scanning the result region
-    # (well past the swimmer-name and id fields) makes this explicit and robust
-    # to the ±column drift different Hy-Tek versions introduce, and never
-    # false-positives on a name, club, or member id.
+    # not a time). Void BOTH the finals and prelim results so the swim bridges to
+    # dq=True / finals_time_cs=None and is excluded from PB / time-drop / medal /
+    # barrier / biggest-drop / possible-PB detection ALIKE — the same single
+    # exclusion the HY3 'Q' code and a PDF 'DQ' row feed (QA-013). Scanning the
+    # result region (well past the swimmer-name and id fields) makes this
+    # explicit and robust to the ±column drift different Hy-Tek versions
+    # introduce, and never false-positives on a name, club, or member id.
     if "DQ" in line[60:]:
         finals_time = None
+        prelim_time = None
 
     # Place at col 134:140 (6 chars right-justified)
     place: Optional[int] = None
@@ -272,7 +276,7 @@ def _parse_d0(line: str) -> dict:
         "stroke": stroke,
         "course": _SDIF_COURSE.get(finals_course_raw),
         "seed_time": seed_time,
-        "prelim_time": None,
+        "prelim_time": prelim_time,
         "finals_time": finals_time,
         "place": place,
         "date_swam": date_swam,
@@ -338,6 +342,11 @@ def parse_sdif(data: bytes) -> InterpretedMeet:
                 events_by_key[key] = ev
 
             time_value = d0.get("finals_time") or d0.get("prelim_time")
+            # Round provenance: when the only countable time is the prelim (no
+            # finals time), this is a heat/prelim result, not a final — mark it
+            # so the bridge reads it as a heat and it can't surface as a
+            # fabricated medal. A finals time (present) is a final → None (#50).
+            round_hint = "prelim" if (not d0.get("finals_time") and d0.get("prelim_time")) else None
 
             yob: Optional[int] = None
             if d0.get("age") and d0.get("date_swam"):
@@ -370,14 +379,17 @@ def parse_sdif(data: bytes) -> InterpretedMeet:
                 field_confidence=field_conf,
                 asa_id=d0.get("member_id") or None,
                 age=d0.get("age"),
+                round_hint=round_hint,
             )
             ev.swims.append(swim)
 
     events = list(events_by_key.values())
+    # Overall confidence carries no lower floor — a broken parse must read as
+    # broken rather than being clamped up to a misleading >=0.5 (#67).
     if events:
         total_swims = sum(len(e.swims) for e in events) or 1
         overall = sum(e.confidence * (len(e.swims) / total_swims) for e in events if e.swims)
-        overall = round(min(0.99, max(0.5, overall)), 3)
+        overall = round(min(0.99, overall), 3)
     else:
         overall = 0.0
 

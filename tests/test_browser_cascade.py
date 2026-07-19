@@ -27,9 +27,9 @@ Follows the ``tests/test_motion.py`` pattern:
   - opt-out via ``MEDIAHUB_SKIP_BROWSER_TESTS=1``
   - auto-skip if Playwright OR the prebaked Chromium is missing
 """
+
 from __future__ import annotations
 
-import importlib
 import os
 import sys
 from pathlib import Path
@@ -41,10 +41,7 @@ _ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_ROOT))
 
 
-_SKIP_BROWSER = (
-    os.environ.get("MEDIAHUB_SKIP_BROWSER_TESTS", "").lower()
-    in ("1", "true", "yes")
-)
+_SKIP_BROWSER = os.environ.get("MEDIAHUB_SKIP_BROWSER_TESTS", "").lower() in ("1", "true", "yes")
 
 from tests._pw_chromium import resolve_prebaked_chromium
 
@@ -54,6 +51,7 @@ _PINNED_CHROMIUM = resolve_prebaked_chromium()
 def _playwright_available() -> bool:
     try:
         import playwright.sync_api  # noqa: F401
+
         return True
     except ImportError:
         return False
@@ -81,34 +79,23 @@ pytestmark = [
 
 
 @pytest.fixture
-def fresh_app(tmp_path, monkeypatch):
-    """A clean Flask app + isolated DATA_DIR, mirrors the pattern
-    used in tests/test_organisation_finalise.py."""
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR",
-                        str(tmp_path / "club_profiles"))
-    (tmp_path / "runs_v4").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "uploads_v4").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "club_profiles").mkdir(parents=True, exist_ok=True)
+def fresh_app(app, web_module):
+    """A clean Flask app + isolated DATA_DIR via the canonical conftest
+    fixtures (``app`` / ``web_module`` handle the per-test DATA_DIR
+    repointing + module-state reset that the old reload did)."""
     import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
     from mediahub.theming.theme_store import _read_cached
-    importlib.reload(cp)
-    importlib.reload(wm)
+
     _read_cached.cache_clear()
-    app = wm.create_app()
-    app.config["TESTING"] = True
-    return app, wm, cp
+    return app, web_module, cp
 
 
 def _seed_profile(cp_module, *, profile_id, primary_hex):
     """Create + persist a minimal profile that's complete enough
     to render the brand-preview card on /organisation/setup."""
     from mediahub.web.club_profile import ClubProfile
-    prof = ClubProfile(profile_id=profile_id,
-                       display_name=f"Browser Test {profile_id}")
+
+    prof = ClubProfile(profile_id=profile_id, display_name=f"Browser Test {profile_id}")
     prof.brand_primary = primary_hex
     prof.brand_voice_summary = "Energetic, community-first."
     prof.brand_keywords = ["test"]
@@ -125,6 +112,7 @@ def _seed_profile(cp_module, *, profile_id, primary_hex):
 def _launch_browser():
     """Construct a Playwright browser pinned to the bundled chrome."""
     from playwright.sync_api import sync_playwright
+
     pw = sync_playwright().start()
     browser = pw.chromium.launch(
         executable_path=str(_PINNED_CHROMIUM),
@@ -140,8 +128,7 @@ def _read_css_var(page, name: str) -> str:
     Returns the trimmed string; an unset variable returns ''.
     """
     return page.evaluate(
-        f"() => getComputedStyle(document.documentElement)"
-        f".getPropertyValue({name!r}).trim()"
+        f"() => getComputedStyle(document.documentElement)" f".getPropertyValue({name!r}).trim()"
     )
 
 
@@ -177,13 +164,11 @@ class TestCascadeResolvesSeed:
         # that contains the seed-red signature.
         plausible = (
             "a30d2d" in normalised
-            or "rgb(163" in normalised   # 0xA3 == 163
+            or "rgb(163" in normalised  # 0xA3 == 163
             or "rgba(163" in normalised
             or "oklch" in normalised
         )
-        assert plausible, (
-            f"expected brand seed to surface in computed style; got {seed!r}"
-        )
+        assert plausible, f"expected brand seed to surface in computed style; got {seed!r}"
 
     def test_surface_resolves_non_empty(self, fresh_app):
         """--mh-surface is a tier-2 role token, registered via
@@ -227,12 +212,10 @@ class TestNoActiveProfile:
             body = c.get("/status").get_data(as_text=True)
         # Stage J2: the inline override block IS present, carrying
         # the generic-default seed.
-        assert 'id="mh-theme-seed"' in body, (
-            "Stage J2 default-theme override missing on unconfigured page"
-        )
-        assert "#0E2A47" in body, (
-            "expected the generic-default seed (#0E2A47) in the override"
-        )
+        assert (
+            'id="mh-theme-seed"' in body
+        ), "Stage J2 default-theme override missing on unconfigured page"
+        assert "#0E2A47" in body, "expected the generic-default seed (#0E2A47) in the override"
 
         pw, browser = _launch_browser()
         try:
@@ -248,11 +231,7 @@ class TestNoActiveProfile:
         normalised = seed.replace(" ", "").lower()
         # Navy is #0E2A47 → R=14 G=42 B=71. Accept hex, rgb, oklch
         # forms; just look for the signature.
-        plausible = (
-            "0e2a47" in normalised
-            or "rgb(14" in normalised
-            or "oklch" in normalised
-        )
+        plausible = "0e2a47" in normalised or "rgb(14" in normalised or "oklch" in normalised
         assert plausible, f"unexpected default seed: {seed!r}"
 
 
@@ -270,9 +249,13 @@ class TestCascadeOrderIntegrity:
 
         # A sample of the tier-2 roles declared in theme-base.css
         roles = (
-            "--mh-surface", "--mh-on-surface",
-            "--mh-primary", "--mh-on-primary",
-            "--mh-tertiary", "--mh-error", "--mh-success",
+            "--mh-surface",
+            "--mh-on-surface",
+            "--mh-primary",
+            "--mh-on-primary",
+            "--mh-tertiary",
+            "--mh-error",
+            "--mh-success",
         )
 
         pw, browser = _launch_browser()

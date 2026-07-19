@@ -20,7 +20,7 @@ from __future__ import annotations
 PRESETS = {
     "shorter": "Make it shorter and punchier — keep only the essentials.",
     "fuller": "Add a little more warmth and detail, without padding.",
-    "punchier": "Make it more energetic and celebratory.",
+    "punchier": "Tighten it and lead with the strongest concrete beat — the time, the placing, the moment.",
     "calmer": "Make it warmer and more understated.",
     "add_time": "Make sure the swimmer's time is mentioned naturally.",
     "tidy": "Tidy the grammar and flow without changing the meaning.",
@@ -83,16 +83,36 @@ def assist_caption(
     instruction = resolve_instruction(transform, custom)
     if not instruction:
         raise ValueError("no transform instruction supplied")
-    from mediahub.web.ai_caption import generate_caption_for_tone  # noqa: PLC0415
-
-    return generate_caption_for_tone(
-        achievement,
-        club_brand,
-        tone=tone,
-        voice_profile=voice_profile,
-        club_profile=club_profile,
-        requirements=build_requirements(current_caption, instruction),
+    from mediahub.web.ai_caption import (  # noqa: PLC0415
+        _contains_ai_tell,
+        generate_caption_for_tone,
     )
+
+    requirements = build_requirements(current_caption, instruction)
+
+    def _write(req: str) -> str:
+        return generate_caption_for_tone(
+            achievement,
+            club_brand,
+            tone=tone,
+            voice_profile=voice_profile,
+            club_profile=club_profile,
+            requirements=req,
+        )
+
+    revised = _write(requirements)
+    # The assist surface returns one caption straight to the reviewer, so it
+    # bypasses the live route's post-generation AI-tell filter. If the model
+    # slipped a banned cliché in, spend ONE more call to rewrite it out —
+    # bounded, and only paid when a tell is actually present.
+    if revised and _contains_ai_tell(revised):
+        retry = _write(
+            requirements + "\n\nYour previous attempt used a banned filler cliché. Rewrite it "
+            "without any such phrase, keeping every fact exactly."
+        )
+        if retry and not _contains_ai_tell(retry):
+            revised = retry
+    return revised
 
 
 __all__ = [

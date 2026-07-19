@@ -232,25 +232,46 @@ def _design_spec_system_prompt(archetypes: list[str], token_roles: list[str]) ->
         '  "archetype": <one archetype name from the list>,\n'
         '  "colour_roles": {"ground": <role>, "surface": <role>, "headline": <role>, "accent": <role>},\n'
         '  "focal_element": "athlete_cutout|athlete_photo|big_number|medal|logo|none",\n'
-        '  "crop_intent": "tight_portrait|rule_of_thirds_action|centered|full_bleed|original",\n'
+        '  "crop_intent": "smart|tight_portrait|rule_of_thirds_action|centered|full_bleed|original",\n'
         '  "hero_stat": "final_time|pb_delta|placing|relay_split|event|points",\n'
         '  "secondary_stats": [<stat>, ...],\n'
-        '  "headline_hook": <<=80 chars, punchy, no emoji, no cliché ("delve","elevate")>,\n'
+        '  "headline_hook": <<=80 chars, no emoji; ground it in THIS result '
+        "(a name, time, event or placing); avoid generic sports hype "
+        '("what a performance", "on fire", "smashing it") and AI cliché '
+        '("delve","elevate")>,\n'
         '  "accent_treatment": "brackets|stripe|badge|frame|minimal|ribbon|underline|'
         "diagonal_underline|thick_stripe|thin_stripe|double_stripe|side_rail|"
-        'large_brackets|small_brackets|bracket_frame|corner_tabs|offset_badge",\n'
-        '  "photo_treatment": "cutout|duotone|halftone|vignette",\n'
+        "large_brackets|small_brackets|bracket_frame|corner_tabs|offset_badge|"
+        'glass_chip",  # glass_chip = frosted-glass data chips over a photo (photo-led cards)\n'
+        '  "photo_treatment": "cutout|duotone|halftone|vignette|wash|sticker",\n'
         '  "logo_lockup": "full_horizontal|full_stacked|mono_light|mono_dark|icon",\n'
         '  "mood": "explosive|electric|calm|fierce|celebratory|stoic|precise|bold|triumphant|minimal",\n'
         '  "motion_intent": "fade_in|snap_in_then_settle|slide_up|scale_in|kinetic_type|count_up|static|bounce_in|flip_reveal|swirl|reveal_from_sides|cascade|rise|pop|drop_in",\n'
-        '  "text_effects": {"headline|result|kicker|event|meta": "none|shadow|outline|neon|gradient|extrude|curve"} (optional flourish — usually {} ),\n'
+        '  "text_effects": {"headline|result|kicker|event|meta": "none|shadow|lift|hollow|outline|splice|echo|glitch|neon|background|gradient|extrude|warp|curve"} (optional flourish — usually {} ),\n'
+        '  "emphasis_word": <optional: ONE word already present in a slot to two-tone-highlight, else "">,\n'
+        '  "emphasis_style": "accent_ink|accent_pill|heavy",\n'
         '  "rationale": <one sentence: why this composition fits THIS result>\n'
         "}\n\n"
         "colour_roles values must be one of: " + ", ".join(token_roles) + ".\n"
         "text_effects is an optional flourish: leave it {} for most cards, and at "
-        "most add ONE slot (a loud headline neon/outline/gradient, or a curved "
-        "kicker) when the moment is genuinely big. The renderer auto-downgrades any "
-        "effect that would hurt legibility, so never reach for one to force drama.\n"
+        "most add ONE slot when the moment is genuinely big. Craft guide: "
+        "hollow/splice suit the heavy display faces only; background is the "
+        "highlight pill that keeps copy legible over a photo; echo adds speed "
+        "behind a result numeral; lift is the quiet photo-card shadow; glitch/neon "
+        "are loud electric moods; warp/curve are geometry, best on short kickers. "
+        "curve arcs text on a baseline: keep it gentle for a headline, but a large "
+        "curve wraps a SHORT all-caps string (a club name, one word) toward a "
+        "varsity-crest circle — only ever short all-caps, never a long line. "
+        "The renderer auto-downgrades any effect that would hurt legibility, so "
+        "never reach for one to force drama.\n"
+        "emphasis_word is the two-tone headline: name ONE word that already "
+        "appears in your headline_hook (or a slot's text) to lift in the accent "
+        "(accent_ink), behind a highlight pill (accent_pill), or in a heavier cut "
+        '(heavy). Leave it "" for most cards; the renderer only highlights the '
+        "word when it genuinely appears and reads legibly, else it stays plain.\n"
+        "photo_treatment craft: wash unifies mismatched/phone photography into "
+        "one campaign look; sticker gives a cutout the die-cut poster edge "
+        "(cutout archetypes only); duotone is the full two-ink brand grade.\n"
         "Choose the archetype that fits the moment (a medal → spotlight; a standout "
         "time with no photo → big_number or minimal poster; a great photo → "
         "full-bleed or diagonal). Lead with the most newsworthy hero_stat. Pick "
@@ -267,7 +288,11 @@ def _design_spec_system_prompt(archetypes: list[str], token_roles: list[str]) ->
         "photo_treatment is normally cutout (clean). Reach for duotone or "
         "halftone only when an editorial, monochrome grade suits the mood, and "
         "vignette to pull focus onto the athlete — never to disguise a weak "
-        "photo, and never on a card without one."
+        "photo, and never on a card without one.\n"
+        "crop_intent smart hands framing to the smartcrop scorer: it picks the "
+        "zoom, places the subject on a rule-of-thirds line, and punches in on a "
+        "distant subject — a strong default when you want editorial framing but "
+        "have no specific crop in mind."
     )
 
 
@@ -282,7 +307,7 @@ def _photo_context(photo_facts: Optional[dict]) -> str:
     if not isinstance(photo_facts, dict):
         return ""
     if not photo_facts.get("has_photo"):
-        return "PHOTO: none available — pick a type-led composition; " "never a photo-led stage."
+        return "PHOTO: none available — pick a type-led composition; never a photo-led stage."
     bits = []
     asset_type = str(photo_facts.get("asset_type") or "").strip()
     orientation = str(photo_facts.get("orientation") or "").strip()

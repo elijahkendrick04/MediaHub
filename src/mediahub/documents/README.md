@@ -36,7 +36,7 @@ is switched on, the engine says so honestly — it never makes up a report.
 | `import_doc.py` | Opens a **PDF / Word / PowerPoint** file back into editable blocks (bounded fidelity). |
 | `pdf_utils.py` | Everyday PDF tools: merge, reorder/rotate/delete pages, images→PDF, PDF→images. |
 | `deck_video.py` | Turns a deck into an **MP4** slideshow (one slide after another). |
-| `deck.py` + `presenter.py` | The **presenter** mode: speaker notes, a timer, autoplay, and your phone as a slide remote. |
+| `deck.py` + `presenter.py` | The **presenter** mode: speaker notes, a timer, autoplay, blackout, and a full-screen audience view. |
 | `store.py` | Saves each club's documents on disk, kept separate per club. |
 | `README.md` | This file. |
 

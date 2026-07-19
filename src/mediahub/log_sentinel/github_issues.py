@@ -111,9 +111,16 @@ def ensure_label() -> None:
 
 
 def issue_state(number: int) -> Optional[str]:
-    """'open' / 'closed' for an issue number, or None when the API errs."""
+    """'open' / 'closed' for an issue number; 'gone' when it 404s (deleted —
+    the caller should file a fresh issue); None only on a transient error (5xx /
+    transport), which the caller treats as 'retry next window'.
+
+    Distinguishing 404 from a transient error matters: mapping a permanent 404 to
+    None left a deleted escalation issue un-refiled forever."""
     try:
         r = _request("GET", f"/repos/{repo()}/issues/{int(number)}")
+        if r.status_code == 404:
+            return "gone"
         if r.status_code != 200:
             return None
         return str(r.json().get("state") or "") or None

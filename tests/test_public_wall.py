@@ -55,17 +55,7 @@ def _seed_run(runs_dir, run_id, profile_id, *, swimmer="Alice Smith", approved=T
 
 
 @pytest.fixture
-def wall_world(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
-
+def wall_world(app, web_module, tmp_path):
     from mediahub.web.club_profile import ClubProfile, save_profile
 
     save_profile(
@@ -87,9 +77,7 @@ def wall_world(tmp_path, monkeypatch):
 
     _seed_run(tmp_path / "runs_v4", "run-a-1", "org-a")
 
-    app = wm.create_app()
-    app.config["TESTING"] = True
-    conn = wm._db()
+    conn = web_module._db()
     conn.execute(
         "INSERT OR REPLACE INTO runs (id, created_at, status, profile_id, meet_name, file_name) "
         "VALUES (?, datetime('now'), 'done', ?, ?, ?)",
@@ -97,7 +85,7 @@ def wall_world(tmp_path, monkeypatch):
     )
     conn.commit()
     conn.close()
-    return {"app": app, "wm": wm, "tmp": tmp_path}
+    return {"app": app, "wm": web_module, "tmp": tmp_path}
 
 
 # ---- module-level helpers ------------------------------------------------

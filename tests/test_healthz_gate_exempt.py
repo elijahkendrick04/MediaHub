@@ -10,41 +10,22 @@ enforced gate, while a content route (/make) still redirects as a control.
 """
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-
 import pytest
-
-_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(_ROOT))
 
 
 @pytest.fixture
-def isolated_profiles(tmp_path, monkeypatch):
-    """Redirect the profile store + DATA_DIR under tmp_path so the gate
-    sees a clean slate (no active org). The web module is reloaded so its
-    module-level globals re-resolve against the fresh tmp dir."""
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    (tmp_path / "runs_v4").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "uploads_v4").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "club_profiles").mkdir(parents=True, exist_ok=True)
-    import importlib
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-    importlib.reload(cp)
-    importlib.reload(wm)
+def isolated_profiles(tmp_path):
+    """A clean slate (no active org) under tmp_path. DATA_DIR isolation + the
+    one-time web.py import come from the autouse ``_isolate_data_dir`` fixture in
+    conftest.py, which points the web module's globals at this test's tmp dir."""
     yield tmp_path
 
 
 @pytest.fixture
-def gated_client(isolated_profiles):
+def gated_client(isolated_profiles, web_module):
     """Test client with TESTING=True but ENFORCE_ORG_GATE=True so the
     org-setup gate is actually active."""
-    import mediahub.web.web as wm
-    app = wm.create_app()
+    app = web_module.create_app()
     app.config["TESTING"] = True
     app.config["ENFORCE_ORG_GATE"] = True
     with app.test_client() as c:

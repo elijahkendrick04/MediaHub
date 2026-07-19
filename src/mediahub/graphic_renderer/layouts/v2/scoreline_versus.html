@@ -24,7 +24,7 @@
   overflow: hidden;
   background: var(--mh-surface);
   color: var(--mh-on-surface);
-  font-family: 'Inter', system-ui, sans-serif;
+  font-family: var(--mh-font-body, 'Inter', system-ui, sans-serif);
   -webkit-font-smoothing: antialiased;
   display: flex; flex-direction: column;
   padding: 84px 76px;
@@ -32,11 +32,11 @@
 .sv *, .sv *::before, .sv *::after { box-sizing: border-box; }
 
 .sv__top { position: relative; z-index: 2; display: flex; flex-direction: column; gap: 14px; }
-.sv__kicker { display: inline-flex; align-items: center; gap: 14px; font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 700; font-size: 25px; letter-spacing: 0.22em; text-transform: uppercase; color: var(--mh-accent); }
+.sv__kicker { display: inline-flex; align-items: center; gap: 14px; font-family: var(--mh-font-kicker, 'Space Grotesk','Inter',sans-serif); font-weight: 700; font-size: 25px; letter-spacing: 0.22em; text-transform: uppercase; color: var(--mh-accent); }
 .sv__tick { width: 42px; height: 6px; border-radius: 3px; background: var(--mh-accent); }
 .sv__name {
-  font-family: 'Anton','Bebas Neue',Impact,sans-serif; font-weight: 400;
-  font-size: var(--mh-fit-surname-px, 116px); line-height: 0.88; letter-spacing: -0.01em;
+  font-family: var(--mh-font-display, 'Anton','Bebas Neue',Impact,sans-serif); font-weight: 400;
+  font-size: var(--mh-fit-surname-px, 116px); line-height: 0.88; letter-spacing: var(--mh-track-surname, -0.01em);
   text-transform: uppercase; color: var(--mh-on-surface); white-space: nowrap;
 }
 
@@ -48,21 +48,21 @@
 .sv__fence { background: var(--mh-accent); align-self: stretch; }
 .sv__cell { padding: 0 40px; display: flex; flex-direction: column; gap: 14px; }
 .sv__cell--r { text-align: right; align-items: flex-end; }
-.sv__lab { font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 700; font-size: 24px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--mh-on-surface); opacity: 0.7; }
-.sv__event { font-family: 'Anton','Bebas Neue',sans-serif; font-weight: 400; font-size: 70px; line-height: 0.92; text-transform: uppercase; color: var(--mh-on-surface); }
+.sv__lab { font-family: var(--mh-font-kicker, 'Space Grotesk','Inter',sans-serif); font-weight: 700; font-size: 24px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--mh-on-surface); opacity: 0.7; }
+.sv__event { font-family: var(--mh-font-display, 'Anton','Bebas Neue',sans-serif); font-weight: 400; font-size: 70px; line-height: 0.92; text-transform: uppercase; color: var(--mh-on-surface); }
 .sv__result {
   font-family: 'JetBrains Mono','Space Grotesk',monospace; font-feature-settings: "tnum";
   font-weight: 700; font-size: var(--mh-fit-result-px, 92px); font-variation-settings: var(--mh-axes-result, normal); line-height: 0.9; color: var(--mh-accent); white-space: nowrap;
 }
-.sv__stat { font-family: 'Inter',sans-serif; font-weight: 600; font-size: 24px; color: var(--mh-on-surface); opacity: 0.8; }
+.sv__stat { font-family: var(--mh-font-body, 'Inter',sans-serif); font-weight: 600; font-size: 24px; color: var(--mh-on-surface); opacity: 0.8; }
 
-.sv__foot { position: relative; z-index: 2; display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; border-top: 2px solid var(--mh-outline); padding-top: 26px; }
-.sv__brand { display: flex; align-items: center; gap: 16px; }
+.sv__foot { position: relative; z-index: 2; display: flex; align-items: flex-end; justify-content: space-between; gap: var(--mh-sp-5); border-top: 2px solid var(--mh-outline); padding-top: 26px; }
+.sv__brand { display: flex; align-items: center; gap: var(--mh-sp-4); }
 .sv__logo { height: 58px; width: auto; }
 .sv__logo img, .sv__logo svg { height: 100%; width: auto; object-fit: contain; display: block; }
 .sv__brand-text { display: flex; flex-direction: column; line-height: 1.16; }
-.sv__club { font-family: 'Inter',sans-serif; font-weight: 800; font-size: 23px; text-transform: uppercase; color: var(--mh-on-surface); }
-.sv__meet { font-family: 'Inter',sans-serif; font-weight: 500; font-size: 18px; color: var(--mh-on-surface); opacity: 0.72; margin-top: 4px; }
+.sv__club { font-family: var(--mh-font-body, 'Inter',sans-serif); font-weight: 800; font-size: 23px; text-transform: uppercase; color: var(--mh-on-surface); }
+.sv__meet { font-family: var(--mh-font-body, 'Inter',sans-serif); font-weight: 500; font-size: 18px; color: var(--mh-on-surface); opacity: 0.72; margin-top: var(--mh-sp-1); }
 .sv__sponsor { flex: 0 0 auto; }
 </style>
 </head>

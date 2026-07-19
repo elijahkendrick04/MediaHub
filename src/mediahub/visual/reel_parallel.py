@@ -249,14 +249,12 @@ def _run_node_segments(
         "--concurrency",
         str(int(concurrency)),
     ]
+    from mediahub.visual.proc import run_capture
+
     try:
-        proc = subprocess.run(
-            cmd,
-            cwd=str(REMOTION_DIR),
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-        )
+        # Kill the whole process group on timeout so the segment's Chromium
+        # children die with node instead of leaking (see visual/proc.py).
+        proc = run_capture(cmd, cwd=str(REMOTION_DIR), timeout=timeout)
     except subprocess.TimeoutExpired as e:
         raise RuntimeError(f"segment render timed out after {timeout}s") from e
     if proc.returncode != 0:

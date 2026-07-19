@@ -2,8 +2,8 @@
 
 These `.woff2` files are the **poster typefaces** used by the static graphic
 renderer (Playwright HTML→PNG) for the cards/reels MediaHub actually posts —
-Bebas Neue, Anton, Bowlby One, Space Grotesk, Inter, JetBrains Mono. They are
-served **first-party** (no Google Fonts CDN).
+Bebas Neue, Anton, Bowlby One, Playfair Display, Space Grotesk, Inter,
+JetBrains Mono. They are served **first-party** (no Google Fonts CDN).
 
 The Council added this on 2026-05-31 (audit round of the typography change): the
 web UI had already moved off the CDN, but the *rendered graphic* — the product's
@@ -29,6 +29,7 @@ holds every weight continuously, declared in `../_shared.css` over an axis range
 | `inter.woff2` | `wght` 100–900 + `opsz` 14–32 (optical size) |
 | `space-grotesk.woff2` | `wght` 300–700 |
 | `jetbrains-mono.woff2` | `wght` 100–800 |
+| `playfair-display.woff2` | `wght` 400–900 (D5 — the serif display register) |
 
 This lets the renderer instance any weight continuously (the autofit axis
 optimiser, `graphic_renderer.autofit.optimise_axes`, can ask for `'wght' 612`)
@@ -67,7 +68,7 @@ operator installs a Han face (see `localize/scripts.py`).
 ## Regenerate
 
 ```bash
-python scripts/fetch_renderer_fonts.py    # the six Latin brand families
+python scripts/fetch_renderer_fonts.py    # the seven Latin brand families
 python scripts/fetch_script_fonts.py      # the non-Latin Noto faces (1.24)
 ```
 

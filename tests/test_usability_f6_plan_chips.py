@@ -8,7 +8,6 @@ none defined on the page. These are now plain language.
 
 from __future__ import annotations
 
-import importlib
 import json
 
 import pytest
@@ -17,16 +16,7 @@ ORG = "club-a"
 
 
 @pytest.fixture
-def client(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    (tmp_path / "club_profiles").mkdir(parents=True, exist_ok=True)
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
+def client(app, tmp_path):
     from mediahub.web.club_profile import ClubProfile, save_profile
 
     save_profile(ClubProfile(profile_id=ORG, display_name="Club A"))
@@ -66,8 +56,6 @@ def client(tmp_path, monkeypatch):
     }
     (d / "latest.json").write_text(json.dumps(plan))
 
-    app = wm.create_app()
-    app.config.update(TESTING=True, SECRET_KEY="x")
     c = app.test_client()
     with c.session_transaction() as s:
         s["active_profile_id"] = ORG

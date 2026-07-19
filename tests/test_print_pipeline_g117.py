@@ -10,9 +10,7 @@ convention as tests/test_print_export.py / tests/test_v8_graphic_renderer.py).
 
 from __future__ import annotations
 
-import importlib
 import json
-import sys
 import uuid
 from pathlib import Path
 
@@ -82,7 +80,9 @@ def _poster_html(**overrides) -> str:
         title="The Weekend in Numbers",
         meet_name="Welsh Winter Open 2026",
         stat_lines=[("PBs", "14"), ("Medals", "6")],
-        highlight_rows=[{"swimmer": "Swimmer 1", "event": "50m Free", "time": "29.9", "note": "PB"}],
+        highlight_rows=[
+            {"swimmer": "Swimmer 1", "event": "50m Free", "time": "29.9", "note": "PB"}
+        ],
         club_name="Test Swim Club",
         brand=BRAND,
     )
@@ -258,7 +258,7 @@ class TestFurnitureSvg:
         assert "#0E5BFF" in svg  # brand primary swatch
 
     def test_info_label_is_escaped(self):
-        svg = print_furniture_svg(geometry_for("A4"), info_label='<script>x</script>')
+        svg = print_furniture_svg(geometry_for("A4"), info_label="<script>x</script>")
         assert "<script>" not in svg and "&lt;script&gt;" in svg
 
     def test_deterministic(self):
@@ -515,20 +515,7 @@ def _run_payload(run_id: str, profile_id: str) -> dict:
 
 
 @pytest.fixture
-def web_env(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    for sub in ("runs_v4", "uploads_v4", "club_profiles"):
-        (tmp_path / sub).mkdir(parents=True, exist_ok=True)
-
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
+def web_env(web_module, client):
     from mediahub.web.club_profile import ClubProfile, save_profile
 
     save_profile(
@@ -543,8 +530,10 @@ def web_env(tmp_path, monkeypatch):
     save_profile(ClubProfile(profile_id="org-beta", display_name="Org Beta"))
 
     run_id = "run-g117-" + uuid.uuid4().hex[:8]
-    (tmp_path / "runs_v4" / f"{run_id}.json").write_text(json.dumps(_run_payload(run_id, "org-alpha")))
-    conn = wm._db()
+    (web_module.RUNS_DIR / f"{run_id}.json").write_text(
+        json.dumps(_run_payload(run_id, "org-alpha"))
+    )
+    conn = web_module._db()
     conn.execute(
         "INSERT OR REPLACE INTO runs (id, created_at, status, profile_id, meet_name, file_name)"
         " VALUES (?, datetime('now'), 'done', ?, ?, ?)",
@@ -553,10 +542,7 @@ def web_env(tmp_path, monkeypatch):
     conn.commit()
     conn.close()
 
-    app = wm.create_app()
-    app.config["TESTING"] = True
-    with app.test_client() as c:
-        yield {"client": c, "run_id": run_id}
+    return {"client": client, "run_id": run_id}
 
 
 def _pin(client, profile_id):

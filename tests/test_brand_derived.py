@@ -18,6 +18,7 @@ reads via the lookup helpers. This file pins:
      weights / type phrases / artefact intents at the consumer
      boundaries (ai_caption, narrate, turn_into).
 """
+
 from __future__ import annotations
 
 import sys
@@ -37,6 +38,7 @@ from mediahub.web.club_profile import ClubProfile  # noqa: E402
 # 1. Derivation produces well-shaped output
 # ---------------------------------------------------------------------------
 
+
 class TestDerivation:
     def test_empty_profile_returns_no_context(self):
         out = bd.derive_operating_profile(ClubProfile(profile_id="x", display_name=""))
@@ -47,20 +49,20 @@ class TestDerivation:
         mock_out = {
             "tone_prose": {
                 "warm-club": "Like a club volunteer talking to parents at the side of the pool.",
-                "data-led":  "Numbers-first, sponsor-friendly, no fluff.",
+                "data-led": "Numbers-first, sponsor-friendly, no fluff.",
                 "invalid_tone": "should be dropped",
             },
             "achievement_priorities": {
                 "pb_confirmed": 1.7,
                 "medal_gold": 0.8,
                 "_default": 1.0,
-                "made_up_type": 9.9,   # not in CANONICAL_ACHIEVEMENT_TYPES — drop
+                "made_up_type": 9.9,  # not in CANONICAL_ACHIEVEMENT_TYPES — drop
                 "first_sub_barrier": 99.0,  # out-of-band — clamp to 2.0
             },
             "type_phrases": {
                 "pb_confirmed": "a brand-new personal best",
-                "medal_gold":   "a gold medal swim",
-                "garbage":      "drop me",
+                "medal_gold": "a gold medal swim",
+                "garbage": "drop me",
             },
             "artefact_voice": {
                 "meet_recap": "Lead with the youngest swimmer's breakthrough.",
@@ -71,7 +73,8 @@ class TestDerivation:
         monkeypatch.setattr(bd, "_call_llm", lambda ctx: mock_out)
 
         p = ClubProfile(
-            profile_id="x", display_name="City Aquatics",
+            profile_id="x",
+            display_name="City Aquatics",
             brand_voice_summary="Inclusive community club.",
         )
         out = bd.derive_operating_profile(p)
@@ -99,9 +102,11 @@ class TestDerivation:
         lookups then fall back to the canonical product defaults."""
         from mediahub.media_ai.llm import ClaudeUnavailableError
         import pytest
+
         monkeypatch.setattr(bd, "_call_llm", lambda ctx: None)
         p = ClubProfile(
-            profile_id="x", display_name="City",
+            profile_id="x",
+            display_name="City",
             brand_voice_summary="Warm club.",
         )
         with pytest.raises(ClaudeUnavailableError):
@@ -113,14 +118,20 @@ class TestDerivation:
         labelled as derived output."""
         from mediahub.media_ai.llm import ClaudeUnavailableError
         import pytest
-        monkeypatch.setattr(bd, "_call_llm", lambda ctx: {
-            "tone_prose": "not a dict",
-            "achievement_priorities": [],
-            "type_phrases": None,
-            "artefact_voice": "neither",
-        })
+
+        monkeypatch.setattr(
+            bd,
+            "_call_llm",
+            lambda ctx: {
+                "tone_prose": "not a dict",
+                "achievement_priorities": [],
+                "type_phrases": None,
+                "artefact_voice": "neither",
+            },
+        )
         p = ClubProfile(
-            profile_id="x", display_name="X",
+            profile_id="x",
+            display_name="X",
             brand_voice_summary="something",
         )
         with pytest.raises(ClaudeUnavailableError):
@@ -131,6 +142,7 @@ class TestDerivation:
 # 2. Lookup helpers
 # ---------------------------------------------------------------------------
 
+
 class TestLookupHelpers:
     def test_tone_descriptor_falls_back_when_no_cache(self):
         p = ClubProfile(profile_id="x", display_name="X")
@@ -138,7 +150,8 @@ class TestLookupHelpers:
 
     def test_tone_descriptor_uses_cache_when_present(self):
         p = ClubProfile(
-            profile_id="x", display_name="X",
+            profile_id="x",
+            display_name="X",
             brand_operating_profile={
                 "tone_prose": {"warm-club": "Org-specific warm prose."},
             },
@@ -153,7 +166,8 @@ class TestLookupHelpers:
 
     def test_priority_uses_derived_specific(self):
         p = ClubProfile(
-            profile_id="x", display_name="X",
+            profile_id="x",
+            display_name="X",
             brand_operating_profile={
                 "achievement_priorities": {"pb_confirmed": 1.8, "_default": 1.1},
             },
@@ -164,7 +178,8 @@ class TestLookupHelpers:
 
     def test_priority_caller_default_when_no_derived_default(self):
         p = ClubProfile(
-            profile_id="x", display_name="X",
+            profile_id="x",
+            display_name="X",
             brand_operating_profile={
                 "achievement_priorities": {"pb_confirmed": 1.8},
             },
@@ -174,7 +189,8 @@ class TestLookupHelpers:
 
     def test_type_phrase_overrides_default(self):
         p = ClubProfile(
-            profile_id="x", display_name="X",
+            profile_id="x",
+            display_name="X",
             brand_operating_profile={
                 "type_phrases": {"pb_confirmed": "a brand-new PB"},
             },
@@ -184,7 +200,8 @@ class TestLookupHelpers:
 
     def test_artefact_intent_overrides_default(self):
         p = ClubProfile(
-            profile_id="x", display_name="X",
+            profile_id="x",
+            display_name="X",
             brand_operating_profile={
                 "artefact_voice": {"meet_recap": "Lead with the volunteers."},
             },
@@ -195,13 +212,20 @@ class TestLookupHelpers:
     def test_helpers_accept_none_and_dict(self):
         assert bd.tone_descriptor_for(None, "warm-club", "X") == "X"
         assert bd.priority_for(None, "pb_confirmed", 1.2) == 1.2
-        assert bd.type_phrase_for({"brand_operating_profile": {"type_phrases": {"pb_confirmed": "Y"}}},
-                                  "pb_confirmed", "X") == "Y"
+        assert (
+            bd.type_phrase_for(
+                {"brand_operating_profile": {"type_phrases": {"pb_confirmed": "Y"}}},
+                "pb_confirmed",
+                "X",
+            )
+            == "Y"
+        )
 
 
 # ---------------------------------------------------------------------------
 # 3. Resolution at consumer boundaries
 # ---------------------------------------------------------------------------
+
 
 class TestConsumerWiring:
     """The derived cache must reach every consumer the audit named:
@@ -210,14 +234,16 @@ class TestConsumerWiring:
 
     def _profile_with_overrides(self) -> ClubProfile:
         return ClubProfile(
-            profile_id="x", display_name="Test Org",
+            profile_id="x",
+            display_name="Test Org",
             achievement_priorities={"pb_confirmed": 1.5, "_default": 1.0},
             brand_operating_profile={
                 "tone_prose": {
                     "warm-club": "ORG-SPECIFIC-TONE-PROSE",
                 },
                 "achievement_priorities": {
-                    "pb_confirmed": 1.9, "_default": 1.1,
+                    "pb_confirmed": 1.9,
+                    "_default": 1.1,
                 },
                 "type_phrases": {
                     "pb_confirmed": "ORG-SPECIFIC-PHRASE",
@@ -230,11 +256,13 @@ class TestConsumerWiring:
 
     def test_ai_caption_tone_descriptor_uses_derived(self):
         from mediahub.web.ai_caption import _resolve_tone_descriptor
+
         p = self._profile_with_overrides()
         assert _resolve_tone_descriptor(p, "warm-club") == "ORG-SPECIFIC-TONE-PROSE"
 
     def test_ai_caption_falls_back_to_default_when_no_cache(self):
         from mediahub.web.ai_caption import _resolve_tone_descriptor, _TONE_DESCRIPTORS
+
         p = ClubProfile(profile_id="x", display_name="X")
         assert _resolve_tone_descriptor(p, "warm-club") == _TONE_DESCRIPTORS["warm-club"]
 
@@ -247,13 +275,15 @@ class TestConsumerWiring:
 
     def test_club_profile_priority_legacy_when_no_derived(self):
         p = ClubProfile(
-            profile_id="x", display_name="X",
+            profile_id="x",
+            display_name="X",
             achievement_priorities={"pb_confirmed": 1.5},
         )
         assert p.get_achievement_priority("pb_confirmed") == 1.5
 
     def test_narrate_uses_derived_phrase(self):
         from mediahub.ai_core.narrate import narrate_achievement
+
         p = self._profile_with_overrides()
         a = {
             "type": "pb_confirmed",
@@ -270,23 +300,30 @@ class TestConsumerWiring:
         """Threading: _gen_caption resolves the artefact intent via the
         profile-derived helper before handing it to the caption LLM."""
         from mediahub.turn_into import templates as ti
+
         # Stub the caption call so we can inspect the enriched payload.
         captured = {}
-        def fake_caption(payload, club_brand, tone=None, club_profile=None,
-                         brief_prose=None, **_kw):
+
+        def fake_caption(
+            payload, club_brand, tone=None, club_profile=None, brief_prose=None, **_kw
+        ):
             captured["payload"] = payload
             captured["club_profile"] = club_profile
             captured["brief_prose"] = brief_prose
             return "stubbed"
+
         monkeypatch.setattr(
             "mediahub.web.ai_caption.generate_caption_for_tone",
             fake_caption,
         )
         p = self._profile_with_overrides()
         out = ti._gen_caption(
-            {"kind": "meet_recap"}, {},
-            tone="warm-club", intent_key="meet_recap",
-            deterministic=False, fallback_text="fb",
+            {"kind": "meet_recap"},
+            {},
+            tone="warm-club",
+            intent_key="meet_recap",
+            deterministic=False,
+            fallback_text="fb",
             profile=p,
         )
         assert out == "stubbed"
@@ -301,26 +338,16 @@ class TestConsumerWiring:
 # 4. End-to-end save path triggers derivation
 # ---------------------------------------------------------------------------
 
+
 class TestSavePathTriggersDerivation:
     def test_setup_capture_writes_operating_profile(
-        self, tmp_path, monkeypatch,
+        self,
+        app,
+        monkeypatch,
     ):
-        monkeypatch.setenv("DATA_DIR", str(tmp_path))
-        monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-        monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-        monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-        (tmp_path / "runs_v4").mkdir(parents=True, exist_ok=True)
-        (tmp_path / "uploads_v4").mkdir(parents=True, exist_ok=True)
-        (tmp_path / "club_profiles").mkdir(parents=True, exist_ok=True)
-
-        import importlib
-        import mediahub.web.club_profile as cp
-        import mediahub.web.web as wm
-        importlib.reload(cp)
-        importlib.reload(wm)
-
         # Stub the social-DNA so it returns a brand context worth deriving from
         from mediahub.brand import social_dna
+
         monkeypatch.setattr(
             social_dna,
             "capture_from_socials",
@@ -342,6 +369,7 @@ class TestSavePathTriggersDerivation:
         )
         # Stub the derivation LLM call
         from mediahub.brand import derived as bd_mod
+
         monkeypatch.setattr(
             bd_mod,
             "_call_llm",
@@ -353,18 +381,20 @@ class TestSavePathTriggersDerivation:
             },
         )
 
-        app = wm.create_app()
-        app.config["TESTING"] = True
         app.config["ENFORCE_ORG_GATE"] = True
         c = app.test_client()
 
-        resp = c.post("/organisation/setup/capture", data={
-            "display_name": "Derive Club",
-            "website_url": "https://derive.example",
-        })
+        resp = c.post(
+            "/organisation/setup/capture",
+            data={
+                "display_name": "Derive Club",
+                "website_url": "https://derive.example",
+            },
+        )
         assert resp.status_code in (301, 302, 303, 307, 308)
 
         from mediahub.web.club_profile import list_profiles
+
         profs = [p for p in list_profiles() if p.display_name == "Derive Club"]
         assert len(profs) == 1
         op = profs[0].brand_operating_profile

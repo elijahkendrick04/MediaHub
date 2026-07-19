@@ -34,6 +34,11 @@ import sys
 from pathlib import Path
 from typing import Optional
 
+from mediahub.ai_core.prompt_guard import (
+    CAPTION_AI_TELL_INSTRUCTION,
+    CAPTION_CONCRETE_FACT_RULE,
+    CAPTION_SHARED_TONE_BANS,
+)
 from mediahub.web.languages import (
     caption_language_instruction,
     get_language,
@@ -109,6 +114,10 @@ KNOWN_AI_TONES: frozenset[str] = frozenset(_TONE_DESCRIPTORS.keys())
 
 AI_TELL_BAN_LIST: frozenset[str] = frozenset(
     {
+        # Overworked AI verbs / nouns. These are vanishingly rare in a
+        # genuine, specific swim caption written by a human, so dropping a
+        # candidate that uses one costs nothing and removes an obvious
+        # "written by a bot" tell.
         "delve",
         "delves",
         "delving",
@@ -116,16 +125,42 @@ AI_TELL_BAN_LIST: frozenset[str] = frozenset(
         "elevates",
         "elevated",
         "elevating",
+        "unleash",
+        "unleashed",
+        "unleashing",
+        "underscore",
+        "underscores",
+        "underscoring",
+        "boasts",
+        "myriad",
+        "plethora",
+        # Filler phrases that pad a caption without adding a fact.
         "in the world of",
+        "in the realm of",
+        "testament to",
+        "a testament",
+        "when it comes to",
+        "at the end of the day",
+        "needless to say",
+        "it's worth noting",
+        "it is worth noting",
+        "goes to show",
+        "speaks volumes",
+        "the epitome of",
+        "second to none",
+        "a shining example",
+        "look no further",
+        "leave no stone unturned",
+        "nothing short of",
+        "a force to be reckoned with",
+        "when all is said and done",
     }
 )
 
-_AI_TELL_SYSTEM_INSTRUCTION: str = (
-    "Never use these overworked AI phrases: "
-    '"delve", "elevate", "in the world of". '
-    "Avoid reflexive exclamation marks — use '!' only when the moment "
-    "genuinely warrants it, not as empty emphasis."
-)
+# Canonical anti-slop guidance now lives in ai_core.prompt_guard so every
+# caption surface shares one source of truth (see that module). Aliased to the
+# existing private names to keep this file's call sites unchanged.
+_AI_TELL_SYSTEM_INSTRUCTION: str = CAPTION_AI_TELL_INSTRUCTION
 
 
 _COURSE_SUFFIX_RE = re.compile(r"\s*\(\s*(SC|LC)\s*\)\s*$", re.IGNORECASE)
@@ -138,9 +173,7 @@ _NO_COURSE_ABBREV_INSTRUCTION: str = (
     "omit it."
 )
 
-_SHARED_TONE_BANS: str = (
-    'Do not open with "Another …" or "What a …"; never use the phrase "testament to".'
-)
+_SHARED_TONE_BANS: str = CAPTION_SHARED_TONE_BANS
 
 
 def _strip_course_suffix(event: str) -> str:
@@ -233,6 +266,58 @@ def _contains_ai_tell(text: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Source-fact grounding check
+# ---------------------------------------------------------------------------
+#
+# Recipe #232 of docs/research/generation-engine-competitor-evaluation.md: a
+# final "does this caption contain a specific fact from the source data?"
+# check. A caption that names no concrete detail — no swimmer, no event, no
+# time, no placing — is generic filler ("What a night for the whole club!"),
+# the exact failure mode the review UI is meant to catch. This is a pure
+# deterministic *detector* (it validates generated text, it never writes it),
+# so it sits on the maths side of the AI/maths split alongside the AI-tell and
+# near-duplicate checks.
+
+
+def _caption_grounding_facts(achievement: Optional[dict]) -> list[str]:
+    """Return the lower-cased concrete facts a grounded caption should mention.
+
+    Pulls the swimmer's name parts, the recorded time, and the distinctive
+    tokens of the event (distance + stroke) from the source achievement. Empty
+    when the source carries no concrete fact (e.g. an aggregate meet-recap
+    payload) — grounding then no-ops rather than penalising legitimately
+    fact-light copy.
+    """
+    if not isinstance(achievement, dict):
+        return []
+    facts: set[str] = set()
+    name = str(achievement.get("swimmer_name") or "")
+    for part in re.split(r"[^\w']+", name):
+        if len(part) >= 3:
+            facts.add(part.lower())
+    time = str(achievement.get("time") or "").strip().lower()
+    if time:
+        facts.add(time)
+    event = _strip_course_suffix(str(achievement.get("event") or "")).lower()
+    for tok in re.split(r"[^\w]+", event):
+        # A token grounds the caption if it carries the distance ("100m") or is
+        # a stroke word ("freestyle"); 1–2 char tokens ("m", "im") are too
+        # ambiguous to match on.
+        if tok and (any(c.isdigit() for c in tok) or len(tok) >= 3):
+            facts.add(tok)
+    return [f for f in facts if f]
+
+
+def _is_grounded(caption: str, facts: list[str]) -> bool:
+    """True if the caption mentions at least one source fact, or there are no
+    facts to check against (grounding is skipped, never fail-closed)."""
+    if not facts:
+        return True
+    low = caption.lower()
+    return any(f in low for f in facts)
+
+
+# ---------------------------------------------------------------------------
 # N-gram similarity helpers (no external deps)
 # ---------------------------------------------------------------------------
 
@@ -266,6 +351,7 @@ def filter_caption_variants(
     recent_captions: Optional[list[str]] = None,
     *,
     dedupe_threshold: float = 0.55,
+    achievement: Optional[dict] = None,
 ) -> list[str]:
     """Shared post-filter for multi-variant caption surfaces.
 
@@ -274,18 +360,24 @@ def filter_caption_variants(
     contain ban-list AI-tells — the same quality gates
     :func:`generate_caption_candidates` applies during generation, packaged
     for callers that already hold a produced list (the live caption route's
-    variants). Fail-open: if filtering would empty a non-empty input, the
-    first original variant is returned — a slightly stale caption beats none.
+    variants). When ``achievement`` is supplied and carries concrete facts,
+    ungrounded candidates (those naming no swimmer/event/time from the source)
+    are also dropped, so a grounded sibling is preferred over generic filler.
+    Fail-open: if filtering would empty a non-empty input, the first original
+    variant is returned — a slightly stale caption beats none.
     """
     cleaned = [v.strip() for v in (variants or []) if v and v.strip()]
     if not cleaned:
         return []
     recents = [r for r in (recent_captions or []) if r and r.strip()]
+    facts = _caption_grounding_facts(achievement)
     kept: list[str] = []
     for v in cleaned:
         if v in kept:
             continue
         if _contains_ai_tell(v):
+            continue
+        if not _is_grounded(v, facts):
             continue
         if _is_near_duplicate(v, recents + kept, threshold=dedupe_threshold):
             continue
@@ -297,25 +389,31 @@ def filter_caption_variants(
 # Platform format specifications for generate_platform_variants
 # ---------------------------------------------------------------------------
 
+# Structural, not vibe-based: these are platform product rules (length,
+# hashtag conventions, where to open) — not "punchy/snappy/emoji welcome"
+# hype cues that produce interchangeable copy. Emoji is left to the club's
+# learned voice (injected separately), not forced on by platform.
 _PLATFORM_SPECS: dict[str, dict] = {
     "feed": {
         "label": "Instagram/Facebook feed",
         "max_chars": 280,
         "guidance": (
-            "casual and warm, emoji welcome, 1–3 hashtags, reads naturally in a feed scroll"
+            "warm and natural; open on the swimmer or the result, not a "
+            "generic hook; up to 3 hashtags; reads naturally in a scroll"
         ),
     },
     "story": {
         "label": "Instagram/TikTok story",
         "max_chars": 100,
         "guidance": (
-            "punchy single sentence, no hashtags, fits on a visual card, immediate impact"
+            "one sentence; lead with the swimmer or the number; no hashtags; "
+            "fits on a visual card"
         ),
     },
     "x": {
         "label": "X (Twitter)",
         "max_chars": 280,
-        "guidance": "snappy, 1–2 hashtags only, link-friendly, punchy opener",
+        "guidance": "open on the concrete result; 1–2 hashtags only; link-friendly",
     },
     "linkedin": {
         "label": "LinkedIn",
@@ -588,6 +686,8 @@ def _compose_caption_prompt(
         _AI_TELL_SYSTEM_INSTRUCTION,
         _NO_COURSE_ABBREV_INSTRUCTION,
         _SHARED_TONE_BANS,
+        # Every tone must stand on a real fact, not just the "ai" default.
+        CAPTION_CONCRETE_FACT_RULE,
         # Force genuine variety. The model has a strong attractor toward
         # the same opener / same closer wording on identical inputs;
         # this instruction nudges it off the attractor.
@@ -1023,6 +1123,7 @@ def generate_platform_variants(
             "no markdown.",
             _AI_TELL_SYSTEM_INSTRUCTION,
             _NO_COURSE_ABBREV_INSTRUCTION,
+            _SHARED_TONE_BANS,
         ]
         if language_line:
             system_parts.append(language_line)

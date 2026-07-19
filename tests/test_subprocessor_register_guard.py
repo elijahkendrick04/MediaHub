@@ -15,6 +15,7 @@ import re
 from pathlib import Path
 
 from mediahub.web import legal
+from tests._helpers import web_surface_src
 
 SRC_ROOT = Path(__file__).resolve().parents[1] / "src" / "mediahub"
 ENV_EXAMPLE = Path(__file__).resolve().parents[1] / ".env.example"
@@ -108,9 +109,12 @@ def test_public_subprocessors_page_renders_from_the_register():
         assert sub.name in public
         assert sub.transfer_mechanism, f"{sub.name} needs a recorded transfer mechanism"
         assert sub.engaged_when, f"{sub.name} needs a recorded engaged-when note"
-    web_src = (SRC_ROOT / "web" / "web.py").read_text(encoding="utf-8")
+    # The subprocessors page lives on the carved web surface (routes_site.py
+    # since the #15 carve) — scan the whole surface, which also strengthens the
+    # no-parallel-list guard to every routes_*.py module.
+    web_src = web_surface_src()
     assert "_SUBPROCESSORS_PUBLIC" not in web_src, (
-        "web.py grew a parallel subprocessor list — render from "
+        "the web surface grew a parallel subprocessor list — render from "
         "legal.SUBPROCESSORS instead (PC.11)"
     )
     assert "subprocessor_public_rows_html" in web_src

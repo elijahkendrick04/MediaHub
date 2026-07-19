@@ -42,8 +42,10 @@ def client(tmp_path, monkeypatch):
         yield c
 
 
-def _home(client) -> str:
-    resp = client.get("/")
+def _about(client) -> str:
+    # The engine bento showcase (mh-ch-engine), pipeline band, and audience
+    # section moved off the brief signed-out home onto the public /about tour.
+    resp = client.get("/about")
     assert resp.status_code == 200, resp.status_code
     return resp.get_data(as_text=True)
 
@@ -113,13 +115,13 @@ class TestSampleGenerator:
 # --------------------------------------------------------------------------- #
 class TestHomeShowcase:
     def test_section_and_heading(self, client):
-        body = _home(client)
+        body = _about(client)
         assert 'id="mh-ch-engine"' in body
         assert "What the engine does" in body
         assert "A results sheet in." in body
 
     def test_six_tiles_with_one_feature(self, client):
-        body = _home(client)
+        body = _about(client)
         assert "mh-bento mh-reveal-group" in body
         assert 'class="mh-bento-tile feature' in body
         assert body.count('class="mh-bento-tile') == 6
@@ -127,7 +129,7 @@ class TestHomeShowcase:
     def test_every_tile_frames_an_inline_svg_render(self, client):
         # Each showcase tile carries a real inline SVG output (role="img"),
         # not a text description.
-        body = _home(client)
+        body = _about(client)
         section = body[body.find('id="mh-ch-engine"'):body.find('id="mh-ch-audience"')]
         assert section.count("<svg") == 6, section.count("<svg")
         assert "mh-bento-caption" in section
@@ -137,13 +139,13 @@ class TestHomeShowcase:
             assert dead not in body, f"stale bento text artefact left: {dead!r}"
 
     def test_showcase_outputs_are_labelled(self, client):
-        body = _home(client)
+        body = _about(client)
         for needle in ("MEET-DAY", "TOP THREE", "DETECTED &amp; RANKED",
                        "YOUR BRAND", "WE DETECT"):
             assert needle in body, f"showcase missing output {needle!r}"
 
     def test_sits_after_the_input_output_band(self, client):
-        body = _home(client)
+        body = _about(client)
         i_hero = body.find('class="mh-hero"')
         i_band = body.find('class="mh-pipeline"')
         i_engine = body.find('class="mh-bento')
@@ -151,9 +153,37 @@ class TestHomeShowcase:
 
     def test_no_remote_image_sources(self, client):
         # The inline SVGs add no <img>; the page stays same-origin only.
-        body = _home(client)
+        body = _about(client)
         for src in re.findall(r'<img[^>]*\bsrc="([^"]+)"', body):
             assert not src.startswith("http://") and not src.startswith("https://"), src
+
+    def test_demo_meet_moment_count_consistent_across_sections(self, client):
+        # The "See it in action" carousel (_hero_product_demo) and the
+        # "Detected & ranked" bento tile (sample_graphics.detected_ranked_svg)
+        # both narrate the SAME fixed demo file ("42 swims read"). If they
+        # disagree on how many moments that file produced, a volunteer reading
+        # the page gets two different answers to "how much content will I get
+        # from my results file?" in the same scroll.
+        body = _about(client)
+        carousel = re.search(r"(\d+) swims read.{0,20}?(\d+) moments ranked", body)
+        assert carousel, "carousel demo meter text not found on the about page"
+        carousel_swims, carousel_moments = int(carousel.group(1)), int(carousel.group(2))
+
+        bento = re.search(
+            r'font-size="68"[^>]*>(\d+)</text>.*?FROM (\d+) SWIMS READ', body, re.S
+        )
+        assert bento, "bento 'detected & ranked' stat not found on the about page"
+        bento_moments, bento_swims = int(bento.group(1)), int(bento.group(2))
+
+        assert carousel_swims == bento_swims, (
+            f"same demo file quoted as {carousel_swims} swims read in the "
+            f"carousel but {bento_swims} in the bento tile"
+        )
+        assert carousel_moments == bento_moments, (
+            f"same {carousel_swims}-swim demo file scored {carousel_moments} "
+            f"moments ranked in the carousel but {bento_moments} moments "
+            "detected in the bento tile"
+        )
 
 
 # --------------------------------------------------------------------------- #

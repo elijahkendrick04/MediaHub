@@ -9,6 +9,7 @@
  */
 import { Easing, interpolate, useCurrentFrame, useVideoConfig } from "remotion";
 import { MetaFooter, KineticWords, ClubLogo, fitLine, withAlpha } from "../sceneKit";
+import { FrameEcho, FrameTornDef, frameClipStyle, hasFrameShape } from "../../StoryCard";
 import type { SceneComponent } from "../registry";
 
 const Scene: SceneComponent = ({ ctx }) => {
@@ -18,6 +19,10 @@ const Scene: SceneComponent = ({ ctx }) => {
 
   const photoW = Math.round(width * 0.56);
   const colLeft = photoW + Math.round(60 * ts);
+  // E4 parity: when the still shaped this card's full-height portrait, mirror
+  // the same silhouette on the panel + the offset accent echo along the seam.
+  const shaped = hasFrameShape(card);
+  const frameOff = Math.round(12 * ts);
 
   // Seam draws downward.
   const seam = interpolate(frame, [5, 5 + 18], [0, 1], {
@@ -42,8 +47,35 @@ const Scene: SceneComponent = ({ ctx }) => {
 
   return (
     <>
+      {/* E4: torn-edge filter def + the offset accent echo behind the panel
+          (both no-ops for rect). The echo is drawn BEFORE the panel so it sits
+          behind it, its shifted edge peeking along the seam into the column. */}
+      <FrameTornDef card={card} />
+      {shaped ? (
+        <FrameEcho
+          card={card}
+          accent={roles.accent}
+          width={photoW}
+          height={height}
+          off={frameOff}
+          left={0}
+          top={0}
+          zIndex={0}
+        />
+      ) : null}
       {/* portrait panel */}
-      <div style={{ position: "absolute", left: 0, top: 0, width: photoW, height, overflow: "hidden", background: roles.surface }}>
+      <div
+        style={{
+          position: "absolute",
+          left: 0,
+          top: 0,
+          width: photoW,
+          height,
+          overflow: "hidden",
+          background: roles.surface,
+          ...frameClipStyle(card),
+        }}
+      >
         {/* no-photo grace: faint surname watermark */}
         <div
           style={{

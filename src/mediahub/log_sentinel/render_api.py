@@ -22,12 +22,15 @@ The API key is a secret: it is read from the environment, sent only in the
 
 from __future__ import annotations
 
+import logging
 import os
 import threading
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Optional
+
+log = logging.getLogger(__name__)
 
 DEFAULT_BASE = "https://api.render.com/v1"
 DEFAULT_TIMEOUT = 20.0
@@ -138,7 +141,12 @@ def owner_id() -> str:
 
 def _parse_epoch(raw: str) -> float:
     try:
-        return datetime.fromisoformat(str(raw).replace("Z", "+00:00")).timestamp()
+        dt = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+        # A naive timestamp is UTC (Render logs UTC); without this .timestamp()
+        # would interpret it in the host's LOCAL zone and skew the boundary cursor.
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.timestamp()
     except Exception:
         return 0.0
 
@@ -175,6 +183,7 @@ def fetch_log_lines(since_epoch: float, *, limit: int = 100) -> tuple[list[LogLi
     newest = since_epoch
     start = since_epoch
     end = time.time()
+    skipped_unparsed = 0
     for _page in range(MAX_PAGES_PER_POLL):
         params = {
             "ownerId": oid,
@@ -199,7 +208,14 @@ def fetch_log_lines(since_epoch: float, *, limit: int = 100) -> tuple[list[LogLi
             msg = str(item.get("message") or item.get("text") or "")
             ts_raw = str(item.get("timestamp") or item.get("ts") or "")
             epoch = _parse_epoch(ts_raw)
-            if epoch and epoch <= since_epoch:
+            if not epoch:
+                # Unparseable timestamp (epoch 0.0): it can't be deduped against
+                # the boundary cursor and never advances it, so appending it would
+                # re-detect the SAME line every poll (alert spam on a Render
+                # timestamp-format change). Skip it; count for one warning.
+                skipped_unparsed += 1
+                continue
+            if epoch <= since_epoch:
                 continue  # boundary duplicate from the previous poll
             lines.append(LogLine(epoch=epoch, timestamp=ts_raw, message=msg))
             if epoch > newest:
@@ -211,6 +227,12 @@ def fetch_log_lines(since_epoch: float, *, limit: int = 100) -> tuple[list[LogLi
         if nxt_epoch <= 0:
             break
         start = nxt_epoch
+    if skipped_unparsed:
+        log.warning(
+            "log_sentinel: skipped %d log line(s) with an unparseable timestamp "
+            "(Render log timestamp format may have changed)",
+            skipped_unparsed,
+        )
     lines.sort(key=lambda ln: ln.epoch)
     return lines, newest
 

@@ -31,9 +31,9 @@ generated captions naming athletes, club-user account emails.
 | S3 | Rendered outputs | `runs_v4/<run_id>/visuals/`, `runs_v4/<run_id>/motion_cache/`, `turn_into_packs/<run_id>/` | renderers | Card PNGs/MP4s with **names and photos of minors**; explainability manifests | via run | With run delete |
 | S4 | Workflow / approval state | `runs_v4/<run_id>__workflow.json` | `workflow/store.py` | Card approval decisions (QUEUE → APPROVED → POSTED) | via run | With run delete |
 | S5 | In-memory run cache | process memory | `web.py` | Run state | — | Evicted on delete |
-| S6 | PB cache (per-run) | `data/discovered/pbs/<run_id>/<swimmer_key>.json` | `pb_discovery/cache.py:41` | PB history keyed by md5(name\|club) (`make_swimmer_key`, `cache.py:35`) | per-run | `POST /privacy/cache/clear` (`web.py:12579`) clears lookup caches; per-run files **not** covered by run delete — **gap** |
-| S7 | PB warm cache | `data/discovered/swimmers/<swimmer_key>.json` (7-day TTL) | same | Same | **NOT tenant-scoped** — shared across tenants; undermines the processor framing (LEGAL_FRAMEWORK §5) — **gap** | `/privacy/cache/clear` |
-| S8 | Search/trust cache | `data/discovered/search_cache/<hash>.json` | `context_engine.trust` | **Raw HTML of fetched profile pages** (names, full PB history) | not scoped — **gap** | `/privacy/cache/clear` |
+| S6 | PB cache (per-run) | `data/discovered/pbs/<run_id>/<swimmer_key>.json` | `pb_discovery/cache.py:41` | PB history keyed by md5(name\|club) (`make_swimmer_key`, `cache.py:35`) | per-run (`run_id` → `profile_id`) | Run-keyed → the SAR export & erasure sweep confine the `pbs/` walk to the requesting tenant's own runs (`_tenant_pbs_dirs`, finding #111 sibling). `POST /privacy/cache/clear` (`web.py:12579`) clears lookup caches; per-run files **not** covered by run delete — smaller residual gap |
+| S7 | PB warm cache | `data/discovered/swimmers/<swimmer_key>.json` (7-day TTL) | same | Same | **Global by design** — keyed by `md5(name\|club)` where "club" is the *swimmer's* club, not the tenant, so there is no tenant dimension to scope to. Content is the subject's own public-results-derived PBs; the SAR export applies per-subject row redaction (`_redact_rows_for_subject`) and erasure deletes the subject's own file. Accepted-risk, not a leak | `/privacy/cache/clear` |
+| S8 | Search cache (defensive namespace) | `data/discovered/search_cache/<hash>.json` | *(no live writer)* | Empty in practice — the DSR/erasure sweeps clear this namespace defensively. The real web-search cache lives at `<DATA_DIR>/.cache/research/<md5(query)>.json` as url/title/snippet JSON (**not raw HTML**, `web_research/search.py`) and is purged separately (`_purge_research_caches`) | global query-hash | `/privacy/cache/clear` |
 | S9 | Media library | `data.db` `media_assets` table + file blobs | `media_library/store.py:37-72` | Photos, `linked_athlete_names`, `permission_status` (`unknown\|user_owned\|needs_parental_consent\|approved_by_club\|approved_public\|do_not_use`), `safe_for_minors`, `uploaded_by` | `profile_id` | `POST /api/media-library/<id>/delete` |
 | S10 | Club profiles | `club_profiles/<org_id>.json` | `club_profile.py:430` (`save_profile`) | Roster ASA IDs, important-swimmer IDs, voice examples (may quote captions naming athletes), per-club tokens | per-org file | Admin edit; no full-profile delete route |
 | S11 | Users ledger | `users.jsonl` (chmod 0600, append-only) | `web/auth.py:191` | Email, bcrypt hash, plan, Stripe customer ID | global | **No delete route** — append-only; account erasure unimplemented — **gap** |
@@ -103,7 +103,7 @@ Found during this audit (flagged in GAP_ANALYSIS as a dedicated item):
 An "erase athlete X" operation must touch: S1 (raw uploads contain X among
 others — redact-or-delete policy needed), S2 (parsed records + captions),
 S3 (rendered cards), S4 (approval state for X's cards), S6/S7/S8 (PB caches
-keyed by md5(name|club) and raw HTML), S9 (`linked_athlete_names` + photos),
+keyed by md5(name|club)), S9 (`linked_athlete_names` + photos),
 S10 (roster/important-swimmer IDs, voice examples), S12 (caption memory),
 S13 (pseudonymise rather than delete — accountability record).
 Today only S2→S5 cascade exists (run-level, not athlete-level), plus a

@@ -11,9 +11,9 @@ change:
      picker on every stub creator form, picks survive the POST onto the
      saved pack, and foreign ids are silently dropped (not 500'd).
 """
+
 from __future__ import annotations
 
-import importlib
 import io
 import json
 import sys
@@ -38,29 +38,16 @@ _JPEG_BYTES = _tiny_jpeg()
 
 
 @pytest.fixture
-def two_org_app(tmp_path, monkeypatch):
+def two_org_app(app, tmp_path):
     """A fresh Flask app with two saved profiles + the org gate disabled.
 
     The org gate is bypassed because these tests focus on the media
     library access rules, not the gate itself.
     """
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    (tmp_path / "runs_v4").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "uploads_v4").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "club_profiles").mkdir(parents=True, exist_ok=True)
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-    importlib.reload(cp)
-    importlib.reload(wm)
-
-    app = wm.create_app()
-    app.config["TESTING"] = True
-
+    # DATA_DIR isolation + web-module reset come from the canonical `app`
+    # fixture (conftest.py), replacing the old setenv + importlib.reload preamble.
     from mediahub.web.club_profile import ClubProfile, save_profile
+
     save_profile(ClubProfile(profile_id="alpha", display_name="Alpha SC"))
     save_profile(ClubProfile(profile_id="beta", display_name="Beta SC"))
 
@@ -98,9 +85,7 @@ class TestFileServeIsolation:
             c.post("/api/organisation/active", data={"profile_id": "alpha"})
             alpha_id, _ = _seed_asset(tmp_path, "alpha")
             resp = c.get(f"/api/media-library/file/{alpha_id}")
-        assert resp.status_code == 200, (
-            "session pinned to alpha must see its own asset"
-        )
+        assert resp.status_code == 200, "session pinned to alpha must see its own asset"
 
     def test_other_profile_is_forbidden(self, two_org_app):
         app, tmp_path = two_org_app
@@ -115,14 +100,35 @@ class TestFileServeIsolation:
         )
 
     def test_run_scoped_profile_is_allowed(self, two_org_app):
+        # A _run_ asset whose run has no owner on file (ownerless/legacy)
+        # inherits the run routes' ownerless-readable policy — still 200.
         app, tmp_path = two_org_app
         with app.test_client() as c:
             c.post("/api/organisation/active", data={"profile_id": "alpha"})
             run_id, _ = _seed_asset(tmp_path, "_run_abcdef123")
             resp = c.get(f"/api/media-library/file/{run_id}")
         assert resp.status_code == 200, (
-            "run-scoped synthetic profiles are allowed because privacy "
+            "an ownerless run-scoped asset is allowed because privacy "
             "is enforced at the run level — got 403 unexpectedly"
+        )
+
+    def test_run_scoped_asset_for_foreign_run_is_blocked(self, two_org_app):
+        """IDOR regression: a _run_<id> asset must inherit its run's access
+        policy, not blanket-allow. An asset tied to a run owned by beta must
+        NOT be readable from an alpha-pinned session even if its id leaks."""
+        app, tmp_path = two_org_app
+        run_dir = tmp_path / "runs_v4"
+        run_dir.mkdir(parents=True, exist_ok=True)
+        (run_dir / "runbeta9.json").write_text(
+            json.dumps({"run_id": "runbeta9", "profile_id": "beta"})
+        )
+        with app.test_client() as c:
+            c.post("/api/organisation/active", data={"profile_id": "alpha"})
+            asset_id, _ = _seed_asset(tmp_path, "_run_runbeta9")
+            resp = c.get(f"/api/media-library/file/{asset_id}")
+        assert resp.status_code in (403, 404), (
+            "a _run_ asset tied to beta's run must not be readable from an "
+            f"alpha session; got {resp.status_code} {resp.data!r}"
         )
 
     def test_served_file_carries_image_mime_and_nosniff(self, two_org_app):
@@ -169,9 +175,9 @@ class TestListJsonIsolation:
         assert body["profile_id"] == "alpha"
         returned_ids = {a["id"] for a in body["assets"]}
         assert a_id in returned_ids
-        assert all(a["id"] != _b_id for a in body["assets"]), (
-            "beta's asset must not appear in alpha's list"
-        )
+        assert all(
+            a["id"] != _b_id for a in body["assets"]
+        ), "beta's asset must not appear in alpha's list"
 
     def test_explicit_foreign_profile_id_rejected(self, two_org_app):
         app, _ = two_org_app
@@ -203,8 +209,7 @@ class TestUploadIsolation:
                 follow_redirects=False,
             )
         assert resp.status_code in (200, 302), (
-            f"alpha session uploading to alpha must be allowed; "
-            f"got {resp.status_code}"
+            f"alpha session uploading to alpha must be allowed; " f"got {resp.status_code}"
         )
 
     def test_upload_disallowed_extension_rejected(self, two_org_app):
@@ -231,9 +236,11 @@ class TestUploadIsolation:
                 )
                 assert resp.status_code == 415, (name, resp.status_code, resp.data)
                 assert json.loads(resp.data)["error"] == "unsupported_type"
-        leftovers = list((tmp_path / "uploads_v4" / "media_library").rglob("*")) if (
-            tmp_path / "uploads_v4" / "media_library"
-        ).exists() else []
+        leftovers = (
+            list((tmp_path / "uploads_v4" / "media_library").rglob("*"))
+            if (tmp_path / "uploads_v4" / "media_library").exists()
+            else []
+        )
         assert not [p for p in leftovers if p.is_file()], leftovers
 
     def test_upload_renamed_nonimage_rejected(self, two_org_app):
@@ -312,9 +319,7 @@ class TestLibraryPageScope:
             _seed_asset(tmp_path, "alpha", filename="alpha_pic.jpg")
             resp = c.get("/media-library")
         body = resp.get_data(as_text=True)
-        assert "alpha" in body, (
-            "library page should default to the session's active profile"
-        )
+        assert "alpha" in body, "library page should default to the session's active profile"
 
     def test_query_string_for_foreign_profile_redirects(self, two_org_app):
         app, _ = two_org_app
@@ -339,12 +344,10 @@ class TestStubLibraryPicker:
             resp = c.get("/weekend-preview")
         body = resp.get_data(as_text=True)
         assert resp.status_code == 200
-        assert "Pick from your library" in body, (
-            "weekend-preview must render the library picker section"
-        )
-        assert alpha_id in body, (
-            "the picker should list the active org's asset by id"
-        )
+        assert (
+            "Pick from your library" in body
+        ), "weekend-preview must render the library picker section"
+        assert alpha_id in body, "the picker should list the active org's asset by id"
 
     def test_picker_does_not_show_foreign_assets(self, two_org_app):
         app, tmp_path = two_org_app
@@ -355,8 +358,7 @@ class TestStubLibraryPicker:
             resp = c.get("/weekend-preview")
         body = resp.get_data(as_text=True)
         assert beta_id not in body, (
-            "the picker on alpha's weekend-preview must NEVER show "
-            "beta's asset id"
+            "the picker on alpha's weekend-preview must NEVER show " "beta's asset id"
         )
 
     def test_picker_appears_on_all_stub_forms(self, two_org_app):
@@ -386,13 +388,17 @@ class TestStubPickPersistence:
         import mediahub.club_platform.stubs as _stubs
 
         def _stub_generate(*args, **kwargs):
-            return {"cards": [{
-                "platform": "Instagram",
-                "caption": "Test caption",
-                "hashtags": ["test"],
-                "confidence": 0.7,
-                "notes": "from test",
-            }]}
+            return {
+                "cards": [
+                    {
+                        "platform": "Instagram",
+                        "caption": "Test caption",
+                        "hashtags": ["test"],
+                        "confidence": 0.7,
+                        "notes": "from test",
+                    }
+                ]
+            }
 
         monkeypatch.setattr(_stubs, "_generate_cards_via_llm", _stub_generate)
 
@@ -428,13 +434,17 @@ class TestStubPickPersistence:
         import mediahub.club_platform.stubs as _stubs
 
         def _stub_generate(*args, **kwargs):
-            return {"cards": [{
-                "platform": "Instagram",
-                "caption": "Test",
-                "hashtags": [],
-                "confidence": 0.5,
-                "notes": "",
-            }]}
+            return {
+                "cards": [
+                    {
+                        "platform": "Instagram",
+                        "caption": "Test",
+                        "hashtags": [],
+                        "confidence": 0.5,
+                        "notes": "",
+                    }
+                ]
+            }
 
         monkeypatch.setattr(_stubs, "_generate_cards_via_llm", _stub_generate)
 
@@ -462,8 +472,7 @@ class TestStubPickPersistence:
         pack = json.loads(all_files[0].read_text())
         form_data = pack.get("form_data") or {}
         assert beta_id not in (form_data.get("library_asset_ids") or ""), (
-            "alpha's session must not be able to attach beta's asset id "
-            "to a saved pack"
+            "alpha's session must not be able to attach beta's asset id " "to a saved pack"
         )
 
 
@@ -477,6 +486,7 @@ class TestFreeTextChatPicker:
             alpha_id, _ = _seed_asset(tmp_path, "alpha", filename="alpha_pic.jpg")
 
             from mediahub.free_text_chat.session import create_session, save_session
+
             s = create_session()
             s.accepted_brief = {
                 "headline": "Test headline",
@@ -489,12 +499,10 @@ class TestFreeTextChatPicker:
             resp = c.get(f"/free-text/chat/{s.chat_id}")
         body = resp.get_data(as_text=True)
         assert resp.status_code == 200
-        assert "Pick from your library" in body, (
-            "free-text chat accepted-brief panel must offer the library picker"
-        )
-        assert alpha_id in body, (
-            "the chat picker should list the active org's asset id"
-        )
+        assert (
+            "Pick from your library" in body
+        ), "free-text chat accepted-brief panel must offer the library picker"
+        assert alpha_id in body, "the chat picker should list the active org's asset id"
 
     def test_chat_generate_carries_library_pick(self, two_org_app):
         app, tmp_path = two_org_app
@@ -503,6 +511,7 @@ class TestFreeTextChatPicker:
             alpha_id, _ = _seed_asset(tmp_path, "alpha", filename="alpha_pic.jpg")
 
             from mediahub.free_text_chat.session import create_session, save_session
+
             s = create_session()
             s.accepted_brief = {
                 "headline": "Test headline",
@@ -518,8 +527,7 @@ class TestFreeTextChatPicker:
                 follow_redirects=False,
             )
         assert resp.status_code == 302, (
-            f"chat-generate must redirect to the saved pack; "
-            f"got {resp.status_code}"
+            f"chat-generate must redirect to the saved pack; " f"got {resp.status_code}"
         )
         packs_dir = tmp_path / "stub_packs"
         all_files = list(packs_dir.glob("*.json"))
@@ -539,22 +547,28 @@ class TestRunGraphicDefenseInDepth:
         """Write a minimal run JSON pinned to a specific organisation."""
         run_dir = tmp_path / "runs_v4"
         run_dir.mkdir(parents=True, exist_ok=True)
-        (run_dir / f"{run_id}.json").write_text(json.dumps({
-            "run_id": run_id,
-            "profile_id": profile_id,
-            "meet": {"name": "Test Meet"},
-            "recognition_report": {
-                "ranked_achievements": [{
-                    "achievement": {
-                        "swim_id": "card1",
-                        "swimmer_name": "Test Swimmer",
-                        "event": "100 Free",
-                        "headline": "PB!",
+        (run_dir / f"{run_id}.json").write_text(
+            json.dumps(
+                {
+                    "run_id": run_id,
+                    "profile_id": profile_id,
+                    "meet": {"name": "Test Meet"},
+                    "recognition_report": {
+                        "ranked_achievements": [
+                            {
+                                "achievement": {
+                                    "swim_id": "card1",
+                                    "swimmer_name": "Test Swimmer",
+                                    "event": "100 Free",
+                                    "headline": "PB!",
+                                },
+                                "safe_to_post": {"level": "safe"},
+                            }
+                        ],
                     },
-                    "safe_to_post": {"level": "safe"},
-                }],
-            },
-        }))
+                }
+            )
+        )
 
     def test_foreign_session_cannot_render_run_graphic(self, two_org_app):
         app, tmp_path = two_org_app
@@ -574,28 +588,26 @@ class TestRunGraphicDefenseInDepth:
             f"pinned to beta; got {resp.status_code} {resp.data!r}"
         )
 
-    def test_same_session_can_render_run_graphic(self, two_org_app, monkeypatch):
+    def test_same_session_can_render_run_graphic(self, two_org_app, web_module, monkeypatch):
         app, tmp_path = two_org_app
         self._seed_run(tmp_path, "run_alpha_1", "alpha")
 
         # Stub the visual generator so we don't have to set up the
         # full creative-brief + renderer stack just to check the gate.
-        import mediahub.web.web as wm
+        wm = web_module
 
         def _fake_visual(item, brand_kit, **kwargs):
             return {"visuals": [], "brief": None, "errors": []}
 
-        monkeypatch.setattr(wm, "_v8_create_visual_for_item", _fake_visual, raising=False)
-        # Also patch into create_app's closure: the route resolves the
-        # symbol at module import time. Re-create the app for this test.
-        import importlib
-        importlib.reload(wm)
+        # The create-graphic route resolves _v8_create_visual_for_item from the
+        # module namespace, so patch it before building the app for this test.
         monkeypatch.setattr(wm, "_v8_create_visual_for_item", _fake_visual, raising=False)
         app2 = wm.create_app()
         app2.config["TESTING"] = True
 
         # Re-seed the asset/run for the fresh app context
         from mediahub.web.club_profile import ClubProfile, save_profile
+
         save_profile(ClubProfile(profile_id="alpha", display_name="Alpha SC"))
         save_profile(ClubProfile(profile_id="beta", display_name="Beta SC"))
         self._seed_run(tmp_path, "run_alpha_1", "alpha")

@@ -25,7 +25,7 @@
   background:
     radial-gradient(70% 55% at 50% 34%, var(--mh-surface) 0%, var(--mh-primary) 72%);
   color: var(--mh-on-primary);
-  font-family: 'Inter', system-ui, sans-serif;
+  font-family: var(--mh-font-body, 'Inter', system-ui, sans-serif);
   -webkit-font-smoothing: antialiased;
   display: flex; flex-direction: column; align-items: center;
   text-align: center;
@@ -34,7 +34,7 @@
 .cm *, .cm *::before, .cm *::after { box-sizing: border-box; }
 
 .cm__kicker {
-  font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 700;
+  font-family: var(--mh-font-kicker, 'Space Grotesk','Inter',sans-serif); font-weight: 700;
   font-size: 26px; letter-spacing: 0.26em; text-transform: uppercase;
   color: var(--mh-accent);
 }
@@ -43,13 +43,17 @@
 .cm__ring {
   position: relative;
   margin: 44px 0 36px;
-  width: 620px; height: 620px;
+  /* F2: the spotlight ring tracks the canvas short edge — 31/54 of it is
+     exactly 620px at a 1080-wide format (byte-identical), and it scales
+     down together with the geometry on a smaller canvas. */
+  width: calc(var(--mh-short, 1080px) * 31 / 54);
+  height: calc(var(--mh-short, 1080px) * 31 / 54);
   border-radius: 50%;
   background: var(--mh-surface);
   border: 10px solid var(--mh-accent);
   overflow: hidden;
   display: flex; align-items: flex-end; justify-content: center;
-  box-shadow: 0 24px 70px rgba(0,0,0,0.34);
+  box-shadow: var(--mh-elev-5, 0 24px 70px rgba(0,0,0,0.34));
   flex: 0 0 auto;
 }
 .cm__ring img {
@@ -62,19 +66,19 @@
 .cm__mono {
   position: absolute; inset: 0; z-index: -1;
   display: flex; align-items: center; justify-content: center;
-  font-family: 'Anton','Bebas Neue',Impact,sans-serif;
+  font-family: var(--mh-font-display, 'Anton','Bebas Neue',Impact,sans-serif);
   font-size: 300px; line-height: 1; color: var(--mh-on-surface);
   opacity: 0.30; text-transform: uppercase;
 }
 
 .cm__name {
-  font-family: 'Anton','Bebas Neue',Impact,sans-serif; font-weight: 400;
+  font-family: var(--mh-font-display, 'Anton','Bebas Neue',Impact,sans-serif); font-weight: 400;
   font-size: var(--mh-fit-surname-px, 110px); line-height: 0.9;
-  letter-spacing: -0.005em; text-transform: uppercase; color: var(--mh-on-primary);
+  letter-spacing: var(--mh-track-surname, -0.005em); text-transform: uppercase; color: var(--mh-on-primary);
 }
 .cm__event {
   margin-top: 14px;
-  font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 600;
+  font-family: var(--mh-font-kicker, 'Space Grotesk','Inter',sans-serif); font-weight: 600;
   font-size: 30px; letter-spacing: 0.06em; text-transform: uppercase;
   color: var(--mh-accent);
 }
@@ -85,17 +89,17 @@
   font-family: 'JetBrains Mono','Space Grotesk',monospace; font-feature-settings: "tnum";
   font-weight: 700; font-size: var(--mh-fit-result-px, 76px); font-variation-settings: var(--mh-axes-result, normal); line-height: 0.92;
 }
-.cm__stat { margin-top: 16px; font-family: 'Inter',sans-serif; font-weight: 600; font-size: 24px; color: var(--mh-on-primary); opacity: 0.82; }
+.cm__stat { margin-top: 16px; font-family: var(--mh-font-body, 'Inter',sans-serif); font-weight: 600; font-size: 24px; color: var(--mh-on-primary); opacity: 0.82; }
 
 .cm__foot {
   margin-top: auto;
-  display: flex; align-items: center; justify-content: center; gap: 16px;
+  display: flex; align-items: center; justify-content: center; gap: var(--mh-sp-4);
   padding-top: 28px;
 }
 .cm__logo { height: 56px; width: auto; }
 .cm__logo img, .cm__logo svg { height: 100%; width: auto; object-fit: contain; display: block; }
-.cm__club { font-family: 'Inter',sans-serif; font-weight: 800; font-size: 24px; text-transform: uppercase; color: var(--mh-on-primary); }
-.cm__meet { font-family: 'Inter',sans-serif; font-weight: 500; font-size: 18px; color: var(--mh-on-primary); opacity: 0.74; }
+.cm__club { font-family: var(--mh-font-body, 'Inter',sans-serif); font-weight: 800; font-size: 24px; text-transform: uppercase; color: var(--mh-on-primary); }
+.cm__meet { font-family: var(--mh-font-body, 'Inter',sans-serif); font-weight: 500; font-size: 18px; color: var(--mh-on-primary); opacity: 0.74; }
 .cm__sponsor { margin-top: 18px; }
 </style>
 </head>

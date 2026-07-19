@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import importlib
-
 import pytest
 
 
@@ -50,9 +48,12 @@ def test_promote_missing_image_returns_none(tmp_path, monkeypatch):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     from mediahub.elements import stickers
 
-    assert stickers.promote_image_to_sticker(
-        profile_id="c", image_path=tmp_path / "nope.png", name="x"
-    ) is None
+    assert (
+        stickers.promote_image_to_sticker(
+            profile_id="c", image_path=tmp_path / "nope.png", name="x"
+        )
+        is None
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -79,21 +80,10 @@ def test_generate_functions_honest_error():
 # web routes
 # --------------------------------------------------------------------------- #
 @pytest.fixture
-def app_env(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    for sub in ("runs_v4", "uploads_v4", "club_profiles"):
-        (tmp_path / sub).mkdir(parents=True, exist_ok=True)
+def app_env(web_module, tmp_path, monkeypatch):
     for var in ("GEMINI_API_KEY", "ANTHROPIC_API_KEY"):
         monkeypatch.delenv(var, raising=False)
 
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
     # The media-library store singleton uses a fixed package-local data.db; point
     # it at tmp so the app and the test share one DB (and the repo isn't touched).
     import mediahub.media_library.store as mls
@@ -101,9 +91,9 @@ def app_env(tmp_path, monkeypatch):
     mls._default_store = mls.MediaLibraryStore(
         db_path=tmp_path / "data.db", uploads_dir=tmp_path / "uploads_v4" / "media_library"
     )
-    app = wm.create_app()
+    app = web_module.create_app()
     app.config["TESTING"] = True
-    return app, wm, tmp_path
+    return app, web_module, tmp_path
 
 
 def _signin(client, profile_id="alpha"):
@@ -137,7 +127,12 @@ def test_annotate_save_and_serve(app_env, monkeypatch):
             json={
                 "symmetry": "none",
                 "strokes": [
-                    {"points": [[0.1, 0.5], [0.9, 0.5]], "kind": "arrow", "colour": "#FF0000", "width": 0.02}
+                    {
+                        "points": [[0.1, 0.5], [0.9, 0.5]],
+                        "kind": "arrow",
+                        "colour": "#FF0000",
+                        "width": 0.02,
+                    }
                 ],
             },
         )

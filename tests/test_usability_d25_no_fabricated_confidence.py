@@ -11,6 +11,7 @@ leaves prompt-led confidence unset (None).
 from __future__ import annotations
 
 from mediahub.club_platform.stubs import render_cards_html
+from tests._helpers import web_surface_src
 
 
 def test_none_confidence_renders_no_badge():
@@ -39,5 +40,5 @@ def test_prompt_led_builders_leave_confidence_unset():
     # now leave confidence unset (None) rather than fabricating a constant.
     import pathlib
 
-    src = pathlib.Path("src/mediahub/web/web.py").read_text(encoding="utf-8")
+    src = web_surface_src()
     assert src.count('"confidence": None') >= 4

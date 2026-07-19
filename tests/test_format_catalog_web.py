@@ -10,35 +10,13 @@ no-design) is exercised for real.
 
 from __future__ import annotations
 
-import importlib
 import json
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-import pytest
-
 from mediahub.club_platform import format_catalog as fc
 from mediahub.creative_brief.generator import CreativeBrief
-
-
-@pytest.fixture
-def app_env(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    for sub in ("runs_v4", "uploads_v4", "club_profiles"):
-        (tmp_path / sub).mkdir(parents=True, exist_ok=True)
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
-    app = wm.create_app()
-    app.config["TESTING"] = True
-    return app, wm, tmp_path
 
 
 def _seed_run(tmp_path: Path, run_id: str = "runF") -> str:
@@ -49,8 +27,15 @@ def _seed_run(tmp_path: Path, run_id: str = "runF") -> str:
             {
                 "recognition_report": {
                     "ranked_achievements": [
-                        {"id": "c1", "achievement": {"swim_id": "c1", "swimmer_name": "Alice Lee",
-                                                     "event": "100 Free", "headline": "New PB"}},
+                        {
+                            "id": "c1",
+                            "achievement": {
+                                "swim_id": "c1",
+                                "swimmer_name": "Alice Lee",
+                                "event": "100 Free",
+                                "headline": "New PB",
+                            },
+                        },
                     ]
                 }
             }
@@ -93,8 +78,7 @@ def _seed_brief(tmp_path: Path, run_id: str, card_id: str = "c1", layout="split_
 # ---------------------------------------------------------------------------
 
 
-def test_formats_catalog_json(app_env):
-    app, wm, tmp_path = app_env
+def test_formats_catalog_json(app):
     with app.test_client() as c:
         r = c.get("/api/formats")
     assert r.status_code == 200
@@ -109,8 +93,7 @@ def test_formats_catalog_json(app_env):
             assert f["width"] > 0 and f["height"] > 0 and f["slug"]
 
 
-def test_formats_catalog_sport_filter(app_env):
-    app, wm, tmp_path = app_env
+def test_formats_catalog_sport_filter(app):
     with app.test_client() as c:
         r = c.get("/api/formats?sport=swimming")
     assert r.status_code == 200
@@ -122,15 +105,13 @@ def test_formats_catalog_sport_filter(app_env):
 # ---------------------------------------------------------------------------
 
 
-def test_reformat_unknown_run_404(app_env):
-    app, wm, tmp_path = app_env
+def test_reformat_unknown_run_404(app):
     with app.test_client() as c:
         r = c.post("/api/runs/nope/card/c1/reformat?format=ig_story", json={})
     assert r.status_code == 404
 
 
-def test_reformat_missing_format_400(app_env):
-    app, wm, tmp_path = app_env
+def test_reformat_missing_format_400(app, tmp_path):
     run_id = _seed_run(tmp_path)
     with app.test_client() as c:
         r = c.post(f"/api/runs/{run_id}/card/c1/reformat", json={})
@@ -138,16 +119,14 @@ def test_reformat_missing_format_400(app_env):
     assert r.get_json()["error"] == "unknown_format"
 
 
-def test_reformat_unknown_format_400(app_env):
-    app, wm, tmp_path = app_env
+def test_reformat_unknown_format_400(app, tmp_path):
     run_id = _seed_run(tmp_path)
     with app.test_client() as c:
         r = c.post(f"/api/runs/{run_id}/card/c1/reformat?format=not_a_format", json={})
     assert r.status_code == 400
 
 
-def test_reformat_bad_custom_size_400(app_env):
-    app, wm, tmp_path = app_env
+def test_reformat_bad_custom_size_400(app, tmp_path):
     run_id = _seed_run(tmp_path)
     with app.test_client() as c:
         r = c.post(f"/api/runs/{run_id}/card/c1/reformat?w=50&h=50", json={})
@@ -155,8 +134,7 @@ def test_reformat_bad_custom_size_400(app_env):
     assert r.get_json()["error"] == "bad_format"
 
 
-def test_reformat_no_brief_409(app_env):
-    app, wm, tmp_path = app_env
+def test_reformat_no_brief_409(app, tmp_path):
     run_id = _seed_run(tmp_path)  # no brief seeded
     with app.test_client() as c:
         r = c.post(f"/api/runs/{run_id}/card/c1/reformat?format=ig_story", json={})
@@ -196,8 +174,7 @@ def _fake_render_brief_factory():
     return _fake, captured
 
 
-def test_reformat_transforms_and_serves_png(app_env):
-    app, wm, tmp_path = app_env
+def test_reformat_transforms_and_serves_png(app, tmp_path):
     run_id = _seed_run(tmp_path)
     _seed_brief(tmp_path, run_id, "c1", layout="split_diagonal_hero")
 
@@ -217,8 +194,7 @@ def test_reformat_transforms_and_serves_png(app_env):
     assert captured["brief"].layout_template != "split_diagonal_hero"
 
 
-def test_reformat_blank_start_serves_png(app_env):
-    app, wm, tmp_path = app_env
+def test_reformat_blank_start_serves_png(app, tmp_path):
     run_id = _seed_run(tmp_path)  # no brief — blank start seeds from brand tokens
 
     fake, captured = _fake_render_brief_factory()
@@ -231,8 +207,7 @@ def test_reformat_blank_start_serves_png(app_env):
     assert captured["size"] == fc.format_for("poster").size
 
 
-def test_reformat_custom_size_serves_png(app_env):
-    app, wm, tmp_path = app_env
+def test_reformat_custom_size_serves_png(app, tmp_path):
     run_id = _seed_run(tmp_path)
     _seed_brief(tmp_path, run_id, "c1")
 
@@ -245,8 +220,7 @@ def test_reformat_custom_size_serves_png(app_env):
     assert captured["size"] == (1200, 1500)
 
 
-def test_reformat_caches_deterministic_render(app_env):
-    app, wm, tmp_path = app_env
+def test_reformat_caches_deterministic_render(app, tmp_path):
     run_id = _seed_run(tmp_path)
     _seed_brief(tmp_path, run_id, "c1")
 
@@ -262,18 +236,20 @@ def test_reformat_caches_deterministic_render(app_env):
     assert captured["calls"] == 1
 
 
-def test_reformat_cache_invalidates_on_brief_edit(app_env):
+def test_reformat_cache_invalidates_on_brief_edit(app, tmp_path):
     """The cache key folds the SOURCE brief's content: an edit that keeps the
     layout template (copilot/headline change persisting a new brief) must
     re-render, never serve the stale pre-edit PNG."""
-    app, wm, tmp_path = app_env
     run_id = _seed_run(tmp_path)
     _seed_brief(tmp_path, run_id, "c1")
 
     fake, captured = _fake_render_brief_factory()
     with mock.patch("mediahub.graphic_renderer.render.render_brief", fake):
         with app.test_client() as c:
-            assert c.post(f"/api/runs/{run_id}/card/c1/reformat?format=ig_square", json={}).status_code == 200
+            assert (
+                c.post(f"/api/runs/{run_id}/card/c1/reformat?format=ig_square", json={}).status_code
+                == 200
+            )
             assert captured["calls"] == 1
             # A later brief version for the same card, same layout, new copy —
             # exactly what a copilot edit persists.
@@ -289,6 +265,9 @@ def test_reformat_cache_invalidates_on_brief_edit(app_env):
             # make the new brief unambiguously the most recent
             now = _time.time()
             _os.utime(p2, (now + 5, now + 5))
-            assert c.post(f"/api/runs/{run_id}/card/c1/reformat?format=ig_square", json={}).status_code == 200
+            assert (
+                c.post(f"/api/runs/{run_id}/card/c1/reformat?format=ig_square", json={}).status_code
+                == 200
+            )
     # The edited design re-rendered instead of serving the pre-edit cache.
     assert captured["calls"] == 2

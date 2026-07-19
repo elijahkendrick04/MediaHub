@@ -46,9 +46,9 @@
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  background: var(--mh-primary);
+  background: var(--mh-ground-gradient, var(--mh-primary));
   color: var(--mh-on-primary);
-  font-family: 'Inter', system-ui, sans-serif;
+  font-family: var(--mh-font-body, 'Inter', system-ui, sans-serif);
   -webkit-font-smoothing: antialiased;
   padding: 96px 80px 80px 190px;
 }
@@ -84,20 +84,20 @@
 }
 
 .tl__lab {
-  font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 700;
+  font-family: var(--mh-font-kicker, 'Space Grotesk','Inter',sans-serif); font-weight: 700;
   font-size: 21px; letter-spacing: 0.22em; text-transform: uppercase;
   color: var(--mh-accent); margin-bottom: 12px;
 }
 .tl__first {
-  font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 700;
+  font-family: var(--mh-font-kicker, 'Space Grotesk','Inter',sans-serif); font-weight: 700;
   font-size: 40px; letter-spacing: 0.01em; text-transform: uppercase;
   color: var(--mh-accent); margin-bottom: 2px;
   white-space: normal; overflow-wrap: anywhere; word-break: break-word;
 }
 .tl__surname {
-  font-family: 'Anton','Bebas Neue',Impact,sans-serif; font-weight: 400;
+  font-family: var(--mh-font-display, 'Anton','Bebas Neue',Impact,sans-serif); font-weight: 400;
   font-size: calc(var(--mh-fit-surname-px, 132px) * 0.5);
-  line-height: 0.9; letter-spacing: -0.01em; text-transform: uppercase;
+  line-height: 0.9; letter-spacing: var(--mh-track-surname, -0.01em); text-transform: uppercase;
   color: var(--mh-on-primary);
   white-space: normal; overflow-wrap: anywhere; word-break: break-word;
   max-width: 100%;
@@ -115,7 +115,7 @@
   max-width: 100%;
 }
 .tl__result-lab {
-  font-family: 'Inter',sans-serif; font-weight: 800;
+  font-family: var(--mh-font-body, 'Inter',sans-serif); font-weight: 800;
   font-size: 17px; letter-spacing: 0.32em; text-transform: uppercase;
   color: var(--mh-primary); opacity: 0.8; margin-bottom: 8px;
 }
@@ -124,21 +124,21 @@
   font-feature-settings: "tnum"; font-weight: 700;
   font-size: calc(var(--mh-fit-result-px, 92px) * 0.62);
   font-variation-settings: var(--mh-axes-result, normal);
-  line-height: 0.92; letter-spacing: -0.01em;
+  line-height: 0.92; letter-spacing: var(--mh-track-result, -0.01em);
   color: var(--mh-primary);
   white-space: normal; overflow-wrap: anywhere; word-break: break-word;
   max-width: 100%;
 }
 .tl__event {
   margin-top: 12px;
-  font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 600;
+  font-family: var(--mh-font-kicker, 'Space Grotesk','Inter',sans-serif); font-weight: 600;
   font-size: 26px; line-height: 1.12; text-transform: uppercase;
   color: var(--mh-primary); opacity: 0.92;
   overflow-wrap: anywhere;
 }
 
 .tl__meet {
-  font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 600;
+  font-family: var(--mh-font-kicker, 'Space Grotesk','Inter',sans-serif); font-weight: 600;
   font-size: 27px; line-height: 1.16; color: var(--mh-on-primary);
   overflow-wrap: anywhere;
 }
@@ -147,7 +147,7 @@
 .tl__hero { margin-top: 14px; }
 .tl__hero:has(.tl__hero-val:empty) { display: none; }
 .tl__hero-lab {
-  font-family: 'Inter',sans-serif; font-weight: 700; font-size: 14px;
+  font-family: var(--mh-font-body, 'Inter',sans-serif); font-weight: 700; font-size: 14px;
   letter-spacing: 0.2em; text-transform: uppercase;
   color: var(--mh-accent); margin-bottom: 6px;
 }
@@ -161,13 +161,13 @@
   position: relative; z-index: 2;
   margin-top: auto; padding-top: 30px;
   border-top: 2px solid var(--mh-outline);
-  display: flex; align-items: flex-end; justify-content: space-between; gap: 24px;
+  display: flex; align-items: flex-end; justify-content: space-between; gap: var(--mh-sp-5);
 }
 .tl__foot-id { min-width: 0; }
-.tl__logo { height: 58px; width: auto; margin-bottom: 12px; }
+.tl__logo { height: 58px; width: auto; margin-bottom: var(--mh-sp-3); }
 .tl__logo img, .tl__logo svg { height: 100%; width: auto; object-fit: contain; display: block; }
 .tl__club {
-  font-family: 'Inter',sans-serif; font-weight: 800; font-size: 19px;
+  font-family: var(--mh-font-body, 'Inter',sans-serif); font-weight: 800; font-size: 19px;
   line-height: 1.18; text-transform: uppercase; color: var(--mh-on-primary);
   overflow-wrap: anywhere;
 }

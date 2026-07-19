@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import importlib
 import json
 import sys
 import uuid
@@ -27,8 +26,16 @@ def _seed_run(runs_dir: Path, run_id: str, profile_id: str):
         "recognition_report": {
             "n_swims_analysed": 1,
             "ranked_achievements": [
-                {"rank": 1, "id": "card-1", "achievement": {"swim_id": "card-1",
-                 "swimmer_name": "Adult", "event": "100 Free", "headline": "PB"}}
+                {
+                    "rank": 1,
+                    "id": "card-1",
+                    "achievement": {
+                        "swim_id": "card-1",
+                        "swimmer_name": "Adult",
+                        "event": "100 Free",
+                        "headline": "PB",
+                    },
+                }
             ],
         },
     }
@@ -36,21 +43,12 @@ def _seed_run(runs_dir: Path, run_id: str, profile_id: str):
 
 
 @pytest.fixture
-def world(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
+def world(web_module, tmp_path, monkeypatch):
     # Ensure no AI provider is configured, so assistant-in-threads honest-errors.
     for k in ("GEMINI_API_KEY", "GOOGLE_API_KEY", "ANTHROPIC_API_KEY", "MEDIAHUB_LLM_ENDPOINTS"):
         monkeypatch.delenv(k, raising=False)
-    for d in ("runs_v4", "club_profiles"):
-        (tmp_path / d).mkdir(parents=True, exist_ok=True)
 
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
+    wm = web_module
 
     from mediahub.web.club_profile import ClubProfile, save_profile
 
@@ -100,7 +98,10 @@ def test_collection_lifecycle(world):
     o = _act_as(world["app"], OWNER)
     cid = o.post("/api/collections", json={"name": "C"}).get_json()["collection"]["id"]
     # add the run
-    r = o.post(f"/api/collections/{cid}", json={"action": "add_item", "item_type": "run", "item_id": world["run_id"]})
+    r = o.post(
+        f"/api/collections/{cid}",
+        json={"action": "add_item", "item_type": "run", "item_id": world["run_id"]},
+    )
     assert r.status_code == 200
     items = o.get(f"/api/collections/{cid}").get_json()["items"]
     assert any(it["item_id"] == world["run_id"] for it in items)
@@ -108,7 +109,10 @@ def test_collection_lifecycle(world):
     cols = o.get("/api/collections").get_json()["collections"]
     assert cols[0]["count"] == 1
     # rename + delete
-    assert o.post(f"/api/collections/{cid}", json={"action": "rename", "name": "C2"}).status_code == 200
+    assert (
+        o.post(f"/api/collections/{cid}", json={"action": "rename", "name": "C2"}).status_code
+        == 200
+    )
     assert o.post(f"/api/collections/{cid}", json={"action": "delete"}).status_code == 200
     assert o.get("/api/collections").get_json()["collections"] == []
 
@@ -131,7 +135,10 @@ def test_run_erasure_drops_collection_membership(world):
     run_id = world["run_id"]
     o = _act_as(world["app"], OWNER)
     cid = o.post("/api/collections", json={"name": "C"}).get_json()["collection"]["id"]
-    o.post(f"/api/collections/{cid}", json={"action": "add_item", "item_type": "run", "item_id": run_id})
+    o.post(
+        f"/api/collections/{cid}",
+        json={"action": "add_item", "item_type": "run", "item_id": run_id},
+    )
     from mediahub.collab import collections as col
     from mediahub.privacy.erasure import run_deletion_cascade
 

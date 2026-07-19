@@ -67,8 +67,8 @@ file and `mediahub-engineering` disagree, `mediahub-engineering` wins.
 3. **Text is measured to fit.** Long names and event titles are normal.
    Use `fit_font_px` (or design for the longest realistic string).
    Truncation and overflow are trust bugs.
-4. **Fonts are the six self-hosted families** (Bebas Neue, Anton, Bowlby
-   One, Space Grotesk, Inter, JetBrains Mono) — never a CDN `<link>`,
+4. **Fonts are the seven self-hosted families** (Bebas Neue, Anton, Bowlby
+   One, Playfair Display, Space Grotesk, Inter, JetBrains Mono) — never a CDN `<link>`,
    `@import`, or new family outside the fonts workflow
    (`tests/test_self_hosted_fonts.py` guards all surfaces).
 5. **Deterministic and explainable.** Same brief + seed → same PNG. Variety

@@ -14,8 +14,9 @@ left alone: changing those risks breaking their terminal-state restores.
 from __future__ import annotations
 
 import pathlib
+from tests._helpers import web_surface_src
 
-_SRC = pathlib.Path("src/mediahub/web/web.py").read_text(encoding="utf-8")
+_SRC = web_surface_src()
 _UI_KIT = pathlib.Path("src/mediahub/web/static/js/ui-kit.js").read_text(encoding="utf-8")
 
 

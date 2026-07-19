@@ -8,9 +8,9 @@ Pins the per-run pipeline error surfacing on /activity:
   * The header callout counts how many of the most-recent 100 runs failed.
   * Long error texts are truncated to keep the table compact.
 """
+
 from __future__ import annotations
 
-import importlib
 import sys
 from pathlib import Path
 
@@ -21,29 +21,18 @@ sys.path.insert(0, str(_ROOT))
 
 
 @pytest.fixture
-def gated_client(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    (tmp_path / "runs_v4").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "uploads_v4").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "club_profiles").mkdir(parents=True, exist_ok=True)
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-    importlib.reload(cp)
-    importlib.reload(wm)
-
-    app = wm.create_app()
-    app.config["TESTING"] = True
+def gated_client(app):
     app.config["ENFORCE_ORG_GATE"] = True
 
     from mediahub.web.club_profile import ClubProfile, save_profile
-    save_profile(ClubProfile(
-        profile_id="club-a", display_name="Club A",
-        brand_voice_summary="A friendly club.",
-    ))
+
+    save_profile(
+        ClubProfile(
+            profile_id="club-a",
+            display_name="Club A",
+            brand_voice_summary="A friendly club.",
+        )
+    )
     with app.test_client() as c:
         yield c, app
 
@@ -53,9 +42,11 @@ def _pin(client, profile_id: str) -> None:
     assert resp.status_code == 200
 
 
-def _seed_run(*, run_id: str, profile_id: str, meet: str,
-              status: str = "done", error: str = None) -> None:
+def _seed_run(
+    *, run_id: str, profile_id: str, meet: str, status: str = "done", error: str = None
+) -> None:
     import mediahub.web.web as wm
+
     conn = wm._db()
     conn.execute(
         "INSERT INTO runs (id, created_at, finished_at, status, profile_id, "
@@ -81,7 +72,9 @@ class TestErrorRowSurfacing:
     def test_errored_run_renders_collapsible_block_with_error(self, gated_client):
         c, _ = gated_client
         _seed_run(
-            run_id="run-bad", profile_id="club-a", meet="Broken meet",
+            run_id="run-bad",
+            profile_id="club-a",
+            meet="Broken meet",
             status="error",
             error="Parse failed: HY3 file is missing event header on row 12",
         )
@@ -100,10 +93,8 @@ class TestErrorRowSurfacing:
     def test_multiple_errored_runs_count_in_callout(self, gated_client):
         c, _ = gated_client
         _seed_run(run_id="r1", profile_id="club-a", meet="ok meet")
-        _seed_run(run_id="r2", profile_id="club-a", meet="bad 1",
-                  status="error", error="error one")
-        _seed_run(run_id="r3", profile_id="club-a", meet="bad 2",
-                  status="error", error="error two")
+        _seed_run(run_id="r2", profile_id="club-a", meet="bad 1", status="error", error="error one")
+        _seed_run(run_id="r3", profile_id="club-a", meet="bad 2", status="error", error="error two")
         _pin(c, "club-a")
         resp = c.get("/activity")
         body = resp.get_data(as_text=True)
@@ -116,8 +107,11 @@ class TestErrorRowSurfacing:
         c, _ = gated_client
         long_err = "Traceback line " * 200  # ~3,200 chars
         _seed_run(
-            run_id="run-long", profile_id="club-a", meet="Tracebacky",
-            status="error", error=long_err,
+            run_id="run-long",
+            profile_id="club-a",
+            meet="Tracebacky",
+            status="error",
+            error=long_err,
         )
         _pin(c, "club-a")
         resp = c.get("/activity")
@@ -133,7 +127,9 @@ class TestErrorRowSurfacing:
         can contain arbitrary content from user files."""
         c, _ = gated_client
         _seed_run(
-            run_id="run-xss", profile_id="club-a", meet="XSS test",
+            run_id="run-xss",
+            profile_id="club-a",
+            meet="XSS test",
             status="error",
             error="<script>alert('xss')</script>",
         )
@@ -150,13 +146,20 @@ class TestErrorRowSurfacing:
         surface on this tenant's activity page."""
         c, _ = gated_client
         from mediahub.web.club_profile import ClubProfile, save_profile
-        save_profile(ClubProfile(
-            profile_id="club-b", display_name="Club B",
-            brand_voice_summary="Serious club.",
-        ))
+
+        save_profile(
+            ClubProfile(
+                profile_id="club-b",
+                display_name="Club B",
+                brand_voice_summary="Serious club.",
+            )
+        )
         _seed_run(
-            run_id="r-b-err", profile_id="club-b", meet="club-b meet",
-            status="error", error="club-b secret error detail",
+            run_id="r-b-err",
+            profile_id="club-b",
+            meet="club-b meet",
+            status="error",
+            error="club-b secret error detail",
         )
         # Seed a club-a run with no errors so the page renders normally.
         _seed_run(run_id="r-a-ok", profile_id="club-a", meet="club-a meet")

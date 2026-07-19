@@ -3,7 +3,8 @@
 The everyday AI helper for writing captions, describing pictures and cutting people
 out of photos. It uses `ai_core` underneath to reach the AI services.
 
-- `llm.py` — writes captions and reads pictures.
+- `llm.py` — writes captions and reads pictures. (The network call to Gemini
+  itself lives in `ai_core/gemini_transport.py`, shared with `ai_core`.)
 - `providers/` — cuts the background out of a photo.
 - `imagine.py` + `imagine_providers/` — **makes and edits pictures** (the P6.3
   generative-imagery seam): generate from a prompt, lift a subject, and more.

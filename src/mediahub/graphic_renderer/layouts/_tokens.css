@@ -1,0 +1,77 @@
+/* ===================================================================
+   _tokens.css — F1 (systemic floor) shared component + token sheet.
+
+   Loaded into every render AFTER the ``:root{--mh-sp-*}`` spacing scale
+   (see render._spacing_scale_css). It carries two things:
+
+   1. Spacing utility aliases — nothing here; the scale itself lives in the
+      injected :root block so it tracks the canvas short edge.
+
+   2. Shared LOCKUP / FOOTER / LOGO component classes. The v2 archetype
+      library re-declares a near-identical bottom lockup (logo mark + club
+      line + meet line, sometimes a sponsor slot) ~30 times, each with its
+      own ``.xx__foot`` prefix and slightly drifting px. These ``.mh-lockup*``
+      classes are the single canonical definition, built entirely on the
+      ``--mh-sp-*`` scale so they stay proportional across formats. A layout
+      opts in by using the class names instead of a bespoke footer block.
+
+   EVERYTHING here is INERT until referenced: an unused class matches no
+   element and paints nothing, so adding this sheet leaves every existing
+   render byte-identical. Brand colour comes only from the resolved
+   ``--mh-*`` role tokens — never a hardcoded hex (mono_mode rewrites the
+   role vars, so no literal here needs rewriting).
+   =================================================================== */
+
+/* The canonical bottom brand lockup: logo mark + club/meet text, left
+   aligned, pinned to the foot of a flex-column layout via margin-top:auto. */
+.mh-lockup {
+  margin-top: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--mh-sp-3);
+  padding-top: var(--mh-sp-5);
+  min-width: 0;
+}
+.mh-lockup--center { justify-content: center; text-align: center; }
+
+.mh-lockup__logo {
+  height: var(--mh-sp-8);
+  width: auto;
+  flex: 0 0 auto;
+}
+.mh-lockup__logo img,
+.mh-lockup__logo svg {
+  height: 100%;
+  width: auto;
+  object-fit: contain;
+  display: block;
+}
+
+.mh-lockup__text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.mh-lockup__club {
+  font-family: var(--mh-font-body, 'Inter', sans-serif);
+  font-weight: 800;
+  font-size: var(--mh-sp-6);
+  letter-spacing: 0.01em;
+  text-transform: uppercase;
+  color: var(--mh-on-primary);
+  line-height: 1.1;
+}
+
+.mh-lockup__meet {
+  font-family: var(--mh-font-body, 'Inter', sans-serif);
+  font-weight: 500;
+  font-size: var(--mh-sp-4);
+  letter-spacing: 0.04em;
+  color: var(--mh-on-primary);
+  opacity: 0.74;
+  margin-top: var(--mh-sp-1);
+}
+
+/* Sponsor slot sitting just below the lockup. */
+.mh-lockup__sponsor { margin-top: var(--mh-sp-4); }

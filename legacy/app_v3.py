@@ -119,12 +119,11 @@ def verification_v3(run_id: str):
 def dashboard_v3(run_id: str):
     run = _get_run(run_id)
     bucket = request.args.get("bucket", "queue")
-    if bucket not in ("queue", "needs_confirmation", "recap", "archive"):
+    if bucket not in ("queue", "recap", "archive"):
         bucket = "queue"
     bucket_cards = [c for c in run.cards if c.bucket == bucket]
     counts = {
         "queue": sum(1 for c in run.cards if c.bucket == "queue"),
-        "needs_confirmation": sum(1 for c in run.cards if c.bucket == "needs_confirmation"),
         "recap": sum(1 for c in run.cards if c.bucket == "recap"),
         "archive": sum(1 for c in run.cards if c.bucket == "archive"),
     }
@@ -228,7 +227,6 @@ def _card_type_label(t: str) -> str:
         "pb_roundup": "PB roundup",
         "qual_alert": "Qualifier alert",
         "weekend_in_numbers": "Weekend in numbers",
-        "needs_confirmation": "Needs confirmation",
         "recap_only": "Recap mention",
         "archive": "Archive",
     }.get(t, t)

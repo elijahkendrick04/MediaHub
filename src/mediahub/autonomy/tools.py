@@ -210,11 +210,19 @@ def _find_card(run_data: dict, card_id: str) -> Optional[dict]:
 
 
 def _wf_status(ctx: ToolContext, run_id: str, card_id: str):
+    """Read a card's workflow status, failing CLOSED on error.
+
+    Returns the stored ``CardStatus``; ``CardStatus.QUEUE`` for a genuinely
+    absent card (no state yet); and ``None`` when the read itself failed.
+    ``None`` is deliberate: it is not in ``_RUNNER_ALLOWED_STATUSES``, so
+    ``_queue_for_approval`` SKIPS the card rather than re-writing over a status a
+    human may have set — the runner fails closed exactly when the state is least
+    trustworthy, instead of assuming QUEUE and clobbering an approval."""
     try:
         st = ctx.env.workflow.load(run_id).get(card_id)
-        return st.status if st else CardStatus.QUEUE
     except Exception:
-        return CardStatus.QUEUE
+        return None
+    return st.status if st else CardStatus.QUEUE
 
 
 # ── the fixed tool set ─────────────────────────────────────────────────────
@@ -411,7 +419,14 @@ def _queue_for_approval(ctx: ToolContext, args: dict) -> str:
     card_ids = args.get("card_ids") or []
     if not isinstance(card_ids, list):
         raise ToolError("card_ids must be a list")
-    note = str(args.get("note") or "Prepared by the autonomy assistant — ready for your review.")
+    runner_note = str(
+        args.get("note") or "Prepared by the autonomy assistant — ready for your review."
+    )
+    # The runner must never be able to set a schedule: a note beginning
+    # "scheduled:" is parsed as a schedule label by workflow/pack.py, so
+    # neutralise that prefix on the model-supplied note.
+    if runner_note.startswith("scheduled:"):
+        runner_note = " " + runner_note
     flagged, skipped, missing = 0, 0, 0
     for raw in card_ids[:50]:
         cid = str(raw).strip()
@@ -424,10 +439,19 @@ def _queue_for_approval(ctx: ToolContext, args: dict) -> str:
         if current not in _RUNNER_ALLOWED_STATUSES:
             skipped += 1
             continue
+        # Preserve any existing note (a human's note may carry a `scheduled:LABEL`
+        # label) — only fall back to the runner's note when the card has none, so
+        # flagging never clobbers a human's note or schedule.
+        existing_note = ""
+        try:
+            st = ctx.env.workflow.load(run_id).get(cid)
+            existing_note = (getattr(st, "notes", "") or "").strip() if st else ""
+        except Exception:
+            existing_note = ""
         # The reviewer-facing NOTE is the flag; the status is deliberately
         # re-written unchanged (QUEUE stays QUEUE, EDITED stays EDITED) so
         # flagging can never move a card anywhere new.
-        _safe_set_status(ctx.env.workflow, run_id, cid, current, note)
+        _safe_set_status(ctx.env.workflow, run_id, cid, current, existing_note or runner_note)
         flagged += 1
     return (
         f"Flagged {flagged} card(s) for your review"

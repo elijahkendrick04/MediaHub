@@ -430,10 +430,26 @@ def test_brand_base_falls_back_when_primary_too_light():
     assert io._luma(deep) <= io._luma(face)
 
 
-def test_brand_base_uses_primary_when_dark_enough():
-    b = _brief(palette={"primary": "#0B2E59", "secondary": "#fff", "accent": "#fff"})
-    face, _deep = io._brand_base(b)
-    assert face == "#0b2e59"
+def test_brand_base_separates_from_the_card_ground():
+    # The card ground of nearly every v2 archetype IS the brand primary, so the
+    # emblem face must NOT be the primary when a contrasting brand colour
+    # exists (the old primary-first rule painted a navy rosette on a navy
+    # card). Accent wins here: it is the first candidate with real luminance
+    # separation from the ground.
+    b = _brief(palette={"primary": "#0B2E59", "secondary": "#fff", "accent": "#E8B94E"})
+    face, deep = io._brand_base(b)
+    assert face == "#e8b94e"
+    assert abs(io._luma(face) - io._luma("#0B2E59")) >= io._GROUND_SEP
+    assert io._luma(deep) <= io._luma(face)
+
+
+def test_brand_base_derives_a_face_for_a_mono_dark_palette():
+    # Whole palette in one dark band → the face is DERIVED from the primary
+    # (lightened) so the emblem still reads; never an invisible smudge.
+    b = _brief(palette={"primary": "#0A2540", "secondary": "#0E1B2C", "accent": "#12263F"})
+    face, deep = io._brand_base(b)
+    assert abs(io._luma(face) - io._luma("#0A2540")) >= io._GROUND_SEP
+    assert io._luma(deep) <= io._luma(face)
 
 
 # ---------------------------------------------------------------------------

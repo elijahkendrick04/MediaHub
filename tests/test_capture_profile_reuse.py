@@ -17,7 +17,6 @@ Two follow-ups to the "signed-out by default" change:
 """
 from __future__ import annotations
 
-import importlib
 import io
 import sys
 from pathlib import Path
@@ -34,27 +33,15 @@ _PNG = bytes.fromhex(
 )
 
 
-@pytest.fixture
-def app(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
+@pytest.fixture(autouse=True)
+def _no_llm_keys(monkeypatch):
     # No LLM keys: capture short-circuits (no network) but the profile
-    # resolution + logo persistence we're testing still run.
+    # resolution + logo persistence we're testing still run. Provider keys are
+    # read live at call time (not at web.py import), so pinning them empty here
+    # is all this file needs on top of the canonical DATA_DIR-isolated ``app``
+    # fixture from tests/conftest.py.
     monkeypatch.setenv("ANTHROPIC_API_KEY", "")
     monkeypatch.setenv("GEMINI_API_KEY", "")
-    for d in ("runs_v4", "uploads_v4", "club_profiles"):
-        (tmp_path / d).mkdir(parents=True, exist_ok=True)
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-    importlib.reload(cp)
-    importlib.reload(wm)
-
-    application = wm.create_app()
-    application.config["TESTING"] = True
-    return application
 
 
 def _seed(display_name="City of Chester SC", profile_id="city-of-chester-sc"):

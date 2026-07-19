@@ -43,9 +43,9 @@
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  background: var(--mh-primary);
+  background: var(--mh-ground-gradient, var(--mh-primary));
   color: var(--mh-on-primary);
-  font-family: 'Inter', system-ui, sans-serif;
+  font-family: var(--mh-font-body, 'Inter', system-ui, sans-serif);
   -webkit-font-smoothing: antialiased;
   padding: 72px 64px 68px;
   gap: 18px;
@@ -121,7 +121,7 @@
   position: absolute; z-index: 3; left: 12px; right: 12px; bottom: 12px;
 }
 .cs__sel-lab {
-  font-family: 'Inter',sans-serif; font-weight: 800;
+  font-family: var(--mh-font-body, 'Inter',sans-serif); font-weight: 800;
   font-size: 13px; letter-spacing: 0.22em; text-transform: uppercase;
   color: var(--mh-accent); margin-bottom: 4px;
 }
@@ -130,7 +130,7 @@
   font-feature-settings: "tnum"; font-weight: 700;
   font-size: calc(var(--mh-fit-result-px, 92px) * 0.42);
   font-variation-settings: var(--mh-axes-result, normal);
-  line-height: 0.9; letter-spacing: -0.02em;
+  line-height: 0.9; letter-spacing: var(--mh-track-result, -0.02em);
   color: var(--mh-on-primary);
   white-space: normal; overflow-wrap: anywhere; word-break: break-word;
 }
@@ -144,25 +144,25 @@
 }
 .cs__cap-main { min-width: 0; }
 .cs__kicker {
-  font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 700;
+  font-family: var(--mh-font-kicker, 'Space Grotesk','Inter',sans-serif); font-weight: 700;
   font-size: 16px; letter-spacing: 0.2em; text-transform: uppercase;
   color: var(--mh-accent); margin-bottom: 8px; overflow-wrap: anywhere;
 }
 .cs__first {
-  font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 700;
+  font-family: var(--mh-font-kicker, 'Space Grotesk','Inter',sans-serif); font-weight: 700;
   font-size: 28px; letter-spacing: 0.01em; text-transform: uppercase;
   color: var(--mh-on-surface); overflow-wrap: anywhere;
 }
 .cs__surname {
-  font-family: 'Anton','Bebas Neue',Impact,sans-serif; font-weight: 400;
+  font-family: var(--mh-font-display, 'Anton','Bebas Neue',Impact,sans-serif); font-weight: 400;
   font-size: calc(var(--mh-fit-surname-px, 132px) * 0.6);
-  line-height: 0.9; letter-spacing: -0.01em; text-transform: uppercase;
+  line-height: 0.9; letter-spacing: var(--mh-track-surname, -0.01em); text-transform: uppercase;
   color: var(--mh-on-surface);
   white-space: normal; overflow-wrap: anywhere; word-break: break-word;
 }
 .cs__event {
   margin-top: 10px;
-  font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 600;
+  font-family: var(--mh-font-kicker, 'Space Grotesk','Inter',sans-serif); font-weight: 600;
   font-size: 22px; text-transform: uppercase; color: var(--mh-on-surface);
   opacity: 0.9; overflow-wrap: anywhere;
 }
@@ -176,11 +176,11 @@
 .cs__logo { height: 48px; width: auto; }
 .cs__logo img, .cs__logo svg { height: 100%; width: auto; object-fit: contain; display: block; }
 .cs__club {
-  font-family: 'Inter',sans-serif; font-weight: 800; font-size: 17px;
+  font-family: var(--mh-font-body, 'Inter',sans-serif); font-weight: 800; font-size: 17px;
   text-transform: uppercase; color: var(--mh-on-surface); text-align: right;
   overflow-wrap: anywhere;
 }
-.cs__sponsor { margin-top: 4px; }
+.cs__sponsor { margin-top: var(--mh-sp-1); }
 </style>
 </head>
 <body>

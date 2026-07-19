@@ -12,8 +12,9 @@ disable wiring at the source level.
 from __future__ import annotations
 
 import pathlib
+from tests._helpers import web_surface_src
 
-_SRC = pathlib.Path("src/mediahub/web/web.py").read_text(encoding="utf-8")
+_SRC = web_surface_src()
 
 
 def test_build_button_disabled_when_zero_approved():

@@ -22,14 +22,14 @@ _GOOD_BRIEF = (
 
 
 @pytest.fixture
-def env(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    for d in ("runs_v4", "uploads_v4", "club_profiles"):
-        (tmp_path / d).mkdir(parents=True, exist_ok=True)
-    yield tmp_path
+def env(tmp_path, web_module):
+    """Private per-test DATA_DIR. Requesting ``web_module`` pulls in the canonical
+    ``_isolate_data_dir`` fixture, which sets the storage-path env vars, repoints
+    the already-imported ``web.py`` globals and clears its per-run caches — the
+    same isolation the old ``setenv + importlib.reload`` boilerplate produced,
+    without the reload. ``tmp_path`` is shared, so ``env`` is the DATA_DIR the app
+    writes to."""
+    return tmp_path
 
 
 def _patch_ask(monkeypatch, *, returns=None, raises=None):
@@ -158,12 +158,11 @@ def test_build_brief_empty_prompt_errors(env):
 
 
 @pytest.fixture
-def app_org(env):
+def app_org(web_module):
     from mediahub.web.club_profile import ClubProfile, save_profile
-    from mediahub.web.web import create_app
 
     save_profile(ClubProfile(profile_id=ORG, display_name="Quick SC"))
-    app = create_app()
+    app = web_module.create_app()
     app.config.update(TESTING=True, SECRET_KEY="x")
     return app
 
@@ -271,25 +270,19 @@ def test_draft_view_warns_loudly_on_marker_drift(app_org, monkeypatch, caplog):
     assert "markup drifted" in caplog.text
 
 
-def test_quick_build_photos_share_the_ingest_gate(env, monkeypatch):
+def test_quick_build_photos_share_the_ingest_gate(env, web_module, monkeypatch):
     """Quick-build photos go through the shared ingest gate (sub_25r-1): a
     HEIC upload is normalised to JPEG (decoder present) or skipped (absent) —
     never stored raw as an undecodable graphic background — and corrupt
     bytes are skipped, not saved."""
-    import importlib
     import io as _io
 
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
-    if not wm._v8_ok:
+    if not web_module._v8_ok:
         pytest.skip("v8 engine unavailable")
     from mediahub.web.club_profile import ClubProfile, save_profile
 
     save_profile(ClubProfile(profile_id=ORG, display_name="Quick SC"))
-    app = wm.create_app()
+    app = web_module.create_app()
     app.config.update(TESTING=True, SECRET_KEY="x")
     _patch_ask(monkeypatch, returns=_GOOD_BRIEF)
 

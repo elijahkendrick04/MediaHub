@@ -12,9 +12,9 @@ Pins the new /sign-in page:
     a Create CTA — previously it 302'd to /organisation/setup, which
     made the home page "Sign in" button look broken.
 """
+
 from __future__ import annotations
 
-import importlib
 import sys
 from pathlib import Path
 
@@ -25,40 +25,30 @@ sys.path.insert(0, str(_ROOT))
 
 
 @pytest.fixture
-def app_no_profiles(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    for d in ("runs_v4", "uploads_v4", "club_profiles"):
-        (tmp_path / d).mkdir(parents=True, exist_ok=True)
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-    importlib.reload(cp)
-    importlib.reload(wm)
-
-    app = wm.create_app()
-    app.config["TESTING"] = True
+def app_no_profiles(client, app, tmp_path):
     app.config["ENFORCE_ORG_GATE"] = True
-    with app.test_client() as c:
-        yield c, app, tmp_path
+    yield client, app, tmp_path
 
 
 @pytest.fixture
 def app_two_profiles(app_no_profiles):
     c, app, tmp_path = app_no_profiles
     from mediahub.web.club_profile import ClubProfile, save_profile
-    save_profile(ClubProfile(
-        profile_id="wycombe",
-        display_name="Wycombe District Swimming Club",
-        brand_voice_summary="Friendly competitive club.",
-        brand_capture_status="ok_heuristic",
-    ))
-    save_profile(ClubProfile(
-        profile_id="other",
-        display_name="Other Club",
-    ))
+
+    save_profile(
+        ClubProfile(
+            profile_id="wycombe",
+            display_name="Wycombe District Swimming Club",
+            brand_voice_summary="Friendly competitive club.",
+            brand_capture_status="ok_heuristic",
+        )
+    )
+    save_profile(
+        ClubProfile(
+            profile_id="other",
+            display_name="Other Club",
+        )
+    )
     return c, app, tmp_path
 
 
@@ -123,7 +113,25 @@ class TestSignInPage:
         resp = c.get("/")
         body = resp.get_data(as_text=True)
         assert "Wycombe District Swimming Club" in body
-        # The pinned-state CTA wording.
+        # The pinned-state hero renders its returning-user CTA.
+        assert "Create new content" in body
+        # Switching organisations is now a developer-operator-only affordance
+        # (ADR-0029). An anonymous pilot session (no account, not the dev
+        # operator) must not see it in the hero or the account menu.
+        assert "Switch organisation" not in body
+
+    def test_switch_organisation_is_dev_operator_only(self, app_two_profiles):
+        """Only the authenticated dev operator keeps the cross-org switcher —
+        it appears in both the account-menu dropdown and the pinned home hero
+        for a dev session, and nowhere for a non-dev session."""
+        c, _, _ = app_two_profiles
+        # A dev-operator session (ADR-0019 grants the session flag).
+        with c.session_transaction() as sess:
+            sess["dev_operator"] = True
+        c.post("/sign-in", data={"profile_id": "wycombe"})
+        body = c.get("/").get_data(as_text=True)
+        assert "Wycombe District Swimming Club" in body
+        # The operator sees the switch affordance (nav dropdown + hero CTA).
         assert "Switch organisation" in body
 
     def test_header_dropdowns_are_mutually_exclusive(self, app_two_profiles):

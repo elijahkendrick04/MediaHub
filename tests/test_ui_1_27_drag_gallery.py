@@ -28,9 +28,9 @@ tests/test_u16_card_tilt.py + tests/test_hover_preview.py):
        native scroll; the focused row scrolls by keyboard; and reduced-motion
        keeps the drag usable (only the smooth-scroll animation stands down).
 """
+
 from __future__ import annotations
 
-import importlib
 import os
 import re
 import sys
@@ -118,23 +118,10 @@ def client(tmp_path, monkeypatch):
 
 
 @pytest.fixture
-def media_app(tmp_path, monkeypatch):
+def media_app(web_module, tmp_path):
     """A fresh app + one active profile + an empty, tmp-scoped media store
     (mirrors tests/test_hover_preview.py::hp_app)."""
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    for d in ("runs_v4", "uploads_v4", "club_profiles"):
-        (tmp_path / d).mkdir(parents=True, exist_ok=True)
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
-
-    app = wm.create_app()
+    app = web_module.create_app()
     app.config["TESTING"] = True
 
     import mediahub.media_library.store as _mls
@@ -153,25 +140,31 @@ def media_app(tmp_path, monkeypatch):
     return app, tmp_path
 
 
-def _seed_asset(tmp_path: Path, *, filename="p.jpg", athletes=None, venue="", atype="athlete_photo"):
+def _seed_asset(
+    tmp_path: Path, *, filename="p.jpg", athletes=None, venue="", atype="athlete_photo"
+):
     from mediahub.media_library.models import MediaAsset
     from mediahub.media_library.store import get_store
 
     asset_path = tmp_path / f"club_{filename}"
     asset_path.write_bytes(b"\xff\xd8\xff\xe0\x00\x10JFIF\x00")
-    return get_store().save(
-        MediaAsset(
-            id="",
-            filename=filename,
-            path=str(asset_path),
-            type=atype,
-            profile_id="club",
-            permission_status="approved_by_club",
-            approval_status="approved",
-            linked_athlete_names=athletes if athletes is not None else ["Eira Hughes"],
-            linked_venue=venue,
+    return (
+        get_store()
+        .save(
+            MediaAsset(
+                id="",
+                filename=filename,
+                path=str(asset_path),
+                type=atype,
+                profile_id="club",
+                permission_status="approved_by_club",
+                approval_status="approved",
+                linked_athlete_names=athletes if athletes is not None else ["Eira Hughes"],
+                linked_venue=venue,
+            )
         )
-    ).id
+        .id
+    )
 
 
 def _media_client(app):
@@ -260,27 +253,27 @@ class TestMotionCss:
 class TestKitJs:
     def test_binder_registered_in_init(self, kit_js):
         assert "function bindDragScroll(" in kit_js, "binder missing"
-        assert 'each(root, ".mh-drag-scroll", bindDragScroll)' in kit_js, (
-            "binder must be wired into init() so re-init picks up new HTML"
-        )
+        assert (
+            'each(root, ".mh-drag-scroll", bindDragScroll)' in kit_js
+        ), "binder must be wired into init() so re-init picks up new HTML"
 
     def test_touch_is_left_to_native_scroll(self, drag_js):
-        assert 'ev.pointerType === "touch"' in drag_js, (
-            "touch must keep native momentum scroll, not the mouse drag"
-        )
+        assert (
+            'ev.pointerType === "touch"' in drag_js
+        ), "touch must keep native momentum scroll, not the mouse drag"
 
     def test_primary_button_only(self, drag_js):
         assert "ev.button" in drag_js and "!== 0" in drag_js
 
     def test_movement_threshold_keeps_clicks_clickable(self, drag_js):
-        assert "Math.abs(dx) < 4" in drag_js, (
-            "a sub-threshold press must stay a click, not become a drag"
-        )
+        assert (
+            "Math.abs(dx) < 4" in drag_js
+        ), "a sub-threshold press must stay a click, not become a drag"
 
     def test_overflow_gate_and_grabbable(self, drag_js):
-        assert "scrollWidth" in drag_js and "clientWidth" in drag_js, (
-            "drag + grab cursor must be gated on real overflow"
-        )
+        assert (
+            "scrollWidth" in drag_js and "clientWidth" in drag_js
+        ), "drag + grab cursor must be gated on real overflow"
         assert '"is-grabbable"' in drag_js
         assert '"is-dragging"' in drag_js
 
@@ -322,9 +315,9 @@ class TestMediaLibraryGallery:
         app, tmp = media_app
         _seed_asset(tmp, filename="a.jpg")
         body = _media_client(app).get("/media-library").get_data(as_text=True)
-        assert body.find('class="mh-drag-scroll"') < body.find("<table"), (
-            "the browse filmstrip should sit above the management table"
-        )
+        assert body.find('class="mh-drag-scroll"') < body.find(
+            "<table"
+        ), "the browse filmstrip should sit above the management table"
         assert "<table" in body, "the detail table must remain"
 
     def test_card_metadata_is_html_escaped(self, media_app):
@@ -496,9 +489,9 @@ class TestDragBrowser:
             page.mouse.down()
             page.mouse.move(cx - 140, cy, steps=8)
             page.mouse.up()
-            assert page.evaluate("() => window.__clicks") == 1, (
-                "the click after a drag must be swallowed"
-            )
+            assert (
+                page.evaluate("() => window.__clicks") == 1
+            ), "the click after a drag must be swallowed"
             ctx.close()
         finally:
             browser.close()

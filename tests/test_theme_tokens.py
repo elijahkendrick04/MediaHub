@@ -13,9 +13,9 @@ The numeric pixel-parity check (i.e. ``--bg`` still resolves to
 ``#0A0B11``) is exercised in tests/test_responsive_meta.py via the
 rendered HTML; here we work at the source-string level.
 """
+
 from __future__ import annotations
 
-import importlib
 import re
 
 import pytest
@@ -29,14 +29,13 @@ import pytest
 @pytest.fixture(scope="module")
 def theme_tokens_css() -> str:
     from mediahub.web.theme_tokens import THEME_TOKENS_CSS
+
     return THEME_TOKENS_CSS
 
 
-@pytest.fixture(scope="module")
-def base_css() -> str:
-    import mediahub.web.web as wm
-    importlib.reload(wm)
-    return wm.BASE_CSS
+@pytest.fixture
+def base_css(web_module) -> str:
+    return web_module.BASE_CSS
 
 
 # ---------------------------------------------------------------------------
@@ -68,8 +67,7 @@ class TestModuleExposure:
 
 _EXPECTED_BRAND_TONES = [0, 50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 950, 1000]
 _EXPECTED_TERTIARY_TONES = _EXPECTED_BRAND_TONES
-_EXPECTED_NEUTRAL_TONES = [0, 50, 100, 200, 300, 400, 500, 600, 700, 750,
-                           800, 850, 900, 950, 1000]
+_EXPECTED_NEUTRAL_TONES = [0, 50, 100, 200, 300, 400, 500, 600, 700, 750, 800, 850, 900, 950, 1000]
 
 
 class TestTier1Primitives:
@@ -190,18 +188,16 @@ class TestTier2RoleTokens:
         for token in _TIER2_ROLE_TOKENS:
             if token in allowed_rgba_only:
                 continue
-            m = re.search(
-                rf"{re.escape(token)}:\s*([^;]+);", theme_tokens_css
-            )
+            m = re.search(rf"{re.escape(token)}:\s*([^;]+);", theme_tokens_css)
             assert m, f"Could not find declaration for {token}"
             value = m.group(1).strip()
             # Must be a var() reference to a primitive.
-            assert value.startswith("var("), (
-                f"{token} must reference a primitive via var(), got {value!r}"
-            )
-            assert not re.search(r"#[0-9A-Fa-f]{3,8}", value), (
-                f"{token} must not contain raw hex, got {value!r}"
-            )
+            assert value.startswith(
+                "var("
+            ), f"{token} must reference a primitive via var(), got {value!r}"
+            assert not re.search(
+                r"#[0-9A-Fa-f]{3,8}", value
+            ), f"{token} must not contain raw hex, got {value!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -213,7 +209,8 @@ class TestTier2RoleTokens:
 # and elevation tokens are composite (rgba + shadow blur) so they don't
 # fit syntax: "<color>" — they're excluded from the registration set.
 _REGISTERED_TOKENS = [
-    t for t in _TIER2_ROLE_TOKENS
+    t
+    for t in _TIER2_ROLE_TOKENS
     if not t.startswith("--mh-outline") and not t.startswith("--mh-elevation")
 ]
 
@@ -227,32 +224,35 @@ class TestPropertyRegistrations:
             rf"inherits:\s*true[^}}]*"
             rf"initial-value:\s*#[0-9A-Fa-f]+"
         )
-        assert re.search(pattern, theme_tokens_css, re.DOTALL), (
-            f"@property declaration for {token} missing or malformed"
-        )
+        assert re.search(
+            pattern, theme_tokens_css, re.DOTALL
+        ), f"@property declaration for {token} missing or malformed"
 
     def test_every_initial_value_is_valid_hex(self, theme_tokens_css):
         # Pull every initial-value from @property blocks and assert hex.
         for m in re.finditer(
             r"@property\s+--[\w-]+\s*\{[^}]*?initial-value:\s*([^;]+);",
-            theme_tokens_css, re.DOTALL,
+            theme_tokens_css,
+            re.DOTALL,
         ):
             value = m.group(1).strip()
-            assert re.fullmatch(r"#[0-9A-Fa-f]{6}", value), (
-                f"initial-value must be 6-digit hex, got {value!r}"
-            )
+            assert re.fullmatch(
+                r"#[0-9A-Fa-f]{6}", value
+            ), f"initial-value must be 6-digit hex, got {value!r}"
 
     def test_initial_value_count_matches_registered_set(self, theme_tokens_css):
         # Belt-and-braces: number of @property declarations equals the set
         # we expect to register. Stage C added the seven seed variables
         # (--mh-…-seed) — they need @property registration too so Stage E
         # can animate the seed crossfade.
-        declared = re.findall(
-            r"@property\s+(--mh-[\w-]+)\s*\{", theme_tokens_css
-        )
+        declared = re.findall(r"@property\s+(--mh-[\w-]+)\s*\{", theme_tokens_css)
         stage_c_seeds = {
-            "--mh-brand-seed", "--mh-tertiary-seed", "--mh-neutral-seed",
-            "--mh-error-seed", "--mh-success-seed", "--mh-warning-seed",
+            "--mh-brand-seed",
+            "--mh-tertiary-seed",
+            "--mh-neutral-seed",
+            "--mh-error-seed",
+            "--mh-success-seed",
+            "--mh-warning-seed",
             "--mh-info-seed",
         }
         expected = set(_REGISTERED_TOKENS) | stage_c_seeds
@@ -271,19 +271,54 @@ class TestPropertyRegistrations:
 # Existing tokens that BASE_CSS defines and that the rest of the app
 # uses. Stage A must preserve every one.
 _LEGACY_ALIASES = [
-    "--bg", "--bg-deep", "--bg-soft",
-    "--surface", "--surface-2", "--surface-3",
-    "--hairline", "--rule", "--chrome",
-    "--ink", "--ink-dim", "--ink-muted", "--ink-faint",
-    "--lane", "--lane-h", "--lane-deep", "--lane-ink", "--lane-glow",
-    "--medal", "--medal-h", "--medal-deep", "--medal-ink", "--medal-glow",
-    "--info", "--info-bg",
-    "--good", "--good-bg", "--warn", "--warn-bg", "--bad", "--bad-bg",
-    "--accent", "--accent-h", "--accent2", "--accent2-h", "--accent3",
-    "--gold", "--gold-h",
-    "--panel", "--panel2", "--panel-h",
-    "--border", "--border-h",
-    "--shadow", "--shadow-h", "--shadow-1", "--shadow-2", "--shadow-3",
+    "--bg",
+    "--bg-deep",
+    "--bg-soft",
+    "--surface",
+    "--surface-2",
+    "--surface-3",
+    "--hairline",
+    "--rule",
+    "--chrome",
+    "--ink",
+    "--ink-dim",
+    "--ink-muted",
+    "--ink-faint",
+    "--lane",
+    "--lane-h",
+    "--lane-deep",
+    "--lane-ink",
+    "--lane-glow",
+    "--medal",
+    "--medal-h",
+    "--medal-deep",
+    "--medal-ink",
+    "--medal-glow",
+    "--info",
+    "--info-bg",
+    "--good",
+    "--good-bg",
+    "--warn",
+    "--warn-bg",
+    "--bad",
+    "--bad-bg",
+    "--accent",
+    "--accent-h",
+    "--accent2",
+    "--accent2-h",
+    "--accent3",
+    "--gold",
+    "--gold-h",
+    "--panel",
+    "--panel2",
+    "--panel-h",
+    "--border",
+    "--border-h",
+    "--shadow",
+    "--shadow-h",
+    "--shadow-1",
+    "--shadow-2",
+    "--shadow-3",
 ]
 
 
@@ -294,8 +329,7 @@ class TestLegacyAliases:
         # alias or as a raw value (glow tokens). Either way, the cascade
         # must see a declaration.
         assert f"{alias}:" in base_css, (
-            f"Legacy alias {alias} disappeared — every old var() callsite "
-            f"would break."
+            f"Legacy alias {alias} disappeared — every old var() callsite " f"would break."
         )
 
 
@@ -303,16 +337,17 @@ class TestCascadeOrder:
     def test_theme_tokens_prepended(self, base_css, theme_tokens_css):
         """The cascade must start with theme_tokens so the tier-2 vocabulary
         is parsed BEFORE BASE_CSS's :root re-points the legacy aliases."""
-        assert base_css.startswith(theme_tokens_css), (
-            "THEME_TOKENS_CSS must be prepended to BASE_CSS."
-        )
+        assert base_css.startswith(
+            theme_tokens_css
+        ), "THEME_TOKENS_CSS must be prepended to BASE_CSS."
 
     def test_guardrails_appended_last(self, base_css):
         """The responsive guardrails must still sit at the end of the cascade."""
         from mediahub.web.responsive_guardrails import RESPONSIVE_GUARDRAILS_CSS
-        assert base_css.endswith(RESPONSIVE_GUARDRAILS_CSS), (
-            "RESPONSIVE_GUARDRAILS_CSS must remain at the end of BASE_CSS."
-        )
+
+        assert base_css.endswith(
+            RESPONSIVE_GUARDRAILS_CSS
+        ), "RESPONSIVE_GUARDRAILS_CSS must remain at the end of BASE_CSS."
 
     def test_no_circular_aliases_in_legacy_layer(self, base_css):
         """Walk the var(--…) graph from every legacy alias and assert each
@@ -344,9 +379,7 @@ class TestCascadeOrder:
             resolved = resolve(alias, set())
             # We don't assert a specific value — just that resolution
             # terminates without a loop and the alias is defined.
-            assert resolved != "<undefined>", (
-                f"Legacy alias {alias} resolves to nothing"
-            )
+            assert resolved != "<undefined>", f"Legacy alias {alias} resolves to nothing"
 
 
 # ---------------------------------------------------------------------------
@@ -363,6 +396,7 @@ class TestNoNewHardcodes:
     def test_inline_hex_count_within_budget(self):
         from pathlib import Path
         import sys
+
         repo_root = Path(__file__).resolve().parents[1]
         sys.path.insert(0, str(repo_root / "scripts"))
         try:
@@ -373,7 +407,8 @@ class TestNoNewHardcodes:
         rows = inv.scan_file(repo_root / "src" / "mediahub" / "web" / "web.py")
         hex_kinds = {"hex3", "hex4", "hex6", "hex8"}
         inline_hex = [
-            r for r in rows
+            r
+            for r in rows
             if r["kind"] in hex_kinds
             and r["classification"] in ("inline_fstring", "inline_html_style")
         ]
@@ -405,7 +440,12 @@ class TestNoNewHardcodes:
         # An emoji entity next to a genuine hex colour: only the real colour counts.
         sample = 'style="color:#0A0B11">&#127912; &#9733; done'
         kinds = [k for k, rx in inv.COLOUR_PATTERNS if rx.search(sample) and k in hex_kinds]
-        hits = [m.group(0) for k, rx in inv.COLOUR_PATTERNS if k in hex_kinds for m in rx.finditer(sample)]
+        hits = [
+            m.group(0)
+            for k, rx in inv.COLOUR_PATTERNS
+            if k in hex_kinds
+            for m in rx.finditer(sample)
+        ]
         assert "#0A0B11" in hits, "a real hex colour must still be detected"
         assert "#127912" not in hits, "the &#127912; emoji entity must not count as hex"
 

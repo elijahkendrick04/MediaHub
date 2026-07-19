@@ -23,6 +23,36 @@ from mediahub.log_sentinel.render_api import LogLine
 MAX_EVIDENCE = 5
 EVIDENCE_TRIM = 300  # chars per evidence line
 
+# Evidence is verbatim production log text that leaves the process — it is
+# written to the audit ledger, pushed to ntfy topics, fed to AI triage and filed
+# into an external GitHub issue whose title flows into docs/ROADMAP.md. Access
+# logs can carry provider keys in query strings (Gemini's ``?key=AIza...``),
+# Authorization headers and athlete PII (emails). Redact BEFORE evidence is built
+# so every downstream sink is covered at once (CLAUDE.md: keys/PII must never
+# appear in user-visible text).
+_REDACTIONS: tuple[tuple[re.Pattern, str], ...] = (
+    (
+        re.compile(
+            r"(?i)\b((?:api[_-]?key|access[_-]?token|key|token|secret|password|pwd)\s*[=:]\s*)"
+            r"[^\s&'\"]+"
+        ),
+        r"\1***",
+    ),
+    (re.compile(r"(?i)\b(authorization\s*[:=]\s*)\S+"), r"\1***"),
+    (re.compile(r"(?i)\b(bearer\s+)\S+"), r"\1***"),
+    (re.compile(r"\bsk-ant-[A-Za-z0-9_-]{6,}"), "sk-ant-***"),
+    (re.compile(r"\bAIza[A-Za-z0-9_-]{10,}"), "AIza***"),
+    (re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b"), "<email redacted>"),
+)
+
+
+def redact_evidence(text: str) -> str:
+    """Mask provider keys, auth headers and emails from a log line before it
+    leaves the box (audit ledger, ntfy, GitHub issue, AI triage)."""
+    for pat, repl in _REDACTIONS:
+        text = pat.sub(repl, text)
+    return text
+
 
 @dataclass(frozen=True)
 class Finding:
@@ -49,6 +79,10 @@ class Detector:
     # an error class in prose (e.g. the boot env-check warning that documents the
     # honest-error behaviour, #1065) without dropping the genuine runtime event.
     exclude: re.Pattern | None = None
+    # How many lines AFTER each match to fold into the evidence. Tracebacks are
+    # logged frame-per-line, so a header-only pattern yields contentless evidence
+    # unless the following frames come with it.
+    context_after: int = 0
 
 
 DETECTORS: tuple[Detector, ...] = (
@@ -165,6 +199,9 @@ DETECTORS: tuple[Detector, ...] = (
             "An exception escaped to the logs. The evidence shows the surrounding "
             "lines; fix belongs in code, so this is notify-only."
         ),
+        # Carry the frames after the header, or the evidence is just the bare
+        # "Traceback (most recent call last):" line repeated with no context.
+        context_after=6,
     ),
 )
 
@@ -173,16 +210,27 @@ def detect(lines: list[LogLine]) -> list[Finding]:
     """Run every detector over one batch; return findings that met threshold."""
     findings: list[Finding] = []
     for det in DETECTORS:
-        matched = [
-            ln
-            for ln in lines
+        match_idxs = [
+            i
+            for i, ln in enumerate(lines)
             if det.pattern.search(ln.message)
             and not (det.exclude and det.exclude.search(ln.message))
         ]
-        if len(matched) < det.threshold:
+        if len(match_idxs) < det.threshold:
             continue
+        # Evidence is each match plus the following ``context_after`` lines (so a
+        # traceback carries its frames, not just the header), de-duplicated by
+        # index and capped at MAX_EVIDENCE total lines.
+        ev_idxs: list[int] = []
+        seen: set[int] = set()
+        for i in match_idxs:
+            for j in range(i, min(i + 1 + det.context_after, len(lines))):
+                if j not in seen:
+                    seen.add(j)
+                    ev_idxs.append(j)
         evidence = tuple(
-            f"{ln.timestamp} {ln.message}".strip()[:EVIDENCE_TRIM] for ln in matched[:MAX_EVIDENCE]
+            redact_evidence(f"{lines[j].timestamp} {lines[j].message}".strip())[:EVIDENCE_TRIM]
+            for j in ev_idxs[:MAX_EVIDENCE]
         )
         findings.append(
             Finding(
@@ -190,11 +238,11 @@ def detect(lines: list[LogLine]) -> list[Finding]:
                 severity=det.severity,
                 title=det.title,
                 suggestion=det.suggestion,
-                count=len(matched),
+                count=len(match_idxs),
                 evidence=evidence,
             )
         )
     return findings
 
 
-__all__ = ["Finding", "Detector", "DETECTORS", "detect", "MAX_EVIDENCE"]
+__all__ = ["Finding", "Detector", "DETECTORS", "detect", "redact_evidence", "MAX_EVIDENCE"]

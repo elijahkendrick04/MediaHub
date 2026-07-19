@@ -9,30 +9,18 @@ returns to the same page.
 
 from __future__ import annotations
 
-import importlib
 import re
 
 import pytest
 
 
 @pytest.fixture
-def client(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
+def client(web_module, monkeypatch):
     monkeypatch.setenv("MEDIAHUB_SCHEDULER", "0")
-    (tmp_path / "runs_v4").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "club_profiles").mkdir(parents=True, exist_ok=True)
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
     from mediahub.web.club_profile import ClubProfile, save_profile
 
     save_profile(ClubProfile(profile_id="club-a", display_name="Club A"))
-    app = wm.create_app()
+    app = web_module.create_app()
     app.config["TESTING"] = True
     c = app.test_client()
     with c.session_transaction() as s:
@@ -135,22 +123,11 @@ def test_switcher_does_not_echo_request_path(client):
 
 
 @pytest.fixture
-def gated_client(tmp_path, monkeypatch):
+def gated_client(web_module, monkeypatch):
     """Client with the org-setup gate ENFORCED and no active organisation — the
     real signed-out-visitor scenario the footer switcher must serve."""
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
     monkeypatch.setenv("MEDIAHUB_SCHEDULER", "0")
-    (tmp_path / "runs_v4").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "club_profiles").mkdir(parents=True, exist_ok=True)
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
-    app = wm.create_app()
+    app = web_module.create_app()
     app.config["TESTING"] = True
     app.config["ENFORCE_ORG_GATE"] = True
     return app.test_client()
@@ -175,26 +152,15 @@ def test_switch_works_for_signed_out_visitor_through_the_gate(gated_client):
     assert '<html lang="cy"' in html
 
 
-def test_switcher_form_carries_a_working_csrf_token(tmp_path, monkeypatch):
+def test_switcher_form_carries_a_working_csrf_token(web_module, monkeypatch):
     # Under real CSRF enforcement, the rendered switcher <form> must carry a
     # token the server accepts — otherwise the control 403s in production even
     # though the plain-TESTING tests (CSRF off) pass.
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
     monkeypatch.setenv("MEDIAHUB_SCHEDULER", "0")
-    (tmp_path / "runs_v4").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "club_profiles").mkdir(parents=True, exist_ok=True)
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
     from mediahub.web.club_profile import ClubProfile, save_profile
 
     save_profile(ClubProfile(profile_id="club-a", display_name="Club A"))
-    app = wm.create_app()
+    app = web_module.create_app()
     app.config["TESTING"] = True
     app.config["ENFORCE_CSRF"] = True
     client = app.test_client()

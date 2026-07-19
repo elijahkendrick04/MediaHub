@@ -8,10 +8,10 @@ never creeps back across all three public surfaces (web UI, still-graphic
 renderer, Remotion video) — each surface's class skips cleanly until that
 surface's assets exist.
 """
+
 from __future__ import annotations
 
 import base64
-import importlib
 import re
 from pathlib import Path
 
@@ -46,27 +46,13 @@ class TestWebFontAssets:
 
     def test_fraunces_is_variable(self):
         css = FONTS_CSS.read_text()
-        assert re.search(r"font-family: 'Fraunces';[^}]*font-weight: 400 900;", css, re.S), \
+        assert re.search(r"font-family: 'Fraunces';[^}]*font-weight: 400 900;", css, re.S), (
             "Fraunces must be self-hosted as a variable font (font-weight: 400 900)"
+        )
 
     def test_metric_tuned_fallback_exists(self):
         css = FONTS_CSS.read_text()
         assert "Hanken Grotesk Fallback" in css and "size-adjust" in css
-
-
-@pytest.fixture
-def app(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    for sub in ("runs_v4", "uploads_v4", "club_profiles"):
-        (tmp_path / sub).mkdir(parents=True, exist_ok=True)
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-    importlib.reload(cp); importlib.reload(wm)
-    a = wm.create_app(); a.config["TESTING"] = True
-    return a
 
 
 class TestWebRenderedHead:
@@ -87,17 +73,20 @@ class TestWebRenderedHead:
             body = c.get("/status").get_data(as_text=True)
         assert "Hanken Grotesk Fallback" in body
 
-    @pytest.mark.parametrize("font_file", [
-        "hanken-latin-normal-400.woff2",
-        "bigshoulders-latin-normal-800.woff2",
-        # Regression: fraunces-latin-italic-400-900.woff2 returned 502 on /dpa
-        # (2026-06-13, Render cold-start) and was absent from MIME coverage.
-        "fraunces-latin-italic-400-900.woff2",
-        # Regression: bigshoulders-latin-normal-600.woff2 returned net::ERR_ABORTED
-        # on /account/2fa (2026-06-18) — 600-weight was absent from MIME coverage
-        # even though 800-weight was tested.
-        "bigshoulders-latin-normal-600.woff2",
-    ])
+    @pytest.mark.parametrize(
+        "font_file",
+        [
+            "hanken-latin-normal-400.woff2",
+            "bigshoulders-latin-normal-800.woff2",
+            # Regression: fraunces-latin-italic-400-900.woff2 returned 502 on /dpa
+            # (2026-06-13, Render cold-start) and was absent from MIME coverage.
+            "fraunces-latin-italic-400-900.woff2",
+            # Regression: bigshoulders-latin-normal-600.woff2 returned net::ERR_ABORTED
+            # on /account/2fa (2026-06-18) — 600-weight was absent from MIME coverage
+            # even though 800-weight was tested.
+            "bigshoulders-latin-normal-600.woff2",
+        ],
+    )
     def test_woff2_served_as_font_mimetype(self, app, font_file):
         # Regression: Python's mimetypes omits font/woff2 on some Linux
         # systems, causing Flask to serve woff2 as application/octet-stream
@@ -122,8 +111,16 @@ _RENDER_PY = _ROOT / "src" / "mediahub" / "graphic_renderer" / "render.py"
 class TestRendererFonts:
     def test_renderer_woff2_present(self):
         names = {p.name for p in (_RL / "fonts").glob("*.woff2")}
-        for slug in ("bebas-neue", "anton", "bowlby-one", "space-grotesk",
-                     "inter", "jetbrains-mono"):
+        # playfair-display joined as the serif display register (D5).
+        for slug in (
+            "bebas-neue",
+            "anton",
+            "bowlby-one",
+            "space-grotesk",
+            "inter",
+            "jetbrains-mono",
+            "playfair-display",
+        ):
             assert f"{slug}.woff2" in names, f"missing renderer font {slug}.woff2"
 
     def test_shared_css_first_party(self):
@@ -163,8 +160,16 @@ class TestRemotionFonts:
     def test_brand_woff2_bundled_in_public(self):
         pub = _REMOTION / "public" / "fonts"
         names = {p.name for p in pub.glob("*.woff2")}
-        for slug in ("bebas-neue", "anton", "bowlby-one", "space-grotesk",
-                     "inter", "jetbrains-mono"):
+        # playfair-display joined as the serif display register (D5).
+        for slug in (
+            "bebas-neue",
+            "anton",
+            "bowlby-one",
+            "space-grotesk",
+            "inter",
+            "jetbrains-mono",
+            "playfair-display",
+        ):
             assert f"{slug}.woff2" in names, f"missing bundled reel font {slug}.woff2"
 
     def test_fonts_module_uses_staticfile_and_delayrender_guard(self):

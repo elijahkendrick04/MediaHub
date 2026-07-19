@@ -196,11 +196,10 @@ class TestVisionCallsAreLogged:
         return rows
 
     def _reset_breaker(self):
-        from mediahub.media_ai import llm as m
+        # Breaker state lives in the shared transport (finding #43).
+        from mediahub.ai_core import gemini_transport
 
-        with m._gemini_breaker_lock:
-            m._gemini_breaker_state["consecutive_failures"] = 0
-            m._gemini_breaker_state["tripped_until"] = 0.0
+        gemini_transport.breaker_record_success()
 
     def test_gemini_vision_success_logs_row(self, fresh_usage, monkeypatch):
         import requests

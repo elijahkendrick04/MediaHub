@@ -10,8 +10,6 @@ is tenant-gated: an id that isn't on the active organisation's roster 404s.
 
 from __future__ import annotations
 
-import importlib
-
 import pytest
 
 ORG = "club-a"
@@ -19,23 +17,11 @@ FOREIGN_ORG = "club-b"
 
 
 @pytest.fixture
-def client(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    (tmp_path / "club_profiles").mkdir(parents=True, exist_ok=True)
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
+def client(app):
     from mediahub.web.club_profile import ClubProfile, save_profile
 
     save_profile(ClubProfile(profile_id=ORG, display_name="Club A"))
     save_profile(ClubProfile(profile_id=FOREIGN_ORG, display_name="Club B"))
-    app = wm.create_app()
-    app.config.update(TESTING=True, SECRET_KEY="x")
     c = app.test_client()
     with c.session_transaction() as s:
         s["active_profile_id"] = ORG
@@ -217,9 +203,12 @@ def test_bulk_failure_mid_way_writes_nothing(client, monkeypatch):
 
     roster = _seed_roster(ORG, ["Maya Patel", "Joe Bloggs", "Eira Hughes"])
     ids = [a.athlete_id for a in roster]
-    assert client.post(
-        "/api/athletes/consent", json={"athlete_ids": ids, "level": "full"}
-    ).get_json()["updated"] == 3
+    assert (
+        client.post("/api/athletes/consent", json={"athlete_ids": ids, "level": "full"}).get_json()[
+            "updated"
+        ]
+        == 3
+    )
 
     calls = {"n": 0}
     real_now = consent._now

@@ -10,7 +10,6 @@ guard on the members admin route.
 
 from __future__ import annotations
 
-import importlib
 import json
 import sys
 import uuid
@@ -54,20 +53,10 @@ def _seed_run(runs_dir: Path, run_id: str, profile_id: str):
 
 
 @pytest.fixture
-def roles_world(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
+def roles_world(app, web_module, tmp_path, monkeypatch):
     monkeypatch.delenv("STRIPE_SECRET_KEY", raising=False)
-    for d in ("runs_v4", "uploads_v4", "club_profiles"):
-        (tmp_path / d).mkdir(parents=True, exist_ok=True)
 
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
+    wm = web_module
 
     from mediahub.web.club_profile import ClubProfile, save_profile
 
@@ -100,8 +89,6 @@ def roles_world(tmp_path, monkeypatch):
         users.create(email, PASSWORD)
         store.add(email, "org-alpha", role=role)
 
-    app = wm.create_app()
-    app.config["TESTING"] = True
     return {"app": app, "wm": wm, "run_id": run_id}
 
 

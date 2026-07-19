@@ -14,12 +14,16 @@ Each returned card is the RankedAchievement dict extended with:
 from __future__ import annotations
 
 import json
+import logging
+import os
 import threading
 from pathlib import Path
 from typing import Optional
 
 from .status import CardStatus
 from .store import WorkflowStore
+
+log = logging.getLogger(__name__)
 
 
 def _capture_memories_async(jobs: list[tuple]) -> None:
@@ -59,14 +63,17 @@ def build_content_pack(
     run_id : str
     profile_id : str
     runs_dir : Path | None
-        Defaults to <project_root>/runs_v4.
+        Defaults to the env-derived runs dir (RUNS_DIR, else DATA_DIR/runs_v4) —
+        the same derivation the web layer uses — so the fallback points at the
+        real runtime run storage, never the source tree.
 
     Returns
     -------
     list[dict]  — approved cards, priority-descending, with brand data.
     """
     if runs_dir is None:
-        runs_dir = Path(__file__).resolve().parents[2] / "runs_v4"
+        data_dir = Path(os.environ.get("DATA_DIR", str(Path(__file__).resolve().parents[1])))
+        runs_dir = Path(os.environ.get("RUNS_DIR", str(data_dir / "runs_v4")))
     runs_dir = Path(runs_dir)
 
     # Load run JSON
@@ -105,7 +112,13 @@ def build_content_pack(
         wf = wf_states.get(card_id)
         if wf and wf.status == CardStatus.APPROVED:
             card = dict(ra)
-            card["workflow"] = wf.to_dict()
+            # Finding #116: `actor` is internal approval-audit state — keep it out
+            # of the built pack so approver identities (a member email, or the
+            # token id) are never disclosed through the content:export ZIP. The
+            # pack renderer only uses status + edited_captions, never the actor.
+            _wf = wf.to_dict()
+            _wf.pop("actor", None)
+            card["workflow"] = _wf
             card["_card_id"] = card_id
 
             # Apply brand captions
@@ -141,29 +154,42 @@ def build_content_pack(
             # into pack building. The embed call itself is HTTP-blocking, so
             # captures are queued here and run on a daemon thread after the
             # pack is assembled — never on the render path.
-            try:
-                from mediahub.memory import learning as _mem
+            _bc = card.get("brand_captions") or {}
+            _active = _bc.get(tone) if isinstance(_bc, dict) else None
+            _cap = ""
+            if isinstance(_active, dict):
+                _cap = " ".join(
+                    str(v).strip() for v in _active.values() if isinstance(v, str) and v.strip()
+                )
 
-                _bc = card.get("brand_captions") or {}
-                _active = _bc.get(tone) if isinstance(_bc, dict) else None
-                if isinstance(_active, dict):
-                    _cap = " ".join(
-                        str(v).strip() for v in _active.values() if isinstance(v, str) and v.strip()
-                    )
-                    if _cap:
-                        if _mem.is_enabled():
-                            capture_jobs.append((profile_id, ach, _cap, card_id, run_id))
-                        # PAR-1 approval loop: the plain few-shot voice store
-                        # works for EVERY club (no embedding backend, no corpus
-                        # floor) — the approved caption becomes a voice example
-                        # injected into future generation. Idempotent per
-                        # caption, a cheap local write, best-effort.
-                        if profile_id:
-                            from mediahub.web.ai_caption import record_approved_caption
+            # PAR-1 approval loop: the plain few-shot voice store works for
+            # EVERY club (no embedding backend, no corpus floor) — the approved
+            # caption becomes a voice example injected into future generation.
+            # Decoupled from the semantic-memory block below so a memory import
+            # failure can never silently skip this cheap, universal local write.
+            # Idempotent per caption, best-effort.
+            if _cap and profile_id:
+                try:
+                    from mediahub.web.ai_caption import record_approved_caption
 
-                            record_approved_caption(str(profile_id), _cap)
-            except Exception:
-                pass
+                    record_approved_caption(str(profile_id), _cap)
+                except Exception as exc:
+                    # Best-effort, but not fully silent — a voice-write failure
+                    # shouldn't disappear (it's decoupled from the semantic-memory
+                    # capture below so one failing never disables the other).
+                    log.warning("PAR-1 voice write failed for profile %s: %s", profile_id, exc)
+
+            # Cap 2b semantic recall: queue the embed capture only when an
+            # embedding backend is configured. Off-by-default, best-effort, and
+            # independent of the PAR-1 write above.
+            if _cap:
+                try:
+                    from mediahub.memory import learning as _mem
+
+                    if _mem.is_enabled():
+                        capture_jobs.append((profile_id, ach, _cap, card_id, run_id))
+                except Exception:
+                    pass
 
             approved.append((ra.get("priority", 0.0), card))
 

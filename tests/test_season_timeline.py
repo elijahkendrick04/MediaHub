@@ -13,16 +13,10 @@ lists — so the same hard rules apply:
 
 Modelled on tests/test_activity_scoping.py (the proven org-gated fixture).
 """
+
 from __future__ import annotations
 
-import importlib
-import sys
-from pathlib import Path
-
 import pytest
-
-_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(_ROOT))
 
 
 def _insert_run(
@@ -35,12 +29,19 @@ def _insert_run(
     status="done",
     our_swims=10,
     n_achievements=3,
+    n_standout=None,
     error=None,
 ):
+    # n_standout (the deduped standout-swim count the timeline chips now show)
+    # defaults to the achievement figure so the seeded meets read the same as
+    # a freshly-persisted run where every detection was a distinct standout.
+    if n_standout is None:
+        n_standout = n_achievements
     conn.execute(
         "INSERT INTO runs (id, created_at, finished_at, status, profile_id, "
-        "meet_name, file_name, our_swims, n_cards, n_queue, n_achievements, error) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?)",
+        "meet_name, file_name, our_swims, n_cards, n_queue, n_achievements, "
+        "n_standout, error) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?)",
         (
             run_id,
             created_at,
@@ -51,56 +52,78 @@ def _insert_run(
             f"{meet}.pdf",
             our_swims,
             n_achievements,
+            n_standout,
             error,
         ),
     )
 
 
 @pytest.fixture
-def gated_client(tmp_path, monkeypatch):
+def gated_client(app, web_module):
     """Fresh DATA_DIR with the org gate enforced, two seeded clubs, and a
-    set of club-a runs spanning two months (with one failed run)."""
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    (tmp_path / "runs_v4").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "uploads_v4").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "club_profiles").mkdir(parents=True, exist_ok=True)
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
-
-    app = wm.create_app()
-    app.config["TESTING"] = True
+    set of club-a runs spanning two months (with one failed run). Uses the
+    canonical shared fixtures (isolated per-test DATA_DIR, no module reload)."""
+    wm = web_module
     app.config["ENFORCE_ORG_GATE"] = True
 
     from mediahub.web.club_profile import ClubProfile, save_profile
 
-    save_profile(ClubProfile(
-        profile_id="club-a", display_name="Dolphins SC",
-        brand_voice_summary="A friendly club.",
-    ))
-    save_profile(ClubProfile(
-        profile_id="club-b", display_name="Sharks SC",
-        brand_voice_summary="A serious club.",
-    ))
+    save_profile(
+        ClubProfile(
+            profile_id="club-a",
+            display_name="Dolphins SC",
+            brand_voice_summary="A friendly club.",
+        )
+    )
+    save_profile(
+        ClubProfile(
+            profile_id="club-b",
+            display_name="Sharks SC",
+            brand_voice_summary="A serious club.",
+        )
+    )
 
     conn = wm._db()
     # club-a: two June meets + one May meet (one of them failed).
-    _insert_run(conn, "a-jun-1", "club-a", "June Open Meet",
-                created_at="2026-06-10T09:00:00Z", our_swims=24, n_achievements=7)
-    _insert_run(conn, "a-jun-2", "club-a", "June Sprint Gala",
-                created_at="2026-06-02T09:00:00Z", our_swims=40, n_achievements=15)
-    _insert_run(conn, "a-may-1", "club-a", "May Distance Meet",
-                created_at="2026-05-18T09:00:00Z", status="error",
-                our_swims=0, n_achievements=0, error="Parser blew up\nfull stack trace")
+    _insert_run(
+        conn,
+        "a-jun-1",
+        "club-a",
+        "June Open Meet",
+        created_at="2026-06-10T09:00:00Z",
+        our_swims=24,
+        n_achievements=7,
+    )
+    _insert_run(
+        conn,
+        "a-jun-2",
+        "club-a",
+        "June Sprint Gala",
+        created_at="2026-06-02T09:00:00Z",
+        our_swims=40,
+        n_achievements=15,
+    )
+    _insert_run(
+        conn,
+        "a-may-1",
+        "club-a",
+        "May Distance Meet",
+        created_at="2026-05-18T09:00:00Z",
+        status="error",
+        our_swims=0,
+        n_achievements=0,
+        error="Parser blew up\nfull stack trace",
+    )
     # club-b: a separate meet that must never leak into club-a's view.
-    _insert_run(conn, "b-1", "club-b", "Sharks County Champs",
-                created_at="2026-06-09T09:00:00Z", our_swims=12, n_achievements=4)
+    _insert_run(
+        conn,
+        "b-1",
+        "club-b",
+        "Sharks County Champs",
+        created_at="2026-06-09T09:00:00Z",
+        our_swims=12,
+        n_achievements=4,
+    )
     conn.commit()
     conn.close()
 
@@ -116,6 +139,7 @@ def _pin(client, profile_id):
 # ---------------------------------------------------------------------------
 # 1. Multi-tenant isolation — the core data-leak guard.
 # ---------------------------------------------------------------------------
+
 
 class TestScoping:
     def test_shows_only_active_org_runs(self, gated_client):
@@ -141,6 +165,7 @@ class TestScoping:
 # 2. The UI2.3 kit contract — timeline nodes + scroll-driven tracing beam.
 # ---------------------------------------------------------------------------
 
+
 class TestKitMarkup:
     def test_renders_tracing_beam_and_timeline(self, gated_client):
         c, _, _ = gated_client
@@ -160,7 +185,7 @@ class TestKitMarkup:
         _pin(c, "club-a")
         body = c.get("/season").get_data(as_text=True)
         assert ".mh-tracing-beam__rail" in body  # the rail rule
-        assert "--mh-progress" in body            # the scroll-driven fill var
+        assert "--mh-progress" in body  # the scroll-driven fill var
 
     def test_page_title_and_eyebrow(self, gated_client):
         c, _, _ = gated_client
@@ -172,6 +197,7 @@ class TestKitMarkup:
 # ---------------------------------------------------------------------------
 # 3. Month grouping + per-item content.
 # ---------------------------------------------------------------------------
+
 
 class TestGroupingAndContent:
     def test_groups_by_month(self, gated_client):
@@ -197,15 +223,16 @@ class TestGroupingAndContent:
         _pin(c, "club-a")
         body = c.get("/season").get_data(as_text=True)
         assert "24 swims matched" in body
-        assert "7 moments detected" in body
+        assert "7 standout swims" in body
         # The 40-swim gala.
         assert "40 swims matched" in body
-        assert "15 moments detected" in body
+        assert "15 standout swims" in body
 
 
 # ---------------------------------------------------------------------------
 # 4. Season totals (count-up stat strip).
 # ---------------------------------------------------------------------------
+
 
 class TestTotals:
     def test_totals_count_up_values(self, gated_client):
@@ -226,12 +253,19 @@ class TestTotals:
     def test_hero_totals_do_not_double_count_reruns(self, gated_client):
         """A re-upload of the same meet (shared content_hash) is badged as a
         re-run and must NOT inflate the celebratory hero stats — each real meet
-        counts once for Meets / Swims matched / Moments detected."""
+        counts once for Meets / Swims matched / Standout swims."""
         c, _, wm = gated_client
         conn = wm._db()
         # A re-run of "June Open Meet" (a-jun-1): same content_hash, newer date.
-        _insert_run(conn, "a-jun-1-rerun", "club-a", "June Open Meet",
-                    created_at="2026-06-11T09:00:00Z", our_swims=24, n_achievements=7)
+        _insert_run(
+            conn,
+            "a-jun-1-rerun",
+            "club-a",
+            "June Open Meet",
+            created_at="2026-06-11T09:00:00Z",
+            our_swims=24,
+            n_achievements=7,
+        )
         conn.execute(
             "UPDATE runs SET content_hash = 'shared-hash-1' WHERE id IN (?, ?)",
             ("a-jun-1", "a-jun-1-rerun"),
@@ -253,6 +287,7 @@ class TestTotals:
 # 5. Status badges + failed-run explainability.
 # ---------------------------------------------------------------------------
 
+
 class TestStatusAndErrors:
     def test_failed_run_shows_reason(self, gated_client):
         c, _, _ = gated_client
@@ -266,22 +301,26 @@ class TestStatusAndErrors:
         _pin(c, "club-a")
         body = c.get("/season").get_data(as_text=True)
         assert "tag good" in body  # done runs
-        assert "tag bad" in body   # the failed run
+        assert "tag bad" in body  # the failed run
 
 
 # ---------------------------------------------------------------------------
 # 6. Security — XSS in user-derived fields.
 # ---------------------------------------------------------------------------
 
+
 class TestSecurity:
     def test_meet_name_is_escaped(self, gated_client):
         c, _, wm = gated_client
         from mediahub.web.club_profile import ClubProfile, save_profile
 
-        save_profile(ClubProfile(
-            profile_id="club-x", display_name="XSS SC",
-            brand_voice_summary="x",
-        ))
+        save_profile(
+            ClubProfile(
+                profile_id="club-x",
+                display_name="XSS SC",
+                brand_voice_summary="x",
+            )
+        )
         conn = wm._db()
         _insert_run(conn, "x-1", "club-x", "<script>alert(1)</script>")
         conn.commit()
@@ -295,13 +334,17 @@ class TestSecurity:
         c, _, wm = gated_client
         from mediahub.web.club_profile import ClubProfile, save_profile
 
-        save_profile(ClubProfile(
-            profile_id="club-e", display_name="Err SC",
-            brand_voice_summary="x",
-        ))
+        save_profile(
+            ClubProfile(
+                profile_id="club-e",
+                display_name="Err SC",
+                brand_voice_summary="x",
+            )
+        )
         conn = wm._db()
-        _insert_run(conn, "e-1", "club-e", "Bad Meet", status="error",
-                    error="<img src=x onerror=alert(1)>")
+        _insert_run(
+            conn, "e-1", "club-e", "Bad Meet", status="error", error="<img src=x onerror=alert(1)>"
+        )
         conn.commit()
         conn.close()
         _pin(c, "club-e")
@@ -314,15 +357,19 @@ class TestSecurity:
 # 7. Empty state + auth gate + fail-soft + robustness.
 # ---------------------------------------------------------------------------
 
+
 class TestEmptyAndGuards:
     def test_empty_state_for_new_club(self, gated_client):
         c, _, wm = gated_client
         from mediahub.web.club_profile import ClubProfile, save_profile
 
-        save_profile(ClubProfile(
-            profile_id="club-c", display_name="New SC",
-            brand_voice_summary="x",
-        ))
+        save_profile(
+            ClubProfile(
+                profile_id="club-c",
+                display_name="New SC",
+                brand_voice_summary="x",
+            )
+        )
         _pin(c, "club-c")
         resp = c.get("/season")
         assert resp.status_code == 200
@@ -359,10 +406,13 @@ class TestEmptyAndGuards:
         c, _, wm = gated_client
         from mediahub.web.club_profile import ClubProfile, save_profile
 
-        save_profile(ClubProfile(
-            profile_id="club-u", display_name="Undated SC",
-            brand_voice_summary="x",
-        ))
+        save_profile(
+            ClubProfile(
+                profile_id="club-u",
+                display_name="Undated SC",
+                brand_voice_summary="x",
+            )
+        )
         conn = wm._db()
         # NULL created_at and a garbage value — both must group as "Undated".
         _insert_run(conn, "u-null", "club-u", "No date meet", created_at=None)
@@ -395,10 +445,13 @@ class TestStaleBannerTitle:
         c, _, wm = gated_client
         from mediahub.web.club_profile import ClubProfile, save_profile
 
-        save_profile(ClubProfile(
-            profile_id="club-banner", display_name="Banner SC",
-            brand_voice_summary="x",
-        ))
+        save_profile(
+            ClubProfile(
+                profile_id="club-banner",
+                display_name="Banner SC",
+                brand_voice_summary="x",
+            )
+        )
         conn = wm._db()
         _insert_run(conn, "banner-1", "club-banner", _BANNER_TITLE)
         conn.commit()
@@ -417,6 +470,7 @@ class TestStaleBannerTitle:
 # ---------------------------------------------------------------------------
 # 8. Navigation — Season is a first-class signed-in nav item.
 # ---------------------------------------------------------------------------
+
 
 class TestNavigation:
     def test_season_link_in_nav(self, gated_client):

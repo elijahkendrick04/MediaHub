@@ -18,9 +18,9 @@ This module pins the fix:
   3. Pure unit on the helper: tone_notes is included (it was the one
      field PR #106 had but the canonical helper didn't).
 """
+
 from __future__ import annotations
 
-import importlib
 import sys
 from pathlib import Path
 
@@ -34,6 +34,7 @@ sys.path.insert(0, str(_ROOT / "src"))
 # ---------------------------------------------------------------------------
 # Unit: the canonical helper now picks up tone_notes too.
 # ---------------------------------------------------------------------------
+
 
 def test_brand_context_for_llm_includes_tone_notes():
     """Freeform user-typed brand voice notes were the one signal PR #106
@@ -61,56 +62,46 @@ def test_brand_context_for_llm_includes_tone_notes():
 # brand context to the LLM and persists the saved pack.
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
-def gated_app(tmp_path, monkeypatch):
+def gated_app(web_module, monkeypatch):
     """Spin up the Flask app with an isolated DATA_DIR and a populated
     active profile carrying every voice signal we care about."""
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR",
-                       str(tmp_path / "club_profiles"))
-    (tmp_path / "club_profiles").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "runs_v4").mkdir(parents=True, exist_ok=True)
     for env in ("ANTHROPIC_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY"):
         monkeypatch.delenv(env, raising=False)
 
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-    importlib.reload(cp)
-    importlib.reload(wm)
-
     from mediahub.web.club_profile import ClubProfile, save_profile
-    save_profile(ClubProfile(
-        profile_id="acmeswim",
-        display_name="ACME Aquatics",
-        short_name="ACME",
-        country="United Kingdom",
-        sponsor_name="Acme Sports",
-        brand_voice_summary=(
-            "Bold, hyped, irreverent club voice. Talks to the squad."
-        ),
-        brand_keywords=["bold", "hungry", "earned", "grit"],
-        brand_phrases_to_use=["Squad up.", "Earned it."],
-        brand_phrases_to_avoid=["thoughts and prayers", "blessed"],
-        tone_notes=(
-            "Use the swimmer's first name. Drop the announcer-voice."
-        ),
-        voice_profile={
-            "sentence_length_avg": 8,
-            "emoji_rate_per_caption": 0.0,
-            "preferred_swimmer_address": "first_name",
-        },
-        brand_guidelines={
-            "summary": "Warm but bold. Never cynical.",
-            "tone_dos": ["Celebrate effort"],
-            "tone_donts": ["Compare swimmers"],
-            "prohibited_words": ["loser"],
-        },
-        brand_guidelines_mandatory_rules=[
-            "Never publish a swimmer's age without consent.",
-        ],
-    ))
 
-    app = wm.create_app()
+    save_profile(
+        ClubProfile(
+            profile_id="acmeswim",
+            display_name="ACME Aquatics",
+            short_name="ACME",
+            country="United Kingdom",
+            sponsor_name="Acme Sports",
+            brand_voice_summary=("Bold, hyped, irreverent club voice. Talks to the squad."),
+            brand_keywords=["bold", "hungry", "earned", "grit"],
+            brand_phrases_to_use=["Squad up.", "Earned it."],
+            brand_phrases_to_avoid=["thoughts and prayers", "blessed"],
+            tone_notes=("Use the swimmer's first name. Drop the announcer-voice."),
+            voice_profile={
+                "sentence_length_avg": 8,
+                "emoji_rate_per_caption": 0.0,
+                "preferred_swimmer_address": "first_name",
+            },
+            brand_guidelines={
+                "summary": "Warm but bold. Never cynical.",
+                "tone_dos": ["Celebrate effort"],
+                "tone_donts": ["Compare swimmers"],
+                "prohibited_words": ["loser"],
+            },
+            brand_guidelines_mandatory_rules=[
+                "Never publish a swimmer's age without consent.",
+            ],
+        )
+    )
+
+    app = web_module.create_app()
     app.config["TESTING"] = True
     return app
 
@@ -121,6 +112,7 @@ def _synthetic_run_with_achievements(run_id: str, runs_dir: Path) -> dict:
     three. This skips the full pipeline (parsing/recognition is covered
     elsewhere) and isolates the spotlight build path."""
     import json
+
     swimmer_id = "acme:Lane,Lara"
     swimmer_name = "Lara Lane"
     achievements = []
@@ -129,29 +121,29 @@ def _synthetic_run_with_achievements(run_id: str, runs_dir: Path) -> dict:
         ("200m Freestyle (LC)", "2:07.71", "200FRLC"),
         ("100m Freestyle (LC)", "0:59.83", "100FRLC"),
     ]:
-        achievements.append({
-            "achievement": {
-                "swim_id":      f"{swimmer_id}:{cid_suffix}:gold",
-                "swimmer_id":   swimmer_id,
-                "swimmer_name": swimmer_name,
-                "event":        ev,
-                "time":         time,
-                "place":        1,
-                "type":         "medal_gold",
-                "headline": (
-                    f"{swimmer_name} wins gold in {ev} — {time}"
-                ),
-                "pb": False,
-            },
-            "priority":      9.0,
-            "quality_band":  "elite",
-        })
+        achievements.append(
+            {
+                "achievement": {
+                    "swim_id": f"{swimmer_id}:{cid_suffix}:gold",
+                    "swimmer_id": swimmer_id,
+                    "swimmer_name": swimmer_name,
+                    "event": ev,
+                    "time": time,
+                    "place": 1,
+                    "type": "medal_gold",
+                    "headline": (f"{swimmer_name} wins gold in {ev} — {time}"),
+                    "pb": False,
+                },
+                "priority": 9.0,
+                "quality_band": "elite",
+            }
+        )
     run_data = {
-        "run_id":     run_id,
+        "run_id": run_id,
         "started_at": "2025-01-01T00:00:00Z",
         "finished_at": "2025-01-01T00:01:00Z",
-        "file_name":  "test.pdf",
-        "meet":       {"name": "Test Invitational"},
+        "file_name": "test.pdf",
+        "meet": {"name": "Test Invitational"},
         "recognition_report": {
             "meet_name": "Test Invitational",
             "ranked_achievements": achievements,
@@ -163,6 +155,7 @@ def _synthetic_run_with_achievements(run_id: str, runs_dir: Path) -> dict:
     # Workflow sidecar: approve all three achievements.
     from mediahub.workflow.store import WorkflowStore
     from mediahub.workflow.status import CardStatus
+
     ws = WorkflowStore(runs_dir)
     for ra in achievements:
         cid = ra["achievement"]["swim_id"]
@@ -189,14 +182,13 @@ def test_spotlight_build_grounds_prompt_in_canonical_brand_context(
     # The endpoint imports `ask` from mediahub.ai_core at call time, so
     # patching the package attribute is enough.
     import mediahub.ai_core as ai_core_pkg
+
     monkeypatch.setattr(ai_core_pkg, "ask", _stub_ask)
 
     run_id = "synth_run"
     runs_dir = tmp_path / "runs_v4"
     run = _synthetic_run_with_achievements(run_id, runs_dir)
-    swimmer_key = run["recognition_report"][
-        "ranked_achievements"
-    ][0]["achievement"]["swimmer_id"]
+    swimmer_key = run["recognition_report"]["ranked_achievements"][0]["achievement"]["swimmer_id"]
 
     with gated_app.test_client() as c:
         with c.session_transaction() as sess:
@@ -208,9 +200,9 @@ def test_spotlight_build_grounds_prompt_in_canonical_brand_context(
         f"expected redirect to /drafts/<id>, got {resp.status_code}: "
         f"{resp.get_data(as_text=True)[:240]}"
     )
-    assert "/drafts/" in (resp.headers.get("Location") or ""), (
-        f"redirect target not /drafts/: {resp.headers.get('Location')}"
-    )
+    assert "/drafts/" in (
+        resp.headers.get("Location") or ""
+    ), f"redirect target not /drafts/: {resp.headers.get('Location')}"
 
     sys_prompt = captured.get("system", "")
     assert sys_prompt, "spotlight_build never called ask()"
@@ -260,24 +252,23 @@ def test_spotlight_build_renders_saved_pack(gated_app, tmp_path, monkeypatch):
     """After build, the /drafts/<pack_id> page renders 200 with the
     composed caption present — i.e. the persisted stub-pack envelope
     plumbs through to the view route end-to-end."""
+
     def _stub_ask(system, user, **kw):
         return "Lara took the meet by the throat."
 
     import mediahub.ai_core as ai_core_pkg
+
     monkeypatch.setattr(ai_core_pkg, "ask", _stub_ask)
 
     run_id = "synth_run_2"
     runs_dir = tmp_path / "runs_v4"
     run = _synthetic_run_with_achievements(run_id, runs_dir)
-    swimmer_key = run["recognition_report"][
-        "ranked_achievements"
-    ][0]["achievement"]["swimmer_id"]
+    swimmer_key = run["recognition_report"]["ranked_achievements"][0]["achievement"]["swimmer_id"]
 
     with gated_app.test_client() as c:
         with c.session_transaction() as sess:
             sess["active_profile_id"] = "acmeswim"
-        r1 = c.post(f"/spotlight/{run_id}/{swimmer_key}/build",
-                    follow_redirects=False)
+        r1 = c.post(f"/spotlight/{run_id}/{swimmer_key}/build", follow_redirects=False)
         assert r1.status_code == 302
         loc = r1.headers["Location"]
         r2 = c.get(loc)
@@ -286,31 +277,28 @@ def test_spotlight_build_renders_saved_pack(gated_app, tmp_path, monkeypatch):
         assert "Lara took the meet by the throat" in html
 
 
-def test_spotlight_build_renders_content_builder_surface(
-    gated_app, tmp_path, monkeypatch
-):
+def test_spotlight_build_renders_content_builder_surface(gated_app, tmp_path, monkeypatch):
     """After build, the saved spotlight pack opens the mode-aware *Content
     builder* (the single composite post — one caption + one graphic + one reel
     from the approved moments) with the full live toolbar, not the standalone
     spotlight builder and not the generic saved-draft card layout."""
+
     def _stub_ask(system, user, **kw):
         return "Lara took the meet by the throat."
 
     import mediahub.ai_core as ai_core_pkg
+
     monkeypatch.setattr(ai_core_pkg, "ask", _stub_ask)
 
     run_id = "synth_run_3"
     runs_dir = tmp_path / "runs_v4"
     run = _synthetic_run_with_achievements(run_id, runs_dir)
-    swimmer_key = run["recognition_report"][
-        "ranked_achievements"
-    ][0]["achievement"]["swimmer_id"]
+    swimmer_key = run["recognition_report"]["ranked_achievements"][0]["achievement"]["swimmer_id"]
 
     with gated_app.test_client() as c:
         with c.session_transaction() as sess:
             sess["active_profile_id"] = "acmeswim"
-        r1 = c.post(f"/spotlight/{run_id}/{swimmer_key}/build",
-                    follow_redirects=False)
+        r1 = c.post(f"/spotlight/{run_id}/{swimmer_key}/build", follow_redirects=False)
         assert r1.status_code == 302
         loc = r1.headers["Location"]
         r2 = c.get(loc)
@@ -350,16 +338,13 @@ def test_composite_builder_toolbar_endpoints(gated_app, tmp_path, monkeypatch):
     compose / caption-assist / reel engine. AI is honest-errored when no
     provider is configured (never a fabricated caption)."""
     import mediahub.ai_core as ai_core_pkg
-    monkeypatch.setattr(
-        ai_core_pkg, "ask", lambda system, user, **kw: "Lara owned the pool today."
-    )
+
+    monkeypatch.setattr(ai_core_pkg, "ask", lambda system, user, **kw: "Lara owned the pool today.")
 
     run_id = "synth_run_ep"
     runs_dir = tmp_path / "runs_v4"
     run = _synthetic_run_with_achievements(run_id, runs_dir)
-    swimmer_key = run["recognition_report"][
-        "ranked_achievements"
-    ][0]["achievement"]["swimmer_id"]
+    swimmer_key = run["recognition_report"]["ranked_achievements"][0]["achievement"]["swimmer_id"]
 
     with gated_app.test_client() as c:
         with c.session_transaction() as sess:
@@ -400,6 +385,7 @@ def test_composite_builder_toolbar_endpoints(gated_app, tmp_path, monkeypatch):
         # The reel job kicks off from the approved moments (render stubbed) and
         # returns a pollable job — the composite reel, not a per-card story.
         import mediahub.visual.motion as _motion
+
         monkeypatch.setattr(_motion, "render_meet_reel", lambda *a, **k: str(a[2]))
         r_reel = c.post(f"/api/drafts/{pack_id}/card/0/reel-job")
         assert r_reel.status_code == 202
@@ -411,9 +397,7 @@ def test_composite_builder_toolbar_endpoints(gated_app, tmp_path, monkeypatch):
         # suggestion chips are always available.
         r_rf = c.post(f"/api/drafts/{pack_id}/card/0/reformat?format=ig_square")
         assert r_rf.status_code == 409
-        r_cp = c.post(
-            f"/api/drafts/{pack_id}/card/0/assistant", json={"message": "make it navy"}
-        )
+        r_cp = c.post(f"/api/drafts/{pack_id}/card/0/assistant", json={"message": "make it navy"})
         assert r_cp.status_code == 409
         r_sg = c.get(f"/api/drafts/{pack_id}/card/0/assistant/suggestions")
         assert r_sg.status_code == 200

@@ -84,6 +84,11 @@ _ANCHORS: dict[str, tuple[str, str, int, int]] = {
     # right info column opens with the kicker at its top → badges live on the
     # photo panel's top-left, clear of the seam.
     "full_height_portrait_split": ("left", "top", 0, 0),
+    # the right sidebar opens with the meet chip at its top (the historic
+    # top-right default stamped the rosette straight over the meet name);
+    # the left column's top is empty apart from the corner-tick arms, so sit
+    # just inside them.
+    "stat_stack_sidebar": ("left", "top", 24, 100),
     # masthead (brand left, meet right) spans the top → below it, right side,
     # clear of the left-aligned name block.
     "editorial_numbers_grid": ("right", "top", 0, 120),
@@ -211,17 +216,42 @@ def _darken(hexs: str, factor: float) -> str:
     return "#{:02x}{:02x}{:02x}".format(int(r * f), int(g * f), int(b * f))
 
 
+def _lighten(hexs: str, amount: float) -> str:
+    r, g, b = _rgb(hexs)
+    a = max(0.0, min(1.0, amount))
+    return "#{:02x}{:02x}{:02x}".format(
+        int(r + (255 - r) * a), int(g + (255 - g) * a), int(b + (255 - b) * a)
+    )
+
+
+# Minimum luminance separation between the emblem face and the card ground for
+# the badge to read as an object rather than a smudge (the ground of nearly
+# every v2 archetype IS the brand primary).
+_GROUND_SEP = 0.18
+
+
 def _brand_base(brief) -> tuple[str, str]:
     """(face, deep) for the on-brand emblems (record shield, PB rosette).
 
-    The club's primary, unless it is so light the badge would vanish — then fall
-    back to a dark secondary or a safe ink so the emblem is always visible.
+    The face must be *visible against the card's ground* — and the ground of
+    nearly every archetype is the brand primary, so "use the primary" (the old
+    rule) painted a navy rosette on a navy card. Walk the brand palette in
+    accent → secondary → primary order and take the first colour with real
+    luminance separation from the ground; when the whole palette sits in one
+    band (a mono-navy brand), shift the primary toward the opposite pole so the
+    emblem always reads. The emblem text sits on the *deep* variant, which the
+    0.55 darken keeps legible for white iconography even off a light face.
     """
     pal = getattr(brief, "palette", None) or {}
-    base = _hex(pal.get("primary")) or "#1B2330"
-    if _luma(base) > 0.72:
-        sec = _hex(pal.get("secondary"))
-        base = sec if (sec and _luma(sec) < 0.72) else "#1B2330"
+    ground = _hex(pal.get("primary")) or "#1B2330"
+    g_luma = _luma(ground)
+    for key in ("accent", "secondary", "primary"):
+        cand = _hex(pal.get(key))
+        if cand and abs(_luma(cand) - g_luma) >= _GROUND_SEP:
+            return cand, _darken(cand, 0.55)
+    # Whole palette hugs the ground's luminance band — derive a visible face
+    # from the primary itself (brand-derived maths, same precedent as darken()).
+    base = _lighten(ground, 0.42) if g_luma < 0.5 else _darken(ground, 0.42)
     return base, _darken(base, 0.55)
 
 

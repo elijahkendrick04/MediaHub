@@ -17,34 +17,21 @@ This file pins that behaviour.
 """
 from __future__ import annotations
 
-import importlib
-import sys
 import time
-from pathlib import Path
 
 import pytest
 
-_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(_ROOT))
 
+def _prepare_app(app):
+    """Layer this suite's opt-in enforcement flags onto the canonical ``app``
+    fixture and seed the club the tests sign into.
 
-def _make_client(tmp_path, monkeypatch, idle_minutes: str | None = None):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    if idle_minutes is not None:
-        monkeypatch.setenv("MEDIAHUB_LOGIN_IDLE_MINUTES", idle_minutes)
-    for d in ("runs_v4", "uploads_v4", "club_profiles"):
-        (tmp_path / d).mkdir(parents=True, exist_ok=True)
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-    importlib.reload(cp)
-    importlib.reload(wm)
-
-    app = wm.create_app()
-    app.config["TESTING"] = True
+    The app object and its isolated ``DATA_DIR`` come from the shared
+    ``app`` fixture (``tests/conftest.py``); this helper only adds what these
+    idle-timeout tests need. ``MEDIAHUB_LOGIN_IDLE_MINUTES`` is *not* set here
+    — it is read live from ``os.environ`` inside ``web.py`` at request time, so
+    a test tunes it with ``monkeypatch.setenv`` before the request instead.
+    """
     app.config["ENFORCE_ORG_GATE"] = True
     # Idle-timeout enforcement mirrors the org gate: off under TESTING
     # unless explicitly opted in. These tests are the opt-in.
@@ -61,8 +48,8 @@ def _make_client(tmp_path, monkeypatch, idle_minutes: str | None = None):
 
 
 @pytest.fixture
-def client(tmp_path, monkeypatch):
-    app = _make_client(tmp_path, monkeypatch)
+def client(app):
+    _prepare_app(app)
     with app.test_client() as c:
         yield c
 
@@ -128,10 +115,13 @@ class TestLoginIdleTimeout:
         with client.session_transaction() as sess:
             assert sess.get("login_seen_at") > stale
 
-    def test_idle_window_is_tunable(self, tmp_path, monkeypatch):
+    def test_idle_window_is_tunable(self, app, monkeypatch):
         """A very short MEDIAHUB_LOGIN_IDLE_MINUTES is honoured (clamped
         to the 1-minute floor): a pin idle past it signs out."""
-        app = _make_client(tmp_path, monkeypatch, idle_minutes="1")
+        # Read live at request time inside web.py, so setting it before the
+        # request suffices — no reload needed.
+        monkeypatch.setenv("MEDIAHUB_LOGIN_IDLE_MINUTES", "1")
+        _prepare_app(app)
         with app.test_client() as c:
             c.post("/sign-in", data={"profile_id": "wycombe"})
             # 90s of idle exceeds the 1-minute window.

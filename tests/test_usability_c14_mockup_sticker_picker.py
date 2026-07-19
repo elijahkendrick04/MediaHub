@@ -10,26 +10,14 @@ and gives the make-sticker API its first working caller.
 
 from __future__ import annotations
 
-import importlib
-
 import pytest
 
 
 @pytest.fixture
-def client(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
+def client(web_module, tmp_path, monkeypatch):
+    wm = web_module
     monkeypatch.setenv("MEDIAHUB_SCHEDULER", "0")
-    for sub in ("runs_v4", "uploads_v4", "club_profiles"):
-        (tmp_path / sub).mkdir(parents=True, exist_ok=True)
 
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
     from mediahub.media_library import store as _mlstore
 
     _mlstore._default_store = _mlstore.MediaLibraryStore(
@@ -54,8 +42,13 @@ def _seed_generated(store_mod, pid="alpha"):
     from mediahub.media_library.models import MediaAsset
 
     a = MediaAsset(
-        id="", filename="gen.png", path="/tmp/gen.png", type="ai_generated",
-        profile_id=pid, description_raw="A poster", description_parsed={"imagine": {"prompt": "x"}},
+        id="",
+        filename="gen.png",
+        path="/tmp/gen.png",
+        type="ai_generated",
+        profile_id=pid,
+        description_raw="A poster",
+        description_parsed={"imagine": {"prompt": "x"}},
     )
     return store_mod._default_store.save(a).id
 

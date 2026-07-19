@@ -25,6 +25,7 @@ DEFAULT_UI_LOCALE = "en"
 # key -> English source string (the base; also the fallback for every locale).
 _EN: dict[str, str] = {
     "nav.home": "Home",
+    "nav.about": "About",
     "nav.create": "Create",
     "nav.review": "Review",
     "nav.settings": "Settings",
@@ -47,7 +48,6 @@ _EN: dict[str, str] = {
     "nav.billing": "Billing",
     "nav.drafts": "Drafts",
     "nav.club_data": "Club data",
-    "nav.slide_remote": "Slide remote",
     "nav.log_in": "Log in",
     "nav.log_out": "Log out",
     "nav.sign_up": "Sign up",
@@ -66,6 +66,7 @@ _EN: dict[str, str] = {
 # these follow established Welsh software/UI conventions (e.g. gov.wales).
 _CY: dict[str, str] = {
     "nav.home": "Hafan",
+    "nav.about": "Amdanom ni",
     "nav.create": "Creu",
     "nav.review": "Adolygu",
     "nav.settings": "Gosodiadau",
@@ -84,7 +85,6 @@ _CY: dict[str, str] = {
     "nav.billing": "Bilio",
     "nav.drafts": "Drafftiau",
     "nav.club_data": "Data'r clwb",
-    "nav.slide_remote": "Rheolydd sleidiau",
     "nav.log_in": "Mewngofnodi",
     "nav.log_out": "Allgofnodi",
     "nav.sign_up": "Cofrestru",

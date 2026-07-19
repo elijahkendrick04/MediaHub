@@ -9,6 +9,7 @@ No swim-vocabulary literals.
 
 from __future__ import annotations
 
+import datetime
 import logging
 import re
 
@@ -57,8 +58,12 @@ def _normalise_yob(raw: str) -> tuple[int | None, float]:
         return int(s), 0.90
     if re.match(r"^\d{2}$", s):
         yr = int(s)
-        # Disambiguate 2-digit year: assume born between 1940-current
-        year_4 = 2000 + yr if yr <= 30 else 1900 + yr
+        # Disambiguate a 2-digit year by pivoting on the current year: a
+        # year-of-birth is never in the future, so a 2-digit year that would
+        # land ahead of this year belongs to the 1900s.
+        year_4 = 2000 + yr
+        if year_4 > datetime.date.today().year:
+            year_4 = 1900 + yr
         return year_4, 0.70
     return None, 0.0
 
@@ -333,6 +338,19 @@ def _is_reaction_like(tok: str) -> bool:
     return bool(_REACTION_TOKEN.match(tok))
 
 
+# A FINA / British-Points column ("430.50", "512.30", "1005.40") is time-shaped
+# under _TIME_TOKEN because that grammar allows up to five integer digits before
+# the decimal. But no swum time is ever printed colon-less with a 3-digit-or-more
+# integer part: a 100 s+ result is always mm:ss.cc. So a colon-less token with a
+# 3+-digit integer part is a points cell, not a race time, and must never be
+# selected as the achieved time (which demoted the real finals time to a seed).
+_POINTS_TOKEN = re.compile(r"^[JXRjxr]?\d{3,}\.\d{2}$")
+
+
+def _is_points_like(tok: str) -> bool:
+    return bool(_POINTS_TOKEN.match(tok))
+
+
 def _tokenise_with_gaps(text: str) -> list[tuple[str, bool]]:
     """Split text into (token, big_gap_before) pairs.
 
@@ -423,7 +441,9 @@ def _record_to_swim(rec: list[tuple[str, bool]]) -> InterpretedSwim | None:
     if not time_idxs:
         return None
     first_time_idx = time_idxs[0]
-    achieved_candidates = [i for i in time_idxs if not _is_reaction_like(rec[i][0])]
+    achieved_candidates = [
+        i for i in time_idxs if not _is_reaction_like(rec[i][0]) and not _is_points_like(rec[i][0])
+    ]
     achieved_idx = achieved_candidates[-1] if achieved_candidates else time_idxs[-1]
     time_tok = rec[achieved_idx][0]
     body = rec[:first_time_idx]
@@ -629,6 +649,42 @@ def _assign_swims_by_line_index(
         events[target].swims.append(swim)
 
 
+def _schema_swims_with_idx(
+    stream: IngestStream,
+    schema_swims: list[InterpretedSwim],
+) -> list[tuple[int, InterpretedSwim]] | None:
+    """Recover each schema-path swim's source line index for event bucketing.
+
+    The schema path builds swims from ``stream.tables`` rows, discarding which
+    ``stream.lines`` index each row came from. To bucket swims into events by
+    position (the way path B does) rather than by blind chunking, match every
+    swim's preserved raw cells (``raw_row``, tab-joined) back to the line that
+    produced them. Deterministic: exact cell-list equality with a forward cursor,
+    walked in document order. Returns ``(line_index, swim)`` pairs, or ``None``
+    if any swim cannot be located — signalling the caller to fall back to
+    positional chunking rather than guess.
+    """
+    split = re.compile(r"  +|\t")
+    line_cells: list[list[str]] = [
+        [c.strip() for c in split.split(getattr(ln, "text", str(ln)).strip()) if c.strip()]
+        for ln in stream.lines
+    ]
+    out: list[tuple[int, InterpretedSwim]] = []
+    cursor = 0
+    for swim in schema_swims:
+        want = [c for c in swim.raw_row.split("\t") if c]
+        found = -1
+        for j in range(cursor, len(line_cells)):
+            if line_cells[j] == want:
+                found = j
+                break
+        if found < 0:
+            return None
+        out.append((found, swim))
+        cursor = found + 1
+    return out
+
+
 def assign_rows_to_events(
     stream: IngestStream,
     events: list[InterpretedEvent],
@@ -696,14 +752,24 @@ def assign_rows_to_events(
         ev_line_idx = _find_event_line_indices(stream, events)
         _assign_swims_by_line_index(structural_with_idx, events, ev_line_idx)
     else:
-        # Sequential chunk assignment for the schema path
+        # Schema path: bucket each swim into the most-recent event by the line
+        # index it was extracted from — the same line-anchored assignment path B
+        # uses — instead of blindly chunking swims evenly across the events
+        # (which mis-buckets whenever the events have unequal entry counts). Each
+        # swim's source line is recovered by matching its preserved raw cells
+        # against stream.lines; positional chunking is kept only as a fallback for
+        # the rare stream whose swims cannot be located that way.
         if len(events) == 1:
             events[0].swims = all_swims
         else:
-            chunk = max(1, len(all_swims) // len(events))
-            for i, ev in enumerate(events):
-                ev.swims = all_swims[i * chunk : (i + 1) * chunk]
-            if events:
+            schema_with_idx = _schema_swims_with_idx(stream, all_swims)
+            if schema_with_idx is not None:
+                ev_line_idx = _find_event_line_indices(stream, events)
+                _assign_swims_by_line_index(schema_with_idx, events, ev_line_idx)
+            else:
+                chunk = max(1, len(all_swims) // len(events))
+                for i, ev in enumerate(events):
+                    ev.swims = all_swims[i * chunk : (i + 1) * chunk]
                 events[-1].swims += all_swims[len(events) * chunk :]
 
 

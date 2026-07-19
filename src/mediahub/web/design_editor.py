@@ -442,7 +442,7 @@ def build_brief_from_params(params: StudioParams, *, profile_id: str = "studio")
     text = dict(params.text)
     hook = text.get("achievement_label") or text.get("event_name") or "MediaHub Studio"
 
-    return CreativeBrief(
+    brief = CreativeBrief(
         id="studio_preview",
         content_item_id="studio",
         profile_id=profile_id or "studio",
@@ -467,6 +467,12 @@ def build_brief_from_params(params: StudioParams, *, profile_id: str = "studio")
         style_pack=params.style_pack_id,
         colour_role_assignment=dict(params.role_assignment),
     )
+    # The studio pack is an explicit HUMAN pick, not the director's seed walk —
+    # the F6 layout scorer must never override it (explain() reports
+    # params.pack_id, so a render-time swap would be a silent substitution with
+    # false meta). The marker is the renderer's own already-decided gate.
+    brief._layout_scored = True
+    return brief
 
 
 def brand_kit_for_params(params: StudioParams):
@@ -571,6 +577,17 @@ def explain(params: StudioParams) -> dict[str, Any]:
             notices.append(
                 "Your colour-role swap was set aside to keep the text legible — "
                 "the deterministic contrast gate kept the brand-default roles."
+            )
+        elif resolved.get("--mh-repair-note"):
+            # C6 (Canva gap analysis) — per-slot contrast repair: rather than
+            # discard the whole swap when one slot fails the gate, the resolver
+            # nudges only the failing role(s) to a legible tone of the SAME
+            # assigned colour and keeps the rest of the swap. Tell the user their
+            # swap was honoured but adjusted, so the repair is never silent.
+            notices.append(
+                "Your colour-role swap was applied, with the affected role(s) "
+                "nudged to a legible tone — the deterministic contrast gate "
+                "repaired the swap instead of discarding it."
             )
 
     if params.pack_eased:
