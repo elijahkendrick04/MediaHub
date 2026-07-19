@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-07-17 · `ee1943c65` · build(deps): bump actions/setup-node from 6 to 7 (#1313) [skip render]
+**Last updated:** 2026-07-19 · `a34782f6e` · Merge pull request #1321 from elijahkendrick04/claude/carve-15-b-complete
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1227,16 +1227,16 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-07-19 | `60b5a1c7c` | chore: suppress 4 nan-injection false positives semgrep can now see (#15) |
+| 2026-07-19 | `a80c18b56` | fix: capture the real app for worker threads + last 2 source-scan migrations (#15) |
+| 2026-07-18 | `5cde5de98` | refactor(web): carve the remaining 5 surfaces — finding #15 complete |
+| 2026-07-18 | `04e4e2771` | test: scan the whole web surface in 2 source-scan guards (#15 carve) |
+| 2026-07-18 | `6441d3e15` | fix: close erasure-parity gaps found by adversarial review of the audit fixes |
+| 2026-07-18 | `18c066179` | docs: regenerate ENV_INVENTORY for env read moved to routes_site (#15 carve) |
+| 2026-07-18 | `449569d1a` | refactor(web): carve auth + site surfaces out of create_app (#15, stage 5a) |
+| 2026-07-18 | `bb413aec3` | fix(retention): sweep the full sidecar family on the fallback erasure path |
+| 2026-07-18 | `313fd915c` | fix: remediate 4 confirmed deficiencies from the 300-PR quality audit |
+| 2026-07-18 | `e53b8d2db` | test(#130): migrate the 3 reload files that landed on main during the outage window |
 | 2026-07-17 | `ef3c96ec9` | build(deps): bump actions/setup-node from 6 to 7 |
 | 2026-07-17 | `c09ce763e` | test: migrate 8 club-a fixtures off importlib.reload onto conftest app (#130) |
-| 2026-07-17 | `ca21317d3` | test: run the tier-A clean-assembly invariant on both render engines (#132) |
-| 2026-07-17 | `eddd67555` | test: stop test_motion_format_focus paying for a cutout model fetch (#133) |
-| 2026-07-17 | `1e5262732` | deep-review #95: atomic quota reserve (fix check-then-act concurrency hole) |
-| 2026-07-17 | `de7ec52a5` | deep-review #59: feed season standards packs + profile filter into qual detection |
-| 2026-07-17 | `01f109c1f` | deep-review #73: publish motion renders atomically (fix cache-slot race) |
-| 2026-07-17 | `135242d71` | deep-review #52 + #64: strict stroke/course codes — no fabricated FR/LC guess |
-| 2026-07-17 | `fe8985d6d` | deep-review #69: pivot 2-digit years on the current year (no frozen constant) |
-| 2026-07-17 | `8913b5eda` | test(#65): add trailing newline (pre-commit end-of-file-fixer) |
-| 2026-07-17 | `a1796c0bf` | deep-review #65: model relays and exclude them from individual PB/medal detection |
-| 2026-07-17 | `bc979e662` | deep-review #60: make OfficialPBDetector Rule 0 work on HY3/SDIF native runs |
 <!-- /ROADMAP:ACTIVITY -->
