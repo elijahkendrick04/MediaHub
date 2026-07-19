@@ -54,6 +54,7 @@ _ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_ROOT / "src"))
 
 from mediahub.web import web as webmod  # noqa: E402
+from tests._helpers import web_surface_src
 
 _NODE = shutil.which("node")
 requires_node = pytest.mark.skipif(_NODE is None, reason="node not on PATH")
@@ -74,7 +75,7 @@ def _motion_css() -> str:
 
 
 def _src() -> str:
-    return Path(webmod.__file__).read_text(encoding="utf-8")
+    return web_surface_src()
 
 
 def _slice(src: str, marker: str, n: int = 3200) -> str:

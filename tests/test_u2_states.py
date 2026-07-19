@@ -21,6 +21,7 @@ import pytest
 
 from mediahub.web import web as webmod
 from mediahub.media_ai import llm as _llm
+from tests._helpers import web_surface_src
 
 
 # --------------------------------------------------------------------------- #
@@ -94,7 +95,7 @@ def test_ai_banner_copy_defined_once_dry():
     """The rendered strap markup lives only in the shared helper, and every
     surface goes through it — so the copy/styling can never drift back apart
     (the pre-U.2 state had three hand-inlined, already-divergent copies)."""
-    src = Path(webmod.__file__).read_text(encoding="utf-8")
+    src = web_surface_src()
     strap = '<span class="strap" style="color:var(--warn)">AI provider not configured</span>'
     assert src.count(strap) == 1, "the banner strap is hand-inlined somewhere again"
     # def line + at least the three primary-flow call sites all route through it.

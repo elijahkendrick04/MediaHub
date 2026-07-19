@@ -1150,9 +1150,13 @@ def api_web_research_submit():
         resp.headers["Retry-After"] = "30"
         return resp, 429
 
+    # The worker thread runs outside the request context, so capture the real
+    # app object here (current_app is only a context-local proxy).
+    _app = current_app._get_current_object()
+
     def _do_research(job_id: str, q: str) -> None:
         try:
-            with current_app.app_context():
+            with _app.app_context():
                 from mediahub.web_research.deep_research import deep_research
 
                 res = deep_research(q)
@@ -1227,9 +1231,13 @@ def api_club_qa_submit():
     question = question[:400]
     pid = W._active_profile_id()
 
+    # The worker thread runs outside the request context, so capture the real
+    # app object here (current_app is only a context-local proxy).
+    _app = current_app._get_current_object()
+
     def _do_answer(job_id: str, q: str) -> None:
         try:
-            with current_app.app_context():
+            with _app.app_context():
                 from mediahub.ai_core import ProviderNotConfigured
                 from mediahub.club_qa import QAEnv, answer_club_question
 
