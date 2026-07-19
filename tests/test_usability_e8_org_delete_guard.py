@@ -5,11 +5,13 @@ happened (it used to bounce silently).
 
 from __future__ import annotations
 
-import pathlib
-
 import pytest
 
-_SRC = pathlib.Path("src/mediahub/web/web.py").read_text(encoding="utf-8")
+from tests._helpers import web_surface_src
+
+# The sign_in_delete handler lives on the carved web surface (routes_auth.py
+# since the #15 carve), so scan the whole surface, not one file.
+_SRC = web_surface_src()
 
 
 @pytest.fixture

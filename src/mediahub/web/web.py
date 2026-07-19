@@ -12310,7 +12310,9 @@ from mediahub.web.theme_tokens import (  # noqa: E402
 from mediahub.web.responsive_guardrails import RESPONSIVE_GUARDRAILS_CSS as _MH_RG_CSS  # noqa: E402
 from mediahub.web.pipeline_diagram import (  # noqa: E402
     PIPELINE_DIAGRAM_CSS as _MH_PL_CSS,
-    pipeline_diagram_section_html as _pipeline_diagram_section_html,
+    # Reached as W._pipeline_diagram_section_html by the carved route surfaces
+    # (call-time resolution) — in-file greps say "unused", routes_site says otherwise.
+    pipeline_diagram_section_html as _pipeline_diagram_section_html,  # noqa: F401
 )
 from mediahub.web.content_intro import (  # noqa: E402
     CONTENT_INTRO_CSS as _MH_CI_CSS,
@@ -31352,6 +31354,371 @@ _PW_NO_ORG = (
 )
 
 
+# --- constants formerly assigned inside create_app (hoisted for the #15 carve) ---
+_FAVICON_SVG = (
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">'
+    '<rect width="32" height="32" rx="6" fill="#0A0B11"/>'
+    '<rect x="6" y="20" width="5" height="7" rx="1" fill="#B6B2A6"/>'
+    '<rect x="13.5" y="9" width="5" height="18" rx="1" fill="#D4FF3A"/>'
+    '<rect x="21" y="14" width="5" height="13" rx="1" fill="#F4D58D"/>'
+    '<line x1="4" y1="28.5" x2="28" y2="28.5" stroke="#D4FF3A" stroke-width="1.5"/>'
+    "</svg>"
+)
+
+_SERVICE_WORKER_JS = r"""
+const CACHE = 'mediahub-shell-v2';
+const DB_NAME = 'mediahub-pwa';
+const STORE = 'approval-queue';
+const SYNC_TAG = 'mediahub-approval-queue';
+// Approve / reject / caption-edit all POST to /api/workflow/<run>/<card>.
+const WF_RX = /\/api\/workflow\//;
+
+self.addEventListener('install', function(e){ self.skipWaiting(); });
+
+self.addEventListener('activate', function(e){
+  e.waitUntil((async function(){
+    var keys = await caches.keys();
+    await Promise.all(keys.map(function(k){ return k === CACHE ? null : caches.delete(k); }));
+    await self.clients.claim();
+  })());
+});
+
+// --- IndexedDB queue: one tiny object store, keyed by a generated id --------
+function idbOpen(){
+  return new Promise(function(resolve, reject){
+    var rq = indexedDB.open(DB_NAME, 1);
+    rq.onupgradeneeded = function(){
+      var db = rq.result;
+      if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE, { keyPath: 'id' });
+    };
+    rq.onsuccess = function(){ resolve(rq.result); };
+    rq.onerror = function(){ reject(rq.error); };
+  });
+}
+function idbAdd(rec){
+  return idbOpen().then(function(db){ return new Promise(function(res, rej){
+    var tx = db.transaction(STORE, 'readwrite');
+    tx.objectStore(STORE).put(rec);
+    tx.oncomplete = function(){ res(); };
+    tx.onerror = function(){ rej(tx.error); };
+  }); });
+}
+function idbGetAll(){
+  return idbOpen().then(function(db){ return new Promise(function(res, rej){
+    var tx = db.transaction(STORE, 'readonly');
+    var rq = tx.objectStore(STORE).getAll();
+    rq.onsuccess = function(){ res(rq.result || []); };
+    rq.onerror = function(){ rej(rq.error); };
+  }); });
+}
+function idbDelete(id){
+  return idbOpen().then(function(db){ return new Promise(function(res, rej){
+    var tx = db.transaction(STORE, 'readwrite');
+    tx.objectStore(STORE).delete(id);
+    tx.oncomplete = function(){ res(); };
+    tx.onerror = function(){ rej(tx.error); };
+  }); });
+}
+function idbCount(){ return idbGetAll().then(function(a){ return a.length; }); }
+
+function genId(){
+  return (self.crypto && crypto.randomUUID)
+    ? crypto.randomUUID()
+    : ('q-' + Date.now() + '-' + Math.random().toString(36).slice(2));
+}
+
+function registerSync(){
+  try {
+    if (self.registration && self.registration.sync) {
+      return self.registration.sync.register(SYNC_TAG).catch(function(){});
+    }
+  } catch (e) {}
+  return Promise.resolve();
+}
+
+async function notifyClients(problems){
+  var n = await idbCount();
+  var cs = await self.clients.matchAll({ includeUncontrolled: true, type: 'window' });
+  cs.forEach(function(c){ c.postMessage({ type: 'mediahub-queue', count: n, problems: problems || [] }); });
+}
+
+// Replay every queued action in submission order. A 5xx or a network failure is
+// transient — the entry stays for the next sync. A 2xx/3xx/4xx is a FINAL server
+// decision (idempotent — re-approving is a no-op), so the entry is dropped — but
+// D-4: we inspect the body first. A 4xx gate refusal (consent/brand/task) or a
+// 200 "held for another approver" vote (status:'queue') is NOT the approval the
+// volunteer intended, so it's collected as a problem and reported to the client
+// rather than silently dropped as "synced".
+async function drainQueue(){
+  var items = await idbGetAll();
+  items.sort(function(a, b){ return a.ts - b.ts; });
+  var problems = [];
+  for (var i = 0; i < items.length; i++){
+    var it = items[i];
+    var requested = '';
+    try { requested = (JSON.parse(it.body) || {}).status || ''; } catch (e) {}
+    try {
+      var res = await fetch(it.url, {
+        method: it.method,
+        headers: it.headers,
+        body: it.body,
+        credentials: 'same-origin'
+      });
+      if (!res || res.status >= 500) { continue; } // transient — keep for next sync
+      var j = null;
+      try { j = await res.clone().json(); } catch (e) {}
+      var blocked = res.status >= 400 || !!(j && j.ok === false);
+      var held = !blocked && !!(j && j.status && requested && j.status !== requested);
+      await idbDelete(it.id);
+      if (blocked || held){
+        problems.push({
+          requested: requested,
+          httpStatus: res.status,
+          error: (j && j.error) || '',
+          reason: (j && (j.reason || j.message)) || '',
+          held: held
+        });
+      }
+    } catch (e) {
+      break; // still offline — leave the remainder queued
+    }
+  }
+  await notifyClients(problems);
+}
+
+async function handleWorkflowPost(req){
+  try {
+    return await fetch(req.clone());
+  } catch (err) {
+    try {
+      var body = await req.clone().text();
+      await idbAdd({
+        id: genId(),
+        url: req.url,
+        method: 'POST',
+        headers: { 'Content-Type': req.headers.get('Content-Type') || 'application/json' },
+        body: body,
+        ts: Date.now()
+      });
+      await registerSync();
+      await notifyClients();
+      return new Response(
+        JSON.stringify({ ok: true, queued: true, status: 'queued' }),
+        { status: 202, headers: { 'Content-Type': 'application/json' } }
+      );
+    } catch (e2) {
+      return new Response(
+        JSON.stringify({ ok: false, error: 'queue_failed' }),
+        { status: 503, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+  }
+}
+
+self.addEventListener('sync', function(e){
+  if (e.tag === SYNC_TAG) e.waitUntil(drainQueue());
+});
+
+self.addEventListener('message', function(e){
+  var data = e.data || {};
+  if (data.type === 'mediahub-queue-status'){
+    idbCount().then(function(n){
+      var msg = { type: 'mediahub-queue', count: n };
+      if (e.ports && e.ports[0]) e.ports[0].postMessage(msg);
+      else if (e.source && e.source.postMessage) e.source.postMessage(msg);
+    });
+  } else if (data.type === 'mediahub-queue-replay'){
+    drainQueue();
+  }
+});
+
+self.addEventListener('fetch', function(e){
+  var req = e.request;
+  var url = new URL(req.url);
+  if (url.origin !== self.location.origin) return;
+  // Offline-tolerant approval queue (roadmap 1.22): queue workflow POSTs and
+  // replay them when the connection returns.
+  if (req.method === 'POST' && WF_RX.test(url.pathname)) {
+    e.respondWith(handleWorkflowPost(req));
+    return;
+  }
+  if (req.method !== 'GET') return;
+  e.respondWith((async function(){
+    try {
+      var res = await fetch(req);
+      if (res && res.status === 200 && url.pathname.indexOf('/static/') !== -1) {
+        var c = await caches.open(CACHE); c.put(req, res.clone());
+      }
+      return res;
+    } catch (err) {
+      var cached = await caches.match(req);
+      if (cached) return cached;
+      if (req.mode === 'navigate') {
+        // J-12: not a dead end — offer a manual retry, auto-reload the moment
+        // connectivity returns, and a link back into the app.
+        var _btn = 'padding:9px 16px;border:1px solid rgba(245,242,232,.3);border-radius:8px;'
+          + 'background:transparent;color:inherit;cursor:pointer;font-size:14px;text-decoration:none';
+        return new Response('<!doctype html><meta charset=utf-8>'
+          + '<meta name=viewport content="width=device-width,initial-scale=1">'
+          + '<title>Offline — MediaHub</title>'
+          + '<body style="font-family:system-ui,sans-serif;background:rgb(10,11,17);'
+          + 'color:rgb(245,242,232);display:flex;align-items:center;justify-content:center;'
+          + 'height:100vh;margin:0"><div style="text-align:center;padding:24px">'
+          + '<h1 style="margin:0 0 8px">You are offline</h1>'
+          + '<p style="opacity:.7">Your approvals are saved and will sync when you reconnect.</p>'
+          + '<div style="margin-top:18px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap">'
+          + '<button onclick="location.reload()" style="' + _btn + '">Try again</button>'
+          + '<a href="/" style="' + _btn + '">Back to MediaHub</a></div>'
+          + '<script>addEventListener("online",function(){location.reload();});</script>'
+          + '</div></body>',
+          { headers: { 'Content-Type': 'text/html; charset=utf-8' } });
+      }
+      return new Response('', { status: 503 });
+    }
+  })());
+});
+"""
+
+_AUDIO_MIME = {
+    ".mp3": "audio/mpeg",
+    ".m4a": "audio/mp4",
+    ".aac": "audio/aac",
+    ".wav": "audio/wav",
+    ".ogg": "audio/ogg",
+    ".opus": "audio/opus",
+    ".flac": "audio/flac",
+}
+
+_AUDIO_UPLOAD_MAX_BYTES = 25 * 1024 * 1024  # 25 MB — clips/beds, not albums
+
+_RETIRED_STUB_SEEDS = {
+    "sponsor_activation": (
+        "A sponsor thank-you post — name the sponsor, the event and the "
+        "moment to celebrate, in club colours."
+    ),
+    "session_update": (
+        "A mid-session update from poolside — the event, what has "
+        "happened so far, and who swims next."
+    ),
+}
+
+_STUB_TYPE_LABEL = {
+    "free_text": "Free Text",
+    "event_preview": "Event Preview",
+    "sponsor_activation": "Sponsor Post",
+    "session_update": "Session Update",
+}
+
+_PRICING_CSS = (
+    "<style>"
+    ".mh-billing-toggle{display:flex;justify-content:center;margin-bottom:var(--sp-6)}"
+    ".mh-tier-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(248px,1fr));"
+    "gap:18px;align-items:stretch}"
+    ".mh-tier{position:relative;display:flex;flex-direction:column;gap:16px;padding:24px;"
+    "background:var(--surface);border:1px solid var(--hairline);border-radius:var(--radius-md)}"
+    ".mh-tier.is-recommended{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}"
+    ".mh-tier-badge{position:absolute;top:-11px;left:24px;background:var(--lane);"
+    "color:var(--lane-ink);font-family:var(--font-mono);font-size:var(--fs-9);font-weight:700;"
+    "letter-spacing:.12em;text-transform:uppercase;padding:3px 10px;border-radius:var(--radius-pill)}"
+    ".mh-tier-name{font-family:var(--font-mono);font-size:12px;text-transform:uppercase;"
+    "letter-spacing:.08em;color:var(--ink-muted);margin-bottom:8px}"
+    ".mh-tier-price{min-height:46px}"
+    ".mh-price-fig{font-size:30px;font-weight:800;line-height:1}"
+    ".mh-price-per{font-size:14px;font-weight:600;color:var(--ink-muted);margin-left:2px}"
+    ".mh-price-note{display:block;font-size:12px;color:var(--ink-muted);margin-top:4px}"
+    ".mh-price-tbc{font-size:15px;color:var(--ink-muted)}"
+    ".mh-tier-blurb{font-size:13px;color:var(--ink-muted);margin-top:8px}"
+    ".mh-feat-list{list-style:none;padding:0;margin:0;font-size:13px;flex:1 1 auto;"
+    "display:flex;flex-direction:column;gap:9px}"
+    ".mh-feat{display:flex;align-items:baseline;gap:8px}"
+    ".mh-feat-mark{flex:0 0 auto;font-weight:700;width:1em;text-align:center}"
+    ".mh-feat-yes .mh-feat-mark{color:var(--good)}"
+    ".mh-feat-no{color:var(--ink-faint)}"
+    ".mh-feat-no .mh-feat-mark{color:var(--ink-faint)}"
+    ".mh-feat-val{margin-left:auto;padding-left:10px;font-weight:600;color:var(--ink);text-align:right}"
+    ".mh-feat-no .mh-feat-val{color:var(--ink-faint)}"
+    ".mh-tier-cta{margin-top:4px}"
+    ".mh-cta{width:100%;text-align:center}"
+    ".mh-cta-note{text-align:center;font-size:13px}"
+    ".mh-price-note-banner{font-size:13px;margin-top:24px;text-align:center}"
+    ".mh-pricing [data-pane=monthly]{display:none}"
+    ".mh-pricing[data-period=monthly] [data-pane=annual]{display:none}"
+    ".mh-pricing[data-period=monthly] [data-pane=monthly]{display:inline}"
+    ".mh-compare-title{margin:var(--sp-9) 0 var(--sp-4);text-align:center}"
+    ".mh-compare-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}"
+    ".mh-compare{width:100%;border-collapse:collapse;font-size:13px;min-width:560px}"
+    ".mh-compare th,.mh-compare td{padding:12px 14px;border-bottom:1px solid var(--border)}"
+    ".mh-compare thead th{vertical-align:bottom}"
+    ".mh-th-plan{text-align:center;font-family:var(--font-mono);font-size:13px;font-weight:700;"
+    "text-transform:uppercase;letter-spacing:.06em}"
+    ".mh-th-rec{display:block;margin-top:4px;color:var(--accent);font-size:9px;letter-spacing:.12em}"
+    ".mh-compare tbody th{text-align:left;font-weight:600;color:var(--ink)}"
+    ".mh-compare td{text-align:center;color:var(--ink-muted)}"
+    ".mh-compare .is-rec{background:color-mix(in oklab, var(--lane) 4.5%, transparent)}"
+    ".mh-compare-group th{padding-top:22px;font-family:var(--font-mono);font-size:11px;"
+    "font-weight:600;text-transform:uppercase;letter-spacing:.1em;color:var(--ink-muted);"
+    "border-bottom-color:var(--border-h)}"
+    ".mh-cell-yes{color:var(--good);font-weight:700}"
+    ".mh-cell-no{color:var(--ink-faint)}"
+    ".mh-cell-val{color:var(--ink)}"
+    ".mh-sr{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;"
+    "clip:rect(0,0,0,0);white-space:nowrap;border:0}"
+    "@media(max-width:600px){.mh-tier-grid{grid-template-columns:1fr}}"
+    "</style>"
+)
+
+_PRICING_JS = (
+    "<script>(function(){"
+    "var root=document.getElementById('mh-pricing');if(!root)return;"
+    "var btns=root.querySelectorAll('.mh-segmented [data-period]');"
+    "function set(period){root.setAttribute('data-period',period);"
+    "for(var i=0;i<btns.length;i++){var on=btns[i].getAttribute('data-period')===period;"
+    "btns[i].classList.toggle('is-active',on);"
+    "btns[i].setAttribute('aria-pressed',on?'true':'false');}}"
+    "for(var i=0;i<btns.length;i++){(function(b){"
+    "b.addEventListener('click',function(){set(b.getAttribute('data-period'));});"
+    "})(btns[i]);}"
+    "})();</script>"
+)
+
+_FORMAT_CATEGORY_LABELS = {
+    "social_size": "Social sizes",
+    "carousel": "Carousel",
+    "poster": "Posters & flyers",
+    "certificate": "Certificates",
+    "card": "Cards",
+    "document": "Documents",
+    "calendar": "Calendars",
+    "wallpaper": "Wallpapers",
+    "custom": "Custom",
+}
+
+_VALID_FORMAT_NAMES = {
+    "feed_portrait",
+    "feed_square",
+    "feed_landscape",
+    "story_portrait",
+    "story_square",
+    "twitter_landscape",
+    "twitter_square",
+    "print_a4",
+    "print_letter",
+}
+
+_DH_IMPORT_EXTS = {".csv", ".xlsx", ".tsv"}
+
+_DH_MAX_UPLOAD = 12 * 1024 * 1024  # 12 MB — plenty for a club spreadsheet
+
+_DH_MAX_IMPORT_ROWS = 20_000
+
+_NL_RANGES = (
+    ("this_month", "This month"),
+    ("last_month", "Last month"),
+    ("last_30", "Last 30 days"),
+    ("this_season", "This season"),
+)
+
+
 def create_app() -> Flask:
     # Fail-fast env validation (security/secrets-and-config): production
     # refuses to boot with unsafe config (no DATA_DIR, weak operator key,
@@ -31390,8 +31757,10 @@ def create_app() -> Flask:
     # request.endpoint keying and the gate exemption sets depend on them).
     from mediahub.web import (
         routes_api_runs,
+        routes_auth,
         routes_media_library,
         routes_organisation,
+        routes_site,
         routes_video,
     )
 
@@ -31399,6 +31768,8 @@ def create_app() -> Flask:
     routes_media_library.register(app)
     routes_organisation.register(app)
     routes_video.register(app)
+    routes_site.register(app)
+    routes_auth.register(app)
 
     # ---- Web hardening (security/web-hardening, THREAT_MODEL §6) --------
     # Security headers on every response + CSRF protection on state-changing
@@ -31543,368 +31914,6 @@ def create_app() -> Flask:
     # one truth (Art. 32 / audit finding 1.10).
 
     # ---- HOME ----------------------------------------------------------
-    @app.route("/")
-    def home():
-        """Rebuilt home page (Phase 1.5 polish).
-
-        Two-button hero — "Sign up" (primary) + "Log in" (secondary, the
-        ACCOUNT log-in) — plus the established four-step explainer. When an
-        org is already pinned, the hero swaps in a "Continue as <name>" CTA
-        pointing at Create, with the log-in / create paths still accessible
-        below so the user can switch tenants without rummaging through nav.
-        """
-        prof = _active_profile()
-        existing = list_profiles()
-        n_orgs = len(existing)
-
-        # Compute small deployment-wide tallies for the hero meta line so the
-        # page doesn't feel hollow once the user has activity. The third figure
-        # is the honest headline — the sum of STANDOUT SWIMS (n_standout:
-        # distinct swims whose best band is elite/strong, deduped across the
-        # several achievements one race can emit) — NOT raw n_achievements,
-        # which counts every derivative detection and reads absurdly high, and
-        # NOT the legacy n_cards column, which the V5 recognition-first
-        # pipeline leaves at ~0 and would read as a falsehood ("0 cards
-        # generated"). COALESCE keeps NULL rows (pre-column runs that were
-        # never relisted) as 0: an honest lower bound, never a fabrication.
-        # Honesty (H-3): a signed-in club must see ITS OWN season, not the
-        # deployment-wide totals. When a workspace is pinned the tallies are
-        # scoped to that profile_id; the signed-out landing keeps the global
-        # figures (a genuine "this many clubs use it" proof, not a per-org claim).
-        n_runs = 0
-        n_moments = 0
-        n_awaiting = 0
-        _tally_pid = prof.profile_id if (prof and prof.is_ready()) else None
-        try:
-            conn = _db()
-            try:
-                if _tally_pid:
-                    n_runs = int(
-                        conn.execute(
-                            "SELECT COUNT(*) FROM runs WHERE profile_id = ?", (_tally_pid,)
-                        ).fetchone()[0]
-                    )
-                    n_moments = int(
-                        conn.execute(
-                            "SELECT COALESCE(SUM(n_standout), 0) FROM runs WHERE profile_id = ?",
-                            (_tally_pid,),
-                        ).fetchone()[0]
-                        or 0
-                    )
-                    n_awaiting = int(
-                        conn.execute(
-                            "SELECT COALESCE(SUM(n_queue), 0) FROM runs "
-                            "WHERE profile_id = ? AND status = 'done'",
-                            (_tally_pid,),
-                        ).fetchone()[0]
-                        or 0
-                    )
-                else:
-                    n_runs = int(conn.execute("SELECT COUNT(*) FROM runs").fetchone()[0])
-                    n_moments = int(
-                        conn.execute("SELECT COALESCE(SUM(n_standout), 0) FROM runs").fetchone()[0]
-                        or 0
-                    )
-            finally:
-                conn.close()
-        except Exception:
-            pass
-
-        # --- Hero ----------------------------------------------------------
-        # Lane-number watermark sits behind the headline. The org name stays
-        # in default ink (no .grad span) so the only lane-yellow on the page
-        # is the live dot + the CTA. Editorial italic does the emphasis work.
-        # U.9 — only the signed-out hero cycles its content-type accent word;
-        # the returning-user "Ready to file." greeting stays static, so the
-        # cycling script ships only when the rotator is actually on the page.
-        word_cycle_js = ""
-        if prof and prof.is_ready():
-            # Returning user with a pinned org.
-            hero_h1 = f'{_h(prof.display_name)}.<br><em class="editorial">Ready</em> to file.'
-            hero_lede = (
-                "Your brand voice, palette, and logo are loaded. Drop a results "
-                "file and the on-brand captions, graphics and reels draft "
-                "themselves — you approve, nothing posts without you."
-            )
-            # The top return task is "upload the weekend's results", so that is
-            # the ONE primary action and it deep-links straight to /upload (no
-            # content-type chooser detour). "Create other content" reaches the
-            # rest; "Edit profile" stays the canonical link to brand/setup (it
-            # must point at /organisation/setup, not the legacy /organisation
-            # editor — g3 brand-canonical guard).
-            # "Switch organisation" is a developer-operator-only affordance
-            # (ADR-0029): members and anonymous pilot sessions never switch —
-            # their club IS their session. The /sign-in picker itself stays as
-            # the org-ready gate destination and the first org pick.
-            _switch_cta = (
-                f'<a class="mh-cta-secondary" href="{url_for("sign_in_page")}">'
-                "Switch organisation</a>"
-                if _auth.is_dev_operator()
-                else ""
-            )
-            hero_actions = (
-                f'<a class="mh-cta-primary" href="{url_for("upload")}">'
-                "Upload results &rarr;</a>"
-                f'<a class="mh-cta-secondary" href="{url_for("make_page")}">'
-                "Create other content</a>"
-                + _switch_cta
-                + f'<a class="mh-cta-secondary" href="{url_for("organisation_setup")}">'
-                "Edit profile</a>"
-            )
-            eyebrow = "Pinned organisation"
-            lane_no = "04"
-        else:
-            # Fresh visit (or signed-out). Display-caps + italic emphasis.
-            # U.9 — the content-type noun is now the gold serif-italic accent
-            # and crossfades through stories / reels / graphics / captions.
-            hero_h1 = "Results in.<br>On-brand " + _hero_word_cycle_html() + " out."
-            word_cycle_js = _HERO_WORD_CYCLE_JS
-            # Lede leads with the ONE concrete thing MediaHub does, in plain
-            # words, so a visitor who has never heard of it understands the
-            # mechanic in a single read: upload a results file → the engine
-            # finds the moments → it drafts branded content → you approve.
-            # (The old lede opened on brand-reading — the setup step — which
-            # buried the actual value under the secondary detail.)
-            hero_lede = (
-                "Upload your meet results — HY3, PDF or a spreadsheet. MediaHub "
-                "finds every personal best, medal and club record, writes the "
-                "caption, and builds branded story cards, feed graphics and "
-                "reels — ready to post in your club's colours and voice. You "
-                "approve each one; nothing posts without you."
-            )
-            # Sign up is the unambiguous entry point for a first-time visitor.
-            # The secondary CTA is the ACCOUNT log-in for returning users
-            # (A-5): authentication is an account action, and organisation
-            # selection happens afterwards — so it points at /login, not the
-            # org picker, and the words never collide with the org vocabulary.
-            hero_actions = (
-                f'<a class="mh-cta-primary" href="{url_for("signup_page")}">'
-                "Sign up &rarr;</a>"
-                f'<a class="mh-cta-secondary" href="{url_for("login_page")}">'
-                "Log in</a>"
-            )
-            eyebrow = "Turn meet results into ready-to-post content"
-            lane_no = "01"
-
-        # Meta line under the CTAs — bracketed mono strap, scoreboard voice.
-        # U.12: the live tallies are odometer numerals — zero-padded digit
-        # reels that roll upward on page load + scroll-into-view via the shared
-        # reveal/counter system (data-mh-count + data-mh-odometer). Progressive
-        # enhancement: the padded value is the element's text, so it reads
-        # correctly with JS off; role="img" + aria-label hand assistive tech the
-        # clean (unpadded, comma-grouped) value on both the JS and no-JS paths.
-        def _odometer(value: int, pad: int) -> str:
-            return (
-                f'<b class="mh-odo" role="img" aria-label="{value:,}" '
-                f'data-mh-count="{value}" data-mh-odometer data-mh-count-pad="{pad}">'
-                f"{value:0{pad}d}</b>"
-            )
-
-        meta_parts = []
-        # Signed-in with a review queue waiting: lead the strap with the ONE
-        # actionable number, accented, so a returning club sees its outstanding
-        # work first (and the resume strip below links straight into it).
-        if _tally_pid and n_awaiting:
-            meta_parts.append(
-                f'<span class="mh-hero-meta-live">{_odometer(n_awaiting, 2)} '
-                f"{'card' if n_awaiting == 1 else 'cards'} awaiting your review</span>"
-            )
-        # The signed-out landing leads with the deployment-wide org count as
-        # social proof; a signed-in club doesn't need "N clubs use this" pitched
-        # back — its strap is its own season (runs/moments) plus the queue above.
-        if n_orgs and not _tally_pid:
-            meta_parts.append(
-                f"<span>{_odometer(n_orgs, 2)} {'organisation' if n_orgs == 1 else 'organisations'}</span>"
-            )
-        if n_runs:
-            meta_parts.append(
-                f"<span>{_odometer(n_runs, 3)} {'result' if n_runs == 1 else 'results'} processed</span>"
-            )
-        if n_moments:
-            meta_parts.append(
-                f"<span>{_odometer(n_moments, 3)} standout "
-                f"{'swim' if n_moments == 1 else 'swims'} found</span>"
-            )
-        if prof and prof.brand_capture_status in ("ok", "ok_heuristic"):
-            meta_parts.append("<span>Brand voice <b>captured</b></span>")
-        meta_html = ""
-        if meta_parts:
-            sep = '<span class="dot">/</span>'
-            meta_html = '<div class="mh-hero-meta">' + sep.join(meta_parts) + "</div>"
-
-        # Demo line for first-time visitors — small tertiary CTA below the
-        # primary buttons. Links to /upload which the org gate will steer
-        # them through cleanly if they don't have an org yet.
-        demo_line_html = ""
-        if not (prof and prof.is_ready()):
-            demo_line_html = (
-                '<p class="mh-demo-line">Just looking? '
-                '<a href="#mh-see-it-work">See it in action</a>, '
-                '<a href="' + url_for("about_page") + '">take the full tour</a> '
-                'or <a href="' + url_for("sign_in_page") + '">browse pinned organisations</a>.'
-                "</p>"
-            )
-
-        # Three-step "how it works" strip, sits under the lede so the core
-        # mechanic (upload → review → post) is glanceable ABOVE THE FOLD — the
-        # one screen every visitor sees — instead of only in the scroll-down
-        # explainer. Fresh / signed-out visitors only; a pinned org already
-        # knows the flow and gets the lean "Ready to file" hero.
-        steps_html = ""
-        if not (prof and prof.is_ready()):
-            _steps = (
-                ("01", "Upload results"),
-                ("02", "Review the drafts"),
-                ("03", "Approve &amp; post"),
-            )
-            steps_html = (
-                '<ol class="mh-hero-steps" '
-                'aria-label="How MediaHub works, in three steps">'
-                + "".join(
-                    f'<li><span class="i" aria-hidden="true">{i}</span>'
-                    f'<span class="t">{t}</span></li>'
-                    for i, t in _steps
-                )
-                + "</ol>"
-            )
-
-        # U.10 — framed, looping product demo in its own "See it work" section.
-        # It is now the FIRST section after the hero (ahead of the read ->
-        # engine -> write diagram), so the concrete product proof lands before
-        # the conceptual explainer. Fresh / signed-out visitors only; a pinned
-        # org gets the utilitarian "Ready to file" hero with no marketing demo.
-        demo_html = "" if (prof and prof.is_ready()) else _hero_product_demo()
-        demo_section_html = ""
-        if demo_html:
-            demo_section_html = (
-                '<section class="mh-section mh-reveal" id="mh-see-it-work">'
-                '<div class="mh-section-eyebrow-strip mh-reveal">'
-                '<span class="label">See it work</span></div>'
-                + _reveal_lines(
-                    ["One result in.", 'A post you <em class="editorial">approve</em>.']
-                )
-                + demo_html
-                + "</section>"
-            )
-
-        hero_html = (
-            f'<section class="mh-hero" id="mh-ch-overview" data-lane="{lane_no}">'
-            f'<span class="mh-hero-eyebrow">{_h(eyebrow)}</span>'
-            f"<h1>{hero_h1}</h1>"
-            f'<p class="lede">{_h(hero_lede)}</p>'
-            f"{steps_html}"
-            f'<div class="mh-hero-actions">{hero_actions}</div>'
-            f"{demo_line_html}"
-            f"{meta_html}"
-            "</section>"
-            f"{word_cycle_js}"
-        )
-
-        # The product-story explainer sections (input→output headline, the
-        # "what the engine does" bento, the "made for" audience cards, the
-        # human-in-the-loop promise and the FAQ) are built by the module-level
-        # `_home_*` helpers above. The signed-OUT landing page assembles them
-        # below; the signed-IN home omits them (they live on the Help page).
-
-        # --- Final CTA strip before the footer. Two variants based on
-        # whether the user has a pinned org. Picks up the masthead lane-
-        # stripe accent so the page resolves with the same chrome.
-        if prof and prof.is_ready():
-            final_cta_html = (
-                '<section class="mh-final-cta mh-reveal" id="mh-ch-start">'
-                "<div>"
-                + _reveal_lines(
-                    ["Next weekend's meet,", "<em>ready</em> in a sitting."],
-                    cls="mh-final-cta-headline",
-                )
-                + '<p class="mh-final-cta-sub mh-reveal">Drop the results file. We\'ll '
-                "rank the moments and write the captions; you spend the "
-                "evening approving instead of opening Photoshop.</p>"
-                "</div>"
-                '<div class="mh-final-cta-actions">'
-                f'<a class="btn large" href="{url_for("make_page")}">Start a content pack &rarr;</a>'
-                f'<a class="btn secondary" href="{url_for("activity_page")}">All recent runs</a>'
-                "</div>"
-                "</section>"
-            )
-        else:
-            final_cta_html = (
-                '<section class="mh-final-cta mh-reveal" id="mh-ch-start">'
-                "<div>"
-                + _reveal_lines(
-                    ["A minute to set up.", "<em>Then</em> every week is easier."],
-                    cls="mh-final-cta-headline",
-                )
-                + '<p class="mh-final-cta-sub mh-reveal">Tell us your club\'s name and '
-                "website. We'll read your brand, palette and voice, and have "
-                "on-brand drafts ready the next time you upload a results file.</p>"
-                "</div>"
-                '<div class="mh-final-cta-actions">'
-                f'<a class="btn large" href="{url_for("organisation_setup")}">Create your organisation &rarr;</a>'
-                f'<a class="btn secondary" href="{url_for("login_page")}">Log in</a>'
-                "</div>"
-                "</section>"
-            )
-
-        # ================================================================ #
-        # Signed-in home — a content-creation workspace, not a sales page.
-        #
-        # A returning club doesn't need "what the engine does" pitched back at
-        # it every visit; it needs to get to work. So the pinned-org home is a
-        # lean dashboard: the "Ready to file" hero, a quick-action grid to the
-        # surfaces they actually use (their runs live on the org-scoped
-        # /activity page, reached from the "All activity" tile), then the
-        # create-focused final CTA. The product-story explainer (how it works /
-        # what it does / promise / FAQ) moved to the in-app Help page, reached
-        # from the account menu. Signed-OUT visitors still get the full landing.
-        # ================================================================ #
-        if prof and prof.is_ready():
-            return _layout(
-                "Home",
-                '<div class="mh-fx mh-spotlight">'
-                + hero_html
-                + "</div>"
-                + _home_resume_strip_html(prof.profile_id)
-                + _home_signed_in_quick_actions_html(n_awaiting)
-                + final_cta_html,
-                active="home",
-            )
-
-        # --- Signed-out landing page — brief, but really clear. ------------
-        # The home page states plainly what MediaHub is and shows it working;
-        # the depth (the animated step-by-step walkthrough and the full explainer
-        # sections) lives on /about, one obvious click away. Keeping the landing
-        # short means a cold visitor gets the value in one screen and one scroll,
-        # not a marketing scroll marathon. No scroll-spy rail here — the page is
-        # deliberately too short to need one (it lives on /about instead).
-        about_teaser_html = (
-            '<section class="mh-section mh-reveal" '
-            'style="text-align:center;padding-top:var(--sp-4)">'
-            + _reveal_lines(["See exactly how", 'it <em class="editorial">works</em>.'])
-            + '<p class="mh-pipeline-sub" style="margin:0 auto var(--sp-5);max-width:52ch">'
-            "A step-by-step, animated walkthrough of the whole flow &mdash; from a "
-            "results file to an approved post &mdash; plus who it&rsquo;s for and "
-            "our human-in-the-loop promise.</p>"
-            f'<a class="btn large" href="{url_for("about_page")}">Take the tour &rarr;</a>'
-            "</section>"
-        )
-        return _layout(
-            "Home",
-            '<div class="mh-fx mh-spotlight">'
-            + hero_html
-            + "</div>"
-            # Concrete product proof FIRST: the framed generate → review →
-            # approve demo shows the actual thing (a results file becoming a
-            # branded card + caption you approve) right after the hero.
-            + demo_section_html
-            # One crisp "what it is" statement — a results sheet in, four
-            # posting-ready formats out — then a single clear path to the full
-            # animated walkthrough and the deeper story on /about.
-            + _home_io_headline_html()
-            + about_teaser_html
-            + final_cta_html,
-            active="home",
-        )
 
     # ---- HELP — the product-story explainer (how it works / what it does /
     # who it's for / promise / FAQ), moved off the signed-in home into a
@@ -31912,96 +31921,6 @@ def create_app() -> Flask:
     # content-creation workspace, so this is where a returning club looks up
     # "how does this actually work?". Public: a signed-out visitor sees the same
     # explainer the landing page carries, so there's nothing to gate.
-    @app.route("/help")
-    def help_page():
-        intro = (
-            "Everything MediaHub does from a single upload — what goes in, what "
-            "comes out, and the questions clubs ask first. It's all one click "
-            "from Create whenever you need it."
-        )
-        header_html = (
-            '<section class="mh-hero" data-lane="">'
-            '<span class="mh-hero-eyebrow">Help &amp; how it works</span>'
-            '<h1>How MediaHub <em class="editorial">works</em>.</h1>'
-            f'<p class="lede">{_h(intro)}</p>'
-            '<div class="mh-hero-actions">'
-            f'<a class="mh-cta-primary" href="{url_for("make_page")}">'
-            "Create new content &rarr;</a>"
-            f'<a class="mh-cta-secondary" href="{url_for("status_page")}">'
-            "System status</a>"
-            "</div>"
-            "</section>"
-        )
-
-        # The looping "see it work" product demo, wrapped exactly as the landing
-        # page wraps it (its non-chapter id keeps it out of any scroll-spy rail).
-        demo_section_html = (
-            '<section class="mh-section mh-reveal" id="mh-see-it-work">'
-            '<div class="mh-section-eyebrow-strip mh-reveal">'
-            '<span class="label">See it work</span></div>'
-            + _reveal_lines(["One result in.", 'A post you <em class="editorial">approve</em>.'])
-            + _hero_product_demo()
-            + "</section>"
-        )
-
-        # Closing "still stuck?" strip — points at the operator-facing surfaces
-        # that answer the rest (live status, the privacy data inventory, roadmap).
-        closing_html = (
-            '<section class="mh-section">'
-            '<div class="mh-section-eyebrow-strip mh-reveal">'
-            '<span class="label">Still stuck?</span></div>'
-            + _reveal_lines(["Can't find the", '<em class="editorial">answer</em>?'])
-            + '<p class="mh-reveal" style="color:var(--ink-dim);max-width:62ch">'
-            "Check the live system status, audit exactly what's stored about your "
-            "club on the privacy page, or see which result files you can upload."
-            "</p>"
-            '<div class="mh-hero-actions" style="margin-top:var(--sp-4)">'
-            f'<a class="btn" href="{url_for("status_page")}">System status</a>'
-            f'<a class="btn secondary" href="{url_for("privacy_page")}">'
-            "Privacy &amp; data</a>"
-            f'<a class="btn secondary" href="{url_for("research_page")}">Supported files</a>'
-            f'<a class="btn secondary" href="{url_for("export_center_page")}">'
-            "Export &amp; convert</a>"
-            f'<a class="btn secondary" href="{url_for("print_center_page")}">'
-            "Print &amp; merch</a>"
-            "</div>"
-            "</section>"
-        )
-
-        # Jump-chip row so the useful answers are one click away instead of a
-        # scroll past the whole explainer. Reuses the shared .mh-legal-toc chrome;
-        # every target is a real in-page anchor id (or a real page) so it works
-        # with JS off. The FAQ (a keyboard-operable <details> accordion) is
-        # rendered FIRST below — it's scannable in one screen — then the full
-        # "how it works" explainer follows for anyone who wants the deep read.
-        help_jump_html = (
-            '<nav class="mh-legal-toc card" aria-label="Jump to" '
-            'style="margin-top:var(--sp-4)">'
-            '<span class="mh-legal-toc-eyebrow">Jump to</span>'
-            '<div class="mh-legal-toc-links">'
-            '<a href="#mh-faq-h">Common questions</a>'
-            '<a href="#mh-pipeline-h">How the pipeline works</a>'
-            '<a href="#mh-ch-engine">What it makes</a>'
-            f'<a href="{url_for("research_page")}">Supported files</a>'
-            f'<a href="{url_for("privacy_page")}">Privacy &amp; data</a>'
-            "</div></nav>"
-        )
-        return _layout(
-            "Help",
-            '<div class="mh-fx mh-spotlight">'
-            + header_html
-            + "</div>"
-            + help_jump_html
-            + _home_faq_html()
-            + _pipeline_diagram_section_html()
-            + demo_section_html
-            + _home_io_headline_html()
-            + _home_engine_bento_html()
-            + _home_audience_html()
-            + _home_promise_html()
-            + closing_html,
-            active="help",
-        )
 
     # ---- MOBILE PARITY &mdash; operator diagnostic: is the phone as good as PC? ----
     @app.route("/tools/mobile-parity")
@@ -33584,62 +33503,6 @@ def create_app() -> Flask:
         return (page, 400) if upload_error else page
 
     # ---- UPLOAD CONFIGURE (V8.1 issue 6: two-step; V8.2 issue 6: photos) ---
-
-    @app.route("/onboarding/sample", methods=["POST"])
-    def onboarding_sample():
-        """U.4 — one-click sample-to-first-content-pack.
-
-        Runs the real pipeline on the bundled synthetic meet, stamped to
-        the signed-in org so the cards come out in the user's brand, and
-        bounces to the standard run-progress page (which advances to the
-        review queue on completion). The org gate already guarantees a
-        ready profile before this route is reachable; the explicit check
-        keeps it honest under TESTING (where the gate is bypassed).
-        """
-        prof = _active_profile()
-        if not (prof and prof.is_ready()):
-            return redirect(url_for("organisation_setup"))
-        if not _SAMPLE_MEET_PDF.exists():
-            return _recovery_page(
-                "Sample meet unavailable",
-                "The bundled sample meet isn't present on this deployment, "
-                "so there's nothing to generate from. Upload your own results "
-                "file to create a content pack.",
-                eyebrow="Sample pack",
-                primary_cta=("Upload results", url_for("upload")),
-                secondary_cta=("Back to create", url_for("make_page")),
-                code=404,
-            )
-        file_bytes = _SAMPLE_MEET_PDF.read_bytes()
-        # Synthetic swimmers — there is nothing to web-verify, so PB web
-        # verification is off (faster, and no PB-verification calls for demo
-        # data). Meet-identity research inside the recognition report still
-        # runs, but it is globally cached, so only the first uncached sample
-        # generation on a deployment can trigger an outbound lookup. The hero
-        # club is pre-selected so the pack shows its best spread of cards.
-        run_id = _start_run(
-            file_bytes,
-            _SAMPLE_MEET_FILENAME,
-            prof.profile_id,
-            True,  # use_pb_cache
-            False,  # fetch_pbs
-            club_filter=_SAMPLE_MEET_CLUB,
-        )
-        _mark_run_sample(run_id)
-        try:
-            from mediahub.workflow.autonomy import AuditLog
-
-            AuditLog().record(
-                prof.profile_id,
-                f"run:{run_id}",
-                "sample_pack_started",
-                tool="onboarding_sample",
-                args={"run_id": run_id, "club": _SAMPLE_MEET_CLUB},
-                result="started",
-            )
-        except Exception:
-            pass
-        return redirect(url_for("run_status", run_id=run_id))
 
     @app.route("/upload/from-url", methods=["POST"])
     def upload_from_url():
@@ -37050,101 +36913,7 @@ function copyWhyCard(btn, taId) {{
 {report_html}"""
         return _layout("Ground Truth", body, active="")
 
-    @app.route("/recognition/<run_id>")
-    def recognition_page(run_id):
-        """Standalone recognition page (redirect to review for now)."""
-        return redirect(url_for("review", run_id=run_id))
-
     # ---- GROUND TRUTH --------------------------------------------------
-    @app.route("/ground-truth/<run_id>", methods=["GET", "POST"])
-    @require_run(
-        deny=lambda: (
-            _recovery_page(
-                "Run not found",
-                "This run isn't on disk. It may have been deleted from /privacy, or the URL might be from a different deployment.",
-                primary_cta=("Open activity", url_for("activity_page")),
-                secondary_cta=("Back to home", url_for("home")),
-            )
-        ),
-        require_exists=True,
-    )
-    def ground_truth(run_id, run_data):
-        data = run_data
-        rep_html = ""
-        if request.method == "POST":
-            text = request.form.get("moments", "")
-            from .ground_truth import evaluate
-
-            # Need ContentCard objects: re-hydrate basic shape from saved dicts
-            class _Stub:
-                pass
-
-            cards = []
-            for d in data.get("cards") or []:
-                s = _Stub()
-                s.card_id = d.get("card_id", "")
-                s.headline = d.get("headline", "")
-                s.swimmer_names = d.get("swimmer_names") or []
-                s.bucket = d.get("bucket", "")
-                claims = []
-                for cl in d.get("claims") or []:
-                    cs = _Stub()
-                    cs.distance = cl.get("distance")
-                    cs.stroke = cl.get("stroke")
-                    claims.append(cs)
-                s.claims = claims
-                cards.append(s)
-            rep = evaluate(text, cards)
-            data["ground_truth_report"] = rep.to_dict()
-            (RUNS_DIR / f"{run_id}.json").write_text(json.dumps(data, indent=2, default=str))
-
-            rows = ""
-            for m in rep.matches:
-                badge = "good" if m.get("matched_card") else "bad"
-                rows += (
-                    f"<tr><td>{_h(m.get('moment', ''))}</td>"
-                    f'<td><span class="tag {badge}">'
-                    f"{'matched' if m.get('matched_card') else 'missed'}</span></td>"
-                    f"<td>{_h(m.get('matched_headline') or '—')}</td>"
-                    f"<td>{_h(m.get('score', ''))}</td></tr>"
-                )
-            rep_html = f"""
-<div class="card">
-  <h2>Result</h2>
-  <div class="stat-block">
-    <div class="stat"><div class="l">Precision</div><div class="v">{rep.precision * 100:.0f}%</div></div>
-    <div class="stat"><div class="l">Recall</div><div class="v">{rep.recall * 100:.0f}%</div></div>
-    <div class="stat"><div class="l">F1</div><div class="v">{rep.f1 * 100:.0f}%</div></div>
-    <div class="stat"><div class="l">Matched</div><div class="v">{rep.n_matched_moments}/{rep.n_total_moments}</div></div>
-  </div>
-  <div class="divider"></div>
-  <table>
-    <thead><tr><th>Expected moment</th><th>Status</th><th>Best card match</th><th>Score</th></tr></thead>
-    <tbody>{rows}</tbody>
-  </table>
-  <p class="muted" style="margin-top:14px">{rep.notes}</p>
-</div>
-"""
-
-        body = f"""
-<section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">
-  <span class="mh-hero-eyebrow">Ground-truth check</span>
-  <h1>How <em class="editorial">well</em> did we recall?</h1>
-  <p class="lede">Paste 5&ndash;15 expected highlights from this meet. We score how many MediaHub surfaced as content cards. One per line.</p>
-</section>
-
-<div class="card">
-  <form method="post" data-loader-text="Scoring recall">
-    <label class="req" for="gt-moments">Expected moments (one per line)</label>
-    <textarea id="gt-moments" name="moments" required placeholder="Eva Davies 100m butterfly PB
-Mathew Bradley 200m IM gold
-Relay team broke club record"></textarea>
-    <div style="margin-top:var(--sp-4)"><button class="btn" type="submit">Score recall &rarr;</button></div>
-  </form>
-</div>
-{rep_html}
-"""
-        return _layout("Ground truth", body, active="home")
 
     # ---- RESEARCH ------------------------------------------------------
     @app.route("/research")
@@ -37188,155 +36957,8 @@ Relay team broke club record"></textarea>
         return _layout("What files can I upload?", body, active="research")
 
     # ---- DEVELOPER / API REFERENCE (UI 1.11) ---------------------------
-    @app.route("/developer/api")
-    def api_docs_page():
-        """Public Developer/API reference.
-
-        Documents the real HTTP + JSON endpoints the app exposes, each with a
-        tabbed cURL / Python / JavaScript code-example switcher. Highlighting is
-        rendered server-side by ``code_highlight.py`` (no Prism, no CDN); the
-        language tabs are pure CSS and the copy button is JS-enhanced (UI 1.11).
-        """
-        return _layout("Developer API", _render_api_docs_body(), active="")
 
     # ---- PRIVACY -------------------------------------------------------
-
-    @app.route("/privacy")
-    def privacy_page():
-        return _privacy_page_render()
-
-    @app.route("/terms")
-    def terms_page():
-        body = _legal.terms_html(
-            privacy_url=url_for("privacy_page"),
-            cookies_url=url_for("cookies_page"),
-            dpa_url=url_for("dpa_page"),
-        )
-        return _layout("Terms of Service", body, active="")
-
-    @app.route("/cookies")
-    def cookies_page():
-        body = _legal.cookies_html(privacy_url=url_for("privacy_page"))
-        return _layout("Cookie Policy", body, active="")
-
-    @app.route("/dpa")
-    def dpa_page():
-        body = _legal.dpa_html(privacy_url=url_for("privacy_page"))
-        return _layout("Data Processing Agreement", body, active="")
-
-    @app.route("/privacy/run/<run_id>/delete", methods=["POST"])
-    def privacy_delete_run(run_id):
-        # Defence in depth: run ids generated by _start_run / upload are
-        # 12-hex-char tokens. Flask's default string converter already
-        # blocks slashes, but tightening here rejects future shapes that
-        # might somehow slip through (e.g. URL-decoded `..` chains).
-        if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", run_id):
-            return _layout(
-                "Delete blocked",
-                '<div class="card"><p class="tag bad">That run id has an unexpected '
-                "shape and was not deleted.</p></div>",
-                active="privacy",
-            ), 400
-        # Multi-tenant guard: a run can only be deleted by the
-        # organisation that owns it. Legacy untagged runs (empty
-        # profile_id) are treated as belonging to whichever org is
-        # active so the user can still clean them up. A request that
-        # targets another tenant's run is refused with a 404 — we don't
-        # confirm-or-deny the existence to a cross-tenant attacker.
-        owner = _run_owner_profile_id(run_id)
-        active = _active_profile_id() or ""
-        if owner is None:
-            return _layout(
-                "Run not found",
-                '<div class="card"><p class="tag bad">No such run.</p></div>',
-                active="privacy",
-            ), 404
-        if owner and active and owner != active:
-            log.warning(
-                "privacy_delete_run: cross-tenant attempt active=%r owner=%r run=%r",
-                active,
-                owner,
-                run_id,
-            )
-            return _layout(
-                "Run not found",
-                '<div class="card"><p class="tag bad">No such run.</p></div>',
-                active="privacy",
-            ), 404
-        _delete_run(run_id)
-        # Stay where the delete was triggered. The settings activity table
-        # posts via fetch() and just drops the row in place (the "delete there
-        # and then, stay on the page" ask); a plain form post returns to the
-        # page named in ``next`` (same-site validated), falling back to the
-        # settings page rather than bouncing the user home.
-        if request.headers.get("X-Requested-With") == "XMLHttpRequest":
-            return jsonify({"ok": True, "deleted": run_id})
-        # Plain form post (e.g. the review-page danger zone) redirects away with
-        # no other signal — a one-shot toast confirms the delete landed (U.2).
-        _flash_toast("Run deleted.")
-        nxt = _safe_next(request.form.get("next") or request.args.get("next"))
-        return redirect(nxt or url_for("settings_page"))
-
-    @app.route("/privacy/runs/clear-all", methods=["POST"])
-    def privacy_clear_all_runs():
-        # Per-tenant bulk erase: permanently delete EVERY finished run owned by
-        # the active organisation, via the same cascade as the single-run delete
-        # (run JSON + sidecars + DB rows + re-derivable caches). The
-        # ``WHERE profile_id`` gate is the tenant-isolation boundary — this never
-        # touches another org's runs (mirrors privacy_delete_run).
-        #
-        # Only terminal runs (done/error) are cleared: deleting a run still in
-        # flight would race the worker, whose _persist_run could resurrect the
-        # DB row after we removed it. In-flight runs finish, then become
-        # deletable like any other.
-        active = _active_profile_id() or ""
-        if not active:
-            # No active org → nothing safe to scope a wipe to (a blank
-            # profile_id would match legacy untagged rows of unknown ownership).
-            if request.headers.get("X-Requested-With") == "XMLHttpRequest":
-                return jsonify({"ok": False, "error": "no active organisation"}), 400
-            _flash_toast("No active organisation to clear.", "error")
-            nxt = _safe_next(request.form.get("next") or request.args.get("next"))
-            return redirect(nxt or url_for("activity_page"))
-        try:
-            conn = _db()
-            ids = [
-                row["id"]
-                for row in conn.execute(
-                    "SELECT id FROM runs WHERE profile_id = ? AND status IN ('done','error')",
-                    (active,),
-                ).fetchall()
-            ]
-            conn.close()
-        except Exception:  # noqa: BLE001
-            ids = []
-        deleted = 0
-        for rid in ids:
-            try:
-                _delete_run(rid)
-                deleted += 1
-            except Exception:  # noqa: BLE001
-                log.warning("clear-all: failed to delete run %s", rid, exc_info=True)
-        log.info("clear-all: org=%r removed %d runs", active, deleted)
-        if request.headers.get("X-Requested-With") == "XMLHttpRequest":
-            return jsonify({"ok": True, "deleted": deleted})
-        _flash_toast(f"Deleted {deleted} run{'s' if deleted != 1 else ''}.")
-        nxt = _safe_next(request.form.get("next") or request.args.get("next"))
-        return redirect(nxt or url_for("activity_page"))
-
-    @app.route("/privacy/cache/clear", methods=["POST"])
-    def privacy_cache_clear():
-        for d in [DATA_DIR / ".cache" / "pb_lookup", DATA_DIR / ".cache" / "swimmingresults"]:
-            if d.exists():
-                for f in d.glob("*.json"):
-                    try:
-                        f.unlink()
-                    except Exception:
-                        pass
-        # Return to wherever the clear was triggered (Settings → Privacy or the
-        # standalone /privacy page), not unconditionally to /privacy.
-        nxt = _safe_next(request.form.get("next"))
-        return redirect(nxt or url_for("privacy_page"))
 
     # ---- DATA-PROTECTION COMPLAINTS (s.164A DPA 2018) -------------------
     # From 19 June 2026 controllers must facilitate data-protection
@@ -37344,77 +36966,10 @@ Relay team broke club record"></textarea>
     # The form is public on purpose: complainants (athletes, parents) are
     # usually NOT platform users. Engine: mediahub.compliance.complaints.
 
-    @app.route("/complaints")
-    def complaints_form():
-        return _layout("Complaints", _complaints_form_body(), active="privacy")
-
-    @app.route("/complaints", methods=["POST"])
-    def complaints_submit():
-        from mediahub.compliance.complaints import ComplaintsStore
-
-        # Same trusted-proxy derivation as the auth limiter — the first XFF
-        # hop is client-supplied, so keying on it would defeat the throttle.
-        remote = _client_ip()
-        if _complaints_throttled(remote):
-            return _layout(
-                "Complaints",
-                _complaints_form_body(
-                    "Too many submissions from this address — please try again later."
-                ),
-                active="privacy",
-            ), 429
-        details = (request.form.get("details") or "").strip()
-        contact = (request.form.get("contact") or "").strip()
-        if not details or not contact:
-            return _layout(
-                "Complaints",
-                _complaints_form_body("Please tell us what happened and how to reach you."),
-                active="privacy",
-            ), 400
-        complaint = ComplaintsStore().submit(
-            name=request.form.get("name") or "",
-            contact=contact,
-            details=details,
-            relationship=request.form.get("relationship") or "",
-            club=request.form.get("club") or "",
-        )
-        log.info("complaint received id=%s", complaint.id)  # no contact details in logs
-        body = f"""
-<section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">
-  <span class="mh-hero-eyebrow">Privacy &amp; data</span>
-  <h1>Complaint <em class="editorial">received.</em></h1>
-  <p class="lede">Thank you. Your reference is <strong>{_h(complaint.id)}</strong> — keep it. We will acknowledge your complaint within 30 days (by {_h(complaint.ack_due_at[:10])}) using the contact details you gave.</p>
-</section>
-<div class="card"><p class="muted">You can also raise this with the Information Commissioner's Office at any time: ico.org.uk/make-a-complaint.</p></div>
-"""
-        return _layout("Complaint received", body, active="privacy")
-
     # ---- SUB-PROCESSOR DISCLOSURE (public) ------------------------------
     # The public page clubs/parents can check. Keep in sync with
     # docs/compliance/SUBPROCESSORS.md (the canonical inventory) — the
     # test suite pins the provider set on both.
-
-    @app.route("/legal/subprocessors")
-    def legal_subprocessors():
-        # One canonical register (legal.SUBPROCESSORS) renders the DPA §6
-        # table AND this public page, and the PC.11 guard test pins it to
-        # the env-flag surface — the two surfaces cannot drift apart.
-        rows = _legal.subprocessor_public_rows_html()
-        body = f"""
-<section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">
-  <span class="mh-hero-eyebrow">Privacy &amp; data</span>
-  <h1>Who we <em class="editorial">work with.</em></h1>
-  <p class="lede">Every third party that can touch personal data processed by this service, what they do, where they do it, and the legal safeguard for the transfer. Social platforms (Instagram, Facebook, TikTok) are not processors — once a club approves a post, the platform handles it under its own terms.</p>
-</section>
-<div class="card">
-  <table>
-    <thead><tr><th>Provider</th><th>What they do</th><th>Where</th><th>Transfer safeguard</th><th>When engaged</th></tr></thead>
-    <tbody>{rows}</tbody>
-  </table>
-  <p class="muted">Clubs are notified before a new sub-processor is added and may object (see the Data Processing Agreement). The swimmingresults.org rankings site is a public data <em>source</em>, not a processor — nothing is sent to it beyond the lookup itself.</p>
-</div>
-"""
-        return _layout("Sub-processors", body, active="privacy")
 
     @app.route("/admin/compliance")
     def admin_compliance():
@@ -37549,230 +37104,7 @@ Relay team broke club record"></textarea>
 
     # ---- Data-subject rights (UK GDPR Arts. 15/17/20) -------------------
 
-    @app.route("/privacy/athlete/erase", methods=["POST"])
-    def privacy_athlete_erase():
-        """Erase one named athlete across everything the active org holds."""
-        active = _active_profile_id() or ""
-        if not active:
-            return redirect(url_for("privacy_page"))
-        name = (request.form.get("athlete_name") or "").strip()
-        club = (request.form.get("athlete_club") or "").strip()
-        if not name:
-            # H-17: re-render with an inline error instead of a silent
-            # redirect that discarded what the user typed.
-            return _privacy_page_render(
-                erase_error=(
-                    "Enter the athlete's full name — nothing was erased. "
-                    "The name must match how it appears in the results."
-                ),
-                erase_values={"athlete_name": name, "athlete_club": club},
-                status=400,
-            )
-        # ONE erasure engine: compliance.dsr delegates to the privacy
-        # cascade and adds the media-library / profile-text / suppression
-        # extras, so this quick action and the Art 12A DSR workflow
-        # (/organisation/athlete-rights) do the same work.
-        from mediahub.compliance.dsr import erase_athlete as _dsr_erase
-
-        recorded_by = ""
-        try:
-            recorded_by = _auth.current_user_email() or ""
-        except Exception:
-            pass
-        report = _dsr_erase(
-            active, name, recorded_by=recorded_by, include_ownerless=_ownerless_run_readable()
-        )
-        cascade = report.get("cascade") or {}
-        body = (
-            '<section class="mh-hero" style="padding-top:var(--sp-7);'
-            'padding-bottom:var(--sp-5);margin-bottom:var(--sp-5)">'
-            '<span class="mh-hero-eyebrow">Privacy &amp; data</span>'
-            '<h1>Athlete <em class="editorial">erased.</em></h1></section>'
-            '<div class="card"><h2>What was removed</h2>'
-            + _erasure_removed_html(report, cascade)
-            + "<p class='muted'>Remaining mentions inside multi-athlete captions "
-            "were redacted. Content already published to social "
-            "platforms must be deleted there too &mdash; use the correction tools "
-            "on the Privacy page.</p>"
-            f'<p><a class="btn secondary" href="{url_for("privacy_page")}">'
-            "&larr; Back to privacy</a></p></div>"
-        )
-        return _layout("Athlete erased", body, active="privacy")
-
-    @app.route("/privacy/correction", methods=["POST"])
-    def privacy_correction_open():
-        """Open a correction/takedown for a published-but-wrong card.
-
-        Does everything MediaHub controls: records the request and pulls the
-        card off the public wall. The response is honest about the manual
-        remainder (deleting the post on the platform itself)."""
-        active = _active_profile_id() or ""
-        if not active:
-            return redirect(url_for("privacy_page"))
-        run_id = (request.form.get("run_id") or "").strip()
-        card_id = (request.form.get("card_id") or "").strip()
-        reason = (request.form.get("reason") or "").strip()
-        _ids_ok = bool(
-            re.fullmatch(r"[A-Za-z0-9_-]{1,64}", run_id)
-            and re.fullmatch(r"[A-Za-z0-9_.:-]{1,128}", card_id)
-        )
-        if not (_ids_ok and reason):
-            # H-17: re-render with an inline error next to the form and the
-            # typed values preserved, instead of a silent redirect that
-            # discarded them.
-            if not _ids_ok:
-                _msg = (
-                    "That meet or card id doesn't look right — copy both from "
-                    "the meet's page and try again. Nothing was recorded."
-                )
-            else:
-                _msg = (
-                    "Say what's wrong with the card — the reason is recorded "
-                    "with the correction. Nothing was recorded yet."
-                )
-            return _privacy_page_render(
-                correction_error=_msg,
-                correction_values={
-                    "run_id": run_id,
-                    "card_id": card_id,
-                    "reason": reason,
-                },
-                status=400,
-            )
-        from mediahub.privacy import TAKEDOWN_CHECKLIST, open_correction
-
-        cid = open_correction(profile_id=active, run_id=run_id, card_id=card_id, reason=reason)
-        # Pull the card off the public wall immediately.
-        try:
-            from mediahub.web.public_wall import card_key
-
-            prof = load_profile(active)
-            if prof is not None:
-                current = set(prof.public_wall_excluded_cards or [])
-                key = card_key(run_id, card_id)
-                if key not in current:
-                    current.add(key)
-                    prof.public_wall_excluded_cards = sorted(current)
-                    save_profile(prof)
-        except Exception:
-            log.warning("correction: wall exclusion failed", exc_info=True)
-        checklist = "".join(f"<li>{_h(item)}</li>" for item in TAKEDOWN_CHECKLIST)
-        body = (
-            '<section class="mh-hero" style="padding-top:var(--sp-7);'
-            'padding-bottom:var(--sp-5);margin-bottom:var(--sp-5)">'
-            '<span class="mh-hero-eyebrow">Privacy &amp; data</span>'
-            '<h1>Correction <em class="editorial">opened.</em></h1></section>'
-            '<div class="card">'
-            f"<p>Correction #{cid} recorded for card <code>{_h(card_id)}</code> "
-            f"in run <code>{_h(run_id)}</code>. The card has been removed from the "
-            "public wall.</p>"
-            "<h2>Still to do (outside MediaHub)</h2>"
-            f"<ul>{checklist}</ul>"
-            f'<p><a class="btn secondary" href="{url_for("privacy_page")}">'
-            "&larr; Back to privacy</a></p></div>"
-        )
-        return _layout("Correction opened", body, active="privacy")
-
-    @app.route("/privacy/correction/<int:correction_id>/resolve", methods=["POST"])
-    def privacy_correction_resolve(correction_id: int):
-        active = _active_profile_id() or ""
-        if active:
-            from mediahub.privacy import resolve_correction
-
-            resolve_correction(
-                profile_id=active,
-                correction_id=correction_id,
-                resolution=(request.form.get("resolution") or "").strip(),
-            )
-        return redirect(url_for("privacy_page"))
-
-    @app.route("/account/export")
-    def account_export_route():
-        email = _auth.current_user_email()
-        if not email:
-            return redirect(url_for("login_page", next=url_for("account_export_route")))
-        from mediahub.privacy import account_export
-
-        payload = account_export(email)
-        resp = jsonify(payload)
-        resp.headers["Content-Disposition"] = 'attachment; filename="mediahub-account-export.json"'
-        return resp
-
-    @app.route("/account/delete", methods=["POST"])
-    def account_delete():
-        email = _auth.current_user_email()
-        if not email:
-            return redirect(url_for("login_page"))
-        # Deleting an account is irreversible — re-verify the password so a
-        # hijacked session can't silently destroy the account.
-        password = request.form.get("password") or ""
-        # E-9: return the user to the page they deleted from (Settings account
-        # or /privacy), not a hardcoded /privacy.
-        _back = _safe_next(request.form.get("return_to")) or url_for("privacy_page")
-        try:
-            _user_store().authenticate(email, password)
-        except _auth.AuthError:
-            return (
-                _layout(
-                    "Account not deleted",
-                    '<div class="card"><p class="tag bad">Password check failed '
-                    "&mdash; account NOT deleted.</p>"
-                    f'<p><a class="btn secondary" href="{_h(_back)}">'
-                    "&larr; Back</a></p></div>",
-                    active="settings",
-                ),
-                403,
-            )
-        from mediahub.privacy import erase_account
-
-        erase_account(email)
-        _auth.logout_user()
-        session.clear()
-        # E-9: land on an explicit confirmation, not a silent bounce to home
-        # that leaves the user unsure whether it worked.
-        return _layout(
-            "Account deleted",
-            '<section class="mh-hero" style="padding-top:var(--sp-7);'
-            'padding-bottom:var(--sp-5);margin-bottom:var(--sp-5)">'
-            '<span class="mh-hero-eyebrow">Account</span>'
-            '<h1>Your account has been <em class="editorial">deleted.</em></h1></section>'
-            '<div class="card"><p>Your MediaHub account and its personal data have been '
-            "erased. You have been signed out.</p>"
-            f'<p><a class="btn" href="{url_for("home")}">Back to home</a></p></div>',
-            active="home",
-        )
-
     # ---- HEALTH --------------------------------------------------------
-
-    @app.route("/health")
-    def health():
-        import time as _time
-
-        started = _time.monotonic()
-        payload = _health_payload()
-        # Surface the deep health result into the heartbeat log so /status
-        # can count real failures, not just "did the request answer".
-        first_error: Optional[str] = None
-        if not payload["ok"]:
-            for name, check in (payload.get("checks") or {}).items():
-                if not check.get("ok"):
-                    first_error = f"{name}: {check.get('error', 'failed')}"
-                    break
-        _record_heartbeat_safe("health", payload["ok"], started, error=first_error)
-        status_code = 200 if payload["ok"] else 503
-        resp = jsonify(payload)
-        resp.status_code = status_code
-        return resp
-
-    _FAVICON_SVG = (
-        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">'
-        '<rect width="32" height="32" rx="6" fill="#0A0B11"/>'
-        '<rect x="6" y="20" width="5" height="7" rx="1" fill="#B6B2A6"/>'
-        '<rect x="13.5" y="9" width="5" height="18" rx="1" fill="#D4FF3A"/>'
-        '<rect x="21" y="14" width="5" height="13" rx="1" fill="#F4D58D"/>'
-        '<line x1="4" y1="28.5" x2="28" y2="28.5" stroke="#D4FF3A" stroke-width="1.5"/>'
-        "</svg>"
-    )
 
     # Installable-PWA service worker. Network-first so the app is always fresh
     # online; falls back to cache (then a tiny offline page) only when the
@@ -37789,323 +37121,6 @@ Relay team broke club record"></textarea>
     # group-approver rule can hold it as a vote (200 status:'queue'). D-4:
     # drainQueue inspects each replay's body and reports those outcomes to the
     # client instead of silently dropping them and claiming "All changes synced".
-    _SERVICE_WORKER_JS = r"""
-const CACHE = 'mediahub-shell-v2';
-const DB_NAME = 'mediahub-pwa';
-const STORE = 'approval-queue';
-const SYNC_TAG = 'mediahub-approval-queue';
-// Approve / reject / caption-edit all POST to /api/workflow/<run>/<card>.
-const WF_RX = /\/api\/workflow\//;
-
-self.addEventListener('install', function(e){ self.skipWaiting(); });
-
-self.addEventListener('activate', function(e){
-  e.waitUntil((async function(){
-    var keys = await caches.keys();
-    await Promise.all(keys.map(function(k){ return k === CACHE ? null : caches.delete(k); }));
-    await self.clients.claim();
-  })());
-});
-
-// --- IndexedDB queue: one tiny object store, keyed by a generated id --------
-function idbOpen(){
-  return new Promise(function(resolve, reject){
-    var rq = indexedDB.open(DB_NAME, 1);
-    rq.onupgradeneeded = function(){
-      var db = rq.result;
-      if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE, { keyPath: 'id' });
-    };
-    rq.onsuccess = function(){ resolve(rq.result); };
-    rq.onerror = function(){ reject(rq.error); };
-  });
-}
-function idbAdd(rec){
-  return idbOpen().then(function(db){ return new Promise(function(res, rej){
-    var tx = db.transaction(STORE, 'readwrite');
-    tx.objectStore(STORE).put(rec);
-    tx.oncomplete = function(){ res(); };
-    tx.onerror = function(){ rej(tx.error); };
-  }); });
-}
-function idbGetAll(){
-  return idbOpen().then(function(db){ return new Promise(function(res, rej){
-    var tx = db.transaction(STORE, 'readonly');
-    var rq = tx.objectStore(STORE).getAll();
-    rq.onsuccess = function(){ res(rq.result || []); };
-    rq.onerror = function(){ rej(rq.error); };
-  }); });
-}
-function idbDelete(id){
-  return idbOpen().then(function(db){ return new Promise(function(res, rej){
-    var tx = db.transaction(STORE, 'readwrite');
-    tx.objectStore(STORE).delete(id);
-    tx.oncomplete = function(){ res(); };
-    tx.onerror = function(){ rej(tx.error); };
-  }); });
-}
-function idbCount(){ return idbGetAll().then(function(a){ return a.length; }); }
-
-function genId(){
-  return (self.crypto && crypto.randomUUID)
-    ? crypto.randomUUID()
-    : ('q-' + Date.now() + '-' + Math.random().toString(36).slice(2));
-}
-
-function registerSync(){
-  try {
-    if (self.registration && self.registration.sync) {
-      return self.registration.sync.register(SYNC_TAG).catch(function(){});
-    }
-  } catch (e) {}
-  return Promise.resolve();
-}
-
-async function notifyClients(problems){
-  var n = await idbCount();
-  var cs = await self.clients.matchAll({ includeUncontrolled: true, type: 'window' });
-  cs.forEach(function(c){ c.postMessage({ type: 'mediahub-queue', count: n, problems: problems || [] }); });
-}
-
-// Replay every queued action in submission order. A 5xx or a network failure is
-// transient — the entry stays for the next sync. A 2xx/3xx/4xx is a FINAL server
-// decision (idempotent — re-approving is a no-op), so the entry is dropped — but
-// D-4: we inspect the body first. A 4xx gate refusal (consent/brand/task) or a
-// 200 "held for another approver" vote (status:'queue') is NOT the approval the
-// volunteer intended, so it's collected as a problem and reported to the client
-// rather than silently dropped as "synced".
-async function drainQueue(){
-  var items = await idbGetAll();
-  items.sort(function(a, b){ return a.ts - b.ts; });
-  var problems = [];
-  for (var i = 0; i < items.length; i++){
-    var it = items[i];
-    var requested = '';
-    try { requested = (JSON.parse(it.body) || {}).status || ''; } catch (e) {}
-    try {
-      var res = await fetch(it.url, {
-        method: it.method,
-        headers: it.headers,
-        body: it.body,
-        credentials: 'same-origin'
-      });
-      if (!res || res.status >= 500) { continue; } // transient — keep for next sync
-      var j = null;
-      try { j = await res.clone().json(); } catch (e) {}
-      var blocked = res.status >= 400 || !!(j && j.ok === false);
-      var held = !blocked && !!(j && j.status && requested && j.status !== requested);
-      await idbDelete(it.id);
-      if (blocked || held){
-        problems.push({
-          requested: requested,
-          httpStatus: res.status,
-          error: (j && j.error) || '',
-          reason: (j && (j.reason || j.message)) || '',
-          held: held
-        });
-      }
-    } catch (e) {
-      break; // still offline — leave the remainder queued
-    }
-  }
-  await notifyClients(problems);
-}
-
-async function handleWorkflowPost(req){
-  try {
-    return await fetch(req.clone());
-  } catch (err) {
-    try {
-      var body = await req.clone().text();
-      await idbAdd({
-        id: genId(),
-        url: req.url,
-        method: 'POST',
-        headers: { 'Content-Type': req.headers.get('Content-Type') || 'application/json' },
-        body: body,
-        ts: Date.now()
-      });
-      await registerSync();
-      await notifyClients();
-      return new Response(
-        JSON.stringify({ ok: true, queued: true, status: 'queued' }),
-        { status: 202, headers: { 'Content-Type': 'application/json' } }
-      );
-    } catch (e2) {
-      return new Response(
-        JSON.stringify({ ok: false, error: 'queue_failed' }),
-        { status: 503, headers: { 'Content-Type': 'application/json' } }
-      );
-    }
-  }
-}
-
-self.addEventListener('sync', function(e){
-  if (e.tag === SYNC_TAG) e.waitUntil(drainQueue());
-});
-
-self.addEventListener('message', function(e){
-  var data = e.data || {};
-  if (data.type === 'mediahub-queue-status'){
-    idbCount().then(function(n){
-      var msg = { type: 'mediahub-queue', count: n };
-      if (e.ports && e.ports[0]) e.ports[0].postMessage(msg);
-      else if (e.source && e.source.postMessage) e.source.postMessage(msg);
-    });
-  } else if (data.type === 'mediahub-queue-replay'){
-    drainQueue();
-  }
-});
-
-self.addEventListener('fetch', function(e){
-  var req = e.request;
-  var url = new URL(req.url);
-  if (url.origin !== self.location.origin) return;
-  // Offline-tolerant approval queue (roadmap 1.22): queue workflow POSTs and
-  // replay them when the connection returns.
-  if (req.method === 'POST' && WF_RX.test(url.pathname)) {
-    e.respondWith(handleWorkflowPost(req));
-    return;
-  }
-  if (req.method !== 'GET') return;
-  e.respondWith((async function(){
-    try {
-      var res = await fetch(req);
-      if (res && res.status === 200 && url.pathname.indexOf('/static/') !== -1) {
-        var c = await caches.open(CACHE); c.put(req, res.clone());
-      }
-      return res;
-    } catch (err) {
-      var cached = await caches.match(req);
-      if (cached) return cached;
-      if (req.mode === 'navigate') {
-        // J-12: not a dead end — offer a manual retry, auto-reload the moment
-        // connectivity returns, and a link back into the app.
-        var _btn = 'padding:9px 16px;border:1px solid rgba(245,242,232,.3);border-radius:8px;'
-          + 'background:transparent;color:inherit;cursor:pointer;font-size:14px;text-decoration:none';
-        return new Response('<!doctype html><meta charset=utf-8>'
-          + '<meta name=viewport content="width=device-width,initial-scale=1">'
-          + '<title>Offline — MediaHub</title>'
-          + '<body style="font-family:system-ui,sans-serif;background:rgb(10,11,17);'
-          + 'color:rgb(245,242,232);display:flex;align-items:center;justify-content:center;'
-          + 'height:100vh;margin:0"><div style="text-align:center;padding:24px">'
-          + '<h1 style="margin:0 0 8px">You are offline</h1>'
-          + '<p style="opacity:.7">Your approvals are saved and will sync when you reconnect.</p>'
-          + '<div style="margin-top:18px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap">'
-          + '<button onclick="location.reload()" style="' + _btn + '">Try again</button>'
-          + '<a href="/" style="' + _btn + '">Back to MediaHub</a></div>'
-          + '<script>addEventListener("online",function(){location.reload();});</script>'
-          + '</div></body>',
-          { headers: { 'Content-Type': 'text/html; charset=utf-8' } });
-      }
-      return new Response('', { status: 503 });
-    }
-  })());
-});
-"""
-
-    @app.route("/favicon.svg")
-    @app.route("/favicon.ico")
-    def favicon():
-        # Browsers auto-request /favicon.ico on every first page load.
-        # Without a handler that produced a 404 on every cold visit
-        # (and a generic browser-tab icon). Serve the MediaHub podium
-        # mark as SVG; modern browsers render SVG favicons and the
-        # .ico alias keeps legacy auto-requests quiet.
-        return app.response_class(
-            _FAVICON_SVG,
-            mimetype="image/svg+xml",
-            headers={"Cache-Control": "public, max-age=86400"},
-        )
-
-    @app.route("/icon-<int:size>.png")
-    def app_icon(size):
-        # Only the two manifest sizes are rendered; anything else snaps to 192.
-        if size not in (192, 512):
-            size = 192
-        return app.response_class(
-            _app_icon_png(size),
-            mimetype="image/png",
-            headers={"Cache-Control": "public, max-age=86400"},
-        )
-
-    @app.route("/manifest.webmanifest")
-    def web_manifest():
-        """PWA manifest — lets MediaHub be installed to a phone home screen so a
-        volunteer can approve content on the go (start_url/scope resolve through
-        any deployed prefix)."""
-        manifest = {
-            "name": "MediaHub",
-            "short_name": "MediaHub",
-            "description": "Turn meet results into ready-to-post content.",
-            "start_url": url_for("home"),
-            "scope": url_for("home"),
-            "display": "standalone",
-            "orientation": "portrait-primary",
-            "theme_color": "#0A0B11",
-            "background_color": "#0A0B11",
-            "icons": [
-                {
-                    "src": url_for("favicon"),
-                    "sizes": "any",
-                    "type": "image/svg+xml",
-                    "purpose": "any",
-                },
-                # Raster home-screen icons (roadmap 1.22) — a real maskable PNG
-                # installs cleanly where an SVG icon doesn't.
-                {
-                    "src": url_for("app_icon", size=192),
-                    "sizes": "192x192",
-                    "type": "image/png",
-                    "purpose": "any maskable",
-                },
-                {
-                    "src": url_for("app_icon", size=512),
-                    "sizes": "512x512",
-                    "type": "image/png",
-                    "purpose": "any maskable",
-                },
-            ],
-            # Web Share Target (roadmap 1.22) — registers MediaHub in the phone's
-            # OS share sheet so a poolside volunteer can share a camera-roll photo
-            # straight into the org's media library. The browser POSTs a multipart
-            # navigation to /share-target with the image(s) under the "photos"
-            # field declared here.
-            "share_target": {
-                "action": url_for("share_target_receiver"),
-                "method": "POST",
-                "enctype": "multipart/form-data",
-                "params": {
-                    "title": "title",
-                    "text": "text",
-                    "url": "url",
-                    "files": [
-                        {"name": "photos", "accept": ["image/*"]},
-                    ],
-                },
-            },
-        }
-        return app.response_class(json.dumps(manifest), mimetype="application/manifest+json")
-
-    @app.route("/sw.js")
-    def service_worker():
-        """Serve the service worker from the app root so it can control the whole
-        scope (via Service-Worker-Allowed)."""
-        resp = app.response_class(_SERVICE_WORKER_JS, mimetype="application/javascript")
-        resp.headers["Service-Worker-Allowed"] = url_for("home")
-        resp.headers["Cache-Control"] = "no-cache"
-        return resp
-
-    @app.route("/static/theme/fonts.css")
-    def static_fonts_css():
-        return app.send_static_file("theme/fonts.css")
-
-    @app.route("/static/theme/motion-vocabulary.css")
-    def static_motion_vocabulary_css():
-        # The compiled brand motion vocabulary (roadmap 1.5): a @keyframes block
-        # per preset, generated from src/mediahub/motion/ by
-        # scripts/regen_motion_tokens.py. Reduce-motion variants are folded in via
-        # @media (prefers-reduced-motion: reduce).
-        return app.send_static_file("theme/motion-vocabulary.css")
 
     @app.route("/motion/vocabulary")
     def motion_vocabulary_gallery():
@@ -38187,221 +37202,6 @@ self.addEventListener('fetch', function(e){
         )
         return app.response_class(html, mimetype="text/html")
 
-    @app.route("/healthz")
-    def healthz():
-        # Cheap liveness probe (no disk/db work). We still record a
-        # heartbeat row so external monitors and Render's own platform
-        # probe contribute to /status's uptime number.
-        import time as _time
-
-        started = _time.monotonic()
-        payload = {"ok": True, "version": APP_VERSION, "ts": datetime.now(timezone.utc).isoformat()}
-        _record_heartbeat_safe("healthz", True, started)
-        return jsonify(payload)
-
-    @app.route("/healthz/ping")
-    def healthz_ping():
-        payload = {"pong": True}
-        return jsonify(payload)
-
-    @app.route("/healthz/memory")
-    def healthz_memory():
-        """Report process memory usage + in-memory state size.
-
-        Added Phase 1.5 as a diagnostic for the "gunicorn restarts
-        every 6 minutes" pattern. If `rss_mb` climbs steadily across
-        repeated polls, the process is leaking and Render's 2 GB
-        Standard ceiling (shared across two gunicorn workers) will
-        eventually OOM-kill it. If `rss_mb` is stable and restarts
-        still happen, the cause is somewhere else (auto-redeploy,
-        platform action, etc.) and the user can stop blaming the app.
-        """
-        import resource
-
-        # Peak (high-water) RSS from ru_maxrss. On Linux it's in KB; on macOS
-        # it's bytes. Render is always Linux so KB is correct.
-        peak_mb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024.0
-        # CURRENT RSS is what actually spots a leak — ru_maxrss is a lifetime
-        # high-water mark that never falls, so freed memory would be invisible
-        # and a one-off spike would read as a permanent leak. Read VmRSS (and
-        # VmHWM, the peak, from the SAME snapshot so peak >= current holds) from
-        # /proc/self/status (Linux/Render); fall back to ru_maxrss where /proc
-        # is absent (e.g. a macOS dev box).
-        rss_mb = peak_mb
-        try:
-            with open("/proc/self/status", encoding="utf-8") as _st:
-                for _line in _st:
-                    if _line.startswith("VmRSS:"):
-                        rss_mb = int(_line.split()[1]) / 1024.0  # KB → MB
-                    elif _line.startswith("VmHWM:"):
-                        peak_mb = int(_line.split()[1]) / 1024.0  # KB → MB
-        except OSError:
-            pass
-        with _active_lock:
-            active_n = len(_active_runs)
-            active_running = sum(1 for v in _active_runs.values() if v.get("status") == "running")
-            ti_n = len(_turn_into_jobs)
-        payload = {"ok": True, "ts": datetime.now(timezone.utc).isoformat()}
-        # RSS, the OOM-ceiling ratio and the in-memory concurrency limits map the
-        # deployment's resource envelope — useful to the operator diagnosing a
-        # restart loop, but reconnaissance for anyone else. Uptime monitors only
-        # need the liveness boolean; the internals are signed-in-operator only,
-        # mirroring /healthz/deps and /healthz/sentinel. (The `_active_runs`
-        # walk above still runs for every caller, so its crash-safety is
-        # exercised regardless of who is looking.)
-        if _auth.is_dev_operator():
-            payload.update(
-                {
-                    "rss_mb": round(rss_mb, 1),
-                    "rss_peak_mb": round(peak_mb, 1),
-                    "rss_pct_of_2048": round((rss_mb / 2048.0) * 100.0, 1),
-                    "active_runs": active_n,
-                    "active_runs_running": active_running,
-                    "active_runs_limit": _ACTIVE_RUNS_LIMIT,
-                    "turn_into_jobs": ti_n,
-                    "turn_into_jobs_limit": _TURN_INTO_LIMIT,
-                }
-            )
-        return jsonify(payload)
-
-    @app.route("/healthz/deps")
-    def healthz_deps():
-        """Report whether image / motion rendering dependencies are available.
-
-        Exposed at /healthz/deps (and read by /api/settings/llm-status
-        for the captions-tab status dot) so operators can tell at a
-        glance whether "Create graphic" and "Generate motion" buttons will
-        succeed in the current deployment. Silent failures of these in
-        production were the root of "images and videos aren't generating".
-        """
-        import shutil
-        import subprocess
-
-        deps: dict[str, dict] = {}
-        # Playwright + chromium browser.
-        #
-        # We deliberately avoid sync_playwright() here: just to read
-        # p.chromium.executable_path it spawns the Playwright Node
-        # driver subprocess and tears it down via the asyncio loop,
-        # which is ~350ms of pure overhead on every probe. Operators
-        # poll this endpoint, so that adds up. Probe the installed
-        # browser by checking the cache directory directly instead.
-        try:
-            import playwright  # noqa: F401
-
-            browser_path = ""
-            chromium_ok = False
-            pw_root = os.environ.get("PLAYWRIGHT_BROWSERS_PATH") or str(
-                Path.home() / ".cache" / "ms-playwright"
-            )
-            try:
-                root = Path(pw_root)
-                # Each Playwright version installs Chromium into
-                # ``chromium-<build>/chrome-linux/chrome`` (or chrome.exe
-                # on Windows). Take the newest matching build so a
-                # stale older install doesn't shadow the current one.
-                candidates = sorted(root.glob("chromium*/chrome-linux/chrome"))
-                if not candidates:
-                    candidates = sorted(root.glob("chromium*/chrome-*/chrome*"))
-                if candidates:
-                    browser_path = str(candidates[-1])
-                    chromium_ok = Path(browser_path).exists()
-            except Exception:
-                pass
-            deps["playwright"] = {
-                "available": True,
-                "chromium": chromium_ok,
-                "executable": browser_path,
-            }
-        except Exception as e:
-            deps["playwright"] = {"available": False, "error": str(e)[:200]}
-        # Node binary
-        node_path = shutil.which("node")
-        if node_path:
-            try:
-                v = subprocess.run(
-                    [node_path, "--version"], capture_output=True, text=True, timeout=5
-                )
-                deps["node"] = {
-                    "available": True,
-                    "path": node_path,
-                    "version": (v.stdout or "").strip(),
-                }
-            except Exception as e:
-                deps["node"] = {"available": True, "path": node_path, "error": str(e)[:200]}
-        else:
-            deps["node"] = {"available": False}
-        # Remotion node_modules
-        remotion_dir = Path(__file__).resolve().parents[1] / "remotion"
-        node_modules = remotion_dir / "node_modules" / "remotion"
-        deps["remotion"] = {
-            "available": node_modules.exists(),
-            "dir": str(remotion_dir),
-        }
-        # Reel-engine selection seam (P0.1).
-        try:
-            from mediahub.visual.reel_engine import reel_engine_status
-
-            deps["reel_engine"] = reel_engine_status()
-        except Exception as _re_err:
-            deps["reel_engine"] = {"error": str(_re_err)[:200]}
-        # TTS provider slot (P0.4) — informational; voiceover is opt-in.
-        try:
-            from mediahub.visual.voiceover import tts_provider_status
-
-            deps["tts_provider"] = tts_provider_status()
-        except Exception as _tts_err:
-            deps["tts_provider"] = {"error": str(_tts_err)[:200]}
-        # ASR provider slot (P0.4 / roadmap 1.4) — informational; server
-        # transcription is opt-in (the live copilot voice path is the browser's
-        # on-device speech capture).
-        try:
-            from mediahub.visual.transcribe import asr_provider_status
-
-            deps["asr_provider"] = asr_provider_status()
-        except Exception as _asr_err:
-            deps["asr_provider"] = {"error": str(_asr_err)[:200]}
-        # Video suite (roadmap 1.6) — footage render engine + the flagged
-        # matting/avatar provider slots (both off by default, honest about it).
-        try:
-            from mediahub.video.render import available as _video_render_available
-
-            deps["video_engine"] = {"available": bool(_video_render_available())}
-            from mediahub.video.matting import matting_status
-
-            deps["video_matting"] = matting_status()
-            from mediahub.video.avatars import avatar_status
-
-            deps["video_avatars"] = avatar_status()
-        except Exception as _vid_err:
-            deps["video_engine"] = {"error": str(_vid_err)[:200]}
-        # Motion is healthy when the *active* reel engine can render:
-        # remotion needs node + node_modules; the ffmpeg fallback (P0.1)
-        # makes both optional.
-        _motion_ok = deps["node"].get("available") and deps["remotion"].get("available")
-        _re_status = deps.get("reel_engine") or {}
-        if _re_status.get("active") == "ffmpeg":
-            _motion_ok = bool(_re_status.get("ffmpeg_available"))
-        ok = deps["playwright"].get("chromium") and _motion_ok
-        payload = {"ok": bool(ok), "deps": deps}
-        # Absolute filesystem paths (the Chromium executable, the node binary and
-        # the Remotion install dir) disclose the deployment's internal layout, so
-        # they are operator-only. This endpoint stays public for uptime monitors —
-        # they still get every availability boolean and version they need — but an
-        # anonymous caller no longer learns where anything lives on disk. Mirrors
-        # /healthz/sentinel, which likewise hands its raw audit tail to the
-        # signed-in operator alone.
-        if not _auth.is_dev_operator():
-            for _dep_key, _path_field in (
-                ("playwright", "executable"),
-                ("node", "path"),
-                ("remotion", "dir"),
-            ):
-                section = deps.get(_dep_key)
-                if isinstance(section, dict):
-                    section.pop(_path_field, None)
-        return jsonify(payload)
-
     # ---- /status -------------------------------------------------------
     #
     # Phase 1.5 — public uptime / status page. No org gate, no auth,
@@ -38417,178 +37217,6 @@ self.addEventListener('fetch', function(e){
     #
     # The numbers come from the SQLite uptime log; honest behaviour
     # when no data exists yet is to say so, not fake 100%.
-
-    @app.route("/status")
-    def status_page():
-        # Public view: just "Website operational" / "Website down". The detailed
-        # uptime/incident/version breakdown is operator-only (also reachable at
-        # Settings → Developer for a signed-in operator).
-        if not _auth.is_dev_operator():
-            body = (
-                '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-8);padding-bottom:var(--sp-6);margin-bottom:var(--sp-4)">'
-                '<span class="mh-hero-eyebrow">Status</span>'
-                '<h1>Service <em class="editorial">status</em></h1></section>'
-                + _render_settings_status_public_section()
-            )
-            resp = make_response(_layout("Status", body, active="status"))
-            resp.headers["Refresh"] = "60"
-            resp.headers["Cache-Control"] = "no-store"
-            return resp
-
-        from mediahub.observability import uptime as _uptime
-
-        # Pull three windows so the page reads "24h / 7d / 30d uptime"
-        # straight off the database, with no aggregation in the view. The
-        # uptime store is exception-safe by contract, but defend the operator
-        # page the same way _render_settings_status_section already does — an
-        # unexpected observability error degrades to the honest public view,
-        # never an unhandled 500.
-        try:
-            s24 = _uptime.uptime_stats(window_hours=24)
-            s7d = _uptime.uptime_stats(window_hours=24 * 7)
-            s30 = _uptime.uptime_stats(window_hours=24 * 30)
-            latest = _uptime.latest_heartbeat()
-            gaps = _uptime.recent_gaps(window_hours=24 * 30, limit=5)
-        except Exception:
-            body = (
-                '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-8);padding-bottom:var(--sp-6);margin-bottom:var(--sp-4)">'
-                '<span class="mh-hero-eyebrow">Status</span>'
-                '<h1>Service <em class="editorial">status</em></h1></section>'
-                + _render_settings_status_public_section()
-            )
-            resp = make_response(_layout("Status", body, active="status"))
-            resp.headers["Refresh"] = "60"
-            resp.headers["Cache-Control"] = "no-store"
-            return resp
-
-        # Current pill — green if last heartbeat < 5 min ago AND ok.
-        pill_class = "muted"
-        pill_label = "no data yet"
-        pill_color = "#7a7a7a"
-        if latest is not None:
-            try:
-                ts_raw = latest["ts"]
-                if ts_raw.endswith("Z"):
-                    ts_raw = ts_raw[:-1] + "+00:00"
-                from datetime import datetime as _dt
-
-                last_ts = _dt.fromisoformat(ts_raw)
-                age_s = (datetime.now(timezone.utc) - last_ts).total_seconds()
-            except (ValueError, TypeError):
-                age_s = 99999
-            if not latest.get("ok"):
-                pill_label = "degraded"
-                pill_color = "#ffaa3a"
-            elif age_s <= 300:
-                pill_label = "operational"
-                pill_color = "#2cc97f"
-            elif age_s <= 1800:
-                pill_label = "stale (no heartbeat in 5–30 min)"
-                pill_color = "#ffaa3a"
-            else:
-                pill_label = "unknown (last heartbeat > 30 min ago)"
-                pill_color = "#ff5d6c"
-
-        # Most recent gap → "Last incident" callout.
-        last_incident_html = (
-            '<p class="dim" style="margin:0">No incidents recorded in the last 30 days.</p>'
-        )
-        if gaps:
-            top = gaps[0]
-            duration = _humanize_duration(top["duration_seconds"])
-            when = _humanize_when(top["to_ts"])
-            last_incident_html = (
-                f'<p style="margin:0"><b>Last incident:</b> {_h(when)} '
-                f"(silent for {_h(duration)})</p>"
-                f'<p class="dim" style="margin:4px 0 0;font-size:12px">'
-                f"Detected from a gap in heartbeats between "
-                f"{_h(top['from_ts'][:19])} and {_h(top['to_ts'][:19])} UTC.</p>"
-            )
-
-        # Build a compact incident table so operators can see the
-        # five longest gaps without a separate /status/incidents page.
-        if gaps:
-            gap_rows = ""
-            for g in gaps:
-                gap_rows += (
-                    f'<tr><td class="muted" style="font-size:12px">'
-                    f"{_h(g['to_ts'][:19])} UTC</td>"
-                    f"<td>{_h(_humanize_duration(g['duration_seconds']))}</td>"
-                    f'<td class="muted" style="font-size:12px">'
-                    f"gap started {_h(g['from_ts'][:19])} UTC</td></tr>"
-                )
-            incidents_html = (
-                '<h2 style="margin-top:28px;margin-bottom:6px;font-size:18px">'
-                "Recent incidents</h2>"
-                '<p class="dim" style="margin-bottom:14px;font-size:13px">'
-                "Gaps longer than 5 minutes between heartbeats. The 5-minute "
-                "grace window matches the platform ping cadence.</p>"
-                '<div class="card"><table>'
-                "<thead><tr><th>Resolved</th><th>Duration</th><th>Window</th></tr></thead>"
-                f"<tbody>{gap_rows}</tbody></table></div>"
-            )
-        else:
-            incidents_html = ""
-
-        # Pull APP_VERSION from the closure scope.
-        version_label = APP_VERSION
-
-        body = (
-            '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">'
-            '<span class="mh-hero-eyebrow">System status</span>'
-            '<h1>Live <em class="editorial">health</em>.</h1>'
-            '<p class="lede">Operational health of this MediaHub deployment. Auto-refreshes every 60 seconds.</p>'
-            "</section>"
-            '<div class="card" style="display:flex;align-items:center;gap:14px;'
-            'padding:18px 22px;margin-bottom:20px">'
-            f'<span style="display:inline-block;width:14px;height:14px;'
-            f'border-radius:50%;background:{pill_color};flex:0 0 auto"></span>'
-            f'<div style="flex:1"><div style="font-size:18px;font-weight:600">'
-            f"Backend &mdash; {_h(pill_label)}</div>"
-            f'<div class="dim" style="font-size:13px;margin-top:2px">'
-            f"Version <code>{_h(version_label)}</code>"
-            + (
-                f" &middot; last heartbeat {_h(_humanize_when(latest['ts']))} "
-                f"({_h((latest.get('source') or '').lower())})"
-                if latest
-                else ""
-            )
-            + "</div></div></div>"
-            '<div class="card" style="padding:18px 22px;margin-bottom:20px">'
-            '<table style="width:100%"><thead>'
-            "<tr><th>Window</th><th>Uptime</th><th>Heartbeats</th>"
-            "<th>Downtime</th></tr></thead><tbody>"
-            f"<tr><td><b>24 hours</b></td>"
-            f"<td>{_format_uptime_pct(s24)}</td>"
-            f"<td>{_h(s24.get('samples', 0))}</td>"
-            f"<td>{_h(_humanize_duration(s24.get('downtime_seconds', 0))) if s24.get('has_data') else '&mdash;'}</td></tr>"
-            f"<tr><td><b>7 days</b></td>"
-            f"<td>{_format_uptime_pct(s7d)}</td>"
-            f"<td>{_h(s7d.get('samples', 0))}</td>"
-            f"<td>{_h(_humanize_duration(s7d.get('downtime_seconds', 0))) if s7d.get('has_data') else '&mdash;'}</td></tr>"
-            f"<tr><td><b>30 days</b></td>"
-            f"<td>{_format_uptime_pct(s30)}</td>"
-            f"<td>{_h(s30.get('samples', 0))}</td>"
-            f"<td>{_h(_humanize_duration(s30.get('downtime_seconds', 0))) if s30.get('has_data') else '&mdash;'}</td></tr>"
-            "</tbody></table>"
-            f"{_uptime_tracking_note(s24, s7d, s30)}</div>"
-            f'<div class="card" style="padding:14px 22px;margin-bottom:20px">'
-            f"{last_incident_html}</div>"
-            f"{incidents_html}"
-            '<p class="dim" style="margin-top:30px;font-size:12px">'
-            "Uptime is derived from heartbeat density: each platform ping or "
-            "health check inserts one row, and gaps over 5 minutes are counted "
-            "as downtime. Raw data at "
-            f'<a href="{url_for("api_status_json")}">/api/status</a>.</p>'
-        )
-        html = _layout("Status", body, active="status")
-        resp = make_response(html)
-        # Auto-refresh: the page is intentionally a low-traffic informational
-        # surface; refreshing every 60s keeps the number live without
-        # JavaScript polling.
-        resp.headers["Refresh"] = "60"
-        resp.headers["Cache-Control"] = "no-store"
-        return resp
 
     @app.route("/api/status")
     def api_status_json():
@@ -38699,311 +37327,6 @@ self.addEventListener('fetch', function(e){
     #   4. Most recent LLM error message (so the operator can diagnose
     #      a quietly-failing provider without grepping logs).
     #   5. 7-day posting-log roll-up.
-    @app.route("/healthz/breaker")
-    def healthz_breaker():
-        """Expose the Gemini circuit-breaker state for one worker.
-
-        Added 2026-05-19 after the user-facing symptom "regenerate
-        keeps returning ai_directed=false even though Gemini usage
-        shows mostly-OK calls" turned out to be (most likely) a
-        tripped per-worker breaker on the worker handling this
-        request. Gunicorn workers have independent in-process breaker
-        state, so the operator may need to refresh this endpoint a
-        few times to land on each worker. Anything in the snapshot
-        with ``open: true`` means that worker is currently skipping
-        Gemini for the listed cooldown period.
-
-        The breaker counters and — especially — ``providers_configured``
-        (which of the GEMINI/ANTHROPIC keys are set on this deployment) are
-        operator diagnostics, not public information. Anonymous callers get
-        the liveness boolean alone, mirroring /healthz/deps and
-        /healthz/sentinel; the full snapshot is signed-in-operator only.
-        """
-        if not _auth.is_dev_operator():
-            return jsonify({"ok": True})
-        try:
-            # Breaker state lives in the shared Gemini transport (one copy
-            # for both LLM wrappers — finding #43).
-            from mediahub.ai_core.gemini_transport import (
-                breaker_snapshot as gemini_breaker_snapshot,
-            )
-
-            snap = gemini_breaker_snapshot()
-        except Exception as e:
-            return jsonify({"error": f"breaker_unavailable: {e}"}), 500
-        try:
-            from mediahub.ai_core.llm import _key_for as _key
-
-            providers_configured = {
-                "gemini": bool(_key("gemini")),
-                "claude": bool(_key("claude")),
-            }
-        except Exception:
-            providers_configured = {}
-        payload = {
-            "ok": True,
-            "gemini_breaker": snap,
-            "providers_configured": providers_configured,
-            "fallback_available": providers_configured.get("claude", False),
-            "note": (
-                "Per-worker state. If your deployment runs multiple "
-                "gunicorn workers, refresh this endpoint to sample each "
-                "worker. A high 'consecutive_failures' on a worker with "
-                "'open': false means a few errors but no trip yet."
-            ),
-        }
-        return jsonify(payload)
-
-    @app.route("/healthz/search")
-    def healthz_search():
-        """Report which web-search backend is live (SearXNG vs DuckDuckGo).
-
-        Lets the operator confirm whether the in-container SearXNG actually
-        started — if it's unreachable, MediaHub silently falls back to
-        DuckDuckGo, and this endpoint says so.
-
-        Which backend is live (and any endpoint detail in the probe) is a
-        deployment internal, so it is signed-in-operator only. Anonymous
-        monitors get the liveness boolean alone, mirroring /healthz/deps and
-        /healthz/sentinel.
-        """
-        if not _auth.is_dev_operator():
-            return jsonify({"ok": True})
-        try:
-            from mediahub.web_research import searxng_client
-
-            return jsonify({"ok": True, **searxng_client.health()})
-        except Exception as e:
-            return jsonify({"ok": False, "error": f"search_health_unavailable: {e}"}), 500
-
-    @app.route("/healthz/sentinel")
-    def healthz_sentinel():
-        """Log-sentinel monitoring probe: last poll, findings, recent actions.
-
-        Read-only snapshot of DATA_DIR/log_sentinel/status.json plus the audit
-        tail, so the operator can see what the watchdog saw and did
-        (docs/LOG_SENTINEL.md). Reports configured=False honestly when the
-        Render API env vars aren't set.
-        """
-        try:
-            from mediahub.log_sentinel import state as _sentinel_state
-
-            payload = {
-                "ok": True,
-                "status": _sentinel_state.read_status(),
-            }
-            # The audit tail carries raw production log excerpts (tracebacks,
-            # request paths/IPs) in its 'evidence' fields — operator-only.
-            # Anonymous monitors get the status booleans/timestamps only, like
-            # the sibling /healthz/* probes.
-            if _auth.is_dev_operator():
-                payload["audit_tail"] = _sentinel_state.read_audit_tail(10)
-            return jsonify(payload)
-        except Exception as e:
-            return jsonify({"ok": False, "error": f"sentinel_health_unavailable: {e}"}), 500
-
-    @app.route("/healthz/governance")
-    def healthz_governance():
-        """Operator-only: per-org AI feature usage across the deployment (1.23)."""
-        if not _auth.is_dev_operator():
-            return redirect(url_for("settings_page"))
-        from mediahub.observability import feature_quota as _fq
-        from mediahub.governance import features as _gf
-
-        per_org = _fq.usage_all_orgs(limit=100)
-        # Fold in generative-imagery usage (it keeps its own dedicated ledger).
-        if _imagine_ok:
-            try:
-                from mediahub.observability import imagine_usage as _iu
-
-                for row in per_org:
-                    n = _iu.count_for_org(row["org_id"])
-                    if n:
-                        row["by_feature"]["imagine"] = n
-                        row["total"] += n
-            except Exception:
-                pass
-        per_org.sort(key=lambda r: r["total"], reverse=True)
-
-        feat_keys = _gf.feature_keys()
-        head = "".join(
-            f'<th style="text-align:right">{_h(_gf.label_for(k))}</th>' for k in feat_keys
-        )
-        rows = ""
-        for r in per_org:
-            cells = "".join(
-                f'<td style="text-align:right">{int(r["by_feature"].get(k, 0))}</td>'
-                for k in feat_keys
-            )
-            rows += (
-                f"<tr><td>{_h(r['org_id'])}</td>{cells}"
-                f'<td style="text-align:right"><strong>{int(r["total"])}</strong></td></tr>'
-            )
-        if not rows:
-            rows = (
-                f'<tr><td colspan="{len(feat_keys) + 2}" class="dim">'
-                "No AI usage recorded in the last 30 days.</td></tr>"
-            )
-        body = (
-            '<div class="card"><h1 style="margin-top:0">AI governance &mdash; usage</h1>'
-            '<p class="dim">Per-org AI feature use over a rolling 30-day window '
-            "(successful calls only). Operator-only.</p>"
-            '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse">'
-            f'<thead><tr><th style="text-align:left">Org</th>{head}'
-            '<th style="text-align:right">Total</th></tr></thead>'
-            f"<tbody>{rows}</tbody></table></div></div>"
-        )
-        return _layout("AI governance · usage", body, active="")
-
-    @app.route("/healthz/usage")
-    def healthz_usage():
-        """Operator-only: LLM call counts, token totals, cost estimates,
-        free-tier headroom and the last raw provider error. Same gate as its
-        sibling /healthz/governance — the org-gate exemption above only lets it
-        past the org-setup wall, it is NOT an authentication."""
-        if not _auth.is_dev_operator():
-            return redirect(url_for("settings_page"))
-        from mediahub.observability import llm_usage as _u
-
-        today = _u.usage_for_window(window_hours=24)
-        seven_d = _u.usage_for_window(window_hours=24 * 7)
-        thirty_d = _u.daily_usage(days=30)
-        last_err = _u.last_error()
-
-        # Per-provider rows for the "Today" card.
-        if today["by_provider"]:
-            prov_rows = ""
-            for b in today["by_provider"]:
-                cost_disp = f"${b['est_cost_usd']:.4f}"
-                if b["provider"] == "gemini" and b["est_cost_usd"] == 0:
-                    cost_disp = "$0.00 (free tier)"
-                prov_rows += (
-                    f"<tr><td><b>{_h(b['provider'])}</b></td>"
-                    f"<td>{_h(b['calls'])}</td>"
-                    f"<td>{_h(b['ok'])}</td>"
-                    f"<td>{_h(b['failed'])}</td>"
-                    f"<td>{_h(b.get('tokens_in', 0))}</td>"
-                    f"<td>{_h(b.get('tokens_out', 0))}</td>"
-                    f"<td>{_h(cost_disp)}</td></tr>"
-                )
-            providers_html = (
-                '<div class="card"><table style="width:100%">'
-                "<thead><tr><th>Provider</th><th>Calls</th><th>OK</th>"
-                "<th>Failed</th><th>Tokens in</th><th>Tokens out</th>"
-                "<th>Est. cost</th></tr></thead>"
-                f"<tbody>{prov_rows}</tbody></table></div>"
-            )
-        else:
-            providers_html = '<div class="card empty">No LLM calls in the last 24 hours.</div>'
-
-        # Gemini free-tier headroom callout.
-        if today["gemini_free_tier_headroom"] is not None:
-            from mediahub.observability.llm_usage import GEMINI_FREE_TIER_DAILY_REQ
-
-            headroom = today["gemini_free_tier_headroom"]
-            used = GEMINI_FREE_TIER_DAILY_REQ - headroom
-            pct = (used / GEMINI_FREE_TIER_DAILY_REQ) * 100.0 if GEMINI_FREE_TIER_DAILY_REQ else 0
-            bar_color = "#2cc97f"
-            if pct > 80:
-                bar_color = "#ffaa3a"
-            if pct >= 100:
-                bar_color = "#ff5d6c"
-            headroom_html = (
-                '<div class="card" style="padding:16px 22px;margin-bottom:18px">'
-                '<div style="display:flex;justify-content:space-between;'
-                'align-items:baseline;margin-bottom:6px">'
-                f"<div><b>Gemini free-tier today</b> &mdash; "
-                f"{_h(used)} / {GEMINI_FREE_TIER_DAILY_REQ} calls</div>"
-                f'<div class="dim" style="font-size:12px">{_h(headroom)} remaining</div>'
-                "</div>"
-                '<div style="height:10px;background:rgba(255,255,255,0.08);'
-                'border-radius:6px;overflow:hidden">'
-                f'<div style="height:100%;width:{min(pct, 100):.1f}%;'
-                f'background:{bar_color}"></div></div>'
-                "</div>"
-            )
-        else:
-            headroom_html = ""
-
-        # Most recent LLM error (if any) — surfaced front and centre.
-        if last_err:
-            err_html = (
-                '<div class="card" style="padding:16px 22px;margin-bottom:18px;'
-                'border-left:3px solid var(--mh-prim-error-500)">'
-                f'<div style="font-weight:600;margin-bottom:4px">'
-                f"Last LLM error &mdash; {_h(last_err.get('provider', 'unknown'))}</div>"
-                f'<div class="dim" style="font-size:12px;margin-bottom:6px">'
-                f"{_h((last_err.get('ts') or '')[:19])} UTC"
-                + (
-                    f" &middot; {_h(last_err.get('error_kind'))}"
-                    if last_err.get("error_kind")
-                    else ""
-                )
-                + "</div>"
-                f'<code style="font-size:12px">'
-                f"{_h((last_err.get('error_message') or '')[:300])}</code>"
-                "</div>"
-            )
-        else:
-            err_html = ""
-
-        # 30-day daily breakdown.
-        if thirty_d:
-            day_rows = ""
-            for d in reversed(thirty_d):
-                cost = f"${d['est_cost_usd']:.4f}" if d["est_cost_usd"] else "$0.00"
-                day_rows += (
-                    f'<tr><td class="muted" style="font-size:12px">{_h(d["date"])}</td>'
-                    f"<td>{_h(d['calls'])}</td>"
-                    f"<td>{_h(d['ok'])}</td>"
-                    f"<td>{_h(d['failed'])}</td>"
-                    f"<td>{_h(cost)}</td></tr>"
-                )
-            thirty_html = (
-                '<h2 style="margin-top:30px;margin-bottom:6px;font-size:18px">'
-                "Last 30 days</h2>"
-                '<p class="dim" style="margin-bottom:14px;font-size:13px">'
-                "Per-day LLM call counts. Estimated cost uses public list "
-                "pricing &mdash; not a billing source of truth.</p>"
-                '<div class="card"><table style="width:100%">'
-                "<thead><tr><th>Date (UTC)</th><th>Calls</th><th>OK</th>"
-                "<th>Failed</th><th>Est. cost</th></tr></thead>"
-                f"<tbody>{day_rows}</tbody></table></div>"
-            )
-        else:
-            thirty_html = ""
-
-        # 7-day totals headline.
-        seven_total = seven_d["total_calls"]
-        seven_cost = seven_d["est_cost_usd_total"]
-        body = (
-            '<h1 style="margin-bottom:6px">Usage</h1>'
-            '<p class="dim" style="margin-bottom:24px">Operator dashboard. '
-            "LLM call counts, free-tier headroom, and recent provider errors "
-            "for this MediaHub deployment.</p>"
-            f"{err_html}"
-            f"{headroom_html}"
-            '<h2 style="margin-top:28px;margin-bottom:6px;font-size:18px">'
-            "Today (last 24h)</h2>"
-            '<p class="dim" style="margin-bottom:14px;font-size:13px">'
-            f"{_h(today['total_calls'])} calls &middot; "
-            f"<b>${today['est_cost_usd_total']:.4f}</b> estimated cost &middot; "
-            f"{_h(today['failed_count'])} failed"
-            "</p>"
-            f"{providers_html}"
-            '<h2 style="margin-top:28px;margin-bottom:6px;font-size:18px">'
-            "Last 7 days</h2>"
-            '<p class="dim" style="margin-bottom:14px;font-size:13px">'
-            f"{_h(seven_total)} calls &middot; "
-            f"<b>${seven_cost:.4f}</b> estimated cost.</p>"
-            f"{thirty_html}"
-            '<p class="dim" style="margin-top:30px;font-size:12px">'
-            "Estimated cost is derived from published list pricing for each "
-            "provider and is not a substitute for a real billing source. "
-            "Gemini free tier (1,500 req/day on gemini-2.5-flash) is treated "
-            "as $0; Anthropic input/output tokens use Sonnet midpoint rates.</p>"
-        )
-        return _layout("Usage", body, active="usage")
 
     #
     # Settings — consolidated operations surface.
@@ -39284,16 +37607,6 @@ self.addEventListener('fetch', function(e){
     # Audio engine (roadmap 1.8) — library, voices, pronunciation lexicon,
     # own-audio upload + rights, and consent-gated voice features.
     # ------------------------------------------------------------------
-    _AUDIO_MIME = {
-        ".mp3": "audio/mpeg",
-        ".m4a": "audio/mp4",
-        ".aac": "audio/aac",
-        ".wav": "audio/wav",
-        ".ogg": "audio/ogg",
-        ".opus": "audio/opus",
-        ".flac": "audio/flac",
-    }
-    _AUDIO_UPLOAD_MAX_BYTES = 25 * 1024 * 1024  # 25 MB — clips/beds, not albums
 
     # H-15: every status code a form POST can redirect back with, mapped to the
 
@@ -43315,16 +41628,6 @@ function copySpotlightCaption(btn) {{
     # Their routes now redirect into the free-text landing with these seeds
     # (the landing's textarea prefills from ?seed=), and old saved drafts of
     # those types point their "start a new draft" link the same way.
-    _RETIRED_STUB_SEEDS = {
-        "sponsor_activation": (
-            "A sponsor thank-you post — name the sponsor, the event and the "
-            "moment to celebrate, in club colours."
-        ),
-        "session_update": (
-            "A mid-session update from poolside — the event, what has "
-            "happened so far, and who swims next."
-        ),
-    }
 
     # Per-content-type hero copy. Centralised once so every stub form
     # (and its returned cards page) shares the same masthead voice. Each
@@ -43334,15 +41637,6 @@ function copySpotlightCaption(btn) {{
     # keeps "Describe it." since describing-any-post is its whole function, and
     # every other tile gets its own editorial opener. Shape: (eyebrow, lead,
     # italic_tail, lede); the lead carries its own terminal punctuation.
-
-    @app.route("/weekend-preview", methods=["GET", "POST"])
-    def stub_weekend_preview():
-        return _render_stub(
-            "WeekendPreviewStub",
-            "stub_weekend_preview",
-            "Event Preview",
-            intro_ct="event_preview",
-        )
 
     # C-11: Sponsor Post and Session Update are retired as standalone forms —
     # Free Text interprets any such prompt, so there is ONE "describe it"
@@ -43867,12 +42161,6 @@ function copySpotlightCaption(btn) {{
         return redirect(pack_url or url_for("free_text_chat_view", chat_id=chat_id))
 
     # ---- Saved stub packs &mdash; list + view + export -----------------------
-    _STUB_TYPE_LABEL = {
-        "free_text": "Free Text",
-        "event_preview": "Event Preview",
-        "sponsor_activation": "Sponsor Post",
-        "session_update": "Session Update",
-    }
 
     @app.route("/drafts")
     def stub_packs_list():
@@ -45133,372 +43421,8 @@ function copySpotlightCaption(btn) {{
     # off. Against a sustained attacker durable-20 is far stronger than the old
     # per-worker-10-that-reset-every-~200-requests. (Shared-NAT analysis: ADR.)
 
-    @app.route("/signup", methods=["GET"])
-    def signup_page():
-        # Already signed in? Send them on to the app.
-        if _auth.current_user_email():
-            return redirect(url_for("make_page"))
-        return _auth_form_page(
-            title="Create account",
-            heading='Create your <em class="editorial">account</em>.',
-            lede=(
-                "One account runs your club&rsquo;s content. Free to start &mdash; "
-                "3 runs a month, no card required. "
-                "Before you start, have your club&rsquo;s website, social profiles, and brand "
-                "guidelines to hand &mdash; the engine needs them to produce on-brand content. "
-                "Right after you sign up we&rsquo;ll walk you through pasting those links (or "
-                "uploading a guidelines document) so the AI can build your brand kit &mdash; "
-                "most fields are optional, and the whole thing takes about 5&nbsp;minutes."
-            ),
-            action_url=url_for("signup_post"),
-            submit_label="Create account",
-            alt_html=(
-                f'Already have an account? <a href="{url_for("login_page")}" '
-                'style="color:var(--accent);font-weight:600">Log in</a>.'
-            ),
-            min_password=True,
-            extra_fields_html=(
-                _referral_field_html(request.args.get("ref") or "") + _terms_checkbox_html()
-            ),
-        )
-
-    @app.route("/signup", methods=["POST"])
-    def signup_post():
-        if _auth_rate_limited("signup"):
-            return _auth_rate_limit_response()
-        email = (request.form.get("email") or "").strip()
-        password = request.form.get("password") or ""
-
-        def _signup_error(message: str, status: int):
-            return (
-                _auth_form_page(
-                    title="Create account",
-                    heading='Create your <em class="editorial">account</em>.',
-                    lede="One account runs your club's content. Free to start.",
-                    action_url=url_for("signup_post"),
-                    submit_label="Create account",
-                    alt_html=(
-                        f'Already have an account? <a href="{url_for("login_page")}" '
-                        'style="color:var(--accent);font-weight:600">Log in</a>.'
-                    ),
-                    prefill_email=email,
-                    error=message,
-                    min_password=True,
-                    extra_fields_html=(
-                        _referral_field_html(request.form.get("ref") or "") + _terms_checkbox_html()
-                    ),
-                ),
-                status,
-            )
-
-        # Versioned ToS acceptance is a hard requirement at signup — the
-        # browser's `required` attribute is convenience, this is the gate.
-        if (request.form.get("accept_terms") or "") != "1":
-            return _signup_error(
-                "Please accept the Terms of Service and Privacy Notice to create an account.",
-                400,
-            )
-        store = _user_store()
-        try:
-            user = store.create(email, password)
-        except _auth.AuthError as exc:
-            return _signup_error(str(exc), 400)
-        # Session rotation on privilege change (signup = login) — clear the
-        # pre-signup session BEFORE the acceptance marker lands in it.
-        session.clear()
-        # Record the timestamped, versioned acceptance before the session
-        # starts; the session marker spares the ledger a read per request.
-        _legal.AcceptanceStore().record(user.email, _legal.DOC_TERMS, _legal.TERMS_VERSION)
-        session["terms_ok_version"] = _legal.TERMS_VERSION
-        _auth.login_user(user)
-        from mediahub.compliance.security_log import record_event as _sec_event
-
-        _sec_event("signup", actor=user.email)
-        # PC.3 (ADR-0014): activate any operator-issued workspace invites for
-        # this email — the zero-founder-involvement first-claim path. The org
-        # binds the moment its invited owner signs up.
-        try:
-            _tenancy.MembershipStore().activate_invites(user.email)
-            _invalidate_memberships_snapshot()
-        except Exception:
-            log.warning("invite activation failed for a new account", exc_info=True)
-        # PC.14: verification mail (best-effort; only when the email seam
-        # is configured — signup never blocks on it).
-        _verify_sent = _send_verification_email(user.email)
-        # D-35 — tell the user their account was created (and, honestly, whether
-        # a verification link is on its way) instead of a silent redirect.
-        if _verify_sent:
-            _flash_toast(
-                f"Account created — we've sent a verification link to {user.email}. "
-                "Verify it so password resets and notices reach you.",
-                "success",
-            )
-        else:
-            _flash_toast("Account created — you're signed in.", "success")
-        # PC.9: a referral code records the new club as a code-tracked lead
-        # in the PC.6 funnel — zero operator typing. Best-effort: a bad
-        # code must never break a signup.
-        ref_code = (request.form.get("ref") or "").strip()
-        if ref_code:
-            try:
-                from mediahub.commercial.referrals import record_referred_signup
-
-                record_referred_signup(ref_code, user.email)
-            except Exception:
-                log.warning("referral signup recording failed", exc_info=True)
-        # First-run routing (A-4 + A1, org-access audit): an account that
-        # signed up via an invite already belongs to a workspace — pin it and
-        # land straight in the app, never on the picker. A brand-new account
-        # with no membership goes straight to setup to create its own club
-        # (sending it to /make would just trip the org-ready gate).
-        if _auto_pin_member_org():
-            return redirect(url_for("make_page"))
-        return redirect(url_for("organisation_setup"))
-
-    @app.route("/login", methods=["GET"])
-    def login_page():
-        if _auth.current_user_email():
-            return redirect(url_for("make_page"))
-        nxt = _safe_next(request.args.get("next"))
-        action = url_for("login_post", next=nxt) if nxt else url_for("login_post")
-        alt = (
-            f'No account yet? <a href="{url_for("signup_page")}" '
-            'style="color:var(--accent);font-weight:600">Create one</a>.'
-            f'<br><a href="{url_for("password_forgot")}" '
-            'style="color:var(--ink-muted);font-weight:600">Forgot your password?</a>'
-        )
-        alt += (
-            f'<br><a href="{url_for("developer_login")}" '
-            'style="color:var(--ink-muted);font-weight:600">'
-            "Developer sign-in &rarr;</a>"
-        )
-        return _auth_form_page(
-            title="Log in",
-            heading='Welcome <em class="editorial">back</em>.',
-            lede="Log in to manage your content and billing.",
-            action_url=action,
-            submit_label="Log in",
-            alt_html=alt,
-        )
-
-    @app.route("/login", methods=["POST"])
-    def login_post():
-        from mediahub.compliance.security_log import record_event as _sec_event
-
-        # Two layers by design: the W per-IP auth limiter (fast 429 on raw
-        # request volume) + the per-email/per-address lockout below (counts
-        # FAILURES, blocks before password verification).
-        if _auth_rate_limited("login"):
-            return _auth_rate_limit_response()
-        email = (request.form.get("email") or "").strip()
-        password = request.form.get("password") or ""
-        # Lockout BEFORE password verification: a locked key gets the same
-        # response whether or not the password would have been right.
-        if _auth.login_locked(email):
-            _sec_event(
-                "login_locked_attempt", actor=_auth.normalize_email(email), outcome="blocked"
-            )
-            return _login_error_page(
-                email, "Too many failed attempts — try again in 15 minutes.", 429
-            )
-        store = _user_store()
-        try:
-            user = store.authenticate(email, password)
-        except _auth.AuthError as exc:
-            locked_now = _auth.record_login_failure(email)
-            _sec_event(
-                "login_lockout" if locked_now else "login_failed",
-                actor=_auth.normalize_email(email),
-                outcome="lockout" if locked_now else "failed",
-            )
-            return _login_error_page(email, str(exc))
-        # Optional second factor: password ok → park the email (NOT a login)
-        # and ask for the TOTP code.
-        if user.totp_secret:
-            session["pending_2fa_email"] = user.email
-            return redirect(url_for("login_2fa"))
-        _auth.clear_login_failures(email)
-        # Session rotation on privilege change: drop everything the
-        # pre-login session held before granting the signed-in identity.
-        session.clear()
-        _auth.login_user(user)
-        _sec_event("login", actor=user.email)
-        # A1 (org-access audit): bind the member's own organisation into the
-        # session at sign-in so they land straight on their club — the picker
-        # is never part of a member's sign-in flow.
-        _auto_pin_member_org()
-        nxt = _safe_next(request.args.get("next") or request.form.get("next"))
-        # Re-acceptance check: accounts whose recorded Terms acceptance
-        # predates TERMS_VERSION (or legacy accounts with no record) are
-        # routed through /legal/accept before they continue.
-        if _legal.AcceptanceStore().needs_terms_reacceptance(user.email):
-            return redirect(
-                url_for("legal_accept_page", next=nxt) if nxt else url_for("legal_accept_page")
-            )
-        session["terms_ok_version"] = _legal.TERMS_VERSION
-        return redirect(nxt or url_for("make_page"))
-
-    @app.route("/login/2fa", methods=["GET", "POST"])
-    def login_2fa():
-        from mediahub.compliance.security_log import record_event as _sec_event
-
-        email = session.get("pending_2fa_email") or ""
-        if not email:
-            return redirect(url_for("login_page"))
-        if request.method == "GET":
-            if request.args.get("cancel"):
-                # Back to log in: abandon the half-finished 2FA login.
-                session.pop("pending_2fa_email", None)
-                return redirect(url_for("login_page"))
-            return _login_2fa_page()
-        # SEC-27: per-IP volume brake on the code-submission POST, matching the
-        # password step's /login brake (it was previously missing here, so TOTP
-        # guessing was bounded only by the per-account lockout). Its OWN bucket
-        # ("login_2fa"), separate from "login", so a shared NAT completing both
-        # steps doesn't compound the two against one budget.
-        if _auth_rate_limited("login_2fa"):
-            return _login_2fa_page(
-                "Too many attempts from your network — wait a few minutes and try again.", 429
-            )
-        if _auth.login_locked(email):
-            return _login_2fa_page("Too many failed attempts — try again in 15 minutes.", 429)
-        store = _user_store()
-        user = store.get(email)
-        code = request.form.get("totp") or ""
-        ok = user is not None and _auth.totp_verify(user.totp_secret, code)
-        used_recovery = False
-        if not ok and user is not None:
-            # Same input doubles as the recovery-code field: a consumed code
-            # (single-use, hash removed on success) logs in like a TOTP match.
-            used_recovery = store.consume_recovery_code(email, code)
-            ok = used_recovery
-        if not ok:
-            locked_now = _auth.record_login_failure(email)
-            _sec_event(
-                "login_lockout" if locked_now else "login_2fa_failed",
-                actor=email,
-                outcome="lockout" if locked_now else "failed",
-            )
-            return _login_2fa_page("That code did not match — try again.", 401)
-        _auth.clear_login_failures(email)
-        session.clear()
-        _auth.login_user(user)
-        _sec_event("login", actor=user.email, detail="2fa_recovery" if used_recovery else "2fa")
-        # A1: same direct-to-their-club landing as the password-only path.
-        _auto_pin_member_org()
-        return redirect(url_for("make_page"))
-
     # Tiny clipboard helper shared by the 2FA setup + recovery-code pages.
     # Plain string (not an f-string), so single braces are literal.
-
-    @app.route("/account/2fa", methods=["GET", "POST"])
-    def account_2fa():
-        from mediahub.compliance.security_log import record_event as _sec_event
-
-        email = _auth.current_user_email()
-        if not email:
-            return redirect(url_for("login_page"))
-        store = _user_store()
-        user = store.get(email)
-        if user is None:
-            return redirect(url_for("login_page"))
-        if request.method == "POST":
-            action = request.form.get("action") or ""
-            code = request.form.get("totp") or ""
-            if action == "enable":
-                secret = session.get("totp_setup_secret") or ""
-                if secret and _auth.totp_verify(secret, code):
-                    store.set_totp(email, secret)
-                    # Issue the one-time recovery codes: only salted hashes are
-                    # persisted; the plaintext is shown once on the next page.
-                    codes = _auth.recovery_generate_codes()
-                    store.set_recovery_codes(email, [_auth.recovery_hash(c) for c in codes])
-                    session.pop("totp_setup_secret", None)
-                    _sec_event("totp_enabled", actor=email)
-                    return _twofa_codes_page(codes, "Two-factor authentication is on")
-                # Inline re-render of the same setup page (QR + secret intact —
-                # the session still holds the pending secret), not a dead end.
-                return _twofa_no_store(
-                    _layout(
-                        "Two-factor",
-                        _twofa_setup_body(
-                            email, error="That code did not match — scan the code again and retry."
-                        ),
-                        active="",
-                    ),
-                    400,
-                )
-            if action == "disable":
-                if user.totp_secret and _auth.totp_verify(user.totp_secret, code):
-                    store.set_totp(email, "")  # also drops the recovery-code hashes
-                    _sec_event("totp_disabled", actor=email)
-                    return redirect(url_for("account_2fa"))
-                return _layout(
-                    "Two-factor",
-                    _twofa_enabled_body(
-                        user,
-                        error="Enter a valid current code to switch 2FA off.",
-                        error_action="disable",
-                    ),
-                    active="",
-                ), 400
-            if action == "regenerate":
-                if user.totp_secret and _auth.totp_verify(user.totp_secret, code):
-                    codes = _auth.recovery_generate_codes()
-                    store.set_recovery_codes(email, [_auth.recovery_hash(c) for c in codes])
-                    _sec_event("totp_recovery_regenerated", actor=email)
-                    return _twofa_codes_page(codes, "Fresh recovery codes")
-                return _layout(
-                    "Two-factor",
-                    _twofa_enabled_body(
-                        user,
-                        error="Enter a valid current code to issue fresh recovery codes.",
-                        error_action="regenerate",
-                    ),
-                    active="",
-                ), 400
-            return jsonify({"error": "unknown action"}), 400
-        if user.totp_secret:
-            return _layout("Two-factor", _twofa_enabled_body(user), active="")
-        return _twofa_no_store(_layout("Two-factor", _twofa_setup_body(email), active=""))
-
-    @app.route("/logout", methods=["GET", "POST"])
-    def logout():
-        """End the account (or operator) session.
-
-        POST performs the logout — the state change rides the app-wide CSRF
-        token like every other form (P3, org-access audit). GET only renders
-        a confirmation page, so a cross-site link can no longer end (or
-        probe) a session. Logout also revokes server-side: the account's
-        session epoch moves on (dev sessions: the revocation watermark), so
-        a replayed pre-logout cookie is dead, and the WHOLE session is
-        cleared — the org pin must never outlive the identity that earned it.
-        """
-        if request.method == "GET":
-            body = (
-                '<div class="card" style="max-width:420px;margin:40px auto;padding:24px 28px">'
-                "<h2>Sign out?</h2>"
-                '<p class="dim" style="font-size:13px">This ends your session on every '
-                "device you are signed in on.</p>"
-                f'<form method="post" action="{url_for("logout")}">'
-                '<button type="submit" class="btn" style="margin-top:12px;width:100%">'
-                "Sign out</button></form>"
-                f'<div class="dim" style="font-size:13px;margin-top:14px;text-align:center">'
-                f'<a href="{url_for("home")}" style="color:var(--accent)">Cancel</a></div>'
-                "</div>"
-            )
-            return _layout("Sign out", body, active="")
-        from mediahub.compliance.security_log import record_event as _sec_event
-
-        email = _auth.current_user_email()
-        if email:
-            _user_store().bump_session_epoch(email)
-            _sec_event("logout", actor=email)
-        if _auth.is_dev_operator():
-            _auth.revoke_dev_sessions()
-            _sec_event("logout", actor="dev_operator")
-        session.clear()
-        return redirect(url_for("home"))
 
     # ---- PC.14 — password reset + email verification --------------------
     #
@@ -45506,233 +43430,7 @@ function copySpotlightCaption(btn) {{
     # Unconfigured deployments get an honest "not available here" page —
     # never a fake "we sent you an email".
 
-    @app.route("/password/forgot", methods=["GET", "POST"])
-    def password_forgot():
-        from mediahub.notify.email import EmailSendError, email_configured, send_email
-        from mediahub.web import account_tokens as _tokens
-
-        if not email_configured():
-            # Honest unavailable state: the GET page renders at 200 (no GET
-            # surface may 5xx — B5 API contract); the POST action is a 503.
-            return _email_unavailable_page(
-                "Password reset unavailable",
-                status=503 if request.method == "POST" else 200,
-            )
-        if request.method == "POST":
-            if _auth_rate_limited("pwreset"):
-                return _auth_rate_limit_response()
-            email = _auth.normalize_email(request.form.get("email") or "")
-            user = _user_store().get(email) if email else None
-            if user is not None:
-                token = _tokens.mint_reset_token(app.secret_key, user.email, user.hashed_password)
-                reset_url = url_for("password_reset", token=token, _external=True)
-                mail_text = (
-                    "Someone (hopefully you) asked to reset the password for "
-                    f"this MediaHub account.\n\nReset it here (link valid for "
-                    f"{int(_tokens.RESET_MAX_AGE_HOURS)} hours, single use):\n"
-                    f"{reset_url}\n\nIf this wasn't you, ignore this email — "
-                    "your password is unchanged."
-                )
-
-                # Timing-oracle guard: the provider POST takes hundreds of ms,
-                # so a synchronous send would make known-account requests
-                # measurably slower than unknown ones even though the bodies
-                # are identical. Fire-and-forget from a thread (send failures
-                # were already log-only best-effort); the URL and text are
-                # built above, inside the request context.
-                def _send_reset_mail(to_email: str = user.email, text: str = mail_text) -> None:
-                    try:
-                        send_email(to_email, "Reset your MediaHub password", text)
-                    except EmailSendError:
-                        log.warning("password reset email failed", exc_info=True)
-
-                threading.Thread(target=_send_reset_mail, name="pwreset-mail", daemon=True).start()
-            # Identical response whether or not the account exists — the
-            # form must not be an email-enumeration oracle.
-            body = _account_email_card(
-                "<p>If an account exists for that address, a reset link is on "
-                "its way. The link works once and expires in "
-                f"{int(_tokens.RESET_MAX_AGE_HOURS)} hours.</p>"
-                f'<p><a class="btn secondary" href="{url_for("login_page")}">'
-                "&larr; Back to log in</a></p>",
-                title="Check your email",
-                heading='Check your <em class="editorial">email</em>.',
-                lede="We've sent a reset link if the account exists.",
-            )
-            return _layout("Check your email", body, active="signin")
-        body = _account_email_card(
-            f'<form method="post" action="{url_for("password_forgot")}">'
-            '<label style="display:block;font-size:12px;text-transform:uppercase;'
-            'letter-spacing:0.06em;color:var(--ink-muted);margin-bottom:6px">Email</label>'
-            '<input type="email" name="email" autocomplete="email" required '
-            'style="width:100%" placeholder="you@club.org" />'
-            '<button type="submit" class="btn" style="margin-top:20px;width:100%">'
-            "Send reset link</button></form>",
-            title="Forgot password",
-            heading='Forgot your <em class="editorial">password</em>?',
-            lede="Enter your account email and we'll send a single-use reset link.",
-        )
-        return _layout("Forgot password", body, active="signin")
-
-    @app.route("/password/reset/<token>", methods=["GET", "POST"])
-    def password_reset(token: str):
-        from mediahub.web import account_tokens as _tokens
-
-        def _hash_for(email: str):
-            u = _user_store().get(email)
-            return u.hashed_password if u else None
-
-        try:
-            email = _tokens.verify_reset_token(
-                app.secret_key, token, current_hash_for_email=_hash_for
-            )
-        except _tokens.AccountTokenExpired:
-            return _layout(
-                "Link expired",
-                '<div class="card"><p class="tag bad">This reset link has '
-                "expired.</p>"
-                f'<p><a class="btn secondary" href="{url_for("password_forgot")}">'
-                "Request a new one</a></p></div>",
-                active="signin",
-            ), 410
-        except _tokens.AccountTokenError:
-            return _layout(
-                "Invalid link",
-                '<div class="card"><p class="tag bad">This reset link is invalid '
-                "or has already been used.</p>"
-                f'<p><a class="btn secondary" href="{url_for("password_forgot")}">'
-                "Request a new one</a></p></div>",
-                active="signin",
-            ), 404
-        if request.method == "POST":
-            if _auth_rate_limited("pwreset"):
-                return _auth_rate_limit_response()
-            try:
-                user = _user_store().set_password(email, request.form.get("password") or "")
-            except _auth.AuthError as exc:
-                body = _account_email_card(
-                    f'<p class="tag bad">{_h(str(exc))}</p>'
-                    f'<form method="post" action="{url_for("password_reset", token=token)}">'
-                    '<label style="display:block;font-size:12px;text-transform:uppercase;'
-                    'letter-spacing:0.06em;color:var(--ink-muted);margin-bottom:6px">'
-                    "New password</label>"
-                    '<input type="password" name="password" required minlength="8" '
-                    'autocomplete="new-password" style="width:100%" />'
-                    '<button type="submit" class="btn" style="margin-top:20px;width:100%">'
-                    "Set new password</button></form>",
-                    title="Choose a new password",
-                    heading='Choose a new <em class="editorial">password</em>.',
-                    lede="At least 8 characters.",
-                )
-                return _layout("Choose a new password", body, active="signin"), 400
-            if user is None:
-                abort(404)
-            # Rotate the session before re-login: set_password bumped the epoch
-            # (revoking pre-reset cookies), so re-mint the current browser under
-            # the new epoch and drop any stale pre-reset session state.
-            session.clear()
-            _auth.login_user(user)
-            if not _legal.AcceptanceStore().needs_terms_reacceptance(user.email):
-                session["terms_ok_version"] = _legal.TERMS_VERSION
-            # D-35 — confirm the change instead of a silent login + redirect.
-            _flash_toast("Password updated — you're signed in.", "success")
-            return redirect(url_for("make_page"))
-        body = _account_email_card(
-            f'<form method="post" action="{url_for("password_reset", token=token)}">'
-            '<label style="display:block;font-size:12px;text-transform:uppercase;'
-            'letter-spacing:0.06em;color:var(--ink-muted);margin-bottom:6px">'
-            f"New password for {_h(email)}</label>"
-            '<input type="password" name="password" required minlength="8" '
-            'autocomplete="new-password" style="width:100%" />'
-            '<div class="dim" style="font-size:12px;margin-top:6px">At least 8 characters.</div>'
-            '<button type="submit" class="btn" style="margin-top:20px;width:100%">'
-            "Set new password</button></form>",
-            title="Choose a new password",
-            heading='Choose a new <em class="editorial">password</em>.',
-            lede="This link works once.",
-        )
-        return _layout("Choose a new password", body, active="signin")
-
-    @app.route("/verify-email/<token>")
-    def verify_email(token: str):
-        from mediahub.web import account_tokens as _tokens
-
-        try:
-            email = _tokens.verify_verify_token(app.secret_key, token)
-        except _tokens.AccountTokenError:
-            return _layout(
-                "Invalid link",
-                '<div class="card"><p class="tag bad">This verification link is '
-                "invalid or has expired.</p></div>",
-                active="signin",
-            ), 404
-        user = _user_store().mark_email_verified(email)
-        if user is None:
-            abort(404)
-        return _layout(
-            "Email verified",
-            '<div class="card"><p class="tag good">Email address verified — '
-            "thanks!</p>"
-            f'<p><a class="btn secondary" href="{url_for("make_page")}">'
-            "Continue &rarr;</a></p></div>",
-            active="signin",
-        )
-
     # ---- /legal/accept (versioned ToS re-acceptance) -------------------
-
-    @app.route("/legal/accept", methods=["GET"])
-    def legal_accept_page():
-        email = _auth.current_user_email()
-        if not email:
-            return redirect(url_for("login_page"))
-        nxt = _safe_next(request.args.get("next"))
-        action = url_for("legal_accept_post", next=nxt) if nxt else url_for("legal_accept_post")
-        prior = _legal.AcceptanceStore().latest(email, _legal.DOC_TERMS)
-        prior_line = (
-            f"You last accepted version {_h(prior.version)} on {_h(prior.accepted_at)}."
-            if prior
-            else "Your account predates recorded acceptance, so we're asking once now."
-        )
-        body = (
-            '<section class="mh-hero" style="padding-top:var(--sp-7);'
-            'padding-bottom:var(--sp-5);margin-bottom:var(--sp-5)">'
-            '<span class="mh-hero-eyebrow">Legal</span>'
-            '<h1>Updated <em class="editorial">terms</em>.</h1>'
-            f'<p class="lede">The Terms of Service changed (version {_legal.TERMS_VERSION}). '
-            "Please review and accept to continue.</p></section>"
-            '<div class="card">'
-            f"<p>{prior_line}</p>"
-            f'<p>Read the <a href="{url_for("terms_page")}" target="_blank" '
-            'style="color:var(--accent)">current Terms of Service</a> and the '
-            f'<a href="{url_for("privacy_page")}" target="_blank" '
-            'style="color:var(--accent)">Privacy Notice</a>.</p>'
-            f'<form method="post" action="{action}">'
-            '<label style="display:flex;gap:10px;align-items:flex-start;'
-            'font-size:13px;color:var(--ink-muted)">'
-            '<input type="checkbox" name="accept_terms" value="1" required '
-            'style="margin-top:3px" />'
-            f"<span>I accept the Terms of Service (version {_legal.TERMS_VERSION}).</span>"
-            "</label>"
-            '<button type="submit" class="btn" style="margin-top:16px">Accept and continue</button>'
-            "</form>"
-            f'<p class="muted" style="margin-top:14px">Don\'t agree? You can '
-            f'<a href="{url_for("privacy_page")}">export your data</a> and '
-            f'<a href="{url_for("logout")}">sign out</a>.</p>'
-            "</div>"
-        )
-        return _layout("Accept updated terms", body, active="")
-
-    @app.route("/legal/accept", methods=["POST"])
-    def legal_accept_post():
-        email = _auth.current_user_email()
-        if not email:
-            return redirect(url_for("login_page"))
-        if (request.form.get("accept_terms") or "") != "1":
-            return redirect(url_for("legal_accept_page"))
-        _legal.AcceptanceStore().record(email, _legal.DOC_TERMS, _legal.TERMS_VERSION)
-        session["terms_ok_version"] = _legal.TERMS_VERSION
-        nxt = _safe_next(request.args.get("next") or request.form.get("next"))
-        return redirect(nxt or url_for("make_page"))
 
     # ---- /developer (operator sign-in) --------------------------------
     # Username + password operator sign-in. Credentials are verified against an
@@ -45740,29 +43438,6 @@ function copySpotlightCaption(btn) {{
     # pair grants an unrestricted (Owner-plan) session that bypasses every
     # paywall gate. The password is never stored in plaintext, never logged, and
     # never rendered back. See docs/adr/0019-password-protect-operator-signin.md.
-
-    @app.route("/developer", methods=["GET"])
-    def developer_login():
-        if _auth.is_dev_operator():
-            return redirect(url_for("make_page"))
-        return _developer_login_page()
-
-    @app.route("/developer", methods=["POST"])
-    def developer_login_post():
-        if _auth_rate_limited("developer"):
-            return _auth_rate_limit_response()
-        if _auth.verify_dev_credentials(
-            request.form.get("dev_user"), request.form.get("dev_password")
-        ):
-            # Session rotation on privilege change (the same order as
-            # login_post): read next from the request FIRST, drop everything
-            # the pre-auth session held, then grant the operator identity —
-            # the highest-privilege grant must not inherit pre-auth state.
-            nxt = _safe_next(request.args.get("next") or request.form.get("next"))
-            session.clear()
-            _auth.login_dev_operator()
-            return redirect(nxt or url_for("make_page"))
-        return _developer_login_page(error="Invalid username or password."), 401
 
     # ---- /operator/commercial — Phase C sell-side console (PC.4 + PC.6) ----
     # Operator-only, exactly like /developer: non-operator sessions are sent to
@@ -46553,402 +44228,12 @@ what you're doing, what they should do.</p>
         return redirect(url_for("operator_commercial"))
 
     # ---- /about -------------------------------------------------------
-    @app.route("/about", methods=["GET"])
-    def about_page():
-        """The detailed, animated product walkthrough — "who we are and what we
-        do", in depth.
-
-        Public marketing page (exempt from the org-ready gate, like /pricing and
-        the legal pages). The signed-out home is deliberately brief; this is
-        where the depth lives — an animated step-by-step walk through the whole
-        flow, then the shared product-story sections (input→output, the engine
-        bento, who it's for, the human-in-the-loop promise, the pipeline diagram
-        and the FAQ). Linked from the top bar's "About" item for signed-out
-        visitors; the URL always resolves so a signed-in user can read it too.
-        """
-        hero_html = (
-            '<section class="mh-hero" id="mh-ch-overview" data-lane="00">'
-            '<span class="mh-hero-eyebrow">About MediaHub</span>'
-            '<h1>The intelligence layer between<br>'
-            '<em class="editorial">results</em> and ready-to-post.</h1>'
-            '<p class="lede">MediaHub turns the structured data a club already '
-            "produces &mdash; meet results, PDFs, spreadsheets &mdash; into "
-            "on-brand content that&rsquo;s ready to post. It detects the moments "
-            "that matter, ranks them by how content-worthy they are, dresses them "
-            "in your colours and voice, and stops at a review queue you control. "
-            "Nothing is invented, and nothing posts without you.</p>"
-            '<div class="mh-hero-actions">'
-            f'<a class="mh-cta-primary" href="{url_for("signup_page")}">Get started &rarr;</a>'
-            f'<a class="mh-cta-secondary" href="{url_for("pricing_page")}">See pricing</a>'
-            "</div>"
-            "</section>"
-        )
-        # The looping generate → review → approve product demo, wrapped exactly
-        # as the landing page wraps it (its non-chapter id keeps it out of the
-        # scroll-spy rail).
-        demo_section_html = (
-            '<section class="mh-section mh-reveal" id="mh-see-it-work">'
-            '<div class="mh-section-eyebrow-strip mh-reveal">'
-            '<span class="label">See it work</span></div>'
-            + _reveal_lines(["One result in.", 'A post you <em class="editorial">approve</em>.'])
-            + _hero_product_demo()
-            + "</section>"
-        )
-        final_cta_html = (
-            '<section class="mh-final-cta mh-reveal" id="mh-ch-start">'
-            "<div>"
-            + _reveal_lines(
-                ["A minute to set up.", "<em>Then</em> every week is easier."],
-                cls="mh-final-cta-headline",
-            )
-            + '<p class="mh-final-cta-sub mh-reveal">Tell us your club\'s name and '
-            "website. We'll read your brand, palette and voice, and have on-brand "
-            "drafts ready the next time you upload a results file.</p>"
-            "</div>"
-            '<div class="mh-final-cta-actions">'
-            f'<a class="btn large" href="{url_for("signup_page")}">Create your organisation &rarr;</a>'
-            f'<a class="btn secondary" href="{url_for("pricing_page")}">See plans &amp; pricing</a>'
-            "</div>"
-            "</section>"
-        )
-        # Rich scroll-spy rail: the animated walkthrough is the first chapter
-        # after the overview, then the supporting explainer sections (each owns
-        # its section id — mh-ch-how / -engine / -audience / -promise / -start).
-        about_chapters = [
-            ("mh-ch-overview", "Overview"),
-            ("mh-ch-flow", "Step by step"),
-            ("mh-ch-how", "How it works"),
-            ("mh-ch-engine", "What it does"),
-            ("mh-ch-audience", "Who it's for"),
-            ("mh-ch-promise", "Our promise"),
-            ("mh-ch-start", "Get started"),
-        ]
-        body = (
-            _ABOUT_CSS
-            + '<div class="mh-about">'
-            + '<div class="mh-fx mh-spotlight">'
-            + hero_html
-            + "</div>"
-            + demo_section_html
-            + _home_io_headline_html()
-            + _about_walkthrough_html()
-            + _pipeline_diagram_section_html()
-            + _home_engine_bento_html()
-            + _home_audience_html()
-            + _home_promise_html()
-            + _home_faq_html()
-            + final_cta_html
-            + "</div>"
-        )
-        return _layout("About", body, active="about", chapters=about_chapters)
 
     # ---- /pricing -----------------------------------------------------
     # UI 1.20 — polished pricing page styling (scoped under .mh-pricing /
     # .mh-compare). Plain strings (not f-strings): the CSS braces are literal.
     # Reuses the existing token system (--surface, --accent, --good, --lane …)
     # and the shared .mh-segmented control for the billing-period toggle.
-    _PRICING_CSS = (
-        "<style>"
-        ".mh-billing-toggle{display:flex;justify-content:center;margin-bottom:var(--sp-6)}"
-        ".mh-tier-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(248px,1fr));"
-        "gap:18px;align-items:stretch}"
-        ".mh-tier{position:relative;display:flex;flex-direction:column;gap:16px;padding:24px;"
-        "background:var(--surface);border:1px solid var(--hairline);border-radius:var(--radius-md)}"
-        ".mh-tier.is-recommended{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}"
-        ".mh-tier-badge{position:absolute;top:-11px;left:24px;background:var(--lane);"
-        "color:var(--lane-ink);font-family:var(--font-mono);font-size:var(--fs-9);font-weight:700;"
-        "letter-spacing:.12em;text-transform:uppercase;padding:3px 10px;border-radius:var(--radius-pill)}"
-        ".mh-tier-name{font-family:var(--font-mono);font-size:12px;text-transform:uppercase;"
-        "letter-spacing:.08em;color:var(--ink-muted);margin-bottom:8px}"
-        ".mh-tier-price{min-height:46px}"
-        ".mh-price-fig{font-size:30px;font-weight:800;line-height:1}"
-        ".mh-price-per{font-size:14px;font-weight:600;color:var(--ink-muted);margin-left:2px}"
-        ".mh-price-note{display:block;font-size:12px;color:var(--ink-muted);margin-top:4px}"
-        ".mh-price-tbc{font-size:15px;color:var(--ink-muted)}"
-        ".mh-tier-blurb{font-size:13px;color:var(--ink-muted);margin-top:8px}"
-        ".mh-feat-list{list-style:none;padding:0;margin:0;font-size:13px;flex:1 1 auto;"
-        "display:flex;flex-direction:column;gap:9px}"
-        ".mh-feat{display:flex;align-items:baseline;gap:8px}"
-        ".mh-feat-mark{flex:0 0 auto;font-weight:700;width:1em;text-align:center}"
-        ".mh-feat-yes .mh-feat-mark{color:var(--good)}"
-        ".mh-feat-no{color:var(--ink-faint)}"
-        ".mh-feat-no .mh-feat-mark{color:var(--ink-faint)}"
-        ".mh-feat-val{margin-left:auto;padding-left:10px;font-weight:600;color:var(--ink);text-align:right}"
-        ".mh-feat-no .mh-feat-val{color:var(--ink-faint)}"
-        ".mh-tier-cta{margin-top:4px}"
-        ".mh-cta{width:100%;text-align:center}"
-        ".mh-cta-note{text-align:center;font-size:13px}"
-        ".mh-price-note-banner{font-size:13px;margin-top:24px;text-align:center}"
-        ".mh-pricing [data-pane=monthly]{display:none}"
-        ".mh-pricing[data-period=monthly] [data-pane=annual]{display:none}"
-        ".mh-pricing[data-period=monthly] [data-pane=monthly]{display:inline}"
-        ".mh-compare-title{margin:var(--sp-9) 0 var(--sp-4);text-align:center}"
-        ".mh-compare-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}"
-        ".mh-compare{width:100%;border-collapse:collapse;font-size:13px;min-width:560px}"
-        ".mh-compare th,.mh-compare td{padding:12px 14px;border-bottom:1px solid var(--border)}"
-        ".mh-compare thead th{vertical-align:bottom}"
-        ".mh-th-plan{text-align:center;font-family:var(--font-mono);font-size:13px;font-weight:700;"
-        "text-transform:uppercase;letter-spacing:.06em}"
-        ".mh-th-rec{display:block;margin-top:4px;color:var(--accent);font-size:9px;letter-spacing:.12em}"
-        ".mh-compare tbody th{text-align:left;font-weight:600;color:var(--ink)}"
-        ".mh-compare td{text-align:center;color:var(--ink-muted)}"
-        ".mh-compare .is-rec{background:color-mix(in oklab, var(--lane) 4.5%, transparent)}"
-        ".mh-compare-group th{padding-top:22px;font-family:var(--font-mono);font-size:11px;"
-        "font-weight:600;text-transform:uppercase;letter-spacing:.1em;color:var(--ink-muted);"
-        "border-bottom-color:var(--border-h)}"
-        ".mh-cell-yes{color:var(--good);font-weight:700}"
-        ".mh-cell-no{color:var(--ink-faint)}"
-        ".mh-cell-val{color:var(--ink)}"
-        ".mh-sr{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;"
-        "clip:rect(0,0,0,0);white-space:nowrap;border:0}"
-        "@media(max-width:600px){.mh-tier-grid{grid-template-columns:1fr}}"
-        "</style>"
-    )
-    _PRICING_JS = (
-        "<script>(function(){"
-        "var root=document.getElementById('mh-pricing');if(!root)return;"
-        "var btns=root.querySelectorAll('.mh-segmented [data-period]');"
-        "function set(period){root.setAttribute('data-period',period);"
-        "for(var i=0;i<btns.length;i++){var on=btns[i].getAttribute('data-period')===period;"
-        "btns[i].classList.toggle('is-active',on);"
-        "btns[i].setAttribute('aria-pressed',on?'true':'false');}}"
-        "for(var i=0;i<btns.length;i++){(function(b){"
-        "b.addEventListener('click',function(){set(b.getAttribute('data-period'));});"
-        "})(btns[i]);}"
-        "})();</script>"
-    )
-
-    @app.route("/pricing", methods=["GET"])
-    def pricing_page():
-        from mediahub.commercial.wtp import QuoteStore, public_list_price
-
-        configured = _billing.billing_configured()
-        plan_now = _auth.current_plan(_user_store())
-        signed_in = bool(_auth.current_user_email())
-        # PC.4 evidence gate (ADR-0011): a committed list price exists only
-        # once ≥5 distinct clubs have paid annual at a tested price, and it is
-        # the highest tested price that cleared — read from the quote ledger.
-        try:
-            list_price = public_list_price(QuoteStore().list_all())
-        except Exception:
-            list_price = None
-
-        _CUR_SYMBOL = {"gbp": "&pound;", "usd": "$", "eur": "&euro;"}
-
-        def _figure(symbol: str, pence: int) -> str:
-            # Whole pounds when even, else two decimals. The pence is always
-            # ledger-derived — never a hardcoded amount (ADR-0011 / PC.4).
-            if pence % 100 == 0:
-                return f"{symbol}{pence // 100}"
-            return f"{symbol}{pence / 100:.2f}"
-
-        def _price_block(plan: str) -> str:
-            """Annual + monthly price panes for a tier.
-
-            Honest billing-period toggle (UI 1.20): MediaHub sells annual
-            prepay only (ADR-0011; wtp.Quote.billing_interval == "year"), so the
-            "Monthly" view shows the *same committed annual price expressed per
-            month* (annual ÷ 12), explicitly "billed annually" — never a
-            fabricated monthly SKU or a made-up discount. While the PC.4 gate is
-            unmet there is no committed figure, so both views read "Pricing TBC"
-            and no "/year" or "/mo" suffix is emitted at all.
-            """
-            if plan == _auth.PLAN_FREE:
-                return '<div class="mh-price-fig">Free</div>'
-            if plan == _auth.PLAN_CLUB and list_price is not None:
-                symbol = _CUR_SYMBOL.get(list_price["currency"], "")
-                annual_pence = int(list_price["amount_pence"])
-                monthly_pence = round(annual_pence / 12)
-                annual = (
-                    '<span data-pane="annual">'
-                    f'<span class="mh-price-fig">{_figure(symbol, annual_pence)}'
-                    '<span class="mh-price-per">/year</span></span>'
-                    '<span class="mh-price-note">Billed annually</span></span>'
-                )
-                monthly = (
-                    '<span data-pane="monthly">'
-                    f'<span class="mh-price-fig">{_figure(symbol, monthly_pence)}'
-                    '<span class="mh-price-per">/mo</span></span>'
-                    '<span class="mh-price-note">billed annually</span></span>'
-                )
-                return annual + monthly
-            # Federation (no committed list price) or Club before the gate: the
-            # honest state is "Pricing TBC" — never a guessed number.
-            purchasable = _billing.plan_purchasable(plan)
-            title = (
-                "The exact price is shown at checkout"
-                if purchasable
-                else "Set STRIPE_PRICE_"
-                + ("CLUB" if plan == _auth.PLAN_CLUB else "FEDERATION")
-                + " to enable"
-            )
-            return f'<div class="mh-price-tbc" title="{title}">Pricing TBC</div>'
-
-        def _feature_li(row, plan: str) -> str:
-            val = row.value_for(plan)
-            if val is False:
-                return (
-                    '<li class="mh-feat mh-feat-no">'
-                    '<span class="mh-feat-mark" aria-hidden="true">&times;</span>'
-                    f'<span class="mh-feat-label">{_h(row.label)}</span>'
-                    '<span class="mh-sr">— not included</span></li>'
-                )
-            value_html = (
-                f'<span class="mh-feat-val">{_h(val)}</span>' if isinstance(val, str) else ""
-            )
-            return (
-                '<li class="mh-feat mh-feat-yes">'
-                '<span class="mh-feat-mark" aria-hidden="true">&check;</span>'
-                f'<span class="mh-feat-label">{_h(row.label)}</span>'
-                f'{value_html}<span class="mh-sr">— included</span></li>'
-            )
-
-        cards = ""
-        for tier in _billing.TIERS:
-            is_current = tier.plan == plan_now and signed_in
-            recommended = tier.plan == _auth.PLAN_CLUB
-            features = "".join(_feature_li(row, tier.plan) for row in _billing.feature_rows())
-            price_html = _price_block(tier.plan)
-
-            # CTA — purchase/upgrade logic (unchanged from the prior page).
-            if is_current:
-                cta = (
-                    '<div class="btn secondary mh-cta" '
-                    'style="pointer-events:none;opacity:0.75">Current plan</div>'
-                )
-            elif tier.plan == _auth.PLAN_FREE:
-                cta = (
-                    f'<a class="btn secondary mh-cta" href="{url_for("signup_page")}">'
-                    "Get started free</a>"
-                    if not signed_in
-                    else '<div class="dim mh-cta-note">Included</div>'
-                )
-            else:
-                if not _billing.plan_purchasable(tier.plan):
-                    # J-15: a tier that can't be bought here (billing not
-                    # configured, or no price wired for it) gets a live route
-                    # to a human — never a dead "Not yet available" pill that
-                    # leaves a treasurer with nothing to click.
-                    cta = (
-                        '<a class="btn secondary mh-cta" '
-                        f'href="mailto:{_legal.CONTACT_EMAIL}'
-                        '?subject=MediaHub%20club%20pricing">'
-                        "Talk to us about pricing</a>"
-                    )
-                elif not signed_in:
-                    cta = (
-                        f'<a class="btn mh-cta" '
-                        f'href="{url_for("login_page", next=url_for("pricing_page"))}">'
-                        "Log in to upgrade</a>"
-                    )
-                else:
-                    # CCR 2013: route through the pre-contract information
-                    # page (/billing/confirm) before any payment step.
-                    cta = (
-                        f'<a class="btn mh-cta" '
-                        f'href="{url_for("billing_confirm", plan=tier.plan)}">'
-                        f"Upgrade to {_h(tier.name)}</a>"
-                    )
-
-            badge = '<div class="mh-tier-badge">Recommended</div>' if recommended else ""
-            cls = "mh-tier" + (" is-recommended" if recommended else "")
-            cards += (
-                f'<div class="{cls}">{badge}'
-                '<div class="mh-tier-head">'
-                f'<div class="mh-tier-name">{_h(tier.name)}</div>'
-                f'<div class="mh-tier-price">{price_html}</div>'
-                f'<div class="mh-tier-blurb">{_h(tier.blurb)}</div>'
-                "</div>"
-                f'<ul class="mh-feat-list">{features}</ul>'
-                f'<div class="mh-tier-cta">{cta}</div>'
-                "</div>"
-            )
-
-        # Feature comparison table — same single-source matrix as the cards.
-        def _cell(val) -> str:
-            if val is True:
-                return (
-                    '<span class="mh-cell-yes" aria-hidden="true">&check;</span>'
-                    '<span class="mh-sr">Included</span>'
-                )
-            if val is False:
-                return (
-                    '<span class="mh-cell-no" aria-hidden="true">&times;</span>'
-                    '<span class="mh-sr">Not included</span>'
-                )
-            return f'<span class="mh-cell-val">{_h(val)}</span>'
-
-        head_cells = ""
-        for t in _billing.TIERS:
-            rec = " is-rec" if t.plan == _auth.PLAN_CLUB else ""
-            tag = '<span class="mh-th-rec">Recommended</span>' if t.plan == _auth.PLAN_CLUB else ""
-            head_cells += f'<th scope="col" class="mh-th-plan{rec}">{_h(t.name)}{tag}</th>'
-        ncols = 1 + len(_billing.TIERS)
-        rows_html = ""
-        for group in _billing.FEATURE_MATRIX:
-            rows_html += (
-                f'<tr class="mh-compare-group"><th colspan="{ncols}" scope="colgroup">'
-                f"{_h(group.title)}</th></tr>"
-            )
-            for row in group.rows:
-                cells = ""
-                for t in _billing.TIERS:
-                    rec = " is-rec" if t.plan == _auth.PLAN_CLUB else ""
-                    cells += f'<td class="{rec.strip()}">{_cell(row.value_for(t.plan))}</td>'
-                rows_html += f'<tr><th scope="row">{_h(row.label)}</th>{cells}</tr>'
-        compare_table = (
-            '<div class="mh-compare-wrap"><table class="mh-compare">'
-            f'<thead><tr><th scope="col"><span class="mh-sr">Feature</span></th>{head_cells}</tr></thead>'
-            f"<tbody>{rows_html}</tbody></table></div>"
-        )
-
-        # Honest banner about where pricing stands (ADR-0011 / PC.4).
-        if configured:
-            note = "Paid plans are billed through Stripe. The exact price is shown during checkout."
-        else:
-            note = (
-                "Billing is not configured on this deployment, so paid plans "
-                "can&rsquo;t be purchased here &mdash; the Free tier is fully usable."
-            )
-        note_html = f'<p class="dim mh-price-note-banner">{note}</p>'
-
-        # The Annually/Monthly segmented control only exists when a committed
-        # list price is live (PC.4): with no price, no tier emits the
-        # annual/monthly panes — every paid tier reads "Pricing TBC" — so the
-        # toggle would render and visibly do nothing. The container keeps its
-        # harmless data-period attribute either way.
-        if list_price is not None:
-            toggle = (
-                '<div class="mh-billing-toggle">'
-                '<div class="mh-segmented" role="group" aria-label="Billing period">'
-                '<button type="button" class="is-active" data-period="annual" '
-                'aria-pressed="true">Annually</button>'
-                '<button type="button" data-period="monthly" '
-                'aria-pressed="false">Monthly</button>'
-                "</div></div>"
-            )
-            period_js = _PRICING_JS
-        else:
-            toggle = ""
-            period_js = ""
-
-        body = (
-            _PRICING_CSS
-            + '<section class="mh-hero" style="padding-top:var(--sp-7);padding-bottom:var(--sp-5);margin-bottom:var(--sp-6)">'
-            '<span class="mh-hero-eyebrow">Pricing</span>'
-            '<h1>Simple <em class="editorial">plans</em> for every club.</h1>'
-            '<p class="lede">Start free. Upgrade when your club is posting in earnest. '
-            "Simple annual pricing.</p>"
-            "</section>"
-            '<div id="mh-pricing" class="mh-pricing" data-period="annual">'
-            f"{toggle}"
-            f'<div class="mh-tier-grid">{cards}</div>'
-            f"{note_html}"
-            '<h2 class="mh-compare-title">Compare every plan</h2>'
-            f"{compare_table}"
-            "</div>" + period_js
-        )
-        return _layout("Pricing", body, active="pricing")
 
     # ---- /billing -----------------------------------------------------
     @app.route("/billing", methods=["GET"])
@@ -47279,326 +44564,6 @@ what you're doing, what they should do.</p>
     # The dev-operator-only "Switch organisation" entries (nav account menu +
     # the pinned-state home hero CTA) link here; for everyone else this route
     # is reached as the org-ready gate destination and the first org pick.
-    @app.route("/sign-in", methods=["GET"])
-    def sign_in_page():
-        # PC.3: the picker only offers workspaces this session may enter —
-        # bound orgs are invisible to non-members (ADR-0014).
-        profiles = [p for p in list_profiles() if _session_can_use_profile(p.profile_id)]
-        current_id = _active_profile_id() or ""
-        # A-6: a same-site destination threaded here by the org-ready gate, so
-        # signing in resumes the page the user was heading to.
-        _next_val = _safe_next(request.args.get("next"))
-
-        # A1 (org-access audit): a signed-in member with exactly one
-        # organisation never routes through the picker — /sign-in IS their
-        # club, so pin it and continue to the app (or the threaded next).
-        # A pending error flash still renders the page so the message isn't
-        # lost; the rare multi-org account keeps a picker that the server
-        # filter above confines to its own workspaces; the dev operator
-        # keeps the full picker (cross-org roaming is operator-only).
-        if (
-            len(profiles) == 1
-            and _auth.current_user_email()
-            and not _auth.is_dev_operator()
-            and not session.get("sign_in_error")
-        ):
-            _pin_active_profile(profiles[0].profile_id)
-            return redirect(_next_val or url_for("make_page"))
-
-        # Surface any error flashed by sign_in_post / a delete bounce / a
-        # signed-out share-target (silent failures fixed). Computed up here so it
-        # renders on BOTH the empty state and the picker.
-        err = session.pop("sign_in_error", None)
-        err_html = ""
-        if err:
-            err_html = (
-                '<div class="mh-flash error" role="alert" style="'
-                "margin: 0 0 var(--sp-5);"
-                "padding: 14px 18px;"
-                "border: 1px solid rgba(255,107,107,0.30);"
-                "border-left: 3px solid var(--bad);"
-                "background: var(--bad-bg);"
-                "color: var(--ink);"
-                "font-family: var(--font-mono);"
-                "font-size: 12px;"
-                "letter-spacing: 0.10em;"
-                "text-transform: uppercase;"
-                f'">[ ERROR ] {_h(err)}</div>'
-            )
-
-        # No profiles yet — render an honest empty state with a clear
-        # path forward. Previously this redirected straight to
-        # /organisation/setup, which made the home page "Sign in" button
-        # appear broken (it'd land you back on the setup screen with no
-        # explanation). Now the user sees what's going on and has both
-        # the "Create" CTA and a way back home.
-        if not profiles:
-            new_org_url = url_for("organisation_setup")
-            home_url = url_for("home")
-            empty_body = (
-                err_html + "<h1>Choose your organisation</h1>"
-                '<p class="lede" style="margin-bottom:var(--sp-6)">'
-                "You don't have access to any organisation yet. "
-                "Create one and it will appear here next time."
-                "</p>"
-                '<div class="card" style="padding:24px 28px;margin-bottom:18px">'
-                '<h2 style="margin-top:0;font-size:18px">Get started</h2>'
-                '<p class="dim" style="margin-bottom:18px;font-size:13px">'
-                "MediaHub needs to know who you are before it can produce "
-                "on-brand content. Create your first organisation profile "
-                "&mdash; it takes a minute &mdash; and the AI will read "
-                "your website and social profiles so every caption it "
-                "writes sounds like you."
-                "</p>"
-                f'<a class="btn" href="{new_org_url}">'
-                "Create your first organisation &rarr;</a>"
-                f'<a class="btn secondary" href="{home_url}" '
-                'style="margin-left:10px">Back to home</a>'
-                "</div>"
-            )
-            return _layout("Choose organisation", empty_body, active="signin")
-
-        def _initials(name: str) -> str:
-            parts = [p for p in (name or "").strip().split() if p]
-            if not parts:
-                return "?"
-            if len(parts) == 1:
-                return parts[0][:2].upper()
-            return (parts[0][0] + parts[-1][0]).upper()
-
-        from mediahub.brand import logos as logos_mod
-
-        cards_html = ""
-        for p in profiles:
-            is_current = p.profile_id == current_id
-            logo_html = ""
-            # Every on-card logo is served FIRST-PARTY. The app CSP pins
-            # ``img-src 'self'``, so a website-scraped ``brand_logo_url`` (an
-            # external origin) can never render here — the browser blocks it
-            # and the card shows a broken-image icon. That is exactly why "the
-            # logos sometimes don't load on the sign-in cards": orgs with an
-            # uploaded logo worked; orgs that only have a detected website logo
-            # didn't. So: uploaded logo → per-profile serve route; else the
-            # detected logo → first-party mirror route (downloads + caches the
-            # bytes on first request); else initials.
-            # Unified logo chip — the KEYED silhouette (opaque/white backgrounds
-            # removed, so no white box) on a contrast-aware, brand-tinted backing,
-            # with a built-in org-initials fallback. Every org tile reads at the
-            # same size and weight whatever its logo's colour / shape / format; an
-            # org with no usable logo simply shows its initials in the same frame.
-            _chip_src = ""
-            _chip_tone = "light"
-            _uploaded = getattr(p, "brand_logos", None) or []
-            _first = next(
-                (
-                    e
-                    for e in _uploaded
-                    if isinstance(e, dict)
-                    and e.get("logo_id")
-                    and str(e.get("mime", "")).startswith("image/")
-                ),
-                None,
-            )
-            if _first:
-                _lid = _first.get("logo_id")
-                # Only emit the logo <img> when its keyed silhouette actually
-                # renders. logo_bg_silhouette_path() returns None for a missing or
-                # un-keyable upload — the SAME None that makes the ?bg=1&chip=1 serve
-                # route 404. Previously the picker always emitted the <img> and leaned
-                # on that 404 + the img's onerror to swap in the initials; the 404
-                # still tripped the autotest crawler's "image sub-request failed"
-                # check (#884). Emitting no <img> for an un-keyable logo shows the
-                # initials with zero failed sub-requests. The silhouette is cached and
-                # logo_chip_tone computes it too, so this adds no real cost.
-                if logos_mod.logo_bg_silhouette_path(p.profile_id, _lid):
-                    _chip_src = url_for(
-                        "organisation_logo_serve",
-                        profile_id=p.profile_id,
-                        logo_id=_lid,
-                        bg=1,
-                        chip=1,
-                    )
-                    _chip_tone = logos_mod.logo_chip_tone(p.profile_id, _lid)
-            else:
-                _cap = (getattr(p, "brand_logo_url", "") or "").strip()
-                if _cap.startswith("http://") or _cap.startswith("https://"):
-                    _chip_src = url_for(
-                        "organisation_logo_mirror", profile_id=p.profile_id, bg=1, chip=1
-                    )
-                    _chip_tone = logos_mod.mirror_chip_tone(p.profile_id, _cap)
-            _ext_pal = getattr(p, "brand_palette_extracted", None) or {}
-            _brand = (_ext_pal.get("primary") or "").strip() or (
-                getattr(p, "brand_primary", "") or ""
-            ).strip()
-            logo_html = _logo_chip_html(
-                _chip_src,
-                alt="",
-                size="lg",
-                tone=_chip_tone,
-                brand_hex=_brand,
-                initials=_initials(p.display_name),
-            )
-
-            ready = p.is_ready()
-            captured = p.brand_capture_status in ("ok", "ok_heuristic")
-            pill_html = ""
-            if is_current:
-                pill_html = (
-                    '<span class="pill" style="background:rgba(34,197,94,0.10);'
-                    'border-color:rgba(34,197,94,0.30);color:var(--good)">Active</span>'
-                )
-            if ready:
-                pill_html += '<span class="pill">Brand ready</span>'
-            elif captured:
-                pill_html += (
-                    '<span class="pill" style="background:rgba(245,158,11,0.10);'
-                    'border-color:rgba(245,158,11,0.30);color:var(--warn)">'
-                    "Partial</span>"
-                )
-            else:
-                pill_html += (
-                    '<span class="pill" style="background:rgba(255,255,255,0.06);'
-                    'border-color:rgba(255,255,255,0.10);color:var(--ink-muted)">'
-                    "Incomplete</span>"
-                )
-
-            sign_in_url = url_for("sign_in_post")
-            delete_url = url_for("sign_in_delete")
-            cards_html += (
-                '<div class="mh-profile-card mh-spotlight-card">'
-                f'<div class="logo">{logo_html}</div>'
-                f'<div class="display-name">{_h(p.display_name)}</div>'
-                f'<div class="meta-line">{pill_html}</div>'
-                '<div class="actions">'
-                f'<form method="post" action="{sign_in_url}" style="flex:1;display:flex" data-loader-text="Switching organisation">'
-                f'<input type="hidden" name="profile_id" value="{_h(p.profile_id)}">'
-                + (
-                    f'<input type="hidden" name="next" value="{_h(_next_val)}">'
-                    if _next_val
-                    else ""
-                )
-                + '<button type="submit" class="btn-sign-in">'
-                f"{'Continue' if is_current else 'Enter'} &rarr;</button>"
-                "</form>"
-                f'<form method="post" action="{delete_url}" data-no-loader="1" '
-                f"onsubmit=\"return confirm('Remove &quot;{_h(p.display_name)}&quot; from this sign-in "
-                f"list permanently? Its brand setup goes with it and this can\\u2019t be undone. "
-                f"(Your processed results are kept.)')\">"
-                f'<input type="hidden" name="profile_id" value="{_h(p.profile_id)}">'
-                f'<button type="submit" class="btn-delete" aria-label="Delete profile" title="Delete profile">&times;</button>'
-                "</form>"
-                "</div>"
-                "</div>"
-            )
-
-        new_org_url = url_for("organisation_setup", fresh="1")
-        cards_html += (
-            f'<a class="mh-new-profile" href="{new_org_url}">'
-            '<div><div class="plus">+</div>'
-            "Create new organisation</div></a>"
-        )
-
-        body = (
-            '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">'
-            '<span class="mh-hero-eyebrow">Organisation</span>'
-            '<h1>Choose your <em class="editorial">organisation</em>.</h1>'
-            f'<p class="lede">{len(profiles):02d} saved {"profile" if len(profiles) == 1 else "profiles"} on this deployment. '
-            "Picking one loads its brand voice, palette, logo, and history. "
-            "Switch any time from the home page.</p>"
-            "</section>"
-            f"{err_html}"
-            f'<div class="mh-profile-grid">{cards_html}</div>'
-        )
-        return _layout("Choose organisation", body, active="signin")
-
-    @app.route("/sign-in", methods=["POST"])
-    def sign_in_post():
-        """Pin the chosen profile into the session and redirect home.
-
-        Failure paths now surface an error via the flash session so the
-        sign-in picker can show the user why nothing happened.
-        """
-        # A-6: a same-site destination the picker carried through from the
-        # gate; on success resume it, and preserve it across error re-renders.
-        _nxt = _safe_next(request.form.get("next"))
-
-        def _back_to_picker():
-            return redirect(url_for("sign_in_page", next=_nxt) if _nxt else url_for("sign_in_page"))
-
-        pid = (request.form.get("profile_id") or "").strip()
-        if not pid:
-            session["sign_in_error"] = "Pick an organisation before signing in."
-            return _back_to_picker()
-        prof = load_profile(pid)
-        if prof is None or not _session_can_use_profile(prof.profile_id):
-            # Same message for "doesn't exist" and "members-only" so the
-            # picker can't be used to probe which orgs exist (ADR-0014).
-            session["sign_in_error"] = (
-                f"Couldn't find a profile with id '{pid}'. It may have been deleted."
-            )
-            return _back_to_picker()
-        _pin_active_profile(prof.profile_id)
-        session.pop("sign_in_error", None)
-        return redirect(_nxt or url_for("home"))
-
-    @app.route("/sign-out", methods=["GET", "POST"])
-    def sign_out():
-        """Clear the active profile pin and return to the sign-in picker.
-
-        POST-only for the state change (same CSRF rationale as /logout);
-        GET renders a confirmation. Only anonymous pilot sessions and the
-        dev operator see this control — a member's org access is bound to
-        their account, so their exit is /logout.
-        """
-        if request.method == "GET":
-            body = (
-                '<div class="card" style="max-width:420px;margin:40px auto;padding:24px 28px">'
-                "<h2>Leave this organisation?</h2>"
-                '<p class="dim" style="font-size:13px">Your work is kept — you can '
-                "re-enter the organisation from the picker at any time.</p>"
-                f'<form method="post" action="{url_for("sign_out")}">'
-                '<button type="submit" class="btn" style="margin-top:12px;width:100%">'
-                "Leave organisation</button></form>"
-                f'<div class="dim" style="font-size:13px;margin-top:14px;text-align:center">'
-                f'<a href="{url_for("home")}" style="color:var(--accent)">Cancel</a></div>'
-                "</div>"
-            )
-            return _layout("Leave organisation", body, active="")
-        session.pop("active_profile_id", None)
-        session.pop("login_seen_at", None)
-        session.pop("sign_in_error", None)
-        return redirect(url_for("sign_in_page"))
-
-    @app.route("/sign-in/delete", methods=["POST"])
-    def sign_in_delete():
-        """Delete the profile JSON from disk and clear the session pin
-        if it was the active one. Runs (under DATA_DIR/runs_v4) are NOT
-        removed — they're orphaned but recoverable.
-        """
-        pid = (request.form.get("profile_id") or "").strip()
-        if not pid:
-            return redirect(url_for("sign_in_page"))
-        if _tenancy.MembershipStore().is_bound(pid) and not _session_owns_profile(pid):
-            # Deleting a bound workspace is owner/operator-only (ADR-0014). E-8:
-            # tell the member why the button did nothing instead of a silent bounce
-            # (reusing the existing sign_in_error flash).
-            session["sign_in_error"] = "Only the workspace owner can delete this organisation."
-            return redirect(url_for("sign_in_page"))
-        from .club_profile import _profiles_dir
-
-        p = _profiles_dir() / f"{pid}.json"
-        try:
-            if p.exists():
-                p.unlink()
-        except OSError:
-            pass
-        # Deleting the file is a mid-request mutation the save hook can't see
-        # (it bypasses save_profile), so drop the cached copy here — otherwise
-        # the _active_profile_id() check below could read the just-deleted org.
-        _invalidate_profile_cache(pid)
-        if _active_profile_id() == pid:
-            session.pop("active_profile_id", None)
-        return redirect(url_for("sign_in_page"))
 
     # ---- /organisation/members — PC.3 workspace membership (ADR-0014) ----
 
@@ -51856,54 +48821,6 @@ ever appear; queued, edited and rejected cards never do.</p>
         resp.headers["Cache-Control"] = "public, max-age=300"
         return resp
 
-    @app.route("/oembed")
-    def oembed():
-        """oEmbed (read-only) for a club's public achievements wall (roadmap 1.21).
-
-        Pass ``?url=<wall url>`` (a ``/wall/<token>`` page) and get oEmbed JSON
-        whose ``html`` is the wall's embed iframe — so a CMS (WordPress, etc.) can
-        auto-embed approved content. The unguessable wall token is the capability
-        (the "signed" embed); an unknown or disabled wall returns 404. Only
-        APPROVED cards are ever shown (enforced by the wall itself)."""
-        raw = (request.args.get("url") or "").strip()
-        fmt = (request.args.get("format") or "json").lower()
-        if fmt != "json":
-            # We offer JSON oEmbed only; XML is not implemented.
-            return jsonify({"error": "unsupported_format", "message": "format must be json"}), 501
-        m = re.search(r"/wall/([A-Za-z0-9_\-]+)", raw)
-        if not m:
-            abort(404)
-        token = m.group(1)
-        prof = _resolve_wall_or_404(token)  # 404 if invalid / wall disabled
-
-        def _clamp(name, default, lo, hi):
-            try:
-                return max(lo, min(hi, int(request.args.get(name, default))))
-            except (TypeError, ValueError):
-                return default
-
-        width = _clamp("maxwidth", 600, 200, 1200)
-        height = _clamp("maxheight", 800, 200, 2000)
-        embed_url = url_for("public_wall_embed", token=token, _external=True)
-        html = (
-            f'<iframe src="{_h(embed_url)}" width="{width}" height="{height}" '
-            'style="border:0;max-width:100%" loading="lazy" '
-            'title="MediaHub achievements wall"></iframe>'
-        )
-        return jsonify(
-            {
-                "version": "1.0",
-                "type": "rich",
-                "provider_name": "MediaHub",
-                "provider_url": request.host_url.rstrip("/"),
-                "title": f"{prof.display_name} — achievements",
-                "html": html,
-                "width": width,
-                "height": height,
-                "cache_age": 300,
-            }
-        )
-
     @app.route("/wall/<token>/feed.json")
     def public_wall_json(token: str):
         from mediahub.web import public_wall as _pw
@@ -52453,18 +49370,6 @@ voice, and queues them for one-click approval.</p>
     # ------------------------------------------------------------------
     # Motion-graphic + short-form video output (Remotion)
     # ------------------------------------------------------------------
-
-    _FORMAT_CATEGORY_LABELS = {
-        "social_size": "Social sizes",
-        "carousel": "Carousel",
-        "poster": "Posters & flyers",
-        "certificate": "Certificates",
-        "card": "Cards",
-        "document": "Documents",
-        "calendar": "Calendars",
-        "wallpaper": "Wallpapers",
-        "custom": "Custom",
-    }
 
     @app.route("/api/formats")
     def api_formats():
@@ -53653,18 +50558,6 @@ voice, and queues them for one-click approval.</p>
         _brief_dir, payload = resolved
         return jsonify(payload)
 
-    _VALID_FORMAT_NAMES = {
-        "feed_portrait",
-        "feed_square",
-        "feed_landscape",
-        "story_portrait",
-        "story_square",
-        "twitter_landscape",
-        "twitter_square",
-        "print_a4",
-        "print_letter",
-    }
-
     @app.route("/api/visual/<vid>/png/<format_name>")
     def api_visual_png(vid: str, format_name: str):
         if format_name not in _VALID_FORMAT_NAMES:
@@ -53940,12 +50833,9 @@ voice, and queues them for one-click approval.</p>
 
     # ---- 1.13: Data hub + bulk generation --------------------------------
 
-    _DH_IMPORT_EXTS = {".csv", ".xlsx", ".tsv"}
-    _DH_MAX_UPLOAD = 12 * 1024 * 1024  # 12 MB — plenty for a club spreadsheet
     # Row cap on spreadsheet imports: each row is persisted individually, so an
     # uncapped 12 MB CSV (10^5+ rows) would turn the import into a multi-minute
     # synchronous request. 20k rows is far beyond any club spreadsheet.
-    _DH_MAX_IMPORT_ROWS = 20_000
 
     @app.route("/data-hub")
     def data_hub_page():
@@ -55097,13 +51987,6 @@ voice, and queues them for one-click approval.</p>
     # content. Export-first: download / copy the HTML for the club's own list
     # tool, or publish a hosted web version. No direct send (a provider adapter
     # behind the publish gate is a later, flagged build — roadmap-explicit).
-
-    _NL_RANGES = (
-        ("this_month", "This month"),
-        ("last_month", "Last month"),
-        ("last_30", "Last 30 days"),
-        ("this_season", "This season"),
-    )
 
     @app.route("/newsletters")
     def newsletters_home():
