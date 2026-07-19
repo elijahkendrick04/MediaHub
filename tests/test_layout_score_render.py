@@ -216,7 +216,9 @@ def test_all_disqualified_is_byte_identical_to_off(monkeypatch, tmp_path):
 def test_scorer_switches_to_the_measured_winner(monkeypatch, tmp_path):
     # Force a two-candidate walk [A, B] and make B measurably better.
     monkeypatch.setenv("MEDIAHUB_LAYOUT_SCORE", "1")
-    monkeypatch.setattr(ls, "candidate_pack_ids", lambda brief, *a, **k: [_PACK_A, _PACK_B])
+    monkeypatch.setattr(
+        ls, "candidate_walk", lambda brief, *a, **k: ([_PACK_A, _PACK_B], {"pool": "catalog"})
+    )
     monkeypatch.setattr(R, "measure_html_geometry", lambda htmls, size, **kw: [_DRIFT, _CLEAN])
     html_on = _capture_html(monkeypatch, tmp_path, _brief(pack=_PACK_A))
 
@@ -230,7 +232,9 @@ def test_scorer_switches_to_the_measured_winner(monkeypatch, tmp_path):
 
 def test_scorer_keeps_current_when_it_is_the_best(monkeypatch, tmp_path):
     monkeypatch.setenv("MEDIAHUB_LAYOUT_SCORE", "1")
-    monkeypatch.setattr(ls, "candidate_pack_ids", lambda brief, *a, **k: [_PACK_A, _PACK_B])
+    monkeypatch.setattr(
+        ls, "candidate_walk", lambda brief, *a, **k: ([_PACK_A, _PACK_B], {"pool": "catalog"})
+    )
     # A is clean, B drifts → keep A (the director's pack).
     monkeypatch.setattr(R, "measure_html_geometry", lambda htmls, size, **kw: [_CLEAN, _DRIFT])
     html_on = _capture_html(monkeypatch, tmp_path, _brief(pack=_PACK_A))
@@ -263,7 +267,9 @@ def test_winner_is_persisted_onto_the_callers_brief(monkeypatch, tmp_path):
     # brief.style_pack for its pack overlay / ground / density register) on the
     # pack the still actually shipped.
     monkeypatch.setenv("MEDIAHUB_LAYOUT_SCORE", "1")
-    monkeypatch.setattr(ls, "candidate_pack_ids", lambda brief, *a, **k: [_PACK_A, _PACK_B])
+    monkeypatch.setattr(
+        ls, "candidate_walk", lambda brief, *a, **k: ([_PACK_A, _PACK_B], {"pool": "catalog"})
+    )
     monkeypatch.setattr(R, "measure_html_geometry", lambda htmls, size, **kw: [_DRIFT, _CLEAN])
     b = _brief(pack=_PACK_A)
     _capture_html(monkeypatch, tmp_path, b)
@@ -280,7 +286,9 @@ def test_second_render_reuses_the_decision(monkeypatch, tmp_path):
     # the SAME brief (another format of the card) must reuse the stored record
     # rather than re-measuring — so all cuts of a card agree by construction.
     monkeypatch.setenv("MEDIAHUB_LAYOUT_SCORE", "1")
-    monkeypatch.setattr(ls, "candidate_pack_ids", lambda brief, *a, **k: [_PACK_A, _PACK_B])
+    monkeypatch.setattr(
+        ls, "candidate_walk", lambda brief, *a, **k: ([_PACK_A, _PACK_B], {"pool": "catalog"})
+    )
     calls = {"n": 0}
 
     def _measure_once(htmls, size, **kw):
@@ -312,7 +320,9 @@ def test_decision_is_made_at_canonical_geometry(monkeypatch, tmp_path):
     # Whatever cut is being rendered, candidates are measured at the v2
     # certification anchor — so every format computes the identical winner.
     monkeypatch.setenv("MEDIAHUB_LAYOUT_SCORE", "1")
-    monkeypatch.setattr(ls, "candidate_pack_ids", lambda brief, *a, **k: [_PACK_A, _PACK_B])
+    monkeypatch.setattr(
+        ls, "candidate_walk", lambda brief, *a, **k: ([_PACK_A, _PACK_B], {"pool": "catalog"})
+    )
     seen = {}
 
     def _measure(htmls, size, **kw):
@@ -340,7 +350,9 @@ def test_swap_onto_a_mesh_pack_resyncs_background(monkeypatch, tmp_path):
     # engine paints (or stops painting) coherently with the winning pack.
     mesh_pack = "gradient_mesh-none-none-standard"
     monkeypatch.setenv("MEDIAHUB_LAYOUT_SCORE", "1")
-    monkeypatch.setattr(ls, "candidate_pack_ids", lambda brief, *a, **k: [_PACK_A, mesh_pack])
+    monkeypatch.setattr(
+        ls, "candidate_walk", lambda brief, *a, **k: ([_PACK_A, mesh_pack], {"pool": "catalog"})
+    )
     monkeypatch.setattr(R, "measure_html_geometry", lambda htmls, size, **kw: [_DRIFT, _CLEAN])
     b = _brief(pack=_PACK_A)
     b.background_style = "water"
@@ -353,7 +365,9 @@ def test_switch_lands_in_safety_notes(monkeypatch, tmp_path):
     # Always-on explainability: a pack switch must be visible on the visual's
     # safety-notes trail even with the opt-in G1.30 sidecar off.
     monkeypatch.setenv("MEDIAHUB_LAYOUT_SCORE", "1")
-    monkeypatch.setattr(ls, "candidate_pack_ids", lambda brief, *a, **k: [_PACK_A, _PACK_B])
+    monkeypatch.setattr(
+        ls, "candidate_walk", lambda brief, *a, **k: ([_PACK_A, _PACK_B], {"pool": "catalog"})
+    )
     monkeypatch.setattr(R, "measure_html_geometry", lambda htmls, size, **kw: [_DRIFT, _CLEAN])
 
     def _fake_png(html, output_path, size):  # noqa: ARG001
@@ -382,8 +396,14 @@ def _chromium_ok() -> bool:
 @pytest.mark.skipif(not _chromium_ok(), reason="chromium unavailable")
 def test_end_to_end_render_is_deterministic_and_collision_free(monkeypatch, tmp_path):
     monkeypatch.setenv("MEDIAHUB_LAYOUT_SCORE", "1")
-    # Keep the pool out of the picture so each render is a clean one-shot.
+    # Keep the pool out of the picture so each render is a clean one-shot, and
+    # kill the render/geometry caches so the second render genuinely re-measures
+    # and re-screenshots — a cache-served copy would make the determinism
+    # assertions tautological. DATA_DIR is pinned inside tmp_path so residual
+    # cache traffic can't touch the repo tree.
     monkeypatch.setenv("MEDIAHUB_RENDER_POOL", "0")
+    monkeypatch.setenv("MEDIAHUB_RENDER_CACHE", "0")
+    monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))
 
     out1 = tmp_path / "r1"
     out2 = tmp_path / "r2"
@@ -394,13 +414,251 @@ def test_end_to_end_render_is_deterministic_and_collision_free(monkeypatch, tmp_
     p2 = out2 / "feed_portrait.png"
     assert p1.exists() and p1.stat().st_size > 1000
     # Deterministic: the same brief scores the same winner → identical HTML and
-    # identical bytes on disk.
+    # identical bytes on disk — from two INDEPENDENT measure+render passes.
     assert res1.html == res2.html, "F6 winner is non-deterministic"
     assert p1.read_bytes() == p2.read_bytes(), "F6 render is non-deterministic"
 
     # The shipped card must be collision-free: re-measure the winner's own HTML
     # (res.html is the fully-composed winning markup) and assert the hard gate
-    # passes.
+    # passes on a real, non-empty measurement.
     geom = R.measure_html_geometry([res1.html], (1080, 1350), output_dir=tmp_path)
     assert geom and geom[0] is not None
+    assert geom[0]["W"] == 1080 and geom[0]["H"] == 1350
+    words = [b for b in geom[0]["boxes"] if ls._is_word(b)]
+    assert len(words) >= 3, f"suspiciously few words measured: {geom[0]['boxes'][:5]}"
     assert ls.score_geometry(geom[0], archetype=_V2_ARCHETYPE)["disqualified"] is False
+
+
+@pytest.mark.skipif(not _chromium_ok(), reason="chromium unavailable")
+def test_measure_js_classification_contract(monkeypatch, tmp_path):
+    """MEASURE_JS against real composed markup: text boxes found, a real photo
+    well classified as 'photo', and a decorated pack's texture tile NOT
+    classified as a photo (the free-saliency corruption this guards against)."""
+    monkeypatch.setenv("MEDIAHUB_RENDER_CACHE", "0")
+    monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))
+
+    # A tiny real photo so the archetype composes an actual photo well.
+    from PIL import Image
+
+    photo = tmp_path / "athlete.png"
+    Image.new("RGB", (320, 400), (30, 90, 160)).save(photo)
+
+    b = _brief(pack="flat-halftone-none-standard")  # a textured (url-tile) pack
+    html = R.render_brief(
+        b,
+        output_dir=tmp_path,
+        size=ls.DECISION_SIZE,
+        bg_photo_path=photo,
+        _html_only=True,
+    )
+    geoms = R.measure_html_geometry([html], ls.DECISION_SIZE, output_dir=tmp_path)
+    assert geoms and geoms[0] is not None
+    boxes = geoms[0]["boxes"]
+    texts = [x for x in boxes if x["kind"] == "text"]
+    photos = [x for x in boxes if x["kind"] == "photo"]
+    assert len(texts) >= 3, "real card text must be classified as text"
+    # Every classified photo must be a genuine cover well, not a texture tile:
+    # the halftone texture div spans the full canvas with a url() tile — if it
+    # were (mis)classified as a photo, a full-canvas centre-focus photo would
+    # appear here alongside the real one.
+    assert len(photos) <= 2, f"texture tile leaked into photo classification: {photos}"
+
+
+def test_switch_note_carries_the_margin(monkeypatch, tmp_path):
+    # The always-on note must justify the swap by itself: measured margin for a
+    # scored incumbent, the rejection reason for a disqualified one.
+    monkeypatch.setenv("MEDIAHUB_LAYOUT_SCORE", "1")
+    monkeypatch.setattr(
+        ls, "candidate_walk", lambda brief, *a, **k: ([_PACK_A, _PACK_B], {"pool": "catalog"})
+    )
+
+    def _fake_png(html, output_path, size):  # noqa: ARG001
+        Path(output_path).write_bytes(b"\x89PNG\r\n\x1a\n")
+        return 8
+
+    monkeypatch.setattr(R, "render_html_to_png", _fake_png)
+
+    # Case 1: incumbent scored but beaten → note carries "score X vs Y".
+    monkeypatch.setattr(R, "measure_html_geometry", lambda htmls, size, **kw: [_DRIFT, _CLEAN])
+    res = R.render_brief(_brief(pack=_PACK_A), output_dir=tmp_path / "a", size=(1080, 1350))
+    notes = [n for n in (res.visual.safety_notes or []) if "layout scorer switched" in n]
+    assert notes and " vs " in notes[0], notes
+
+    # Case 2: incumbent disqualified → note carries the rejection reason.
+    collide = {
+        "W": 1080,
+        "H": 1350,
+        "boxes": [
+            dict(_CLEAN["boxes"][0]),
+            {**dict(_CLEAN["boxes"][0]), "x": _CLEAN["boxes"][0]["x"] + 5},
+        ],
+    }
+    monkeypatch.setattr(R, "measure_html_geometry", lambda htmls, size, **kw: [collide, _CLEAN])
+    res2 = R.render_brief(_brief(pack=_PACK_A), output_dir=tmp_path / "b", size=(1080, 1350))
+    notes2 = [n for n in (res2.visual.safety_notes or []) if "layout scorer switched" in n]
+    assert notes2 and "rejected" in notes2[0], notes2
+
+
+def test_skip_reason_is_recorded_when_measurement_unavailable(monkeypatch, tmp_path):
+    # An enabled-but-degraded scorer must be distinguishable from never-enabled:
+    # the sidecar record says why, while the brief stays unmarked so a later
+    # format retries.
+    monkeypatch.setenv("MEDIAHUB_LAYOUT_SCORE", "1")
+    monkeypatch.setenv("MEDIAHUB_INSPECT_OVERLAY", "1")
+    monkeypatch.setattr(R, "measure_html_geometry", lambda htmls, size, **kw: None)
+    b = _brief()
+    _capture_html(monkeypatch, tmp_path, b)
+    import json as _json
+
+    sidecar = _json.loads((tmp_path / "feed_portrait.json").read_text())
+    score = sidecar["layout"]["score"]
+    assert score.get("skipped") is True
+    assert "measure unavailable" in score.get("reason", "")
+    assert not getattr(b, "_layout_scored", False), "a skip must not mark the brief decided"
+
+
+def test_sidecar_carries_the_decision_record_across_formats(monkeypatch, tmp_path):
+    # The G1.30 sidecar must answer "why this pack" on EVERY cut — including a
+    # later format that reused the stored per-card decision.
+    import json as _json
+
+    monkeypatch.setenv("MEDIAHUB_LAYOUT_SCORE", "1")
+    monkeypatch.setenv("MEDIAHUB_INSPECT_OVERLAY", "1")
+    monkeypatch.setattr(
+        ls, "candidate_walk", lambda brief, *a, **k: ([_PACK_A, _PACK_B], {"pool": "catalog"})
+    )
+    monkeypatch.setattr(R, "measure_html_geometry", lambda htmls, size, **kw: [_DRIFT, _CLEAN])
+
+    def _fake_png(html, output_path, size):  # noqa: ARG001
+        Path(output_path).write_bytes(b"\x89PNG\r\n\x1a\n")
+        return 8
+
+    monkeypatch.setattr(R, "render_html_to_png", _fake_png)
+    b = _brief(pack=_PACK_A)
+    R.render_brief(b, output_dir=tmp_path, size=(1080, 1350))
+    score = _json.loads((tmp_path / "feed_portrait.json").read_text())["layout"]["score"]
+    assert score["winner"] == _PACK_B and score["changed"] is True
+    assert score["decided_at"].startswith("feed_portrait@")
+    assert score["walk"]["pool"] == "catalog"
+    assert set(score["candidates"][0]["terms"]) == set(ls._WEIGHTS)
+
+    # Second cut: measurement forbidden (already decided) — the stored record
+    # must still reach this format's sidecar.
+    def _boom(*a, **k):  # pragma: no cover
+        raise AssertionError("re-measured an already-decided brief")
+
+    monkeypatch.setattr(R, "measure_html_geometry", _boom)
+    R.render_brief(b, output_dir=tmp_path, size=(1080, 1920), format_name="story")
+    score2 = _json.loads((tmp_path / "story.json").read_text())["layout"]["score"]
+    assert score2["winner"] == _PACK_B and score2["changed"] is True
+
+
+def test_persisted_brief_and_motion_mirror_carry_the_winner(monkeypatch, tmp_path):
+    """C1 regression — the full pipeline: create_visual_for_item persists the
+    brief JSON BEFORE rendering; after an F6 switch it must be re-persisted so
+    the motion route (which mirrors exactly that JSON) decorates with the pack
+    the approved still actually shipped."""
+    import json as _json
+
+    from mediahub.content_pack_visual import integration as I
+
+    monkeypatch.setenv("MEDIAHUB_LAYOUT_SCORE", "1")
+    monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setattr(
+        ls, "candidate_walk", lambda brief, *a, **k: ([_PACK_A, _PACK_B], {"pool": "catalog"})
+    )
+    monkeypatch.setattr(R, "measure_html_geometry", lambda htmls, size, **kw: [_DRIFT, _CLEAN])
+
+    def _fake_png(html, output_path, size):  # noqa: ARG001
+        Path(output_path).write_bytes(b"\x89PNG\r\n\x1a\n")
+        return 8
+
+    monkeypatch.setattr(R, "render_html_to_png", _fake_png)
+
+    item = {
+        "id": "ci-f6",
+        "post_angle": "individual_pb",
+        "achievement": {
+            "swimmer_name": "Mia Cox",
+            "event_name": "200m Individual Medley",
+            "result_time": "2:18.07",
+            "raw_facts": {"drop_seconds": 2.4},
+        },
+    }
+    run_id = "run_f6"
+    res = I.create_visual_for_item(
+        item,
+        run_id=run_id,
+        brand_kit=_brand(),
+        profile_id="f6",
+        formats=["feed_portrait"],
+    )
+    assert res.get("visuals"), res.get("errors")
+
+    brief_dict = res["brief"]
+    # The returned dict must carry the shipped (post-switch) pack…
+    bid = brief_dict["id"]
+    stored = _json.loads((I.briefs_dir_for_run(run_id) / f"{bid}.json").read_text())
+    # …and the persisted JSON the motion route mirrors must agree with it.
+    assert stored["style_pack"] == brief_dict["style_pack"]
+    # If a switch happened this render, both must be the winner.
+    if brief_dict["style_pack"] != _PACK_A:
+        from mediahub.visual import motion
+
+        card = {"id": "ci-f6", "achievement": item["achievement"]}
+        props = motion._card_to_props(card, brief=stored, brand_kit=_brand())
+        assert props["stylePack"] == brief_dict["style_pack"]
+
+
+def test_studio_brief_is_never_overridden(monkeypatch):
+    # C21 — the studio pack is an explicit HUMAN pick; the brief must arrive
+    # pre-marked as decided so the F6 gate (render.py) can never swap it.
+    from mediahub.web import design_editor as DE
+
+    params = DE.coerce_params({})
+    b = DE.build_brief_from_params(params)
+    assert getattr(b, "_layout_scored", False) is True
+
+
+# --------------------------------------------------------------------------- #
+# Opt-in sweep: the scorer stays live + deterministic on EVERY archetype
+# --------------------------------------------------------------------------- #
+
+
+def _score_lint_enabled() -> bool:
+    import os
+
+    return os.environ.get("MEDIAHUB_LAYOUT_SCORE_LINT", "").strip().lower() in ("1", "true", "on")
+
+
+@pytest.mark.skipif(
+    not _chromium_ok() or not _score_lint_enabled(),
+    reason="opt-in slow layout-score sweep (set MEDIAHUB_LAYOUT_SCORE_LINT=1 with chromium)",
+)
+@pytest.mark.parametrize("name", archetypes.list_archetypes())
+def test_scorer_liveness_per_archetype(name, monkeypatch, tmp_path):
+    """Per-archetype liveness: with the flag on, the scorer must actually
+    decide (no silent except-swallow) and never disqualify its own winner."""
+    monkeypatch.setenv("MEDIAHUB_LAYOUT_SCORE", "1")
+    monkeypatch.setenv("MEDIAHUB_RENDER_CACHE", "0")
+    monkeypatch.setenv("MEDIAHUB_RENDER_POOL", "0")
+    monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))
+
+    def _fake_png(html, output_path, size):  # noqa: ARG001
+        Path(output_path).write_bytes(b"\x89PNG\r\n\x1a\n")
+        return 8
+
+    monkeypatch.setattr(R, "render_html_to_png", _fake_png)
+    b = _brief()
+    b.layout_template = name
+    R.render_brief(b, output_dir=tmp_path, size=(1080, 1350))
+    assert getattr(b, "_layout_scored", False) is True, f"{name}: scorer never decided"
+    rec = b.layout_score
+    assert rec.get("candidates"), f"{name}: no candidates scored"
+    winner = next(c for c in rec["candidates"] if c["pack"] == rec["winner"])
+    if not rec.get("changed"):
+        # Keeping the incumbent is fine even if disqualified (degrade rule);
+        # but a SWITCHED-TO winner must never itself be disqualified.
+        pass
+    else:
+        assert not winner.get("disqualified"), f"{name}: switched to a rejected pack"

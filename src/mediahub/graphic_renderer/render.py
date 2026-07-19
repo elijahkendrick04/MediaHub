@@ -3576,6 +3576,53 @@ class _RenderWorker(threading.Thread):
                 return _render_on_context(ctx, html, output_path, size, dpr)
             raise
 
+    def _measure_once(self, html: str, size: tuple[int, int]) -> dict:
+        """One F6 geometry sweep on this worker's warm browser (no screenshot).
+
+        Never touches ``_render_on_context`` or the PNG cache — F6's
+        pixel-isolation invariant holds. dpr=1: box geometry is CSS-pixel.
+        """
+        from mediahub.graphic_renderer.layout_score import MEASURE_JS
+
+        ctx = self._context_for(size, 1)
+        page_path = _render_cache.geom_cache_dir() / (
+            f"_f6cand.{os.getpid()}-{uuid.uuid4().hex[:8]}.render.html"
+        )
+        page = ctx.new_page()
+        try:
+            page_path.write_text(html, encoding="utf-8")
+            page.goto(page_path.as_uri(), wait_until="load", timeout=30_000)
+            try:
+                page.evaluate(
+                    "() => (document.fonts && document.fonts.ready) "
+                    "? document.fonts.ready.then(() => true) : true"
+                )
+            except Exception:
+                try:
+                    page.wait_for_timeout(200)
+                except Exception:
+                    pass
+            return page.evaluate(MEASURE_JS)
+        finally:
+            try:
+                page.close()
+            except Exception:
+                pass
+            try:
+                page_path.unlink()
+            except OSError:
+                pass
+
+    def _measure(self, html: str, size: tuple[int, int]) -> dict:
+        try:
+            return self._measure_once(html, size)
+        except Exception as exc:
+            if _is_closed_error(exc):
+                log.warning("render pool: browser closed mid-measure, recreating (%s)", exc)
+                self._recreate_browser()
+                return self._measure_once(html, size)
+            raise
+
     # -- thread body -------------------------------------------------------
     def run(self) -> None:
         try:
@@ -3603,13 +3650,25 @@ class _RenderWorker(threading.Thread):
                 try:
                     if task is _POOL_SHUTDOWN:
                         return
-                    html, output_path, size, dpr, fut = task
-                    if not fut.set_running_or_notify_cancel():
-                        continue
-                    try:
-                        fut.set_result(self._render(html, output_path, size, dpr))
-                    except Exception as exc:
-                        fut.set_exception(exc)
+                    # Kind-tagged tasks: ("render", html, output_path, size,
+                    # dpr, fut) screenshots via the shared render core;
+                    # ("measure", html, size, fut) runs the F6 geometry sweep.
+                    if task[0] == "measure":
+                        _kind, html, size, fut = task
+                        if not fut.set_running_or_notify_cancel():
+                            continue
+                        try:
+                            fut.set_result(self._measure(html, size))
+                        except Exception as exc:
+                            fut.set_exception(exc)
+                    else:
+                        _kind, html, output_path, size, dpr, fut = task
+                        if not fut.set_running_or_notify_cancel():
+                            continue
+                        try:
+                            fut.set_result(self._render(html, output_path, size, dpr))
+                        except Exception as exc:
+                            fut.set_exception(exc)
                 finally:
                     self._q.task_done()
         finally:
@@ -3642,11 +3701,7 @@ class _RenderPool:
         for w in self._workers:
             w.start()
 
-    def submit(self, html: str, output_path: Path, size: tuple[int, int], dpr: int) -> int:
-        if self._broken.is_set():
-            raise _PoolUnavailable("render pool has no live browser")
-        fut: "Future[int]" = Future()
-        self._q.put((html, output_path, size, dpr, fut))
+    def _await(self, fut: "Future") -> Any:
         # Poll the future rather than block forever: if a worker fails to stand
         # up its browser AFTER we queued (so ``_broken`` flips under us), wake
         # within the poll interval and bail to a one-shot launch instead of
@@ -3668,6 +3723,30 @@ class _RenderPool:
                     raise _PoolUnavailable(
                         f"render pool timed out after {_POOL_SUBMIT_TIMEOUT_S}s"
                     ) from None
+
+    def submit(self, html: str, output_path: Path, size: tuple[int, int], dpr: int) -> int:
+        if self._broken.is_set():
+            raise _PoolUnavailable("render pool has no live browser")
+        fut: "Future[int]" = Future()
+        self._q.put(("render", html, output_path, size, dpr, fut))
+        return self._await(fut)
+
+    def measure_async(self, html: str, size: tuple[int, int]) -> "Future[dict]":
+        """Enqueue one F6 geometry sweep (per-candidate task); await via
+        :meth:`await_result`.
+
+        Per-candidate — not one batched K-sweep — so each task stays inside the
+        submit-timeout envelope and the K candidates fan across the warm
+        workers concurrently.
+        """
+        if self._broken.is_set():
+            raise _PoolUnavailable("render pool has no live browser")
+        fut: "Future[dict]" = Future()
+        self._q.put(("measure", html, size, fut))
+        return fut
+
+    def await_result(self, fut: "Future") -> Any:
+        return self._await(fut)
 
     def shutdown(self) -> None:
         for _ in self._workers:
@@ -3834,7 +3913,7 @@ def measure_html_geometry(
     # geometry is CSS-pixel — DPR-independent — so the key pins dpr=1. A full
     # cache hit answers without launching a browser at all, which is the common
     # case for re-renders of an unchanged card.
-    keys = [_render_cache.png_cache_key(h, width, height, 1) for h in htmls]
+    keys = [_render_cache.geom_cache_key(h, width, height) for h in htmls]
     results: list[Optional[dict]] = [_render_cache.get_cached_geometry(k) for k in keys]
     if all(g is not None for g in results):
         return results
@@ -3844,6 +3923,32 @@ def measure_html_geometry(
     except Exception as e:  # pragma: no cover - environment-dependent
         log.debug("F6 layout scoring skipped — Playwright unavailable: %s", e)
         return None
+
+    # Prefer the warm pool: per-candidate measure tasks fan across the pool's
+    # warm browsers (no fresh Chromium launch, no extra driver process — the
+    # batch pipeline already holds a render_pool_session open). Falls through
+    # to the self-contained one-shot loop when no pool is warm or it breaks.
+    pool = _active_pool()
+    if pool is not None:
+        try:
+            pending: list[tuple[int, Any]] = []
+            for i, html in enumerate(htmls):
+                if results[i] is None:
+                    pending.append((i, pool.measure_async(html, (width, height))))
+            for i, fut in pending:
+                try:
+                    geom = pool.await_result(fut)
+                except _PoolUnavailable:
+                    raise
+                except Exception as exc:
+                    log.debug("F6 candidate measure failed (pool): %s", exc)
+                    geom = None
+                results[i] = geom
+                if geom is not None:
+                    _render_cache.store_geometry(keys[i], geom)
+            return results
+        except _PoolUnavailable as exc:
+            log.warning("F6 measure pool unavailable, falling back to one-shot: %s", exc)
 
     from mediahub.graphic_renderer.layout_score import MEASURE_JS
 
@@ -4353,9 +4458,31 @@ def _v2_photo_position(athlete_path, width: int = 1080, height: int = 1350, mask
         from mediahub.graphic_renderer.saliency import focus_position, focus_position_with_mask
 
         ratio = f"{int(width)}:{int(height)}"
+        # Memoised through the G1.24 asset cache: the saliency PIL pass is a
+        # pure function of (photo file, mask file, ratio), and one card's photo
+        # is focused repeatedly — per format cut, and K+1 times when the F6
+        # scorer composes its candidate walk. Values are tiny "x% y%" strings;
+        # the mask's identity is folded into the salt (the cache keys only one
+        # path). Any cache/memo failure falls through to the direct call.
         if mask_path and str(mask_path) != str(athlete_path):
-            return focus_position_with_mask(athlete_path, mask_path, ratio)
-        return focus_position(athlete_path, ratio)
+            try:
+                _mask = Path(mask_path)
+                _st = _mask.stat()
+                return _render_cache.asset_data_uri(
+                    athlete_path,
+                    loader=lambda p: focus_position_with_mask(p, mask_path, ratio),
+                    salt=f"focusmask:{_mask.resolve()}:{_st.st_mtime_ns}:{_st.st_size}:{ratio}",
+                )
+            except Exception:
+                return focus_position_with_mask(athlete_path, mask_path, ratio)
+        try:
+            return _render_cache.asset_data_uri(
+                athlete_path,
+                loader=lambda p: focus_position(p, ratio),
+                salt=f"focus:{ratio}",
+            )
+        except Exception:
+            return focus_position(athlete_path, ratio)
     except Exception:
         return "center 28%"
 
@@ -5809,6 +5936,26 @@ def _scrim_alpha_for_luma(luma: int, ink_hex: str, base_hex: str, floor: float) 
     return round(min(_SCRIM_MAX_ALPHA, max(floor, _SCRIM_MAX_ALPHA)), 2)
 
 
+def _photo_adjust_signature_for(brief) -> str:
+    """The stable signature of the brief's photo-adjust recipe ('none' if none).
+
+    Used as a cache-salt component wherever pixels sampled AFTER grading are
+    memoised — two different grades of one photo must never share an entry.
+    """
+    try:
+        from mediahub.graphic_renderer import photo_adjust as _photo_adjust
+
+        recipe = _photo_adjust.recipe_for(
+            explicit=getattr(brief, "photo_adjust", "") or "",
+            treatment=getattr(brief, "photo_treatment", "") or "",
+        )
+        if recipe is not None and not recipe.is_noop():
+            return recipe.signature()
+    except Exception:
+        pass
+    return "none"
+
+
 def _photo_scrim_plan(
     archetype: str,
     athlete_path,
@@ -5833,12 +5980,13 @@ def _photo_scrim_plan(
     base_hex, floor = _SCRIM_PLAN[archetype]
     if base_hex is None:
         base_hex = root_vars.get("--mh-primary") or "#0A2540"
-    try:
+
+    def _sample_luma(p) -> str:
         from PIL import Image
 
         from mediahub.graphic_renderer import photo_adjust as _photo_adjust
 
-        img = Image.open(athlete_path)
+        img = Image.open(p)
         img.load()
         if img.mode not in ("RGB", "L"):
             img = img.convert("RGB")
@@ -5851,7 +5999,25 @@ def _photo_scrim_plan(
                 img = recipe.apply(img)
         except Exception:
             pass
-        luma = _cover_bottom_band_luma(img, width, height, pos)
+        return str(_cover_bottom_band_luma(img, width, height, pos))
+
+    try:
+        # The graded full-photo decode + band sample is pack-independent and
+        # repeats per format cut (and K+1 times under the F6 candidate walk),
+        # so it is memoised through the G1.24 asset cache keyed on the photo
+        # file + the recipe/geometry that shape the sampled pixels. ``None``
+        # round-trips as the string "None". The ink gate above and the alpha
+        # search below stay outside the memo — they depend on the role vars.
+        try:
+            _recipe = _photo_adjust_signature_for(brief)
+            raw = _render_cache.asset_data_uri(
+                athlete_path,
+                loader=_sample_luma,
+                salt=f"scrimluma:{_recipe}:{int(width)}x{int(height)}:{pos}",
+            )
+        except Exception:
+            raw = _sample_luma(athlete_path)
+        luma = None if raw == "None" else int(raw)
     except Exception:
         return None
     if luma is None:
@@ -6519,8 +6685,13 @@ def render_brief(
             from mediahub.graphic_renderer import layout_score as _layout_score
 
             if _layout_score.enabled():
-                _cand_ids = _layout_score.candidate_pack_ids(brief)
-                if len(_cand_ids) > 1:
+                _cand_ids, _walk_meta = _layout_score.candidate_walk(brief)
+                if len(_cand_ids) <= 1:
+                    _layout_score_record = {
+                        "skipped": True,
+                        "reason": f"walk too small (k={len(_cand_ids)})",
+                    }
+                else:
                     _dec_w, _dec_h = _layout_score.DECISION_SIZE
 
                     def _compose_for_pack(_pid: str) -> str:
@@ -6562,13 +6733,23 @@ def render_brief(
                     _geoms = measure_html_geometry(
                         _cand_htmls, (_dec_w, _dec_h), output_dir=output_dir
                     )
-                    if _geoms is not None:
+                    if _geoms is None:
+                        # Degraded (no browser / pass failure): the director's
+                        # pack ships unchanged, but the trail must say the
+                        # scorer was asked and could not answer. Not stamped on
+                        # the brief, so a later format retries.
+                        _layout_score_record = {
+                            "skipped": True,
+                            "reason": "measure unavailable",
+                        }
+                    else:
                         _rec = _layout_score.choose(
                             list(zip(_cand_ids, _geoms)),
                             archetype=family,
                             current_id=_cand_ids[0],
                         )
                         _rec["decided_at"] = f"feed_portrait@{_dec_w}x{_dec_h}"
+                        _rec["walk"] = _walk_meta
                         # The variation_signature keeps its generation-time
                         # ``sp:<original>`` token DELIBERATELY: it seeds the F7
                         # overlap accent, and candidates were measured with that
@@ -6601,8 +6782,8 @@ def render_brief(
                         brief.layout_score = _rec
                         brief._layout_scored = True
         except Exception as exc:  # F6 is a ranking aid, never load-bearing
-            log.debug("F6 layout scoring skipped: %s", exc)
-            _layout_score_record = None
+            log.info("F6 layout scoring skipped (%s)", type(exc).__name__)
+            _layout_score_record = {"skipped": True, "reason": "error: " + type(exc).__name__}
 
     # G1.25 — server-side photo adjustment stack (deterministic PIL recipes).
     # Resolve the recipe once; ``None`` (the default) keeps the un-adjusted
@@ -7103,16 +7284,26 @@ def render_brief(
     # the pixels shipped differ from a naive render, so the trail records why.
     _safety_notes.extend(_render_floor_notes)
     # F6: a measured pack switch changed the shipped decoration — the trail
-    # records the swap (and its measured margin) even when the opt-in G1.30
-    # sidecar is off, so a reviewer can always answer "why does this card wear
-    # a different pack than the director chose?".
+    # records the swap with the incumbent's margin (or its rejection reason)
+    # even when the opt-in G1.30 sidecar is off, so a reviewer can always
+    # answer "why does this card wear a different pack than the director
+    # chose?" from the note alone.
     if _layout_score_record and _layout_score_record.get("changed"):
         try:
+            _cand0 = (_layout_score_record.get("candidates") or [{}])[0]
+            if _cand0.get("disqualified"):
+                _why = "current pack rejected: {}; winner score {}".format(
+                    _cand0.get("reason"), _layout_score_record.get("winner_total")
+                )
+            else:
+                _why = "score {} vs {}".format(
+                    _layout_score_record.get("winner_total"), _cand0.get("total")
+                )
             _safety_notes.append(
-                "layout scorer switched style pack {} -> {} (measured score {})".format(
+                "layout scorer switched style pack {} -> {} ({})".format(
                     _layout_score_record.get("current"),
                     _layout_score_record.get("winner"),
-                    _layout_score_record.get("winner_total"),
+                    _why,
                 )
             )
         except Exception:

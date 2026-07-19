@@ -177,6 +177,11 @@ class CreativeBrief:
     # over the chosen archetype — see ``graphic_renderer.style_packs``. Empty =
     # the bare pack (undecorated), so legacy/flag-off callers are byte-identical.
     style_pack: str = ""
+    # F6 — the sibling packs the generation-time picker stepped past, carried so
+    # the render-time layout-scorer walk honours the same anti-samey avoid set
+    # (a measured switch must not land on the pack the neighbouring card just
+    # wore). Empty for legacy / explicit-seed briefs; additive & default-safe.
+    recent_style_packs: list[str] = field(default_factory=list)
     # --- Gen Engine v2 Tier B (additive; default-safe for legacy callers) ---
     # The measured emphasis facts this card can honestly lead with, keyed by
     # design_spec.STAT_KEYS ("pb_delta" → "−0.42s on PB"). Only facts the
@@ -876,6 +881,9 @@ def generate(
                     or ""
                 )
                 _pack = _sp.pick_mood_pack_for_card(_mood, _pack_key or None, _recent_packs)
+                # F6 — carry the avoid set so the render-time scorer walk
+                # honours the same anti-samey contract this pick just did.
+                brief.recent_style_packs = [p.strip().lower() for p in _recent_packs if p][:8]
             brief.style_pack = _pack.id
     except Exception:
         log.debug("gen-v2 style-pack selection skipped", exc_info=True)

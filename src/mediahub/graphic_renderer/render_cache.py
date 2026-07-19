@@ -361,6 +361,35 @@ def _prune(d: Path, pattern: str = "*.png") -> None:
 # screenshot.
 
 
+_geom_js_salt_lock = threading.Lock()
+_geom_js_salt: Optional[str] = None
+
+
+def _measure_js_salt() -> str:
+    """Digest of the F6 measurement sweep source, folded into geometry keys.
+
+    The cached geometry is only valid for the sweep that produced it — a
+    classification fix (photo vs texture, glyph alpha) must invalidate every
+    stored measurement, or stale boxes would keep steering the argmax. Lazy
+    import mirrors ``_launch_args_salt``'s cycle avoidance.
+    """
+    global _geom_js_salt
+    with _geom_js_salt_lock:
+        if _geom_js_salt is None:
+            from mediahub.graphic_renderer.layout_score import MEASURE_JS
+
+            _geom_js_salt = hashlib.sha256(MEASURE_JS.encode("utf-8")).hexdigest()[:12]
+        return _geom_js_salt
+
+
+def geom_cache_key(html: str, width: int, height: int) -> str:
+    """Stable key for one candidate's measured geometry (dpr-independent)."""
+    h = hashlib.sha256()
+    h.update(png_cache_key(html, width, height, 1).encode("ascii"))
+    h.update(("|js:" + _measure_js_salt()).encode("ascii"))
+    return h.hexdigest()
+
+
 def geom_cache_dir() -> Path:
     d = _data_dir() / "render_cache" / "geom"
     d.mkdir(parents=True, exist_ok=True)
