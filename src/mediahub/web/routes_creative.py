@@ -122,6 +122,8 @@ def research_page():
   <li><strong>Hytek results (.hy3)</strong> &mdash; the file Meet Manager exports after
       a gala. This is the richest input: individual swims, splits and heats all come
       through.</li>
+  <li><strong>SDIF timing exports (.sd3 / .cl2)</strong> &mdash; the sibling of the
+      Hytek file, used by USA Swimming meets.</li>
   <li><strong>PDF result sheets</strong> &mdash; the printed-style results many meets
       publish. We read the tables and flag anything that looks unclear for your review.</li>
   <li><strong>Spreadsheets (.csv / .xls / .xlsx)</strong> &mdash; results exported from
@@ -131,7 +133,6 @@ def research_page():
 </ul>
 <h3>Coming soon</h3>
 <ul>
-  <li>SDIF / CL2 timing exports (the sibling of the Hytek file, used by USA Swimming).</li>
   <li>Direct import from more meet-management and timing platforms.</li>
 </ul>
 <p class="muted">Not sure your file will work? Upload it anyway &mdash; MediaHub tells you
@@ -920,8 +921,8 @@ def make_page():
     # "Your drafts" segment below (built above), so the old top-right
     # "Your saved drafts →" strip was retired to avoid two links to the
     # same place on one page. (The template gallery is deliberately reached
-    # from Settings — and now the ⌘K palette — not from here, so Create
-    # stays focused; see test_make_page_no_longer_links_to_gallery.)
+    # from Settings — not from here, so Create stays focused; see
+    # test_make_page_no_longer_links_to_gallery.)
     body = (
         '<section class="mh-hero" data-lane="03" style="padding-top:var(--sp-9);padding-bottom:var(--sp-7);margin-bottom:var(--sp-6)">'
         '<span class="mh-hero-eyebrow">Create</span>'

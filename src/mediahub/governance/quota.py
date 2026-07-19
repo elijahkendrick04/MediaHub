@@ -148,12 +148,25 @@ def limit_for(
     return UNLIMITED
 
 
+def _metered_here(feature: str) -> bool:
+    """Whether ``feature`` meters through the shared feature_quota ledger.
+
+    Reads :attr:`~mediahub.governance.features.FeatureSpec.metered_here` — the
+    registry, not a hard-coded feature key, decides. Unknown keys default to
+    True so an unregistered feature is still counted rather than silently
+    dropped.
+    """
+    spec = features.spec_for(feature)
+    return spec.metered_here if spec is not None else True
+
+
 def _used(org_id: str, feature: str, window_hours: Optional[int]) -> int:
     if not org_id:
         return 0
     feat = features.normalise(feature)
-    # Generative imagery is metered in its own dedicated ledger.
-    if feat == features.FEATURE_IMAGINE:
+    # Features that don't meter here keep a dedicated ledger — today that is
+    # only generative imagery (imagine_usage).
+    if not _metered_here(feat):
         try:
             from ..observability import imagine_usage
 
@@ -248,7 +261,7 @@ def record(
     if not org_id:
         return
     feat = features.normalise(feature)
-    if feat == features.FEATURE_IMAGINE:
+    if not _metered_here(feat):
         return
     feature_quota.record_use(
         org_id=org_id,
@@ -285,9 +298,9 @@ def reserve(
     if not org_id:
         return None
     feat = features.normalise(feature)
-    # Generative imagery is metered in its own ledger (imagine_usage); its own
-    # reservation path is out of scope for #95's governance-quota fix.
-    if feat == features.FEATURE_IMAGINE:
+    # A feature metered in its own ledger (generative imagery) has no shared
+    # slot to reserve; imagine's reservation path is out of scope for #95.
+    if not _metered_here(feat):
         return None
     pl = _norm_plan(plan)
     limit = limit_for(pl, feat, org_override=org_override)
@@ -334,7 +347,7 @@ def finalize(
     if reservation is None:
         record(org_id, feature, ok=ok, provider=provider, model=model, detail=detail, error=error)
         return
-    if feat == features.FEATURE_IMAGINE:
+    if not _metered_here(feat):
         return
     feature_quota.finalize_use(
         reservation,

@@ -714,11 +714,22 @@ def api_brand_kit_update(kit_id):
             "by_type": by_type_raw,
         }
     )
+    # F2 follow-up: the edit form's checkbox-gated pickers mean an unticked
+    # slot posts nothing, so unticking EVERY set slot posts zero colour
+    # fields. The form's palette_submitted sentinel distinguishes that
+    # deliberate clear-all (honour the empty palette) from a POST that never
+    # carried palette fields at all (hand-crafted/legacy — keep the old
+    # "empty means untouched" fallback so it can't wipe a palette by accident).
+    submitted_pal = W._form_palette()
+    if request.form.get("palette_submitted"):
+        palette = submitted_pal
+    else:
+        palette = submitted_pal or existing.palette
     raw = existing.to_dict()
     raw.update(
         {
             "name": (request.form.get("name") or existing.name).strip(),
-            "palette": W._form_palette() or existing.palette,
+            "palette": palette,
             "font_pairing": (request.form.get("font_pairing") or "").strip(),
             "tone": (request.form.get("tone") or "").strip(),
             "locks": locks,
@@ -732,7 +743,6 @@ def api_brand_kit_update(kit_id):
     # blanket "Saved kit". With colour pickers + dropdowns this is normally
     # empty, but a palette-file import or a hand-crafted POST can still carry
     # an unreadable value, and the user deserves to know it didn't stick.
-    submitted_pal = W._form_palette()
     dropped = [
         slot for slot, val in submitted_pal.items() if val and slot not in (kit.palette or {})
     ]

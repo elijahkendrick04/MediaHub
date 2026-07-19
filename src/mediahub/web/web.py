@@ -3393,6 +3393,10 @@ def _persist_run(run: PipelineRunV4, file_name: str) -> None:
         "self_check": run.self_check,
         "standards_meta": run.standards_meta,
         "cards": [c.to_dict() for c in run.cards],
+        # ADR-0032 provenance: which ranking authority ordered run.cards
+        # ("v5" / "v3-legacy" / "none"). Persisted so the audit trail survives
+        # the run — without it the marker only ever existed in memory.
+        "cards_order_source": getattr(run, "cards_order_source", "none") or "none",
         "trust": run.trust.to_dict() if run.trust else None,
         "ground_truth_report": run.ground_truth_report,
         "recognition_report": run.recognition_report,
@@ -21424,7 +21428,7 @@ def _render_api_docs_body() -> str:
         "<code>cards:approve</code>, <code>content:export</code>, and so on &mdash; so an "
         "integration gets exactly the access you grant it. Mint and revoke tokens on the "
         f'<a href="{url_for("organisation_api_tokens_page")}">API tokens</a> page; the full '
-        'machine-readable contract is the <a href="/api/v1/openapi.json">OpenAPI spec</a>. '
+        f'machine-readable contract is the <a href="{url_for("api_v1.openapi_spec")}">OpenAPI spec</a>. '
         "Approving a card over the API counts as the human-publish signal and runs the same "
         "consent and brand checks as the app &mdash; MediaHub never posts to a social account.</p>"
         "<p><strong>Legacy session endpoints.</strong> The original <code>/api/&hellip;</code> "
@@ -24961,6 +24965,12 @@ def _brand_kit_card_html(prof, kit, default_id: str, can_admin: bool = True) -> 
         f'<form method="post" action="{url_for("api_brand_kit_update", kit_id=kit.kit_id)}" '
         'style="display:flex;flex-direction:column;gap:8px;margin-top:10px">'
         f'<input class="mh-input" name="name" value="{_h(kit.name)}" placeholder="Kit name" required />'
+        # Sentinel: disabled pickers are not submitted, so an all-slots-unticked
+        # save posts ZERO colour fields — indistinguishable from a POST that
+        # never carried the palette at all. This marker tells the update route
+        # the palette section WAS on the form, so an empty submission honestly
+        # clears every slot instead of silently keeping the old palette.
+        '<input type="hidden" name="palette_submitted" value="1"/>'
         '<div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">'
         + palette_pickers
         + "</div>"

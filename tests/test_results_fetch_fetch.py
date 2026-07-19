@@ -70,14 +70,17 @@ class FakePool:
         self.closed = True
 
 
-def _install_pinned(monkeypatch, handler):
+def _install_pinned(monkeypatch, handler, seen_accepts=None):
     """Patch ``fetch._pinned_open`` — StaticBackend now pins every hop to the
     SSRF-validated IP via ``safe_fetch._pinned_open`` (one resolution, used for
     the connection too), instead of a validate-then-reconnect. ``handler(url)``
     returns a ``FakePinnedResponse`` or raises ``ValueError`` to model a hop the
-    SSRF guard refuses (unresolvable / internal IP / non-http(s) scheme)."""
+    SSRF guard refuses (unresolvable / internal IP / non-http(s) scheme).
+    ``seen_accepts`` (a list) records the ``accept`` kwarg passed per hop."""
 
-    def fake_open(url, *, timeout):
+    def fake_open(url, *, timeout, accept=None):
+        if seen_accepts is not None:
+            seen_accepts.append(accept)
         return handler(url), FakePool()
 
     monkeypatch.setattr(fetchmod, "_pinned_open", fake_open)
@@ -248,6 +251,38 @@ def test_static_enforces_byte_cap(monkeypatch):
 def test_static_non_200_returns_none(monkeypatch):
     _install_pinned(monkeypatch, lambda url: FakePinnedResponse(404, {}, b"nope"))
     assert StaticBackend().fetch("https://x.example/missing") is None
+
+
+def test_static_advertises_document_accept_on_every_hop(monkeypatch):
+    """Tier A's job includes downloading PDFs/CSVs/ZIPs for the interpreter, so
+    every pinned hop must advertise the allowlist's document types (plus a
+    low-q wildcard covering the spreadsheet/image entries). The hardened
+    door's default Accept is HTML-centric — sending it here would let a
+    strictly content-negotiating server 406 (or negotiate to HTML) a results
+    file that previously fetched fine."""
+    seen: list = []
+
+    def handler(url):
+        if url.endswith("/start"):
+            return FakePinnedResponse(302, location="https://x.example/results.pdf")
+        return FakePinnedResponse(
+            200, {"Content-Type": "application/pdf"}, b"%PDF-1.7\n" + b"x" * 64
+        )
+
+    _install_pinned(monkeypatch, handler, seen_accepts=seen)
+    page = StaticBackend().fetch("https://x.example/start")
+    assert page is not None and page.content_type == "application/pdf"
+    assert len(seen) == 2  # redirect hop AND final hop both carried it
+    for accept in seen:
+        assert accept == fetchmod._RESULTS_ACCEPT
+        for token in (
+            "application/pdf",
+            "application/json",
+            "text/csv",
+            "application/zip",
+            "*/*",
+        ):
+            assert token in accept
 
 
 # ---------------------------------------------------------------------------

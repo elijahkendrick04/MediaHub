@@ -6,7 +6,7 @@ through every signature would be invasive and easy to get wrong. Instead the web
 layer binds the active org + plan into a :class:`contextvars.ContextVar` once per
 request (``set_request_context``), and the governance guard reads it.
 
-:func:`feature_scope` is the one wrapper a surface (or its route) uses:
+:func:`feature_scope` is the packaged guard for wiring a surface:
 
     with governance.feature_scope(features.FEATURE_CAPTION) as scope:
         scope.provider = "gemini"      # optional annotation
@@ -18,6 +18,13 @@ one usage row (ok on success, failure recorded but not charged to quota). When
 no org is bound (e.g. the operator, or a background job), it is a transparent
 no-op that still runs the body — governance never blocks unattributed internal
 work, it just doesn't meter it.
+
+Honest adoption status: the routes metered so far (captions, translation)
+interleave the role/permission gate with route-specific error bodies, so they
+call :func:`~mediahub.governance.quota.reserve` /
+:func:`~mediahub.governance.quota.finalize` directly rather than this wrapper.
+``feature_scope`` is the one-liner for wiring the remaining
+registered-but-unmetered surfaces (see the package README's honest-status note).
 
 Pure stdlib (contextvars) — no Flask import — so the package stays importable and
 testable standalone.

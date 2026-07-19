@@ -304,6 +304,16 @@ def _canonical_result_identity(r: RaceResult) -> tuple:
     and the round / A-B-final label that genuinely separate a heat from a final
     of the same event. It deliberately EXCLUDES age_band and place — the two
     fields the age-band reprint mutates — so one swim is never queued twice.
+
+    Known limitation (deliberate): when the reprints carry different
+    band-relative places (3rd in "10-13", 1st in "13 Year Olds"), the FIRST
+    printing in document order survives, so the kept ``(age_band, place)``
+    pair is print-order dependent and a later band's award place is dropped.
+    No tiebreak (min place / narrowest band) is applied because which band's
+    place is award-bearing depends on the meet's award structure, which the
+    file does not state — either choice under-reports a real award in some
+    meet shapes. The survivor is always one coherent printed pair, never a
+    stitched hybrid.
     """
     extra = r.extra or {}
     return (

@@ -102,3 +102,26 @@ def test_operator_dashboard_shows_per_org_usage(app_with_org, monkeypatch):
     html = resp.get_data(as_text=True)
     assert "AI governance" in html
     assert ORG in html and "club-y" in html
+
+
+def test_operator_dashboard_lists_imagine_only_org(app_with_org):
+    """An org whose ONLY AI usage is generative imagery (rows in the dedicated
+    imagine_uses ledger, none in feature_uses) must still appear on the
+    operator dashboard — imagery is the one feature with a real per-call cost,
+    so it must never be invisible there."""
+    from mediahub.observability import feature_quota, imagine_usage
+
+    feature_quota.record_use(org_id=ORG, feature="caption", ok=True)
+    imagine_usage.record_use(org_id="club-imagery", op="generate", ok=True)
+    imagine_usage.record_use(org_id="club-imagery", op="edit", ok=True)
+
+    from mediahub.web import auth
+
+    client = app_with_org.test_client()
+    with client.session_transaction() as sess:
+        sess[auth._DEV_SESSION_KEY] = True  # operator session
+
+    html = client.get("/healthz/governance").get_data(as_text=True)
+    assert "club-imagery" in html
+    # Both its imagine calls are counted in the row (per-feature cell + total).
+    assert html.count(">2</") >= 1

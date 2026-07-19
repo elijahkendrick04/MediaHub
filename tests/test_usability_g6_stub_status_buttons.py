@@ -111,3 +111,19 @@ def test_draft_page_serves_buttons_and_status_roundtrip(client):
     r = client.post(f"/api/drafts/{pid}/card/0/status", data={"status": "queue"})
     assert r.status_code == 200
     assert r.get_json()["status"] == "queue"
+
+
+def test_status_endpoint_rejects_non_string_json_status(client):
+    """A JSON body whose status is not a string ({"status": 123}) must get the
+    same invalid_request 400 as any other malformed status — never an
+    AttributeError 500 from calling .strip() on an int/list/dict."""
+    pack = _save_pack()
+    pid = pack["pack_id"]
+    for bad in (123, True, ["approved"], {"v": "approved"}):
+        r = client.post(f"/api/drafts/{pid}/card/0/status", json={"status": bad})
+        assert r.status_code == 400, bad
+        assert r.get_json() == {"ok": False, "error": "invalid_request"}
+    # …and the card's persisted status is untouched by the rejected posts.
+    from mediahub.club_platform.stub_pack_store import load_pack
+
+    assert load_pack(pid)["cards"][0].get("status", "queue") == "queue"

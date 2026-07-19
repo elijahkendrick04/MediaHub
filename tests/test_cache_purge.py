@@ -164,6 +164,32 @@ def test_purge_covers_newer_cache_roots(monkeypatch, tmp_path):
         assert not (tmp_path / name / "entry.bin").exists()
 
 
+def test_purge_sweeps_legacy_site_cache_root(monkeypatch, tmp_path):
+    """The removed website-builder feature (club microsites + forms) cached
+    rendered microsite assets — athlete-name-bearing HTML/PNG — under
+    ``DATA_DIR/site_cache``.
+
+    Regression: the feature removal dropped the root from ``cache_roots()``,
+    silently excluding leftover pre-removal trees from the privacy purge even
+    though the purge is the only deletion path left for that data.
+    """
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    from mediahub.privacy.cache_purge import cache_roots, purge_all_caches
+
+    labels = [label for label, _ in cache_roots()]
+    assert "site_cache" in labels
+
+    site_cache = tmp_path / "site_cache"
+    site_cache.mkdir(parents=True, exist_ok=True)
+    (site_cache / "deadbeef.png").write_bytes(b"\x89PNG\r\n\x1a\n fake snapshot")
+
+    report = purge_all_caches()
+
+    assert "site_cache" in report["sections"]
+    assert report["sections"]["site_cache"]["files_deleted"] >= 1
+    assert not site_cache.exists()
+
+
 def test_purge_clears_in_process_module_caches(monkeypatch, tmp_path):
     """A disk purge must also drop the matching in-process caches from memory,
     or the worker keeps serving them (and its RSS never falls)."""

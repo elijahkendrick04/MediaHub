@@ -22,6 +22,7 @@ Public API:
     record_use(...)                  — insert one usage row
     count_for_org(org_id, ...)       — count rows in a trailing window
     usage_for_org(org_id, ...)       — per-operation breakdown
+    counts_all_orgs(...)             — per-org totals (operator dashboard)
 """
 
 from __future__ import annotations
@@ -255,10 +256,41 @@ def usage_for_org(
     return out
 
 
+def counts_all_orgs(
+    *,
+    window_hours: int = MONTHLY_WINDOW_HOURS,
+    ok_only: bool = True,
+) -> dict[str, int]:
+    """Per-org usage counts over the trailing window — ``{org_id: count}``.
+
+    Backs the operator governance dashboard, which must list an org whose
+    ONLY AI usage is generative imagery (this ledger is separate from
+    ``feature_quota``'s ``feature_uses``, so such an org is invisible to
+    ``feature_quota.usage_all_orgs``). Counts successful operations only by
+    default, mirroring ``count_for_org``; returns ``{}`` on any read error.
+    """
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=window_hours)).isoformat()
+    sql = "SELECT org_id, COUNT(*) AS c FROM imagine_uses WHERE ts>=?"
+    if ok_only:
+        sql += " AND ok=1"
+    sql += " GROUP BY org_id"
+    try:
+        conn = _connect()
+        try:
+            rows = conn.execute(sql, (cutoff,)).fetchall()
+        finally:
+            conn.close()
+    except (sqlite3.Error, OSError) as exc:
+        log.warning("imagine_usage: counts_all_orgs failed: %s", exc)
+        return {}
+    return {str(r["org_id"]): int(r["c"]) for r in rows}
+
+
 __all__ = [
     "record_use",
     "count_for_org",
     "usage_for_org",
+    "counts_all_orgs",
     "MONTHLY_WINDOW_HOURS",
     # DB_PATH remains accessible (served lazily via __getattr__) but is no longer
     # a star-exported constant — it resolves per access now (#101).

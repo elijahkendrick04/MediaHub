@@ -146,3 +146,18 @@ def test_interpreter_path_is_unaffected_no_v3_cards():
 def test_pipeline_run_defaults_cards_order_source_none():
     run = PipelineRunV4(run_id="r", started_at="t")
     assert run.cards_order_source == "none"
+
+
+def test_persist_run_stores_cards_order_source(app, web_module):
+    """The provenance marker must survive persistence: the runs_v4 JSON payload
+    carries cards_order_source, so which authority ordered the cards ('v5' vs
+    'v3-legacy') is auditable for every persisted run — not just in memory
+    while the pipeline thread is alive (the audit-trail rule)."""
+    import json
+
+    run = PipelineRunV4(run_id="prov-1", started_at="t", finished_at="t", profile_id="club-a")
+    run.cards_order_source = "v5"
+    web_module._persist_run(run, "meet.hy3")
+
+    payload = json.loads((web_module.RUNS_DIR / "prov-1.json").read_text())
+    assert payload["cards_order_source"] == "v5"

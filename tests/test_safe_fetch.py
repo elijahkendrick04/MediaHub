@@ -134,6 +134,27 @@ def test_connection_is_pinned_to_validated_ip(monkeypatch):
     assert headers["Host"] == "example.test"
 
 
+def test_pinned_open_accept_default_and_override(monkeypatch):
+    """``_pinned_open`` sends the HTML-centric Accept by default (deep-research
+    page reads stay byte-identical), and a caller whose payloads are document
+    downloads (results-fetch Tier A) can widen it — the override must reach
+    the wire exactly as given."""
+    monkeypatch.setattr(socket, "getaddrinfo", _resolver({"example.test": "93.184.216.34"}))
+    pools = _FakePools({("93.184.216.34", "/results.pdf"): _Resp(200, b"%PDF-1.7")})
+    pools.install(monkeypatch)
+
+    r, pool = sf._pinned_open("https://example.test/results.pdf", timeout=5.0)
+    r.close()
+    pool.close()
+    assert pools.calls[0][5]["Accept"] == "text/html,application/xhtml+xml,text/plain;q=0.9"
+
+    broad = "text/html,application/pdf,text/csv,application/zip,*/*;q=0.5"
+    r, pool = sf._pinned_open("https://example.test/results.pdf", timeout=5.0, accept=broad)
+    r.close()
+    pool.close()
+    assert pools.calls[1][5]["Accept"] == broad
+
+
 def test_allows_public_ip(monkeypatch):
     monkeypatch.setattr(socket, "getaddrinfo", _resolver({"example.test": "93.184.216.34"}))
     pools = _FakePools(

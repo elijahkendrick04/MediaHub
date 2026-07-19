@@ -205,11 +205,6 @@ def _detect_stroke_match(text: str) -> tuple[Optional[str], Optional[re.Match]]:
     return None, None
 
 
-def _detect_stroke(text: str) -> Optional[str]:
-    """Detect stroke name from text."""
-    return _detect_stroke_match(text)[0]
-
-
 def _normalise_time(t: str) -> str:
     """Normalise a time string to MM:SS.ss or SS.ss format."""
     t = t.strip()

@@ -449,6 +449,58 @@ def test_edl_edit_retimes_captions_on_reorder(app):
         assert by_text["A line"] == 100  # A moved to second (offset 90 + local 10)
 
 
+def test_edl_speed_only_edit_retimes_captions(app):
+    """F-14 follow-up: ``Clip.timeline_ms`` is span/speed, so a speed-only edit
+    (the editor's 0.25-4x control) shifts every later clip's timeline offset.
+    The structural-change guard must treat it as structural and re-place the
+    later clips' cues at their new offsets instead of leaving them to drift.
+    """
+    from mediahub.video.edl import EDL, Clip, Transition
+    from mediahub.video.projects import VideoProject, get_store
+
+    application, _ = app
+    cut = Transition("cut", 0)
+    track = {
+        "color": "#FFFFFF",
+        "scrim": "#0A2540",
+        "cues": [
+            {"from": 10, "dur": 20, "text": "A line"},  # in clip A (timeline 0)
+            {"from": 100, "dur": 20, "text": "B line"},  # in clip B (offset 90f @30fps)
+        ],
+    }
+    old = EDL(
+        fps=30,
+        clips=[
+            Clip(source="a.mp4", in_ms=0, out_ms=3000, transition_in=cut),
+            Clip(source="b.mp4", in_ms=0, out_ms=3000, transition_in=cut),
+        ],
+        captions=track,
+    )
+    store = get_store()
+    proj = store.save(VideoProject(id="", profile_id="alpha", edl=old))
+
+    # Speed clip A up 2x: its timeline length halves (3000ms → 1500ms), so
+    # clip B now starts at frame 45 instead of 90.
+    sped = EDL(
+        fps=30,
+        clips=[
+            Clip(source="a.mp4", in_ms=0, out_ms=3000, speed=2.0, transition_in=cut),
+            Clip(source="b.mp4", in_ms=0, out_ms=3000, transition_in=cut),
+        ],
+        captions=track,
+    )
+    with application.test_client() as c:
+        _pin(c, "alpha")
+        r = c.post(f"/api/video/projects/{proj.id}", json={"edl": sped.to_dict()})
+        assert r.status_code == 200
+        cues = c.get(f"/api/video/projects/{proj.id}").get_json()["project"]["edl"]["captions"][
+            "cues"
+        ]
+        by_text = {cue["text"]: cue["from"] for cue in cues}
+        assert by_text["A line"] == 10  # clip A's own offset didn't move
+        assert by_text["B line"] == 55  # followed clip B: new offset 45 + local 10
+
+
 def test_edl_text_only_edit_leaves_caption_timing_untouched(app):
     """A caption text/grade edit that doesn't change the clip structure must not
     perturb cue timing — the render stays byte-identical.

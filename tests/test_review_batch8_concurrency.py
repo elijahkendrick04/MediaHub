@@ -28,6 +28,9 @@ def test_create_task_rejects_bad_once(tmp_path):
 
 
 def test_create_task_rejects_bad_cron(tmp_path):
+    # create_task deliberately tolerates croniter's absence (validation is
+    # skipped, matching the fire path) — so without it this is a skip, not a fail.
+    pytest.importorskip("croniter")
     from mediahub.workflow import schedule
 
     with pytest.raises(ValueError):
@@ -116,3 +119,23 @@ def test_latin1_header_keeps_emoji_title_deliverable():
     out.encode("latin-1")  # must not raise (requests encodes headers latin-1)
     # An already-clean title is passed through untouched.
     assert _latin1_header("Riverside Swimming Club") == "Riverside Swimming Club"
+
+
+def test_latin1_header_long_title_stays_single_line():
+    from mediahub.notify.channels import _latin1_header
+
+    # A non-Latin-1 title whose RFC 2047 encoding exceeds Header's ~76-char
+    # fold point must NOT come back folded ("\n ") — requests rejects any
+    # header value containing CR/LF, which would kill the push outright.
+    title = "🏊 Riverside Swimming Club — County Championships Day 2 Finals résumé"
+    out = _latin1_header(title)
+    assert "\n" not in out and "\r" not in out
+    out.encode("latin-1")  # must not raise
+    # The unfolded encoded-words still decode back to the full title.
+    import email.header as eh
+
+    decoded = "".join(
+        (b.decode(c or "ascii") if isinstance(b, bytes) else b)
+        for b, c in eh.decode_header(out)
+    )
+    assert decoded == title

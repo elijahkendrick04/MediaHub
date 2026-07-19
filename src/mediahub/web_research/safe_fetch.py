@@ -134,7 +134,7 @@ def _decode_body(body: bytes, content_type: str) -> str:
     return body.decode("utf-8", errors="replace")
 
 
-def _pinned_open(url: str, *, timeout: float):
+def _pinned_open(url: str, *, timeout: float, accept: Optional[str] = None):
     """Open a pinned GET for ``url`` without reading the body.
 
     Resolves + validates the host (``resolve_safe_ip``), connects to the
@@ -145,6 +145,13 @@ def _pinned_open(url: str, *, timeout: float):
     scheme is not http(s) or the host is unresolvable / resolves to an
     internal IP; transport errors propagate. The caller owns closing both
     the response and the pool.
+
+    ``accept`` overrides the ``Accept`` header. The default is HTML-centric
+    (sized for deep-research page-text reads); a caller whose legitimate
+    payloads are document downloads (e.g. results-fetch Tier A pulling
+    PDF/CSV/ZIP for the interpreter) passes its own breadth so a strictly
+    content-negotiating server doesn't 406 — or negotiate to HTML — a file
+    the caller wants.
     """
     import urllib3  # noqa: PLC0415
 
@@ -167,7 +174,7 @@ def _pinned_open(url: str, *, timeout: float):
     headers = {
         "Host": host_hdr,
         "User-Agent": "MediaHubResearch/1.0 (+https://github.com/)",
-        "Accept": "text/html,application/xhtml+xml,text/plain;q=0.9",
+        "Accept": accept or "text/html,application/xhtml+xml,text/plain;q=0.9",
         "Accept-Language": "en-GB,en;q=0.9",
     }
     pool_timeout = urllib3.Timeout(connect=timeout, read=timeout)

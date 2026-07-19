@@ -652,8 +652,10 @@ def dev_password_hash_overridden() -> bool:
 
     The default hash at ``_DEV_PASSWORD_HASH_DEFAULT`` is committed to a
     *public* repository, so it is offline-crackable by anyone with repo read.
-    Production must not run on it — ``env_check`` refuses to boot unless this
-    returns True (deep-review #26 / ADR-0022, which amends ADR-0019's
+    Production must not run on it — when this returns False, ``env_check``
+    logs a production warning; the hard refuse-to-boot enforcement is deferred
+    to pre-launch (roadmap RP.5), so the pre-customer deploy still boots on
+    the default (deep-review #26 / ADR-0022, which amends ADR-0019's
     zero-config boot for the operator credential specifically). Setting the env
     var to the shipped-default value does not count as a rotation.
     """

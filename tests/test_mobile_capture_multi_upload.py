@@ -42,3 +42,24 @@ def test_single_submit_no_longer_hardwires_only_first_file():
     handler = handler[: handler.index("});") + 3]
     # The multi-select branch must be present in the submit handler itself.
     assert "processAndUploadAll(fileInput.files)" in handler
+
+
+def test_camera_fallback_carries_the_captured_photo():
+    """The native fallback must not lose a camera capture.
+
+    ``nativeFallback()`` used to call ``form.submit()`` with the photo still
+    stuck in the hidden, NAMELESS ``#ml-capture`` input — so a failed AJAX
+    upload fell back to a multipart POST carrying no file at all, the server
+    answered ``{"error":"no_file"}`` and the capture was gone. The fallback
+    must give the capture input a form name (only when the named input is
+    empty, so the form-submit path never double-posts) BEFORE submitting.
+    """
+    src = _JS.read_text(encoding="utf-8")
+    fn = src[src.index("function nativeFallback") : src.index("function processAndUpload")]
+    # The capture input is named just-in-time so the native POST carries it...
+    assert "captureInput.name" in fn, "fallback must name the capture input"
+    # ...before the submit statement fires (";" pins the call, not a comment)...
+    assert fn.index("captureInput.name") < fn.index("form.submit();")
+    # ...and only when a capture is pending and the named input is empty.
+    assert "captureInput.files" in fn
+    assert "fileInput.files" in fn

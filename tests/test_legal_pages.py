@@ -67,6 +67,18 @@ def test_privacy_notice_hides_deployment_inventory_when_signed_out(client):
     assert "Your data on this deployment" not in html
 
 
+def test_section_toc_does_not_double_escape_heading_entities(client):
+    # Privacy section 3's authored heading contains an &mdash; entity. The
+    # section-TOC pass must reuse the already-encoded title verbatim in both
+    # the stamped <h2> and the "Jump to" link — re-escaping it rendered the
+    # literal text "&mdash;" on the live page.
+    html = client.get("/privacy").get_data(as_text=True)
+    assert "&amp;mdash;" not in html
+    heading = "3. What we do with it &mdash; and which services receive it"
+    assert f'<h2 id="privacy-3">{heading}</h2>' in html
+    assert f'<a href="#privacy-3">{heading}</a>' in html
+
+
 def test_terms_cover_consumer_law_essentials(client):
     html = client.get("/terms").get_data(as_text=True)
     # CCR 2013 cooling-off + digital-content waiver wording.

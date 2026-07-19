@@ -105,6 +105,19 @@
   function nativeFallback() {
     setStatus("");
     try {
+      // A camera capture lives in the hidden #ml-capture input, which has no
+      // name attribute (so the AJAX path never double-posts it). On the
+      // capture path the named file input is empty, so a bare form.submit()
+      // would post no file at all and the photo would be lost — name the
+      // capture input just-in-time so the native multipart submit carries it.
+      if (
+        captureInput &&
+        captureInput.files &&
+        captureInput.files.length &&
+        !(fileInput && fileInput.files && fileInput.files.length)
+      ) {
+        captureInput.name = (fileInput && fileInput.name) || "file";
+      }
       form.submit();
     } catch (e) {
       /* nothing more we can do */
