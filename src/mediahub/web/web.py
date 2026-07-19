@@ -19495,6 +19495,8 @@ def _hero_product_demo() -> str:
         '<div class="mh-demo-acts" style="margin-top:10px">'
         '<span class="go">&#x2B07; Download&nbsp;.zip</span>'
         "</div>"
+        '<div class="mh-demo-note">Yours to post manually &mdash; MediaHub '
+        "never publishes on your behalf.</div>"
         '<div class="mh-demo-meter"><span class="lab">'
         "Nothing leaves the queue without your approval.</span></div>"
         "</div>"

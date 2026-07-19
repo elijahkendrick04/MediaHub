@@ -521,3 +521,26 @@ def test_review_scene_shows_queue_position():
         "queue indicator must show position context e.g. '1 of 3' so the visitor "
         "understands two more moments follow Tom Davies in the queue"
     )
+
+
+# =========================================================================== #
+# Group G — the Approve scene must clarify the post-approval path is a manual
+# download, not scheduling or direct publishing to a social platform
+# (regression guard for autotest finding: publishing path unclear).
+# =========================================================================== #
+def test_approve_scene_clarifies_download_is_manual_not_auto_publish():
+    """The Approve scene's only visible action is '⬇ Download .zip' with no
+    surrounding text — a fresh visitor cannot tell whether approving a card
+    schedules or auto-publishes it to a social platform, or whether they must
+    post it themselves. Every real (authenticated) surface in the app spells
+    this out already (e.g. the content builder's 'MediaHub never posts on
+    your behalf'); the landing-page demo must say so too.
+    """
+    html = _demo_html()
+    p3_html = html[html.index('<div class="mh-demo-phase p3">') :]
+    lowered = p3_html.lower()
+    assert "manual" in lowered or "never post" in lowered or "yourself" in lowered, (
+        "Approve scene shows only '⬇ Download .zip' with no text clarifying this "
+        "is a manual download (not direct/auto publishing to a social platform) "
+        "— a fresh visitor can't tell which workflow this is"
+    )
