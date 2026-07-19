@@ -55,10 +55,20 @@ __all__ = [
     "enabled",
     "candidate_count",
     "candidate_pack_ids",
+    "candidate_walk",
+    "DECISION_SIZE",
     "MEASURE_JS",
     "score_geometry",
     "choose",
 ]
+
+# The canonical decision geometry: the v2 archetype certification anchor
+# (1080×1350 feed_portrait — the primary cut every archetype must read well at).
+# Candidates are always composed and measured at THIS geometry, whatever cut is
+# being rendered, so every format of a card computes the identical winner — a
+# card stays one design across its cuts, and parallel per-format renders can
+# only benign-race to the same deterministic value.
+DECISION_SIZE = (1080, 1350)
 
 
 # --------------------------------------------------------------------------- #
@@ -109,24 +119,52 @@ def candidate_count() -> int:
 def candidate_pack_ids(
     brief: Any, k: Optional[int] = None, recent: Iterable[str] = ()
 ) -> list[str]:
+    """The candidate pack ids to score (thin wrapper over :func:`candidate_walk`)."""
+    return candidate_walk(brief, k, recent)[0]
+
+
+def candidate_walk(
+    brief: Any, k: Optional[int] = None, recent: Iterable[str] = ()
+) -> tuple[list[str], dict]:
     """The candidate pack ids to score, the director's current pack first.
 
     F6 must respect *whichever picker chose the card*: a mood card walks its
     small curated mood bundle (so a geometrically-tidy but off-mood pack can
-    never override the director's feeling), and every other card walks the full
-    deterministic catalog order. In both cases the current pack is candidate #0
-    (so it wins ties and a no-improvement card stays byte-identical), and the
-    walk steps forward past ``recent`` ids exactly like
+    never override the director's feeling), and every other card samples the
+    full deterministic catalog order. In both cases the current pack is
+    candidate #0 (so it wins ties and a no-improvement card stays
+    byte-identical), and later candidates skip ``recent`` ids exactly like
     ``style_packs.pick_style_pack_avoiding``.
 
-    An empty / unknown ``brief.style_pack`` yields ``[]`` — a legacy / bare card
-    has no pack to score, so F6 no-ops and the render is unchanged.
+    **Strided sampling.** The catalog is sorted quiet → busy, so the packs
+    *adjacent* to the current one are near-duplicates (same ground, trailing
+    density/texture variants) — measuring those would choose among visually
+    identical candidates and learn nothing. The walk therefore samples the pool
+    at ``n/k`` strides from the current pack's position: candidates span the
+    ground/texture space (a genuinely different treatment can rescue a card
+    whose current ground buries its focus), while staying fully deterministic —
+    same current pack + same pool → same candidate list. A small pool (a mood
+    bundle) degrades naturally to the plain forward walk.
+
+    Returns ``(ids, meta)`` where ``meta`` records the walk's provenance for
+    the explainability record: the pool that was walked (``"mood:<mood>"`` or
+    ``"catalog"``), its size, the requested K, and the avoid set honoured.
+
+    ``recent`` defaults to the sibling packs the generation-time picker avoided
+    (``brief.recent_style_packs``, stamped by the generator), so the render-time
+    walk cannot re-offer the pack the card next to this one just wore — the
+    same anti-samey contract the pickers guarantee.
+
+    An empty / unknown ``brief.style_pack`` yields ``([], meta)`` — a legacy /
+    bare card has no pack to score, so F6 no-ops and the render is unchanged.
     """
     current = (getattr(brief, "style_pack", "") or "").strip().lower()
-    if not current:
-        return []
     if k is None:
         k = candidate_count()
+    recent = list(recent) or list(getattr(brief, "recent_style_packs", None) or [])
+    meta: dict = {"pool": "", "pool_size": 0, "k_requested": k, "avoided": []}
+    if not current:
+        return [], meta
 
     from mediahub.graphic_renderer import style_packs as _sp
 
@@ -135,8 +173,10 @@ def candidate_pack_ids(
     mood_ids = [m.strip().lower() for m in _sp.mood_preset_ids(mood)] if mood else []
     if mood_ids:
         pool_ids = mood_ids
+        meta["pool"] = f"mood:{mood.lower()}"
     else:
         pool_ids = [p.id for p in _sp.list_style_packs()]
+        meta["pool"] = "catalog"
 
     # The current pack must anchor the walk at index 0 even if (unusually) it is
     # not a member of the chosen pool — so it always wins ties and the no-change
@@ -146,22 +186,24 @@ def candidate_pack_ids(
 
     start = pool_ids.index(current)
     avoid = {str(r).strip().lower() for r in recent if r}
-    out: list[str] = []
-    seen: set[str] = set()
+    avoid.discard(current)  # the incumbent is always eligible
+    meta["pool_size"] = len(pool_ids)
+    meta["avoided"] = sorted(avoid)
+    out: list[str] = [current]
+    seen: set[str] = {current}
     n = len(pool_ids)
-    for off in range(n):
-        cid = pool_ids[(start + off) % n]
-        if cid in seen:
-            continue
-        # The current pack (offset 0) is always eligible; later candidates skip
-        # recently-used looks so a content pack still varies pack-to-pack.
-        if off != 0 and cid in avoid:
-            continue
-        seen.add(cid)
-        out.append(cid)
-        if len(out) >= k:
+    # Deterministic strided sample: the j-th candidate sits j·n/k past the
+    # current pack (wrapping), stepping forward past duplicates / recent ids.
+    for j in range(1, k):
+        base = (start + (j * n) // k) % n
+        for probe in range(n):
+            cid = pool_ids[(base + probe) % n]
+            if cid in seen or cid in avoid:
+                continue
+            seen.add(cid)
+            out.append(cid)
             break
-    return out
+    return out, meta
 
 
 # --------------------------------------------------------------------------- #
@@ -200,25 +242,51 @@ MEASURE_JS = r"""
     if (r.width < 1 || r.height < 1) continue;
     const tag = el.tagName.toLowerCase();
     const bg = cs.backgroundImage || 'none';
-    const isImg = tag === 'img' || /url\(/i.test(bg);
+    const hasUrlBg = /url\(/i.test(bg);
+    // A PHOTO is an <img>, or a url() background painted as a cover well —
+    // texture tiles also use url() backgrounds but compute an explicit px pair
+    // for background-size, while every real photo well (v2 <img> wells, the
+    // legacy .bg-photo div, frame_breakout / band_break background wells)
+    // computes 'cover'. Without this split a textured pack gains a fake
+    // centre-focused "photo" and scores a free saliency 1.0.
+    const bgSize = (cs.backgroundSize || '').trim().toLowerCase();
+    const isPhoto = tag === 'img' || (hasUrlBg && bgSize === 'cover');
     const isGradient = /gradient\(/i.test(bg);
     const bgFill = !!(cs.backgroundColor && cs.backgroundColor !== 'rgba(0, 0, 0, 0)' && bg === 'none');
-    // effective alpha = element opacity × text-colour alpha (a faint watermark
+    // effective alpha = element opacity × text-PAINT alpha (a faint watermark
     // is low and drops out of collision detection, matching the F3 lint).
+    // color alone lies for two house glyph treatments that paint through a
+    // transparent fill: background-clip:text (F9 medal numerals, D6 gradient
+    // emphasis — the background paints the glyphs, so they are fully visible)
+    // and -webkit-text-stroke (hollow/splice — the stroke's own alpha is the
+    // real paint alpha; a faint ghost stroke keeps its exclusion).
     let colorA = 1;
     const cm = (cs.color || '').match(/rgba?\(([^)]+)\)/);
     if (cm) { const p = cm[1].split(','); if (p.length === 4) colorA = parseFloat(p[3]); }
+    const clip = (cs.webkitBackgroundClip || cs.backgroundClip || '');
+    if (clip.includes('text') && bg !== 'none') {
+      colorA = 1;
+    } else if (parseFloat(cs.webkitTextStrokeWidth || '0') > 0) {
+      let strokeA = 1;
+      const sm = (cs.webkitTextStrokeColor || '').match(/rgba?\(([^)]+)\)/);
+      if (sm) { const p = sm[1].split(','); if (p.length === 4) strokeA = parseFloat(p[3]); }
+      colorA = Math.max(colorA, strokeA);
+    }
     const eff = parseFloat(cs.opacity) * colorA;
 
-    // An <svg> root is a single decorative mark (its <path> children carry no
-    // background fill so they are skipped below); capture it and move on.
+    // An <svg> root is a single decorative mark — unless it carries text
+    // (curve/arc/spine headlines): those glyphs are real content whose empty
+    // chord AABB must not count as decoration; the glyph runs are captured
+    // as text leaves below.
     if (tag === 'svg') {
-      boxes.push({ kind: 'mark', x: r.x, y: r.y, w: r.width, h: r.height, gradient: true, fill: false });
+      if (!el.querySelector('text')) {
+        boxes.push({ kind: 'mark', x: r.x, y: r.y, w: r.width, h: r.height, gradient: true, fill: false });
+      }
       continue;
     }
 
-    // A url()-image element is a photo well; record the crop focus.
-    if (isImg) {
+    // A photo well: record the crop focus.
+    if (isPhoto) {
       const op = (cs.objectPosition || '').split(/\s+/).filter(Boolean);
       const ox = pctOf(op[0], 0.5);
       const oy = pctOf(op[1], 0.5);
@@ -241,7 +309,10 @@ MEASURE_JS = r"""
     }
 
     // A painted, text-less leaf: solid chip, gradient/border decoration, rule.
-    const hasBorder = cs.borderStyle && cs.borderStyle !== 'none' && parseFloat(cs.borderTopWidth || '0') > 0;
+    // Any bordered side counts (corner ticks / arcs pair top-left with
+    // bottom-right ornaments — a top-only test would measure asymmetrically).
+    const hasBorder = ['borderTopWidth','borderBottomWidth','borderLeftWidth','borderRightWidth']
+      .some(p => parseFloat(cs[p] || '0') > 0);
     if (!direct && !hasChild && (bgFill || isGradient || hasBorder)) {
       if (r.width >= 6 && r.height >= 6) {
         boxes.push({ kind: 'mark', x: r.x, y: r.y, w: r.width, h: r.height, gradient: isGradient, fill: bgFill });
@@ -273,10 +344,19 @@ _WEIGHTS = {
 # A card wants to breathe: too dense reads busy, too empty reads unfinished. The
 # default band suits most portrait cards; dense/quiet archetypes can override.
 _DEFAULT_WHITESPACE_BAND = (0.45, 0.78)
+# Keys MUST be real v2 archetype ids (guarded by a registry-coherence test) —
+# score_geometry receives ``archetype=family``, the v2 archetype id.
 _WHITESPACE_BANDS: dict[str, tuple[float, float]] = {
-    # A stat-dense recap legitimately fills more of the canvas.
-    "stat_stack_recap": (0.35, 0.70),
-    "data_grid_recap": (0.35, 0.70),
+    # Stat-dense archetypes legitimately fill more of the canvas.
+    "stat_stack_sidebar": (0.35, 0.70),
+    "editorial_numbers_grid": (0.35, 0.70),
+    "contact_sheet": (0.35, 0.70),
+    "ticker_strip": (0.35, 0.70),
+    "timeline_progression": (0.35, 0.70),
+    "broadcast_scorebug": (0.35, 0.70),
+    "three_card_editorial_grid": (0.35, 0.70),
+    "relay_collage": (0.35, 0.70),
+    "vertical_stat_tower": (0.35, 0.70),
     # A quiet spotlight wants generous negative space.
     "centered_medal_spotlight": (0.55, 0.85),
     "spotlight_disc": (0.55, 0.85),
@@ -372,8 +452,27 @@ def _coverage_fraction(boxes: list[dict], W: float, H: float) -> float:
 
 
 def _whitespace_score(boxes: list[dict], W: float, H: float, archetype: Optional[str]) -> float:
-    """Reward macro whitespace inside the archetype's band (text + marks only)."""
-    content = [b for b in boxes if b.get("kind") in ("text", "mark")]
+    """Reward macro whitespace inside the archetype's band (text + marks only).
+
+    Non-fill marks whose AABB spans (almost) the whole canvas are atmosphere,
+    not clutter: every non-flat pack ground is a full-canvas gradient overlay,
+    and the hollow ``frame`` accent's box covers ~90% of the canvas while its
+    actual ink ring is ~2%. Counting those as coverage would zero this — the
+    highest-weighted — term for every decorated pack and turn the scorer into a
+    "prefer flat/bare" bias, the exact opposite of measuring the composition.
+    Solid full-canvas panels (``fill``) still count: painted area IS density.
+    """
+    canvas = max(1.0, W * H)
+    content = [
+        b
+        for b in boxes
+        if b.get("kind") in ("text", "mark")
+        and not (
+            b.get("kind") == "mark"
+            and not b.get("fill")
+            and (float(b["w"]) * float(b["h"])) >= 0.80 * canvas
+        )
+    ]
     coverage = _coverage_fraction(content, W, H)
     whitespace = 1.0 - coverage
     lo, hi = _WHITESPACE_BANDS.get(str(archetype or ""), _DEFAULT_WHITESPACE_BAND)
@@ -432,25 +531,40 @@ def _balance_score(boxes: list[dict], W: float, H: float) -> float:
 def _alignment_score(boxes: list[dict], W: float) -> float:
     """Reward shared vertical edges among text boxes (a grid-aligned feel).
 
-    Counts left / right / centre-x edges shared within a few px across text
-    boxes; more shared edges → a tidier column structure. Normalised so a
-    handful of alignments saturates the term.
+    Alignment is judged **per edge class** — left edges with left edges, right
+    with right, centre-x with centre-x — because a right edge landing near
+    another box's centre-x is coincidence, not grid structure. Within each
+    class the edges are clustered at ``_ALIGN_EPS`` tolerance; a box counts as
+    *aligned* when any of its edges sits in a cluster shared with a DIFFERENT
+    box. The score is the fraction of visible text boxes that are aligned, so
+    a clean two-column layout scores high and scattered accidental near-edges
+    do not accumulate.
     """
-    texts = [b for b in boxes if b.get("kind") == "text"]
+    texts = [
+        b for b in boxes if b.get("kind") == "text" and float(b.get("eff", 1.0)) >= _MIN_WORD_ALPHA
+    ]
     if len(texts) < 2:
         return 0.5
-    edges: list[float] = []
-    for b in texts:
-        edges.append(float(b["x"]))
-        edges.append(float(b["x"]) + float(b["w"]))
-        edges.append(float(b["x"]) + float(b["w"]) / 2.0)
-    edges.sort()
-    shared = 0
-    for i in range(len(edges) - 1):
-        if edges[i + 1] - edges[i] <= _ALIGN_EPS:
-            shared += 1
-    # Saturate at ~ len(texts) shared edges: a clean layout aligns most boxes.
-    return min(1.0, shared / float(max(1, len(texts))))
+    aligned: set[int] = set()
+    for edge_of in (
+        lambda b: float(b["x"]),
+        lambda b: float(b["x"]) + float(b["w"]),
+        lambda b: float(b["x"]) + float(b["w"]) / 2.0,
+    ):
+        pairs = sorted((edge_of(b), i) for i, b in enumerate(texts))
+        cluster: list[int] = [pairs[0][1]]
+        prev = pairs[0][0]
+        for val, idx in pairs[1:]:
+            if val - prev <= _ALIGN_EPS:
+                cluster.append(idx)
+            else:
+                if len(set(cluster)) >= 2:
+                    aligned.update(cluster)
+                cluster = [idx]
+            prev = val
+        if len(set(cluster)) >= 2:
+            aligned.update(cluster)
+    return len(aligned) / float(len(texts))
 
 
 def _clearance_score(boxes: list[dict], W: float, H: float) -> float:

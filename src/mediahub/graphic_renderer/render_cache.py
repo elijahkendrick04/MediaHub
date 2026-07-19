@@ -39,6 +39,7 @@ Operational notes
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import threading
 from collections import OrderedDict
@@ -327,11 +328,11 @@ def store_png(key: str, png_bytes: bytes) -> None:
     _prune(d)
 
 
-def _prune(d: Path) -> None:
+def _prune(d: Path, pattern: str = "*.png") -> None:
     """Bound the on-disk cache to ``_max_entries()``, dropping the oldest first."""
     cap = _max_entries()
     try:
-        entries = list(d.glob("*.png"))
+        entries = list(d.glob(pattern))
     except OSError:
         return
     if len(entries) <= cap:
@@ -345,6 +346,95 @@ def _prune(d: Path) -> None:
             p.unlink()
         except OSError:
             pass
+
+
+# --------------------------------------------------------------------------- #
+# F6 — measured element geometry (layout scorer), keyed like the PNG cache
+# --------------------------------------------------------------------------- #
+#
+# The F6 layout scorer's per-candidate measurement (a getBoundingClientRect
+# sweep) is a pure function of (candidate HTML, canvas size) within one
+# renderer environment — the same purity argument as the screenshot — so it
+# caches under the SAME key maths (``png_cache_key`` with dpr=1; geometry is
+# CSS-pixel and DPR-independent). A re-render of an identical card then skips
+# the whole compose-and-measure browser pass, mirroring how G1.24 skips the
+# screenshot.
+
+
+_geom_js_salt_lock = threading.Lock()
+_geom_js_salt: Optional[str] = None
+
+
+def _measure_js_salt() -> str:
+    """Digest of the F6 measurement sweep source, folded into geometry keys.
+
+    The cached geometry is only valid for the sweep that produced it — a
+    classification fix (photo vs texture, glyph alpha) must invalidate every
+    stored measurement, or stale boxes would keep steering the argmax. Lazy
+    import mirrors ``_launch_args_salt``'s cycle avoidance.
+    """
+    global _geom_js_salt
+    with _geom_js_salt_lock:
+        if _geom_js_salt is None:
+            from mediahub.graphic_renderer.layout_score import MEASURE_JS
+
+            _geom_js_salt = hashlib.sha256(MEASURE_JS.encode("utf-8")).hexdigest()[:12]
+        return _geom_js_salt
+
+
+def geom_cache_key(html: str, width: int, height: int) -> str:
+    """Stable key for one candidate's measured geometry (dpr-independent)."""
+    h = hashlib.sha256()
+    h.update(png_cache_key(html, width, height, 1).encode("ascii"))
+    h.update(("|js:" + _measure_js_salt()).encode("ascii"))
+    return h.hexdigest()
+
+
+def geom_cache_dir() -> Path:
+    d = _data_dir() / "render_cache" / "geom"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _geom_path(key: str) -> Path:
+    return geom_cache_dir() / f"{key}.geom.json"
+
+
+def get_cached_geometry(key: str) -> Optional[dict]:
+    """Return the cached measurement dict for ``key``, or ``None`` on a miss."""
+    if not cache_enabled():
+        return None
+    p = _geom_path(key)
+    try:
+        data = json.loads(p.read_text("utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    try:
+        os.utime(p, None)  # LRU recency, same as the PNG entries
+    except OSError:
+        pass
+    return data
+
+
+def store_geometry(key: str, geom: dict) -> None:
+    """Persist a measurement dict under ``key`` (atomic write), then prune."""
+    if not cache_enabled():
+        return
+    d = geom_cache_dir()
+    final = d / f"{key}.geom.json"
+    tmp = d / f".{key}.{os.getpid()}.tmp"
+    try:
+        tmp.write_text(json.dumps(geom, separators=(",", ":")), encoding="utf-8")
+        os.replace(tmp, final)
+    except (OSError, TypeError, ValueError):
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+        return
+    _prune(d, "*.geom.json")
 
 
 def clear() -> None:

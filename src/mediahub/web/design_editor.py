@@ -442,7 +442,7 @@ def build_brief_from_params(params: StudioParams, *, profile_id: str = "studio")
     text = dict(params.text)
     hook = text.get("achievement_label") or text.get("event_name") or "MediaHub Studio"
 
-    return CreativeBrief(
+    brief = CreativeBrief(
         id="studio_preview",
         content_item_id="studio",
         profile_id=profile_id or "studio",
@@ -467,6 +467,12 @@ def build_brief_from_params(params: StudioParams, *, profile_id: str = "studio")
         style_pack=params.style_pack_id,
         colour_role_assignment=dict(params.role_assignment),
     )
+    # The studio pack is an explicit HUMAN pick, not the director's seed walk —
+    # the F6 layout scorer must never override it (explain() reports
+    # params.pack_id, so a render-time swap would be a silent substitution with
+    # false meta). The marker is the renderer's own already-decided gate.
+    brief._layout_scored = True
+    return brief
 
 
 def brand_kit_for_params(params: StudioParams):

@@ -115,6 +115,149 @@ def test_candidates_anchor_unknown_current_at_zero():
     assert cands[0] == "not-a-real-pack-id"
 
 
+def test_whitespace_band_keys_are_real_archetypes():
+    # A renamed or removed archetype must never silently orphan a tuned band —
+    # score_geometry keys bands by the v2 archetype id (render passes family).
+    from mediahub.graphic_renderer import archetypes
+
+    names = set(archetypes.list_archetypes())
+    dead = [k for k in ls._WHITESPACE_BANDS if k not in names]
+    assert not dead, f"_WHITESPACE_BANDS keys not in the v2 registry: {dead}"
+
+
+def test_walk_meta_records_provenance():
+    from mediahub.graphic_renderer import style_packs as sp
+
+    packs = sp.list_style_packs()
+    ids, meta = ls.candidate_walk(_Brief(style_pack=packs[10].id), k=4)
+    assert meta["pool"] == "catalog"
+    assert meta["pool_size"] == len(packs)
+    assert meta["k_requested"] == 4
+    assert meta["avoided"] == []
+
+    mood_ids = [m.lower() for m in sp.mood_preset_ids("explosive")]
+    ids2, meta2 = ls.candidate_walk(_Brief(style_pack=mood_ids[0], mood="explosive"), k=4)
+    assert meta2["pool"] == "mood:explosive"
+    assert meta2["pool_size"] == len(mood_ids)
+
+
+def test_walk_honours_the_briefs_recent_style_packs():
+    # The generator stamps the packs its picker stepped past; the render-time
+    # walk must honour the same avoid set so a measured switch can't land on
+    # the pack the neighbouring card just wore.
+    from mediahub.graphic_renderer import style_packs as sp
+
+    mood_ids = [m.lower() for m in sp.mood_preset_ids("explosive")]
+    assert len(mood_ids) >= 3
+
+    class _B:
+        style_pack = mood_ids[0]
+        mood = "explosive"
+        recent_style_packs = [mood_ids[1]]
+
+    ids, meta = ls.candidate_walk(_B(), k=8)
+    assert mood_ids[1] not in ids, "a recent sibling pack must not be re-offered"
+    assert mood_ids[1] in meta["avoided"]
+    # The incumbent is always eligible even if listed as recent.
+    _B.recent_style_packs = [mood_ids[0], mood_ids[1]]
+    ids2, _ = ls.candidate_walk(_B(), k=8)
+    assert ids2[0] == mood_ids[0]
+
+
+def test_score_record_invariants_fuzz():
+    # Seeded fuzz over hostile-but-contract-shaped geometry: every record must
+    # stay bounded, NaN-free, JSON-serialisable, and box-order invariant.
+    import json as _json
+    import random
+
+    rng = random.Random(0)
+    kinds = ("text", "photo", "mark")
+    band_keys = list(ls._WHITESPACE_BANDS)
+    for trial in range(150):
+        W, H = rng.choice(((1080, 1350), (1080, 1920), (500, 500)))
+        boxes = []
+        for _ in range(rng.randrange(0, 25)):
+            kind = rng.choice(kinds)
+            b = {
+                "kind": kind,
+                "x": rng.uniform(-200, W + 200),
+                "y": rng.uniform(-200, H + 200),
+                "w": rng.choice((0.0, 1.0, rng.uniform(1, W), W * 2)),
+                "h": rng.choice((0.0, 1.0, rng.uniform(1, H), H * 2)),
+            }
+            if kind == "text" and rng.random() > 0.2:
+                b["text"] = rng.choice(("EIRA HUGHES", "PB", ".", "100M", ""))
+                b["fontPx"] = rng.choice((0.0, 12.0, 96.0))
+                b["weight"] = 700
+                b["bgFill"] = rng.random() < 0.3
+                b["eff"] = rng.choice((0.0, 0.3, 1.0))
+            if kind == "photo" and rng.random() > 0.3:
+                b["ox"] = rng.uniform(-0.5, 1.5)
+                b["oy"] = rng.uniform(-0.5, 1.5)
+            if kind == "mark" and rng.random() > 0.3:
+                b["gradient"] = rng.random() < 0.5
+                b["fill"] = rng.random() < 0.5
+            boxes.append(b)
+        arch = rng.choice(band_keys + [None, "not_a_real_archetype"])
+        geom = {"W": W, "H": H, "boxes": boxes}
+        rec = ls.score_geometry(geom, archetype=arch)
+        assert 0.0 <= rec["total"] <= 1.0, (trial, rec)
+        for k, v in rec["terms"].items():
+            assert 0.0 <= v <= 1.0, (trial, k, v)
+        _json.dumps(rec, allow_nan=False)
+        # Box-order permutation invariance.
+        shuffled = list(boxes)
+        rng.shuffle(shuffled)
+        rec2 = ls.score_geometry({"W": W, "H": H, "boxes": shuffled}, archetype=arch)
+        assert rec2 == rec, f"trial {trial}: box order changed the score"
+
+
+def test_full_canvas_atmosphere_does_not_zero_whitespace():
+    # A decorated pack's full-canvas gradient ground (or a hollow frame) is
+    # atmosphere, not clutter — it must not zero the highest-weighted term and
+    # bias the argmax toward flat/bare packs.
+    W, H = 1080, 1350
+    text = [_text(80, 120, 500, 130, text="EIRA HUGHES"), _mark(80, 200, 920, 400)]
+    ground = {"kind": "mark", "x": 0, "y": 0, "w": W, "h": H, "gradient": True, "fill": False}
+    bare = ls._whitespace_score(list(text), W, H, "individual_hero")
+    decorated = ls._whitespace_score(list(text) + [ground], W, H, "individual_hero")
+    assert decorated == bare, "a full-canvas gradient ground must not count as coverage"
+    # A SOLID full-canvas panel still counts (painted area is real density).
+    solid = {"kind": "mark", "x": 0, "y": 0, "w": W, "h": H, "gradient": False, "fill": True}
+    assert ls._whitespace_score(list(text) + [solid], W, H, "individual_hero") < bare
+
+
+def test_alignment_is_per_edge_class():
+    # A right edge coincidentally near another box's centre-x is NOT alignment;
+    # a genuine shared-left column is.
+    W = 1080
+    col = [
+        _text(80, 100, 300, 60, text="EIRA HUGHES"),
+        _text(80, 200, 200, 40, text="FREESTYLE"),
+        _text(80, 300, 250, 50, text="MANCHESTER"),
+    ]
+    assert ls._alignment_score(col, W) == 1.0
+    # Cross-class coincidences: b's right edge ≈ a's centre-x, no shared class.
+    cross = [
+        _text(100, 100, 300, 60, text="EIRA HUGHES"),  # left 100, right 400, cx 250
+        _text(30, 300, 220, 40, text="FREESTYLE"),  # left 30, right 250, cx 140
+    ]
+    assert ls._alignment_score(cross, W) == 0.0
+
+
+def test_candidates_are_ground_diverse():
+    # The catalog is sorted quiet→busy, so ADJACENT packs share a ground; the
+    # strided walk must sample across the pool so the scorer chooses among
+    # genuinely different treatments, not four density variants of one look.
+    from mediahub.graphic_renderer import style_packs as sp
+
+    packs = sp.list_style_packs()
+    for idx in (50, len(packs) // 2, (3 * len(packs)) // 4):
+        walk = ls.candidate_pack_ids(_Brief(style_pack=packs[idx].id), k=4)
+        grounds = {pid.split("-")[0] for pid in walk}
+        assert len(grounds) >= 2, f"walk from {packs[idx].id} is not ground-diverse: {walk}"
+
+
 # --------------------------------------------------------------------------- #
 # Geometry fixtures + the measurement JS contract
 # --------------------------------------------------------------------------- #
