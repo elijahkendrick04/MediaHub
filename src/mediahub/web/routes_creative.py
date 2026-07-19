@@ -2102,6 +2102,13 @@ def content_pack(run_id):
         } style="font-size:12px;color:var(--ink-dim);margin:10px 0 12px">{_export_note}</div>
 
   <div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:6px">Social posting</div>
+  <p id="mh-export-howto" class="muted" style="font-size:12px;margin:0 0 10px;max-width:640px">
+    Each ZIP holds a ready-to-post caption (.txt) alongside the branded image(s) &mdash;
+    no editing needed. Download it, pick the size for your platform (square or
+    portrait for Instagram or Facebook, story/9:16 for Instagram Stories,
+    portrait or square for Twitter / X), then upload that image and paste in
+    the matching caption yourself &mdash; MediaHub never posts on your behalf.
+  </p>
   <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px">
     <a class="btn" href="{_export_zip_url}"{_export_disabled_attr}{
             _export_title_attr(
