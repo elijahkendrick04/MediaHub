@@ -120,13 +120,38 @@ def share_target_receiver():
     MediaHub") and drops them straight into the active organisation's media
     library — the single highest-value poolside mobile behaviour. The OS
     sends a top-level multipart navigation that can't carry a CSRF token
-    (so the path is CSRF-exempt) and writes only to the *signed-in*
-    session's own library. Non-image, disallowed-type, and unreadable
-    attachments are skipped and counted.
+    (so the path is CSRF-exempt, compensated by the Fetch-Metadata guard
+    below) and writes only to the *signed-in* session's own library.
+    Non-image, disallowed-type, and unreadable attachments are skipped
+    and counted.
     """
     if not W._v8_ok:
         return redirect(url_for("media_library_page"))
     from flask import request as _req
+
+    # Fetch-Metadata guard — the compensating control for the CSRF exemption.
+    # Every share_target-capable browser stamps ``Sec-Fetch-Site`` on the
+    # top-level share navigation (``none``: user-agent-initiated), so a
+    # cross-site page auto-submitting a forged multipart POST arrives as
+    # ``cross-site`` and is rejected before anything is saved. An absent
+    # header is allowed: browsers that could be CSRF'd always send it —
+    # only non-browser clients (which carry no ambient session) omit it.
+    sec_fetch_site = (_req.headers.get("Sec-Fetch-Site") or "").strip().lower()
+    if sec_fetch_site not in ("", "none", "same-origin"):
+        try:
+            from mediahub.compliance.security_log import record_event as _sec_event
+
+            _sec_event(
+                "share_target_cross_site_rejected",
+                detail=sec_fetch_site[:200],
+                outcome="blocked",
+            )
+        except Exception:
+            pass
+        return (
+            "<h1>Request blocked</h1><p>Shared photos are only accepted from "
+            "the device share sheet, not from another website.</p>"
+        ), 403
 
     profile_id = W._active_profile_id()
     if not profile_id:

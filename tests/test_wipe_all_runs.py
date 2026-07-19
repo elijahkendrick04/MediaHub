@@ -144,6 +144,69 @@ def test_keep_uploads_flag(tmp_path, monkeypatch):
     assert list((data / "runs_v4").glob("*")) == []  # runs still gone
 
 
+def _flaky_rmtree(real_rmtree, blocked_root: Path):
+    """A shutil.rmtree stand-in that refuses to delete anything at/under
+    ``blocked_root`` — honouring ``ignore_errors`` exactly like the real one,
+    so the pre-fix ``ignore_errors=True`` calls would still swallow the
+    failure (and these tests would fail against the old code)."""
+
+    def rmtree(path, *args, **kwargs):
+        p = Path(path).resolve()
+        if p == blocked_root or blocked_root in p.parents:
+            if kwargs.get("ignore_errors", bool(args and args[0])):
+                return  # old swallow-behaviour: pretend it worked
+            raise OSError(f"[injected] cannot delete {path}")
+        return real_rmtree(path, *args, **kwargs)
+
+    return rmtree
+
+
+def test_uploads_clear_failure_reported_not_swallowed(tmp_path, monkeypatch, capsys):
+    # Uploads-deletion parity with the other erasure steps: a failed deletion
+    # must increment the error count (exit 1) and must NOT print the
+    # unconditional "cleared uploads" success line.
+    data = tmp_path / "data"
+    _seed(data)
+    (data / "uploads_v4" / "sub").mkdir()
+    (data / "uploads_v4" / "sub" / "meet2.hy3").write_text("x")
+    monkeypatch.setenv("DATA_DIR", str(data))
+    monkeypatch.delenv("RUNS_DIR", raising=False)
+    monkeypatch.delenv("UPLOADS_DIR", raising=False)
+    mod = _load()
+    monkeypatch.setattr(
+        mod.shutil,
+        "rmtree",
+        _flaky_rmtree(mod.shutil.rmtree, (data / "uploads_v4").resolve()),
+    )
+    rc = mod.main(["--yes"])
+    captured = capsys.readouterr()
+    assert rc == 1, "a failed upload deletion must be an honest non-zero exit"
+    assert "cleared uploads" not in captured.out
+    assert "uploads clear incomplete" in captured.err
+    assert (data / "uploads_v4" / "sub" / "meet2.hy3").exists()  # really remains
+
+
+def test_packs_clear_failure_reported_not_swallowed(tmp_path, monkeypatch, capsys):
+    data = tmp_path / "data"
+    _seed(data)
+    packs = data / "stub_packs"
+    packs.mkdir()
+    (packs / "draft.json").write_text("{}")
+    monkeypatch.setenv("DATA_DIR", str(data))
+    monkeypatch.delenv("RUNS_DIR", raising=False)
+    monkeypatch.delenv("UPLOADS_DIR", raising=False)
+    mod = _load()
+    monkeypatch.setattr(
+        mod.shutil, "rmtree", _flaky_rmtree(mod.shutil.rmtree, packs.resolve())
+    )
+    rc = mod.main(["--yes", "--include-packs"])
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert "cleared content packs" not in captured.out
+    assert "packs clear failed" in captured.err
+    assert (packs / "draft.json").exists()
+
+
 def test_preflight_refuses_wrong_data_dir(tmp_path, monkeypatch, capsys):
     # Reproduce the real footgun: DATA_DIR points somewhere with no data.db,
     # while RUNS_DIR still points at the disk that holds the runs. The wipe
@@ -184,6 +247,27 @@ def test_dry_run_flags_preflight_issue(tmp_path, monkeypatch):
     monkeypatch.setenv("RUNS_DIR", str(wrong / "runs_v4"))
     monkeypatch.delenv("UPLOADS_DIR", raising=False)
     assert _load().main([]) == 2  # dry run surfaces the blocking issue
+
+
+def test_preflight_flags_unusable_uploads_dir(tmp_path, monkeypatch, capsys):
+    # A separately-set UPLOADS_DIR that can't be written must block the wipe
+    # (parity with the DATA_DIR / RUNS_DIR probes) instead of exiting 0 while
+    # the raw meet files remain. A path under a regular FILE defeats
+    # _writable even when the suite runs as root (chmod would not).
+    data = tmp_path / "data"
+    _seed(data)
+    blocker = tmp_path / "blocker"
+    blocker.write_text("not a dir")
+    monkeypatch.setenv("DATA_DIR", str(data))
+    monkeypatch.delenv("RUNS_DIR", raising=False)
+    monkeypatch.setenv("UPLOADS_DIR", str(blocker / "uploads"))
+    mod = _load()
+    assert mod.main(["--yes"]) == 2, "must refuse an unusable UPLOADS_DIR"
+    assert "UPLOADS_DIR" in capsys.readouterr().out
+    assert (data / "runs_v4" / "r1.json").exists()  # nothing deleted
+    # --keep-uploads makes the uploads dir irrelevant: probe skipped, wipe runs.
+    assert mod.main(["--yes", "--keep-uploads"]) == 0
+    assert list((data / "runs_v4").glob("*")) == []
 
 
 if str(_REPO / "src") not in sys.path:

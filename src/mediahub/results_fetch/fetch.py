@@ -316,6 +316,17 @@ class FetchBackend(Protocol):
 # Tier A — static backend
 # ---------------------------------------------------------------------------
 
+# Advertised on every static hop. Mirrors ALLOWED_CONTENT_TYPES: a results
+# crawl's legitimate payloads are as often PDF/CSV/JSON/ZIP downloads as HTML
+# pages, and the low-q wildcard covers the spreadsheet + image entries — so a
+# strictly content-negotiating server never 406es (or negotiates to HTML) a
+# file the interpreter can read. Passed into ``_pinned_open``, whose default
+# Accept is HTML-centric (sized for deep-research page-text reads).
+_RESULTS_ACCEPT = (
+    "text/html,application/xhtml+xml,application/pdf,application/json,"
+    "text/csv,text/plain,application/zip,*/*;q=0.5"
+)
+
 _REDIRECT_CODES = frozenset({301, 302, 303, 307, 308})
 
 
@@ -373,7 +384,11 @@ class StaticBackend:
                 # Resolve + validate + PIN this hop's connection to the validated
                 # IP (defeats the validate-then-reconnect DNS-rebinding TOCTOU).
                 # Redirects are NOT followed here — each hop is re-validated below.
-                resp, pool = _pinned_open(current, timeout=self.limits.static_timeout_s)
+                resp, pool = _pinned_open(
+                    current,
+                    timeout=self.limits.static_timeout_s,
+                    accept=_RESULTS_ACCEPT,
+                )
             except Exception:
                 # ValueError("unsafe_url") for a refused host/scheme, or any
                 # transport error — Tier A never raises.

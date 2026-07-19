@@ -1030,14 +1030,17 @@ def api_video_project(project_id: str):
         # as sent, so the render stays byte-identical).
         if new_edl.captions and (new_edl.captions.get("cues")):
             # A structural change is any edit that moves a clip's placement on
-            # the timeline: its source, trim window, or the transition that
-            # shifts everything after it. Grade / caption-text edits don't.
+            # the timeline: its source, trim window, speed (timeline_ms is
+            # span/speed, so a retime shifts every later clip), or the
+            # transition that shifts everything after it. Grade / caption-text
+            # edits don't.
             def _shape(clips):
                 return [
                     (
                         c.source,
                         c.in_ms,
                         c.out_ms,
+                        c.speed,
                         c.transition_in.kind,
                         c.transition_in.duration_ms,
                     )

@@ -139,7 +139,7 @@ class _FakePool:
 def test_static_backend_pins_via_pinned_open(monkeypatch):
     used = {}
 
-    def fake_open(url, *, timeout):
+    def fake_open(url, *, timeout, accept=None):
         used["url"] = url
         used["timeout"] = timeout
         body = b"<html><body>1st 2nd 58.21</body></html>"
@@ -157,7 +157,7 @@ def test_static_backend_pins_via_pinned_open(monkeypatch):
 def test_static_backend_refuses_when_pin_raises(monkeypatch):
     # _pinned_open raises ValueError("unsafe_url") for a refused host — the
     # backend must swallow it and return None (never raise).
-    def boom(url, *, timeout):
+    def boom(url, *, timeout, accept=None):
         raise ValueError("unsafe_url")
 
     monkeypatch.setattr(fetchmod, "_pinned_open", boom)

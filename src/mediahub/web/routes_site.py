@@ -1565,15 +1565,21 @@ def healthz_governance():
 
     per_org = _fq.usage_all_orgs(limit=100)
     # Fold in generative-imagery usage (it keeps its own dedicated ledger).
+    # Union, not intersect: an org whose ONLY AI usage is imagery has no
+    # feature_uses rows, so it is absent from usage_all_orgs — it must still
+    # appear here (imagery is the one feature with a real per-call cost).
     if W._imagine_ok:
         try:
             from mediahub.observability import imagine_usage as _iu
 
-            for row in per_org:
-                n = _iu.count_for_org(row["org_id"])
-                if n:
-                    row["by_feature"]["imagine"] = n
-                    row["total"] += n
+            by_org = {row["org_id"]: row for row in per_org}
+            for org_id, n in _iu.counts_all_orgs().items():
+                row = by_org.get(org_id)
+                if row is None:
+                    row = {"org_id": org_id, "total": 0, "by_feature": {}}
+                    per_org.append(row)
+                row["by_feature"]["imagine"] = n
+                row["total"] += n
         except Exception:
             pass
     per_org.sort(key=lambda r: r["total"], reverse=True)

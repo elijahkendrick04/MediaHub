@@ -145,6 +145,27 @@ class TestSignInPage:
         assert body.count("mh:dropdown-open") >= 4
         assert "detail:'notif'" in body and "detail:'orgmenu'" in body
 
+    def test_header_dropdowns_portal_to_body_and_clamp_to_viewport(self, app_two_profiles):
+        """Both header dropdowns must (a) portal their panel to <body> on open —
+        inside the mobile hamburger drawer the transformed nav becomes the
+        containing block for position:fixed, anchoring the panel off-screen
+        otherwise — (b) clamp the panel's right edge inside the viewport, and
+        (c) cap its height to the space below the trigger so the last item
+        stays reachable on a short phone. Source-level pins, mirroring the
+        sibling mh:dropdown-open test above."""
+        c, _, _ = app_two_profiles
+        c.post("/sign-in", data={"profile_id": "wycombe"})
+        body = c.get("/").get_data(as_text=True)
+        # (a) body-portal on open, in BOTH dropdowns (notif + org menu).
+        assert (
+            body.count("if (panel.parentNode !== document.body) document.body.appendChild(panel);")
+            >= 2
+        )
+        # (b) horizontal viewport clamp with 8px gutters, both panels.
+        assert body.count("right = Math.min(Math.max(8, right), Math.max(8, vw - pw - 8));") >= 2
+        # (c) max-height cap so the panel scrolls internally, both panels.
+        assert body.count("panel.style.maxHeight = Math.max(120, vh - top - 8) + 'px';") >= 2
+
     def test_delete_removes_profile_json(self, app_two_profiles):
         c, _, tmp_path = app_two_profiles
         json_path = tmp_path / "club_profiles" / "other.json"

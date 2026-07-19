@@ -124,3 +124,31 @@ def test_ragged_dims_raises(monkeypatch):
     monkeypatch.setattr(requests, "post", fake_post)
     with pytest.raises(embedder.EmbedderUnavailable):
         embedder.embed(["a", "b"])
+
+
+def test_vector_count_mismatch_raises(monkeypatch):
+    # Fewer vectors than inputs must raise, never silently misalign vector i
+    # against text i (#47).
+    monkeypatch.setenv("MEDIAHUB_EMBED_ENDPOINT", "https://host/v1")
+    monkeypatch.setenv("MEDIAHUB_EMBED_MODEL", "m")
+
+    def fake_post(url, json=None, headers=None, timeout=None, **kw):
+        return _FakeResp(200, _emb_payload([0.1, 0.2]))
+
+    monkeypatch.setattr(requests, "post", fake_post)
+    with pytest.raises(embedder.EmbedderUnavailable, match="1 vectors for 2 inputs"):
+        embedder.embed(["a", "b"])
+
+
+def test_null_vector_row_raises(monkeypatch):
+    # A null/empty embedding row must raise, never be dropped (#47) — dropping
+    # would shift every later vector off its text.
+    monkeypatch.setenv("MEDIAHUB_EMBED_ENDPOINT", "https://host/v1")
+    monkeypatch.setenv("MEDIAHUB_EMBED_MODEL", "m")
+
+    def fake_post(url, json=None, headers=None, timeout=None, **kw):
+        return _FakeResp(200, {"data": [{"embedding": [0.1, 0.2]}, {"embedding": None}]})
+
+    monkeypatch.setattr(requests, "post", fake_post)
+    with pytest.raises(embedder.EmbedderUnavailable, match="empty/null vector row"):
+        embedder.embed(["a", "b"])

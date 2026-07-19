@@ -179,12 +179,16 @@ def _writable(path: Path) -> bool:
         return False
 
 
-def _preflight_issues(data_dir: Path, runs_dir: Path, run_ids: dict) -> list[str]:
+def _preflight_issues(
+    data_dir: Path, runs_dir: Path, uploads_dir: Path | None, run_ids: dict
+) -> list[str]:
     """Blocking problems that mean the wipe would silently under-delete.
 
     The classic footgun is a wrong ``DATA_DIR`` (e.g. a placeholder path): the
     run files under ``RUNS_DIR`` get deleted, but the DB rows, caches and memory
     under ``DATA_DIR`` are unreachable — a half-wipe. Catch that up front.
+    ``uploads_dir`` is ``None`` under ``--keep-uploads`` (nothing there will be
+    touched, so its writability doesn't matter).
     """
     issues: list[str] = []
     if not _writable(data_dir):
@@ -206,6 +210,11 @@ def _preflight_issues(data_dir: Path, runs_dir: Path, run_ids: dict) -> list[str
         )
     if not _writable(runs_dir):
         issues.append(f"RUNS_DIR ({runs_dir}) is not writable — run files can't be removed.")
+    if uploads_dir is not None and not _writable(uploads_dir):
+        issues.append(
+            f"UPLOADS_DIR ({uploads_dir}) is not writable — the raw uploaded "
+            f"meet files can't be removed (or pass --keep-uploads)."
+        )
     return issues
 
 
@@ -267,7 +276,9 @@ def main(argv: list[str] | None = None) -> int:
     # Pre-flight: refuse a mis-pointed / unwritable DATA_DIR before deleting a
     # single file, so we never leave the app with dead run rows and orphaned
     # files (the exact half-wipe a placeholder DATA_DIR would cause).
-    issues = _preflight_issues(data_dir, runs_dir, run_ids)
+    issues = _preflight_issues(
+        data_dir, runs_dir, None if args.keep_uploads else uploads_dir, run_ids
+    )
     if issues:
         print("Pre-flight found problem(s):")
         for msg in issues:
@@ -344,19 +355,36 @@ def main(argv: list[str] | None = None) -> int:
         errors += 1
 
     if not args.keep_uploads and uploads_dir.is_dir():
+        # Failure-tracking parity with the other erasure steps: count what
+        # couldn't be deleted and only claim success when everything went.
+        upload_failures = 0
         for child in uploads_dir.iterdir():
             try:
                 if child.is_dir():
-                    shutil.rmtree(child, ignore_errors=True)
+                    shutil.rmtree(child)
                 else:
                     child.unlink(missing_ok=True)
-            except OSError:
-                pass
-        print(f"  cleared uploads ({up_files} file(s))")
+            except OSError as exc:
+                upload_failures += 1
+                if upload_failures <= 3:  # don't flood; the count is reported below
+                    print(f"  ! could not delete upload {child.name}: {exc}", file=sys.stderr)
+        if upload_failures:
+            print(
+                f"  ! uploads clear incomplete — {upload_failures} item(s) under "
+                f"{uploads_dir} could not be deleted",
+                file=sys.stderr,
+            )
+            errors += 1
+        else:
+            print(f"  cleared uploads ({up_files} file(s))")
 
     if args.include_packs and packs_dir.is_dir():
-        shutil.rmtree(packs_dir, ignore_errors=True)
-        print(f"  cleared content packs / drafts ({pack_files} file(s))")
+        try:
+            shutil.rmtree(packs_dir)
+            print(f"  cleared content packs / drafts ({pack_files} file(s))")
+        except OSError as exc:
+            print(f"  ! packs clear failed: {exc}", file=sys.stderr)
+            errors += 1
 
     if not args.keep_memory:
         try:

@@ -185,6 +185,44 @@ def test_share_target_path_is_csrf_exempt(app):
     assert _library_count() == 1
 
 
+def test_share_target_rejects_cross_site_post(app):
+    """Fetch-Metadata guard: the CSRF exemption's compensating control.
+
+    A cross-site page auto-submitting a forged multipart POST arrives with
+    ``Sec-Fetch-Site: cross-site`` (or ``same-site``) — it must be rejected
+    before anything lands in the signed-in org's library.
+    """
+    c = app.test_client()
+    _pin(c)
+    for forged in ("cross-site", "same-site"):
+        resp = c.post(
+            "/share-target",
+            data={"photos": (io.BytesIO(_JPEG), "planted.jpg")},
+            content_type="multipart/form-data",
+            headers={"Sec-Fetch-Site": forged},
+            follow_redirects=False,
+        )
+        assert resp.status_code == 403, f"Sec-Fetch-Site: {forged} must be blocked"
+    assert _library_count() == 0, "a forged cross-site share must never be saved"
+
+
+def test_share_target_allows_real_share_navigation(app):
+    """A genuine OS share-sheet navigation carries ``Sec-Fetch-Site: none``
+    (user-agent-initiated) and must keep working."""
+    c = app.test_client()
+    _pin(c)
+    resp = c.post(
+        "/share-target",
+        data={"photos": (io.BytesIO(_JPEG), "poolside.jpg")},
+        content_type="multipart/form-data",
+        headers={"Sec-Fetch-Site": "none"},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 302
+    assert "shared=1" in resp.headers["Location"]
+    assert _library_count() == 1
+
+
 # ---------------------------------------------------------------------------
 # Media-library page: capture affordance + banner
 # ---------------------------------------------------------------------------

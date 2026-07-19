@@ -2796,6 +2796,10 @@ def api_stub_pack_card_status(pack_id, card_idx):
     status = (
         (_body or {}).get("status") if isinstance(_body, dict) else request.form.get("status")
     ) or ""
+    # A JSON body can carry any type ({"status": 123}); a non-string must fall
+    # through to the invalid_request 400 below, not AttributeError on .strip().
+    if not isinstance(status, str):
+        status = ""
     status = status.strip().lower()
     rec = update_card_status(pack_id, card_idx, status)
     if not rec:

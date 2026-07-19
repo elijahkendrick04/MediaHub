@@ -1796,7 +1796,7 @@ def organisation_api_tokens_page():
     docs_link = (
         f'<p class="dim" style="font-size:13px;margin-top:var(--sp-4)">'
         f'See the <a href="{url_for("api_docs_page")}">API reference</a>, the '
-        f'<a href="/api/v1/openapi.json">OpenAPI spec</a>, and '
+        f'<a href="{url_for("api_v1.openapi_spec")}">OpenAPI spec</a>, and '
         f'<a href="{url_for("api_docs_page")}">the webhooks guide</a> for the full list.</p>'
     )
 

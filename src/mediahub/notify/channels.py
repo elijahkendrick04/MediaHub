@@ -57,7 +57,11 @@ def _latin1_header(value: str) -> str:
     try:
         from email.header import Header  # noqa: PLC0415
 
-        return Header(v, "utf-8").encode()
+        # Header.encode() folds long values at ~76 chars with "\n " —
+        # ``requests`` rejects any header value containing CR/LF, so unfold
+        # back to one line (whitespace between adjacent RFC 2047
+        # encoded-words is ignored when a client decodes them).
+        return "".join(Header(v, "utf-8").encode().splitlines())
     except Exception:
         return v.encode("ascii", "ignore").decode("ascii").strip()
 

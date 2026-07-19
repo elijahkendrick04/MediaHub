@@ -179,6 +179,26 @@ def test_record_skips_imagine_feature(fresh):
     assert fq.count_for_org("club-a", ok_only=False) == 0
 
 
+def test_metered_here_flag_drives_the_shared_ledger_skip(fresh, monkeypatch):
+    q, fq = fresh
+    # The registry's ``FeatureSpec.metered_here`` flag — not a hard-coded
+    # feature key — decides whether a feature meters in the shared ledger: a
+    # spec with metered_here=False must be skipped by record() and reserve()
+    # exactly like generative imagery is.
+    monkeypatch.setitem(
+        features._FEATURES,
+        "sidecar",
+        features.FeatureSpec(
+            "sidecar", "Sidecar", "Dedicated-ledger test feature", metered_here=False
+        ),
+    )
+    q.record("club-a", "sidecar", ok=True)
+    assert fq.count_for_org("club-a", ok_only=False) == 0
+    # Even with a limit configured there is no shared-ledger slot to reserve.
+    monkeypatch.setenv("MEDIAHUB_QUOTA_SIDECAR", "1")
+    assert q.reserve("club-a", "sidecar", plan="free") is None
+
+
 def test_imagine_quota_reads_imagine_ledger(tmp_path, monkeypatch):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     import mediahub.observability.imagine_usage as iu

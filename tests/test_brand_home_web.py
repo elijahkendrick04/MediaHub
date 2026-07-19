@@ -370,6 +370,34 @@ def test_edit_form_unset_slots_disabled_and_noop_save_preserves_palette(app_clie
     assert after == before  # no fabricated accent/fourth
 
 
+def test_edit_form_unticking_every_slot_clears_the_palette(app_client):
+    """F2 contract completion: unticking EVERY set slot posts zero colour
+    fields (disabled inputs are not submitted), and the form's
+    palette_submitted sentinel makes the save honour that as a clear-all —
+    never silently keep the old palette while reporting "Saved kit"."""
+    client, cp, _ = app_client
+    _seed_profile(cp)  # primary + secondary set
+    _signin(client)
+    from mediahub.brand.kits import list_kits
+
+    # The rendered edit form carries the sentinel a real browser would post.
+    form = _primary_edit_form(client.get("/brand").get_data(as_text=True))
+    assert 'name="palette_submitted"' in form
+    # All slots unticked -> the browser posts no colour fields at all.
+    client.post(
+        "/api/brand/kits/primary",
+        data={"name": "Primary brand", "palette_submitted": "1"},
+    )
+    after = next(k for k in list_kits(cp.load_profile("brandclub")) if k.kit_id == "primary")
+    assert after.palette == {}
+    # …and a sentinel-less POST without colour fields (hand-crafted/legacy)
+    # still keeps the "empty means untouched" fallback.
+    client.post("/api/brand/kits/primary", data={"name": "Primary brand", "primary": "#0e2a47"})
+    client.post("/api/brand/kits/primary", data={"name": "Primary brand"})
+    kept = next(k for k in list_kits(cp.load_profile("brandclub")) if k.kit_id == "primary")
+    assert kept.palette.get("primary") == "#0e2a47"
+
+
 def test_edit_form_can_still_set_a_new_colour(app_client):
     """F2 guard: the fix must not stop a user from setting a slot explicitly."""
     client, cp, _ = app_client

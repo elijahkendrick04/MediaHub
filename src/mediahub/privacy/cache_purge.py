@@ -15,7 +15,10 @@ the on-disk roots, shared by all workers, are gone immediately.
 Nothing here is a source of truth: each directory is a cache the engine
 rebuilds on demand — re-fetched PB-lookup pages, re-rendered motion, re-shot
 graphic-card PNGs, re-captured brand DNA, re-synthesised narration, re-run web
-research. Source data is deliberately **untouched**: runs (``runs_v4``),
+research. (One legacy root, ``site_cache`` from the removed website-builder
+feature, is swept even though nothing rebuilds it: pre-removal deployments may
+still carry it, and this purge is the only deletion path left.) Source data is
+deliberately **untouched**: runs (``runs_v4``),
 uploads (``uploads_v4``), the SQLite databases (``data.db``, ``memory.db``),
 the media library originals, and the JSONL ledgers all survive a purge. The
 only cost of clearing is that the next request re-derives what it needs.
@@ -68,6 +71,15 @@ def cache_roots() -> List[Tuple[str, Path]]:
         # the site-wide purge — without it "clear all caches" left every
         # rendered card PNG on disk despite the UI promising graphic renders.
         ("graphic_render_cache", data / "render_cache"),
+        # Legacy: the removed website-builder feature (club microsites + forms)
+        # cached rendered microsite assets — page snapshots, QR codes, HTML
+        # embedding athlete names — under ``DATA_DIR/site_cache``. The feature
+        # and its ``mediahub.sites.cache`` resolver are gone, but a deployment
+        # that ran microsites before the removal still carries the tree and
+        # nothing else can delete it any more, so the purge keeps sweeping the
+        # conventional path. Absent on deployments that never ran microsites
+        # (a no-op: the purge tolerates a missing root).
+        ("site_cache", data / "site_cache"),
     ]
 
     # PB-discovery tree (pbs / swimmers / search_cache / meets). The resolver

@@ -29,7 +29,6 @@ pattern as ``users.jsonl`` (web/auth.py).
 
 from __future__ import annotations
 
-import html as _html
 import json
 import os
 import re
@@ -46,9 +45,12 @@ def _with_section_toc(body: str, slug: str) -> str:
 
     Deterministic + safe: it only touches ``<h2>N. Title</h2>`` headings (the
     numbered top-level sections), stamps each with a stable ``id`` and builds a
-    wrapped row of ``#anchor`` links. Section titles are HTML-escaped into the
-    link text. If fewer than three numbered sections are found (or the hero has
-    no boundary to insert after) the body is returned unchanged.
+    wrapped row of ``#anchor`` links. Section titles are already-encoded HTML
+    authored in this module (and the regex admits no ``<``), so they are reused
+    verbatim in the heading and link text — re-escaping would double-encode
+    entities like ``&mdash;``. If fewer than three numbered sections are found
+    (or the hero has no boundary to insert after) the body is returned
+    unchanged.
     """
     heading = re.compile(r"<h2>(\d+)\.\s*([^<]+?)</h2>")
     sections: list[tuple[str, str, str]] = []  # (anchor_id, number, title)
@@ -57,14 +59,14 @@ def _with_section_toc(body: str, slug: str) -> str:
         num, title = m.group(1), m.group(2).strip()
         anchor = f"{slug}-{num}"
         sections.append((anchor, num, title))
-        return f'<h2 id="{anchor}">{num}. {_html.escape(title)}</h2>'
+        return f'<h2 id="{anchor}">{num}. {title}</h2>'
 
     stamped = heading.sub(_stamp, body)
     if len(sections) < 3:
         return body
 
     links = "".join(
-        f'<a href="#{anchor}">{num}. {_html.escape(title)}</a>' for anchor, num, title in sections
+        f'<a href="#{anchor}">{num}. {title}</a>' for anchor, num, title in sections
     )
     toc = (
         '<nav class="mh-legal-toc card" aria-label="On this page">'
