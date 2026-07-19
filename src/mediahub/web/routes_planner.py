@@ -2890,6 +2890,10 @@ def api_stub_pack_create_graphic(pack_id, card_idx):
         if _req.is_json and _req.json:
             req_fmt = _req.json.get("format")
             chosen_asset_id = (_req.json.get("asset_id") or "").strip() or None
+            # JSON flag truthiness — bool() of a JSON value is the intended
+            # presence test, not a numeric cast. (pre-existing web.py body
+            # exposed to semgrep by the #15 carve; behaviour unchanged.)
+            # nosemgrep: python.flask.security.injection.nan-injection.nan-injection
             force_no_photo = bool(_req.json.get("no_photo"))
     except Exception:
         pass

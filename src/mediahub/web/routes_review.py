@@ -3976,6 +3976,9 @@ def run_results_table(run_id, run_data):
         sel = " selected" if ek == f_event else ""
         ev_opts += f'<option value="{_h(ek)}"{sel}>{_h(elabel)}</option>'
 
+    # Truthiness of already-parsed filter values, not a user-input cast.
+    # (pre-existing web.py body exposed to semgrep by the #15 carve.)
+    # nosemgrep: python.flask.security.injection.nan-injection.nan-injection
     any_filter = bool(f_event or f_q or f_pb)
     clear_link = (
         f'<a class="btn ghost" style="font-size:13px" '

@@ -701,6 +701,10 @@ def api_brand_kit_update(kit_id):
     for type_key in ("safeguarding", "sponsor_activation"):
         by_type_raw[type_key] = {
             "min_approvers": request.form.get(f"min_approvers__{type_key}", "0"),
+            # HTML checkbox truthiness — the form value is "on" or absent, never a
+            # NaN literal; bool() is the intended presence test. (pre-existing web.py
+            # body exposed to semgrep by the finding-#15 carve; behaviour unchanged.)
+            # nosemgrep: python.flask.security.injection.nan-injection.nan-injection
             "require_owner": bool(request.form.get(f"require_owner__{type_key}")),
         }
     approver_rule = normalise_approver_rule(

@@ -3946,6 +3946,9 @@ def public_wall_update():
         prof.public_wall_enabled = False
         prof.public_wall_token = ""
     elif action == "settings":
+        # HTML checkbox truthiness — "on" or absent, never a NaN literal.
+        # (pre-existing web.py body exposed to semgrep by the #15 carve.)
+        # nosemgrep: python.flask.security.injection.nan-injection.nan-injection
         prof.public_wall_initials_only = bool(request.form.get("initials_only"))
     elif action in ("exclude", "include"):
         key = (request.form.get("card_key") or "").strip()
