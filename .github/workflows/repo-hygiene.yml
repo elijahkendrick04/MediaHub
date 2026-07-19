@@ -37,7 +37,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v6
         with:
-          python-version: "3.12"
+          python-version: "3.14"
           cache: pip
       - run: python -m pip install --upgrade pip pre-commit
       - name: Run hooks on the whole tree (blocking)
