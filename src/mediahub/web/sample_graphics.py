@@ -158,7 +158,7 @@ def story_card_svg() -> str:
         'font-size="14">R</text>' + '<text x="64" y="604" class="mhg-m mhg-i" font-size="13" '
         'letter-spacing="1">RIVERSIDE SC</text>'
         + '<text x="64" y="617" class="mhg-m mhg-ft" font-size="10" '
-        'letter-spacing="1.5">SOURCE-GROUNDED &#183; 0.96</text>'
+        'letter-spacing="1.5">SOURCE-GROUNDED &#183; HIGH</text>'
         + f'<text x="{w-26}" y="614" text-anchor="end" class="mhg-d mhg-l" '
         'font-size="40" style="opacity:0.9">04</text>' + _corner_marks(w, h) + "</svg>"
     )

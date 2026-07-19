@@ -19437,7 +19437,9 @@ def _hero_product_demo() -> str:
         ' title="Confidence — how certain the engine is the facts are correct.'
         " Above 0.85 means the achievement is well-grounded in the uploaded"
         ' results.">'
-        '<span class="track"><i></i></span>0.94</span>'
+        '<span class="mh-demo-conf-label">High confidence</span>'
+        '<span class="track"><i></i></span>'
+        '<span class="mh-demo-conf-num">0.94</span></span>'
         "</div>"
         # Queue position indicator: shows the volunteer which moment they are
         # on and how many remain — fixes the dead-end where "3 moments ranked"

@@ -1562,6 +1562,14 @@ time.mh-rel[title] { cursor: help; border-bottom: 1px dotted var(--hairline); }
   font-size: var(--fs-md);
   color: var(--good);
 }
+.mh-demo-conf-label {
+  font-family: var(--font-body);
+  font-size: var(--fs-9);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+}
 .mh-demo-conf .track {
   width: 64px; height: 4px;
   background: var(--hairline);
@@ -1575,6 +1583,11 @@ time.mh-rel[title] { cursor: help; border-bottom: 1px dotted var(--hairline); }
   transform: scaleX(0);
 }
 .mh-demo-phase.p2 .mh-demo-conf .track i { animation: mh-demo-conf 12s var(--ease-out) infinite; }
+.mh-demo-conf-num {
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-muted);
+  font-size: var(--fs-9);
+}
 /* Queue position indicator — shows '1 of 3 · 2 remaining' between the row
    header and the card so a visitor understands there are more moments to triage
    (fixes the dead-end after Scene 1 advertises 3 ranked moments). */

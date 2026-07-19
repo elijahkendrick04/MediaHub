@@ -95,6 +95,20 @@ class TestSampleGenerator:
         for fact in ("TOM", "DAVIES", "52.41", "100M FREESTYLE", "0.74s", "53.15"):
             assert fact in svg, f"story card missing verified fact {fact!r}"
 
+    def test_story_card_footer_confidence_is_a_plain_language_label(self):
+        """The footer confidence readout must not show a bare decimal with no
+        legend (regression: 'SOURCE-GROUNDED · 0.96' gave a non-technical
+        volunteer a number with no indication of what it means or whether it
+        is good). It must instead read as a plain-language label."""
+        svg = sg.story_card_svg()
+        assert "SOURCE-GROUNDED" in svg
+        assert not re.search(r"SOURCE-GROUNDED\s*(?:&#183;|·)\s*0\.\d\d", svg), (
+            "footer must not show a bare decimal confidence score"
+        )
+        assert re.search(r"SOURCE-GROUNDED\s*(?:&#183;|·)\s*[A-Z]", svg), (
+            "footer must carry a plain-language confidence label"
+        )
+
     def test_medal_gold_reserved_for_achievement(self):
         # Gold appears on the achievement surfaces (story PB chip, podium,
         # ranked medal badges) — never as plain chrome.
