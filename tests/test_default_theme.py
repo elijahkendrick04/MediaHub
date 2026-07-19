@@ -14,34 +14,26 @@ themes are.
 """
 from __future__ import annotations
 
-import importlib
 import json
 
 import pytest
 
 
 @pytest.fixture
-def fresh_app(tmp_path, monkeypatch):
-    """Clean app + isolated DATA_DIR + reloaded modules so the
-    ``_default_theme_json_cached`` lru_cache doesn't leak across
-    tests."""
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR",
-                        str(tmp_path / "club_profiles"))
-    (tmp_path / "runs_v4").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "uploads_v4").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "club_profiles").mkdir(parents=True, exist_ok=True)
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
+def fresh_app(app, web_module, tmp_path):
+    """Clean app + web module + isolated DATA_DIR, built on the canonical
+    conftest fixtures (deep-review finding #130).
+
+    ``_isolate_data_dir`` — pulled in via ``app`` / ``web_module`` — repoints
+    ``DATA_DIR`` (and the derived storage dirs) at this test's ``tmp_path`` and
+    clears the module's ``_default_theme_json_cached`` lru_cache, so the reload
+    the old fixture used purely to reset that cache is no longer needed. The
+    theme_store read cache is keyed by the DATA_DIR-derived path (and mtime),
+    but is cleared here too so a prior test's ``default`` theme can never
+    satisfy a read."""
     from mediahub.theming.theme_store import _read_cached
-    importlib.reload(cp)
-    importlib.reload(wm)
     _read_cached.cache_clear()
-    app = wm.create_app()
-    app.config["TESTING"] = True
-    return app, wm, tmp_path
+    return app, web_module, tmp_path
 
 
 class TestDefaultThemeHelper:

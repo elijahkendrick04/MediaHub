@@ -5,9 +5,10 @@ discover them by surprise.
 
 ## Deployment
 
-- **One Gunicorn worker.** `runs_v4/<id>.json` is read/written by a Python
-  thread; multi-worker requires a shared lock or a queue. The Procfile uses
-  `--workers 1 --threads 4`.
+- **Two Gunicorn gthread workers.** `runs_v4/<id>.json` is disk-backed, so a
+  poll landing on either worker still finds the job. The single production
+  launcher `scripts/docker-entrypoint.sh` runs
+  `--workers 2 --worker-class gthread --threads 4`.
 - **Persistent disk for `data/` and `runs_v4/`.** Ephemeral storage is fine for
   a demo but loses the PB cache and uploaded brand kits between restarts.
 - **Outbound HTTPS** is required for `swimmingresults.org`,

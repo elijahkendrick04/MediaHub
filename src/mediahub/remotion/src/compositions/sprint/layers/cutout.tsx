@@ -29,6 +29,7 @@ import {
   PhotoFilterDefs,
   photoExactGradeFor,
   photoHalftoneMaskFor,
+  stickerContourFilter,
 } from "./photo_filters";
 
 type Placement = { side: "left" | "right"; widthPct: number; heightPct: number };
@@ -118,6 +119,12 @@ const Layer: SceneComponent = ({ ctx }) => {
   // grounded drop-shadow untouched.
   const exactGrade = photoExactGradeFor(card);
   const mask = photoHalftoneMaskFor(card);
+  // B5 die-cut sticker contour parity: when the still traced the cutout with
+  // its 8-direction on-ground-ink outline (photoTreatment === "sticker"),
+  // paint the identical contour here, REPLACING the grounded depth shadow
+  // exactly as the still's `img.athlete-cutout { filter }` rule does. "" for
+  // every other card, so the depth shadow is untouched.
+  const sticker = stickerContourFilter(card);
 
   return (
     <div
@@ -146,6 +153,7 @@ const Layer: SceneComponent = ({ ctx }) => {
           // (the brand ground at alpha) — never recolours the photo itself.
           filter:
             exactGrade ||
+            sticker ||
             `drop-shadow(0 16px 28px ${ground}AA) drop-shadow(0 3px 7px ${ground}70)`,
           ...(mask ?? {}),
         }}

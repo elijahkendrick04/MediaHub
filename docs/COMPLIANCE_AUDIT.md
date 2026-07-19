@@ -56,7 +56,7 @@ are completed outside the repo.
 | 1.8 | Rectification + post-publication correction | NON-COMPLIANT | High | No rectification or takedown workflow; once a club has exported and posted content manually there is no correction path in code | Correction/takedown workflow (C3) |
 | 1.9 | Retention limits & deletion jobs | PARTIAL | High | TTLs exist only for caches (7d warm PB `pb_discovery/cache.py:82`, 30d research `web_research/search.py:36`) and ring-buffer prunes (`observability/llm_usage.py:481`, demo runs `web/demo_try.py:20`). Runs, uploads (`input.bin`), packs, `memory.db`: indefinite | Configurable retention + scheduled deletion job (C4) |
 | 1.10 | Security (Art. 32) | PARTIAL | Medium | Strong: bcrypt-12 (`auth.py:117`), constant-time verify + dummy hash (`auth.py:128,220`), HttpOnly/SameSite/Secure cookies (`web.py:7920–7934`), 0600 secret files (`web.py:7896`), parameterised SQL throughout, `_h()` escaping, ZIP-bomb guards (`interpreter/_zip_safety.py:24–26`), tenant isolation per ADR-0014 (`web.py:1643–1686`, invariant tests). Gaps: no rate limiting on `/login` `/signup` `/developer` (`web.py:18633,18694,18790`); no HSTS/forced HTTPS in app; SQLite unencrypted at rest | Auth rate limiting + security headers (C5); disk encryption = operational |
-| 1.11 | International transfers | NON-COMPLIANT | High | Gemini/Anthropic/Photoroom/Replicate/Stripe/ntfy are US-based processors; `render.yaml` sets no region (Render default = US/Oregon); `fly.toml:6` = lhr (UK). No transfer mechanism (IDTA/Addendum) referenced anywhere | Document transfers + mechanisms in Privacy Notice/DPA (B2, B4); executing the mechanisms is operational (D) |
+| 1.11 | International transfers | NON-COMPLIANT | High | Gemini/Anthropic/Photoroom/Replicate/Stripe/ntfy are US-based processors; `render.yaml` sets no region (Render default = US/Oregon). No transfer mechanism (IDTA/Addendum) referenced anywhere | Document transfers + mechanisms in Privacy Notice/DPA (B2, B4); executing the mechanisms is operational (D) |
 | 1.12 | Breach readiness (72h) | PARTIAL | Medium | Autonomy audit ledger is queryable (`workflow/autonomy.py` AuditLog); no breach-response procedure | Breach procedure section in DPA + ops checklist (B4, D) |
 | 1.13 | DPIA | NON-COMPLIANT | Critical | Mandatory here (children's data at scale + public dissemination + third-country AI processing — ICO DPIA screening criteria squarely met); none exists | Draft DPIA (B5) |
 | 2.1 | PECR — cookies | PARTIAL | Low | Only cookie set is the strictly-necessary Flask session cookie (`web.py:7908–7934`); no analytics/tracking anywhere (no Sentry/GA/PostHog — verified by sweep). Missing: any cookie disclosure | Cookie policy page + consent gate for future non-essential cookies (B3) |
@@ -127,7 +127,7 @@ trigger.
 **Transfers.** Gemini (Google, US), Anthropic (US), Photoroom (FR/US — CANNOT VERIFY
 region from code), Replicate (US), Stripe (US), ntfy.sh (default server, EU/US —
 operator-configurable), DuckDuckGo (US). Render deployment has **no region pinned**
-(`render.yaml`) → default US; Fly config pins London (`fly.toml:6`). No IDTA/Addendum or
+(`render.yaml`) → default US. No IDTA/Addendum or
 adequacy reliance is documented anywhere. The UK has adequacy for the
 EU and an extension for the US (UK–US Data Bridge) **only** for certified organisations —
 whether each processor is certified CANNOT be verified from code and is an operational
@@ -135,7 +135,7 @@ item.
 
 **Security (Art. 32).** Genuinely strong baseline — see findings table 1.10. The gaps
 to fix in code: rate limiting on auth endpoints, HSTS/security headers. Disk encryption
-and TLS termination are platform-level (Render/Fly) and go on the operational checklist.
+and TLS termination are platform-level (Render) and go on the operational checklist.
 
 ### 3.2 PECR
 The only cookie is Flask's signed session cookie — strictly necessary, exempt from
@@ -212,7 +212,7 @@ and posted content. Remediation C3.
 
 ### (c) Operational items (outside the repo)
 1. Pay the ICO data protection fee / register as a controller.
-2. Pin the Render deployment region (or move to Fly lhr) and enable disk encryption.
+2. Pin the Render deployment region and enable disk encryption.
 3. Accept/execute processor terms + transfer mechanisms with: Google (Gemini API),
    Anthropic, Photoroom, Replicate, Stripe, ntfy (or self-host), hosting
    provider. Verify UK–US Data Bridge certification or execute IDTA/Addendum per vendor.

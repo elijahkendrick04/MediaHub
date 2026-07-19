@@ -46,9 +46,9 @@
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  background: var(--mh-primary);
+  background: var(--mh-ground-gradient, var(--mh-primary));
   color: var(--mh-on-primary);
-  font-family: 'Inter', system-ui, sans-serif;
+  font-family: var(--mh-font-body, 'Inter', system-ui, sans-serif);
   -webkit-font-smoothing: antialiased;
 }
 .tk *, .tk *::before, .tk *::after { box-sizing: border-box; }
@@ -69,7 +69,7 @@
 }
 .tk__rail-club {
   display: flex; align-items: center; gap: 18px;
-  font-family: 'Inter',sans-serif; font-weight: 800; font-size: 24px;
+  font-family: var(--mh-font-body, 'Inter',sans-serif); font-weight: 800; font-size: 24px;
   letter-spacing: 0.16em; text-transform: uppercase; color: var(--mh-primary);
 }
 .tk__rail-club::before {
@@ -77,7 +77,7 @@
   background: var(--mh-primary); flex: 0 0 auto;
 }
 .tk__rail-meet {
-  font-family: 'Inter',sans-serif; font-weight: 700; font-size: 21px;
+  font-family: var(--mh-font-body, 'Inter',sans-serif); font-weight: 700; font-size: 21px;
   letter-spacing: 0.1em; text-transform: uppercase; color: var(--mh-primary);
   text-align: right;
 }
@@ -87,7 +87,7 @@
   position: relative;
   flex: 1 1 auto;
   display: flex; flex-direction: column; justify-content: center;
-  padding: 76px 64px;
+  padding: 76px var(--mh-sp-8);
   overflow: hidden;
 }
 .tk__photo { position: absolute; inset: 0; z-index: 0; opacity: 0.14; }
@@ -96,10 +96,17 @@
   object-position: var(--mh-photo-pos, center 28%);
   filter: grayscale(1) contrast(1.05);
 }
+/* C4: a photo-derived (non-brand) colour cast over the grayscale wash — the
+   muted swatch of the athlete's own photo. Transparent (byte-identical) unless
+   the photo-semantic-tint hook resolved --mh-photo-wash. */
+.tk__photo::after {
+  content: ''; position: absolute; inset: 0; pointer-events: none;
+  background: var(--mh-photo-wash, transparent); mix-blend-mode: multiply;
+}
 .tk__name > .tk__kicker, .tk__name > .tk__first, .tk__name > .tk__surname { position: relative; z-index: 1; }
 .tk__kicker {
   display: inline-flex; align-self: flex-start; align-items: center; gap: 16px;
-  font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 700;
+  font-family: var(--mh-font-kicker, 'Space Grotesk','Inter',sans-serif); font-weight: 700;
   font-size: 25px; letter-spacing: 0.22em; text-transform: uppercase;
   /* accent TEXT on the brand ground (a renderer-guaranteed legible pair),
      fronted by a solid accent tab -- never dark text on an accent fill,
@@ -111,7 +118,7 @@
   background: var(--mh-accent); flex: 0 0 auto;
 }
 .tk__first {
-  font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 700;
+  font-family: var(--mh-font-kicker, 'Space Grotesk','Inter',sans-serif); font-weight: 700;
   font-size: 50px; letter-spacing: 0.02em; text-transform: uppercase;
   color: var(--mh-accent); margin-bottom: 4px;
   /* a space-less single-token name cannot wrap at a space, so allow it to
@@ -124,7 +131,7 @@
   /* full-canvas autofit var used directly: this band spans the whole
      canvas width, which is exactly what the renderer sizes the var for. */
   font-size: var(--mh-fit-surname-px, 132px);
-  line-height: 0.84; letter-spacing: -0.01em; text-transform: uppercase;
+  line-height: 0.84; letter-spacing: var(--mh-track-surname, -0.01em); text-transform: uppercase;
   color: var(--mh-on-primary);
   white-space: normal; overflow-wrap: anywhere; word-break: break-word;
   max-width: 100%;
@@ -159,12 +166,14 @@
 }
 .tk__score-result .tk__tag { color: var(--mh-primary); opacity: 0.72; }
 .tk__tag {
-  font-family: 'Inter',sans-serif; font-weight: 700; font-size: 16px;
+  font-family: var(--mh-font-body, 'Inter',sans-serif); font-weight: 700;
+  font-variation-settings: 'wght' var(--mh-wght-meta, 700);
+  font-size: 16px;
   letter-spacing: 0.24em; text-transform: uppercase; color: var(--mh-accent);
   margin-bottom: 12px;
 }
 .tk__event-val {
-  font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 600;
+  font-family: var(--mh-font-kicker, 'Space Grotesk','Inter',sans-serif); font-weight: 600;
   font-size: 38px; line-height: 1.04; text-transform: uppercase;
   color: var(--mh-on-surface); overflow-wrap: anywhere;
 }
@@ -180,13 +189,13 @@
 .tk__foot {
   flex: 0 0 auto;
   display: flex; align-items: center; justify-content: space-between; gap: 28px;
-  padding: 40px 64px;
+  padding: 40px var(--mh-sp-8);
 }
-.tk__foot-id { display: flex; align-items: center; gap: 24px; min-width: 0; }
+.tk__foot-id { display: flex; align-items: center; gap: var(--mh-sp-5); min-width: 0; }
 .tk__logo { height: 60px; width: auto; flex: 0 0 auto; }
 .tk__logo img, .tk__logo svg { height: 100%; width: auto; object-fit: contain; display: block; }
 .tk__club {
-  font-family: 'Inter',sans-serif; font-weight: 800; font-size: 22px;
+  font-family: var(--mh-font-body, 'Inter',sans-serif); font-weight: 800; font-size: 22px;
   line-height: 1.16; text-transform: uppercase; color: var(--mh-on-primary);
   overflow-wrap: anywhere;
 }
@@ -195,12 +204,13 @@
   padding-left: 28px; border-left: 4px solid var(--mh-accent);
 }
 .tk__hero-lab {
-  font-family: 'Inter',sans-serif; font-weight: 700; font-size: 14px;
+  font-family: var(--mh-font-body, 'Inter',sans-serif); font-weight: 700; font-size: 14px;
   letter-spacing: 0.2em; text-transform: uppercase; color: var(--mh-accent);
   margin-bottom: 8px;
 }
 .tk__hero-val {
-  font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 700;
+  font-family: var(--mh-font-kicker, 'Space Grotesk','Inter',sans-serif); font-weight: 700;
+  font-variation-settings: 'wght' var(--mh-wght-kicker, 700);
   font-size: 26px; line-height: 1.1; color: var(--mh-on-primary);
 }
 /* the highlight block collapses entirely when no hero stat is supplied,

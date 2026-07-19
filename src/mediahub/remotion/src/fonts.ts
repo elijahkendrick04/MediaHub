@@ -27,6 +27,9 @@ const FACES: Face[] = [
   { family: "Space Grotesk", weight: "500 700", file: "space-grotesk.woff2" },
   { family: "Inter", weight: "400 800", file: "inter.woff2" },
   { family: "JetBrains Mono", weight: "500 700", file: "jetbrains-mono.woff2" },
+  // D5 — the serif display register (Playfair pairings); byte-identical to the
+  // still renderer's playfair-display.woff2 so both surfaces set the same face.
+  { family: "Playfair Display", weight: "400 900", file: "playfair-display.woff2" },
 ];
 
 let injected = false;

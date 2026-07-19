@@ -76,6 +76,8 @@ _ALLOWED_PLACEHOLDERS = {
     # M11 — data-led slots (both collapse to "" when the facts are absent).
     "STAT_CHIPS",
     "PB_BARS",
+    # F7 — the seeded overlap accent straddling a declared mh-anchor edge.
+    "OVERLAP_ACCENT",
 }
 
 _SCENES_DIR = motion.REMOTION_DIR / "src" / "compositions" / "sprint" / "scenes"

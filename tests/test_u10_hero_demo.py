@@ -24,7 +24,6 @@ The contract these tests defend:
 """
 from __future__ import annotations
 
-import importlib
 import re
 import sys
 from pathlib import Path
@@ -36,28 +35,18 @@ sys.path.insert(0, str(_ROOT))
 
 
 # --------------------------------------------------------------------------- #
-# App fixture (modelled on tests/test_capture_profile_reuse.py) — a tmp
-# DATA_DIR with no LLM keys and the web + profile modules reloaded so saved
-# profiles land under the temp dir.
+# App fixture — a fresh app on this test's isolated DATA_DIR (the canonical
+# ``web_module`` fixture repoints the storage dirs + clears caches) with no LLM
+# provider keys configured, so the signed-out landing/demo surface renders its
+# honest no-provider state. Provider keys are read live at call time, so pinning
+# them empty here (not at import) is what the honest-error assertions rely on.
 # --------------------------------------------------------------------------- #
 @pytest.fixture
-def app(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
+def app(web_module, monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "")
     monkeypatch.setenv("GEMINI_API_KEY", "")
-    for d in ("runs_v4", "uploads_v4", "club_profiles"):
-        (tmp_path / d).mkdir(parents=True, exist_ok=True)
 
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
-
-    application = wm.create_app()
+    application = web_module.create_app()
     application.config["TESTING"] = True
     return application
 

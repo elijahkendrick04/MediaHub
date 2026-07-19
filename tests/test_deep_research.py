@@ -5,6 +5,7 @@ no real LLM or network happens. Covers tool dispatch + source collection, the
 'discard partial synthesis when incomplete' rule, the structural authority
 annotation, the round-cap clamp, and honest provider errors.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -30,8 +31,11 @@ def no_network(monkeypatch):
         "mediahub.web_research.deep_research.safe_fetch",
         lambda url, **k: "page text confirming the PB is 25.10",
     )
-    for k in ("MEDIAHUB_RESEARCH_MAX_ROUNDS", "MEDIAHUB_RESEARCH_MAX_TOKENS",
-              "MEDIAHUB_RESEARCH_AUTHORITY_DOMAINS"):
+    for k in (
+        "MEDIAHUB_RESEARCH_MAX_ROUNDS",
+        "MEDIAHUB_RESEARCH_MAX_TOKENS",
+        "MEDIAHUB_RESEARCH_AUTHORITY_DOMAINS",
+    ):
         monkeypatch.delenv(k, raising=False)
     # Neutral learned-trust by default so authority comes only from the explicit
     # config a test sets.
@@ -39,20 +43,29 @@ def no_network(monkeypatch):
     yield
 
 
-def _fake_loop(answer, *, drive_tools=True):
+def _fake_loop(answer, *, drive_tools=True, exhausted=False):
     def _aw(system, user, *, tools, on_tool_call, max_tokens, max_rounds, provider=None):
         calls = []
         if drive_tools:
             calls.append(
-                ToolCallRecord("search", {"query": "swimmer pb"},
-                               on_tool_call("search", {"query": "swimmer pb"}), "gemini")
+                ToolCallRecord(
+                    "search",
+                    {"query": "swimmer pb"},
+                    on_tool_call("search", {"query": "swimmer pb"}),
+                    "gemini",
+                )
             )
             calls.append(
-                ToolCallRecord("fetch_url", {"url": "https://swimmingresults.org/r"},
-                               on_tool_call("fetch_url", {"url": "https://swimmingresults.org/r"}),
-                               "gemini")
+                ToolCallRecord(
+                    "fetch_url",
+                    {"url": "https://swimmingresults.org/r"},
+                    on_tool_call("fetch_url", {"url": "https://swimmingresults.org/r"}),
+                    "gemini",
+                )
             )
-        return ToolConversation(text=answer, provider="gemini", tool_calls=calls)
+        return ToolConversation(
+            text=answer, provider="gemini", tool_calls=calls, exhausted=exhausted
+        )
 
     return _aw
 
@@ -75,12 +88,29 @@ def test_happy_path_complete(monkeypatch):
 def test_incomplete_is_discarded(monkeypatch):
     monkeypatch.setattr(
         "mediahub.ai_core.llm.ask_with_tools",
-        _fake_loop("(the model is still gathering evidence; try a smaller question.)"),
+        _fake_loop(
+            "(the model is still gathering evidence; try a smaller question.)",
+            exhausted=True,
+        ),
     )
     res = dr.deep_research("hard question")
     assert res.complete is False
     assert res.answer == ""  # partial synthesis discarded, not returned
     assert res.sources  # but the sources it touched are still surfaced
+
+
+def test_real_answer_mentioning_the_phrase_is_kept(monkeypatch):
+    # #39: completeness is the exhausted flag, not a substring — a genuine answer
+    # that happens to mention "still gathering evidence" must NOT be discarded.
+    monkeypatch.setenv("MEDIAHUB_RESEARCH_AUTHORITY_DOMAINS", "swimmingresults.org")
+    real = "The coach said the squad is still gathering evidence of improvement; the PB stands."
+    monkeypatch.setattr(
+        "mediahub.ai_core.llm.ask_with_tools",
+        _fake_loop(real, exhausted=False),
+    )
+    res = dr.deep_research("what did the coach say?")
+    assert res.complete is True
+    assert res.answer == real
 
 
 def test_empty_question_makes_no_llm_call(monkeypatch):
@@ -117,6 +147,7 @@ def test_round_cap_is_clamped(monkeypatch):
 
 # --- verify primitives ------------------------------------------------------
 
+
 def test_is_authority_source_operator_configured(monkeypatch):
     monkeypatch.setenv("MEDIAHUB_RESEARCH_AUTHORITY_DOMAINS", "authority.test")
     monkeypatch.setattr("mediahub.context_engine.trust.score_domain", lambda d: 0.5)
@@ -130,9 +161,20 @@ def test_is_authority_source_operator_configured(monkeypatch):
 
 def test_is_authority_source_learned_trust(monkeypatch):
     monkeypatch.delenv("MEDIAHUB_RESEARCH_AUTHORITY_DOMAINS", raising=False)
-    monkeypatch.setattr("mediahub.context_engine.trust.score_domain", lambda d: 0.95)
+    from mediahub.context_engine import trust
+
+    def _ledger(attempts, successes):
+        return lambda: {"earned.test": {"parse_attempts": attempts, "parse_successes": successes}}
+
+    # High success rate but too few attempts (3/3 → score 0.8) is NOT authority —
+    # a site can't earn trust from just three clean parses.
+    monkeypatch.setattr(trust, "_load_ledger", _ledger(3, 3))
+    assert verify.is_authority_source("https://earned.test/x") is False
+    # Enough attempts AND a high score → authority.
+    monkeypatch.setattr(trust, "_load_ledger", _ledger(12, 12))
     assert verify.is_authority_source("https://earned.test/x") is True
-    monkeypatch.setattr("mediahub.context_engine.trust.score_domain", lambda d: 0.4)
+    # Enough attempts but a poor success rate → NOT authority.
+    monkeypatch.setattr(trust, "_load_ledger", _ledger(20, 5))
     assert verify.is_authority_source("https://earned.test/x") is False
 
 

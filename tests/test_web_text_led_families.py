@@ -11,18 +11,18 @@ from __future__ import annotations
 
 from pathlib import Path
 
-WEB_PY = Path(__file__).resolve().parents[1] / "src" / "mediahub" / "web" / "web.py"
+from tests._helpers import web_surface_src
 
 
 def test_no_photo_gates_import_the_generator_constant():
-    src = WEB_PY.read_text(encoding="utf-8")
+    src = web_surface_src()
     # Both gates import the canonical set instead of hardcoding the families.
     assert src.count("from mediahub.creative_brief.generator import _TEXT_LED_FAMILIES") >= 2
     assert src.count("sorted(_TEXT_LED_FAMILIES)") >= 2
 
 
 def test_no_hardcoded_text_led_family_list_left():
-    src = WEB_PY.read_text(encoding="utf-8")
+    src = web_surface_src()
     assert '["text_led_recap", "weekend_numbers", "stat_line"]' not in src
 
 

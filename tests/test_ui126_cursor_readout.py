@@ -38,7 +38,6 @@ What is asserted here:
 """
 from __future__ import annotations
 
-import importlib
 import json
 import os
 import re
@@ -55,6 +54,7 @@ _ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_ROOT / "src"))
 
 from mediahub.web import web as webmod  # noqa: E402
+from tests._helpers import web_surface_src
 
 _NODE = shutil.which("node")
 requires_node = pytest.mark.skipif(_NODE is None, reason="node not on PATH")
@@ -75,7 +75,7 @@ def _motion_css() -> str:
 
 
 def _src() -> str:
-    return Path(webmod.__file__).read_text(encoding="utf-8")
+    return web_surface_src()
 
 
 def _slice(src: str, marker: str, n: int = 3200) -> str:
@@ -176,24 +176,14 @@ def test_upload_ingest_wires_cursor():
 # B. Pages
 # =========================================================================== #
 @pytest.fixture
-def page_html(tmp_path, monkeypatch):
+def page_html(web_module, client, monkeypatch):
     """Render the upload page (render + ingest surface) and a review page for
     one owned run. Modelled on tests/test_u6_render_progress.py::page_html."""
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
+    # Kill-switch is read live in ``_results_url_enabled()`` (per request), so set
+    # it before driving the pages below.
     monkeypatch.setenv("MEDIAHUB_RESULTS_FETCH_ENABLED", "1")
-    for d in ("runs_v4", "uploads_v4", "club_profiles"):
-        (tmp_path / d).mkdir(parents=True, exist_ok=True)
 
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
-    app = wm.create_app()
-    app.config["TESTING"] = True
+    wm = web_module
 
     from mediahub.web.club_profile import ClubProfile, save_profile
 
@@ -225,12 +215,12 @@ def page_html(tmp_path, monkeypatch):
     (wm.RUNS_DIR / "r1.json").write_text(json.dumps(run), encoding="utf-8")
 
     out = {}
-    with app.test_client() as c:
-        c.post("/api/organisation/active", data={"profile_id": "alpha"})
-        for url in ("/upload", "/review/r1"):
-            resp = c.get(url)
-            assert resp.status_code == 200, f"{url} -> {resp.status_code}"
-            out[url] = resp.get_data(as_text=True)
+    c = client
+    c.post("/api/organisation/active", data={"profile_id": "alpha"})
+    for url in ("/upload", "/review/r1"):
+        resp = c.get(url)
+        assert resp.status_code == 200, f"{url} -> {resp.status_code}"
+        out[url] = resp.get_data(as_text=True)
     return out
 
 

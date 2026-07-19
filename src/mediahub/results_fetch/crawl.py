@@ -646,9 +646,17 @@ def crawl_results_site(
                 if isinstance(page, RenderedPage):
                     for cap in page.captures:
                         _keep_capture(result, cap, used_paths, limits)
-                    if page.screenshot:
+                    # Screenshots count against the same total-byte budget as
+                    # kept files/captures: up to ``max_renders`` viewport JPEGs
+                    # (~1-2 MB each) would otherwise pile up in memory on top of
+                    # ``max_total_bytes``. Stop storing once the budget is hit.
+                    if (
+                        page.screenshot
+                        and result.total_bytes + len(page.screenshot) <= limits.max_total_bytes
+                    ):
                         shot_path = _mirror_path(norm_url, "image/jpeg", used_paths)
                         result.screenshots[shot_path] = page.screenshot
+                        result.total_bytes += len(page.screenshot)
 
                 if (
                     not kept_this_page

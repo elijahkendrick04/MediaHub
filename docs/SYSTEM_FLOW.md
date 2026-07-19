@@ -87,8 +87,7 @@ Both are invoked by `pipeline_v4`. New detectors should be added under
    `weekend_numbers`).
 2. Renders the Jinja template with the brief's payload.
 3. Rasterises HTML → PNG via Playwright (Chromium installed in the deployed
-   container); WeasyPrint is the secondary in-process rasteriser for layouts
-   that don't need a full browser.
+   container).
 4. Generates each requested format size from `FORMAT_SIZES`. The default render
    is the square/portrait/story trio (1080×1080, 1080×1350, 1080×1920);
    landscape & extended aspect ratios (16:9 1920×1080, 3:2 1620×1080, 4:3

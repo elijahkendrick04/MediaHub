@@ -6,7 +6,6 @@ orchestration over an injected renderer, capped and approval-gated.
 
 from __future__ import annotations
 
-import importlib
 import json
 import sys
 from pathlib import Path
@@ -195,23 +194,10 @@ def test_apply_counts_skips(tmp_path):
 
 
 @pytest.fixture
-def app_client(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    for sub in ("runs_v4", "club_profiles"):
-        (tmp_path / sub).mkdir(parents=True, exist_ok=True)
+def app_client(client, web_module, tmp_path):
     import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
 
-    importlib.reload(cp)
-    importlib.reload(wm)
-    wm._wf_store = None
-    wm._approval_ledger = None
-    app = wm.create_app()
-    app.config["TESTING"] = True
-    with app.test_client() as c:
-        yield c, cp, wm, tmp_path
+    yield client, cp, web_module, tmp_path
 
 
 def test_resweep_preview_route(app_client):

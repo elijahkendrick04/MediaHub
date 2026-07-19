@@ -17,7 +17,8 @@ from mediahub.memory import embedder, learning, store
 
 @pytest.fixture(autouse=True)
 def tmp_memory_db(tmp_path, monkeypatch):
-    monkeypatch.setattr(store, "DB_PATH", tmp_path / "memory.db")
+    # The store resolves DATA_DIR/memory.db per call now, so point DATA_DIR here.
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
     # Quiet env so tests control the knobs explicitly.
     for k in ("MEDIAHUB_MEMORY_MIN_CORPUS", "MEDIAHUB_MEMORY_TOPK"):
         monkeypatch.delenv(k, raising=False)

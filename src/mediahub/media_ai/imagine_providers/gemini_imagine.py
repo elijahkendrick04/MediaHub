@@ -144,7 +144,7 @@ def imagen_predict(
             "safetySetting": safety,
         },
     }
-    from mediahub.media_ai.llm import _redact_key
+    from mediahub.ai_core.gemini_transport import redact_key as _redact_key
 
     try:
         r = requests.post(
@@ -160,7 +160,9 @@ def imagen_predict(
         log.debug(
             "imagine.gemini: non-200 %s %s",
             r.status_code,
-            _redact_key((r.text or "")[:300], key),
+            # Redact BEFORE truncating — a key straddling the cut would
+            # otherwise leave an un-redacted fragment in the log line.
+            _redact_key(r.text or "", key)[:300],
         )
         return []
     try:

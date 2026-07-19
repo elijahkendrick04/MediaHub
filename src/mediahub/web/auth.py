@@ -39,6 +39,8 @@ import bcrypt
 from argon2 import PasswordHasher as _Argon2Hasher
 from flask import g, session
 
+from mediahub.web import auth_brakes
+
 # argon2id with argon2-cffi defaults (t=3, m=64MiB, p=4) — ASVS L2 V2.4.
 _ARGON2 = _Argon2Hasher()
 
@@ -180,31 +182,33 @@ def password_needs_rehash(hashed: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Account lockout (ASVS V2.2): per normalised email, in-process. 5 failures
-# in 15 minutes locks the ACCOUNT for 15 minutes. Deliberately NOT keyed on
-# client address: per-IP volume limiting is the web layer's per-app auth
-# limiter (web.py _auth_rate_limited) — an address key here would let one
-# bad actor behind a club's shared NAT lock out the whole club (and lets a
-# spoofed X-Forwarded-For lock arbitrary keys). In-memory by design (a
-# restart clears it); every lockout is written to the security event log so
-# a pattern survives restarts as evidence.
+# Account lockout (ASVS V2.2): per normalised email. 5 failures in 15 minutes
+# locks the ACCOUNT for 15 minutes. Deliberately NOT keyed on client address:
+# per-IP volume limiting is the web layer's per-app auth limiter (web.py
+# _auth_rate_limited) — an address key here would let one bad actor behind a
+# club's shared NAT lock out the whole club (and lets a spoofed
+# X-Forwarded-For lock arbitrary keys).
+#
+# SEC-27: the failure counter lives in the shared SQLite DB (auth_brakes),
+# NOT a per-worker dict, so the lockout is consistent across gunicorn's two
+# workers and survives a --max-requests worker recycle. Every lockout is also
+# written to the security event log. See
+# docs/adr/0030-durable-cross-worker-bruteforce-brakes.md.
 # ---------------------------------------------------------------------------
 
 LOGIN_FAILURE_LIMIT = 5
 LOGIN_FAILURE_WINDOW_SECS = 15 * 60
-_failed_logins: dict[str, list[float]] = {}
-_FAIL_LOCK = threading.Lock()
+_FAIL_SCOPE = "fail"
 
 
 def login_locked(email: str) -> bool:
     norm = normalize_email(email)
     if not norm:
         return False
-    now = time.time()
-    with _FAIL_LOCK:
-        window = [t for t in _failed_logins.get(norm, []) if now - t < LOGIN_FAILURE_WINDOW_SECS]
-        _failed_logins[norm] = window
-        return len(window) >= LOGIN_FAILURE_LIMIT
+    count = auth_brakes.count_events(
+        _FAIL_SCOPE, norm, now=time.time(), window_secs=LOGIN_FAILURE_WINDOW_SECS
+    )
+    return count >= LOGIN_FAILURE_LIMIT
 
 
 def record_login_failure(email: str) -> bool:
@@ -212,19 +216,16 @@ def record_login_failure(email: str) -> bool:
     norm = normalize_email(email)
     if not norm:
         return False
-    now = time.time()
-    with _FAIL_LOCK:
-        window = [t for t in _failed_logins.get(norm, []) if now - t < LOGIN_FAILURE_WINDOW_SECS]
-        window.append(now)
-        _failed_logins[norm] = window
-        return len(window) == LOGIN_FAILURE_LIMIT
+    count = auth_brakes.record_event(
+        _FAIL_SCOPE, norm, now=time.time(), window_secs=LOGIN_FAILURE_WINDOW_SECS
+    )
+    return count == LOGIN_FAILURE_LIMIT
 
 
 def clear_login_failures(email: str) -> None:
     norm = normalize_email(email)
     if norm:
-        with _FAIL_LOCK:
-            _failed_logins.pop(norm, None)
+        auth_brakes.clear_events(_FAIL_SCOPE, norm)
 
 
 # ---------------------------------------------------------------------------
@@ -255,11 +256,11 @@ def _totp_code(secret: str, counter: int) -> str:
 
 # Replay guard (RFC 6238 §5.2): the verifier must not accept the same code
 # twice, so remember the last accepted counter per secret and reject any
-# counter at or below it. In-process, like the login-failure lockout above —
-# a worker restart forgets it, but the accepted window is only ±1 step
-# (~90s), so the residual exposure is small and there is no schema change.
-_TOTP_LOCK = threading.Lock()
-_totp_last_counter: dict[str, int] = {}
+# counter at or below it. SEC-27: the last-accepted counter lives in the
+# shared SQLite DB (auth_brakes.totp_replay), so the guard is consistent
+# across gunicorn's two workers and survives a worker recycle — closing the
+# ~90s per-restart window the old in-process dict left open. The secret is
+# hashed before use as a key, so the raw secret never enters data.db.
 
 
 def totp_verify(secret: str, code: str, *, at: Optional[float] = None) -> bool:
@@ -268,16 +269,14 @@ def totp_verify(secret: str, code: str, *, at: Optional[float] = None) -> bool:
     cleaned = str(code).strip().replace(" ", "")
     if not cleaned.isdigit() or len(cleaned) != 6:
         return False
-    counter = int((at if at is not None else time.time()) // 30)
+    now = at if at is not None else time.time()
+    counter = int(now // 30)
     for skew in (-1, 0, 1):
         if hmac.compare_digest(_totp_code(secret, counter + skew), cleaned):
-            matched = counter + skew
-            with _TOTP_LOCK:
-                last = _totp_last_counter.get(secret)
-                if last is not None and matched <= last:
-                    return False  # replayed (or older) code within the window
-                _totp_last_counter[secret] = matched
-            return True
+            # Accept the code only if its counter is newer than the last one we
+            # accepted for this secret (cross-worker, durable). A replay or an
+            # older-skew code after a newer one landed is rejected here.
+            return auth_brakes.totp_replay_ok(secret, counter + skew, now=now)
     return False
 
 
@@ -509,6 +508,11 @@ class UserStore:
             if user is None:
                 return None
             user.hashed_password = hash_password(new_plaintext)
+            # Revoke every outstanding session cookie: a password reset must
+            # invalidate any session an attacker already holds (mirrors
+            # bump_session_epoch, which logout uses). The reset handler then
+            # re-mints the current browser's cookie under the new epoch.
+            user.session_epoch = int(user.session_epoch or 0) + 1
             self._append(user)
             return user
 
@@ -640,6 +644,21 @@ def _dev_username() -> str:
 
 def _dev_password_hash() -> str:
     return (os.environ.get("MEDIAHUB_DEV_PASSWORD_HASH") or _DEV_PASSWORD_HASH_DEFAULT).strip()
+
+
+def dev_password_hash_overridden() -> bool:
+    """True when the operator password hash has been rotated away from the
+    shipped default via ``MEDIAHUB_DEV_PASSWORD_HASH``.
+
+    The default hash at ``_DEV_PASSWORD_HASH_DEFAULT`` is committed to a
+    *public* repository, so it is offline-crackable by anyone with repo read.
+    Production must not run on it — ``env_check`` refuses to boot unless this
+    returns True (deep-review #26 / ADR-0022, which amends ADR-0019's
+    zero-config boot for the operator credential specifically). Setting the env
+    var to the shipped-default value does not count as a rotation.
+    """
+    env = os.environ.get("MEDIAHUB_DEV_PASSWORD_HASH", "").strip()
+    return bool(env) and env != _DEV_PASSWORD_HASH_DEFAULT
 
 
 def verify_dev_credentials(username: object, password: object) -> bool:

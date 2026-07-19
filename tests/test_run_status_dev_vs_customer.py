@@ -8,7 +8,6 @@ step lines (including "PB lookup error for NAME: …") on the progress screen.
 
 from __future__ import annotations
 
-import importlib
 import json
 import time
 
@@ -16,19 +15,8 @@ import pytest
 
 
 @pytest.fixture
-def app_client(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    (tmp_path / "runs_v4").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "uploads_v4").mkdir(parents=True, exist_ok=True)
-
-    import mediahub.web.web as web
-
-    importlib.reload(web)
-    app = web.create_app()
-    app.config["TESTING"] = True
-    return web, app.test_client()
+def app_client(web_module, client):
+    return web_module, client
 
 
 _PB_LOG = [
@@ -105,9 +93,9 @@ def test_progress_page_clamps_percent_and_steps_monotonically(app_client):
     assert html.count("maxPct") >= 2, "progress percent has no monotonic high-water clamp"
     # …and the step count / raw log is held to the longest log seen, so it can't
     # drop when a lagging cross-worker poll returns fewer lines.
-    assert "bestLog" in html and html.count("maxSteps") >= 2, (
-        "step count has no monotonic high-water clamp"
-    )
+    assert (
+        "bestLog" in html and html.count("maxSteps") >= 2
+    ), "step count has no monotonic high-water clamp"
 
 
 # --- Post-run processing log: PB-lookup / store errors are surfaced to the

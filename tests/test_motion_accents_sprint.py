@@ -30,6 +30,7 @@ These tests prove the shipped R1.5 expansion pack end to end without Node:
 A final, Node-gated test type-checks the whole Remotion project with ``tsc``
 when the toolchain is present, so the TSX is proven to compile too.
 """
+
 from __future__ import annotations
 
 import re
@@ -88,9 +89,7 @@ def _motion_parity_corpus() -> str:
     motion-parity test scans (a registered file is a real execution path)."""
     parts = [STORYCARD.read_text()]
     sprint = _COMP / "sprint"
-    parts.extend(
-        p.read_text() for p in sorted(sprint.rglob("*")) if p.suffix in {".ts", ".tsx"}
-    )
+    parts.extend(p.read_text() for p in sorted(sprint.rglob("*")) if p.suffix in {".ts", ".tsx"})
     return "\n".join(parts)
 
 
@@ -164,9 +163,25 @@ def test_accents_never_shadow_builtins():
 # ---------------------------------------------------------------------------
 
 
+# B6 (Canva gap analysis) — the frosted-glass chip is a surface-tinted glass
+# decoration, not an accent-coloured mark: its whole point is the translucent
+# resolved *surface* role (rgba(var(--mh-surface-rgb),0.30)), mirroring the
+# still's .mh-glass recipe exactly. The design-spec accent_treatment contract
+# forces its motion twin into this registry, so the accent-role-only craft rule
+# gets a named exception here — it is still strictly brand-locked (a resolved
+# role, no invented hex), just to the surface role instead of the accent role.
+_SURFACE_TINTED_ACCENTS = {"glass_chip"}
+
+
 def test_accents_draw_in_the_accent_role_only():
     for p in _accent_files():
         src = p.read_text()
+        if _token_of(p) in _SURFACE_TINTED_ACCENTS:
+            # Surface-tinted glass: must paint in the resolved surface role and
+            # invent no raw colour (the brand-lock invariant that actually matters).
+            assert "roles.surface" in src, f"{p.name}: glass must paint with the surface role"
+            assert "roles.accent" not in src, f"{p.name}: a glass chip is not accent-coloured"
+            continue
         assert "roles.accent" in src, f"{p.name}: must paint with the accent role"
         for forbidden in ("roles.ground", "roles.surface", "roles.onGround"):
             assert forbidden not in src, (
@@ -265,9 +280,7 @@ def test_motion_props_forward_each_new_accent_token():
     it through ``EXTRA_ACCENTS[token]`` to the registered decoration."""
     for p in _accent_files():
         token = _token_of(p)
-        props = motion._card_to_props(
-            _card(), brief={"accent_style": token}, brand_kit=_BRAND
-        )
+        props = motion._card_to_props(_card(), brief={"accent_style": token}, brand_kit=_BRAND)
         assert props["accentStyle"] == token, token
 
 

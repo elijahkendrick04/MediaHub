@@ -39,7 +39,16 @@ BASE_BRANCH = os.environ.get("AUTOTEST_BASE_BRANCH", "main")
 PROTECTED = (
     "src/mediahub/interpreter/", "src/mediahub/pb_discovery/",
     "src/mediahub/recognition/", "src/mediahub/recognition_swim/",
-    "legacy/swim_content_v5/ranker_v3.py", "src/mediahub/theming/logo_chip.py",
+    # The two LIVE rankers — the content-worthiness ranking maths CLAUDE.md keeps
+    # deterministic. V5 `rank_achievements` is the interpreter-path authority
+    # (re-exported at src/mediahub/recognition/__init__.py); V3 `rank_cards` ranks
+    # the review queue (imported at src/mediahub/pipeline/pipeline_v4.py). Both must
+    # stay off the bot's editable surface. The former guard pinned
+    # `legacy/swim_content_v5/ranker_v3.py`, a path that has NEVER existed, so
+    # `_touches_protected` matched NEITHER real ranker and the deterministic-engine
+    # boundary silently missed the ranker entirely (F17).
+    "legacy/swim_content_v5/ranker.py", "legacy/swim_content/ranker_v3.py",
+    "src/mediahub/theming/logo_chip.py",
     "src/mediahub/media_library/selector.py",
     # The human-blessed ground-truth oracle. A `ground_truth_regression` means the
     # deterministic engine diverged from these numbers; the finding's suspect points at

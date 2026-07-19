@@ -60,6 +60,8 @@ class TestCardWorkflowStateDefaults:
         assert s.notes is None
         assert s.posted_at is None
         assert s.last_changed_at == ""
+        # Finding #116: no actor recorded until something stamps one.
+        assert s.actor is None
 
 
 # ---------------------------------------------------------------------------
@@ -85,6 +87,7 @@ class TestToDict:
             "posted_at",
             "last_changed_at",
             "translations",  # 1.24 localisation: per-language variants
+            "actor",  # finding #116: who/what last changed the card
         }
         assert set(d.keys()) == expected
 
@@ -108,9 +111,20 @@ class TestFromDict:
             notes="committee approved",
             posted_at="2024-05-01T12:00:00Z",
             last_changed_at="2024-04-30T10:00:00Z",
+            actor="api-token:mht_abc123",
         )
         loaded = CardWorkflowState.from_dict(original.to_dict())
         assert loaded == original
+        assert loaded.actor == "api-token:mht_abc123"
+
+    def test_legacy_dict_without_actor_loads(self) -> None:
+        # State written before finding #116 has no `actor` key — it must still
+        # load, defaulting to None rather than raising.
+        loaded = CardWorkflowState.from_dict(
+            {"card_id": "old", "status": "approved", "last_changed_at": "2024-01-01T00:00:00Z"}
+        )
+        assert loaded.status is CardStatus.APPROVED
+        assert loaded.actor is None
 
     def test_unknown_status_falls_back_to_queue(self) -> None:
         loaded = CardWorkflowState.from_dict(

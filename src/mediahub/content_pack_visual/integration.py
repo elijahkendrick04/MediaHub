@@ -105,6 +105,17 @@ def persist_visual(visual, *, run_id: str, brief=None) -> Path:
     payload["visual_ids"] = ids_map
     sidecar.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
 
+    # Perf (#17): stamp the vid → (run_id, brief_id) index so /api/visual/<vid>
+    # resolves in one indexed SELECT instead of walking every run dir. Strictly
+    # best-effort — the routes backfill lazily on a miss, so a DB hiccup here
+    # only costs one slow walk, never a lost visual.
+    try:
+        from mediahub.content_pack_visual import visual_index as _vidx
+
+        _vidx.index_visual(run_id, brief_id, payload)
+    except Exception:
+        pass
+
     # Governance (1.23): stamp an honest provenance manifest beside the PNG —
     # what made this card, from what, when. A result card is a deterministic
     # composite of real photography (not an AI image); only the caption and
@@ -619,6 +630,24 @@ def create_visual_for_item(
             watermark_text=watermark_text,
             photo_pos_override=_photo_pos,
         )
+
+        # F6 — the layout scorer may have switched the brief's style pack at
+        # render time (render_brief writes the winner back onto this brief
+        # object). The brief JSON above was persisted BEFORE the render and is
+        # exactly the record the motion route mirrors (_latest_brief_for_card),
+        # so on a switch it must be rewritten — and out["brief"] refreshed —
+        # or the exported video would decorate with the pack the director
+        # chose, not the pack the approved still shipped. Gated on a real
+        # switch, so flag-off and no-swap runs stay byte-identical (no writes).
+        _f6_rec = getattr(brief, "layout_score", None)
+        if isinstance(_f6_rec, dict) and _f6_rec.get("changed"):
+            try:
+                (bdir / f"{brief.id}.json").write_text(
+                    json.dumps(brief.to_dict(), indent=2, default=str), encoding="utf-8"
+                )
+            except Exception as e:
+                out["errors"].append(f"brief_repersist_failed: {e}")
+            out["brief"] = brief.to_dict()
     except Exception as e:
         out["errors"].append(f"render_failed: {e}")
         traceback.print_exc()
@@ -943,6 +972,18 @@ def create_candidate_pool_for_item(
                     sponsor_name=sponsor_name,
                     sponsor_logo_path=sponsor_logo_path,
                 )
+                # F6 — same post-render re-persist as the primary path: a
+                # measured pack switch must reach the stored brief JSON the
+                # motion route mirrors. No-op unless a switch happened.
+                _f6_rec = getattr(brief, "layout_score", None)
+                if isinstance(_f6_rec, dict) and _f6_rec.get("changed"):
+                    try:
+                        (briefs_dir_for_run(run_id) / f"{brief.id}.json").write_text(
+                            json.dumps(brief.to_dict(), indent=2, default=str),
+                            encoding="utf-8",
+                        )
+                    except Exception as e:
+                        out["errors"].append(f"brief_repersist_failed_{idx}: {e}")
                 visuals_summary: list[dict] = []
                 for r in results:
                     try:
@@ -1089,6 +1130,15 @@ def attach_visuals_to_pack(
             item["visual_errors"] = res.get("errors") or None
             sig = (res.get("brief") or {}).get("variation_signature")
             if sig:
+                # F6 — the persisted signature deliberately keeps its
+                # generation-time ``sp:`` token (it seeds the F7 overlap
+                # accent), but THIS copy feeds the next card's pack-avoid
+                # parse, which must avoid the pack the card actually SHIPPED.
+                # Patch the trailing token on the threaded value only; when
+                # F6 didn't swap, this is an identity rewrite.
+                _shipped = (res.get("brief") or {}).get("style_pack") or ""
+                if _shipped and "sp:" in sig:
+                    sig = sig.split("sp:", 1)[0] + "sp:" + _shipped
                 recent_sigs.append(sig)
             for v in res.get("visuals") or []:
                 for aid in v.get("sourced_asset_ids") or []:

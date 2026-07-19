@@ -6,42 +6,28 @@ segments in via the form value lets the configure page render meta
 sourced from anywhere on disk. The fix rejects any run_id that doesn't
 match the generated-token shape (``[A-Za-z0-9_-]{1,64}``).
 """
+
 from __future__ import annotations
 
-import importlib
 import json
-import sys
 from pathlib import Path
 
 import pytest
 
 
-_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(_ROOT))
-
-
 @pytest.fixture
-def gated_client(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    for sub in ("runs_v4", "uploads_v4", "club_profiles"):
-        (tmp_path / sub).mkdir(parents=True, exist_ok=True)
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-    importlib.reload(cp); importlib.reload(wm)
-
-    app = wm.create_app()
-    app.config["TESTING"] = True
+def gated_client(app, tmp_path):
     app.config["ENFORCE_ORG_GATE"] = True
 
     from mediahub.web.club_profile import ClubProfile, save_profile
-    save_profile(ClubProfile(
-        profile_id="my-club", display_name="My Club",
-        brand_voice_summary="A friendly club.",
-    ))
+
+    save_profile(
+        ClubProfile(
+            profile_id="my-club",
+            display_name="My Club",
+            brand_voice_summary="A friendly club.",
+        )
+    )
 
     with app.test_client() as c:
         c.post("/api/organisation/active", data={"profile_id": "my-club"})
@@ -53,12 +39,16 @@ def _plant_attacker_meta(tmp_path: Path) -> None:
     so we can confirm the guard refuses to traverse into it."""
     victim = tmp_path / "attacker_dir"
     victim.mkdir(parents=True, exist_ok=True)
-    (victim / "upload_meta.json").write_text(json.dumps({
-        "filename": "planted.hy3",
-        "clubs": ["planted-club"],
-        "meet_name": "Planted Meet",
-        "file_byte_size": 100,
-    }))
+    (victim / "upload_meta.json").write_text(
+        json.dumps(
+            {
+                "filename": "planted.hy3",
+                "clubs": ["planted-club"],
+                "meet_name": "Planted Meet",
+                "file_byte_size": 100,
+            }
+        )
+    )
     (victim / "input.bin").write_bytes(b"A1Planted\n")
 
 
@@ -70,12 +60,16 @@ def test_legitimate_token_reaches_configure_page(gated_client):
     run_id = "abc123def456"
     staged = tmp / "runs_v4" / run_id
     staged.mkdir(parents=True, exist_ok=True)
-    (staged / "upload_meta.json").write_text(json.dumps({
-        "filename": "real.hy3",
-        "clubs": ["my-club"],
-        "meet_name": "Real Meet",
-        "file_byte_size": 12345,
-    }))
+    (staged / "upload_meta.json").write_text(
+        json.dumps(
+            {
+                "filename": "real.hy3",
+                "clubs": ["my-club"],
+                "meet_name": "Real Meet",
+                "file_byte_size": 12345,
+            }
+        )
+    )
     (staged / "input.bin").write_bytes(b"A1Real\n")
     resp = c.get(f"/upload/configure?run_id={run_id}")
     assert resp.status_code == 200
@@ -117,13 +111,16 @@ def test_post_with_traversal_run_id_does_not_start_pipeline(gated_client):
         assert "Planted Meet" not in rj.read_text()
 
 
-@pytest.mark.parametrize("bad_id", [
-    "../etc/passwd",
-    "..%2Fattacker_dir",
-    "abc/../def",  # rejected by the Flask string converter pre-routing
-    "x" * 65,      # exceeds the 64-char regex cap
-    "abc!def",     # disallowed punctuation
-])
+@pytest.mark.parametrize(
+    "bad_id",
+    [
+        "../etc/passwd",
+        "..%2Fattacker_dir",
+        "abc/../def",  # rejected by the Flask string converter pre-routing
+        "x" * 65,  # exceeds the 64-char regex cap
+        "abc!def",  # disallowed punctuation
+    ],
+)
 def test_assorted_bad_shapes_are_refused(gated_client, bad_id):
     c, _, _ = gated_client
     resp = c.get(f"/upload/configure?run_id={bad_id}")

@@ -17,12 +17,7 @@ def _png_bytes(color=(20, 60, 120), size=(400, 500)):
 
 
 @pytest.fixture
-def app_env(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    for d in ("uploads_v4", "club_profiles", "runs_v4"):
-        (tmp_path / d).mkdir(parents=True, exist_ok=True)
+def app_env(web_module, tmp_path, monkeypatch):
     for var in (
         "GEMINI_API_KEY",
         "GOOGLE_API_KEY",
@@ -43,16 +38,12 @@ def app_env(tmp_path, monkeypatch):
         uploads_dir=tmp_path / "uploads_v4" / "media_library",
     )
 
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
     from mediahub.web.club_profile import ClubProfile, save_profile
 
     save_profile(ClubProfile(profile_id="club-x", display_name="Club X"))
     save_profile(ClubProfile(profile_id="club-y", display_name="Club Y"))
 
+    wm = web_module
     app = wm.create_app()
     app.config["TESTING"] = True
     if not app.secret_key:

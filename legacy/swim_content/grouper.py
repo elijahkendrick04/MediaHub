@@ -8,9 +8,28 @@ Takes a list of per-swim Claims and produces a list of ContentCards where:
   - confirmed PBs across the team become a single `pb_roundup`
   - qualifying-time hits become `qual_alert` cards (one per swim, but flagged)
 
-Anti-spam: if a swimmer has 3+ swims that would otherwise become standalone
-cards, the standalone cards are demoted to RECAP and a single spotlight card
-takes their place in the queue. This is the rule the brief asked for.
+Emission contract (per swimmer — the two card types are mutually exclusive):
+  - A swimmer with 3+ notable swims OR a same-stroke gold double yields exactly
+    ONE `athlete_spotlight` card and NO `standout_swim` cards.
+  - Every other swimmer (1-2 notable swims, not a same-stroke gold double)
+    yields one `standout_swim` per notable swim and NO spotlight.
+  A single swimmer therefore never produces both a spotlight and standouts. The
+  anti-spam rule the brief asked for ("one card instead of a flood of
+  standalone swims") is enforced structurally here at grouping time — the
+  spotlight is emitted *instead of* the per-swim standouts, not alongside them
+  and then demoted downstream.
+
+  Consequence for `ranker_v3.rank_cards`: this grouper keys swimmers by
+  `swimmer_tiref or swimmer_name` (see the loop below), so a single athlete
+  never yields both a spotlight and standouts. The ranker's step-2
+  spotlight-owner demotion, however, keys on `primary_swimmer` — the display
+  *name*. The two keys agree except when two DISTINCT athletes share a display
+  name (distinct tirefs): only then can the name-keyed demotion fire on this
+  grouper's output, and it fires on the *other* same-named athlete's standout.
+  So the demotion is effectively a no-op on real output in the common case, but
+  it is not strictly unreachable. Any change to that coupling (e.g. re-keying
+  the demotion on tiref) must be coordinated with the ranker_v3 owner — see PR
+  notes for finding F28.
 """
 from __future__ import annotations
 
@@ -20,17 +39,17 @@ from typing import Iterable
 from .cards import (
     Claim, ContentCard, CaptionVariants,
     TYPE_STANDOUT, TYPE_SPOTLIGHT, TYPE_PB_ROUNDUP, TYPE_QUAL_ALERT,
-    TYPE_PODIUM_ROUNDUP, TYPE_WEEKEND_NUMBERS, TYPE_RECAP, TYPE_NEEDS_CONFIRMATION,
+    TYPE_PODIUM_ROUNDUP, TYPE_WEEKEND_NUMBERS, TYPE_RECAP,
 )
 from .evidence import Evidence, evidence_from_meet
 
 
 # ---------- helpers ----------
 
-# Stroke families for sweep detection
-_STROKE_NAME = {"FR": "freestyle", "BK": "backstroke", "BR": "breaststroke",
-                "FL": "fly", "IM": "individual medley"}
-
+# Stroke families for sweep-detection headlines. Both lookup sites
+# (`_event_label` and the spotlight `family` local) use `.get(stroke, stroke)`,
+# so an unknown/raw or empty stroke code degrades to a label instead of raising
+# KeyError (finding F61).
 _STROKE_FAMILY_TITLE = {"FR": "Freestyle", "BK": "Backstroke", "BR": "Breaststroke",
                          "FL": "Butterfly", "IM": "Individual Medley"}
 
@@ -106,12 +125,17 @@ def group_claims_into_cards(
         if same_stroke_sweep or many_notables:
             # Build a spotlight card
             stroke = gold_strokes[0] if same_stroke_sweep else None
+            # Guard the family lookup like `_event_label` does: an unknown stroke
+            # code degrades to its own label, and a missing/empty code degrades to
+            # "", so building the headline never KeyErrors (finding F61). `family`
+            # is only consumed on the same_stroke_sweep path below.
+            family = _STROKE_FAMILY_TITLE.get(stroke, stroke) or ""
             if same_stroke_sweep and len(gold_swims) >= 3:
-                headline = f"{primary_name} — {_STROKE_FAMILY_TITLE[stroke].lower()} clean sweep"
-                subhead = f"{len(gold_swims)} golds in the {_STROKE_FAMILY_TITLE[stroke]} events"
+                headline = f"{primary_name} — {family.lower()} clean sweep"
+                subhead = f"{len(gold_swims)} golds in the {family} events"
             elif same_stroke_sweep:
-                headline = f"{primary_name} doubles up in the {_STROKE_FAMILY_TITLE[stroke].lower()}"
-                subhead = f"Two golds across the {_STROKE_FAMILY_TITLE[stroke]} events"
+                headline = f"{primary_name} doubles up in the {family.lower()}"
+                subhead = f"Two golds across the {family} events"
             elif len(gold_swims) >= 2 and len(gold_swims) >= len(medal_swims) - 1:
                 headline = f"{primary_name} — multi-event winner"
                 subhead = f"{len(gold_swims)} golds and {len(notable_swims)} notable swims"
@@ -134,7 +158,11 @@ def group_claims_into_cards(
             )
             cards.append(card)
         else:
-            # One standout card per notable swim (will be deduped by ranker if too many)
+            # One standout card per notable swim. A swimmer reaching this branch
+            # has at most 2 notable swims (3+ notables or a same-stroke gold
+            # double would have produced a spotlight above), so a single swimmer
+            # can't flood the queue here. Across swimmers, the global queue cap in
+            # ranker_v3 is the volume control (the ranker never dedups cards).
             for swim_claims in notable_swims:
                 ref = swim_claims[0]
                 ev_label = _event_label(ref.distance, ref.stroke, ref.course)

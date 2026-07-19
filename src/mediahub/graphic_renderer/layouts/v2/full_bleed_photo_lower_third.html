@@ -26,7 +26,7 @@
   isolation: isolate;
   background: radial-gradient(120% 80% at 50% 8%, var(--mh-surface) 0%, var(--mh-primary) 78%);
   color: var(--mh-on-primary);
-  font-family: 'Inter', system-ui, sans-serif;
+  font-family: var(--mh-font-body, 'Inter', system-ui, sans-serif);
   -webkit-font-smoothing: antialiased;
 }
 .fb *, .fb *::before, .fb *::after { box-sizing: border-box; }
@@ -38,9 +38,19 @@
   object-position: var(--mh-photo-pos, center 26%);
   display: block;
 }
+/* B7: the bottom scrim alpha adapts to the pixels behind it (--mh-scrim-alpha),
+   with the authored 0.40 as the byte-identical fallback. */
 .fb__grad {
   position: absolute; inset: 0; z-index: 1; pointer-events: none;
-  background: linear-gradient(180deg, rgba(0,0,0,0) 44%, rgba(0,0,0,0.12) 62%, rgba(0,0,0,0.40) 100%);
+  background: linear-gradient(180deg, rgba(0,0,0,0) 44%, rgba(0,0,0,0.12) 62%, rgba(0,0,0,var(--mh-scrim-alpha,0.40)) 100%);
+}
+/* C4: an additive photo-cast scrim — the athlete photo's own shadow swatch
+   (dark_muted), APCA-gated by the hook. Deepens the neutral scrim with the
+   photo's hue; transparent (byte-identical) unless --mh-photo-scrim resolved. */
+.fb__grad::after {
+  content: ''; position: absolute; inset: 0; pointer-events: none;
+  background: linear-gradient(180deg, transparent 44%, var(--mh-photo-scrim, transparent) 100%);
+  opacity: 0.34;
 }
 
 /* kicker top-left, brand chip top-right — both over the photo */
@@ -49,13 +59,13 @@
   display: inline-flex; align-items: center;
   padding: 14px 22px;
   background: var(--mh-accent); color: var(--mh-primary);
-  font-family: 'Space Grotesk', 'Inter', sans-serif;
+  font-family: var(--mh-font-kicker, 'Space Grotesk', 'Inter', sans-serif);
   font-weight: 800; font-size: 25px; letter-spacing: 0.16em; text-transform: uppercase;
 }
 .fb__brand { position: absolute; top: 60px; right: 60px; z-index: 3; display: flex; align-items: center; gap: 14px; }
 .fb__logo { height: 56px; width: auto; }
 .fb__logo img, .fb__logo svg { height: 100%; width: auto; object-fit: contain; display: block; }
-.fb__club { font-family: 'Inter', sans-serif; font-weight: 800; font-size: 23px; text-transform: uppercase; color: var(--mh-on-primary); text-shadow: 0 2px 12px rgba(0,0,0,0.5); }
+.fb__club { font-family: var(--mh-font-body, 'Inter', sans-serif); font-weight: 800; font-size: 23px; text-transform: uppercase; color: var(--mh-on-primary); text-shadow: 0 2px 12px rgba(0,0,0,0.5); }
 
 /* the lower third — a vertical stack so the name always gets full width */
 .fb__band {
@@ -66,14 +76,14 @@
   display: flex; flex-direction: column;
 }
 .fb__first {
-  font-family: 'Space Grotesk', 'Inter', sans-serif;
+  font-family: var(--mh-font-kicker, 'Space Grotesk', 'Inter', sans-serif);
   font-weight: 700; font-size: 30px; letter-spacing: 0.12em; text-transform: uppercase;
   color: var(--mh-accent);
 }
 .fb__surname {
   font-family: var(--mh-font-display, 'Anton', 'Bebas Neue', Impact, sans-serif);
   font-weight: 400; font-size: var(--mh-fit-surname-px, 116px);
-  line-height: 0.86; letter-spacing: -0.01em; text-transform: uppercase;
+  line-height: 0.86; letter-spacing: var(--mh-track-surname, -0.01em); text-transform: uppercase;
   color: var(--mh-on-primary); white-space: nowrap;
 }
 .fb__row {
@@ -82,16 +92,23 @@
 }
 .fb__meta { min-width: 0; }
 .fb__event {
-  font-family: 'Space Grotesk', 'Inter', sans-serif;
+  font-family: var(--mh-font-kicker, 'Space Grotesk', 'Inter', sans-serif);
   font-weight: 600; font-size: 28px; letter-spacing: 0.05em; text-transform: uppercase;
   color: var(--mh-on-primary);
 }
-.fb__where { margin-top: 8px; font-family: 'Inter', sans-serif; font-weight: 500; font-size: 21px; color: var(--mh-on-primary); opacity: 0.74; }
-.fb__stat { margin-top: 8px; font-family: 'Inter', sans-serif; font-weight: 600; font-size: 22px; color: var(--mh-accent); }
+.fb__where { margin-top: 8px; font-family: var(--mh-font-body, 'Inter', sans-serif); font-weight: 500; font-size: 21px; color: var(--mh-on-primary); opacity: 0.74; }
+.fb__stat { margin-top: 8px; font-family: var(--mh-font-body, 'Inter', sans-serif); font-weight: 600; font-size: 22px; color: var(--mh-accent); }
 .fb__right { flex: 0 0 auto; display: flex; flex-direction: column; align-items: flex-end; gap: 14px; }
+/* B6: the result chip frosts over the photo when glass is opted in
+   (--mh-glass-*), with the light on-primary ink; else the opaque accent chip
+   via the var() fallbacks (byte-identical). */
 .fb__result {
   display: inline-block; padding: 16px 26px;
-  background: var(--mh-accent); color: var(--mh-primary);
+  background: var(--mh-glass-bg, var(--mh-accent)); color: var(--mh-glass-ink, var(--mh-primary));
+  -webkit-backdrop-filter: var(--mh-glass-filter, none);
+  backdrop-filter: var(--mh-glass-filter, none);
+  border: var(--mh-glass-border, none);
+  box-shadow: var(--mh-glass-shadow, none);
   font-family: 'JetBrains Mono', 'Space Grotesk', monospace; font-feature-settings: "tnum";
   font-weight: 700; font-size: var(--mh-fit-result-px, 80px); font-variation-settings: var(--mh-axes-result, normal); line-height: 0.9;
 }
@@ -111,6 +128,7 @@
   </div>
 
   <div class="fb__band">
+    <div class="mh-anchor mh-anchor--panel-tr">{{OVERLAP_ACCENT}}</div>
     <div class="fb__first">{{ATHLETE_FIRST_NAME}}</div>
     <div class="fb__surname">{{ATHLETE_SURNAME_DISPLAY}}</div>
     <div class="fb__row">

@@ -4,45 +4,25 @@ The endpoint that the "Looks right" button calls before navigating.
 Idempotent: ensures the active profile's derived palette is computed
 and persisted; returns the resolved seed_hex + repair flag.
 """
-from __future__ import annotations
 
-import importlib
-import sys
-from pathlib import Path
+from __future__ import annotations
 
 import pytest
 
 
-_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(_ROOT))
-
-
 @pytest.fixture
-def app_client(tmp_path, monkeypatch):
-    """A clean Flask app with isolated DATA_DIR and a session pin
-    helper. Pattern mirrors tests/test_responsive_meta.py."""
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    (tmp_path / "runs_v4").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "uploads_v4").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "club_profiles").mkdir(parents=True, exist_ok=True)
-
+def app_client(client, web_module):
+    """A clean Flask app client on an isolated DATA_DIR, plus the web and
+    club_profile modules the tests below reach into."""
     import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-    importlib.reload(cp)
-    importlib.reload(wm)
 
-    app = wm.create_app()
-    app.config["TESTING"] = True
-    with app.test_client() as c:
-        yield c, wm, cp
+    return client, web_module, cp
 
 
 def _seed_profile(cp_module, primary="#06D6A0", display_name="Test Club"):
     """Create a minimal profile with a brand kit and persist it."""
     from mediahub.web.club_profile import ClubProfile
+
     pid = "swim-test"
     prof = ClubProfile(profile_id=pid, display_name=display_name)
     prof.brand_primary = primary
@@ -93,6 +73,7 @@ class TestWithActiveProfile:
         assert "seed_hex" in payload
         # The seed should be a 6/8-digit hex.
         import re
+
         assert re.fullmatch(r"#[0-9A-Fa-f]{6,8}", payload["seed_hex"])
 
     def test_persistence_end_to_end(self, app_client):
@@ -105,8 +86,10 @@ class TestWithActiveProfile:
 
         # Pre-state: no derived palette
         before = cp.load_profile(prof.profile_id)
-        assert "derived_palette" not in (before.brand_kit or {}) or \
-               before.brand_kit.get("derived_palette") is None
+        assert (
+            "derived_palette" not in (before.brand_kit or {})
+            or before.brand_kit.get("derived_palette") is None
+        )
 
         r = client.post("/api/organisation/finalise")
         assert r.status_code == 200
@@ -114,9 +97,9 @@ class TestWithActiveProfile:
         # Post-state: derived palette present
         after = cp.load_profile(prof.profile_id)
         bk = after.brand_kit or {}
-        assert bk.get("derived_palette") is not None, (
-            f"profile not updated after finalise; brand_kit={bk!r}"
-        )
+        assert (
+            bk.get("derived_palette") is not None
+        ), f"profile not updated after finalise; brand_kit={bk!r}"
         derived = bk["derived_palette"]
         # The derived dict carries the documented shape
         for key in ("seed_hex", "palettes", "roles", "schema_version"):

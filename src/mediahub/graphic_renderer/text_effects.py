@@ -31,6 +31,7 @@ re-assignment exactly like the rest of the card).
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Optional
 from urllib.parse import quote
@@ -131,6 +132,8 @@ def _style_for(name: str) -> str:
             "0.165em 0.165em 0 rgba(0,0,0,0.05);"
         )
     if name == "glitch":
+        # No-brand fallback dyad; the brand-locked dyad (derived from the
+        # card's accent) is computed in effect_css via _glitch_style.
         return "text-shadow:-0.022em 0 0 rgba(255,0,86,0.62),0.022em 0 0 rgba(0,224,255,0.62);"
     if name == "neon":
         # Fill inherited (stays role-legible); glow in the brand accent.
@@ -153,6 +156,41 @@ def _outline_style() -> str:
         "color:var(--mh-on-primary);"
         "-webkit-text-stroke:0.03em var(--mh-primary);"
         "paint-order:stroke fill;"
+    )
+
+
+def _glitch_style(accent_hex: str) -> str:
+    """The glitch fringe dyad, derived from the card's own accent (C7).
+
+    Canva's Glitch restricts its colour to luminance-matched dyads, which is
+    what makes it read deliberate. Ours was the one decoration in the system
+    that ignored the brand palette (hardcoded magenta/cyan). The dyad here is
+    the accent hue rotated ±140° with the accent's own lightness kept — pure
+    HLS maths on a resolved role, so it is brand-derived, deterministic, and
+    changes with medal tints exactly like the rest of the card. Falls back to
+    the fixed dyad when the accent hex is unparseable.
+    """
+    import colorsys
+
+    h = (accent_hex or "").strip().lstrip("#")
+    if len(h) == 3:
+        h = "".join(c * 2 for c in h)
+    if len(h) != 6:
+        return _style_for("glitch")
+    try:
+        r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+    except ValueError:
+        return _style_for("glitch")
+    hue, lig, sat = colorsys.rgb_to_hls(r / 255.0, g / 255.0, b / 255.0)
+    sat = max(sat, 0.55)  # a grey accent still needs visible fringes
+    lig = min(max(lig, 0.35), 0.72)  # keep both fringes in a readable band
+
+    def _rot(deg: float) -> str:
+        rr, gg, bb = colorsys.hls_to_rgb((hue + deg / 360.0) % 1.0, lig, sat)
+        return f"{int(round(rr * 255))},{int(round(gg * 255))},{int(round(bb * 255))}"
+
+    return (
+        f"text-shadow:-0.022em 0 0 rgba({_rot(-140)},0.62)," f"0.022em 0 0 rgba({_rot(140)},0.62);"
     )
 
 
@@ -203,7 +241,11 @@ def effect_css(
         return EffectResult("curve", "curve", "", True, _is_legible(ink, ground), False, "")
 
     # Fill-preserving decorative effects: colour inherited, always ≥ plain legibility.
-    if req in ("shadow", "lift", "echo", "glitch", "neon", "extrude"):
+    if req == "glitch":
+        return EffectResult(
+            "glitch", "glitch", _glitch_style(accent), False, _is_legible(ink, ground), False, ""
+        )
+    if req in ("shadow", "lift", "echo", "neon", "extrude"):
         return EffectResult(req, req, _style_for(req), False, _is_legible(ink, ground), False, "")
 
     if req == "outline":
@@ -292,8 +334,125 @@ def apply_to_value(value_html: str, result: EffectResult) -> str:
 
 
 # --------------------------------------------------------------------------- #
+# D6 (Canva gap analysis) — per-word emphasis (the two-tone headline).
+#
+# Canva templates constantly emphasise ONE word of a headline — an accent-ink
+# word, a highlight pill, or a heavier cut — adding a second brand colour and a
+# focal point *without adding an element*. MediaHub could only style a whole
+# slot uniformly. This wraps a single, fact-gated word (the director names it;
+# it is kept only when it whole-word matches the slot's actual value) in an
+# ``mh-em`` span carrying one of a small closed vocabulary of treatments, each
+# APCA-gated with a downgrade to plain ink, exactly like the slot effects above.
+# Colours ride the live ``--mh-*`` custom properties, so mono mode and role
+# re-assignment track the emphasis for free (no new brand-hex token).
+# --------------------------------------------------------------------------- #
+EMPHASIS_STYLES: tuple[str, ...] = ("accent_ink", "accent_pill", "heavy")
+DEFAULT_EMPHASIS_STYLE = "accent_ink"
+
+EMPHASIS_LABELS: dict[str, str] = {
+    "accent_ink": "Accent word",
+    "accent_pill": "Highlight pill",
+    "heavy": "Heavier weight",
+}
+
+
+def emphasis_css(
+    style: str,
+    *,
+    ground: str,
+    accent: str,
+    on_accent: str,
+) -> EffectResult:
+    """Resolve one emphasis treatment into an :class:`EffectResult`.
+
+    ``accent_ink`` repaints the word in the brand accent (APCA-gated against the
+    ground; downgraded to *plain ink* — i.e. no wrap — when the accent would not
+    read); ``accent_pill`` is the highlight box (ink chosen legible on the
+    accent fill by construction, like the ``background`` slot effect); ``heavy``
+    bumps the variable weight only (colour unchanged ⇒ always legible). An
+    unknown token falls back to ``accent_ink``.
+    """
+    req = (style or "").strip().lower().replace(" ", "_")
+    if req not in EMPHASIS_STYLES:
+        req = DEFAULT_EMPHASIS_STYLE
+
+    if req == "heavy":
+        css = "font-weight:800;font-variation-settings:'wght' 800;"
+        return EffectResult("heavy", "heavy", css, False, True, False, "")
+
+    if req == "accent_pill":
+        css = (
+            f"background:var(--mh-accent);color:{on_accent};"
+            "padding:0 0.14em;border-radius:0.08em;"
+            "box-decoration-break:clone;-webkit-box-decoration-break:clone;"
+        )
+        return EffectResult("accent_pill", "accent_pill", css, False, True, False, "")
+
+    # accent_ink — the emphasised word in the brand accent, policed like a
+    # fill-altering effect: if the accent would drop below the emphasis floor on
+    # this ground, leave the word as plain ink (no wrap ⇒ byte-identical).
+    if _is_legible(accent, ground):
+        return EffectResult(
+            "accent_ink", "accent_ink", "color:var(--mh-accent);", False, True, False, ""
+        )
+    return EffectResult(
+        "accent_ink",
+        "plain",
+        "",
+        False,
+        True,
+        True,
+        (
+            f"accent ink would drop the word below the APCA emphasis floor "
+            f"(Lc {_LC_FLOOR:.0f}) on this ground; left as plain ink."
+        ),
+    )
+
+
+# Split a slot value into tag / non-tag runs so a whole-word match can never
+# land inside a ``<br>`` or an already-applied effect span's attributes.
+_TAG_SPLIT_RE = re.compile(r"(<[^>]+>)")
+
+
+def emphasise_value(value_html: str, word: str, result: EffectResult) -> str:
+    """Wrap the FIRST whole-word match of ``word`` in ``value_html`` in the
+    emphasis span, or return the value untouched.
+
+    ``value_html`` is already HTML-escaped; ``word`` is escaped here before
+    matching (so card text can never inject markup) and matched case-insensitively
+    on word boundaries, only within text runs (never inside a tag). A downgraded
+    (plain) result carries an empty style and leaves the value byte-identical.
+    """
+    if not value_html or not word or not result.style:
+        return value_html
+    esc = _esc(word).strip()
+    if not esc:
+        return value_html
+    pattern = re.compile(r"(?<!\w)(" + re.escape(esc) + r")(?!\w)", re.IGNORECASE)
+    span_open = f'<span class="mh-em" style="{result.style}">'
+    out: list[str] = []
+    done = False
+    for segment in _TAG_SPLIT_RE.split(value_html):
+        if not done and segment and not segment.startswith("<"):
+            new, n = pattern.subn(rf"{span_open}\1</span>", segment, count=1)
+            if n:
+                done = True
+                out.append(new)
+                continue
+        out.append(segment)
+    return "".join(out) if done else value_html
+
+
+# --------------------------------------------------------------------------- #
 # Curve — glyph-on-path as a self-contained inline SVG
 # --------------------------------------------------------------------------- #
+# The curvature magnitude at/below which the historic shallow quadratic bow is
+# used (byte-identical to the pre-D7 renders). Above it, a true circular SVG arc
+# takes over so the varsity-crest / badge register — text wrapping toward a full
+# circle at the extremes — becomes reachable (D7, Canva gap analysis).
+_CURVE_QUADRATIC_MAX = 0.4
+
+
 def curve_text_svg(
     text: str,
     *,
@@ -303,36 +462,115 @@ def curve_text_svg(
     font_weight: str = "inherit",
     uid: Optional[str] = None,
 ) -> str:
-    """Return a responsive inline SVG laying ``text`` on a quadratic arc.
+    """Return a responsive inline SVG laying ``text`` on a curved baseline.
 
     ``curvature`` ∈ [-1, 1]: positive arcs the baseline upward (smile), negative
-    downward (frown), 0 is flat. The SVG scales to its container via a viewBox +
-    ``width:100%``; ``fill: currentColor`` (the default) inherits the slot ink so
-    a curved headline keeps its role-gated, APCA-passed colour. Deterministic: the
-    path id is derived from the text so repeated calls are byte-identical, and two
-    different curved slots on one page never collide.
+    downward (frown), 0 is flat. For ``|curvature| <= 0.4`` this is the historic
+    shallow **quadratic** bow (byte-identical to pre-D7 renders); above 0.4 it
+    switches to a **true circular arc** (SVG ``A`` command, central angle
+    ``θ = |c|·2π`` and radius ``r = w/θ``) so short all-caps strings can wrap
+    toward a full-circle badge lockup, with tight-curve letter-spacing
+    compensation added as the radius shrinks.
+
+    The SVG scales to its container via a viewBox + ``width:100%``;
+    ``fill: currentColor`` (the default) inherits the slot ink so a curved
+    headline keeps its role-gated, APCA-passed colour. Deterministic: the path id
+    is derived from the text + curvature so repeated calls are byte-identical, and
+    two different curved slots on one page never collide.
     """
     t = (text or "").strip()
     c = max(-1.0, min(1.0, float(curvature)))
-    W, H = 1000.0, 360.0
-    # Quadratic Bézier across the width; control point lifted/dropped by curvature.
-    y0 = H * (0.5 + 0.34 * abs(c)) if c >= 0 else H * (0.5 - 0.34 * abs(c))
-    ctrl_y = H * (0.5 - 0.40 * c)  # opposite sense so the arc bows correctly
-    x0, x1 = 40.0, W - 40.0
     path_id = uid or ("mhcurve-" + _short_hash(f"{t}|{c:.3f}"))
-    path_d = f"M {x0:.0f} {y0:.0f} Q {W / 2:.0f} {ctrl_y:.0f} {x1:.0f} {y0:.0f}"
     fs = 150.0
+
+    if abs(c) <= _CURVE_QUADRATIC_MAX:
+        W, H = 1000.0, 360.0
+        # Quadratic Bézier across the width; control point lifted/dropped by curvature.
+        y0 = H * (0.5 + 0.34 * abs(c)) if c >= 0 else H * (0.5 - 0.34 * abs(c))
+        ctrl_y = H * (0.5 - 0.40 * c)  # opposite sense so the arc bows correctly
+        x0, x1 = 40.0, W - 40.0
+        path_d = f"M {x0:.0f} {y0:.0f} Q {W / 2:.0f} {ctrl_y:.0f} {x1:.0f} {y0:.0f}"
+        view_box = f"0 0 {W:.0f} {H:.0f}"
+        letter_spacing = "0.01em"
+    else:
+        path_d, view_box, letter_spacing = _curve_arc_geometry(t, c, fs)
+
     return (
         f'<svg class="mh-fx-curve" xmlns="http://www.w3.org/2000/svg" '
-        f'viewBox="0 0 {W:.0f} {H:.0f}" width="100%" '
+        f'viewBox="{view_box}" width="100%" '
         f'preserveAspectRatio="xMidYMid meet" role="img" aria-label="{_esc(t)}">'
         f'<defs><path id="{path_id}" d="{path_d}" fill="none"/></defs>'
         f'<text font-family="{font_family}" font-weight="{font_weight}" '
-        f'font-size="{fs:.0f}" fill="{fill}" letter-spacing="0.01em" '
+        f'font-size="{fs:.0f}" fill="{fill}" letter-spacing="{letter_spacing}" '
         f'text-anchor="middle" dominant-baseline="middle">'
         f'<textPath href="#{path_id}" startOffset="50%">{_esc(t)}</textPath>'
         f"</text></svg>"
     )
+
+
+def _curve_arc_geometry(text: str, c: float, fs: float) -> tuple[str, str, str]:
+    """The true-arc path, viewBox and letter-spacing for ``|c| > 0.4`` (D7).
+
+    Lays the string on a circle of central angle ``θ = |c|·2π`` (clamped just
+    short of a full turn to avoid a degenerate zero-length arc) whose radius
+    ``r = arc_length / θ`` is sized so the estimated text advance fills the arc.
+    Positive curvature bows up (text on the top of the circle reading L→R),
+    negative bows down. The viewBox is computed by sampling the baseline and the
+    glyph-reach radius so the whole lockup is contained and centred; a tighter
+    curve (bigger θ, smaller r) earns proportionally more splay compensation.
+    """
+    import math
+
+    theta = min(abs(c) * 2.0 * math.pi, 1.9 * math.pi)
+    # Tight-curve letter-spacing compensation: +0.02em at the switch point up to
+    # +0.05em near a full wrap (glyphs splay at the baseline as the radius drops).
+    span = (1.9 * math.pi) - (_CURVE_QUADRATIC_MAX * 2.0 * math.pi)
+    frac = (
+        0.0
+        if span <= 0
+        else max(0.0, min(1.0, (theta - _CURVE_QUADRATIC_MAX * 2.0 * math.pi) / span))
+    )
+    ls_em = round(0.02 + 0.03 * frac, 4)
+
+    n = max(1, len(text))
+    # Estimated advance in user units at font-size fs (caps average ≈ 0.62em plus
+    # the applied tracking), inflated 6% so the run never overruns the arc ends.
+    advance = fs * (n * 0.62 + (n - 1) * ls_em) * 1.06
+    r = advance / theta if theta > 1e-6 else advance
+
+    # Circle centred at the origin; sample the baseline + a small inward band and
+    # the outward glyph reach so the bounding box contains every painted pixel.
+    glyph_out = fs * 0.82  # caps ascent reach beyond the baseline
+    glyph_in = fs * 0.16
+    up = c > 0  # smile: arc on the top of the circle; frown: on the bottom
+    base = (-math.pi / 2.0) if up else (math.pi / 2.0)
+    a_start = base - theta / 2.0
+    a_end = base + theta / 2.0
+
+    def _pt(angle: float, radius: float) -> tuple[float, float]:
+        return (radius * math.cos(angle), radius * math.sin(angle))
+
+    x0, y0 = _pt(a_start, r)
+    x1, y1 = _pt(a_end, r)
+    large_arc = 1 if theta > math.pi else 0
+    # increasing angle → clockwise sweep in SVG's y-down space (reads L→R on top).
+    sweep = 1
+    path_d = f"M {x0:.2f} {y0:.2f} A {r:.2f} {r:.2f} 0 {large_arc} {sweep} {x1:.2f} {y1:.2f}"
+
+    xs: list[float] = []
+    ys: list[float] = []
+    steps = 32
+    for i in range(steps + 1):
+        a = a_start + (a_end - a_start) * (i / steps)
+        for radius in (r - glyph_in, r, r + glyph_out):
+            px, py = _pt(a, radius)
+            xs.append(px)
+            ys.append(py)
+    pad = fs * 0.12
+    min_x, max_x = min(xs) - pad, max(xs) + pad
+    min_y, max_y = min(ys) - pad, max(ys) + pad
+    view_box = f"{min_x:.2f} {min_y:.2f} {max_x - min_x:.2f} {max_y - min_y:.2f}"
+    return path_d, view_box, f"{ls_em}em"
 
 
 def _short_hash(s: str) -> str:
@@ -351,4 +589,9 @@ __all__ = [
     "effect_css",
     "apply_to_value",
     "curve_text_svg",
+    "EMPHASIS_STYLES",
+    "DEFAULT_EMPHASIS_STYLE",
+    "EMPHASIS_LABELS",
+    "emphasis_css",
+    "emphasise_value",
 ]

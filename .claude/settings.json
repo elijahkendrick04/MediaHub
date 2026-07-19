@@ -5,7 +5,11 @@
       "mcp__playwright",
       "mcp__chrome-devtools",
       "mcp__puppeteer",
-      "mcp__browserbase"
+      "mcp__browserbase",
+      "mcp__ddg-search",
+      "mcp__github",
+      "mcp__claude-code-remote__subscribe_pr_activity",
+      "mcp__claude-code-remote__unsubscribe_pr_activity"
     ]
   },
   "hooks": {

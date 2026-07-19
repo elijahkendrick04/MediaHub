@@ -32,7 +32,14 @@ import logging
 import os
 import re
 import time
-from typing import Any, Optional
+from typing import Any, Callable, Optional, Union
+
+# The Gemini REST transport (HTTP call, key redaction, thinking-budget
+# clamp, overload circuit breaker) is shared with ai_core.llm — one copy,
+# both wrappers (deep-review finding #43). This module keeps the tolerant
+# contract on top of it: helpers return text or None and generate() walks
+# the provider chain.
+from mediahub.ai_core import gemini_transport
 
 log = logging.getLogger(__name__)
 
@@ -118,43 +125,17 @@ def _has_anthropic_key() -> bool:
 
 
 def _resolve_gemini_key() -> Optional[str]:
-    """Return env GEMINI_API_KEY (or GOOGLE_API_KEY), else stored secret."""
-    for env_name in ("GEMINI_API_KEY", "GOOGLE_API_KEY"):
-        env = os.environ.get(env_name)
-        if env and env.strip():
-            return env.strip()
-    try:
-        from mediahub.web.secrets_store import get_secret
+    """Return env GEMINI_API_KEY (or GOOGLE_API_KEY), else stored secret.
 
-        v = get_secret("gemini_api_key")
-        return v if v else None
-    except Exception:
-        return None
+    Canonical resolution lives in ``ai_core.gemini_transport``; this stays
+    a module-level function (not a bare import alias) because tests and
+    the background/imagery providers patch and import it here by name.
+    """
+    return gemini_transport.resolve_gemini_key()
 
 
 def _has_gemini_key() -> bool:
     return bool(_resolve_gemini_key())
-
-
-def _redact_key(text: str, key: Optional[str]) -> str:
-    """Strip the Gemini API key from arbitrary text before logging.
-
-    Gemini's endpoint takes the key as a `?key=…` query parameter, so a
-    `requests` exception's repr (which embeds the failing URL) leaks the
-    secret straight into stdout. We rewrite both the literal key and any
-    `key=` query parameter to a stable redaction sentinel so logs are
-    safe to ship to operator dashboards or third-party aggregators.
-    """
-    if not text:
-        return text
-    out = text
-    if key:
-        out = out.replace(key, "***REDACTED***")
-    # Catch other shapes (URL-encoded, leftover ?key=…&… fragments)
-    import re as _re  # noqa: PLC0415
-
-    out = _re.sub(r"(?i)(\?|&)key=[^&\s'\")]+", r"\1key=***REDACTED***", out)
-    return out
 
 
 def _preferred_provider() -> str:
@@ -251,8 +232,10 @@ def _call_anthropic(
     if not client:
         return None
     use_model = model or DEFAULT_MODEL
-    last_err: Optional[Exception] = None
-    for attempt_model in (use_model, ALT_MODEL):
+    # Only fall back to the alt model when it's actually different (don't retry
+    # the identical model the operator already pinned to ALT_MODEL).
+    attempt_models = (use_model,) if use_model == ALT_MODEL else (use_model, ALT_MODEL)
+    for attempt_model in attempt_models:
         started = time.monotonic()
         try:
             kwargs = {
@@ -281,7 +264,6 @@ def _call_anthropic(
             if text:
                 return text
         except Exception as e:
-            last_err = e
             log.warning("anthropic call failed (%s): %s", attempt_model, e)
             _log_call(
                 provider="anthropic",
@@ -291,132 +273,114 @@ def _call_anthropic(
                 error_kind=type(e).__name__,
                 error_message=str(e),
             )
+            # Only a model-specific failure (404 not-found / 529 overloaded) can
+            # be helped by trying the alt model. For auth/bad-request/rate-limit
+            # a second billable call won't succeed — stop instead of burning it.
+            if getattr(e, "status_code", None) not in (404, 529):
+                break
             continue
     return None
 
 
 # ---------------------------------------------------------------------------
-# Gemini (free default)
+# Gemini (free default) — HTTP transport, key redaction, thinking-budget
+# clamp and the overload circuit breaker all live in
+# ai_core.gemini_transport (one copy for both LLM wrappers, finding #43).
+# This side keeps the tolerant contract: helpers return text or None and
+# write one usage-ledger row per attempt.
 # ---------------------------------------------------------------------------
 
-# Gemini default updated May 2026: gemini-2.0-flash was deprecated and
-# returns 410 Gone. gemini-2.5-flash is the current GA model with the
-# same free-tier (1,500 req/day) and similar quality.
-_GEMINI_MODEL = os.environ.get("MEDIAHUB_GEMINI_MODEL", "gemini-2.5-flash")
-_GEMINI_TIMEOUT = int(os.environ.get("MEDIAHUB_GEMINI_TIMEOUT", "45"))
+
+def _ledger_kind(e: "gemini_transport.GeminiTransportError") -> str:
+    """Map a classified transport failure onto the ledger's ``error_kind``
+    vocabulary (auth / rate_limited / transport / parse / http_NNN /
+    no_candidates / malformed). One vocabulary for both Gemini surfaces
+    now: gemini-vision rows adopted the text path's ``auth`` /
+    ``rate_limited`` names (they used to land as raw ``http_401/403/429``
+    — recorded in ADR-0030)."""
+    if e.status in (401, 403):
+        return "auth"
+    if e.status == 429:
+        return "rate_limited"
+    return e.kind
 
 
-def _gemini_thinking_budget() -> int:
-    """Tokens the model is allowed to spend on internal "thinking".
+def _gemini_via_transport(
+    provider_label: str,
+    payload: Union[dict[str, Any], Callable[[], dict[str, Any]]],
+) -> Optional[str]:
+    """One tolerant Gemini round-trip: text or ``None``, never raises.
 
-    Gemini 2.5 Flash ships with thinking enabled by default. Those
-    tokens count against ``maxOutputTokens`` but don't appear in
-    ``content.parts`` — so a caller that sized the budget for the
-    visible JSON it expected will see the response truncated mid-key
-    once thinking has eaten its share. Every JSON-output call in
-    MediaHub (palette resolver, block detector, content extractor, …)
-    sized their budgets for the response only and silently broke when
-    the default model gained thinking.
+    Skips the network entirely while the shared overload breaker is open
+    (media_ai is the hot path — org-setup capture fires ~24 sequential
+    calls, so a doomed round-trip per call turns ~10s into 60–80s).
+    Breaker accounting itself happens inside the transport so outages
+    seen by either wrapper trip the same switch.
 
-    Default 0 (off) because every existing caller passes a max_tokens
-    sized for the visible output, not thinking. Operators can opt back
-    in per process via ``MEDIAHUB_GEMINI_THINKING_BUDGET`` if a new
-    caller wants the reasoning headroom.
+    ``payload`` may be a zero-arg builder: expensive payload construction
+    (vision's per-image base64 encode) then happens only after the no-key
+    and breaker-open short-circuits, matching the pre-convergence cost of
+    a skipped call (zero).
     """
-    raw = os.environ.get("MEDIAHUB_GEMINI_THINKING_BUDGET", "0").strip()
+    key = _resolve_gemini_key()
+    if not key:
+        return None
+    model = gemini_transport.gemini_model()
+    if gemini_transport.breaker_is_open():
+        _log_call(
+            provider=provider_label,
+            ok=False,
+            model=model,
+            duration_ms=0.0,
+            error_kind="breaker_open",
+            error_message="Gemini circuit breaker is open; " "skipping to next provider",
+        )
+        return None
+    if callable(payload):
+        payload = payload()
+    started = time.monotonic()
     try:
-        return max(0, int(raw))
-    except ValueError:
-        return 0
-
-
-def _gemini_generation_config(max_tokens: int) -> dict:
-    cfg: dict = {"maxOutputTokens": int(max_tokens)}
-    budget = _gemini_thinking_budget()
-    # thinkingConfig is only honoured by 2.5+ models; sending it to an
-    # older model is rejected as an unknown field. Gate on the model
-    # name so a downgrade via MEDIAHUB_GEMINI_MODEL still works.
-    if "2.5" in _GEMINI_MODEL or "3." in _GEMINI_MODEL:
-        # Pro models cannot disable thinking — the API rejects budgets
-        # below 128 with 400 INVALID_ARGUMENT — so clamp to the Pro
-        # minimum there. Flash models keep 0 (thinking off).
-        if "pro" in _GEMINI_MODEL:
-            budget = max(128, budget)
-        cfg["thinkingConfig"] = {"thinkingBudget": budget}
-    return cfg
-
-
-# ---------------------------------------------------------------------------
-# Gemini overload circuit breaker
-# ---------------------------------------------------------------------------
-# When Gemini returns repeated 5xx / overload responses, every subsequent
-# call in the same request still pays the round-trip cost before falling
-# through to Anthropic. The org-setup capture step is the worst offender —
-# it fires ~24 sequential Gemini calls (block_detector, content_extractor,
-# endpoint_discoverer, strategy × every link), so a sustained Gemini
-# outage turns a normal ~10s capture into a 60-80s hang and the user
-# stares at a loader assuming the app is broken.
-#
-# The breaker is a tiny in-process trip switch: once we see N consecutive
-# Gemini failures within a short window, skip Gemini entirely for a cool-
-# off period and go straight to whatever's next in the provider order.
-# Any Gemini success clears the trip.
-#
-# This is intentionally per-process, not cluster-wide. With two gunicorn
-# workers on Render Standard the cost of the second worker independently
-# discovering the outage is one wasted call per request batch, which is
-# fine — we'd rather not bring in Redis just for this signal.
-import threading as _bt
-
-_GEMINI_BREAKER_THRESHOLD = int(os.environ.get("MEDIAHUB_GEMINI_BREAKER_THRESHOLD", "3"))
-_GEMINI_BREAKER_COOLDOWN_S = float(os.environ.get("MEDIAHUB_GEMINI_BREAKER_COOLDOWN_S", "60"))
-_gemini_breaker_lock = _bt.Lock()
-_gemini_breaker_state: dict[str, float] = {
-    "consecutive_failures": 0.0,  # float so it round-trips through env
-    "tripped_until": 0.0,  # time.monotonic() value
-}
-
-
-def _gemini_breaker_is_open() -> bool:
-    """True while we're skipping Gemini after sustained failures."""
-    with _gemini_breaker_lock:
-        return time.monotonic() < _gemini_breaker_state["tripped_until"]
-
-
-def _gemini_breaker_record_failure() -> None:
-    """Count a failure; trip the breaker when the threshold is hit."""
-    with _gemini_breaker_lock:
-        _gemini_breaker_state["consecutive_failures"] += 1
-        if _gemini_breaker_state["consecutive_failures"] >= _GEMINI_BREAKER_THRESHOLD:
-            _gemini_breaker_state["tripped_until"] = time.monotonic() + _GEMINI_BREAKER_COOLDOWN_S
-
-
-def _gemini_breaker_record_success() -> None:
-    """Any success clears the trip and resets the failure counter."""
-    with _gemini_breaker_lock:
-        _gemini_breaker_state["consecutive_failures"] = 0
-        _gemini_breaker_state["tripped_until"] = 0.0
-
-
-def gemini_breaker_snapshot() -> dict:
-    """Return the current breaker state in a JSON-serialisable shape.
-
-    Exposed for observability (the ``/healthz/breaker`` route reads
-    this) so operators can tell whether silent "ai_directed=false"
-    responses are caused by a tripped breaker. The values are
-    per-process — multi-worker deployments will see one snapshot per
-    gunicorn worker.
-    """
-    with _gemini_breaker_lock:
-        now = time.monotonic()
-        tripped_until = _gemini_breaker_state["tripped_until"]
-        return {
-            "open": now < tripped_until,
-            "consecutive_failures": int(_gemini_breaker_state["consecutive_failures"]),
-            "seconds_until_reset": max(0.0, round(tripped_until - now, 1)),
-            "threshold": _GEMINI_BREAKER_THRESHOLD,
-            "cooldown_seconds": _GEMINI_BREAKER_COOLDOWN_S,
-        }
+        data = gemini_transport.generate_content(
+            payload, key=key, model=model, timeout_default=45.0
+        )
+        parts = gemini_transport.first_candidate_parts(data)
+    except gemini_transport.GeminiTransportError as e:
+        dur_ms = (time.monotonic() - started) * 1000.0
+        if e.kind == "transport":
+            log.warning("gemini transport failed: %s", e)
+        elif e.status is not None and e.status not in (401, 403, 429):
+            log.warning("gemini non-ok (%s): %s", e.status, e)
+        _log_call(
+            provider=provider_label,
+            ok=False,
+            model=model,
+            duration_ms=dur_ms,
+            error_kind=_ledger_kind(e),
+            error_message=str(e)[:300],
+        )
+        return None
+    dur_ms = (time.monotonic() - started) * 1000.0
+    out = gemini_transport.text_from_parts(parts)
+    if out:
+        tin, tout = gemini_transport.usage_tokens(data)
+        _log_call(
+            provider=provider_label,
+            ok=True,
+            model=model,
+            tokens_in=tin,
+            tokens_out=tout,
+            duration_ms=dur_ms,
+        )
+        return out
+    _log_call(
+        provider=provider_label,
+        ok=False,
+        model=model,
+        duration_ms=dur_ms,
+        error_kind="empty_response",
+        error_message="Gemini returned no text",
+    )
+    return None
 
 
 def _call_gemini(messages: list[dict], system: Optional[str], max_tokens: int) -> Optional[str]:
@@ -427,27 +391,10 @@ def _call_gemini(messages: list[dict], system: Optional[str], max_tokens: int) -
     free tier handles the entire small-club tier.
 
     Returns None immediately (without an HTTP round-trip) while the
-    overload circuit breaker is tripped — see ``_gemini_breaker_*``
-    above. The caller's normal fall-through to Anthropic kicks in
-    the same way it would on a real Gemini failure.
+    overload circuit breaker is tripped. The caller's normal
+    fall-through to Anthropic kicks in the same way it would on a real
+    Gemini failure.
     """
-    key = _resolve_gemini_key()
-    if not key:
-        return None
-    if _gemini_breaker_is_open():
-        _log_call(
-            provider="gemini",
-            ok=False,
-            model=_GEMINI_MODEL,
-            duration_ms=0.0,
-            error_kind="breaker_open",
-            error_message="Gemini circuit breaker is open; " "skipping to next provider",
-        )
-        return None
-    try:
-        import requests
-    except Exception:
-        return None
     contents: list[dict] = []
     for m in messages or []:
         role = m.get("role", "user")
@@ -461,151 +408,11 @@ def _call_gemini(messages: list[dict], system: Optional[str], max_tokens: int) -
         )
     payload: dict[str, Any] = {
         "contents": contents,
-        "generationConfig": _gemini_generation_config(max_tokens),
+        "generationConfig": gemini_transport.generation_config(max_tokens),
     }
     if system:
         payload["systemInstruction"] = {"parts": [{"text": system}]}
-    # Key travels in the x-goog-api-key header, NOT the URL — a URL-borne
-    # key rides into every exception repr / access log that mentions the
-    # request URL. _redact_key stays as defence-in-depth.
-    url = (
-        f"https://generativelanguage.googleapis.com/v1beta/models/"
-        f"{_GEMINI_MODEL}:generateContent"
-    )
-    started = time.monotonic()
-    try:
-        r = requests.post(
-            url,
-            json=payload,
-            headers={"Content-Type": "application/json", "x-goog-api-key": key},
-            timeout=_GEMINI_TIMEOUT,
-        )
-    except Exception as e:
-        safe_err = _redact_key(str(e), key)
-        log.warning("gemini transport failed: %s", safe_err)
-        _log_call(
-            provider="gemini",
-            ok=False,
-            model=_GEMINI_MODEL,
-            duration_ms=(time.monotonic() - started) * 1000.0,
-            error_kind="transport",
-            error_message=safe_err,
-        )
-        # A network-level outage (timeout / connection refused) is the
-        # breaker's most expensive case — each call eats the full request
-        # timeout — so it must count toward tripping like a 5xx does.
-        _gemini_breaker_record_failure()
-        return None
-    dur_ms = (time.monotonic() - started) * 1000.0
-    if r.status_code in (401, 403):
-        _log_call(
-            provider="gemini",
-            ok=False,
-            model=_GEMINI_MODEL,
-            duration_ms=dur_ms,
-            error_kind="auth",
-            error_message=f"HTTP {r.status_code}",
-        )
-        return None
-    if r.status_code == 429:
-        _log_call(
-            provider="gemini",
-            ok=False,
-            model=_GEMINI_MODEL,
-            duration_ms=dur_ms,
-            error_kind="rate_limited",
-            error_message="HTTP 429",
-        )
-        return None
-    if not r.ok:
-        body_safe = _redact_key((r.text or "")[:300], key)
-        log.warning("gemini non-ok (%s): %s", r.status_code, body_safe)
-        _log_call(
-            provider="gemini",
-            ok=False,
-            model=_GEMINI_MODEL,
-            duration_ms=dur_ms,
-            error_kind=f"http_{r.status_code}",
-            error_message=body_safe,
-        )
-        # 5xx / overload signals warrant tripping the breaker so the
-        # next call this request doesn't waste another round-trip.
-        # 4xx (other than 429, handled above) are usually our fault
-        # (bad payload) — don't trip on those.
-        if r.status_code >= 500:
-            _gemini_breaker_record_failure()
-        return None
-    try:
-        data = r.json()
-    except ValueError:
-        _log_call(
-            provider="gemini",
-            ok=False,
-            model=_GEMINI_MODEL,
-            duration_ms=dur_ms,
-            error_kind="parse",
-            error_message="response was not JSON",
-        )
-        return None
-    candidates = data.get("candidates") if isinstance(data, dict) else None
-    if not candidates:
-        _log_call(
-            provider="gemini",
-            ok=False,
-            model=_GEMINI_MODEL,
-            duration_ms=dur_ms,
-            error_kind="no_candidates",
-            error_message="response had no candidates",
-        )
-        return None
-    first = candidates[0] if isinstance(candidates, list) else None
-    if not isinstance(first, dict):
-        _log_call(
-            provider="gemini",
-            ok=False,
-            model=_GEMINI_MODEL,
-            duration_ms=dur_ms,
-            error_kind="malformed",
-            error_message="first candidate not a dict",
-        )
-        return None
-    content = first.get("content") or {}
-    parts = content.get("parts") if isinstance(content, dict) else None
-    if not isinstance(parts, list):
-        _log_call(
-            provider="gemini",
-            ok=False,
-            model=_GEMINI_MODEL,
-            duration_ms=dur_ms,
-            error_kind="malformed",
-            error_message="content.parts not a list",
-        )
-        return None
-    texts = [p.get("text", "") for p in parts if isinstance(p, dict)]
-    out = "".join(texts).strip()
-    if out:
-        usage = data.get("usageMetadata") if isinstance(data, dict) else None
-        tin = (usage or {}).get("promptTokenCount") if isinstance(usage, dict) else None
-        tout = (usage or {}).get("candidatesTokenCount") if isinstance(usage, dict) else None
-        _log_call(
-            provider="gemini",
-            ok=True,
-            model=_GEMINI_MODEL,
-            tokens_in=tin,
-            tokens_out=tout,
-            duration_ms=dur_ms,
-        )
-        _gemini_breaker_record_success()
-        return out
-    _log_call(
-        provider="gemini",
-        ok=False,
-        model=_GEMINI_MODEL,
-        duration_ms=dur_ms,
-        error_kind="empty_response",
-        error_message="Gemini returned no text",
-    )
-    return None
+    return _gemini_via_transport("gemini", payload)
 
 
 def _call_gemini_vision(
@@ -617,138 +424,27 @@ def _call_gemini_vision(
     Gemini outage doesn't waste vision round-trips when text calls
     have already noticed the failure.
     """
-    key = _resolve_gemini_key()
-    if not key:
-        return None
-    if _gemini_breaker_is_open():
-        _log_call(
-            provider="gemini-vision",
-            ok=False,
-            model=_GEMINI_MODEL,
-            duration_ms=0.0,
-            error_kind="breaker_open",
-            error_message="Gemini circuit breaker is open; skipping to next provider",
-        )
-        return None
-    try:
-        import requests
-    except Exception:
-        return None
-    parts: list[dict] = []
-    for p in image_paths[:5]:
-        data, mt = _read_image_for_vision(p)
-        if data is None:
-            continue
-        parts.append({"inline_data": {"mime_type": mt, "data": data}})
-    parts.append({"text": prompt})
-    payload: dict[str, Any] = {
-        "contents": [{"role": "user", "parts": parts}],
-        "generationConfig": _gemini_generation_config(max_tokens),
-    }
-    if system:
-        payload["systemInstruction"] = {"parts": [{"text": system}]}
-    # Key in the x-goog-api-key header, not the URL — see _call_gemini.
-    url = (
-        f"https://generativelanguage.googleapis.com/v1beta/models/"
-        f"{_GEMINI_MODEL}:generateContent"
-    )
-    started = time.monotonic()
-    try:
-        r = requests.post(
-            url,
-            json=payload,
-            headers={"x-goog-api-key": key},
-            timeout=_GEMINI_TIMEOUT,
-        )
-    except Exception as e:
-        safe_err = _redact_key(str(e), key)
-        log.warning("gemini vision transport failed: %s", safe_err)
-        _log_call(
-            provider="gemini-vision",
-            ok=False,
-            model=_GEMINI_MODEL,
-            duration_ms=(time.monotonic() - started) * 1000.0,
-            error_kind="transport",
-            error_message=safe_err,
-        )
-        _gemini_breaker_record_failure()
-        return None
-    dur_ms = (time.monotonic() - started) * 1000.0
-    if not r.ok:
-        body_safe = _redact_key((r.text or "")[:300], key)
-        log.warning("gemini vision non-ok (%s): %s", r.status_code, body_safe)
-        _log_call(
-            provider="gemini-vision",
-            ok=False,
-            model=_GEMINI_MODEL,
-            duration_ms=dur_ms,
-            error_kind=f"http_{r.status_code}",
-            error_message=body_safe,
-        )
-        if r.status_code >= 500:
-            _gemini_breaker_record_failure()
-        return None
-    try:
-        data = r.json()
-    except ValueError:
-        _log_call(
-            provider="gemini-vision",
-            ok=False,
-            model=_GEMINI_MODEL,
-            duration_ms=dur_ms,
-            error_kind="parse",
-            error_message="response was not JSON",
-        )
-        return None
-    candidates = data.get("candidates") if isinstance(data, dict) else None
-    if not candidates:
-        _log_call(
-            provider="gemini-vision",
-            ok=False,
-            model=_GEMINI_MODEL,
-            duration_ms=dur_ms,
-            error_kind="no_candidates",
-            error_message="response had no candidates",
-        )
-        return None
-    first = candidates[0] if isinstance(candidates, list) else None
-    content = (first or {}).get("content") or {}
-    parts = content.get("parts") if isinstance(content, dict) else None
-    if not isinstance(parts, list):
-        _log_call(
-            provider="gemini-vision",
-            ok=False,
-            model=_GEMINI_MODEL,
-            duration_ms=dur_ms,
-            error_kind="malformed",
-            error_message="content.parts not a list",
-        )
-        return None
-    texts = [p.get("text", "") for p in parts if isinstance(p, dict)]
-    out = "".join(texts).strip()
-    if out:
-        usage = data.get("usageMetadata") if isinstance(data, dict) else None
-        tin = (usage or {}).get("promptTokenCount") if isinstance(usage, dict) else None
-        tout = (usage or {}).get("candidatesTokenCount") if isinstance(usage, dict) else None
-        _log_call(
-            provider="gemini-vision",
-            ok=True,
-            model=_GEMINI_MODEL,
-            tokens_in=tin,
-            tokens_out=tout,
-            duration_ms=dur_ms,
-        )
-        _gemini_breaker_record_success()
-        return out
-    _log_call(
-        provider="gemini-vision",
-        ok=False,
-        model=_GEMINI_MODEL,
-        duration_ms=dur_ms,
-        error_kind="empty_response",
-        error_message="Gemini returned no text",
-    )
-    return None
+
+    def _build_payload() -> dict[str, Any]:
+        # Built lazily: base64-encoding up to 5 photos is the expensive part
+        # of a vision call, and it must cost nothing when the breaker is
+        # open or no key is configured (the guards run first).
+        parts: list[dict] = []
+        for p in image_paths[:5]:
+            data, mt = _read_image_for_vision(p)
+            if data is None:
+                continue
+            parts.append({"inline_data": {"mime_type": mt, "data": data}})
+        parts.append({"text": prompt})
+        payload: dict[str, Any] = {
+            "contents": [{"role": "user", "parts": parts}],
+            "generationConfig": gemini_transport.generation_config(max_tokens),
+        }
+        if system:
+            payload["systemInstruction"] = {"parts": [{"text": system}]}
+        return payload
+
+    return _gemini_via_transport("gemini-vision", _build_payload)
 
 
 # ---------------------------------------------------------------------------
@@ -880,19 +576,33 @@ def generate(
     model on the OpenAI-compatible path. Gemini/Anthropic ignore it.
     """
     msgs = messages if messages else [{"role": "user", "content": prompt}]
+    # Track which providers actually had a key and were CALLED, so an all-attempts-
+    # failed outcome isn't reported as "not configured" (the same honest-error fix
+    # generate_vision already carries; the hot-path generate() had been left out).
+    attempted: list[str] = []
     for provider in _provider_order():
-        if provider == "gemini":
+        if provider == "gemini" and _has_gemini_key():
+            attempted.append(provider)
             out = _call_gemini(msgs, system, max_tokens)
-        elif provider == "anthropic":
+        elif provider == "anthropic" and _has_anthropic_key():
+            attempted.append(provider)
             out = _call_anthropic(msgs, system, max_tokens)
-        elif provider == "openai":
+        elif provider == "openai" and _is_openai_on():
             from mediahub.media_ai.llm_providers import call_openai
 
+            attempted.append(provider)
             out = call_openai(msgs, system, max_tokens, content_type=content_type)
         else:
             continue
         if out:
             return out
+    if attempted:
+        # Keys exist and calls were made — saying "not configured" would be a false
+        # reason. The failure detail is in the usage ledger / logs the helpers write.
+        raise ClaudeUnavailableError(
+            "AI text generation failed (provider(s) attempted: "
+            f"{', '.join(attempted)}). See the LLM usage log for the failure detail."
+        )
     raise ClaudeUnavailableError(
         "AI features are unavailable on this deployment. The operator "
         "has not configured a Gemini or Anthropic API key. Contact your "
@@ -923,6 +633,22 @@ def generate_json(
     parsed = _extract_json(raw)
     if parsed is not None:
         return parsed
+    # The provider answered but the output didn't parse as JSON. Don't let that be
+    # silently indistinguishable from an empty result at the ~20 call sites — log
+    # it (a head snippet, never the whole blob) AND record a ledger row so the
+    # usage log can tell "model returned garbage" apart from "empty result".
+    head = (raw or "")[:120]
+    log.warning(
+        "generate_json: provider output was not parseable JSON (%d chars); using fallback. head=%r",
+        len(raw or ""),
+        head,
+    )
+    _log_call(
+        provider=_preferred_provider(),
+        ok=False,
+        error_kind="json_parse",
+        error_message=head,
+    )
     return fallback if fallback is not None else {}
 
 

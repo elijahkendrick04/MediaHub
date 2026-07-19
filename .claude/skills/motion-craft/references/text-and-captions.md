@@ -7,9 +7,9 @@ own, written frame-pure for Remotion.
 
 ## The fixed type palette
 
-Fonts are the six self-hosted families loaded by `remotion/src/fonts.ts`
+Fonts are the seven self-hosted families loaded by `remotion/src/fonts.ts`
 (byte-identical woff2 to the still renderer): **Bebas Neue, Anton, Bowlby
-One** (display), **Space Grotesk** 500/700, **Inter** 400/800 (text),
+One, Playfair Display** (display), **Space Grotesk** 500/700, **Inter** 400/800 (text),
 **JetBrains Mono** 500/700 (data). The brief's `typographyPair` picks the
 pairing. Your levers are register, weight contrast, size, tracking, and
 motion — never a new family, never a CDN (`tests/test_self_hosted_fonts.py`

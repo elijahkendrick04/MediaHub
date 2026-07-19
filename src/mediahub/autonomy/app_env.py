@@ -55,10 +55,13 @@ def _owns_run(org_id: str, run_id: str) -> bool:
     data = _load_run(run_id)
     if not data:
         return False
-    return (data.get("profile_id") or "").strip() == (org_id or "").strip() and bool(org_id)
+    return (data.get("profile_id") or "").strip() == (org_id or "").strip() and bool(
+        (org_id or "").strip()
+    )
 
 
 def _list_runs(org_id: str) -> list[dict]:
+    conn = None
     try:
         conn = sqlite3.connect(str(_db_path()), timeout=5.0)
         conn.row_factory = sqlite3.Row
@@ -67,10 +70,15 @@ def _list_runs(org_id: str) -> list[dict]:
             "WHERE profile_id = ? AND status = 'done' ORDER BY created_at DESC LIMIT 20",
             (org_id,),
         ).fetchall()
-        conn.close()
         return [dict(r) for r in rows]
-    except Exception:
+    except Exception as exc:
+        # Callers expect [] on failure, but a real schema/DB error must not be
+        # masked as "no runs" — log it (and never leak the connection).
+        log.warning("autonomy: could not list runs for org %s: %s", org_id, exc)
         return []
+    finally:
+        if conn is not None:
+            conn.close()
 
 
 def _org_tone(org_id: str) -> str:

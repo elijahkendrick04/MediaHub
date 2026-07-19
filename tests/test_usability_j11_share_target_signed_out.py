@@ -8,28 +8,19 @@ via the sign-in picker's existing error channel.
 
 from __future__ import annotations
 
-import importlib
 import io
 
 import pytest
 
 
 @pytest.fixture
-def client(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
+def client(web_module, monkeypatch):
     monkeypatch.setenv("MEDIAHUB_SCHEDULER", "0")
-    (tmp_path / "club_profiles").mkdir(parents=True, exist_ok=True)
 
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
-    app = wm.create_app()
+    app = web_module.create_app()
     app.config.update(TESTING=True, SECRET_KEY="x")
     c = app.test_client()
-    if not wm._v8_ok:
+    if not web_module._v8_ok:
         pytest.skip("V8 media engine not enabled")
     return c
 

@@ -12,7 +12,6 @@ real supported formats.
 
 from __future__ import annotations
 
-import importlib
 import io
 import sys
 from pathlib import Path
@@ -24,28 +23,12 @@ sys.path.insert(0, str(_ROOT))
 
 
 @pytest.fixture
-def gated_client(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    for sub in ("runs_v4", "uploads_v4", "club_profiles"):
-        (tmp_path / sub).mkdir(parents=True, exist_ok=True)
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
-    app = wm.create_app()
-    app.config["TESTING"] = True
-
+def gated_client(client):
     from mediahub.web.club_profile import ClubProfile, save_profile
 
     save_profile(ClubProfile(profile_id="wycombe", display_name="Wycombe SC"))
-    with app.test_client() as c:
-        c.post("/api/organisation/active", data={"profile_id": "wycombe"})
-        yield c
+    client.post("/api/organisation/active", data={"profile_id": "wycombe"})
+    return client
 
 
 def _upload_crashing_file(c, monkeypatch):

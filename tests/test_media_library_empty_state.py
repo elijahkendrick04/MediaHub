@@ -20,15 +20,9 @@ genuinely-corrupt.
 
 from __future__ import annotations
 
-import importlib
 import sqlite3
-import sys
-from pathlib import Path
 
 import pytest
-
-_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(_ROOT))
 
 # Distinctive fragments of each rendered state (HTML entities stripped to the
 # ASCII-safe core so the match doesn't depend on &rsquo;/&mdash; encoding).
@@ -39,23 +33,12 @@ _EMPTY_SENTINEL = "photos onto cards in three steps"
 
 
 @pytest.fixture
-def org_app(tmp_path, monkeypatch):
-    """A fresh Flask app with one saved profile, all storage under tmp_path."""
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    (tmp_path / "runs_v4").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "uploads_v4").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "club_profiles").mkdir(parents=True, exist_ok=True)
+def org_app(web_module, tmp_path):
+    """A fresh Flask app with one saved profile, all storage under tmp_path.
 
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
-
-    app = wm.create_app()
+    DATA_DIR isolation + one-time web.py import come from the autouse
+    ``_isolate_data_dir`` fixture in conftest.py."""
+    app = web_module.create_app()
     app.config["TESTING"] = True
 
     from mediahub.web.club_profile import ClubProfile, save_profile

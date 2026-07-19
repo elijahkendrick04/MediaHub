@@ -12,7 +12,6 @@ persist nothing; and the hidden-input plumbing is gone.
 
 from __future__ import annotations
 
-import importlib
 import sys
 from pathlib import Path
 
@@ -28,23 +27,15 @@ _OLD_VOICE_EXAMPLES = ["Old caption one", "Old caption two"]
 
 
 @pytest.fixture
-def env(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    (tmp_path / "club_profiles").mkdir(parents=True, exist_ok=True)
+def env(app):
     import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
 
-    importlib.reload(cp)
-    importlib.reload(wm)
     prof = cp.ClubProfile(profile_id="otters", display_name="Otters SC")
     prof.voice_examples = list(_OLD_VOICE_EXAMPLES)
     prof.voice_profile = dict(_OLD_VOICE_PROFILE)
     prof.brand_voice_summary = "The old summary."
     cp.save_profile(prof)
 
-    app = wm.create_app()
-    app.config["TESTING"] = True
     return app, cp
 
 
@@ -79,9 +70,7 @@ def test_voice_analysis_persists_immediately(env, monkeypatch):
     app, cp = env
     import mediahub.brand.voice_imitation as vi
 
-    monkeypatch.setattr(
-        vi, "analyse_examples", lambda examples, **kw: {"sentence_length_avg": 9.0}
-    )
+    monkeypatch.setattr(vi, "analyse_examples", lambda examples, **kw: {"sentence_length_avg": 9.0})
     with app.test_client() as c:
         r = _analyse_post(c)
         assert r.status_code == 200
@@ -192,9 +181,7 @@ def test_discard_restores_previous_voice_values(env, monkeypatch):
     app, cp = env
     import mediahub.brand.voice_imitation as vi
 
-    monkeypatch.setattr(
-        vi, "analyse_examples", lambda examples, **kw: {"sentence_length_avg": 9.0}
-    )
+    monkeypatch.setattr(vi, "analyse_examples", lambda examples, **kw: {"sentence_length_avg": 9.0})
     with app.test_client() as c:
         _analyse_post(c)
         assert cp.load_profile("otters").voice_profile == {"sentence_length_avg": 9.0}
@@ -239,9 +226,7 @@ def test_discard_with_mismatched_kind_noops_honestly(env, monkeypatch):
     app, cp = env
     import mediahub.brand.voice_imitation as vi
 
-    monkeypatch.setattr(
-        vi, "analyse_examples", lambda examples, **kw: {"sentence_length_avg": 9.0}
-    )
+    monkeypatch.setattr(vi, "analyse_examples", lambda examples, **kw: {"sentence_length_avg": 9.0})
     with app.test_client() as c:
         _analyse_post(c)  # the stash now belongs to kind == "voice"
         r = c.post("/organisation/analysis/discard", data={"kind": "brand"})
@@ -262,9 +247,7 @@ def test_discard_buttons_post_their_own_kind(env, monkeypatch):
     import mediahub.brand.social_dna as sd
     import mediahub.brand.voice_imitation as vi
 
-    monkeypatch.setattr(
-        vi, "analyse_examples", lambda examples, **kw: {"sentence_length_avg": 9.0}
-    )
+    monkeypatch.setattr(vi, "analyse_examples", lambda examples, **kw: {"sentence_length_avg": 9.0})
     with app.test_client() as c:
         html = _analyse_post(c).get_data(as_text=True)
         assert 'name="kind" value="voice"' in html

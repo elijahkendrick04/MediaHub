@@ -17,11 +17,14 @@ Plain JSON on purpose: tiny write volume, human-inspectable, no schema to migrat
 from __future__ import annotations
 
 import json
+import logging
 import os
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
+
+log = logging.getLogger(__name__)
 
 AUDIT_MAX_BYTES = 5 * 1024 * 1024  # rotate to .1 beyond this; two files max
 
@@ -88,16 +91,22 @@ def record_action(state: dict) -> None:
 
 
 def append_audit(entry: dict, data_dir: Optional[str] = None) -> None:
-    """Append one audit line; rotate once at AUDIT_MAX_BYTES (keep .1)."""
-    path = state_dir(data_dir) / "audit.jsonl"
+    """Append one audit line; rotate once at AUDIT_MAX_BYTES (keep .1).
+
+    Best-effort: a failed audit write — e.g. ``ENOSPC``, which happens exactly
+    when the ``disk_full`` detector fires — must NOT abort the sentinel cycle
+    before the operator notification is sent, so write failures are swallowed and
+    logged rather than raised.
+    """
     try:
+        path = state_dir(data_dir) / "audit.jsonl"
         if path.exists() and path.stat().st_size > AUDIT_MAX_BYTES:
             path.replace(path.with_suffix(".jsonl.1"))
-    except Exception:
-        pass
-    record = {"ts": _utc_now_iso(), **entry}
-    with path.open("a", encoding="utf-8") as fh:
-        fh.write(json.dumps(record, sort_keys=True) + "\n")
+        record = {"ts": _utc_now_iso(), **entry}
+        with path.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(record, sort_keys=True) + "\n")
+    except OSError as exc:
+        log.warning("log_sentinel: audit write failed (%s); continuing to notify", exc)
 
 
 def read_audit_tail(n: int = 50, data_dir: Optional[str] = None) -> list[dict]:
@@ -136,17 +145,25 @@ def acquire_leader(worker_id: str, ttl: float, data_dir: Optional[str] = None) -
     The lock is a heartbeat file: the holder rewrites it each tick; any other
     worker may take over once the heartbeat is older than ``ttl`` (covers the
     holder dying mid-flight, e.g. gunicorn max-requests recycling)."""
-    path = state_dir(data_dir) / "leader.json"
+    from mediahub._atomic_io import cross_process_lock  # noqa: PLC0415
+
+    d = state_dir(data_dir)
+    path = d / "leader.json"
     now = time.time()
-    current = _read_json(path)
-    holder = str(current.get("worker") or "")
-    beat = float(current.get("ts") or 0.0)
-    if holder and holder != worker_id and (now - beat) < ttl:
-        return False
-    _write_json(path, {"worker": worker_id, "ts": now})
-    # Read-back settles near-simultaneous claims: last writer wins, the loser
-    # sees the other id and stands down until the next tick.
-    return str(_read_json(path).get("worker") or "") == worker_id
+    # Hold a cross-process lock across the whole read→decide→write so two workers
+    # can't interleave and BOTH pass the read-back for one tick (duplicate polls /
+    # notifications). Falls back to the write+read-back on a non-POSIX box.
+    with cross_process_lock(d / "leader.lock"):
+        current = _read_json(path)
+        holder = str(current.get("worker") or "")
+        beat = float(current.get("ts") or 0.0)
+        if holder and holder != worker_id and (now - beat) < ttl:
+            return False
+        _write_json(path, {"worker": worker_id, "ts": now})
+        # Read-back still settles near-simultaneous claims on a box without
+        # fcntl (where the lock is a no-op): last writer wins, the loser stands
+        # down until the next tick.
+        return str(_read_json(path).get("worker") or "") == worker_id
 
 
 def release_leader(worker_id: str, data_dir: Optional[str] = None) -> None:

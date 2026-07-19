@@ -13,9 +13,9 @@ Two layers:
 No Playwright/Chromium is needed anywhere: the tests synthesise tiny valid
 PNGs directly, exactly as the renderer would have written them to disk.
 """
+
 from __future__ import annotations
 
-import importlib
 import io
 import json
 import struct
@@ -43,7 +43,9 @@ def _make_png(width: int, height: int, *, fill: int = 0xFF) -> bytes:
 
     def chunk(typ: bytes, data: bytes) -> bytes:
         body = typ + data
-        return struct.pack(">I", len(data)) + body + struct.pack(">I", zlib.crc32(body) & 0xFFFFFFFF)
+        return (
+            struct.pack(">I", len(data)) + body + struct.pack(">I", zlib.crc32(body) & 0xFFFFFFFF)
+        )
 
     ihdr = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)  # 8-bit RGB
     raw = (b"\x00" + bytes([fill, 0, 0]) * width) * height
@@ -115,7 +117,11 @@ class TestCollectPackCards:
             vdir,
             "brief_a",
             content_item_id="card-A",
-            formats={"feed_square": (1080, 1080), "feed_portrait": (1080, 1350), "story": (1080, 1920)},
+            formats={
+                "feed_square": (1080, 1080),
+                "feed_portrait": (1080, 1350),
+                "story": (1080, 1920),
+            },
         )
         cards = pe.collect_pack_cards(vdir)
         assert len(cards) == 1
@@ -132,7 +138,9 @@ class TestCollectPackCards:
 
     def test_reports_missing_standard_formats(self, tmp_path):
         vdir = tmp_path / "visuals"
-        _write_card(vdir, "brief_b", content_item_id="card-B", formats={"feed_portrait": (1080, 1350)})
+        _write_card(
+            vdir, "brief_b", content_item_id="card-B", formats={"feed_portrait": (1080, 1350)}
+        )
         (card,) = pe.collect_pack_cards(vdir)
         assert card.formats_present == ["feed_portrait"]
         assert card.formats_missing == ["feed_square", "story"]
@@ -166,7 +174,9 @@ class TestCollectPackCards:
         vdir = tmp_path / "visuals"
         d = vdir / "brief_nopng"
         d.mkdir(parents=True)
-        (d / "visual.json").write_text(json.dumps({"id": "v1", "content_item_id": "x"}), encoding="utf-8")
+        (d / "visual.json").write_text(
+            json.dumps({"id": "v1", "content_item_id": "x"}), encoding="utf-8"
+        )
         assert pe.collect_pack_cards(vdir) == []
 
     def test_missing_dir_returns_empty(self, tmp_path):
@@ -175,7 +185,9 @@ class TestCollectPackCards:
     def test_deterministic_order_by_dir_name(self, tmp_path):
         vdir = tmp_path / "visuals"
         for bid in ("brief_z", "brief_a", "brief_m"):
-            _write_card(vdir, bid, content_item_id=f"c-{bid}", formats={"feed_portrait": (1080, 1350)})
+            _write_card(
+                vdir, bid, content_item_id=f"c-{bid}", formats={"feed_portrait": (1080, 1350)}
+            )
         cards = pe.collect_pack_cards(vdir)
         assert [c.brief_id for c in cards] == ["brief_a", "brief_m", "brief_z"]
 
@@ -183,16 +195,28 @@ class TestCollectPackCards:
 class TestBuildManifest:
     def _cards(self, tmp_path):
         vdir = tmp_path / "visuals"
-        _write_card(vdir, "brief_a", content_item_id="card-A",
-                    formats={"feed_square": (1080, 1080), "feed_portrait": (1080, 1350), "story": (1080, 1920)})
-        _write_card(vdir, "brief_b", content_item_id="card-B",
-                    formats={"feed_portrait": (1080, 1350)})
+        _write_card(
+            vdir,
+            "brief_a",
+            content_item_id="card-A",
+            formats={
+                "feed_square": (1080, 1080),
+                "feed_portrait": (1080, 1350),
+                "story": (1080, 1920),
+            },
+        )
+        _write_card(
+            vdir, "brief_b", content_item_id="card-B", formats={"feed_portrait": (1080, 1350)}
+        )
         return pe.collect_pack_cards(vdir)
 
     def test_top_level_shape(self, tmp_path):
-        m = pe.build_manifest("run-1", self._cards(tmp_path),
-                              run_meta={"name": "Manchester Open", "venue": "MAC"},
-                              club={"name": "Test SC", "primary_colour": "#0E5BFF"})
+        m = pe.build_manifest(
+            "run-1",
+            self._cards(tmp_path),
+            run_meta={"name": "Manchester Open", "venue": "MAC"},
+            club={"name": "Test SC", "primary_colour": "#0E5BFF"},
+        )
         assert m["manifest_version"] == pe.MANIFEST_VERSION
         assert m["kind"] == pe.MANIFEST_KIND
         assert m["run_id"] == "run-1"
@@ -228,7 +252,8 @@ class TestBuildManifest:
 
     def test_caption_alt_status_lookup_by_content_item_id(self, tmp_path):
         m = pe.build_manifest(
-            "run-1", self._cards(tmp_path),
+            "run-1",
+            self._cards(tmp_path),
             captions={"card-A": "Eira smashes her 200 free PB!"},
             alt_texts={"card-A": "Swimmer mid-stroke"},
             statuses={"card-A": "approved", "card-B": "approved"},
@@ -244,15 +269,25 @@ class TestBuildManifest:
 class TestBuildPackExport:
     def _vdir(self, tmp_path):
         vdir = tmp_path / "visuals"
-        _write_card(vdir, "brief_a", content_item_id="card-A",
-                    formats={"feed_square": (1080, 1080), "feed_portrait": (1080, 1350), "story": (1080, 1920)})
-        _write_card(vdir, "brief_b", content_item_id="card-B",
-                    formats={"feed_portrait": (1080, 1350)})
+        _write_card(
+            vdir,
+            "brief_a",
+            content_item_id="card-A",
+            formats={
+                "feed_square": (1080, 1080),
+                "feed_portrait": (1080, 1350),
+                "story": (1080, 1920),
+            },
+        )
+        _write_card(
+            vdir, "brief_b", content_item_id="card-B", formats={"feed_portrait": (1080, 1350)}
+        )
         return vdir
 
     def test_zip_structure(self, tmp_path):
-        res = pe.build_pack_export("run-1", visuals_dir=self._vdir(tmp_path),
-                                   captions={"card-A": "Great swim!"})
+        res = pe.build_pack_export(
+            "run-1", visuals_dir=self._vdir(tmp_path), captions={"card-A": "Great swim!"}
+        )
         assert res.card_count == 2
         assert res.image_count == 4
         zf = zipfile.ZipFile(io.BytesIO(res.zip_bytes))
@@ -269,8 +304,9 @@ class TestBuildPackExport:
         assert m["summary"]["image_count"] == 4
 
     def test_caption_file_only_when_caption_present(self, tmp_path):
-        res = pe.build_pack_export("run-1", visuals_dir=self._vdir(tmp_path),
-                                   captions={"card-A": "Has a caption"})
+        res = pe.build_pack_export(
+            "run-1", visuals_dir=self._vdir(tmp_path), captions={"card-A": "Has a caption"}
+        )
         zf = zipfile.ZipFile(io.BytesIO(res.zip_bytes))
         names = set(zf.namelist())
         # card-A got a caption.txt; card-B (no caption) did not.
@@ -279,8 +315,9 @@ class TestBuildPackExport:
         assert "/cards/01-" in cap_files[0]
 
     def test_order_overrides_disk_order(self, tmp_path):
-        res = pe.build_pack_export("run-1", visuals_dir=self._vdir(tmp_path),
-                                   order=["card-B", "card-A"])
+        res = pe.build_pack_export(
+            "run-1", visuals_dir=self._vdir(tmp_path), order=["card-B", "card-A"]
+        )
         cards = res.manifest["cards"]
         assert [c["content_item_id"] for c in cards] == ["card-B", "card-A"]
         # Folder numbering follows the ranking, not the dir name.
@@ -300,8 +337,12 @@ class TestBuildPackExport:
 
     def test_deterministic_with_pinned_timestamp(self, tmp_path):
         vdir = self._vdir(tmp_path)
-        kw = dict(visuals_dir=vdir, generated_at="2026-06-16T00:00:00+00:00",
-                  captions={"card-A": "x"}, order=["card-A", "card-B"])
+        kw = dict(
+            visuals_dir=vdir,
+            generated_at="2026-06-16T00:00:00+00:00",
+            captions={"card-A": "x"},
+            order=["card-A", "card-B"],
+        )
         a = pe.build_pack_export("run-1", **kw)
         b = pe.build_pack_export("run-1", **kw)
         assert a.zip_bytes == b.zip_bytes
@@ -331,7 +372,9 @@ class TestBuildPackExport:
         assert fmts["story"]["svg_file"].endswith("/story.svg")
         # Formats without a sidecar carry no svg_file key.
         assert "svg_file" not in fmts["feed_square"]
-        assert "svg_file" not in {f["format"]: f for f in by_cid["card-B"]["formats"]}["feed_portrait"]
+        assert (
+            "svg_file" not in {f["format"]: f for f in by_cid["card-B"]["formats"]}["feed_portrait"]
+        )
 
     def test_rejected_card_excluded_from_zip_and_manifest(self, tmp_path):
         """A human rejected card-B — its images and caption must not ship."""
@@ -361,9 +404,13 @@ class TestBuildPackExport:
 
     def test_path_traversal_in_title_is_neutralised(self, tmp_path):
         vdir = tmp_path / "visuals"
-        _write_card(vdir, "brief_evil", content_item_id="card-evil",
-                    formats={"feed_portrait": (1080, 1350)},
-                    sidecar_extra={"text_layers": {"swimmer_name": "../../etc", "event": "passwd"}})
+        _write_card(
+            vdir,
+            "brief_evil",
+            content_item_id="card-evil",
+            formats={"feed_portrait": (1080, 1350)},
+            sidecar_extra={"text_layers": {"swimmer_name": "../../etc", "event": "passwd"}},
+        )
         res = pe.build_pack_export("run-1", visuals_dir=vdir)
         for name in zipfile.ZipFile(io.BytesIO(res.zip_bytes)).namelist():
             assert ".." not in name
@@ -376,50 +423,52 @@ class TestBuildPackExport:
 
 
 @pytest.fixture
-def client(tmp_path, monkeypatch):
-    """Fresh DATA_DIR/RUNS_DIR with the org gate enforced; web module reloaded
-    so module-level RUNS_DIR re-resolves against tmp_path."""
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    for sub in ("runs_v4", "uploads_v4", "club_profiles"):
-        (tmp_path / sub).mkdir(parents=True, exist_ok=True)
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-    importlib.reload(cp)
-    importlib.reload(wm)
-
-    app = wm.create_app()
-    app.config["TESTING"] = True
+def client(app, web_module, tmp_path):
+    """Fresh isolated DATA_DIR/RUNS_DIR (canonical fixtures) with the org gate
+    enforced and two club profiles seeded."""
     app.config["ENFORCE_ORG_GATE"] = True
 
     from mediahub.web.club_profile import ClubProfile, save_profile
-    save_profile(ClubProfile(profile_id="club-a", display_name="Club A", brand_voice_summary="Friendly."))
-    save_profile(ClubProfile(profile_id="club-b", display_name="Club B", brand_voice_summary="Serious."))
+
+    save_profile(
+        ClubProfile(profile_id="club-a", display_name="Club A", brand_voice_summary="Friendly.")
+    )
+    save_profile(
+        ClubProfile(profile_id="club-b", display_name="Club B", brand_voice_summary="Serious.")
+    )
 
     runs_dir = tmp_path / "runs_v4"
     with app.test_client() as c:
-        yield c, wm, runs_dir
+        yield c, web_module, runs_dir
 
 
 def _seed_run(runs_dir: Path, run_id: str, profile_id: str, *, with_visuals=True):
     """Write the run JSON + (optionally) a visuals dir with two cards."""
     (runs_dir / f"{run_id}.json").write_text(
-        json.dumps({
-            "run_id": run_id,
-            "profile_id": profile_id,
-            "meet": {"name": "Manchester Open", "venue": "Manchester Aquatics Centre"},
-        }),
+        json.dumps(
+            {
+                "run_id": run_id,
+                "profile_id": profile_id,
+                "meet": {"name": "Manchester Open", "venue": "Manchester Aquatics Centre"},
+            }
+        ),
         encoding="utf-8",
     )
     if with_visuals:
         vdir = runs_dir / run_id / "visuals"
-        _write_card(vdir, "brief_a", content_item_id="card-A",
-                    formats={"feed_square": (1080, 1080), "feed_portrait": (1080, 1350), "story": (1080, 1920)})
-        _write_card(vdir, "brief_b", content_item_id="card-B",
-                    formats={"feed_portrait": (1080, 1350)})
+        _write_card(
+            vdir,
+            "brief_a",
+            content_item_id="card-A",
+            formats={
+                "feed_square": (1080, 1080),
+                "feed_portrait": (1080, 1350),
+                "story": (1080, 1920),
+            },
+        )
+        _write_card(
+            vdir, "brief_b", content_item_id="card-B", formats={"feed_portrait": (1080, 1350)}
+        )
 
 
 def _pin(client, profile_id: str):

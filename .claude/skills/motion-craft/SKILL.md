@@ -56,7 +56,7 @@ for the Remotion stack and MediaHub's non-negotiables. Where this file and
 4. **Brand is exact.** Colours come only from the resolved roles
    (`roleGround`/`roleSurface`/`roleAccent`/`roleOnGround`, the same
    APCA-gated set the still painted) or the seed-permutation fallback. Never
-   invent a hex. Fonts are the six self-hosted families loaded by
+   invent a hex. Fonts are the seven self-hosted families loaded by
    `fonts.ts` — never a CDN, never a new family without the fonts workflow.
 5. **Motion mirrors the approved still.** Archetype → motion scene parity is
    test-enforced (`tests/test_motion_v2_parity.py`); photo focus reuses

@@ -11,42 +11,27 @@ nothing highlighted.
 
 from __future__ import annotations
 
-import importlib
 import json
 import pathlib
 import re
 from datetime import datetime, timezone
 
 import pytest
+from tests._helpers import web_surface_src
 
 ORG = "org-g7"
 
 
 @pytest.fixture
-def env(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    for sub in ("runs_v4", "club_profiles"):
-        (tmp_path / sub).mkdir(parents=True, exist_ok=True)
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
-
-    if not wm._v8_ok:
+def env(client, web_module, tmp_path):
+    if not web_module._v8_ok:
         pytest.skip("V8 media engine not available")
 
     from mediahub.web.club_profile import ClubProfile, save_profile
 
     save_profile(ClubProfile(profile_id=ORG, display_name="Test Club"))
-    app = wm.create_app()
-    app.config["TESTING"] = True
-    c = app.test_client()
-    assert c.post("/api/organisation/active", data={"profile_id": ORG}).status_code == 200
-    return {"client": c, "wm": wm, "tmp": tmp_path}
+    assert client.post("/api/organisation/active", data={"profile_id": ORG}).status_code == 200
+    return {"client": client, "wm": web_module, "tmp": tmp_path}
 
 
 def _seed_done_run(env, run_id="rung7a"):
@@ -85,20 +70,20 @@ def test_studio_cross_links_meet_reel_to_activity_without_a_pack(env):
 def test_active_video_highlights_create_in_both_navs(env):
     html = env["client"].get("/video").get_data(as_text=True)
     # Top bar: the Create link carries the active class.
-    assert re.search(r'<a href="/make" class="active">', html), (
-        "top-nav Create should highlight on the Video Studio"
-    )
+    assert re.search(
+        r'<a href="/make" class="active">', html
+    ), "top-nav Create should highlight on the Video Studio"
     # Mobile bottom nav too.
-    assert re.search(r'<a href="/make" class="is-active"', html), (
-        "bottom-nav Create should highlight on the Video Studio"
-    )
+    assert re.search(
+        r'<a href="/make" class="is-active"', html
+    ), "bottom-nav Create should highlight on the Video Studio"
 
 
 def test_pack_reel_composer_cross_links_video_studio():
     # The pack page needs a full approved pack to render, so the composer's
     # one-line hint is pinned at source level (same idiom as other JS-in-
     # template guards).
-    src = pathlib.Path("src/mediahub/web/web.py").read_text(encoding="utf-8")
+    src = web_surface_src()
     assert "Working from race footage?" in src
     i = src.index("Working from race footage?")
     frag = src[i : i + 220]

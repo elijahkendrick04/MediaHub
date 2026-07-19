@@ -28,6 +28,7 @@ Two tiers:
 
 from __future__ import annotations
 
+import re
 import tempfile
 from pathlib import Path
 
@@ -111,8 +112,17 @@ _MEASURE_JS = r"""
 (RESULT) => {
   let node = null;
   for (const el of document.querySelectorAll('*')) {
+    // Own text = direct text nodes PLUS the A5 kern cells (<span class="mh-sep">)
+    // that wrap intra-numeric separators — they belong to the slot's own run.
     const own = [...el.childNodes]
-      .filter(n => n.nodeType === 3).map(n => n.textContent).join('').trim();
+      .map(n => {
+        if (n.nodeType === 3) return n.textContent;
+        if (n.nodeType === 1 && n.classList && n.classList.contains('mh-sep')) {
+          return n.textContent;
+        }
+        return '';
+      })
+      .join('').trim();
     if (own === RESULT) node = el;
   }
   if (!node) return { found: false };
@@ -186,7 +196,11 @@ def test_result_time_fits_in_every_studio_archetype(monkeypatch, tmp_path):
     pages: dict[str, tuple[Path, tuple[int, int]]] = {}
     for name in names:
         html, size = _capture_preview_html(name, monkeypatch)
-        assert RESULT in html, f"{name}: studio default time {RESULT!r} missing from HTML"
+        # A5 (Canva gap analysis) kern-wraps intra-numeric separators, so the
+        # verified time appears with kern cells around ":" / "." — de-kern
+        # before asserting the exact verified string is present.
+        dekerned = re.sub(r'<span class="mh-sep">([.:])</span>', r"\1", html)
+        assert RESULT in dekerned, f"{name}: studio default time {RESULT!r} missing from HTML"
         page_path = tmp_path / f"{name}.html"
         page_path.write_text(html, encoding="utf-8")
         pages[name] = (page_path, size)

@@ -15,7 +15,6 @@
 
 from __future__ import annotations
 
-import importlib
 import json
 import sys
 import time
@@ -59,32 +58,21 @@ def _run_payload(profile_id: str, n: int = 3) -> dict:
 
 
 @pytest.fixture
-def app_env(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    for d in ("runs_v4", "uploads_v4", "club_profiles"):
-        (tmp_path / d).mkdir(parents=True, exist_ok=True)
-
-    import mediahub.media_library.store as mls
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
+def app_env(app, web_module, tmp_path):
     # The media store is a module-level singleton; drop it so each test's
     # DATA_DIR gets a fresh DB instead of accumulating across tests.
+    import mediahub.media_library.store as mls
+
     mls._default_store = None
-    app = wm.create_app()
-    app.config["TESTING"] = True
 
     from mediahub.web.club_profile import ClubProfile, save_profile
 
     save_profile(ClubProfile(profile_id="alpha", display_name="Alpha SC"))
     save_profile(ClubProfile(profile_id="beta", display_name="Beta SC"))
-    (wm.RUNS_DIR / "r1.json").write_text(json.dumps(_run_payload("alpha")), encoding="utf-8")
-    return app, wm, tmp_path
+    (web_module.RUNS_DIR / "r1.json").write_text(
+        json.dumps(_run_payload("alpha")), encoding="utf-8"
+    )
+    return app, web_module, tmp_path
 
 
 def _approve(tmp_path, *card_ids):

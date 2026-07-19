@@ -15,35 +15,11 @@ server would reject.
 
 from __future__ import annotations
 
-import importlib
 import io
 from pathlib import Path
+from tests._helpers import web_surface_src
 
-import pytest
-
-_WEB_SRC = (
-    Path(__file__).resolve().parents[1] / "src" / "mediahub" / "web" / "web.py"
-).read_text(encoding="utf-8")
-
-
-@pytest.fixture
-def client(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    for d in ("runs_v4", "club_profiles"):
-        (tmp_path / d).mkdir(parents=True, exist_ok=True)
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
-
-    app = wm.create_app()
-    app.config["TESTING"] = True
-    with app.test_client() as c:
-        yield c
+_WEB_SRC = web_surface_src()
 
 
 def _post_upload(client, data):

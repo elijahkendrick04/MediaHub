@@ -21,7 +21,6 @@ owner's secret markers must never appear in a foreign org's response.
 
 from __future__ import annotations
 
-import importlib
 import json
 import re
 import sys
@@ -71,20 +70,8 @@ _ARG_RE = re.compile(r"<(?:[^:>]+:)?([^>]+)>")
 
 
 @pytest.fixture
-def two_orgs(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    (tmp_path / "runs_v4").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "uploads_v4").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "club_profiles").mkdir(parents=True, exist_ok=True)
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
+def two_orgs(tmp_path, web_module):
+    wm = web_module
 
     from mediahub.web.club_profile import ClubProfile, save_profile
 

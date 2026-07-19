@@ -9,7 +9,6 @@ old behaviour unchanged.
 
 from __future__ import annotations
 
-import importlib
 import json
 import sys
 from pathlib import Path
@@ -84,27 +83,12 @@ def test_ledger_clear(tmp_path):
 
 
 @pytest.fixture
-def app_client(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
+def app_client(client, web_module, tmp_path, monkeypatch):
     for var in ("GEMINI_API_KEY", "GOOGLE_API_KEY", "ANTHROPIC_API_KEY"):
         monkeypatch.delenv(var, raising=False)
-    for sub in ("runs_v4", "club_profiles"):
-        (tmp_path / sub).mkdir(parents=True, exist_ok=True)
     import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
 
-    importlib.reload(cp)
-    importlib.reload(wm)
-    # the workflow / approval stores are module-global singletons — reset them so
-    # they bind to this test's RUNS_DIR
-    wm._wf_store = None
-    wm._approval_ledger = None
-    app = wm.create_app()
-    app.config["TESTING"] = True
-    with app.test_client() as c:
-        yield c, cp, wm, tmp_path
+    yield client, cp, web_module, tmp_path
 
 
 def _seed_run_with_brief(tmp_path, pid, *, palette, run_id="run-g", card_id="swim_1"):

@@ -26,11 +26,17 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from mediahub._atomic_io import atomic_write_text
+
 log = logging.getLogger(__name__)
 
 
 def _data_dir() -> Path:
-    return Path(os.environ.get("DATA_DIR", "data"))
+    # Fall back to the package root (src/mediahub) — the SAME default the web
+    # layer uses (web.py's DATA_DIR = _SRC_ROOT = parents[1]) — so with DATA_DIR
+    # unset the erasure cascade scans the very tree the app writes to, not a
+    # cwd-relative "data" the app never touches.
+    return Path(os.environ.get("DATA_DIR", str(Path(__file__).resolve().parents[1])))
 
 
 def _runs_dir() -> Path:
@@ -69,16 +75,33 @@ def _delete_json_files_mentioning(directory: Path, needle: str, glob: str = "*.j
     return removed
 
 
-def _purge_pb_caches(name: str, club: str = "") -> int:
-    """Remove an athlete from the PB discovery caches (warm + per-run)."""
-    from mediahub.pb_discovery.cache import _discovered_root, make_swimmer_key
+def _purge_pb_caches(name: str, club: str = "", *, run_ids: list[str] | None = None) -> int:
+    """Remove an athlete from the PB discovery caches (warm + per-run).
+
+    ``swimmers/`` is a global public-reference warm cache keyed by
+    ``md5(name|club)`` — it has no tenant dimension, so the subject's own warm
+    entry is cleared everywhere. ``pbs/`` is run-keyed
+    (``discovered/pbs/<_safe(run_id)>/``); when ``run_ids`` is given (the
+    erasing tenant's own runs) the per-run purge is confined to those runs so a
+    signed-in tenant cannot delete another club's PB cache (finding #111).
+    ``run_ids=None`` keeps the legacy global sweep for full-instance / org
+    -lifecycle callers."""
+    from mediahub.pb_discovery.cache import _discovered_root, _safe, make_swimmer_key
 
     removed = 0
     root = _discovered_root()
-    # Exact key delete when we know the club…
+    # pbs/ dirs to touch: the tenant's own runs when scoped, else the whole tree.
+    pbs_dirs = (
+        [root / "pbs" / _safe(rid) for rid in run_ids] if run_ids is not None else [root / "pbs"]
+    )
+    # Exact key delete when we know the club (swimmers/ is global by design).
     if club:
         key = make_swimmer_key(name, club)
-        for p in [root / "swimmers" / f"{key}.json", *root.glob(f"pbs/*/{key}.json")]:
+        if run_ids is not None:
+            pbs_key_paths = [d / f"{key}.json" for d in pbs_dirs]
+        else:
+            pbs_key_paths = list(root.glob(f"pbs/*/{key}.json"))
+        for p in [root / "swimmers" / f"{key}.json", *pbs_key_paths]:
             try:
                 if p.exists():
                     p.unlink()
@@ -87,7 +110,8 @@ def _purge_pb_caches(name: str, club: str = "") -> int:
                 continue
     # …and a content scan either way (cached payloads carry the name).
     removed += _delete_json_files_mentioning(root / "swimmers", name)
-    removed += _delete_json_files_mentioning(root / "pbs", name)
+    for d in pbs_dirs:
+        removed += _delete_json_files_mentioning(d, name)
     return removed
 
 
@@ -268,6 +292,13 @@ def _name_value_match(d: dict, frag: str) -> bool:
 _CARD_SUBJECT_KEYS = ("name", "swimmer", "athlete", "title", "headline", "subject")
 
 
+def _name_in_text(text: str, frag: str) -> bool:
+    """Whole-name match — "Sam Lee" must NOT match inside "Sam Leeson". Erasing
+    one subject must never delete another whose name merely contains it (the same
+    name-boundary rule ``_delete_json_files_mentioning`` already applies)."""
+    return re.search(r"(?<![a-z0-9])" + re.escape(frag) + r"(?![a-z0-9])", text.lower()) is not None
+
+
 def _card_is_about(card: dict, frag: str) -> bool:
     """A card is removed only when the athlete is its subject; a card about
     someone else that merely mentions the name in prose is kept and redacted
@@ -275,7 +306,7 @@ def _card_is_about(card: dict, frag: str) -> bool:
     if _name_value_match(card, frag):
         return True
     for key in _CARD_SUBJECT_KEYS:
-        if frag in str(card.get(key) or "").lower():
+        if _name_in_text(str(card.get(key) or ""), frag):
             return True
     facts = card.get("raw_facts")
     if isinstance(facts, dict) and _name_value_match(facts, frag):
@@ -353,6 +384,10 @@ def erase_athlete(profile_id: str, name: str, club: str = "") -> AthleteErasureR
         return report
 
     runs_dir = _runs_dir()
+    # Every run this tenant owns — used to confine the run-keyed pbs/ cache
+    # purge to the tenant's own runs (finding #111), so erasing an athlete for
+    # one club never deletes another club's PB cache on a name collision.
+    tenant_run_ids: list[str] = []
     if runs_dir.exists():
         for run_file in sorted(runs_dir.glob("*.json")):
             try:
@@ -363,13 +398,14 @@ def erase_athlete(profile_id: str, name: str, club: str = "") -> AthleteErasureR
                 continue
             if (payload.get("profile_id") or "") != profile_id:
                 continue
+            tenant_run_ids.append(str(payload.get("run_id") or run_file.stem))
             if frag not in json.dumps(payload, default=str).lower():
                 continue
             run_id = str(payload.get("run_id") or run_file.stem)
             stripped, n_cards, n_other, removed_ids = _strip_athlete_from_payload(payload, frag)
             stripped = _redact_strings(stripped, name)
             try:
-                run_file.write_text(json.dumps(stripped, indent=2, default=str), encoding="utf-8")
+                atomic_write_text(run_file, json.dumps(stripped, indent=2, default=str))
             except OSError as exc:
                 log.warning("erasure: could not rewrite %s: %s", run_file, exc)
                 continue
@@ -388,7 +424,7 @@ def erase_athlete(profile_id: str, name: str, club: str = "") -> AthleteErasureR
                             pass
             report.assets_removed += _purge_motion_cache_for_run(run_id) if removed_ids else 0
 
-    report.pb_cache_files = _purge_pb_caches(name, club)
+    report.pb_cache_files = _purge_pb_caches(name, club, run_ids=tenant_run_ids)
     report.research_cache_files = _purge_research_caches(name)
     try:
         from mediahub.memory import store as memory_store

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import importlib
 import json
 import sys
 import time
@@ -24,8 +23,16 @@ def _seed_run(runs_dir: Path, run_id: str, profile_id: str):
         "run_id": run_id,
         "profile_id": profile_id,
         "meet": {"name": "Alpha"},
-        "cards": [{"card_id": "card-1", "id": "card-1", "swim_id": "card-1",
-                   "swimmer_name": "Adult", "event": "100 Free", "headline": "PB"}],
+        "cards": [
+            {
+                "card_id": "card-1",
+                "id": "card-1",
+                "swim_id": "card-1",
+                "swimmer_name": "Adult",
+                "event": "100 Free",
+                "headline": "PB",
+            }
+        ],
         "recognition_report": {"n_swims_analysed": 1},
     }
     (runs_dir / f"{run_id}.json").write_text(json.dumps(data))
@@ -35,25 +42,21 @@ def _write_brief(runs_dir, run_id, brief_id, card_id, headline, created):
     bdir = runs_dir / run_id / "briefs"
     bdir.mkdir(parents=True, exist_ok=True)
     (bdir / f"{brief_id}.json").write_text(
-        json.dumps({"id": brief_id, "content_item_id": card_id,
-                    "text_layers": {"headline_line1": headline},
-                    "layout_template": "hero", "created_at": created})
+        json.dumps(
+            {
+                "id": brief_id,
+                "content_item_id": card_id,
+                "text_layers": {"headline_line1": headline},
+                "layout_template": "hero",
+                "created_at": created,
+            }
+        )
     )
 
 
 @pytest.fixture
-def world(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    for d in ("runs_v4", "club_profiles"):
-        (tmp_path / d).mkdir(parents=True, exist_ok=True)
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
+def world(web_module, tmp_path):
+    wm = web_module
 
     from mediahub.web.club_profile import ClubProfile, save_profile
 
@@ -138,7 +141,9 @@ def test_locks_get_and_set_gate(world):
     assert r.status_code == 403
     # owner can lock
     o = _act_as(world["app"], OWNER)
-    r2 = o.post(f"/api/runs/{run_id}/card/card-1/locks", json={"element": "sponsor", "locked": True})
+    r2 = o.post(
+        f"/api/runs/{run_id}/card/card-1/locks", json={"element": "sponsor", "locked": True}
+    )
     assert r2.status_code == 200
     assert "sponsor" in r2.get_json()["locked"]
 
@@ -158,7 +163,10 @@ def test_locked_sponsor_drops_inspector_override(world):
     # try to hide the sponsor via the inspector + a normal caption edit
     r = o.post(
         f"/api/workflow/{run_id}/card-1",
-        json={"action": "set_edits", "edits": {"insp.hideSponsor": "1", "warm-club_headline": "Hi"}},
+        json={
+            "action": "set_edits",
+            "edits": {"insp.hideSponsor": "1", "warm-club_headline": "Hi"},
+        },
     )
     assert r.status_code == 200
     import os

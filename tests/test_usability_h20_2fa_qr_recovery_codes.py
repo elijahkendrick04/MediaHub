@@ -25,12 +25,10 @@ import pytest
 def app(monkeypatch, tmp_path):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     monkeypatch.delenv("STRIPE_SECRET_KEY", raising=False)
-    from mediahub.web import auth as auth_mod
     from mediahub.web.web import create_app
 
-    # lockout + TOTP replay state are process-global — isolate per test
-    auth_mod._failed_logins.clear()
-    auth_mod._totp_last_counter.clear()
+    # SEC-27: lockout + TOTP replay state now live in the per-DATA_DIR SQLite
+    # DB, so a fresh tmp_path isolates each test — no process-global dict to clear.
     application = create_app()
     application.config["TESTING"] = True
     if not application.secret_key:

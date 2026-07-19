@@ -3,29 +3,19 @@ demo flow (staged upload → club pick → run → preview), claim, and sweep.""
 
 from __future__ import annotations
 
-import importlib
 import json
 
 import pytest
 
 
 @pytest.fixture
-def demo_world(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-
-    import mediahub.web.club_profile as cp
+def demo_world(tmp_path, web_module, app):
+    # DATA_DIR / RUNS_DIR / SWIM_CONTENT_PROFILES_DIR isolation + a fresh
+    # create_app() come from the canonical fixtures (web_module / app); the
+    # TRY_* env vars are read live in demo_try.py, so tests set them per case.
     import mediahub.web.demo_try as dt
-    import mediahub.web.web as wm
 
-    importlib.reload(cp)
-    importlib.reload(dt)
-    importlib.reload(wm)
-
-    app = wm.create_app()
-    app.config["TESTING"] = True
-    return {"app": app, "wm": wm, "dt": dt, "tmp": tmp_path}
+    return {"app": app, "wm": web_module, "dt": dt, "tmp": tmp_path}
 
 
 def _seed_demo_run(world, run_id, *, status="done", created_at=None):

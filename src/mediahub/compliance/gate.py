@@ -58,14 +58,20 @@ def consent_block_reason(
     # W.2 safeguarding levels (do_not_feature blocks; the photo/initials
     # levels are enforced at media selection / rendering, not here).
     try:
-        from mediahub.safeguarding import effective_policy, regime_active  # noqa: PLC0415
+        from mediahub.safeguarding import effective_policy  # noqa: PLC0415
 
-        if profile_id and regime_active(profile_id):
+        if profile_id:
+            # effective_policy is permissive when no regime is configured and
+            # fails closed on a lookup error, so consult it directly rather than
+            # gating on a separate regime_active() that could raise and skip the
+            # whole W.2 check.
             policy = effective_policy(profile_id, name)
             if policy.blocked:
                 return policy.reason or f"{name}'s consent level does not allow featuring"
     except Exception:
-        pass  # ledger below still enforces; the publish gate fails closed separately
+        # A failure reaching the safeguarding check must not silently open the
+        # W.2 gate — block pending review (the ledger checks below add to this).
+        return f"{name}: safeguarding consent check failed — blocked pending review"
 
     registry = ConsentRegistry(profile_id)
     rec = registry.get(name)

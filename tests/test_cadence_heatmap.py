@@ -17,9 +17,9 @@ Pins the GitHub-contribution-graph-style year grid on the Activity page
     injected CSS before the guardrails layer, stays scoped to the pinned org, and
     is absent for a club with no runs
 """
+
 from __future__ import annotations
 
-import importlib
 import sys
 import xml.etree.ElementTree as ET
 from datetime import date, datetime, timedelta, timezone
@@ -139,8 +139,11 @@ class TestBuildGrid:
         end = date(2026, 6, 14)
         d = (end - timedelta(days=1)).isoformat()
         grid = ch.build_grid(
-            {d: "nope", (end - timedelta(days=2)).isoformat(): 0,
-             (end - timedelta(days=3)).isoformat(): -2},
+            {
+                d: "nope",
+                (end - timedelta(days=2)).isoformat(): 0,
+                (end - timedelta(days=3)).isoformat(): -2,
+            },
             end=end,
         )
         assert grid.total == 0
@@ -233,7 +236,7 @@ class TestRenderSvg:
 
     def test_titles_describe_activity(self):
         end = date(2026, 6, 14)
-        d = (end - timedelta(days=2))
+        d = end - timedelta(days=2)
         svg = ch.render_svg(ch.build_grid({d: 3}, end=end))
         assert "3 generated" in svg
         assert "posted" not in svg  # MediaHub never posts — no phantom lane
@@ -365,37 +368,31 @@ class TestCadenceCss:
 # DB reader + end-to-end on /activity
 # =========================================================================== #
 @pytest.fixture
-def gated_client(tmp_path, monkeypatch):
-    """Fresh DATA_DIR with the org gate enforced; web module reloaded so the
-    module-level DB_PATH / RUNS_DIR re-resolve against tmp_path."""
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    for sub in ("runs_v4", "uploads_v4", "club_profiles"):
-        (tmp_path / sub).mkdir(parents=True, exist_ok=True)
+def gated_client(app, client, web_module):
+    """Shared isolated app with the org gate enforced; two club profiles seeded.
 
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-    importlib.reload(cp)
-    importlib.reload(wm)
-
-    app = wm.create_app()
-    app.config["TESTING"] = True
+    The canonical fixtures give a private DATA_DIR (module globals repointed, caches
+    cleared) and a fresh ``create_app()`` — the org gate is the only extra config."""
     app.config["ENFORCE_ORG_GATE"] = True
 
     from mediahub.web.club_profile import ClubProfile, save_profile
-    save_profile(ClubProfile(
-        profile_id="club-a", display_name="Club A",
-        brand_voice_summary="A friendly club.",
-    ))
-    save_profile(ClubProfile(
-        profile_id="club-b", display_name="Club B",
-        brand_voice_summary="A serious club.",
-    ))
 
-    with app.test_client() as c:
-        yield c, wm
+    save_profile(
+        ClubProfile(
+            profile_id="club-a",
+            display_name="Club A",
+            brand_voice_summary="A friendly club.",
+        )
+    )
+    save_profile(
+        ClubProfile(
+            profile_id="club-b",
+            display_name="Club B",
+            brand_voice_summary="A serious club.",
+        )
+    )
+
+    yield client, web_module
 
 
 def _insert_run(wm, run_id, profile_id, created_at, status="done"):
@@ -404,8 +401,7 @@ def _insert_run(wm, run_id, profile_id, created_at, status="done"):
         "INSERT INTO runs (id, created_at, finished_at, status, profile_id, "
         "meet_name, file_name, our_swims, n_cards, n_queue, error) "
         "VALUES (?, ?, ?, ?, ?, ?, ?, 1, 0, 0, NULL)",
-        (run_id, created_at, created_at, status, profile_id,
-         f"Meet {run_id}", f"{run_id}.pdf"),
+        (run_id, created_at, created_at, status, profile_id, f"Meet {run_id}", f"{run_id}.pdf"),
     )
     conn.commit()
     conn.close()
@@ -452,7 +448,9 @@ class TestActivityPageRendersHeatmap:
         today = datetime.now(timezone.utc).date()
         for i in range(6):
             _insert_run(
-                wm, f"a{i}", "club-a",
+                wm,
+                f"a{i}",
+                "club-a",
                 f"{(today - timedelta(days=i)).isoformat()}T09:00:00+00:00",
             )
         _pin(c, "club-a")
@@ -460,7 +458,7 @@ class TestActivityPageRendersHeatmap:
         # The aria-label string only appears on the rendered <section>, never
         # in the always-injected <style> block.
         assert "Content cadence over the last year" in body
-        assert "<svg class=\"mh-cad-svg\"" in body
+        assert '<svg class="mh-cad-svg"' in body
         # The combined cell class only appears on a real drawn square, proving
         # at least one lit day made it into the grid (not just the CSS rule).
         assert 'class="mh-cad-cell mh-cad-l1"' in body

@@ -42,8 +42,27 @@ log = logging.getLogger(__name__)
 # Storage paths — same convention as the rest of the SQLite stores.
 # ---------------------------------------------------------------------------
 
-DATA_DIR = Path(os.environ.get("DATA_DIR", str(Path(__file__).resolve().parents[1])))
-DB_PATH = DATA_DIR / "data.db"
+
+def _db_path() -> Path:
+    """Resolve ``DATA_DIR/data.db`` at CALL time (deep-review #101).
+
+    Freezing this at import let a late ``DATA_DIR`` (set after this module was
+    imported) split writes across two DBs; resolving per call keeps every store
+    on one DB. Mirrors ``feature_quota._db_path`` / ``approval_telemetry._db_path``.
+    """
+    data_dir = Path(os.environ.get("DATA_DIR", str(Path(__file__).resolve().parents[1])))
+    return data_dir / "data.db"
+
+
+def __getattr__(name: str):
+    # Back-compat: ``DATA_DIR`` / ``DB_PATH`` were module-level constants. Serve
+    # them lazily so external readers always see the current DATA_DIR, never an
+    # import-time freeze.
+    if name == "DB_PATH":
+        return _db_path()
+    if name == "DATA_DIR":
+        return _db_path().parent
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 # ---------------------------------------------------------------------------
@@ -110,11 +129,12 @@ CREATE INDEX IF NOT EXISTS idx_llm_calls_provider_ts
 
 
 def _connect() -> sqlite3.Connection:
+    p = _db_path()
     try:
-        DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+        p.parent.mkdir(parents=True, exist_ok=True)
     except OSError:
         pass
-    conn = sqlite3.connect(str(DB_PATH))
+    conn = sqlite3.connect(str(p))
     conn.row_factory = sqlite3.Row
     try:
         conn.execute("PRAGMA journal_mode=WAL")
@@ -137,7 +157,10 @@ def _ensure_schema() -> None:
         log.warning("llm_usage: schema bootstrap OS error: %s", exc)
 
 
-_ensure_schema()
+# No import-time schema bootstrap (deep-review #101): building the schema at
+# import created it in the default-DATA_DIR DB, which a late DATA_DIR then
+# diverges from. Each write calls _ensure_schema() first (targeting the lazily
+# resolved DB); every read degrades gracefully on a missing table.
 
 
 # ---------------------------------------------------------------------------
@@ -214,6 +237,28 @@ def record_call(
         return 0
     except OSError as exc:
         log.warning("llm_usage: record_call OS error: %s", exc)
+        return 0
+
+
+def _gemini_calls_last_24h() -> int:
+    """Gemini call count over a FIXED trailing 24h — the free-tier daily reset.
+
+    Kept separate from the summary's ``window_hours`` so a 7- or 30-day dashboard
+    window can't subtract a week/month of calls from the 1,500/day ceiling and
+    understate (often to zero) the real headroom."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
+    try:
+        conn = _connect()
+        try:
+            row = conn.execute(
+                "SELECT COUNT(*) AS c FROM llm_calls WHERE provider = 'gemini' AND ts >= ?",
+                (cutoff,),
+            ).fetchone()
+            return int(row["c"] or 0) if row else 0
+        finally:
+            conn.close()
+    except (sqlite3.Error, OSError) as exc:
+        log.warning("llm_usage: 24h gemini count failed: %s", exc)
         return 0
 
 
@@ -315,12 +360,13 @@ def usage_for_window(window_hours: int = 24) -> dict:
     ok = sum(b["ok"] for b in by_provider)
     failed = sum(b["failed"] for b in by_provider)
 
-    # Gemini free-tier headroom is "today" (rolling 24h is a fine proxy
-    # for the published per-day reset).
-    gemini_calls_today = sum(b["calls"] for b in by_provider if b["provider"] == "gemini")
+    # Gemini free-tier headroom is measured over a FIXED trailing 24h (the daily
+    # reset) — NOT this summary's window_hours, which for a 7/30-day view would
+    # subtract far more than a day's calls and understate the headroom.
+    gemini_calls_24h = _gemini_calls_last_24h()
     headroom = None
-    if gemini_calls_today > 0:
-        headroom = max(0, GEMINI_FREE_TIER_DAILY_REQ - gemini_calls_today)
+    if gemini_calls_24h > 0:
+        headroom = max(0, GEMINI_FREE_TIER_DAILY_REQ - gemini_calls_24h)
 
     return {
         "window_hours": window_hours,
@@ -499,8 +545,8 @@ def _maybe_prune(conn: sqlite3.Connection) -> None:
 
 
 __all__ = [
-    "DATA_DIR",
-    "DB_PATH",
+    # DATA_DIR / DB_PATH remain accessible (served lazily via __getattr__) but
+    # are no longer star-exported constants — they resolve per access now (#101).
     "GEMINI_FREE_TIER_DAILY_REQ",
     "record_call",
     "usage_for_window",

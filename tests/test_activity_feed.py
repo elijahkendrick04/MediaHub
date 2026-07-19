@@ -12,9 +12,9 @@ Two layers:
     lanes (runs / approvals / exports), the empty state, multi-tenant
     isolation, the ?kind= filter, expandable detail, and HTML-escaping.
 """
+
 from __future__ import annotations
 
-import importlib
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -146,7 +146,12 @@ class TestSummariseWorkflow:
         }
         summ = af.summarise_workflow(states)
         assert summ["counts"] == {
-            "queue": 1, "approved": 2, "rejected": 1, "posted": 0, "edited": 1, "total": 5,
+            "queue": 1,
+            "approved": 2,
+            "rejected": 1,
+            "posted": 0,
+            "edited": 1,
+            "total": 5,
         }
         # Newest review change is the second approval (10 min ago).
         assert summ["review_latest"] == _ago(minutes=10)
@@ -172,8 +177,12 @@ class TestSummariseWorkflow:
         from mediahub.workflow.status import CardStatus, CardWorkflowState
 
         states = {
-            "c1": CardWorkflowState(card_id="c1", status=CardStatus.APPROVED, last_changed_at=_ago(minutes=12)),
-            "c2": CardWorkflowState(card_id="c2", status=CardStatus.POSTED, posted_at=_ago(minutes=4)),
+            "c1": CardWorkflowState(
+                card_id="c1", status=CardStatus.APPROVED, last_changed_at=_ago(minutes=12)
+            ),
+            "c2": CardWorkflowState(
+                card_id="c2", status=CardStatus.POSTED, posted_at=_ago(minutes=4)
+            ),
         }
         summ = af.summarise_workflow(states)
         assert summ["counts"]["approved"] == 1
@@ -189,9 +198,16 @@ class TestSummariseWorkflow:
 class TestRunEvent:
     def _run(self, **over):
         base = {
-            "id": "r1", "created_at": _ago(hours=2), "finished_at": _ago(hours=2, minutes=-1),
-            "status": "done", "meet_name": "County Champs", "file_name": "county.pdf",
-            "our_swims": 12, "n_achievements": 5, "n_queue": 3, "error": None,
+            "id": "r1",
+            "created_at": _ago(hours=2),
+            "finished_at": _ago(hours=2, minutes=-1),
+            "status": "done",
+            "meet_name": "County Champs",
+            "file_name": "county.pdf",
+            "our_swims": 12,
+            "n_achievements": 5,
+            "n_queue": 3,
+            "error": None,
         }
         base.update(over)
         return af._run_event(base)
@@ -228,8 +244,18 @@ class TestRunEvent:
 
 class TestApprovalEvent:
     def test_emitted_with_label_precedence(self):
-        summ = {"counts": {"approved": 2, "rejected": 1, "edited": 0, "posted": 0, "queue": 0, "total": 3},
-                "review_latest": _ago(minutes=10), "posted_latest": ""}
+        summ = {
+            "counts": {
+                "approved": 2,
+                "rejected": 1,
+                "edited": 0,
+                "posted": 0,
+                "queue": 0,
+                "total": 3,
+            },
+            "review_latest": _ago(minutes=10),
+            "posted_latest": "",
+        }
         e = af._approval_event("r1", {"meet_name": "County"}, summ)
         assert e.kind == af.KIND_APPROVAL and e.status_label == "approved"
         assert e.status_tone == af.TONE_GOOD
@@ -237,35 +263,85 @@ class TestApprovalEvent:
         assert e.ts == _ago(minutes=10) and e.title == "County"
 
     def test_rejected_only_is_warn(self):
-        summ = {"counts": {"approved": 0, "rejected": 3, "edited": 0, "posted": 0, "queue": 0, "total": 3},
-                "review_latest": _ago(minutes=5), "posted_latest": ""}
+        summ = {
+            "counts": {
+                "approved": 0,
+                "rejected": 3,
+                "edited": 0,
+                "posted": 0,
+                "queue": 0,
+                "total": 3,
+            },
+            "review_latest": _ago(minutes=5),
+            "posted_latest": "",
+        }
         e = af._approval_event("r1", {}, summ)
         assert e.status_label == "rejected" and e.status_tone == af.TONE_WARN
 
     def test_edited_only_is_info(self):
-        summ = {"counts": {"approved": 0, "rejected": 0, "edited": 2, "posted": 0, "queue": 0, "total": 2},
-                "review_latest": _ago(minutes=5), "posted_latest": ""}
+        summ = {
+            "counts": {
+                "approved": 0,
+                "rejected": 0,
+                "edited": 2,
+                "posted": 0,
+                "queue": 0,
+                "total": 2,
+            },
+            "review_latest": _ago(minutes=5),
+            "posted_latest": "",
+        }
         e = af._approval_event("r1", {}, summ)
         assert e.status_label == "edited" and e.status_tone == af.TONE_INFO
 
     def test_no_event_without_review_activity(self):
-        summ = {"counts": {"approved": 0, "rejected": 0, "edited": 0, "posted": 4, "queue": 1, "total": 5},
-                "review_latest": "", "posted_latest": _ago(minutes=1)}
+        summ = {
+            "counts": {
+                "approved": 0,
+                "rejected": 0,
+                "edited": 0,
+                "posted": 4,
+                "queue": 1,
+                "total": 5,
+            },
+            "review_latest": "",
+            "posted_latest": _ago(minutes=1),
+        }
         assert af._approval_event("r1", {}, summ) is None
 
 
 class TestExportEvents:
     def test_posted_export(self):
-        summ = {"counts": {"approved": 0, "rejected": 0, "edited": 0, "posted": 3, "queue": 0, "total": 3},
-                "review_latest": "", "posted_latest": _ago(minutes=2)}
+        summ = {
+            "counts": {
+                "approved": 0,
+                "rejected": 0,
+                "edited": 0,
+                "posted": 3,
+                "queue": 0,
+                "total": 3,
+            },
+            "review_latest": "",
+            "posted_latest": _ago(minutes=2),
+        }
         e = af._posted_export_event("r1", {"meet_name": "County"}, summ)
         assert e.kind == af.KIND_EXPORT and e.subkind == "posted"
         assert e.status_tone == af.TONE_GOOD and "3 cards marked posted" in e.summary
         assert e.ts == _ago(minutes=2)
 
     def test_no_posted_export_when_zero(self):
-        summ = {"counts": {"approved": 1, "rejected": 0, "edited": 0, "posted": 0, "queue": 0, "total": 1},
-                "review_latest": _ago(minutes=2), "posted_latest": ""}
+        summ = {
+            "counts": {
+                "approved": 1,
+                "rejected": 0,
+                "edited": 0,
+                "posted": 0,
+                "queue": 0,
+                "total": 1,
+            },
+            "review_latest": _ago(minutes=2),
+            "posted_latest": "",
+        }
         assert af._posted_export_event("r1", {}, summ) is None
 
 
@@ -277,15 +353,30 @@ class TestExportEvents:
 class TestBuildFeed:
     def _data(self):
         runs = [
-            {"id": "r1", "created_at": _ago(hours=2), "finished_at": _ago(hours=2),
-             "status": "done", "meet_name": "County Champs", "our_swims": 12, "n_achievements": 5},
-            {"id": "r2", "created_at": _ago(hours=1), "finished_at": _ago(hours=1),
-             "status": "error", "meet_name": "Regional", "error": "boom"},
+            {
+                "id": "r1",
+                "created_at": _ago(hours=2),
+                "finished_at": _ago(hours=2),
+                "status": "done",
+                "meet_name": "County Champs",
+                "our_swims": 12,
+                "n_achievements": 5,
+            },
+            {
+                "id": "r2",
+                "created_at": _ago(hours=1),
+                "finished_at": _ago(hours=1),
+                "status": "error",
+                "meet_name": "Regional",
+                "error": "boom",
+            },
         ]
-        wf = {"r1": {
-            "c1": _state("c1", "approved", changed=_ago(minutes=40)),
-            "c2": _state("c2", "posted", posted=_ago(minutes=20)),
-        }}
+        wf = {
+            "r1": {
+                "c1": _state("c1", "approved", changed=_ago(minutes=40)),
+                "c2": _state("c2", "posted", posted=_ago(minutes=20)),
+            }
+        }
         return runs, wf
 
     def test_merge_sort_newest_first(self):
@@ -341,32 +432,21 @@ class TestBuildFeed:
 
 
 @pytest.fixture
-def feed_client(tmp_path, monkeypatch):
+def feed_client(app, web_module):
     """Fresh DATA_DIR + org gate, mirroring tests/test_activity_scoping.py."""
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    for sub in ("runs_v4", "uploads_v4", "club_profiles"):
-        (tmp_path / sub).mkdir(parents=True, exist_ok=True)
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-    importlib.reload(cp)
-    importlib.reload(wm)
-
-    app = wm.create_app()
-    app.config["TESTING"] = True
     app.config["ENFORCE_ORG_GATE"] = True
 
     from mediahub.web.club_profile import ClubProfile, save_profile
-    save_profile(ClubProfile(profile_id="club-a", display_name="Club A",
-                             brand_voice_summary="Friendly."))
-    save_profile(ClubProfile(profile_id="club-b", display_name="Club B",
-                             brand_voice_summary="Serious."))
+
+    save_profile(
+        ClubProfile(profile_id="club-a", display_name="Club A", brand_voice_summary="Friendly.")
+    )
+    save_profile(
+        ClubProfile(profile_id="club-b", display_name="Club B", brand_voice_summary="Serious.")
+    )
 
     with app.test_client() as c:
-        yield c, wm
+        yield c, web_module
 
 
 def _seed_run(wm, run_id, profile_id, meet, *, status="done", error=None):
@@ -392,6 +472,7 @@ class TestFeedRoute:
         _seed_run(wm, "r1", "club-a", "County Champs")
         from mediahub.workflow.status import CardStatus
         from mediahub.workflow.store import WorkflowStore
+
         ws = WorkflowStore(wm.RUNS_DIR)
         ws.set_status("r1", "c1", CardStatus.APPROVED)
         ws.set_status("r1", "c2", CardStatus.POSTED)
@@ -399,14 +480,14 @@ class TestFeedRoute:
         _pin(c, "club-a")
         body = c.get("/activity/feed").get_data(as_text=True)
         assert "Activity feed" in body
-        assert "County Champs" in body              # run + approval titles
+        assert "County Champs" in body  # run + approval titles
         assert 'data-kind="run"' in body
         assert 'data-kind="approval"' in body
-        assert 'data-kind="export"' in body         # the card marked posted
+        assert 'data-kind="export"' in body  # the card marked posted
         assert '<article class="mh-feed-item' in body
-        assert "<details" in body                   # expandable detail
+        assert "<details" in body  # expandable detail
         assert 'class="tag good"' in body
-        assert 'class="mh-rel' in body              # relative timestamps
+        assert 'class="mh-rel' in body  # relative timestamps
 
     def test_precolumn_row_uses_json_count_and_warms_column(self, feed_client):
         """A pre-column run (NULL n_achievements) shows the JSON-derived count,
@@ -425,8 +506,13 @@ class TestFeedRoute:
         conn.close()
         # The run JSON carries the real achievement count.
         (wm.RUNS_DIR / "rold.json").write_text(
-            _json.dumps({"run_id": "rold", "profile_id": "club-a",
-                         "recognition_report": {"n_achievements": 9}}),
+            _json.dumps(
+                {
+                    "run_id": "rold",
+                    "profile_id": "club-a",
+                    "recognition_report": {"n_achievements": 9},
+                }
+            ),
             encoding="utf-8",
         )
 
@@ -436,9 +522,9 @@ class TestFeedRoute:
 
         # The best-effort backfill warmed the column after the view.
         conn = wm._db()
-        val = conn.execute(
-            "SELECT n_achievements FROM runs WHERE id = 'rold'"
-        ).fetchone()["n_achievements"]
+        val = conn.execute("SELECT n_achievements FROM runs WHERE id = 'rold'").fetchone()[
+            "n_achievements"
+        ]
         conn.close()
         assert val == 9
 
@@ -456,6 +542,7 @@ class TestFeedRoute:
         # Club B approvals + exports that must never appear in Club A's feed.
         from mediahub.workflow.status import CardStatus
         from mediahub.workflow.store import WorkflowStore
+
         ws = WorkflowStore(wm.RUNS_DIR)
         ws.set_status("rb", "c1", CardStatus.APPROVED)
 
@@ -469,6 +556,7 @@ class TestFeedRoute:
         _seed_run(wm, "r1", "club-a", "County Champs")
         from mediahub.workflow.status import CardStatus
         from mediahub.workflow.store import WorkflowStore
+
         ws = WorkflowStore(wm.RUNS_DIR)
         ws.set_status("r1", "c1", CardStatus.APPROVED)
         _pin(c, "club-a")

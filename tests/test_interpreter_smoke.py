@@ -49,6 +49,27 @@ def _call(raw: bytes, hint: str) -> InterpretedMeet:
     )
 
 
+@pytest.fixture(autouse=True)
+def _isolate_patterns(tmp_path, monkeypatch):
+    """Never let a low-confidence fixture's ``propose_patterns`` → ``flush()``
+    rewrite the developer's REAL ``data/patterns.jsonl`` (#128). Each test gets a
+    private tmp copy, and the module-cached ``PatternStore`` (``interpreter._store``)
+    is reset so a real-path store can't leak across tests (order-dependent
+    contamination)."""
+    import mediahub.interpreter as _interp
+
+    real = PROJECT_ROOT / "data" / "patterns.jsonl"
+    tmp_patterns = tmp_path / "patterns.jsonl"
+    tmp_patterns.write_text(
+        real.read_text(encoding="utf-8") if real.exists() else "", encoding="utf-8"
+    )
+    monkeypatch.setattr(sys.modules[__name__], "PATTERNS_PATH", tmp_patterns)
+    monkeypatch.setattr(_interp, "_store", None, raising=False)
+    yield
+    # Belt-and-braces: drop the cached store again so nothing survives the test.
+    monkeypatch.setattr(_interp, "_store", None, raising=False)
+
+
 # ===========================================================================
 # Fixture A — Plain-text tabular layout
 # ===========================================================================

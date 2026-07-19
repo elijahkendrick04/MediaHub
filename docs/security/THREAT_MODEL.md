@@ -45,7 +45,8 @@ Internet ──> [TLS proxy (Render/Fly/反向代理)] ──> Flask monolith (w
 | S | Session fixation/persistence: cookie never rotates, no idle timeout | **S1** — rotation on login, idle timeout enforcement |
 | E | Brute-force login (no rate limit today) | **S1** — per-account+IP throttle, lockout, security events |
 | E | Weak password hash future-proofing (bcrypt-72-byte) | **S1** — argon2id for new hashes, verify-and-upgrade for existing |
-| E | Operator `/developer` sign-in guessed / brute-forced | Username + **argon2id-hashed password** (hash only in source, never plaintext), constant-time compare, per-account+IP **rate-limit** on the endpoint, `_safe_next` open-redirect guard; **S7** logs operator logins. Rotate via `MEDIAHUB_DEV_USER` / `MEDIAHUB_DEV_PASSWORD_HASH` or in code (ADR-0019, supersedes ADR-0018). Residual: a weak operator password is the operator's own risk. |
+| E | Operator `/developer` sign-in guessed / brute-forced | Username + **argon2id-hashed password** (hash only in source, never plaintext), constant-time compare, per-account+IP **rate-limit** on the endpoint, `_safe_next` open-redirect guard; **S7** logs operator logins. Rotate via `MEDIAHUB_DEV_USER` / `MEDIAHUB_DEV_PASSWORD_HASH` (ADR-0019, supersedes ADR-0018). |
+| E | Operator credential **offline-cracked from the public repo** (the committed default hash is world-readable) | Known + accepted during development (no customer data yet), **enforcement roadmapped for pre-launch** (deep-review #26 / **ADR-0022** / roadmap **RP.5** / residual **R12**). Today `env_check` emits a production *warning*; at go-live it flips to a hard boot-refusal unless `MEDIAHUB_DEV_PASSWORD_HASH` is rotated to a non-default value, and the repo-private flip (RP.1–RP.4) collapses most of the exposure. Online path is already rate-limited. Residual: a weak *rotated* password is still the operator's own risk — use a long random passphrase. |
 
 ## 3. Playwright HTML→PNG renderer
 

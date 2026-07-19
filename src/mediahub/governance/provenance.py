@@ -33,6 +33,8 @@ import logging
 from pathlib import Path
 from typing import Iterable, Optional
 
+from .._atomic_io import atomic_write_text
+
 log = logging.getLogger(__name__)
 
 PRODUCER = "MediaHub"
@@ -200,8 +202,7 @@ def write_sidecar(image_path, manifest: dict) -> Optional[Path]:
     None on any failure (a provenance write must never sink a render)."""
     try:
         p = sidecar_path(image_path)
-        p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(json.dumps(manifest, indent=2, sort_keys=True, default=str), encoding="utf-8")
+        atomic_write_text(p, json.dumps(manifest, indent=2, sort_keys=True, default=str))
         return p
     except OSError as exc:
         log.warning("provenance: sidecar write failed: %s", exc)

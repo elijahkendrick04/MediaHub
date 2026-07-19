@@ -10,29 +10,17 @@ left byte-for-byte unchanged.
 
 from __future__ import annotations
 
-import importlib
 import json
 
 import pytest
 
 
 @pytest.fixture
-def app_mod(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
+def app_mod(web_module, monkeypatch):
     monkeypatch.setenv("MEDIAHUB_RESULTS_FETCH_ENABLED", "1")
-    for sub in ("runs_v4", "uploads_v4", "club_profiles"):
-        (tmp_path / sub).mkdir(parents=True, exist_ok=True)
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
-    app = wm.create_app()
+    app = web_module.create_app()
     app.config["TESTING"] = True
-    return app, wm
+    return app, web_module
 
 
 _EVENT_HTML = (
@@ -396,14 +384,9 @@ def test_prune_reaps_stale_running_job_files(app_mod):
 # ---------------------------------------------------------------------------
 
 
-def test_kill_switch_hides_input_and_404s_route(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
+def test_kill_switch_hides_input_and_404s_route(web_module, monkeypatch):
     monkeypatch.setenv("MEDIAHUB_RESULTS_FETCH_ENABLED", "0")
-    import mediahub.web.web as wm
-
-    importlib.reload(wm)
-    app = wm.create_app()
+    app = web_module.create_app()
     app.config["TESTING"] = True
     c = app.test_client()
     assert "mh-url-input" not in c.get("/upload").get_data(as_text=True)

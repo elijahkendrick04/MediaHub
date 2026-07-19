@@ -5,7 +5,7 @@
 # `playwright install --with-deps` both fail at build time (see the
 # May 2026 build log: "List directory /var/lib/apt/lists/partial is
 # missing - Read-only file system"). The project's Dockerfile already
-# installs Node 20, Playwright + Chromium with system deps, and the
+# installs Node 22, Playwright + Chromium with system deps, and the
 # Remotion node_modules in one go, so we point Render at it directly.
 #
 # https://render.com/docs/blueprint-spec
@@ -70,9 +70,22 @@ services:
       # Operator developer sign-in: the home-page "Developer access" link and
       # the /developer route ask for a username + password (credentialed per
       # docs/adr/0019-password-protect-operator-signin.md, which superseded
-      # ADR-0018's passwordless one-click). Defaults are baked into
-      # web/auth.py; rotate by setting MEDIAHUB_DEV_USER and
-      # MEDIAHUB_DEV_PASSWORD_HASH in the dashboard.
+      # ADR-0018's passwordless one-click).
+      #
+      # REQUIRED AT GO-LIVE: the shipped default password hash in web/auth.py is
+      # committed to a PUBLIC repo and is therefore offline-crackable.
+      # Enforcement is staged (deep-review #26 /
+      # docs/adr/0022-require-operator-credential-rotation.md / roadmap RP.5):
+      # env_check only *warns* during development so the in-dev deploy keeps
+      # booting, and flips to a hard boot-refusal at go-live until you rotate it
+      # here. Set it before serving real customers. Generate a hash with:
+      #   python -c "from mediahub.web.auth import hash_password; \
+      #     print(hash_password('your-strong-passphrase'))"
+      # The username is not secret; MEDIAHUB_DEV_USER is an optional override.
+      - key: MEDIAHUB_DEV_PASSWORD_HASH
+        sync: false
+      - key: MEDIAHUB_DEV_USER
+        sync: false
       # --- In-container SearXNG metasearch (Capability 3, OPTIONAL) ---
       # Runs stock SearXNG as a localhost-only process INSIDE this container —
       # no new service, no extra cost. It uses ~150-250 MB RAM; Playwright /

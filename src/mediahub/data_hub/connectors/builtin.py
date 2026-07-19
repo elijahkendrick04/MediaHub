@@ -36,11 +36,18 @@ class CsvUrlConnector(Connector):
     def _fetch_bytes(self, url: str) -> bytes:
         if self._fetcher is not None:
             return self._fetcher(url)
-        import requests
+        # Route the caller-supplied URL through the project's SSRF-hardened door
+        # rather than a bare ``requests.get``: it enforces an http(s) scheme
+        # allow-list, blocks private/loopback/link-local/metadata IPs, follows
+        # (and re-validates + pins) a bounded redirect chain, and byte-caps the
+        # read. A blocked/failed fetch returns ``None``; we raise so ``fetch``'s
+        # existing error path reports it as a fetch failure.
+        from mediahub.web_research.safe_fetch import safe_fetch_bytes  # noqa: PLC0415
 
-        resp = requests.get(url, timeout=20)
-        resp.raise_for_status()
-        return resp.content
+        res = safe_fetch_bytes(url, max_bytes=25 * 1024 * 1024, timeout=20)
+        if res is None:
+            raise RuntimeError("URL was blocked (SSRF guard) or could not be fetched")
+        return res[1]
 
     def fetch(self, profile_id: str, params: dict | None = None) -> ConnectorResult:
         params = params or {}

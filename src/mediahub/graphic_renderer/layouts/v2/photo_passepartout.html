@@ -22,9 +22,9 @@
   width: {{WIDTH}}px;
   height: {{HEIGHT}}px;
   overflow: hidden;
-  background: var(--mh-primary);
+  background: var(--mh-ground-gradient, var(--mh-primary));
   color: var(--mh-on-primary);
-  font-family: 'Inter', system-ui, sans-serif;
+  font-family: var(--mh-font-body, 'Inter', system-ui, sans-serif);
   -webkit-font-smoothing: antialiased;
   display: flex; flex-direction: column;
   padding: 72px;
@@ -32,12 +32,12 @@
 .pp *, .pp *::before, .pp *::after { box-sizing: border-box; }
 
 .pp__head { position: relative; z-index: 2; display: flex; align-items: center; justify-content: space-between; gap: 24px; margin-bottom: 36px; }
-.pp__kicker { display: inline-flex; align-items: center; gap: 14px; font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 700; font-size: 24px; letter-spacing: 0.22em; text-transform: uppercase; color: var(--mh-accent); }
+.pp__kicker { display: inline-flex; align-items: center; gap: 14px; font-family: var(--mh-font-kicker, 'Space Grotesk','Inter',sans-serif); font-weight: 700; font-size: 24px; letter-spacing: 0.22em; text-transform: uppercase; color: var(--mh-accent); }
 .pp__tick { width: 40px; height: 6px; border-radius: 3px; background: var(--mh-accent); }
 .pp__brand { display: flex; align-items: center; gap: 14px; }
 .pp__logo { height: 54px; width: auto; }
 .pp__logo img, .pp__logo svg { height: 100%; width: auto; object-fit: contain; display: block; }
-.pp__club { font-family: 'Inter',sans-serif; font-weight: 800; font-size: 21px; text-transform: uppercase; color: var(--mh-on-primary); }
+.pp__club { font-family: var(--mh-font-body, 'Inter',sans-serif); font-weight: 800; font-size: 21px; text-transform: uppercase; color: var(--mh-on-primary); }
 
 /* the matted window */
 .pp__window { flex: 1 1 0; position: relative; z-index: 2; background: var(--mh-surface); border: 3px solid var(--mh-accent); overflow: hidden; }
@@ -46,17 +46,17 @@
 /* gallery caption plate */
 .pp__plate { position: relative; z-index: 2; margin-top: 32px; display: flex; align-items: flex-end; justify-content: space-between; gap: 32px; }
 .pp__meta { min-width: 0; }
-.pp__first { font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 700; font-size: 28px; letter-spacing: 0.10em; text-transform: uppercase; color: var(--mh-accent); }
+.pp__first { font-family: var(--mh-font-kicker, 'Space Grotesk','Inter',sans-serif); font-weight: 700; font-size: 28px; letter-spacing: 0.10em; text-transform: uppercase; color: var(--mh-accent); }
 /* the caption meta shares its row with the result chip (~0.53 of the canvas),
    narrower than the full-width box the autofit var assumes (~0.86) — so the
    surname is scaled via calc(var * 0.62) AND allowed to wrap, never run
    under the chip (the tl/ps narrow-column precedent). */
 .pp__surname { font-family: var(--mh-font-display, 'Anton','Bebas Neue',Impact,sans-serif); font-weight: 400; font-size: calc(var(--mh-fit-surname-px, 104px) * 0.62); line-height: 0.88; text-transform: uppercase; color: var(--mh-on-primary); white-space: normal; overflow-wrap: anywhere; word-break: break-word; max-width: 100%; }
-.pp__event { margin-top: 12px; font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 600; font-size: 26px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--mh-on-primary); }
-.pp__sub { margin-top: 6px; font-family: 'Inter',sans-serif; font-weight: 500; font-size: 19px; color: var(--mh-on-primary); opacity: 0.72; }
+.pp__event { margin-top: 12px; font-family: var(--mh-font-kicker, 'Space Grotesk','Inter',sans-serif); font-weight: 600; font-size: 26px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--mh-on-primary); }
+.pp__sub { margin-top: 6px; font-family: var(--mh-font-body, 'Inter',sans-serif); font-weight: 500; font-size: 19px; color: var(--mh-on-primary); opacity: 0.72; }
 .pp__right { flex: 0 0 auto; display: flex; flex-direction: column; align-items: flex-end; gap: 14px; }
 .pp__result { display: inline-block; padding: 14px 24px; background: var(--mh-accent); color: var(--mh-primary); font-family: 'JetBrains Mono','Space Grotesk',monospace; font-feature-settings: "tnum"; font-weight: 700; font-size: var(--mh-fit-result-px, 70px); font-variation-settings: var(--mh-axes-result, normal); line-height: 0.9; }
-.pp__stat { font-family: 'Inter',sans-serif; font-weight: 600; font-size: 20px; color: var(--mh-on-primary); opacity: 0.82; }
+.pp__stat { font-family: var(--mh-font-body, 'Inter',sans-serif); font-weight: 600; font-size: 20px; color: var(--mh-on-primary); opacity: 0.82; }
 .pp__sponsor { flex: 0 0 auto; }
 </style>
 </head>
@@ -74,6 +74,7 @@
   <div class="pp__window">{{ATHLETE_IMG_BLOCK}}</div>
 
   <div class="pp__plate">
+    <div class="mh-anchor mh-anchor--panel-tr">{{OVERLAP_ACCENT}}</div>
     <div class="pp__meta">
       <div class="pp__first">{{ATHLETE_FIRST_NAME}}</div>
       <div class="pp__surname">{{ATHLETE_SURNAME_DISPLAY}}</div>

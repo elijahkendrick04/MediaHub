@@ -148,3 +148,44 @@ def test_anton_estimate_errs_wide_not_narrow():
             f"autofit over-measures Anton for {text!r}: estimate "
             f"{estimate:.3f}em vs real {real:.3f}em"
         )
+
+
+# --------------------------------------------------------------------------- #
+# 3. D5 — the serif display face measures from its own char table
+# --------------------------------------------------------------------------- #
+# Playfair Display's glyph proportions deviate from the Helvetica table a flat
+# class multiplier assumes (its narrow glyphs — I, J — are relatively wide, so
+# an I-heavy run would under-estimate and overflow). autofit carries a
+# fontTools-measured per-glyph table (+2% margin) for it; this pins the same
+# never-overflow contract the Anton test above pins, against the SHIPPED
+# playfair-display.woff2 (including the "III" run the flat scale failed on).
+
+
+def _real_playfair_em(text: str) -> float:
+    from PIL import ImageFont
+
+    font = ImageFont.truetype(str(_FONTS_DIR / "playfair-display.woff2"), 1000)
+    return font.getlength(text) / 1000.0
+
+
+def test_playfair_estimate_errs_wide_not_narrow():
+    pytest.importorskip("PIL")
+    try:
+        _real_playfair_em("X")
+    except Exception:
+        pytest.skip("Pillow/FreeType cannot load the shipped playfair-display.woff2")
+
+    from mediahub.graphic_renderer.autofit import em_width
+
+    for text in _CAPS_CORPUS + ["III", "SMITH III", "IJSSELMUIDEN", "Ffion-Haf"]:
+        real = _real_playfair_em(text)
+        estimate = em_width(text, font_family="Playfair Display", weight=400)
+        assert estimate >= real, (
+            f"autofit under-measures Playfair Display for {text!r}: estimate "
+            f"{estimate:.3f}em < real {real:.3f}em — a serif hero line would "
+            f"overflow its box"
+        )
+        assert estimate <= real * 1.35, (
+            f"autofit over-measures Playfair Display for {text!r}: estimate "
+            f"{estimate:.3f}em vs real {real:.3f}em"
+        )

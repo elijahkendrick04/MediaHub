@@ -21,7 +21,6 @@ This file pins the fix:
 
 from __future__ import annotations
 
-import importlib
 import json
 import re
 import sys
@@ -29,33 +28,20 @@ import types
 from pathlib import Path
 
 import pytest
+from tests._helpers import web_surface_src
 
 _ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_ROOT))
 
-_WEB_SRC = (_ROOT / "src" / "mediahub" / "web" / "web.py").read_text(encoding="utf-8")
+_WEB_SRC = web_surface_src()
 
 
 # --------------------------------------------------------------------------- #
 # Fixtures (modelled on tests/test_ui_2_4_clientside_tabs.py)
 # --------------------------------------------------------------------------- #
 @pytest.fixture
-def world(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    (tmp_path / "runs_v4").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "club_profiles").mkdir(parents=True, exist_ok=True)
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
-
-    app = wm.create_app()
-    app.config["TESTING"] = True
-    return types.SimpleNamespace(app=app, wm=wm, tmp=tmp_path)
+def world(app, web_module, tmp_path):
+    return types.SimpleNamespace(app=app, wm=web_module, tmp=tmp_path)
 
 
 def _save_org(world, pid="riverbend", name="Riverbend SC"):
@@ -299,7 +285,10 @@ class TestApproveAllFullQueue:
         subtracted before the confirm message and the POST, or the button
         over-counts. Each row's live data-status is the source of truth."""
         assert "var decidedNow = {{}};" in _WEB_SRC
-        assert "if (chk && chk.value && row.dataset.status !== 'queue') decidedNow[chk.value] = 1;" in _WEB_SRC
+        assert (
+            "if (chk && chk.value && row.dataset.status !== 'queue') decidedNow[chk.value] = 1;"
+            in _WEB_SRC
+        )
         assert "ids = ids.filter(function(id){{ return !decidedNow[id]; }});" in _WEB_SRC
         # The reconciliation happens BEFORE the "nothing to approve" guard and
         # the confirm-message maths.
@@ -333,7 +322,10 @@ class TestPaginatedClientHonesty:
         a new page universe). On single-page runs the client toggle keeps the
         URL in sync via URLSearchParams, preserving any other params."""
         assert "if (document.querySelector('.mh-review-pager')) {" in _WEB_SRC
-        assert "location.assign(location.pathname + (val ? ('?wf=' + encodeURIComponent(val)) : ''));" in _WEB_SRC
+        assert (
+            "location.assign(location.pathname + (val ? ('?wf=' + encodeURIComponent(val)) : ''));"
+            in _WEB_SRC
+        )
         assert "var qs = new URLSearchParams(location.search);" in _WEB_SRC
         assert "qs.set('wf', val)" in _WEB_SRC
 

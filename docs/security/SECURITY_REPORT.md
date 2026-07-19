@@ -64,6 +64,7 @@ Explicitly accepted, with rationale — revisit at least annually:
 | R9 | **Docker non-root build not build-verified in this environment** (no Docker daemon available) | Change is review-verified; CI/staging build will exercise it — verify before next deploy |
 | R10 | **Published content** lives on social platforms beyond MediaHub's reach | Stated in notices, erasure reports, and the DPIA — a legal/communications control, not a technical one |
 | R11 | **Backup archives** can outlive an erasure request | Erasure reports list them as residual; backup retention documented; operators must rotate backups within the retention window |
+| R12 | **Operator `/developer` credential offline-crackable from the public repo** — the argon2id hash of the baked-in operator password is committed to a public repo, so a short password is crackable offline; a crack grants an unrestricted operator session (deep-review 2026-07 #26) | Accepted **during development only** (no customer data yet). Online sign-in is rate-limited; `env_check` emits a production warning today. **Enforcement is roadmapped (RP.5) as a blocking pre-launch task**: rotate `MEDIAHUB_DEV_PASSWORD_HASH` and flip `env_check` to a hard boot-refusal (ADR-0022), landing alongside the repo-private flip (RP.1–RP.4) that itself collapses most of the exposure. Must be closed before go-live |
 
 ## 4. Verification status
 

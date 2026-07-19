@@ -21,7 +21,7 @@ from typing import Optional
 from .cards import (
     ContentCard, Claim, CaptionVariants,
     TYPE_STANDOUT, TYPE_SPOTLIGHT, TYPE_PB_ROUNDUP, TYPE_PODIUM_ROUNDUP,
-    TYPE_QUAL_ALERT, TYPE_WEEKEND_NUMBERS, TYPE_RECAP, TYPE_NEEDS_CONFIRMATION,
+    TYPE_QUAL_ALERT, TYPE_WEEKEND_NUMBERS, TYPE_RECAP,
 )
 
 
@@ -215,15 +215,6 @@ def _captions_qual_alert(card: ContentCard, club_short: str) -> CaptionVariants:
     return _captions_standout(card, club_short)
 
 
-def _captions_needs_conf(card: ContentCard, club_short: str) -> CaptionVariants:
-    name = card.primary_swimmer or "A swimmer"
-    return CaptionVariants(
-        clean=f"{name} — strong swim awaiting confirmation.",
-        team=f"{name} put down a strong swim — we'll confirm the details before posting.",
-        hype="HOLD — pending confirmation.",
-    )
-
-
 _GENERATORS = {
     TYPE_STANDOUT: _captions_standout,
     TYPE_SPOTLIGHT: _captions_spotlight,
@@ -231,7 +222,6 @@ _GENERATORS = {
     TYPE_PODIUM_ROUNDUP: _captions_podium_roundup,
     TYPE_WEEKEND_NUMBERS: _captions_weekend_numbers,
     TYPE_QUAL_ALERT: _captions_qual_alert,
-    TYPE_NEEDS_CONFIRMATION: _captions_needs_conf,
 }
 
 

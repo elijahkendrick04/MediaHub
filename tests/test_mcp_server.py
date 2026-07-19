@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import importlib
 import json
 import sqlite3
 
@@ -19,9 +18,7 @@ def _server():
 
 
 def test_initialize_handshake():
-    r = _server().handle_message(
-        {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}
-    )
+    r = _server().handle_message({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}})
     assert r["id"] == 1
     assert r["result"]["protocolVersion"] == PROTOCOL_VERSION
     assert r["result"]["serverInfo"]["name"] == "mediahub"
@@ -34,7 +31,9 @@ def test_ping():
 
 
 def test_initialized_notification_has_no_response():
-    assert _server().handle_message({"jsonrpc": "2.0", "method": "notifications/initialized"}) is None
+    assert (
+        _server().handle_message({"jsonrpc": "2.0", "method": "notifications/initialized"}) is None
+    )
 
 
 def test_tools_list_exposes_the_catalogue():
@@ -65,14 +64,18 @@ def test_no_publishing_tool_exists():
 
 def test_tools_call_unconfigured_is_error():
     r = _server().handle_message(
-        {"jsonrpc": "2.0", "id": 6, "method": "tools/call",
-         "params": {"name": "list_runs", "arguments": {}}}
+        {
+            "jsonrpc": "2.0",
+            "id": 6,
+            "method": "tools/call",
+            "params": {"name": "list_runs", "arguments": {}},
+        }
     )
     assert r["result"]["isError"] is True
     assert "not configured" in r["result"]["content"][0]["text"].lower()
 
 
-# --- tools over the real API (reloaded app + flask transport) --------------
+# --- tools over the real API (isolated app + flask transport) --------------
 def _seed_run(runs_dir, db_path, run_id, profile_id):
     runs_dir.mkdir(parents=True, exist_ok=True)
     (runs_dir / f"{run_id}.json").write_text(
@@ -100,27 +103,24 @@ def _seed_run(runs_dir, db_path, run_id, profile_id):
 
 
 @pytest.fixture
-def mcp(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
+def mcp(web_module, monkeypatch):
+    # MEDIAHUB_SCHEDULER is read fresh inside create_app() (scheduler._enabled()),
+    # not at web.py import time — so it must be set before create_app() runs, which
+    # rules out the canonical `app` fixture (its create_app() call already happened
+    # by the time this fixture body executes).
     monkeypatch.setenv("MEDIAHUB_SCHEDULER", "0")
 
     from mediahub.api_public import _db as api_db
 
     api_db._initialized.clear()
 
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
-
     from mediahub.web.club_profile import ClubProfile, save_profile
 
     save_profile(ClubProfile(profile_id="org-a", display_name="Org A SC"))
-    wm.app.config["TESTING"] = True
-    _seed_run(tmp_path / "runs_v4", tmp_path / "data.db", "runmcp000001", "org-a")
+
+    flask_app = web_module.create_app()
+    flask_app.config["TESTING"] = True
+    _seed_run(web_module.RUNS_DIR, web_module.DB_PATH, "runmcp000001", "org-a")
 
     from mediahub.api_public.tokens import ApiTokenStore
 
@@ -129,7 +129,7 @@ def mcp(tmp_path, monkeypatch):
         client = ApiClient(
             base_url="http://localhost/api/v1",
             token=secret,
-            transport=flask_test_transport(wm.app.test_client()),
+            transport=flask_test_transport(flask_app.test_client()),
         )
         return MCPServer(client)
 
@@ -138,8 +138,12 @@ def mcp(tmp_path, monkeypatch):
 
 def _call(server, name, arguments=None):
     r = server.handle_message(
-        {"jsonrpc": "2.0", "id": 9, "method": "tools/call",
-         "params": {"name": name, "arguments": arguments or {}}}
+        {
+            "jsonrpc": "2.0",
+            "id": 9,
+            "method": "tools/call",
+            "params": {"name": name, "arguments": arguments or {}},
+        }
     )
     payload = json.loads(r["result"]["content"][0]["text"])
     return r["result"]["isError"], payload

@@ -13,9 +13,30 @@ Schemas (``inputSchema``) are JSON Schema, the shape MCP clients expect.
 from __future__ import annotations
 
 import base64
+import urllib.parse
 from typing import Callable
 
 from .client import ApiClient
+
+
+class McpParamError(ValueError):
+    """A tool was called with a missing/blank required argument. Mapped to
+    JSON-RPC ``INVALID_PARAMS`` by the server (not the opaque ``INTERNAL_ERROR``
+    a bare ``KeyError`` produced)."""
+
+
+def _seg(a: dict, key: str) -> str:
+    """Return a required id as a single URL-path segment, percent-encoded.
+
+    Encoding (``safe=""``) means an id carrying ``/``, ``?`` or ``..`` can no
+    longer reroute the API call onto a different resource, and a missing id
+    raises :class:`McpParamError` (a clean INVALID_PARAMS) instead of a
+    ``KeyError``."""
+    v = a.get(key)
+    if v is None or str(v).strip() == "":
+        raise McpParamError(f"missing required argument: {key!r}")
+    return urllib.parse.quote(str(v), safe="")
+
 
 # A handler: (client, arguments) -> (ok: bool, result_obj)
 Handler = Callable[[ApiClient, dict], tuple[bool, object]]
@@ -43,48 +64,52 @@ def _h_list_runs(c: ApiClient, a: dict):
 
 
 def _h_get_run(c: ApiClient, a: dict):
-    s, b = c.request("GET", f"/runs/{a['run_id']}")
+    s, b = c.request("GET", f"/runs/{_seg(a, 'run_id')}")
     return _ok(s), b
 
 
 def _h_list_cards(c: ApiClient, a: dict):
     params = {"status": a["status"]} if a.get("status") else {}
-    s, b = c.request("GET", f"/runs/{a['run_id']}/cards", params=params)
+    s, b = c.request("GET", f"/runs/{_seg(a, 'run_id')}/cards", params=params)
     return _ok(s), b
 
 
 def _h_get_card(c: ApiClient, a: dict):
-    s, b = c.request("GET", f"/runs/{a['run_id']}/cards/{a['card_id']}")
+    s, b = c.request("GET", f"/runs/{_seg(a, 'run_id')}/cards/{_seg(a, 'card_id')}")
     return _ok(s), b
 
 
 def _h_approve_card(c: ApiClient, a: dict):
-    s, b = c.request("POST", f"/runs/{a['run_id']}/cards/{a['card_id']}/approve", json_body={})
+    s, b = c.request(
+        "POST", f"/runs/{_seg(a, 'run_id')}/cards/{_seg(a, 'card_id')}/approve", json_body={}
+    )
     return _ok(s), b
 
 
 def _h_reject_card(c: ApiClient, a: dict):
-    s, b = c.request("POST", f"/runs/{a['run_id']}/cards/{a['card_id']}/reject", json_body={})
+    s, b = c.request(
+        "POST", f"/runs/{_seg(a, 'run_id')}/cards/{_seg(a, 'card_id')}/reject", json_body={}
+    )
     return _ok(s), b
 
 
 def _h_edit_caption(c: ApiClient, a: dict):
     s, b = c.request(
         "PATCH",
-        f"/runs/{a['run_id']}/cards/{a['card_id']}",
+        f"/runs/{_seg(a, 'run_id')}/cards/{_seg(a, 'card_id')}",
         json_body={"edits": a.get("edits", {})},
     )
     return _ok(s), b
 
 
 def _h_export_pack(c: ApiClient, a: dict):
-    s, b = c.request("GET", f"/runs/{a['run_id']}/export")
+    s, b = c.request("GET", f"/runs/{_seg(a, 'run_id')}/export")
     if _ok(s):
         # The body is a binary ZIP; don't shovel it through MCP — hand back a
         # download pointer the operator can fetch with their token.
         return True, {
             "exported": True,
-            "download_url": f"{c.base_url}/runs/{a['run_id']}/export",
+            "download_url": f"{c.base_url}/runs/{_seg(a, 'run_id')}/export",
             "note": "Pack is ready. Download the ZIP at download_url with your API token.",
         }
     return False, b

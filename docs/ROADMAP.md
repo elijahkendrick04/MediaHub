@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-07-12 · `8c92cd6e2` · Add ⌘K command palette + engagement/findability upgrades across the app (#1187)
+**Last updated:** 2026-07-19 · `a34782f6e` · Merge pull request #1321 from elijahkendrick04/claude/carve-15-b-complete
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -146,6 +146,7 @@ second sport on Phases 1–3 — the swimming wedge is sold before we broaden
 - **RP.2** · Repo-private fast-track (pre-flight) — Trim CI Actions-minutes and ship it BEFORE the flip (the one real cost: a private repo on Free gets 2,000 min/mo, and today's `autotest` every 6 h × 70 min + `dependabot-automerge` every 30 min + daily contract would burn that in days; the nightly Lighthouse + cross-browser sweeps were **removed 2026-07-08** — see docs/adr/0021 — trimming that slice already): `autotest` 6 h → daily, automerge 30 min → 4–6 h, add `concurrency: cancel-in-progress` on the push/PR suites · ❌ **NOT STARTED**
 - **RP.3** · Repo-private fast-track (pre-flight) — Keep `main` protection alive on private: classic protected-branches are **public-only on the Free plan**, so migrate `main`'s protection to a repository **ruleset** (free on private) and verify the three self-merging bots (autotest fixer, `roadmap-autoupdate`, `dependabot-automerge`) and the `claude/*` app-token PRs all still merge under it — else the flip silently drops branch protection and the bot-merge model breaks · ❌ **NOT STARTED**
 - **RP.4** · Repo-private fast-track (pre-flight) — Make "private repo" read true in the docs + leave no dangling public dependency: update `DATA_MAP` §6 + `OPEN_LEGAL_QUESTIONS` Q13 with the honest public-window dates, keep the CI security gates (gitleaks/bandit/semgrep/pip-audit) that replace GitHub's free public-repo secret-scanning (the Upptime status-page caveat is moot — Upptime was **removed 2026-07-08**, see docs/adr/0021) · ❌ **NOT STARTED**
+- **RP.5** · Repo-private fast-track (pre-flight, before real customers) — Enforce operator-credential rotation (deep-review #26 / ADR-0022 / residual R12): (1) generate a hash from a long random passphrase and set `MEDIAHUB_DEV_PASSWORD_HASH` in Render (the baked-in default in `web/auth.py` is offline-crackable while the repo is public — RP.1–RP.4 shrink this, this closes it); (2) flip `env_check`'s production check from a *warning* to a hard boot-refusal (`warnings.append` → `errors.append`, ~1 line) so a fresh deploy can never silently run the shipped default; (3) update ADR-0022 status → enforced and clear R12. Staged as a warning today so the in-dev Render deploy still boots · ❌ **NOT STARTED**
 - **1.25** · Phase 1 (Product) — Pro editor & round-trip: layers/align/guides/page management as validated spec patches, vector node/boolean ops, curves/levels recipes, layered SVG/PSD export-import; deep darkroom/DTP stays a round-trip non-goal · ❌ **NOT STARTED**
 - **1.26** · Phase 1 (Product) — Ollama local LLM provider behind the existing `ai_core.llm` interface · ❌ **NOT STARTED**
 - **1.27** · Phase 1 (Product) — Satori graphics fast-path (~100× lighter than headless Chromium; rides the reel-engine seam P0.1 shipped) · ❌ **NOT STARTED**
@@ -853,7 +854,7 @@ Why this workstream jumped to the head of the founder list:
   the **US** (per the DPA's subprocessor register); an EU/UK box simplifies
   F.4's transfer-mechanism homework.
 - **The move is already cheap to execute.** The deploy is one Dockerfile
-  (compose + `fly.toml` templates exist), all state lives under `DATA_DIR`,
+  (a compose template exists), all state lives under `DATA_DIR`,
   and PC.14 shipped daily backups with a restore drill rehearsed on every
   test run — restoring a production backup onto a new box *is* the
   migration. 3.1 packages the remainder: reverse-proxy TLS template,
@@ -1226,15 +1227,16 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
-| 2026-07-12 | `bfd951d49` | Add ⌘K command palette + engagement/findability upgrades across the app |
-| 2026-07-12 | `7e29921aa` | Wire per-platform variants, reachable variant picker, and caption persistence |
-| 2026-07-12 | `ed957955b` | docs: add deep code review & improvement backlog (2026-07) |
-| 2026-07-11 | `428e0d9a1` | Vary the shared kicker signature across archetypes |
-| 2026-07-11 | `32802043e` | Break the uniform tile grid in the motion background (PatternLayer) |
-| 2026-07-11 | `4fbff71c7` | Give quote_led_recap a sentence-case register (break all-caps monoculture) |
-| 2026-07-11 | `13cf4e78f` | Wire typography_pair into v2 stills (still↔motion parity fix) |
-| 2026-07-11 | `34bdaa6ad` | chore(docs): remove completed audit reports and stale one-off build sweeps |
-| 2026-07-11 | `c47966be0` | style: satisfy ruff-format in caption_assist |
-| 2026-07-11 | `0d023dbf6` | Apply ruff-format normalization (quote style + line wrap) |
-| 2026-07-11 | `32682f562` | Strengthen and unify the caption-generator quality guardrails |
+| 2026-07-19 | `60b5a1c7c` | chore: suppress 4 nan-injection false positives semgrep can now see (#15) |
+| 2026-07-19 | `a80c18b56` | fix: capture the real app for worker threads + last 2 source-scan migrations (#15) |
+| 2026-07-18 | `5cde5de98` | refactor(web): carve the remaining 5 surfaces — finding #15 complete |
+| 2026-07-18 | `04e4e2771` | test: scan the whole web surface in 2 source-scan guards (#15 carve) |
+| 2026-07-18 | `6441d3e15` | fix: close erasure-parity gaps found by adversarial review of the audit fixes |
+| 2026-07-18 | `18c066179` | docs: regenerate ENV_INVENTORY for env read moved to routes_site (#15 carve) |
+| 2026-07-18 | `449569d1a` | refactor(web): carve auth + site surfaces out of create_app (#15, stage 5a) |
+| 2026-07-18 | `bb413aec3` | fix(retention): sweep the full sidecar family on the fallback erasure path |
+| 2026-07-18 | `313fd915c` | fix: remediate 4 confirmed deficiencies from the 300-PR quality audit |
+| 2026-07-18 | `e53b8d2db` | test(#130): migrate the 3 reload files that landed on main during the outage window |
+| 2026-07-17 | `ef3c96ec9` | build(deps): bump actions/setup-node from 6 to 7 |
+| 2026-07-17 | `c09ce763e` | test: migrate 8 club-a fixtures off importlib.reload onto conftest app (#130) |
 <!-- /ROADMAP:ACTIVITY -->

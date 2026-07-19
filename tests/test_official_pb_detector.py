@@ -14,6 +14,7 @@ import pytest
 from mediahub.recognition_swim.achievements.official_pb import (
     OfficialPBDetector,
     _cs_to_str,
+    _parse_pb_date,
     _swim_id,
 )
 
@@ -392,3 +393,187 @@ class TestOfficialPBDetectorDerivedDecision:
         dets = production_detectors()
         assert dets[0].name == "official_pb_confirmed"
         assert len(dets) > 1
+
+
+# ---------------------------------------------------------------------------
+# _parse_pb_date — flexible date normalisation (F18)
+# ---------------------------------------------------------------------------
+
+
+class TestParsePbDate:
+    @pytest.mark.parametrize(
+        "value, expected",
+        [
+            ("2026-06-14", (2026, 6, 14)),          # ISO
+            ("2026-06-14T09:30:00", (2026, 6, 14)),  # ISO datetime → date part
+            ("14/06/2026", (2026, 6, 14)),          # day-first slash (UK/EU)
+            ("14.06.2026", (2026, 6, 14)),          # day-first dot (continental)
+            ("14-06-2026", (2026, 6, 14)),          # day-first dash
+            ("2026/06/14", (2026, 6, 14)),          # year-first slash
+            ("2026.06.14", (2026, 6, 14)),          # year-first dot
+            ("  14/06/2026  ", (2026, 6, 14)),      # surrounding whitespace
+            ("14/06/26", (2026, 6, 14)),            # two-digit year (scraper emits these)
+            ("14.06.24", (2024, 6, 14)),            # two-digit year, dotted
+            ("14/06/98", (1998, 6, 14)),            # two-digit year, pre-2000 pivot
+        ],
+    )
+    def test_supported_formats(self, value, expected) -> None:
+        from datetime import date
+
+        assert _parse_pb_date(value) == date(*expected)
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            None, "", "   ", "not a date",
+            "June 2026", "12 March 2024",   # month-name forms are not parsed
+            "03/14/2024",                    # US MM/DD with day>12 → invalid, not silently swapped
+            "32/01/2026", "14/13/2026",      # impossible day / month
+            "12/03/202",                     # 3-digit year is not a valid 2- or 4-digit year
+        ],
+    )
+    def test_unparseable_returns_none(self, value) -> None:
+        assert _parse_pb_date(value) is None
+
+
+# ---------------------------------------------------------------------------
+# F18 regression — the ISO-date gate made official_pb_confirmed unfireable on
+# every real production path (interpreter PBs have date=None; heuristic dates
+# are non-ISO). These pin that a genuinely confirmed official PB now fires, and
+# that the loosening did NOT open a false-positive (a slower progression entry
+# must never be announced as the all-time PB).
+# ---------------------------------------------------------------------------
+
+
+def _snapshot_history_from_entries(entries):
+    """Build a real SwimmerHistory whose 100FRLC event holds ``entries``."""
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "legacy"))
+    from swim_content_v5.history import SwimmerHistory
+
+    snap = SimpleNamespace(
+        fetch_ok=True,
+        pb_times={"100FRLC": list(entries)},
+        source_domain="example.org",
+        tiref="jane-smith-001",
+    )
+    return SwimmerHistory("jane-smith-001", "Jane Smith", snap)
+
+
+class TestOfficialPBDetectorF18:
+    def test_fires_with_non_iso_date_in_window(self) -> None:
+        # Heuristic path: a UK/EU day-first date within the meet window used to
+        # be rejected by the strict ISO gate → detector never fired.
+        det = OfficialPBDetector()
+        history = _make_snapshot_history(date_iso="07/06/2026")
+        achs = det.detect(_make_swim(), _meet_ctx(), history, extra={"swimmer_name": "Jane"})
+        assert len(achs) == 1
+        assert achs[0].type == "official_pb_confirmed"
+
+    def test_fires_with_continental_dotted_date_in_window(self) -> None:
+        det = OfficialPBDetector()
+        history = _make_snapshot_history(date_iso="08.06.2026")
+        achs = det.detect(_make_swim(), _meet_ctx(), history, extra={})
+        assert len(achs) == 1
+        assert achs[0].type == "official_pb_confirmed"
+
+    def test_fires_when_listed_pb_has_empty_date(self) -> None:
+        # Interpreter path: pb_bridge writes ``date_iso=""`` for every row (the
+        # interpreter carries no date). An exact match to the fastest listed
+        # time still confirms the official PB.
+        det = OfficialPBDetector()
+        history = _make_snapshot_history(date_iso="")
+        achs = det.detect(_make_swim(), _meet_ctx(), history, extra={})
+        assert len(achs) == 1
+        assert achs[0].type == "official_pb_confirmed"
+        # Honest explainability: reason notes the absent cross-checkable date.
+        assert "no" in achs[0].raw_facts["reason"].lower()
+
+    def test_fires_when_listed_pb_date_is_none(self) -> None:
+        det = OfficialPBDetector()
+        history = _make_snapshot_history(date_iso=None)
+        achs = det.detect(_make_swim(), _meet_ctx(), history, extra={})
+        assert len(achs) == 1
+        assert achs[0].type == "official_pb_confirmed"
+
+    def test_no_fire_when_non_iso_date_outside_window(self) -> None:
+        # The window guard must still hold for non-ISO dates: a parseable date
+        # clearly outside the meet is a different, older swim.
+        det = OfficialPBDetector()
+        history = _make_snapshot_history(date_iso="07/01/2026")  # 2026-01-07
+        assert det.detect(_make_swim(), _meet_ctx(), history, extra={}) == []
+
+    def test_fires_when_two_digit_year_date_in_window(self) -> None:
+        # The discovery scraper emits two-digit years; an in-window DD/MM/YY must
+        # be parsed and confirmed (recall), not dropped.
+        det = OfficialPBDetector()
+        history = _make_snapshot_history(date_iso="07/06/26")  # 2026-06-07
+        achs = det.detect(_make_swim(), _meet_ctx(), history, extra={})
+        assert len(achs) == 1
+        assert achs[0].type == "official_pb_confirmed"
+
+    def test_no_fire_when_two_digit_year_date_outside_window(self) -> None:
+        # Regression for the verification-found false positive: an OLD listed PB
+        # dated with a two-digit year ("12/03/24" → 2024-03-12) that the swim
+        # merely equals must NOT be announced as a fresh official PB. The date is
+        # *present and parseable but out of window*, so the window guard excludes it.
+        det = OfficialPBDetector()
+        history = _make_snapshot_history(date_iso="12/03/24")  # 2024-03-12
+        assert det.detect(_make_swim(), _meet_ctx(), history, extra={}) == []
+
+    def test_no_fire_when_present_date_is_unparseable(self) -> None:
+        # A recorded-but-unreadable date (month-name form) must be treated as
+        # suspicious — never collapsed into the date-less firing branch, since it
+        # may be an out-of-window older swim we simply can't read.
+        det = OfficialPBDetector()
+        history = _make_snapshot_history(date_iso="12 March 2024")
+        assert det.detect(_make_swim(), _meet_ctx(), history, extra={}) == []
+
+    def test_no_fire_when_us_format_day_gt_12_unparseable(self) -> None:
+        # A US MM/DD/YYYY date whose day component exceeds 12 ("03/14/2024") is
+        # invalid under day-first parsing → unparseable → suspicious → no fire
+        # (rather than silently swapped or treated as date-less).
+        det = OfficialPBDetector()
+        history = _make_snapshot_history(date_iso="03/14/2024")
+        assert det.detect(_make_swim(), _meet_ctx(), history, extra={}) == []
+
+    def test_no_fire_when_undated_match_is_not_the_fastest(self) -> None:
+        # Progression with no dates: the swim equals a SLOWER listed time while a
+        # faster one exists → it is NOT the all-time PB and must not fire.
+        det = OfficialPBDetector()
+        history = _snapshot_history_from_entries(
+            [
+                {"time_sec": 61.00, "date_iso": "", "source_url": "https://example.org/p"},
+                {"time_sec": 62.34, "date_iso": "", "source_url": "https://example.org/p"},
+            ]
+        )
+        # swim = 62.34s (default) equals the slower 62.34 entry, not the 61.00 best.
+        assert det.detect(_make_swim(), _meet_ctx(), history, extra={}) == []
+
+    def test_fires_when_undated_match_is_the_fastest_of_progression(self) -> None:
+        det = OfficialPBDetector()
+        history = _snapshot_history_from_entries(
+            [
+                {"time_sec": 62.34, "date_iso": "", "source_url": "https://example.org/p"},
+                {"time_sec": 63.10, "date_iso": "", "source_url": "https://example.org/p"},
+            ]
+        )
+        achs = det.detect(_make_swim(), _meet_ctx(), history, extra={})
+        assert len(achs) == 1
+        assert achs[0].type == "official_pb_confirmed"
+
+    def test_date_confirmed_entry_preferred_over_dateless_tie(self) -> None:
+        # Two fastest-tier entries: one date-confirmed at the meet, one undated.
+        # The stronger (date-confirmed) reason must be chosen.
+        det = OfficialPBDetector()
+        history = _snapshot_history_from_entries(
+            [
+                {"time_sec": 62.34, "date_iso": "", "source_url": "https://example.org/undated"},
+                {"time_sec": 62.34, "date_iso": "2026-06-07", "source_url": "https://example.org/dated"},
+            ]
+        )
+        achs = det.detect(_make_swim(), _meet_ctx(), history, extra={})
+        assert len(achs) == 1
+        assert "date match" in achs[0].raw_facts["reason"].lower()

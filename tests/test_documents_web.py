@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import importlib
 import io
 import json
 
@@ -10,25 +9,17 @@ import pytest
 
 
 @pytest.fixture
-def app_env(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
+def app_env(web_module, tmp_path, monkeypatch):
+    # DATA_DIR / RUNS_DIR / UPLOADS_DIR / profiles dir isolation is provided by
+    # the autouse ``_isolate_data_dir`` fixture in conftest.py; web.py is imported
+    # once and pointed at this test's tmp_path there. Only the file-specific env
+    # tweaks remain.
     monkeypatch.setenv("MEDIAHUB_SCHEDULER", "0")
-    for sub in ("runs_v4", "uploads_v4", "club_profiles"):
-        (tmp_path / sub).mkdir(parents=True, exist_ok=True)
     for var in ("GEMINI_API_KEY", "GOOGLE_API_KEY", "ANTHROPIC_API_KEY", "MEDIAHUB_LLM_PROVIDER"):
         monkeypatch.delenv(var, raising=False)
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
-    app = wm.create_app()
+    app = web_module.create_app()
     app.config["TESTING"] = True
-    return app, wm, tmp_path
+    return app, web_module, tmp_path
 
 
 def _login(client, pid="club-a"):
@@ -326,7 +317,7 @@ def test_present_deck_creates_session(app_env):
     spec = _save_deck()
     r = c.get(f"/documents/{spec.doc_id}/present")
     assert r.status_code == 200
-    assert b"Phone remote" in r.data
+    assert b"Audience view" in r.data
     # a live session now exists
     from mediahub.documents import presenter as _pres
 
@@ -356,7 +347,7 @@ def test_presenter_state_action_and_owner_gate(app_env):
     assert r2.status_code == 403
 
 
-def test_audience_view_and_remote(app_env):
+def test_audience_view(app_env):
     app, wm, _ = app_env
     c = app.test_client()
     _login(c)
@@ -369,22 +360,6 @@ def test_audience_view_and_remote(app_env):
     aud = app.test_client()
     r = aud.get(f"/present/{sess.session_id}")
     assert r.status_code == 200 and b"<html" in r.data.lower()
-
-    # remote by code drives without sign-in
-    rc = aud.get(f"/remote/{sess.pairing_code}")
-    assert rc.status_code == 200
-    act = aud.post(f"/api/remote/{sess.pairing_code}/action", json={"action": "next"})
-    assert act.get_json()["state"]["current"] == 1
-    # bad code → recovery
-    assert aud.get("/remote/ZZZZZZ").status_code == 404
-
-
-def test_remote_landing(app_env):
-    app, wm, _ = app_env
-    c = app.test_client()
-    r = c.get("/remote")
-    assert r.status_code == 200
-    assert b"code" in r.data.lower()
 
 
 # ---------------------------------------------------------------------------

@@ -10,12 +10,11 @@ carry a confirm.
 
 from __future__ import annotations
 
-import importlib
-import pathlib
-
 import pytest
 
-_SRC = pathlib.Path("src/mediahub/web/web.py").read_text(encoding="utf-8")
+from tests._helpers import web_surface_src
+
+_SRC = web_surface_src()
 
 
 def test_mh_confirm_and_toast_action_exist():
@@ -52,23 +51,12 @@ def test_sponsor_and_member_removes_have_confirm():
 
 
 @pytest.fixture
-def client(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
+def client(web_module, monkeypatch):
     monkeypatch.setenv("MEDIAHUB_SCHEDULER", "0")
-    (tmp_path / "runs_v4").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "club_profiles").mkdir(parents=True, exist_ok=True)
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
     from mediahub.web.club_profile import ClubProfile, save_profile
 
     save_profile(ClubProfile(profile_id="club-a", display_name="Club A"))
-    app = wm.create_app()
+    app = web_module.create_app()
     app.config["TESTING"] = True
     c = app.test_client()
     with c.session_transaction() as s:

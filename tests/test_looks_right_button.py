@@ -10,7 +10,6 @@ The button is the user-visible trigger for the cascade. Tests:
 
 from __future__ import annotations
 
-import importlib
 import sys
 from pathlib import Path
 
@@ -22,23 +21,10 @@ sys.path.insert(0, str(_ROOT))
 
 
 @pytest.fixture
-def app_client(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    (tmp_path / "runs_v4").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "uploads_v4").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "club_profiles").mkdir(parents=True, exist_ok=True)
+def app_client(client, web_module):
     import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
 
-    importlib.reload(cp)
-    importlib.reload(wm)
-    app = wm.create_app()
-    app.config["TESTING"] = True
-    with app.test_client() as c:
-        yield c, wm, cp
+    return client, web_module, cp
 
 
 def _seed_with_brand_capture(cp_module):
@@ -86,9 +72,9 @@ class TestButtonInRenderedPage:
         body = client.get("/organisation/setup").get_data(as_text=True)
         # The button must carry data-mh-cascade for the JS handler.
         # Allow either single quotes or double quotes around the value.
-        assert 'data-mh-cascade="finalise"' in body or "data-mh-cascade='finalise'" in body, (
-            "button missing data-mh-cascade='finalise' attribute"
-        )
+        assert (
+            'data-mh-cascade="finalise"' in body or "data-mh-cascade='finalise'" in body
+        ), "button missing data-mh-cascade='finalise' attribute"
 
     def test_button_retains_href(self, app_client):
         """No-JS users must still get to /make via the button's href —
@@ -122,9 +108,9 @@ class TestCascadeJSHandler:
         for route in ("/status", "/healthz/usage"):
             body = client.get(route).get_data(as_text=True)
             assert "data-mh-cascade" in body, f"{route}: cascade handler not embedded"
-            assert "/api/organisation/finalise" in body, (
-                f"{route}: finalise URL not in client-side handler"
-            )
+            assert (
+                "/api/organisation/finalise" in body
+            ), f"{route}: finalise URL not in client-side handler"
 
     def test_handler_uses_view_transitions_pattern(self, app_client):
         """The handler must POST to finalise then navigate. Since
@@ -135,9 +121,9 @@ class TestCascadeJSHandler:
         body = client.get("/status").get_data(as_text=True)
         # Sanity: the handler references location.assign (or .href) so
         # the navigation actually happens.
-        assert "location.assign" in body or "location.href" in body, (
-            "cascade handler doesn't navigate"
-        )
+        assert (
+            "location.assign" in body or "location.href" in body
+        ), "cascade handler doesn't navigate"
 
     def test_handler_respects_modifier_keys(self, app_client):
         """Right-click / ctrl+click / middle-click should NOT be
@@ -168,9 +154,9 @@ class TestCascadeJSHandler:
         # Inspect the fetch options object that follows so a Content-Type
         # elsewhere on the page can't mask a regression here.
         block = body[m.start() : m.start() + 600]
-        assert re.search(r"['\"]Content-Type['\"]\s*:\s*['\"]application/json", block), (
-            "finalise POST must set Content-Type: application/json (CSRF-exempt marker)"
-        )
+        assert re.search(
+            r"['\"]Content-Type['\"]\s*:\s*['\"]application/json", block
+        ), "finalise POST must set Content-Type: application/json (CSRF-exempt marker)"
 
     def test_finalise_csrf_contract_old_shape_blocked_json_shape_succeeds(self, app_client):
         """End-to-end CSRF contract under production enforcement: the OLD call
@@ -195,9 +181,9 @@ class TestCascadeJSHandler:
             headers={"Accept": "application/json", "Content-Type": "application/json"},
         )
         assert r_new.status_code == 200, r_new.get_data(as_text=True)[:300]
-        assert r_new.get_json().get("seed_hex"), (
-            "finalise did not persist/return the derived palette"
-        )
+        assert r_new.get_json().get(
+            "seed_hex"
+        ), "finalise did not persist/return the derived palette"
 
 
 class TestThemeSeedStyleBlock:
@@ -208,9 +194,9 @@ class TestThemeSeedStyleBlock:
             sess["active_profile_id"] = prof.profile_id
         body = client.get("/status").get_data(as_text=True)
         # The override <style id="mh-theme-seed"> block must appear.
-        assert 'id="mh-theme-seed"' in body or "id='mh-theme-seed'" in body, (
-            "missing <style id='mh-theme-seed'> per-org override block"
-        )
+        assert (
+            'id="mh-theme-seed"' in body or "id='mh-theme-seed'" in body
+        ), "missing <style id='mh-theme-seed'> per-org override block"
         # The seed value within the override should be a valid hex.
         import re
 
@@ -229,7 +215,7 @@ class TestThemeSeedStyleBlock:
         client, _, _ = app_client
         body = client.get("/status").get_data(as_text=True)
         # Stage J2: override block present, carrying generic-default seed.
-        assert 'id="mh-theme-seed"' in body, (
-            "Stage J2 default-theme override missing on unconfigured page"
-        )
+        assert (
+            'id="mh-theme-seed"' in body
+        ), "Stage J2 default-theme override missing on unconfigured page"
         assert "#0E2A47" in body, "expected the generic-default seed (#0E2A47) in the override"

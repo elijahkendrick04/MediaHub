@@ -20,7 +20,7 @@ import sys
 from typing import Optional
 
 from .client import ApiClient
-from .tools import dispatch, tool_list
+from .tools import McpParamError, dispatch, tool_list
 
 log = logging.getLogger(__name__)
 
@@ -119,7 +119,12 @@ class MCPServer:
                     "isError": True,
                 },
             )
-        ok, body = dispatch(name, arguments, self.client)
+        try:
+            ok, body = dispatch(name, arguments, self.client)
+        except McpParamError as e:
+            # A missing/invalid required argument is a client error, not an
+            # internal one — surface it as INVALID_PARAMS with a useful message.
+            return self._error(msg_id, INVALID_PARAMS, str(e))
         return self._result(
             msg_id,
             {

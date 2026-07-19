@@ -1,10 +1,10 @@
 """J-13 — the presenter console must be able to end the talk.
 
 The console (the laptop driving the deck) exposed Prev/Next/Blackout/Autoplay/
-Reset but no "End" — only the phone remote could end. A presenter who closed the
-laptop tab left the session live for its 6-hour TTL, so the projector kept
-showing the last slide. The console now has a confirmed "End presentation" that
-fires the ``end`` action and returns the presenter to the document.
+Reset but no "End". A presenter who closed the laptop tab left the session live
+for its 6-hour TTL, so the projector kept showing the last slide. The console now
+has a confirmed "End presentation" that fires the ``end`` action and returns the
+presenter to the document.
 
 The console needs a live session + deck to render, so this guards the fix at the
 source level, plus a check that the console route wires up the return URL.
@@ -13,8 +13,9 @@ source level, plus a check that the console route wires up the return URL.
 from __future__ import annotations
 
 import pathlib
+from tests._helpers import web_surface_src
 
-_SRC = pathlib.Path("src/mediahub/web/web.py").read_text(encoding="utf-8")
+_SRC = web_surface_src()
 
 
 def test_console_has_confirmed_end_button():

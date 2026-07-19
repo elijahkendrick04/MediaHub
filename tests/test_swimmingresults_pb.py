@@ -150,10 +150,11 @@ def test_parse_personal_best_extracts_events_with_course():
 
 
 def test_parse_drops_entry_without_resolvable_course():
-    # No course heading anywhere → fallback assumes first table is LC.
+    # No course heading anywhere → the row is ambiguous and is dropped, never
+    # defaulted to LC (guessing course can create a wrong PB baseline).
     html = "<table><tr><td>50 Freestyle</td><td>29.00</td><td>x</td><td>x</td><td>01/01/24</td></tr></table>"
     page = parse_personal_best(html, "9")
-    assert [f"{e.distance}{e.stroke}{e.course}" for e in page.entries] == ["50FRLC"]
+    assert page.entries == []
 
 
 # --------------------------------------------------------------------------- #
@@ -168,6 +169,8 @@ def test_parse_drops_entry_without_resolvable_course():
         ("Sam", "Jones", "Samuel", "Jones", True),        # nickname
         ("Ben", "Carter", "Benjamin", "Carter", True),    # prefix
         ("Sophie", "Lee", "Sofie", "Lee", True),          # 1-edit spelling
+        ("Freddie", "Smith", "Frederick", "Smith", True),  # #68: freddie↔frederick
+        ("Freya", "Smith", "Freddie", "Smith", False),     # #68: freya is NOT freddie
         ("Holly", "Greenslade", "Holly", "Greenwood", False),  # surname differs
         ("John", "Smith", "Jane", "Smith", False),        # distinct first names
         ("", "Smith", "John", "Smith", False),            # missing name
@@ -288,6 +291,35 @@ def test_siblings_disambiguated_by_time_not_nickname():
     snaps = lookup_official_pbs(meet, {"s1"}, "Torfaen Dolphins")
     assert "s1" in snaps
     assert "tiref=2001" in (snaps["s1"].source_url or "")  # Raffaelle, by time
+
+
+def test_match_one_returns_none_when_surname_matches_but_time_implausible():
+    """Deep-review #53: when every same-surname candidate is ruled out by the
+    time-plausibility check (the meet time is implausibly fast for all of them),
+    the resolver must return an honest miss — NOT fall back to a ruled-out
+    candidate and assign a *different* swimmer's official record as this
+    swimmer's PB baseline."""
+    from mediahub.swimmingresults.lookup import _match_one
+
+    roster = {
+        "2001": {"name": "Raffaelle Tincombe", "events": {"100FRLC": {"time_cs": 6500}}},
+        "2002": {"name": "Matilda Tincombe", "events": {"100FRLC": {"time_cs": 8000}}},
+    }
+    # 55.00 is >7% faster than both siblings' bests → both ruled out.
+    assert _match_one("Zoe", "Tincombe", {"100FRLC": 5500}, roster) is None
+
+
+def test_match_one_still_resolves_the_time_plausible_sibling():
+    """Positive control for #53: a plausible time still resolves the right
+    same-surname candidate (the fix must not turn genuine matches into misses)."""
+    from mediahub.swimmingresults.lookup import _match_one
+
+    roster = {
+        "2001": {"name": "Raffaelle Tincombe", "events": {"100FRLC": {"time_cs": 6500}}},
+        "2002": {"name": "Matilda Tincombe", "events": {"100FRLC": {"time_cs": 8000}}},
+    }
+    # 1:05.5 fits Raffaelle (6500) and rules out Matilda (8000).
+    assert _match_one("Zoe", "Tincombe", {"100FRLC": 6550}, roster) == "2001"
 
 
 def test_plain_text_row_swimmer_gets_snapshot():

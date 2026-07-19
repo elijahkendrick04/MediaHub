@@ -13,36 +13,16 @@ validation errors, tenant isolation, run-not-found, the CSRF content-type
 exemption the front-end relies on, run-deletion cleanup, and that the comment
 UI helpers actually ship in the page JS.
 """
+
 from __future__ import annotations
 
-import importlib
 import json
-import sys
-from pathlib import Path
 
 import pytest
 
-_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(_ROOT))
-
 
 @pytest.fixture
-def app_env(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    for d in ("runs_v4", "uploads_v4", "club_profiles"):
-        (tmp_path / d).mkdir(parents=True, exist_ok=True)
-
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-
-    importlib.reload(cp)
-    importlib.reload(wm)
-    app = wm.create_app()
-    app.config["TESTING"] = True
-
+def app_env(app, web_module, tmp_path):
     from mediahub.web.club_profile import ClubProfile, save_profile
 
     save_profile(ClubProfile(profile_id="alpha", display_name="Alpha SC"))
@@ -56,8 +36,8 @@ def app_env(tmp_path, monkeypatch):
             "meet": {"name": "Test Open"},
             "recognition_report": {"ranked_achievements": []},
         }
-        (wm.RUNS_DIR / f"{rid}.json").write_text(json.dumps(run), encoding="utf-8")
-    return app, wm, tmp_path
+        (web_module.RUNS_DIR / f"{rid}.json").write_text(json.dumps(run), encoding="utf-8")
+    return app, web_module, tmp_path
 
 
 def _as(client, pid):
@@ -117,9 +97,7 @@ class TestCreateAndList:
             _add(c, target="reel", body="reel note")
             _add(c, target="card:swim-9", body="card note")
             reel = c.get("/api/runs/r1/reel/comments?target=reel").get_json()["comments"]
-            card = c.get(
-                "/api/runs/r1/reel/comments?target=card:swim-9"
-            ).get_json()["comments"]
+            card = c.get("/api/runs/r1/reel/comments?target=card:swim-9").get_json()["comments"]
             assert [x["body"] for x in reel] == ["reel note"]
             assert [x["body"] for x in card] == ["card note"]
 
@@ -155,9 +133,7 @@ class TestMutate:
         with app.test_client() as c:
             _as(c, "alpha")
             cid = _add(c, body="old").get_json()["comment"]["id"]
-            r = c.post(
-                f"/api/runs/r1/reel/comments/{cid}", json={"action": "edit", "body": "new"}
-            )
+            r = c.post(f"/api/runs/r1/reel/comments/{cid}", json={"action": "edit", "body": "new"})
             assert r.status_code == 200 and r.get_json()["comment"]["body"] == "new"
 
     def test_edit_empty_body_is_400(self, app_env):
@@ -165,9 +141,7 @@ class TestMutate:
         with app.test_client() as c:
             _as(c, "alpha")
             cid = _add(c).get_json()["comment"]["id"]
-            r = c.post(
-                f"/api/runs/r1/reel/comments/{cid}", json={"action": "edit", "body": "  "}
-            )
+            r = c.post(f"/api/runs/r1/reel/comments/{cid}", json={"action": "edit", "body": "  "})
             assert r.status_code == 400
 
     def test_delete(self, app_env):

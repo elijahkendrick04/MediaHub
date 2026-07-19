@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>{{ATHLETE_FULL_NAME}} — {{ACHIEVEMENT_LABEL}}</title>
+<style>{{BASE_CSS}}
+
+/* ===================================================================
+   frame_breakout  (v2 archetype, E5 — Canva gap analysis)
+
+   The signature "pop-out" composition: the athlete cutout is clipped INSIDE
+   a brand shape frame (circle by default, arch via --mh-frame-radius) sitting
+   on a lit disc, while a second pixel-aligned paint of the SAME cutout escapes
+   ABOVE the frame's top edge (the head / raised arm breaks the mask) — the most
+   recognisable "made by a designer" move in sports announcement graphics.
+
+   Two copies, one source: both planes read the ONE cutout via
+   --mh-athlete-img (ATHLETE_IMG_VAR), each ``inset:0`` of the same square
+   stage with identical ``background: contain bottom center`` — so they are
+   pixel-aligned by construction. The INSIDE copy is clipped to the disc
+   (clip-path circle); the BREAKOUT copy is clipped to only the band ABOVE the
+   disc's top (clip-path inset), so ~12–16% of the subject overdraws the frame.
+   The breakout carries the role-tinted depth drop-shadow so it casts onto the
+   frame — real depth, not a flat sticker.
+
+   Structural signature: subject-breaks-the-frame — distinct from spotlight_disc
+   (subject fully inside the circle) and poster_name_behind (type behind subject).
+
+   No-photo grace: without a cutout the disc becomes a clean brand medallion and
+   the name/result plane below carries the card — a deliberate emblem poster.
+
+   Matte-gate grace (.mh-photo-flat): when the matte gate rejected the cutout
+   and the ORIGINAL photograph ships, it fills the disc (object cover) and the
+   breakout copy is dropped — honest, never a broken silhouette.
+   =================================================================== */
+
+.fbo {
+  position: relative;
+  width: {{WIDTH}}px;
+  height: {{HEIGHT}}px;
+  overflow: hidden;
+  isolation: isolate;
+  background: radial-gradient(120% 82% at 50% 8%, var(--mh-surface) 0%, var(--mh-primary) 74%);
+  color: var(--mh-on-primary);
+  font-family: 'Inter', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  /* the ONE real cutout, carried once and painted by both planes */
+  {{ATHLETE_IMG_VAR}}
+}
+.fbo *, .fbo *::before, .fbo *::after { box-sizing: border-box; }
+
+/* kicker — top-left over the ground */
+.fbo__kicker {
+  position: absolute; top: 60px; left: 60px; z-index: 6;
+  display: inline-flex; align-items: center; padding: 14px 22px;
+  background: var(--mh-accent); color: var(--mh-primary);
+  font-family: var(--mh-font-kicker, 'Space Grotesk','Inter',sans-serif);
+  font-weight: 800; font-size: 25px; letter-spacing: 0.16em; text-transform: uppercase;
+}
+.fbo__kicker:empty { display: none; }
+
+/* the square stage: both cutout copies live here, bottom-anchored contain-fit */
+.fbo__stage {
+  position: absolute; left: 15%; right: 15%; top: 11%;
+  aspect-ratio: 1 / 1; z-index: 2;
+}
+/* the lit disc the subject stands in (the frame body). The frame SHAPE is one
+   var (--mh-frame-clip) shared by the disc and the inside copy so a seeded arch
+   variant (a tall ellipse) swaps both at once; the ring + shadow read the frame
+   radius/centre. */
+.fbo__disc {
+  position: absolute; inset: 0; z-index: 1;
+  clip-path: var(--mh-frame-clip, circle(40% at 50% 60%));
+  background:
+    radial-gradient(120% 120% at 50% 18%,
+      color-mix(in srgb, var(--mh-surface) 88%, white 12%) 0%,
+      var(--mh-surface) 46%,
+      color-mix(in srgb, var(--mh-surface) 70%, var(--mh-primary) 30%) 100%);
+}
+/* the disc depth: a soft ground shadow under the frame (role-hue tinted) */
+.fbo__disc-shadow {
+  position: absolute; left: 50%; top: var(--mh-frame-cy, 60%);
+  width: calc(var(--mh-frame-r, 40%) * 2);
+  aspect-ratio: 1 / 1; transform: translate(-50%, -50%);
+  border-radius: 50%; z-index: 0;
+  box-shadow: 0 26px 60px rgba(var(--mh-shadow-rgb, 0,0,0), 0.42);
+}
+/* a thin brand ring tracing the disc edge (circle framings only — the seeded
+   arch variant sets --mh-ring-display:none since a radial can't trace an
+   ellipse cleanly; the clipped disc shape still reads as the frame). */
+.fbo__ring {
+  position: absolute; inset: 0; z-index: 3; pointer-events: none;
+  display: var(--mh-ring-display, block);
+  clip-path: circle(calc(var(--mh-frame-r, 40%) + 0.4%) at 50% var(--mh-frame-cy, 60%));
+  background:
+    radial-gradient(circle var(--mh-frame-r, 40%) at 50% var(--mh-frame-cy, 60%),
+      transparent 0 98.5%, var(--mh-accent) 99% 100%);
+}
+/* copy A — the subject clipped INSIDE the frame shape */
+.fbo__inside {
+  position: absolute; inset: 0; z-index: 2;
+  background-image: var(--mh-athlete-img);
+  background-repeat: no-repeat; background-position: bottom center; background-size: contain;
+  clip-path: var(--mh-frame-clip, circle(40% at 50% 60%));
+}
+/* copy B — the SAME subject, escaping ABOVE the disc's top edge */
+.fbo__breakout {
+  position: absolute; inset: 0; z-index: 4;
+  background-image: var(--mh-athlete-img);
+  background-repeat: no-repeat; background-position: bottom center; background-size: contain;
+  /* show only the band from the top of the stage down to just past the disc's
+     top line (disc top = cy - r ≈ 20%), so the head/arm overdraws the frame */
+  clip-path: inset(0 0 var(--mh-breakout-floor, 78%) 0);
+  filter: drop-shadow(0 12px 20px rgba(var(--mh-shadow-rgb, 0,0,0), 0.42));
+}
+
+/* the fact plane below the frame */
+.fbo__facts {
+  position: absolute; left: 60px; right: 60px; bottom: 54px; z-index: 5;
+  display: flex; flex-direction: column; align-items: center; text-align: center; gap: 12px;
+}
+.fbo__first {
+  font-family: var(--mh-font-kicker, 'Space Grotesk','Inter',sans-serif); font-weight: 700;
+  font-size: 30px; letter-spacing: 0.10em; text-transform: uppercase; color: var(--mh-accent);
+}
+.fbo__surname {
+  font-family: var(--mh-font-display, 'Anton','Bebas Neue',Impact,sans-serif);
+  font-weight: 400; font-size: var(--mh-fit-surname-px, 116px);
+  line-height: 0.86; letter-spacing: var(--mh-track-surname, -0.01em); text-transform: uppercase;
+  color: var(--mh-on-primary); white-space: nowrap; max-width: 100%;
+}
+.fbo__event {
+  font-family: var(--mh-font-kicker, 'Space Grotesk','Inter',sans-serif); font-weight: 600;
+  font-size: 26px; letter-spacing: 0.05em; text-transform: uppercase;
+  color: var(--mh-on-primary); opacity: 0.9; overflow-wrap: anywhere;
+}
+.fbo__result {
+  margin-top: 6px; display: inline-block; padding: 14px 34px; border-radius: 999px;
+  background: var(--mh-accent); color: var(--mh-primary);
+  font-family: 'JetBrains Mono','Space Grotesk',monospace; font-feature-settings: "tnum";
+  font-weight: 700; font-size: var(--mh-fit-result-px, 70px);
+  font-variation-settings: var(--mh-axes-result, normal); line-height: 0.92;
+}
+.fbo__stat { font-family: 'Inter',sans-serif; font-weight: 600; font-size: 22px; color: var(--mh-on-primary); opacity: 0.8; }
+.fbo__foot {
+  margin-top: 8px; display: flex; align-items: center; justify-content: center; gap: 14px;
+}
+.fbo__logo { height: 46px; width: auto; }
+.fbo__logo img, .fbo__logo svg { height: 100%; width: auto; object-fit: contain; display: block; }
+.fbo__club { font-family: 'Inter',sans-serif; font-weight: 800; font-size: 20px; text-transform: uppercase; color: var(--mh-on-primary); }
+.fbo__meet { font-family: 'Inter',sans-serif; font-weight: 500; font-size: 17px; color: var(--mh-on-primary); opacity: 0.7; }
+.fbo__sponsor { position: absolute; top: 60px; right: 60px; z-index: 6; }
+
+/* matte-gate fallback: the original photograph fills the disc (cover); no
+   breakout copy for a rectangular photo — the frame stays a clean window. */
+.fbo.mh-photo-flat .fbo__inside { background-size: cover; background-position: var(--mh-photo-pos, center 30%); }
+.fbo.mh-photo-flat .fbo__breakout { display: none; }
+</style>
+</head>
+<body>
+<div class="fbo{{PHOTO_FLAT_CLASS}}">
+
+  <div class="fbo__kicker">{{ACHIEVEMENT_LABEL}}</div>
+  <div class="fbo__sponsor">{{SPONSOR_BLOCK}}</div>
+
+  <div class="fbo__stage">
+    <div class="fbo__disc-shadow"></div>
+    <div class="fbo__disc"></div>
+    {{PHOTO_ONLY_OPEN}}<div class="fbo__inside"></div>{{PHOTO_ONLY_CLOSE}}
+    <div class="fbo__ring"></div>
+    {{PHOTO_ONLY_OPEN}}<div class="fbo__breakout"></div>{{PHOTO_ONLY_CLOSE}}
+  </div>
+
+  <div class="fbo__facts">
+    <div class="fbo__first">{{ATHLETE_FIRST_NAME}}</div>
+    <div class="fbo__surname">{{ATHLETE_SURNAME_DISPLAY}}</div>
+    <div class="fbo__event">{{EVENT_NAME}}</div>
+    <div class="fbo__result">{{RESULT_VALUE}}</div>
+    <div class="fbo__stat">{{HERO_STAT}}</div>
+    <div class="fbo__foot">
+      <div class="fbo__logo">{{LOGO_BLOCK}}</div>
+      <div class="fbo__club">{{CLUB_FULL}}</div>
+      <div class="fbo__meet">· {{MEET_NAME}}</div>
+    </div>
+  </div>
+
+  {{ACCENT_DECORATION}}
+
+</div>
+</body>
+</html>

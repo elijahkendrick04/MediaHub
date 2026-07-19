@@ -38,7 +38,7 @@ def test_autoplay_seconds_is_published_in_public_state():
 
     importlib.reload(presenter)
     s = presenter.PresenterSession(
-        session_id="s1", doc_id="d1", owner="club-1", total_slides=3, pairing_code="ABC234"
+        session_id="s1", doc_id="d1", owner="club-1", total_slides=3
     )
     assert "autoplay_seconds" in s.public_state()
     assert s.public_state()["autoplay_seconds"] == 8.0

@@ -20,7 +20,6 @@ click four separate renders (four waits, four progress bars). Now:
 from __future__ import annotations
 
 import contextlib
-import importlib
 import json
 import pathlib
 import re
@@ -30,6 +29,7 @@ from pathlib import Path
 from unittest import mock
 
 import pytest
+from tests._helpers import web_surface_src
 
 _ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_ROOT))
@@ -62,30 +62,19 @@ def _run_payload(profile_id: str) -> dict:
 
 
 @pytest.fixture
-def app_env(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    for d in ("runs_v4", "uploads_v4", "club_profiles"):
-        (tmp_path / d).mkdir(parents=True, exist_ok=True)
-
+def app_env(app, web_module, tmp_path):
     import mediahub.media_library.store as mls
-    import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
 
-    importlib.reload(cp)
-    importlib.reload(wm)
     mls._default_store = None
-    app = wm.create_app()
-    app.config["TESTING"] = True
 
     from mediahub.web.club_profile import ClubProfile, save_profile
 
     save_profile(ClubProfile(profile_id="alpha", display_name="Alpha SC"))
     save_profile(ClubProfile(profile_id="beta", display_name="Beta SC"))
-    (wm.RUNS_DIR / "r1.json").write_text(json.dumps(_run_payload("alpha")), encoding="utf-8")
-    return app, wm, tmp_path
+    (web_module.RUNS_DIR / "r1.json").write_text(
+        json.dumps(_run_payload("alpha")), encoding="utf-8"
+    )
+    return app, web_module, tmp_path
 
 
 def _poll_until_settled(client, poll_url, tries=80, delay=0.2):
@@ -197,9 +186,7 @@ class TestMotionBatchJob:
 
         with app.test_client() as c:
             c.post("/api/organisation/active", data={"profile_id": "alpha"})
-            with mock.patch.object(
-                motion, "render_story_card", side_effect=RuntimeError("boom")
-            ):
+            with mock.patch.object(motion, "render_story_card", side_effect=RuntimeError("boom")):
                 resp = c.post("/api/runs/r1/card/swim-1/motion-batch-job")
                 assert resp.status_code == 202
                 j = _poll_until_settled(c, resp.get_json()["poll_url"])
@@ -250,9 +237,7 @@ class TestMotionBatchJob:
         monkeypatch.setattr(wm, "_render_slot", _slot)
         with app.test_client() as c:
             c.post("/api/organisation/active", data={"profile_id": "alpha"})
-            with mock.patch.object(
-                motion, "render_story_card", side_effect=RuntimeError("boom")
-            ):
+            with mock.patch.object(motion, "render_story_card", side_effect=RuntimeError("boom")):
                 resp = c.post("/api/runs/r1/card/swim-1/motion-batch-job")
                 j = _poll_until_settled(c, resp.get_json()["poll_url"])
         assert j["status"] == "error"
@@ -288,7 +273,7 @@ class TestMotionBatchJob:
 # Source-level: the client wiring (JS inside the shared template block)
 # ---------------------------------------------------------------------------
 
-_SRC = pathlib.Path("src/mediahub/web/web.py").read_text(encoding="utf-8")
+_SRC = web_surface_src()
 
 
 def _fn(name: str) -> str:

@@ -189,6 +189,99 @@ def record_use(
         return 0
 
 
+def reserve_use(
+    *,
+    org_id: str,
+    feature: str,
+    limit: int,
+    window_hours: int = MONTHLY_WINDOW_HOURS,
+    ts: Optional[str] = None,
+    db_path: Optional[Path] = None,
+) -> Optional[int]:
+    """Atomically reserve one quota slot (deep-review #95).
+
+    Inserts a usage row (ok=1) IFF the org is currently under ``limit`` for this
+    feature in the trailing window, evaluated INSIDE a ``BEGIN IMMEDIATE`` write
+    transaction so concurrent reservers serialise on the DB write lock rather than
+    racing a read-then-insert. Returns the new row id (the reservation) if a slot
+    was taken, or ``None`` if the org is already at the limit.
+
+    Raises ``sqlite3.Error`` / ``OSError`` on a genuine DB failure so the caller
+    can fail OPEN (a transient DB hiccup must never wrongly block a paying club).
+    A negative ``limit`` (unmetered) reserves nothing and returns ``None``.
+    """
+    org = (org_id or "").strip()
+    feat = (feature or "").strip().lower()
+    if not org or not feat or limit < 0:
+        return None
+    when = ts or datetime.now(timezone.utc).isoformat()
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=window_hours)).isoformat()
+    ensure_schema(db_path)
+    conn = _connect(db_path)
+    try:
+        # BEGIN IMMEDIATE takes the write lock up front; the conditional INSERT
+        # then sees a committed, consistent count including any concurrent
+        # reservation that has already committed.
+        conn.execute("BEGIN IMMEDIATE")
+        cur = conn.execute(
+            "INSERT INTO feature_uses (ts, org_id, feature, ok) "
+            "SELECT ?, ?, ?, 1 WHERE ("
+            "  SELECT COUNT(*) FROM feature_uses "
+            "  WHERE org_id=? AND feature=? AND ts>=? AND ok=1"
+            ") < ?",
+            (when, org, feat, org, feat, cutoff, int(limit)),
+        )
+        reserved = cur.rowcount == 1
+        new_id = int(cur.lastrowid or 0) if reserved else None
+        conn.commit()
+        return new_id
+    finally:
+        conn.close()
+
+
+def finalize_use(
+    row_id: Optional[int],
+    *,
+    ok: bool,
+    provider: Optional[str] = None,
+    model: Optional[str] = None,
+    detail: Optional[str] = None,
+    error_kind: Optional[str] = None,
+    error_message: Optional[str] = None,
+    db_path: Optional[Path] = None,
+) -> None:
+    """Finalize a slot reserved by :func:`reserve_use` (deep-review #95).
+
+    On success keeps ``ok=1`` and attaches the call metadata; on failure sets
+    ``ok=0`` so the reservation no longer counts against quota (a failed billed
+    call is not charged to the customer's quota — mirrors ``record_use``). The
+    trailing-window prune still applies via the next write. Best-effort: never
+    raises, so a finalize failure cannot fail the request.
+    """
+    if not row_id:
+        return
+    prov = None if provider is None else str(provider)[:40]
+    mdl = None if model is None else str(model)[:80]
+    det = None if detail is None else str(detail)[:200]
+    ek = None if error_kind is None else str(error_kind)[:50]
+    em = None if error_message is None else str(error_message)[:500]
+    try:
+        conn = _connect(db_path)
+        try:
+            conn.execute(
+                "UPDATE feature_uses SET ok=?, provider=?, model=?, detail=?, "
+                "error_kind=?, error_message=? WHERE id=?",
+                (1 if ok else 0, prov, mdl, det, ek, em, int(row_id)),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+    except sqlite3.Error as exc:
+        log.warning("feature_quota: finalize_use failed: %s", exc)
+    except OSError as exc:
+        log.warning("feature_quota: finalize_use OS error: %s", exc)
+
+
 def count_for_org(
     org_id: str,
     *,

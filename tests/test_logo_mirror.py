@@ -14,6 +14,7 @@ per-profile route, else the detected logo mirrored to our own origin
 route), else the org initials. An ``onerror`` handler swaps in the initials if
 anything still fails, so a broken-image icon never reaches the user.
 """
+
 from __future__ import annotations
 
 import importlib
@@ -46,10 +47,12 @@ def logos_mod(tmp_path, monkeypatch):
     """``brand.logos`` rebound to a temp DATA_DIR, with the SSRF gate open."""
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     import mediahub.brand.logos as logos
+
     importlib.reload(logos)
     # Open the SSRF gate (no real DNS in tests). Individual tests that need it
     # closed override this.
     import mediahub.web_research.safe_fetch as sf
+
     monkeypatch.setattr(sf, "is_url_safe", lambda _u: True)
     return logos, tmp_path
 
@@ -69,6 +72,7 @@ class TestMirrorExternalLogo:
             return _FakeResp(headers={"Content-Type": "image/png"})
 
         import requests
+
         monkeypatch.setattr(requests, "get", fake_get)
 
         path = logos.mirror_external_logo("acme", "https://club.example/logo.png")
@@ -86,10 +90,13 @@ class TestMirrorExternalLogo:
     def test_rejects_non_image_content_type(self, logos_mod, monkeypatch):
         logos, _ = logos_mod
         import requests
+
         monkeypatch.setattr(
-            requests, "get",
-            lambda url, **kw: _FakeResp(headers={"Content-Type": "text/html"},
-                                        chunks=[b"<html>nope</html>"]),
+            requests,
+            "get",
+            lambda url, **kw: _FakeResp(
+                headers={"Content-Type": "text/html"}, chunks=[b"<html>nope</html>"]
+            ),
         )
         # An error page served at the logo URL must NOT be cached as a logo.
         assert logos.mirror_external_logo("acme", "https://club.example/oops") is None
@@ -97,12 +104,14 @@ class TestMirrorExternalLogo:
     def test_blocked_by_ssrf_guard(self, logos_mod, monkeypatch):
         logos, _ = logos_mod
         import mediahub.web_research.safe_fetch as sf
+
         monkeypatch.setattr(sf, "is_url_safe", lambda _u: False)
 
         def boom(*a, **k):  # must never be reached
             raise AssertionError("network attempted despite SSRF block")
 
         import requests
+
         monkeypatch.setattr(requests, "get", boom)
         assert logos.mirror_external_logo("acme", "http://169.254.169.254/x.png") is None
 
@@ -116,10 +125,11 @@ class TestMirrorExternalLogo:
         logos, _ = logos_mod
         monkeypatch.setattr(logos, "_MIRROR_MAX_BYTES", 16)
         import requests
+
         monkeypatch.setattr(
-            requests, "get",
-            lambda url, **kw: _FakeResp(headers={"Content-Type": "image/png"},
-                                        chunks=[b"x" * 64]),
+            requests,
+            "get",
+            lambda url, **kw: _FakeResp(headers={"Content-Type": "image/png"}, chunks=[b"x" * 64]),
         )
         assert logos.mirror_external_logo("acme", "https://club.example/huge.png") is None
 
@@ -128,11 +138,13 @@ class TestMirrorExternalLogo:
 
         def fake_get(url, **kw):
             if url.endswith("/start.png"):
-                return _FakeResp(status_code=302,
-                                 headers={"Location": "https://cdn.example/real.png"})
+                return _FakeResp(
+                    status_code=302, headers={"Location": "https://cdn.example/real.png"}
+                )
             return _FakeResp(headers={"Content-Type": "image/png"})
 
         import requests
+
         monkeypatch.setattr(requests, "get", fake_get)
         path = logos.mirror_external_logo("acme", "https://club.example/start.png")
         assert path is not None and path.exists()
@@ -140,9 +152,11 @@ class TestMirrorExternalLogo:
     def test_content_type_uses_url_ext_when_header_missing(self, logos_mod, monkeypatch):
         logos, _ = logos_mod
         import requests
+
         # No usable Content-Type header — fall back to the URL path extension.
         monkeypatch.setattr(
-            requests, "get",
+            requests,
+            "get",
             lambda url, **kw: _FakeResp(headers={"Content-Type": ""}),
         )
         path = logos.mirror_external_logo("acme", "https://club.example/crest.webp")
@@ -158,6 +172,7 @@ class TestMirrorExternalLogo:
             return _FakeResp(status_code=404)
 
         import requests
+
         monkeypatch.setattr(requests, "get", fake_get)
 
         assert logos.mirror_external_logo("acme", "https://club.example/dead.png") is None
@@ -173,15 +188,16 @@ class TestMirrorExternalLogo:
         logos, tmp_path = logos_mod
         import os
         import requests
-        monkeypatch.setattr(requests, "get",
-                            lambda url, **kw: _FakeResp(status_code=503))
+
+        monkeypatch.setattr(requests, "get", lambda url, **kw: _FakeResp(status_code=503))
         assert logos.mirror_external_logo("acme", "https://club.example/flaky.png") is None
         (miss,) = (tmp_path / "club_logo_cache" / "acme").glob("*.miss")
         # Age the marker past the TTL — the next call retries the fetch.
         old = miss.stat().st_mtime - logos._MIRROR_MISS_TTL - 10
         os.utime(miss, (old, old))
         monkeypatch.setattr(
-            requests, "get",
+            requests,
+            "get",
             lambda url, **kw: _FakeResp(headers={"Content-Type": "image/png"}),
         )
         path = logos.mirror_external_logo("acme", "https://club.example/flaky.png")
@@ -201,25 +217,15 @@ class TestMirrorExternalLogo:
 
 
 @pytest.fixture
-def app_client(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
-    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
-    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    for d in ("runs_v4", "uploads_v4", "club_profiles"):
-        (tmp_path / d).mkdir(parents=True, exist_ok=True)
+def app_client(client, web_module, tmp_path):
     import mediahub.web.club_profile as cp
-    import mediahub.web.web as wm
-    importlib.reload(cp)
-    importlib.reload(wm)
-    app = wm.create_app()
-    app.config["TESTING"] = True
-    with app.test_client() as c:
-        yield c, wm, cp, tmp_path
+
+    yield client, web_module, cp, tmp_path
 
 
 def _seed(cp, **kw):
     from mediahub.web.club_profile import ClubProfile, save_profile
+
     prof = ClubProfile(**kw)
     save_profile(prof)
     return prof
@@ -237,8 +243,12 @@ class TestBrandLogoRoute:
 
     def test_serves_mirrored_bytes_first_party(self, app_client, monkeypatch):
         client, wm, cp, tmp_path = app_client
-        _seed(cp, profile_id="acme", display_name="Acme SC",
-              brand_logo_url="https://club.example/logo.png")
+        _seed(
+            cp,
+            profile_id="acme",
+            display_name="Acme SC",
+            brand_logo_url="https://club.example/logo.png",
+        )
 
         # Stand in for the network: drop a real cached file and hand its path
         # back, exactly as a successful mirror would.
@@ -246,6 +256,7 @@ class TestBrandLogoRoute:
         cached.parent.mkdir(parents=True, exist_ok=True)
         cached.write_bytes(_PNG)
         import mediahub.brand.logos as logos
+
         monkeypatch.setattr(logos, "mirror_external_logo", lambda pid, url: cached)
 
         resp = client.get("/organisation/acme/brand-logo")
@@ -256,9 +267,14 @@ class TestBrandLogoRoute:
 
     def test_404_when_mirror_fails(self, app_client, monkeypatch):
         client, _, cp, _ = app_client
-        _seed(cp, profile_id="dead", display_name="Dead Logo Club",
-              brand_logo_url="https://club.example/gone.png")
+        _seed(
+            cp,
+            profile_id="dead",
+            display_name="Dead Logo Club",
+            brand_logo_url="https://club.example/gone.png",
+        )
         import mediahub.brand.logos as logos
+
         monkeypatch.setattr(logos, "mirror_external_logo", lambda pid, url: None)
         assert client.get("/organisation/dead/brand-logo").status_code == 404
 
@@ -266,8 +282,12 @@ class TestBrandLogoRoute:
 class TestSignInPickerLogo:
     def test_detected_logo_uses_mirror_route_not_external_url(self, app_client):
         client, _, cp, _ = app_client
-        _seed(cp, profile_id="ext", display_name="External Logo Club",
-              brand_logo_url="https://club.example/badge.png")
+        _seed(
+            cp,
+            profile_id="ext",
+            display_name="External Logo Club",
+            brand_logo_url="https://club.example/badge.png",
+        )
         body = client.get("/sign-in").get_data(as_text=True)
         # First-party mirror src (the KEYED ?bg=1&chip=1 silhouette), never the raw
         # cross-origin URL (CSP would block it). The unified chip carries a built-in

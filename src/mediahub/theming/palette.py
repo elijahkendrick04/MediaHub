@@ -47,6 +47,7 @@ __all__ = [
     "DerivedPalette",
     "derive_palette",
     "derive_palette_multi",
+    "tonal_pick",
     "TONE_STOPS",
 ]
 
@@ -152,6 +153,35 @@ def _status_ramp(name: str) -> TonalRamp:
     hue, chroma = STATUS_ANCHORS[name]
     palette = TonalPalette.from_hue_and_chroma(hue, chroma)
     return _materialise(palette, name)
+
+
+def tonal_pick(seed_hex: str, tone: int, *, chroma_scale: float = 1.0) -> str:
+    """Return the hex at ``tone`` on the HCT tonal ramp of ``seed_hex``.
+
+    The single-colour bridge the still/motion role resolver uses to pull
+    container / raised / accent-container tones out of a brand seed (Canva gap
+    C1) — the same HCT engine :func:`derive_palette` runs, gamut-mapped per tone
+    by materialyoucolor so a fluorescent seed self-desaturates at light tones.
+
+    ``chroma_scale`` optionally scales the seed's own chroma before the ramp is
+    built (Canva gap C9's mood accent-container chroma multiplier); ``1.0`` keeps
+    the seed's real chroma, so the colour's identity is preserved rather than
+    flattened to the MD3 default the way a full ``SchemeTonalSpot`` primary would.
+
+    Deterministic and pure. ``tone`` is clamped to ``[0, 100]``. Any parse error
+    returns the seed unchanged (a valid hex) so the caller's APCA fallback path
+    still has a colour to gate.
+    """
+    try:
+        argb = _hex_to_argb(seed_hex)
+        hct = Hct.from_int(argb)
+        chroma = max(0.0, hct.chroma * float(chroma_scale))
+        clamped = 0 if tone < 0 else 100 if tone > 100 else int(tone)
+        palette = TonalPalette.from_hue_and_chroma(hct.hue, chroma)
+        return _argb_to_hex(palette.tone(clamped))
+    except Exception:
+        s = (seed_hex or "").strip()
+        return s.upper() if s.startswith("#") else "#000000"
 
 
 def derive_palette(seed_hex: str) -> DerivedPalette:
