@@ -65,9 +65,7 @@ def _with_section_toc(body: str, slug: str) -> str:
     if len(sections) < 3:
         return body
 
-    links = "".join(
-        f'<a href="#{anchor}">{num}. {title}</a>' for anchor, num, title in sections
-    )
+    links = "".join(f'<a href="#{anchor}">{num}. {title}</a>' for anchor, num, title in sections)
     toc = (
         '<nav class="mh-legal-toc card" aria-label="On this page">'
         '<span class="mh-legal-toc-eyebrow">Jump to</span>'
