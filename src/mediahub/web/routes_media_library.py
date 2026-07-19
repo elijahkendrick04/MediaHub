@@ -32,6 +32,10 @@ from flask import (
 from mediahub.web import web as W
 
 
+# Photo-ingest allowlist: attacker-chosen suffixes (.svg, .html, …) must
+# never be stored — library files are served back same-origin. HEIC/HEIF
+# uploads are additionally accepted via ``heic.is_heic`` and normalised
+# to JPEG on the way in.
 def api_media_library_upload():
     """Save one or MANY photos into the org's library (M33 multi-upload).
 
@@ -291,6 +295,10 @@ def api_media_library_describe_job():
     )
 
 
+# Suffix → served Content-Type for library files. Derived from the stored
+# file, never the uploader's declared type: send_file's default guess
+# would happily serve a legacy .svg as image/svg+xml (active content,
+# same-origin) — anything outside this map downloads as a plain blob.
 def api_media_library_file(asset_id: str):
     if not W._v8_ok:
         return "", 503

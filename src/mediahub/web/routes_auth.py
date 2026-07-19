@@ -137,6 +137,13 @@ def account_delete():
     )
 
 
+# PC.1 / PC.2 — self-serve account auth + Stripe billing (Phase C).
+#
+# These are ACCOUNT-level (email + password → who is paying), distinct
+# from the organisation-level /sign-in picker below (which club's brand
+# is active). A deployment with no STRIPE_* env and no accounts never
+# forces anyone here — every existing route stays open. Billing routes
+# honest-error with 503 when Stripe is unconfigured.
 def signup_page():
     # Already signed in? Send them on to the app.
     if W._auth.current_user_email():

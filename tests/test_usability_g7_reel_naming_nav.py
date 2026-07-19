@@ -17,6 +17,7 @@ import re
 from datetime import datetime, timezone
 
 import pytest
+from tests._helpers import web_surface_src
 
 ORG = "org-g7"
 
@@ -82,7 +83,7 @@ def test_pack_reel_composer_cross_links_video_studio():
     # The pack page needs a full approved pack to render, so the composer's
     # one-line hint is pinned at source level (same idiom as other JS-in-
     # template guards).
-    src = pathlib.Path("src/mediahub/web/web.py").read_text(encoding="utf-8")
+    src = web_surface_src()
     assert "Working from race footage?" in src
     i = src.index("Working from race footage?")
     frag = src[i : i + 220]

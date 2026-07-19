@@ -20,6 +20,7 @@ import pathlib
 import uuid
 
 import pytest
+from tests._helpers import web_surface_src
 
 
 @pytest.fixture
@@ -132,7 +133,7 @@ def test_pack_page_print_buttons_read_differently(env):
 # Source-level
 # ---------------------------------------------------------------------------
 
-_SRC = pathlib.Path("src/mediahub/web/web.py").read_text(encoding="utf-8")
+_SRC = web_surface_src()
 
 
 def test_owner_vocabulary_not_run():

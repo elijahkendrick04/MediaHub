@@ -10,6 +10,7 @@ the misdirecting "review page" copy is gone.
 from __future__ import annotations
 
 import pytest
+from tests._helpers import web_surface_src
 
 
 @pytest.fixture
@@ -35,7 +36,7 @@ def test_hub_points_at_the_real_export_path(export_html):
 def test_source_lists_recent_runs_via_export_tool():
     import pathlib
 
-    src = pathlib.Path("src/mediahub/web/web.py").read_text(encoding="utf-8")
+    src = web_surface_src()
     # The hub queries the profile's recent done runs and links to export_run_tool_page.
     assert 'url_for("export_run_tool_page", run_id=r["id"])' in src
     assert "WHERE profile_id = ? AND status = 'done'" in src

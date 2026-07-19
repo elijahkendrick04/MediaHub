@@ -14,6 +14,7 @@ import re
 import time
 
 import pytest
+from tests._helpers import web_surface_src
 
 
 class _Resp:
@@ -99,7 +100,7 @@ def test_signup_without_email_seam_gives_honest_flash(app_world):
 
 
 def test_progress_page_reassures_run_survives_leaving():
-    src = pathlib.Path("src/mediahub/web/web.py").read_text(encoding="utf-8")
+    src = web_surface_src()
     assert "You can leave this page" in src
     assert "it finishes on Home" in src
     assert "the run keeps going on our server" in src

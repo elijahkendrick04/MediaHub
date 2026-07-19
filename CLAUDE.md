@@ -23,7 +23,10 @@ The system should not become a manual agency or a Canva template shop. The defen
 
 ```
 src/mediahub/          — Main Python package (~43 sub-packages)
-  web/web.py           — Flask monolith (~69,000 lines, ~465 routes)
+  web/web.py           — Flask app core (~32k lines: helpers, tenant spine,
+                         templates' shared chrome; create_app = wiring only)
+  web/routes_*.py      — all ~465 routes in 11 carved surface modules
+                         (finding #15 complete; ADR-0031 add_url_rule pattern)
   web/club_profile.py  — ClubProfile dataclass + persistence
   media_ai/llm.py      — Cloud LLM wrapper (Gemini/Claude with provider failover)
   ai_core/             — Provider-agnostic LLM client + bounded ask_with_tools loop (Cap 1);

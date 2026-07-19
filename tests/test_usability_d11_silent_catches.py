@@ -23,8 +23,9 @@ from __future__ import annotations
 
 import pathlib
 import re
+from tests._helpers import web_surface_src
 
-_SRC = pathlib.Path("src/mediahub/web/web.py").read_text(encoding="utf-8")
+_SRC = web_surface_src()
 _PE = pathlib.Path("src/mediahub/web/photo_editor.py").read_text(encoding="utf-8")
 
 _EMPTY_CATCH = ".catch(function(){})"

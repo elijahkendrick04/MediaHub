@@ -21,6 +21,7 @@ import pathlib
 import uuid
 
 import pytest
+from tests._helpers import web_surface_src
 
 
 @pytest.fixture
@@ -184,7 +185,7 @@ def test_builder_card_uses_the_one_name(env):
 # Source-level: strings the rendered fixtures can't reach
 # ---------------------------------------------------------------------------
 
-_SRC = pathlib.Path("src/mediahub/web/web.py").read_text(encoding="utf-8")
+_SRC = web_surface_src()
 
 
 def test_no_native_dialogs_left_in_the_pack_view_script():

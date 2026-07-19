@@ -29,6 +29,7 @@ from pathlib import Path
 from unittest import mock
 
 import pytest
+from tests._helpers import web_surface_src
 
 _ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_ROOT))
@@ -272,7 +273,7 @@ class TestMotionBatchJob:
 # Source-level: the client wiring (JS inside the shared template block)
 # ---------------------------------------------------------------------------
 
-_SRC = pathlib.Path("src/mediahub/web/web.py").read_text(encoding="utf-8")
+_SRC = web_surface_src()
 
 
 def _fn(name: str) -> str:

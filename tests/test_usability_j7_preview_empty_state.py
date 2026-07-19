@@ -9,8 +9,9 @@ pattern and links back to the draft.
 from __future__ import annotations
 
 import pathlib
+from tests._helpers import web_surface_src
 
-_SRC = pathlib.Path("src/mediahub/web/web.py").read_text(encoding="utf-8")
+_SRC = web_surface_src()
 
 
 def test_preview_empty_state_links_back_to_draft():

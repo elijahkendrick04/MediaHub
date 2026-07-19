@@ -17,10 +17,9 @@ from __future__ import annotations
 
 import io
 from pathlib import Path
+from tests._helpers import web_surface_src
 
-_WEB_SRC = (Path(__file__).resolve().parents[1] / "src" / "mediahub" / "web" / "web.py").read_text(
-    encoding="utf-8"
-)
+_WEB_SRC = web_surface_src()
 
 
 def _post_upload(client, data):

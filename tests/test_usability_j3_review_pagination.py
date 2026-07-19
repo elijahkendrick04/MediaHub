@@ -28,11 +28,12 @@ import types
 from pathlib import Path
 
 import pytest
+from tests._helpers import web_surface_src
 
 _ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_ROOT))
 
-_WEB_SRC = (_ROOT / "src" / "mediahub" / "web" / "web.py").read_text(encoding="utf-8")
+_WEB_SRC = web_surface_src()
 
 
 # --------------------------------------------------------------------------- #
