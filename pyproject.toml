@@ -56,7 +56,7 @@ dependencies = [
   "onnxruntime>=1.27.0",
   # Phase 1.6 Stage B — Adaptive Theming Engine colour-science package.
   # See requirements.txt and docs/THEMING.md.
-  "materialyoucolor>=3.0.2",
+  "materialyoucolor>=3.0.3",
   "coloraide>=8.10",
   "numpy>=2.4.6",
   # Sport-profile config loader (mediahub.sport_profiles) parses the
@@ -66,7 +66,7 @@ dependencies = [
   # in-process QR matrix for the otpauth:// provisioning URI. Tiny,
   # pure-Python, MIT-licensed. (Reinstated after the sites feature removal
   # took the previous consumer with it.)
-  "segno>=1.6.1",
+  "segno>=1.6.6",
   # Scheduler (mediahub.scheduler / mediahub.workflow.schedule): croniter computes
   # cron / daily / weekly / monthly fire-times. MIT, maintained under Pallets-Eco.
   "croniter>=6.2.4",
@@ -84,12 +84,12 @@ dependencies = [
   # means billing 503s and the rest of the app is unaffected.
   "bcrypt>=5.0.0",
   "argon2-cffi>=25.1.0",
-  "stripe>=15.3.0",
+  "stripe>=15.3.1",
 ]
 
 [project.optional-dependencies]
 ai = [
-  "anthropic>=0.116.0",
+  "anthropic>=0.117.0",
   "replicate>=1.0.7",
 ]
 # W.10 OCR fallback for scanned/photographed result sheets (interpreter/ocr.py).
@@ -100,7 +100,7 @@ ai = [
 # rapidocr-onnxruntime (heavier wheel; onnxruntime already ships for rembg).
 ocr = [
   "pytesseract>=0.3.13",
-  "pypdfium2>=5.11.0",
+  "pypdfium2>=5.12.1",
 ]
 # Optional PSD import (roadmap 1.21, interop/psd_import.py). psd-tools is
 # MIT-licensed, pure-Python (reads .psd; renders the flattened composite via
@@ -159,7 +159,7 @@ dev = [
   # no-5xx smoke needs no extra dep. Pinned to the 3.x line whose API the test targets
   # (from_dict / get_all_operations / call_wsgi); the test also skips cleanly on any
   # API drift, so a future bump can't redden CI — only a real 5xx fails it.
-  "schemathesis>=4.22.4,<5",
+  "schemathesis>=4.23.0,<5",
   # D1: re-run a failing test on demand (opt-in via --reruns) to tell a flake from a
   # real failure. Inert unless --reruns is passed, so the gating suite is unaffected.
   "pytest-rerunfailures>=16.4",
