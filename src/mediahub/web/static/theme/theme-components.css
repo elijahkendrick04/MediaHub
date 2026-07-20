@@ -1754,6 +1754,11 @@ time.mh-rel[title] { cursor: help; border-bottom: 1px dotted var(--hairline); }
   color: var(--lane-ink);
   border-color: var(--lane);
 }
+.mh-demo-note {
+  margin-top: 6px;
+  font-size: var(--fs-10);
+  color: var(--ink-muted);
+}
 
 /* Scene 3 — the human approval gate */
 .mh-demo-state {
