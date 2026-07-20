@@ -79,7 +79,7 @@ class TestCatalogueKeys:
 
         assert UI.t("nav.media_library", "en") == "Media library"
         assert UI.t("nav.media_library", "cy") == "Llyfrgell cyfryngau"
-        assert UI.t("nav.my_season", "cy") == "Fy Nhymor"
+        assert UI.t("nav.my_season", "cy") == "Llinell Amser y Tymor"
         assert UI.t("nav.research", "cy") == "Ymchwil"
         assert UI.t("nav.help", "cy") == "Cymorth"
         assert UI.t("nav.activity", "cy") == "Gweithgarwch"
@@ -99,7 +99,7 @@ class TestWelshChrome:
         # Top nav
         assert "Llyfrgell cyfryngau" in html  # Media library
         assert "Gweithgarwch" in html  # Activity
-        assert "Fy Nhymor" in html  # My Season
+        assert "Llinell Amser y Tymor" in html  # Season Timeline
         # Account menu
         assert "Drafftiau" in html  # Drafts
         assert "Cymorth" in html  # Help
@@ -112,7 +112,7 @@ class TestWelshChrome:
         assert "Gosodiadau" in html  # Settings
         # The English labels these replace must be gone from the nav
         assert ">Media library</a>" not in html
-        assert ">My Season</a>" not in html
+        assert ">Season Timeline</a>" not in html
         assert '"mh-notif-h-title">Notifications<' not in html
 
     def test_signed_out_chrome_is_welsh(self, env):
@@ -130,7 +130,7 @@ class TestWelshChrome:
     def test_english_chrome_unchanged(self, env):
         html = env["client"].get("/?lang=en").get_data(as_text=True)
         assert ">Media library</a>" in html
-        assert ">My Season</a>" in html
+        assert ">Season Timeline</a>" in html
         assert ">Drafts</a>" in html
         assert ">Help</a>" in html
         assert "Hafan" not in html
