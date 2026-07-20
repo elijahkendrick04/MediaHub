@@ -16,6 +16,8 @@ Modelled on tests/test_activity_scoping.py (the proven org-gated fixture).
 
 from __future__ import annotations
 
+import re
+
 import pytest
 
 
@@ -477,10 +479,31 @@ class TestNavigation:
         c, _, _ = gated_client
         _pin(c, "club-a")
         body = c.get("/season").get_data(as_text=True)
-        assert ">My Season<" in body
+        assert ">Season Timeline<" in body
 
     def test_season_nav_marked_active_on_page(self, gated_client):
         c, _, _ = gated_client
         _pin(c, "club-a")
         body = c.get("/season").get_data(as_text=True)
-        assert 'class="active">My Season<' in body
+        assert 'class="active">Season Timeline<' in body
+
+    def test_season_nav_label_signals_content(self, gated_client):
+        """The nav label must hint at what /season actually contains — a
+        history/timeline of processed meets — instead of a bare 'My Season'
+        that reads equally like a calendar or a personal settings area (a
+        volunteer looking for a previous meet's content wouldn't know to
+        click it)."""
+        c, _, _ = gated_client
+        _pin(c, "club-a")
+        body = c.get("/season").get_data(as_text=True)
+        m = re.search(r'href="/season"[^>]*>([^<]+)<', body)
+        assert m, "season nav link not found"
+        label = m.group(1).strip()
+        assert label.lower() != "my season", (
+            "'My Season' alone doesn't say whether this is a history of "
+            "uploaded results, a calendar, or a personal settings area"
+        )
+        assert any(k in label.lower() for k in ("timeline", "meet", "history", "past")), (
+            f"nav label {label!r} still doesn't signal the page holds a "
+            "meet-by-meet history/timeline"
+        )
