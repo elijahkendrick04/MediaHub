@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-07-19 · `a34782f6e` · Merge pull request #1321 from elijahkendrick04/claude/carve-15-b-complete
+**Last updated:** 2026-07-20 · `02aed4235` · Merge pull request #1327 from elijahkendrick04/autotest/fix-ed10df968cf5
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1227,16 +1227,16 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-07-20 | `47490bb1d` | fix: Marketing steps and product steps use different names for th |
+| 2026-07-19 | `7d5becce9` | fix: Post-approval publishing path is unclear — download-only or |
+| 2026-07-19 | `afaba1b3b` | ci: run all workflows on Python 3.14 to match the 3.14-slim deploy image |
+| 2026-07-19 | `9344adecd` | build(deps): bump the remotion-deps group across 1 directory with 4 updates |
+| 2026-07-19 | `2fae4fe1d` | style: collapse legal TOC join to one line (ruff-format) |
+| 2026-07-19 | `034364986` | cleanup: resolve 22 minor observations from the 300-PR quality audit |
+| 2026-07-19 | `0d615fc0d` | F6 elevation — parity persistence, energy-term correctness, pool measurement, deep test battery |
 | 2026-07-19 | `60b5a1c7c` | chore: suppress 4 nan-injection false positives semgrep can now see (#15) |
 | 2026-07-19 | `a80c18b56` | fix: capture the real app for worker threads + last 2 source-scan migrations (#15) |
 | 2026-07-18 | `5cde5de98` | refactor(web): carve the remaining 5 surfaces — finding #15 complete |
+| 2026-07-18 | `2b0dc723a` | test: repoint the moment-count consistency test at /about after the IA rename |
 | 2026-07-18 | `04e4e2771` | test: scan the whole web surface in 2 source-scan guards (#15 carve) |
-| 2026-07-18 | `6441d3e15` | fix: close erasure-parity gaps found by adversarial review of the audit fixes |
-| 2026-07-18 | `18c066179` | docs: regenerate ENV_INVENTORY for env read moved to routes_site (#15 carve) |
-| 2026-07-18 | `449569d1a` | refactor(web): carve auth + site surfaces out of create_app (#15, stage 5a) |
-| 2026-07-18 | `bb413aec3` | fix(retention): sweep the full sidecar family on the fallback erasure path |
-| 2026-07-18 | `313fd915c` | fix: remediate 4 confirmed deficiencies from the 300-PR quality audit |
-| 2026-07-18 | `e53b8d2db` | test(#130): migrate the 3 reload files that landed on main during the outage window |
-| 2026-07-17 | `ef3c96ec9` | build(deps): bump actions/setup-node from 6 to 7 |
-| 2026-07-17 | `c09ce763e` | test: migrate 8 club-a fixtures off importlib.reload onto conftest app (#130) |
 <!-- /ROADMAP:ACTIVITY -->
