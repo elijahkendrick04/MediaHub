@@ -233,16 +233,18 @@ def home():
         )
 
     # Three-step "how it works" strip, sits under the lede so the core
-    # mechanic (upload → review → post) is glanceable ABOVE THE FOLD — the
-    # one screen every visitor sees — instead of only in the scroll-down
-    # explainer. Fresh / signed-out visitors only; a pinned org already
-    # knows the flow and gets the lean "Ready to file" hero.
+    # mechanic (generate → review → approve) is glanceable ABOVE THE FOLD —
+    # the one screen every visitor sees — instead of only in the scroll-down
+    # explainer. Labels match the live product demo's step indicator below
+    # (mh-demo-steps in _hero_product_demo) so a visitor reads one consistent
+    # vocabulary for the same 3 stages. Fresh / signed-out visitors only; a
+    # pinned org already knows the flow and gets the lean "Ready to file" hero.
     steps_html = ""
     if not (prof and prof.is_ready()):
         _steps = (
-            ("01", "Upload results"),
-            ("02", "Review the drafts"),
-            ("03", "Approve &amp; post"),
+            ("01", "Generate"),
+            ("02", "Review"),
+            ("03", "Approve"),
         )
         steps_html = (
             '<ol class="mh-hero-steps" '
