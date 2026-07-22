@@ -38,6 +38,7 @@ Rules (the same honesty contract as the rest of the renderer):
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import re
 import subprocess
@@ -98,6 +99,18 @@ LOUDNORM_DEFAULT_LRA = 11.0  # loudness range (LU)
 _LOUDNORM_I_RANGE = (-31.0, -5.0)
 _LOUDNORM_TP_RANGE = (-9.0, 0.0)
 _LOUDNORM_LRA_RANGE = (1.0, 50.0)
+
+# Operator-declared music-bed volume envelope — a keyframable generalisation of
+# the fixed per-profile resting level. A sibling ``<track>.env.json`` sidecar (or
+# a global ``MEDIAHUB_REEL_AUDIO_ENVELOPE`` file) holds a JSON array of
+# ``{"t": seconds, "gain": multiplier}`` points; the bed's resting level then
+# steps between them (the intro/outro stings, cut accents and sidechain ducking
+# still act on top). File-derived and deterministic — never inferred by DSP.
+_ENV_SUFFIX = ".env.json"
+_ENV_MAX_GAIN = 3.0  # ceiling on a bed boost when the bed plays alone
+# Under narration the envelope may only duck the bed, never boost it above the
+# profile's tuned resting level — so a keyframe can't defeat voice intelligibility.
+_ENV_MAX_GAIN_UNDER_VOICE = 1.0
 
 
 # ---------------------------------------------------------------------------
@@ -288,6 +301,93 @@ def track_bpm(path) -> Optional[float]:
     return None
 
 
+def track_envelope(path) -> Optional[list[dict]]:
+    """The operator-declared volume envelope for a bed, or ``None`` — never DSP-guessed.
+
+    Read from a sibling ``<track>.env.json`` sidecar, else a global
+    ``MEDIAHUB_REEL_AUDIO_ENVELOPE`` JSON file (mirrors ``env_mix_profile``). The
+    file is a JSON array of ``{"t": seconds, "gain": multiplier}`` points. Parsed
+    defensively: non-dict / non-numeric points dropped, ``t`` clamped ``>= 0``,
+    ``gain`` clamped to ``[0, _ENV_MAX_GAIN]``, both rounded to 3dp, sorted by
+    ``t`` with duplicate timestamps de-duped (last wins). Empty / invalid /
+    missing → ``None``. Purely file-derived (the same 'never DSP-guessed' rule as
+    ``track_bpm``), so the render stays deterministic.
+    """
+    p = Path(path)
+    raw_text: Optional[str] = None
+    side = p.with_name(p.name + _ENV_SUFFIX)
+    try:
+        if side.is_file():
+            raw_text = side.read_text(encoding="utf-8")
+    except OSError:
+        raw_text = None
+    if raw_text is None:
+        env_path = os.environ.get("MEDIAHUB_REEL_AUDIO_ENVELOPE", "").strip()
+        if env_path:
+            try:
+                ep = Path(env_path)
+                if ep.is_file():
+                    raw_text = ep.read_text(encoding="utf-8")
+            except OSError:
+                raw_text = None
+    if raw_text is None:
+        return None
+    try:
+        data = json.loads(raw_text)
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(data, list):
+        return None
+    cleaned: dict[float, float] = {}
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        try:
+            t = float(item["t"])
+            g = float(item["gain"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        t = max(0.0, t)
+        g = _clamp(g, 0.0, _ENV_MAX_GAIN)
+        cleaned[round(t, 3)] = round(g, 3)  # last write wins for a duplicate t
+    if not cleaned:
+        return None
+    return [{"t": t, "gain": cleaned[t]} for t in sorted(cleaned)]
+
+
+def envelope_filter(
+    points: Optional[list[dict]], duration_sec: float, *, max_gain: Optional[float] = None
+) -> str:
+    """A piecewise-constant volume chain for the bed's resting level, or ``""``.
+
+    Each point holds its gain until the next point (the last runs to
+    ``duration_sec``); the region before the first point stays at unit gain (no
+    filter emitted). ``max_gain`` caps every gain — used under narration so the
+    envelope can only duck the bed, never boost it above its tuned resting level.
+    Pure: a comma-joined chain of ``volume=g:enable='between(t,a,b)'`` gates, the
+    same idiom as the stings/accents. Empty / ``None`` points → ``""``.
+    """
+    pts = points or []
+    if not pts:
+        return ""
+    d = max(0.1, float(duration_sec))
+    gates: list[str] = []
+    n = len(pts)
+    for i, pt in enumerate(pts):
+        a = float(pt["t"])
+        if a >= d:
+            break
+        b = float(pts[i + 1]["t"]) if i + 1 < n else d
+        b = min(b, d)
+        if b <= a:
+            continue
+        g = float(pt["gain"])
+        if max_gain is not None:
+            g = min(g, max_gain)
+        gates.append(f"volume={g:.3f}:enable='between(t,{a:.3f},{b:.3f})'")
+    return ",".join(gates)
+
+
 def music_pool_summary() -> dict:
     """Explainability snapshot of the operator's music pool (for manifests)."""
     tracks = music_candidates()
@@ -349,6 +449,14 @@ def build_audio_plan(
         except OSError:
             plan.pop("music", None)
             plan.pop("music_path", None)
+    # Operator-declared volume envelope shapes the bed's resting level over time;
+    # folded into the plan (and so the cache key) only when a bed exists and a
+    # valid sidecar resolves — otherwise the plan is byte-identical to before.
+    if "music" in plan:
+        env_source = track if track is not None else Path(library_track.path)
+        env_points = track_envelope(env_source)
+        if env_points:
+            plan["audio_envelope"] = env_points
     if not plan:
         return None
     profile = _coalesce_profile(mix_profile)
@@ -460,12 +568,24 @@ def music_filterchain(
     duration_sec: float,
     cut_times: Optional[list[float]] = None,
     bpm: Optional[float] = None,
+    envelope: Optional[list[dict]] = None,
+    under_voice: bool = False,
 ) -> str:
     """The deterministic music-bed shaping chain: resting level, intro/outro
     stings, and a beat-aware accent on each card cut. Pure + testable — returns
-    a comma-joined FFmpeg filterchain (no input/output pad labels)."""
+    a comma-joined FFmpeg filterchain (no input/output pad labels).
+
+    ``envelope`` (optional) time-varies the resting bed level between the
+    operator's keyframes; ``under_voice`` caps its gain so a keyframe can only
+    duck (never boost) the bed under narration. The stings/accents/ducking still
+    act on top of the enveloped level, exactly as they do on the flat one."""
     intro_on, outro_on, outro_start, fade_start = _sting_windows(duration_sec)
     filters = [f"volume={base_vol:.3f}"]
+    if envelope:
+        cap = _ENV_MAX_GAIN_UNDER_VOICE if under_voice else None
+        chain = envelope_filter(envelope, duration_sec, max_gain=cap)
+        if chain:
+            filters.append(chain)
     # Intro: a punchy swell-in (the sting), or a gentle fade when there's no room.
     if intro_on:
         filters.append(f"afade=t=in:st=0:d={INTRO_STING_SEC}")
@@ -498,6 +618,7 @@ def mux_args(
     cut_times: Optional[list[float]] = None,
     profile: Any = DEFAULT_MIX_PROFILE,
     loudnorm: Optional[dict] = None,
+    envelope: Optional[list[dict]] = None,
 ) -> list[str]:
     """Argument list (after the binary) for the audio mux. Pure + testable.
 
@@ -545,6 +666,8 @@ def mux_args(
             duration_sec=d,
             cut_times=cut_times,
             bpm=bpm,
+            envelope=envelope,
+            under_voice=True,
         )
         # Voice is split: one copy mixes, one keys the sidechain that ducks the
         # bed only while there's speech (refined automatic ducking).
@@ -562,7 +685,12 @@ def mux_args(
     else:
         bpm = track_bpm(music)
         chain = music_filterchain(
-            base_vol=levels["music_bed_volume"], duration_sec=d, cut_times=cut_times, bpm=bpm
+            base_vol=levels["music_bed_volume"],
+            duration_sec=d,
+            cut_times=cut_times,
+            bpm=bpm,
+            envelope=envelope,
+            under_voice=False,
         )
         graph = f"[1:a]{chain},{tail}"
 
@@ -668,6 +796,7 @@ def apply_audio(
                     cut_times=cut_times,
                     profile=profile,
                     loudnorm=plan.get("loudnorm"),
+                    envelope=plan.get("audio_envelope"),
                 )
             )
             if not tmp_out.exists() or tmp_out.stat().st_size < 1024:
@@ -704,6 +833,8 @@ def apply_audio(
         bpm = track_bpm(music_path)
         if bpm is not None:
             record["music_bpm"] = bpm
+        if plan.get("audio_envelope"):
+            record["audio_envelope"] = plan["audio_envelope"]
         aligned = [c for c in (cut_times or []) if c > 0]
         if aligned:
             record["beat_aligned_cuts"] = aligned
@@ -803,6 +934,8 @@ __all__ = [
     "music_candidates",
     "pick_music",
     "track_bpm",
+    "track_envelope",
+    "envelope_filter",
     "music_pool_summary",
     "audio_active",
     "build_audio_plan",

@@ -870,3 +870,155 @@ def test_apply_audio_records_loudnorm_in_manifest(tmp_path, monkeypatch):
     video.write_bytes(b"vid")
     rec_off = audio_mux.apply_audio(video, {"music": "bed.mp3"}, duration_sec=5.0)
     assert rec_off["status"] == "mixed" and "loudnorm" not in rec_off
+
+
+# ---------------------------------------------------------------------------
+# Keyframable music-bed volume envelope (opt-in <track>.env.json sidecar)
+# ---------------------------------------------------------------------------
+
+
+def _write_env_sidecar(track: Path, points) -> Path:
+    side = track.with_name(track.name + audio_mux._ENV_SUFFIX)
+    side.write_text(__import__("json").dumps(points), encoding="utf-8")
+    return side
+
+
+def test_track_envelope_parses_clamps_sorts_and_rejects_invalid(tmp_path):
+    track = tmp_path / "bed.mp3"
+    track.write_bytes(b"m")
+    _write_env_sidecar(
+        track,
+        [
+            {"t": 4.0, "gain": 0.8},  # out of order
+            {"t": -1.0, "gain": 9.9},  # t clamped to 0, gain clamped to _ENV_MAX_GAIN
+            {"t": 2.0, "gain": 0.5},
+            {"t": 2.0, "gain": 0.6},  # duplicate t — last wins
+            {"gain": 1.0},  # missing t — dropped
+            "nonsense",  # non-dict — dropped
+        ],
+    )
+    pts = audio_mux.track_envelope(track)
+    assert pts == [
+        {"t": 0.0, "gain": audio_mux._ENV_MAX_GAIN},
+        {"t": 2.0, "gain": 0.6},
+        {"t": 4.0, "gain": 0.8},
+    ]
+    # No sidecar and no env fallback → None (byte-identical default).
+    assert audio_mux.track_envelope(tmp_path / "other.mp3") is None
+
+
+def test_track_envelope_sidecar_precedence_over_env_fallback(tmp_path, monkeypatch):
+    track = tmp_path / "bed.mp3"
+    track.write_bytes(b"m")
+    _write_env_sidecar(track, [{"t": 0.0, "gain": 0.7}])
+    fallback = tmp_path / "global.env.json"
+    fallback.write_text('[{"t":0.0,"gain":0.1}]', encoding="utf-8")
+    monkeypatch.setenv("MEDIAHUB_REEL_AUDIO_ENVELOPE", str(fallback))
+    # Per-track sidecar wins over the global fallback.
+    assert audio_mux.track_envelope(track) == [{"t": 0.0, "gain": 0.7}]
+    # With no sidecar, the global fallback applies.
+    assert audio_mux.track_envelope(tmp_path / "nosidecar.mp3") == [{"t": 0.0, "gain": 0.1}]
+
+
+def test_envelope_filter_emits_between_gates_and_holds():
+    pts = [{"t": 0.0, "gain": 0.5}, {"t": 2.0, "gain": 1.2}, {"t": 4.0, "gain": 0.8}]
+    chain = audio_mux.envelope_filter(pts, 6.0)
+    assert chain == (
+        "volume=0.500:enable='between(t,0.000,2.000)',"
+        "volume=1.200:enable='between(t,2.000,4.000)',"
+        "volume=0.800:enable='between(t,4.000,6.000)'"
+    )
+    # A leading region before the first point stays at unit gain (no gate).
+    assert audio_mux.envelope_filter([{"t": 1.0, "gain": 0.3}], 5.0) == (
+        "volume=0.300:enable='between(t,1.000,5.000)'"
+    )
+    # Under-voice cap lets a keyframe duck but never boost.
+    assert "volume=1.000:" in audio_mux.envelope_filter(pts, 6.0, max_gain=1.0)
+    # Empty / None → "" (no empty-filter splice hazard).
+    assert audio_mux.envelope_filter([], 6.0) == ""
+    assert audio_mux.envelope_filter(None, 6.0) == ""
+
+
+def test_music_filterchain_with_envelope_keeps_stings_and_base_vol():
+    pts = [{"t": 0.0, "gain": 0.6}, {"t": 3.0, "gain": 1.0}]
+    plain = audio_mux.music_filterchain(base_vol=0.40, duration_sec=15.0)
+    enveloped = audio_mux.music_filterchain(base_vol=0.40, duration_sec=15.0, envelope=pts)
+    # Envelope is additive: base_vol and the intro sting survive; a gate is added.
+    assert enveloped.startswith("volume=0.400")
+    assert f"afade=t=in:st=0:d={audio_mux.INTRO_STING_SEC}" in enveloped
+    assert "between(t,0.000,3.000)" in enveloped
+    # No envelope → byte-identical to the historic chain.
+    assert audio_mux.music_filterchain(base_vol=0.40, duration_sec=15.0, envelope=None) == plain
+
+
+def test_mux_args_threads_envelope_music_only_and_voice_plus_music(tmp_path):
+    v, n, bed, o = (tmp_path / x for x in ("v.mp4", "n.mp3", "bed.mp3", "o.mp4"))
+    pts = [{"t": 0.0, "gain": 2.5}, {"t": 5.0, "gain": 0.8}]
+    # Music-only: the full envelope gain (2.5) rides the bed.
+    music_only = _graph(audio_mux.mux_args(v, None, bed, o, duration_sec=15.0, envelope=pts))
+    assert "volume=2.500:enable='between(t,0.000,5.000)'" in music_only
+    # Voice+music: the same envelope is capped to 1.0 so it can't out-shout the voice.
+    voice_music = _graph(audio_mux.mux_args(v, n, bed, o, duration_sec=15.0, envelope=pts))
+    assert "volume=1.000:enable='between(t,0.000,5.000)'" in voice_music
+    assert "volume=2.500" not in voice_music
+    # Voice-only: no bed, so the envelope is a no-op (honest).
+    voice_only = _graph(audio_mux.mux_args(v, n, None, o, duration_sec=15.0, envelope=pts))
+    assert "between(t,0.000,5.000)" not in voice_only
+
+
+def test_build_audio_plan_adds_envelope_only_with_a_bed_and_omits_otherwise(tmp_path, monkeypatch):
+    d = tmp_path / "music"
+    d.mkdir()
+    track = d / "bed.mp3"
+    track.write_bytes(b"x")
+    monkeypatch.setenv("MEDIAHUB_REEL_MUSIC_DIR", str(d))
+    monkeypatch.delenv("MEDIAHUB_VOICEOVER", raising=False)
+    monkeypatch.delenv("MEDIAHUB_REEL_AUDIO_ENVELOPE", raising=False)
+    # No sidecar → plan carries no envelope (byte-identical).
+    assert "audio_envelope" not in audio_mux.build_audio_plan(script="x", content_key="k")
+    # Sidecar present → plan gains the canonical points.
+    _write_env_sidecar(track, [{"t": 0.0, "gain": 0.5}])
+    plan = audio_mux.build_audio_plan(script="x", content_key="k")
+    assert plan["audio_envelope"] == [{"t": 0.0, "gain": 0.5}]
+    # A voice-only render (no bed) never carries an envelope, even with the env fallback set.
+    monkeypatch.delenv("MEDIAHUB_REEL_MUSIC_DIR", raising=False)
+    monkeypatch.setenv("MEDIAHUB_VOICEOVER", "1")
+    monkeypatch.setattr("mediahub.visual.voiceover.is_available", lambda: True)
+    fb = tmp_path / "g.env.json"
+    fb.write_text('[{"t":0.0,"gain":0.5}]', encoding="utf-8")
+    monkeypatch.setenv("MEDIAHUB_REEL_AUDIO_ENVELOPE", str(fb))
+    voice_plan = audio_mux.build_audio_plan(script="Spring Open.", content_key="k")
+    assert "music" not in voice_plan and "audio_envelope" not in voice_plan
+
+
+def test_apply_audio_records_audio_envelope(tmp_path, monkeypatch):
+    d = tmp_path / "music"
+    d.mkdir()
+    (d / "bed.mp3").write_bytes(b"m")
+    monkeypatch.setenv("MEDIAHUB_REEL_MUSIC_DIR", str(d))
+    monkeypatch.setattr(
+        audio_mux, "_run_ffmpeg", lambda args, **k: Path(args[-1]).write_bytes(b"x" * 2048)
+    )
+    video = tmp_path / "reel.mp4"
+    video.write_bytes(b"vid")
+    pts = [{"t": 0.0, "gain": 0.5}]
+    rec = audio_mux.apply_audio(
+        video, {"music": "bed.mp3", "audio_envelope": pts}, duration_sec=5.0
+    )
+    assert rec["status"] == "mixed" and rec["audio_envelope"] == pts
+    video.write_bytes(b"vid")
+    rec_off = audio_mux.apply_audio(video, {"music": "bed.mp3"}, duration_sec=5.0)
+    assert "audio_envelope" not in rec_off
+
+
+def test_audio_envelope_folds_into_cache_key_absence_is_byte_identical():
+    """The envelope changes the motion content hash; its absence reproduces the
+    pre-envelope key byte-for-byte (fold-only-when-present)."""
+    from mediahub.visual import motion
+
+    base = {"voice": "en-GB-SoniaNeural", "script": "hi", "music": "bed.mp3"}
+    enveloped = {**base, "audio_envelope": [{"t": 0.0, "gain": 0.5}]}
+    h_plain = motion._content_hash({"audio": base}, kind="reel")
+    h_env = motion._content_hash({"audio": enveloped}, kind="reel")
+    assert h_plain == motion._content_hash({"audio": base}, kind="reel")
+    assert h_plain != h_env
