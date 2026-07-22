@@ -84,6 +84,21 @@ _BPM_MIN, _BPM_MAX = 40.0, 300.0
 
 _TRUTHY = {"1", "true", "yes", "on"}
 
+# Opt-in EBU R128 loudness normalisation. Off by default; when the operator sets
+# ``MEDIAHUB_REEL_LOUDNORM=1`` the final mix is normalised to a fixed integrated
+# loudness / true-peak / range target so reels hit a consistent platform level
+# instead of the uncalibrated fixed gains. Single-pass (a stateless one-shot
+# filter) so it stays deterministic — targets come only from env, parsed and
+# clamped to fixed ranges (malformed → defaults, never raises). Folded into the
+# audio plan (and therefore the cache key) only when on, so the default path —
+# and every existing cached MP4 — stays byte-identical.
+LOUDNORM_DEFAULT_I = -14.0  # integrated loudness target (LUFS) — a common social level
+LOUDNORM_DEFAULT_TP = -1.0  # true-peak ceiling (dBTP)
+LOUDNORM_DEFAULT_LRA = 11.0  # loudness range (LU)
+_LOUDNORM_I_RANGE = (-31.0, -5.0)
+_LOUDNORM_TP_RANGE = (-9.0, 0.0)
+_LOUDNORM_LRA_RANGE = (1.0, 50.0)
+
 
 # ---------------------------------------------------------------------------
 # Per-card audio-mix profiles (R1.19)
@@ -140,6 +155,39 @@ def env_mix_profile() -> str:
 def mix_profile_levels(name: Any) -> dict[str, float]:
     """The fixed level set for a profile (validated). Always a fresh dict."""
     return dict(AUDIO_MIX_PROFILES[resolve_mix_profile(name)])
+
+
+def _clamp(v: float, lo: float, hi: float) -> float:
+    return lo if v < lo else hi if v > hi else v
+
+
+def resolve_loudnorm() -> Optional[dict]:
+    """Opt-in EBU R128 loudness target for the final mix, or ``None`` when off.
+
+    Off unless ``MEDIAHUB_REEL_LOUDNORM`` is truthy. When on, the integrated
+    loudness / true-peak / range targets may be tuned via
+    ``MEDIAHUB_REEL_LOUDNORM_LUFS`` / ``_TP`` / ``_LRA`` — each parsed and clamped
+    to a fixed range, with malformed values falling back to the default (never
+    raises). Returns a canonical ``{"i", "tp", "lra"}`` dict so identical env
+    gives an identical filter string, and therefore an identical cache key.
+    """
+    if os.environ.get("MEDIAHUB_REEL_LOUDNORM", "").strip().lower() not in _TRUTHY:
+        return None
+
+    def _read(name: str, default: float, lo: float, hi: float) -> float:
+        raw = os.environ.get(name, "").strip()
+        if not raw:
+            return default
+        try:
+            return _clamp(float(raw), lo, hi)
+        except ValueError:
+            return default
+
+    return {
+        "i": _read("MEDIAHUB_REEL_LOUDNORM_LUFS", LOUDNORM_DEFAULT_I, *_LOUDNORM_I_RANGE),
+        "tp": _read("MEDIAHUB_REEL_LOUDNORM_TP", LOUDNORM_DEFAULT_TP, *_LOUDNORM_TP_RANGE),
+        "lra": _read("MEDIAHUB_REEL_LOUDNORM_LRA", LOUDNORM_DEFAULT_LRA, *_LOUDNORM_LRA_RANGE),
+    }
 
 
 def _coalesce_profile(explicit: Any) -> str:
@@ -306,6 +354,11 @@ def build_audio_plan(
     profile = _coalesce_profile(mix_profile)
     if profile != DEFAULT_MIX_PROFILE:
         plan["mix"] = profile
+    # EBU R128 loudness normalisation rides inside the plan (and so the cache
+    # key) only when the operator opted in — the default plan is unchanged.
+    loudnorm = resolve_loudnorm()
+    if loudnorm is not None:
+        plan["loudnorm"] = loudnorm
     return plan
 
 
@@ -444,6 +497,7 @@ def mux_args(
     duration_sec: float,
     cut_times: Optional[list[float]] = None,
     profile: Any = DEFAULT_MIX_PROFILE,
+    loudnorm: Optional[dict] = None,
 ) -> list[str]:
     """Argument list (after the binary) for the audio mux. Pure + testable.
 
@@ -474,7 +528,16 @@ def mux_args(
         # Loop the bed so short tracks cover long reels; atrim cuts the tail.
         args += ["-stream_loop", "-1", "-i", str(music)]
 
-    tail = f"atrim=0:{d:.3f},afade=t=out:st={fade_start:.3f}:d={AUDIO_FADE_OUT_SEC}[aout]"
+    # Loudness normalisation sits AFTER the trim but BEFORE the tail fade-out, so
+    # the fade stays the final gesture: loudnorm's time-varying make-up gain can't
+    # pump the outro back up and muddy the resolve. Empty when off → byte-identical.
+    ln_stage = ""
+    if loudnorm:
+        ln_stage = f"loudnorm=I={loudnorm['i']:g}:TP={loudnorm['tp']:g}:LRA={loudnorm['lra']:g},"
+    tail = (
+        f"atrim=0:{d:.3f},{ln_stage}"
+        f"afade=t=out:st={fade_start:.3f}:d={AUDIO_FADE_OUT_SEC}[aout]"
+    )
     if voice is not None and music is not None:
         bpm = track_bpm(music)
         chain = music_filterchain(
@@ -604,16 +667,20 @@ def apply_audio(
                     duration_sec=duration_sec,
                     cut_times=cut_times,
                     profile=profile,
+                    loudnorm=plan.get("loudnorm"),
                 )
             )
             if not tmp_out.exists() or tmp_out.stat().st_size < 1024:
                 raise RuntimeError("mux produced no output")
             os.replace(tmp_out, video)
     except Exception as e:
-        return {
-            "status": "silent_fallback",
-            "reason": f"{voice_error + '; ' if voice_error else ''}{e}",
-        }
+        reason = f"{voice_error + '; ' if voice_error else ''}{e}"
+        # Flag a loudnorm-caused failure (e.g. an ffmpeg build without the
+        # filter) so it isn't misread as a generic mux failure — the clip is
+        # still shipped silent, but the manifest says which stage broke.
+        if plan.get("loudnorm"):
+            reason = f"loudnorm active; {reason}"
+        return {"status": "silent_fallback", "reason": reason}
 
     record: dict[str, Any] = {
         "status": "mixed",
@@ -622,6 +689,8 @@ def apply_audio(
         "mix": profile,
         "transcript": transcript,
     }
+    if plan.get("loudnorm"):
+        record["loudnorm"] = plan["loudnorm"]
     # 1.24 AI-dub provenance: when the voice track is a translated dub, label it
     # in the manifest (clearly AI-dubbed, source→target) so every downstream
     # surface can show it honestly.
@@ -720,6 +789,10 @@ __all__ = [
     "CUT_ACCENT_GAIN",
     "DEFAULT_MIX_PROFILE",
     "AUDIO_MIX_PROFILES",
+    "LOUDNORM_DEFAULT_I",
+    "LOUDNORM_DEFAULT_TP",
+    "LOUDNORM_DEFAULT_LRA",
+    "resolve_loudnorm",
     "resolve_mix_profile",
     "env_mix_profile",
     "mix_profile_levels",

@@ -748,3 +748,127 @@ def test_real_mux_plain_voice_has_no_dub_provenance(tmp_path, monkeypatch):
     )
     assert rec["status"] == "mixed"
     assert "dubbed" not in rec
+
+
+# ---------------------------------------------------------------------------
+# Loudness normalisation (EBU R128, opt-in via MEDIAHUB_REEL_LOUDNORM)
+# ---------------------------------------------------------------------------
+
+
+def _graph(args: list[str]) -> str:
+    """The -filter_complex graph string out of a mux_args list."""
+    return args[args.index("-filter_complex") + 1]
+
+
+def test_resolve_loudnorm_off_by_default(monkeypatch):
+    monkeypatch.delenv("MEDIAHUB_REEL_LOUDNORM", raising=False)
+    assert audio_mux.resolve_loudnorm() is None
+
+
+def test_resolve_loudnorm_defaults_and_clamps(monkeypatch):
+    monkeypatch.setenv("MEDIAHUB_REEL_LOUDNORM", "1")
+    for k in ("LUFS", "TP", "LRA"):
+        monkeypatch.delenv(f"MEDIAHUB_REEL_LOUDNORM_{k}", raising=False)
+    # Opt-in with no overrides → the canonical default target.
+    assert audio_mux.resolve_loudnorm() == {
+        "i": audio_mux.LOUDNORM_DEFAULT_I,
+        "tp": audio_mux.LOUDNORM_DEFAULT_TP,
+        "lra": audio_mux.LOUDNORM_DEFAULT_LRA,
+    }
+    # Out-of-range targets are clamped to the fixed ranges.
+    monkeypatch.setenv("MEDIAHUB_REEL_LOUDNORM_LUFS", "-99")  # below the -31 floor
+    monkeypatch.setenv("MEDIAHUB_REEL_LOUDNORM_TP", "5")  # above the 0 dBTP ceiling
+    clamped = audio_mux.resolve_loudnorm()
+    assert clamped["i"] == audio_mux._LOUDNORM_I_RANGE[0]
+    assert clamped["tp"] == audio_mux._LOUDNORM_TP_RANGE[1]
+    # A tuned, in-range target survives.
+    monkeypatch.setenv("MEDIAHUB_REEL_LOUDNORM_LUFS", "-16")
+    assert audio_mux.resolve_loudnorm()["i"] == -16.0
+    # Malformed → the default, never a raise.
+    monkeypatch.setenv("MEDIAHUB_REEL_LOUDNORM_LUFS", "loud please")
+    assert audio_mux.resolve_loudnorm()["i"] == audio_mux.LOUDNORM_DEFAULT_I
+
+
+def test_build_audio_plan_omits_loudnorm_by_default(tmp_path, monkeypatch):
+    """Feature off → the plan is byte-identical to the pre-loudnorm era."""
+    d = tmp_path / "music"
+    d.mkdir()
+    (d / "bed.mp3").write_bytes(b"x")
+    monkeypatch.setenv("MEDIAHUB_REEL_MUSIC_DIR", str(d))
+    monkeypatch.delenv("MEDIAHUB_VOICEOVER", raising=False)
+    monkeypatch.delenv("MEDIAHUB_REEL_LOUDNORM", raising=False)
+    plan = audio_mux.build_audio_plan(script="ignored", content_key="k")
+    assert plan is not None and "loudnorm" not in plan
+
+
+def test_build_audio_plan_records_loudnorm_when_enabled(tmp_path, monkeypatch):
+    d = tmp_path / "music"
+    d.mkdir()
+    (d / "bed.mp3").write_bytes(b"x")
+    monkeypatch.setenv("MEDIAHUB_REEL_MUSIC_DIR", str(d))
+    monkeypatch.delenv("MEDIAHUB_VOICEOVER", raising=False)
+    monkeypatch.setenv("MEDIAHUB_REEL_LOUDNORM", "1")
+    for k in ("LUFS", "TP", "LRA"):
+        monkeypatch.delenv(f"MEDIAHUB_REEL_LOUDNORM_{k}", raising=False)
+    plan = audio_mux.build_audio_plan(script="ignored", content_key="k")
+    assert plan["loudnorm"] == {
+        "i": audio_mux.LOUDNORM_DEFAULT_I,
+        "tp": audio_mux.LOUDNORM_DEFAULT_TP,
+        "lra": audio_mux.LOUDNORM_DEFAULT_LRA,
+    }
+
+
+def test_mux_args_no_loudnorm_graph_is_byte_identical(tmp_path):
+    """loudnorm=None (and the default) leave the fade tail contiguous — no stage
+    inserted — for all three source branches."""
+    v, n, bed, o = (tmp_path / x for x in ("v.mp4", "n.mp3", "bed.mp3", "o.mp4"))
+    combos = [
+        (n, None),  # voice only
+        (None, bed),  # music only
+        (n, bed),  # voice + music
+    ]
+    for voice, music in combos:
+        default = _graph(audio_mux.mux_args(v, voice, music, o, duration_sec=15.0))
+        explicit_none = _graph(
+            audio_mux.mux_args(v, voice, music, o, duration_sec=15.0, loudnorm=None)
+        )
+        assert default == explicit_none, "loudnorm defaulting to None must not change the graph"
+        assert "loudnorm" not in default
+        assert "atrim=0:15.000,afade=t=out" in default, "the fade tail stays contiguous when off"
+
+
+def test_mux_args_places_loudnorm_before_fade_and_encode(tmp_path):
+    """When active, loudnorm sits AFTER atrim but BEFORE the fade-out (so the
+    fade is the final gesture) and before the AAC encode — for every branch."""
+    v, n, bed, o = (tmp_path / x for x in ("v.mp4", "n.mp3", "bed.mp3", "o.mp4"))
+    ln = {"i": -14.0, "tp": -1.0, "lra": 11.0}
+    for voice, music in [(n, None), (None, bed), (n, bed)]:
+        args = audio_mux.mux_args(v, voice, music, o, duration_sec=15.0, loudnorm=ln)
+        graph = _graph(args)
+        assert "atrim=0:15.000,loudnorm=I=-14:TP=-1:LRA=11,afade=t=out" in graph
+        joined = " ".join(args)
+        assert joined.index("loudnorm=") < joined.index("afade=t=out")
+        assert joined.index("loudnorm=") < joined.index("-c:a"), "normalise before the encode"
+
+
+def test_apply_audio_records_loudnorm_in_manifest(tmp_path, monkeypatch):
+    """A successful mux records the loudnorm target; absent when off."""
+    d = tmp_path / "music"
+    d.mkdir()
+    (d / "bed.mp3").write_bytes(b"m")
+    monkeypatch.setenv("MEDIAHUB_REEL_MUSIC_DIR", str(d))
+
+    def _fake_run(args, *, timeout=300):
+        Path(args[-1]).write_bytes(b"x" * 2048)  # a plausible muxed output
+
+    monkeypatch.setattr(audio_mux, "_run_ffmpeg", _fake_run)
+
+    video = tmp_path / "reel.mp4"
+    video.write_bytes(b"vid")
+    ln = {"i": -14.0, "tp": -1.0, "lra": 11.0}
+    rec = audio_mux.apply_audio(video, {"music": "bed.mp3", "loudnorm": ln}, duration_sec=5.0)
+    assert rec["status"] == "mixed" and rec["loudnorm"] == ln
+
+    video.write_bytes(b"vid")
+    rec_off = audio_mux.apply_audio(video, {"music": "bed.mp3"}, duration_sec=5.0)
+    assert rec_off["status"] == "mixed" and "loudnorm" not in rec_off
