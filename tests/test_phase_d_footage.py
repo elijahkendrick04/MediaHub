@@ -187,8 +187,10 @@ def footage_env(tmp_path, monkeypatch):
     # Fake trim: writes a deterministic file instead of shelling FFmpeg.
     trims: list[dict] = []
 
-    def fake_trim(src, out_path, *, in_ms, out_ms, dims):
-        trims.append({"src": str(src), "in": in_ms, "out": out_ms, "dims": dims})
+    def fake_trim(src, out_path, *, in_ms, out_ms, dims, stabilize=False):
+        trims.append(
+            {"src": str(src), "in": in_ms, "out": out_ms, "dims": dims, "stabilize": stabilize}
+        )
         Path(out_path).write_bytes(b"clip" * 512)
         return True
 
@@ -403,6 +405,65 @@ class TestResolveCardFootage:
         monkeypatch.setattr(footage_mod, "_normalise_clip", lambda *a, **k: False)
         res, why = self._resolve(tmp, store=FakeStore([_footage_asset(tmp)]))
         assert res is None and why == "ffmpeg-trim-failed-or-unavailable"
+
+    # -- opt-in deterministic stabilization (footage-stabilization) --
+
+    def test_stabilize_off_is_byte_identical(self, footage_env):
+        """A clip that doesn't request stabilization keeps the exact historic
+        filename, cache_sig, and (no) provenance — trim invoked with stabilize=False."""
+        tmp = footage_env["tmp"]
+        res, why = self._resolve(tmp, store=FakeStore([_footage_asset(tmp)]))
+        assert res is not None and why == ""
+        assert "-stab" not in res.video_src
+        assert "stabilize" not in res.cache_sig
+        assert "stabilize" not in res.provenance
+        assert footage_env["trims"][-1]["stabilize"] is False
+
+    def test_stabilize_applied(self, footage_env, monkeypatch):
+        tmp = footage_env["tmp"]
+        monkeypatch.setattr("mediahub.video.enhance.is_stabilize_available", lambda: True)
+        ft = _footage_asset(tmp)
+        ft.media_meta["stabilize"] = True
+        res, why = self._resolve(tmp, store=FakeStore([ft]))
+        assert res is not None and why == ""
+        assert res.video_src.endswith("-stab.mp4")
+        assert res.cache_sig["stabilize"] == "applied"
+        assert res.provenance["stabilize"] == {
+            "requested": True,
+            "applied": True,
+            "reason": "",
+        }
+        assert footage_env["trims"][-1]["stabilize"] is True
+
+    def test_stabilize_unavailable_honest_fallback(self, footage_env, monkeypatch):
+        """vidstab requested but the host FFmpeg lacks the filter → plain trim,
+        honestly recorded, never a faked steadied clip."""
+        tmp = footage_env["tmp"]
+        monkeypatch.setattr("mediahub.video.enhance.is_stabilize_available", lambda: False)
+        ft = _footage_asset(tmp)
+        ft.media_meta["stabilize"] = True
+        res, why = self._resolve(tmp, store=FakeStore([ft]))
+        assert res is not None and why == ""
+        assert "-stab" not in res.video_src
+        assert res.cache_sig["stabilize"] == "unavailable"
+        assert res.provenance["stabilize"]["applied"] is False
+        assert res.provenance["stabilize"]["reason"] == "vidstab-unavailable"
+        assert footage_env["trims"][-1]["stabilize"] is False
+
+    def test_stabilize_folds_into_content_hash(self, footage_env):
+        """The stabilize cache_sig key changes the motion content hash; the
+        default cache_sig (no key) hashes byte-identically to before."""
+        from mediahub.visual import motion
+
+        tmp = footage_env["tmp"]
+        base, _ = self._resolve(tmp, store=FakeStore([_footage_asset(tmp)]))
+        assert "stabilize" not in base.cache_sig
+        # Same footage sig ± only the stabilize key isolates the fold.
+        stabbed_sig = {**base.cache_sig, "stabilize": "applied"}
+        h_plain = motion._content_hash({"footage": base.cache_sig}, kind="story")
+        h_stab = motion._content_hash({"footage": stabbed_sig}, kind="story")
+        assert h_plain == motion._content_hash({"footage": base.cache_sig}, kind="story")
+        assert h_plain != h_stab  # stabilize state re-keys the render
 
 
 # ---------------------------------------------------------------------------

@@ -40,6 +40,7 @@ import hashlib
 import json
 import logging
 import subprocess
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
@@ -204,8 +205,87 @@ def _cached_trim_window(
     return SimpleNamespace(**memo_payload["window"]), ""
 
 
+def _stabilize_in_place(exe: str, clip: Path) -> bool:
+    """Two-pass vidstab on an already-trimmed, already-scaled beat clip, in place.
+
+    Reuses the canonical vidstab settings from ``video/enhance.py`` (fixed
+    shakiness/accuracy/smoothing constants → deterministic: same clip yields the
+    same steadied file). The final encode preserves the OffthreadVideo contract
+    (``-an``, yuv420p, 1s GOP, faststart) that ``enhance``'s generic builder
+    omits. Temp files live beside the clip so the replace is an atomic same-fs
+    rename. Returns False on any failure — the caller then serves the plain trim.
+    """
+    from mediahub.video import enhance
+
+    try:
+        with tempfile.TemporaryDirectory(prefix="mh_vidstab_", dir=str(clip.parent)) as td:
+            trf = Path(td) / "transforms.trf"
+            steadied = Path(td) / "steadied.mp4"
+            detect = [
+                exe,
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-y",
+                *enhance.vidstabdetect_args(
+                    clip,
+                    trf,
+                    shakiness=enhance.DEFAULT_SHAKINESS,
+                    accuracy=enhance.DEFAULT_ACCURACY,
+                ),
+            ]
+            p1 = subprocess.run(detect, capture_output=True, text=True, timeout=300)
+            if p1.returncode != 0 or not trf.exists():
+                return False
+            transform = [
+                exe,
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-y",
+                "-i",
+                str(clip),
+                "-vf",
+                (
+                    f"vidstabtransform=input={trf}:"
+                    f"smoothing={enhance.DEFAULT_SMOOTHING}:optzoom=1,"
+                    "unsharp=5:5:0.5:3:3:0.0"
+                ),
+                "-an",
+                "-c:v",
+                "libx264",
+                "-preset",
+                "veryfast",
+                "-crf",
+                "20",
+                "-pix_fmt",
+                "yuv420p",
+                "-g",
+                "30",
+                "-keyint_min",
+                "30",
+                "-movflags",
+                "+faststart",
+                str(steadied),
+            ]
+            p2 = subprocess.run(transform, capture_output=True, text=True, timeout=300)
+            if p2.returncode != 0 or not steadied.exists() or steadied.stat().st_size < 1024:
+                return False
+            steadied.replace(clip)
+            return True
+    except Exception as e:
+        log.warning("footage stabilization failed for %s: %s", clip, e)
+        return False
+
+
 def _normalise_clip(
-    src: Path, out_path: Path, *, in_ms: int, out_ms: int, dims: tuple[int, int]
+    src: Path,
+    out_path: Path,
+    *,
+    in_ms: int,
+    out_ms: int,
+    dims: tuple[int, int],
+    stabilize: bool = False,
 ) -> bool:
     """FFmpeg-trim ``src`` [in_ms, out_ms) into a normalised beat clip.
 
@@ -214,6 +294,11 @@ def _normalise_clip(
     frame seeks are cheap and exact), faststart. Deterministic: same source
     bytes + window + dims → the same playable content. Returns False (and
     cleans up) on any failure — never a half-written clip.
+
+    ``stabilize`` (opt-in, off by default) adds a deterministic two-pass vidstab
+    finishing pass on the trimmed clip; the default path is byte-for-byte
+    unchanged. A stabilization failure fails the whole normalise (the caller
+    then falls back to the photo), never a half-steadied clip.
     """
     from mediahub.visual.reel_ffmpeg import ffmpeg_exe
 
@@ -256,6 +341,8 @@ def _normalise_clip(
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
         if proc.returncode != 0 or not tmp.exists() or tmp.stat().st_size < 1024:
             raise RuntimeError((proc.stderr or "").strip().splitlines()[-1:] or "empty output")
+        if stabilize and not _stabilize_in_place(exe, tmp):
+            raise RuntimeError("vidstab pass failed")
         tmp.replace(out_path)
         return True
     except Exception as e:
@@ -418,43 +505,74 @@ def _resolve_card_footage(
             return None, why
 
         dims = clip_scale_dims(asset.width or 1280, asset.height or 720)
-        clip_name = f"{fingerprint}-{best.start_ms}-{best.end_ms}.mp4"
+
+        # Opt-in, deterministic stabilization: a stored per-asset boolean, gated
+        # by the host FFmpeg actually having the vidstab filter. Off by default,
+        # so the clip filename, cache_sig, and provenance are all byte-identical
+        # for every clip that doesn't request it.
+        stab_req = bool(meta.get("stabilize"))
+        stab_applied = False
+        if stab_req:
+            from mediahub.video import enhance
+
+            stab_applied = enhance.is_stabilize_available()
+
+        clip_name = (
+            f"{fingerprint}-{best.start_ms}-{best.end_ms}"
+            f"{'-stab' if stab_applied else ''}.mp4"
+        )
         clip_path = footage_cache_dir() / clip_name
         if not (clip_path.exists() and clip_path.stat().st_size > 1024):
             if not _normalise_clip(
-                src, clip_path, in_ms=best.start_ms, out_ms=best.end_ms, dims=dims
+                src,
+                clip_path,
+                in_ms=best.start_ms,
+                out_ms=best.end_ms,
+                dims=dims,
+                stabilize=stab_applied,
             ):
                 return None, "ffmpeg-trim-failed-or-unavailable"
             prune_footage_cache()
 
         video_src = f"{FOOTAGE_CACHE_DIRNAME}/{clip_name}"
         window_sec = round((best.end_ms - best.start_ms) / 1000.0, 3)
+        cache_sig = {
+            "src": video_src,
+            "fingerprint": fingerprint,
+            "in_ms": best.start_ms,
+            "out_ms": best.end_ms,
+        }
+        provenance = {
+            "used": True,
+            "asset_id": asset.id,
+            "filename": asset.filename,
+            "in_ms": best.start_ms,
+            "out_ms": best.end_ms,
+            "moment": {
+                "score": round(best.score, 4),
+                "kind": best.kind,
+                "reason": best.reason,
+            },
+            "footage_score": round(footage_score, 3),
+            "photo_score": round(photo_score, 3),
+            "decision": "footage",
+            "rule": "footage plays when its selector score >= the photo's",
+        }
+        # Fold stabilization state only when it was requested, so the default
+        # (no-stabilize) footage card keeps its exact historic cache key.
+        if stab_req:
+            cache_sig["stabilize"] = "applied" if stab_applied else "unavailable"
+            provenance["stabilize"] = {
+                "requested": True,
+                "applied": stab_applied,
+                "reason": "" if stab_applied else "vidstab-unavailable",
+            }
         resolution = FootageResolution(
             video_src=video_src,
             video_start_sec=0.0,
             video_duration_sec=window_sec,
-            cache_sig={
-                "src": video_src,
-                "fingerprint": fingerprint,
-                "in_ms": best.start_ms,
-                "out_ms": best.end_ms,
-            },
-            provenance={
-                "used": True,
-                "asset_id": asset.id,
-                "filename": asset.filename,
-                "in_ms": best.start_ms,
-                "out_ms": best.end_ms,
-                "moment": {
-                    "score": round(best.score, 4),
-                    "kind": best.kind,
-                    "reason": best.reason,
-                },
-                "footage_score": round(footage_score, 3),
-                "photo_score": round(photo_score, 3),
-                "decision": "footage",
-                "rule": "footage plays when its selector score >= the photo's",
-            },
+            cache_sig=cache_sig,
+            provenance=provenance,
         )
         return resolution, ""
     return None, "no-usable-footage-for-athlete"
