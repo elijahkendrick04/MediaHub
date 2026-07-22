@@ -517,10 +517,8 @@ def _resolve_card_footage(
 
             stab_applied = enhance.is_stabilize_available()
 
-        clip_name = (
-            f"{fingerprint}-{best.start_ms}-{best.end_ms}"
-            f"{'-stab' if stab_applied else ''}.mp4"
-        )
+        stab_suffix = "-stab" if stab_applied else ""
+        clip_name = f"{fingerprint}-{best.start_ms}-{best.end_ms}{stab_suffix}.mp4"
         clip_path = footage_cache_dir() / clip_name
         if not (clip_path.exists() and clip_path.stat().st_size > 1024):
             if not _normalise_clip(
