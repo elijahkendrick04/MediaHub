@@ -19,11 +19,35 @@ import {
   EXTRA_SPRINGS,
 } from "./sprint/registry";
 import {
+  glyphRevealAt,
+  resolveStagger,
+  textFxGlyphAt,
+  textFxTrackingDeltaEm,
+  textFxUnitFor,
+  type StaggerConfig,
+  type TextFx,
+  type TextFxKind,
+} from "../motion/compile";
+import {
   PhotoFilterDefs,
   photoGradeFilterFor,
   photoHalftoneMaskFor,
 } from "./sprint/layers/photo_filters";
 import { StatChipsBlock } from "./sprint/sceneKit";
+import { Dither } from "./Dither";
+
+// true-motion-blur (opt-in): the shutter-accumulation config Python resolves from
+// MEDIAHUB_MOTION_BLUR. `.optional()` (absent => undefined) is the inert default,
+// so a card/reel rendered without it takes the exact current, unwrapped code path
+// (byte-identical). When present, the composition wraps ONLY the settling moving
+// layers (story hero/result entrance + count-up, reel whip flick) in the
+// frame-pure MotionBlurSampler below. Shared/exported so MeetReel folds the same
+// shape into its reel-level prop.
+export const motionBlurSchema = z.object({
+  samples: z.number().default(8),
+  shutter: z.number().default(180),
+});
+export type MotionBlur = z.infer<typeof motionBlurSchema>;
 
 // Exported for MeetReel: ONE schema for a card's props on both compositions,
 // so a field added here can never be silently zod-stripped on the reel path.
@@ -37,6 +61,10 @@ export const cardSchema = z.object({
   meetName: z.string().default(""),
   place: z.string().default(""),
   variationSeed: z.number().default(0),
+  // Entrance-stagger scale (0 = unset → the fixed default delays). >1 loosens
+  // the importance separation, <1 tightens it; only the token-compiled entrance
+  // intents (drop_in / rise / pop) consume it.
+  staggerScale: z.number().default(0),
   // Path A/B variation axes — every field is optional. Empty strings
   // fall back to the variationSeed-driven behaviour, so legacy callers
   // that haven't been updated keep producing the same output they did
@@ -89,6 +117,19 @@ export const cardSchema = z.object({
   // transform-origin at the saliency focus, multiplying into the cinematic
   // push-in. 0 = no crop zoom (byte-identical).
   photoScale: z.number().default(0),
+  // transform-sampling (AE-gap): opt-in per-photo resample-quality hint for the
+  // transform-scaled athlete photos. 0 (default) = untouched, byte-identical.
+  // > 0 pins imageRendering:'auto' on the scaled <img> so the compositor uses
+  // high-quality interpolation (never crisp/pixelated) when photoScale zooms in.
+  // Deliberately NOT a geometry prescale: rendering the <img> at 100·ss %% with
+  // an inverse scale(1/ss) does NOT create a real supersampled backing store
+  // under renderMedia's default scale:1 (Chromium rasters the shrunk layer at
+  // display resolution) and it doubles the seeded camera drift / shifts the
+  // crop-wrapper origin — a visual regression for zero sharpness gain. The
+  // GUARANTEED dense-buffer path is the whole-composition MEDIAHUB_MOTION_
+  // SUPERSAMPLE (renderMedia scale× + Lanczos downscale), already shipped; this
+  // knob is an honestly-scoped best-effort hint recorded as such in the manifest.
+  photoSupersample: z.number().default(0),
   // M12 layered-depth twins: the brief's decoration_strength for the
   // role-coloured cutout depth filter. Only attached when non-default, so the
   // schema default mirrors the still's 0.5 fallback.
@@ -116,6 +157,19 @@ export const cardSchema = z.object({
   // keeps v1 briefs byte-identical.
   washTint: z.string().default(""),
   washMix: z.number().default(0),
+  // stylize-richer — three held pure-SVG photo looks, each rebuilt byte-for-byte
+  // from the still's _v2_photo_treatment_assets: mosaicBlock = feMorphology
+  // dilate radius; motionTileGrid = the static feTile replicate grid N;
+  // roughenSeed + roughenScale = the held feTurbulence integer seed (derived
+  // from the shared variation_signature) + feDisplacementMap scale.
+  // treatmentIntensity = the resolved 0..1 grade strength (informational; -1 =
+  // unset). 0 / -1 on all of them (the defaults) = no stylize look, so every
+  // untreated / legacy card renders byte-identically.
+  mosaicBlock: z.number().default(0),
+  motionTileGrid: z.number().default(0),
+  roughenSeed: z.number().default(0),
+  roughenScale: z.number().default(0),
+  treatmentIntensity: z.number().default(-1),
   // E6 style-pack ground focus — the resolved saliency focus [fx, fy] in
   // percent, recentring the vignette/spotlight ground ellipse on the subject.
   // null (photo-less cards / non-subject grounds) keeps the fixed centre,
@@ -170,9 +224,32 @@ export const cardSchema = z.object({
   // The motion pack layer paints the same shape at a fixed overlap-safe corner.
   // Empty = no overlap accent (bare/legacy card), byte-equivalent.
   overlapAccent: z.string().default(""),
+  // blend-modes (still parity): the seeded, mood-biased texture composite blend
+  // mode (a lightening-family CSS mix-blend value, e.g. "screen"). Empty (the
+  // default) keeps the hard-coded "overlay" composite — byte-equivalent to the
+  // pre-blend-modes render. Set only when the still opted into seeded_blend.
+  textureBlend: z.string().default(""),
   // The design-spec director's motion language for this card
   // (design_spec.MOTION_INTENTS). Empty = the mood/seed default programme.
   motionIntent: z.string().default(""),
+  // Text reveal granularity for the type-carried intents (kinetic_type /
+  // cascade). "word" (the default) keeps the byte-identical per-word reveal;
+  // "glyph" opts a card into the per-character reveal channel. Set ONLY by
+  // motion.py's deterministic seed gate (never a director/LLM field), and only
+  // for those two intents — so every other card keeps a byte-identical payload.
+  textGranularity: z.enum(["word", "glyph"]).default("word"),
+  // text-fx-richer: the closed-enum entrance text animator for the type-carried
+  // intents (kinetic_type / cascade). "" (the default) is OFF — byte-identical
+  // to today. The four presets are frame-pure, seeded, and resolve to the still
+  // (blur 0 / baseline tracking / wiggle 0) within GLYPH_BUDGET_SEC. Set ONLY by
+  // motion.py's deterministic seed gate under MEDIAHUB_TEXT_FX, and only on a
+  // glyph-mode eligible card (the same seed%2==1 gate that sets textGranularity
+  // "glyph"), so a per-glyph animator only ever attaches when perGlyph is true.
+  // A closed enum + a sole trusted producer (Python) — no operator string, no
+  // eval — so no untrusted value ever reaches the animator switch.
+  textAnimator: z
+    .enum(["", "blur_reveal", "track_in", "wiggle_settle", "word_rise_blur"])
+    .default(""),
   // Resolved still-parity colour roles: the exact APCA-gated hexes the
   // card's still graphic painted (medal tint included), resolved by the
   // deterministic Python resolver. Empty strings = seed-permutation
@@ -181,6 +258,15 @@ export const cardSchema = z.object({
   roleSurface: z.string().default(""),
   roleAccent: z.string().default(""),
   roleOnGround: z.string().default(""),
+  // alpha-export: when true this card is being rendered for a transparent-
+  // background compositing export, so the outermost full-bleed ground fill
+  // (backgroundColor + any full-bleed meshBg) is SUPPRESSED — alpha is only
+  // meaningful when the ground is not painted. Everything else (scene content,
+  // text, chips, photo, StylePack/sprint layers) renders unchanged over the
+  // transparency. Set ONLY by motion.py on the opt-in alpha path; the default
+  // false keeps the DOM byte-identical (the ground fill paints exactly as
+  // before). A pure boolean read — no frame-impure sampling.
+  transparentBg: z.boolean().default(false),
   // F9 medal chrome (still parity): the resolved specular ramp CSS
   // (linear-gradient(...)). roleMedalRamp fills the bevelled result chip;
   // roleMedalNumeralRamp is the gate-passing twin that gradient-clips the mega
@@ -200,6 +286,12 @@ export const cardSchema = z.object({
   // Painted on the composition root beneath every content layer, exactly the
   // still's ground override. Empty = the flat roles.ground (byte-identical).
   meshBg: z.string().default(""),
+  // render-banding-dither: when true the card opted into the ordered-dither
+  // debanding overlay (a static Bayer tile composited mix-blend "overlay" over
+  // the ground fill), mirroring the still's sprint_hooks/dither_bg layer. Set
+  // ONLY by motion.py when the still's background_style == "dither"; the default
+  // false keeps the render byte-identical (no <Dither> layer mounts).
+  dither: z.boolean().default(false),
   // D8 (Canva gap analysis): the still's density/mood-coherent supporting weight
   // register (kicker/meta/data over the shipped variable axes), mirrored from
   // render.py so the reel's labels/meta/data carry the same weights the still
@@ -221,7 +313,36 @@ export const cardSchema = z.object({
   frameTornFreq: z.number().default(0),
   frameTornScale: z.number().default(0),
   frameTornSeed: z.number().default(0),
+  // blur-family: the develop-in focus-blur variant motion.py picked for a
+  // legacy-animated graded photo card ("directional" | "radial" | "lens").
+  // "" (and "gaussian") keep today's isotropic blur() focus-in, byte-identical;
+  // photo_filters.tsx renders the animated SVG <filter> only for a real value.
+  focusBlurStyle: z.string().default(""),
+  // per-effect-toggle (REVIEW-ONLY A/B): a sorted list of decorative axes to
+  // suppress for a with/without comparison render. Set ONLY by motion.py's
+  // review_ab path — a shipped card never carries it, so the still it mirrors
+  // stays in parity. An empty array (the default) means every gate passes, so
+  // the scene is byte-identical to a card that never learned about toggles.
+  // The allowlist is decorative-only (background_pattern / motion_intent /
+  // accent / style_pack / sprint_layers / mesh_bg / overlap_accent / cutout /
+  // text_fx);
+  // legibility layers (photo scrims/filters, burn-in captions) are never
+  // toggleable, so no toggle can drop a text/bg pair below its APCA gate.
+  effectsDisabled: z.array(z.string()).default([]),
+  // true-motion-blur (opt-in, STORY path): the shutter-accumulation config for
+  // this card's own render. Absent (the default) => no wrapper is inserted and the
+  // scene renders verbatim (byte-identical). Set ONLY by motion.py under
+  // MEDIAHUB_MOTION_BLUR. On the REEL path the beats' cards NEVER carry this (so
+  // cards_props stays byte-identical); the reel supplies it via a dedicated
+  // top-level `motionBlur` prop on <StoryCard> instead (read below as a fallback).
+  motionBlur: motionBlurSchema.optional(),
 });
+
+// per-effect-toggle: a pure membership test over a card's disabled-axis list.
+// Frame-independent (reads only the static prop array), so every gate keyed off
+// it stays frame-pure and — with the default empty array — a no-op.
+const effectOff = (card: { effectsDisabled?: string[] }, key: string): boolean =>
+  (card.effectsDisabled || []).includes(key);
 
 const brandSchema = z.object({
   primary: z.string().default("#0A2540"),
@@ -243,11 +364,122 @@ type BrandProps = Props["brand"];
 export type Roles = { ground: string; surface: string; accent: string; onGround: string };
 
 // D8 (Canva gap analysis) — fontVariationSettings for a supporting-register
-// weight (kicker/meta/data) mirrored from the still's --mh-wght-* vars. A 0 (the
-// still did not spend the register) omits the setting, so the scene keeps its
-// static fontWeight and renders byte-identically to the pre-D8 reel.
-function wghtFvs(weight: number | undefined): React.CSSProperties {
-  return weight && weight > 0 ? { fontVariationSettings: `'wght' ${Math.round(weight)}` } : {};
+// weight (kicker/meta/data) mirrored from the still's --mh-wght-* vars, now
+// animated by a frame-pure weight *bloom* (varfont-animation). The register
+// enters transiently lighter and blooms UP to the still's exact static target,
+// landing there by ~20% of the beat (see wghtBloomAt) and holding it for the
+// rest of the clip. Because the held/terminal value equals the still's static
+// weight, still↔motion parity is preserved (parity samples the resolved state).
+// A 0/undefined weight (the still did not spend the register) omits the setting
+// entirely — that inactive path is byte-identical to the pre-animation reel.
+//
+// Start-weight note (varfont-animation adversarial correction): startW clamps
+// to 100, the ABSOLUTE minimum of the wght axis — NOT a guaranteed per-face
+// floor. The DATA register hard-codes JetBrains Mono (min 100) so its bloom
+// spans the full range. But the KICKER (LabelChip) and META (BottomStrip)
+// registers set no fontFamily and inherit the card-root fontStack
+// (fontStackFor(typographyPair)), which can resolve to Space Grotesk (min
+// wght 300), Playfair Display (min 400), or a STATIC display face
+// (Anton/Bebas/Bowlby, no wght axis at all). For those faces the browser
+// DETERMINISTICALLY clamps the axis to the face's own floor, so the bloom is
+// simply shallower — or, on a static face, a no-op. This stays fully frame-pure
+// and parity-safe: the held target is unchanged and the browser clamp is
+// deterministic per face, never random.
+export function wghtFvs(weight: number | undefined, bloom = 1): React.CSSProperties {
+  if (!weight || weight <= 0) {
+    return {};
+  }
+  const target = Math.round(weight);
+  const startW = Math.max(100, target - 220);
+  const w = Math.round(startW + (target - startW) * Math.min(1, Math.max(0, bloom)));
+  return { fontVariationSettings: `'wght' ${w}` };
+}
+
+// varfont-animation — the shared 0→1 weight-bloom curve. Exported so sceneKit's
+// data register computes the IDENTICAL curve as the StoryCard kicker/meta
+// registers (both compositions share one animation). Frame-pure: an interpolate
+// over useCurrentFrame() with clamped extrapolation and a fixed easing, using
+// the same off-frame-0 proportional keyframe helper (`3 + (durationInFrames -
+// 3) * f`) as animProgram so it stays correct for any clip length. No
+// Math.random / Date.now / new Date.
+export function wghtBloomAt(frame: number, durationInFrames: number): number {
+  const at = (f: number) => 3 + (durationInFrames - 3) * f;
+  return interpolate(frame, [at(0.0), at(0.2)], [0, 1], {
+    extrapolateLeft: "clamp",
+    extrapolateRight: "clamp",
+    easing: Easing.out(Easing.cubic),
+  });
+}
+
+// transform-sampling (AE-gap): honest, framing-neutral resample hint for a
+// transform-scaled athlete photo. When the caller has NOT opted in (ss <= 0, the
+// schema default) this returns the SAME style object it was given — reference-
+// identical, so React serialises the inline style byte-for-byte as today and
+// every existing render keeps its cache key. When opted in (ss > 0) it pins
+// imageRendering:'auto' so the compositor never falls back to a crisp/pixelated
+// sample of the up-scaled photo. It deliberately does NOT rewrite the geometry:
+// the "render at 100·ss %% then scale(1/ss)" trick does not produce a real
+// supersampled backing store under renderMedia's default scale:1 (Chromium
+// rasters the shrunk layer at display resolution) and it would double the seeded
+// camera drift and shift the crop-wrapper origin — a mis-frame for no sharpness
+// win. The guaranteed dense-buffer path stays the whole-composition motion
+// supersample; this is the honestly-scoped per-photo hint. Pure: no frame /
+// random / time input, so the render stays a pure function of useCurrentFrame().
+export function supersampledImgStyle(
+  base: React.CSSProperties,
+  ss: number,
+): React.CSSProperties {
+  if (!ss || ss <= 0) {
+    return base;
+  }
+  return { ...base, imageRendering: "auto" };
+}
+
+// text-fx-richer: the identity per-unit offset every non-opted intent carries,
+// so KineticLine's fx guards see all-zero terms and emit the pre-fx DOM
+// byte-for-byte. A module const (stable reference) mirroring identityWord /
+// identityGlyph.
+const identityFx = (): TextFx => ({ blur: 0, dx: 0, dy: 0, rotate: 0 });
+
+// text-fx-richer: a span transform carrying the base translateY PLUS any
+// non-zero fx offset. Every fx term 0 => exactly `translateY(${y}px)` — the
+// pre-fx string — so the OFF/held span DOM is byte-identical.
+function fxTransform(y: number, fx: TextFx): string {
+  let t = `translateY(${fx.dy !== 0 ? y + fx.dy : y}px)`;
+  if (fx.dx !== 0) {
+    t += ` translateX(${fx.dx}px)`;
+  }
+  if (fx.rotate !== 0) {
+    t += ` rotate(${fx.rotate}deg)`;
+  }
+  return t;
+}
+
+// text-fx-richer: fold the track_in em delta into a line's letter-spacing. A
+// delta of 0 (every OFF/held frame) returns the SAME style object reference, so
+// React serialises byte-identical props and the line's cache key is unchanged.
+function withLineTracking(
+  style: React.CSSProperties,
+  deltaEm: number,
+): React.CSSProperties {
+  if (deltaEm === 0) {
+    return style;
+  }
+  const baseLS = style.letterSpacing;
+  const ls =
+    baseLS == null || baseLS === ""
+      ? `${deltaEm}em`
+      : typeof baseLS === "number"
+        ? `calc(${baseLS}px + ${deltaEm}em)`
+        : `calc(${baseLS} + ${deltaEm}em)`;
+  return { ...style, letterSpacing: ls };
+}
+
+// text-fx-richer: true only when at least one fx geometry term is active, i.e.
+// the span needs the fx style branch. Every term 0 (OFF / held) => false => the
+// pre-fx style object, byte-identical.
+function fxActive(fx: TextFx): boolean {
+  return fx.blur > 0 || fx.dx !== 0 || fx.dy !== 0 || fx.rotate !== 0;
 }
 
 // Six palette role permutations — mirror creative_brief/generator.py
@@ -429,8 +661,39 @@ export type AnimChannels = {
   // Numeric count-up progress for the result value (count_up intent).
   // 1 everywhere else, so every other programme renders the verbatim text.
   resultProgress: number;
+  // Typewriter/scramble "decode" progress for the result string (text_scramble
+  // intent). 1 = identity (the verbatim value); <1 drives the length-preserving
+  // left-to-right scramble decode. 1 everywhere else, so every other programme
+  // (all 8 core + every existing sprint intent) renders the verbatim text and
+  // stays byte-identical.
+  textRevealProgress: number;
   // Per-word staggered reveal (kinetic_type); identity elsewhere.
   wordAt: (index: number) => { y: number; opacity: number };
+  // Per-glyph staggered reveal (kinetic_type / cascade under the seed gate);
+  // identity elsewhere. `index` is the running glyph index within a line and
+  // `total` the line's glyph count — both feed the seeded ORDER × SHAPE range
+  // selector so glyphs can reveal in reverse / centre-out / seeded order. Only
+  // invoked when a card opts into glyph-level text (card.textGranularity ===
+  // "glyph"), so word-mode DOM is byte-identical whatever this channel holds.
+  glyphAt: (index: number, total: number) => { y: number; opacity: number };
+  // varfont-animation — 0→1 weight-bloom progress for the supporting registers
+  // (kicker/meta/data). wghtFvs blooms the register's variable wght axis UP from
+  // a transiently-lighter start to the still's exact static target, landing by
+  // ~20% of the beat and holding 1 for the rest of the clip. The terminal value
+  // equals the still weight, so still↔motion parity holds; register-absent cards
+  // (weight 0) take wghtFvs's unchanged `{}` branch and never read this.
+  wghtBloom: number;
+  // text-fx-richer (opt-in): the closed-enum entrance animator's grouping unit
+  // plus its frame-pure per-unit offset and line-level tracking delta. `fxUnit
+  // === ""` (every non-opted intent, the default) makes KineticLine take its
+  // exact pre-fx paint path, so the OFF DOM is byte-identical; and every
+  // animator's terminal state is identity (blur 0 / tracking 0 / no residual
+  // transform) within GLYPH_BUDGET_SEC, so the held frame equals the still.
+  // `glyphFx(index, total)` is called with the unit index/count at `fxUnit`'s
+  // grouping level (glyph index for glyph animators, word index for word ones).
+  fxUnit: "" | "glyph" | "word" | "line";
+  glyphFx: (index: number, total: number) => TextFx;
+  trackingDeltaEm: number;
 };
 
 // The nine executable intents. Kept in lock-step with
@@ -493,12 +756,18 @@ function animProgram(
   fps: number,
   durationInFrames: number,
   seed: number,
+  stagger?: StaggerConfig,
+  animator: string = "",
 ): AnimChannels {
   const moodSpring = springConfigFor(mood);
   const clampRight = { extrapolateRight: "clamp" as const };
   // Identity word reveal: the parent line owns motion + opacity, so a word
   // contributes nothing extra (no double-applied fades).
   const identityWord = () => ({ y: 0, opacity: 1 });
+  // Identity glyph reveal — same contract for the per-character channel. Every
+  // intent inherits this (via `...base`) so glyph-mode is a no-op unless the
+  // intent replaces it (kinetic_type below; cascade in its sprint module).
+  const identityGlyph = () => ({ y: 0, opacity: 1 });
 
   // M19 — beat-proportional choreography. Keyframes are FRACTIONS of the
   // clip so a 4s reel beat and a 6s story distribute the same build →
@@ -548,7 +817,18 @@ function animProgram(
     resolveAccent: resolvePulse,
     resolveAccentKind,
     resultProgress: 1,
+    textRevealProgress: 1,
     wordAt: identityWord,
+    glyphAt: identityGlyph,
+    // varfont-animation — every intent spreads ...base, so all inherit the
+    // supporting-register weight bloom for free. Same curve sceneKit uses.
+    wghtBloom: wghtBloomAt(frame, durationInFrames),
+    // text-fx-richer — identity by default; `withTextFx` (applied on the way
+    // out of every branch) replaces these ONLY when an animator is active, so
+    // every non-opted intent stays byte-identical.
+    fxUnit: "",
+    glyphFx: identityFx,
+    trackingDeltaEm: 0,
   };
 
   // Kind-specific execution of the resolve accent that lives in the shared
@@ -560,9 +840,30 @@ function animProgram(
       ? { ...ch, resultScale: ch.resultScale * (1 + 0.04 * ch.resolveAccent) }
       : ch;
 
+  // text-fx-richer: attach the closed-enum entrance animator's channels ONLY
+  // when one is active. When `animator === ""` the SAME channel object is
+  // returned reference-unchanged (like supersampledImgStyle's early return), so
+  // React serialises byte-identical props and every existing cache key holds.
+  // Applied on the way out of every branch (via `finish`), incl. the sprint
+  // default case, so a sprint intent (cascade) inherits it too.
+  const withTextFx = (ch: AnimChannels): AnimChannels => {
+    if (!animator) {
+      return ch;
+    }
+    const kind = animator as TextFxKind;
+    return {
+      ...ch,
+      fxUnit: textFxUnitFor(kind),
+      glyphFx: (index: number, total: number) =>
+        textFxGlyphAt(kind, index, total, frame, fps, seed),
+      trackingDeltaEm: textFxTrackingDeltaEm(kind, frame, fps),
+    };
+  };
+  const finish = (ch: AnimChannels): AnimChannels => withTextFx(withResolveAccent(ch));
+
   switch (intent) {
     case "fade_in": {
-      return withResolveAccent({
+      return finish({
         ...base,
         heroY: 0,
         heroOpacity: interpolate(frame, [at(0.0), at(0.115)], [0, 1], clampRight),
@@ -580,7 +881,7 @@ function animProgram(
         fps,
         config: { damping: 9, stiffness: 220, mass: 0.5 },
       });
-      return withResolveAccent({
+      return finish({
         ...base,
         heroY: interpolate(snap, [0, 1], [90, 0]),
         heroOpacity: interpolate(frame, [at(0.0), at(0.035)], [0, 1], clampRight),
@@ -594,7 +895,7 @@ function animProgram(
         ...clampRight,
         easing: Easing.out(Easing.cubic),
       });
-      return withResolveAccent({
+      return finish({
         ...base,
         heroY: eased * 240,
         heroOpacity: interpolate(frame, [at(0.0), at(0.085)], [0, 1], clampRight),
@@ -605,7 +906,7 @@ function animProgram(
     }
     case "scale_in": {
       const grow = spring({ frame, fps, config: moodSpring });
-      return withResolveAccent({
+      return finish({
         ...base,
         heroY: 0,
         heroOpacity: interpolate(frame, [at(0.0), at(0.07)], [0, 1], clampRight),
@@ -617,7 +918,7 @@ function animProgram(
     }
     case "crossfade": {
       // Layered opacity beats, no movement: hero → secondary → result → chrome.
-      return withResolveAccent({
+      return finish({
         ...base,
         heroY: 0,
         heroOpacity: interpolate(frame, [at(0.0), at(0.085)], [0, 1], clampRight),
@@ -630,7 +931,7 @@ function animProgram(
     case "kinetic_type": {
       // Per-word staggered reveal — the type itself carries the energy.
       // The hero line's block opacity is 1; each word owns its reveal.
-      return withResolveAccent({
+      return finish({
         ...base,
         heroY: 0,
         heroOpacity: 1,
@@ -656,6 +957,12 @@ function animProgram(
             ),
           };
         },
+        // Per-glyph reveal for cards that opted into glyph granularity. Seeded
+        // ORDER × SHAPE ranking + clamped in the shared helper so held headline
+        // glyphs always clear the APCA floor before the hold phase whatever the
+        // ordering (see motion/compile.ts + sprint/rangeSelector.ts).
+        glyphAt: (i: number, total: number) =>
+          glyphRevealAt(i, total, frame, fps, seed, mood),
       });
     }
     case "parallax": {
@@ -663,7 +970,7 @@ function animProgram(
       // photo keeps its stronger dual-rate push (no extra lateral drift on
       // top; the depth split IS this intent's camera language).
       const drift = interpolate(frame, [0, durationInFrames], [0, 60]);
-      return withResolveAccent({
+      return finish({
         ...base,
         bgDrift: drift,
         photoScale: interpolate(frame, [0, durationInFrames], [1.0, 1.07]),
@@ -676,7 +983,7 @@ function animProgram(
       // settles — with a small confirmation pulse — on the exact verified
       // value, which then holds for the rest of the clip. A calm fade
       // programme carries the layers around it.
-      return withResolveAccent({
+      return finish({
         ...base,
         heroY: 0,
         heroOpacity: interpolate(frame, [at(0.0), at(0.085)], [0, 1], clampRight),
@@ -698,8 +1005,10 @@ function animProgram(
     case "static": {
       // Everything present from frame 0 — the card IS the statement. The
       // photo is genuinely still too (stillness as a choice), and no resolve
-      // accent fires.
-      return {
+      // accent fires. `withTextFx` is a no-op here (static is never an animator
+      // intent, so `animator === ""` returns the reference unchanged), kept for
+      // uniformity with the other branches.
+      return withTextFx({
         heroY: 0,
         heroOpacity: 1,
         heroScale: 1,
@@ -714,16 +1023,25 @@ function animProgram(
         resolveAccent: 0,
         resolveAccentKind: "none",
         resultProgress: 1,
+        textRevealProgress: 1,
         wordAt: identityWord,
-      };
+        glyphAt: identityGlyph,
+        // static: everything is present from frame 0, so the register holds its
+        // terminal (still-parity) weight — no bloom, consistent with the intent.
+        wghtBloom: 1,
+        // text-fx-richer — identity (animator never applies to a static card).
+        fxUnit: "",
+        glyphFx: identityFx,
+        trackingDeltaEm: 0,
+      });
     }
     default: {
       // Sprint intents (R1.1) register their own file under sprint/intents/.
       // They spread ...base, so the M15 photo camera and M19 resolve accent
       // ride along unless a sprint intent deliberately overrides them.
       const extra = EXTRA_INTENTS[intent];
-      return withResolveAccent(
-        extra ? extra(frame, fps, durationInFrames, mood, base) : base,
+      return finish(
+        extra ? extra(frame, fps, durationInFrames, mood, base, stagger, seed) : base,
       );
     }
   }
@@ -1000,6 +1318,88 @@ function countUpDisplay(text: string, progress: number): string {
   return text;
 }
 
+// Charset the scramble picks unsettled glyphs from — uppercase A-Z + 0-9 only,
+// every one of which the heavy display faces (Anton/Bebas/Bowlby) carry, so no
+// scramble frame ever hits a missing-glyph fallback. Spaces/punctuation are
+// never scrambled (they pass through), so the string's shape holds throughout.
+const SCRAMBLE_CHARSET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+// How many discrete scramble "flips" an unsettled position cycles through over
+// the whole decode. Quantising progress to an integer tick makes the scramble
+// advance in stable, re-render-identical steps (frame-pure, no time source).
+const SCRAMBLE_CYCLES = 6;
+
+// Deterministic 32-bit hash of (seed, position, tick) — frame-pure, no
+// randomness. Same mix as motion/compile.ts:glyphHash, extended with the tick
+// so a position's decoy glyph advances deterministically as progress ticks.
+function scrambleHash(seed: number, pos: number, tick: number): number {
+  let x =
+    (Math.imul(seed | 0, 73856093) ^
+      Math.imul(pos | 0, 19349663) ^
+      Math.imul(tick | 0, 83492791)) >>>
+    0;
+  x = Math.imul(x ^ (x >>> 13), 0x5bd1e995) >>> 0;
+  return (x ^ (x >>> 15)) >>> 0;
+}
+
+// Deterministic typewriter/scramble "decode" of the result string for the
+// text_scramble intent. Length-preserving and in-place: every character
+// position is present from frame 0 (no growth → no autofit reflow of the
+// APCA-sized text box), and position `i` settles onto its TRUE glyph once
+// `progress >= (i+1)/len` (left-to-right typewriter order). Unsettled
+// alphanumeric positions show a decoy glyph from SCRAMBLE_CHARSET chosen by a
+// hash of (seed, i, quantised-progress-tick); spaces and punctuation always
+// pass through so the shape reads. Pure function of (text, progress, seed):
+// `progress` is frame-derived (interpolate in the sprint intent) and glyph
+// choice uses only the integer hash above — never Math.random/Date.now/new
+// Date. The `progress >= 1 || !text` guard makes it land on the EXACT verified
+// string (mirrors countUpDisplay's verbatim guard), so it always resolves to
+// the verified value — never an invented one.
+function scrambleReveal(text: string, progress: number, seed: number): string {
+  if (progress >= 1 || !text) {
+    return text;
+  }
+  const p = Math.max(0, progress);
+  const len = text.length;
+  // Quantise progress to a stable per-decode tick so decoy glyphs step in
+  // discrete, re-render-identical increments rather than flickering per frame.
+  const tick = Math.floor(p * len * SCRAMBLE_CYCLES);
+  let out = "";
+  for (let i = 0; i < len; i++) {
+    const ch = text[i];
+    // Left-to-right settle: position i shows its true glyph once progress has
+    // reached its slot. Non-alphanumeric glyphs (space, ":", ".", "—") always
+    // pass through so the value's shape is preserved during the decode.
+    const settled = p >= (i + 1) / len;
+    const isAlnum =
+      (ch >= "A" && ch <= "Z") ||
+      (ch >= "a" && ch <= "z") ||
+      (ch >= "0" && ch <= "9");
+    if (settled || !isAlnum) {
+      out += ch;
+    } else {
+      const h = scrambleHash(seed, i, tick);
+      out += SCRAMBLE_CHARSET[h % SCRAMBLE_CHARSET.length];
+    }
+  }
+  return out;
+}
+
+// Router for the single reveal-driven result string threaded into ctx.result:
+// when a card opts into the text_scramble decode (textRevealProgress < 1) it
+// runs the scramble; otherwise it is the numeric count-up verbatim. For every
+// existing intent textRevealProgress === 1, so this is countUpDisplay(text,
+// resultProgress) exactly — byte-identical, no behaviour change.
+function revealResult(
+  text: string,
+  resultProgress: number,
+  textRevealProgress: number,
+  seed: number,
+): string {
+  return textRevealProgress < 1
+    ? scrambleReveal(text, textRevealProgress, seed)
+    : countUpDisplay(text, resultProgress);
+}
+
 // A5 (Canva gap analysis) parity — kern the result numeral's intra-numeric
 // separators exactly as the still's render._kern_numeric_seps / _SEP_CSS do:
 // every "." / ":" that sits BETWEEN two digits (the same `(?<=\d)[.:](?=\d)`
@@ -1075,30 +1475,103 @@ function placeDisplay(place: string): string {
 }
 
 // Staggered word row used by the kinetic_type-aware hero/poster scenes.
+// `perGlyph` (threaded from card.textGranularity === "glyph") splits each word
+// into per-character inline-block spans driven by `anim.glyphAt`; when
+// false/absent the DOM is byte-identical to the pre-glyph word structure.
 const KineticLine: React.FC<{
   text: string;
   anim: AnimChannels;
   style: React.CSSProperties;
   startIndex?: number;
-}> = ({ text, anim, style, startIndex = 0 }) => {
+  perGlyph?: boolean;
+}> = ({ text, anim, style, startIndex = 0, perGlyph = false }) => {
   const parts = words(text);
   if (parts.length === 0) {
     return null;
   }
+  // text-fx-richer: which grouping level (if any) the active animator paints at.
+  // "" for every non-opted card, so both guarded branches below take their exact
+  // pre-fx path. `track_in` (line unit) rides the outer div's letter-spacing in
+  // BOTH branches; `word_rise_blur` (word unit) the per-word wrapper span; the
+  // per-glyph animators the inner glyph span (glyph mode only). Every fx guard
+  // falls through to the pre-fx style object when the fx term is 0, so the
+  // OFF/held DOM is byte-identical.
+  const glyphUnit = anim.fxUnit === "glyph";
+  const wordUnit = anim.fxUnit === "word";
+  if (perGlyph) {
+    // Keep the per-word wrapper span (so the 0.28em inter-word gap is preserved
+    // exactly), but reveal each character on its own glyph channel with a
+    // running index carried across words from the line's glyph base.
+    let glyph = startIndex;
+    const lineTotal = parts.reduce((n, w) => n + Array.from(w).length, 0);
+    return (
+      <div style={withLineTracking(style, anim.trackingDeltaEm)}>
+        {parts.map((w, wi) => {
+          const chars = Array.from(w);
+          const base = glyph;
+          glyph += chars.length;
+          const wordFx = wordUnit ? anim.glyphFx(wi, parts.length) : null;
+          const wordStyle: React.CSSProperties =
+            wordFx && fxActive(wordFx)
+              ? {
+                  display: "inline-block",
+                  marginRight: "0.28em",
+                  transform: fxTransform(0, wordFx),
+                  ...(wordFx.blur > 0 ? { filter: `blur(${wordFx.blur}px)` } : {}),
+                }
+              : { display: "inline-block", marginRight: "0.28em" };
+          return (
+            <span key={`${w}-${wi}`} style={wordStyle}>
+              {chars.map((ch, ci) => {
+                const a = anim.glyphAt(base + ci, lineTotal);
+                const fx = glyphUnit ? anim.glyphFx(base + ci, lineTotal) : null;
+                const glyphStyle: React.CSSProperties =
+                  fx && fxActive(fx)
+                    ? {
+                        display: "inline-block",
+                        transform: fxTransform(a.y, fx),
+                        opacity: a.opacity,
+                        ...(fx.blur > 0 ? { filter: `blur(${fx.blur}px)` } : {}),
+                      }
+                    : {
+                        display: "inline-block",
+                        transform: `translateY(${a.y}px)`,
+                        opacity: a.opacity,
+                      };
+                return (
+                  <span key={ci} style={glyphStyle}>
+                    {ch}
+                  </span>
+                );
+              })}
+            </span>
+          );
+        })}
+      </div>
+    );
+  }
   return (
-    <div style={style}>
+    <div style={withLineTracking(style, anim.trackingDeltaEm)}>
       {parts.map((w, i) => {
         const a = anim.wordAt(startIndex + i);
+        const fx = wordUnit ? anim.glyphFx(i, parts.length) : null;
+        const spanStyle: React.CSSProperties =
+          fx && fxActive(fx)
+            ? {
+                display: "inline-block",
+                transform: fxTransform(a.y, fx),
+                opacity: a.opacity,
+                marginRight: "0.28em",
+                ...(fx.blur > 0 ? { filter: `blur(${fx.blur}px)` } : {}),
+              }
+            : {
+                display: "inline-block",
+                transform: `translateY(${a.y}px)`,
+                opacity: a.opacity,
+                marginRight: "0.28em",
+              };
         return (
-          <span
-            key={`${w}-${i}`}
-            style={{
-              display: "inline-block",
-              transform: `translateY(${a.y}px)`,
-              opacity: a.opacity,
-              marginRight: "0.28em",
-            }}
-          >
+          <span key={`${w}-${i}`} style={spanStyle}>
             {kernNumeric(w)}
           </span>
         );
@@ -1180,25 +1653,28 @@ const PhotoLayer: React.FC<{ ctx: SceneCtx; scrim?: "bottom" | "full" }> = ({
     <img
       src={card.photoSrc}
       alt=""
-      style={{
-        position: "absolute",
-        inset: 0,
-        width: "100%",
-        height: "100%",
-        objectFit: "cover",
-        objectPosition: card.photoPos || "center 28%",
-        // M15 — the seed-chosen camera move: slow push plus (for the drift
-        // variants) a lateral travel in % of the photo's own box, small
-        // enough that the saliency framing always holds.
-        transform: `translate(${anim.photoDriftX}%, ${anim.photoDriftY}%) scale(${anim.photoScale})`,
-        ...(grade ? { filter: grade } : {}),
-        ...(mask ?? {}),
-      }}
+      style={supersampledImgStyle(
+        {
+          position: "absolute",
+          inset: 0,
+          width: "100%",
+          height: "100%",
+          objectFit: "cover",
+          objectPosition: card.photoPos || "center 28%",
+          // M15 — the seed-chosen camera move: slow push plus (for the drift
+          // variants) a lateral travel in % of the photo's own box, small
+          // enough that the saliency framing always holds.
+          transform: `translate(${anim.photoDriftX}%, ${anim.photoDriftY}%) scale(${anim.photoScale})`,
+          ...(grade ? { filter: grade } : {}),
+          ...(mask ?? {}),
+        },
+        card.photoSupersample,
+      )}
     />
   );
   return (
     <>
-      <PhotoFilterDefs card={card} />
+      <PhotoFilterDefs card={card} frame={frame} fps={fps} />
       {cropScale > 1 && !card.videoSrc ? (
         <div
           style={{
@@ -1228,6 +1704,11 @@ const PhotoLayer: React.FC<{ ctx: SceneCtx; scrim?: "bottom" | "full" }> = ({
 };
 
 const PatternLayer: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
+  // per-effect-toggle: suppress the whole background pattern layer under the
+  // review-only "background_pattern" toggle (no-op when the list is empty).
+  if (effectOff(ctx.card, "background_pattern")) {
+    return null;
+  }
   const bgPattern = bgPatternFor(ctx.card.backgroundStyle || "", ctx.roles);
   if (!bgPattern) {
     return null;
@@ -1835,6 +2316,11 @@ const StylePackLayer: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
   }
   const { width, height, frame, roles } = ctx;
   const accent = roles.accent || "#FFFFFF";
+  // blend-modes (still parity): the seeded texture composite blend, or the
+  // hard-coded "overlay" when the card did not opt in — byte-equivalent to the
+  // pre-blend-modes render. Only the composite mix-blend swaps; the stack's
+  // internal background-blend-mode (its tile-fusing lever) is untouched.
+  const texBlend = ctx.card.textureBlend || "overlay";
   // Ease the whole treatment in with the scene (motion only for feedback).
   const enter = interpolate(frame, [2, 16], [0, 1], {
     extrapolateLeft: "clamp",
@@ -1864,7 +2350,7 @@ const StylePackLayer: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
             backgroundRepeat: "repeat, repeat",
             backgroundBlendMode: blend,
             opacity: pack.bold ? 0.15 : 0.1,
-            mixBlendMode: "overlay",
+            mixBlendMode: texBlend as React.CSSProperties["mixBlendMode"],
           }}
         />,
       );
@@ -1884,7 +2370,7 @@ const StylePackLayer: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
             backgroundSize: `${size}px ${size}px`,
             backgroundRepeat: "repeat",
             opacity: op,
-            mixBlendMode: "overlay",
+            mixBlendMode: texBlend as React.CSSProperties["mixBlendMode"],
           }}
         />,
       );
@@ -1999,8 +2485,8 @@ const BottomStrip: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
         textTransform: "uppercase",
       }}
     >
-      <span style={{ ...wghtFvs(ctx.card.wghtMeta) }}>{meet}</span>
-      <span style={{ fontWeight: 700, ...wghtFvs(ctx.card.wghtMeta) }}>{club}</span>
+      <span style={{ ...wghtFvs(ctx.card.wghtMeta, anim.wghtBloom) }}>{meet}</span>
+      <span style={{ fontWeight: 700, ...wghtFvs(ctx.card.wghtMeta, anim.wghtBloom) }}>{club}</span>
     </div>
   );
 };
@@ -2027,7 +2513,7 @@ const LabelChip: React.FC<{ ctx: SceneCtx; left?: number; top?: number; center?:
         color: roles.ground,
         fontSize: Math.round(36 * ts),
         fontWeight: 800,
-        ...wghtFvs(ctx.card.wghtKicker),
+        ...wghtFvs(ctx.card.wghtKicker, anim.wghtBloom),
         letterSpacing: "0.12em",
         opacity: anim.chipOpacity,
         borderRadius: 6,
@@ -2067,7 +2553,11 @@ const HeroScene: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
         }}
       />
 
-      {accentDecoration(card.accentStyle || "", roles, anim.chipOpacity, width, height)}
+      {/* per-effect-toggle: the "accent" toggle drops the scene's accent
+          decoration (paired with the ResolveAccentLayer gate in CardScene). */}
+      {effectOff(card, "accent")
+        ? null
+        : accentDecoration(card.accentStyle || "", roles, anim.chipOpacity, width, height)}
 
       {/* Mega watermark surname behind everything */}
       <div
@@ -2114,6 +2604,7 @@ const HeroScene: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
       <KineticLine
         text={ctx.surnameText}
         anim={anim}
+        perGlyph={ctx.card.textGranularity === "glyph"}
         style={{
           position: "absolute",
           left: layout.textLeft,
@@ -2271,6 +2762,7 @@ const PosterScene: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
         <KineticLine
           text={mega}
           anim={anim}
+          perGlyph={ctx.card.textGranularity === "glyph"}
           style={{
             fontSize: megaSize,
             fontWeight: 900,
@@ -2708,6 +3200,7 @@ const SpotlightScene: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
         <KineticLine
           text={ctx.surnameText}
           anim={anim}
+          perGlyph={ctx.card.textGranularity === "glyph"}
           style={{
             marginTop: Math.round(70 * ts),
             fontSize: fitLinePx(ctx.surnameText, Math.round(140 * ts), width - 160 * ts),
@@ -2910,6 +3403,7 @@ const TickerScene: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
       <KineticLine
         text={ctx.surnameText}
         anim={anim}
+        perGlyph={ctx.card.textGranularity === "glyph"}
         style={{
           position: "absolute",
           left: 80,
@@ -3031,15 +3525,18 @@ const SplitScene: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
           <img
             src={duoSrc}
             alt=""
-            style={{
-              position: "absolute",
-              inset: 0,
-              width: "100%",
-              height: "100%",
-              objectFit: "cover",
-              objectPosition: "center 28%",
-              transform: `translate(${-anim.photoDriftX}%, ${anim.photoDriftY}%) scale(${anim.photoScale})`,
-            }}
+            style={supersampledImgStyle(
+              {
+                position: "absolute",
+                inset: 0,
+                width: "100%",
+                height: "100%",
+                objectFit: "cover",
+                objectPosition: "center 28%",
+                transform: `translate(${-anim.photoDriftX}%, ${anim.photoDriftY}%) scale(${anim.photoScale})`,
+              },
+              card.photoSupersample,
+            )}
           />
           {/* Role scrim so the result stays legible on the wedge. */}
           <div
@@ -3072,13 +3569,16 @@ const SplitScene: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
           <img
             src={src}
             alt=""
-            style={{
-              width: "100%",
-              height: "100%",
-              objectFit: "cover",
-              objectPosition: "center 28%",
-              transform: `scale(${anim.photoScale})`,
-            }}
+            style={supersampledImgStyle(
+              {
+                width: "100%",
+                height: "100%",
+                objectFit: "cover",
+                objectPosition: "center 28%",
+                transform: `scale(${anim.photoScale})`,
+              },
+              card.photoSupersample,
+            )}
           />
         </div>
       ))}
@@ -3117,6 +3617,7 @@ const SplitScene: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
       <KineticLine
         text={ctx.surnameText}
         anim={anim}
+        perGlyph={ctx.card.textGranularity === "glyph"}
         style={{
           position: "absolute",
           left: 80,
@@ -3256,6 +3757,7 @@ const MagazineScene: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
       <KineticLine
         text={ctx.surnameText}
         anim={anim}
+        perGlyph={ctx.card.textGranularity === "glyph"}
         style={{
           position: "absolute",
           left: 80,
@@ -3354,20 +3856,109 @@ const SCENES: Record<SceneMode, React.FC<{ ctx: SceneCtx }>> = {
   magazine: MagazineScene,
 };
 
-export const StoryCard: React.FC<Props> = ({ card, brand }) => {
+// true-motion-blur — the deterministic sub-frame set for one integer frame. A
+// shutter of `shutter` degrees opens the accumulation window over `shutter/360`
+// of a frame, centred on the current frame; `samples` copies are spread evenly
+// across it. Pure function of (frame, samples, shutter) — no Math.random /
+// Date.now / performance.now — so identical inputs give identical offsets and the
+// render stays frame-pure. samples/shutter are clamped here too (defence in depth
+// over Python's clamp) so a hand-authored prop can never explode the sample count.
+export function motionBlurSubFrames(frame: number, samples: number, shutter: number): number[] {
+  const n = Math.max(2, Math.min(16, Math.round(samples)));
+  const span = Math.max(1, Math.min(360, shutter)) / 360; // window width in frames
+  const out: number[] = [];
+  for (let i = 0; i < n; i++) {
+    // i/(n-1) - 0.5 spans [-0.5, 0.5]; × span centres the window on `frame`.
+    out.push(frame + (i / (n - 1) - 0.5) * span);
+  }
+  return out;
+}
+
+// true-motion-blur — the frame-pure multi-sample accumulator. It renders the
+// wrapped layer at each deterministic sub-frame (via the `render` callback, which
+// RECOMPUTES the layer's closed-form animation at that sub-frame — never an opaque
+// re-timing of already-rendered children) and composites the n copies as a TRUE
+// premultiplied average: each copy at equal opacity 1/n, summed with
+// `mix-blend-mode: plus-lighter` inside an `isolation: isolate` group. plus-lighter
+// adds premultiplied colour AND alpha, so the accumulation is the exact linear mean
+// of the n samples in BOTH channels — including semi-transparent pixels (AA glyph
+// edges, scrims). At an at-rest (terminal/held) frame every sub-frame collapses to
+// identical pixels, so the mean equals a single draw EXACTLY, alpha included, and
+// still<->motion parity holds. (This replaces an earlier progressive-opacity scheme
+// — opacity 1/(i+1) — which averaged colour correctly but over-accumulated alpha on
+// semi-transparent pixels, reading fractionally heavier than the still.) `isolation`
+// keeps the additive blend contained to the sample group; the group itself then
+// composites source-over onto the scene below. Only ever mounted when a motionBlur
+// prop is present (the OFF path renders the verbatim unwrapped layer), so the default
+// DOM is byte-identical.
+export const MotionBlurSampler: React.FC<{
+  frame: number;
+  samples: number;
+  shutter: number;
+  render: (frameSub: number) => React.ReactNode;
+}> = ({ frame, samples, shutter, render }) => {
+  const subs = motionBlurSubFrames(frame, samples, shutter);
+  const inv = 1 / subs.length;
+  return (
+    <AbsoluteFill style={{ isolation: "isolate" }}>
+      {subs.map((f, i) => (
+        <AbsoluteFill key={i} style={{ opacity: inv, mixBlendMode: "plus-lighter" }}>
+          {render(f)}
+        </AbsoluteFill>
+      ))}
+    </AbsoluteFill>
+  );
+};
+
+export const StoryCard: React.FC<Props & { motionBlur?: MotionBlur }> = ({
+  card,
+  brand,
+  motionBlur,
+}) => {
   const frame = useCurrentFrame();
   const { fps, durationInFrames, width, height } = useVideoConfig();
 
+  // per-effect-toggle (REVIEW-ONLY): decorative axes suppressed for an A/B
+  // comparison render. Empty (the shipped default) => every gate below passes
+  // and the scene is byte-identical.
+  const off = (key: string) => effectOff(card, key);
+
   const roles = resolveRoles(card, brand);
   const fontStack = fontStackFor(card.typographyPair || "");
-  const anim = animProgram(
-    card.motionIntent || "",
-    card.mood || "",
-    frame,
-    fps,
-    durationInFrames,
-    card.variationSeed || 0,
-  );
+  // true-motion-blur: capture the animProgram arguments once so the sampler can
+  // recompute the SAME closed-form channels at deterministic sub-frame offsets.
+  // animAt(frame) reproduces the exact prior single call, so `anim` — and every
+  // default (blur-off) render — stays byte-identical.
+  //
+  // Suppressing the director's motion intent falls the beat through to the shared
+  // base channels — but via the switch's default case, which still applies
+  // withResolveAccent(base), so the M19 resolve accent (the separate "accent"
+  // toggle target) is NOT silently killed by this toggle.
+  const mbIntent = off("motion_intent") ? "" : card.motionIntent || "";
+  // text-fx-richer: the closed-enum entrance animator. Suppressible as a
+  // decorative axis for a review-only A/B render (off("text_fx")); "" falls
+  // through to the byte-identical no-animator path. Text-fx is entrance-only
+  // (terminal = still), so it is a legitimate A/B-suppressible axis and never a
+  // legibility layer.
+  const mbAnimator = off("text_fx") ? "" : card.textAnimator || "";
+  const mbStagger =
+    card.staggerScale && card.staggerScale > 0 ? resolveStagger(card.staggerScale) : undefined;
+  const animAt = (f: number): AnimChannels =>
+    animProgram(
+      mbIntent,
+      card.mood || "",
+      f,
+      fps,
+      durationInFrames,
+      card.variationSeed || 0,
+      mbStagger,
+      mbAnimator,
+    );
+  const anim = animAt(frame);
+  // true-motion-blur: the story path carries the config on the card; the reel
+  // injects it as a dedicated top-level prop (keeping cards_props byte-identical).
+  // Undefined on both when the operator did not opt in => no wrapper, verbatim DOM.
+  const mb = card.motionBlur ?? motionBlur;
   const mode = sceneForArchetype(card.archetype || "");
   const layout = compositionLayoutFor(card.composition || "left", width);
 
@@ -3389,8 +3980,22 @@ export const StoryCard: React.FC<Props> = ({ card, brand }) => {
         { extrapolateLeft: "clamp", extrapolateRight: "clamp" },
       );
 
+  // per-effect-toggle: the cutout plane and the overlap accent are carried on
+  // the card prop and consumed by several scenes + sprint layers, so blanking
+  // them once here suppresses every consumer at a single lever (no-op unless
+  // that toggle is set). effectsDisabled itself is preserved so PatternLayer /
+  // HeroScene accent gates still see it.
+  const sceneCard =
+    off("cutout") || off("overlap_accent")
+      ? {
+          ...card,
+          ...(off("cutout") ? { cutoutSrc: "" } : {}),
+          ...(off("overlap_accent") ? { overlapAccent: "" } : {}),
+        }
+      : card;
+
   const ctx: SceneCtx = {
-    card,
+    card: sceneCard,
     brand,
     roles,
     anim,
@@ -3407,7 +4012,12 @@ export const StoryCard: React.FC<Props> = ({ card, brand }) => {
     firstName: (card.athleteFirstName || "").toUpperCase(),
     label: (card.achievementLabel || "").toUpperCase(),
     event: card.eventName || "",
-    result: countUpDisplay(card.resultValue || "", anim.resultProgress),
+    result: revealResult(
+      card.resultValue || "",
+      anim.resultProgress,
+      anim.textRevealProgress,
+      card.variationSeed || 0,
+    ),
     resultFinal: card.resultValue || "",
     meet: card.meetName || "",
     club: (brand.displayName || brand.shortName || "").toUpperCase(),
@@ -3417,14 +4027,51 @@ export const StoryCard: React.FC<Props> = ({ card, brand }) => {
   // built-in scene; otherwise the parity-mapped built-in scene renders.
   const Scene = EXTRA_SCENES[card.archetype || ""] || SCENES[mode];
 
+  // true-motion-blur: recompute the SETTLING anim channels at a sub-frame and
+  // re-render the scene with them, keeping the PERPETUAL camera/parallax channels
+  // (photoScale / photoDriftX / photoDriftY / bgDrift — the only channels still in
+  // motion at the held frame) FROZEN to the integer-frame value. So only the
+  // hero/result entrance + count-up smear during motion, while the photo camera
+  // stays sharp and, crucially, every sub-frame at the terminal frame collapses to
+  // the approved still (still<->motion parity). ctx.frame is left at the integer
+  // frame, so any scene animation driven directly off the frame (not through anim)
+  // renders identically across the copies and is not blurred. Only ever called from
+  // the mb-present branch below, so the default DOM never touches this path.
+  const renderSceneAt = (fSub: number): React.ReactNode => {
+    const aSub = animAt(fSub);
+    const a: AnimChannels = {
+      ...aSub,
+      photoScale: anim.photoScale,
+      photoDriftX: anim.photoDriftX,
+      photoDriftY: anim.photoDriftY,
+      bgDrift: anim.bgDrift,
+    };
+    const ctxSub: SceneCtx = {
+      ...ctx,
+      anim: a,
+      result: revealResult(
+        card.resultValue || "",
+        a.resultProgress,
+        a.textRevealProgress,
+        card.variationSeed || 0,
+      ),
+    };
+    return <Scene ctx={ctxSub} />;
+  };
+
   return (
     <AbsoluteFill
       style={{
-        backgroundColor: roles.ground,
+        // alpha-export: suppress the full-bleed ground fill under the opt-in
+        // transparent export (default false → `{ backgroundColor: roles.ground }`,
+        // byte-identical to the historic unconditional fill).
+        ...(card.transparentBg ? {} : { backgroundColor: roles.ground }),
         // G1.8 mesh ground — the still's exact SVG, under every content layer
         // (the still hook overrides the ground element's background-image the
-        // same way). Absent = the flat brand ground, byte-identical.
-        ...(card.meshBg
+        // same way). Absent = the flat brand ground, byte-identical. Under the
+        // alpha export the full-bleed mesh is also suppressed (it is a ground
+        // paint), so the composite stays transparent behind the content.
+        ...(card.meshBg && !off("mesh_bg") && !card.transparentBg
           ? {
               backgroundImage: card.meshBg,
               backgroundSize: "cover",
@@ -3436,15 +4083,38 @@ export const StoryCard: React.FC<Props> = ({ card, brand }) => {
         opacity: outroFade,
       }}
     >
-      {/* Pack ground BENEATH the scene (the still's z1-under-copy order). */}
-      <StylePackGroundLayer ctx={ctx} />
-      <Scene ctx={ctx} />
-      <ResolveAccentLayer ctx={ctx} />
-      <StylePackLayer ctx={ctx} />
-      {/* Sprint overlay layers (R1.6/8/9/10/11/22/23/24/25) — additive, in order. */}
-      {EXTRA_LAYERS.map(({ Layer }, i) => (
-        <Layer key={`sprint-layer-${i}`} ctx={ctx} />
-      ))}
+      {/* render-banding-dither: the debanding overlay rides directly over the
+          ground fill and BENEATH the content (mirroring the still's below-copy
+          placement), so it composites against the big brand fill that bands.
+          Mounted only when the still opted in; absent = byte-identical. */}
+      {card.dither ? <Dither /> : null}
+      {/* Pack ground BENEATH the scene (the still's z1-under-copy order).
+          per-effect-toggle: the "style_pack" toggle drops both pack layers. */}
+      {off("style_pack") ? null : <StylePackGroundLayer ctx={ctx} />}
+      {/* true-motion-blur: wrap ONLY the scene (hero/result entrance + count-up)
+          in the frame-pure sampler when opted in; OFF (the default) renders the
+          verbatim `<Scene ctx={ctx} />`, so the default DOM is byte-identical. */}
+      {mb ? (
+        <MotionBlurSampler
+          frame={frame}
+          samples={mb.samples}
+          shutter={mb.shutter}
+          render={renderSceneAt}
+        />
+      ) : (
+        <Scene ctx={ctx} />
+      )}
+      {/* per-effect-toggle: the "accent" toggle drops the resolve accent layer
+          (paired with the HeroScene accentDecoration gate). */}
+      {off("accent") ? null : <ResolveAccentLayer ctx={ctx} />}
+      {off("style_pack") ? null : <StylePackLayer ctx={ctx} />}
+      {/* Sprint overlay layers (R1.6/8/9/10/11/22/23/24/25) — additive, in order.
+          per-effect-toggle: the "sprint_layers" toggle drops them all. */}
+      {off("sprint_layers")
+        ? null
+        : EXTRA_LAYERS.map(({ Layer }, i) => (
+            <Layer key={`sprint-layer-${i}`} ctx={ctx} />
+          ))}
     </AbsoluteFill>
   );
 };

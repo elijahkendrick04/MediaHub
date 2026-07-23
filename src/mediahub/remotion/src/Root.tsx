@@ -29,6 +29,7 @@ const defaultCard = {
   meetName: "MediaHub Open",
   place: "1",
   variationSeed: 1,
+  staggerScale: 0,
   backgroundStyle: "",
   composition: "",
   typographyPair: "",
@@ -46,6 +47,7 @@ const defaultCard = {
   cutoutSrc: "",
   photoMode: "",
   photoScale: 0,
+  photoSupersample: 0,
   decorationStrength: 0.5,
   duotoneShadow: "",
   duotoneHighlight: "",
@@ -54,6 +56,11 @@ const defaultCard = {
   stickerRadius: 0,
   washTint: "",
   washMix: 0,
+  mosaicBlock: 0,
+  motionTileGrid: 0,
+  roughenSeed: 0,
+  roughenScale: 0,
+  treatmentIntensity: -1,
   packGroundFocus: null as number[] | null,
   statChips: [] as { label: string; value: string }[],
   statInk: "",
@@ -69,9 +76,14 @@ const defaultCard = {
   // overlay; production passes the still's real pack id (or "" for bare).
   stylePack: "vignette-grain-corner_ticks-standard",
   overlapAccent: "",
+  textureBlend: "",
   roleMedalRamp: "",
   roleMedalNumeralRamp: "",
   motionIntent: "",
+  textGranularity: "word" as "word" | "glyph",
+  // text-fx-richer: "" = no entrance animator (byte-identical). Production sets
+  // one of the four presets only under MEDIAHUB_TEXT_FX on a glyph-mode card.
+  textAnimator: "" as "" | "blur_reveal" | "track_in" | "wiggle_settle" | "word_rise_blur",
   roleGround: "",
   roleSurface: "",
   roleAccent: "",
@@ -79,6 +91,10 @@ const defaultCard = {
   captionsJson: "",
   inReel: false,
   meshBg: "",
+  dither: false,
+  // alpha-export: opaque by default (byte-identical). Production sets true only
+  // on the opt-in transparent-background compositing export.
+  transparentBg: false,
   // D8 register weight vars mirrored from the still's --mh-wght-* (0 = leave the
   // static cut untouched, matching the schema defaults in StoryCard.tsx).
   wghtKicker: 0,
@@ -89,6 +105,12 @@ const defaultCard = {
   frameTornFreq: 0,
   frameTornScale: 0,
   frameTornSeed: 0,
+  // blur-family: "" keeps the isotropic blur() focus-in (byte-identical);
+  // production attaches "directional"/"radial"/"lens" on graded photo cards.
+  focusBlurStyle: "",
+  // per-effect-toggle: no axes suppressed in the studio preview / default
+  // render (empty => byte-identical to a card without the field).
+  effectsDisabled: [] as string[],
 };
 
 export const RemotionRoot: React.FC = () => {
@@ -130,6 +152,14 @@ export const RemotionRoot: React.FC = () => {
           coverTypography: "",
           coverPhotoSrc: "",
           coverPhotoPos: "",
+          // svg-shape-decompose logo draw-on: inactive by default → the filled
+          // `<img>` logo, byte-identical. Production sends the decomposed paths.
+          logoDrawOn: false,
+          logoViewBox: "",
+          logoPaths: [],
+          // alpha-export: opaque by default; production sets true only on the
+          // opt-in transparent-background reel export.
+          transparentBg: false,
         }}
       />
     </>

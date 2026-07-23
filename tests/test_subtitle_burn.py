@@ -340,7 +340,9 @@ def _card(i: int = 1) -> dict:
     }
 
 
-def _fake_run(*, composition_id, props, out_path, duration_sec=None, size=None, timeout=600):
+def _fake_run(
+    *, composition_id, props, out_path, duration_sec=None, size=None, timeout=600, supersample=1.0
+):
     out = Path(out_path)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_bytes(b"0" * 2048)
@@ -533,9 +535,9 @@ def test_reel_captions_are_sized_to_each_cards_carved_beat(tmp_path, monkeypatch
     seen: list[int] = []
     real = motion._reel_caption_json
 
-    def _spy(card_dict, brand_dict, *, beat_frames):
+    def _spy(card_dict, brand_dict, *, beat_frames, fps=motion.MOTION_FPS):
         seen.append(beat_frames)
-        return real(card_dict, brand_dict, beat_frames=beat_frames)
+        return real(card_dict, brand_dict, beat_frames=beat_frames, fps=fps)
 
     with (
         mock.patch.object(motion, "_reel_caption_json", side_effect=_spy),

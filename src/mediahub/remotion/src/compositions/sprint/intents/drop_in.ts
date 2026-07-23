@@ -9,7 +9,7 @@ import { entranceChannels } from "../../../motion/compile";
  * so the same drop renders identically as CSS in the browser. Pure function of
  * the frame.
  */
-const program: IntentProgram = (frame, fps, _durationInFrames, _mood, base) =>
-  entranceChannels("drop_in", frame, fps, base);
+const program: IntentProgram = (frame, fps, _durationInFrames, _mood, base, stagger) =>
+  entranceChannels("drop_in", frame, fps, base, stagger);
 
 export default { name: "drop_in", program };

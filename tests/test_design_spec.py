@@ -9,6 +9,7 @@ Coverage:
 
 No live LLM is involved — this is the pure contract.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -113,6 +114,19 @@ def test_to_dict_is_json_friendly():
     assert isinstance(d["colour_roles"], dict)
     assert isinstance(d["secondary_stats"], list)
     assert set(d["colour_roles"]) == set(COLOUR_ROLE_SLOTS)
+
+
+def test_seeded_blend_defaults_off_and_coerces():
+    # blend-modes: absent → False (byte-identical default), truthy bool/string
+    # → True, garbage → False. Round-trips through to_dict.
+    assert _norm(VALID_RAW).seeded_blend is False
+    assert _norm({**VALID_RAW, "seeded_blend": True}).seeded_blend is True
+    assert _norm({**VALID_RAW, "seeded_blend": "true"}).seeded_blend is True
+    assert _norm({**VALID_RAW, "seeded_blend": "nonsense"}).seeded_blend is False
+    assert _norm({**VALID_RAW, "seeded_blend": 3}).seeded_blend is False
+    on = _norm({**VALID_RAW, "seeded_blend": True})
+    assert on.to_dict()["seeded_blend"] is True
+    assert _norm(on.to_dict()).seeded_blend is True
 
 
 def test_design_spec_is_frozen():

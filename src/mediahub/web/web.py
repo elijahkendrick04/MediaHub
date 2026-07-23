@@ -23818,6 +23818,10 @@ def _reel_file_url_kwargs(inputs: dict, run_id: str) -> dict:
         kwargs["lang"] = inputs["dub_language"]
     if inputs.get("cards_param"):
         kwargs["cards"] = inputs["cards_param"]
+    # alpha-export: carry the profile so the reel-file route resolves the
+    # .mov/.webm name + Content-Type.
+    if inputs.get("alpha"):
+        kwargs["alpha"] = inputs["alpha"]
     return kwargs
 
 
@@ -28615,14 +28619,81 @@ def _session_can_access_profile(asset_profile_id: Optional[str]) -> bool:
     return asset_profile_id == _active_profile_id()
 
 
-def _assemble_card_motion_inputs(run_id: str, card_id: str):
-    """Shared validation + payload assembly for the per-card motion routes.
+def _resolve_motion_canvas():
+    """Resolve the motion canvas from the request args to a single format token.
 
-    Returns ``(inputs_dict, None)`` on success or ``(None, (response,
-    status))`` — the same contract as ``_assemble_reel_inputs`` — so the
-    sync route and the M32 async job route stay behaviourally identical.
+    One shared resolver for every motion/reel route (render + file + manifest),
+    so all six sites derive the identical name. Precedence:
+
+    1. explicit geometry — ``?size=WxH`` or (``?w=`` AND ``?h=``) — WINS over
+       ``?format=``. Parsed to ints, validated via ``motion.validate_canvas_size``
+       (bad → honest 400 ``bad_canvas``), then normalised with
+       ``motion.canonical_motion_format`` so a custom size that equals a preset's
+       dims collapses to the preset name (byte-identical file + cache key).
+    2. else ``?format=`` — validated ``in MOTION_FORMATS`` (unknown → 400
+       ``bad_format``).
+    3. else the default ``story`` cut.
+
+    A half-supplied geometry pair (``?w=`` without ``?h=``, or vice versa) is a
+    400 rather than a silently-ignored typo. Returns ``(token, None)`` on success
+    or ``(None, (response, status))`` — the same contract as the assemble helpers.
+    The returned token is used both for the render (``format_name``) AND the
+    filename suffix, and for a custom size is always ``f"{w}x{h}"`` built from the
+    validated ints — never raw query text — so the path-traversal guard holds and
+    the file/manifest routes re-derive the exact file the render wrote. Absent →
+    ``story`` → byte-identical to every existing URL and cached artifact.
     """
     from mediahub.visual import motion as _motion
+
+    def _present(v):
+        return v is not None and str(v).strip() != ""
+
+    size_raw = request.args.get("size")
+    w_raw = request.args.get("w")
+    h_raw = request.args.get("h")
+
+    if _present(size_raw):
+        try:
+            parsed = _motion._parse_size_token(str(size_raw).strip().lower())
+        except ValueError as e:
+            return None, (jsonify({"error": "bad_canvas", "detail": str(e)}), 400)
+        if parsed is None:
+            return None, (
+                jsonify(
+                    {
+                        "error": "bad_canvas",
+                        "detail": f"unparseable size {size_raw!r}; use WxH (e.g. 1600x900)",
+                    }
+                ),
+                400,
+            )
+        w, h = parsed
+        return _motion.canonical_motion_format(w, h), None
+
+    if _present(w_raw) or _present(h_raw):
+        if not (_present(w_raw) and _present(h_raw)):
+            return None, (
+                jsonify(
+                    {
+                        "error": "bad_canvas",
+                        "detail": "both w and h are required for a custom canvas",
+                    }
+                ),
+                400,
+            )
+        try:
+            w = int(str(w_raw).strip())
+            h = int(str(h_raw).strip())
+        except (TypeError, ValueError):
+            return None, (
+                jsonify({"error": "bad_canvas", "detail": "w and h must be integers"}),
+                400,
+            )
+        try:
+            w, h = _motion.validate_canvas_size(w, h)
+        except ValueError as e:
+            return None, (jsonify({"error": "bad_canvas", "detail": str(e)}), 400)
+        return _motion.canonical_motion_format(w, h), None
 
     fmt = (request.args.get("format") or _motion.DEFAULT_MOTION_FORMAT).strip().lower()
     if fmt not in _motion.MOTION_FORMATS:
@@ -28636,6 +28707,23 @@ def _assemble_card_motion_inputs(run_id: str, card_id: str):
             ),
             400,
         )
+    return fmt, None
+
+
+def _assemble_card_motion_inputs(run_id: str, card_id: str):
+    """Shared validation + payload assembly for the per-card motion routes.
+
+    Returns ``(inputs_dict, None)`` on success or ``(None, (response,
+    status))`` — the same contract as ``_assemble_reel_inputs`` — so the
+    sync route and the M32 async job route stay behaviourally identical.
+
+    The output cut comes from ``_resolve_motion_canvas`` (``?format=`` preset or
+    an arbitrary-canvas ``?w=&h=`` / ``?size=WxH`` — any-canvas). The batch
+    routes stay preset-only; a custom size is a single-cut request.
+    """
+    fmt, canvas_err = _resolve_motion_canvas()
+    if canvas_err is not None:
+        return None, canvas_err
 
     run_data = _load_run(run_id)
     if run_data is None:
@@ -28689,6 +28777,27 @@ def _assemble_card_motion_inputs(run_id: str, card_id: str):
             400,
         )
 
+    # alpha-export — optional opt-in transparent-background export
+    # (?alpha=prores4444|vp9), validated against the closed ALPHA_PROFILES
+    # vocabulary. Absent keeps the default opaque .mp4 (byte-identical); an
+    # unknown value is an honest 400. When set, the served file carries the
+    # profile's container extension + Content-Type and the render runs silent.
+    from mediahub.visual import motion as _motion
+
+    alpha = (request.args.get("alpha") or "").strip().lower()
+    if alpha and alpha not in _motion.ALPHA_PROFILES:
+        return None, (
+            jsonify(
+                {
+                    "error": "bad_alpha",
+                    "detail": f"unknown alpha export profile {alpha!r}",
+                    "valid_alpha": sorted(_motion.ALPHA_PROFILES),
+                }
+            ),
+            400,
+        )
+    alpha_prof = _motion.resolve_alpha_profile(alpha) if alpha else None
+
     ach = target.get("achievement") or {}
     meet_name = (run_data.get("meet") or {}).get("name") or run_data.get("meet_name", "")
     card_payload = {
@@ -28719,8 +28828,11 @@ def _assemble_card_motion_inputs(run_id: str, card_id: str):
     out_dir = RUNS_DIR / run_id / "motion"
     out_dir.mkdir(parents=True, exist_ok=True)
     # The story format keeps its historic filename so existing links and
-    # cached artifacts stay valid; other cuts get a format suffix.
-    out_name = f"{card_id}.mp4" if fmt == "story" else f"{card_id}_{fmt}.mp4"
+    # cached artifacts stay valid; other cuts get a format suffix. alpha-export
+    # swaps the .mp4 extension for the profile's alpha container (.mov/.webm) so
+    # the served file name matches its true container.
+    ext = alpha_prof.ext if alpha_prof else "mp4"
+    out_name = f"{card_id}.{ext}" if fmt == "story" else f"{card_id}_{fmt}.{ext}"
     out_path = out_dir / out_name
 
     # Load the most recent Gemini-directed brief for this card so the
@@ -28750,6 +28862,8 @@ def _assemble_card_motion_inputs(run_id: str, card_id: str):
             "out_name": out_name,
             "variation_seed": variation_seed,
             "brief": brief_dict,
+            "alpha": alpha,
+            "content_type": alpha_prof.content_type if alpha_prof else "video/mp4",
         },
         None,
     )
@@ -28815,18 +28929,12 @@ def _assemble_reel_inputs(run_id: str):
     if selected_ids:
         n = len(selected_ids)
 
-    fmt = (request.args.get("format") or _motion.DEFAULT_MOTION_FORMAT).strip().lower()
-    if fmt not in _motion.MOTION_FORMATS:
-        return None, (
-            jsonify(
-                {
-                    "error": "bad_format",
-                    "detail": f"unknown motion format {fmt!r}",
-                    "valid_formats": sorted(_motion.MOTION_FORMATS),
-                }
-            ),
-            400,
-        )
+    # Output cut from the shared resolver: ``?format=`` preset OR an
+    # arbitrary-canvas ``?w=&h=`` / ``?size=WxH`` token (any-canvas). Batch
+    # routes stay preset-only; a custom size is a single-cut reel request.
+    fmt, canvas_err = _resolve_motion_canvas()
+    if canvas_err is not None:
+        return None, canvas_err
 
     # R1.19 — optional per-reel audio-mix profile (?mix=voice_lead|balanced|
     # music_forward), a deterministic operator knob like ?format/?n. Folded
@@ -28846,6 +28954,25 @@ def _assemble_reel_inputs(run_id: str):
             ),
             400,
         )
+
+    # alpha-export — optional opt-in transparent-background reel
+    # (?alpha=prores4444|vp9), validated against the closed ALPHA_PROFILES
+    # vocabulary. Absent keeps the default opaque .mp4 (byte-identical); an
+    # unknown value is an honest 400. When set, the reel is silent and the
+    # served file carries the profile's container extension + Content-Type.
+    alpha = (request.args.get("alpha") or "").strip().lower()
+    if alpha and alpha not in _motion.ALPHA_PROFILES:
+        return None, (
+            jsonify(
+                {
+                    "error": "bad_alpha",
+                    "detail": f"unknown alpha export profile {alpha!r}",
+                    "valid_alpha": sorted(_motion.ALPHA_PROFILES),
+                }
+            ),
+            400,
+        )
+    alpha_prof = _motion.resolve_alpha_profile(alpha) if alpha else None
 
     # R1.13 — optional cover stat-chip config from the POST body. Validated
     # via normalise_reel_stat_config (ValueError on junk ids → honest 400);
@@ -29065,7 +29192,9 @@ def _assemble_reel_inputs(run_id: str):
     # shape.
     base_name = f"reel_{n}{sel_suffix}{_lang_suffix}"
     _stem = base_name if fmt == "story" else f"{base_name}_{fmt}"
-    out_path = out_dir / f"{_stem}.mp4"
+    # alpha-export swaps the .mp4 extension for the profile's alpha container.
+    _ext = alpha_prof.ext if alpha_prof else "mp4"
+    out_path = out_dir / f"{_stem}.{_ext}"
 
     # Look up the latest brief per card so every beat of the reel
     # carries its own AI-directed variation. Cards without a brief
@@ -29107,6 +29236,8 @@ def _assemble_reel_inputs(run_id: str):
             # for a custom M31 selection (threaded into the file URL so the
             # reel-file route re-derives the same _sel suffix).
             "cards_param": ",".join(ordered_ids) if sel_suffix else "",
+            "alpha": alpha,
+            "content_type": alpha_prof.content_type if alpha_prof else "video/mp4",
         },
         None,
     )

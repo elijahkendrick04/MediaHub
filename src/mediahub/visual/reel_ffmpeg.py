@@ -134,6 +134,65 @@ _XFADE_FOR_KIND: dict[str, str] = {
 # ---------------------------------------------------------------------------
 
 
+def _supersample_requested() -> bool:
+    """True when the Remotion-only motion supersample knob is set > 1. This free
+    engine renders pre-baked Playwright stills and never invokes render.js, so it
+    reports the knob as not-applied in its manifest rather than silently swallowing
+    it (its stills already get their own DPR supersample upstream)."""
+    raw = os.environ.get("MEDIAHUB_MOTION_SUPERSAMPLE", "").strip()
+    try:
+        return float(raw) > 1.0
+    except ValueError:
+        return False
+
+
+def _photo_supersample_requested() -> bool:
+    """True when the per-photo resample knob (``MEDIAHUB_PHOTO_SUPERSAMPLE``) is
+    set. Unlike the Remotion best-effort CSS hint, this free engine ALREADY
+    resamples every camera move from a genuine 2x Lanczos prescale (``scale=
+    {w*2}:{h*2}:flags=lanczos`` at :440/:460 into the zoompan crop), so it reports
+    the knob as natively satisfied — the honest truth — rather than claiming to
+    honour an arbitrary caller factor it did not apply."""
+    raw = os.environ.get("MEDIAHUB_PHOTO_SUPERSAMPLE", "").strip()
+    try:
+        return int(float(raw)) >= 2
+    except ValueError:
+        return False
+
+
+def _motion_encode_requested() -> bool:
+    """True when the opt-in higher-bit-depth / wide-gamut encode profile
+    (``MEDIAHUB_MOTION_ENCODE``) is set to anything but the byte-identical
+    default. This free FFmpeg engine composites pre-baked 8-bit still PNGs and
+    re-encodes with a fixed ``libx264 -pix_fmt yuv420p`` path — it is NOT wired to
+    the Remotion ``renderMedia`` encoder settings and its still sources carry no
+    extra precision to preserve. So a 10-bit/wide-gamut request degrades HONESTLY:
+    the manifest records ``encode: unsupported-on-engine`` rather than shipping a
+    faked 10-bit or falsely bt2020-tagged file (invariant 5). Mirrors
+    ``_photo_supersample_requested`` env-read shape; unset / ``default`` / ``h264``
+    → False (no note, byte-identical)."""
+    raw = os.environ.get("MEDIAHUB_MOTION_ENCODE", "").strip().lower()
+    return bool(raw) and raw not in ("default", "h264")
+
+
+def _motion_blur_requested() -> bool:
+    """True when the opt-in shutter-accumulation blur (``MEDIAHUB_MOTION_BLUR``) is
+    on. True multi-sample motion blur re-renders a moving layer at N sub-frame
+    offsets and composites them — a per-frame Remotion DOM capability. This free
+    engine composites pre-baked stills and cannot multi-sample a shutter interval,
+    so a request degrades HONESTLY: the manifest records
+    ``motion_blur: unsupported-on-engine`` rather than faking an accumulated smear
+    (invariant 5). Gated on the same truthy switch ``motion._motion_blur`` reads,
+    so the note fires exactly when the Remotion path would have blurred; unset →
+    False (no note, byte-identical)."""
+    return os.environ.get("MEDIAHUB_MOTION_BLUR", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
 def ffmpeg_exe() -> Optional[str]:
     """Resolve the FFmpeg binary, or None when no source provides one."""
     env = os.environ.get("MEDIAHUB_FFMPEG", "").strip()
@@ -409,6 +468,7 @@ def _ken_burns_filter(
     tag: str = "0",
     width: int = WIDTH,
     height: int = HEIGHT,
+    fps: int = FPS,
 ) -> str:
     """One beat's motion sub-graph — a Ken Burns variant, the 2.5D parallax
     composite, or an honest held frame.
@@ -423,15 +483,15 @@ def _ken_burns_filter(
     ``-filter_complex`` (reel) graph. Pure arithmetic, no easing RNG: the
     same inputs yield an identical fragment and a byte-identical MP4.
     """
-    frames = max(1, round(duration_sec * FPS))
+    frames = max(1, round(duration_sec * fps))
     base = f"scale={width * 2}:{height * 2}:flags=lanczos"
     centre = "x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'"
-    tail = f":s={width}x{height}:fps={FPS}"
+    tail = f":s={width}x{height}:fps={fps}"
 
     if variant == "hold":
         # Honest stillness for a `static` motion_intent — no camera move,
         # just the still rescaled to the beat geometry at the beat rate.
-        return f"scale={width}:{height}:flags=lanczos,fps={FPS}"
+        return f"scale={width}:{height}:flags=lanczos,fps={fps}"
 
     if variant == "parallax":
         fg_w = int(round(width * _PARALLAX_FG_SCALE))
@@ -441,12 +501,12 @@ def _ken_burns_filter(
             f"[pbg{tag}]scale={width}:{height},gblur=sigma={_PARALLAX_BG_BLUR},"
             f"zoompan=z='{_PARALLAX_BG_ZOOM}':d=1"
             f":x='(iw-iw/zoom)*(on/{frames})':y='ih/2-(ih/zoom/2)'"
-            f":s={width}x{height}:fps={FPS}[pbgz{tag}]"
+            f":s={width}x{height}:fps={fps}[pbgz{tag}]"
         )
         fg = (
             f"[pfg{tag}]scale={fg_w * 2}:{fg_h * 2}:flags=lanczos,"
             f"zoompan=z='min(1.0+{fg_rate:.6f}*on,{_PARALLAX_FG_ZOOM})':d=1"
-            f":{centre}:s={fg_w}x{fg_h}:fps={FPS}[pfgz{tag}]"
+            f":{centre}:s={fg_w}x{fg_h}:fps={fps}[pfgz{tag}]"
         )
         return (
             f"split=2[pbg{tag}][pfg{tag}];{bg};{fg};"
@@ -488,6 +548,7 @@ def _write_caption_ass(
     *,
     width: int = WIDTH,
     height: int = HEIGHT,
+    fps: int = FPS,
 ) -> Optional[Path]:
     """Write a card's caption track (R1.3) as an ASS file for burn-in, or None.
 
@@ -502,7 +563,7 @@ def _write_caption_ass(
         track = json.loads(caption_json)
         if not isinstance(track, dict) or not track.get("cues"):
             return None
-        doc = subtitle_burn.ass_document(track, width=width, height=height, fps=FPS)
+        doc = subtitle_burn.ass_document(track, width=width, height=height, fps=fps)
         path = work_dir / f"{name}.ass"
         path.write_text(doc, encoding="utf-8")
         return path
@@ -547,6 +608,7 @@ def _beat_motion_filter(
     tag: str,
     width: int = WIDTH,
     height: int = HEIGHT,
+    fps: int = FPS,
 ) -> str:
     """One beat's motion fragment, compiled from the brand motion vocabulary.
 
@@ -570,8 +632,11 @@ def _beat_motion_filter(
             width=width,
             height=height,
             tag=tag,
+            fps=fps,
         )
-    return _ken_burns_filter(duration_sec, variant=variant, tag=tag, width=width, height=height)
+    return _ken_burns_filter(
+        duration_sec, variant=variant, tag=tag, width=width, height=height, fps=fps
+    )
 
 
 def _transition_kind_for(seed: int, *, peak: bool = False, mood: str = "") -> str:
@@ -654,6 +719,7 @@ def story_ffmpeg_args(
     ass_path: Optional[Path] = None,
     width: int = WIDTH,
     height: int = HEIGHT,
+    fps: int = FPS,
 ) -> list[str]:
     """Argument list (after the binary) for a single-card story MP4.
 
@@ -667,7 +733,7 @@ def story_ffmpeg_args(
     """
     fade_out = max(0.0, duration_sec - 0.6)
     vf = (
-        f"{_beat_motion_filter(duration_sec, variant=variant, tag='s', width=width, height=height)},"
+        f"{_beat_motion_filter(duration_sec, variant=variant, tag='s', width=width, height=height, fps=fps)},"
         f"fade=t=in:st=0:d=0.4,fade=t=out:st={fade_out:.3f}:d=0.6,"
         f"format=yuv420p,setsar=1"
     )
@@ -679,7 +745,7 @@ def story_ffmpeg_args(
         "-loop",
         "1",
         "-framerate",
-        str(FPS),
+        str(fps),
         "-t",
         f"{duration_sec:.3f}",
         "-i",
@@ -687,7 +753,7 @@ def story_ffmpeg_args(
         "-vf",
         vf,
         "-r",
-        str(FPS),
+        str(fps),
         "-c:v",
         "libx264",
         "-preset",
@@ -765,6 +831,7 @@ def reel_ffmpeg_args(
     transitions: Optional[list[str]] = None,
     width: int = WIDTH,
     height: int = HEIGHT,
+    fps: int = FPS,
 ) -> list[str]:
     """Argument list (after the binary) for the multi-beat reel MP4.
 
@@ -791,7 +858,7 @@ def reel_ffmpeg_args(
             "-loop",
             "1",
             "-framerate",
-            str(FPS),
+            str(fps),
             "-t",
             f"{dur:.3f}",
             "-i",
@@ -802,7 +869,7 @@ def reel_ffmpeg_args(
     chains: list[str] = []
     for i, dur in enumerate(segment_durations):
         kb = _beat_motion_filter(
-            dur, variant=kb_variants[i], tag=str(i), width=width, height=height
+            dur, variant=kb_variants[i], tag=str(i), width=width, height=height, fps=fps
         )
         chains.append(f"[{i}:v]{kb},setsar=1[v{i}]")
     last = "v0"
@@ -826,7 +893,7 @@ def reel_ffmpeg_args(
         "-map",
         "[vout]",
         "-r",
-        str(FPS),
+        str(fps),
         "-c:v",
         "libx264",
         "-preset",
@@ -937,6 +1004,8 @@ def render_story_card_from_props(
     brief_dict: Optional[dict] = None,
     audio_plan: Optional[dict] = None,
     format_name: str = "story",
+    fps: int = FPS,
+    alpha_profile: str = "",
 ) -> Path:
     """Render one card's story MP4 via the still+FFmpeg path.
 
@@ -974,6 +1043,10 @@ def render_story_card_from_props(
         cache_payload["format"] = format_name
     if audio_plan:
         cache_payload["audio"] = audio_plan
+    # fps-option: fold the frame rate only for a non-default choice so the
+    # default (30fps) ffmpeg-story cache key is byte-identical to before.
+    if int(fps) != FPS:
+        cache_payload["fps"] = int(fps)
     cache_key = _content_hash(cache_payload, kind="story")
     cached = _cache_dir() / f"{cache_key}.mp4"
     if cached.exists() and cached.stat().st_size > 1024:
@@ -997,7 +1070,12 @@ def render_story_card_from_props(
         )
         tmp_mp4 = work / "story.mp4"
         ass_path = _write_caption_ass(
-            str(card_props.get("captionsJson") or ""), work, "story", width=width, height=height
+            str(card_props.get("captionsJson") or ""),
+            work,
+            "story",
+            width=width,
+            height=height,
+            fps=fps,
         )
         _run_ffmpeg(
             story_ffmpeg_args(
@@ -1008,6 +1086,7 @@ def render_story_card_from_props(
                 ass_path=ass_path,
                 width=width,
                 height=height,
+                fps=fps,
             )
         )
         # M22 — the same explainability shape the Remotion story path writes,
@@ -1020,18 +1099,94 @@ def render_story_card_from_props(
             "format": format_name,
             "size": [width, height],
             "duration_sec": duration_sec,
+            "fps": int(fps),
             "card": _card_manifest_axes(card_props),
             "kb_variant": variant,
             "captions": _caption_manifest(str(card_props.get("captionsJson") or "")),
             "notes": {
+                **(
+                    {"supersample": {"applied": False, "reason": "remotion-only"}}
+                    if _supersample_requested()
+                    else {}
+                ),
+                # transform-sampling: the per-photo resample knob maps to this
+                # engine's NATIVE 2x Lanczos prescale (the zoompan crop already
+                # samples a dense buffer), so it is satisfied natively rather than
+                # faking a caller factor — the honest cross-engine parity note.
+                **(
+                    {
+                        "photo_supersample": {
+                            "applied": True,
+                            "method": "native-2x-lanczos-prescale",
+                        }
+                    }
+                    if _photo_supersample_requested()
+                    else {}
+                ),
                 # M23: footage-backed beats need the Remotion engine (this
                 # path animates the card's pre-baked still and cannot play a
                 # video plane) — an honest capability note, never a fake beat.
                 "footage": "unsupported-on-engine",
+                # render-banding-dither: the ordered-dither debanding overlay is a
+                # Remotion mix-blend layer (Dither.tsx); this engine animates the
+                # card's pre-baked still and cannot composite it, so a dither-opted
+                # STORY render honestly reports it absent — never a faked layer.
+                # (The reel path composites the pre-baked still PNGs, which already
+                # carry the still-side dither baked in, so it needs no such note.)
+                "dither": "unsupported-on-engine",
+                # blur-family: the develop-in directional/radial/lens focus blur
+                # is a per-frame Remotion photo-element grade; this engine
+                # composites the approved still unblurred, so the intro smear is
+                # honestly absent — never a faked filter.
+                "focus_blur": "unsupported-on-engine",
+                # Per-glyph text reveal needs the DOM Remotion path; this engine
+                # animates the pre-baked still, so any glyph-granularity request
+                # degrades honestly to the whole-still render — never a faked
+                # per-character animation.
+                "text_granularity": "per-glyph-unsupported-on-engine",
+                # text-fx-richer: the closed-enum entrance text animators
+                # (per-glyph blur/wiggle, per-word rise, per-line tracking) are
+                # Remotion DOM effects; this engine animates the card's pre-baked
+                # still and has no per-glyph/-word/-line DOM, so a text-fx request
+                # degrades honestly to the whole-still camera move — never a faked
+                # per-character animation.
+                "text_fx": "per-glyph-text-animators-unsupported-on-engine",
+                # true-motion-blur: real shutter-accumulation blur re-renders the
+                # moving layer at N sub-frame offsets and composites them — a
+                # per-frame Remotion DOM capability. This engine animates the card's
+                # pre-baked still and cannot multi-sample a shutter interval, so an
+                # opted-in request degrades HONESTLY to the whole-still camera move —
+                # never a faked smear. Fold-only-when-requested keeps default notes clean.
+                **({"motion_blur": "unsupported-on-engine"} if _motion_blur_requested() else {}),
+                # per-effect-toggle (REVIEW-ONLY A/B): the decorative treatment
+                # is baked into the approved still this engine animates, so it
+                # cannot selectively drop an individual motion effect for a
+                # with/without comparison. Reported honestly ONLY when a review
+                # render asked for it — never a faked toggled variant. Absent on
+                # every default render, so the note is fold-only-when-present.
+                **(
+                    {"effect_toggles": "unsupported-on-engine"}
+                    if card_props.get("effectsDisabled")
+                    else {}
+                ),
+                # bit-depth-gamut: the higher-bit-depth / wide-gamut encode is a
+                # Remotion renderMedia codec/pixelFormat/colorSpace setting; this
+                # engine composites pre-baked 8-bit stills through a fixed libx264
+                # yuv420p path with no extra precision to preserve, so a request
+                # degrades HONESTLY — never a faked 10-bit or false gamut tag.
+                # Fold-only-when-requested keeps every default render's note clean.
+                **({"encode": "unsupported-on-engine"} if _motion_encode_requested() else {}),
+                # alpha-export: a transparent-background export is a Remotion
+                # renderMedia codec/pixelFormat capability; this engine composites
+                # OPAQUE pre-baked stills and cannot emit an alpha channel.
+                # Belt-and-braces honesty (fold-only-when-requested): the caller
+                # (motion.render_story_card) normally RAISES before reaching this
+                # engine, so this note only fires on a direct alpha call here.
+                **({"alpha": "unsupported-on-engine"} if alpha_profile else {}),
                 "engine_note": (
                     "Rendered by the reduced-motion FFmpeg engine: the card's own "
                     "approved still with a deterministic camera move — no text "
-                    "choreography or count-up."
+                    "choreography, count-up, or typewriter/scramble reveal."
                 ),
             },
         }
@@ -1059,6 +1214,9 @@ def render_meet_reel_from_props(
     format_name: str = "story",
     rhythm: Optional[dict] = None,
     audio_notes: Optional[dict] = None,
+    fps: int = FPS,
+    logo_drawon: bool = False,
+    alpha_profile: str = "",
 ) -> Path:
     """Render the meet reel (cover + one beat per card) via still+FFmpeg.
 
@@ -1105,6 +1263,18 @@ def render_meet_reel_from_props(
         cache_payload["format"] = format_name
     if audio_plan:
         cache_payload["audio"] = audio_plan
+    # svg-shape-decompose: the opt-in draw-on request folds into the cache key
+    # ONLY when set, so the opted-in reel caches (and re-manifests) under its own
+    # key with the honest "unsupported-on-engine" note, while every default reel
+    # stays byte-identical. The rendered bytes are the same static logo either
+    # way — this engine can't animate the paths — so the fold is manifest-honesty
+    # only, never a faked draw.
+    if logo_drawon:
+        cache_payload["logo_drawon_requested"] = True
+    # fps-option: fold the frame rate only for a non-default choice so the
+    # default (30fps) ffmpeg-reel cache key is byte-identical to before.
+    if int(fps) != FPS:
+        cache_payload["fps"] = int(fps)
     cache_key = _content_hash(cache_payload, kind="reel")
     cached = _cache_dir() / f"{cache_key}.mp4"
     if cached.exists() and cached.stat().st_size > 1024:
@@ -1185,6 +1355,7 @@ def render_meet_reel_from_props(
                 transitions=transitions,
                 width=width,
                 height=height,
+                fps=fps,
             )
         )
         # M22 — the same explainability shape the Remotion reel path writes,
@@ -1199,6 +1370,7 @@ def render_meet_reel_from_props(
             "format": format_name,
             "size": [width, height],
             "duration_sec": duration_sec,
+            "fps": int(fps),
             "meet_name": meet_name,
             "rhythm": rhythm or "default",
             "cards": [_card_manifest_axes(cp) for cp in cards_props],
@@ -1206,12 +1378,91 @@ def render_meet_reel_from_props(
             "transitions": transitions,
             "captions": {"status": "unsupported-on-engine"},
             "notes": {
+                **(
+                    {"supersample": {"applied": False, "reason": "remotion-only"}}
+                    if _supersample_requested()
+                    else {}
+                ),
+                # transform-sampling: satisfied natively by this engine's fixed 2x
+                # Lanczos prescale into every zoompan crop — honest parity note,
+                # never a faked caller factor.
+                **(
+                    {
+                        "photo_supersample": {
+                            "applied": True,
+                            "method": "native-2x-lanczos-prescale",
+                        }
+                    }
+                    if _photo_supersample_requested()
+                    else {}
+                ),
                 "captions": "unsupported-on-engine",
                 "stat_chips": "static-cover",
+                # varfont-animation: the Remotion engine blooms the supporting
+                # weight registers' variable wght axis up to the still's target
+                # over the first ~20% of the beat. This engine bakes the approved
+                # still, which already carries that static register weight, so it
+                # shows the terminal (parity) weight with no bloom — reported
+                # truthfully, never a faked animation.
+                "variable_axes": "static-weight",
                 # M23: footage-backed beats need the Remotion engine (this
                 # path animates pre-baked stills and cannot play a video
                 # plane) — an honest capability note, never a fake beat.
                 "footage": "unsupported-on-engine",
+                # blur-family: the develop-in directional/radial/lens focus blur
+                # is a per-frame Remotion photo-element grade; each beat here is
+                # the approved still composited unblurred, so the intro smear is
+                # honestly absent — never a faked filter.
+                "focus_blur": "unsupported-on-engine",
+                # Per-glyph text reveal needs the DOM Remotion path; each beat
+                # here is the pre-baked still, so a glyph-granularity request
+                # degrades honestly — never a faked per-character animation.
+                "text_granularity": "per-glyph-unsupported-on-engine",
+                # text-fx-richer: the closed-enum entrance text animators
+                # (per-glyph blur/wiggle, per-word rise, per-line tracking) are
+                # Remotion DOM effects; this engine animates the card's pre-baked
+                # still and has no per-glyph/-word/-line DOM, so a text-fx request
+                # degrades honestly to the whole-still camera move — never a faked
+                # per-character animation.
+                "text_fx": "per-glyph-text-animators-unsupported-on-engine",
+                # true-motion-blur: real shutter-accumulation blur re-renders the
+                # moving layer (whip flick + beat entrance/count-up) at N sub-frame
+                # offsets and composites them — a per-frame Remotion DOM capability.
+                # This engine composites pre-baked stills and cannot multi-sample a
+                # shutter interval, so an opted-in request degrades HONESTLY — never
+                # a faked smear. Fold-only-when-requested keeps default notes clean.
+                **({"motion_blur": "unsupported-on-engine"} if _motion_blur_requested() else {}),
+                # per-effect-toggle (REVIEW-ONLY A/B): the decorative treatment is
+                # baked into the approved stills this engine composites, so it
+                # cannot selectively drop an individual motion effect for a
+                # with/without comparison. Reported honestly ONLY when any beat
+                # asked for it — never a faked toggled variant. Absent on every
+                # default reel, so the note is fold-only-when-present.
+                **(
+                    {"effect_toggles": "unsupported-on-engine"}
+                    if any(cp.get("effectsDisabled") for cp in cards_props)
+                    else {}
+                ),
+                # svg-shape-decompose: the per-path SVG stroke draw-on on the
+                # cover/outro is a DOM Remotion effect; this engine composites a
+                # static logo overlay and cannot animate individual paths. When
+                # the caller opted in, report it unsupported HONESTLY (the static
+                # brand mark it already draws is unchanged) — never a faked draw.
+                # Fold-only-when-requested keeps every default reel's note clean.
+                **({"logo_drawon": "unsupported-on-engine"} if logo_drawon else {}),
+                # bit-depth-gamut: the higher-bit-depth / wide-gamut encode is a
+                # Remotion renderMedia setting; each beat here is a pre-baked 8-bit
+                # still composited through a fixed libx264 yuv420p path, so a
+                # request degrades HONESTLY — never a faked 10-bit or false gamut
+                # tag. Fold-only-when-requested keeps every default reel's note clean.
+                **({"encode": "unsupported-on-engine"} if _motion_encode_requested() else {}),
+                # alpha-export: a transparent-background reel is a Remotion
+                # renderMedia codec/pixelFormat capability; this engine composites
+                # OPAQUE stills and cannot emit an alpha channel. Belt-and-braces
+                # honesty (fold-only-when-requested): motion.render_meet_reel
+                # normally RAISES before reaching this engine, so this note only
+                # fires on a direct alpha call here.
+                **({"alpha": "unsupported-on-engine"} if alpha_profile else {}),
                 "engine_note": (
                     "Rendered by the reduced-motion FFmpeg engine: each beat is "
                     "the card's own approved still with a deterministic camera "

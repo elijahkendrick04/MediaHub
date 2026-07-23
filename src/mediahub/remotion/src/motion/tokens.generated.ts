@@ -3,7 +3,7 @@
 // The single source of truth is the Python preset registry; a guard
 // test (tests/test_motion_tokens_sync.py) fails if this drifts.
 
-export type MotionKeyframe = { offset: number; value: number; easing: string };
+export type MotionKeyframe = { offset: number; value: number; easing: string; interp?: "hold" | "auto" | "continuous" };
 export type MotionChannels = Record<string, MotionKeyframe[]>;
 export type MotionPresetTokens = {
   name: string;
@@ -21,16 +21,33 @@ export type MotionTokenBundle = {
   easings: Record<string, { bezier: number[] }>;
   presets: Record<string, MotionPresetTokens>;
   reduced: Record<string, MotionPresetTokens>;
+  text: { glyphStaggerSec: number };
 };
 
 export const MOTION_TOKENS: MotionTokenBundle = {
   "easings": {
+    "ease_in_back": {
+      "bezier": [
+        0.36,
+        0.0,
+        0.66,
+        -0.56
+      ]
+    },
     "ease_in_cubic": {
       "bezier": [
         0.55,
         0.055,
         0.675,
         0.19
+      ]
+    },
+    "ease_in_out_back": {
+      "bezier": [
+        0.68,
+        -0.6,
+        0.32,
+        1.6
       ]
     },
     "ease_in_out_cubic": {
@@ -61,6 +78,22 @@ export const MOTION_TOKENS: MotionTokenBundle = {
       "bezier": [
         0.34,
         1.56,
+        0.64,
+        1.0
+      ]
+    },
+    "ease_out_back_soft": {
+      "bezier": [
+        0.34,
+        1.3,
+        0.64,
+        1.0
+      ]
+    },
+    "ease_out_back_strong": {
+      "bezier": [
+        0.34,
+        1.8,
         0.64,
         1.0
       ]
@@ -1344,7 +1377,10 @@ export const MOTION_TOKENS: MotionTokenBundle = {
       "photo": false
     }
   },
-  "version": 1
+  "text": {
+    "glyphStaggerSec": 0.035
+  },
+  "version": 2
 } as const;
 
 export default MOTION_TOKENS;

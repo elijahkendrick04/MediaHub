@@ -73,12 +73,24 @@ def _brand_kit() -> BrandKit:
 
 def _reel_cards() -> list[dict]:
     return [
-        {"id": "c1", "achievement": {"swimmer_name": "Ada Lovelace",
-                                     "event_name": "100m Free LC",
-                                     "result_time": "00:58.31", "type": "NEW PB"}},
-        {"id": "c2", "achievement": {"swimmer_name": "Grace Hopper",
-                                     "event_name": "200m Fly LC",
-                                     "result_time": "02:14.90", "type": "GOLD"}},
+        {
+            "id": "c1",
+            "achievement": {
+                "swimmer_name": "Ada Lovelace",
+                "event_name": "100m Free LC",
+                "result_time": "00:58.31",
+                "type": "NEW PB",
+            },
+        },
+        {
+            "id": "c2",
+            "achievement": {
+                "swimmer_name": "Grace Hopper",
+                "event_name": "200m Fly LC",
+                "result_time": "02:14.90",
+                "type": "GOLD",
+            },
+        },
     ]
 
 
@@ -242,12 +254,16 @@ def test_try_returns_none_when_disabled(monkeypatch, tmp_path):
     monkeypatch.setattr(reel_parallel, "available", lambda: True)
     called = {"render": False}
     monkeypatch.setattr(
-        reel_parallel, "render_reel_parallel",
+        reel_parallel,
+        "render_reel_parallel",
         lambda **k: called.__setitem__("render", True),
     )
     out = reel_parallel.try_render_reel_parallel(
-        composition_id="MeetReel", props={"cards": []}, out_path=tmp_path / "r.mp4",
-        duration_sec=15.0, size=(1080, 1920),
+        composition_id="MeetReel",
+        props={"cards": []},
+        out_path=tmp_path / "r.mp4",
+        duration_sec=15.0,
+        size=(1080, 1920),
     )
     assert out is None
     assert called["render"] is False  # never even attempted
@@ -258,8 +274,11 @@ def test_try_returns_none_when_unavailable(monkeypatch, tmp_path):
     monkeypatch.setenv("MEDIAHUB_REEL_PARALLEL", "1")
     monkeypatch.setattr(reel_parallel, "available", lambda: False)
     out = reel_parallel.try_render_reel_parallel(
-        composition_id="MeetReel", props={"cards": []}, out_path=tmp_path / "r.mp4",
-        duration_sec=15.0, size=(1080, 1920),
+        composition_id="MeetReel",
+        props={"cards": []},
+        out_path=tmp_path / "r.mp4",
+        duration_sec=15.0,
+        size=(1080, 1920),
     )
     assert out is None
 
@@ -272,8 +291,11 @@ def test_try_returns_none_on_unavailable_split(monkeypatch, tmp_path):
     monkeypatch.setattr(reel_parallel, "available", lambda: True)
     # 1s @ 30fps = 30 frames, below MIN_FRAMES_TO_SPLIT (60).
     out = reel_parallel.try_render_reel_parallel(
-        composition_id="MeetReel", props={"cards": []}, out_path=tmp_path / "r.mp4",
-        duration_sec=1.0, size=(1080, 1920),
+        composition_id="MeetReel",
+        props={"cards": []},
+        out_path=tmp_path / "r.mp4",
+        duration_sec=1.0,
+        size=(1080, 1920),
     )
     assert out is None
 
@@ -288,8 +310,11 @@ def test_try_returns_none_on_render_failure(monkeypatch, tmp_path):
 
     monkeypatch.setattr(reel_parallel, "render_reel_parallel", boom)
     out = reel_parallel.try_render_reel_parallel(
-        composition_id="MeetReel", props={"cards": []}, out_path=tmp_path / "r.mp4",
-        duration_sec=15.0, size=(1080, 1920),
+        composition_id="MeetReel",
+        props={"cards": []},
+        out_path=tmp_path / "r.mp4",
+        duration_sec=15.0,
+        size=(1080, 1920),
     )
     assert out is None  # any failure ⇒ serial, never a hard error
 
@@ -305,13 +330,23 @@ def _mock_pipeline(monkeypatch):
     capturing what the node seam received."""
     captured: dict = {}
 
-    def fake_node(*, composition_id, props_path, manifest_path, duration_sec,
-                  size, concurrency, timeout):
+    def fake_node(
+        *,
+        composition_id,
+        props_path,
+        manifest_path,
+        duration_sec,
+        size,
+        concurrency,
+        timeout,
+        fps=reel_parallel.REEL_FPS,
+    ):
         manifest = json.loads(Path(manifest_path).read_text())
         captured["manifest"] = manifest
         captured["composition_id"] = composition_id
         captured["size"] = size
         captured["concurrency"] = concurrency
+        captured["fps"] = fps
         captured["props"] = json.loads(Path(props_path).read_text())
         for seg in manifest["segments"]:
             Path(seg["output"]).write_bytes(_FAKE_MP4)
@@ -353,16 +388,75 @@ def test_render_reel_parallel_builds_manifest_and_composites(monkeypatch, tmp_pa
         assert b["start"] == a["end"] + 1  # no gap, no overlap
     assert captured["composition_id"] == "MeetReel"
     assert captured["size"] == (1080, 1920)
+    assert captured["fps"] == reel_parallel.REEL_FPS  # default rate threaded through
     # Concat list references every segment, in order.
     assert captured["concat_list"].count("file '") == 4
+
+
+def test_render_reel_parallel_plans_at_selected_fps(monkeypatch, tmp_path):
+    """A non-default fps re-plans the split at that rate (double the frames at
+    60fps) and threads the selected fps down to the node segment renderer."""
+    _common(monkeypatch, tmp_path)
+    monkeypatch.setattr(reel_parallel, "_cpu_count", lambda: 4)
+    monkeypatch.delenv("MEDIAHUB_REEL_PARALLEL_WORKERS", raising=False)
+    captured = _mock_pipeline(monkeypatch)
+
+    out = tmp_path / "out60.mp4"
+    reel_parallel.render_reel_parallel(
+        composition_id="MeetReel",
+        props={"cards": [_props()], "brand": _brand_dict(), "meetName": "Test Meet"},
+        out_path=out,
+        duration_sec=15.0,
+        size=(1080, 1920),
+        fps=60,
+    )
+    segs = captured["manifest"]["segments"]
+    # 15s @ 60fps ⇒ 900 frames tiled contiguously (vs 450 at 30fps).
+    assert segs[0]["start"] == 0
+    assert segs[-1]["end"] == 899
+    assert captured["fps"] == 60
+
+
+def test_run_node_segments_appends_fps_only_when_non_default(monkeypatch, tmp_path):
+    captured: dict = {}
+
+    class _Proc:
+        returncode = 0
+        stderr = ""
+
+    def fake_run_capture(cmd, *, cwd=None, timeout=None):
+        captured["cmd"] = list(cmd)
+        return _Proc()
+
+    monkeypatch.setattr("mediahub.visual.proc.run_capture", fake_run_capture)
+
+    common = dict(
+        composition_id="MeetReel",
+        props_path=tmp_path / "p.json",
+        manifest_path=tmp_path / "m.json",
+        duration_sec=15.0,
+        size=(1080, 1920),
+        concurrency=1,
+        timeout=600,
+    )
+    reel_parallel._run_node_segments(**common, fps=50)
+    assert "--fps" in captured["cmd"]
+    assert captured["cmd"][captured["cmd"].index("--fps") + 1] == "50"
+
+    captured.clear()
+    reel_parallel._run_node_segments(**common, fps=30)
+    assert "--fps" not in captured["cmd"]  # default command byte-identical
 
 
 def test_render_reel_parallel_rejects_subthreshold(monkeypatch, tmp_path):
     _common(monkeypatch, tmp_path)
     with pytest.raises(reel_parallel.ReelParallelUnavailable):
         reel_parallel.render_reel_parallel(
-            composition_id="MeetReel", props={"cards": []}, out_path=tmp_path / "r.mp4",
-            duration_sec=1.0, size=(1080, 1920),  # 30 frames < 60
+            composition_id="MeetReel",
+            props={"cards": []},
+            out_path=tmp_path / "r.mp4",
+            duration_sec=1.0,
+            size=(1080, 1920),  # 30 frames < 60
         )
 
 
@@ -377,7 +471,9 @@ def test_render_reel_parallel_discards_wrong_duration(monkeypatch, tmp_path):
         reel_parallel.render_reel_parallel(
             composition_id="MeetReel",
             props={"cards": [_props()], "brand": _brand_dict(), "meetName": "M"},
-            out_path=tmp_path / "out.mp4", duration_sec=15.0, size=(1080, 1920),
+            out_path=tmp_path / "out.mp4",
+            duration_sec=15.0,
+            size=(1080, 1920),
         )
 
 
@@ -390,7 +486,9 @@ def test_render_reel_parallel_raises_when_segment_missing(monkeypatch, tmp_path)
         reel_parallel.render_reel_parallel(
             composition_id="MeetReel",
             props={"cards": [_props()], "brand": _brand_dict(), "meetName": "M"},
-            out_path=tmp_path / "out.mp4", duration_sec=15.0, size=(1080, 1920),
+            out_path=tmp_path / "out.mp4",
+            duration_sec=15.0,
+            size=(1080, 1920),
         )
 
 
@@ -424,9 +522,7 @@ def test_render_meet_reel_uses_serial_when_parallel_off(monkeypatch, tmp_path):
     monkeypatch.setattr(motion, "_run_remotion", fake_remotion)
 
     out = tmp_path / "reel.mp4"
-    result = motion.render_meet_reel(
-        _reel_cards(), _brand_kit(), out, meet_name="Test Meet"
-    )
+    result = motion.render_meet_reel(_reel_cards(), _brand_kit(), out, meet_name="Test Meet")
     assert Path(result).exists()
     assert len(calls) == 1  # serial render ran exactly once
     cached = calls[0]["out_path"]
@@ -453,9 +549,7 @@ def test_render_meet_reel_uses_parallel_result_when_available(monkeypatch, tmp_p
     monkeypatch.setattr(motion, "_run_remotion", forbidden)
 
     out = tmp_path / "reel.mp4"
-    result = motion.render_meet_reel(
-        _reel_cards(), _brand_kit(), out, meet_name="Test Meet"
-    )
+    result = motion.render_meet_reel(_reel_cards(), _brand_kit(), out, meet_name="Test Meet")
     assert Path(result).exists()
     # Find the cache sidecar and confirm the strategy was recorded.
     cache_dir = tmp_path / "motion_cache"
@@ -478,7 +572,8 @@ def test_parallel_render_is_cache_key_invariant(monkeypatch, tmp_path):
 
     monkeypatch.setattr(motion, "_render_reel_parallel_or_none", fake_parallel)
     monkeypatch.setattr(
-        motion, "_run_remotion",
+        motion,
+        "_run_remotion",
         lambda **k: (_ for _ in ()).throw(AssertionError("should not serial-render")),
     )
     out1 = tmp_path / "reel1.mp4"
@@ -490,7 +585,8 @@ def test_parallel_render_is_cache_key_invariant(monkeypatch, tmp_path):
     # Second request, identical inputs, parallel now "off": must be a cache hit
     # (no parallel attempt, no serial render) at the SAME key.
     monkeypatch.setattr(
-        motion, "_render_reel_parallel_or_none",
+        motion,
+        "_render_reel_parallel_or_none",
         lambda **k: (_ for _ in ()).throw(AssertionError("should not attempt parallel on hit")),
     )
     out2 = tmp_path / "reel2.mp4"

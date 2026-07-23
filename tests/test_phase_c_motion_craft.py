@@ -71,7 +71,9 @@ def _reel_src() -> str:
     return (motion.REMOTION_DIR / "src" / "compositions" / "MeetReel.tsx").read_text()
 
 
-def _fake_run(*, composition_id, props, out_path, duration_sec=None, size=None, timeout=600):
+def _fake_run(
+    *, composition_id, props, out_path, duration_sec=None, size=None, timeout=600, supersample=1.0
+):
     out = Path(out_path)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_bytes(b"\x00\x00\x00\x18ftypisom" + b"\x00" * 4096)
@@ -162,9 +164,9 @@ class TestM16PairedTransitions:
 
     def test_story_self_fade_is_gated_on_in_reel(self):
         src = _story_src()
-        assert re.search(r"card\.inReel\s*\n?\s*\?\s*1", src), (
-            "inside a reel the beat must hold fully visible (the transition is the exit)"
-        )
+        assert re.search(
+            r"card\.inReel\s*\n?\s*\?\s*1", src
+        ), "inside a reel the beat must hold fully visible (the transition is the exit)"
 
     def test_reel_beats_pass_in_reel(self):
         assert "card={{ ...card, inReel: true }}" in _reel_src()
@@ -259,7 +261,16 @@ class TestM18BrandTrueCover:
         monkeypatch.setenv("DATA_DIR", str(tmp_path))
         captured: dict = {}
 
-        def _capture(*, composition_id, props, out_path, duration_sec=None, size=None, timeout=600):
+        def _capture(
+            *,
+            composition_id,
+            props,
+            out_path,
+            duration_sec=None,
+            size=None,
+            timeout=600,
+            supersample=1.0,
+        ):
             captured["props"] = props
             return _fake_run(
                 composition_id=composition_id,
@@ -525,9 +536,9 @@ class TestM21EditedPhotoParity:
                 store.get("edit-1"), EditRecipe.build([("blur", {"radius": 9})]), store
             )
             motion.render_story_card(_card(1), BRAND, tmp_path / "b.mp4", brief=brief)
-        assert len(list(motion._cache_dir().glob("*.mp4"))) == n_before + 1, (
-            "an edited photo must re-render, never serve the pre-edit MP4"
-        )
+        assert (
+            len(list(motion._cache_dir().glob("*.mp4"))) == n_before + 1
+        ), "an edited photo must re-render, never serve the pre-edit MP4"
 
     def test_exif_orientation_is_normalised_in_the_thumbnail(self, tmp_path):
         """A phone-portrait JPEG (EXIF orientation 6) must play upright."""
@@ -542,9 +553,10 @@ class TestM21EditedPhotoParity:
         uri = motion._photo_data_uri_for_path(src)
         assert uri.startswith("data:image/jpeg;base64,")
         decoded = Image.open(io.BytesIO(base64.b64decode(uri.split(",", 1)[1])))
-        assert (decoded.width, decoded.height) == (200, 400), (
-            "EXIF orientation must be baked (transposed), not dropped"
-        )
+        assert (decoded.width, decoded.height) == (
+            200,
+            400,
+        ), "EXIF orientation must be baked (transposed), not dropped"
 
 
 # =========================================================================== #

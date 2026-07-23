@@ -9,7 +9,7 @@ import { entranceChannels } from "../../../motion/compile";
  * same keyframe data the CSS surface uses, so the movement is identical on every
  * surface. Pure function of the frame.
  */
-const program: IntentProgram = (frame, fps, _durationInFrames, _mood, base) =>
-  entranceChannels("rise", frame, fps, base);
+const program: IntentProgram = (frame, fps, _durationInFrames, _mood, base, stagger) =>
+  entranceChannels("rise", frame, fps, base, stagger);
 
 export default { name: "rise", program };

@@ -318,14 +318,54 @@ def test_motion_is_deterministic():
 
 
 # ---------------------------------------------------------------------------
+# Selectable output frame rate (fps-option) — honestly supported by ffmpeg's -r
+# ---------------------------------------------------------------------------
+
+
+def test_story_args_default_fps_is_byte_identical():
+    """Passing fps=FPS explicitly equals omitting it — the default is unchanged."""
+    a = reel_ffmpeg.story_ffmpeg_args(Path("s.png"), Path("o.mp4"), 6.0)
+    b = reel_ffmpeg.story_ffmpeg_args(Path("s.png"), Path("o.mp4"), 6.0, fps=reel_ffmpeg.FPS)
+    assert a == b
+    assert a[a.index("-framerate") + 1] == str(reel_ffmpeg.FPS)
+    assert a[a.index("-r") + 1] == str(reel_ffmpeg.FPS)
+
+
+def test_story_args_use_the_selected_fps():
+    args = reel_ffmpeg.story_ffmpeg_args(Path("s.png"), Path("o.mp4"), 6.0, fps=50)
+    assert args[args.index("-framerate") + 1] == "50"
+    assert args[args.index("-r") + 1] == "50"
+    # The Ken Burns sub-graph re-times to the selected rate too.
+    assert "fps=50" in " ".join(args)
+
+
+def test_reel_args_use_the_selected_fps():
+    stills = [Path("c.png"), Path("a.png"), Path("b.png")]
+    segs = reel_ffmpeg.reel_segment_durations(2, reel_duration_for(2))
+    args = reel_ffmpeg.reel_ffmpeg_args(stills, Path("r.mp4"), segs, fps=60)
+    # Every -framerate input flag and the final output rate use 60.
+    assert args.count("-framerate") == len(stills)
+    for i, tok in enumerate(args):
+        if tok == "-framerate":
+            assert args[i + 1] == "60"
+    assert args[args.index("-r") + 1] == "60"
+    assert "fps=60" in " ".join(args)
+
+
+def test_ken_burns_filter_retimes_to_selected_fps():
+    at30 = reel_ffmpeg._ken_burns_filter(4.0, variant="zoom_in", fps=30)
+    at60 = reel_ffmpeg._ken_burns_filter(4.0, variant="zoom_in", fps=60)
+    assert "fps=30" in at30 and "fps=60" in at60
+    assert at30 != at60
+
+
+# ---------------------------------------------------------------------------
 # Frame briefs — deterministic, no AI
 # ---------------------------------------------------------------------------
 
 
 def test_minimal_brief_carries_card_facts_and_brand_palette():
-    brief = reel_ffmpeg._minimal_brief(
-        _props(), _brand_dict(), profile_id="ffmpeg-test"
-    )
+    brief = reel_ffmpeg._minimal_brief(_props(), _brand_dict(), profile_id="ffmpeg-test")
     assert brief.layout_template == "story_card"
     assert brief.text_layers["athlete_full_name"] == "Ada Lovelace"
     assert brief.text_layers["result_value"] == "00:58.31"
@@ -348,9 +388,7 @@ def test_rehydrate_brief_roundtrips_a_persisted_brief():
 
 
 def test_frame_brief_falls_back_when_dict_is_not_a_brief():
-    brief = reel_ffmpeg._frame_brief(
-        _props(), _brand_dict(), _brand_kit(), {"not_a_field": True}
-    )
+    brief = reel_ffmpeg._frame_brief(_props(), _brand_dict(), _brand_kit(), {"not_a_field": True})
     assert brief.layout_template == "story_card"  # deterministic fallback
 
 
@@ -374,9 +412,7 @@ def test_missing_ffmpeg_raises_engine_unavailable(tmp_path, monkeypatch):
     monkeypatch.setattr(reel_ffmpeg, "ffmpeg_exe", lambda: None)
     out = tmp_path / "story.mp4"
     with pytest.raises(ReelEngineUnavailable, match="FFmpeg"):
-        reel_ffmpeg.render_story_card_from_props(
-            _props(), _brand_dict(), _brand_kit(), out
-        )
+        reel_ffmpeg.render_story_card_from_props(_props(), _brand_dict(), _brand_kit(), out)
     assert not out.exists(), "no placeholder asset may be written on failure"
 
 
@@ -408,6 +444,194 @@ def test_cache_key_is_engine_separated():
     remotion_key = _content_hash(base, kind="story")
     ffmpeg_key = _content_hash({**base, "engine": "ffmpeg", "brief": {}}, kind="story")
     assert remotion_key != ffmpeg_key
+
+
+def test_ffmpeg_manifests_declare_focus_blur_unsupported():
+    """The develop-in directional/radial/lens focus blur is a per-frame Remotion
+    photo-element grade; this engine composites the approved still unblurred, so
+    BOTH the story and the reel manifests degrade honestly (never a faked
+    filter)."""
+    src = (Path(reel_ffmpeg.__file__)).read_text()
+    assert src.count('"focus_blur": "unsupported-on-engine"') == 2
+
+
+def test_ffmpeg_manifests_declare_effect_toggles_unsupported_when_requested():
+    """per-effect-toggle (REVIEW-ONLY A/B): the decorative treatment is baked into
+    the approved still this engine animates, so it cannot selectively drop an
+    individual motion effect for a comparison render. BOTH the story and the reel
+    branches carry the honest note (emitted only when a review render asks for
+    it), never faking a toggled variant."""
+    src = (Path(reel_ffmpeg.__file__)).read_text()
+    assert src.count('"effect_toggles": "unsupported-on-engine"') == 2
+
+
+def test_ffmpeg_reports_text_fx_unsupported():
+    """text-fx-richer: the closed-enum entrance text animators (per-glyph
+    blur/wiggle, per-word rise, per-line tracking) are Remotion DOM effects. This
+    engine animates the card's pre-baked still and has no per-glyph/-word/-line
+    DOM, so BOTH the story and the reel manifests declare it unsupported-on-engine
+    — never a faked per-character animation."""
+    src = (Path(reel_ffmpeg.__file__)).read_text()
+    assert (
+        src.count('"text_fx": "per-glyph-text-animators-unsupported-on-engine"') == 2
+    )
+
+
+def test_ffmpeg_reel_branch_declares_logo_drawon_unsupported_when_requested():
+    """svg-shape-decompose: the per-path SVG stroke draw-on on the cover/outro is
+    a DOM Remotion effect; this engine composites a static logo and cannot
+    animate individual paths. The reel branch carries the honest note (emitted
+    only when the caller opts in), never faking the draw."""
+    src = (Path(reel_ffmpeg.__file__)).read_text()
+    assert src.count('"logo_drawon": "unsupported-on-engine"') == 1
+
+
+@pytest.mark.skipif(not _HAS_FFMPEG, reason="no FFmpeg binary resolvable")
+def test_ffmpeg_reel_manifest_notes_logo_drawon_only_when_requested(tmp_path, monkeypatch):
+    """A reel that opted into the logo draw-on records the honest unsupported
+    note AND still emits the static logo reel; a default reel does NOT — fold-
+    only-when-present, so the default manifest is byte-identical."""
+    import json as _json
+
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+
+    def _fake_still(brief, brand_kit, out_dir, name, **kw):
+        return _write_synthetic_still(
+            out_dir / name / "story.png",
+            (60, 60, 90),
+            size=kw.get("size", (reel_ffmpeg.WIDTH, reel_ffmpeg.HEIGHT)),
+        )
+
+    monkeypatch.setattr(reel_ffmpeg, "_render_still", _fake_still)
+    cards = [_props()]
+
+    out_default = tmp_path / "reel_default.mp4"
+    reel_ffmpeg.render_meet_reel_from_props(
+        cards, _brand_dict(), _brand_kit(), out_default, meet_name="Test Meet"
+    )
+    notes_default = _json.loads(Path(out_default).with_suffix(".json").read_text())["notes"]
+    assert "logo_drawon" not in notes_default
+
+    out_drawon = tmp_path / "reel_drawon.mp4"
+    result = reel_ffmpeg.render_meet_reel_from_props(
+        cards, _brand_dict(), _brand_kit(), out_drawon, meet_name="Test Meet", logo_drawon=True
+    )
+    assert (
+        Path(result).exists() and Path(result).stat().st_size > 1024
+    ), "static logo reel still ships"
+    notes_drawon = _json.loads(Path(out_drawon).with_suffix(".json").read_text())["notes"]
+    assert notes_drawon["logo_drawon"] == "unsupported-on-engine"
+
+
+@pytest.mark.skipif(not _HAS_FFMPEG, reason="no FFmpeg binary resolvable")
+def test_ffmpeg_story_manifest_notes_effect_toggles_only_on_review_render(tmp_path, monkeypatch):
+    """A review render (card carries effectsDisabled) records the honest
+    unsupported note; a default render does NOT — fold-only-when-present, so the
+    default manifest is unchanged and no faked toggled asset is emitted."""
+    import json as _json
+
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(
+        reel_ffmpeg,
+        "_render_still",
+        lambda brief, brand_kit, out_dir, name, **kw: _write_synthetic_still(
+            out_dir / name / "story.png",
+            size=kw.get("size", (reel_ffmpeg.WIDTH, reel_ffmpeg.HEIGHT)),
+        ),
+    )
+    # Default render: no toggle -> no note.
+    out_default = tmp_path / "default.mp4"
+    reel_ffmpeg.render_story_card_from_props(
+        _props(), _brand_dict(), _brand_kit(), out_default, duration_sec=3.0
+    )
+    notes_default = _json.loads(out_default.with_suffix(".json").read_text())["notes"]
+    assert "effect_toggles" not in notes_default
+
+    # Review render: effectsDisabled attached -> honest unsupported note.
+    review_props = {**_props(), "effectsDisabled": ["accent", "style_pack"]}
+    out_review = tmp_path / "review.mp4"
+    reel_ffmpeg.render_story_card_from_props(
+        review_props, _brand_dict(), _brand_kit(), out_review, duration_sec=3.0
+    )
+    notes_review = _json.loads(out_review.with_suffix(".json").read_text())["notes"]
+    assert notes_review["effect_toggles"] == "unsupported-on-engine"
+
+
+def test_ffmpeg_story_manifest_declares_dither_unsupported():
+    """render-banding-dither: the ordered-dither debanding overlay is a Remotion
+    mix-blend layer this engine can't composite over an animated still, so the
+    STORY path reports it honestly. The REEL path composites pre-baked still
+    PNGs (which already carry the still-side dither baked in), so it needs no
+    such note — the note appears exactly once, on the story path."""
+    src = (Path(reel_ffmpeg.__file__)).read_text()
+    assert src.count('"dither": "unsupported-on-engine"') == 1
+
+
+def test_ffmpeg_manifests_declare_motion_blur_unsupported():
+    """true-motion-blur: real shutter-accumulation blur re-renders a moving layer
+    at N sub-frame offsets and composites them — a per-frame Remotion DOM
+    capability. This engine composites pre-baked stills and cannot multi-sample a
+    shutter interval, so BOTH the story and reel branches declare it
+    unsupported-on-engine (emitted only when opted in), never a faked smear."""
+    src = (Path(reel_ffmpeg.__file__)).read_text()
+    assert src.count('"motion_blur": "unsupported-on-engine"') == 2
+
+
+@pytest.mark.skipif(not _HAS_FFMPEG, reason="no FFmpeg binary resolvable")
+def test_ffmpeg_reports_motion_blur_unsupported(tmp_path, monkeypatch):
+    """With MEDIAHUB_MOTION_BLUR opted in, the FFmpeg reel + story manifests carry
+    the honest ``motion_blur: unsupported-on-engine`` note; a default (off) render
+    does NOT — fold-only-when-requested, so the default manifest is unchanged and
+    the engine ships its normal (non-accumulated) output either way. The note is an
+    explainability sidecar (deliberately NOT in the ffmpeg cache key), so off/on use
+    separate DATA_DIRs to force a cold render of each and read the manifest each
+    writes."""
+    import json as _json
+
+    monkeypatch.setattr(
+        reel_ffmpeg,
+        "_render_still",
+        lambda brief, brand_kit, out_dir, name, **kw: _write_synthetic_still(
+            out_dir / name / "story.png",
+            size=kw.get("size", (reel_ffmpeg.WIDTH, reel_ffmpeg.HEIGHT)),
+        ),
+    )
+
+    # Default (blur off), its own cache: no note on either surface.
+    monkeypatch.delenv("MEDIAHUB_MOTION_BLUR", raising=False)
+    monkeypatch.setenv("DATA_DIR", str(tmp_path / "off"))
+    out_story_off = tmp_path / "story_off.mp4"
+    reel_ffmpeg.render_story_card_from_props(
+        _props(), _brand_dict(), _brand_kit(), out_story_off, duration_sec=3.0
+    )
+    story_off = _json.loads(out_story_off.with_suffix(".json").read_text())["notes"]
+    assert "motion_blur" not in story_off
+
+    out_reel_off = tmp_path / "reel_off.mp4"
+    reel_ffmpeg.render_meet_reel_from_props(
+        [_props()], _brand_dict(), _brand_kit(), out_reel_off, meet_name="Test Meet"
+    )
+    reel_off = _json.loads(out_reel_off.with_suffix(".json").read_text())["notes"]
+    assert "motion_blur" not in reel_off
+
+    # Opted in, a fresh cache (cold render): the honest note appears, output ships.
+    monkeypatch.setenv("MEDIAHUB_MOTION_BLUR", "1")
+    monkeypatch.setenv("DATA_DIR", str(tmp_path / "on"))
+    out_story_on = tmp_path / "story_on.mp4"
+    result_s = reel_ffmpeg.render_story_card_from_props(
+        _props(), _brand_dict(), _brand_kit(), out_story_on, duration_sec=3.0
+    )
+    assert Path(result_s).exists() and Path(result_s).stat().st_size > 1024
+    story_on = _json.loads(out_story_on.with_suffix(".json").read_text())["notes"]
+    assert story_on["motion_blur"] == "unsupported-on-engine"
+
+    out_reel_on = tmp_path / "reel_on.mp4"
+    result_r = reel_ffmpeg.render_meet_reel_from_props(
+        [_props()], _brand_dict(), _brand_kit(), out_reel_on, meet_name="Test Meet"
+    )
+    assert Path(result_r).exists() and Path(result_r).stat().st_size > 1024
+    reel_on = _json.loads(out_reel_on.with_suffix(".json").read_text())["notes"]
+    assert reel_on["motion_blur"] == "unsupported-on-engine"
 
 
 # ---------------------------------------------------------------------------
@@ -474,6 +698,41 @@ def test_reel_assembly_hits_data_driven_duration_and_caches(tmp_path, monkeypatc
     )
     assert renders == []
     assert Path(again).exists()
+
+
+@pytest.mark.skipif(not _HAS_FFMPEG, reason="no FFmpeg binary resolvable")
+def test_reel_assembly_at_selected_fps_records_manifest_and_folds_cache(tmp_path, monkeypatch):
+    """A non-default fps renders honestly (ffmpeg -r), the manifest records the
+    real output fps, and the render caches under a DISTINCT key from the 30fps
+    reel (so the two never collide)."""
+    import json as _json
+
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+
+    def _fake_still(brief, brand_kit, out_dir, name, **kw):
+        return _write_synthetic_still(
+            out_dir / name / "story.png",
+            (60, 60, 90),
+            size=kw.get("size", (reel_ffmpeg.WIDTH, reel_ffmpeg.HEIGHT)),
+        )
+
+    monkeypatch.setattr(reel_ffmpeg, "_render_still", _fake_still)
+    cards = [_props()]
+
+    out50 = tmp_path / "reel50.mp4"
+    reel_ffmpeg.render_meet_reel_from_props(
+        cards, _brand_dict(), _brand_kit(), out50, meet_name="Test Meet", fps=50
+    )
+    manifest = _json.loads(Path(out50).with_suffix(".json").read_text())
+    assert manifest["fps"] == 50
+
+    out30 = tmp_path / "reel30.mp4"
+    reel_ffmpeg.render_meet_reel_from_props(
+        cards, _brand_dict(), _brand_kit(), out30, meet_name="Test Meet", fps=30
+    )
+    # The 30fps and 50fps reels are distinct cache entries (fold-only-when-active).
+    cache_mp4s = {p.name for p in (tmp_path / "motion_cache").glob("*.mp4")}
+    assert len(cache_mp4s) == 2
 
 
 # ---------------------------------------------------------------------------
@@ -814,9 +1073,7 @@ def test_kb_variant_preset_map_mirrors_the_vocabulary_aliases():
     vocabulary's KEN_BURNS_ALIASES inverted."""
     from mediahub.motion.vocabulary import KEN_BURNS_ALIASES
 
-    assert {v: k for k, v in KEN_BURNS_ALIASES.items()} == dict(
-        reel_ffmpeg._PRESET_FOR_KB_VARIANT
-    )
+    assert {v: k for k, v in KEN_BURNS_ALIASES.items()} == dict(reel_ffmpeg._PRESET_FOR_KB_VARIANT)
 
 
 def test_reel_graph_actually_routes_through_the_compiler(monkeypatch):

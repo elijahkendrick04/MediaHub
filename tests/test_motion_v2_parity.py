@@ -240,7 +240,16 @@ def test_motion_format_sizes():
 def _stub_render(tmp_path, monkeypatch, fmt: str, captured: dict):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
 
-    def _fake_run(*, composition_id, props, out_path, duration_sec=None, size=None, timeout=600):
+    def _fake_run(
+        *,
+        composition_id,
+        props,
+        out_path,
+        duration_sec=None,
+        size=None,
+        timeout=600,
+        supersample=1.0,
+    ):
         captured["size"] = size
         out = Path(out_path)
         out.parent.mkdir(parents=True, exist_ok=True)
@@ -329,6 +338,77 @@ def test_count_up_settles_on_the_verbatim_value():
     assert "resultFinal" in src
 
 
+# ---------------------------------------------------------------------------
+# text_scramble intent — typewriter/scramble decode (source + vocabulary)
+# ---------------------------------------------------------------------------
+
+
+def test_text_scramble_settles_on_the_verbatim_value():
+    """The typewriter/scramble decode must land on the EXACT verified string —
+    the same zero-invention rule count_up lives by. The helpers exist, route
+    through the shared reveal channel, and carry the progress>=1 verbatim guard.
+    Checked at the source-contract level (no Node needed)."""
+    src = (motion.REMOTION_DIR / "src" / "compositions" / "StoryCard.tsx").read_text()
+    assert "function scrambleReveal" in src
+    assert "function revealResult" in src
+    # The verbatim guard: at progress>=1 (or empty text) the true string is
+    # returned untouched, so the decode always resolves to the verified value.
+    assert "if (progress >= 1 || !text)" in src
+    # The reveal is threaded through the shared channel, not a new card prop.
+    assert "textRevealProgress" in src
+    # revealResult is a strict no-op for every non-scramble intent (identity=1).
+    assert "textRevealProgress < 1" in src
+
+
+def test_text_scramble_channel_defaults_to_identity():
+    """Byte-identical-default contract: AnimChannels declares textRevealProgress
+    and BOTH the shared `base` object and the `static` literal default it to 1
+    (identity), so no existing intent's render changes."""
+    src = (motion.REMOTION_DIR / "src" / "compositions" / "StoryCard.tsx").read_text()
+    assert "textRevealProgress: number;" in src
+    # Two literal AnimChannels objects (base + static) both default it to 1.
+    assert src.count("textRevealProgress: 1,") == 2
+
+
+def test_text_scramble_in_vocabulary_and_round_trips():
+    """The token is a first-class member of the closed motion vocabulary and
+    survives normalise (does not collapse to the default intent)."""
+    assert "text_scramble" in ds.MOTION_INTENTS
+    spec = ds.normalise(
+        {"motion_intent": "text_scramble", "archetype": "big_number_dominant"},
+        archetypes=["big_number_dominant", "minimal_type_poster"],
+        token_roles=["primary", "secondary"],
+    )
+    assert spec.motion_intent == "text_scramble"
+
+
+def test_text_scramble_sprint_file_contract_and_determinism():
+    """The sprint file exists, default-exports name+program off the shared
+    IntentProgram type, and is frame-pure (no time/random source)."""
+    f = motion.REMOTION_DIR / "src" / "compositions" / "sprint" / "intents" / "text_scramble.ts"
+    assert f.is_file()
+    src = f.read_text()
+    assert 'name: "text_scramble"' in src
+    assert "program" in src
+    assert "IntentProgram" in src and '"../registry"' in src
+    for banned in ("Math.random", "Date.now", "new Date", "performance.now"):
+        assert banned not in src
+    assert "frame" in src
+
+
+def test_text_scramble_reachable_from_the_director_prompt():
+    """Director-reachability: the AI director selects motion_intent from the
+    enumerated pipe-list in its system prompt, so a new selectable intent must
+    appear there or the LLM can never emit it (the feature would be dead)."""
+    from mediahub.creative_brief import ai_director
+    from mediahub.graphic_renderer import archetypes
+
+    prompt = ai_director._design_spec_system_prompt(
+        archetypes.list_archetypes(), list(archetypes.TOKEN_ROLES)
+    )
+    assert "text_scramble" in prompt
+
+
 def test_result_numeral_kerning_mirrors_the_still():
     """A5 (Canva gap analysis) parity — the motion result numeral kerns its
     intra-numeric separators with the SAME cell the still's _kern_numeric_seps /
@@ -393,7 +473,16 @@ def test_story_render_writes_explainability_manifest(tmp_path, monkeypatch):
 def test_reel_render_writes_manifest_with_per_card_axes(tmp_path, monkeypatch):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
 
-    def _fake_run(*, composition_id, props, out_path, duration_sec=None, size=None, timeout=600):
+    def _fake_run(
+        *,
+        composition_id,
+        props,
+        out_path,
+        duration_sec=None,
+        size=None,
+        timeout=600,
+        supersample=1.0,
+    ):
         out = Path(out_path)
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_bytes(b"0" * 2048)
@@ -441,6 +530,28 @@ def test_reel_duration_contract():
 def test_render_js_supports_width_height_override():
     src = (motion.REMOTION_DIR / "render.js").read_text()
     assert "--width" in src and "--height" in src
-    assert re.search(r"width,\s*\n\s*height,", src), (
-        "render.js must pass the overridden canvas into renderMedia"
-    )
+    assert re.search(
+        r"width,\s*\n\s*height,", src
+    ), "render.js must pass the overridden canvas into renderMedia"
+
+
+# ---------------------------------------------------------------------------
+# Per-glyph reveal ordering — the range-selector vocabulary is wired in
+# ---------------------------------------------------------------------------
+
+
+def test_per_glyph_channel_flows_through_range_selector():
+    """Drift guard: the per-glyph reveal for BOTH type-carried intents
+    (kinetic_type inline in StoryCard, cascade as a sprint intent) must drive
+    the shared `glyphRevealAt`, which routes each glyph's stagger through the
+    seeded ORDER × SHAPE range-selector vocabulary. The vocabulary module must
+    live in the scanned sprint corpus, and the default selector must be the
+    {index, linear} identity ramp (so a non-varied glyph card is unchanged)."""
+    src = _motion_source_corpus()
+    # The vocabulary module is present in the corpus and exports its selection fn.
+    assert "export function selectRangeFor(" in src
+    assert 'export type RangeOrder = "index" | "reverse" | "center_out" | "seeded";' in src
+    # Both intents thread (index, total, ..., mood) into the shared reveal helper.
+    assert src.count("glyphRevealAt(i, total, frame, fps, seed, mood),") == 2
+    # Identity default preserved (byte-identical path for restraint moods).
+    assert "return { ...IDENTITY_SELECTOR };" in src

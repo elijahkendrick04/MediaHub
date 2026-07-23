@@ -9,8 +9,17 @@ import {
   useVideoConfig,
 } from "remotion";
 import { z } from "zod";
-import { StoryCard, cardSchema, fontStackFor } from "./StoryCard";
+import {
+  StoryCard,
+  cardSchema,
+  fontStackFor,
+  motionBlurSchema,
+  MotionBlurSampler,
+  type MotionBlur,
+} from "./StoryCard";
 import { REEL_LAYERS } from "./sprint/reelRegistry";
+import { Dither } from "./Dither";
+import { LogoDrawOn, LogoDrawConfig } from "./sprint/reel/logo_drawon";
 
 // The reel reuses StoryCard's card schema verbatim (single source of truth):
 // zod strips undeclared keys, so a shared schema means a prop added for the
@@ -107,6 +116,37 @@ export const meetReelSchema = z.object({
   coverTypography: z.string().default(""),
   coverPhotoSrc: z.string().default(""),
   coverPhotoPos: z.string().default(""),
+  // svg-shape-decompose — opt-in logo draw-on for the cover + outro "brand
+  // statement" scenes. All three default to inactive/no-op so a prop-less reel
+  // renders the exact filled `<img>` logo, byte-identical to before. When
+  // active, Python sends the SVG's viewBox and its ordered per-path
+  // `{ d, len, stroke }` list (decomposed deterministically Python-side); the
+  // stroke draws on then cross-fades into the real filled logo. Zod strips
+  // undeclared keys, so these MUST be top-level props (not nested in rhythm).
+  logoDrawOn: z.boolean().default(false),
+  logoViewBox: z.string().default(""),
+  logoPaths: z
+    .array(
+      z.object({
+        d: z.string(),
+        len: z.number(),
+        stroke: z.string(),
+      }),
+    )
+    .default([]),
+  // alpha-export: when true the reel is being rendered for a transparent-
+  // background compositing export, so the CoverScreen and OutroScreen full-bleed
+  // ground fills are SUPPRESSED (the card beats inherit it via each card's own
+  // `transparentBg` prop). Set ONLY by motion.py on the opt-in alpha path; the
+  // default false keeps every bookend's DOM byte-identical.
+  transparentBg: z.boolean().default(false),
+  // true-motion-blur (opt-in): the reel-level shutter-accumulation config. The
+  // whip transition lives in the composition chrome (not per-card), so it is a
+  // reel-level prop, resolved once Python-side and threaded down to BOTH the whip
+  // wrappers AND each <StoryCard> beat's entrance/count-up (via a dedicated prop,
+  // never cards_props). `.optional()` (absent => undefined) keeps the inactive DOM
+  // the exact current whip feGaussianBlur + unwrapped beats (byte-identical).
+  motionBlur: motionBlurSchema.optional(),
 });
 
 // The resolved bookend colour roles a cover/outro paints with. Every field
@@ -492,12 +532,23 @@ type CoverVariantProps = {
   roles: CoverRoles;
   photoSrc: string;
   photoPos: string;
+  // svg-shape-decompose — opt-in logo draw-on config (inactive by default, so
+  // the variants keep the exact filled `<img>`).
+  logoDraw: LogoDrawConfig;
 };
 
 // Variant 1 — STACK: the classic centred emblem lockup. Logo scales in, the
 // meet name springs up under the seed-picked eyebrow, a brand-secondary rule
 // grows out, club name and honest chips settle beneath.
-const StackCover: React.FC<CoverVariantProps> = ({ brand, meetName, eyebrow, chips, env, roles }) => {
+const StackCover: React.FC<CoverVariantProps> = ({
+  brand,
+  meetName,
+  eyebrow,
+  chips,
+  env,
+  roles,
+  logoDraw,
+}) => {
   const { frame, fps, width, ts, chipsOpacity, chipsProgress } = env;
   const accent = roles.onGround || brand.accent || "#FFFFFF";
   const intro = spring({ frame, fps, config: { damping: 16, stiffness: 100, mass: 0.6 } });
@@ -539,20 +590,20 @@ const StackCover: React.FC<CoverVariantProps> = ({ brand, meetName, eyebrow, chi
         textAlign: "center",
       }}
     >
-      {brand.logoDataUri ? (
-        <img
-          src={brand.logoDataUri}
-          alt={brand.displayName || "club logo"}
-          style={{
-            width: Math.round(220 * ts),
-            height: Math.round(220 * ts),
-            objectFit: "contain",
-            marginBottom: Math.round(48 * ts),
-            transform: `scale(${0.6 + 0.4 * logoScale})`,
-            opacity: logoScale,
-          }}
-        />
-      ) : null}
+      <LogoDrawOn
+        logoDataUri={brand.logoDataUri}
+        alt={brand.displayName || "club logo"}
+        style={{
+          width: Math.round(220 * ts),
+          height: Math.round(220 * ts),
+          objectFit: "contain",
+          marginBottom: Math.round(48 * ts),
+          transform: `scale(${0.6 + 0.4 * logoScale})`,
+          opacity: logoScale,
+        }}
+        draw={logoDraw}
+        progress={logoScale}
+      />
       <div
         style={{
           fontSize: Math.round(38 * ts),
@@ -624,7 +675,15 @@ const StackCover: React.FC<CoverVariantProps> = ({ brand, meetName, eyebrow, chi
 // down the left of a huge left-set headline that slides in from the left out
 // of a defocus; the club + honest chips settle as a centred footer. The mix
 // of a left hero and a centred footer is a deliberate editorial contrast.
-const MastheadCover: React.FC<CoverVariantProps> = ({ brand, meetName, eyebrow, chips, env, roles }) => {
+const MastheadCover: React.FC<CoverVariantProps> = ({
+  brand,
+  meetName,
+  eyebrow,
+  chips,
+  env,
+  roles,
+  logoDraw,
+}) => {
   const { frame, fps, width, height, ts, chipsOpacity, chipsProgress } = env;
   const accent = roles.onGround || brand.accent || "#FFFFFF";
   const barH = interpolate(frame, [3, fps * 0.65], [0, Math.round(height * 0.46)], {
@@ -674,21 +733,21 @@ const MastheadCover: React.FC<CoverVariantProps> = ({ brand, meetName, eyebrow, 
           opacity: 0.95,
         }}
       />
-      {brand.logoDataUri ? (
-        <img
-          src={brand.logoDataUri}
-          alt={brand.displayName || "club logo"}
-          style={{
-            position: "absolute",
-            top: 84,
-            right: 84,
-            width: Math.round(120 * ts),
-            height: Math.round(120 * ts),
-            objectFit: "contain",
-            opacity: logoOpacity,
-          }}
-        />
-      ) : null}
+      <LogoDrawOn
+        logoDataUri={brand.logoDataUri}
+        alt={brand.displayName || "club logo"}
+        style={{
+          position: "absolute",
+          top: 84,
+          right: 84,
+          width: Math.round(120 * ts),
+          height: Math.round(120 * ts),
+          objectFit: "contain",
+          opacity: logoOpacity,
+        }}
+        draw={logoDraw}
+        progress={logoOpacity}
+      />
       {/* hero — left-aligned masthead headline, vertically centred */}
       <div
         style={{
@@ -898,7 +957,15 @@ const SpotlightCover: React.FC<CoverVariantProps> = ({ brand, meetName, counts, 
 // up top, a full-width brand-secondary band wipes across the middle carrying
 // the club logo, and the club name + honest chips rise in beneath it. Text
 // stays accent-on-primary; only the logo (an image) ever sits on the band.
-const BannerCover: React.FC<CoverVariantProps> = ({ brand, meetName, eyebrow, chips, env, roles }) => {
+const BannerCover: React.FC<CoverVariantProps> = ({
+  brand,
+  meetName,
+  eyebrow,
+  chips,
+  env,
+  roles,
+  logoDraw,
+}) => {
   const { frame, fps, height, ts, chipsOpacity, chipsProgress } = env;
   const accent = roles.onGround || brand.accent || "#FFFFFF";
   const titleY = interpolate(
@@ -984,17 +1051,17 @@ const BannerCover: React.FC<CoverVariantProps> = ({ brand, meetName, eyebrow, ch
           justifyContent: "center",
         }}
       >
-        {brand.logoDataUri ? (
-          <img
-            src={brand.logoDataUri}
-            alt={brand.displayName || "club logo"}
-            style={{
-              height: Math.round(bandH * 0.62),
-              objectFit: "contain",
-              opacity: logoOpacity,
-            }}
-          />
-        ) : null}
+        <LogoDrawOn
+          logoDataUri={brand.logoDataUri}
+          alt={brand.displayName || "club logo"}
+          style={{
+            height: Math.round(bandH * 0.62),
+            objectFit: "contain",
+            opacity: logoOpacity,
+          }}
+          draw={logoDraw}
+          progress={logoOpacity}
+        />
       </div>
       {/* lower — club + honest chips */}
       <div
@@ -1047,6 +1114,7 @@ const PhotoCover: React.FC<CoverVariantProps> = ({
   roles,
   photoSrc,
   photoPos,
+  logoDraw,
 }) => {
   const { frame, fps, width, height, ts, chipsOpacity, chipsProgress } = env;
   const accent = roles.onGround || brand.accent || "#FFFFFF";
@@ -1095,21 +1163,21 @@ const PhotoCover: React.FC<CoverVariantProps> = ({
           background: `linear-gradient(180deg, ${ground}88 0%, ${ground}30 38%, ${ground}55 62%, ${ground}E6 100%)`,
         }}
       />
-      {brand.logoDataUri ? (
-        <img
-          src={brand.logoDataUri}
-          alt={brand.displayName || "club logo"}
-          style={{
-            position: "absolute",
-            top: 84,
-            right: 84,
-            width: Math.round(120 * ts),
-            height: Math.round(120 * ts),
-            objectFit: "contain",
-            opacity: eyebrowOpacity,
-          }}
-        />
-      ) : null}
+      <LogoDrawOn
+        logoDataUri={brand.logoDataUri}
+        alt={brand.displayName || "club logo"}
+        style={{
+          position: "absolute",
+          top: 84,
+          right: 84,
+          width: Math.round(120 * ts),
+          height: Math.round(120 * ts),
+          objectFit: "contain",
+          opacity: eyebrowOpacity,
+        }}
+        draw={logoDraw}
+        progress={eyebrowOpacity}
+      />
       {/* Masthead block over the lower scrim. */}
       <div
         style={{
@@ -1193,6 +1261,14 @@ const CoverScreen: React.FC<{
   // out; inside a real reel the paired exit owns the handoff, so the cover
   // stays fully visible until the first beat's transition takes over.
   selfExit?: boolean;
+  // render-banding-dither: true when a card in the reel opted into the dither
+  // overlay, so the bookend backgrounds deband the same flat ground the beats
+  // do. Default false keeps the cover byte-identical.
+  dither?: boolean;
+  // svg-shape-decompose — opt-in logo draw-on (inactive by default).
+  logoDraw: LogoDrawConfig;
+  // alpha-export — suppress the full-bleed ground fill for a transparent export.
+  transparentBg?: boolean;
 }> = ({
   brand,
   meetName,
@@ -1204,6 +1280,9 @@ const CoverScreen: React.FC<{
   photoSrc,
   photoPos,
   selfExit = false,
+  dither = false,
+  logoDraw,
+  transparentBg = false,
 }) => {
   const env = useCoverEnv(durationInFrames);
   // Data-driven: the variant is a pure function of the meet's identity and its
@@ -1225,11 +1304,16 @@ const CoverScreen: React.FC<{
   return (
     <AbsoluteFill
       style={{
-        backgroundColor: roles.ground || brand.primary || "#0A2540",
+        // alpha-export: drop the full-bleed cover ground under the opt-in
+        // transparent export (default false → the historic fill, byte-identical).
+        ...(transparentBg
+          ? {}
+          : { backgroundColor: roles.ground || brand.primary || "#0A2540" }),
         fontFamily: fontStack || COVER_FONT,
         opacity: selfExit ? env.outroFade : 1,
       }}
     >
+      {dither ? <Dither /> : null}
       <Body
         brand={brand}
         meetName={meetName}
@@ -1240,6 +1324,7 @@ const CoverScreen: React.FC<{
         roles={roles}
         photoSrc={photoSrc}
         photoPos={photoPos}
+        logoDraw={logoDraw}
       />
     </AbsoluteFill>
   );
@@ -1285,7 +1370,23 @@ const OutroScreen: React.FC<{
   nextMeet: string;
   // M18 — the same resolved bookend roles the cover paints with.
   roles: CoverRoles;
-}> = ({ brand, meetName, durationInFrames, sponsor, nextMeet, roles }) => {
+  // render-banding-dither: deband the flat outro ground when a card opted in.
+  dither?: boolean;
+  // svg-shape-decompose — opt-in logo draw-on (inactive by default).
+  logoDraw: LogoDrawConfig;
+  // alpha-export — suppress the full-bleed ground fill for a transparent export.
+  transparentBg?: boolean;
+}> = ({
+  brand,
+  meetName,
+  durationInFrames,
+  sponsor,
+  nextMeet,
+  roles,
+  dither = false,
+  logoDraw,
+  transparentBg = false,
+}) => {
   const frame = useCurrentFrame();
   const { fps, width, height } = useVideoConfig();
   const ts = Math.min(width / 1080, height / 1440, 1);
@@ -1330,11 +1431,16 @@ const OutroScreen: React.FC<{
   return (
     <AbsoluteFill
       style={{
-        backgroundColor: roles.ground || brand.primary || "#0A2540",
+        // alpha-export: drop the full-bleed outro ground under the opt-in
+        // transparent export (default false → the historic fill, byte-identical).
+        ...(transparentBg
+          ? {}
+          : { backgroundColor: roles.ground || brand.primary || "#0A2540" }),
         fontFamily: COVER_FONT,
         opacity: outroFade,
       }}
     >
+      {dither ? <Dither /> : null}
       <div
         style={{
           position: "absolute",
@@ -1348,19 +1454,19 @@ const OutroScreen: React.FC<{
           opacity: fadeIn,
         }}
       >
-        {brand.logoDataUri ? (
-          <img
-            src={brand.logoDataUri}
-            alt={brand.displayName || "club logo"}
-            style={{
-              width: Math.round(260 * ts),
-              height: Math.round(260 * ts),
-              objectFit: "contain",
-              marginBottom: Math.round(44 * ts),
-              transform: `scale(${0.8 + 0.2 * grow})`,
-            }}
-          />
-        ) : null}
+        <LogoDrawOn
+          logoDataUri={brand.logoDataUri}
+          alt={brand.displayName || "club logo"}
+          style={{
+            width: Math.round(260 * ts),
+            height: Math.round(260 * ts),
+            objectFit: "contain",
+            marginBottom: Math.round(44 * ts),
+            transform: `scale(${0.8 + 0.2 * grow})`,
+          }}
+          draw={logoDraw}
+          progress={grow}
+        />
         <div
           style={{
             fontSize: Math.round(72 * ts),
@@ -1451,9 +1557,22 @@ export const MeetReel: React.FC<Props> = ({
   coverTypography,
   coverPhotoSrc,
   coverPhotoPos,
+  logoDrawOn,
+  logoViewBox,
+  logoPaths,
+  transparentBg,
+  motionBlur,
 }) => {
   const { fps, durationInFrames, width, height } = useVideoConfig();
   const rootFrame = useCurrentFrame();
+  // svg-shape-decompose — the cover + outro logo draw-on bundle. Active only
+  // when the caller opted in AND Python decomposed at least one path; empty
+  // otherwise, so the logo stays the exact filled `<img>` (byte-identical).
+  const logoDraw: LogoDrawConfig = {
+    on: Boolean(logoDrawOn) && (logoPaths || []).length > 0,
+    viewBox: logoViewBox || "",
+    paths: logoPaths || [],
+  };
 
   // Allocate the reel: cover + rank/weight-carved card beats + outro.
   const safeCards = (cards || []).slice(0, 5);
@@ -1461,6 +1580,11 @@ export const MeetReel: React.FC<Props> = ({
   // honest totals the variant SELECTION + spotlight numeral read from).
   const chips = reelStats(safeCards, reelStatConfig);
   const counts = coverStatCounts(safeCards);
+  // render-banding-dither: the card beats deband via StoryCard's own <Dither>
+  // (each carries the attach-only `dither` prop); the reel's cover/outro
+  // bookends deband too when ANY card opted in, so the whole piece is coherent.
+  // False (no card opted in) keeps every bookend byte-identical.
+  const reelDither = safeCards.some((c) => Boolean(c.dither));
   // M18 — the resolved bookend roles (empty strings = legacy brand pairing)
   // and the top card's typography, shared by the cover AND the outro.
   const coverRoles: CoverRoles = {
@@ -1483,6 +1607,8 @@ export const MeetReel: React.FC<Props> = ({
         photoSrc={coverPhotoSrc || ""}
         photoPos={coverPhotoPos || ""}
         selfExit
+        logoDraw={logoDraw}
+        transparentBg={Boolean(transparentBg)}
       />
     );
   }
@@ -1562,6 +1688,7 @@ export const MeetReel: React.FC<Props> = ({
         kind={specs[0].kind}
         startLocal={coverFrames}
         exitFrames={beatFades[0]}
+        mb={motionBlur}
       >
         <CoverScreen
           brand={brand}
@@ -1573,6 +1700,9 @@ export const MeetReel: React.FC<Props> = ({
           fontStack={coverFontStack}
           photoSrc={coverPhotoSrc || ""}
           photoPos={coverPhotoPos || ""}
+          dither={reelDither}
+          logoDraw={logoDraw}
+          transparentBg={Boolean(transparentBg)}
         />
       </ExitWrap>
     </Sequence>,
@@ -1599,9 +1729,17 @@ export const MeetReel: React.FC<Props> = ({
         from={cursor}
         durationInFrames={dur + transitionFrames}
       >
-        <ExitWrap kind={nextKind} startLocal={dur - transitionFrames} exitFrames={nextFrames}>
-          <TransitionWrap fadeInFrames={fadeFrames} kind={spec.kind} accent={accent}>
-            <StoryCard card={{ ...card, inReel: true }} brand={brand} />
+        <ExitWrap
+          kind={nextKind}
+          startLocal={dur - transitionFrames}
+          exitFrames={nextFrames}
+          mb={motionBlur}
+        >
+          <TransitionWrap fadeInFrames={fadeFrames} kind={spec.kind} accent={accent} mb={motionBlur}>
+            {/* true-motion-blur: the reel injects the shutter config as a dedicated
+                prop so the beat's entrance/count-up blur without ever mutating
+                cards_props (which stays byte-identical when off). */}
+            <StoryCard card={{ ...card, inReel: true }} brand={brand} motionBlur={motionBlur} />
           </TransitionWrap>
         </ExitWrap>
       </Sequence>,
@@ -1625,6 +1763,9 @@ export const MeetReel: React.FC<Props> = ({
           sponsor={sponsor}
           nextMeet={nextMeet}
           roles={coverRoles}
+          dither={reelDither}
+          logoDraw={logoDraw}
+          transparentBg={Boolean(transparentBg)}
         />
       </TransitionWrap>
     </Sequence>,
@@ -1675,8 +1816,11 @@ const TransitionWrap: React.FC<{
   fadeInFrames: number;
   kind: TransitionKind;
   accent?: string;
+  // true-motion-blur (opt-in): reel-level shutter config. Absent (the default) =>
+  // the whip renders its verbatim feGaussianBlur DOM (byte-identical).
+  mb?: MotionBlur;
   children: React.ReactNode;
-}> = ({ fadeInFrames, kind, accent, children }) => {
+}> = ({ fadeInFrames, kind, accent, mb, children }) => {
   const frame = useCurrentFrame();
   const { width, height } = useVideoConfig();
   // The incoming beat overlaps the outgoing one for `fadeInFrames`, so the
@@ -1728,16 +1872,63 @@ const TransitionWrap: React.FC<{
     );
   }
   if (kind === "whip") {
-    // High-energy lateral snap with a directional blur that resolves on landing.
+    // true-motion-blur (opt-in): replace the single-Gaussian smear with REAL
+    // shutter accumulation. The whip's lateral translateX + fade are closed-form
+    // functions of the frame, so we resample them at N deterministic sub-frames
+    // and composite N copies of the (unchanged) children — a genuine per-sample
+    // pan blur, not a fake. The children are a rigid moving layer here (we blur the
+    // whip's OWN transform, never re-time the children's internal animation), which
+    // is exactly what a whip pan should smear. On the landing frame (t=1) all
+    // sub-frames collapse to the resting transform, so the beat resolves clean.
+    if (mb) {
+      const whipAt = (f: number) => {
+        const tt = interpolate(f, [0, fadeInFrames], [0, 1], {
+          extrapolateRight: "clamp",
+          easing: Easing.out(Easing.cubic),
+        });
+        return { opacity: Math.min(1, tt * 1.6), tx: (1 - tt) * width * 0.5 };
+      };
+      return (
+        <MotionBlurSampler
+          frame={frame}
+          samples={mb.samples}
+          shutter={mb.shutter}
+          render={(f) => {
+            const w = whipAt(f);
+            return (
+              <AbsoluteFill style={{ opacity: w.opacity, transform: `translateX(${w.tx}px)` }}>
+                {children}
+              </AbsoluteFill>
+            );
+          }}
+        />
+      );
+    }
+    // Default (blur off): the verbatim velocity-aligned feGaussianBlur smear.
+    // stdDeviation "X 0" blurs only along the X axis — the actual motion vector —
+    // a directional smear, not isotropic softening. id is whip-only (peak beat).
     const t = ease(Easing.out(Easing.cubic));
+    const whipBlur = (1 - t) * 14;
     return (
       <AbsoluteFill
         style={{
           opacity: Math.min(1, t * 1.6),
           transform: `translateX(${(1 - t) * width * 0.5}px)`,
-          filter: `blur(${(1 - t) * 14}px)`,
+          filter: "url(#reel-whip-in)",
         }}
       >
+        <svg width="0" height="0" style={{ position: "absolute" }}>
+          <filter
+            id="reel-whip-in"
+            x="-50%"
+            y="-10%"
+            width="200%"
+            height="120%"
+            filterUnits="objectBoundingBox"
+          >
+            <feGaussianBlur in="SourceGraphic" stdDeviation={`${whipBlur} 0`} edgeMode="duplicate" />
+          </filter>
+        </svg>
         {children}
       </AbsoluteFill>
     );
@@ -1838,20 +2029,20 @@ const ExitWrap: React.FC<{
   kind: TransitionKind;
   startLocal: number; // local frame at which the incoming scene starts
   exitFrames: number; // the incoming transition's frame window
+  // true-motion-blur (opt-in): reel-level shutter config. Absent (the default) =>
+  // the whip exit renders its verbatim feGaussianBlur DOM (byte-identical).
+  mb?: MotionBlur;
   children: React.ReactNode;
-}> = ({ kind, startLocal, exitFrames, children }) => {
+}> = ({ kind, startLocal, exitFrames, mb, children }) => {
   const frame = useCurrentFrame();
   const { width, height } = useVideoConfig();
-  const t = interpolate(
-    frame,
-    [startLocal, startLocal + Math.max(1, exitFrames)],
-    [0, 1],
-    {
+  const exitT = (f: number) =>
+    interpolate(f, [startLocal, startLocal + Math.max(1, exitFrames)], [0, 1], {
       extrapolateLeft: "clamp",
       extrapolateRight: "clamp",
       easing: Easing.in(Easing.cubic),
-    },
-  );
+    });
+  const t = exitT(frame);
   if (t <= 0) {
     return <AbsoluteFill>{children}</AbsoluteFill>;
   }
@@ -1865,14 +2056,47 @@ const ExitWrap: React.FC<{
     );
   }
   if (kind === "whip") {
-    // Mirrors the incoming whip laterally, with the same directional blur.
+    // true-motion-blur (opt-in): REAL shutter accumulation for the mirrored exit —
+    // resample the closed-form lateral translateX at N deterministic sub-frames and
+    // composite N copies of the (rigid) children, the exit twin of the incoming
+    // whip's pan blur. On the fully-exited frame all sub-frames collapse, so the
+    // handoff resolves clean.
+    if (mb) {
+      return (
+        <MotionBlurSampler
+          frame={frame}
+          samples={mb.samples}
+          shutter={mb.shutter}
+          render={(f) => (
+            <AbsoluteFill style={{ transform: `translateX(${-exitT(f) * width * 0.5}px)` }}>
+              {children}
+            </AbsoluteFill>
+          )}
+        />
+      );
+    }
+    // Default (blur off): mirrors the incoming whip laterally, with the same
+    // velocity-aligned (X-axis) feGaussianBlur "X 0", not an isotropic blur.
+    const whipBlur = t * 14;
     return (
       <AbsoluteFill
         style={{
           transform: `translateX(${-t * width * 0.5}px)`,
-          filter: `blur(${t * 14}px)`,
+          filter: "url(#reel-whip-out)",
         }}
       >
+        <svg width="0" height="0" style={{ position: "absolute" }}>
+          <filter
+            id="reel-whip-out"
+            x="-50%"
+            y="-10%"
+            width="200%"
+            height="120%"
+            filterUnits="objectBoundingBox"
+          >
+            <feGaussianBlur in="SourceGraphic" stdDeviation={`${whipBlur} 0`} edgeMode="duplicate" />
+          </filter>
+        </svg>
         {children}
       </AbsoluteFill>
     );

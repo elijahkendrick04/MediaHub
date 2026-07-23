@@ -143,8 +143,7 @@ process.stdin.on("end", () => {
 
 def _node_ready() -> bool:
     return (
-        motion.node_available()
-        and (motion.REMOTION_DIR / "node_modules" / "typescript").exists()
+        motion.node_available() and (motion.REMOTION_DIR / "node_modules" / "typescript").exists()
     )
 
 
@@ -218,11 +217,11 @@ def test_zero_value_chips_are_never_emitted(harness):
 def test_relay_wins_counted_from_label_not_place(harness):
     """Relay wins need a RELAY event AND a won() label — never a bare place."""
     cards = [
-        _card("RELAY GOLD", "4x100 Free Relay"),       # win ✓
-        _card("1ST", "4x50 Medley Relay"),             # win ✓ (1ST)
-        _card("CHAMPIONS", "4x200 Free Relay"),        # win ✓ (champion)
-        _card("SILVER", "4x100 Free Relay"),           # relay but not a win ✗
-        _card("GOLD MEDAL", "100 Free"),               # win but NOT a relay ✗
+        _card("RELAY GOLD", "4x100 Free Relay"),  # win ✓
+        _card("1ST", "4x50 Medley Relay"),  # win ✓ (1ST)
+        _card("CHAMPIONS", "4x200 Free Relay"),  # win ✓ (champion)
+        _card("SILVER", "4x100 Free Relay"),  # relay but not a win ✗
+        _card("GOLD MEDAL", "100 Free"),  # win but NOT a relay ✗
         _card("STRONG SWIM", "4x100 Relay", place="1"),  # relay, place 1, but
         # the label is not a win → must NOT count (no place guessing)
     ]
@@ -234,10 +233,10 @@ def test_relay_win_signal_vocabulary(harness):
     """Win signals are precise: WIN/WINS/WON/WINNER(S)/CHAMPIONS all count, but
     'CHAMPIONSHIP' (a meet name, not a result) must not be mistaken for a win."""
     cards = [
-        _card("RELAY WIN", "4x100 Relay"),         # win ✓
-        _card("WINS", "4x50 Relay"),               # win ✓
-        _card("WON THE FINAL", "4x200 Relay"),     # win ✓
-        _card("RELAY CHAMPIONS", "4x100 Relay"),   # win ✓
+        _card("RELAY WIN", "4x100 Relay"),  # win ✓
+        _card("WINS", "4x50 Relay"),  # win ✓
+        _card("WON THE FINAL", "4x200 Relay"),  # win ✓
+        _card("RELAY CHAMPIONS", "4x100 Relay"),  # win ✓
         _card("CHAMPIONSHIP RECORD", "4x100 Relay"),  # NOT a win (meet name) ✗
     ]
     [chips] = _run(harness, [{"cards": cards, "config": {"include": ["relayWins"]}}])
@@ -249,19 +248,24 @@ def test_records_season_bests_finals_splits_are_honest(harness):
         _card("CLUB RECORD", "200 IM"),
         _card("MEET RECORD", "100 Back"),
         _card("SEASON BEST", "50 Free"),
-        _card("SB", "100 Fly"),                       # word-boundary SB
-        _card("A FINAL — 3RD", "200 Free Final"),     # final ✓
-        _card("SEMIFINAL", "100 Free Semifinal"),     # NOT a final ✗
+        _card("SB", "100 Fly"),  # word-boundary SB
+        _card("A FINAL — 3RD", "200 Free Final"),  # final ✓
+        _card("SEMIFINAL", "100 Free Semifinal"),  # NOT a final ✗
         _card("FASTEST SPLIT", "4x100 Relay", hero="23.4 split"),  # split ✓
     ]
     [chips] = _run(
         harness,
-        [{"cards": cards, "config": {"include": ["records", "seasonBests", "finals", "topSplits"], "max": 9}}],
+        [
+            {
+                "cards": cards,
+                "config": {"include": ["records", "seasonBests", "finals", "topSplits"], "max": 9},
+            }
+        ],
     )
     labels = _labels(chips)
     assert "2 RECORDS" in labels
     assert "2 SEASON BESTS" in labels
-    assert "1 FINAL" in labels       # the semifinal is excluded
+    assert "1 FINAL" in labels  # the semifinal is excluded
     assert "1 TOP SPLIT" in labels
 
 
@@ -374,7 +378,16 @@ def _render_capture(tmp_path, monkeypatch, **kwargs):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     captured: dict = {}
 
-    def _fake_run(*, composition_id, props, out_path, duration_sec=None, size=None, timeout=600):
+    def _fake_run(
+        *,
+        composition_id,
+        props,
+        out_path,
+        duration_sec=None,
+        size=None,
+        timeout=600,
+        supersample=1.0,
+    ):
         captured["props"] = props
         out = Path(out_path)
         out.parent.mkdir(parents=True, exist_ok=True)

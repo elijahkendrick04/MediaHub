@@ -286,3 +286,183 @@ def test_storycard_base_tiles_and_sizes_exist_for_each_stack(token):
     for base in (base_a, base_b):
         assert f'case "{base}":' in src, f"{base}: no packTextureImage branch in StoryCard.tsx"
         assert re.search(rf"\b{base}:\s*\d+", src), f"{base}: no PACK_TEX_SIZE in StoryCard.tsx"
+
+
+# --------------------------------------------------------------------------- #
+# blend-modes — seeded / mood-biased texture composite blend (opt-in)
+# --------------------------------------------------------------------------- #
+
+_SOME_KEY = "vignette-grain-corner_ticks-standard|#0E2A47|water|brackets|anton-inter|left|cutout|PB"
+
+
+def test_texture_blend_gate_returns_empty():
+    # Off by default: disabled, no card key, and neutral / unknown moods all
+    # return "" (the sentinel that keeps the hard-coded overlay) — the
+    # byte-identical gate.
+    assert sp.texture_blend_for("explosive", _SOME_KEY, enabled=False) == ""
+    assert sp.texture_blend_for("explosive", "", enabled=True) == ""
+    assert sp.texture_blend_for("explosive", None, enabled=True) == ""  # type: ignore[arg-type]
+    assert sp.texture_blend_for("neutral", _SOME_KEY, enabled=True) == ""
+    assert sp.texture_blend_for("", _SOME_KEY, enabled=True) == ""
+    assert sp.texture_blend_for("not-a-real-mood", _SOME_KEY, enabled=True) == ""
+    assert sp.texture_blend_for(None, _SOME_KEY, enabled=True) == ""
+
+
+def test_texture_blend_is_family_member_never_multiply():
+    # Sweep every biased mood × a spread of keys: the result is always a member
+    # of the lightening family and NEVER 'multiply' (which would darken copy).
+    biased = [m for m in sp.mood_preset_moods() if sp._MOOD_BLEND_BIAS.get(m)]
+    assert biased, "no biased moods to exercise"
+    for mood in biased:
+        for i in range(50):
+            blend = sp.texture_blend_for(mood, f"{_SOME_KEY}|{i}", enabled=True)
+            assert blend in sp._TEXTURE_BLEND_FAMILY, f"{mood}/{i}: {blend!r} off-family"
+            assert blend != "multiply", f"{mood}/{i}: multiply must never be chosen"
+    # The family itself excludes multiply by construction.
+    assert "multiply" not in sp._TEXTURE_BLEND_FAMILY
+
+
+def test_texture_blend_is_deterministic_per_key():
+    # Same (mood, card_key) → same blend across repeated calls (frame-pure,
+    # process-stable: _seed_for is sha256-derived, not PRNG state).
+    for mood in ("explosive", "calm", "bold"):
+        a = sp.texture_blend_for(mood, _SOME_KEY, enabled=True)
+        b = sp.texture_blend_for(mood, _SOME_KEY, enabled=True)
+        assert a == b, f"{mood}: non-deterministic blend"
+
+
+def test_mood_bias_table_covers_every_mood_token():
+    # The bias table is pinned to the design_spec.MOODS vocabulary exactly, so a
+    # silent drift (a new mood, a renamed one) is caught here.
+    from mediahub.creative_brief import design_spec as ds
+
+    assert set(sp._MOOD_BLEND_BIAS) == set(ds.MOODS), "mood bias table drifted from MOODS"
+    # Every ordering is a subset of the safe family (or empty for the no-bias
+    # neutral mood), never carrying multiply.
+    for mood, ordering in sp._MOOD_BLEND_BIAS.items():
+        for blend in ordering:
+            assert blend in sp._TEXTURE_BLEND_FAMILY, f"{mood}: {blend!r} off-family"
+
+
+def test_default_overlay_html_byte_identical_without_override():
+    # blend_override=None (the default) must emit the exact historic strings, on
+    # both the single-tile and every layered-stack path.
+    for t in _single_textures():
+        for density, bold in (("standard", False), ("bold", True)):
+            got = sp.pack_overlay_html(
+                sp.normalise_pack(texture=t, density=density), width=1080, height=1350
+            )
+            assert got == _old_single_texture_div(t, bold), f"{t}/{density}: single drifted"
+    for t in LAYERED:
+        html = sp.pack_overlay_html(sp.normalise_pack(texture=t), width=1080, height=1350)
+        assert "mix-blend-mode:overlay" in html, f"{t}: default composite blend must be overlay"
+
+
+def test_override_swaps_composite_mix_blend_only():
+    # A validated override replaces the composite mix-blend-mode (single-tile AND
+    # stack) while the stack's tile-fusing background-blend-mode is unchanged.
+    override = "screen"
+    assert override in sp._TEXTURE_BLEND_FAMILY
+
+    # Single-tile: mix-blend switches, no background-blend-mode present.
+    single = sp._texture_layer_html("grain", bold=False, blend_override=override)
+    assert f"mix-blend-mode:{override}" in single
+    assert "mix-blend-mode:overlay" not in single
+    assert "background-blend-mode" not in single
+
+    # Layered stack: mix-blend switches; background-blend-mode keeps the recipe.
+    for t in LAYERED:
+        base_a, base_b, fuse = sp.texture_stack(t)
+        layered = sp._texture_layer_html(t, bold=False, blend_override=override)
+        assert f"mix-blend-mode:{override}" in layered, t
+        assert "mix-blend-mode:overlay" not in layered, t
+        # The tile-fusing lever is the recipe blend, untouched by the override.
+        assert f"background-blend-mode:{fuse}" in layered, t
+
+
+def test_motion_props_mirror_the_texture_blend(monkeypatch):
+    from mediahub.brand.kit import BrandKit
+    from mediahub.creative_brief.generator import generate
+
+    monkeypatch.setenv("MEDIAHUB_GEN_V2", "1")
+    brand = BrandKit(
+        profile_id="p",
+        display_name="P",
+        primary_colour="#0E2A47",
+        secondary_colour="#C9A227",
+        accent_colour="#E8563F",
+        short_name="P",
+    )
+    b = generate(
+        {
+            "id": "swim-blend-1",
+            "post_angle": "individual_pb",
+            "achievement": {
+                "swimmer_name": "Eira",
+                "event_name": "200 Free",
+                "result_time": "2:08.41",
+            },
+        },
+        None,
+        brand,
+        profile_id="p",
+        variation_seed=5,
+    )
+    bd = b.to_dict()
+    if not bd.get("style_pack"):
+        pytest.skip("no pack picked for this seed")
+
+    # Off by default: no textureBlend prop, byte-identical payload.
+    props_off = motion._card_to_props(
+        {"id": "swim-blend-1", "swim_id": "swim-blend-1", "achievement": {"swimmer_name": "Eira"}},
+        brief=bd,
+        brand_kit=brand,
+    )
+    assert "textureBlend" not in props_off
+
+    # Opt in + give the card a biased mood: the motion prop equals the engine's
+    # own texture_blend_for for the same brief (the still↔motion parity contract).
+    bd["seeded_blend"] = True
+    bd["mood"] = "explosive"
+    expected = motion._texture_blend_for_brief(bd)
+    props_on = motion._card_to_props(
+        {"id": "swim-blend-1", "swim_id": "swim-blend-1", "achievement": {"swimmer_name": "Eira"}},
+        brief=bd,
+        brand_kit=brand,
+    )
+    assert props_on.get("textureBlend", "") == expected
+    if expected:
+        assert expected in sp._TEXTURE_BLEND_FAMILY
+        # Turning the feature on for this card DOES change the payload (feature
+        # is reachable, not dead), and only via the one new key.
+        assert props_on != props_off
+        assert set(props_on) - set(props_off) == {"textureBlend"}
+
+
+def test_bare_pack_card_gets_no_motion_texture_blend():
+    # A bare pack / missing pack / opt-out all yield no motion blend.
+    assert (
+        motion._texture_blend_for_brief(
+            {
+                "style_pack": "flat-none-none-standard",
+                "id": "x",
+                "seeded_blend": True,
+                "mood": "explosive",
+            }
+        )
+        == ""
+    )
+    assert (
+        motion._texture_blend_for_brief(
+            {"style_pack": "vignette-grain-corner_ticks-standard", "id": "x", "mood": "explosive"}
+        )
+        == ""
+    )  # seeded_blend absent → off
+    assert motion._texture_blend_for_brief({"style_pack": "", "id": "x"}) == ""
+    assert motion._texture_blend_for_brief(None) == ""
+
+
+def test_tsx_reads_texture_blend_prop():
+    src = _story_src()
+    assert "textureBlend" in src, "StoryCard.tsx never reads the textureBlend prop"
+    assert "const texBlend" in src, "StoryCard.tsx has no texBlend composite selector"
