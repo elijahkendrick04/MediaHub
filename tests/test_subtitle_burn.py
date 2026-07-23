@@ -535,9 +535,9 @@ def test_reel_captions_are_sized_to_each_cards_carved_beat(tmp_path, monkeypatch
     seen: list[int] = []
     real = motion._reel_caption_json
 
-    def _spy(card_dict, brand_dict, *, beat_frames):
+    def _spy(card_dict, brand_dict, *, beat_frames, fps=motion.MOTION_FPS):
         seen.append(beat_frames)
-        return real(card_dict, brand_dict, beat_frames=beat_frames)
+        return real(card_dict, brand_dict, beat_frames=beat_frames, fps=fps)
 
     with (
         mock.patch.object(motion, "_reel_caption_json", side_effect=_spy),

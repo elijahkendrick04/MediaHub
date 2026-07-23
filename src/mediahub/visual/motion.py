@@ -1970,6 +1970,38 @@ def _reel_audio_plan(
 # The Remotion compositions and the FFmpeg engine both run at 30fps; the caption
 # engine needs the cadence to turn millisecond SRT cues into frame windows.
 MOTION_FPS = 30
+
+# Curated, selectable output frame rates (fps-option). 30 stays the default and
+# the byte-identical baseline; a non-default choice folds "fps" into the content
+# cache key and appends --fps to the node command (fold-only-when-active), and
+# compile.ts rescales its preset frame counts by fps/30 so entrances keep their
+# wall-clock timing. The set is deliberately small — the film/broadcast/social
+# rates the renderer is validated for.
+ALLOWED_FPS = frozenset({24, 25, 30, 50, 60})
+
+
+def _validate_fps(fps: int) -> int:
+    """Return ``fps`` if it is one of :data:`ALLOWED_FPS`, else raise ``ValueError``.
+
+    Rejects anything outside the curated set (``0``, ``48``, ``None``, floats,
+    booleans) up front so a bad request fails loudly before any expensive
+    photo-embed / render work rather than emitting an off-spec MP4.
+    """
+    if isinstance(fps, bool) or not isinstance(fps, int) or fps not in ALLOWED_FPS:
+        raise ValueError(f"unsupported fps {fps!r}; choose one of {sorted(ALLOWED_FPS)}")
+    return fps
+
+
+def _fps_kw(fps: int) -> dict:
+    """The ``fps=`` keyword to forward, empty at the default.
+
+    Only non-default renders carry the kwarg downstream, so the default call
+    signature — and every existing render mock / call assertion — is unchanged
+    and the default render stays byte-identical.
+    """
+    return {"fps": int(fps)} if int(fps) != MOTION_FPS else {}
+
+
 _TRUTHY = {"1", "true", "yes", "on"}
 
 
@@ -1998,7 +2030,7 @@ def _caption_roles(card_dict: dict, brand_dict: dict) -> tuple[str, str, str]:
 
 
 def _story_caption_json(
-    card_dict: dict, brand_dict: dict, audio_plan, *, duration_sec: float
+    card_dict: dict, brand_dict: dict, audio_plan, *, duration_sec: float, fps: int = MOTION_FPS
 ) -> str:
     """The caption track for a story render as a JSON string, or ``""``.
 
@@ -2020,7 +2052,7 @@ def _story_caption_json(
             script,
             voice=voice,
             duration_sec=duration_sec,
-            fps=MOTION_FPS,
+            fps=fps,
             ground=ground,
             onground=onground,
             accent=accent,
@@ -2030,7 +2062,9 @@ def _story_caption_json(
         return ""
 
 
-def _reel_caption_json(card_dict: dict, brand_dict: dict, *, beat_frames: int) -> str:
+def _reel_caption_json(
+    card_dict: dict, brand_dict: dict, *, beat_frames: int, fps: int = MOTION_FPS
+) -> str:
     """Per-beat caption track for a reel card as a JSON string, or ``""``.
 
     The reel narrates one continuous script, so each beat is captioned from its
@@ -2047,7 +2081,7 @@ def _reel_caption_json(card_dict: dict, brand_dict: dict, *, beat_frames: int) -
         track = subtitle_burn.text_caption_track(
             line,
             total_frames=beat_frames,
-            fps=MOTION_FPS,
+            fps=fps,
             ground=ground,
             onground=onground,
             accent=accent,
@@ -2248,6 +2282,7 @@ def _run_remotion(
     size: Optional[tuple[int, int]] = None,
     timeout: int = 600,
     supersample: float = 1.0,
+    fps: int = MOTION_FPS,
 ) -> Path:
     """Invoke the Node render script. Raises RuntimeError on failure."""
     if not node_available():
@@ -2295,6 +2330,10 @@ def _run_remotion(
         cmd.extend(["--width", str(int(size[0])), "--height", str(int(size[1]))])
     if supersample > 1.0:
         cmd.extend(["--scale", f"{supersample:g}"])
+    # fps-option: append --fps only for a non-default rate, so the default node
+    # command (and its cache-busting hash) stays byte-identical to before.
+    if int(fps) != MOTION_FPS:
+        cmd.extend(["--fps", str(int(fps))])
 
     from mediahub.visual.proc import run_capture
 
@@ -2395,6 +2434,7 @@ def render_story_card(
     duration_sec: float = 6.0,
     brief: Optional[dict] = None,
     format_name: str = DEFAULT_MOTION_FORMAT,
+    fps: int = MOTION_FPS,
 ) -> Path:
     """Render a single content-pack card to an MP4 story.
 
@@ -2417,7 +2457,12 @@ def render_story_card(
     mixed track and the audio plan is folded into the cache key; otherwise
     the silent path's cache keys stay byte-identical to the pre-audio era.
     A poster-frame PNG sidecar is written beside the MP4 either way.
+
+    ``fps`` selects the output frame rate from the curated ``ALLOWED_FPS`` set
+    (default 30). A non-default rate folds into the cache key and appends
+    ``--fps`` to the render; 30 keeps the byte-identical default.
     """
+    fps = _validate_fps(fps)
     engine = _dispatch_engine()
     size = motion_format_size(format_name)
     supersample = _motion_supersample()
@@ -2446,7 +2491,9 @@ def render_story_card(
 
     # Burn-in captions (R1.3): only attach the prop when a track exists so the
     # captions-off path keeps the historic cache key byte-identical.
-    caption_json = _story_caption_json(card_dict, brand_dict, audio_plan, duration_sec=duration_sec)
+    caption_json = _story_caption_json(
+        card_dict, brand_dict, audio_plan, duration_sec=duration_sec, fps=fps
+    )
     if caption_json:
         card_dict = {**card_dict, "captionsJson": caption_json}
 
@@ -2462,6 +2509,7 @@ def render_story_card(
             brief_dict=brief,
             audio_plan=audio_plan,
             format_name=format_name,
+            **_fps_kw(fps),
         )
 
     cache_payload = {
@@ -2488,6 +2536,10 @@ def render_story_card(
     # byte-identical story cache key; a 2x render keys independently.
     if supersample > 1.0:
         cache_payload["supersample"] = supersample
+    # fps-option: fold the frame rate only for a non-default choice, so the
+    # default (30fps) story cache key is byte-identical to before.
+    if int(fps) != MOTION_FPS:
+        cache_payload["fps"] = int(fps)
     cache_key = _content_hash(cache_payload, kind="story")
     cached = _cache_dir() / f"{cache_key}.mp4"
     if cached.exists() and cached.stat().st_size > 1024:
@@ -2512,6 +2564,7 @@ def render_story_card(
         duration_sec=duration_sec,
         size=size,
         supersample=supersample,
+        **_fps_kw(fps),
     )
     audio_rec = _finish_cached_video(
         cached, kind="story", plan=audio_plan, duration_sec=duration_sec
@@ -2525,6 +2578,7 @@ def render_story_card(
         "format": format_name,
         "size": list(size),
         "duration_sec": duration_sec,
+        "fps": int(fps),
         "card": _card_manifest_axes(card_dict),
         "audio": audio_rec,
         "captions": _caption_manifest(card_dict.get("captionsJson") or ""),
@@ -2952,7 +3006,7 @@ def _reel_duration_kwargs(rhythm: Optional[dict]) -> dict:
 
 
 def _render_reel_parallel_or_none(
-    *, props: dict, cached: Path, duration_sec: float, size: tuple[int, int]
+    *, props: dict, cached: Path, duration_sec: float, size: tuple[int, int], fps: int = MOTION_FPS
 ) -> Optional[Path]:
     """Opt-in parallel reel composition (roadmap R1.28).
 
@@ -2975,6 +3029,7 @@ def _render_reel_parallel_or_none(
         out_path=cached,
         duration_sec=duration_sec,
         size=size,
+        **_fps_kw(fps),
     )
 
 
@@ -2988,6 +3043,7 @@ def _assemble_reel_props(
     rhythm: Optional[dict] = None,
     dub_language: str = "",
     resolve_footage: bool = False,
+    fps: int = MOTION_FPS,
 ) -> tuple[list[dict], dict, str, float, Any, list, Optional[dict], Optional[dict], list]:
     """Format-independent prop assembly shared by the single and batch reel
     renders.
@@ -3031,7 +3087,7 @@ def _assemble_reel_props(
     rhythm_norm = normalise_reel_rhythm(rhythm, n_cards)
     if duration_sec is None:
         duration_sec = reel_duration_for(n_cards, **_reel_duration_kwargs(rhythm_norm))
-    beat_frames = reel_card_beat_frames(n_cards, duration_sec, rhythm_norm)
+    beat_frames = reel_card_beat_frames(n_cards, duration_sec, rhythm_norm, fps=fps)
 
     cards_props: list[dict] = []
     footage_list: list[tuple[Optional[Any], str]] = []
@@ -3066,8 +3122,11 @@ def _assemble_reel_props(
         # the card's props byte-identical with the reason kept for the manifest.
         foot, foot_reason = (None, "")
         if resolve_footage and idx < len(beat_frames):
+            # Convert this beat's carved frames to seconds at the SELECTED fps —
+            # beat_frames already scales with fps, so dividing by the fixed
+            # MOTION_FPS would over-trim the footage window by fps/30 at 50/60.
             foot, foot_reason = _footage_for_card(
-                c, brief, brand_kit, beat_seconds=beat_frames[idx] / MOTION_FPS
+                c, brief, brand_kit, beat_seconds=beat_frames[idx] / fps
             )
         footage_list.append((foot, foot_reason))
         # Format-independent base focus (story 9:16); the per-cut saliency
@@ -3111,10 +3170,10 @@ def _assemble_reel_props(
     # MeetReel.tsx allocation), not a flat REEL_PER_CARD_SEC grid, so trailing
     # cues survive short beats and the emphasised beat stays captioned.
     if _subtitles_enabled() and audio_plan and audio_plan.get("voice") and audio_plan.get("script"):
-        beats = reel_card_beat_frames(len(cards_props), duration_sec, rhythm_norm)
+        beats = reel_card_beat_frames(len(cards_props), duration_sec, rhythm_norm, fps=fps)
         for idx, cp in enumerate(cards_props):
             beat_frames = max(1, beats[idx]) if idx < len(beats) else 1
-            cj = _reel_caption_json(cp, brand_dict, beat_frames=beat_frames)
+            cj = _reel_caption_json(cp, brand_dict, beat_frames=beat_frames, fps=fps)
             if cj:
                 cp["captionsJson"] = cj
 
@@ -3266,6 +3325,7 @@ def _render_reel_one_format(
     audio_notes: Optional[dict] = None,
     stat_config: Optional[dict] = None,
     footage_list: Optional[list] = None,
+    fps: int = MOTION_FPS,
 ) -> Path:
     """Render (or serve cached) ONE reel cut from already-assembled props.
 
@@ -3310,6 +3370,7 @@ def _render_reel_one_format(
             format_name=format_name,
             rhythm=rhythm,
             audio_notes=audio_notes,
+            **_fps_kw(fps),
         )
 
     cache_payload = {
@@ -3346,6 +3407,10 @@ def _render_reel_one_format(
     # byte-identical cache key; a 2x reel keys independently.
     if supersample > 1.0:
         cache_payload["supersample"] = supersample
+    # fps-option: fold the frame rate only for a non-default choice, so the
+    # default (30fps) reel cache key is byte-identical to before.
+    if int(fps) != MOTION_FPS:
+        cache_payload["fps"] = int(fps)
     cache_key = _content_hash(cache_payload, kind="reel")
     cached = _cache_dir() / f"{cache_key}.mp4"
     if cached.exists() and cached.stat().st_size > 1024:
@@ -3390,7 +3455,7 @@ def _render_reel_one_format(
     # unchanged 1x reel still tries parallel first).
     if supersample <= 1.0 and (
         _render_reel_parallel_or_none(
-            props=reel_props, cached=cached, duration_sec=duration_sec, size=size
+            props=reel_props, cached=cached, duration_sec=duration_sec, size=size, **_fps_kw(fps)
         )
         is not None
     ):
@@ -3403,6 +3468,7 @@ def _render_reel_one_format(
             duration_sec=duration_sec,
             size=size,
             supersample=supersample,
+            **_fps_kw(fps),
         )
     audio_rec = _finish_cached_video(
         cached,
@@ -3433,6 +3499,7 @@ def _render_reel_one_format(
             "composition_revision": REEL_COMPOSITION_REVISION,
             "size": list(size),
             "duration_sec": duration_sec,
+            "fps": int(fps),
             "meet_name": meet_name,
             "rhythm": rhythm or "default",
             "cta": cta_props,
@@ -3479,6 +3546,7 @@ def render_meet_reel(
     rhythm: Optional[dict] = None,
     dub_language: str = "",
     reel_stat_config: Optional[dict] = None,
+    fps: int = MOTION_FPS,
 ) -> Path:
     """Render a multi-card reel from the top cards for a meet.
 
@@ -3522,8 +3590,13 @@ def render_meet_reel(
     are mixed in when configured, with an honest silent fallback, and a
     poster-frame PNG sidecar lands beside the MP4.
 
+    ``fps`` selects the output frame rate from the curated ``ALLOWED_FPS`` set
+    (default 30, byte-identical); a non-default rate folds into the cache key
+    and re-times the render across the serial, parallel and ffmpeg engines.
+
     For every cut in one request, see ``render_meet_reel_all_formats``.
     """
+    fps = _validate_fps(fps)
     engine = _dispatch_engine()
     # Validate the stat-chip config up front so a typo fails loudly before any
     # expensive photo-embed/prop work.
@@ -3547,6 +3620,7 @@ def render_meet_reel(
         rhythm=rhythm,
         dub_language=dub_language,
         resolve_footage=engine != "ffmpeg",
+        fps=fps,
     )
     cta_props = _reel_cta_props(sponsor, next_meet)
     return _render_reel_one_format(
@@ -3565,6 +3639,7 @@ def render_meet_reel(
         audio_notes=audio_notes,
         stat_config=stat_config,
         footage_list=footage_list,
+        fps=fps,
     )
 
 
@@ -3598,6 +3673,7 @@ def render_meet_reel_all_formats(
     rhythm: Optional[dict] = None,
     dub_language: str = "",
     reel_stat_config: Optional[dict] = None,
+    fps: int = MOTION_FPS,
 ) -> dict[str, Any]:
     """Render + cache every requested reel format in a single pass (R1.15).
 
@@ -3637,6 +3713,7 @@ def render_meet_reel_all_formats(
     still ships what succeeded. The order of ``rendered`` follows
     ``MOTION_FORMATS`` for stable, predictable output.
     """
+    fps = _validate_fps(fps)
     engine = _dispatch_engine()
 
     requested = list(formats) if formats else list(MOTION_FORMATS)
@@ -3668,6 +3745,7 @@ def render_meet_reel_all_formats(
         rhythm=rhythm,
         dub_language=dub_language,
         resolve_footage=engine != "ffmpeg",
+        fps=fps,
     )
     cta_props = _reel_cta_props(sponsor, next_meet)
 
@@ -3695,6 +3773,7 @@ def render_meet_reel_all_formats(
                     audio_notes=audio_notes,
                     stat_config=stat_config,
                     footage_list=footage_list,
+                    fps=fps,
                 )
         except ReelEngineUnavailable as e:
             # Expected capability gap (e.g. ffmpeg can't do non-story) —

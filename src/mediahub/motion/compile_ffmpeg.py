@@ -54,6 +54,7 @@ def compile_ffmpeg(
     width: int = 1080,
     height: int = 1920,
     tag: str = "0",
+    fps: int = 30,
 ) -> str:
     """An FFmpeg filtergraph fragment for ``preset`` (no leading/trailing pads).
 
@@ -80,7 +81,7 @@ def compile_ffmpeg(
         from mediahub.visual.reel_ffmpeg import _ken_burns_filter
 
         return _ken_burns_filter(
-            float(duration_sec), variant=variant, tag=tag, width=width, height=height
+            float(duration_sec), variant=variant, tag=tag, width=width, height=height, fps=fps
         )
     if preset.channel_names() == ("opacity",):
         return _fade_fragment(preset, float(duration_sec), clip)

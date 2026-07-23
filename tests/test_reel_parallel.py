@@ -306,12 +306,13 @@ def _mock_pipeline(monkeypatch):
     captured: dict = {}
 
     def fake_node(*, composition_id, props_path, manifest_path, duration_sec,
-                  size, concurrency, timeout):
+                  size, concurrency, timeout, fps=reel_parallel.REEL_FPS):
         manifest = json.loads(Path(manifest_path).read_text())
         captured["manifest"] = manifest
         captured["composition_id"] = composition_id
         captured["size"] = size
         captured["concurrency"] = concurrency
+        captured["fps"] = fps
         captured["props"] = json.loads(Path(props_path).read_text())
         for seg in manifest["segments"]:
             Path(seg["output"]).write_bytes(_FAKE_MP4)
@@ -353,8 +354,64 @@ def test_render_reel_parallel_builds_manifest_and_composites(monkeypatch, tmp_pa
         assert b["start"] == a["end"] + 1  # no gap, no overlap
     assert captured["composition_id"] == "MeetReel"
     assert captured["size"] == (1080, 1920)
+    assert captured["fps"] == reel_parallel.REEL_FPS  # default rate threaded through
     # Concat list references every segment, in order.
     assert captured["concat_list"].count("file '") == 4
+
+
+def test_render_reel_parallel_plans_at_selected_fps(monkeypatch, tmp_path):
+    """A non-default fps re-plans the split at that rate (double the frames at
+    60fps) and threads the selected fps down to the node segment renderer."""
+    _common(monkeypatch, tmp_path)
+    monkeypatch.setattr(reel_parallel, "_cpu_count", lambda: 4)
+    monkeypatch.delenv("MEDIAHUB_REEL_PARALLEL_WORKERS", raising=False)
+    captured = _mock_pipeline(monkeypatch)
+
+    out = tmp_path / "out60.mp4"
+    reel_parallel.render_reel_parallel(
+        composition_id="MeetReel",
+        props={"cards": [_props()], "brand": _brand_dict(), "meetName": "Test Meet"},
+        out_path=out,
+        duration_sec=15.0,
+        size=(1080, 1920),
+        fps=60,
+    )
+    segs = captured["manifest"]["segments"]
+    # 15s @ 60fps ⇒ 900 frames tiled contiguously (vs 450 at 30fps).
+    assert segs[0]["start"] == 0
+    assert segs[-1]["end"] == 899
+    assert captured["fps"] == 60
+
+
+def test_run_node_segments_appends_fps_only_when_non_default(monkeypatch, tmp_path):
+    captured: dict = {}
+
+    class _Proc:
+        returncode = 0
+        stderr = ""
+
+    def fake_run_capture(cmd, *, cwd=None, timeout=None):
+        captured["cmd"] = list(cmd)
+        return _Proc()
+
+    monkeypatch.setattr("mediahub.visual.proc.run_capture", fake_run_capture)
+
+    common = dict(
+        composition_id="MeetReel",
+        props_path=tmp_path / "p.json",
+        manifest_path=tmp_path / "m.json",
+        duration_sec=15.0,
+        size=(1080, 1920),
+        concurrency=1,
+        timeout=600,
+    )
+    reel_parallel._run_node_segments(**common, fps=50)
+    assert "--fps" in captured["cmd"]
+    assert captured["cmd"][captured["cmd"].index("--fps") + 1] == "50"
+
+    captured.clear()
+    reel_parallel._run_node_segments(**common, fps=30)
+    assert "--fps" not in captured["cmd"]  # default command byte-identical
 
 
 def test_render_reel_parallel_rejects_subthreshold(monkeypatch, tmp_path):

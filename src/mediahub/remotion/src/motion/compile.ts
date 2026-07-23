@@ -177,21 +177,30 @@ export function presetFor(
   return table[name];
 }
 
-/** Value of one preset channel at `frame` (loops wrap; entrances clamp). */
+/**
+ * Value of one preset channel at `frame` (loops wrap; entrances clamp).
+ *
+ * The preset's `durationFrames` and the caller's `delayFrames` are authored at
+ * MOTION_TOKENS.fps (=30), so at a non-default output fps they must be rescaled
+ * by `fps / MOTION_TOKENS.fps` or a sprint entrance would complete in the wrong
+ * wall-clock time (e.g. half as long at 60fps). At the default 30fps the scale
+ * is exactly 1.0, so `x * 1.0 === x` leaves every sampled value bit-identical.
+ */
 export function sampleChannel(
   preset: MotionPresetTokens,
   channel: string,
   frame: number,
-  _fps: number,
+  fps: number,
   opts?: { delayFrames?: number; speed?: number },
 ): number {
   const kfs = preset.channels[channel];
   if (!kfs || kfs.length === 0) {
     return REST[channel] ?? 0;
   }
-  const delay = opts?.delayFrames ?? 0;
+  const scale = fps / MOTION_TOKENS.fps;
+  const delay = (opts?.delayFrames ?? 0) * scale;
   const speed = opts?.speed ?? 1;
-  const dur = Math.max(1, preset.durationFrames / speed);
+  const dur = Math.max(1, (preset.durationFrames * scale) / speed);
   let local = frame - delay;
   if (preset.loop) {
     local = ((local % dur) + dur) % dur; // wrap (handles negatives)

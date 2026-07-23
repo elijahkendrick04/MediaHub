@@ -421,6 +421,7 @@ def _ken_burns_filter(
     tag: str = "0",
     width: int = WIDTH,
     height: int = HEIGHT,
+    fps: int = FPS,
 ) -> str:
     """One beat's motion sub-graph — a Ken Burns variant, the 2.5D parallax
     composite, or an honest held frame.
@@ -435,15 +436,15 @@ def _ken_burns_filter(
     ``-filter_complex`` (reel) graph. Pure arithmetic, no easing RNG: the
     same inputs yield an identical fragment and a byte-identical MP4.
     """
-    frames = max(1, round(duration_sec * FPS))
+    frames = max(1, round(duration_sec * fps))
     base = f"scale={width * 2}:{height * 2}:flags=lanczos"
     centre = "x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'"
-    tail = f":s={width}x{height}:fps={FPS}"
+    tail = f":s={width}x{height}:fps={fps}"
 
     if variant == "hold":
         # Honest stillness for a `static` motion_intent — no camera move,
         # just the still rescaled to the beat geometry at the beat rate.
-        return f"scale={width}:{height}:flags=lanczos,fps={FPS}"
+        return f"scale={width}:{height}:flags=lanczos,fps={fps}"
 
     if variant == "parallax":
         fg_w = int(round(width * _PARALLAX_FG_SCALE))
@@ -453,12 +454,12 @@ def _ken_burns_filter(
             f"[pbg{tag}]scale={width}:{height},gblur=sigma={_PARALLAX_BG_BLUR},"
             f"zoompan=z='{_PARALLAX_BG_ZOOM}':d=1"
             f":x='(iw-iw/zoom)*(on/{frames})':y='ih/2-(ih/zoom/2)'"
-            f":s={width}x{height}:fps={FPS}[pbgz{tag}]"
+            f":s={width}x{height}:fps={fps}[pbgz{tag}]"
         )
         fg = (
             f"[pfg{tag}]scale={fg_w * 2}:{fg_h * 2}:flags=lanczos,"
             f"zoompan=z='min(1.0+{fg_rate:.6f}*on,{_PARALLAX_FG_ZOOM})':d=1"
-            f":{centre}:s={fg_w}x{fg_h}:fps={FPS}[pfgz{tag}]"
+            f":{centre}:s={fg_w}x{fg_h}:fps={fps}[pfgz{tag}]"
         )
         return (
             f"split=2[pbg{tag}][pfg{tag}];{bg};{fg};"
@@ -500,6 +501,7 @@ def _write_caption_ass(
     *,
     width: int = WIDTH,
     height: int = HEIGHT,
+    fps: int = FPS,
 ) -> Optional[Path]:
     """Write a card's caption track (R1.3) as an ASS file for burn-in, or None.
 
@@ -514,7 +516,7 @@ def _write_caption_ass(
         track = json.loads(caption_json)
         if not isinstance(track, dict) or not track.get("cues"):
             return None
-        doc = subtitle_burn.ass_document(track, width=width, height=height, fps=FPS)
+        doc = subtitle_burn.ass_document(track, width=width, height=height, fps=fps)
         path = work_dir / f"{name}.ass"
         path.write_text(doc, encoding="utf-8")
         return path
@@ -559,6 +561,7 @@ def _beat_motion_filter(
     tag: str,
     width: int = WIDTH,
     height: int = HEIGHT,
+    fps: int = FPS,
 ) -> str:
     """One beat's motion fragment, compiled from the brand motion vocabulary.
 
@@ -582,8 +585,11 @@ def _beat_motion_filter(
             width=width,
             height=height,
             tag=tag,
+            fps=fps,
         )
-    return _ken_burns_filter(duration_sec, variant=variant, tag=tag, width=width, height=height)
+    return _ken_burns_filter(
+        duration_sec, variant=variant, tag=tag, width=width, height=height, fps=fps
+    )
 
 
 def _transition_kind_for(seed: int, *, peak: bool = False, mood: str = "") -> str:
@@ -666,6 +672,7 @@ def story_ffmpeg_args(
     ass_path: Optional[Path] = None,
     width: int = WIDTH,
     height: int = HEIGHT,
+    fps: int = FPS,
 ) -> list[str]:
     """Argument list (after the binary) for a single-card story MP4.
 
@@ -679,7 +686,7 @@ def story_ffmpeg_args(
     """
     fade_out = max(0.0, duration_sec - 0.6)
     vf = (
-        f"{_beat_motion_filter(duration_sec, variant=variant, tag='s', width=width, height=height)},"
+        f"{_beat_motion_filter(duration_sec, variant=variant, tag='s', width=width, height=height, fps=fps)},"
         f"fade=t=in:st=0:d=0.4,fade=t=out:st={fade_out:.3f}:d=0.6,"
         f"format=yuv420p,setsar=1"
     )
@@ -691,7 +698,7 @@ def story_ffmpeg_args(
         "-loop",
         "1",
         "-framerate",
-        str(FPS),
+        str(fps),
         "-t",
         f"{duration_sec:.3f}",
         "-i",
@@ -699,7 +706,7 @@ def story_ffmpeg_args(
         "-vf",
         vf,
         "-r",
-        str(FPS),
+        str(fps),
         "-c:v",
         "libx264",
         "-preset",
@@ -777,6 +784,7 @@ def reel_ffmpeg_args(
     transitions: Optional[list[str]] = None,
     width: int = WIDTH,
     height: int = HEIGHT,
+    fps: int = FPS,
 ) -> list[str]:
     """Argument list (after the binary) for the multi-beat reel MP4.
 
@@ -803,7 +811,7 @@ def reel_ffmpeg_args(
             "-loop",
             "1",
             "-framerate",
-            str(FPS),
+            str(fps),
             "-t",
             f"{dur:.3f}",
             "-i",
@@ -814,7 +822,7 @@ def reel_ffmpeg_args(
     chains: list[str] = []
     for i, dur in enumerate(segment_durations):
         kb = _beat_motion_filter(
-            dur, variant=kb_variants[i], tag=str(i), width=width, height=height
+            dur, variant=kb_variants[i], tag=str(i), width=width, height=height, fps=fps
         )
         chains.append(f"[{i}:v]{kb},setsar=1[v{i}]")
     last = "v0"
@@ -838,7 +846,7 @@ def reel_ffmpeg_args(
         "-map",
         "[vout]",
         "-r",
-        str(FPS),
+        str(fps),
         "-c:v",
         "libx264",
         "-preset",
@@ -949,6 +957,7 @@ def render_story_card_from_props(
     brief_dict: Optional[dict] = None,
     audio_plan: Optional[dict] = None,
     format_name: str = "story",
+    fps: int = FPS,
 ) -> Path:
     """Render one card's story MP4 via the still+FFmpeg path.
 
@@ -986,6 +995,10 @@ def render_story_card_from_props(
         cache_payload["format"] = format_name
     if audio_plan:
         cache_payload["audio"] = audio_plan
+    # fps-option: fold the frame rate only for a non-default choice so the
+    # default (30fps) ffmpeg-story cache key is byte-identical to before.
+    if int(fps) != FPS:
+        cache_payload["fps"] = int(fps)
     cache_key = _content_hash(cache_payload, kind="story")
     cached = _cache_dir() / f"{cache_key}.mp4"
     if cached.exists() and cached.stat().st_size > 1024:
@@ -1009,7 +1022,12 @@ def render_story_card_from_props(
         )
         tmp_mp4 = work / "story.mp4"
         ass_path = _write_caption_ass(
-            str(card_props.get("captionsJson") or ""), work, "story", width=width, height=height
+            str(card_props.get("captionsJson") or ""),
+            work,
+            "story",
+            width=width,
+            height=height,
+            fps=fps,
         )
         _run_ffmpeg(
             story_ffmpeg_args(
@@ -1020,6 +1038,7 @@ def render_story_card_from_props(
                 ass_path=ass_path,
                 width=width,
                 height=height,
+                fps=fps,
             )
         )
         # M22 — the same explainability shape the Remotion story path writes,
@@ -1032,6 +1051,7 @@ def render_story_card_from_props(
             "format": format_name,
             "size": [width, height],
             "duration_sec": duration_sec,
+            "fps": int(fps),
             "card": _card_manifest_axes(card_props),
             "kb_variant": variant,
             "captions": _caption_manifest(str(card_props.get("captionsJson") or "")),
@@ -1086,6 +1106,7 @@ def render_meet_reel_from_props(
     format_name: str = "story",
     rhythm: Optional[dict] = None,
     audio_notes: Optional[dict] = None,
+    fps: int = FPS,
 ) -> Path:
     """Render the meet reel (cover + one beat per card) via still+FFmpeg.
 
@@ -1132,6 +1153,10 @@ def render_meet_reel_from_props(
         cache_payload["format"] = format_name
     if audio_plan:
         cache_payload["audio"] = audio_plan
+    # fps-option: fold the frame rate only for a non-default choice so the
+    # default (30fps) ffmpeg-reel cache key is byte-identical to before.
+    if int(fps) != FPS:
+        cache_payload["fps"] = int(fps)
     cache_key = _content_hash(cache_payload, kind="reel")
     cached = _cache_dir() / f"{cache_key}.mp4"
     if cached.exists() and cached.stat().st_size > 1024:
@@ -1212,6 +1237,7 @@ def render_meet_reel_from_props(
                 transitions=transitions,
                 width=width,
                 height=height,
+                fps=fps,
             )
         )
         # M22 — the same explainability shape the Remotion reel path writes,
@@ -1226,6 +1252,7 @@ def render_meet_reel_from_props(
             "format": format_name,
             "size": [width, height],
             "duration_sec": duration_sec,
+            "fps": int(fps),
             "meet_name": meet_name,
             "rhythm": rhythm or "default",
             "cards": [_card_manifest_axes(cp) for cp in cards_props],

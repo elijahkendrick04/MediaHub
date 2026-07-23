@@ -430,3 +430,102 @@ def test_render_diff_brief_variants_produce_distinct_mp4s(tmp_path, monkeypatch)
                 f"compositionLayoutFor / accentDecoration)."
             )
         seen[digest] = idx
+
+
+# ---------------------------------------------------------------------------
+# Selectable output frame rate (fps-option)
+# ---------------------------------------------------------------------------
+
+def test_validate_fps_accepts_curated_and_rejects_others():
+    for good in (24, 25, 30, 50, 60):
+        assert motion._validate_fps(good) == good
+    for bad in (0, 48, 23, 61, None, 30.0, True, "30"):
+        with pytest.raises(ValueError):
+            motion._validate_fps(bad)
+
+
+def test_fps_kw_is_empty_at_the_default_and_present_otherwise():
+    # The default (30fps) forwards no kwarg, so every existing call signature —
+    # and its mocks/assertions — is unchanged and the default render is
+    # byte-identical.
+    assert motion._fps_kw(30) == {}
+    assert motion._fps_kw(50) == {"fps": 50}
+    assert motion._fps_kw(60) == {"fps": 60}
+
+
+def test_fps_folds_into_story_cache_key_only_when_non_default():
+    base = {"card": {"a": 1}, "brand": {}, "duration": 6.0, "size": [1080, 1920]}
+    h_default = motion._content_hash(base, kind="story")
+    # 30fps must NOT fold an "fps" key, so the key equals the pre-change fixture.
+    assert h_default == motion._content_hash(base, kind="story")
+    h50 = motion._content_hash({**base, "fps": 50}, kind="story")
+    h60 = motion._content_hash({**base, "fps": 60}, kind="story")
+    assert h_default != h50 and h_default != h60 and h50 != h60
+
+
+def test_fps_folds_into_reel_cache_key_only_when_non_default():
+    base = {"cards": [{"a": 1}], "brand": {}, "meet": "M", "duration": 15.0, "size": [1080, 1920]}
+    h_default = motion._content_hash(base, kind="reel")
+    assert h_default == motion._content_hash(base, kind="reel")
+    h50 = motion._content_hash({**base, "fps": 50}, kind="reel")
+    h60 = motion._content_hash({**base, "fps": 60}, kind="reel")
+    assert h_default != h50 and h_default != h60 and h50 != h60
+
+
+def test_run_remotion_appends_fps_only_when_non_default(tmp_path, monkeypatch):
+    monkeypatch.setattr(motion, "node_available", lambda: True)
+    captured: dict = {}
+
+    class _Proc:
+        returncode = 0
+        stderr = ""
+
+    def fake_run_capture(cmd, *, cwd=None, timeout=None):
+        captured["cmd"] = list(cmd)
+        Path(cmd[cmd.index("--output") + 1]).write_bytes(b"x" * 4096)
+        return _Proc()
+
+    monkeypatch.setattr("mediahub.visual.proc.run_capture", fake_run_capture)
+
+    # Non-default fps: --fps <n> is appended.
+    motion._run_remotion(
+        composition_id="StoryCard",
+        props={"card": {}, "brand": {}},
+        out_path=tmp_path / "a.mp4",
+        duration_sec=6.0,
+        size=(1080, 1920),
+        fps=50,
+    )
+    assert "--fps" in captured["cmd"]
+    assert captured["cmd"][captured["cmd"].index("--fps") + 1] == "50"
+
+    # Default fps (30): the node command is byte-identical to the pre-fps era.
+    captured.clear()
+    motion._run_remotion(
+        composition_id="StoryCard",
+        props={"card": {}, "brand": {}},
+        out_path=tmp_path / "b.mp4",
+        duration_sec=6.0,
+        size=(1080, 1920),
+        fps=30,
+    )
+    assert "--fps" not in captured["cmd"]
+
+
+def test_reel_card_beat_frames_scales_with_selected_fps():
+    # The carve is the exact Python mirror of MeetReel.tsx: it is authored in
+    # SECONDS, so beat frames scale ~linearly with fps and the per-beat SECONDS
+    # stay ~fps-invariant. This is what makes the footage-window divisor correct
+    # only when it divides by the SELECTED fps.
+    b30 = motion.reel_card_beat_frames(3, 15.0, fps=30)
+    b60 = motion.reel_card_beat_frames(3, 15.0, fps=60)
+    b50 = motion.reel_card_beat_frames(3, 15.0, fps=50)
+    assert len(b30) == len(b60) == len(b50) == 3
+    # Default call (no fps) equals fps=30 exactly — byte-identical behaviour.
+    assert motion.reel_card_beat_frames(3, 15.0) == b30
+    # 60fps roughly doubles the frame counts vs 30fps.
+    assert all(f60 > f30 for f30, f60 in zip(b30, b60))
+    # Per-beat seconds match across fps within one frame of rounding.
+    for f30, f50, f60 in zip(b30, b50, b60):
+        assert abs(f30 / 30 - f60 / 60) < 0.05
+        assert abs(f30 / 30 - f50 / 50) < 0.05

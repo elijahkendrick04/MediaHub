@@ -74,6 +74,13 @@ async function main() {
   const durationSec = args.duration ? parseFloat(args.duration) : null;
   const widthPx = args.width ? parseInt(args.width, 10) : null;
   const heightPx = args.height ? parseInt(args.height, 10) : null;
+  // Optional output frame rate override (fps-option). Absent (or <=0) keeps the
+  // composition's declared fps, so the default render is byte-identical; a
+  // curated value (24/25/30/50/60) re-times durationInFrames + the poster math
+  // and rides into the composition object exactly like --width/--height. The
+  // TSX is already fps-aware via useVideoConfig().fps, and compile.ts rescales
+  // its preset frame counts by fps/MOTION_TOKENS.fps.
+  const fpsArg = args.fps ? parseInt(args.fps, 10) : null;
   // Optional supersample factor: render at scale× the target and let Python
   // Lanczos-downscale back to WxH for crisper text/vector/gradient edges. Omitted
   // (scale absent) when <=1 so the default render is byte-identical.
@@ -130,15 +137,16 @@ async function main() {
     process.exit(4);
   }
 
+  const fps = fpsArg && fpsArg > 0 ? fpsArg : composition.fps;
   let durationInFrames = composition.durationInFrames;
   if (durationSec) {
-    durationInFrames = Math.max(1, Math.round(durationSec * composition.fps));
+    durationInFrames = Math.max(1, Math.round(durationSec * fps));
   }
   const width = widthPx && widthPx > 0 ? widthPx : composition.width;
   const height = heightPx && heightPx > 0 ? heightPx : composition.height;
 
   console.error(
-    `[remotion] rendering ${compositionId} (${width}x${height} @ ${composition.fps}fps × ${durationInFrames} frames)`,
+    `[remotion] rendering ${compositionId} (${width}x${height} @ ${fps}fps × ${durationInFrames} frames)`,
   );
   await renderMedia({
     composition: {
@@ -146,6 +154,7 @@ async function main() {
       durationInFrames,
       width,
       height,
+      fps,
     },
     serveUrl,
     codec: "h264",
@@ -176,15 +185,12 @@ async function main() {
   const kind = compositionId === "MeetReel" ? "reel" : "story";
   const posterPath = posterPathFor(outputPath);
   const posterFrame = Math.min(
-    Math.max(
-      0,
-      Math.round(posterTimeFor(kind, durationInFrames / composition.fps) * composition.fps),
-    ),
+    Math.max(0, Math.round(posterTimeFor(kind, durationInFrames / fps) * fps)),
     durationInFrames - 1,
   );
   try {
     await renderStill({
-      composition: { ...composition, durationInFrames, width, height },
+      composition: { ...composition, durationInFrames, width, height, fps },
       serveUrl,
       output: posterPath,
       frame: posterFrame,

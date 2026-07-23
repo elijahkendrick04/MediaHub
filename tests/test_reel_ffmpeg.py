@@ -318,6 +318,48 @@ def test_motion_is_deterministic():
 
 
 # ---------------------------------------------------------------------------
+# Selectable output frame rate (fps-option) — honestly supported by ffmpeg's -r
+# ---------------------------------------------------------------------------
+
+
+def test_story_args_default_fps_is_byte_identical():
+    """Passing fps=FPS explicitly equals omitting it — the default is unchanged."""
+    a = reel_ffmpeg.story_ffmpeg_args(Path("s.png"), Path("o.mp4"), 6.0)
+    b = reel_ffmpeg.story_ffmpeg_args(Path("s.png"), Path("o.mp4"), 6.0, fps=reel_ffmpeg.FPS)
+    assert a == b
+    assert a[a.index("-framerate") + 1] == str(reel_ffmpeg.FPS)
+    assert a[a.index("-r") + 1] == str(reel_ffmpeg.FPS)
+
+
+def test_story_args_use_the_selected_fps():
+    args = reel_ffmpeg.story_ffmpeg_args(Path("s.png"), Path("o.mp4"), 6.0, fps=50)
+    assert args[args.index("-framerate") + 1] == "50"
+    assert args[args.index("-r") + 1] == "50"
+    # The Ken Burns sub-graph re-times to the selected rate too.
+    assert "fps=50" in " ".join(args)
+
+
+def test_reel_args_use_the_selected_fps():
+    stills = [Path("c.png"), Path("a.png"), Path("b.png")]
+    segs = reel_ffmpeg.reel_segment_durations(2, reel_duration_for(2))
+    args = reel_ffmpeg.reel_ffmpeg_args(stills, Path("r.mp4"), segs, fps=60)
+    # Every -framerate input flag and the final output rate use 60.
+    assert args.count("-framerate") == len(stills)
+    for i, tok in enumerate(args):
+        if tok == "-framerate":
+            assert args[i + 1] == "60"
+    assert args[args.index("-r") + 1] == "60"
+    assert "fps=60" in " ".join(args)
+
+
+def test_ken_burns_filter_retimes_to_selected_fps():
+    at30 = reel_ffmpeg._ken_burns_filter(4.0, variant="zoom_in", fps=30)
+    at60 = reel_ffmpeg._ken_burns_filter(4.0, variant="zoom_in", fps=60)
+    assert "fps=30" in at30 and "fps=60" in at60
+    assert at30 != at60
+
+
+# ---------------------------------------------------------------------------
 # Frame briefs — deterministic, no AI
 # ---------------------------------------------------------------------------
 
@@ -477,6 +519,41 @@ def test_reel_assembly_hits_data_driven_duration_and_caches(tmp_path, monkeypatc
     )
     assert renders == []
     assert Path(again).exists()
+
+
+@pytest.mark.skipif(not _HAS_FFMPEG, reason="no FFmpeg binary resolvable")
+def test_reel_assembly_at_selected_fps_records_manifest_and_folds_cache(tmp_path, monkeypatch):
+    """A non-default fps renders honestly (ffmpeg -r), the manifest records the
+    real output fps, and the render caches under a DISTINCT key from the 30fps
+    reel (so the two never collide)."""
+    import json as _json
+
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+
+    def _fake_still(brief, brand_kit, out_dir, name, **kw):
+        return _write_synthetic_still(
+            out_dir / name / "story.png",
+            (60, 60, 90),
+            size=kw.get("size", (reel_ffmpeg.WIDTH, reel_ffmpeg.HEIGHT)),
+        )
+
+    monkeypatch.setattr(reel_ffmpeg, "_render_still", _fake_still)
+    cards = [_props()]
+
+    out50 = tmp_path / "reel50.mp4"
+    reel_ffmpeg.render_meet_reel_from_props(
+        cards, _brand_dict(), _brand_kit(), out50, meet_name="Test Meet", fps=50
+    )
+    manifest = _json.loads(Path(out50).with_suffix(".json").read_text())
+    assert manifest["fps"] == 50
+
+    out30 = tmp_path / "reel30.mp4"
+    reel_ffmpeg.render_meet_reel_from_props(
+        cards, _brand_dict(), _brand_kit(), out30, meet_name="Test Meet", fps=30
+    )
+    # The 30fps and 50fps reels are distinct cache entries (fold-only-when-active).
+    cache_mp4s = {p.name for p in (tmp_path / "motion_cache").glob("*.mp4")}
+    assert len(cache_mp4s) == 2
 
 
 # ---------------------------------------------------------------------------
