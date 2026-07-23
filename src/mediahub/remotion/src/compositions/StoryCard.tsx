@@ -18,7 +18,16 @@ import {
   EXTRA_SCENES,
   EXTRA_SPRINGS,
 } from "./sprint/registry";
-import { glyphRevealAt, resolveStagger, type StaggerConfig } from "../motion/compile";
+import {
+  glyphRevealAt,
+  resolveStagger,
+  textFxGlyphAt,
+  textFxTrackingDeltaEm,
+  textFxUnitFor,
+  type StaggerConfig,
+  type TextFx,
+  type TextFxKind,
+} from "../motion/compile";
 import {
   PhotoFilterDefs,
   photoGradeFilterFor,
@@ -216,6 +225,18 @@ export const cardSchema = z.object({
   // motion.py's deterministic seed gate (never a director/LLM field), and only
   // for those two intents — so every other card keeps a byte-identical payload.
   textGranularity: z.enum(["word", "glyph"]).default("word"),
+  // text-fx-richer: the closed-enum entrance text animator for the type-carried
+  // intents (kinetic_type / cascade). "" (the default) is OFF — byte-identical
+  // to today. The four presets are frame-pure, seeded, and resolve to the still
+  // (blur 0 / baseline tracking / wiggle 0) within GLYPH_BUDGET_SEC. Set ONLY by
+  // motion.py's deterministic seed gate under MEDIAHUB_TEXT_FX, and only on a
+  // glyph-mode eligible card (the same seed%2==1 gate that sets textGranularity
+  // "glyph"), so a per-glyph animator only ever attaches when perGlyph is true.
+  // A closed enum + a sole trusted producer (Python) — no operator string, no
+  // eval — so no untrusted value ever reaches the animator switch.
+  textAnimator: z
+    .enum(["", "blur_reveal", "track_in", "wiggle_settle", "word_rise_blur"])
+    .default(""),
   // Resolved still-parity colour roles: the exact APCA-gated hexes the
   // card's still graphic painted (medal tint included), resolved by the
   // deterministic Python resolver. Empty strings = seed-permutation
@@ -290,7 +311,8 @@ export const cardSchema = z.object({
   // stays in parity. An empty array (the default) means every gate passes, so
   // the scene is byte-identical to a card that never learned about toggles.
   // The allowlist is decorative-only (background_pattern / motion_intent /
-  // accent / style_pack / sprint_layers / mesh_bg / overlap_accent / cutout);
+  // accent / style_pack / sprint_layers / mesh_bg / overlap_accent / cutout /
+  // text_fx);
   // legibility layers (photo scrims/filters, burn-in captions) are never
   // toggleable, so no toggle can drop a text/bg pair below its APCA gate.
   effectsDisabled: z.array(z.string()).default([]),
@@ -391,6 +413,53 @@ export function supersampledImgStyle(
     return base;
   }
   return { ...base, imageRendering: "auto" };
+}
+
+// text-fx-richer: the identity per-unit offset every non-opted intent carries,
+// so KineticLine's fx guards see all-zero terms and emit the pre-fx DOM
+// byte-for-byte. A module const (stable reference) mirroring identityWord /
+// identityGlyph.
+const identityFx = (): TextFx => ({ blur: 0, dx: 0, dy: 0, rotate: 0 });
+
+// text-fx-richer: a span transform carrying the base translateY PLUS any
+// non-zero fx offset. Every fx term 0 => exactly `translateY(${y}px)` — the
+// pre-fx string — so the OFF/held span DOM is byte-identical.
+function fxTransform(y: number, fx: TextFx): string {
+  let t = `translateY(${fx.dy !== 0 ? y + fx.dy : y}px)`;
+  if (fx.dx !== 0) {
+    t += ` translateX(${fx.dx}px)`;
+  }
+  if (fx.rotate !== 0) {
+    t += ` rotate(${fx.rotate}deg)`;
+  }
+  return t;
+}
+
+// text-fx-richer: fold the track_in em delta into a line's letter-spacing. A
+// delta of 0 (every OFF/held frame) returns the SAME style object reference, so
+// React serialises byte-identical props and the line's cache key is unchanged.
+function withLineTracking(
+  style: React.CSSProperties,
+  deltaEm: number,
+): React.CSSProperties {
+  if (deltaEm === 0) {
+    return style;
+  }
+  const baseLS = style.letterSpacing;
+  const ls =
+    baseLS == null || baseLS === ""
+      ? `${deltaEm}em`
+      : typeof baseLS === "number"
+        ? `calc(${baseLS}px + ${deltaEm}em)`
+        : `calc(${baseLS} + ${deltaEm}em)`;
+  return { ...style, letterSpacing: ls };
+}
+
+// text-fx-richer: true only when at least one fx geometry term is active, i.e.
+// the span needs the fx style branch. Every term 0 (OFF / held) => false => the
+// pre-fx style object, byte-identical.
+function fxActive(fx: TextFx): boolean {
+  return fx.blur > 0 || fx.dx !== 0 || fx.dy !== 0 || fx.rotate !== 0;
 }
 
 // Six palette role permutations — mirror creative_brief/generator.py
@@ -594,6 +663,17 @@ export type AnimChannels = {
   // equals the still weight, so still↔motion parity holds; register-absent cards
   // (weight 0) take wghtFvs's unchanged `{}` branch and never read this.
   wghtBloom: number;
+  // text-fx-richer (opt-in): the closed-enum entrance animator's grouping unit
+  // plus its frame-pure per-unit offset and line-level tracking delta. `fxUnit
+  // === ""` (every non-opted intent, the default) makes KineticLine take its
+  // exact pre-fx paint path, so the OFF DOM is byte-identical; and every
+  // animator's terminal state is identity (blur 0 / tracking 0 / no residual
+  // transform) within GLYPH_BUDGET_SEC, so the held frame equals the still.
+  // `glyphFx(index, total)` is called with the unit index/count at `fxUnit`'s
+  // grouping level (glyph index for glyph animators, word index for word ones).
+  fxUnit: "" | "glyph" | "word" | "line";
+  glyphFx: (index: number, total: number) => TextFx;
+  trackingDeltaEm: number;
 };
 
 // The nine executable intents. Kept in lock-step with
@@ -657,6 +737,7 @@ function animProgram(
   durationInFrames: number,
   seed: number,
   stagger?: StaggerConfig,
+  animator: string = "",
 ): AnimChannels {
   const moodSpring = springConfigFor(mood);
   const clampRight = { extrapolateRight: "clamp" as const };
@@ -722,6 +803,12 @@ function animProgram(
     // varfont-animation — every intent spreads ...base, so all inherit the
     // supporting-register weight bloom for free. Same curve sceneKit uses.
     wghtBloom: wghtBloomAt(frame, durationInFrames),
+    // text-fx-richer — identity by default; `withTextFx` (applied on the way
+    // out of every branch) replaces these ONLY when an animator is active, so
+    // every non-opted intent stays byte-identical.
+    fxUnit: "",
+    glyphFx: identityFx,
+    trackingDeltaEm: 0,
   };
 
   // Kind-specific execution of the resolve accent that lives in the shared
@@ -733,9 +820,30 @@ function animProgram(
       ? { ...ch, resultScale: ch.resultScale * (1 + 0.04 * ch.resolveAccent) }
       : ch;
 
+  // text-fx-richer: attach the closed-enum entrance animator's channels ONLY
+  // when one is active. When `animator === ""` the SAME channel object is
+  // returned reference-unchanged (like supersampledImgStyle's early return), so
+  // React serialises byte-identical props and every existing cache key holds.
+  // Applied on the way out of every branch (via `finish`), incl. the sprint
+  // default case, so a sprint intent (cascade) inherits it too.
+  const withTextFx = (ch: AnimChannels): AnimChannels => {
+    if (!animator) {
+      return ch;
+    }
+    const kind = animator as TextFxKind;
+    return {
+      ...ch,
+      fxUnit: textFxUnitFor(kind),
+      glyphFx: (index: number, total: number) =>
+        textFxGlyphAt(kind, index, total, frame, fps, seed),
+      trackingDeltaEm: textFxTrackingDeltaEm(kind, frame, fps),
+    };
+  };
+  const finish = (ch: AnimChannels): AnimChannels => withTextFx(withResolveAccent(ch));
+
   switch (intent) {
     case "fade_in": {
-      return withResolveAccent({
+      return finish({
         ...base,
         heroY: 0,
         heroOpacity: interpolate(frame, [at(0.0), at(0.115)], [0, 1], clampRight),
@@ -753,7 +861,7 @@ function animProgram(
         fps,
         config: { damping: 9, stiffness: 220, mass: 0.5 },
       });
-      return withResolveAccent({
+      return finish({
         ...base,
         heroY: interpolate(snap, [0, 1], [90, 0]),
         heroOpacity: interpolate(frame, [at(0.0), at(0.035)], [0, 1], clampRight),
@@ -767,7 +875,7 @@ function animProgram(
         ...clampRight,
         easing: Easing.out(Easing.cubic),
       });
-      return withResolveAccent({
+      return finish({
         ...base,
         heroY: eased * 240,
         heroOpacity: interpolate(frame, [at(0.0), at(0.085)], [0, 1], clampRight),
@@ -778,7 +886,7 @@ function animProgram(
     }
     case "scale_in": {
       const grow = spring({ frame, fps, config: moodSpring });
-      return withResolveAccent({
+      return finish({
         ...base,
         heroY: 0,
         heroOpacity: interpolate(frame, [at(0.0), at(0.07)], [0, 1], clampRight),
@@ -790,7 +898,7 @@ function animProgram(
     }
     case "crossfade": {
       // Layered opacity beats, no movement: hero → secondary → result → chrome.
-      return withResolveAccent({
+      return finish({
         ...base,
         heroY: 0,
         heroOpacity: interpolate(frame, [at(0.0), at(0.085)], [0, 1], clampRight),
@@ -803,7 +911,7 @@ function animProgram(
     case "kinetic_type": {
       // Per-word staggered reveal — the type itself carries the energy.
       // The hero line's block opacity is 1; each word owns its reveal.
-      return withResolveAccent({
+      return finish({
         ...base,
         heroY: 0,
         heroOpacity: 1,
@@ -842,7 +950,7 @@ function animProgram(
       // photo keeps its stronger dual-rate push (no extra lateral drift on
       // top; the depth split IS this intent's camera language).
       const drift = interpolate(frame, [0, durationInFrames], [0, 60]);
-      return withResolveAccent({
+      return finish({
         ...base,
         bgDrift: drift,
         photoScale: interpolate(frame, [0, durationInFrames], [1.0, 1.07]),
@@ -855,7 +963,7 @@ function animProgram(
       // settles — with a small confirmation pulse — on the exact verified
       // value, which then holds for the rest of the clip. A calm fade
       // programme carries the layers around it.
-      return withResolveAccent({
+      return finish({
         ...base,
         heroY: 0,
         heroOpacity: interpolate(frame, [at(0.0), at(0.085)], [0, 1], clampRight),
@@ -877,8 +985,10 @@ function animProgram(
     case "static": {
       // Everything present from frame 0 — the card IS the statement. The
       // photo is genuinely still too (stillness as a choice), and no resolve
-      // accent fires.
-      return {
+      // accent fires. `withTextFx` is a no-op here (static is never an animator
+      // intent, so `animator === ""` returns the reference unchanged), kept for
+      // uniformity with the other branches.
+      return withTextFx({
         heroY: 0,
         heroOpacity: 1,
         heroScale: 1,
@@ -899,14 +1009,18 @@ function animProgram(
         // static: everything is present from frame 0, so the register holds its
         // terminal (still-parity) weight — no bloom, consistent with the intent.
         wghtBloom: 1,
-      };
+        // text-fx-richer — identity (animator never applies to a static card).
+        fxUnit: "",
+        glyphFx: identityFx,
+        trackingDeltaEm: 0,
+      });
     }
     default: {
       // Sprint intents (R1.1) register their own file under sprint/intents/.
       // They spread ...base, so the M15 photo camera and M19 resolve accent
       // ride along unless a sprint intent deliberately overrides them.
       const extra = EXTRA_INTENTS[intent];
-      return withResolveAccent(
+      return finish(
         extra ? extra(frame, fps, durationInFrames, mood, base, stagger, seed) : base,
       );
     }
@@ -1355,6 +1469,15 @@ const KineticLine: React.FC<{
   if (parts.length === 0) {
     return null;
   }
+  // text-fx-richer: which grouping level (if any) the active animator paints at.
+  // "" for every non-opted card, so both guarded branches below take their exact
+  // pre-fx path. `track_in` (line unit) rides the outer div's letter-spacing in
+  // BOTH branches; `word_rise_blur` (word unit) the per-word wrapper span; the
+  // per-glyph animators the inner glyph span (glyph mode only). Every fx guard
+  // falls through to the pre-fx style object when the fx term is 0, so the
+  // OFF/held DOM is byte-identical.
+  const glyphUnit = anim.fxUnit === "glyph";
+  const wordUnit = anim.fxUnit === "word";
   if (perGlyph) {
     // Keep the per-word wrapper span (so the 0.28em inter-word gap is preserved
     // exactly), but reveal each character on its own glyph channel with a
@@ -1362,27 +1485,41 @@ const KineticLine: React.FC<{
     let glyph = startIndex;
     const lineTotal = parts.reduce((n, w) => n + Array.from(w).length, 0);
     return (
-      <div style={style}>
+      <div style={withLineTracking(style, anim.trackingDeltaEm)}>
         {parts.map((w, wi) => {
           const chars = Array.from(w);
           const base = glyph;
           glyph += chars.length;
+          const wordFx = wordUnit ? anim.glyphFx(wi, parts.length) : null;
+          const wordStyle: React.CSSProperties =
+            wordFx && fxActive(wordFx)
+              ? {
+                  display: "inline-block",
+                  marginRight: "0.28em",
+                  transform: fxTransform(0, wordFx),
+                  ...(wordFx.blur > 0 ? { filter: `blur(${wordFx.blur}px)` } : {}),
+                }
+              : { display: "inline-block", marginRight: "0.28em" };
           return (
-            <span
-              key={`${w}-${wi}`}
-              style={{ display: "inline-block", marginRight: "0.28em" }}
-            >
+            <span key={`${w}-${wi}`} style={wordStyle}>
               {chars.map((ch, ci) => {
                 const a = anim.glyphAt(base + ci, lineTotal);
+                const fx = glyphUnit ? anim.glyphFx(base + ci, lineTotal) : null;
+                const glyphStyle: React.CSSProperties =
+                  fx && fxActive(fx)
+                    ? {
+                        display: "inline-block",
+                        transform: fxTransform(a.y, fx),
+                        opacity: a.opacity,
+                        ...(fx.blur > 0 ? { filter: `blur(${fx.blur}px)` } : {}),
+                      }
+                    : {
+                        display: "inline-block",
+                        transform: `translateY(${a.y}px)`,
+                        opacity: a.opacity,
+                      };
                 return (
-                  <span
-                    key={ci}
-                    style={{
-                      display: "inline-block",
-                      transform: `translateY(${a.y}px)`,
-                      opacity: a.opacity,
-                    }}
-                  >
+                  <span key={ci} style={glyphStyle}>
                     {ch}
                   </span>
                 );
@@ -1394,19 +1531,27 @@ const KineticLine: React.FC<{
     );
   }
   return (
-    <div style={style}>
+    <div style={withLineTracking(style, anim.trackingDeltaEm)}>
       {parts.map((w, i) => {
         const a = anim.wordAt(startIndex + i);
+        const fx = wordUnit ? anim.glyphFx(i, parts.length) : null;
+        const spanStyle: React.CSSProperties =
+          fx && fxActive(fx)
+            ? {
+                display: "inline-block",
+                transform: fxTransform(a.y, fx),
+                opacity: a.opacity,
+                marginRight: "0.28em",
+                ...(fx.blur > 0 ? { filter: `blur(${fx.blur}px)` } : {}),
+              }
+            : {
+                display: "inline-block",
+                transform: `translateY(${a.y}px)`,
+                opacity: a.opacity,
+                marginRight: "0.28em",
+              };
         return (
-          <span
-            key={`${w}-${i}`}
-            style={{
-              display: "inline-block",
-              transform: `translateY(${a.y}px)`,
-              opacity: a.opacity,
-              marginRight: "0.28em",
-            }}
-          >
+          <span key={`${w}-${i}`} style={spanStyle}>
             {kernNumeric(w)}
           </span>
         );
@@ -3714,6 +3859,12 @@ export const StoryCard: React.FC<Props> = ({ card, brand }) => {
     durationInFrames,
     card.variationSeed || 0,
     card.staggerScale && card.staggerScale > 0 ? resolveStagger(card.staggerScale) : undefined,
+    // text-fx-richer: the closed-enum entrance animator. Suppressible as a
+    // decorative axis for a review-only A/B render (off("text_fx")); "" falls
+    // through to the byte-identical no-animator path. Text-fx is entrance-only
+    // (terminal = still), so it is a legitimate A/B-suppressible axis and never
+    // a legibility layer.
+    off("text_fx") ? "" : card.textAnimator || "",
   );
   const mode = sceneForArchetype(card.archetype || "");
   const layout = compositionLayoutFor(card.composition || "left", width);

@@ -1601,6 +1601,56 @@ def _entrance_stagger_scale(mood: str, motion_intent: str) -> float:
     return 1.0
 
 
+# text-fx-richer — the CLOSED set of opt-in entrance text animators. This is the
+# SOLE trusted producer of the tokens the TSX ``textAnimator`` enum accepts:
+# Python only ever emits one of these four members (or omits the prop), so no
+# operator string reaches the animator switch — a closed enum + a single trusted
+# producer, never an expression language (invariant #6/#7). Order is fixed so
+# the deterministic seed bucket below is stable across runs.
+_TEXT_ANIMATORS: tuple[str, ...] = (
+    "blur_reveal",
+    "track_in",
+    "wiggle_settle",
+    "word_rise_blur",
+)
+
+_TEXT_FX_TRUTHY = {"1", "true", "yes", "on"}
+
+
+def _text_fx_enabled() -> bool:
+    """Master switch for the richer text animators (``MEDIAHUB_TEXT_FX``).
+
+    Default OFF: unset / malformed / a non-truthy value returns ``False`` so no
+    card carries a ``textAnimator`` prop and every existing cache key and
+    rendered byte is unchanged (byte-identical default). Mirrors
+    ``_motion_supersample``'s honest env parse — no DSP guessing."""
+    return os.environ.get("MEDIAHUB_TEXT_FX", "").strip().lower() in _TEXT_FX_TRUTHY
+
+
+def _text_animator_for(props: dict, variation_seed: Any) -> str:
+    """Pick the opt-in entrance animator for a card, or ``""``.
+
+    Returns ``""`` (no animator) unless the master switch is ON **and** the card
+    is a type-carried intent card (kinetic_type / cascade — the surface the
+    KineticLine per-glyph reveal owns) **and** it is on the SAME glyph gate that
+    yields per-glyph mode (``seed % 2 == 1``, mirroring the ``textGranularity``
+    gate). Gating on the glyph condition guarantees ``perGlyph`` is true wherever
+    an animator attaches, so a per-glyph animator is never painted onto a
+    word-mode card. The preset is picked from a DIFFERENT seed bucket
+    (``(seed // 2) % 4``) than the granularity gate, so the two gates are
+    independent and sibling cards vary. A pure integer bucket over the sanctioned
+    ``variation_seed`` — no model inference, deterministic-engine boundary
+    respected."""
+    if not _text_fx_enabled():
+        return ""
+    if props.get("motionIntent") not in ("kinetic_type", "cascade"):
+        return ""
+    seed = int(variation_seed or 0)
+    if seed % 2 != 1:
+        return ""
+    return _TEXT_ANIMATORS[(seed // 2) % len(_TEXT_ANIMATORS)]
+
+
 def _card_to_props(
     card: dict,
     *,
@@ -1807,6 +1857,15 @@ def _card_to_props(
         and int(variation_seed or 0) % 2 == 1
     ):
         props["textGranularity"] = "glyph"
+    # text-fx-richer: the opt-in closed-enum entrance animator. Attached ONLY
+    # when the master switch (MEDIAHUB_TEXT_FX) is on AND the card is on the same
+    # glyph gate above (so perGlyph is guaranteed true and a per-glyph animator
+    # never lands on a word-mode card). Fold-only-when-present — with the switch
+    # off (the default) every card keeps a byte-identical prop dict / cache key /
+    # rendered byte, exactly like the textGranularity / overlapAccent attaches.
+    _text_animator = _text_animator_for(props, variation_seed)
+    if _text_animator:
+        props["textAnimator"] = _text_animator
     # F9 medal chrome (still parity): the resolved specular ramp, attached only
     # on a gate-passing medal card so non-medal cards keep byte-identical props.
     medal_ramp = roles.get("roleMedalRamp", "")
@@ -2070,6 +2129,7 @@ def _card_manifest_axes(card_props: dict) -> dict:
         "texture_blend": card_props.get("textureBlend") or "",
         "motion_intent": card_props.get("motionIntent") or "",
         "text_granularity": card_props.get("textGranularity") or "word",
+        "text_animator": card_props.get("textAnimator") or "",
         "accent_style": card_props.get("accentStyle") or "",
         "photo_treatment": card_props.get("photoTreatment") or "",
         "focus_blur_style": card_props.get("focusBlurStyle") or "gaussian",
@@ -2132,6 +2192,7 @@ EFFECT_TOGGLE_ALLOWLIST: tuple[str, ...] = (
     "overlap_accent",
     "sprint_layers",
     "style_pack",
+    "text_fx",
 )
 
 

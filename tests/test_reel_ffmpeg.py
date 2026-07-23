@@ -465,6 +465,18 @@ def test_ffmpeg_manifests_declare_effect_toggles_unsupported_when_requested():
     assert src.count('"effect_toggles": "unsupported-on-engine"') == 2
 
 
+def test_ffmpeg_reports_text_fx_unsupported():
+    """text-fx-richer: the closed-enum entrance text animators (per-glyph
+    blur/wiggle, per-word rise, per-line tracking) are Remotion DOM effects. This
+    engine animates the card's pre-baked still and has no per-glyph/-word/-line
+    DOM, so BOTH the story and the reel manifests declare it unsupported-on-engine
+    — never a faked per-character animation."""
+    src = (Path(reel_ffmpeg.__file__)).read_text()
+    assert (
+        src.count('"text_fx": "per-glyph-text-animators-unsupported-on-engine"') == 2
+    )
+
+
 def test_ffmpeg_reel_branch_declares_logo_drawon_unsupported_when_requested():
     """svg-shape-decompose: the per-path SVG stroke draw-on on the cover/outro is
     a DOM Remotion effect; this engine composites a static logo and cannot

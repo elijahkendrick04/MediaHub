@@ -96,6 +96,151 @@ export function glyphRevealAt(
   };
 }
 
+// ---------------------------------------------------------------------------
+// Richer text-fx animators (text-fx-richer — opt-in)
+// ---------------------------------------------------------------------------
+//
+// A CLOSED enum of frame-pure, seeded ENTRANCE animators that COMPOSE the
+// per-glyph reveal above. This is NOT an expression language (invariant #7):
+// the only tokens that ever reach these functions are the four the Python
+// resolver (`visual/motion.py::_text_animator_for`) emits — Python is the sole
+// trusted producer of the token set, and it emits one of the four closed
+// members or omits the prop entirely. No operator string, no eval.
+//
+// Each animator's terminal/held state equals the approved still exactly
+// (blur 0, tracking baseline, wiggle 0, no residual translate/rotate) and
+// resolves to identity WITHIN the same reused `GLYPH_BUDGET_SEC` budget as the
+// reveal, so still<->motion parity and the APCA hold hold by construction — a
+// glyph never carries a degraded-contrast/blurred state into the resolve phase.
+// Frame-pure: every value is a pure function of (kind, i, total, frame, fps,
+// seed) — no Math.random / Date.now / new Date / performance.now. The grouping
+// unit (glyph / word / line) is carried alongside so the painter applies the fx
+// at the matching span level.
+
+export type TextFxKind =
+  | ""
+  | "blur_reveal"
+  | "track_in"
+  | "wiggle_settle"
+  | "word_rise_blur";
+
+export type TextFx = { blur: number; dx: number; dy: number; rotate: number };
+
+const TEXT_FX_IDENTITY: TextFx = { blur: 0, dx: 0, dy: 0, rotate: 0 };
+
+// Entrance ceilings — reached at progress 0 and enveloped to exactly 0 by
+// GLYPH_BUDGET_SEC, so the held frame is the still's baked value.
+const MAX_BLUR_PX = 8; // per-unit entrance blur
+const MAX_TRACK_EM = 0.12; // per-line tracking-open delta (em)
+const WORD_RISE_PX = 26; // per-word entrance rise
+const WIGGLE_DX_PX = 3; // seeded wiggle amplitudes
+const WIGGLE_DY_PX = 3;
+const WIGGLE_ROT_DEG = 4;
+const WIGGLE_FREQ_A = 0.55; // fixed per-frame angular rates (frame-derived)
+const WIGGLE_FREQ_B = 0.93;
+
+/** The grouping unit an animator paints at (glyph / word / line). "" = none. */
+export function textFxUnitFor(kind: TextFxKind): "" | "glyph" | "word" | "line" {
+  switch (kind) {
+    case "blur_reveal":
+    case "wiggle_settle":
+      return "glyph";
+    case "word_rise_blur":
+      return "word";
+    case "track_in":
+      return "line";
+    default:
+      return "";
+  }
+}
+
+// Per-unit entrance progress 0->1, reusing glyphRevealAt's CLAMPED budget maths
+// (:67-97) so every animator resolves to identity by GLYPH_BUDGET_SEC whatever
+// the unit count — the same APCA-hold guarantee the reveal carries.
+function textFxUnitProgress(
+  index: number,
+  frame: number,
+  fps: number,
+  seed: number,
+): number {
+  const staggerSec = MOTION_TOKENS.text.glyphStaggerSec;
+  const revealFrames = fps * GLYPH_REVEAL_SEC;
+  const maxStart = Math.max(0, fps * GLYPH_BUDGET_SEC - revealFrames);
+  const jitter = 0.6 * ((glyphHash(seed, index) % 1000) / 1000);
+  const start = Math.min((index + jitter) * staggerSec * fps, maxStart);
+  return interpolate(frame, [start, start + revealFrames], [0, 1], {
+    extrapolateLeft: "clamp",
+    extrapolateRight: "clamp",
+  });
+}
+
+/**
+ * Frame-pure per-unit text-fx offset for animator `kind`. `i`/`total` are the
+ * unit index and count at the animator's grouping level (glyph index for glyph
+ * animators, word index for word animators). Returns identity for `""` and for
+ * `track_in` (expressed as a line-level tracking delta, not a per-unit offset)
+ * and for any frame at/after the budget, so the held DOM is byte-identical to
+ * the pre-fx render.
+ */
+export function textFxGlyphAt(
+  kind: TextFxKind,
+  i: number,
+  total: number,
+  frame: number,
+  fps: number,
+  seed: number,
+): TextFx {
+  if (kind === "" || kind === "track_in" || total <= 0) {
+    return TEXT_FX_IDENTITY;
+  }
+  const env = 1 - textFxUnitProgress(i, frame, fps, seed);
+  if (env <= 0) {
+    return TEXT_FX_IDENTITY;
+  }
+  if (kind === "blur_reveal") {
+    return { blur: MAX_BLUR_PX * env, dx: 0, dy: 0, rotate: 0 };
+  }
+  if (kind === "word_rise_blur") {
+    return { blur: MAX_BLUR_PX * env, dx: 0, dy: WORD_RISE_PX * env, rotate: 0 };
+  }
+  // wiggle_settle — a fixed sum-of-two-sines value-noise sampled at the integer
+  // frame, phase seeded by glyphHash, amplitude enveloped to 0 by the budget.
+  const phase = ((glyphHash(seed, i) % 1000) / 1000) * Math.PI * 2;
+  const nx =
+    Math.sin(frame * WIGGLE_FREQ_A + phase) * 0.6 +
+    Math.sin(frame * WIGGLE_FREQ_B + phase * 1.7) * 0.4;
+  const ny =
+    Math.cos(frame * WIGGLE_FREQ_A + phase * 1.3) * 0.6 +
+    Math.cos(frame * WIGGLE_FREQ_B + phase) * 0.4;
+  return {
+    blur: 0,
+    dx: WIGGLE_DX_PX * env * nx,
+    dy: WIGGLE_DY_PX * env * ny,
+    rotate: WIGGLE_ROT_DEG * env * nx,
+  };
+}
+
+/**
+ * Line-level tracking delta (em) for `track_in`; 0 for every other animator.
+ * Opens at MAX_TRACK_EM and closes to 0 by GLYPH_BUDGET_SEC, so the terminal
+ * letter-spacing equals the line's baked (still-parity) value.
+ */
+export function textFxTrackingDeltaEm(
+  kind: TextFxKind,
+  frame: number,
+  fps: number,
+): number {
+  if (kind !== "track_in") {
+    return 0;
+  }
+  const budget = fps * GLYPH_BUDGET_SEC;
+  const p = interpolate(frame, [0, budget], [0, 1], {
+    extrapolateLeft: "clamp",
+    extrapolateRight: "clamp",
+  });
+  return MAX_TRACK_EM * (1 - p);
+}
+
 const REST: Record<string, number> = {
   opacity: 1,
   translateX: 0,

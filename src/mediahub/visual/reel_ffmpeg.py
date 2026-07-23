@@ -1126,6 +1126,13 @@ def render_story_card_from_props(
                 # degrades honestly to the whole-still render — never a faked
                 # per-character animation.
                 "text_granularity": "per-glyph-unsupported-on-engine",
+                # text-fx-richer: the closed-enum entrance text animators
+                # (per-glyph blur/wiggle, per-word rise, per-line tracking) are
+                # Remotion DOM effects; this engine animates the card's pre-baked
+                # still and has no per-glyph/-word/-line DOM, so a text-fx request
+                # degrades honestly to the whole-still camera move — never a faked
+                # per-character animation.
+                "text_fx": "per-glyph-text-animators-unsupported-on-engine",
                 # per-effect-toggle (REVIEW-ONLY A/B): the decorative treatment
                 # is baked into the approved still this engine animates, so it
                 # cannot selectively drop an individual motion effect for a
@@ -1386,6 +1393,13 @@ def render_meet_reel_from_props(
                 # here is the pre-baked still, so a glyph-granularity request
                 # degrades honestly — never a faked per-character animation.
                 "text_granularity": "per-glyph-unsupported-on-engine",
+                # text-fx-richer: the closed-enum entrance text animators
+                # (per-glyph blur/wiggle, per-word rise, per-line tracking) are
+                # Remotion DOM effects; this engine animates the card's pre-baked
+                # still and has no per-glyph/-word/-line DOM, so a text-fx request
+                # degrades honestly to the whole-still camera move — never a faked
+                # per-character animation.
+                "text_fx": "per-glyph-text-animators-unsupported-on-engine",
                 # per-effect-toggle (REVIEW-ONLY A/B): the decorative treatment is
                 # baked into the approved stills this engine composites, so it
                 # cannot selectively drop an individual motion effect for a

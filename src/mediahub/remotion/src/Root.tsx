@@ -81,6 +81,9 @@ const defaultCard = {
   roleMedalNumeralRamp: "",
   motionIntent: "",
   textGranularity: "word" as "word" | "glyph",
+  // text-fx-richer: "" = no entrance animator (byte-identical). Production sets
+  // one of the four presets only under MEDIAHUB_TEXT_FX on a glyph-mode card.
+  textAnimator: "" as "" | "blur_reveal" | "track_in" | "wiggle_settle" | "word_rise_blur",
   roleGround: "",
   roleSurface: "",
   roleAccent: "",
