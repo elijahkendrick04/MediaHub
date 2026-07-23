@@ -1728,16 +1728,32 @@ const TransitionWrap: React.FC<{
     );
   }
   if (kind === "whip") {
-    // High-energy lateral snap with a directional blur that resolves on landing.
+    // High-energy lateral snap with a velocity-aligned blur that resolves on
+    // landing. feGaussianBlur stdDeviation "X 0" blurs only along the X axis —
+    // the actual motion vector — a genuine directional smear, not the isotropic
+    // CSS softening this used to fake. id is whip-only (peak beat), no collision.
     const t = ease(Easing.out(Easing.cubic));
+    const whipBlur = (1 - t) * 14;
     return (
       <AbsoluteFill
         style={{
           opacity: Math.min(1, t * 1.6),
           transform: `translateX(${(1 - t) * width * 0.5}px)`,
-          filter: `blur(${(1 - t) * 14}px)`,
+          filter: "url(#reel-whip-in)",
         }}
       >
+        <svg width="0" height="0" style={{ position: "absolute" }}>
+          <filter
+            id="reel-whip-in"
+            x="-50%"
+            y="-10%"
+            width="200%"
+            height="120%"
+            filterUnits="objectBoundingBox"
+          >
+            <feGaussianBlur in="SourceGraphic" stdDeviation={`${whipBlur} 0`} edgeMode="duplicate" />
+          </filter>
+        </svg>
         {children}
       </AbsoluteFill>
     );
@@ -1865,14 +1881,28 @@ const ExitWrap: React.FC<{
     );
   }
   if (kind === "whip") {
-    // Mirrors the incoming whip laterally, with the same directional blur.
+    // Mirrors the incoming whip laterally, with the same velocity-aligned
+    // (X-axis) blur — feGaussianBlur "X 0", not an isotropic blur.
+    const whipBlur = t * 14;
     return (
       <AbsoluteFill
         style={{
           transform: `translateX(${-t * width * 0.5}px)`,
-          filter: `blur(${t * 14}px)`,
+          filter: "url(#reel-whip-out)",
         }}
       >
+        <svg width="0" height="0" style={{ position: "absolute" }}>
+          <filter
+            id="reel-whip-out"
+            x="-50%"
+            y="-10%"
+            width="200%"
+            height="120%"
+            filterUnits="objectBoundingBox"
+          >
+            <feGaussianBlur in="SourceGraphic" stdDeviation={`${whipBlur} 0`} edgeMode="duplicate" />
+          </filter>
+        </svg>
         {children}
       </AbsoluteFill>
     );

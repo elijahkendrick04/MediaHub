@@ -2342,7 +2342,12 @@ REEL_TOTAL_RANGE = (3.0, 60.0)
 #         + firmer on-video text (outline / shadow3d / stroke_animate) and
 #         firmer photo scrim for muted-feed legibility. All change MeetReel's
 #         deterministic output for an unchanged payload, so cached reels retire.
-REEL_COMPOSITION_REVISION = "5"
+#   "6" — the whip transition's blur is now velocity-aligned: an X-axis-only
+#         SVG feGaussianBlur (a genuine directional smear along the lateral
+#         motion) replaces the isotropic CSS blur() on both the incoming
+#         (TransitionWrap) and paired exit (ExitWrap) whip. Reel-only (whip
+#         lives only in MeetReel), so cached reels retire; story is untouched.
+REEL_COMPOSITION_REVISION = "6"
 
 # Story composition revision — folded into the STORY cache key (M15). The
 # story payload historically had no revision field; introducing one both

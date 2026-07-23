@@ -198,6 +198,23 @@ def test_light_sweep_glints_the_brand_accent_not_an_invented_colour():
     assert hexes <= {"#FFFFFF"}, f"unexpected hard-coded colour in light-sweep: {hexes}"
 
 
+def test_whip_transition_uses_axis_aligned_directional_blur():
+    """The whip is a lateral (X-axis) snap, so its blur must smear along that
+    axis — an SVG feGaussianBlur stdDeviation 'X 0' — not the isotropic CSS
+    blur() it used to fake. Checked on both the incoming and paired-exit whip."""
+    src = _reel_src()
+    wrap = _wrap_region(src)  # TransitionWrap body + ExitWrap + the rest
+    trans_body, exit_body = wrap.split("const ExitWrap", 1)
+    for body, fid in ((trans_body, "reel-whip-in"), (exit_body, "reel-whip-out")):
+        whip = body.split('kind === "whip"', 1)[1].split("if (kind ===", 1)[0]
+        assert f"url(#{fid})" in whip, f"whip must reference the {fid} SVG filter"
+        assert "feGaussianBlur" in whip, "whip blur must be an SVG feGaussianBlur"
+        # Two-value stdDeviation 'X 0' → blur on the X axis only (velocity-aligned).
+        assert re.search(r"stdDeviation=\{`[^`]* 0`\}", whip), "blur must be X-axis only"
+        # The isotropic CSS blur() is gone from the whip branch.
+        assert "blur(" not in whip, "whip must not use isotropic blur()"
+
+
 # --------------------------------------------------------------------------- #
 # FFmpeg engine parity — _transition_kind_for mirrors transitionFor exactly
 # --------------------------------------------------------------------------- #
@@ -310,12 +327,11 @@ def _render_reel_capture(tmp_path, monkeypatch, cards, **kwargs):
             captured["payload"] = payload
         return real_hash(payload, kind=kind)
 
-    with mock.patch.object(motion, "_run_remotion", side_effect=_fake_run), mock.patch.object(
-        motion, "_content_hash", side_effect=_capture_hash
+    with (
+        mock.patch.object(motion, "_run_remotion", side_effect=_fake_run),
+        mock.patch.object(motion, "_content_hash", side_effect=_capture_hash),
     ):
-        result = motion.render_meet_reel(
-            cards, BRAND, tmp_path / "out" / "reel.mp4", **kwargs
-        )
+        result = motion.render_meet_reel(cards, BRAND, tmp_path / "out" / "reel.mp4", **kwargs)
     return captured, result
 
 
