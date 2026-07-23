@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import re
 import subprocess
@@ -201,6 +202,56 @@ def resolve_loudnorm() -> Optional[dict]:
         "tp": _read("MEDIAHUB_REEL_LOUDNORM_TP", LOUDNORM_DEFAULT_TP, *_LOUDNORM_TP_RANGE),
         "lra": _read("MEDIAHUB_REEL_LOUDNORM_LRA", LOUDNORM_DEFAULT_LRA, *_LOUDNORM_LRA_RANGE),
     }
+
+
+# Opt-in sidechain-ducking overrides. Off by default; when the operator sets any of
+# MEDIAHUB_REEL_DUCK_THRESHOLD / _RATIO / _ATTACK / _RELEASE the voice-keyed compressor
+# that ducks the music bed under narration is retuned. Each knob is parsed and clamped to
+# a fixed range inside FFmpeg sidechaincompress's legal domain (non-finite or malformed ->
+# that knob is left at its default, never raises). Only the knobs the operator actually set
+# ride into the audio plan (and so the cache key), so the default mix stays byte-identical
+# and every cached MP4 is preserved. Attack/release are milliseconds (matching DUCK_*_MS).
+_DUCK_THRESHOLD_RANGE = (0.001, 1.0)  # linear voice level gate (sidechaincompress: ~0.000977..1)
+_DUCK_RATIO_RANGE = (1.0, 20.0)  # compression ratio
+_DUCK_ATTACK_RANGE = (0.01, 2000.0)  # ms
+_DUCK_RELEASE_RANGE = (0.01, 9000.0)  # ms
+
+
+def resolve_duck() -> Optional[dict]:
+    """Opt-in sidechain-ducking overrides, or ``None`` when the operator set none.
+
+    Reads ``MEDIAHUB_REEL_DUCK_THRESHOLD`` / ``_RATIO`` / ``_ATTACK`` / ``_RELEASE``.
+    Each is parsed and clamped to a fixed range; a malformed or non-finite value leaves
+    that knob at its default (never raises). Returns a canonical dict of **only the knobs
+    the operator actually set to a parseable value** — so an unset feature is ``None``
+    (byte-identical default) and every override folds distinctly into the cache key. A
+    config that sets only malformed values degrades to ``None``.
+
+    Unlike ``resolve_loudnorm`` this returns a **partial** dict and does no
+    compare-to-default: the runtime ratio baseline is the mix profile's ``duck_ratio``
+    (not the ``DUCK_RATIO`` constant), so filling unset knobs from constants here would
+    silently override a non-``balanced`` profile. ``mux_args`` defaults each unset knob to
+    its real runtime source instead.
+    """
+    specs = (
+        ("threshold", "MEDIAHUB_REEL_DUCK_THRESHOLD", _DUCK_THRESHOLD_RANGE),
+        ("ratio", "MEDIAHUB_REEL_DUCK_RATIO", _DUCK_RATIO_RANGE),
+        ("attack", "MEDIAHUB_REEL_DUCK_ATTACK", _DUCK_ATTACK_RANGE),
+        ("release", "MEDIAHUB_REEL_DUCK_RELEASE", _DUCK_RELEASE_RANGE),
+    )
+    out: dict[str, float] = {}
+    for key, env, (lo, hi) in specs:
+        raw = os.environ.get(env, "").strip()
+        if not raw:
+            continue
+        try:
+            val = float(raw)
+        except ValueError:
+            continue  # malformed -> leave that knob at its default (omit)
+        if not math.isfinite(val):
+            continue  # nan/inf -> would break the filter graph; omit
+        out[key] = _clamp(val, lo, hi)
+    return out or None
 
 
 def _coalesce_profile(explicit: Any) -> str:
@@ -467,6 +518,14 @@ def build_audio_plan(
     loudnorm = resolve_loudnorm()
     if loudnorm is not None:
         plan["loudnorm"] = loudnorm
+    # Sidechain-ducking overrides ride inside the plan (and so the cache key) only when the
+    # operator opted in AND the render actually ducks (voice bed under music). A voice-only or
+    # music-only render never emits the compressor, so it stays byte-identical even with the
+    # env set.
+    if "voice" in plan and "music" in plan:
+        duck = resolve_duck()
+        if duck is not None:
+            plan["duck"] = duck
     return plan
 
 
@@ -619,6 +678,7 @@ def mux_args(
     profile: Any = DEFAULT_MIX_PROFILE,
     loudnorm: Optional[dict] = None,
     envelope: Optional[list[dict]] = None,
+    duck: Optional[dict] = None,
 ) -> list[str]:
     """Argument list (after the binary) for the audio mux. Pure + testable.
 
@@ -639,7 +699,14 @@ def mux_args(
     if voice is None and music is None:
         raise ValueError("at least one audio source is required")
     levels = mix_profile_levels(profile)
-    duck_ratio = levels["duck_ratio"]
+    # Opt-in sidechain-duck overrides: each unset knob defaults to its true runtime source
+    # (ratio from the mix profile, threshold/attack/release from the module constants), so an
+    # absent/empty ``duck`` reproduces today's filter string character-for-character.
+    _d = duck or {}
+    duck_threshold = _d.get("threshold", DUCK_THRESHOLD)
+    duck_ratio = _d.get("ratio", levels["duck_ratio"])
+    duck_attack = _d.get("attack", DUCK_ATTACK_MS)
+    duck_release = _d.get("release", DUCK_RELEASE_MS)
     d = max(0.1, float(duration_sec))
     fade_start = max(0.0, d - AUDIO_FADE_OUT_SEC)
     args: list[str] = ["-i", str(video)]
@@ -675,8 +742,8 @@ def mux_args(
             f"[1:a]apad,asplit=2[vmain][vkey];"
             f"[2:a]{chain}[mraw];"
             f"[mraw][vkey]sidechaincompress="
-            f"threshold={DUCK_THRESHOLD:g}:ratio={duck_ratio:g}:"
-            f"attack={DUCK_ATTACK_MS:g}:release={DUCK_RELEASE_MS:g}[mduck];"
+            f"threshold={duck_threshold:g}:ratio={duck_ratio:g}:"
+            f"attack={duck_attack:g}:release={duck_release:g}[mduck];"
             f"[vmain][mduck]amix=inputs=2:duration=first:dropout_transition=0:normalize=0,"
             f"{tail}"
         )
@@ -797,6 +864,7 @@ def apply_audio(
                     profile=profile,
                     loudnorm=plan.get("loudnorm"),
                     envelope=plan.get("audio_envelope"),
+                    duck=plan.get("duck"),
                 )
             )
             if not tmp_out.exists() or tmp_out.stat().st_size < 1024:
@@ -829,6 +897,8 @@ def apply_audio(
         record["dub_target_language"] = str(plan.get("dub_target_language") or "")
     if voice_path is not None and music_path is not None:
         record["ducking"] = "sidechain"
+        if plan.get("duck"):
+            record["duck"] = plan["duck"]
     if music_path is not None:
         bpm = track_bpm(music_path)
         if bpm is not None:
@@ -924,6 +994,7 @@ __all__ = [
     "LOUDNORM_DEFAULT_TP",
     "LOUDNORM_DEFAULT_LRA",
     "resolve_loudnorm",
+    "resolve_duck",
     "resolve_mix_profile",
     "env_mix_profile",
     "mix_profile_levels",

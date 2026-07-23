@@ -873,6 +873,223 @@ def test_apply_audio_records_loudnorm_in_manifest(tmp_path, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# Sidechain-ducking overrides (opt-in via MEDIAHUB_REEL_DUCK_*)
+# ---------------------------------------------------------------------------
+
+_DUCK_ENVS = (
+    "MEDIAHUB_REEL_DUCK_THRESHOLD",
+    "MEDIAHUB_REEL_DUCK_RATIO",
+    "MEDIAHUB_REEL_DUCK_ATTACK",
+    "MEDIAHUB_REEL_DUCK_RELEASE",
+)
+
+
+def _clear_duck_env(monkeypatch):
+    for e in _DUCK_ENVS:
+        monkeypatch.delenv(e, raising=False)
+
+
+def test_resolve_duck_off_by_default(monkeypatch):
+    _clear_duck_env(monkeypatch)
+    assert audio_mux.resolve_duck() is None
+
+
+def test_resolve_duck_reads_and_clamps(monkeypatch):
+    _clear_duck_env(monkeypatch)
+    # In-range values survive verbatim, out-of-range clamp to the fixed ranges.
+    monkeypatch.setenv("MEDIAHUB_REEL_DUCK_THRESHOLD", "9")  # above the 1.0 ceiling
+    monkeypatch.setenv("MEDIAHUB_REEL_DUCK_RATIO", "8.0")  # in range
+    monkeypatch.setenv("MEDIAHUB_REEL_DUCK_ATTACK", "0")  # below the 0.01 floor
+    monkeypatch.setenv("MEDIAHUB_REEL_DUCK_RELEASE", "400")  # in range
+    got = audio_mux.resolve_duck()
+    assert got == {
+        "threshold": audio_mux._DUCK_THRESHOLD_RANGE[1],
+        "ratio": 8.0,
+        "attack": audio_mux._DUCK_ATTACK_RANGE[0],
+        "release": 400.0,
+    }
+    # Malformed values omit just that knob (never raise); the rest survive.
+    monkeypatch.setenv("MEDIAHUB_REEL_DUCK_RATIO", "loud please")
+    got = audio_mux.resolve_duck()
+    assert "ratio" not in got and got["release"] == 400.0
+    # A config of ONLY malformed values degrades to None (byte-identical default).
+    _clear_duck_env(monkeypatch)
+    monkeypatch.setenv("MEDIAHUB_REEL_DUCK_RATIO", "nonsense")
+    assert audio_mux.resolve_duck() is None
+
+
+def test_resolve_duck_rejects_non_finite(monkeypatch):
+    """nan/inf parse without raising but must never reach the filter graph."""
+    _clear_duck_env(monkeypatch)
+    for bad in ("nan", "inf", "-inf", "Infinity"):
+        monkeypatch.setenv("MEDIAHUB_REEL_DUCK_RATIO", bad)
+        assert audio_mux.resolve_duck() is None, bad
+
+
+def test_resolve_duck_partial_folds_only_set_knobs(monkeypatch):
+    _clear_duck_env(monkeypatch)
+    monkeypatch.setenv("MEDIAHUB_REEL_DUCK_RATIO", "8.0")
+    assert audio_mux.resolve_duck() == {"ratio": 8.0}
+
+
+def test_build_audio_plan_omits_duck_by_default(tmp_path, monkeypatch):
+    """A voice+music plan built with no duck env has no 'duck' key (cache identity)."""
+    d = tmp_path / "music"
+    d.mkdir()
+    (d / "bed.mp3").write_bytes(b"x")
+    monkeypatch.setenv("MEDIAHUB_REEL_MUSIC_DIR", str(d))
+    monkeypatch.setenv("MEDIAHUB_VOICEOVER", "1")
+    monkeypatch.setattr("mediahub.visual.voiceover.is_available", lambda: True)
+    _clear_duck_env(monkeypatch)
+    plan = audio_mux.build_audio_plan(script="Recap.", content_key="k")
+    assert plan is not None and "voice" in plan and "music" in plan
+    assert "duck" not in plan
+
+
+def test_build_audio_plan_records_duck_when_set(tmp_path, monkeypatch):
+    d = tmp_path / "music"
+    d.mkdir()
+    (d / "bed.mp3").write_bytes(b"x")
+    monkeypatch.setenv("MEDIAHUB_REEL_MUSIC_DIR", str(d))
+    monkeypatch.setenv("MEDIAHUB_VOICEOVER", "1")
+    monkeypatch.setattr("mediahub.visual.voiceover.is_available", lambda: True)
+    _clear_duck_env(monkeypatch)
+    monkeypatch.setenv("MEDIAHUB_REEL_DUCK_RATIO", "8.0")
+    plan = audio_mux.build_audio_plan(script="Recap.", content_key="k")
+    assert plan["duck"] == {"ratio": 8.0}
+
+
+def test_build_audio_plan_ignores_duck_without_both_sources(tmp_path, monkeypatch):
+    """A single-source render emits no compressor, so it stays byte-identical
+    even with the duck env set."""
+    _clear_duck_env(monkeypatch)
+    monkeypatch.setenv("MEDIAHUB_REEL_DUCK_RATIO", "8.0")
+    # Music only (voiceover off).
+    d = tmp_path / "music"
+    d.mkdir()
+    (d / "bed.mp3").write_bytes(b"x")
+    monkeypatch.setenv("MEDIAHUB_REEL_MUSIC_DIR", str(d))
+    monkeypatch.delenv("MEDIAHUB_VOICEOVER", raising=False)
+    music_only = audio_mux.build_audio_plan(script="ignored", content_key="k")
+    assert music_only is not None and "music" in music_only and "voice" not in music_only
+    assert "duck" not in music_only
+    # Voice only (no music dir).
+    monkeypatch.delenv("MEDIAHUB_REEL_MUSIC_DIR", raising=False)
+    monkeypatch.setenv("MEDIAHUB_VOICEOVER", "1")
+    monkeypatch.setattr("mediahub.visual.voiceover.is_available", lambda: True)
+    voice_only = audio_mux.build_audio_plan(script="Recap.", content_key="k")
+    assert voice_only is not None and "voice" in voice_only and "music" not in voice_only
+    assert "duck" not in voice_only
+
+
+def test_mux_args_default_duck_graph_is_byte_identical(tmp_path):
+    """duck=None (and the default) leave the sidechaincompress line character-identical
+    to today, and the knobs never appear in the voice-only/music-only branches."""
+    v, n, bed, o = (tmp_path / x for x in ("v.mp4", "n.mp3", "bed.mp3", "o.mp4"))
+    # Voice+music: the compressor line reproduces the shipped constants exactly.
+    default = _graph(audio_mux.mux_args(v, n, bed, o, duration_sec=15.0))
+    explicit_none = _graph(audio_mux.mux_args(v, n, bed, o, duration_sec=15.0, duck=None))
+    empty = _graph(audio_mux.mux_args(v, n, bed, o, duration_sec=15.0, duck={}))
+    assert default == explicit_none == empty
+    anchor = (
+        f"sidechaincompress=threshold={audio_mux.DUCK_THRESHOLD:g}:"
+        f"ratio={audio_mux.DUCK_RATIO:g}:"
+        f"attack={audio_mux.DUCK_ATTACK_MS:g}:release={audio_mux.DUCK_RELEASE_MS:g}"
+    )
+    assert anchor in default
+    # Single-source branches never carry a compressor at all.
+    assert "sidechaincompress" not in _graph(
+        audio_mux.mux_args(v, n, None, o, duration_sec=15.0, duck={"ratio": 8.0})
+    )
+    assert "sidechaincompress" not in _graph(
+        audio_mux.mux_args(v, None, bed, o, duration_sec=15.0, duck={"ratio": 8.0})
+    )
+
+
+def test_mux_args_applies_duck_overrides(tmp_path):
+    v, n, bed, o = (tmp_path / x for x in ("v.mp4", "n.mp3", "bed.mp3", "o.mp4"))
+    duck = {"threshold": 0.05, "ratio": 8.0, "attack": 30.0, "release": 400.0}
+    graph = _graph(audio_mux.mux_args(v, n, bed, o, duration_sec=15.0, duck=duck))
+    assert "sidechaincompress=threshold=0.05:ratio=8:attack=30:release=400" in graph
+    # A partial override tunes only its knob; the others stay on their defaults.
+    partial = _graph(
+        audio_mux.mux_args(v, n, bed, o, duration_sec=15.0, duck={"threshold": 0.05})
+    )
+    assert (
+        f"sidechaincompress=threshold=0.05:ratio={audio_mux.DUCK_RATIO:g}:"
+        f"attack={audio_mux.DUCK_ATTACK_MS:g}:release={audio_mux.DUCK_RELEASE_MS:g}" in partial
+    )
+
+
+def test_mux_args_duck_ratio_override_beats_profile(tmp_path):
+    """The ratio baseline is the mix profile's duck_ratio, not the DUCK_RATIO constant.
+    An explicit ratio override must win over the profile's value; with no override the
+    profile's ratio (here voice_lead's 9.0) rides through."""
+    v, n, bed, o = (tmp_path / x for x in ("v.mp4", "n.mp3", "bed.mp3", "o.mp4"))
+    # No override → voice_lead's profile ratio (9.0), NOT DUCK_RATIO (6.0).
+    base = _graph(audio_mux.mux_args(v, n, bed, o, duration_sec=15.0, profile="voice_lead"))
+    assert "ratio=9:" in base
+    # An explicit override wins over the profile ratio.
+    over = _graph(
+        audio_mux.mux_args(
+            v, n, bed, o, duration_sec=15.0, profile="voice_lead", duck={"ratio": 8.0}
+        )
+    )
+    assert "ratio=8:" in over
+
+
+def test_apply_audio_records_duck_in_manifest(tmp_path, monkeypatch):
+    """A successful voice+music mux records the duck override; absent when off or
+    single-source."""
+    d = tmp_path / "music"
+    d.mkdir()
+    (d / "bed.mp3").write_bytes(b"m")
+    monkeypatch.setenv("MEDIAHUB_REEL_MUSIC_DIR", str(d))
+    monkeypatch.setattr(
+        audio_mux, "_run_ffmpeg", lambda args, **k: Path(args[-1]).write_bytes(b"x" * 2048)
+    )
+
+    class _Result:
+        audio_path = tmp_path / "voice.wav"
+        transcript = "Recap."
+
+    _Result.audio_path.write_bytes(b"v")
+    monkeypatch.setattr("mediahub.visual.voiceover.synthesize", lambda *a, **k: _Result())
+
+    duck = {"ratio": 8.0}
+    video = tmp_path / "reel.mp4"
+    video.write_bytes(b"vid")
+    rec = audio_mux.apply_audio(
+        video,
+        {"voice": "en-GB-SoniaNeural", "script": "Recap.", "music": "bed.mp3", "duck": duck},
+        duration_sec=5.0,
+    )
+    assert rec["status"] == "mixed" and rec["ducking"] == "sidechain" and rec["duck"] == duck
+
+    # Off → no duck key.
+    video.write_bytes(b"vid")
+    rec_off = audio_mux.apply_audio(
+        video,
+        {"voice": "en-GB-SoniaNeural", "script": "Recap.", "music": "bed.mp3"},
+        duration_sec=5.0,
+    )
+    assert rec_off["status"] == "mixed" and "duck" not in rec_off
+
+
+def test_duck_folds_into_cache_key_absence_is_byte_identical():
+    """The duck override changes the motion content hash; its absence reproduces
+    the pre-feature key byte-for-byte (fold-only-when-present)."""
+    from mediahub.visual import motion
+
+    base = {"voice": "en-GB-SoniaNeural", "script": "hi", "music": "bed.mp3"}
+    ducked = {**base, "duck": {"ratio": 8.0}}
+    h_plain = motion._content_hash({"audio": base}, kind="reel")
+    h_duck = motion._content_hash({"audio": ducked}, kind="reel")
+    assert h_plain == motion._content_hash({"audio": base}, kind="reel")
+    assert h_plain != h_duck
+
+
+# ---------------------------------------------------------------------------
 # Keyframable music-bed volume envelope (opt-in <track>.env.json sidecar)
 # ---------------------------------------------------------------------------
 
