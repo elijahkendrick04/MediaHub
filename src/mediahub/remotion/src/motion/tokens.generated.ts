@@ -25,12 +25,28 @@ export type MotionTokenBundle = {
 
 export const MOTION_TOKENS: MotionTokenBundle = {
   "easings": {
+    "ease_in_back": {
+      "bezier": [
+        0.36,
+        0.0,
+        0.66,
+        -0.56
+      ]
+    },
     "ease_in_cubic": {
       "bezier": [
         0.55,
         0.055,
         0.675,
         0.19
+      ]
+    },
+    "ease_in_out_back": {
+      "bezier": [
+        0.68,
+        -0.6,
+        0.32,
+        1.6
       ]
     },
     "ease_in_out_cubic": {
@@ -61,6 +77,22 @@ export const MOTION_TOKENS: MotionTokenBundle = {
       "bezier": [
         0.34,
         1.56,
+        0.64,
+        1.0
+      ]
+    },
+    "ease_out_back_soft": {
+      "bezier": [
+        0.34,
+        1.3,
+        0.64,
+        1.0
+      ]
+    },
+    "ease_out_back_strong": {
+      "bezier": [
+        0.34,
+        1.8,
         0.64,
         1.0
       ]
