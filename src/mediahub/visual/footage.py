@@ -113,6 +113,53 @@ def clip_scale_dims(width: int, height: int, *, max_edge: int = CLIP_MAX_EDGE) -
     return w - (w % 2), h - (h % 2)
 
 
+# speed-ramp (AE-gap): the default decelerate-into-the-beat end rate. Output
+# playback speed falls linearly 1.0 -> r_end over the beat, so the source
+# consumed is W = beat*(1+r_end)/2 (0.75*beat at r_end=0.5). Each kind carries a
+# short filename code so a ramped clip never aliases a native one in the cache.
+_RAMP_KINDS: dict[str, tuple[float, str]] = {
+    # kind -> (end playback rate, filename code)
+    "slow_in": (0.5, "si50"),
+}
+
+
+def speed_ramp_plan(kind: str, out_ms: int) -> Optional[tuple[str, int, dict]]:
+    """Pure ramp plan for one beat: ``(setpts_expr, source_span_ms, params)``.
+
+    ``slow_in`` decelerates into the beat: output playback speed falls linearly
+    from ``1.0`` to ``r_end`` across the beat, so the source consumed is
+    ``W = out_ms*(1+r_end)/2`` (0.75·beat at ``r_end=0.5``) and a single
+    monotonic ``setpts`` expression stretches that window to fill the whole
+    beat. The bake feeds the source sub-window ``[start, start+W)`` and sets the
+    ffmpeg output ``-t`` to the full beat, so the baked clip is ``beat·30``
+    frames — the caller decouples ``video_duration_sec`` to the baked beat
+    length so the clip never freezes.
+
+    Pure maths from ``out_ms`` + fixed constants — no randomness, no seed, so a
+    given ``(kind, out_ms)`` always yields identical bytes. Returns ``None`` for
+    an unknown kind or a non-positive beat (the caller then keeps the native
+    trim). The ffmpeg ``setpts`` variable ``T`` is the input (source) timestamp
+    in seconds; inverting the source-time-vs-output-time integral
+    ``s(T)=T+a·T²`` gives ``T(s)=(-1+sqrt(1+4·a·s))/(2·a)``, which maps each
+    source frame to its stretched output PTS.
+    """
+    spec = _RAMP_KINDS.get(str(kind or "").strip().lower())
+    if spec is None or out_ms <= 0:
+        return None
+    r_end, code = spec
+    out_s = out_ms / 1000.0
+    source_span_ms = int(round(out_ms * (1.0 + r_end) / 2.0))
+    a = (r_end - 1.0) / (2.0 * out_s)
+    setpts_expr = f"(-1+sqrt(1+4*({a:.10f})*T))/(2*({a:.10f}))/TB"
+    params = {
+        "kind": str(kind).strip().lower(),
+        "code": code,
+        "r_end": r_end,
+        "source_span_ms": source_span_ms,
+    }
+    return setpts_expr, source_span_ms, params
+
+
 def pick_trim_window(moments: list, *, beat_ms: int) -> tuple[Optional[Any], str]:
     """The single best moment window for this beat, or (None, reason).
 
@@ -286,6 +333,8 @@ def _normalise_clip(
     out_ms: int,
     dims: tuple[int, int],
     stabilize: bool = False,
+    setpts_expr: Optional[str] = None,
+    out_dur_ms: Optional[int] = None,
 ) -> bool:
     """FFmpeg-trim ``src`` [in_ms, out_ms) into a normalised beat clip.
 
@@ -299,6 +348,13 @@ def _normalise_clip(
     finishing pass on the trimmed clip; the default path is byte-for-byte
     unchanged. A stabilization failure fails the whole normalise (the caller
     then falls back to the photo), never a half-steadied clip.
+
+    ``setpts_expr`` (speed-ramp, opt-in) bakes a deterministic time-remap into
+    the trim: it is prepended to the ``-vf`` chain and the output ``-t`` is set
+    to ``out_dur_ms`` (the full beat) instead of the source span, so the ramped
+    source sub-window is stretched to fill the beat. Remotion then plays the
+    baked clip at native 1x (playbackRate is not frame-pure). ``None`` (the
+    default) leaves the trim byte-for-byte unchanged.
     """
     from mediahub.visual.reel_ffmpeg import ffmpeg_exe
 
@@ -306,7 +362,12 @@ def _normalise_clip(
     if not exe:
         return False
     w, h = dims
-    dur_s = max(0.1, (out_ms - in_ms) / 1000.0)
+    if setpts_expr and out_dur_ms is not None:
+        dur_s = max(0.1, out_dur_ms / 1000.0)
+        vf = f"setpts={setpts_expr},scale={w}:{h},fps=30,format=yuv420p"
+    else:
+        dur_s = max(0.1, (out_ms - in_ms) / 1000.0)
+        vf = f"scale={w}:{h},fps=30,format=yuv420p"
     tmp = out_path.with_name(out_path.name + ".part.mp4")
     cmd = [
         exe,
@@ -322,7 +383,7 @@ def _normalise_clip(
         f"{dur_s:.3f}",
         "-an",
         "-vf",
-        f"scale={w}:{h},fps=30,format=yuv420p",
+        vf,
         "-c:v",
         "libx264",
         "-preset",
@@ -404,6 +465,7 @@ def resolve_card_footage(
     beat_seconds: float,
     photo_asset: Any = None,
     store: Any = None,
+    speed_ramp: Optional[str] = None,
 ) -> tuple[Optional[FootageResolution], str]:
     """Resolve the footage beat for one card — ``(resolution, reason)``.
 
@@ -414,10 +476,21 @@ def resolve_card_footage(
     ``photo_asset`` is the card's already-resolved still photo (the brief's
     sourced asset), passed by the caller so the priority rule can score it
     without re-resolving.
+
+    ``speed_ramp`` (opt-in, default ``None``) bakes a deterministic decelerate-
+    into-the-beat ramp into the trimmed clip via ffmpeg ``setpts`` (see
+    :func:`speed_ramp_plan`). ``None`` — every existing caller — keeps the trim,
+    filename, ``cache_sig`` and bytes byte-identical.
     """
     try:
         return _resolve_card_footage(
-            card, brief, brand_kit, beat_seconds=beat_seconds, photo_asset=photo_asset, store=store
+            card,
+            brief,
+            brand_kit,
+            beat_seconds=beat_seconds,
+            photo_asset=photo_asset,
+            store=store,
+            speed_ramp=speed_ramp,
         )
     except Exception as e:  # a footage miss must never fail the render
         log.warning("footage resolution failed: %s", e)
@@ -432,6 +505,7 @@ def _resolve_card_footage(
     beat_seconds: float,
     photo_asset: Any,
     store: Any,
+    speed_ramp: Optional[str] = None,
 ) -> tuple[Optional[FootageResolution], str]:
     b = brief if isinstance(brief, dict) else {}
     if not b or str(b.get("photo_treatment") or "") == "no-photo":
@@ -518,6 +592,93 @@ def _resolve_card_footage(
             stab_applied = enhance.is_stabilize_available()
 
         stab_suffix = "-stab" if stab_applied else ""
+
+        # Shared manifest facts for whichever trim (native or ramped) plays.
+        base_provenance = {
+            "used": True,
+            "asset_id": asset.id,
+            "filename": asset.filename,
+            "moment": {
+                "score": round(best.score, 4),
+                "kind": best.kind,
+                "reason": best.reason,
+            },
+            "footage_score": round(footage_score, 3),
+            "photo_score": round(photo_score, 3),
+            "decision": "footage",
+            "rule": "footage plays when its selector score >= the photo's",
+        }
+
+        def _stab_folds(cache_sig: dict, provenance: dict) -> None:
+            # Fold stabilization state only when it was requested, so the default
+            # (no-stabilize) footage card keeps its exact historic cache key.
+            if stab_req:
+                cache_sig["stabilize"] = "applied" if stab_applied else "unavailable"
+                provenance["stabilize"] = {
+                    "requested": True,
+                    "applied": stab_applied,
+                    "reason": "" if stab_applied else "vidstab-unavailable",
+                }
+
+        # speed-ramp (AE-gap, opt-in): bake a deterministic decelerate-into-the-
+        # beat ramp into the trimmed clip via ffmpeg setpts, so Remotion still
+        # plays the clip at native 1x (playbackRate is not frame-pure). The
+        # source sub-window shrinks to W = beat·(1+r_end)/2 and setpts stretches
+        # it to fill the whole beat, so the baked clip is beat·30 frames — the
+        # ramped resolution DECOUPLES video_duration_sec to the baked beat length
+        # (not W) so the clip never freezes. The ramp descriptor folds into the
+        # ramp-tagged clip_name + cache_sig, so a ramped clip never aliases the
+        # native one; a bake failure degrades honestly to the native trim below.
+        ramp_plan = speed_ramp_plan(speed_ramp, beat_ms) if speed_ramp else None
+        if ramp_plan is not None:
+            setpts_expr, span_ms, ramp_params = ramp_plan
+            ramp_in, ramp_out = best.start_ms, best.start_ms + span_ms
+            clip_name = (
+                f"{fingerprint}-{ramp_in}-{ramp_out}{stab_suffix}-r{ramp_params['code']}.mp4"
+            )
+            clip_path = footage_cache_dir() / clip_name
+            baked = clip_path.exists() and clip_path.stat().st_size > 1024
+            if not baked:
+                baked = _normalise_clip(
+                    src,
+                    clip_path,
+                    in_ms=ramp_in,
+                    out_ms=ramp_out,
+                    dims=dims,
+                    stabilize=stab_applied,
+                    setpts_expr=setpts_expr,
+                    out_dur_ms=beat_ms,
+                )
+                if baked:
+                    prune_footage_cache()
+            if baked:
+                video_src = f"{FOOTAGE_CACHE_DIRNAME}/{clip_name}"
+                cache_sig = {
+                    "src": video_src,
+                    "fingerprint": fingerprint,
+                    "in_ms": ramp_in,
+                    "out_ms": ramp_out,
+                }
+                provenance = {**base_provenance, "in_ms": ramp_in, "out_ms": ramp_out}
+                _stab_folds(cache_sig, provenance)
+                # Fold applied-state into cache_sig so a ramped clip and a native
+                # (degraded) clip can never share a motion content-hash key.
+                cache_sig["ramp"] = ramp_params
+                provenance["ramp"] = {"requested": True, "applied": True, **ramp_params}
+                return (
+                    FootageResolution(
+                        video_src=video_src,
+                        video_start_sec=0.0,
+                        # DECOUPLED: the baked clip is beat·30 frames, so the
+                        # playable length is the full beat, not the W source span.
+                        video_duration_sec=round(beat_ms / 1000.0, 3),
+                        cache_sig=cache_sig,
+                        provenance=provenance,
+                    ),
+                    "",
+                )
+            # bake failed → honest degrade to the native trim below.
+
         clip_name = f"{fingerprint}-{best.start_ms}-{best.end_ms}{stab_suffix}.mp4"
         clip_path = footage_cache_dir() / clip_name
         if not (clip_path.exists() and clip_path.stat().st_size > 1024):
@@ -540,30 +701,18 @@ def _resolve_card_footage(
             "in_ms": best.start_ms,
             "out_ms": best.end_ms,
         }
-        provenance = {
-            "used": True,
-            "asset_id": asset.id,
-            "filename": asset.filename,
-            "in_ms": best.start_ms,
-            "out_ms": best.end_ms,
-            "moment": {
-                "score": round(best.score, 4),
-                "kind": best.kind,
-                "reason": best.reason,
-            },
-            "footage_score": round(footage_score, 3),
-            "photo_score": round(photo_score, 3),
-            "decision": "footage",
-            "rule": "footage plays when its selector score >= the photo's",
-        }
-        # Fold stabilization state only when it was requested, so the default
-        # (no-stabilize) footage card keeps its exact historic cache key.
-        if stab_req:
-            cache_sig["stabilize"] = "applied" if stab_applied else "unavailable"
-            provenance["stabilize"] = {
+        provenance = {**base_provenance, "in_ms": best.start_ms, "out_ms": best.end_ms}
+        _stab_folds(cache_sig, provenance)
+        # The native trim is also the honest degrade when a ramp bake failed:
+        # record the request + non-application in provenance ONLY (the native
+        # bytes keep the native cache_sig/key, so they never alias a ramped clip).
+        if speed_ramp:
+            provenance["ramp"] = {
                 "requested": True,
-                "applied": stab_applied,
-                "reason": "" if stab_applied else "vidstab-unavailable",
+                "applied": False,
+                "reason": (
+                    "speed-ramp-bake-failed" if ramp_plan is not None else "unknown-ramp-kind"
+                ),
             }
         resolution = FootageResolution(
             video_src=video_src,
@@ -581,6 +730,7 @@ __all__ = [
     "footage_cache_dir",
     "source_fingerprint",
     "clip_scale_dims",
+    "speed_ramp_plan",
     "pick_trim_window",
     "prune_footage_cache",
     "resolve_card_footage",

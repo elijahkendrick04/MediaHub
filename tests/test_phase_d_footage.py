@@ -187,9 +187,19 @@ def footage_env(tmp_path, monkeypatch):
     # Fake trim: writes a deterministic file instead of shelling FFmpeg.
     trims: list[dict] = []
 
-    def fake_trim(src, out_path, *, in_ms, out_ms, dims, stabilize=False):
+    def fake_trim(
+        src, out_path, *, in_ms, out_ms, dims, stabilize=False, setpts_expr=None, out_dur_ms=None
+    ):
         trims.append(
-            {"src": str(src), "in": in_ms, "out": out_ms, "dims": dims, "stabilize": stabilize}
+            {
+                "src": str(src),
+                "in": in_ms,
+                "out": out_ms,
+                "dims": dims,
+                "stabilize": stabilize,
+                "setpts_expr": setpts_expr,
+                "out_dur_ms": out_dur_ms,
+            }
         )
         Path(out_path).write_bytes(b"clip" * 512)
         return True
@@ -616,6 +626,74 @@ class TestMotionFootageFold:
         )
         d = self._props(footage=res, brief=_brief(crop_intent="tight_portrait"))
         assert "photoScale" not in d
+
+
+# ---------------------------------------------------------------------------
+# speed-ramp — reel PEAK-beat gate (idx==0), server-only opt-in
+# ---------------------------------------------------------------------------
+
+
+class TestReelPeakSpeedRampGate:
+    def _capture_ramps(self, monkeypatch):
+        from mediahub.visual import motion
+
+        calls: list[str] = []
+
+        def capture(card, brief, brand_kit, *, beat_seconds, speed_ramp=""):
+            calls.append(speed_ramp)
+            return None, ""
+
+        monkeypatch.setattr(motion, "_footage_for_card", capture)
+        return motion, calls
+
+    def test_peak_ramp_gated_to_idx0(self, footage_env, monkeypatch):
+        motion, calls = self._capture_ramps(monkeypatch)
+        cards = [_card(), _card(id="swim-2", swim_id="swim-2")]
+        briefs = [_brief(), _brief()]
+        motion._assemble_reel_props(
+            cards,
+            BRAND,
+            meet_name="M",
+            duration_sec=None,
+            briefs=briefs,
+            resolve_footage=True,
+            peak_speed_ramp="slow_in",
+        )
+        # Only the #1 ranked beat (idx 0) requests the ramp.
+        assert calls == ["slow_in", ""]
+
+    def test_default_off_no_beat_requests_ramp(self, footage_env, monkeypatch):
+        motion, calls = self._capture_ramps(monkeypatch)
+        cards = [_card(), _card(id="swim-2", swim_id="swim-2")]
+        briefs = [_brief(), _brief()]
+        motion._assemble_reel_props(
+            cards,
+            BRAND,
+            meet_name="M",
+            duration_sec=None,
+            briefs=briefs,
+            resolve_footage=True,
+        )
+        assert calls == ["", ""]
+
+    def test_ramp_stays_out_of_remotion_rhythm_dict(self, footage_env, monkeypatch):
+        """The peak-ramp opt-in must NEVER ride into the Remotion-bound rhythm
+        prop (correction #2): normalise_reel_rhythm's shape is prop-verbatim."""
+        motion, _ = self._capture_ramps(monkeypatch)
+        (_, _, _, _, _, _, rhythm_norm, _, _) = motion._assemble_reel_props(
+            [_card()],
+            BRAND,
+            meet_name="M",
+            duration_sec=None,
+            briefs=[_brief()],
+            resolve_footage=True,
+            peak_speed_ramp="slow_in",
+        )
+        # Default rhythm request → None; a customised one would still never carry
+        # a peakSpeedRamp/speed_ramp key.
+        if rhythm_norm is not None:
+            assert "peakSpeedRamp" not in rhythm_norm
+            assert "speed_ramp" not in rhythm_norm
 
 
 # ---------------------------------------------------------------------------

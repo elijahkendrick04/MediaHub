@@ -1428,7 +1428,12 @@ def _photo_srcs_for_card(card: Any, brief: Optional[dict], brand_kit: Any) -> li
 
 
 def _footage_for_card(
-    card: Any, brief: Optional[dict], brand_kit: Any, *, beat_seconds: float
+    card: Any,
+    brief: Optional[dict],
+    brand_kit: Any,
+    *,
+    beat_seconds: float,
+    speed_ramp: str = "",
 ) -> tuple[Optional[Any], str]:
     """Resolve this card's footage beat (M23) — ``(resolution, reason)``.
 
@@ -1439,16 +1444,37 @@ def _footage_for_card(
     quiet miss, ``(None, reason)`` when a candidate lost or failed — the
     caller records the reason in the render manifest and the photo path
     renders untouched.
+
+    ``speed_ramp`` (opt-in, default ``""``) requests a baked decelerate-into-
+    the-beat ramp on the resolved clip; ``""`` keeps the clip byte-identical.
     """
     try:
         from mediahub.visual import footage as _footage
 
         photo_asset, _ = _photo_asset_for_brief(brief)
         return _footage.resolve_card_footage(
-            card, brief, brand_kit, beat_seconds=beat_seconds, photo_asset=photo_asset
+            card,
+            brief,
+            brand_kit,
+            beat_seconds=beat_seconds,
+            photo_asset=photo_asset,
+            speed_ramp=speed_ramp or None,
         )
     except Exception:
         return None, ""
+
+
+def _brief_speed_ramp(brief: Optional[dict]) -> str:
+    """The story card's opt-in footage speed-ramp kind, or ``""`` (off).
+
+    A server-only creative axis read straight from the brief (``speed_ramp``);
+    it never rides into the Remotion props — the ramp is baked into the trimmed
+    clip on the server. Absent / blank keeps the footage beat byte-identical.
+    Only a kind :func:`footage.speed_ramp_plan` recognises has any effect (an
+    unknown value degrades honestly to the native trim).
+    """
+    b = brief if isinstance(brief, dict) else {}
+    return str(b.get("speed_ramp") or "").strip()
 
 
 # Entrance-stagger scale (adjustable-stagger): a deterministic mood-derived
@@ -2720,7 +2746,11 @@ def render_story_card(
     foot, foot_reason = (None, "")
     if engine != "ffmpeg":
         foot, foot_reason = _footage_for_card(
-            card_payload, brief, brand_kit, beat_seconds=duration_sec
+            card_payload,
+            brief,
+            brand_kit,
+            beat_seconds=duration_sec,
+            speed_ramp=_brief_speed_ramp(brief),
         )
     card_dict = _card_to_props(
         card_payload,
@@ -3331,6 +3361,7 @@ def _assemble_reel_props(
     rhythm: Optional[dict] = None,
     dub_language: str = "",
     resolve_footage: bool = False,
+    peak_speed_ramp: str = "",
     fps: int = MOTION_FPS,
 ) -> tuple[list[dict], dict, str, float, Any, list, Optional[dict], Optional[dict], list]:
     """Format-independent prop assembly shared by the single and batch reel
@@ -3355,6 +3386,13 @@ def _assemble_reel_props(
     allocation — rank-weighted / rhythm-custom), so an emphasised beat earns a
     longer window. Off (the default, and always off for the ffmpeg engine),
     every prop dict is byte-identical to the photo-only behaviour.
+
+    ``peak_speed_ramp`` (speed-ramp, opt-in) requests a baked decelerate-into-
+    the-beat ramp on the reel's PEAK beat only (``idx==0`` — the #1 ranked card
+    the beat carve already emphasises). It is a SERVER-ONLY field, deliberately
+    kept OUT of the Remotion-bound ``rhythm`` dict (the ramp is baked into the
+    clip, never a prop). ``""`` (the default) leaves every footage beat
+    byte-identical.
 
     Returns ``(cards_props, brand_dict, meet_name, duration_sec, audio_plan,
     briefs_list, rhythm_norm, audio_notes, footage_list)`` — ``audio_notes``
@@ -3413,8 +3451,14 @@ def _assemble_reel_props(
             # Convert this beat's carved frames to seconds at the SELECTED fps —
             # beat_frames already scales with fps, so dividing by the fixed
             # MOTION_FPS would over-trim the footage window by fps/30 at 50/60.
+            # speed-ramp is gated to the PEAK beat (idx==0) and only when the
+            # server-only opt-in named a kind, so every other beat is untouched.
             foot, foot_reason = _footage_for_card(
-                c, brief, brand_kit, beat_seconds=beat_frames[idx] / fps
+                c,
+                brief,
+                brand_kit,
+                beat_seconds=beat_frames[idx] / fps,
+                speed_ramp=peak_speed_ramp if idx == 0 else "",
             )
         footage_list.append((foot, foot_reason))
         # Format-independent base focus (story 9:16); the per-cut saliency
@@ -3913,6 +3957,7 @@ def render_meet_reel(
     fps: int = MOTION_FPS,
     review_ab: Optional[list[str]] = None,
     logo_drawon: bool = False,
+    peak_speed_ramp: str = "",
 ) -> Path:
     """Render a multi-card reel from the top cards for a meet.
 
@@ -3975,6 +4020,11 @@ def render_meet_reel(
     any logo that can't decompose — keeps the reel byte-identical, folding
     nothing into the cache key. The free FFmpeg engine reports it unsupported.
 
+    ``peak_speed_ramp`` (speed-ramp, opt-in) bakes a decelerate-into-the-beat
+    ramp onto the reel's PEAK beat (the #1 ranked card) via ffmpeg ``setpts`` —
+    a server-only field kept OUT of the Remotion-bound rhythm dict. ``""`` (the
+    default) keeps every footage beat byte-identical.
+
     For every cut in one request, see ``render_meet_reel_all_formats``.
     """
     fps = _validate_fps(fps)
@@ -4001,6 +4051,7 @@ def render_meet_reel(
         rhythm=rhythm,
         dub_language=dub_language,
         resolve_footage=engine != "ffmpeg",
+        peak_speed_ramp=peak_speed_ramp,
         fps=fps,
     )
     cta_props = _reel_cta_props(sponsor, next_meet)
@@ -4058,6 +4109,7 @@ def render_meet_reel_all_formats(
     reel_stat_config: Optional[dict] = None,
     fps: int = MOTION_FPS,
     logo_drawon: bool = False,
+    peak_speed_ramp: str = "",
 ) -> dict[str, Any]:
     """Render + cache every requested reel format in a single pass (R1.15).
 
@@ -4129,6 +4181,7 @@ def render_meet_reel_all_formats(
         rhythm=rhythm,
         dub_language=dub_language,
         resolve_footage=engine != "ffmpeg",
+        peak_speed_ramp=peak_speed_ramp,
         fps=fps,
     )
     cta_props = _reel_cta_props(sponsor, next_meet)
