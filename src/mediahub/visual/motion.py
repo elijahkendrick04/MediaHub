@@ -1843,6 +1843,10 @@ def _card_manifest_axes(card_props: dict) -> dict:
         "hero_stat": card_props.get("heroStat") or "",
         "stat_chips": len(card_props.get("statChips") or []),
         "has_pb_bars": bool(card_props.get("pbBars")),
+        # per-effect-toggle: the decorative axes this render suppressed for an
+        # A/B comparison. Empty on every shipped card (the review-only path is
+        # the only writer), so a default manifest is unchanged in meaning.
+        "effects_disabled": list(card_props.get("effectsDisabled") or []),
     }
 
 
@@ -1867,6 +1871,61 @@ def _card_mix_profile(card: Any, brief: Optional[dict] = None) -> Optional[str]:
             if val:
                 return str(val)
     return None
+
+
+# per-effect-toggle (REVIEW-ONLY A/B): the fixed allowlist of DECORATIVE axes a
+# reviewer may suppress for a with/without comparison render. Deliberately
+# excludes every legibility- / accessibility-critical layer — photo scrims and
+# filters, and burn-in captions stay ALWAYS-ON — so no toggle can drop a text/bg
+# pair below its APCA gate or remove a required scrim. Sorted, immutable.
+EFFECT_TOGGLE_ALLOWLIST: tuple[str, ...] = (
+    "accent",
+    "background_pattern",
+    "cutout",
+    "mesh_bg",
+    "motion_intent",
+    "overlap_accent",
+    "sprint_layers",
+    "style_pack",
+)
+
+
+def _validate_effect_toggles(keys: Any) -> list[str]:
+    """Filter an arbitrary iterable of effect keys to the sorted allowlist.
+
+    Unknown keys are dropped; duplicates collapse. The result is a stable,
+    sorted list so the same request always keys the same cache entry (and the
+    order can never perturb the content hash). A non-iterable / empty input
+    yields ``[]``. This is a deterministic production knob — no model inference —
+    so it never crosses the deterministic-engine boundary.
+    """
+    if not keys or isinstance(keys, (str, bytes)):
+        return []
+    allowed = set(EFFECT_TOGGLE_ALLOWLIST)
+    out = {str(k) for k in keys if str(k) in allowed}
+    return sorted(out)
+
+
+def _effect_toggles_for_brief(brief: Optional[dict]) -> list[str]:
+    """The sorted decorative axes a brief asks to SUPPRESS, or ``[]``.
+
+    Reads ``brief["effect_toggles"]`` — a plain ``{effect_key: bool}`` dict — and
+    returns the allowlisted keys explicitly set falsey (validated + sorted via
+    :func:`_validate_effect_toggles`). Keys set truthy, unknown keys, and an
+    absent field all yield no suppression. Read straight from the payload (like
+    ``_card_mix_profile``), never model-inferred.
+
+    NOTE: this is consumed ONLY by the review-only A/B render path — it is never
+    folded into a shipped card's props, so the still a shipped card mirrors stays
+    in still<->motion parity. Toggling an effect changes the *comparison* render,
+    not the card that gets exported for posting.
+    """
+    b = brief if isinstance(brief, dict) else {}
+    toggles = b.get("effect_toggles")
+    if not isinstance(toggles, dict):
+        return []
+    disabled = [k for k, v in toggles.items() if not v]
+    return _validate_effect_toggles(disabled)
 
 
 def _library_bed_for(content_key: str):
@@ -2490,6 +2549,7 @@ def render_story_card(
     brief: Optional[dict] = None,
     format_name: str = DEFAULT_MOTION_FORMAT,
     fps: int = MOTION_FPS,
+    review_ab: Optional[list[str]] = None,
 ) -> Path:
     """Render a single content-pack card to an MP4 story.
 
@@ -2516,6 +2576,17 @@ def render_story_card(
     ``fps`` selects the output frame rate from the curated ``ALLOWED_FPS`` set
     (default 30). A non-default rate folds into the cache key and appends
     ``--fps`` to the render; 30 keeps the byte-identical default.
+
+    ``review_ab`` (per-effect-toggle, REVIEW-ONLY) is an opt-in list of
+    decorative axes to SUPPRESS for a with/without comparison — the "B" variant
+    of an A/B review, rendered against the normal full-effect "A" render. It is
+    validated against ``EFFECT_TOGGLE_ALLOWLIST`` (decorative axes only — photo
+    scrims/filters and burn-in captions are never toggleable, so APCA is never at
+    risk), attaches ``effectsDisabled`` to the card props, and folds a distinct
+    ``ab_review`` marker into the cache key so it can never collide with or shift
+    the default render's key/bytes. ``None`` (the default) — and a list that
+    validates to empty — leave the render byte-identical to the shipped card, so
+    a card that gets exported for posting always keeps still<->motion parity.
     """
     fps = _validate_fps(fps)
     engine = _dispatch_engine()
@@ -2558,6 +2629,15 @@ def render_story_card(
     photo_ss = _photo_supersample()
     if photo_ss > 0:
         card_dict = {**card_dict, "photoSupersample": photo_ss}
+
+    # per-effect-toggle (REVIEW-ONLY A/B): attach the suppressed-axis list ONLY on
+    # the explicit review path AND only when it validates non-empty, so a shipped
+    # render (review_ab=None) keeps a byte-identical card_dict + cache key — the
+    # still<->motion parity guarantee. The list rides inside card_dict, so it
+    # folds into the story cache key automatically (fold-only-when-present).
+    ab_disabled = _validate_effect_toggles(review_ab) if review_ab is not None else []
+    if ab_disabled:
+        card_dict = {**card_dict, "effectsDisabled": ab_disabled}
 
     if engine == "ffmpeg":
         from mediahub.visual import reel_ffmpeg
@@ -2602,6 +2682,12 @@ def render_story_card(
     # default (30fps) story cache key is byte-identical to before.
     if int(fps) != MOTION_FPS:
         cache_payload["fps"] = int(fps)
+    # per-effect-toggle (REVIEW-ONLY A/B): a distinct top-level marker so the
+    # comparison "B" variant can never collide with, or perturb, the default
+    # single-render key. Set ONLY when the review path validated non-empty, so a
+    # shipped render's key is untouched.
+    if ab_disabled:
+        cache_payload["ab_review"] = ab_disabled
     cache_key = _content_hash(cache_payload, kind="story")
     cached = _cache_dir() / f"{cache_key}.mp4"
     if cached.exists() and cached.stat().st_size > 1024:
@@ -3409,6 +3495,7 @@ def _render_reel_one_format(
     stat_config: Optional[dict] = None,
     footage_list: Optional[list] = None,
     fps: int = MOTION_FPS,
+    review_ab: Optional[list[str]] = None,
 ) -> Path:
     """Render (or serve cached) ONE reel cut from already-assembled props.
 
@@ -3441,6 +3528,17 @@ def _render_reel_one_format(
     # identically to the story path.
     if photo_ss > 0:
         cards_props = [{**cp, "photoSupersample": photo_ss} for cp in cards_props]
+
+    # per-effect-toggle (REVIEW-ONLY A/B): suppress the decorative axes on EVERY
+    # beat's card for a with/without comparison reel, attached ONLY on the
+    # explicit review path AND only when it validates non-empty, so a shipped
+    # reel keeps byte-identical card props + cache key. Rides through <StoryCard>
+    # (and the ffmpeg path's card manifest) via the card prop. The reel COVER and
+    # OUTRO are separate, non-per-card scenes and deliberately keep their full
+    # treatment — the toggle scopes to the card beats it names.
+    ab_disabled = _validate_effect_toggles(review_ab) if review_ab is not None else []
+    if ab_disabled:
+        cards_props = [{**cp, "effectsDisabled": ab_disabled} for cp in cards_props]
 
     # M18 — brand-true cover/outro props (APCA-gated roles, top card's
     # typography, top photo for the pool-gated photo cover). Assembled per cut
@@ -3503,6 +3601,11 @@ def _render_reel_one_format(
     # default (30fps) reel cache key is byte-identical to before.
     if int(fps) != MOTION_FPS:
         cache_payload["fps"] = int(fps)
+    # per-effect-toggle (REVIEW-ONLY A/B): a distinct top-level marker so the
+    # comparison "B" reel can never collide with, or perturb, the default reel
+    # key. Set ONLY on the validated review path; a shipped reel is untouched.
+    if ab_disabled:
+        cache_payload["ab_review"] = ab_disabled
     cache_key = _content_hash(cache_payload, kind="reel")
     cached = _cache_dir() / f"{cache_key}.mp4"
     if cached.exists() and cached.stat().st_size > 1024:
@@ -3655,6 +3758,7 @@ def render_meet_reel(
     dub_language: str = "",
     reel_stat_config: Optional[dict] = None,
     fps: int = MOTION_FPS,
+    review_ab: Optional[list[str]] = None,
 ) -> Path:
     """Render a multi-card reel from the top cards for a meet.
 
@@ -3702,6 +3806,13 @@ def render_meet_reel(
     (default 30, byte-identical); a non-default rate folds into the cache key
     and re-times the render across the serial, parallel and ffmpeg engines.
 
+    ``review_ab`` (per-effect-toggle, REVIEW-ONLY) mirrors ``render_story_card``:
+    an opt-in list of decorative axes to SUPPRESS on every card beat for a
+    with/without comparison reel, validated against ``EFFECT_TOGGLE_ALLOWLIST``
+    and keyed distinctly (``ab_review``) so the default reel's key/bytes are
+    untouched. The cover/outro keep their full treatment (they are not per-card
+    axes). ``None`` — and an all-unknown list — render byte-identically.
+
     For every cut in one request, see ``render_meet_reel_all_formats``.
     """
     fps = _validate_fps(fps)
@@ -3748,6 +3859,7 @@ def render_meet_reel(
         stat_config=stat_config,
         footage_list=footage_list,
         fps=fps,
+        review_ab=review_ab,
     )
 
 

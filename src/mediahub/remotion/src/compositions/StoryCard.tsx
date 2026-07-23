@@ -275,7 +275,23 @@ export const cardSchema = z.object({
   // "" (and "gaussian") keep today's isotropic blur() focus-in, byte-identical;
   // photo_filters.tsx renders the animated SVG <filter> only for a real value.
   focusBlurStyle: z.string().default(""),
+  // per-effect-toggle (REVIEW-ONLY A/B): a sorted list of decorative axes to
+  // suppress for a with/without comparison render. Set ONLY by motion.py's
+  // review_ab path — a shipped card never carries it, so the still it mirrors
+  // stays in parity. An empty array (the default) means every gate passes, so
+  // the scene is byte-identical to a card that never learned about toggles.
+  // The allowlist is decorative-only (background_pattern / motion_intent /
+  // accent / style_pack / sprint_layers / mesh_bg / overlap_accent / cutout);
+  // legibility layers (photo scrims/filters, burn-in captions) are never
+  // toggleable, so no toggle can drop a text/bg pair below its APCA gate.
+  effectsDisabled: z.array(z.string()).default([]),
 });
+
+// per-effect-toggle: a pure membership test over a card's disabled-axis list.
+// Frame-independent (reads only the static prop array), so every gate keyed off
+// it stays frame-pure and — with the default empty array — a no-op.
+const effectOff = (card: { effectsDisabled?: string[] }, key: string): boolean =>
+  (card.effectsDisabled || []).includes(key);
 
 const brandSchema = z.object({
   primary: z.string().default("#0A2540"),
@@ -1514,6 +1530,11 @@ const PhotoLayer: React.FC<{ ctx: SceneCtx; scrim?: "bottom" | "full" }> = ({
 };
 
 const PatternLayer: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
+  // per-effect-toggle: suppress the whole background pattern layer under the
+  // review-only "background_pattern" toggle (no-op when the list is empty).
+  if (effectOff(ctx.card, "background_pattern")) {
+    return null;
+  }
   const bgPattern = bgPatternFor(ctx.card.backgroundStyle || "", ctx.roles);
   if (!bgPattern) {
     return null;
@@ -2358,7 +2379,11 @@ const HeroScene: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
         }}
       />
 
-      {accentDecoration(card.accentStyle || "", roles, anim.chipOpacity, width, height)}
+      {/* per-effect-toggle: the "accent" toggle drops the scene's accent
+          decoration (paired with the ResolveAccentLayer gate in CardScene). */}
+      {effectOff(card, "accent")
+        ? null
+        : accentDecoration(card.accentStyle || "", roles, anim.chipOpacity, width, height)}
 
       {/* Mega watermark surname behind everything */}
       <div
@@ -3661,10 +3686,19 @@ export const StoryCard: React.FC<Props> = ({ card, brand }) => {
   const frame = useCurrentFrame();
   const { fps, durationInFrames, width, height } = useVideoConfig();
 
+  // per-effect-toggle (REVIEW-ONLY): decorative axes suppressed for an A/B
+  // comparison render. Empty (the shipped default) => every gate below passes
+  // and the scene is byte-identical.
+  const off = (key: string) => effectOff(card, key);
+
   const roles = resolveRoles(card, brand);
   const fontStack = fontStackFor(card.typographyPair || "");
   const anim = animProgram(
-    card.motionIntent || "",
+    // Suppressing the director's motion intent falls the beat through to the
+    // shared base channels — but via the switch's default case, which still
+    // applies withResolveAccent(base), so the M19 resolve accent (the separate
+    // "accent" toggle target) is NOT silently killed by this toggle.
+    off("motion_intent") ? "" : card.motionIntent || "",
     card.mood || "",
     frame,
     fps,
@@ -3693,8 +3727,22 @@ export const StoryCard: React.FC<Props> = ({ card, brand }) => {
         { extrapolateLeft: "clamp", extrapolateRight: "clamp" },
       );
 
+  // per-effect-toggle: the cutout plane and the overlap accent are carried on
+  // the card prop and consumed by several scenes + sprint layers, so blanking
+  // them once here suppresses every consumer at a single lever (no-op unless
+  // that toggle is set). effectsDisabled itself is preserved so PatternLayer /
+  // HeroScene accent gates still see it.
+  const sceneCard =
+    off("cutout") || off("overlap_accent")
+      ? {
+          ...card,
+          ...(off("cutout") ? { cutoutSrc: "" } : {}),
+          ...(off("overlap_accent") ? { overlapAccent: "" } : {}),
+        }
+      : card;
+
   const ctx: SceneCtx = {
-    card,
+    card: sceneCard,
     brand,
     roles,
     anim,
@@ -3733,7 +3781,7 @@ export const StoryCard: React.FC<Props> = ({ card, brand }) => {
         // G1.8 mesh ground — the still's exact SVG, under every content layer
         // (the still hook overrides the ground element's background-image the
         // same way). Absent = the flat brand ground, byte-identical.
-        ...(card.meshBg
+        ...(card.meshBg && !off("mesh_bg")
           ? {
               backgroundImage: card.meshBg,
               backgroundSize: "cover",
@@ -3750,15 +3798,21 @@ export const StoryCard: React.FC<Props> = ({ card, brand }) => {
           placement), so it composites against the big brand fill that bands.
           Mounted only when the still opted in; absent = byte-identical. */}
       {card.dither ? <Dither /> : null}
-      {/* Pack ground BENEATH the scene (the still's z1-under-copy order). */}
-      <StylePackGroundLayer ctx={ctx} />
+      {/* Pack ground BENEATH the scene (the still's z1-under-copy order).
+          per-effect-toggle: the "style_pack" toggle drops both pack layers. */}
+      {off("style_pack") ? null : <StylePackGroundLayer ctx={ctx} />}
       <Scene ctx={ctx} />
-      <ResolveAccentLayer ctx={ctx} />
-      <StylePackLayer ctx={ctx} />
-      {/* Sprint overlay layers (R1.6/8/9/10/11/22/23/24/25) — additive, in order. */}
-      {EXTRA_LAYERS.map(({ Layer }, i) => (
-        <Layer key={`sprint-layer-${i}`} ctx={ctx} />
-      ))}
+      {/* per-effect-toggle: the "accent" toggle drops the resolve accent layer
+          (paired with the HeroScene accentDecoration gate). */}
+      {off("accent") ? null : <ResolveAccentLayer ctx={ctx} />}
+      {off("style_pack") ? null : <StylePackLayer ctx={ctx} />}
+      {/* Sprint overlay layers (R1.6/8/9/10/11/22/23/24/25) — additive, in order.
+          per-effect-toggle: the "sprint_layers" toggle drops them all. */}
+      {off("sprint_layers")
+        ? null
+        : EXTRA_LAYERS.map(({ Layer }, i) => (
+            <Layer key={`sprint-layer-${i}`} ctx={ctx} />
+          ))}
     </AbsoluteFill>
   );
 };

@@ -455,6 +455,50 @@ def test_ffmpeg_manifests_declare_focus_blur_unsupported():
     assert src.count('"focus_blur": "unsupported-on-engine"') == 2
 
 
+def test_ffmpeg_manifests_declare_effect_toggles_unsupported_when_requested():
+    """per-effect-toggle (REVIEW-ONLY A/B): the decorative treatment is baked into
+    the approved still this engine animates, so it cannot selectively drop an
+    individual motion effect for a comparison render. BOTH the story and the reel
+    branches carry the honest note (emitted only when a review render asks for
+    it), never faking a toggled variant."""
+    src = (Path(reel_ffmpeg.__file__)).read_text()
+    assert src.count('"effect_toggles": "unsupported-on-engine"') == 2
+
+
+@pytest.mark.skipif(not _HAS_FFMPEG, reason="no FFmpeg binary resolvable")
+def test_ffmpeg_story_manifest_notes_effect_toggles_only_on_review_render(tmp_path, monkeypatch):
+    """A review render (card carries effectsDisabled) records the honest
+    unsupported note; a default render does NOT — fold-only-when-present, so the
+    default manifest is unchanged and no faked toggled asset is emitted."""
+    import json as _json
+
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(
+        reel_ffmpeg,
+        "_render_still",
+        lambda brief, brand_kit, out_dir, name, **kw: _write_synthetic_still(
+            out_dir / name / "story.png",
+            size=kw.get("size", (reel_ffmpeg.WIDTH, reel_ffmpeg.HEIGHT)),
+        ),
+    )
+    # Default render: no toggle -> no note.
+    out_default = tmp_path / "default.mp4"
+    reel_ffmpeg.render_story_card_from_props(
+        _props(), _brand_dict(), _brand_kit(), out_default, duration_sec=3.0
+    )
+    notes_default = _json.loads(out_default.with_suffix(".json").read_text())["notes"]
+    assert "effect_toggles" not in notes_default
+
+    # Review render: effectsDisabled attached -> honest unsupported note.
+    review_props = {**_props(), "effectsDisabled": ["accent", "style_pack"]}
+    out_review = tmp_path / "review.mp4"
+    reel_ffmpeg.render_story_card_from_props(
+        review_props, _brand_dict(), _brand_kit(), out_review, duration_sec=3.0
+    )
+    notes_review = _json.loads(out_review.with_suffix(".json").read_text())["notes"]
+    assert notes_review["effect_toggles"] == "unsupported-on-engine"
+
+
 def test_ffmpeg_story_manifest_declares_dither_unsupported():
     """render-banding-dither: the ordered-dither debanding overlay is a Remotion
     mix-blend layer this engine can't composite over an animated still, so the

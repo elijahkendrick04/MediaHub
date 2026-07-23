@@ -529,3 +529,132 @@ def test_reel_card_beat_frames_scales_with_selected_fps():
     for f30, f50, f60 in zip(b30, b50, b60):
         assert abs(f30 / 30 - f60 / 60) < 0.05
         assert abs(f30 / 30 - f50 / 50) < 0.05
+
+
+# ---------------------------------------------------------------------------
+# per-effect-toggle (REVIEW-ONLY A/B) — decorative-axis suppression for a
+# with/without comparison render. Must NEVER touch a shipped card (parity).
+# ---------------------------------------------------------------------------
+
+def test_effect_toggle_allowlist_is_decorative_only_and_excludes_legibility():
+    """The allowlist is sorted, decorative-only, and rejects every legibility-
+    or accessibility-critical layer, so no toggle can drop a text/bg pair below
+    its APCA gate or remove a required scrim/caption."""
+    allow = motion.EFFECT_TOGGLE_ALLOWLIST
+    assert list(allow) == sorted(allow)
+    # APCA / legibility layers are NOT toggleable — validation drops them.
+    for forbidden in (
+        "photo_scrim",
+        "photo_filters",
+        "photoScrim",
+        "scrim",
+        "captions",
+        "captionsJson",
+        "roleGround",
+    ):
+        assert forbidden not in allow
+        assert motion._validate_effect_toggles([forbidden]) == []
+    # Unknown keys drop; duplicates collapse; the result is sorted.
+    assert motion._validate_effect_toggles(
+        ["style_pack", "accent", "accent", "bogus"]
+    ) == ["accent", "style_pack"]
+    # A bare string / empty / None never validates to a spurious key.
+    assert motion._validate_effect_toggles("accent") == []
+    assert motion._validate_effect_toggles(None) == []
+    assert motion._validate_effect_toggles([]) == []
+
+
+def test_effect_toggles_for_brief_returns_sorted_false_allowlisted_keys():
+    """Only allowlisted keys set FALSEY are suppressed; keys set truthy, unknown
+    keys, and an absent field yield no suppression (sorted, deterministic)."""
+    disabled = motion._effect_toggles_for_brief(
+        {"effect_toggles": {"style_pack": False, "accent": True, "mesh_bg": False,
+                            "unknown_axis": False}}
+    )
+    # accent is True (keep), unknown dropped, remaining sorted.
+    assert disabled == ["mesh_bg", "style_pack"]
+    assert motion._effect_toggles_for_brief(None) == []
+    assert motion._effect_toggles_for_brief({}) == []
+    assert motion._effect_toggles_for_brief({"effect_toggles": {}}) == []
+    assert motion._effect_toggles_for_brief({"effect_toggles": "nope"}) == []
+
+
+def test_card_manifest_axes_records_effects_disabled():
+    """The manifest records the suppressed axes — empty on every shipped card
+    (only the review path is a writer), populated when the review path set them."""
+    props = motion._card_to_props(
+        {"achievement": {"swimmer_name": "A B", "event_name": "50m Free",
+                         "result_time": "00:25.00"}}
+    )
+    assert motion._card_manifest_axes(props)["effects_disabled"] == []
+    axes = motion._card_manifest_axes({**props, "effectsDisabled": ["accent", "style_pack"]})
+    assert axes["effects_disabled"] == ["accent", "style_pack"]
+
+
+def _ab_story_key(card_dict, brand_dict, *, disabled=None):
+    payload = {
+        "card": ({**card_dict, "effectsDisabled": disabled} if disabled else card_dict),
+        "brand": brand_dict,
+        "duration": 6.0,
+        "size": [1080, 1920],
+        "rev": motion.STORY_COMPOSITION_REVISION,
+    }
+    if disabled:
+        payload["ab_review"] = disabled
+    return motion._content_hash(payload, kind="story")
+
+
+def test_review_ab_story_key_is_distinct_and_deterministic():
+    """The comparison 'B' variant keys distinctly from the default render and is
+    deterministic across runs; the default (no toggles) key is unchanged."""
+    card = {"achievement": {"swimmer_name": "Cache Hit", "event_name": "100m Free LC",
+                            "result_time": "00:50.00"}}
+    brand_dict = motion._brand_to_dict(BrandKit(profile_id="x", display_name="Club"))
+    card_dict = motion._card_to_props(card, variation_seed=7)
+    default_key = _ab_story_key(card_dict, brand_dict)
+    disabled = ["accent", "background_pattern"]
+    b_key = _ab_story_key(card_dict, brand_dict, disabled=disabled)
+    assert b_key != default_key
+    assert b_key == _ab_story_key(card_dict, brand_dict, disabled=disabled)  # deterministic
+    # Attaching effectsDisabled alone (no marker) already shifts the key.
+    only_prop = motion._content_hash(
+        {"card": {**card_dict, "effectsDisabled": disabled}, "brand": brand_dict,
+         "duration": 6.0, "size": [1080, 1920], "rev": motion.STORY_COMPOSITION_REVISION},
+        kind="story",
+    )
+    assert only_prop != default_key
+
+
+def test_render_story_card_review_ab_serves_distinct_variant(tmp_path, monkeypatch):
+    """render_story_card(review_ab=...) serves a DISTINCT cached B variant, while
+    the default call (review_ab=None) and an all-unknown list both serve the
+    byte-identical A render — so a shipped card keeps still<->motion parity."""
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    cache_dir = tmp_path / "motion_cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    card = {"achievement": {"swimmer_name": "Cache Hit", "event_name": "100m Free LC",
+                            "result_time": "00:50.00"}}
+    brand = BrandKit(profile_id="x", display_name="Cache Club")
+    brand_dict = motion._brand_to_dict(brand)
+    card_dict = motion._card_to_props(card, variation_seed=7)
+    disabled = ["accent", "background_pattern"]
+    a_bytes = b"\x00\x00\x00\x18ftypisomAAAA" + b"\x00" * 4096
+    b_bytes = b"\x00\x00\x00\x18ftypisomBBBB" + b"\x00" * 4096
+    (cache_dir / f"{_ab_story_key(card_dict, brand_dict)}.mp4").write_bytes(a_bytes)
+    (cache_dir / f"{_ab_story_key(card_dict, brand_dict, disabled=disabled)}.mp4").write_bytes(b_bytes)
+
+    # Default: no marker attached -> pre-feature key -> A bytes.
+    r_a = motion.render_story_card(card, brand, tmp_path / "a.mp4", variation_seed=7)
+    assert Path(r_a).read_bytes()[:16] == a_bytes[:16]
+    # Review path: keys distinctly -> B bytes (order-insensitive input).
+    r_b = motion.render_story_card(
+        card, brand, tmp_path / "b.mp4", variation_seed=7,
+        review_ab=["background_pattern", "accent"],
+    )
+    assert Path(r_b).read_bytes()[:16] == b_bytes[:16]
+    # All-unknown / legibility-only review_ab validates empty -> no-op -> A bytes.
+    r_noop = motion.render_story_card(
+        card, brand, tmp_path / "noop.mp4", variation_seed=7,
+        review_ab=["bogus", "photo_scrim"],
+    )
+    assert Path(r_noop).read_bytes()[:16] == a_bytes[:16]

@@ -1110,6 +1110,17 @@ def render_story_card_from_props(
                 # degrades honestly to the whole-still render — never a faked
                 # per-character animation.
                 "text_granularity": "per-glyph-unsupported-on-engine",
+                # per-effect-toggle (REVIEW-ONLY A/B): the decorative treatment
+                # is baked into the approved still this engine animates, so it
+                # cannot selectively drop an individual motion effect for a
+                # with/without comparison. Reported honestly ONLY when a review
+                # render asked for it — never a faked toggled variant. Absent on
+                # every default render, so the note is fold-only-when-present.
+                **(
+                    {"effect_toggles": "unsupported-on-engine"}
+                    if card_props.get("effectsDisabled")
+                    else {}
+                ),
                 "engine_note": (
                     "Rendered by the reduced-motion FFmpeg engine: the card's own "
                     "approved still with a deterministic camera move — no text "
@@ -1335,6 +1346,17 @@ def render_meet_reel_from_props(
                 # here is the pre-baked still, so a glyph-granularity request
                 # degrades honestly — never a faked per-character animation.
                 "text_granularity": "per-glyph-unsupported-on-engine",
+                # per-effect-toggle (REVIEW-ONLY A/B): the decorative treatment is
+                # baked into the approved stills this engine composites, so it
+                # cannot selectively drop an individual motion effect for a
+                # with/without comparison. Reported honestly ONLY when any beat
+                # asked for it — never a faked toggled variant. Absent on every
+                # default reel, so the note is fold-only-when-present.
+                **(
+                    {"effect_toggles": "unsupported-on-engine"}
+                    if any(cp.get("effectsDisabled") for cp in cards_props)
+                    else {}
+                ),
                 "engine_note": (
                     "Rendered by the reduced-motion FFmpeg engine: each beat is "
                     "the card's own approved still with a deterministic camera "
