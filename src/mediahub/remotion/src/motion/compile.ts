@@ -75,22 +75,46 @@ export function sampleChannel(
   return last.value;
 }
 
-const HERO_DELAY = 3;
-const SECONDARY_DELAY = 6;
-const RESULT_DELAY = 9;
-const CHIP_DELAY = 14;
+export type StaggerConfig = {
+  hero: number;
+  secondary: number;
+  result: number;
+  chip: number;
+};
+
+const DEFAULT_STAGGER: StaggerConfig = { hero: 3, secondary: 6, result: 9, chip: 14 };
+
+/**
+ * Resolve an entrance-stagger config from a scale multiplier. `scale === 1` (or
+ * a non-positive / non-finite value) returns exactly DEFAULT_STAGGER, so an
+ * unscaled card is byte-identical to the fixed pre-config delays. Each delay is
+ * scaled, rounded to an integer frame (cross-platform-identical), clamped to a
+ * sane band, and forced monotonic non-decreasing so a bad scale can never
+ * invert the hero → secondary → result → chip importance sequence.
+ */
+export function resolveStagger(scale: number): StaggerConfig {
+  const s = Number.isFinite(scale) && scale > 0 ? scale : 1;
+  const clamp = (v: number) => Math.max(0, Math.min(40, Math.round(v)));
+  const hero = clamp(DEFAULT_STAGGER.hero * s);
+  const secondary = Math.max(hero, clamp(DEFAULT_STAGGER.secondary * s));
+  const result = Math.max(secondary, clamp(DEFAULT_STAGGER.result * s));
+  const chip = Math.max(result, clamp(DEFAULT_STAGGER.chip * s));
+  return { hero, secondary, result, chip };
+}
 
 /**
  * Drive the StoryCard AnimChannels from an entrance preset, staggering the
  * layers by importance. Channels the preset doesn't animate fall back to rest
  * (so a scale-only preset leaves heroY at 0, an opacity-only preset leaves
- * scale at 1), and everything else inherits from `base`.
+ * scale at 1), and everything else inherits from `base`. `stagger` defaults to
+ * the fixed importance delays; a resolved config retunes the separation.
  */
 export function entranceChannels(
   presetName: string,
   frame: number,
   fps: number,
   base: AnimChannels,
+  stagger: StaggerConfig = DEFAULT_STAGGER,
 ): AnimChannels {
   const p = presetFor(presetName);
   if (!p) {
@@ -98,16 +122,16 @@ export function entranceChannels(
   }
   return {
     ...base,
-    heroY: sampleChannel(p, "translateY", frame, fps, { delayFrames: HERO_DELAY }),
-    heroOpacity: sampleChannel(p, "opacity", frame, fps, { delayFrames: HERO_DELAY }),
-    heroScale: sampleChannel(p, "scale", frame, fps, { delayFrames: HERO_DELAY }),
+    heroY: sampleChannel(p, "translateY", frame, fps, { delayFrames: stagger.hero }),
+    heroOpacity: sampleChannel(p, "opacity", frame, fps, { delayFrames: stagger.hero }),
+    heroScale: sampleChannel(p, "scale", frame, fps, { delayFrames: stagger.hero }),
     secondaryOpacity: sampleChannel(p, "opacity", frame, fps, {
-      delayFrames: SECONDARY_DELAY,
+      delayFrames: stagger.secondary,
     }),
     resultOpacity: sampleChannel(p, "opacity", frame, fps, {
-      delayFrames: RESULT_DELAY,
+      delayFrames: stagger.result,
     }),
-    resultScale: sampleChannel(p, "scale", frame, fps, { delayFrames: RESULT_DELAY }),
-    chipOpacity: sampleChannel(p, "opacity", frame, fps, { delayFrames: CHIP_DELAY }),
+    resultScale: sampleChannel(p, "scale", frame, fps, { delayFrames: stagger.result }),
+    chipOpacity: sampleChannel(p, "opacity", frame, fps, { delayFrames: stagger.chip }),
   };
 }

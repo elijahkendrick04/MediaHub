@@ -1197,6 +1197,30 @@ def _footage_for_card(
         return None, ""
 
 
+# Entrance-stagger scale (adjustable-stagger): a deterministic mood-derived
+# multiplier on the token-compiled entrance intents' importance stagger. Calm /
+# measured moods loosen the separation (>1), high-energy moods tighten it (<1).
+# Substring matching mirrors the TSX mood gating (pop.ts subdued set + the
+# StoryCard accent-amp regex), so compound moods still resolve. Only drop_in /
+# rise / pop route through entranceChannels, so only they consume it.
+_STAGGER_LOOSER = ("calm", "stoic", "precise", "minimal", "composed", "weighty")
+_STAGGER_TIGHTER = ("electric", "explosive", "fierce", "celebratory", "triumph")
+_STAGGER_INTENTS = frozenset({"drop_in", "rise", "pop"})
+
+
+def _entrance_stagger_scale(mood: str, motion_intent: str) -> float:
+    """A deterministic entrance-stagger multiplier, or ``1.0`` for a neutral mood
+    or a non-entrance intent (``1.0`` → the prop is omitted → byte-identical)."""
+    if motion_intent not in _STAGGER_INTENTS:
+        return 1.0
+    m = (mood or "").lower()
+    if any(k in m for k in _STAGGER_LOOSER):
+        return 1.3
+    if any(k in m for k in _STAGGER_TIGHTER):
+        return 0.65
+    return 1.0
+
+
 def _card_to_props(
     card: dict,
     *,
@@ -1376,6 +1400,14 @@ def _card_to_props(
         props["photoSrcs"] = photo_srcs
     if mesh_bg:
         props["meshBg"] = mesh_bg
+    # adjustable-stagger: retune the token-compiled entrance stagger by mood
+    # (calm moods loosen the separation, high-energy tighten it). Attached only
+    # when it differs from the default AND the intent is one of the entrance
+    # intents that consume it, so neutral / non-entrance cards keep byte-identical
+    # props (and story cache keys) — no composition-revision bump.
+    _stagger_scale = _entrance_stagger_scale(props.get("mood", ""), props.get("motionIntent", ""))
+    if _stagger_scale != 1.0:
+        props["staggerScale"] = _stagger_scale
     # F9 medal chrome (still parity): the resolved specular ramp, attached only
     # on a gate-passing medal card so non-medal cards keep byte-identical props.
     medal_ramp = roles.get("roleMedalRamp", "")

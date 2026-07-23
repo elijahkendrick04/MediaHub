@@ -29,6 +29,7 @@ const defaultCard = {
   meetName: "MediaHub Open",
   place: "1",
   variationSeed: 1,
+  staggerScale: 0,
   backgroundStyle: "",
   composition: "",
   typographyPair: "",

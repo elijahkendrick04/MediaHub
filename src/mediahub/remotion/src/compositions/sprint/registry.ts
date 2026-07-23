@@ -31,6 +31,9 @@ import type { AnimChannels, Roles, SceneCtx } from "../StoryCard";
 // Re-exported so every sprint module imports its types from one place
 // (`../registry`) regardless of which subfolder it lives in.
 export type { AnimChannels, Roles, SceneCtx } from "../StoryCard";
+export type { StaggerConfig } from "../../motion/compile";
+
+import type { StaggerConfig } from "../../motion/compile";
 
 export type IntentProgram = (
   frame: number,
@@ -38,6 +41,7 @@ export type IntentProgram = (
   durationInFrames: number,
   mood: string,
   base: AnimChannels,
+  stagger?: StaggerConfig,
 ) => AnimChannels;
 
 export type SpringConfig = { damping: number; stiffness: number; mass: number };

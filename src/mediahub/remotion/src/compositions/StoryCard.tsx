@@ -18,6 +18,7 @@ import {
   EXTRA_SCENES,
   EXTRA_SPRINGS,
 } from "./sprint/registry";
+import { resolveStagger, type StaggerConfig } from "../motion/compile";
 import {
   PhotoFilterDefs,
   photoGradeFilterFor,
@@ -37,6 +38,10 @@ export const cardSchema = z.object({
   meetName: z.string().default(""),
   place: z.string().default(""),
   variationSeed: z.number().default(0),
+  // Entrance-stagger scale (0 = unset → the fixed default delays). >1 loosens
+  // the importance separation, <1 tightens it; only the token-compiled entrance
+  // intents (drop_in / rise / pop) consume it.
+  staggerScale: z.number().default(0),
   // Path A/B variation axes — every field is optional. Empty strings
   // fall back to the variationSeed-driven behaviour, so legacy callers
   // that haven't been updated keep producing the same output they did
@@ -493,6 +498,7 @@ function animProgram(
   fps: number,
   durationInFrames: number,
   seed: number,
+  stagger?: StaggerConfig,
 ): AnimChannels {
   const moodSpring = springConfigFor(mood);
   const clampRight = { extrapolateRight: "clamp" as const };
@@ -723,7 +729,7 @@ function animProgram(
       // ride along unless a sprint intent deliberately overrides them.
       const extra = EXTRA_INTENTS[intent];
       return withResolveAccent(
-        extra ? extra(frame, fps, durationInFrames, mood, base) : base,
+        extra ? extra(frame, fps, durationInFrames, mood, base, stagger) : base,
       );
     }
   }
@@ -3367,6 +3373,7 @@ export const StoryCard: React.FC<Props> = ({ card, brand }) => {
     fps,
     durationInFrames,
     card.variationSeed || 0,
+    card.staggerScale && card.staggerScale > 0 ? resolveStagger(card.staggerScale) : undefined,
   );
   const mode = sceneForArchetype(card.archetype || "");
   const layout = compositionLayoutFor(card.composition || "left", width);
