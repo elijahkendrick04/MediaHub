@@ -3683,10 +3683,15 @@ def api_card_motion(run_id: str, card_id: str):
     cache miss. Always serves the MP4 with the correct mime type so the
     UI can use <video src=&hellip;> or a direct download.
 
-    ``?format=story|square|landscape`` picks the output cut (default
-    story, 1080×1920). Synchronous — the UI now prefers the async
-    ``motion-job`` route (M32), which survives proxy timeouts on cold
-    renders; this route remains for API callers and cache-hit fetches.
+    ``?format=story|portrait|square|landscape`` picks a named cut (default
+    story, 1080×1920). For an arbitrary validated canvas (any-canvas) pass
+    ``?w=&h=`` or ``?size=WxH`` (e.g. ``?w=1600&h=900``): explicit geometry
+    wins over ``?format=`` and must be even-dimensioned, within
+    ``[256, 2560]`` per side and a sane aspect, else an honest 400
+    ``bad_canvas``. A custom size that equals a preset's dims collapses to
+    that preset. Synchronous — the UI now prefers the async ``motion-job``
+    route (M32), which survives proxy timeouts on cold renders; this route
+    remains for API callers and cache-hit fetches.
     """
     from flask import send_file
 
@@ -4029,15 +4034,12 @@ def api_card_motion_file(run_id: str, card_id: str):
             return jsonify({"error": "run_not_found"}), 404
     if not W._can_access_run(run_id, run_data, W._active_profile_id()):
         return jsonify({"error": "run_not_found"}), 404
-    try:
-        from mediahub.visual import motion as _motion
-
-        fmt = (request.args.get("format") or _motion.DEFAULT_MOTION_FORMAT).strip().lower()
-        valid = fmt in _motion.MOTION_FORMATS
-    except Exception:
-        fmt, valid = "story", True
-    if not valid:
-        return jsonify({"error": "bad_format"}), 400
+    # Same shared canvas resolver the render route used, so this file route
+    # re-derives the identical filename token for ``?format=`` presets AND
+    # arbitrary-canvas ``?w=&h=`` / ``?size=WxH`` cuts (any-canvas).
+    fmt, canvas_err = W._resolve_motion_canvas()
+    if canvas_err is not None:
+        return canvas_err
     motion_dir = W.RUNS_DIR / run_id / "motion"
     name = f"{card_id}.mp4" if fmt == "story" else f"{card_id}_{fmt}.mp4"
     path = motion_dir / name
@@ -4068,15 +4070,9 @@ def api_card_motion_manifest(run_id: str, card_id: str):
     """The motion render's explainability record — archetype, motion
     intent, mood, colour source, seed — written as a JSON sidecar beside
     every rendered MP4. 404 until the matching cut has been rendered."""
-    try:
-        from mediahub.visual import motion as _motion
-
-        fmt = (request.args.get("format") or _motion.DEFAULT_MOTION_FORMAT).strip().lower()
-        valid = fmt in _motion.MOTION_FORMATS
-    except Exception:
-        fmt, valid = "story", True
-    if not valid:
-        return jsonify({"error": "bad_format"}), 400
+    fmt, canvas_err = W._resolve_motion_canvas()
+    if canvas_err is not None:
+        return canvas_err
     name = f"{card_id}.json" if fmt == "story" else f"{card_id}_{fmt}.json"
     sidecar = W.RUNS_DIR / run_id / "motion" / name
     if not sidecar.exists():
@@ -4657,7 +4653,9 @@ def api_run_reel(run_id: str):
     """Render (or serve cached) a multi-card MP4 reel for the meet.
 
     Uses the top 3 ranked achievements by default; caller can override
-    the count with ?n=<int> up to a hard cap of 5.
+    the count with ?n=<int> up to a hard cap of 5. ``?format=`` picks a
+    named cut; ``?w=&h=`` / ``?size=WxH`` requests a single arbitrary
+    validated canvas (any-canvas), which wins over ``?format=``.
     """
     from flask import send_file
 
@@ -5119,8 +5117,6 @@ def api_run_reel_file(run_id: str):
     """Serve an already-rendered reel MP4 — never triggers a render."""
     from flask import send_file
 
-    from mediahub.visual import motion as _motion
-
     run_data = W._load_run(run_id)
     if run_data is None:
         run_json = W.RUNS_DIR / run_id / "run.json"
@@ -5143,9 +5139,9 @@ def api_run_reel_file(run_id: str):
     except (TypeError, ValueError):
         n = 3
     n = max(1, min(5, n))
-    fmt = (request.args.get("format") or _motion.DEFAULT_MOTION_FORMAT).strip().lower()
-    if fmt not in _motion.MOTION_FORMATS:
-        return jsonify({"error": "bad_format"}), 400
+    fmt, canvas_err = W._resolve_motion_canvas()
+    if canvas_err is not None:
+        return canvas_err
     # ?lang= mirrors the render routes' 1.24 dub gate so a dubbed cut's
     # language-suffixed file is findable; anything non-dubbable falls back
     # to the original-language name.
@@ -5218,16 +5214,15 @@ def api_run_reel_manifest(run_id: str):
     if not W._can_access_run(run_id, run_data, W._active_profile_id()):
         return jsonify({"error": "run_not_found"}), 404
     from mediahub.visual import dub as _dub
-    from mediahub.visual import motion as _motion
 
     try:
         n = int(request.args.get("n", "3"))
     except (TypeError, ValueError):
         n = 3
     n = max(1, min(5, n))
-    fmt = (request.args.get("format") or _motion.DEFAULT_MOTION_FORMAT).strip().lower()
-    if fmt not in _motion.MOTION_FORMATS:
-        return jsonify({"error": "bad_format"}), 400
+    fmt, canvas_err = W._resolve_motion_canvas()
+    if canvas_err is not None:
+        return canvas_err
     _lang = (request.args.get("lang") or "").strip()
     _suffix = (
         f"_{_lang.split('-', 1)[0]}"

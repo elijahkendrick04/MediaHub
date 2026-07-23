@@ -28615,14 +28615,81 @@ def _session_can_access_profile(asset_profile_id: Optional[str]) -> bool:
     return asset_profile_id == _active_profile_id()
 
 
-def _assemble_card_motion_inputs(run_id: str, card_id: str):
-    """Shared validation + payload assembly for the per-card motion routes.
+def _resolve_motion_canvas():
+    """Resolve the motion canvas from the request args to a single format token.
 
-    Returns ``(inputs_dict, None)`` on success or ``(None, (response,
-    status))`` — the same contract as ``_assemble_reel_inputs`` — so the
-    sync route and the M32 async job route stay behaviourally identical.
+    One shared resolver for every motion/reel route (render + file + manifest),
+    so all six sites derive the identical name. Precedence:
+
+    1. explicit geometry — ``?size=WxH`` or (``?w=`` AND ``?h=``) — WINS over
+       ``?format=``. Parsed to ints, validated via ``motion.validate_canvas_size``
+       (bad → honest 400 ``bad_canvas``), then normalised with
+       ``motion.canonical_motion_format`` so a custom size that equals a preset's
+       dims collapses to the preset name (byte-identical file + cache key).
+    2. else ``?format=`` — validated ``in MOTION_FORMATS`` (unknown → 400
+       ``bad_format``).
+    3. else the default ``story`` cut.
+
+    A half-supplied geometry pair (``?w=`` without ``?h=``, or vice versa) is a
+    400 rather than a silently-ignored typo. Returns ``(token, None)`` on success
+    or ``(None, (response, status))`` — the same contract as the assemble helpers.
+    The returned token is used both for the render (``format_name``) AND the
+    filename suffix, and for a custom size is always ``f"{w}x{h}"`` built from the
+    validated ints — never raw query text — so the path-traversal guard holds and
+    the file/manifest routes re-derive the exact file the render wrote. Absent →
+    ``story`` → byte-identical to every existing URL and cached artifact.
     """
     from mediahub.visual import motion as _motion
+
+    def _present(v):
+        return v is not None and str(v).strip() != ""
+
+    size_raw = request.args.get("size")
+    w_raw = request.args.get("w")
+    h_raw = request.args.get("h")
+
+    if _present(size_raw):
+        try:
+            parsed = _motion._parse_size_token(str(size_raw).strip().lower())
+        except ValueError as e:
+            return None, (jsonify({"error": "bad_canvas", "detail": str(e)}), 400)
+        if parsed is None:
+            return None, (
+                jsonify(
+                    {
+                        "error": "bad_canvas",
+                        "detail": f"unparseable size {size_raw!r}; use WxH (e.g. 1600x900)",
+                    }
+                ),
+                400,
+            )
+        w, h = parsed
+        return _motion.canonical_motion_format(w, h), None
+
+    if _present(w_raw) or _present(h_raw):
+        if not (_present(w_raw) and _present(h_raw)):
+            return None, (
+                jsonify(
+                    {
+                        "error": "bad_canvas",
+                        "detail": "both w and h are required for a custom canvas",
+                    }
+                ),
+                400,
+            )
+        try:
+            w = int(str(w_raw).strip())
+            h = int(str(h_raw).strip())
+        except (TypeError, ValueError):
+            return None, (
+                jsonify({"error": "bad_canvas", "detail": "w and h must be integers"}),
+                400,
+            )
+        try:
+            w, h = _motion.validate_canvas_size(w, h)
+        except ValueError as e:
+            return None, (jsonify({"error": "bad_canvas", "detail": str(e)}), 400)
+        return _motion.canonical_motion_format(w, h), None
 
     fmt = (request.args.get("format") or _motion.DEFAULT_MOTION_FORMAT).strip().lower()
     if fmt not in _motion.MOTION_FORMATS:
@@ -28636,6 +28703,23 @@ def _assemble_card_motion_inputs(run_id: str, card_id: str):
             ),
             400,
         )
+    return fmt, None
+
+
+def _assemble_card_motion_inputs(run_id: str, card_id: str):
+    """Shared validation + payload assembly for the per-card motion routes.
+
+    Returns ``(inputs_dict, None)`` on success or ``(None, (response,
+    status))`` — the same contract as ``_assemble_reel_inputs`` — so the
+    sync route and the M32 async job route stay behaviourally identical.
+
+    The output cut comes from ``_resolve_motion_canvas`` (``?format=`` preset or
+    an arbitrary-canvas ``?w=&h=`` / ``?size=WxH`` — any-canvas). The batch
+    routes stay preset-only; a custom size is a single-cut request.
+    """
+    fmt, canvas_err = _resolve_motion_canvas()
+    if canvas_err is not None:
+        return None, canvas_err
 
     run_data = _load_run(run_id)
     if run_data is None:
@@ -28815,18 +28899,12 @@ def _assemble_reel_inputs(run_id: str):
     if selected_ids:
         n = len(selected_ids)
 
-    fmt = (request.args.get("format") or _motion.DEFAULT_MOTION_FORMAT).strip().lower()
-    if fmt not in _motion.MOTION_FORMATS:
-        return None, (
-            jsonify(
-                {
-                    "error": "bad_format",
-                    "detail": f"unknown motion format {fmt!r}",
-                    "valid_formats": sorted(_motion.MOTION_FORMATS),
-                }
-            ),
-            400,
-        )
+    # Output cut from the shared resolver: ``?format=`` preset OR an
+    # arbitrary-canvas ``?w=&h=`` / ``?size=WxH`` token (any-canvas). Batch
+    # routes stay preset-only; a custom size is a single-cut reel request.
+    fmt, canvas_err = _resolve_motion_canvas()
+    if canvas_err is not None:
+        return None, canvas_err
 
     # R1.19 — optional per-reel audio-mix profile (?mix=voice_lead|balanced|
     # music_forward), a deterministic operator knob like ?format/?n. Folded

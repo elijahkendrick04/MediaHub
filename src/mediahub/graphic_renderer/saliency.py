@@ -157,10 +157,27 @@ def ratio_for_format(format_name: str) -> str:
     Case-insensitive; unknown or empty names fall back to the 9:16 story
     ratio (the default cut), so a caller can pass a format straight through
     without first validating it.
+
+    Beyond the named presets, a parseable arbitrary-canvas token
+    (``"WxH"`` / ``"W:H"`` — any-canvas) is returned verbatim, since
+    :func:`_parse_ratio` already understands it. This makes photo focus /
+    saliency aspect-correct for a custom cut, derived from the aspect ratio
+    (not the name). Named presets still hit the dict branch unchanged, so
+    every default (non-opt-in) focus path is byte-identical.
     """
+    # Explicit falsy short-circuit: keep ``None``/``""`` pinned to the 9:16
+    # default independent of _parse_ratio, so a future refactor of _parse_ratio
+    # can never silently move the empty-name default and shift default pixels.
     if not format_name:
         return _DEFAULT_FORMAT_RATIO
-    return FORMAT_RATIOS.get(str(format_name).strip().lower(), _DEFAULT_FORMAT_RATIO)
+    key = str(format_name).strip().lower()
+    if key in FORMAT_RATIOS:
+        return FORMAT_RATIOS[key]
+    try:
+        _parse_ratio(key)  # parseable "WxH"/"W:H"? (raises on junk)
+        return key
+    except ValueError:
+        return _DEFAULT_FORMAT_RATIO
 
 
 def focus_position_for_format(image_path: Union[str, Path], format_name: str = "story") -> str:

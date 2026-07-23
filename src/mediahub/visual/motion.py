@@ -31,6 +31,7 @@ import hashlib
 import json
 import math
 import os
+import re
 import shutil
 import subprocess
 import threading
@@ -64,17 +65,103 @@ MOTION_FORMATS: dict[str, tuple[int, int]] = {
 }
 DEFAULT_MOTION_FORMAT = "story"
 
+# Arbitrary-canvas geometry (any-canvas): beyond the 4 named presets a caller
+# may request a validated custom ``(width, height)`` cut via a canonical
+# ``"WxH"`` size token (route params ``?w=&h=`` or ``?size=WxH``; there is no
+# env var). The TSX compositions are preset-free responsive, so one composition
+# serves any size — no ``.tsx``/``.ts``/``.css`` edit, so ``renderer_generation()``
+# is unchanged and every named-preset byte stays identical (presets never leave
+# the dict path below). The bounds keep the encode honest: even luma dims
+# (yuv420p / h264), a sane per-dimension range, and a bounded aspect. The
+# MAX ceiling also keeps a 2x supersample intermediate (≤5120px) inside libx264.
+MIN_CANVAS_DIM = 256  # per-dimension floor
+MAX_CANVAS_DIM = 2560  # per-dimension ceiling (2x supersample intermediate stays < libx264 limit)
+MIN_CANVAS_ASPECT = 0.25  # 1:4
+MAX_CANVAS_ASPECT = 4.0  # 4:1
+_SIZE_TOKEN_RE = re.compile(r"^(\d{2,4})x(\d{2,4})$")  # canonical "WxH", lowercase x
+
+
+def validate_canvas_size(w: int, h: int) -> tuple[int, int]:
+    """Validate an arbitrary motion canvas ``(w, h)`` — the ONE resolver.
+
+    Raises ``ValueError`` (an honest config error, same contract as
+    :func:`motion_format_size`) when either dimension is not an ``int``, is
+    ``< MIN_CANVAS_DIM`` or ``> MAX_CANVAS_DIM``, is **odd** (yuv420p / h264 need
+    even luma dims), or the aspect ``w/h`` is outside
+    ``[MIN_CANVAS_ASPECT, MAX_CANVAS_ASPECT]``. Bools are rejected explicitly
+    (``bool`` is an ``int`` subclass), mirroring ``_validate_fps`` and
+    ``saliency._parse_ratio``. Returns ``(w, h)`` unchanged on success.
+
+    This is the single validator both the route layer and
+    :func:`motion_format_size` call, so a size the route accepted can never
+    later raise inside a deep render helper.
+    """
+    if isinstance(w, bool) or isinstance(h, bool):
+        raise ValueError(f"canvas dims must be int, not bool: {(w, h)!r}")
+    if not isinstance(w, int) or not isinstance(h, int):
+        raise ValueError(f"canvas dims must be int: {(w, h)!r}")
+    for dim in (w, h):
+        if dim < MIN_CANVAS_DIM or dim > MAX_CANVAS_DIM:
+            raise ValueError(f"canvas dim {dim} out of range [{MIN_CANVAS_DIM}, {MAX_CANVAS_DIM}]")
+        if dim % 2 != 0:
+            raise ValueError(f"canvas dim {dim} must be even (yuv420p / h264)")
+    aspect = w / h
+    if aspect < MIN_CANVAS_ASPECT or aspect > MAX_CANVAS_ASPECT:
+        raise ValueError(
+            f"canvas aspect {aspect:.3f} out of range "
+            f"[{MIN_CANVAS_ASPECT}, {MAX_CANVAS_ASPECT}]"
+        )
+    return w, h
+
+
+def _parse_size_token(token: str) -> Optional[tuple[int, int]]:
+    """Parse a canonical ``"WxH"`` size token → validated ``(w, h)``.
+
+    Returns ``None`` on a regex miss (so ``motion_format_size`` can then raise
+    its "unknown format" error); on a regex hit calls :func:`validate_canvas_size`,
+    which RAISES ``ValueError`` on an out-of-bounds / odd / bad-aspect size. The
+    single validator means the token this returns is always the fully-validated
+    one — never an unvalidated size on one path and a validated one on another.
+    """
+    m = _SIZE_TOKEN_RE.match(str(token).strip().lower())
+    if m is None:
+        return None
+    return validate_canvas_size(int(m.group(1)), int(m.group(2)))
+
+
+def canonical_motion_format(w: int, h: int) -> str:
+    """Normalise a validated ``(w, h)`` to a preset NAME or a ``"WxH"`` token.
+
+    A client that reaches a preset's exact dims via ``?w=&h=`` collapses to the
+    preset name (so it reuses the preset cache key + bare filename + byte-identical
+    output rather than minting a duplicate ``"1080x1920"`` cut); any other size
+    returns ``f"{w}x{h}"`` built from the **validated ints**. This is the route-layer
+    normaliser that keeps preset byte-identity even when a caller uses geometry
+    params. ``(w, h)`` is assumed already validated by :func:`validate_canvas_size`.
+    """
+    for name, dims in MOTION_FORMATS.items():
+        if dims == (w, h):
+            return name
+    return f"{w}x{h}"
+
 
 def motion_format_size(format_name: str) -> tuple[int, int]:
     """Resolve a motion format name to ``(width, height)``.
 
-    Unknown names raise ``ValueError`` — an honest configuration error
-    beats silently rendering the wrong aspect ratio.
+    Named presets (``story``/``portrait``/``square``/``landscape``) resolve via
+    the ``MOTION_FORMATS`` dict — 100% unchanged. A non-preset key is then tried
+    as a canonical arbitrary-canvas ``"WxH"`` token (route params ``?w=&h=`` /
+    ``?size=WxH``); a valid token returns its validated ``(w, h)``. Anything else
+    raises ``ValueError`` — an honest configuration error beats silently
+    rendering the wrong aspect ratio.
     """
     key = (format_name or DEFAULT_MOTION_FORMAT).strip().lower()
-    if key not in MOTION_FORMATS:
-        raise ValueError(f"unknown motion format {format_name!r}; valid: {sorted(MOTION_FORMATS)}")
-    return MOTION_FORMATS[key]
+    if key in MOTION_FORMATS:
+        return MOTION_FORMATS[key]
+    parsed = _parse_size_token(key)
+    if parsed is not None:
+        return parsed
+    raise ValueError(f"unknown motion format {format_name!r}; valid: {sorted(MOTION_FORMATS)}")
 
 
 def _data_dir() -> Path:
@@ -2710,7 +2797,10 @@ def render_story_card(
 
     ``format_name`` picks the output cut: ``story`` (1080×1920, default),
     ``portrait`` (1080×1350), ``square`` (1080×1080) or ``landscape``
-    (1920×1080).
+    (1920×1080). Beyond the presets it also accepts a validated arbitrary-canvas
+    ``"WxH"`` token (any-canvas — the web routes expose it as ``?w=&h=`` /
+    ``?size=WxH``): a distinct ``(w, h)`` keys its own cache entry via the
+    already-folded ``size`` list, so the preset paths stay byte-identical.
 
     When audio is configured (``MEDIAHUB_VOICEOVER=1`` narration and/or an
     operator ``MEDIAHUB_REEL_MUSIC_DIR`` bed), the finished MP4 carries the
@@ -3975,7 +4065,10 @@ def render_meet_reel(
                   ranked moments (1 card → 7s … 5 cards → 23s; 3 cards keep the
                   historic 15s) unless customised.
       format_name  output cut: ``story`` (default) / ``portrait`` /
-                  ``square`` / ``landscape``.
+                  ``square`` / ``landscape``, or a validated arbitrary-canvas
+                  ``"WxH"`` token (any-canvas — exposed on the routes as
+                  ``?w=&h=`` / ``?size=WxH``). A custom size keys its own cache
+                  entry via the folded ``size`` list; presets stay byte-identical.
       sponsor     optional sponsor name for the reel's outro close (R1.30).
                   When set, the Remotion outro shows a "proudly supported by"
                   thank-you; blank falls back to the follow-the-club close.
@@ -4292,6 +4385,8 @@ __all__ = [
     "reel_duration_for",
     "normalise_reel_rhythm",
     "motion_format_size",
+    "validate_canvas_size",
+    "canonical_motion_format",
     "MOTION_FORMATS",
     "DEFAULT_MOTION_FORMAT",
     "node_available",
