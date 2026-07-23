@@ -42,6 +42,11 @@ export type IntentProgram = (
   mood: string,
   base: AnimChannels,
   stagger?: StaggerConfig,
+  // The card's variationSeed, threaded from `animProgram` so a sprint intent
+  // can build a deterministic, frame-pure per-glyph / per-card variation
+  // (e.g. cascade's seeded per-character reveal). Optional so existing intent
+  // modules that ignore it keep the exact same signature.
+  seed?: number,
 ) => AnimChannels;
 
 export type SpringConfig = { damping: number; stiffness: number; mass: number };

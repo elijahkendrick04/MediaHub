@@ -18,7 +18,7 @@ import {
   EXTRA_SCENES,
   EXTRA_SPRINGS,
 } from "./sprint/registry";
-import { resolveStagger, type StaggerConfig } from "../motion/compile";
+import { glyphRevealAt, resolveStagger, type StaggerConfig } from "../motion/compile";
 import {
   PhotoFilterDefs,
   photoGradeFilterFor,
@@ -178,6 +178,12 @@ export const cardSchema = z.object({
   // The design-spec director's motion language for this card
   // (design_spec.MOTION_INTENTS). Empty = the mood/seed default programme.
   motionIntent: z.string().default(""),
+  // Text reveal granularity for the type-carried intents (kinetic_type /
+  // cascade). "word" (the default) keeps the byte-identical per-word reveal;
+  // "glyph" opts a card into the per-character reveal channel. Set ONLY by
+  // motion.py's deterministic seed gate (never a director/LLM field), and only
+  // for those two intents — so every other card keeps a byte-identical payload.
+  textGranularity: z.enum(["word", "glyph"]).default("word"),
   // Resolved still-parity colour roles: the exact APCA-gated hexes the
   // card's still graphic painted (medal tint included), resolved by the
   // deterministic Python resolver. Empty strings = seed-permutation
@@ -436,6 +442,11 @@ export type AnimChannels = {
   resultProgress: number;
   // Per-word staggered reveal (kinetic_type); identity elsewhere.
   wordAt: (index: number) => { y: number; opacity: number };
+  // Per-glyph staggered reveal (kinetic_type / cascade under the seed gate);
+  // identity elsewhere. `index` is the running glyph index within a line. Only
+  // invoked when a card opts into glyph-level text (card.textGranularity ===
+  // "glyph"), so word-mode DOM is byte-identical whatever this channel holds.
+  glyphAt: (index: number) => { y: number; opacity: number };
 };
 
 // The nine executable intents. Kept in lock-step with
@@ -505,6 +516,10 @@ function animProgram(
   // Identity word reveal: the parent line owns motion + opacity, so a word
   // contributes nothing extra (no double-applied fades).
   const identityWord = () => ({ y: 0, opacity: 1 });
+  // Identity glyph reveal — same contract for the per-character channel. Every
+  // intent inherits this (via `...base`) so glyph-mode is a no-op unless the
+  // intent replaces it (kinetic_type below; cascade in its sprint module).
+  const identityGlyph = () => ({ y: 0, opacity: 1 });
 
   // M19 — beat-proportional choreography. Keyframes are FRACTIONS of the
   // clip so a 4s reel beat and a 6s story distribute the same build →
@@ -555,6 +570,7 @@ function animProgram(
     resolveAccentKind,
     resultProgress: 1,
     wordAt: identityWord,
+    glyphAt: identityGlyph,
   };
 
   // Kind-specific execution of the resolve accent that lives in the shared
@@ -662,6 +678,10 @@ function animProgram(
             ),
           };
         },
+        // Per-glyph reveal for cards that opted into glyph granularity. Seeded
+        // + clamped in the shared helper so held headline glyphs always clear
+        // the APCA floor before the hold phase (see motion/compile.ts).
+        glyphAt: (i: number) => glyphRevealAt(i, frame, fps, seed),
       });
     }
     case "parallax": {
@@ -721,6 +741,7 @@ function animProgram(
         resolveAccentKind: "none",
         resultProgress: 1,
         wordAt: identityWord,
+        glyphAt: identityGlyph,
       };
     }
     default: {
@@ -729,7 +750,7 @@ function animProgram(
       // ride along unless a sprint intent deliberately overrides them.
       const extra = EXTRA_INTENTS[intent];
       return withResolveAccent(
-        extra ? extra(frame, fps, durationInFrames, mood, base, stagger) : base,
+        extra ? extra(frame, fps, durationInFrames, mood, base, stagger, seed) : base,
       );
     }
   }
@@ -1081,15 +1102,56 @@ function placeDisplay(place: string): string {
 }
 
 // Staggered word row used by the kinetic_type-aware hero/poster scenes.
+// `perGlyph` (threaded from card.textGranularity === "glyph") splits each word
+// into per-character inline-block spans driven by `anim.glyphAt`; when
+// false/absent the DOM is byte-identical to the pre-glyph word structure.
 const KineticLine: React.FC<{
   text: string;
   anim: AnimChannels;
   style: React.CSSProperties;
   startIndex?: number;
-}> = ({ text, anim, style, startIndex = 0 }) => {
+  perGlyph?: boolean;
+}> = ({ text, anim, style, startIndex = 0, perGlyph = false }) => {
   const parts = words(text);
   if (parts.length === 0) {
     return null;
+  }
+  if (perGlyph) {
+    // Keep the per-word wrapper span (so the 0.28em inter-word gap is preserved
+    // exactly), but reveal each character on its own glyph channel with a
+    // running index carried across words from the line's glyph base.
+    let glyph = startIndex;
+    return (
+      <div style={style}>
+        {parts.map((w, wi) => {
+          const chars = Array.from(w);
+          const base = glyph;
+          glyph += chars.length;
+          return (
+            <span
+              key={`${w}-${wi}`}
+              style={{ display: "inline-block", marginRight: "0.28em" }}
+            >
+              {chars.map((ch, ci) => {
+                const a = anim.glyphAt(base + ci);
+                return (
+                  <span
+                    key={ci}
+                    style={{
+                      display: "inline-block",
+                      transform: `translateY(${a.y}px)`,
+                      opacity: a.opacity,
+                    }}
+                  >
+                    {ch}
+                  </span>
+                );
+              })}
+            </span>
+          );
+        })}
+      </div>
+    );
   }
   return (
     <div style={style}>
@@ -2120,6 +2182,7 @@ const HeroScene: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
       <KineticLine
         text={ctx.surnameText}
         anim={anim}
+        perGlyph={ctx.card.textGranularity === "glyph"}
         style={{
           position: "absolute",
           left: layout.textLeft,
@@ -2277,6 +2340,7 @@ const PosterScene: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
         <KineticLine
           text={mega}
           anim={anim}
+          perGlyph={ctx.card.textGranularity === "glyph"}
           style={{
             fontSize: megaSize,
             fontWeight: 900,
@@ -2714,6 +2778,7 @@ const SpotlightScene: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
         <KineticLine
           text={ctx.surnameText}
           anim={anim}
+          perGlyph={ctx.card.textGranularity === "glyph"}
           style={{
             marginTop: Math.round(70 * ts),
             fontSize: fitLinePx(ctx.surnameText, Math.round(140 * ts), width - 160 * ts),
@@ -2916,6 +2981,7 @@ const TickerScene: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
       <KineticLine
         text={ctx.surnameText}
         anim={anim}
+        perGlyph={ctx.card.textGranularity === "glyph"}
         style={{
           position: "absolute",
           left: 80,
@@ -3123,6 +3189,7 @@ const SplitScene: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
       <KineticLine
         text={ctx.surnameText}
         anim={anim}
+        perGlyph={ctx.card.textGranularity === "glyph"}
         style={{
           position: "absolute",
           left: 80,
@@ -3262,6 +3329,7 @@ const MagazineScene: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
       <KineticLine
         text={ctx.surnameText}
         anim={anim}
+        perGlyph={ctx.card.textGranularity === "glyph"}
         style={{
           position: "absolute",
           left: 80,

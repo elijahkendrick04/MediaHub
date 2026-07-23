@@ -18,7 +18,7 @@ import json
 from typing import Any, Dict, Iterable
 
 from .easing import EASINGS
-from .vocabulary import FPS, MOTION_REV, PRESETS, MotionPreset
+from .vocabulary import FPS, GLYPH_STAGGER_SEC, MOTION_REV, PRESETS, MotionPreset
 
 
 def preset_tokens(preset: MotionPreset) -> Dict[str, Any]:
@@ -50,6 +50,11 @@ def token_bundle(presets: Iterable[MotionPreset] | None = None) -> Dict[str, Any
         "easings": {name: {"bezier": list(e.bezier)} for name, e in EASINGS.items()},
         "presets": {p.name: preset_tokens(p) for p in items},
         "reduced": {p.name: preset_tokens(p.reduced()) for p in items},
+        # Text-level timing shared by the TSX type channels. `glyphStaggerSec`
+        # is the per-glyph reveal cadence the kinetic_type / cascade intents read
+        # for their opt-in per-character reveal (the per-word channel keeps its
+        # own inline tempo). Single source of truth — the TSX never hard-codes it.
+        "text": {"glyphStaggerSec": round(GLYPH_STAGGER_SEC, 6)},
     }
 
 
@@ -85,6 +90,7 @@ def export_ts(bundle: Dict[str, Any] | None = None) -> str:
         "  easings: Record<string, { bezier: number[] }>;\n"
         "  presets: Record<string, MotionPresetTokens>;\n"
         "  reduced: Record<string, MotionPresetTokens>;\n"
+        "  text: { glyphStaggerSec: number };\n"
         "};\n"
         "\n"
         f"export const MOTION_TOKENS: MotionTokenBundle = {payload} as const;\n"

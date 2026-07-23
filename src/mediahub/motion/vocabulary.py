@@ -40,9 +40,22 @@ from .easing import DEFAULT_EASING, get_easing
 # Vocabulary revision — bumped when the deterministic preset output changes for
 # unchanged inputs, so a motion-vocabulary change supersedes stale cache entries
 # and the generated Remotion token bundle is re-checked for drift.
-MOTION_REV = 1
+#   1 — original preset registry.
+#   2 — per-glyph reveal: the token bundle now carries text.glyphStaggerSec (the
+#       per-glyph reveal cadence the kinetic_type / cascade intents share).
+MOTION_REV = 2
 
 FPS = 30
+
+# Per-glyph reveal cadence (seconds) — the base stagger step between consecutive
+# characters when a kinetic_type / cascade card opts into glyph-level reveal
+# (motion.py's seed gate). It is the SINGLE source of truth for the token bundle
+# and the TSX glyph channel; the TSX clamps the resulting per-glyph start so the
+# WHOLE line resolves to opacity 1 within the same short reveal budget as the
+# per-word channel (so held headline glyphs never sit below the APCA floor),
+# independent of glyph count. Frame-pure — no Math.random.
+GLYPH_STAGGER_SEC = 0.035
+
 MAX_ANIM_SECONDS = 10.0
 MAX_ANIMS_PER_DESIGN = 50
 MAX_ANIM_FRAMES = int(MAX_ANIM_SECONDS * FPS)
@@ -598,6 +611,7 @@ def nearest_ken_burns_variant(name: str) -> str | None:
 __all__ = [
     "MOTION_REV",
     "FPS",
+    "GLYPH_STAGGER_SEC",
     "MAX_ANIM_SECONDS",
     "MAX_ANIMS_PER_DESIGN",
     "MAX_ANIM_FRAMES",

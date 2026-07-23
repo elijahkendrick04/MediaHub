@@ -227,6 +227,43 @@ export const KineticWords: React.FC<{
   if (parts.length === 0) {
     return null;
   }
+  // Glyph granularity (kinetic_type / cascade under the seed gate) splits each
+  // word into per-character inline-block spans on the shared glyph channel; word
+  // mode (the default) is byte-identical to the pre-glyph structure.
+  if (ctx.card.textGranularity === "glyph") {
+    let glyph = startIndex;
+    return (
+      <div style={style}>
+        {parts.map((w, wi) => {
+          const chars = Array.from(w);
+          const base = glyph;
+          glyph += chars.length;
+          return (
+            <span
+              key={`${w}-${wi}`}
+              style={{ display: "inline-block", marginRight: "0.28em" }}
+            >
+              {chars.map((ch, ci) => {
+                const a = ctx.anim.glyphAt(base + ci);
+                return (
+                  <span
+                    key={ci}
+                    style={{
+                      display: "inline-block",
+                      transform: `translateY(${a.y}px)`,
+                      opacity: a.opacity,
+                    }}
+                  >
+                    {ch}
+                  </span>
+                );
+              })}
+            </span>
+          );
+        })}
+      </div>
+    );
+  }
   return (
     <div style={style}>
       {parts.map((w, i) => {

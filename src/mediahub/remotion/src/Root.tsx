@@ -73,6 +73,7 @@ const defaultCard = {
   roleMedalRamp: "",
   roleMedalNumeralRamp: "",
   motionIntent: "",
+  textGranularity: "word" as "word" | "glyph",
   roleGround: "",
   roleSurface: "",
   roleAccent: "",

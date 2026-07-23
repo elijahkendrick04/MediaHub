@@ -10,10 +10,74 @@
 // StoryCard AnimChannels, staggering hero → result → chrome by importance (the
 // motion-craft choreography rule), so a sprint intent file becomes a one-liner.
 
-import { interpolate } from "remotion";
+import { interpolate, spring } from "remotion";
 import type { AnimChannels } from "../compositions/StoryCard";
 import { easingFor } from "./easing";
 import { MOTION_TOKENS, MotionPresetTokens } from "./tokens.generated";
+
+// ---------------------------------------------------------------------------
+// Per-glyph reveal (kinetic_type / cascade opt-in)
+// ---------------------------------------------------------------------------
+//
+// The shared, frame-pure per-character reveal channel. Both type-carried intents
+// (kinetic_type in StoryCard, cascade in sprint/intents) drive `glyphAt` through
+// this one function so their cadence can never drift, and the stagger step is
+// read from the token bundle (MOTION_TOKENS.text.glyphStaggerSec) — never hard-
+// coded in the TSX.
+//
+// APCA-safety (the correction the planner flagged): the per-glyph start is
+// CLAMPED so the LAST glyph of a line always reaches opacity 1 within the same
+// short absolute budget as the per-word channel (~half a second), regardless of
+// glyph count. A long hero line therefore can never carry sub-opacity headline
+// glyphs into the resolve/hold phase — held text always clears the APCA floor.
+//
+// Determinism: a small per-glyph phase jitter is a pure integer mix of the
+// card's variationSeed and the glyph index (no Math.random / Date.now), so
+// sibling cards scatter differently but every render of the same frame is
+// bit-stable.
+
+const GLYPH_REVEAL_SEC = 0.2; // per-glyph opacity fade duration
+const GLYPH_BUDGET_SEC = 0.5; // absolute cap: every glyph is opaque by here
+
+/** Deterministic 32-bit hash of (seed, glyphIndex) — frame-pure, no randomness. */
+function glyphHash(seed: number, index: number): number {
+  let x = (Math.imul(seed | 0, 73856093) ^ Math.imul(index | 0, 19349663)) >>> 0;
+  x = Math.imul(x ^ (x >>> 13), 0x5bd1e995) >>> 0;
+  return (x ^ (x >>> 15)) >>> 0;
+}
+
+/**
+ * Reveal one glyph at running index `i` for `frame`. Returns the same
+ * `{ y, opacity }` shape as the per-word channel. The start offset grows with
+ * `i` at the tokenised cadence but is clamped to `GLYPH_BUDGET_SEC -
+ * GLYPH_REVEAL_SEC`, so the whole line resolves inside the reveal budget.
+ */
+export function glyphRevealAt(
+  i: number,
+  frame: number,
+  fps: number,
+  seed: number,
+): { y: number; opacity: number } {
+  const staggerSec = MOTION_TOKENS.text.glyphStaggerSec;
+  const revealFrames = fps * GLYPH_REVEAL_SEC;
+  const maxStart = Math.max(0, fps * GLYPH_BUDGET_SEC - revealFrames);
+  // A deterministic sub-step jitter in [0, 0.6) of one glyph step so cards with
+  // different seeds scatter their characters instead of a metronomic wipe.
+  const jitter = 0.6 * ((glyphHash(seed, i) % 1000) / 1000);
+  const start = Math.min((i + jitter) * staggerSec * fps, maxStart);
+  const s = spring({
+    frame: Math.max(0, frame - start),
+    fps,
+    config: { damping: 16, stiffness: 170, mass: 0.6 },
+  });
+  return {
+    y: interpolate(s, [0, 1], [40, 0]),
+    opacity: interpolate(frame, [start, start + revealFrames], [0, 1], {
+      extrapolateLeft: "clamp",
+      extrapolateRight: "clamp",
+    }),
+  };
+}
 
 const REST: Record<string, number> = {
   opacity: 1,

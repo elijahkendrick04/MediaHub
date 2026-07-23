@@ -21,6 +21,7 @@ export type MotionTokenBundle = {
   easings: Record<string, { bezier: number[] }>;
   presets: Record<string, MotionPresetTokens>;
   reduced: Record<string, MotionPresetTokens>;
+  text: { glyphStaggerSec: number };
 };
 
 export const MOTION_TOKENS: MotionTokenBundle = {
@@ -1376,7 +1377,10 @@ export const MOTION_TOKENS: MotionTokenBundle = {
       "photo": false
     }
   },
-  "version": 1
+  "text": {
+    "glyphStaggerSec": 0.035
+  },
+  "version": 2
 } as const;
 
 export default MOTION_TOKENS;

@@ -1045,6 +1045,11 @@ def render_story_card_from_props(
                 # path animates the card's pre-baked still and cannot play a
                 # video plane) — an honest capability note, never a fake beat.
                 "footage": "unsupported-on-engine",
+                # Per-glyph text reveal needs the DOM Remotion path; this engine
+                # animates the pre-baked still, so any glyph-granularity request
+                # degrades honestly to the whole-still render — never a faked
+                # per-character animation.
+                "text_granularity": "per-glyph-unsupported-on-engine",
                 "engine_note": (
                     "Rendered by the reduced-motion FFmpeg engine: the card's own "
                     "approved still with a deterministic camera move — no text "
@@ -1234,6 +1239,10 @@ def render_meet_reel_from_props(
                 # path animates pre-baked stills and cannot play a video
                 # plane) — an honest capability note, never a fake beat.
                 "footage": "unsupported-on-engine",
+                # Per-glyph text reveal needs the DOM Remotion path; each beat
+                # here is the pre-baked still, so a glyph-granularity request
+                # degrades honestly — never a faked per-character animation.
+                "text_granularity": "per-glyph-unsupported-on-engine",
                 "engine_note": (
                     "Rendered by the reduced-motion FFmpeg engine: each beat is "
                     "the card's own approved still with a deterministic camera "

@@ -1408,6 +1408,18 @@ def _card_to_props(
     _stagger_scale = _entrance_stagger_scale(props.get("mood", ""), props.get("motionIntent", ""))
     if _stagger_scale != 1.0:
         props["staggerScale"] = _stagger_scale
+    # per-glyph text reveal: the two type-carried intents (kinetic_type /
+    # cascade) can render their headline one CHARACTER at a time instead of one
+    # word at a time. Selection is a deterministic engine decision (a seed gate),
+    # never a director/LLM field — half the seeds of those two intents opt in, so
+    # sibling cards vary. Attached ONLY when it fires (fold-only-when-present), so
+    # every other card keeps a byte-identical prop dict / cache key; the TSX reads
+    # "word" by default and renders the byte-identical per-word DOM.
+    if (
+        props.get("motionIntent") in ("kinetic_type", "cascade")
+        and int(variation_seed or 0) % 2 == 1
+    ):
+        props["textGranularity"] = "glyph"
     # F9 medal chrome (still parity): the resolved specular ramp, attached only
     # on a gate-passing medal card so non-medal cards keep byte-identical props.
     medal_ramp = roles.get("roleMedalRamp", "")
@@ -1644,6 +1656,7 @@ def _card_manifest_axes(card_props: dict) -> dict:
         "style_pack": card_props.get("stylePack") or "",
         "overlap_accent": card_props.get("overlapAccent") or "",
         "motion_intent": card_props.get("motionIntent") or "",
+        "text_granularity": card_props.get("textGranularity") or "word",
         "accent_style": card_props.get("accentStyle") or "",
         "photo_treatment": card_props.get("photoTreatment") or "",
         "background_style": card_props.get("backgroundStyle") or "",
@@ -2446,7 +2459,12 @@ REEL_TOTAL_RANGE = (3.0, 60.0)
 #         motion) replaces the isotropic CSS blur() on both the incoming
 #         (TransitionWrap) and paired exit (ExitWrap) whip. Reel-only (whip
 #         lives only in MeetReel), so cached reels retire; story is untouched.
-REEL_COMPOSITION_REVISION = "6"
+#   "7" — per-glyph text reveal: the shared KineticLine / KineticWords gained a
+#         glyph-granularity branch for the kinetic_type / cascade intents. Word
+#         mode is byte-identical; belt-and-braces bump since the shared line
+#         component changed (renderer_generation already busts + re-renders the
+#         untouched cards identically).
+REEL_COMPOSITION_REVISION = "7"
 
 # Story composition revision — folded into the STORY cache key (M15). The
 # story payload historically had no revision field; introducing one both
@@ -2471,7 +2489,11 @@ REEL_COMPOSITION_REVISION = "6"
 #         change is reel-only, but StoryCard shares the text_fx + photo_scrim
 #         sprint layers, so these firmer values change a story's deterministic
 #         output for an unchanged payload too — hence the story bump.
-STORY_COMPOSITION_REVISION = "3"
+#   "4" — per-glyph text reveal: KineticLine gained a glyph-granularity branch
+#         (kinetic_type / cascade opt in via the deterministic seed gate). Word
+#         mode renders byte-identically, so an unchanged, non-opted-in payload is
+#         pixel-identical; this bump is belt-and-braces for the shared component.
+STORY_COMPOSITION_REVISION = "4"
 
 
 def _clamp(value: float, lo: float, hi: float) -> float:
