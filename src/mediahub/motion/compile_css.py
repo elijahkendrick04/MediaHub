@@ -35,12 +35,22 @@ def class_name(preset: MotionPreset) -> str:
 
 
 def _needs_fine_grid(preset: MotionPreset) -> bool:
-    """True when any channel uses a non-linear easing or 3+ keyframes."""
+    """True when any channel uses a non-linear easing, 3+ keyframes, or a
+    non-bezier interp mode.
+
+    The last condition matters: a ``hold`` / ``auto`` / ``continuous`` segment is
+    not a plain linear tween between endpoints, so baking only the {0,1} stops
+    would let the browser tween it linearly while ``_sample`` produces a step or
+    Hermite curve — a silent CSS↔Remotion divergence. A fine grid samples enough
+    stops from the same ``value_at`` (_sample) that CSS playback tracks it.
+    """
     for kfs in preset.channels.values():
         if len(kfs) > 2:
             return True
         for k in kfs:
             if k.easing != "linear":
+                return True
+            if k.interp != "bezier":
                 return True
     return False
 

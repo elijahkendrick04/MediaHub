@@ -3,7 +3,7 @@
 // The single source of truth is the Python preset registry; a guard
 // test (tests/test_motion_tokens_sync.py) fails if this drifts.
 
-export type MotionKeyframe = { offset: number; value: number; easing: string };
+export type MotionKeyframe = { offset: number; value: number; easing: string; interp?: "hold" | "auto" | "continuous" };
 export type MotionChannels = Record<string, MotionKeyframe[]>;
 export type MotionPresetTokens = {
   name: string;

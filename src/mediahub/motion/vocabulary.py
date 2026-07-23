@@ -83,6 +83,18 @@ FAMILIES: Tuple[str, ...] = ("in", "loop", "out")
 ENERGIES: Tuple[str, ...] = ("calm", "standard", "electric")
 DIRECTIONS: Tuple[str, ...] = ("up", "down", "left", "right", "in", "out", "none")
 
+# Per-keyframe interpolation modes. ``bezier`` (the default) eases the SEGMENT
+# into this keyframe with its ``easing`` curve — today's behaviour, unchanged.
+# The three others describe how the *track* passes through this keyframe:
+#   * ``hold``       — step: the value holds the previous keyframe until this
+#                      offset, then jumps (no tween).
+#   * ``auto``       — smooth cubic-Hermite over the (offset,value) track with
+#                      Catmull-Rom finite-difference tangents, flattened to 0 at
+#                      a local extremum so the curve never overshoots a neighbour.
+#   * ``continuous`` — the same cubic-Hermite but keeping the raw tangent, so
+#                      velocity is continuous across the keyframe (may overshoot).
+INTERP_MODES: Tuple[str, ...] = ("bezier", "hold", "auto", "continuous")
+
 
 class MotionCapError(ValueError):
     """Raised when a design exceeds the engineering caps."""
@@ -94,16 +106,29 @@ class Keyframe:
 
     ``easing`` is the curve travelled *into* this keyframe from the previous one
     (a CSS keyframe declares the timing function of the segment that starts at
-    it — same convention).
+    it — same convention). ``interp`` selects the interpolation MODE for the
+    segment ending at this keyframe: ``bezier`` (default) applies ``easing`` as
+    today; ``hold`` / ``auto`` / ``continuous`` are the step and cubic-Hermite
+    shapes described on :data:`INTERP_MODES`. An unknown mode raises at
+    construction — no silent guess.
     """
 
     offset: float
     value: float
     easing: str = DEFAULT_EASING
+    interp: str = "bezier"
+
+    def __post_init__(self) -> None:
+        if self.interp not in INTERP_MODES:
+            raise MotionCapError(
+                f"unknown keyframe interp mode {self.interp!r} (expected one of {INTERP_MODES})"
+            )
 
 
-def kf(offset: float, value: float, easing: str = DEFAULT_EASING) -> Keyframe:
-    return Keyframe(offset=float(offset), value=float(value), easing=easing)
+def kf(
+    offset: float, value: float, easing: str = DEFAULT_EASING, interp: str = "bezier"
+) -> Keyframe:
+    return Keyframe(offset=float(offset), value=float(value), easing=easing, interp=interp)
 
 
 @dataclass(frozen=True)
@@ -165,6 +190,60 @@ class MotionPreset:
         return replace(self, duration_frames=MAX_ANIM_FRAMES)
 
 
+def _sign(x: float) -> int:
+    return (x > 0.0) - (x < 0.0)
+
+
+def _track_tangents(kfs: Sequence[Keyframe], mode: str) -> list[float]:
+    """Catmull-Rom finite-difference tangents (dv/dt) over the (offset,value) track.
+
+    Interior tangent ``m_i = (v[i+1]-v[i-1]) / (t[i+1]-t[i-1])``; endpoints are
+    one-sided. For ``auto`` the tangent is flattened to 0 at a local extremum
+    (``sign(v[i]-v[i-1]) != sign(v[i+1]-v[i])``) so the curve never overshoots a
+    neighbour; ``continuous`` keeps the raw finite difference. Pure arithmetic —
+    the TS ``trackTangents`` mirrors it exactly.
+    """
+    n = len(kfs)
+    t = [k.offset for k in kfs]
+    v = [k.value for k in kfs]
+    m = [0.0] * n
+    for i in range(n):
+        if i == 0:
+            span = t[1] - t[0]
+            m[i] = 0.0 if span == 0 else (v[1] - v[0]) / span
+        elif i == n - 1:
+            span = t[n - 1] - t[n - 2]
+            m[i] = 0.0 if span == 0 else (v[n - 1] - v[n - 2]) / span
+        else:
+            span = t[i + 1] - t[i - 1]
+            m[i] = 0.0 if span == 0 else (v[i + 1] - v[i - 1]) / span
+            if mode == "auto" and _sign(v[i] - v[i - 1]) != _sign(v[i + 1] - v[i]):
+                m[i] = 0.0
+    return m
+
+
+def _hermite_at(kfs: Sequence[Keyframe], i: int, t: float, mode: str) -> float:
+    """Cubic-Hermite value of the segment ``kfs[i-1] -> kfs[i]`` at ``t``.
+
+    Standard Hermite basis with the finite-difference tangents scaled by the
+    segment span (so the normalised parameter ``s`` stays in [0,1]).
+    """
+    a, b = kfs[i - 1], kfs[i]
+    span = b.offset - a.offset
+    if span <= 0:
+        return b.value
+    tangents = _track_tangents(kfs, mode)
+    m0, m1 = tangents[i - 1], tangents[i]
+    s = (t - a.offset) / span
+    s2 = s * s
+    s3 = s2 * s
+    h00 = 2 * s3 - 3 * s2 + 1
+    h10 = s3 - 2 * s2 + s
+    h01 = -2 * s3 + 3 * s2
+    h11 = s3 - s2
+    return h00 * a.value + h10 * span * m0 + h01 * b.value + h11 * span * m1
+
+
 def _sample(kfs: Sequence[Keyframe], t: float) -> float:
     """Eased interpolation of a keyframe track at ``t`` (0..1)."""
     if t <= kfs[0].offset:
@@ -174,6 +253,12 @@ def _sample(kfs: Sequence[Keyframe], t: float) -> float:
     for i in range(1, len(kfs)):
         a, b = kfs[i - 1], kfs[i]
         if t <= b.offset:
+            mode = b.interp
+            if mode == "hold":
+                # Step: hold the previous value until this offset, jump AT it.
+                return a.value if t < b.offset else b.value
+            if mode == "auto" or mode == "continuous":
+                return _hermite_at(kfs, i, t, mode)
             span = b.offset - a.offset
             local = 0.0 if span <= 0 else (t - a.offset) / span
             eased = get_easing(b.easing).sample(local)
@@ -617,6 +702,7 @@ __all__ = [
     "MAX_ANIM_FRAMES",
     "CHANNELS",
     "REST",
+    "INTERP_MODES",
     "FAMILIES",
     "ENERGIES",
     "DIRECTIONS",

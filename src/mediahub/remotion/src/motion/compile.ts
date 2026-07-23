@@ -14,7 +14,7 @@ import { interpolate, spring } from "remotion";
 import type { AnimChannels } from "../compositions/StoryCard";
 import { selectRangeFor, selectorRank } from "../compositions/sprint/rangeSelector";
 import { easingFor } from "./easing";
-import { MOTION_TOKENS, MotionPresetTokens } from "./tokens.generated";
+import { MOTION_TOKENS, MotionKeyframe, MotionPresetTokens } from "./tokens.generated";
 
 // ---------------------------------------------------------------------------
 // Per-glyph reveal (kinetic_type / cascade opt-in)
@@ -105,6 +105,70 @@ const REST: Record<string, number> = {
   blur: 0,
 };
 
+// ---------------------------------------------------------------------------
+// Non-bezier interpolation modes (hold / auto / continuous)
+// ---------------------------------------------------------------------------
+//
+// These mirror the Python `_track_tangents` / `_hermite_at` in
+// src/mediahub/motion/vocabulary.py EXACTLY — same finite-difference tangents,
+// same Hermite basis — so a preset that opts into a mode samples identically on
+// every surface. Pure arithmetic, frame-pure (no Math.random / Date.now).
+
+function sign(x: number): number {
+  return x > 0 ? 1 : x < 0 ? -1 : 0;
+}
+
+/** Catmull-Rom finite-difference tangents (dv/dt) over the (offset,value) track. */
+function trackTangents(kfs: MotionKeyframe[], mode: string): number[] {
+  const n = kfs.length;
+  const m: number[] = new Array(n).fill(0);
+  for (let i = 0; i < n; i++) {
+    if (i === 0) {
+      const span = kfs[1].offset - kfs[0].offset;
+      m[i] = span === 0 ? 0 : (kfs[1].value - kfs[0].value) / span;
+    } else if (i === n - 1) {
+      const span = kfs[n - 1].offset - kfs[n - 2].offset;
+      m[i] = span === 0 ? 0 : (kfs[n - 1].value - kfs[n - 2].value) / span;
+    } else {
+      const span = kfs[i + 1].offset - kfs[i - 1].offset;
+      m[i] = span === 0 ? 0 : (kfs[i + 1].value - kfs[i - 1].value) / span;
+      if (
+        mode === "auto" &&
+        sign(kfs[i].value - kfs[i - 1].value) !== sign(kfs[i + 1].value - kfs[i].value)
+      ) {
+        m[i] = 0;
+      }
+    }
+  }
+  return m;
+}
+
+/** Cubic-Hermite value of segment `kfs[i-1] -> kfs[i]` at `t` (mirrors Python). */
+function hermiteAt(
+  kfs: MotionKeyframe[],
+  i: number,
+  t: number,
+  mode: string,
+): number {
+  const a = kfs[i - 1];
+  const b = kfs[i];
+  const span = b.offset - a.offset;
+  if (span <= 0) {
+    return b.value;
+  }
+  const tangents = trackTangents(kfs, mode);
+  const m0 = tangents[i - 1];
+  const m1 = tangents[i];
+  const s = (t - a.offset) / span;
+  const s2 = s * s;
+  const s3 = s2 * s;
+  const h00 = 2 * s3 - 3 * s2 + 1;
+  const h10 = s3 - 2 * s2 + s;
+  const h01 = -2 * s3 + 3 * s2;
+  const h11 = s3 - s2;
+  return h00 * a.value + h10 * span * m0 + h01 * b.value + h11 * span * m1;
+}
+
 export function presetFor(
   name: string,
   reduced = false,
@@ -144,6 +208,14 @@ export function sampleChannel(
     const a = kfs[i - 1];
     const b = kfs[i];
     if (t <= b.offset) {
+      const mode = b.interp;
+      if (mode === "hold") {
+        // Step: hold the previous value until this offset, jump AT it.
+        return t < b.offset ? a.value : b.value;
+      }
+      if (mode === "auto" || mode === "continuous") {
+        return hermiteAt(kfs, i, t, mode);
+      }
       const span = b.offset - a.offset || 1;
       const localSeg = (t - a.offset) / span;
       return interpolate(localSeg, [0, 1], [a.value, b.value], {

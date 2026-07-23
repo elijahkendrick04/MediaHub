@@ -21,6 +21,23 @@ from .easing import EASINGS
 from .vocabulary import FPS, GLYPH_STAGGER_SEC, MOTION_REV, PRESETS, MotionPreset
 
 
+def _kf_token(k) -> Dict[str, Any]:
+    """One keyframe as a token dict.
+
+    ``interp`` is emitted ONLY when non-default (fold-only-when-present), so the
+    serialized dict for every shipped bezier preset stays byte-identical and the
+    generated ``tokens.generated.ts`` DATA blocks do not change.
+    """
+    tok: Dict[str, Any] = {
+        "offset": round(k.offset, 6),
+        "value": round(k.value, 6),
+        "easing": k.easing,
+    }
+    if k.interp != "bezier":
+        tok["interp"] = k.interp
+    return tok
+
+
 def preset_tokens(preset: MotionPreset) -> Dict[str, Any]:
     """One preset as interpolation tokens (channels → keyframes)."""
     return {
@@ -31,13 +48,7 @@ def preset_tokens(preset: MotionPreset) -> Dict[str, Any]:
         "durationFrames": preset.duration_frames,
         "loop": preset.loop,
         "photo": preset.photo,
-        "channels": {
-            ch: [
-                {"offset": round(k.offset, 6), "value": round(k.value, 6), "easing": k.easing}
-                for k in kfs
-            ]
-            for ch, kfs in preset.channels.items()
-        },
+        "channels": {ch: [_kf_token(k) for k in kfs] for ch, kfs in preset.channels.items()},
     }
 
 
@@ -72,7 +83,8 @@ def export_ts(bundle: Dict[str, Any] | None = None) -> str:
         "// The single source of truth is the Python preset registry; a guard\n"
         "// test (tests/test_motion_tokens_sync.py) fails if this drifts.\n"
         "\n"
-        "export type MotionKeyframe = { offset: number; value: number; easing: string };\n"
+        "export type MotionKeyframe = { offset: number; value: number; easing: string;"
+        ' interp?: "hold" | "auto" | "continuous" };\n'
         "export type MotionChannels = Record<string, MotionKeyframe[]>;\n"
         "export type MotionPresetTokens = {\n"
         "  name: string;\n"
