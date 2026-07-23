@@ -232,6 +232,7 @@ export const KineticWords: React.FC<{
   // mode (the default) is byte-identical to the pre-glyph structure.
   if (ctx.card.textGranularity === "glyph") {
     let glyph = startIndex;
+    const lineTotal = parts.reduce((n, w) => n + Array.from(w).length, 0);
     return (
       <div style={style}>
         {parts.map((w, wi) => {
@@ -244,7 +245,7 @@ export const KineticWords: React.FC<{
               style={{ display: "inline-block", marginRight: "0.28em" }}
             >
               {chars.map((ch, ci) => {
-                const a = ctx.anim.glyphAt(base + ci);
+                const a = ctx.anim.glyphAt(base + ci, lineTotal);
                 return (
                   <span
                     key={ci}

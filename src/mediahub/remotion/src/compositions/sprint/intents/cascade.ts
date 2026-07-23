@@ -19,7 +19,7 @@ const program: IntentProgram = (
   frame,
   fps,
   _durationInFrames,
-  _mood,
+  mood,
   base,
   _stagger,
   seed = 0,
@@ -77,10 +77,12 @@ const program: IntentProgram = (
       };
     },
     // Per-glyph cascade for cards that opted into glyph granularity — the same
-    // seeded, APCA-clamped reveal kinetic_type uses, driven by the seed the
-    // registry now threads in (cascade previously had no seed in scope, which is
-    // why the shared IntentProgram signature was extended). Frame-pure.
-    glyphAt: (i: number) => glyphRevealAt(i, frame, fps, seed),
+    // seeded, ORDER × SHAPE-selected, APCA-clamped reveal kinetic_type uses,
+    // driven by the seed the registry now threads in (cascade previously had no
+    // seed in scope, which is why the shared IntentProgram signature was
+    // extended). Frame-pure.
+    glyphAt: (i: number, total: number) =>
+      glyphRevealAt(i, total, frame, fps, seed, mood),
   };
 };
 

@@ -462,3 +462,25 @@ def test_render_js_supports_width_height_override():
     assert re.search(
         r"width,\s*\n\s*height,", src
     ), "render.js must pass the overridden canvas into renderMedia"
+
+
+# ---------------------------------------------------------------------------
+# Per-glyph reveal ordering — the range-selector vocabulary is wired in
+# ---------------------------------------------------------------------------
+
+
+def test_per_glyph_channel_flows_through_range_selector():
+    """Drift guard: the per-glyph reveal for BOTH type-carried intents
+    (kinetic_type inline in StoryCard, cascade as a sprint intent) must drive
+    the shared `glyphRevealAt`, which routes each glyph's stagger through the
+    seeded ORDER × SHAPE range-selector vocabulary. The vocabulary module must
+    live in the scanned sprint corpus, and the default selector must be the
+    {index, linear} identity ramp (so a non-varied glyph card is unchanged)."""
+    src = _motion_source_corpus()
+    # The vocabulary module is present in the corpus and exports its selection fn.
+    assert "export function selectRangeFor(" in src
+    assert 'export type RangeOrder = "index" | "reverse" | "center_out" | "seeded";' in src
+    # Both intents thread (index, total, ..., mood) into the shared reveal helper.
+    assert src.count("glyphRevealAt(i, total, frame, fps, seed, mood),") == 2
+    # Identity default preserved (byte-identical path for restraint moods).
+    assert "return { ...IDENTITY_SELECTOR };" in src

@@ -49,9 +49,10 @@ def test_staggerscale_folds_into_story_cache_key_only_when_present():
     assert h_plain != h_scaled
     # The prop carries the change, so the staggerScale feature itself needs no
     # composition-revision bump. (The constant tracks whatever the current story
-    # revision is — bumped to "4" by the later per-glyph-text change, which is
-    # unrelated to staggerScale's fold-only-when-present behaviour proved above.)
-    assert motion.STORY_COMPOSITION_REVISION == "4"
+    # revision is — bumped to "5" by the later per-glyph-text + range-selector
+    # changes, which are unrelated to staggerScale's fold-only-when-present
+    # behaviour proved above.)
+    assert motion.STORY_COMPOSITION_REVISION == "5"
 
 
 def test_card_to_props_attaches_staggerscale_only_when_active():

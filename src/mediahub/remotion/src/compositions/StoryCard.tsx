@@ -443,10 +443,12 @@ export type AnimChannels = {
   // Per-word staggered reveal (kinetic_type); identity elsewhere.
   wordAt: (index: number) => { y: number; opacity: number };
   // Per-glyph staggered reveal (kinetic_type / cascade under the seed gate);
-  // identity elsewhere. `index` is the running glyph index within a line. Only
+  // identity elsewhere. `index` is the running glyph index within a line and
+  // `total` the line's glyph count — both feed the seeded ORDER × SHAPE range
+  // selector so glyphs can reveal in reverse / centre-out / seeded order. Only
   // invoked when a card opts into glyph-level text (card.textGranularity ===
   // "glyph"), so word-mode DOM is byte-identical whatever this channel holds.
-  glyphAt: (index: number) => { y: number; opacity: number };
+  glyphAt: (index: number, total: number) => { y: number; opacity: number };
 };
 
 // The nine executable intents. Kept in lock-step with
@@ -679,9 +681,11 @@ function animProgram(
           };
         },
         // Per-glyph reveal for cards that opted into glyph granularity. Seeded
-        // + clamped in the shared helper so held headline glyphs always clear
-        // the APCA floor before the hold phase (see motion/compile.ts).
-        glyphAt: (i: number) => glyphRevealAt(i, frame, fps, seed),
+        // ORDER × SHAPE ranking + clamped in the shared helper so held headline
+        // glyphs always clear the APCA floor before the hold phase whatever the
+        // ordering (see motion/compile.ts + sprint/rangeSelector.ts).
+        glyphAt: (i: number, total: number) =>
+          glyphRevealAt(i, total, frame, fps, seed, mood),
       });
     }
     case "parallax": {
@@ -1121,6 +1125,7 @@ const KineticLine: React.FC<{
     // exactly), but reveal each character on its own glyph channel with a
     // running index carried across words from the line's glyph base.
     let glyph = startIndex;
+    const lineTotal = parts.reduce((n, w) => n + Array.from(w).length, 0);
     return (
       <div style={style}>
         {parts.map((w, wi) => {
@@ -1133,7 +1138,7 @@ const KineticLine: React.FC<{
               style={{ display: "inline-block", marginRight: "0.28em" }}
             >
               {chars.map((ch, ci) => {
-                const a = anim.glyphAt(base + ci);
+                const a = anim.glyphAt(base + ci, lineTotal);
                 return (
                   <span
                     key={ci}

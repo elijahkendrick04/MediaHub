@@ -93,8 +93,9 @@ def test_ffmpeg_manifests_declare_per_glyph_unsupported():
 
 
 def test_revisions_bumped_for_shared_kineticline_change():
-    assert motion.STORY_COMPOSITION_REVISION == "4"
-    assert motion.REEL_COMPOSITION_REVISION == "7"
+    # Bumped again by range-selectors (glyph reveal ORDER × SHAPE now varies).
+    assert motion.STORY_COMPOSITION_REVISION == "5"
+    assert motion.REEL_COMPOSITION_REVISION == "8"
 
 
 # ---------------------------------------------------------------------------
@@ -116,14 +117,14 @@ def test_token_bundle_exposes_glyph_stagger():
 
 
 def test_animchannels_has_required_glyph_channel():
-    assert "glyphAt: (index: number) => { y: number; opacity: number };" in STORY_TSX
+    assert "glyphAt: (index: number, total: number) => { y: number; opacity: number };" in STORY_TSX
     # base + static both set the identity glyph so every intent inherits it.
     assert STORY_TSX.count("glyphAt: identityGlyph") == 2
     assert "const identityGlyph = () => ({ y: 0, opacity: 1 });" in STORY_TSX
 
 
 def test_kinetic_type_drives_the_glyph_channel():
-    assert "glyphAt: (i: number) => glyphRevealAt(i, frame, fps, seed)," in STORY_TSX
+    assert "glyphRevealAt(i, total, frame, fps, seed, mood)," in STORY_TSX
 
 
 def test_kineticline_word_mode_preserved_and_glyph_branch_added():
@@ -131,14 +132,14 @@ def test_kineticline_word_mode_preserved_and_glyph_branch_added():
     assert "{kernNumeric(w)}" in STORY_TSX
     # Glyph branch: per-word wrapper kept, characters split onto glyphAt.
     assert "if (perGlyph) {" in STORY_TSX
-    assert "const a = anim.glyphAt(base + ci);" in STORY_TSX
+    assert "const a = anim.glyphAt(base + ci, lineTotal);" in STORY_TSX
     # All six call sites thread the flag from the card.
     assert STORY_TSX.count('perGlyph={ctx.card.textGranularity === "glyph"}') == 6
 
 
 def test_scenekit_kineticwords_mirrors_glyph_split():
     assert 'ctx.card.textGranularity === "glyph"' in SCENEKIT_TSX
-    assert "const a = ctx.anim.glyphAt(base + ci);" in SCENEKIT_TSX
+    assert "const a = ctx.anim.glyphAt(base + ci, lineTotal);" in SCENEKIT_TSX
 
 
 def test_intentprogram_threads_seed_and_dispatch_passes_it():
@@ -146,7 +147,7 @@ def test_intentprogram_threads_seed_and_dispatch_passes_it():
     assert "seed?: number," in REGISTRY_TS
     assert "extra(frame, fps, durationInFrames, mood, base, stagger, seed)" in STORY_TSX
     assert "seed = 0," in CASCADE_TS
-    assert "glyphAt: (i: number) => glyphRevealAt(i, frame, fps, seed)," in CASCADE_TS
+    assert "glyphRevealAt(i, total, frame, fps, seed, mood)," in CASCADE_TS
 
 
 def test_glyph_reveal_helper_is_frame_pure_and_apca_clamped():
@@ -161,4 +162,4 @@ def test_glyph_reveal_helper_is_frame_pure_and_apca_clamped():
     # within the absolute budget regardless of glyph count.
     assert "GLYPH_BUDGET_SEC" in COMPILE_TS
     assert "const maxStart = Math.max(0, fps * GLYPH_BUDGET_SEC - revealFrames);" in COMPILE_TS
-    assert "Math.min((i + jitter) * staggerSec * fps, maxStart)" in COMPILE_TS
+    assert "Math.min((rank + jitter) * staggerSec * fps, maxStart)" in COMPILE_TS

@@ -2464,7 +2464,15 @@ REEL_TOTAL_RANGE = (3.0, 60.0)
 #         mode is byte-identical; belt-and-braces bump since the shared line
 #         component changed (renderer_generation already busts + re-renders the
 #         untouched cards identically).
-REEL_COMPOSITION_REVISION = "7"
+#   "8" — range selectors: the per-glyph reveal's stagger ORDER × SHAPE now flows
+#         through the seeded sprint/rangeSelector.ts vocabulary (reverse /
+#         centre-out / seeded scatter, eased), picked from (variationSeed, mood).
+#         The identity selector ({index, linear}, e.g. every restraint mood) is
+#         byte-identical to rev "7"; energetic / seed-varied glyph cards reveal
+#         in a new order, so a glyph-opted reel's deterministic output changes for
+#         an unchanged payload — hence the bump. Word-mode + non-glyph cards are
+#         untouched (glyphAt is never invoked there).
+REEL_COMPOSITION_REVISION = "8"
 
 # Story composition revision — folded into the STORY cache key (M15). The
 # story payload historically had no revision field; introducing one both
@@ -2493,7 +2501,15 @@ REEL_COMPOSITION_REVISION = "7"
 #         (kinetic_type / cascade opt in via the deterministic seed gate). Word
 #         mode renders byte-identically, so an unchanged, non-opted-in payload is
 #         pixel-identical; this bump is belt-and-braces for the shared component.
-STORY_COMPOSITION_REVISION = "4"
+#   "5" — range selectors: the per-glyph reveal's stagger ORDER × SHAPE now flows
+#         through the seeded sprint/rangeSelector.ts vocabulary (reverse /
+#         centre-out / seeded scatter, eased), picked from (variationSeed, mood).
+#         The identity selector ({index, linear}, e.g. every restraint mood)
+#         renders byte-identically to rev "4"; energetic / seed-varied glyph cards
+#         reveal in a new order, so a glyph-opted story's deterministic output
+#         changes for an unchanged payload. Word-mode + non-glyph cards are
+#         untouched (glyphAt is never invoked there).
+STORY_COMPOSITION_REVISION = "5"
 
 
 def _clamp(value: float, lo: float, hi: float) -> float:
