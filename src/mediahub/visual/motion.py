@@ -2676,6 +2676,59 @@ def _motion_supersample() -> float:
     return max(1.0, min(2.0, v))
 
 
+# true-motion-blur — the opt-in shutter-accumulation axis. OFF by default:
+# without ``MEDIAHUB_MOTION_BLUR`` opted in, ``_motion_blur()`` returns ``None``
+# so no ``motionBlur`` prop is folded into the card/reel props and every cache
+# key + rendered byte is byte-identical to today. When ON, the composition wraps
+# ONLY the settling moving layers (the story hero/result entrance + count-up, the
+# reel whip flick) in a frame-pure multi-sample sampler: it recomputes the
+# closed-form animated quantity at ``samples`` deterministic sub-frame offsets
+# across the shutter window and composites the copies with equal-weight
+# progressive alpha. The sub-frame set is a pure function of the integer frame,
+# so identical env ⇒ identical render (no Math.random/Date.now anywhere). The
+# perpetual camera/parallax channels are deliberately NOT sampled, so the
+# terminal/held frame collapses to the single at-rest frame and still↔motion
+# parity is preserved. A closed env parse + fixed clamp — no DSP/LLM guessing, so
+# the deterministic-engine boundary is respected.
+MOTION_BLUR_DEFAULT_SAMPLES = 8
+MOTION_BLUR_SAMPLES_RANGE = (2, 16)
+MOTION_BLUR_DEFAULT_SHUTTER = 180.0
+MOTION_BLUR_SHUTTER_RANGE = (1.0, 360.0)
+
+
+def _motion_blur() -> Optional[dict]:
+    """Resolve the opt-in motion-blur config, or ``None`` when OFF.
+
+    Returns ``None`` unless ``MEDIAHUB_MOTION_BLUR`` is truthy (the byte-identical
+    default). When ON, reads the optional ``MEDIAHUB_MOTION_BLUR_SAMPLES`` (clamped
+    to ``[2, 16]``) and ``MEDIAHUB_MOTION_BLUR_SHUTTER`` (shutter angle in degrees,
+    clamped to ``[1.0, 360.0]``) and returns a canonical
+    ``{"samples": <int>, "shutter": <float>}`` dict. Malformed values fall back to
+    the defaults (never raises) so the render stays deterministic. Mirrors
+    ``_motion_supersample``'s honest env parse — no DSP guessing."""
+    if os.environ.get("MEDIAHUB_MOTION_BLUR", "").strip().lower() not in _TRUTHY:
+        return None
+    lo_s, hi_s = MOTION_BLUR_SAMPLES_RANGE
+    samples = MOTION_BLUR_DEFAULT_SAMPLES
+    raw_s = os.environ.get("MEDIAHUB_MOTION_BLUR_SAMPLES", "").strip()
+    if raw_s:
+        try:
+            samples = int(round(float(raw_s)))
+        except ValueError:
+            samples = MOTION_BLUR_DEFAULT_SAMPLES
+    samples = max(lo_s, min(hi_s, samples))
+    lo_a, hi_a = MOTION_BLUR_SHUTTER_RANGE
+    shutter = MOTION_BLUR_DEFAULT_SHUTTER
+    raw_a = os.environ.get("MEDIAHUB_MOTION_BLUR_SHUTTER", "").strip()
+    if raw_a:
+        try:
+            shutter = float(raw_a)
+        except ValueError:
+            shutter = MOTION_BLUR_DEFAULT_SHUTTER
+    shutter = max(lo_a, min(hi_a, shutter))
+    return {"samples": samples, "shutter": shutter}
+
+
 # bit-depth-gamut — the opt-in higher-bit-depth / wide-gamut ENCODE vocabulary.
 # Each entry is a FIXED, verified (codec, pixelFormat, colorSpace, container)
 # quad — a closed table, never an expression language: no operator-supplied
@@ -3193,6 +3246,15 @@ def render_story_card(
     if photo_ss > 0:
         card_dict = {**card_dict, "photoSupersample": photo_ss}
 
+    # true-motion-blur: attach the opt-in shutter-accumulation config ONLY when
+    # the operator opted in (None = OFF), exactly like the photoSupersample fold
+    # above, so every default render keeps a byte-identical card_dict + story
+    # cache key. The composition wraps only the settling hero/result entrance +
+    # count-up in the frame-pure sampler; absent => the verbatim current DOM.
+    mblur = _motion_blur()
+    if mblur is not None:
+        card_dict = {**card_dict, "motionBlur": mblur}
+
     # alpha-export: mark the card for the transparent export so the composition's
     # false-default ``transparentBg`` prop suppresses the outer full-bleed ground
     # fill. Attach-only (fold-only-when-active), so a non-alpha render keeps a
@@ -3363,6 +3425,27 @@ def render_story_card(
             "kind": "best-effort-hint",
             "note": "imageRendering:auto on scaled photos; guaranteed dense-buffer "
             "supersample is the whole-composition MEDIAHUB_MOTION_SUPERSAMPLE",
+        }
+    # true-motion-blur: record the opt-in shutter-accumulation HONESTLY — the
+    # sample count is the per-frame cost multiplier (the composition re-renders the
+    # wrapped settling layer ``samples``× per frame), and the scope is bounded to
+    # the hero/result entrance + count-up (the photo camera / parallax are NOT
+    # sampled, so the held frame stays the approved still). Fold-only-when-active.
+    if mblur is not None:
+        story_manifest["motionBlur"] = {
+            "samples": mblur["samples"],
+            "shutter": mblur["shutter"],
+            "scope": "entrance+count_up",
+            "note": (
+                "Real multi-sample shutter accumulation: the settling hero/result "
+                "entrance + count-up is recomputed at %d deterministic sub-frames "
+                "across a %g-degree shutter and composited with equal-weight "
+                "progressive alpha (frame-pure, no @remotion/motion-blur). The "
+                "perpetual photo camera / parallax are NOT sampled, so the terminal "
+                "held frame collapses to the approved still (still<->motion parity). "
+                "Cost scales with the sample count (%d x the wrapped layer's "
+                "per-frame work)." % (mblur["samples"], mblur["shutter"], mblur["samples"])
+            ),
         }
     # M23 explainability: full provenance when a clip plays; the honest
     # fall-back reason when a candidate existed but the photo path won.
@@ -4174,6 +4257,13 @@ def _render_reel_one_format(
     if encode is not None:
         supersample = 1.0
     photo_ss = _photo_supersample()
+    # true-motion-blur: resolve the opt-in shutter-accumulation config once. None
+    # (default) keeps the reel byte-identical. The whip transition lives in the
+    # composition chrome (not per-card), so this is a REEL-LEVEL prop — it rides
+    # into reel_props + the cache key only when active, and the composition threads
+    # it down to each <StoryCard> beat's entrance/count-up as a dedicated prop, so
+    # cards_props (and its cache contribution) stay byte-identical when off.
+    mblur = _motion_blur()
     out_path = Path(out_path)
     # R1.7: steer each card's photo focus for this cut's aspect ratio (no-op for
     # the story base). Folds into the cache key below, so each cut caches its own
@@ -4276,6 +4366,13 @@ def _render_reel_one_format(
     # byte-identical cache key; a 2x reel keys independently.
     if supersample > 1.0:
         cache_payload["supersample"] = supersample
+    # true-motion-blur: the reel-level shutter-accumulation axis. Folded ONLY when
+    # active (mblur is not None) so a blurred reel can never be served from — or
+    # overwrite — an un-blurred cache entry, and the default reel key is untouched.
+    # Reel-level (not per-card), so it needs its own fold: cards_props stay
+    # byte-identical, and each distinct (samples, shutter) keys independently.
+    if mblur is not None:
+        cache_payload["motionBlur"] = mblur
     # fps-option: fold the frame rate only for a non-default choice, so the
     # default (30fps) reel cache key is byte-identical to before.
     if int(fps) != MOTION_FPS:
@@ -4344,6 +4441,15 @@ def _render_reel_one_format(
         reel_props["logoDrawOn"] = True
         reel_props["logoViewBox"] = logo_drawon_payload["viewBox"]
         reel_props["logoPaths"] = logo_drawon_payload["paths"]
+    # true-motion-blur: pass the reel-level shutter-accumulation config into the
+    # reel props ONLY when active, so the default reel's props (and thus the bundle
+    # hash) stay byte-identical. The composition wraps the whip flick AND threads
+    # this down to each <StoryCard> beat's entrance/count-up as a dedicated prop
+    # (never via cards_props, which stays byte-identical). The zod
+    # ``motionBlur.optional()`` default (absent => undefined) keeps the inactive
+    # DOM the exact current whip feGaussianBlur + unwrapped beats.
+    if mblur is not None:
+        reel_props["motionBlur"] = mblur
     # Cold render. Try the opt-in parallel composition path (R1.28) first: it
     # splits the reel's frames across concurrent segment renders and composites
     # them into a byte-equivalent silent reel, cutting wall-clock on multi-core
@@ -4462,6 +4568,33 @@ def _render_reel_one_format(
                     }
                 }
                 if photo_ss > 0
+                else {}
+            ),
+            # true-motion-blur: honest reel-level shutter-accumulation record —
+            # the sample count is the per-frame cost multiplier and the scope is
+            # bounded to the whip flick + each beat's settling entrance/count-up
+            # (the photo camera / parallax are NOT sampled, so held frames stay
+            # the approved stills). Fold-only-when-active.
+            **(
+                {
+                    "motionBlur": {
+                        "samples": mblur["samples"],
+                        "shutter": mblur["shutter"],
+                        "scope": "whip+entrance+count_up",
+                        "note": (
+                            "Real multi-sample shutter accumulation: the whip "
+                            "transition's lateral flick and each beat's settling "
+                            "hero/result entrance + count-up are recomputed at "
+                            "%d deterministic sub-frames across a %g-degree shutter "
+                            "and composited with equal-weight progressive alpha "
+                            "(frame-pure, no @remotion/motion-blur). The perpetual "
+                            "photo camera / parallax are NOT sampled, so terminal "
+                            "held frames collapse to the approved stills. Cost "
+                            "scales with the sample count." % (mblur["samples"], mblur["shutter"])
+                        ),
+                    }
+                }
+                if mblur is not None
                 else {}
             ),
             "format": format_name,

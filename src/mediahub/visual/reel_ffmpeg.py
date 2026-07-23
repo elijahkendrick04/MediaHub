@@ -175,6 +175,24 @@ def _motion_encode_requested() -> bool:
     return bool(raw) and raw not in ("default", "h264")
 
 
+def _motion_blur_requested() -> bool:
+    """True when the opt-in shutter-accumulation blur (``MEDIAHUB_MOTION_BLUR``) is
+    on. True multi-sample motion blur re-renders a moving layer at N sub-frame
+    offsets and composites them — a per-frame Remotion DOM capability. This free
+    engine composites pre-baked stills and cannot multi-sample a shutter interval,
+    so a request degrades HONESTLY: the manifest records
+    ``motion_blur: unsupported-on-engine`` rather than faking an accumulated smear
+    (invariant 5). Gated on the same truthy switch ``motion._motion_blur`` reads,
+    so the note fires exactly when the Remotion path would have blurred; unset →
+    False (no note, byte-identical)."""
+    return os.environ.get("MEDIAHUB_MOTION_BLUR", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
 def ffmpeg_exe() -> Optional[str]:
     """Resolve the FFmpeg binary, or None when no source provides one."""
     env = os.environ.get("MEDIAHUB_FFMPEG", "").strip()
@@ -1133,6 +1151,13 @@ def render_story_card_from_props(
                 # degrades honestly to the whole-still camera move — never a faked
                 # per-character animation.
                 "text_fx": "per-glyph-text-animators-unsupported-on-engine",
+                # true-motion-blur: real shutter-accumulation blur re-renders the
+                # moving layer at N sub-frame offsets and composites them — a
+                # per-frame Remotion DOM capability. This engine animates the card's
+                # pre-baked still and cannot multi-sample a shutter interval, so an
+                # opted-in request degrades HONESTLY to the whole-still camera move —
+                # never a faked smear. Fold-only-when-requested keeps default notes clean.
+                **({"motion_blur": "unsupported-on-engine"} if _motion_blur_requested() else {}),
                 # per-effect-toggle (REVIEW-ONLY A/B): the decorative treatment
                 # is baked into the approved still this engine animates, so it
                 # cannot selectively drop an individual motion effect for a
@@ -1400,6 +1425,13 @@ def render_meet_reel_from_props(
                 # degrades honestly to the whole-still camera move — never a faked
                 # per-character animation.
                 "text_fx": "per-glyph-text-animators-unsupported-on-engine",
+                # true-motion-blur: real shutter-accumulation blur re-renders the
+                # moving layer (whip flick + beat entrance/count-up) at N sub-frame
+                # offsets and composites them — a per-frame Remotion DOM capability.
+                # This engine composites pre-baked stills and cannot multi-sample a
+                # shutter interval, so an opted-in request degrades HONESTLY — never
+                # a faked smear. Fold-only-when-requested keeps default notes clean.
+                **({"motion_blur": "unsupported-on-engine"} if _motion_blur_requested() else {}),
                 # per-effect-toggle (REVIEW-ONLY A/B): the decorative treatment is
                 # baked into the approved stills this engine composites, so it
                 # cannot selectively drop an individual motion effect for a

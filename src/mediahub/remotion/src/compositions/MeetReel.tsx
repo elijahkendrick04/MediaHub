@@ -9,7 +9,14 @@ import {
   useVideoConfig,
 } from "remotion";
 import { z } from "zod";
-import { StoryCard, cardSchema, fontStackFor } from "./StoryCard";
+import {
+  StoryCard,
+  cardSchema,
+  fontStackFor,
+  motionBlurSchema,
+  MotionBlurSampler,
+  type MotionBlur,
+} from "./StoryCard";
 import { REEL_LAYERS } from "./sprint/reelRegistry";
 import { Dither } from "./Dither";
 import { LogoDrawOn, LogoDrawConfig } from "./sprint/reel/logo_drawon";
@@ -133,6 +140,13 @@ export const meetReelSchema = z.object({
   // `transparentBg` prop). Set ONLY by motion.py on the opt-in alpha path; the
   // default false keeps every bookend's DOM byte-identical.
   transparentBg: z.boolean().default(false),
+  // true-motion-blur (opt-in): the reel-level shutter-accumulation config. The
+  // whip transition lives in the composition chrome (not per-card), so it is a
+  // reel-level prop, resolved once Python-side and threaded down to BOTH the whip
+  // wrappers AND each <StoryCard> beat's entrance/count-up (via a dedicated prop,
+  // never cards_props). `.optional()` (absent => undefined) keeps the inactive DOM
+  // the exact current whip feGaussianBlur + unwrapped beats (byte-identical).
+  motionBlur: motionBlurSchema.optional(),
 });
 
 // The resolved bookend colour roles a cover/outro paints with. Every field
@@ -1547,6 +1561,7 @@ export const MeetReel: React.FC<Props> = ({
   logoViewBox,
   logoPaths,
   transparentBg,
+  motionBlur,
 }) => {
   const { fps, durationInFrames, width, height } = useVideoConfig();
   const rootFrame = useCurrentFrame();
@@ -1673,6 +1688,7 @@ export const MeetReel: React.FC<Props> = ({
         kind={specs[0].kind}
         startLocal={coverFrames}
         exitFrames={beatFades[0]}
+        mb={motionBlur}
       >
         <CoverScreen
           brand={brand}
@@ -1713,9 +1729,17 @@ export const MeetReel: React.FC<Props> = ({
         from={cursor}
         durationInFrames={dur + transitionFrames}
       >
-        <ExitWrap kind={nextKind} startLocal={dur - transitionFrames} exitFrames={nextFrames}>
-          <TransitionWrap fadeInFrames={fadeFrames} kind={spec.kind} accent={accent}>
-            <StoryCard card={{ ...card, inReel: true }} brand={brand} />
+        <ExitWrap
+          kind={nextKind}
+          startLocal={dur - transitionFrames}
+          exitFrames={nextFrames}
+          mb={motionBlur}
+        >
+          <TransitionWrap fadeInFrames={fadeFrames} kind={spec.kind} accent={accent} mb={motionBlur}>
+            {/* true-motion-blur: the reel injects the shutter config as a dedicated
+                prop so the beat's entrance/count-up blur without ever mutating
+                cards_props (which stays byte-identical when off). */}
+            <StoryCard card={{ ...card, inReel: true }} brand={brand} motionBlur={motionBlur} />
           </TransitionWrap>
         </ExitWrap>
       </Sequence>,
@@ -1792,8 +1816,11 @@ const TransitionWrap: React.FC<{
   fadeInFrames: number;
   kind: TransitionKind;
   accent?: string;
+  // true-motion-blur (opt-in): reel-level shutter config. Absent (the default) =>
+  // the whip renders its verbatim feGaussianBlur DOM (byte-identical).
+  mb?: MotionBlur;
   children: React.ReactNode;
-}> = ({ fadeInFrames, kind, accent, children }) => {
+}> = ({ fadeInFrames, kind, accent, mb, children }) => {
   const frame = useCurrentFrame();
   const { width, height } = useVideoConfig();
   // The incoming beat overlaps the outgoing one for `fadeInFrames`, so the
@@ -1845,10 +1872,41 @@ const TransitionWrap: React.FC<{
     );
   }
   if (kind === "whip") {
-    // High-energy lateral snap with a velocity-aligned blur that resolves on
-    // landing. feGaussianBlur stdDeviation "X 0" blurs only along the X axis —
-    // the actual motion vector — a genuine directional smear, not the isotropic
-    // CSS softening this used to fake. id is whip-only (peak beat), no collision.
+    // true-motion-blur (opt-in): replace the single-Gaussian smear with REAL
+    // shutter accumulation. The whip's lateral translateX + fade are closed-form
+    // functions of the frame, so we resample them at N deterministic sub-frames
+    // and composite N copies of the (unchanged) children — a genuine per-sample
+    // pan blur, not a fake. The children are a rigid moving layer here (we blur the
+    // whip's OWN transform, never re-time the children's internal animation), which
+    // is exactly what a whip pan should smear. On the landing frame (t=1) all
+    // sub-frames collapse to the resting transform, so the beat resolves clean.
+    if (mb) {
+      const whipAt = (f: number) => {
+        const tt = interpolate(f, [0, fadeInFrames], [0, 1], {
+          extrapolateRight: "clamp",
+          easing: Easing.out(Easing.cubic),
+        });
+        return { opacity: Math.min(1, tt * 1.6), tx: (1 - tt) * width * 0.5 };
+      };
+      return (
+        <MotionBlurSampler
+          frame={frame}
+          samples={mb.samples}
+          shutter={mb.shutter}
+          render={(f) => {
+            const w = whipAt(f);
+            return (
+              <AbsoluteFill style={{ opacity: w.opacity, transform: `translateX(${w.tx}px)` }}>
+                {children}
+              </AbsoluteFill>
+            );
+          }}
+        />
+      );
+    }
+    // Default (blur off): the verbatim velocity-aligned feGaussianBlur smear.
+    // stdDeviation "X 0" blurs only along the X axis — the actual motion vector —
+    // a directional smear, not isotropic softening. id is whip-only (peak beat).
     const t = ease(Easing.out(Easing.cubic));
     const whipBlur = (1 - t) * 14;
     return (
@@ -1971,20 +2029,20 @@ const ExitWrap: React.FC<{
   kind: TransitionKind;
   startLocal: number; // local frame at which the incoming scene starts
   exitFrames: number; // the incoming transition's frame window
+  // true-motion-blur (opt-in): reel-level shutter config. Absent (the default) =>
+  // the whip exit renders its verbatim feGaussianBlur DOM (byte-identical).
+  mb?: MotionBlur;
   children: React.ReactNode;
-}> = ({ kind, startLocal, exitFrames, children }) => {
+}> = ({ kind, startLocal, exitFrames, mb, children }) => {
   const frame = useCurrentFrame();
   const { width, height } = useVideoConfig();
-  const t = interpolate(
-    frame,
-    [startLocal, startLocal + Math.max(1, exitFrames)],
-    [0, 1],
-    {
+  const exitT = (f: number) =>
+    interpolate(f, [startLocal, startLocal + Math.max(1, exitFrames)], [0, 1], {
       extrapolateLeft: "clamp",
       extrapolateRight: "clamp",
       easing: Easing.in(Easing.cubic),
-    },
-  );
+    });
+  const t = exitT(frame);
   if (t <= 0) {
     return <AbsoluteFill>{children}</AbsoluteFill>;
   }
@@ -1998,8 +2056,27 @@ const ExitWrap: React.FC<{
     );
   }
   if (kind === "whip") {
-    // Mirrors the incoming whip laterally, with the same velocity-aligned
-    // (X-axis) blur — feGaussianBlur "X 0", not an isotropic blur.
+    // true-motion-blur (opt-in): REAL shutter accumulation for the mirrored exit —
+    // resample the closed-form lateral translateX at N deterministic sub-frames and
+    // composite N copies of the (rigid) children, the exit twin of the incoming
+    // whip's pan blur. On the fully-exited frame all sub-frames collapse, so the
+    // handoff resolves clean.
+    if (mb) {
+      return (
+        <MotionBlurSampler
+          frame={frame}
+          samples={mb.samples}
+          shutter={mb.shutter}
+          render={(f) => (
+            <AbsoluteFill style={{ transform: `translateX(${-exitT(f) * width * 0.5}px)` }}>
+              {children}
+            </AbsoluteFill>
+          )}
+        />
+      );
+    }
+    // Default (blur off): mirrors the incoming whip laterally, with the same
+    // velocity-aligned (X-axis) feGaussianBlur "X 0", not an isotropic blur.
     const whipBlur = t * 14;
     return (
       <AbsoluteFill

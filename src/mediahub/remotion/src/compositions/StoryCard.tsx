@@ -36,6 +36,19 @@ import {
 import { StatChipsBlock } from "./sprint/sceneKit";
 import { Dither } from "./Dither";
 
+// true-motion-blur (opt-in): the shutter-accumulation config Python resolves from
+// MEDIAHUB_MOTION_BLUR. `.optional()` (absent => undefined) is the inert default,
+// so a card/reel rendered without it takes the exact current, unwrapped code path
+// (byte-identical). When present, the composition wraps ONLY the settling moving
+// layers (story hero/result entrance + count-up, reel whip flick) in the
+// frame-pure MotionBlurSampler below. Shared/exported so MeetReel folds the same
+// shape into its reel-level prop.
+export const motionBlurSchema = z.object({
+  samples: z.number().default(8),
+  shutter: z.number().default(180),
+});
+export type MotionBlur = z.infer<typeof motionBlurSchema>;
+
 // Exported for MeetReel: ONE schema for a card's props on both compositions,
 // so a field added here can never be silently zod-stripped on the reel path.
 export const cardSchema = z.object({
@@ -316,6 +329,13 @@ export const cardSchema = z.object({
   // legibility layers (photo scrims/filters, burn-in captions) are never
   // toggleable, so no toggle can drop a text/bg pair below its APCA gate.
   effectsDisabled: z.array(z.string()).default([]),
+  // true-motion-blur (opt-in, STORY path): the shutter-accumulation config for
+  // this card's own render. Absent (the default) => no wrapper is inserted and the
+  // scene renders verbatim (byte-identical). Set ONLY by motion.py under
+  // MEDIAHUB_MOTION_BLUR. On the REEL path the beats' cards NEVER carry this (so
+  // cards_props stays byte-identical); the reel supplies it via a dedicated
+  // top-level `motionBlur` prop on <StoryCard> instead (read below as a fallback).
+  motionBlur: motionBlurSchema.optional(),
 });
 
 // per-effect-toggle: a pure membership test over a card's disabled-axis list.
@@ -3836,7 +3856,59 @@ const SCENES: Record<SceneMode, React.FC<{ ctx: SceneCtx }>> = {
   magazine: MagazineScene,
 };
 
-export const StoryCard: React.FC<Props> = ({ card, brand }) => {
+// true-motion-blur — the deterministic sub-frame set for one integer frame. A
+// shutter of `shutter` degrees opens the accumulation window over `shutter/360`
+// of a frame, centred on the current frame; `samples` copies are spread evenly
+// across it. Pure function of (frame, samples, shutter) — no Math.random /
+// Date.now / performance.now — so identical inputs give identical offsets and the
+// render stays frame-pure. samples/shutter are clamped here too (defence in depth
+// over Python's clamp) so a hand-authored prop can never explode the sample count.
+export function motionBlurSubFrames(frame: number, samples: number, shutter: number): number[] {
+  const n = Math.max(2, Math.min(16, Math.round(samples)));
+  const span = Math.max(1, Math.min(360, shutter)) / 360; // window width in frames
+  const out: number[] = [];
+  for (let i = 0; i < n; i++) {
+    // i/(n-1) - 0.5 spans [-0.5, 0.5]; × span centres the window on `frame`.
+    out.push(frame + (i / (n - 1) - 0.5) * span);
+  }
+  return out;
+}
+
+// true-motion-blur — the frame-pure multi-sample accumulator. It renders the
+// wrapped layer at each deterministic sub-frame (via the `render` callback, which
+// RECOMPUTES the layer's closed-form animation at that sub-frame — never an opaque
+// re-timing of already-rendered children) and composites the copies with
+// equal-weight progressive alpha. Compositing children j=0..n-1 in source order
+// (j=0 painted first/bottom) with opacity 1/(j+1) yields the true equal-weight
+// average of the n sampled frames: acc after k layers = mean of the first k, so
+// acc after n = (1/n)·Σ copies. At an at-rest (terminal/held) frame every sub-frame
+// collapses to identical pixels, so the composite equals the single frame and
+// still<->motion parity holds. Only ever mounted when a motionBlur prop is present
+// (the OFF path renders the verbatim unwrapped layer), so the default DOM is
+// byte-identical.
+export const MotionBlurSampler: React.FC<{
+  frame: number;
+  samples: number;
+  shutter: number;
+  render: (frameSub: number) => React.ReactNode;
+}> = ({ frame, samples, shutter, render }) => {
+  const subs = motionBlurSubFrames(frame, samples, shutter);
+  return (
+    <AbsoluteFill>
+      {subs.map((f, i) => (
+        <AbsoluteFill key={i} style={{ opacity: 1 / (i + 1) }}>
+          {render(f)}
+        </AbsoluteFill>
+      ))}
+    </AbsoluteFill>
+  );
+};
+
+export const StoryCard: React.FC<Props & { motionBlur?: MotionBlur }> = ({
+  card,
+  brand,
+  motionBlur,
+}) => {
   const frame = useCurrentFrame();
   const { fps, durationInFrames, width, height } = useVideoConfig();
 
@@ -3847,25 +3919,40 @@ export const StoryCard: React.FC<Props> = ({ card, brand }) => {
 
   const roles = resolveRoles(card, brand);
   const fontStack = fontStackFor(card.typographyPair || "");
-  const anim = animProgram(
-    // Suppressing the director's motion intent falls the beat through to the
-    // shared base channels — but via the switch's default case, which still
-    // applies withResolveAccent(base), so the M19 resolve accent (the separate
-    // "accent" toggle target) is NOT silently killed by this toggle.
-    off("motion_intent") ? "" : card.motionIntent || "",
-    card.mood || "",
-    frame,
-    fps,
-    durationInFrames,
-    card.variationSeed || 0,
-    card.staggerScale && card.staggerScale > 0 ? resolveStagger(card.staggerScale) : undefined,
-    // text-fx-richer: the closed-enum entrance animator. Suppressible as a
-    // decorative axis for a review-only A/B render (off("text_fx")); "" falls
-    // through to the byte-identical no-animator path. Text-fx is entrance-only
-    // (terminal = still), so it is a legitimate A/B-suppressible axis and never
-    // a legibility layer.
-    off("text_fx") ? "" : card.textAnimator || "",
-  );
+  // true-motion-blur: capture the animProgram arguments once so the sampler can
+  // recompute the SAME closed-form channels at deterministic sub-frame offsets.
+  // animAt(frame) reproduces the exact prior single call, so `anim` — and every
+  // default (blur-off) render — stays byte-identical.
+  //
+  // Suppressing the director's motion intent falls the beat through to the shared
+  // base channels — but via the switch's default case, which still applies
+  // withResolveAccent(base), so the M19 resolve accent (the separate "accent"
+  // toggle target) is NOT silently killed by this toggle.
+  const mbIntent = off("motion_intent") ? "" : card.motionIntent || "";
+  // text-fx-richer: the closed-enum entrance animator. Suppressible as a
+  // decorative axis for a review-only A/B render (off("text_fx")); "" falls
+  // through to the byte-identical no-animator path. Text-fx is entrance-only
+  // (terminal = still), so it is a legitimate A/B-suppressible axis and never a
+  // legibility layer.
+  const mbAnimator = off("text_fx") ? "" : card.textAnimator || "";
+  const mbStagger =
+    card.staggerScale && card.staggerScale > 0 ? resolveStagger(card.staggerScale) : undefined;
+  const animAt = (f: number): AnimChannels =>
+    animProgram(
+      mbIntent,
+      card.mood || "",
+      f,
+      fps,
+      durationInFrames,
+      card.variationSeed || 0,
+      mbStagger,
+      mbAnimator,
+    );
+  const anim = animAt(frame);
+  // true-motion-blur: the story path carries the config on the card; the reel
+  // injects it as a dedicated top-level prop (keeping cards_props byte-identical).
+  // Undefined on both when the operator did not opt in => no wrapper, verbatim DOM.
+  const mb = card.motionBlur ?? motionBlur;
   const mode = sceneForArchetype(card.archetype || "");
   const layout = compositionLayoutFor(card.composition || "left", width);
 
@@ -3934,6 +4021,38 @@ export const StoryCard: React.FC<Props> = ({ card, brand }) => {
   // built-in scene; otherwise the parity-mapped built-in scene renders.
   const Scene = EXTRA_SCENES[card.archetype || ""] || SCENES[mode];
 
+  // true-motion-blur: recompute the SETTLING anim channels at a sub-frame and
+  // re-render the scene with them, keeping the PERPETUAL camera/parallax channels
+  // (photoScale / photoDriftX / photoDriftY / bgDrift — the only channels still in
+  // motion at the held frame) FROZEN to the integer-frame value. So only the
+  // hero/result entrance + count-up smear during motion, while the photo camera
+  // stays sharp and, crucially, every sub-frame at the terminal frame collapses to
+  // the approved still (still<->motion parity). ctx.frame is left at the integer
+  // frame, so any scene animation driven directly off the frame (not through anim)
+  // renders identically across the copies and is not blurred. Only ever called from
+  // the mb-present branch below, so the default DOM never touches this path.
+  const renderSceneAt = (fSub: number): React.ReactNode => {
+    const aSub = animAt(fSub);
+    const a: AnimChannels = {
+      ...aSub,
+      photoScale: anim.photoScale,
+      photoDriftX: anim.photoDriftX,
+      photoDriftY: anim.photoDriftY,
+      bgDrift: anim.bgDrift,
+    };
+    const ctxSub: SceneCtx = {
+      ...ctx,
+      anim: a,
+      result: revealResult(
+        card.resultValue || "",
+        a.resultProgress,
+        a.textRevealProgress,
+        card.variationSeed || 0,
+      ),
+    };
+    return <Scene ctx={ctxSub} />;
+  };
+
   return (
     <AbsoluteFill
       style={{
@@ -3966,7 +4085,19 @@ export const StoryCard: React.FC<Props> = ({ card, brand }) => {
       {/* Pack ground BENEATH the scene (the still's z1-under-copy order).
           per-effect-toggle: the "style_pack" toggle drops both pack layers. */}
       {off("style_pack") ? null : <StylePackGroundLayer ctx={ctx} />}
-      <Scene ctx={ctx} />
+      {/* true-motion-blur: wrap ONLY the scene (hero/result entrance + count-up)
+          in the frame-pure sampler when opted in; OFF (the default) renders the
+          verbatim `<Scene ctx={ctx} />`, so the default DOM is byte-identical. */}
+      {mb ? (
+        <MotionBlurSampler
+          frame={frame}
+          samples={mb.samples}
+          shutter={mb.shutter}
+          render={renderSceneAt}
+        />
+      ) : (
+        <Scene ctx={ctx} />
+      )}
       {/* per-effect-toggle: the "accent" toggle drops the resolve accent layer
           (paired with the HeroScene accentDecoration gate). */}
       {off("accent") ? null : <ResolveAccentLayer ctx={ctx} />}

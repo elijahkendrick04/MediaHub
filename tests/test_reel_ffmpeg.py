@@ -567,6 +567,73 @@ def test_ffmpeg_story_manifest_declares_dither_unsupported():
     assert src.count('"dither": "unsupported-on-engine"') == 1
 
 
+def test_ffmpeg_manifests_declare_motion_blur_unsupported():
+    """true-motion-blur: real shutter-accumulation blur re-renders a moving layer
+    at N sub-frame offsets and composites them — a per-frame Remotion DOM
+    capability. This engine composites pre-baked stills and cannot multi-sample a
+    shutter interval, so BOTH the story and reel branches declare it
+    unsupported-on-engine (emitted only when opted in), never a faked smear."""
+    src = (Path(reel_ffmpeg.__file__)).read_text()
+    assert src.count('"motion_blur": "unsupported-on-engine"') == 2
+
+
+@pytest.mark.skipif(not _HAS_FFMPEG, reason="no FFmpeg binary resolvable")
+def test_ffmpeg_reports_motion_blur_unsupported(tmp_path, monkeypatch):
+    """With MEDIAHUB_MOTION_BLUR opted in, the FFmpeg reel + story manifests carry
+    the honest ``motion_blur: unsupported-on-engine`` note; a default (off) render
+    does NOT — fold-only-when-requested, so the default manifest is unchanged and
+    the engine ships its normal (non-accumulated) output either way. The note is an
+    explainability sidecar (deliberately NOT in the ffmpeg cache key), so off/on use
+    separate DATA_DIRs to force a cold render of each and read the manifest each
+    writes."""
+    import json as _json
+
+    monkeypatch.setattr(
+        reel_ffmpeg,
+        "_render_still",
+        lambda brief, brand_kit, out_dir, name, **kw: _write_synthetic_still(
+            out_dir / name / "story.png",
+            size=kw.get("size", (reel_ffmpeg.WIDTH, reel_ffmpeg.HEIGHT)),
+        ),
+    )
+
+    # Default (blur off), its own cache: no note on either surface.
+    monkeypatch.delenv("MEDIAHUB_MOTION_BLUR", raising=False)
+    monkeypatch.setenv("DATA_DIR", str(tmp_path / "off"))
+    out_story_off = tmp_path / "story_off.mp4"
+    reel_ffmpeg.render_story_card_from_props(
+        _props(), _brand_dict(), _brand_kit(), out_story_off, duration_sec=3.0
+    )
+    story_off = _json.loads(out_story_off.with_suffix(".json").read_text())["notes"]
+    assert "motion_blur" not in story_off
+
+    out_reel_off = tmp_path / "reel_off.mp4"
+    reel_ffmpeg.render_meet_reel_from_props(
+        [_props()], _brand_dict(), _brand_kit(), out_reel_off, meet_name="Test Meet"
+    )
+    reel_off = _json.loads(out_reel_off.with_suffix(".json").read_text())["notes"]
+    assert "motion_blur" not in reel_off
+
+    # Opted in, a fresh cache (cold render): the honest note appears, output ships.
+    monkeypatch.setenv("MEDIAHUB_MOTION_BLUR", "1")
+    monkeypatch.setenv("DATA_DIR", str(tmp_path / "on"))
+    out_story_on = tmp_path / "story_on.mp4"
+    result_s = reel_ffmpeg.render_story_card_from_props(
+        _props(), _brand_dict(), _brand_kit(), out_story_on, duration_sec=3.0
+    )
+    assert Path(result_s).exists() and Path(result_s).stat().st_size > 1024
+    story_on = _json.loads(out_story_on.with_suffix(".json").read_text())["notes"]
+    assert story_on["motion_blur"] == "unsupported-on-engine"
+
+    out_reel_on = tmp_path / "reel_on.mp4"
+    result_r = reel_ffmpeg.render_meet_reel_from_props(
+        [_props()], _brand_dict(), _brand_kit(), out_reel_on, meet_name="Test Meet"
+    )
+    assert Path(result_r).exists() and Path(result_r).stat().st_size > 1024
+    reel_on = _json.loads(out_reel_on.with_suffix(".json").read_text())["notes"]
+    assert reel_on["motion_blur"] == "unsupported-on-engine"
+
+
 # ---------------------------------------------------------------------------
 # Real FFmpeg assembly (synthetic stills — no Chromium, no Node)
 # ---------------------------------------------------------------------------

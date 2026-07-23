@@ -220,8 +220,12 @@ def test_withtextfx_reference_unchanged_when_off():
     assert "animator: string = \"\"," in STORY_TSX
     assert "const withTextFx = (ch: AnimChannels): AnimChannels => {" in STORY_TSX
     assert "if (!animator) {\n      return ch;\n    }" in STORY_TSX
-    # Suppressible as a review-only A/B axis at the single call site.
-    assert 'off("text_fx") ? "" : card.textAnimator || "",' in STORY_TSX
+    # Suppressible as a review-only A/B axis. true-motion-blur hoisted the animator
+    # expression into a captured `mbAnimator` (so the sampler can recompute the same
+    # channels at sub-frames), but the off("text_fx") suppression is identical.
+    assert 'const mbAnimator = off("text_fx") ? "" : card.textAnimator || "";' in STORY_TSX
+    # …and it is the animator argument threaded into every animProgram call.
+    assert "mbAnimator," in STORY_TSX
 
 
 def test_kineticline_guards_identity_style():
