@@ -1045,6 +1045,11 @@ def render_story_card_from_props(
                 # path animates the card's pre-baked still and cannot play a
                 # video plane) — an honest capability note, never a fake beat.
                 "footage": "unsupported-on-engine",
+                # blur-family: the develop-in directional/radial/lens focus blur
+                # is a per-frame Remotion photo-element grade; this engine
+                # composites the approved still unblurred, so the intro smear is
+                # honestly absent — never a faked filter.
+                "focus_blur": "unsupported-on-engine",
                 # Per-glyph text reveal needs the DOM Remotion path; this engine
                 # animates the pre-baked still, so any glyph-granularity request
                 # degrades honestly to the whole-still render — never a faked
@@ -1246,6 +1251,11 @@ def render_meet_reel_from_props(
                 # path animates pre-baked stills and cannot play a video
                 # plane) — an honest capability note, never a fake beat.
                 "footage": "unsupported-on-engine",
+                # blur-family: the develop-in directional/radial/lens focus blur
+                # is a per-frame Remotion photo-element grade; each beat here is
+                # the approved still composited unblurred, so the intro smear is
+                # honestly absent — never a faked filter.
+                "focus_blur": "unsupported-on-engine",
                 # Per-glyph text reveal needs the DOM Remotion path; each beat
                 # here is the pre-baked still, so a glyph-granularity request
                 # degrades honestly — never a faked per-character animation.

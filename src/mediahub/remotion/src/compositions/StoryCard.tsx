@@ -232,6 +232,11 @@ export const cardSchema = z.object({
   frameTornFreq: z.number().default(0),
   frameTornScale: z.number().default(0),
   frameTornSeed: z.number().default(0),
+  // blur-family: the develop-in focus-blur variant motion.py picked for a
+  // legacy-animated graded photo card ("directional" | "radial" | "lens").
+  // "" (and "gaussian") keep today's isotropic blur() focus-in, byte-identical;
+  // photo_filters.tsx renders the animated SVG <filter> only for a real value.
+  focusBlurStyle: z.string().default(""),
 });
 
 const brandSchema = z.object({
@@ -1414,7 +1419,7 @@ const PhotoLayer: React.FC<{ ctx: SceneCtx; scrim?: "bottom" | "full" }> = ({
   );
   return (
     <>
-      <PhotoFilterDefs card={card} />
+      <PhotoFilterDefs card={card} frame={frame} fps={fps} />
       {cropScale > 1 && !card.videoSrc ? (
         <div
           style={{

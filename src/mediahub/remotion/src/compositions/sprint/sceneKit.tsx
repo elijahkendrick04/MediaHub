@@ -345,7 +345,7 @@ export const PhotoFill: React.FC<{
   );
   return (
     <>
-      <PhotoFilterDefs card={card} />
+      <PhotoFilterDefs card={card} frame={frame} fps={fps} />
       {cropScale > 1 ? (
         <div
           style={{

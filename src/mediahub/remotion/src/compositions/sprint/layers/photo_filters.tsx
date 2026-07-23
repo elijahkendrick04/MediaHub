@@ -53,7 +53,14 @@ import type { SceneComponent } from "../registry";
 type TreatmentCard = {
   photoSrc?: string;
   photoTreatment?: string;
+  photoPos?: string;
   mood?: string;
+  variationSeed?: number;
+  // blur-family (picked Python-side by motion.py `_focus_blur_style`): one of
+  // "directional" | "radial" | "lens" enriches the develop-in focus blur on a
+  // legacy-animated graded photo card into a real SVG-filter smear. Absent /
+  // "gaussian" = today's isotropic CSS blur() focus-in, byte-identical.
+  focusBlurStyle?: string;
   duotoneShadow?: string;
   duotoneHighlight?: string;
   halftoneTile?: number;
@@ -130,16 +137,168 @@ export function washFilterId(card: TreatmentCard): string {
   return `mh-wash-${t}-${m}`;
 }
 
+// ---------------------------------------------------------------------------
+// blur-family — the develop-in focus blur, enriched from the single isotropic
+// gaussian into a deterministic family {directional, radial, lens} rendered via
+// an animated SVG <filter>. The style is chosen Python-side (motion.py
+// `_focus_blur_style`, a pure function of variationSeed + mood) and passed as
+// `focusBlurStyle`, so the two surfaces can never drift (the exact-mirror
+// philosophy). Like every treatment here it is a MOTION intro only: the
+// magnitude rides the same `interpolate(frame) -> 0` develop-in curve, so the
+// held frame is a filter NO-OP and still<->motion parity is preserved. Enabled
+// ONLY on a legacy-animated graded photo card (never an exact-mirror
+// duotone/halftone/wash card, and never stacked), so every other card renders
+// byte-identically.
+//
+// SVG note: feGaussianBlur's `stdDeviation` is an XML attribute, not a CSS
+// property, so it cannot ride a CSS var — the only frame-pure route is to
+// re-emit the filter markup each frame with an interpolate(frame)-derived
+// value. That is why PhotoFilterDefs takes `frame`/`fps` and re-renders (the
+// reel whip helper's exact idiom, #reel-whip-*).
+// ---------------------------------------------------------------------------
+
+// The three non-gaussian styles. "gaussian" / absent = today's blur() focus-in.
+const FOCUS_BLUR_STYLES = ["directional", "radial", "lens"] as const;
+// The lens bokeh's highlight lift is bounded and transient — it rides the same
+// frame->0 curve, so on the held frame the transfer is identity (slope 1) and
+// it can never leave a permanent brightened plate under APCA-gated text.
+const FOCUS_LENS_MAX_LIFT = 0.12;
+
+// Deterministic [0,1) from the seed — the integer hash pattern_drift.tsx uses
+// (frame-independent, no randomness), so a card's axis pick is stable.
+function focusSeedFrac(seed: number): number {
+  const s = Math.floor(Math.abs(seed)) || 0;
+  return ((((s * 2654435761) % 1000) + 1000) % 1000) / 1000;
+}
+
+// True when motion.py enabled the family for this card (a legacy-animated
+// graded photo). Every other card keeps the plain gaussian focus-in.
+function focusBlurActive(card: TreatmentCard): boolean {
+  const style = (card.focusBlurStyle || "").toLowerCase();
+  return Boolean(card.photoSrc) && (FOCUS_BLUR_STYLES as readonly string[]).includes(style);
+}
+
+// Per-(style, seed) filter id — two reel beats can be mounted at once during a
+// transition overlap; a shared id would let one beat's animated blur bleed onto
+// the other's photo (the duotoneFilterId / washFilterId reasoning).
+export function focusBlurFilterId(card: TreatmentCard): string {
+  const style = (card.focusBlurStyle || "gaussian").toLowerCase();
+  const seed = Math.floor(Math.abs(card.variationSeed || 0)) || 0;
+  return `mh-focus-${style}-${seed}`;
+}
+
+// The develop-in blur magnitude at `frame` — the SAME frame-pure curve the
+// legacy gaussian focus-in used (FOCUS_IN_BLUR_PX -> 0, eased out), so the
+// family resolves to a no-op on the held frame and the photo is left sharp.
+function focusBlurMag(frame: number, fps: number): number {
+  return interpolate(frame, [0, fps * FOCUS_IN_SEC], [FOCUS_IN_BLUR_PX, 0], {
+    extrapolateLeft: "clamp",
+    extrapolateRight: "clamp",
+    easing: Easing.out(Easing.cubic),
+  });
+}
+
+// Percent focus [fx, fy] from an objectPosition string ("center 28%",
+// "62% 40%", …) — the axis a radial-zoom streak orients from. Defaults to the
+// photo layer's "center 28%".
+function focusPercent(pos: string): [number, number] {
+  const words: Record<string, number> = {
+    left: 0,
+    top: 0,
+    center: 50,
+    right: 100,
+    bottom: 100,
+  };
+  const parts = (pos || "").trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const val = (tok: string, fallback: number): number => {
+    if (tok in words) {
+      return words[tok];
+    }
+    const m = tok.match(/^(-?\d+(?:\.\d+)?)%?$/);
+    return m ? Number(m[1]) : fallback;
+  };
+  const fx = parts.length >= 1 ? val(parts[0], 50) : 50;
+  const fy = parts.length >= 2 ? val(parts[1], 28) : 28;
+  return [fx, fy];
+}
+
+// The frame-pure focus-blur <filter> primitives for the active style. Re-built
+// each frame from `mag` (the develop-in magnitude), so the intro animates and
+// resolves to a no-op (stdDeviation 0 / identity transfer) on the held frame.
+function focusBlurPrimitives(
+  card: TreatmentCard,
+  mag: number,
+): React.ReactNode {
+  const style = (card.focusBlurStyle || "").toLowerCase();
+  if (style === "directional") {
+    // A whip streak — a single-axis feGaussianBlur (the reel whip helper's
+    // "Bx 0" idiom), the axis quantized from the seed so sibling cards streak
+    // differently. edgeMode="duplicate" avoids a transparent halo at the edge.
+    const axes: Array<[number, number]> = [
+      [mag, 0],
+      [0, mag],
+      [mag * 0.85, mag * 0.35],
+      [mag * 0.35, mag * 0.85],
+    ];
+    const i = Math.floor(focusSeedFrac(card.variationSeed || 0) * axes.length) % axes.length;
+    const [sx, sy] = axes[i];
+    return (
+      <feGaussianBlur
+        in="SourceGraphic"
+        stdDeviation={`${sx.toFixed(3)} ${sy.toFixed(3)}`}
+        edgeMode="duplicate"
+      />
+    );
+  }
+  if (style === "radial") {
+    // Zoom-streak approximation — SVG has no single zoom-blur primitive, so a
+    // single-axis feGaussianBlur oriented from the saliency focus (photoPos)
+    // reads as a cheap, honest radial smear toward the subject.
+    const [fx, fy] = focusPercent(card.photoPos || "");
+    const horiz = Math.abs(fx - 50) >= Math.abs(fy - 50);
+    const sx = horiz ? mag : mag * 0.25;
+    const sy = horiz ? mag * 0.25 : mag;
+    return (
+      <feGaussianBlur
+        in="SourceGraphic"
+        stdDeviation={`${sx.toFixed(3)} ${sy.toFixed(3)}`}
+        edgeMode="duplicate"
+      />
+    );
+  }
+  // lens — an isotropic defocus plus a BOUNDED, transient highlight lift for a
+  // bokeh bloom. The lift rides the same frame->0 curve (slope 1 = identity on
+  // the held frame).
+  const lift = Number((1 + FOCUS_LENS_MAX_LIFT * (mag / FOCUS_IN_BLUR_PX)).toFixed(4));
+  return (
+    <>
+      <feGaussianBlur in="SourceGraphic" stdDeviation={`${mag.toFixed(3)}`} result="mh-focus-src" />
+      <feComponentTransfer in="mh-focus-src">
+        <feFuncR type="linear" slope={lift} intercept={0} />
+        <feFuncG type="linear" slope={lift} intercept={0} />
+        <feFuncB type="linear" slope={lift} intercept={0} />
+      </feComponentTransfer>
+    </>
+  );
+}
+
 // The zero-size SVG defs carrying the real exact-mirror filter for the card:
 //   • duotone — the exact markup of the still's _duotone_defs_svg (sRGB
 //     interpolation, luminance matrix, per-channel tableValues
 //     "(shadow/255).toFixed(4) (highlight/255).toFixed(4)");
 //   • wash (C5) — the still's _wash_defs_svg arithmetic recipe: saturate the
 //     source, flood the resolved brand tint clipped to SourceAlpha, then
-//     feComposite arithmetic mix (k2 = 1-m desaturated source, k3 = m tint).
+//     feComposite arithmetic mix (k2 = 1-m desaturated source, k3 = m tint);
+//   • blur-family — the animated directional/radial/lens focus-blur <filter>
+//     (re-emitted each frame with a frame-driven stdDeviation), only when
+//     motion.py enabled it via `focusBlurStyle`.
 // Rendered by every photo paint site next to its <img>; null unless the card
 // carries one treatment's parameters, so untreated cards stay byte-identical.
-export const PhotoFilterDefs: React.FC<{ card: TreatmentCard }> = ({ card }) => {
+export const PhotoFilterDefs: React.FC<{
+  card: TreatmentCard;
+  frame?: number;
+  fps?: number;
+}> = ({ card, frame = 0, fps = 30 }) => {
   if (duotoneActive(card)) {
     const sh = hexChannels(card.duotoneShadow || "");
     const hi = hexChannels(card.duotoneHighlight || "");
@@ -177,6 +336,19 @@ export const PhotoFilterDefs: React.FC<{ card: TreatmentCard }> = ({ card }) => 
             k3={Number(m.toFixed(3))}
             k4={0}
           />
+        </filter>
+      </svg>
+    );
+  }
+  if (focusBlurActive(card)) {
+    // The animated develop-in focus-blur family (directional/radial/lens),
+    // re-emitted each frame with a frame-driven stdDeviation so the intro
+    // resolves to a no-op on the held frame (sharp photo, parity preserved).
+    const mag = focusBlurMag(frame, fps);
+    return (
+      <svg width="0" height="0" style={{ position: "absolute" }} aria-hidden>
+        <filter id={focusBlurFilterId(card)} x="-20%" y="-20%" width="140%" height="140%">
+          {focusBlurPrimitives(card, mag)}
         </filter>
       </svg>
     );
@@ -362,17 +534,23 @@ function developStack(s: FilterStack, dev: number): FilterStack {
   };
 }
 
-// Compose the CSS filter string. All four roadmap levers — brightness, contrast,
-// saturate (saturation), blur — are always present, alongside grayscale + sepia.
-function cssFilter(s: FilterStack, blurPx: number): string {
+// The grade head — brightness / contrast / saturate / grayscale / sepia — the
+// part identical whether the tail is the gaussian blur() or the blur-family's
+// url(#…) filter. Kept separate so both paths emit byte-identical head bytes.
+function cssFilterHead(s: FilterStack): string {
   return (
     `brightness(${s.brightness.toFixed(3)}) ` +
     `contrast(${s.contrast.toFixed(3)}) ` +
     `saturate(${s.saturate.toFixed(3)}) ` +
     `grayscale(${s.grayscale.toFixed(3)}) ` +
-    `sepia(${s.sepia.toFixed(3)}) ` +
-    `blur(${blurPx.toFixed(2)}px)`
+    `sepia(${s.sepia.toFixed(3)})`
   );
+}
+
+// Compose the CSS filter string. All four roadmap levers — brightness, contrast,
+// saturate (saturation), blur — are always present, alongside grayscale + sepia.
+function cssFilter(s: FilterStack, blurPx: number): string {
+  return `${cssFilterHead(s)} blur(${blurPx.toFixed(2)}px)`;
 }
 
 // The grade a card's photo holds at `frame`, as a CSS `filter` string — or ""
@@ -409,17 +587,17 @@ export function photoGradeFilterFor(
     extrapolateRight: "clamp" as const,
   };
   const dev = interpolate(frame, [0, fps * DEVELOP_SEC], [0, 1], clamp);
+  const developed = developStack(stack, dev);
+  // blur-family: when motion.py enabled a directional/radial/lens intro, the
+  // family REPLACES only the plain blur() tail with the animated SVG filter
+  // (PhotoFilterDefs emits its markup). The grade head is byte-identical, so a
+  // family intro rides the same develop-in as the gaussian it enriches.
+  if (focusBlurActive(card)) {
+    return `${cssFilterHead(developed)} url(#${focusBlurFilterId(card)})`;
+  }
   // Focus-in blur: starts soft, resolves to 0 — the held frame is always sharp.
-  const blurPx = interpolate(
-    frame,
-    [0, fps * FOCUS_IN_SEC],
-    [FOCUS_IN_BLUR_PX, 0],
-    {
-      ...clamp,
-      easing: Easing.out(Easing.cubic),
-    },
-  );
-  return cssFilter(developStack(stack, dev), blurPx);
+  const blurPx = focusBlurMag(frame, fps);
+  return cssFilter(developed, blurPx);
 }
 
 const Layer: SceneComponent = ({ ctx }) => {

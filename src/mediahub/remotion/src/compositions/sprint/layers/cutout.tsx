@@ -138,7 +138,7 @@ const Layer: SceneComponent = ({ ctx }) => {
         ...sideStyle,
       }}
     >
-      <PhotoFilterDefs card={card} />
+      <PhotoFilterDefs card={card} frame={frame} fps={fps} />
       <img
         src={cutout}
         alt=""

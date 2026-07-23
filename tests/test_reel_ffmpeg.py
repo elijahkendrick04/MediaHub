@@ -323,9 +323,7 @@ def test_motion_is_deterministic():
 
 
 def test_minimal_brief_carries_card_facts_and_brand_palette():
-    brief = reel_ffmpeg._minimal_brief(
-        _props(), _brand_dict(), profile_id="ffmpeg-test"
-    )
+    brief = reel_ffmpeg._minimal_brief(_props(), _brand_dict(), profile_id="ffmpeg-test")
     assert brief.layout_template == "story_card"
     assert brief.text_layers["athlete_full_name"] == "Ada Lovelace"
     assert brief.text_layers["result_value"] == "00:58.31"
@@ -348,9 +346,7 @@ def test_rehydrate_brief_roundtrips_a_persisted_brief():
 
 
 def test_frame_brief_falls_back_when_dict_is_not_a_brief():
-    brief = reel_ffmpeg._frame_brief(
-        _props(), _brand_dict(), _brand_kit(), {"not_a_field": True}
-    )
+    brief = reel_ffmpeg._frame_brief(_props(), _brand_dict(), _brand_kit(), {"not_a_field": True})
     assert brief.layout_template == "story_card"  # deterministic fallback
 
 
@@ -374,9 +370,7 @@ def test_missing_ffmpeg_raises_engine_unavailable(tmp_path, monkeypatch):
     monkeypatch.setattr(reel_ffmpeg, "ffmpeg_exe", lambda: None)
     out = tmp_path / "story.mp4"
     with pytest.raises(ReelEngineUnavailable, match="FFmpeg"):
-        reel_ffmpeg.render_story_card_from_props(
-            _props(), _brand_dict(), _brand_kit(), out
-        )
+        reel_ffmpeg.render_story_card_from_props(_props(), _brand_dict(), _brand_kit(), out)
     assert not out.exists(), "no placeholder asset may be written on failure"
 
 
@@ -408,6 +402,15 @@ def test_cache_key_is_engine_separated():
     remotion_key = _content_hash(base, kind="story")
     ffmpeg_key = _content_hash({**base, "engine": "ffmpeg", "brief": {}}, kind="story")
     assert remotion_key != ffmpeg_key
+
+
+def test_ffmpeg_manifests_declare_focus_blur_unsupported():
+    """The develop-in directional/radial/lens focus blur is a per-frame Remotion
+    photo-element grade; this engine composites the approved still unblurred, so
+    BOTH the story and the reel manifests degrade honestly (never a faked
+    filter)."""
+    src = (Path(reel_ffmpeg.__file__)).read_text()
+    assert src.count('"focus_blur": "unsupported-on-engine"') == 2
 
 
 # ---------------------------------------------------------------------------
@@ -814,9 +817,7 @@ def test_kb_variant_preset_map_mirrors_the_vocabulary_aliases():
     vocabulary's KEN_BURNS_ALIASES inverted."""
     from mediahub.motion.vocabulary import KEN_BURNS_ALIASES
 
-    assert {v: k for k, v in KEN_BURNS_ALIASES.items()} == dict(
-        reel_ffmpeg._PRESET_FOR_KB_VARIANT
-    )
+    assert {v: k for k, v in KEN_BURNS_ALIASES.items()} == dict(reel_ffmpeg._PRESET_FOR_KB_VARIANT)
 
 
 def test_reel_graph_actually_routes_through_the_compiler(monkeypatch):

@@ -886,6 +886,39 @@ def _photo_treatment_mirror_props(
     return {}
 
 
+# blur-family — the develop-in focus blur enriches from the single isotropic
+# gaussian into a deterministic {directional, radial, lens} family, but ONLY on
+# a legacy-animated graded photo card (a sourced photograph with a graded
+# treatment that did NOT resolve an exact still-mirror). The four graded
+# treatments photo_filters.baseStackFor animates; the exact-mirror v2 cards
+# (duotone/halftone/wash) keep their held SVG grade with no stacked intro blur.
+_FOCUS_BLUR_TREATMENTS = frozenset({"duotone", "halftone", "vignette", "wash"})
+_FOCUS_BLUR_STYLES = ("directional", "radial", "lens")
+# The same two mood families photo_filters.applyMoodNuance buckets on.
+_FOCUS_BLUR_ENERGETIC = ("electric", "kinetic", "snappy", "bold", "triumph", "celebratory")
+_FOCUS_BLUR_CALM = ("calm", "composed", "weighty", "contemplative", "melancholic")
+
+
+def _focus_blur_style(seed: int, mood: str) -> str:
+    """The develop-in focus-blur family for a legacy-animated graded photo card.
+
+    A pure function of (variation_seed, mood): energetic moods get a directional
+    whip streak, calm moods a lens bokeh, and a neutral mood lets the seed pick
+    so a pack of neutral cards still varies. Never returns "gaussian" — that is
+    the absence default photo_filters.tsx renders when the prop is not attached.
+    The specific SVG smear (directional axis, radial orientation, lens lift) is
+    a frame-pure sub-choice inside the TSX; this only names the family.
+    """
+    m = (mood or "").lower()
+    if any(w in m for w in _FOCUS_BLUR_ENERGETIC):
+        return "directional"
+    if any(w in m for w in _FOCUS_BLUR_CALM):
+        return "lens"
+    s = abs(int(seed or 0))
+    frac = (((s * 2654435761) % 1000) + 1000) % 1000 / 1000
+    return _FOCUS_BLUR_STYLES[int(frac * len(_FOCUS_BLUR_STYLES)) % len(_FOCUS_BLUR_STYLES)]
+
+
 def _stat_chips_for_brief(brief: Optional[dict]) -> list[dict[str, str]]:
     """The card's secondary-stat chips for motion (M11 parity), as
     ``[{"label": ..., "value": ...}, ...]``.
@@ -1487,6 +1520,24 @@ def _card_to_props(
             format_name=format_name,
         )
     )
+    # blur-family: enrich the develop-in focus blur into a deterministic
+    # {directional, radial, lens} family for a legacy-animated graded photo
+    # card — a sourced photograph with a graded treatment that did NOT resolve
+    # an exact still-mirror (v2 duotone/halftone/wash keep their held SVG grade
+    # with no stacked intro blur; a footage beat plays real video, no develop-in
+    # grade). Fold-only-when-present: attached ONLY here, so every photo-less /
+    # cutout / clean / exact-mirror / footage / default card keeps a
+    # byte-identical prop dict (and cache key). The style is picked Python-side
+    # (pure fn of variation_seed + mood) and rendered by photo_filters.tsx; it
+    # resolves to 0 on the held frame, so still<->motion parity is preserved.
+    _pt = str(b.get("photo_treatment") or "").strip().lower()
+    _exact_mirror = any(
+        k in props for k in ("duotoneShadow", "duotoneHighlight", "halftoneTile", "washTint")
+    )
+    if photo_uri and footage is None and _pt in _FOCUS_BLUR_TREATMENTS and not _exact_mirror:
+        props["focusBlurStyle"] = _focus_blur_style(
+            int(variation_seed or 0), str(b.get("mood") or "")
+        )
     # D8 (Canva gap analysis): the still's density/mood-coherent supporting weight
     # register (kicker/meta/data), mirrored so the reel's labels/meta/data carry
     # the same weights the still painted. Attached ONLY when the still spent the
@@ -1659,6 +1710,7 @@ def _card_manifest_axes(card_props: dict) -> dict:
         "text_granularity": card_props.get("textGranularity") or "word",
         "accent_style": card_props.get("accentStyle") or "",
         "photo_treatment": card_props.get("photoTreatment") or "",
+        "focus_blur_style": card_props.get("focusBlurStyle") or "gaussian",
         "background_style": card_props.get("backgroundStyle") or "",
         "mood": card_props.get("mood") or "",
         "variation_seed": card_props.get("variationSeed") or 0,

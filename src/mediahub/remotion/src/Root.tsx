@@ -91,6 +91,9 @@ const defaultCard = {
   frameTornFreq: 0,
   frameTornScale: 0,
   frameTornSeed: 0,
+  // blur-family: "" keeps the isotropic blur() focus-in (byte-identical);
+  // production attaches "directional"/"radial"/"lens" on graded photo cards.
+  focusBlurStyle: "",
 };
 
 export const RemotionRoot: React.FC = () => {
