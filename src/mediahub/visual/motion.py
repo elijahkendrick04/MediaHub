@@ -585,6 +585,27 @@ def _cutout_data_uri_for_brief(brief: Optional[dict]) -> str:
 # sprint_hooks/gradient_mesh_bg._TRIGGERS; parsed before any ":mode" suffix).
 _MESH_TRIGGERS = frozenset({"gradient_mesh", "gradient-mesh", "mesh"})
 
+# render-banding-dither: the still's standalone opt-in token for the ordered-
+# dither debanding overlay (mirrors sprint_hooks/dither_bg._TRIGGERS). A base
+# token, deliberately SEPARATE from the mesh ":mode" suffix so the two never
+# collide on background_style's single suffix slot.
+_DITHER_TRIGGERS = frozenset({"dither"})
+
+
+def _dither_for_brief(brief: Optional[dict]) -> bool:
+    """Whether the still opted into the ordered-dither debanding overlay.
+
+    Parity by construction: parses ``background_style`` exactly like the still
+    render hook (``sprint_hooks.dither_bg``) — the standalone ``"dither"`` base
+    token — so a card's video debands the same big fill the approved still did.
+    False (the default and every miss) keeps the card props byte-identical.
+    """
+    b = brief if isinstance(brief, dict) else {}
+    raw = str(b.get("background_style") or "").strip().lower()
+    if not raw:
+        return False
+    return raw.partition(":")[0] in _DITHER_TRIGGERS
+
 
 def _mesh_bg_for_brief(brief: Optional[dict], brand_kit: Any, format_name: str) -> str:
     """The still's G1.8 gradient-mesh ground for this card as a CSS
@@ -1514,6 +1535,13 @@ def _card_to_props(
         props["photoSrcs"] = photo_srcs
     if mesh_bg:
         props["meshBg"] = mesh_bg
+    # render-banding-dither: the ordered-dither debanding overlay, attached ONLY
+    # when the still opted in (background_style="dither"), so every other card's
+    # props (and cache key) stay byte-identical (fold-only-when-present). The TSX
+    # <Dither> layer paints the same static Bayer tile the still hook injects, so
+    # the video debands the same big fill the approved still did.
+    if _dither_for_brief(b):
+        props["dither"] = True
     # adjustable-stagger: retune the token-compiled entrance stagger by mood
     # (calm moods loosen the separation, high-energy tighten it). Attached only
     # when it differs from the default AND the intent is one of the entrance
@@ -2726,7 +2754,13 @@ REEL_TOTAL_RANGE = (3.0, 60.0)
 #          layer busts renderer_generation()'s content hash once — a documented
 #          full re-render (identical pixels for unchanged intents/cards), so this
 #          bump is the explicit human signal for the shared-vocabulary change.
-REEL_COMPOSITION_REVISION = "10"
+#   "11" — render-banding-dither: a new Dither.tsx overlay component, mounted in
+#          StoryCard (every reel card beat) and on the reel cover/outro when a
+#          card opted in. Cards WITHOUT the attach-only `dither` prop render the
+#          untouched default path (pixel-identical), but adding Dither.tsx +
+#          editing MeetReel busts renderer_generation()'s content hash once — a
+#          documented full re-render, hence this explicit bump.
+REEL_COMPOSITION_REVISION = "11"
 
 # Story composition revision — folded into the STORY cache key (M15). The
 # story payload historically had no revision field; introducing one both
@@ -2777,7 +2811,12 @@ REEL_COMPOSITION_REVISION = "10"
 #         busts renderer_generation()'s content hash once — a documented full
 #         re-render (identical pixels for unchanged cards) — so this bump is the
 #         explicit human signal for the shared-vocabulary change.
-STORY_COMPOSITION_REVISION = "7"
+#   "8" — render-banding-dither: StoryCard gained a Dither.tsx overlay, mounted
+#         only when the attach-only `dither` prop is set. A card WITHOUT it
+#         renders the untouched default path (pixel-identical); adding the new
+#         component busts renderer_generation()'s content hash once — a
+#         documented full re-render, so this bump is the explicit human signal.
+STORY_COMPOSITION_REVISION = "8"
 
 
 def _clamp(value: float, lo: float, hi: float) -> float:

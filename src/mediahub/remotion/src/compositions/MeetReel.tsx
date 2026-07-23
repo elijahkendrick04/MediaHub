@@ -11,6 +11,7 @@ import {
 import { z } from "zod";
 import { StoryCard, cardSchema, fontStackFor } from "./StoryCard";
 import { REEL_LAYERS } from "./sprint/reelRegistry";
+import { Dither } from "./Dither";
 
 // The reel reuses StoryCard's card schema verbatim (single source of truth):
 // zod strips undeclared keys, so a shared schema means a prop added for the
@@ -1193,6 +1194,10 @@ const CoverScreen: React.FC<{
   // out; inside a real reel the paired exit owns the handoff, so the cover
   // stays fully visible until the first beat's transition takes over.
   selfExit?: boolean;
+  // render-banding-dither: true when a card in the reel opted into the dither
+  // overlay, so the bookend backgrounds deband the same flat ground the beats
+  // do. Default false keeps the cover byte-identical.
+  dither?: boolean;
 }> = ({
   brand,
   meetName,
@@ -1204,6 +1209,7 @@ const CoverScreen: React.FC<{
   photoSrc,
   photoPos,
   selfExit = false,
+  dither = false,
 }) => {
   const env = useCoverEnv(durationInFrames);
   // Data-driven: the variant is a pure function of the meet's identity and its
@@ -1230,6 +1236,7 @@ const CoverScreen: React.FC<{
         opacity: selfExit ? env.outroFade : 1,
       }}
     >
+      {dither ? <Dither /> : null}
       <Body
         brand={brand}
         meetName={meetName}
@@ -1285,7 +1292,9 @@ const OutroScreen: React.FC<{
   nextMeet: string;
   // M18 — the same resolved bookend roles the cover paints with.
   roles: CoverRoles;
-}> = ({ brand, meetName, durationInFrames, sponsor, nextMeet, roles }) => {
+  // render-banding-dither: deband the flat outro ground when a card opted in.
+  dither?: boolean;
+}> = ({ brand, meetName, durationInFrames, sponsor, nextMeet, roles, dither = false }) => {
   const frame = useCurrentFrame();
   const { fps, width, height } = useVideoConfig();
   const ts = Math.min(width / 1080, height / 1440, 1);
@@ -1335,6 +1344,7 @@ const OutroScreen: React.FC<{
         opacity: outroFade,
       }}
     >
+      {dither ? <Dither /> : null}
       <div
         style={{
           position: "absolute",
@@ -1461,6 +1471,11 @@ export const MeetReel: React.FC<Props> = ({
   // honest totals the variant SELECTION + spotlight numeral read from).
   const chips = reelStats(safeCards, reelStatConfig);
   const counts = coverStatCounts(safeCards);
+  // render-banding-dither: the card beats deband via StoryCard's own <Dither>
+  // (each carries the attach-only `dither` prop); the reel's cover/outro
+  // bookends deband too when ANY card opted in, so the whole piece is coherent.
+  // False (no card opted in) keeps every bookend byte-identical.
+  const reelDither = safeCards.some((c) => Boolean(c.dither));
   // M18 — the resolved bookend roles (empty strings = legacy brand pairing)
   // and the top card's typography, shared by the cover AND the outro.
   const coverRoles: CoverRoles = {
@@ -1573,6 +1588,7 @@ export const MeetReel: React.FC<Props> = ({
           fontStack={coverFontStack}
           photoSrc={coverPhotoSrc || ""}
           photoPos={coverPhotoPos || ""}
+          dither={reelDither}
         />
       </ExitWrap>
     </Sequence>,
@@ -1625,6 +1641,7 @@ export const MeetReel: React.FC<Props> = ({
           sponsor={sponsor}
           nextMeet={nextMeet}
           roles={coverRoles}
+          dither={reelDither}
         />
       </TransitionWrap>
     </Sequence>,

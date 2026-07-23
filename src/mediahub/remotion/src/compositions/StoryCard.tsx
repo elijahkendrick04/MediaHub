@@ -25,6 +25,7 @@ import {
   photoHalftoneMaskFor,
 } from "./sprint/layers/photo_filters";
 import { StatChipsBlock } from "./sprint/sceneKit";
+import { Dither } from "./Dither";
 
 // Exported for MeetReel: ONE schema for a card's props on both compositions,
 // so a field added here can never be silently zod-stripped on the reel path.
@@ -242,6 +243,12 @@ export const cardSchema = z.object({
   // Painted on the composition root beneath every content layer, exactly the
   // still's ground override. Empty = the flat roles.ground (byte-identical).
   meshBg: z.string().default(""),
+  // render-banding-dither: when true the card opted into the ordered-dither
+  // debanding overlay (a static Bayer tile composited mix-blend "overlay" over
+  // the ground fill), mirroring the still's sprint_hooks/dither_bg layer. Set
+  // ONLY by motion.py when the still's background_style == "dither"; the default
+  // false keeps the render byte-identical (no <Dither> layer mounts).
+  dither: z.boolean().default(false),
   // D8 (Canva gap analysis): the still's density/mood-coherent supporting weight
   // register (kicker/meta/data over the shipped variable axes), mirrored from
   // render.py so the reel's labels/meta/data carry the same weights the still
@@ -3738,6 +3745,11 @@ export const StoryCard: React.FC<Props> = ({ card, brand }) => {
         opacity: outroFade,
       }}
     >
+      {/* render-banding-dither: the debanding overlay rides directly over the
+          ground fill and BENEATH the content (mirroring the still's below-copy
+          placement), so it composites against the big brand fill that bands.
+          Mounted only when the still opted in; absent = byte-identical. */}
+      {card.dither ? <Dither /> : null}
       {/* Pack ground BENEATH the scene (the still's z1-under-copy order). */}
       <StylePackGroundLayer ctx={ctx} />
       <Scene ctx={ctx} />

@@ -665,6 +665,54 @@ def _noise_pattern_data_uri() -> str:
     return f'url("data:image/svg+xml;base64,{base64.b64encode(svg.encode()).decode()}")'
 
 
+# render-banding-dither: the standard 8×8 Bayer ordered-dither threshold matrix
+# (values 0–63). A COMPILE-TIME CONSTANT — no feTurbulence, no RNG, no wall
+# clock — so the pattern is a pure function of this table. It is symmetric about
+# its midpoint (every value ``v`` has a partner ``63 - v``), which is what makes
+# the emitted tile mean-preserving (see ``_dither_pattern_data_uri``).
+_BAYER_8X8: tuple[tuple[int, ...], ...] = (
+    (0, 32, 8, 40, 2, 34, 10, 42),
+    (48, 16, 56, 24, 50, 18, 58, 26),
+    (12, 44, 4, 36, 14, 46, 6, 38),
+    (60, 28, 52, 20, 62, 30, 54, 22),
+    (3, 35, 11, 43, 1, 33, 9, 41),
+    (51, 19, 59, 27, 49, 17, 57, 25),
+    (15, 47, 7, 39, 13, 45, 5, 37),
+    (63, 31, 55, 23, 61, 29, 53, 21),
+)
+
+# Max luminance deviation, in 8-bit steps, of the ordered-dither tile around the
+# neutral grey (128). At ±1 the tile perturbs the fill by ~±1/255 — enough to
+# break 8-bit gradient banding, far too small to shift an APCA text/bg pair.
+_DITHER_AMPLITUDE = 1
+
+
+def _dither_pattern_data_uri() -> str:
+    """A static Bayer-8×8 ordered-dither tile as a CSS ``url(data:…)`` value.
+
+    Composited with ``mix-blend-mode: overlay`` over a big 8-bit brand fill, an
+    8px tile of near-neutral greys nudges each pixel by at most ±1/255 in an
+    ordered pattern — enough to break the visible banding a flat gradient shows
+    on a phone screen without introducing any hue (luminance-only) and without
+    moving the field's average colour (the matrix is symmetric about 128, so the
+    mean grey is EXACTLY 128 = neutral under overlay). Deterministic: the output
+    is a pure function of :data:`_BAYER_8X8`, byte-stable across calls, with no
+    ``feTurbulence`` / RNG / clock anywhere — distinct from the aesthetic
+    film-grain of :func:`_noise_pattern_data_uri`.
+    """
+    span = 2 * _DITHER_AMPLITUDE  # full peak-to-peak swing across the 0..63 ramp
+    rects = []
+    for y, row in enumerate(_BAYER_8X8):
+        for x, v in enumerate(row):
+            g = 128 + round((v - 31.5) / 63.0 * span)
+            rects.append(f"<rect x='{x}' y='{y}' width='1' height='1' fill='rgb({g},{g},{g})'/>")
+    svg = (
+        "<svg xmlns='http://www.w3.org/2000/svg' width='8' height='8' "
+        "shape-rendering='crispEdges'>" + "".join(rects) + "</svg>"
+    )
+    return f'url("data:image/svg+xml;base64,{base64.b64encode(svg.encode()).decode()}")'
+
+
 # ---------------------------------------------------------------------------
 # Variation backgrounds — pick a pattern from the brief.background_style axis.
 # Each returns a CSS ``url("data:image/svg+xml;base64,...")`` value that the
@@ -898,6 +946,12 @@ def _background_pattern_for(style: str) -> str:
         "dots": _bg_dots_data_uri,
         "duotone": _bg_duotone_data_uri,
         "grain": _bg_clean_data_uri,  # rely on the noise overlay only
+        # render-banding-dither: a bare "dither" ground opts a card into the
+        # ordered-dither debanding overlay (painted by sprint_hooks/dither_bg).
+        # Registered here so the token resolves to a CLEAN ground instead of
+        # falling through to the default water tile — the dither layer wants a
+        # smooth big fill to deband, not a busy pattern on top of it.
+        "dither": _bg_clean_data_uri,
         # R1.4 sprint-pattern tokens — still tiles mirroring the motion
         # registry (sprint/patterns/*.ts) 1:1 so both surfaces stay in parity.
         # The motion token spells "organic-waves"; accept both separators.

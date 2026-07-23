@@ -455,6 +455,16 @@ def test_ffmpeg_manifests_declare_focus_blur_unsupported():
     assert src.count('"focus_blur": "unsupported-on-engine"') == 2
 
 
+def test_ffmpeg_story_manifest_declares_dither_unsupported():
+    """render-banding-dither: the ordered-dither debanding overlay is a Remotion
+    mix-blend layer this engine can't composite over an animated still, so the
+    STORY path reports it honestly. The REEL path composites pre-baked still
+    PNGs (which already carry the still-side dither baked in), so it needs no
+    such note — the note appears exactly once, on the story path."""
+    src = (Path(reel_ffmpeg.__file__)).read_text()
+    assert src.count('"dither": "unsupported-on-engine"') == 1
+
+
 # ---------------------------------------------------------------------------
 # Real FFmpeg assembly (synthetic stills — no Chromium, no Node)
 # ---------------------------------------------------------------------------

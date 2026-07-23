@@ -88,6 +88,7 @@ const defaultCard = {
   captionsJson: "",
   inReel: false,
   meshBg: "",
+  dither: false,
   // D8 register weight vars mirrored from the still's --mh-wght-* (0 = leave the
   // static cut untouched, matching the schema defaults in StoryCard.tsx).
   wghtKicker: 0,

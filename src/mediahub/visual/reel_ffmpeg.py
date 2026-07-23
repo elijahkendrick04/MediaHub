@@ -1093,6 +1093,13 @@ def render_story_card_from_props(
                 # path animates the card's pre-baked still and cannot play a
                 # video plane) — an honest capability note, never a fake beat.
                 "footage": "unsupported-on-engine",
+                # render-banding-dither: the ordered-dither debanding overlay is a
+                # Remotion mix-blend layer (Dither.tsx); this engine animates the
+                # card's pre-baked still and cannot composite it, so a dither-opted
+                # STORY render honestly reports it absent — never a faked layer.
+                # (The reel path composites the pre-baked still PNGs, which already
+                # carry the still-side dither baked in, so it needs no such note.)
+                "dither": "unsupported-on-engine",
                 # blur-family: the develop-in directional/radial/lens focus blur
                 # is a per-frame Remotion photo-element grade; this engine
                 # composites the approved still unblurred, so the intro smear is
