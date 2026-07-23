@@ -3877,15 +3877,20 @@ export function motionBlurSubFrames(frame: number, samples: number, shutter: num
 // true-motion-blur — the frame-pure multi-sample accumulator. It renders the
 // wrapped layer at each deterministic sub-frame (via the `render` callback, which
 // RECOMPUTES the layer's closed-form animation at that sub-frame — never an opaque
-// re-timing of already-rendered children) and composites the copies with
-// equal-weight progressive alpha. Compositing children j=0..n-1 in source order
-// (j=0 painted first/bottom) with opacity 1/(j+1) yields the true equal-weight
-// average of the n sampled frames: acc after k layers = mean of the first k, so
-// acc after n = (1/n)·Σ copies. At an at-rest (terminal/held) frame every sub-frame
-// collapses to identical pixels, so the composite equals the single frame and
-// still<->motion parity holds. Only ever mounted when a motionBlur prop is present
-// (the OFF path renders the verbatim unwrapped layer), so the default DOM is
-// byte-identical.
+// re-timing of already-rendered children) and composites the n copies as a TRUE
+// premultiplied average: each copy at equal opacity 1/n, summed with
+// `mix-blend-mode: plus-lighter` inside an `isolation: isolate` group. plus-lighter
+// adds premultiplied colour AND alpha, so the accumulation is the exact linear mean
+// of the n samples in BOTH channels — including semi-transparent pixels (AA glyph
+// edges, scrims). At an at-rest (terminal/held) frame every sub-frame collapses to
+// identical pixels, so the mean equals a single draw EXACTLY, alpha included, and
+// still<->motion parity holds. (This replaces an earlier progressive-opacity scheme
+// — opacity 1/(i+1) — which averaged colour correctly but over-accumulated alpha on
+// semi-transparent pixels, reading fractionally heavier than the still.) `isolation`
+// keeps the additive blend contained to the sample group; the group itself then
+// composites source-over onto the scene below. Only ever mounted when a motionBlur
+// prop is present (the OFF path renders the verbatim unwrapped layer), so the default
+// DOM is byte-identical.
 export const MotionBlurSampler: React.FC<{
   frame: number;
   samples: number;
@@ -3893,10 +3898,11 @@ export const MotionBlurSampler: React.FC<{
   render: (frameSub: number) => React.ReactNode;
 }> = ({ frame, samples, shutter, render }) => {
   const subs = motionBlurSubFrames(frame, samples, shutter);
+  const inv = 1 / subs.length;
   return (
-    <AbsoluteFill>
+    <AbsoluteFill style={{ isolation: "isolate" }}>
       {subs.map((f, i) => (
-        <AbsoluteFill key={i} style={{ opacity: 1 / (i + 1) }}>
+        <AbsoluteFill key={i} style={{ opacity: inv, mixBlendMode: "plus-lighter" }}>
           {render(f)}
         </AbsoluteFill>
       ))}

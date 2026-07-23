@@ -352,6 +352,70 @@ def test_reel_cache_key_byte_identical_without_alpha(tmp_path, monkeypatch):
     assert "alpha" not in seen["payload"]
 
 
+def _assemble_with_captions(monkeypatch):
+    """Wrap _assemble_reel_props so every beat carries a baked caption track, as a
+    voiceover+subtitles reel would — WITHOUT setting up narration/audio. Returns the
+    call counter so a test can prove the captions really existed before any strip."""
+    real = motion._assemble_reel_props
+    counter = {"beats_captioned": 0}
+
+    def _wrapped(*a, **k):
+        result = real(*a, **k)
+        cards = result[0]
+        for cp in cards:
+            cp["captionsJson"] = '[{"t":0,"d":1,"text":"HI"}]'
+            counter["beats_captioned"] += 1
+        return result
+
+    monkeypatch.setattr(motion, "_assemble_reel_props", _wrapped)
+    return counter
+
+
+def test_reel_alpha_strips_burn_in_captions(tmp_path, monkeypatch):
+    """A transparent (alpha) reel is silent by design, so a burn-in caption track
+    baked upstream by _assemble_reel_props must be dropped — otherwise it would ship a
+    silent transparent asset with hardcoded narration captions, contradicting the
+    'clean compositing asset' contract and the story path (which nulls audio before its
+    caption build). The strip lands before the cache-payload fold, so a caption-free
+    alpha reel keys distinctly and never collides with a captioned opaque reel."""
+    monkeypatch.delenv("MEDIAHUB_REEL_ENGINE", raising=False)
+    monkeypatch.delenv("MEDIAHUB_MOTION_ENCODE", raising=False)
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    counter = _assemble_with_captions(monkeypatch)
+    sink: dict = {}
+    with (
+        patch.object(motion, "_run_remotion", side_effect=_fake_run_remotion_factory(sink)),
+        patch.object(motion, "_render_reel_parallel_or_none", side_effect=lambda **k: None),
+    ):
+        motion.render_meet_reel(
+            [_fake_card()], _fake_brand(), tmp_path / "reel.webm", alpha_profile="vp9"
+        )
+    # Captions WERE baked (real strip, not a never-created no-op)…
+    assert counter["beats_captioned"] >= 1
+    # …and every rendered beat had the track removed under alpha (cover/outro carry none).
+    cards = sink["props"]["cards"]
+    assert cards and all("captionsJson" not in cp for cp in cards)
+
+
+def test_reel_non_alpha_keeps_burn_in_captions(tmp_path, monkeypatch):
+    """Control: the strip is alpha-ONLY. The same baked caption track rides through an
+    ordinary opaque reel unchanged (byte-identical to today)."""
+    monkeypatch.delenv("MEDIAHUB_REEL_ENGINE", raising=False)
+    monkeypatch.delenv("MEDIAHUB_MOTION_ENCODE", raising=False)
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    _assemble_with_captions(monkeypatch)
+    sink: dict = {}
+    with (
+        patch.object(motion, "_run_remotion", side_effect=_fake_run_remotion_factory(sink)),
+        patch.object(motion, "_render_reel_parallel_or_none", side_effect=lambda **k: None),
+    ):
+        motion.render_meet_reel(
+            [_fake_card()], _fake_brand(), tmp_path / "reel.mp4", alpha_profile=""
+        )
+    cards = sink["props"]["cards"]
+    assert cards and all(cp.get("captionsJson") for cp in cards)
+
+
 # ---------------------------------------------------------------------------
 # FFmpeg engine — honest typed error (deliberate deviation from degrade-and-ship)
 # ---------------------------------------------------------------------------

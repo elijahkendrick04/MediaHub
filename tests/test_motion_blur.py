@@ -4,8 +4,10 @@ Motion renders default to the single-Gaussian whip smear + un-blurred entrance.
 ``MEDIAHUB_MOTION_BLUR`` opts into REAL shutter accumulation: the composition
 recomputes the closed-form animation (story hero/result entrance + count-up, the
 reel whip flick) at N deterministic sub-frames across the shutter window and
-composites the copies with equal-weight progressive alpha — a frame-pure, dep-free
-sampler (no ``@remotion/motion-blur``). OFF by default and folded into props +
+composites the copies as a true premultiplied average (equal ``1/n`` opacity summed
+with ``mix-blend-mode: plus-lighter`` inside an ``isolation: isolate`` group, so
+colour AND alpha are the exact linear mean) — a frame-pure, dep-free sampler (no
+``@remotion/motion-blur``). OFF by default and folded into props +
 cache key only when active, so every existing cache key and rendered byte is
 byte-identical. The free FFmpeg engine cannot multi-sample a shutter interval, so
 it declares ``motion_blur: unsupported-on-engine`` — never a faked smear.
@@ -354,6 +356,21 @@ def test_tsx_sampler_is_frame_pure():
         assert forbidden not in code, forbidden
     # The sub-frame set is derived from the frame index.
     assert re.search(r"frame\s*\+\s*\(i", code)
+
+
+def test_tsx_sampler_composites_true_premultiplied_average():
+    """The accumulator composites the N sub-samples as a TRUE premultiplied average
+    — equal ``1/n`` opacity summed with ``plus-lighter`` inside an ``isolation:
+    isolate`` group — so colour AND alpha are the exact linear mean. An at-rest frame
+    then collapses to a single draw (alpha included), preserving still<->motion parity.
+    Guards against a regression to the old progressive-opacity scheme (``1/(i+1)``),
+    which averaged colour but over-accumulated alpha on semi-transparent pixels."""
+    code = _strip_comments(STORY_TSX.read_text())
+    assert 'mixBlendMode: "plus-lighter"' in code
+    assert 'isolation: "isolate"' in code
+    # Equal-weight (1/n), never the progressive 1/(i+1) that over-covers alpha.
+    assert "1 / subs.length" in code
+    assert re.search(r"opacity:\s*1\s*/\s*\(i\s*\+\s*1\)", code) is None
 
 
 def test_tsx_story_gates_wrapper_on_prop_present():

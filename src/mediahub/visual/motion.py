@@ -4322,10 +4322,20 @@ def _render_reel_one_format(
 
     # alpha-export: mark every beat's card for the transparent export so each
     # <StoryCard> beat suppresses its outer ground fill; the reel-level cover/outro
-    # inherit it via reel_props["transparentBg"] below. Attach-only, so a non-alpha
-    # reel keeps byte-identical card props + cache key.
+    # inherit it via reel_props["transparentBg"] below. A transparent compositing
+    # asset is also silent by design (audio_plan was nulled above), so drop any
+    # burn-in caption track that _assemble_reel_props baked upstream too — otherwise a
+    # voiceover+subtitles reel would ship a silent transparent asset with hardcoded
+    # captions, contradicting the alpha "clean compositing asset" contract and the
+    # story path (which nulls the audio plan before its caption build so captions stay
+    # off too). Attach-and-drop only, so a non-alpha reel keeps byte-identical card
+    # props + cache key (and this lands before the cache-payload fold, so a caption-free
+    # alpha reel keys distinctly and never collides with a captioned opaque reel).
     if alpha_prof is not None:
-        cards_props = [{**cp, "transparentBg": True} for cp in cards_props]
+        cards_props = [
+            {**{k: v for k, v in cp.items() if k != "captionsJson"}, "transparentBg": True}
+            for cp in cards_props
+        ]
 
     # per-effect-toggle (REVIEW-ONLY A/B): suppress the decorative axes on EVERY
     # beat's card for a with/without comparison reel, attached ONLY on the
