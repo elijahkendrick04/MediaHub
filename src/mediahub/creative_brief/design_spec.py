@@ -128,6 +128,18 @@ ACCENT_TREATMENTS: tuple[str, ...] = (
 # masks background-removal edge fringe). Both are still-authoritative; the
 # motion side carries wash as a saturation grade and treats sticker as
 # structural until the outline parameters are plumbed into the props.
+#
+# stylize-richer additions: "mosaic" (a morphological dilate for a blocky,
+# posterised look), "motion_tile" (a static feTile replicate of the photo's
+# centre into an NxN grid), and "roughen_edges" (a held feTurbulence +
+# feDisplacementMap that perturbs the photo's silhouette). All three are pure,
+# still-authoritative SVG filters that operate on the photo element only, so the
+# free FFmpeg engine inherits them for free through the baked still and the
+# APCA/brand colour gates are untouched (they never invent a hue). Their
+# strength is sized by ``photo_treatment_intensity`` (below) when set, else the
+# shared ``decoration_strength``; ``roughen_edges``' turbulence seed is derived
+# deterministically from the card's ``variation_signature`` on BOTH surfaces so
+# the still and motion silhouettes cannot drift.
 PHOTO_TREATMENTS: tuple[str, ...] = (
     "cutout",
     "duotone",
@@ -135,6 +147,9 @@ PHOTO_TREATMENTS: tuple[str, ...] = (
     "vignette",
     "wash",
     "sticker",
+    "mosaic",
+    "motion_tile",
+    "roughen_edges",
 )
 
 # E4 (Canva gap analysis) — the shaped photo-frame the director may request on
@@ -247,6 +262,10 @@ DEFAULT_CROP_INTENT = "centered"
 DEFAULT_HERO_STAT = "final_time"
 DEFAULT_ACCENT_TREATMENT = "minimal"
 DEFAULT_PHOTO_TREATMENT = "cutout"
+# stylize-richer — the sentinel that means "photo_treatment_intensity is unset,
+# so size the photo grade off the shared decoration_strength" (the byte-identical
+# default). A director-supplied value in 0..1 overrides it.
+UNSET_PHOTO_TREATMENT_INTENSITY = -1.0
 DEFAULT_PHOTO_FRAME_SHAPE = "rect"
 DEFAULT_LOGO_LOCKUP = "icon"
 DEFAULT_MOOD = "neutral"
@@ -307,6 +326,13 @@ class DesignSpec:
     # default) asks for no grade, so an older spec dict without the field
     # normalises to a byte-identical card.
     photo_treatment: str = DEFAULT_PHOTO_TREATMENT
+    # stylize-richer — an OPTIONAL tunable strength (0..1) for the photo grade.
+    # The sentinel default (``UNSET_PHOTO_TREATMENT_INTENSITY`` = -1.0) means
+    # "unset → size the grade off ``decoration_strength``", so an older spec dict
+    # without the field normalises to a byte-identical card. A supplied value
+    # overrides the strength that sizes each grade (existing and new) on both the
+    # still and motion surfaces.
+    photo_treatment_intensity: float = UNSET_PHOTO_TREATMENT_INTENSITY
     # E4 — the shaped photo frame for the windowed archetypes (PHOTO_FRAME_SHAPES).
     # "rect" (the default) is the raw rectangular window, so an older spec dict
     # without the field normalises to a byte-identical card.
@@ -342,6 +368,7 @@ class DesignSpec:
             "motion_intent": self.motion_intent,
             "rationale": self.rationale,
             "photo_treatment": self.photo_treatment,
+            "photo_treatment_intensity": self.photo_treatment_intensity,
             "photo_frame_shape": self.photo_frame_shape,
             "text_effects": self.text_effects_map(),
             "emphasis_word": self.emphasis_word,
@@ -427,6 +454,22 @@ def _coerce_emphasis_word(value: Any) -> str:
     return tokens[0][:MAX_EMPHASIS_WORD_LEN]
 
 
+def _coerce_intensity(value: Any) -> float:
+    """Coerce the optional ``photo_treatment_intensity`` to 0..1 or the unset
+    sentinel (``UNSET_PHOTO_TREATMENT_INTENSITY`` = -1.0).
+
+    A non-number (or a bool, or a negative value) is treated as "unset" so the
+    grade sizes off ``decoration_strength`` and the card stays byte-identical; a
+    number in range is clamped to 0..1.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return UNSET_PHOTO_TREATMENT_INTENSITY
+    v = float(value)
+    if v < 0.0:
+        return UNSET_PHOTO_TREATMENT_INTENSITY
+    return max(0.0, min(1.0, v))
+
+
 def _coerce_text_effects(value: Any) -> tuple[tuple[str, str], ...]:
     """Coerce a raw ``{slot: effect}`` map into validated, sorted pairs.
 
@@ -508,6 +551,7 @@ def normalise(raw: dict, *, archetypes: list[str], token_roles: list[str]) -> De
         photo_treatment=_coerce_enum(
             data.get("photo_treatment"), PHOTO_TREATMENTS, DEFAULT_PHOTO_TREATMENT
         ),
+        photo_treatment_intensity=_coerce_intensity(data.get("photo_treatment_intensity")),
         photo_frame_shape=_coerce_enum(
             data.get("photo_frame_shape"), PHOTO_FRAME_SHAPES, DEFAULT_PHOTO_FRAME_SHAPE
         ),
@@ -566,6 +610,13 @@ def design_spec_json_schema(*, archetypes: list[str], token_roles: list[str]) ->
             "motion_intent": {"type": "string", "enum": list(MOTION_INTENTS)},
             "rationale": {"type": "string", "maxLength": MAX_RATIONALE_LEN},
             "photo_treatment": {"type": "string", "enum": list(PHOTO_TREATMENTS)},
+            # stylize-richer — the tunable grade strength. Required like every
+            # other field (schema-constrained decoding fills all of them), with a
+            # sentinel: -1 = "auto" (size the grade off decoration_strength, the
+            # byte-identical default), else 0..1 — the same "required-with-a-
+            # sentinel-for-none" shape as ``emphasis_word``. ``normalise`` maps any
+            # value < 0 back to the unset sentinel.
+            "photo_treatment_intensity": {"type": "number", "minimum": -1.0, "maximum": 1.0},
             "photo_frame_shape": {"type": "string", "enum": list(PHOTO_FRAME_SHAPES)},
             "text_effects": {
                 "type": "object",
@@ -595,6 +646,7 @@ def design_spec_json_schema(*, archetypes: list[str], token_roles: list[str]) ->
             "motion_intent",
             "rationale",
             "photo_treatment",
+            "photo_treatment_intensity",
             "photo_frame_shape",
             "text_effects",
             # D6 — required like every other spec field (normalise fills the
@@ -631,6 +683,7 @@ __all__ = [
     "DEFAULT_HERO_STAT",
     "DEFAULT_ACCENT_TREATMENT",
     "DEFAULT_PHOTO_TREATMENT",
+    "UNSET_PHOTO_TREATMENT_INTENSITY",
     "DEFAULT_PHOTO_FRAME_SHAPE",
     "DEFAULT_LOGO_LOCKUP",
     "DEFAULT_MOOD",

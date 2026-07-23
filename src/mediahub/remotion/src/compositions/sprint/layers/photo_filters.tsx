@@ -75,6 +75,19 @@ type TreatmentCard = {
   // _wash_defs_svg composites; only set for a wash-treated v2 card.
   washTint?: string;
   washMix?: number;
+  // stylize-richer — three held pure-SVG looks, each rebuilt byte-for-byte from
+  // the still's _v2_photo_treatment_assets. mosaicBlock = feMorphology dilate
+  // radius (render._mosaic_defs_svg); motionTileGrid = the static feTile
+  // replicate grid N (render._motion_tile_defs_svg); roughenSeed/roughenScale =
+  // the held feTurbulence integer seed (derived from the shared
+  // variation_signature) + feDisplacementMap scale (render._roughen_edges_defs_svg).
+  // treatmentIntensity is the resolved 0..1 strength (informational parity).
+  // 0 / absent on all of them = no stylize look, byte-identical.
+  mosaicBlock?: number;
+  motionTileGrid?: number;
+  roughenSeed?: number;
+  roughenScale?: number;
+  treatmentIntensity?: number;
 };
 
 // The still's exact held halftone grade (render._v2_photo_treatment_assets):
@@ -135,6 +148,43 @@ export function washFilterId(card: TreatmentCard): string {
   const t = (card.washTint || "").replace("#", "");
   const m = Math.round(washMixClamped(card) * 1000);
   return `mh-wash-${t}-${m}`;
+}
+
+// ---------------------------------------------------------------------------
+// stylize-richer — three held pure-SVG looks (mosaic / motion_tile /
+// roughen_edges), each an exact byte-for-byte mirror of the still's
+// _v2_photo_treatment_assets SVG. Held (no time term) and RNG-free — roughen's
+// feTurbulence takes an INTEGER seed derived Python-side from the shared
+// variation_signature, so still and motion draw the identical silhouette. Each
+// is gated on its own param + a photo, so untreated cards stay byte-identical,
+// and each carries a per-param filter id (the duotone/wash reasoning) so a reel
+// transition overlap can never let one beat's filter paint the other's photo.
+// ---------------------------------------------------------------------------
+
+function mosaicActive(card: TreatmentCard): boolean {
+  return Boolean(card.photoSrc && (card.mosaicBlock || 0) > 0);
+}
+
+export function mosaicFilterId(card: TreatmentCard): string {
+  return `mh-mosaic-${Math.round(card.mosaicBlock || 0)}`;
+}
+
+function motionTileActive(card: TreatmentCard): boolean {
+  return Boolean(card.photoSrc && (card.motionTileGrid || 0) > 1);
+}
+
+export function motionTileFilterId(card: TreatmentCard): string {
+  return `mh-mtile-${Math.round(card.motionTileGrid || 0)}`;
+}
+
+function roughenActive(card: TreatmentCard): boolean {
+  return Boolean(card.photoSrc && (card.roughenScale || 0) > 0);
+}
+
+export function roughenFilterId(card: TreatmentCard): string {
+  const seed = Math.floor(card.roughenSeed || 0);
+  const scale = Math.round(card.roughenScale || 0);
+  return `mh-roughen-${seed}-${scale}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -340,6 +390,68 @@ export const PhotoFilterDefs: React.FC<{
       </svg>
     );
   }
+  if (mosaicActive(card)) {
+    // stylize mosaic — the still's _mosaic_defs_svg feMorphology dilate.
+    const r = Math.round(card.mosaicBlock || 0);
+    return (
+      <svg width="0" height="0" style={{ position: "absolute" }} aria-hidden>
+        <filter id={mosaicFilterId(card)} colorInterpolationFilters="sRGB">
+          <feMorphology operator="dilate" radius={r} />
+        </filter>
+      </svg>
+    );
+  }
+  if (motionTileActive(card)) {
+    // stylize motion-tile — the still's _motion_tile_defs_svg static feTile of
+    // the centre 1/N subregion. Percentages formatted to 4dp exactly as Python.
+    const n = Math.round(card.motionTileGrid || 0);
+    const size = (100 / n).toFixed(4);
+    const orig = (50 - 50 / n).toFixed(4);
+    return (
+      <svg width="0" height="0" style={{ position: "absolute" }} aria-hidden>
+        <filter id={motionTileFilterId(card)} x="0%" y="0%" width="100%" height="100%">
+          <feOffset
+            in="SourceGraphic"
+            dx="0"
+            dy="0"
+            x={`${orig}%`}
+            y={`${orig}%`}
+            width={`${size}%`}
+            height={`${size}%`}
+            result="mh-mt-tile"
+          />
+          <feTile in="mh-mt-tile" />
+        </filter>
+      </svg>
+    );
+  }
+  if (roughenActive(card)) {
+    // stylize roughen-edges — the still's _roughen_edges_defs_svg held
+    // feTurbulence (integer seed from the shared variation_signature) +
+    // feDisplacementMap. No time term, so still↔motion silhouettes are identical.
+    const seed = Math.floor(card.roughenSeed || 0);
+    const scale = Math.round(card.roughenScale || 0);
+    return (
+      <svg width="0" height="0" style={{ position: "absolute" }} aria-hidden>
+        <filter id={roughenFilterId(card)} colorInterpolationFilters="sRGB">
+          <feTurbulence
+            type="fractalNoise"
+            baseFrequency="0.04"
+            numOctaves="2"
+            seed={seed}
+            result="mh-r-noise"
+          />
+          <feDisplacementMap
+            in="SourceGraphic"
+            in2="mh-r-noise"
+            scale={scale}
+            xChannelSelector="R"
+            yChannelSelector="G"
+          />
+        </filter>
+      </svg>
+    );
+  }
   if (focusBlurActive(card)) {
     // The animated develop-in focus-blur family (directional/radial/lens),
     // re-emitted each frame with a frame-driven stdDeviation so the intro
@@ -399,6 +511,16 @@ export function photoExactGradeFor(card: TreatmentCard): string {
   }
   if (card.photoSrc && (card.halftoneTile || 0) > 0) {
     return HALFTONE_FILTER;
+  }
+  // stylize-richer — the three held SVG looks (mutually exclusive per card).
+  if (mosaicActive(card)) {
+    return `url(#${mosaicFilterId(card)})`;
+  }
+  if (motionTileActive(card)) {
+    return `url(#${motionTileFilterId(card)})`;
+  }
+  if (roughenActive(card)) {
+    return `url(#${roughenFilterId(card)})`;
   }
   return "";
 }

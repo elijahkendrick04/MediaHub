@@ -197,9 +197,7 @@ def test_accent_token_flows_to_motion_props():
 
 
 def test_director_prompt_offers_the_accent_pack():
-    prompt = ai_director._design_spec_system_prompt(
-        list_archetypes(), list(TOKEN_ROLES)
-    )
+    prompt = ai_director._design_spec_system_prompt(list_archetypes(), list(TOKEN_ROLES))
     for token in sorted(R15_PACK | {"diagonal_underline"}):
         assert token in prompt, f"{token!r} missing from the director prompt"
 
@@ -210,7 +208,17 @@ def test_director_prompt_offers_the_accent_pack():
 
 
 def test_photo_treatments_vocabulary_and_default():
-    assert PHOTO_TREATMENTS == ("cutout", "duotone", "halftone", "vignette", "wash", "sticker")
+    assert PHOTO_TREATMENTS == (
+        "cutout",
+        "duotone",
+        "halftone",
+        "vignette",
+        "wash",
+        "sticker",
+        "mosaic",
+        "motion_tile",
+        "roughen_edges",
+    )
     assert DEFAULT_PHOTO_TREATMENT in PHOTO_TREATMENTS
     # Structural decisions are NOT art direction — never offered to the model.
     assert "no-photo" not in PHOTO_TREATMENTS
@@ -222,12 +230,41 @@ def test_normalise_coerces_photo_treatment():
     assert _spec(photo_treatment=" HALFTONE ").photo_treatment == "halftone"
     assert _spec(photo_treatment="sepia-dream").photo_treatment == "cutout"
     assert _spec().photo_treatment == "cutout"  # absent field → clean default
+    # stylize-richer — the three new looks normalise; an unknown value still
+    # falls back to the clean cutout default.
+    assert _spec(photo_treatment="mosaic").photo_treatment == "mosaic"
+    assert _spec(photo_treatment=" MOTION_TILE ").photo_treatment == "motion_tile"
+    assert _spec(photo_treatment="roughen_edges").photo_treatment == "roughen_edges"
+    assert _spec(photo_treatment="pixel-sort").photo_treatment == "cutout"
+
+
+def test_normalise_coerces_photo_treatment_intensity():
+    # Absent → the unset sentinel (grade sizes off decoration_strength).
+    assert _spec().photo_treatment_intensity == -1.0
+    # In-range value survives; out-of-range is clamped; a negative / non-number
+    # / bool is treated as unset.
+    assert _spec(photo_treatment_intensity=0.0).photo_treatment_intensity == 0.0
+    assert _spec(photo_treatment_intensity=0.75).photo_treatment_intensity == 0.75
+    assert _spec(photo_treatment_intensity=1.0).photo_treatment_intensity == 1.0
+    assert _spec(photo_treatment_intensity=5.0).photo_treatment_intensity == 1.0
+    assert _spec(photo_treatment_intensity=-2.0).photo_treatment_intensity == -1.0
+    assert _spec(photo_treatment_intensity="loud").photo_treatment_intensity == -1.0
+    assert _spec(photo_treatment_intensity=True).photo_treatment_intensity == -1.0
+
+
+def test_schema_carries_intensity_with_the_sentinel_range():
+    schema = design_spec_json_schema(archetypes=list_archetypes(), token_roles=list(TOKEN_ROLES))
+    prop = schema["properties"]["photo_treatment_intensity"]
+    # Required like every field, with the -1 (auto) sentinel permitted.
+    assert prop["type"] == "number" and prop["minimum"] == -1.0 and prop["maximum"] == 1.0
+    assert "photo_treatment_intensity" in schema["required"]
+    # The new looks are in the photo_treatment enum.
+    for look in ("mosaic", "motion_tile", "roughen_edges"):
+        assert look in schema["properties"]["photo_treatment"]["enum"]
 
 
 def test_schema_carries_photo_treatment_enum():
-    schema = design_spec_json_schema(
-        archetypes=list_archetypes(), token_roles=list(TOKEN_ROLES)
-    )
+    schema = design_spec_json_schema(archetypes=list_archetypes(), token_roles=list(TOKEN_ROLES))
     assert schema["properties"]["photo_treatment"]["enum"] == list(PHOTO_TREATMENTS)
     assert "photo_treatment" in schema["required"]
 
@@ -279,9 +316,7 @@ def test_photo_grade_flows_to_motion_props():
 
 
 def test_director_prompt_offers_the_photo_grades():
-    prompt = ai_director._design_spec_system_prompt(
-        list_archetypes(), list(TOKEN_ROLES)
-    )
+    prompt = ai_director._design_spec_system_prompt(list_archetypes(), list(TOKEN_ROLES))
     assert "photo_treatment" in prompt
     for grade in ("duotone", "halftone", "vignette"):
         assert grade in prompt
@@ -312,9 +347,7 @@ def test_non_mesh_pack_keeps_the_default_background():
 
 
 def test_explicit_background_choice_is_never_overridden():
-    brief = _bare_brief(
-        style_pack=_pack_with_ground("gradient_mesh").id, background_style="clean"
-    )
+    brief = _bare_brief(style_pack=_pack_with_ground("gradient_mesh").id, background_style="clean")
     _sync_background_style_with_pack(brief)
     assert brief.background_style == "clean"
     # A mode-suffixed explicit opt-in survives a re-key onto a non-mesh pack.

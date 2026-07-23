@@ -784,6 +784,39 @@ def _decoration_strength_of(brief: Optional[dict]) -> float:
         return 0.5
 
 
+def _resolved_treatment_strength_of(brief: Optional[dict]) -> float:
+    """The 0..1 strength that sizes a photo grade — the motion mirror of
+    ``render._resolved_treatment_strength``. ``photo_treatment_intensity`` (0..1)
+    wins when set; otherwise it falls back to ``decoration_strength`` (clamped),
+    so a card without the new token sizes every grade byte-identically."""
+    b = brief if isinstance(brief, dict) else {}
+    raw = b.get("photo_treatment_intensity", -1.0)
+    try:
+        intensity = float(raw)
+    except (TypeError, ValueError):
+        intensity = -1.0
+    if intensity >= 0.0:
+        return max(0.0, min(1.0, intensity))
+    return max(0.0, min(1.0, _decoration_strength_of(b)))
+
+
+def _roughen_seed_for_brief(brief: Optional[dict]) -> int:
+    """The feTurbulence integer seed for a roughen-edges card, derived from the
+    card's shared ``variation_signature`` (salt='roughen') — byte-for-byte the
+    same derivation as ``render._roughen_seed_for``, so still and motion draw the
+    identical silhouette perturbation."""
+    b = brief if isinstance(brief, dict) else {}
+    sig = str(b.get("variation_signature") or b.get("id") or "").strip()
+    if not sig:
+        return 0
+    try:
+        from mediahub.graphic_renderer.style_packs import _seed_for as _rk_seed
+
+        return _rk_seed(sig, salt="roughen") % 100000
+    except Exception:
+        return 0
+
+
 def _pack_ground_focus_prop(
     brief: Optional[dict], photo_pos: str, has_photo: bool
 ) -> Optional[list[int]]:
@@ -864,13 +897,13 @@ def _photo_treatment_mirror_props(
             "duotoneHighlight": root_vars.get("--mh-accent", "#FFFFFF"),
         }
     if treatment == "halftone":
-        strength = _decoration_strength_of(b)
+        strength = _resolved_treatment_strength_of(b)
         return {"halftoneTile": int(round(14 + 18 * max(0.0, min(1.0, strength))))}
     if treatment == "sticker":
         ink = root_vars.get("--mh-on-primary")
         if not ink or not has_cutout:
             return {}
-        s = max(0.0, min(1.0, _decoration_strength_of(b)))
+        s = _resolved_treatment_strength_of(b)
         width, height = motion_format_size(format_name)
         radius = max(3, int(round(min(width, height) * (0.003 + 0.004 * s))))
         return {"stickerInk": str(ink), "stickerRadius": radius}
@@ -881,8 +914,26 @@ def _photo_treatment_mirror_props(
             tint = darken(root_vars.get("--mh-primary", "#0A2540"), 0.20)
         except Exception:
             return {}
-        s = max(0.0, min(1.0, _decoration_strength_of(b)))
+        s = _resolved_treatment_strength_of(b)
         return {"washTint": tint, "washMix": round(0.18 + 0.24 * s, 4)}
+    # stylize-richer — three pure-SVG stylize looks. Each derives its param(s)
+    # from the SAME resolved strength the still uses, so the TSX rebuilds the
+    # identical held filter; attached ONLY on its own branch, so every other
+    # card keeps a byte-identical prop dict. ``treatmentIntensity`` rides the
+    # props (informational parity + it folds the tuning into the content hash).
+    if treatment == "mosaic":
+        s = _resolved_treatment_strength_of(b)
+        return {"mosaicBlock": max(1, int(round(1 + 4 * s))), "treatmentIntensity": round(s, 4)}
+    if treatment == "motion_tile":
+        s = _resolved_treatment_strength_of(b)
+        return {"motionTileGrid": 2 + int(round(2 * s)), "treatmentIntensity": round(s, 4)}
+    if treatment == "roughen_edges":
+        s = _resolved_treatment_strength_of(b)
+        return {
+            "roughenSeed": _roughen_seed_for_brief(b),
+            "roughenScale": max(1, int(round(2 + 10 * s))),
+            "treatmentIntensity": round(s, 4),
+        }
     return {}
 
 
@@ -2532,7 +2583,14 @@ REEL_TOTAL_RANGE = (3.0, 60.0)
 #         render byte-identically; a register-BEARING reel's deterministic output
 #         changes for an unchanged payload (the terminal/held weight equals the
 #         still, so still↔motion parity holds) — hence the bump.
-REEL_COMPOSITION_REVISION = "9"
+#   "10" — stylize-richer: photo_filters.tsx gained three held SVG stylize looks
+#          (mosaic / motion_tile / roughen_edges) + the tunable
+#          photo_treatment_intensity. Untreated cards attach none of the new
+#          props and render byte-identically, but editing the shared photo_filters
+#          layer busts renderer_generation()'s content hash once — a documented
+#          full re-render (identical pixels for unchanged intents/cards), so this
+#          bump is the explicit human signal for the shared-vocabulary change.
+REEL_COMPOSITION_REVISION = "10"
 
 # Story composition revision — folded into the STORY cache key (M15). The
 # story payload historically had no revision field; introducing one both
@@ -2576,7 +2634,14 @@ REEL_COMPOSITION_REVISION = "9"
 #         byte-identically; a register-BEARING story's deterministic output
 #         changes for an unchanged payload (terminal/held weight equals the
 #         still — still↔motion parity preserved) — hence the bump.
-STORY_COMPOSITION_REVISION = "6"
+#   "7" — stylize-richer: photo_filters.tsx gained three held SVG stylize looks
+#         (mosaic / motion_tile / roughen_edges) + the tunable
+#         photo_treatment_intensity. Untreated cards attach none of the new props
+#         and render byte-identically; editing the shared photo_filters layer
+#         busts renderer_generation()'s content hash once — a documented full
+#         re-render (identical pixels for unchanged cards) — so this bump is the
+#         explicit human signal for the shared-vocabulary change.
+STORY_COMPOSITION_REVISION = "7"
 
 
 def _clamp(value: float, lo: float, hi: float) -> float:

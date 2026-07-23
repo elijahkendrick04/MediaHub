@@ -243,7 +243,11 @@ def _design_spec_system_prompt(archetypes: list[str], token_roles: list[str]) ->
         "diagonal_underline|thick_stripe|thin_stripe|double_stripe|side_rail|"
         "large_brackets|small_brackets|bracket_frame|corner_tabs|offset_badge|"
         'glass_chip",  # glass_chip = frosted-glass data chips over a photo (photo-led cards)\n'
-        '  "photo_treatment": "cutout|duotone|halftone|vignette|wash|sticker",\n'
+        '  "photo_treatment": "cutout|duotone|halftone|vignette|wash|sticker|'
+        'mosaic|motion_tile|roughen_edges",\n'
+        '  "photo_treatment_intensity": <-1 for auto (size the grade off the '
+        "card's decoration strength), else 0..1 for how strong the photo grade "
+        "reads>,\n"
         '  "logo_lockup": "full_horizontal|full_stacked|mono_light|mono_dark|icon",\n'
         '  "mood": "explosive|electric|calm|fierce|celebratory|stoic|precise|bold|triumphant|minimal",\n'
         '  "motion_intent": "fade_in|snap_in_then_settle|slide_up|scale_in|kinetic_type|count_up|static|bounce_in|flip_reveal|swirl|reveal_from_sides|cascade|rise|pop|drop_in|text_scramble",\n'
@@ -271,7 +275,13 @@ def _design_spec_system_prompt(archetypes: list[str], token_roles: list[str]) ->
         "word when it genuinely appears and reads legibly, else it stays plain.\n"
         "photo_treatment craft: wash unifies mismatched/phone photography into "
         "one campaign look; sticker gives a cutout the die-cut poster edge "
-        "(cutout archetypes only); duotone is the full two-ink brand grade.\n"
+        "(cutout archetypes only); duotone is the full two-ink brand grade. "
+        "mosaic/motion_tile/roughen_edges are editorial stylize looks (a blocky "
+        "posterise, a tiled photo replicate, a roughened silhouette) — reach for "
+        "them sparingly, only when a graphic, treated feel genuinely suits the "
+        "moment. photo_treatment_intensity tunes how strong any grade reads: use "
+        "-1 (auto) for most cards to size it off the card's decoration strength, "
+        "and 0..1 only when you want to dial a specific grade up or down.\n"
         "Choose the archetype that fits the moment (a medal → spotlight; a standout "
         "time with no photo → big_number or minimal poster; a great photo → "
         "full-bleed or diagonal). Lead with the most newsworthy hero_stat. Pick "

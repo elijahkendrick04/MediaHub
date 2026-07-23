@@ -4721,6 +4721,117 @@ def _sticker_outline_css(width: int, height: int, strength: float) -> str:
     )
 
 
+# --------------------------------------------------------------------------- #
+# stylize-richer — tunable strength + three pure-SVG stylize looks
+# --------------------------------------------------------------------------- #
+
+
+def _resolved_treatment_strength(brief) -> float:
+    """The 0..1 strength that sizes a photo grade.
+
+    ``photo_treatment_intensity`` (0..1) wins when the director set it; otherwise
+    the grade falls back to the shared ``decoration_strength`` with the still's
+    exact ``float(... or 0.5)`` semantics, so a card without the new token sizes
+    every grade byte-identically to the pre-lever render. Mirrored on the motion
+    side by ``motion._resolved_treatment_strength_of``.
+    """
+    raw = getattr(brief, "photo_treatment_intensity", -1.0)
+    try:
+        intensity = float(raw)
+    except (TypeError, ValueError):
+        intensity = -1.0
+    if intensity >= 0.0:
+        return max(0.0, min(1.0, intensity))
+    try:
+        ds = float(getattr(brief, "decoration_strength", 0.5) or 0.5)
+    except (TypeError, ValueError):
+        ds = 0.5
+    return max(0.0, min(1.0, ds))
+
+
+def _mosaic_block_px(strength: float) -> int:
+    """The feMorphology dilate radius (1..5) sizing the blocky mosaic look."""
+    return max(1, int(round(1 + 4 * max(0.0, min(1.0, strength)))))
+
+
+def _motion_tile_grid(strength: float) -> int:
+    """The feTile replicate grid (2..4) sizing the motion-tile look."""
+    return 2 + int(round(2 * max(0.0, min(1.0, strength))))
+
+
+def _roughen_scale_px(strength: float) -> int:
+    """The feDisplacementMap scale (2..12) sizing the roughen-edges look."""
+    return max(1, int(round(2 + 10 * max(0.0, min(1.0, strength)))))
+
+
+def _roughen_seed_for(brief) -> int:
+    """The feTurbulence integer seed, derived from the card's shared
+    ``variation_signature`` (salt='roughen') so the still and motion silhouettes
+    cannot drift. Mirrored byte-for-byte by ``motion._roughen_seed_for_brief``.
+    """
+    sig = str(getattr(brief, "variation_signature", "") or getattr(brief, "id", "") or "").strip()
+    if not sig:
+        return 0
+    from mediahub.graphic_renderer.style_packs import _seed_for as _rk_seed
+
+    return _rk_seed(sig, salt="roughen") % 100000
+
+
+def _mosaic_defs_svg(radius: int) -> str:
+    """A zero-size SVG carrying the morphological-dilate mosaic filter.
+
+    A held ``feMorphology`` dilate — bright regions grow to a chunky, posterised
+    block look. Deterministic, no time term, no randomness; the TSX rebuilds the
+    identical markup from ``mosaicBlock``.
+    """
+    return (
+        '<svg width="0" height="0" style="position:absolute" aria-hidden="true">'
+        f'<filter id="mh-mosaic-{radius}" color-interpolation-filters="sRGB">'
+        f'<feMorphology operator="dilate" radius="{radius}"/>'
+        "</filter></svg>"
+    )
+
+
+def _motion_tile_defs_svg(grid: int) -> str:
+    """A zero-size SVG carrying the static feTile replicate filter.
+
+    Clips the photo's CENTRE ``1/grid`` subregion and tiles it across an NxN
+    grid — a static replicate motif (no time term), so the FFmpeg still loses no
+    motion. The TSX rebuilds the identical markup from ``motionTileGrid`` (same
+    ``.4f``-formatted percentages).
+    """
+    size = f"{100 / grid:.4f}"
+    orig = f"{50 - 50 / grid:.4f}"
+    return (
+        '<svg width="0" height="0" style="position:absolute" aria-hidden="true">'
+        f'<filter id="mh-mtile-{grid}" x="0%" y="0%" width="100%" height="100%">'
+        f'<feOffset in="SourceGraphic" dx="0" dy="0" x="{orig}%" y="{orig}%" '
+        f'width="{size}%" height="{size}%" result="mh-mt-tile"/>'
+        '<feTile in="mh-mt-tile"/></filter></svg>'
+    )
+
+
+def _roughen_edges_defs_svg(seed: int, scale: int) -> str:
+    """A zero-size SVG carrying the held roughen-edges filter.
+
+    ``feTurbulence`` (fractalNoise, the INTEGER ``seed`` derived from the card's
+    ``variation_signature``) feeds a ``feDisplacementMap`` that perturbs the
+    photo's silhouette. The turbulence is HELD (no time term) and the seed is a
+    spec-defined hash, never a render-time RNG — so the same card yields
+    identical pixels every render, and the TSX rebuilds the identical markup from
+    ``roughenSeed``/``roughenScale``.
+    """
+    return (
+        '<svg width="0" height="0" style="position:absolute" aria-hidden="true">'
+        f'<filter id="mh-roughen-{seed}-{scale}" color-interpolation-filters="sRGB">'
+        f'<feTurbulence type="fractalNoise" baseFrequency="0.04" numOctaves="2" '
+        f'seed="{seed}" result="mh-r-noise"/>'
+        f'<feDisplacementMap in="SourceGraphic" in2="mh-r-noise" scale="{scale}" '
+        'xChannelSelector="R" yChannelSelector="G"/>'
+        "</filter></svg>"
+    )
+
+
 def _v2_photo_treatment_assets(
     brief, root_vars: dict[str, str], width: int = 1080, height: int = 1350, cutout_ok: bool = True
 ) -> tuple[str, str]:
@@ -4735,6 +4846,10 @@ def _v2_photo_treatment_assets(
     box halo, so a photo-mode / matte-rejected card honestly skips it.
     """
     treatment = (getattr(brief, "photo_treatment", "") or "").strip().lower()
+    # stylize-richer — the tunable strength that sizes each grade. Falls back to
+    # decoration_strength when ``photo_treatment_intensity`` is unset, so every
+    # card without the new token sizes its grade byte-identically.
+    strength = _resolved_treatment_strength(brief)
     if treatment == "duotone":
         shadow = darken(root_vars.get("--mh-primary", "#0A2540"), 0.30)
         highlight = root_vars.get("--mh-accent", "#FFFFFF")
@@ -4744,8 +4859,7 @@ def _v2_photo_treatment_assets(
         )
         return css, _duotone_defs_svg(shadow, highlight)
     if treatment == "halftone":
-        strength = float(getattr(brief, "decoration_strength", 0.5) or 0.5)
-        tile = int(round(14 + 18 * max(0.0, min(1.0, strength))))  # 14–32px dots
+        tile = int(round(14 + 18 * strength))  # 14–32px dots
         uri = _halftone_mask_tile_uri(tile)
         css = (
             "\n/* --- M10 real halftone (style-pack dot geometry) --- */\n"
@@ -4755,8 +4869,7 @@ def _v2_photo_treatment_assets(
         )
         return css, ""
     if treatment == "wash":
-        strength = float(getattr(brief, "decoration_strength", 0.5) or 0.5)
-        mix = 0.18 + 0.24 * max(0.0, min(1.0, strength))  # 0.18–0.42 tint mix
+        mix = 0.18 + 0.24 * strength  # 0.18–0.42 tint mix
         tint = darken(root_vars.get("--mh-primary", "#0A2540"), 0.20)
         css = (
             "\n/* --- C5 brand colour-wash (campaign unifier) --- */\n"
@@ -4766,8 +4879,29 @@ def _v2_photo_treatment_assets(
     if treatment == "sticker":
         if not cutout_ok:
             return "", ""
-        strength = float(getattr(brief, "decoration_strength", 0.5) or 0.5)
         return _sticker_outline_css(width, height, strength), ""
+    if treatment == "mosaic":
+        radius = _mosaic_block_px(strength)
+        css = (
+            "\n/* --- stylize mosaic (morphological blocky) --- */\n"
+            f"img.athlete-cutout {{ filter: url(#mh-mosaic-{radius}); }}\n"
+        )
+        return css, _mosaic_defs_svg(radius)
+    if treatment == "motion_tile":
+        grid = _motion_tile_grid(strength)
+        css = (
+            "\n/* --- stylize motion-tile (static feTile replicate) --- */\n"
+            f"img.athlete-cutout {{ filter: url(#mh-mtile-{grid}); }}\n"
+        )
+        return css, _motion_tile_defs_svg(grid)
+    if treatment == "roughen_edges":
+        seed = _roughen_seed_for(brief)
+        scale = _roughen_scale_px(strength)
+        css = (
+            "\n/* --- stylize roughen-edges (held turbulence displacement) --- */\n"
+            f"img.athlete-cutout {{ filter: url(#mh-roughen-{seed}-{scale}); }}\n"
+        )
+        return css, _roughen_edges_defs_svg(seed, scale)
     return "", ""
 
 

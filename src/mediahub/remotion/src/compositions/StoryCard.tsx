@@ -121,6 +121,19 @@ export const cardSchema = z.object({
   // keeps v1 briefs byte-identical.
   washTint: z.string().default(""),
   washMix: z.number().default(0),
+  // stylize-richer — three held pure-SVG photo looks, each rebuilt byte-for-byte
+  // from the still's _v2_photo_treatment_assets: mosaicBlock = feMorphology
+  // dilate radius; motionTileGrid = the static feTile replicate grid N;
+  // roughenSeed + roughenScale = the held feTurbulence integer seed (derived
+  // from the shared variation_signature) + feDisplacementMap scale.
+  // treatmentIntensity = the resolved 0..1 grade strength (informational; -1 =
+  // unset). 0 / -1 on all of them (the defaults) = no stylize look, so every
+  // untreated / legacy card renders byte-identically.
+  mosaicBlock: z.number().default(0),
+  motionTileGrid: z.number().default(0),
+  roughenSeed: z.number().default(0),
+  roughenScale: z.number().default(0),
+  treatmentIntensity: z.number().default(-1),
   // E6 style-pack ground focus — the resolved saliency focus [fx, fy] in
   // percent, recentring the vignette/spotlight ground ellipse on the subject.
   // null (photo-less cards / non-subject grounds) keeps the fixed centre,
