@@ -2273,6 +2273,33 @@ def _motion_supersample() -> float:
     return max(1.0, min(2.0, v))
 
 
+def _photo_supersample() -> int:
+    """Per-photo resample-quality knob (``MEDIAHUB_PHOTO_SUPERSAMPLE``), returned
+    as ``0`` (off / default) or ``2`` (capped).
+
+    This is the honest, opt-in analogue of the FFmpeg engine's fixed 2x Lanczos
+    prescale for the Remotion transform-scaled athlete photos. It is deliberately
+    NOT the whole-composition supersample (that is ``_motion_supersample`` /
+    ``MEDIAHUB_MOTION_SUPERSAMPLE``, which renderMedia-scales the entire frame and
+    Lanczos-downscales — the guaranteed dense-buffer path). When set, it folds a
+    ``photoSupersample`` card prop that pins ``imageRendering:'auto'`` on those
+    ``<img>`` elements so the compositor uses high-quality interpolation; the
+    manifest records it as a best-effort hint, never a claimed supersample.
+
+    Capped at ``2`` for cross-engine parity: the FFmpeg fallback's prescale is a
+    fixed 2x, so a higher factor could never be honoured there. ``0`` (unset /
+    malformed / ``<= 1``) means off — byte-identical to today (fold-only-when-
+    active)."""
+    raw = os.environ.get("MEDIAHUB_PHOTO_SUPERSAMPLE", "").strip()
+    if not raw:
+        return 0
+    try:
+        v = int(float(raw))
+    except ValueError:
+        return 0
+    return 2 if v >= 2 else 0
+
+
 def _run_remotion(
     *,
     composition_id: str,
@@ -2497,6 +2524,13 @@ def render_story_card(
     if caption_json:
         card_dict = {**card_dict, "captionsJson": caption_json}
 
+    # transform-sampling (AE-gap): attach the per-photo resample hint ONLY when
+    # the operator opted in (> 0), exactly like the captions fold above, so every
+    # default render keeps its byte-identical card_dict and story cache key.
+    photo_ss = _photo_supersample()
+    if photo_ss > 0:
+        card_dict = {**card_dict, "photoSupersample": photo_ss}
+
     if engine == "ffmpeg":
         from mediahub.visual import reel_ffmpeg
 
@@ -2587,6 +2621,16 @@ def render_story_card(
     }
     if supersample > 1.0:
         story_manifest["supersample"] = supersample
+    # transform-sampling (AE-gap): record the per-photo hint HONESTLY — a
+    # best-effort compositor interpolation hint, NOT a guaranteed dense-buffer
+    # supersample (that is the whole-composition MEDIAHUB_MOTION_SUPERSAMPLE).
+    if photo_ss > 0:
+        story_manifest["photoSupersample"] = {
+            "factor": photo_ss,
+            "kind": "best-effort-hint",
+            "note": "imageRendering:auto on scaled photos; guaranteed dense-buffer "
+            "supersample is the whole-composition MEDIAHUB_MOTION_SUPERSAMPLE",
+        }
     # M23 explainability: full provenance when a clip plays; the honest
     # fall-back reason when a candidate existed but the photo path won.
     if foot is not None:
@@ -3344,11 +3388,20 @@ def _render_reel_one_format(
     """
     size = motion_format_size(format_name)
     supersample = _motion_supersample()
+    photo_ss = _photo_supersample()
     out_path = Path(out_path)
     # R1.7: steer each card's photo focus for this cut's aspect ratio (no-op for
     # the story base). Folds into the cache key below, so each cut caches its own
     # focus and the story cut stays byte-identical.
     cards_props = _apply_format_photo_focus(cards_props, briefs_list, format_name)
+
+    # transform-sampling (AE-gap): attach the per-photo resample hint to each
+    # beat's card ONLY when opted in (> 0), mirroring the fold-only pattern so an
+    # un-opted reel keeps byte-identical card props and cache key. Each reel beat
+    # renders through <StoryCard>, so the card prop drives supersampledImgStyle
+    # identically to the story path.
+    if photo_ss > 0:
+        cards_props = [{**cp, "photoSupersample": photo_ss} for cp in cards_props]
 
     # M18 — brand-true cover/outro props (APCA-gated roles, top card's
     # typography, top photo for the pool-gated photo cover). Assembled per cut
@@ -3495,6 +3548,22 @@ def _render_reel_one_format(
             "engine": engine,
             "render_strategy": render_strategy,
             **({"supersample": supersample} if supersample > 1.0 else {}),
+            # transform-sampling (AE-gap): honest per-photo hint record — a
+            # best-effort compositor interpolation hint on the beats' scaled
+            # photos, NOT a guaranteed dense-buffer supersample.
+            **(
+                {
+                    "photoSupersample": {
+                        "factor": photo_ss,
+                        "kind": "best-effort-hint",
+                        "note": "imageRendering:auto on scaled photos; guaranteed "
+                        "dense-buffer supersample is the whole-composition "
+                        "MEDIAHUB_MOTION_SUPERSAMPLE",
+                    }
+                }
+                if photo_ss > 0
+                else {}
+            ),
             "format": format_name,
             "composition_revision": REEL_COMPOSITION_REVISION,
             "size": list(size),

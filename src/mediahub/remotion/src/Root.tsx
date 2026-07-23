@@ -47,6 +47,7 @@ const defaultCard = {
   cutoutSrc: "",
   photoMode: "",
   photoScale: 0,
+  photoSupersample: 0,
   decorationStrength: 0.5,
   duotoneShadow: "",
   duotoneHighlight: "",

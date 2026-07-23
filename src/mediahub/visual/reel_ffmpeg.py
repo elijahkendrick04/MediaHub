@@ -146,6 +146,20 @@ def _supersample_requested() -> bool:
         return False
 
 
+def _photo_supersample_requested() -> bool:
+    """True when the per-photo resample knob (``MEDIAHUB_PHOTO_SUPERSAMPLE``) is
+    set. Unlike the Remotion best-effort CSS hint, this free engine ALREADY
+    resamples every camera move from a genuine 2x Lanczos prescale (``scale=
+    {w*2}:{h*2}:flags=lanczos`` at :440/:460 into the zoompan crop), so it reports
+    the knob as natively satisfied — the honest truth — rather than claiming to
+    honour an arbitrary caller factor it did not apply."""
+    raw = os.environ.get("MEDIAHUB_PHOTO_SUPERSAMPLE", "").strip()
+    try:
+        return int(float(raw)) >= 2
+    except ValueError:
+        return False
+
+
 def ffmpeg_exe() -> Optional[str]:
     """Resolve the FFmpeg binary, or None when no source provides one."""
     env = os.environ.get("MEDIAHUB_FFMPEG", "").strip()
@@ -1061,6 +1075,20 @@ def render_story_card_from_props(
                     if _supersample_requested()
                     else {}
                 ),
+                # transform-sampling: the per-photo resample knob maps to this
+                # engine's NATIVE 2x Lanczos prescale (the zoompan crop already
+                # samples a dense buffer), so it is satisfied natively rather than
+                # faking a caller factor — the honest cross-engine parity note.
+                **(
+                    {
+                        "photo_supersample": {
+                            "applied": True,
+                            "method": "native-2x-lanczos-prescale",
+                        }
+                    }
+                    if _photo_supersample_requested()
+                    else {}
+                ),
                 # M23: footage-backed beats need the Remotion engine (this
                 # path animates the card's pre-baked still and cannot play a
                 # video plane) — an honest capability note, never a fake beat.
@@ -1263,6 +1291,19 @@ def render_meet_reel_from_props(
                 **(
                     {"supersample": {"applied": False, "reason": "remotion-only"}}
                     if _supersample_requested()
+                    else {}
+                ),
+                # transform-sampling: satisfied natively by this engine's fixed 2x
+                # Lanczos prescale into every zoompan crop — honest parity note,
+                # never a faked caller factor.
+                **(
+                    {
+                        "photo_supersample": {
+                            "applied": True,
+                            "method": "native-2x-lanczos-prescale",
+                        }
+                    }
+                    if _photo_supersample_requested()
                     else {}
                 ),
                 "captions": "unsupported-on-engine",

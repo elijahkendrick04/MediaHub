@@ -94,6 +94,19 @@ export const cardSchema = z.object({
   // transform-origin at the saliency focus, multiplying into the cinematic
   // push-in. 0 = no crop zoom (byte-identical).
   photoScale: z.number().default(0),
+  // transform-sampling (AE-gap): opt-in per-photo resample-quality hint for the
+  // transform-scaled athlete photos. 0 (default) = untouched, byte-identical.
+  // > 0 pins imageRendering:'auto' on the scaled <img> so the compositor uses
+  // high-quality interpolation (never crisp/pixelated) when photoScale zooms in.
+  // Deliberately NOT a geometry prescale: rendering the <img> at 100·ss %% with
+  // an inverse scale(1/ss) does NOT create a real supersampled backing store
+  // under renderMedia's default scale:1 (Chromium rasters the shrunk layer at
+  // display resolution) and it doubles the seeded camera drift / shifts the
+  // crop-wrapper origin — a visual regression for zero sharpness gain. The
+  // GUARANTEED dense-buffer path is the whole-composition MEDIAHUB_MOTION_
+  // SUPERSAMPLE (renderMedia scale× + Lanczos downscale), already shipped; this
+  // knob is an honestly-scoped best-effort hint recorded as such in the manifest.
+  photoSupersample: z.number().default(0),
   // M12 layered-depth twins: the brief's decoration_strength for the
   // role-coloured cutout depth filter. Only attached when non-default, so the
   // schema default mirrors the still's 0.5 fallback.
@@ -322,6 +335,30 @@ export function wghtBloomAt(frame: number, durationInFrames: number): number {
     extrapolateRight: "clamp",
     easing: Easing.out(Easing.cubic),
   });
+}
+
+// transform-sampling (AE-gap): honest, framing-neutral resample hint for a
+// transform-scaled athlete photo. When the caller has NOT opted in (ss <= 0, the
+// schema default) this returns the SAME style object it was given — reference-
+// identical, so React serialises the inline style byte-for-byte as today and
+// every existing render keeps its cache key. When opted in (ss > 0) it pins
+// imageRendering:'auto' so the compositor never falls back to a crisp/pixelated
+// sample of the up-scaled photo. It deliberately does NOT rewrite the geometry:
+// the "render at 100·ss %% then scale(1/ss)" trick does not produce a real
+// supersampled backing store under renderMedia's default scale:1 (Chromium
+// rasters the shrunk layer at display resolution) and it would double the seeded
+// camera drift and shift the crop-wrapper origin — a mis-frame for no sharpness
+// win. The guaranteed dense-buffer path stays the whole-composition motion
+// supersample; this is the honestly-scoped per-photo hint. Pure: no frame /
+// random / time input, so the render stays a pure function of useCurrentFrame().
+export function supersampledImgStyle(
+  base: React.CSSProperties,
+  ss: number,
+): React.CSSProperties {
+  if (!ss || ss <= 0) {
+    return base;
+  }
+  return { ...base, imageRendering: "auto" };
 }
 
 // Six palette role permutations — mirror creative_brief/generator.py
@@ -1419,20 +1456,23 @@ const PhotoLayer: React.FC<{ ctx: SceneCtx; scrim?: "bottom" | "full" }> = ({
     <img
       src={card.photoSrc}
       alt=""
-      style={{
-        position: "absolute",
-        inset: 0,
-        width: "100%",
-        height: "100%",
-        objectFit: "cover",
-        objectPosition: card.photoPos || "center 28%",
-        // M15 — the seed-chosen camera move: slow push plus (for the drift
-        // variants) a lateral travel in % of the photo's own box, small
-        // enough that the saliency framing always holds.
-        transform: `translate(${anim.photoDriftX}%, ${anim.photoDriftY}%) scale(${anim.photoScale})`,
-        ...(grade ? { filter: grade } : {}),
-        ...(mask ?? {}),
-      }}
+      style={supersampledImgStyle(
+        {
+          position: "absolute",
+          inset: 0,
+          width: "100%",
+          height: "100%",
+          objectFit: "cover",
+          objectPosition: card.photoPos || "center 28%",
+          // M15 — the seed-chosen camera move: slow push plus (for the drift
+          // variants) a lateral travel in % of the photo's own box, small
+          // enough that the saliency framing always holds.
+          transform: `translate(${anim.photoDriftX}%, ${anim.photoDriftY}%) scale(${anim.photoScale})`,
+          ...(grade ? { filter: grade } : {}),
+          ...(mask ?? {}),
+        },
+        card.photoSupersample,
+      )}
     />
   );
   return (
@@ -3279,15 +3319,18 @@ const SplitScene: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
           <img
             src={duoSrc}
             alt=""
-            style={{
-              position: "absolute",
-              inset: 0,
-              width: "100%",
-              height: "100%",
-              objectFit: "cover",
-              objectPosition: "center 28%",
-              transform: `translate(${-anim.photoDriftX}%, ${anim.photoDriftY}%) scale(${anim.photoScale})`,
-            }}
+            style={supersampledImgStyle(
+              {
+                position: "absolute",
+                inset: 0,
+                width: "100%",
+                height: "100%",
+                objectFit: "cover",
+                objectPosition: "center 28%",
+                transform: `translate(${-anim.photoDriftX}%, ${anim.photoDriftY}%) scale(${anim.photoScale})`,
+              },
+              card.photoSupersample,
+            )}
           />
           {/* Role scrim so the result stays legible on the wedge. */}
           <div
@@ -3320,13 +3363,16 @@ const SplitScene: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
           <img
             src={src}
             alt=""
-            style={{
-              width: "100%",
-              height: "100%",
-              objectFit: "cover",
-              objectPosition: "center 28%",
-              transform: `scale(${anim.photoScale})`,
-            }}
+            style={supersampledImgStyle(
+              {
+                width: "100%",
+                height: "100%",
+                objectFit: "cover",
+                objectPosition: "center 28%",
+                transform: `scale(${anim.photoScale})`,
+              },
+              card.photoSupersample,
+            )}
           />
         </div>
       ))}
