@@ -2472,7 +2472,15 @@ REEL_TOTAL_RANGE = (3.0, 60.0)
 #         in a new order, so a glyph-opted reel's deterministic output changes for
 #         an unchanged payload — hence the bump. Word-mode + non-glyph cards are
 #         untouched (glyphAt is never invoked there).
-REEL_COMPOSITION_REVISION = "8"
+#   "9" — varfont-animation: the supporting weight registers (kicker/meta/data)
+#         now BLOOM their variable wght axis up to the still's static target over
+#         the first ~20% of the beat (StoryCard.wghtFvs + shared wghtBloomAt;
+#         sceneKit's data chips share the curve). Register-ABSENT cards
+#         (wghtKicker/Meta/Data == 0) keep wghtFvs's unchanged `{}` branch and
+#         render byte-identically; a register-BEARING reel's deterministic output
+#         changes for an unchanged payload (the terminal/held weight equals the
+#         still, so still↔motion parity holds) — hence the bump.
+REEL_COMPOSITION_REVISION = "9"
 
 # Story composition revision — folded into the STORY cache key (M15). The
 # story payload historically had no revision field; introducing one both
@@ -2509,7 +2517,14 @@ REEL_COMPOSITION_REVISION = "8"
 #         reveal in a new order, so a glyph-opted story's deterministic output
 #         changes for an unchanged payload. Word-mode + non-glyph cards are
 #         untouched (glyphAt is never invoked there).
-STORY_COMPOSITION_REVISION = "5"
+#   "6" — varfont-animation: the supporting weight registers (kicker/meta/data)
+#         now BLOOM their variable wght axis up to the still's static target over
+#         the first ~20% of the beat (StoryCard.wghtFvs + shared wghtBloomAt).
+#         Register-ABSENT cards keep the unchanged `{}` branch and render
+#         byte-identically; a register-BEARING story's deterministic output
+#         changes for an unchanged payload (terminal/held weight equals the
+#         still — still↔motion parity preserved) — hence the bump.
+STORY_COMPOSITION_REVISION = "6"
 
 
 def _clamp(value: float, lo: float, hi: float) -> float:

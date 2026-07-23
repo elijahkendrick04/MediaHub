@@ -254,11 +254,51 @@ type BrandProps = Props["brand"];
 export type Roles = { ground: string; surface: string; accent: string; onGround: string };
 
 // D8 (Canva gap analysis) — fontVariationSettings for a supporting-register
-// weight (kicker/meta/data) mirrored from the still's --mh-wght-* vars. A 0 (the
-// still did not spend the register) omits the setting, so the scene keeps its
-// static fontWeight and renders byte-identically to the pre-D8 reel.
-function wghtFvs(weight: number | undefined): React.CSSProperties {
-  return weight && weight > 0 ? { fontVariationSettings: `'wght' ${Math.round(weight)}` } : {};
+// weight (kicker/meta/data) mirrored from the still's --mh-wght-* vars, now
+// animated by a frame-pure weight *bloom* (varfont-animation). The register
+// enters transiently lighter and blooms UP to the still's exact static target,
+// landing there by ~20% of the beat (see wghtBloomAt) and holding it for the
+// rest of the clip. Because the held/terminal value equals the still's static
+// weight, still↔motion parity is preserved (parity samples the resolved state).
+// A 0/undefined weight (the still did not spend the register) omits the setting
+// entirely — that inactive path is byte-identical to the pre-animation reel.
+//
+// Start-weight note (varfont-animation adversarial correction): startW clamps
+// to 100, the ABSOLUTE minimum of the wght axis — NOT a guaranteed per-face
+// floor. The DATA register hard-codes JetBrains Mono (min 100) so its bloom
+// spans the full range. But the KICKER (LabelChip) and META (BottomStrip)
+// registers set no fontFamily and inherit the card-root fontStack
+// (fontStackFor(typographyPair)), which can resolve to Space Grotesk (min
+// wght 300), Playfair Display (min 400), or a STATIC display face
+// (Anton/Bebas/Bowlby, no wght axis at all). For those faces the browser
+// DETERMINISTICALLY clamps the axis to the face's own floor, so the bloom is
+// simply shallower — or, on a static face, a no-op. This stays fully frame-pure
+// and parity-safe: the held target is unchanged and the browser clamp is
+// deterministic per face, never random.
+export function wghtFvs(weight: number | undefined, bloom = 1): React.CSSProperties {
+  if (!weight || weight <= 0) {
+    return {};
+  }
+  const target = Math.round(weight);
+  const startW = Math.max(100, target - 220);
+  const w = Math.round(startW + (target - startW) * Math.min(1, Math.max(0, bloom)));
+  return { fontVariationSettings: `'wght' ${w}` };
+}
+
+// varfont-animation — the shared 0→1 weight-bloom curve. Exported so sceneKit's
+// data register computes the IDENTICAL curve as the StoryCard kicker/meta
+// registers (both compositions share one animation). Frame-pure: an interpolate
+// over useCurrentFrame() with clamped extrapolation and a fixed easing, using
+// the same off-frame-0 proportional keyframe helper (`3 + (durationInFrames -
+// 3) * f`) as animProgram so it stays correct for any clip length. No
+// Math.random / Date.now / new Date.
+export function wghtBloomAt(frame: number, durationInFrames: number): number {
+  const at = (f: number) => 3 + (durationInFrames - 3) * f;
+  return interpolate(frame, [at(0.0), at(0.2)], [0, 1], {
+    extrapolateLeft: "clamp",
+    extrapolateRight: "clamp",
+    easing: Easing.out(Easing.cubic),
+  });
 }
 
 // Six palette role permutations — mirror creative_brief/generator.py
@@ -455,6 +495,13 @@ export type AnimChannels = {
   // invoked when a card opts into glyph-level text (card.textGranularity ===
   // "glyph"), so word-mode DOM is byte-identical whatever this channel holds.
   glyphAt: (index: number, total: number) => { y: number; opacity: number };
+  // varfont-animation — 0→1 weight-bloom progress for the supporting registers
+  // (kicker/meta/data). wghtFvs blooms the register's variable wght axis UP from
+  // a transiently-lighter start to the still's exact static target, landing by
+  // ~20% of the beat and holding 1 for the rest of the clip. The terminal value
+  // equals the still weight, so still↔motion parity holds; register-absent cards
+  // (weight 0) take wghtFvs's unchanged `{}` branch and never read this.
+  wghtBloom: number;
 };
 
 // The nine executable intents. Kept in lock-step with
@@ -580,6 +627,9 @@ function animProgram(
     textRevealProgress: 1,
     wordAt: identityWord,
     glyphAt: identityGlyph,
+    // varfont-animation — every intent spreads ...base, so all inherit the
+    // supporting-register weight bloom for free. Same curve sceneKit uses.
+    wghtBloom: wghtBloomAt(frame, durationInFrames),
   };
 
   // Kind-specific execution of the resolve accent that lives in the shared
@@ -754,6 +804,9 @@ function animProgram(
         textRevealProgress: 1,
         wordAt: identityWord,
         glyphAt: identityGlyph,
+        // static: everything is present from frame 0, so the register holds its
+        // terminal (still-parity) weight — no bloom, consistent with the intent.
+        wghtBloom: 1,
       };
     }
     default: {
@@ -2162,8 +2215,8 @@ const BottomStrip: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
         textTransform: "uppercase",
       }}
     >
-      <span style={{ ...wghtFvs(ctx.card.wghtMeta) }}>{meet}</span>
-      <span style={{ fontWeight: 700, ...wghtFvs(ctx.card.wghtMeta) }}>{club}</span>
+      <span style={{ ...wghtFvs(ctx.card.wghtMeta, anim.wghtBloom) }}>{meet}</span>
+      <span style={{ fontWeight: 700, ...wghtFvs(ctx.card.wghtMeta, anim.wghtBloom) }}>{club}</span>
     </div>
   );
 };
@@ -2190,7 +2243,7 @@ const LabelChip: React.FC<{ ctx: SceneCtx; left?: number; top?: number; center?:
         color: roles.ground,
         fontSize: Math.round(36 * ts),
         fontWeight: 800,
-        ...wghtFvs(ctx.card.wghtKicker),
+        ...wghtFvs(ctx.card.wghtKicker, anim.wghtBloom),
         letterSpacing: "0.12em",
         opacity: anim.chipOpacity,
         borderRadius: 6,

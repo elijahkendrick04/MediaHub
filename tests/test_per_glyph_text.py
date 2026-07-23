@@ -93,9 +93,11 @@ def test_ffmpeg_manifests_declare_per_glyph_unsupported():
 
 
 def test_revisions_bumped_for_shared_kineticline_change():
-    # Bumped again by range-selectors (glyph reveal ORDER × SHAPE now varies).
-    assert motion.STORY_COMPOSITION_REVISION == "5"
-    assert motion.REEL_COMPOSITION_REVISION == "8"
+    # Bumped by range-selectors (glyph reveal ORDER × SHAPE now varies) and kept
+    # monotonic by later shared-composition changes (e.g. varfont-animation's
+    # register weight bloom), so pin the floor rather than an exact value.
+    assert int(motion.STORY_COMPOSITION_REVISION) >= 5
+    assert int(motion.REEL_COMPOSITION_REVISION) >= 8
 
 
 # ---------------------------------------------------------------------------

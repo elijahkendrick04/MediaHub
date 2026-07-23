@@ -1235,6 +1235,13 @@ def render_meet_reel_from_props(
                 ),
                 "captions": "unsupported-on-engine",
                 "stat_chips": "static-cover",
+                # varfont-animation: the Remotion engine blooms the supporting
+                # weight registers' variable wght axis up to the still's target
+                # over the first ~20% of the beat. This engine bakes the approved
+                # still, which already carries that static register weight, so it
+                # shows the terminal (parity) weight with no bloom — reported
+                # truthfully, never a faked animation.
+                "variable_axes": "static-weight",
                 # M23: footage-backed beats need the Remotion engine (this
                 # path animates pre-baked stills and cannot play a video
                 # plane) — an honest capability note, never a fake beat.

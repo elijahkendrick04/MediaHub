@@ -25,6 +25,7 @@
 import React from "react";
 import { Easing, interpolate, useVideoConfig } from "remotion";
 import type { SceneCtx } from "./registry";
+import { wghtBloomAt, wghtFvs } from "../StoryCard";
 import {
   PhotoFilterDefs,
   photoGradeFilterFor,
@@ -450,8 +451,10 @@ export const StatChipsBlock: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
               fontVariantNumeric: "tabular-nums",
               fontWeight: 700,
               // D8 — the still's data-register weight (0 ⇒ omit, byte-identical).
-              fontVariationSettings:
-                card.wghtData && card.wghtData > 0 ? `'wght' ${Math.round(card.wghtData)}` : undefined,
+              // varfont-animation — blooms UP to that static weight via the
+              // shared frame-pure curve (identical to StoryCard's registers).
+              fontVariationSettings: wghtFvs(card.wghtData, wghtBloomAt(frame, durationInFrames))
+                .fontVariationSettings,
               fontSize: Math.round(17 * ts),
               color: valueInk,
               padding: `0 ${Math.round(10 * ts)}px`,
@@ -519,10 +522,12 @@ export const StatChipsBlock: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
                     fontVariantNumeric: "tabular-nums",
                     fontWeight: 700,
                     // D8 — the still's data-register weight (0 ⇒ omit, byte-identical).
-                    fontVariationSettings:
-                      card.wghtData && card.wghtData > 0
-                        ? `'wght' ${Math.round(card.wghtData)}`
-                        : undefined,
+                    // varfont-animation — blooms UP to that static weight via
+                    // the shared frame-pure curve.
+                    fontVariationSettings: wghtFvs(
+                      card.wghtData,
+                      wghtBloomAt(frame, durationInFrames),
+                    ).fontVariationSettings,
                     fontSize: Math.round(30 * ts),
                     lineHeight: 1.05,
                     color: ink,

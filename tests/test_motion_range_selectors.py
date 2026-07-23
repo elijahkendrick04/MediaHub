@@ -149,5 +149,7 @@ def test_identity_selector_reproduces_plain_index_ramp_contract():
 
 
 def test_composition_revisions_bumped_for_range_selectors():
-    assert motion.STORY_COMPOSITION_REVISION == "5"
-    assert motion.REEL_COMPOSITION_REVISION == "8"
+    # Range-selectors set the "5"/"8" floor; later shared-composition changes
+    # (e.g. varfont-animation's register weight bloom) keep bumping monotonically.
+    assert int(motion.STORY_COMPOSITION_REVISION) >= 5
+    assert int(motion.REEL_COMPOSITION_REVISION) >= 8
