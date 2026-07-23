@@ -405,6 +405,7 @@ def _fake_all_formats_writing(rendered_formats, errors=None, captured=None):
         rhythm=None,
         dub_language="",
         reel_stat_config=None,
+        alpha_profile="",
     ):
         if captured is not None:
             captured.update(

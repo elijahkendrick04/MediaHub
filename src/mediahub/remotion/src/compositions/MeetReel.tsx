@@ -127,6 +127,12 @@ export const meetReelSchema = z.object({
       }),
     )
     .default([]),
+  // alpha-export: when true the reel is being rendered for a transparent-
+  // background compositing export, so the CoverScreen and OutroScreen full-bleed
+  // ground fills are SUPPRESSED (the card beats inherit it via each card's own
+  // `transparentBg` prop). Set ONLY by motion.py on the opt-in alpha path; the
+  // default false keeps every bookend's DOM byte-identical.
+  transparentBg: z.boolean().default(false),
 });
 
 // The resolved bookend colour roles a cover/outro paints with. Every field
@@ -1247,6 +1253,8 @@ const CoverScreen: React.FC<{
   dither?: boolean;
   // svg-shape-decompose — opt-in logo draw-on (inactive by default).
   logoDraw: LogoDrawConfig;
+  // alpha-export — suppress the full-bleed ground fill for a transparent export.
+  transparentBg?: boolean;
 }> = ({
   brand,
   meetName,
@@ -1260,6 +1268,7 @@ const CoverScreen: React.FC<{
   selfExit = false,
   dither = false,
   logoDraw,
+  transparentBg = false,
 }) => {
   const env = useCoverEnv(durationInFrames);
   // Data-driven: the variant is a pure function of the meet's identity and its
@@ -1281,7 +1290,11 @@ const CoverScreen: React.FC<{
   return (
     <AbsoluteFill
       style={{
-        backgroundColor: roles.ground || brand.primary || "#0A2540",
+        // alpha-export: drop the full-bleed cover ground under the opt-in
+        // transparent export (default false → the historic fill, byte-identical).
+        ...(transparentBg
+          ? {}
+          : { backgroundColor: roles.ground || brand.primary || "#0A2540" }),
         fontFamily: fontStack || COVER_FONT,
         opacity: selfExit ? env.outroFade : 1,
       }}
@@ -1347,6 +1360,8 @@ const OutroScreen: React.FC<{
   dither?: boolean;
   // svg-shape-decompose — opt-in logo draw-on (inactive by default).
   logoDraw: LogoDrawConfig;
+  // alpha-export — suppress the full-bleed ground fill for a transparent export.
+  transparentBg?: boolean;
 }> = ({
   brand,
   meetName,
@@ -1356,6 +1371,7 @@ const OutroScreen: React.FC<{
   roles,
   dither = false,
   logoDraw,
+  transparentBg = false,
 }) => {
   const frame = useCurrentFrame();
   const { fps, width, height } = useVideoConfig();
@@ -1401,7 +1417,11 @@ const OutroScreen: React.FC<{
   return (
     <AbsoluteFill
       style={{
-        backgroundColor: roles.ground || brand.primary || "#0A2540",
+        // alpha-export: drop the full-bleed outro ground under the opt-in
+        // transparent export (default false → the historic fill, byte-identical).
+        ...(transparentBg
+          ? {}
+          : { backgroundColor: roles.ground || brand.primary || "#0A2540" }),
         fontFamily: COVER_FONT,
         opacity: outroFade,
       }}
@@ -1526,6 +1546,7 @@ export const MeetReel: React.FC<Props> = ({
   logoDrawOn,
   logoViewBox,
   logoPaths,
+  transparentBg,
 }) => {
   const { fps, durationInFrames, width, height } = useVideoConfig();
   const rootFrame = useCurrentFrame();
@@ -1572,6 +1593,7 @@ export const MeetReel: React.FC<Props> = ({
         photoPos={coverPhotoPos || ""}
         selfExit
         logoDraw={logoDraw}
+        transparentBg={Boolean(transparentBg)}
       />
     );
   }
@@ -1664,6 +1686,7 @@ export const MeetReel: React.FC<Props> = ({
           photoPos={coverPhotoPos || ""}
           dither={reelDither}
           logoDraw={logoDraw}
+          transparentBg={Boolean(transparentBg)}
         />
       </ExitWrap>
     </Sequence>,
@@ -1718,6 +1741,7 @@ export const MeetReel: React.FC<Props> = ({
           roles={coverRoles}
           dither={reelDither}
           logoDraw={logoDraw}
+          transparentBg={Boolean(transparentBg)}
         />
       </TransitionWrap>
     </Sequence>,

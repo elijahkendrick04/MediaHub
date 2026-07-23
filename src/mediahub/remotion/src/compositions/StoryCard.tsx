@@ -224,6 +224,15 @@ export const cardSchema = z.object({
   roleSurface: z.string().default(""),
   roleAccent: z.string().default(""),
   roleOnGround: z.string().default(""),
+  // alpha-export: when true this card is being rendered for a transparent-
+  // background compositing export, so the outermost full-bleed ground fill
+  // (backgroundColor + any full-bleed meshBg) is SUPPRESSED — alpha is only
+  // meaningful when the ground is not painted. Everything else (scene content,
+  // text, chips, photo, StylePack/sprint layers) renders unchanged over the
+  // transparency. Set ONLY by motion.py on the opt-in alpha path; the default
+  // false keeps the DOM byte-identical (the ground fill paints exactly as
+  // before). A pure boolean read — no frame-impure sampling.
+  transparentBg: z.boolean().default(false),
   // F9 medal chrome (still parity): the resolved specular ramp CSS
   // (linear-gradient(...)). roleMedalRamp fills the bevelled result chip;
   // roleMedalNumeralRamp is the gate-passing twin that gradient-clips the mega
@@ -3777,11 +3786,16 @@ export const StoryCard: React.FC<Props> = ({ card, brand }) => {
   return (
     <AbsoluteFill
       style={{
-        backgroundColor: roles.ground,
+        // alpha-export: suppress the full-bleed ground fill under the opt-in
+        // transparent export (default false → `{ backgroundColor: roles.ground }`,
+        // byte-identical to the historic unconditional fill).
+        ...(card.transparentBg ? {} : { backgroundColor: roles.ground }),
         // G1.8 mesh ground — the still's exact SVG, under every content layer
         // (the still hook overrides the ground element's background-image the
-        // same way). Absent = the flat brand ground, byte-identical.
-        ...(card.meshBg && !off("mesh_bg")
+        // same way). Absent = the flat brand ground, byte-identical. Under the
+        // alpha export the full-bleed mesh is also suppressed (it is a ground
+        // paint), so the composite stays transparent behind the content.
+        ...(card.meshBg && !off("mesh_bg") && !card.transparentBg
           ? {
               backgroundImage: card.meshBg,
               backgroundSize: "cover",

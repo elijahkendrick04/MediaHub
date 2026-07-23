@@ -987,6 +987,7 @@ def render_story_card_from_props(
     audio_plan: Optional[dict] = None,
     format_name: str = "story",
     fps: int = FPS,
+    alpha_profile: str = "",
 ) -> Path:
     """Render one card's story MP4 via the still+FFmpeg path.
 
@@ -1143,6 +1144,13 @@ def render_story_card_from_props(
                 # degrades HONESTLY — never a faked 10-bit or false gamut tag.
                 # Fold-only-when-requested keeps every default render's note clean.
                 **({"encode": "unsupported-on-engine"} if _motion_encode_requested() else {}),
+                # alpha-export: a transparent-background export is a Remotion
+                # renderMedia codec/pixelFormat capability; this engine composites
+                # OPAQUE pre-baked stills and cannot emit an alpha channel.
+                # Belt-and-braces honesty (fold-only-when-requested): the caller
+                # (motion.render_story_card) normally RAISES before reaching this
+                # engine, so this note only fires on a direct alpha call here.
+                **({"alpha": "unsupported-on-engine"} if alpha_profile else {}),
                 "engine_note": (
                     "Rendered by the reduced-motion FFmpeg engine: the card's own "
                     "approved still with a deterministic camera move — no text "
@@ -1176,6 +1184,7 @@ def render_meet_reel_from_props(
     audio_notes: Optional[dict] = None,
     fps: int = FPS,
     logo_drawon: bool = False,
+    alpha_profile: str = "",
 ) -> Path:
     """Render the meet reel (cover + one beat per card) via still+FFmpeg.
 
@@ -1401,6 +1410,13 @@ def render_meet_reel_from_props(
                 # request degrades HONESTLY — never a faked 10-bit or false gamut
                 # tag. Fold-only-when-requested keeps every default reel's note clean.
                 **({"encode": "unsupported-on-engine"} if _motion_encode_requested() else {}),
+                # alpha-export: a transparent-background reel is a Remotion
+                # renderMedia codec/pixelFormat capability; this engine composites
+                # OPAQUE stills and cannot emit an alpha channel. Belt-and-braces
+                # honesty (fold-only-when-requested): motion.render_meet_reel
+                # normally RAISES before reaching this engine, so this note only
+                # fires on a direct alpha call here.
+                **({"alpha": "unsupported-on-engine"} if alpha_profile else {}),
                 "engine_note": (
                     "Rendered by the reduced-motion FFmpeg engine: each beat is "
                     "the card's own approved still with a deterministic camera "

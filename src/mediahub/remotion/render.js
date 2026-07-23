@@ -95,6 +95,13 @@ async function main() {
   const codecArg = args.codec || "h264";
   const pixelFormatArg = args["pixel-format"] || "yuv420p";
   const colorSpaceArg = args["color-space"] || null;
+  // Optional ProRes profile (alpha-export): only meaningful with codec=prores
+  // (Remotion throws if proResProfile is set with a non-prores codec). Absent
+  // (the default) spreads nothing, so the default renderMedia call is
+  // byte-identical; the transparent-export path passes "4444" alongside
+  // codec=prores + pixelFormat=yuva444p10le. Encoder-only — never touches the
+  // rendered frame buffer, so frame-purity is intact.
+  const proResProfileArg = args["prores-profile"] || null;
 
   if (!compositionId || !propsPath || !outputPath) {
     console.error(
@@ -170,6 +177,7 @@ async function main() {
     codec: codecArg,
     ...(scaleN > 1 ? { scale: scaleN } : {}),
     ...(colorSpaceArg ? { colorSpace: colorSpaceArg } : {}),
+    ...(proResProfileArg ? { proResProfile: proResProfileArg } : {}),
     outputLocation: outputPath,
     inputProps,
     chromiumOptions: {

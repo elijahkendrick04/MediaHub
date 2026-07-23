@@ -89,6 +89,9 @@ const defaultCard = {
   inReel: false,
   meshBg: "",
   dither: false,
+  // alpha-export: opaque by default (byte-identical). Production sets true only
+  // on the opt-in transparent-background compositing export.
+  transparentBg: false,
   // D8 register weight vars mirrored from the still's --mh-wght-* (0 = leave the
   // static cut untouched, matching the schema defaults in StoryCard.tsx).
   wghtKicker: 0,
@@ -151,6 +154,9 @@ export const RemotionRoot: React.FC = () => {
           logoDrawOn: false,
           logoViewBox: "",
           logoPaths: [],
+          // alpha-export: opaque by default; production sets true only on the
+          // opt-in transparent-background reel export.
+          transparentBg: false,
         }}
       />
     </>

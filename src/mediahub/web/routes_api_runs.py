@@ -3713,9 +3713,13 @@ def api_card_motion(run_id: str, card_id: str):
                 variation_seed=inputs["variation_seed"],
                 brief=inputs["brief"],
                 format_name=inputs["format"],
+                alpha_profile=inputs["alpha"],
             )
     except W._RenderBusy:
         return W._render_busy_response("motion")
+    except _motion.AlphaUnsupportedError as e:
+        # alpha-export: an honest 503 rather than a mislabeled opaque file.
+        return jsonify({"error": "alpha_unsupported_on_engine", "detail": str(e)}), 503
     except RuntimeError as e:
         _payload = W._motion_error_payload(e)
         return jsonify(_payload), 503 if _payload.get("kind") == "infra_missing" else 500
@@ -3737,7 +3741,7 @@ def api_card_motion(run_id: str, card_id: str):
         ), 500
     return send_file(
         str(mp4),
-        mimetype="video/mp4",
+        mimetype=inputs["content_type"],
         as_attachment=False,
         download_name=inputs["out_name"],
     )
@@ -3766,6 +3770,10 @@ def api_card_motion_job(run_id: str, card_id: str):
     _file_kwargs = {"run_id": run_id, "card_id": card_id}
     if inputs["format"] != _motion.DEFAULT_MOTION_FORMAT:
         _file_kwargs["format"] = inputs["format"]
+    # alpha-export: carry the profile so the file route resolves the .mov/.webm
+    # name + Content-Type.
+    if inputs["alpha"]:
+        _file_kwargs["alpha"] = inputs["alpha"]
     file_url = url_for("api_card_motion_file", **_file_kwargs)
     job_id = W.uuid.uuid4().hex
     job: dict = {
@@ -3792,6 +3800,7 @@ def api_card_motion_job(run_id: str, card_id: str):
                         variation_seed=inputs["variation_seed"],
                         brief=inputs["brief"],
                         format_name=inputs["format"],
+                        alpha_profile=inputs["alpha"],
                     )
             if not Path(mp4).exists():
                 raise RuntimeError("mp4 missing after render")
@@ -3867,6 +3876,10 @@ def api_card_motion_batch_job(run_id: str, card_id: str):
         return err
 
     out_dir = Path(inputs["out_path"]).parent
+    # alpha-export: every cut in the batch inherits the requested transparent
+    # profile; the .mov/.webm extension threads into the file names + URLs.
+    _alpha_prof = _motion.resolve_alpha_profile(inputs["alpha"]) if inputs["alpha"] else None
+    _alpha_ext = _alpha_prof.ext if _alpha_prof else "mp4"
     # url_for needs the request context — resolve every cut's file URL
     # now, before the worker thread (which has none).
     file_urls: dict[str, str] = {}
@@ -3874,6 +3887,8 @@ def api_card_motion_batch_job(run_id: str, card_id: str):
         _file_kwargs = {"run_id": run_id, "card_id": card_id}
         if fmt != _motion.DEFAULT_MOTION_FORMAT:
             _file_kwargs["format"] = fmt
+        if inputs["alpha"]:
+            _file_kwargs["alpha"] = inputs["alpha"]
         file_urls[fmt] = url_for("api_card_motion_file", **_file_kwargs)
 
     job_id = W.uuid.uuid4().hex
@@ -3906,9 +3921,9 @@ def api_card_motion_batch_job(run_id: str, card_id: str):
                     job["current"] = fmt
                     W._variant_job_save(job)
                     out_name = (
-                        f"{card_id}.mp4"
+                        f"{card_id}.{_alpha_ext}"
                         if fmt == _motion.DEFAULT_MOTION_FORMAT
-                        else f"{card_id}_{fmt}.mp4"
+                        else f"{card_id}_{fmt}.{_alpha_ext}"
                     )
                     try:
                         # Per-cut slot with the queue timeout (like the
@@ -3924,6 +3939,7 @@ def api_card_motion_batch_job(run_id: str, card_id: str):
                                 variation_seed=inputs["variation_seed"],
                                 brief=inputs["brief"],
                                 format_name=fmt,
+                                alpha_profile=inputs["alpha"],
                             )
                         if not Path(mp4).exists():
                             raise RuntimeError("mp4 missing after render")
@@ -4040,8 +4056,18 @@ def api_card_motion_file(run_id: str, card_id: str):
     fmt, canvas_err = W._resolve_motion_canvas()
     if canvas_err is not None:
         return canvas_err
+    # alpha-export: an alpha cut is served from its .mov/.webm slot with the
+    # profile's Content-Type. Absent keeps the historic .mp4 / video/mp4 path.
+    from mediahub.visual import motion as _motion
+
+    alpha = (request.args.get("alpha") or "").strip().lower()
+    if alpha and alpha not in _motion.ALPHA_PROFILES:
+        return jsonify({"error": "bad_alpha", "valid_alpha": sorted(_motion.ALPHA_PROFILES)}), 400
+    _alpha_prof = _motion.resolve_alpha_profile(alpha) if alpha else None
+    _ext = _alpha_prof.ext if _alpha_prof else "mp4"
+    _content_type = _alpha_prof.content_type if _alpha_prof else "video/mp4"
     motion_dir = W.RUNS_DIR / run_id / "motion"
-    name = f"{card_id}.mp4" if fmt == "story" else f"{card_id}_{fmt}.mp4"
+    name = f"{card_id}.{_ext}" if fmt == "story" else f"{card_id}_{fmt}.{_ext}"
     path = motion_dir / name
     # Defence-in-depth: the card id is a single URL segment, but never let
     # a crafted id escape the run's motion dir.
@@ -4062,7 +4088,7 @@ def api_card_motion_file(run_id: str, card_id: str):
             as_attachment=False,
             download_name=poster.name,
         )
-    return send_file(str(path), mimetype="video/mp4", as_attachment=False, download_name=name)
+    return send_file(str(path), mimetype=_content_type, as_attachment=False, download_name=name)
 
 
 @W.require_run
@@ -4682,9 +4708,13 @@ def api_run_reel(run_id: str):
                 next_meet=inputs.get("next_meet", ""),
                 dub_language=inputs.get("dub_language", ""),
                 reel_stat_config=inputs.get("reel_stat_config"),
+                alpha_profile=inputs["alpha"],
             )
     except W._RenderBusy:
         return W._render_busy_response("reel")
+    except _motion.AlphaUnsupportedError as e:
+        # alpha-export: an honest 503 rather than a mislabeled opaque file.
+        return jsonify({"error": "alpha_unsupported_on_engine", "detail": str(e)}), 503
     except RuntimeError as e:
         _payload = W._motion_error_payload(e)
         return jsonify(_payload), 503 if _payload.get("kind") == "infra_missing" else 500
@@ -4704,11 +4734,12 @@ def api_run_reel(run_id: str):
                 ),
             }
         ), 500
+    _reel_ext = Path(mp4).suffix.lstrip(".") or "mp4"
     return send_file(
         str(mp4),
-        mimetype="video/mp4",
+        mimetype=inputs["content_type"],
         as_attachment=False,
-        download_name=f"meet_reel_{run_id}.mp4",
+        download_name=f"meet_reel_{run_id}.{_reel_ext}",
     )
 
 
@@ -4924,6 +4955,7 @@ def api_run_reel_job(run_id: str):
                         next_meet=inputs.get("next_meet", ""),
                         dub_language=inputs.get("dub_language", ""),
                         reel_stat_config=inputs.get("reel_stat_config"),
+                        alpha_profile=inputs["alpha"],
                     )
             if not Path(mp4).exists():
                 raise RuntimeError("mp4 missing after render")
@@ -5055,6 +5087,7 @@ def api_run_reel_batch(run_id: str):
                     next_meet=inputs.get("next_meet", ""),
                     dub_language=inputs.get("dub_language", ""),
                     reel_stat_config=inputs.get("reel_stat_config"),
+                    alpha_profile=inputs["alpha"],
                 )
             rendered = result.get("rendered") or {}
             errors = result.get("errors") or {}
@@ -5162,8 +5195,18 @@ def api_run_reel_file(run_id: str):
         if _cards_arg
         else ""
     )
+    # alpha-export: a transparent reel is served from its .mov/.webm slot with
+    # the profile's Content-Type; absent keeps the historic .mp4 / video/mp4 path.
+    from mediahub.visual import motion as _motion
+
+    alpha = (request.args.get("alpha") or "").strip().lower()
+    if alpha and alpha not in _motion.ALPHA_PROFILES:
+        return jsonify({"error": "bad_alpha", "valid_alpha": sorted(_motion.ALPHA_PROFILES)}), 400
+    _alpha_prof = _motion.resolve_alpha_profile(alpha) if alpha else None
+    _ext = _alpha_prof.ext if _alpha_prof else "mp4"
+    _content_type = _alpha_prof.content_type if _alpha_prof else "video/mp4"
     base = f"reel_{n}{_sel}{_suffix}"
-    name = f"{base}.mp4" if fmt == "story" else f"{base}_{fmt}.mp4"
+    name = f"{base}.{_ext}" if fmt == "story" else f"{base}_{fmt}.{_ext}"
     path = W.RUNS_DIR / run_id / "motion" / name
     if not path.exists():
         return jsonify({"error": "reel_not_rendered"}), 404
@@ -5183,11 +5226,11 @@ def api_run_reel_file(run_id: str):
         )
     return send_file(
         str(path),
-        mimetype="video/mp4",
+        mimetype=_content_type,
         as_attachment=False,
-        download_name=f"meet_reel_{run_id}_{fmt}.mp4"
+        download_name=f"meet_reel_{run_id}_{fmt}.{_ext}"
         if fmt != "story"
-        else f"meet_reel_{run_id}.mp4",
+        else f"meet_reel_{run_id}.{_ext}",
     )
 
 

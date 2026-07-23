@@ -37,7 +37,7 @@ import subprocess
 import threading
 from dataclasses import is_dataclass, asdict
 from pathlib import Path
-from typing import Any, Callable, ContextManager, Optional
+from typing import Any, Callable, ContextManager, NamedTuple, Optional
 
 
 from mediahub.visual.reel_engine import (
@@ -204,20 +204,33 @@ def _touch_cache_hit(cached: Path) -> None:
 
 
 def _prune_motion_cache(d: Optional[Path] = None) -> None:
-    """Bound the motion cache to ``_motion_cache_max()`` MP4s, oldest first.
+    """Bound the motion cache to ``_motion_cache_max()`` video slots, oldest first.
 
-    Each evicted ``<hash>.mp4`` takes its sidecars with it (the ``<hash>.json``
+    Each evicted ``<hash>.<ext>`` takes its sidecars with it (the ``<hash>.json``
     manifest, ``<hash>.poster.png`` poster, ``<hash>.audio.json`` record). The
     ``props/`` subdir is keyed by output-stem, not cache-hash, so it is left
     alone. Best-effort: a prune failure must never fail a successful render.
+
+    alpha-export: the glob unions the ``.mp4`` slots with the opt-in alpha
+    ``.mov``/``.webm`` slots so a transparent-export cut still counts toward the
+    cap and is swept with its sidecars — otherwise alpha slots would grow
+    UNBOUNDED on the bounded Render disk. With zero alpha files present the union
+    returns the identical ``.mp4`` set, so the DEFAULT prune stays byte-identical.
     """
     d = d or _cache_dir()
     cap = _motion_cache_max()
     try:
-        # Skip in-flight atomic-render temp files (".<stem>.<pid>.<tid>.tmp.mp4",
+        # Skip in-flight atomic-render temp files (".<stem>.<pid>.<tid>.tmp.<ext>",
         # #73) — they are hidden dotfiles, whereas a real cache entry is a bare
         # 24-hex-char stem, so they must never count toward the cap or be evicted.
-        entries = [p for p in d.glob("*.mp4") if not p.name.startswith(".")]
+        # The dotfile exclusion also drops the alpha tmp files (".<stem>...tmp.mov"
+        # / ".tmp.webm").
+        entries = [
+            p
+            for ext in ("*.mp4", "*.mov", "*.webm")
+            for p in d.glob(ext)
+            if not p.name.startswith(".")
+        ]
     except OSError:
         return
     if len(entries) <= cap:
@@ -2673,6 +2686,110 @@ def _motion_encode_profile() -> Optional[dict]:
     return dict(prof) if prof is not None else None
 
 
+# alpha-export — the opt-in transparent-background compositing vocabulary
+# (Remotion-only). Each entry is a FIXED, internally-consistent
+# ``(codec, pixel_format, prores_profile, ext, content_type)`` tuple from a
+# CLOSED table — no operator-supplied codec/pixelFormat string ever reaches
+# renderMedia, only these names select a profile (invariant 7). The two targets
+# are both fully supported by the pinned Remotion 4.0.493 + its bundled
+# compositor ffmpeg, and each triple is kept valid so Remotion's own
+# pixel-format<->codec / proResProfile<->codec validators never throw:
+#   - prores4444: ProRes 4444 (codec=prores, pixelFormat=yuva444p10le,
+#     proResProfile=4444, .mov, video/quicktime) — the AE-parity target.
+#   - vp9:        VP9 (codec=vp9, pixelFormat=yuva420p, NO proResProfile,
+#     .webm, video/webm) — a web-friendly transparent video.
+# Honesty (invariant 5): alpha only REMOVES the outer full-bleed ground paint
+# (via the composition's false-default ``transparentBg`` prop) and re-encodes
+# the SAME brand-locked, APCA-gated colours into an alpha container — it never
+# synthesises colour. Scene-internal full-bleed fills and full-bleed athlete
+# photos stay opaque (recorded honestly in the manifest). PNG-sequence export is
+# out of scope (renderMedia cannot emit image sequences — that is renderFrames,
+# a different output/packaging path).
+class _AlphaProfile(NamedTuple):
+    key: str
+    codec: str
+    pixel_format: str
+    prores_profile: str  # "" when not applicable (vp9)
+    ext: str  # container extension WITHOUT the dot ("mov" / "webm")
+    content_type: str
+
+
+ALPHA_PROFILES: dict[str, _AlphaProfile] = {
+    "prores4444": _AlphaProfile(
+        "prores4444", "prores", "yuva444p10le", "4444", "mov", "video/quicktime"
+    ),
+    "vp9": _AlphaProfile("vp9", "vp9", "yuva420p", "", "webm", "video/webm"),
+}
+
+
+class AlphaUnsupportedError(RuntimeError):
+    """Raised when a transparent-background (alpha) export is requested on an
+    engine that cannot produce one — currently the free FFmpeg fallback, which
+    composites opaque 8-bit stills. Erroring is a DELIBERATE deviation from that
+    engine's usual degrade-and-ship pattern: shipping a mislabeled OPAQUE file
+    under a ``.mov``/``.webm`` transparent-export name would be an active lie,
+    worse than an honest error (invariant 5). The web routes map this to a 503."""
+
+
+def resolve_alpha_profile(name: str) -> Optional[_AlphaProfile]:
+    """Resolve a transparent-export profile NAME to its ``_AlphaProfile``, or None.
+
+    ``""`` / whitespace / any unknown name → ``None`` (alpha OFF — byte-identical
+    default). A closed lower/strip dict lookup: no expression language, no eval,
+    no operator-supplied codec strings (invariant 7)."""
+    key = (name or "").strip().lower()
+    return ALPHA_PROFILES.get(key)
+
+
+def _alpha_encode(prof: _AlphaProfile) -> dict:
+    """Express an ``_AlphaProfile`` as the ``encode`` dict ``_run_remotion`` and the
+    cache-slot/manifest seams already understand (built by bit-depth-gamut).
+
+    The dict reuses the bit-depth ``encode`` threading verbatim — ``codec`` /
+    ``pixelFormat`` / ``container`` — with ``colorSpace=None`` (no gamut tag) and a
+    ``proResProfile`` key added ONLY for a profile that carries one (dropped for
+    vp9, so Remotion's "proResProfile with a non-prores codec throws" trap is
+    avoided). ``alpha`` marks it as a transparent export so the manifest branch
+    picks the alpha note rather than the bit-depth note."""
+    d = {
+        "name": prof.key,
+        "codec": prof.codec,
+        "pixelFormat": prof.pixel_format,
+        "colorSpace": None,
+        "container": f".{prof.ext}",
+        "alpha": True,
+    }
+    if prof.prores_profile:
+        d["proResProfile"] = prof.prores_profile
+    return d
+
+
+def _alpha_manifest(prof: _AlphaProfile) -> dict:
+    """The manifest ``alpha`` block for a transparent export — states the real
+    scope boundary and the deliberate deviations honestly (invariant 5)."""
+    return {
+        "profile": prof.key,
+        "codec": prof.codec,
+        "pixel_format": prof.pixel_format,
+        **({"prores_profile": prof.prores_profile} if prof.prores_profile else {}),
+        "container": prof.ext,
+        "note": (
+            "Transparent-background compositing export (Remotion-only). Only the "
+            "OUTERMOST per-scene full-bleed ground fill (+ full-bleed meshBg) is "
+            "suppressed; scene-internal full-bleed fills and full-bleed athlete "
+            "photos stay OPAQUE. Silent by design — a compositing asset carries no "
+            "audio (the aac-in-mp4/mov mux is not validated for 10-bit prores / "
+            "vp9-webm). The poster is the in-render transparent PNG "
+            "(renderStill imageFormat:png); the ffmpeg frame-grab fallback is "
+            "intentionally unavailable for alpha containers. The operator owns the "
+            "downstream backdrop, so the text-on-ground APCA pair no longer "
+            "describes the final composited contrast — colour choice is unchanged; "
+            "the ground paint is removed, not recoloured. PNG-sequence export is "
+            "out of scope (renderMedia cannot emit image sequences)."
+        ),
+    }
+
+
 def _photo_supersample() -> int:
     """Per-photo resample-quality knob (``MEDIAHUB_PHOTO_SUPERSAMPLE``), returned
     as ``0`` (off / default) or ``2`` (capped).
@@ -2777,6 +2894,11 @@ def _run_remotion(
         cmd.extend(["--codec", encode["codec"], "--pixel-format", encode["pixelFormat"]])
         if encode.get("colorSpace"):
             cmd.extend(["--color-space", encode["colorSpace"]])
+        # alpha-export: ProRes 4444 needs its proResProfile; it is present ONLY
+        # for the prores profile (dropped for vp9), so Remotion never sees a
+        # proResProfile paired with a non-prores codec.
+        if encode.get("proResProfile"):
+            cmd.extend(["--prores-profile", encode["proResProfile"]])
 
     from mediahub.visual.proc import run_capture
 
@@ -2802,7 +2924,12 @@ def _run_remotion(
     # back to the exact target WxH (same h264/yuv420p deliverable) so only edge
     # fidelity improves — a deterministic ffmpeg pass, the same class the audio
     # mux and poster grabs already rely on.
-    if supersample > 1.0 and size is not None:
+    # alpha-export / bit-depth-gamut belt-and-braces: an active encode profile
+    # (10-bit / alpha) is incompatible with this libx264/yuv420p downscale, which
+    # would flatten the higher bit-depth or destroy the alpha channel. Callers
+    # already force supersample=1.0 whenever encode is set, so this block is
+    # unreachable on those paths; the ``encode is None`` guard makes that explicit.
+    if supersample > 1.0 and size is not None and encode is None:
         from mediahub.visual.reel_ffmpeg import ffmpeg_exe
 
         exe = ffmpeg_exe()
@@ -2879,6 +3006,7 @@ def render_story_card(
     format_name: str = DEFAULT_MOTION_FORMAT,
     fps: int = MOTION_FPS,
     review_ab: Optional[list[str]] = None,
+    alpha_profile: str = "",
 ) -> Path:
     """Render a single content-pack card to an MP4 story.
 
@@ -2919,6 +3047,18 @@ def render_story_card(
     the default render's key/bytes. ``None`` (the default) — and a list that
     validates to empty — leave the render byte-identical to the shipped card, so
     a card that gets exported for posting always keeps still<->motion parity.
+
+    ``alpha_profile`` (alpha-export, opt-in, Remotion-only) selects a
+    transparent-background compositing export from the closed
+    :data:`ALPHA_PROFILES` vocabulary (``"prores4444"`` / ``"vp9"``). When set,
+    the composition's outer full-bleed ground fill is suppressed (via the
+    ``transparentBg`` prop), the render is encoded into an alpha container
+    (``.mov``/``.webm``) with a distinct cache key, the whole-composition
+    supersample is forced off (its libx264 downscale would flatten alpha), and
+    the asset is silent by design (a compositing layer carries no audio). On the
+    free FFmpeg engine an alpha request raises :class:`AlphaUnsupportedError`
+    rather than shipping a mislabeled opaque file. ``""`` (default) → alpha OFF,
+    byte-identical to before.
     """
     fps = _validate_fps(fps)
     engine = _dispatch_engine()
@@ -2930,6 +3070,18 @@ def render_story_card(
     # and would flatten a 10-bit render back to 8-bit h264 — so encode wins and
     # supersample is forced off (recorded honestly in the manifest below).
     encode = _motion_encode_profile()
+    # alpha-export: an opt-in transparent export OVERRIDES the env encode profile
+    # (mutually exclusive — alpha needs prores/vp9 + an alpha pixelFormat) and
+    # rides the same ``encode`` seam. On the FFmpeg engine it errors honestly.
+    alpha_prof = resolve_alpha_profile(alpha_profile)
+    if alpha_prof is not None:
+        if engine == "ffmpeg":
+            raise AlphaUnsupportedError(
+                "alpha_unsupported_on_engine: a transparent-background export "
+                "requires the Remotion engine; the free FFmpeg engine composites "
+                "opaque 8-bit stills and cannot produce a transparent asset."
+            )
+        encode = _alpha_encode(alpha_prof)
     if encode is not None:
         supersample = 1.0
     out_path = Path(out_path)
@@ -2958,6 +3110,12 @@ def render_story_card(
     audio_plan = _story_audio_plan(
         card_dict, brand_dict, mix_profile=_card_mix_profile(card_payload, brief)
     )
+    # alpha-export: a transparent compositing asset is silent by design — drop the
+    # audio plan so the mux (_finish_cached_video) never runs (an aac-in-mp4/mov
+    # mux is not validated for 10-bit prores / vp9-webm), and no burn-in caption
+    # track is derived. Done before the caption build so captions stay off too.
+    if alpha_prof is not None:
+        audio_plan = None
 
     # Burn-in captions (R1.3): only attach the prop when a track exists so the
     # captions-off path keeps the historic cache key byte-identical.
@@ -2973,6 +3131,13 @@ def render_story_card(
     photo_ss = _photo_supersample()
     if photo_ss > 0:
         card_dict = {**card_dict, "photoSupersample": photo_ss}
+
+    # alpha-export: mark the card for the transparent export so the composition's
+    # false-default ``transparentBg`` prop suppresses the outer full-bleed ground
+    # fill. Attach-only (fold-only-when-active), so a non-alpha render keeps a
+    # byte-identical card_dict + story cache key.
+    if alpha_prof is not None:
+        card_dict = {**card_dict, "transparentBg": True}
 
     # per-effect-toggle (REVIEW-ONLY A/B): attach the suppressed-axis list ONLY on
     # the explicit review path AND only when it validates non-empty, so a shipped
@@ -3032,14 +3197,22 @@ def render_story_card(
     # shipped render's key is untouched.
     if ab_disabled:
         cache_payload["ab_review"] = ab_disabled
+    # alpha-export: fold the transparent-export profile under a distinct ``alpha``
+    # key when active, so an alpha cut can never be served from — or overwrite —
+    # an opaque cache entry, and the default (alpha off) key is untouched.
     # bit-depth-gamut: fold the profile NAME (not the codec strings) into the key
     # only when active, so an 8-bit cache entry can never be served for a 10-bit
     # request (or vice-versa) and the default (encode is None) key is untouched.
-    if encode is not None:
+    # The two are mutually exclusive (alpha overrode encode above), so exactly one
+    # of these folds fires.
+    if alpha_prof is not None:
+        cache_payload["alpha"] = alpha_prof.key
+    elif encode is not None:
         cache_payload["encode"] = encode["name"]
     cache_key = _content_hash(cache_payload, kind="story")
-    # Container-aware cached slot: every shipped profile is .mp4, so this is a
-    # no-op for the shipped set but keeps the seam correct for a future .mov.
+    # Container-aware cached slot: opaque profiles are .mp4; an alpha export writes
+    # the profile's .mov/.webm slot (the alpha key already differs, so no collision
+    # with an h264 slot).
     cached = _cache_dir() / f"{cache_key}{encode['container'] if encode else '.mp4'}"
     if cached.exists() and cached.stat().st_size > 1024:
         _touch_cache_hit(cached)  # LRU recency (#71)
@@ -3087,11 +3260,16 @@ def render_story_card(
     }
     if supersample > 1.0:
         story_manifest["supersample"] = supersample
+    # alpha-export: record the transparent export HONESTLY and state the real
+    # scope boundary + deliberate deviations (silent, opaque scene-internal fills,
+    # in-render PNG poster, APCA-pair caveat).
+    if alpha_prof is not None:
+        story_manifest["alpha"] = _alpha_manifest(alpha_prof)
     # bit-depth-gamut: record the encode profile HONESTLY — the source frames are
     # Chromium 8-bit sRGB; 10-bit reduces encode banding and colorSpace tags the
     # container. This is a precision + metadata change over the same brand-locked,
     # APCA-gated colours, NOT a synthesised wide-gamut master.
-    if encode is not None:
+    elif encode is not None:
         story_manifest["encode"] = {
             "profile": encode["name"],
             "codec": encode["codec"],
@@ -3891,6 +4069,7 @@ def _render_reel_one_format(
     fps: int = MOTION_FPS,
     review_ab: Optional[list[str]] = None,
     logo_drawon: bool = False,
+    alpha_profile: str = "",
 ) -> Path:
     """Render (or serve cached) ONE reel cut from already-assembled props.
 
@@ -3916,6 +4095,21 @@ def _render_reel_one_format(
     # h264 segments and threads no codec/pixelFormat/colorSpace, so it cannot emit
     # the profile output. encode wins; supersample is forced off.
     encode = _motion_encode_profile()
+    # alpha-export: an opt-in transparent reel OVERRIDES the env encode profile
+    # (mutually exclusive) and rides the same ``encode`` seam. It forces the
+    # SERIAL render (the parallel-segment composite stream-copies h264 and threads
+    # no codec/pixelFormat — the ``encode is None`` guard below already excludes
+    # it), silences the reel, and errors honestly on the FFmpeg engine.
+    alpha_prof = resolve_alpha_profile(alpha_profile)
+    if alpha_prof is not None:
+        if engine == "ffmpeg":
+            raise AlphaUnsupportedError(
+                "alpha_unsupported_on_engine: a transparent-background reel "
+                "requires the Remotion engine; the free FFmpeg engine composites "
+                "opaque 8-bit stills and cannot produce a transparent asset."
+            )
+        encode = _alpha_encode(alpha_prof)
+        audio_plan = None
     if encode is not None:
         supersample = 1.0
     photo_ss = _photo_supersample()
@@ -3932,6 +4126,13 @@ def _render_reel_one_format(
     # identically to the story path.
     if photo_ss > 0:
         cards_props = [{**cp, "photoSupersample": photo_ss} for cp in cards_props]
+
+    # alpha-export: mark every beat's card for the transparent export so each
+    # <StoryCard> beat suppresses its outer ground fill; the reel-level cover/outro
+    # inherit it via reel_props["transparentBg"] below. Attach-only, so a non-alpha
+    # reel keeps byte-identical card props + cache key.
+    if alpha_prof is not None:
+        cards_props = [{**cp, "transparentBg": True} for cp in cards_props]
 
     # per-effect-toggle (REVIEW-ONLY A/B): suppress the decorative axes on EVERY
     # beat's card for a with/without comparison reel, attached ONLY on the
@@ -4023,13 +4224,20 @@ def _render_reel_one_format(
     # key. Set ONLY on the validated review path; a shipped reel is untouched.
     if ab_disabled:
         cache_payload["ab_review"] = ab_disabled
+    # alpha-export: fold the transparent-export profile under a distinct ``alpha``
+    # key when active, so an alpha reel can never be served from — or overwrite —
+    # an opaque cache entry, and the default reel key is untouched.
     # bit-depth-gamut: fold the profile NAME only when active, so a 10-bit/tagged
     # reel can never be served from an 8-bit cache entry and the default (encode
-    # is None) reel key stays byte-identical.
-    if encode is not None:
+    # is None) reel key stays byte-identical. Mutually exclusive (alpha overrode
+    # encode above) — exactly one fold fires.
+    if alpha_prof is not None:
+        cache_payload["alpha"] = alpha_prof.key
+    elif encode is not None:
         cache_payload["encode"] = encode["name"]
     cache_key = _content_hash(cache_payload, kind="reel")
-    # Container-aware cached slot (no-op for the .mp4-only shipped set).
+    # Container-aware cached slot: opaque reels are .mp4; an alpha reel writes the
+    # profile's .mov/.webm slot (the alpha key already differs, so no collision).
     cached = _cache_dir() / f"{cache_key}{encode['container'] if encode else '.mp4'}"
     if cached.exists() and cached.stat().st_size > 1024:
         _touch_cache_hit(cached)  # LRU recency (#71)
@@ -4062,6 +4270,11 @@ def _render_reel_one_format(
         reel_props["rhythm"] = rhythm
     if stat_config:
         reel_props["reelStatConfig"] = stat_config
+    # alpha-export: drive the CoverScreen/OutroScreen ground suppression via the
+    # reel-level prop (the per-card beats already carry their own transparentBg).
+    # Attach-only, so a non-alpha reel's props (and bundle hash) stay byte-identical.
+    if alpha_prof is not None:
+        reel_props["transparentBg"] = True
     # svg-shape-decompose: pass the decomposed logo paths into the reel props
     # ONLY when active, so the default reel's props (and thus the bundle hash)
     # stay byte-identical. The zod defaults (logoDrawOn:false, logoPaths:[])
@@ -4133,6 +4346,9 @@ def _render_reel_one_format(
             "engine": engine,
             "render_strategy": render_strategy,
             **({"supersample": supersample} if supersample > 1.0 else {}),
+            # alpha-export: honest transparent-export record (fold-only-when-active,
+            # mutually exclusive with the encode block below).
+            **({"alpha": _alpha_manifest(alpha_prof)} if alpha_prof is not None else {}),
             # bit-depth-gamut: honest encode-profile record (fold-only-when-active).
             # Same brand-locked, APCA-gated colours re-encoded at higher bit-depth
             # precision + gamut-tagged — not a synthesised wide-gamut master.
@@ -4168,7 +4384,7 @@ def _render_reel_one_format(
                         else {}
                     ),
                 }
-                if encode is not None
+                if (encode is not None and alpha_prof is None)
                 else {}
             ),
             # transform-sampling (AE-gap): honest per-photo hint record — a
@@ -4254,6 +4470,7 @@ def render_meet_reel(
     review_ab: Optional[list[str]] = None,
     logo_drawon: bool = False,
     peak_speed_ramp: str = "",
+    alpha_profile: str = "",
 ) -> Path:
     """Render a multi-card reel from the top cards for a meet.
 
@@ -4373,10 +4590,13 @@ def render_meet_reel(
         fps=fps,
         review_ab=review_ab,
         logo_drawon=logo_drawon,
+        alpha_profile=alpha_profile,
     )
 
 
-def reel_format_out_path(out_dir: Path, format_name: str, *, base_name: str = "reel") -> Path:
+def reel_format_out_path(
+    out_dir: Path, format_name: str, *, base_name: str = "reel", container_ext: str = "mp4"
+) -> Path:
     """Resolve one cut's output path under ``out_dir``.
 
     The ``story`` cut keeps the bare ``<base_name>.mp4`` filename (so existing
@@ -4384,10 +4604,14 @@ def reel_format_out_path(out_dir: Path, format_name: str, *, base_name: str = "r
     ``<base_name>_<format>.mp4``. Mirrors the naming the reel routes already
     use (``reel_<n>.mp4`` / ``reel_<n>_<fmt>.mp4``), so the batch writes the
     exact files the ``reel-file`` route serves.
+
+    ``container_ext`` (alpha-export) swaps the ``.mp4`` extension for a
+    transparent-export container (``mov``/``webm``); the default ``"mp4"`` keeps
+    every existing name byte-identical.
     """
     motion_format_size(format_name)  # validate the name (raises on unknown)
     stem = base_name if format_name == DEFAULT_MOTION_FORMAT else f"{base_name}_{format_name}"
-    return Path(out_dir) / f"{stem}.mp4"
+    return Path(out_dir) / f"{stem}.{container_ext.lstrip('.')}"
 
 
 def render_meet_reel_all_formats(
@@ -4409,6 +4633,7 @@ def render_meet_reel_all_formats(
     fps: int = MOTION_FPS,
     logo_drawon: bool = False,
     peak_speed_ramp: str = "",
+    alpha_profile: str = "",
 ) -> dict[str, Any]:
     """Render + cache every requested reel format in a single pass (R1.15).
 
@@ -4486,10 +4711,15 @@ def render_meet_reel_all_formats(
     cta_props = _reel_cta_props(sponsor, next_meet)
 
     out_dir = Path(out_dir)
+    # alpha-export: every cut in the batch inherits the transparent profile; the
+    # cut filenames carry the profile's .mov/.webm container so they match the
+    # reel-file route's alpha-aware naming.
+    alpha_prof = resolve_alpha_profile(alpha_profile)
+    _cut_ext = alpha_prof.ext if alpha_prof else "mp4"
     rendered: dict[str, Path] = {}
     errors: dict[str, str] = {}
     for fmt in ordered:
-        out_path = reel_format_out_path(out_dir, fmt, base_name=base_name)
+        out_path = reel_format_out_path(out_dir, fmt, base_name=base_name, container_ext=_cut_ext)
         slot_cm: ContextManager = render_slot(fmt) if render_slot else contextlib.nullcontext()
         try:
             with slot_cm:
@@ -4511,6 +4741,7 @@ def render_meet_reel_all_formats(
                     footage_list=footage_list,
                     fps=fps,
                     logo_drawon=logo_drawon,
+                    alpha_profile=alpha_profile,
                 )
         except ReelEngineUnavailable as e:
             # Expected capability gap (e.g. ffmpeg can't do non-story) —
@@ -4595,6 +4826,9 @@ __all__ = [
     "canonical_motion_format",
     "MOTION_FORMATS",
     "DEFAULT_MOTION_FORMAT",
+    "ALPHA_PROFILES",
+    "resolve_alpha_profile",
+    "AlphaUnsupportedError",
     "node_available",
     "remotion_installed",
     "REMOTION_DIR",
