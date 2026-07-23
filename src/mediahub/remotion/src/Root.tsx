@@ -146,6 +146,11 @@ export const RemotionRoot: React.FC = () => {
           coverTypography: "",
           coverPhotoSrc: "",
           coverPhotoPos: "",
+          // svg-shape-decompose logo draw-on: inactive by default → the filled
+          // `<img>` logo, byte-identical. Production sends the decomposed paths.
+          logoDrawOn: false,
+          logoViewBox: "",
+          logoPaths: [],
         }}
       />
     </>

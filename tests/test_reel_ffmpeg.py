@@ -465,6 +465,52 @@ def test_ffmpeg_manifests_declare_effect_toggles_unsupported_when_requested():
     assert src.count('"effect_toggles": "unsupported-on-engine"') == 2
 
 
+def test_ffmpeg_reel_branch_declares_logo_drawon_unsupported_when_requested():
+    """svg-shape-decompose: the per-path SVG stroke draw-on on the cover/outro is
+    a DOM Remotion effect; this engine composites a static logo and cannot
+    animate individual paths. The reel branch carries the honest note (emitted
+    only when the caller opts in), never faking the draw."""
+    src = (Path(reel_ffmpeg.__file__)).read_text()
+    assert src.count('"logo_drawon": "unsupported-on-engine"') == 1
+
+
+@pytest.mark.skipif(not _HAS_FFMPEG, reason="no FFmpeg binary resolvable")
+def test_ffmpeg_reel_manifest_notes_logo_drawon_only_when_requested(tmp_path, monkeypatch):
+    """A reel that opted into the logo draw-on records the honest unsupported
+    note AND still emits the static logo reel; a default reel does NOT — fold-
+    only-when-present, so the default manifest is byte-identical."""
+    import json as _json
+
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+
+    def _fake_still(brief, brand_kit, out_dir, name, **kw):
+        return _write_synthetic_still(
+            out_dir / name / "story.png",
+            (60, 60, 90),
+            size=kw.get("size", (reel_ffmpeg.WIDTH, reel_ffmpeg.HEIGHT)),
+        )
+
+    monkeypatch.setattr(reel_ffmpeg, "_render_still", _fake_still)
+    cards = [_props()]
+
+    out_default = tmp_path / "reel_default.mp4"
+    reel_ffmpeg.render_meet_reel_from_props(
+        cards, _brand_dict(), _brand_kit(), out_default, meet_name="Test Meet"
+    )
+    notes_default = _json.loads(Path(out_default).with_suffix(".json").read_text())["notes"]
+    assert "logo_drawon" not in notes_default
+
+    out_drawon = tmp_path / "reel_drawon.mp4"
+    result = reel_ffmpeg.render_meet_reel_from_props(
+        cards, _brand_dict(), _brand_kit(), out_drawon, meet_name="Test Meet", logo_drawon=True
+    )
+    assert (
+        Path(result).exists() and Path(result).stat().st_size > 1024
+    ), "static logo reel still ships"
+    notes_drawon = _json.loads(Path(out_drawon).with_suffix(".json").read_text())["notes"]
+    assert notes_drawon["logo_drawon"] == "unsupported-on-engine"
+
+
 @pytest.mark.skipif(not _HAS_FFMPEG, reason="no FFmpeg binary resolvable")
 def test_ffmpeg_story_manifest_notes_effect_toggles_only_on_review_render(tmp_path, monkeypatch):
     """A review render (card carries effectsDisabled) records the honest

@@ -174,6 +174,125 @@ def _logo_to_data_uri(logo_svg: Optional[str]) -> str:
     return f"data:image/svg+xml;base64,{encoded}"
 
 
+def _brand_logo_svg(brand_kit: Any) -> str:
+    """Extract the brand's raw inline SVG markup (mirrors ``_brand_to_dict``'s
+    source resolution), or ``""`` when the brand carries no SVG mark.
+
+    Only ever returns raw ``<svg …>`` markup (never a ``data:`` URI or a stale
+    text mark), so the decomposer below can parse the DOM the still renderer
+    also draws — no remote fetch, no invented content.
+    """
+    if brand_kit is None:
+        raw = ""
+    elif isinstance(brand_kit, dict):
+        raw = brand_kit.get("logo_svg") or brand_kit.get("logoSvg") or ""
+    elif is_dataclass(brand_kit):
+        raw = getattr(brand_kit, "logo_svg", "") or ""
+    else:
+        raw = getattr(brand_kit, "logo_svg", "") or getattr(brand_kit, "logoSvg", "") or ""
+    raw = raw if isinstance(raw, str) else ""
+    s = raw.strip()
+    return s if s.startswith("<") else ""
+
+
+def _decompose_logo_svg(logo_svg: Optional[str]) -> Optional[dict]:
+    """Decompose an inline SVG logo into ordered per-path draw-on data, or
+    ``None`` for an honest degrade to the static filled ``<img>``.
+
+    Returns ``{"viewBox": str, "paths": [{"d", "len", "stroke"}, …]}`` where
+    ``len`` is the deterministic polyline arc-length of the path (via
+    :func:`mediahub.motion.paths.from_svg`, computed here so the browser never
+    calls ``getTotalLength()``) and ``stroke`` is the path's OWN resolved
+    fill-or-stroke colour (inherited from an ancestor when the path itself
+    declares none) — never an invented hue.
+
+    Degrades to ``None`` (→ the existing static ``<img>``) when:
+      * the markup fails to parse,
+      * it has NO ``<path>`` children (a pure ``<circle>``/``<rect>``/raster
+        logo the trim-path can't animate), or
+      * ANY path uses a command ``paths.from_svg`` does not model (A/S/T/…),
+        since a partial draw-on of a mis-parsed path would be dishonest.
+
+    Deterministic: ``xml.etree`` parse of a fixed string + the deterministic
+    arc-length maths, identical every run. No LLM, no network.
+    """
+    if not logo_svg or not isinstance(logo_svg, str):
+        return None
+    s = logo_svg.strip()
+    if not s.startswith("<"):
+        return None
+
+    import xml.etree.ElementTree as ET
+
+    from mediahub.motion import paths as _paths
+
+    try:
+        root = ET.fromstring(s)
+    except ET.ParseError:
+        return None
+
+    def _local(tag: Any) -> str:
+        # Strip the "{namespace}" prefix ElementTree prepends.
+        return tag.rsplit("}", 1)[-1] if isinstance(tag, str) else ""
+
+    # viewBox verbatim, else derived from width/height, else give up (the TSX
+    # needs a coordinate space for the paths).
+    view_box = (root.get("viewBox") or root.get("viewbox") or "").strip()
+    if not view_box:
+        w = (root.get("width") or "").strip().rstrip("px").strip()
+        h = (root.get("height") or "").strip().rstrip("px").strip()
+        try:
+            if w and h:
+                view_box = f"0 0 {float(w):g} {float(h):g}"
+        except ValueError:
+            view_box = ""
+    if not view_box:
+        return None
+
+    # Parent map so a path with no own fill/stroke can inherit the colour its
+    # ancestor <g>/<svg> declared (the same colour the browser paints the img).
+    parent = {child: p for p in root.iter() for child in p}
+
+    def _inherited(el: Any, attr: str) -> str:
+        cur: Any = el
+        while cur is not None:
+            v = (cur.get(attr) or "").strip()
+            if v:
+                return v
+            cur = parent.get(cur)
+        return ""
+
+    def _stroke_for(el: Any) -> str:
+        fill = _inherited(el, "fill")
+        if fill and fill.lower() != "none":
+            return fill
+        stroke = _inherited(el, "stroke")
+        if stroke and stroke.lower() != "none":
+            return stroke
+        # SVG's default paint is black; honest (the browser paints the same),
+        # never an invented brand hue.
+        return "#000000"
+
+    out_paths: list[dict] = []
+    for el in root.iter():
+        if _local(el.tag) != "path":
+            continue
+        d = (el.get("d") or "").strip()
+        if not d:
+            continue
+        try:
+            mp = _paths.from_svg(d)
+        except ValueError:
+            # Unsupported command (A/S/T/…): honest degrade — never a partial
+            # draw of a mis-parsed path.
+            return None
+        out_paths.append({"d": d, "len": round(mp.length, 3), "stroke": _stroke_for(el)})
+
+    if not out_paths:
+        return None
+    return {"viewBox": view_box, "paths": out_paths}
+
+
 def _brand_to_dict(brand_kit: Any) -> dict[str, str]:
     """Normalise a BrandKit dataclass / dict / object into the shape the
     Remotion compositions expect.
@@ -3496,6 +3615,7 @@ def _render_reel_one_format(
     footage_list: Optional[list] = None,
     fps: int = MOTION_FPS,
     review_ab: Optional[list[str]] = None,
+    logo_drawon: bool = False,
 ) -> Path:
     """Render (or serve cached) ONE reel cut from already-assembled props.
 
@@ -3545,6 +3665,13 @@ def _render_reel_one_format(
     # so the cover photo's saliency focus follows the format.
     cover_props = _reel_cover_props(cards_props, brand_dict, brand_kit)
 
+    # svg-shape-decompose — opt-in logo draw-on for the cover/outro brand
+    # scenes. Decompose the brand's OWN inline SVG into ordered per-path
+    # draw-on data; ``None`` (opt-out OR an honest degrade — raster/circle-only
+    # or an unsupported path command) keeps the static filled ``<img>`` and a
+    # byte-identical cache key. Folded into props + cache key only when present.
+    logo_drawon_payload = _decompose_logo_svg(_brand_logo_svg(brand_kit)) if logo_drawon else None
+
     if engine == "ffmpeg":
         from mediahub.visual import reel_ffmpeg
 
@@ -3560,6 +3687,7 @@ def _render_reel_one_format(
             format_name=format_name,
             rhythm=rhythm,
             audio_notes=audio_notes,
+            logo_drawon=logo_drawon,
             **_fps_kw(fps),
         )
 
@@ -3579,6 +3707,11 @@ def _render_reel_one_format(
         cache_payload["cta"] = cta_props
     if cover_props:
         cache_payload["cover"] = cover_props
+    # svg-shape-decompose: fold the decomposed logo paths ONLY when the draw-on
+    # is active (opt-in + successful decompose), so every reel rendered without
+    # it keeps a byte-identical cache key.
+    if logo_drawon_payload:
+        cache_payload["logoDrawOn"] = logo_drawon_payload
     if audio_plan:
         cache_payload["audio"] = audio_plan
     # M21: per-card edit-recipe signatures, folded only when any card's photo
@@ -3639,6 +3772,14 @@ def _render_reel_one_format(
         reel_props["rhythm"] = rhythm
     if stat_config:
         reel_props["reelStatConfig"] = stat_config
+    # svg-shape-decompose: pass the decomposed logo paths into the reel props
+    # ONLY when active, so the default reel's props (and thus the bundle hash)
+    # stay byte-identical. The zod defaults (logoDrawOn:false, logoPaths:[])
+    # make the composition's inactive DOM the exact filled ``<img>``.
+    if logo_drawon_payload:
+        reel_props["logoDrawOn"] = True
+        reel_props["logoViewBox"] = logo_drawon_payload["viewBox"]
+        reel_props["logoPaths"] = logo_drawon_payload["paths"]
     # Cold render. Try the opt-in parallel composition path (R1.28) first: it
     # splits the reel's frames across concurrent segment renders and composites
     # them into a byte-equivalent silent reel, cutting wall-clock on multi-core
@@ -3727,6 +3868,18 @@ def _render_reel_one_format(
             },
             "cards": [_card_manifest_axes(cp) for cp in cards_props],
             "stat_config": stat_config or "default",
+            # svg-shape-decompose: honest provenance of the logo draw-on, folded
+            # only when active — how many of the brand's OWN paths draw on.
+            **(
+                {
+                    "logo_drawon": {
+                        "paths": len(logo_drawon_payload["paths"]),
+                        "view_box": logo_drawon_payload["viewBox"],
+                    }
+                }
+                if logo_drawon_payload
+                else {}
+            ),
             "audio": audio_rec,
             "captions": _reel_caption_manifest(cards_props),
             "poster": poster_path_for(cached).name if poster_path_for(cached).exists() else "",
@@ -3759,6 +3912,7 @@ def render_meet_reel(
     reel_stat_config: Optional[dict] = None,
     fps: int = MOTION_FPS,
     review_ab: Optional[list[str]] = None,
+    logo_drawon: bool = False,
 ) -> Path:
     """Render a multi-card reel from the top cards for a meet.
 
@@ -3813,6 +3967,14 @@ def render_meet_reel(
     untouched. The cover/outro keep their full treatment (they are not per-card
     axes). ``None`` — and an all-unknown list — render byte-identically.
 
+    ``logo_drawon`` (svg-shape-decompose) opts the reel's cover + outro brand
+    scenes into a per-path SVG stroke draw-on: the club's OWN logo paths trace
+    on then cross-fade into the exact filled logo. Decomposed deterministically
+    from the brand's inline SVG; a raster / circle-only / unsupported-command
+    logo degrades honestly to the static ``<img>``. ``False`` (default) — and
+    any logo that can't decompose — keeps the reel byte-identical, folding
+    nothing into the cache key. The free FFmpeg engine reports it unsupported.
+
     For every cut in one request, see ``render_meet_reel_all_formats``.
     """
     fps = _validate_fps(fps)
@@ -3860,6 +4022,7 @@ def render_meet_reel(
         footage_list=footage_list,
         fps=fps,
         review_ab=review_ab,
+        logo_drawon=logo_drawon,
     )
 
 
@@ -3894,6 +4057,7 @@ def render_meet_reel_all_formats(
     dub_language: str = "",
     reel_stat_config: Optional[dict] = None,
     fps: int = MOTION_FPS,
+    logo_drawon: bool = False,
 ) -> dict[str, Any]:
     """Render + cache every requested reel format in a single pass (R1.15).
 
@@ -3994,6 +4158,7 @@ def render_meet_reel_all_formats(
                     stat_config=stat_config,
                     footage_list=footage_list,
                     fps=fps,
+                    logo_drawon=logo_drawon,
                 )
         except ReelEngineUnavailable as e:
             # Expected capability gap (e.g. ffmpeg can't do non-story) —

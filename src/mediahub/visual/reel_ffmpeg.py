@@ -1153,6 +1153,7 @@ def render_meet_reel_from_props(
     rhythm: Optional[dict] = None,
     audio_notes: Optional[dict] = None,
     fps: int = FPS,
+    logo_drawon: bool = False,
 ) -> Path:
     """Render the meet reel (cover + one beat per card) via still+FFmpeg.
 
@@ -1199,6 +1200,14 @@ def render_meet_reel_from_props(
         cache_payload["format"] = format_name
     if audio_plan:
         cache_payload["audio"] = audio_plan
+    # svg-shape-decompose: the opt-in draw-on request folds into the cache key
+    # ONLY when set, so the opted-in reel caches (and re-manifests) under its own
+    # key with the honest "unsupported-on-engine" note, while every default reel
+    # stays byte-identical. The rendered bytes are the same static logo either
+    # way — this engine can't animate the paths — so the fold is manifest-honesty
+    # only, never a faked draw.
+    if logo_drawon:
+        cache_payload["logo_drawon_requested"] = True
     # fps-option: fold the frame rate only for a non-default choice so the
     # default (30fps) ffmpeg-reel cache key is byte-identical to before.
     if int(fps) != FPS:
@@ -1357,6 +1366,13 @@ def render_meet_reel_from_props(
                     if any(cp.get("effectsDisabled") for cp in cards_props)
                     else {}
                 ),
+                # svg-shape-decompose: the per-path SVG stroke draw-on on the
+                # cover/outro is a DOM Remotion effect; this engine composites a
+                # static logo overlay and cannot animate individual paths. When
+                # the caller opted in, report it unsupported HONESTLY (the static
+                # brand mark it already draws is unchanged) — never a faked draw.
+                # Fold-only-when-requested keeps every default reel's note clean.
+                **({"logo_drawon": "unsupported-on-engine"} if logo_drawon else {}),
                 "engine_note": (
                     "Rendered by the reduced-motion FFmpeg engine: each beat is "
                     "the card's own approved still with a deterministic camera "

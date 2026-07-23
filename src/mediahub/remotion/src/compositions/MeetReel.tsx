@@ -12,6 +12,7 @@ import { z } from "zod";
 import { StoryCard, cardSchema, fontStackFor } from "./StoryCard";
 import { REEL_LAYERS } from "./sprint/reelRegistry";
 import { Dither } from "./Dither";
+import { LogoDrawOn, LogoDrawConfig } from "./sprint/reel/logo_drawon";
 
 // The reel reuses StoryCard's card schema verbatim (single source of truth):
 // zod strips undeclared keys, so a shared schema means a prop added for the
@@ -108,6 +109,24 @@ export const meetReelSchema = z.object({
   coverTypography: z.string().default(""),
   coverPhotoSrc: z.string().default(""),
   coverPhotoPos: z.string().default(""),
+  // svg-shape-decompose — opt-in logo draw-on for the cover + outro "brand
+  // statement" scenes. All three default to inactive/no-op so a prop-less reel
+  // renders the exact filled `<img>` logo, byte-identical to before. When
+  // active, Python sends the SVG's viewBox and its ordered per-path
+  // `{ d, len, stroke }` list (decomposed deterministically Python-side); the
+  // stroke draws on then cross-fades into the real filled logo. Zod strips
+  // undeclared keys, so these MUST be top-level props (not nested in rhythm).
+  logoDrawOn: z.boolean().default(false),
+  logoViewBox: z.string().default(""),
+  logoPaths: z
+    .array(
+      z.object({
+        d: z.string(),
+        len: z.number(),
+        stroke: z.string(),
+      }),
+    )
+    .default([]),
 });
 
 // The resolved bookend colour roles a cover/outro paints with. Every field
@@ -493,12 +512,23 @@ type CoverVariantProps = {
   roles: CoverRoles;
   photoSrc: string;
   photoPos: string;
+  // svg-shape-decompose — opt-in logo draw-on config (inactive by default, so
+  // the variants keep the exact filled `<img>`).
+  logoDraw: LogoDrawConfig;
 };
 
 // Variant 1 — STACK: the classic centred emblem lockup. Logo scales in, the
 // meet name springs up under the seed-picked eyebrow, a brand-secondary rule
 // grows out, club name and honest chips settle beneath.
-const StackCover: React.FC<CoverVariantProps> = ({ brand, meetName, eyebrow, chips, env, roles }) => {
+const StackCover: React.FC<CoverVariantProps> = ({
+  brand,
+  meetName,
+  eyebrow,
+  chips,
+  env,
+  roles,
+  logoDraw,
+}) => {
   const { frame, fps, width, ts, chipsOpacity, chipsProgress } = env;
   const accent = roles.onGround || brand.accent || "#FFFFFF";
   const intro = spring({ frame, fps, config: { damping: 16, stiffness: 100, mass: 0.6 } });
@@ -540,20 +570,20 @@ const StackCover: React.FC<CoverVariantProps> = ({ brand, meetName, eyebrow, chi
         textAlign: "center",
       }}
     >
-      {brand.logoDataUri ? (
-        <img
-          src={brand.logoDataUri}
-          alt={brand.displayName || "club logo"}
-          style={{
-            width: Math.round(220 * ts),
-            height: Math.round(220 * ts),
-            objectFit: "contain",
-            marginBottom: Math.round(48 * ts),
-            transform: `scale(${0.6 + 0.4 * logoScale})`,
-            opacity: logoScale,
-          }}
-        />
-      ) : null}
+      <LogoDrawOn
+        logoDataUri={brand.logoDataUri}
+        alt={brand.displayName || "club logo"}
+        style={{
+          width: Math.round(220 * ts),
+          height: Math.round(220 * ts),
+          objectFit: "contain",
+          marginBottom: Math.round(48 * ts),
+          transform: `scale(${0.6 + 0.4 * logoScale})`,
+          opacity: logoScale,
+        }}
+        draw={logoDraw}
+        progress={logoScale}
+      />
       <div
         style={{
           fontSize: Math.round(38 * ts),
@@ -625,7 +655,15 @@ const StackCover: React.FC<CoverVariantProps> = ({ brand, meetName, eyebrow, chi
 // down the left of a huge left-set headline that slides in from the left out
 // of a defocus; the club + honest chips settle as a centred footer. The mix
 // of a left hero and a centred footer is a deliberate editorial contrast.
-const MastheadCover: React.FC<CoverVariantProps> = ({ brand, meetName, eyebrow, chips, env, roles }) => {
+const MastheadCover: React.FC<CoverVariantProps> = ({
+  brand,
+  meetName,
+  eyebrow,
+  chips,
+  env,
+  roles,
+  logoDraw,
+}) => {
   const { frame, fps, width, height, ts, chipsOpacity, chipsProgress } = env;
   const accent = roles.onGround || brand.accent || "#FFFFFF";
   const barH = interpolate(frame, [3, fps * 0.65], [0, Math.round(height * 0.46)], {
@@ -675,21 +713,21 @@ const MastheadCover: React.FC<CoverVariantProps> = ({ brand, meetName, eyebrow, 
           opacity: 0.95,
         }}
       />
-      {brand.logoDataUri ? (
-        <img
-          src={brand.logoDataUri}
-          alt={brand.displayName || "club logo"}
-          style={{
-            position: "absolute",
-            top: 84,
-            right: 84,
-            width: Math.round(120 * ts),
-            height: Math.round(120 * ts),
-            objectFit: "contain",
-            opacity: logoOpacity,
-          }}
-        />
-      ) : null}
+      <LogoDrawOn
+        logoDataUri={brand.logoDataUri}
+        alt={brand.displayName || "club logo"}
+        style={{
+          position: "absolute",
+          top: 84,
+          right: 84,
+          width: Math.round(120 * ts),
+          height: Math.round(120 * ts),
+          objectFit: "contain",
+          opacity: logoOpacity,
+        }}
+        draw={logoDraw}
+        progress={logoOpacity}
+      />
       {/* hero — left-aligned masthead headline, vertically centred */}
       <div
         style={{
@@ -899,7 +937,15 @@ const SpotlightCover: React.FC<CoverVariantProps> = ({ brand, meetName, counts, 
 // up top, a full-width brand-secondary band wipes across the middle carrying
 // the club logo, and the club name + honest chips rise in beneath it. Text
 // stays accent-on-primary; only the logo (an image) ever sits on the band.
-const BannerCover: React.FC<CoverVariantProps> = ({ brand, meetName, eyebrow, chips, env, roles }) => {
+const BannerCover: React.FC<CoverVariantProps> = ({
+  brand,
+  meetName,
+  eyebrow,
+  chips,
+  env,
+  roles,
+  logoDraw,
+}) => {
   const { frame, fps, height, ts, chipsOpacity, chipsProgress } = env;
   const accent = roles.onGround || brand.accent || "#FFFFFF";
   const titleY = interpolate(
@@ -985,17 +1031,17 @@ const BannerCover: React.FC<CoverVariantProps> = ({ brand, meetName, eyebrow, ch
           justifyContent: "center",
         }}
       >
-        {brand.logoDataUri ? (
-          <img
-            src={brand.logoDataUri}
-            alt={brand.displayName || "club logo"}
-            style={{
-              height: Math.round(bandH * 0.62),
-              objectFit: "contain",
-              opacity: logoOpacity,
-            }}
-          />
-        ) : null}
+        <LogoDrawOn
+          logoDataUri={brand.logoDataUri}
+          alt={brand.displayName || "club logo"}
+          style={{
+            height: Math.round(bandH * 0.62),
+            objectFit: "contain",
+            opacity: logoOpacity,
+          }}
+          draw={logoDraw}
+          progress={logoOpacity}
+        />
       </div>
       {/* lower — club + honest chips */}
       <div
@@ -1048,6 +1094,7 @@ const PhotoCover: React.FC<CoverVariantProps> = ({
   roles,
   photoSrc,
   photoPos,
+  logoDraw,
 }) => {
   const { frame, fps, width, height, ts, chipsOpacity, chipsProgress } = env;
   const accent = roles.onGround || brand.accent || "#FFFFFF";
@@ -1096,21 +1143,21 @@ const PhotoCover: React.FC<CoverVariantProps> = ({
           background: `linear-gradient(180deg, ${ground}88 0%, ${ground}30 38%, ${ground}55 62%, ${ground}E6 100%)`,
         }}
       />
-      {brand.logoDataUri ? (
-        <img
-          src={brand.logoDataUri}
-          alt={brand.displayName || "club logo"}
-          style={{
-            position: "absolute",
-            top: 84,
-            right: 84,
-            width: Math.round(120 * ts),
-            height: Math.round(120 * ts),
-            objectFit: "contain",
-            opacity: eyebrowOpacity,
-          }}
-        />
-      ) : null}
+      <LogoDrawOn
+        logoDataUri={brand.logoDataUri}
+        alt={brand.displayName || "club logo"}
+        style={{
+          position: "absolute",
+          top: 84,
+          right: 84,
+          width: Math.round(120 * ts),
+          height: Math.round(120 * ts),
+          objectFit: "contain",
+          opacity: eyebrowOpacity,
+        }}
+        draw={logoDraw}
+        progress={eyebrowOpacity}
+      />
       {/* Masthead block over the lower scrim. */}
       <div
         style={{
@@ -1198,6 +1245,8 @@ const CoverScreen: React.FC<{
   // overlay, so the bookend backgrounds deband the same flat ground the beats
   // do. Default false keeps the cover byte-identical.
   dither?: boolean;
+  // svg-shape-decompose — opt-in logo draw-on (inactive by default).
+  logoDraw: LogoDrawConfig;
 }> = ({
   brand,
   meetName,
@@ -1210,6 +1259,7 @@ const CoverScreen: React.FC<{
   photoPos,
   selfExit = false,
   dither = false,
+  logoDraw,
 }) => {
   const env = useCoverEnv(durationInFrames);
   // Data-driven: the variant is a pure function of the meet's identity and its
@@ -1247,6 +1297,7 @@ const CoverScreen: React.FC<{
         roles={roles}
         photoSrc={photoSrc}
         photoPos={photoPos}
+        logoDraw={logoDraw}
       />
     </AbsoluteFill>
   );
@@ -1294,7 +1345,18 @@ const OutroScreen: React.FC<{
   roles: CoverRoles;
   // render-banding-dither: deband the flat outro ground when a card opted in.
   dither?: boolean;
-}> = ({ brand, meetName, durationInFrames, sponsor, nextMeet, roles, dither = false }) => {
+  // svg-shape-decompose — opt-in logo draw-on (inactive by default).
+  logoDraw: LogoDrawConfig;
+}> = ({
+  brand,
+  meetName,
+  durationInFrames,
+  sponsor,
+  nextMeet,
+  roles,
+  dither = false,
+  logoDraw,
+}) => {
   const frame = useCurrentFrame();
   const { fps, width, height } = useVideoConfig();
   const ts = Math.min(width / 1080, height / 1440, 1);
@@ -1358,19 +1420,19 @@ const OutroScreen: React.FC<{
           opacity: fadeIn,
         }}
       >
-        {brand.logoDataUri ? (
-          <img
-            src={brand.logoDataUri}
-            alt={brand.displayName || "club logo"}
-            style={{
-              width: Math.round(260 * ts),
-              height: Math.round(260 * ts),
-              objectFit: "contain",
-              marginBottom: Math.round(44 * ts),
-              transform: `scale(${0.8 + 0.2 * grow})`,
-            }}
-          />
-        ) : null}
+        <LogoDrawOn
+          logoDataUri={brand.logoDataUri}
+          alt={brand.displayName || "club logo"}
+          style={{
+            width: Math.round(260 * ts),
+            height: Math.round(260 * ts),
+            objectFit: "contain",
+            marginBottom: Math.round(44 * ts),
+            transform: `scale(${0.8 + 0.2 * grow})`,
+          }}
+          draw={logoDraw}
+          progress={grow}
+        />
         <div
           style={{
             fontSize: Math.round(72 * ts),
@@ -1461,9 +1523,20 @@ export const MeetReel: React.FC<Props> = ({
   coverTypography,
   coverPhotoSrc,
   coverPhotoPos,
+  logoDrawOn,
+  logoViewBox,
+  logoPaths,
 }) => {
   const { fps, durationInFrames, width, height } = useVideoConfig();
   const rootFrame = useCurrentFrame();
+  // svg-shape-decompose — the cover + outro logo draw-on bundle. Active only
+  // when the caller opted in AND Python decomposed at least one path; empty
+  // otherwise, so the logo stays the exact filled `<img>` (byte-identical).
+  const logoDraw: LogoDrawConfig = {
+    on: Boolean(logoDrawOn) && (logoPaths || []).length > 0,
+    viewBox: logoViewBox || "",
+    paths: logoPaths || [],
+  };
 
   // Allocate the reel: cover + rank/weight-carved card beats + outro.
   const safeCards = (cards || []).slice(0, 5);
@@ -1498,6 +1571,7 @@ export const MeetReel: React.FC<Props> = ({
         photoSrc={coverPhotoSrc || ""}
         photoPos={coverPhotoPos || ""}
         selfExit
+        logoDraw={logoDraw}
       />
     );
   }
@@ -1589,6 +1663,7 @@ export const MeetReel: React.FC<Props> = ({
           photoSrc={coverPhotoSrc || ""}
           photoPos={coverPhotoPos || ""}
           dither={reelDither}
+          logoDraw={logoDraw}
         />
       </ExitWrap>
     </Sequence>,
@@ -1642,6 +1717,7 @@ export const MeetReel: React.FC<Props> = ({
           nextMeet={nextMeet}
           roles={coverRoles}
           dither={reelDither}
+          logoDraw={logoDraw}
         />
       </TransitionWrap>
     </Sequence>,

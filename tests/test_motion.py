@@ -6,6 +6,7 @@ The Remotion pipeline depends on Node 18+ and a local ``npm install`` inside
 default; the pure-Python shaping helpers are still tested unconditionally
 because they don't touch Node.
 """
+
 from __future__ import annotations
 
 import os
@@ -24,10 +25,16 @@ from mediahub.visual import motion
 # when Node isn't installed.
 # ---------------------------------------------------------------------------
 
+
 def test_brand_to_dict_from_dataclass():
-    bk = BrandKit(profile_id="club", display_name="Test SC",
-                  primary_colour="#112233", secondary_colour="#445566",
-                  accent_colour="#778899", short_name="TSC")
+    bk = BrandKit(
+        profile_id="club",
+        display_name="Test SC",
+        primary_colour="#112233",
+        secondary_colour="#445566",
+        accent_colour="#778899",
+        short_name="TSC",
+    )
     out = motion._brand_to_dict(bk)
     assert out["primary"] == "#112233"
     assert out["secondary"] == "#445566"
@@ -37,11 +44,13 @@ def test_brand_to_dict_from_dataclass():
 
 
 def test_brand_to_dict_from_plain_dict():
-    out = motion._brand_to_dict({
-        "primary_colour": "#aabbcc",
-        "secondary_colour": "#001122",
-        "display_name": "Direct Club",
-    })
+    out = motion._brand_to_dict(
+        {
+            "primary_colour": "#aabbcc",
+            "secondary_colour": "#001122",
+            "display_name": "Direct Club",
+        }
+    )
     assert out["primary"] == "#aabbcc"
     assert out["secondary"] == "#001122"
     assert out["displayName"] == "Direct Club"
@@ -52,7 +61,12 @@ def test_brand_to_dict_from_plain_dict():
 def test_brand_to_dict_handles_none():
     out = motion._brand_to_dict(None)
     assert set(out.keys()) >= {
-        "primary", "secondary", "accent", "displayName", "shortName", "logoDataUri",
+        "primary",
+        "secondary",
+        "accent",
+        "displayName",
+        "shortName",
+        "logoDataUri",
     }
     assert out["logoDataUri"] == ""
 
@@ -63,6 +77,7 @@ def test_logo_to_data_uri_encodes_inline_svg():
     assert uri.startswith("data:image/svg+xml;base64,")
     # Round-trip base64 to confirm the SVG payload survives intact.
     import base64
+
     payload = base64.b64decode(uri.split(",", 1)[1]).decode("utf-8")
     assert payload == svg
 
@@ -77,6 +92,7 @@ def test_logo_to_data_uri_rejects_non_svg():
 
 def test_brand_to_dict_threads_logo_through():
     from mediahub.brand.kit import BrandKit
+
     svg = "<svg viewBox='0 0 100 100'><circle cx='50' cy='50' r='40'/></svg>"
     bk = BrandKit(profile_id="x", display_name="With Logo", logo_svg=svg)
     out = motion._brand_to_dict(bk)
@@ -158,8 +174,14 @@ def test_card_to_props_without_brief_keeps_axes_empty():
     so the TSX composition falls back to its variationSeed-only path."""
     card = {"achievement": {"swimmer_name": "Sample Person"}}
     props = motion._card_to_props(card, variation_seed=1)
-    for k in ("backgroundStyle", "typographyPair", "composition",
-              "accentStyle", "mood", "photoTreatment"):
+    for k in (
+        "backgroundStyle",
+        "typographyPair",
+        "composition",
+        "accentStyle",
+        "mood",
+        "photoTreatment",
+    ):
         assert props[k] == ""
 
 
@@ -192,15 +214,25 @@ def test_render_story_card_returns_cached_file_when_present(tmp_path, monkeypatc
 
     # Pre-seed the cache with a hash that matches what render_story_card will
     # compute for this input.
-    card = {"id": "c1", "achievement": {"swimmer_name": "Cache Hit",
-                                          "event_name": "100m Free LC",
-                                          "result_time": "00:50.00"}}
+    card = {
+        "id": "c1",
+        "achievement": {
+            "swimmer_name": "Cache Hit",
+            "event_name": "100m Free LC",
+            "result_time": "00:50.00",
+        },
+    }
     brand = BrandKit(profile_id="x", display_name="Cache Club")
     brand_dict = motion._brand_to_dict(brand)
     card_dict = motion._card_to_props(card, variation_seed=7)
     cache_key = motion._content_hash(
-        {"card": card_dict, "brand": brand_dict, "duration": 6.0,
-         "size": [1080, 1920], "rev": motion.STORY_COMPOSITION_REVISION},
+        {
+            "card": card_dict,
+            "brand": brand_dict,
+            "duration": 6.0,
+            "size": [1080, 1920],
+            "rev": motion.STORY_COMPOSITION_REVISION,
+        },
         kind="story",
     )
     (cache_dir / f"{cache_key}.mp4").write_bytes(fake_mp4_bytes)
@@ -217,6 +249,7 @@ def test_render_story_card_returns_cached_file_when_present(tmp_path, monkeypatc
 # don't want to add 60s to the suite by default.
 # ---------------------------------------------------------------------------
 
+
 def _node_present() -> bool:
     return shutil.which("node") is not None
 
@@ -229,9 +262,7 @@ def _remotion_installed() -> bool:
 # Override with MEDIAHUB_SKIP_MOTION_TESTS=1 if you need to run the suite
 # in a Node-less environment temporarily. The Dockerfile always installs
 # Remotion's node_modules so the production image satisfies this.
-_SKIP_INTEGRATION = (
-    os.environ.get("MEDIAHUB_SKIP_MOTION_TESTS", "").lower() in ("1", "true", "yes")
-)
+_SKIP_INTEGRATION = os.environ.get("MEDIAHUB_SKIP_MOTION_TESTS", "").lower() in ("1", "true", "yes")
 
 
 @pytest.mark.skipif(_SKIP_INTEGRATION, reason="MEDIAHUB_SKIP_MOTION_TESTS set")
@@ -252,12 +283,16 @@ def test_render_story_card_produces_valid_mp4(tmp_path, monkeypatch):
             "type": "NEW PB",
         },
     }
-    brand = BrandKit(profile_id="t", display_name="Smoke Club",
-                     primary_colour="#0A2540", secondary_colour="#000000",
-                     accent_colour="#FFFFFF", short_name="SC")
+    brand = BrandKit(
+        profile_id="t",
+        display_name="Smoke Club",
+        primary_colour="#0A2540",
+        secondary_colour="#000000",
+        accent_colour="#FFFFFF",
+        short_name="SC",
+    )
     out = tmp_path / "story.mp4"
-    result = motion.render_story_card(card, brand, out, duration_sec=1.0,
-                                       variation_seed=1)
+    result = motion.render_story_card(card, brand, out, duration_sec=1.0, variation_seed=1)
     assert Path(result).exists()
     size = Path(result).stat().st_size
     assert size > 4096, f"MP4 unexpectedly small: {size} bytes"
@@ -345,9 +380,12 @@ def _shared_test_card() -> dict:
 
 def _shared_brand() -> BrandKit:
     return BrandKit(
-        profile_id="diff-club", display_name="Diff Test Club",
-        primary_colour="#0A2540", secondary_colour="#FF6F61",
-        accent_colour="#FFFFFF", short_name="DTC",
+        profile_id="diff-club",
+        display_name="Diff Test Club",
+        primary_colour="#0A2540",
+        secondary_colour="#FF6F61",
+        accent_colour="#FFFFFF",
+        short_name="DTC",
     )
 
 
@@ -364,7 +402,9 @@ def test_render_diff_brief_variants_produce_unique_cache_keys():
     keys: list[str] = []
     for brief in _BRIEF_VARIANTS:
         card_dict = motion._card_to_props(
-            card, variation_seed=2, brief=brief,
+            card,
+            variation_seed=2,
+            brief=brief,
         )
         key = motion._content_hash(
             {"card": card_dict, "brand": brand_dict, "duration": 1.0},
@@ -377,9 +417,10 @@ def test_render_diff_brief_variants_produce_unique_cache_keys():
     )
 
 
-_SKIP_DIFF_REGRESSION = (
-    os.environ.get("MEDIAHUB_RUN_DIFF_REGRESSION", "").lower()
-    not in ("1", "true", "yes")
+_SKIP_DIFF_REGRESSION = os.environ.get("MEDIAHUB_RUN_DIFF_REGRESSION", "").lower() not in (
+    "1",
+    "true",
+    "yes",
 )
 
 
@@ -402,6 +443,7 @@ def test_render_diff_brief_variants_produce_distinct_mp4s(tmp_path, monkeypatch)
     full sweep takes ~30-60s on a Standard Render box.
     """
     import hashlib
+
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     card = _shared_test_card()
     brand = _shared_brand()
@@ -409,7 +451,9 @@ def test_render_diff_brief_variants_produce_distinct_mp4s(tmp_path, monkeypatch)
     for idx, brief in enumerate(_BRIEF_VARIANTS):
         out = tmp_path / f"variant_{idx}.mp4"
         result = motion.render_story_card(
-            card, brand, out,
+            card,
+            brand,
+            out,
             variation_seed=2,
             duration_sec=1.0,
             brief=brief,
@@ -435,6 +479,7 @@ def test_render_diff_brief_variants_produce_distinct_mp4s(tmp_path, monkeypatch)
 # ---------------------------------------------------------------------------
 # Selectable output frame rate (fps-option)
 # ---------------------------------------------------------------------------
+
 
 def test_validate_fps_accepts_curated_and_rejects_others():
     for good in (24, 25, 30, 50, 60):
@@ -470,6 +515,22 @@ def test_fps_folds_into_reel_cache_key_only_when_non_default():
     h50 = motion._content_hash({**base, "fps": 50}, kind="reel")
     h60 = motion._content_hash({**base, "fps": 60}, kind="reel")
     assert h_default != h50 and h_default != h60 and h50 != h60
+
+
+def test_logo_drawon_folds_into_reel_cache_key_only_when_active():
+    """svg-shape-decompose — the decomposed logo paths enter the reel cache key
+    ONLY when the draw-on is active. A reel with the feature absent keys exactly
+    as before (byte-identical); a reel with the paths folded keys differently."""
+    base = {"cards": [{"a": 1}], "brand": {}, "meet": "M", "duration": 15.0, "size": [1080, 1920]}
+    h_default = motion._content_hash(base, kind="reel")
+    # Absent → stable, pre-change key.
+    assert h_default == motion._content_hash(base, kind="reel")
+    payload = {
+        "viewBox": "0 0 10 10",
+        "paths": [{"d": "M0 0 L5 5", "len": 7.071, "stroke": "#123456"}],
+    }
+    h_active = motion._content_hash({**base, "logoDrawOn": payload}, kind="reel")
+    assert h_active != h_default
 
 
 def test_run_remotion_appends_fps_only_when_non_default(tmp_path, monkeypatch):
@@ -536,6 +597,7 @@ def test_reel_card_beat_frames_scales_with_selected_fps():
 # with/without comparison render. Must NEVER touch a shipped card (parity).
 # ---------------------------------------------------------------------------
 
+
 def test_effect_toggle_allowlist_is_decorative_only_and_excludes_legibility():
     """The allowlist is sorted, decorative-only, and rejects every legibility-
     or accessibility-critical layer, so no toggle can drop a text/bg pair below
@@ -555,9 +617,10 @@ def test_effect_toggle_allowlist_is_decorative_only_and_excludes_legibility():
         assert forbidden not in allow
         assert motion._validate_effect_toggles([forbidden]) == []
     # Unknown keys drop; duplicates collapse; the result is sorted.
-    assert motion._validate_effect_toggles(
-        ["style_pack", "accent", "accent", "bogus"]
-    ) == ["accent", "style_pack"]
+    assert motion._validate_effect_toggles(["style_pack", "accent", "accent", "bogus"]) == [
+        "accent",
+        "style_pack",
+    ]
     # A bare string / empty / None never validates to a spurious key.
     assert motion._validate_effect_toggles("accent") == []
     assert motion._validate_effect_toggles(None) == []
@@ -568,8 +631,14 @@ def test_effect_toggles_for_brief_returns_sorted_false_allowlisted_keys():
     """Only allowlisted keys set FALSEY are suppressed; keys set truthy, unknown
     keys, and an absent field yield no suppression (sorted, deterministic)."""
     disabled = motion._effect_toggles_for_brief(
-        {"effect_toggles": {"style_pack": False, "accent": True, "mesh_bg": False,
-                            "unknown_axis": False}}
+        {
+            "effect_toggles": {
+                "style_pack": False,
+                "accent": True,
+                "mesh_bg": False,
+                "unknown_axis": False,
+            }
+        }
     )
     # accent is True (keep), unknown dropped, remaining sorted.
     assert disabled == ["mesh_bg", "style_pack"]
@@ -583,8 +652,13 @@ def test_card_manifest_axes_records_effects_disabled():
     """The manifest records the suppressed axes — empty on every shipped card
     (only the review path is a writer), populated when the review path set them."""
     props = motion._card_to_props(
-        {"achievement": {"swimmer_name": "A B", "event_name": "50m Free",
-                         "result_time": "00:25.00"}}
+        {
+            "achievement": {
+                "swimmer_name": "A B",
+                "event_name": "50m Free",
+                "result_time": "00:25.00",
+            }
+        }
     )
     assert motion._card_manifest_axes(props)["effects_disabled"] == []
     axes = motion._card_manifest_axes({**props, "effectsDisabled": ["accent", "style_pack"]})
@@ -607,8 +681,13 @@ def _ab_story_key(card_dict, brand_dict, *, disabled=None):
 def test_review_ab_story_key_is_distinct_and_deterministic():
     """The comparison 'B' variant keys distinctly from the default render and is
     deterministic across runs; the default (no toggles) key is unchanged."""
-    card = {"achievement": {"swimmer_name": "Cache Hit", "event_name": "100m Free LC",
-                            "result_time": "00:50.00"}}
+    card = {
+        "achievement": {
+            "swimmer_name": "Cache Hit",
+            "event_name": "100m Free LC",
+            "result_time": "00:50.00",
+        }
+    }
     brand_dict = motion._brand_to_dict(BrandKit(profile_id="x", display_name="Club"))
     card_dict = motion._card_to_props(card, variation_seed=7)
     default_key = _ab_story_key(card_dict, brand_dict)
@@ -618,8 +697,13 @@ def test_review_ab_story_key_is_distinct_and_deterministic():
     assert b_key == _ab_story_key(card_dict, brand_dict, disabled=disabled)  # deterministic
     # Attaching effectsDisabled alone (no marker) already shifts the key.
     only_prop = motion._content_hash(
-        {"card": {**card_dict, "effectsDisabled": disabled}, "brand": brand_dict,
-         "duration": 6.0, "size": [1080, 1920], "rev": motion.STORY_COMPOSITION_REVISION},
+        {
+            "card": {**card_dict, "effectsDisabled": disabled},
+            "brand": brand_dict,
+            "duration": 6.0,
+            "size": [1080, 1920],
+            "rev": motion.STORY_COMPOSITION_REVISION,
+        },
         kind="story",
     )
     assert only_prop != default_key
@@ -632,8 +716,13 @@ def test_render_story_card_review_ab_serves_distinct_variant(tmp_path, monkeypat
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     cache_dir = tmp_path / "motion_cache"
     cache_dir.mkdir(parents=True, exist_ok=True)
-    card = {"achievement": {"swimmer_name": "Cache Hit", "event_name": "100m Free LC",
-                            "result_time": "00:50.00"}}
+    card = {
+        "achievement": {
+            "swimmer_name": "Cache Hit",
+            "event_name": "100m Free LC",
+            "result_time": "00:50.00",
+        }
+    }
     brand = BrandKit(profile_id="x", display_name="Cache Club")
     brand_dict = motion._brand_to_dict(brand)
     card_dict = motion._card_to_props(card, variation_seed=7)
@@ -641,20 +730,28 @@ def test_render_story_card_review_ab_serves_distinct_variant(tmp_path, monkeypat
     a_bytes = b"\x00\x00\x00\x18ftypisomAAAA" + b"\x00" * 4096
     b_bytes = b"\x00\x00\x00\x18ftypisomBBBB" + b"\x00" * 4096
     (cache_dir / f"{_ab_story_key(card_dict, brand_dict)}.mp4").write_bytes(a_bytes)
-    (cache_dir / f"{_ab_story_key(card_dict, brand_dict, disabled=disabled)}.mp4").write_bytes(b_bytes)
+    (cache_dir / f"{_ab_story_key(card_dict, brand_dict, disabled=disabled)}.mp4").write_bytes(
+        b_bytes
+    )
 
     # Default: no marker attached -> pre-feature key -> A bytes.
     r_a = motion.render_story_card(card, brand, tmp_path / "a.mp4", variation_seed=7)
     assert Path(r_a).read_bytes()[:16] == a_bytes[:16]
     # Review path: keys distinctly -> B bytes (order-insensitive input).
     r_b = motion.render_story_card(
-        card, brand, tmp_path / "b.mp4", variation_seed=7,
+        card,
+        brand,
+        tmp_path / "b.mp4",
+        variation_seed=7,
         review_ab=["background_pattern", "accent"],
     )
     assert Path(r_b).read_bytes()[:16] == b_bytes[:16]
     # All-unknown / legibility-only review_ab validates empty -> no-op -> A bytes.
     r_noop = motion.render_story_card(
-        card, brand, tmp_path / "noop.mp4", variation_seed=7,
+        card,
+        brand,
+        tmp_path / "noop.mp4",
+        variation_seed=7,
         review_ab=["bogus", "photo_scrim"],
     )
     assert Path(r_noop).read_bytes()[:16] == a_bytes[:16]
