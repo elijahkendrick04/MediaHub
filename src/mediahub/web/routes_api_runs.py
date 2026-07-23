@@ -3704,6 +3704,29 @@ def api_card_motion(run_id: str, card_id: str):
     if err is not None:
         return err
 
+    # data-driven-json (PREVIEW/A-B ONLY): an optional ``template`` object in the
+    # POST body drives this motion preview's art axes (merged into the brief at
+    # render time) — it never regenerates or persists the approved still, so the
+    # exported card's still<->motion parity is untouched. Validated up front so a
+    # bad template is an honest 400 before any render work. The render section
+    # maps onto the existing fps/review_ab kwargs; ``format`` stays a ``?format=``
+    # query concern (out_path / Content-Type are already bound to it). Absent
+    # template ⇒ inert ⇒ byte-identical.
+    from mediahub.visual import motion_template as _mt
+
+    _body = request.get_json(silent=True) or {}
+    _template = _body.get("template")
+    try:
+        _tmpl = _mt.validate_motion_template(_template)
+    except _mt.MotionTemplateError as e:
+        return jsonify({"error": "bad_motion_template", "detail": str(e)}), 400
+    _render_kw = _mt.render_kwargs_from_template(_tmpl)
+    _tmpl_kw: dict = {}
+    if "fps" in _render_kw:
+        _tmpl_kw["fps"] = _render_kw["fps"]
+    if "review_ab" in _render_kw:
+        _tmpl_kw["review_ab"] = _render_kw["review_ab"]
+
     try:
         with W._render_slot("motion", card_id, timeout=W._RENDER_TRY_TIMEOUT):
             mp4 = _motion.render_story_card(
@@ -3714,6 +3737,8 @@ def api_card_motion(run_id: str, card_id: str):
                 brief=inputs["brief"],
                 format_name=inputs["format"],
                 alpha_profile=inputs["alpha"],
+                motion_template=_template,
+                **_tmpl_kw,
             )
     except W._RenderBusy:
         return W._render_busy_response("motion")
@@ -4694,6 +4719,40 @@ def api_run_reel(run_id: str):
     if err is not None:
         return err
 
+    # data-driven-json (PREVIEW/A-B ONLY): an optional per-beat ``templates``
+    # array (parallel to the cards) drives each card beat's art axes, and an
+    # optional reel-level ``template`` object's render section maps onto the
+    # existing fps / review_ab / rhythm kwargs. This is a motion preview — it
+    # never regenerates or persists the approved stills. Validated up front so a
+    # bad template is an honest 400. Precedence: an explicit ``?cover/outro/beat/
+    # weights`` query rhythm WINS over a template's weights (they can't clobber);
+    # ``format`` stays a ``?format=`` query concern. Absent ⇒ inert ⇒
+    # byte-identical.
+    from mediahub.visual import motion_template as _mt
+
+    _body = request.get_json(silent=True) or {}
+    _templates = _body.get("templates")
+    if _templates is not None and not isinstance(_templates, list):
+        return jsonify({"error": "bad_motion_template", "detail": "templates must be a list"}), 400
+    try:
+        if _templates is not None:
+            for _t in _templates:
+                _mt.validate_motion_template(_t)
+        _reel_tmpl = _mt.validate_motion_template(_body.get("template"))
+    except _mt.MotionTemplateError as e:
+        return jsonify({"error": "bad_motion_template", "detail": str(e)}), 400
+    _render_kw = _mt.render_kwargs_from_template(_reel_tmpl, n_cards=len(inputs["cards"]))
+    _tmpl_kw: dict = {}
+    if "fps" in _render_kw:
+        _tmpl_kw["fps"] = _render_kw["fps"]
+    if "review_ab" in _render_kw:
+        _tmpl_kw["review_ab"] = _render_kw["review_ab"]
+    # Query rhythm wins; only fall back to a template's weights when no explicit
+    # rhythm was requested, so the two rhythm channels can never clobber.
+    _reel_rhythm = inputs["rhythm"]
+    if _reel_rhythm is None and "rhythm" in _render_kw:
+        _reel_rhythm = _render_kw["rhythm"]
+
     try:
         with W._render_slot("reel", run_id, timeout=W._RENDER_TRY_TIMEOUT):
             mp4 = _motion.render_meet_reel(
@@ -4703,12 +4762,14 @@ def api_run_reel(run_id: str):
                 meet_name=inputs["meet_name"],
                 briefs=inputs["briefs"],
                 format_name=inputs["format"],
-                rhythm=inputs["rhythm"],
+                rhythm=_reel_rhythm,
                 sponsor=inputs.get("sponsor", ""),
                 next_meet=inputs.get("next_meet", ""),
                 dub_language=inputs.get("dub_language", ""),
                 reel_stat_config=inputs.get("reel_stat_config"),
                 alpha_profile=inputs["alpha"],
+                motion_templates=_templates,
+                **_tmpl_kw,
             )
     except W._RenderBusy:
         return W._render_busy_response("reel")

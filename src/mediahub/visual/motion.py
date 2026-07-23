@@ -3121,6 +3121,7 @@ def render_story_card(
     fps: int = MOTION_FPS,
     review_ab: Optional[list[str]] = None,
     alpha_profile: str = "",
+    motion_template: Optional[dict] = None,
 ) -> Path:
     """Render a single content-pack card to an MP4 story.
 
@@ -3162,6 +3163,20 @@ def render_story_card(
     validates to empty — leave the render byte-identical to the shipped card, so
     a card that gets exported for posting always keeps still<->motion parity.
 
+    ``motion_template`` (data-driven-json, opt-in, PREVIEW/A-B only) is a
+    validated declarative art template (see :mod:`mediahub.visual.motion_template`)
+    whose ``art`` overrides are merged into the card's ``brief`` BEFORE prop
+    assembly, so BOTH the Remotion and the FFmpeg engines render the same
+    reselected treatment. It is validated / clamped against the closed brief
+    vocabularies (an unknown key or out-of-vocabulary value raises
+    :class:`~mediahub.visual.motion_template.MotionTemplateError`); the merge is
+    object-identity when the template is ``None`` / empty, so the default render
+    stays byte-identical. This drives a motion PREVIEW only — it never
+    regenerates or persists the approved still, so the exported card's
+    still<->motion parity is untouched (exactly like ``review_ab``). The
+    template's ``render`` section is resolved by the route into the existing
+    ``format_name`` / ``fps`` / ``review_ab`` kwargs, never here.
+
     ``alpha_profile`` (alpha-export, opt-in, Remotion-only) selects a
     transparent-background compositing export from the closed
     :data:`ALPHA_PROFILES` vocabulary (``"prores4444"`` / ``"vp9"``). When set,
@@ -3200,6 +3215,15 @@ def render_story_card(
         supersample = 1.0
     out_path = Path(out_path)
     brand_dict = _brand_to_dict(brand_kit)
+    # data-driven-json (PREVIEW/A-B only): merge the validated template's art
+    # overrides into the brief BEFORE footage resolution and prop assembly, so
+    # every downstream reader (footage, _card_to_props + its helpers, the ffmpeg
+    # brief_dict) sees the same reselected treatment. Object-identity no-op when
+    # the template is None/empty ⇒ byte-identical default. Raises
+    # MotionTemplateError up to the route (→ HTTP 400) on any bad input.
+    from mediahub.visual import motion_template as _mt
+
+    brief = _mt.merge_into_brief(brief, _mt.validate_motion_template(motion_template))
     # M23 — footage-backed story: resolve the card's race clip for this 6s
     # beat. Remotion-only (the ffmpeg fallback renders pre-baked stills and
     # cannot play a video plane — its manifest says so honestly); a miss of
@@ -3916,6 +3940,7 @@ def _assemble_reel_props(
     resolve_footage: bool = False,
     peak_speed_ramp: str = "",
     fps: int = MOTION_FPS,
+    motion_templates: Optional[list[Optional[dict]]] = None,
 ) -> tuple[list[dict], dict, str, float, Any, list, Optional[dict], Optional[dict], list]:
     """Format-independent prop assembly shared by the single and batch reel
     renders.
@@ -3996,6 +4021,23 @@ def _assemble_reel_props(
                     except Exception:
                         seed = 1
         brief = briefs_list[idx] if idx < len(briefs_list) else None
+        # data-driven-json (PREVIEW/A-B only): merge this beat's validated
+        # template art overrides into the brief IN PLACE (write back to
+        # briefs_list[idx]) BEFORE footage, _card_to_props, the mix-profile read,
+        # and the edit-signature fold — so every per-card reader sees the same
+        # reselected treatment. Object-identity no-op when the template is
+        # None/empty ⇒ that card stays byte-identical. Raises MotionTemplateError
+        # up to the route (→ 400) on any bad input.
+        if motion_templates and idx < len(motion_templates):
+            from mediahub.visual import motion_template as _mt
+
+            brief = _mt.merge_into_brief(brief, _mt.validate_motion_template(motion_templates[idx]))
+            if idx < len(briefs_list):
+                briefs_list[idx] = brief
+            else:
+                while len(briefs_list) <= idx:
+                    briefs_list.append(None)
+                briefs_list[idx] = brief
         # M23 — this card's footage beat, trimmed to its OWN carved beat
         # seconds. Only attempted when the engine can play it; any miss keeps
         # the card's props byte-identical with the reason kept for the manifest.
@@ -4665,6 +4707,7 @@ def render_meet_reel(
     logo_drawon: bool = False,
     peak_speed_ramp: str = "",
     alpha_profile: str = "",
+    motion_templates: Optional[list[Optional[dict]]] = None,
 ) -> Path:
     """Render a multi-card reel from the top cards for a meet.
 
@@ -4763,6 +4806,7 @@ def render_meet_reel(
         resolve_footage=engine != "ffmpeg",
         peak_speed_ramp=peak_speed_ramp,
         fps=fps,
+        motion_templates=motion_templates,
     )
     cta_props = _reel_cta_props(sponsor, next_meet)
     return _render_reel_one_format(
@@ -4828,6 +4872,7 @@ def render_meet_reel_all_formats(
     logo_drawon: bool = False,
     peak_speed_ramp: str = "",
     alpha_profile: str = "",
+    motion_templates: Optional[list[Optional[dict]]] = None,
 ) -> dict[str, Any]:
     """Render + cache every requested reel format in a single pass (R1.15).
 
@@ -4901,6 +4946,7 @@ def render_meet_reel_all_formats(
         resolve_footage=engine != "ffmpeg",
         peak_speed_ramp=peak_speed_ramp,
         fps=fps,
+        motion_templates=motion_templates,
     )
     cta_props = _reel_cta_props(sponsor, next_meet)
 
