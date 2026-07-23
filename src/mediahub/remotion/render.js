@@ -85,6 +85,16 @@ async function main() {
   // Lanczos-downscale back to WxH for crisper text/vector/gradient edges. Omitted
   // (scale absent) when <=1 so the default render is byte-identical.
   const scaleN = args.scale ? parseFloat(args.scale) : 1;
+  // Optional encode profile (bit-depth-gamut): higher-bit-depth codec /
+  // pixelFormat and a container colour-space tag, resolved Python-side from a
+  // closed profile vocabulary and passed as fixed CLI strings. Absent flags
+  // keep the historic h264 / yuv420p / no-colorSpace defaults, so the default
+  // renderMedia call is byte-identical to before. colorSpace stays null unless
+  // the flag is present — Remotion's own default is 'default', which emits NO
+  // colour-tagging ffmpeg args, so the OFF path must pass nothing at all.
+  const codecArg = args.codec || "h264";
+  const pixelFormatArg = args["pixel-format"] || "yuv420p";
+  const colorSpaceArg = args["color-space"] || null;
 
   if (!compositionId || !propsPath || !outputPath) {
     console.error(
@@ -157,8 +167,9 @@ async function main() {
       fps,
     },
     serveUrl,
-    codec: "h264",
+    codec: codecArg,
     ...(scaleN > 1 ? { scale: scaleN } : {}),
+    ...(colorSpaceArg ? { colorSpace: colorSpaceArg } : {}),
     outputLocation: outputPath,
     inputProps,
     chromiumOptions: {
@@ -168,7 +179,7 @@ async function main() {
     // the MeetReel on a 1-CPU deployment. Python's subprocess timeout is
     // 600s, so 120s here stays well inside the outer budget.
     timeoutInMilliseconds: 120000,
-    pixelFormat: "yuv420p",
+    pixelFormat: pixelFormatArg,
   });
   const renderElapsed = ((Date.now() - start) / 1000).toFixed(1);
   console.error(`[remotion] rendered → ${outputPath} (${renderElapsed}s)`);

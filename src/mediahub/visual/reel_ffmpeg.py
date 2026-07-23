@@ -160,6 +160,21 @@ def _photo_supersample_requested() -> bool:
         return False
 
 
+def _motion_encode_requested() -> bool:
+    """True when the opt-in higher-bit-depth / wide-gamut encode profile
+    (``MEDIAHUB_MOTION_ENCODE``) is set to anything but the byte-identical
+    default. This free FFmpeg engine composites pre-baked 8-bit still PNGs and
+    re-encodes with a fixed ``libx264 -pix_fmt yuv420p`` path — it is NOT wired to
+    the Remotion ``renderMedia`` encoder settings and its still sources carry no
+    extra precision to preserve. So a 10-bit/wide-gamut request degrades HONESTLY:
+    the manifest records ``encode: unsupported-on-engine`` rather than shipping a
+    faked 10-bit or falsely bt2020-tagged file (invariant 5). Mirrors
+    ``_photo_supersample_requested`` env-read shape; unset / ``default`` / ``h264``
+    → False (no note, byte-identical)."""
+    raw = os.environ.get("MEDIAHUB_MOTION_ENCODE", "").strip().lower()
+    return bool(raw) and raw not in ("default", "h264")
+
+
 def ffmpeg_exe() -> Optional[str]:
     """Resolve the FFmpeg binary, or None when no source provides one."""
     env = os.environ.get("MEDIAHUB_FFMPEG", "").strip()
@@ -1121,6 +1136,13 @@ def render_story_card_from_props(
                     if card_props.get("effectsDisabled")
                     else {}
                 ),
+                # bit-depth-gamut: the higher-bit-depth / wide-gamut encode is a
+                # Remotion renderMedia codec/pixelFormat/colorSpace setting; this
+                # engine composites pre-baked 8-bit stills through a fixed libx264
+                # yuv420p path with no extra precision to preserve, so a request
+                # degrades HONESTLY — never a faked 10-bit or false gamut tag.
+                # Fold-only-when-requested keeps every default render's note clean.
+                **({"encode": "unsupported-on-engine"} if _motion_encode_requested() else {}),
                 "engine_note": (
                     "Rendered by the reduced-motion FFmpeg engine: the card's own "
                     "approved still with a deterministic camera move — no text "
@@ -1373,6 +1395,12 @@ def render_meet_reel_from_props(
                 # brand mark it already draws is unchanged) — never a faked draw.
                 # Fold-only-when-requested keeps every default reel's note clean.
                 **({"logo_drawon": "unsupported-on-engine"} if logo_drawon else {}),
+                # bit-depth-gamut: the higher-bit-depth / wide-gamut encode is a
+                # Remotion renderMedia setting; each beat here is a pre-baked 8-bit
+                # still composited through a fixed libx264 yuv420p path, so a
+                # request degrades HONESTLY — never a faked 10-bit or false gamut
+                # tag. Fold-only-when-requested keeps every default reel's note clean.
+                **({"encode": "unsupported-on-engine"} if _motion_encode_requested() else {}),
                 "engine_note": (
                     "Rendered by the reduced-motion FFmpeg engine: each beat is "
                     "the card's own approved still with a deterministic camera "

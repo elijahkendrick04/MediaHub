@@ -2321,6 +2321,16 @@ def _fps_kw(fps: int) -> dict:
     return {"fps": int(fps)} if int(fps) != MOTION_FPS else {}
 
 
+def _encode_kw(encode: Optional[dict]) -> dict:
+    """The ``encode=`` keyword to forward, empty at the default (encode is None).
+
+    bit-depth-gamut: only an active profile carries the kwarg downstream, so the
+    default call signature — and every existing render mock / call assertion —
+    is unchanged and the default render stays byte-identical (``_run_remotion``
+    itself defaults ``encode=None``, so an absent kwarg == the OFF path)."""
+    return {"encode": encode} if encode is not None else {}
+
+
 _TRUTHY = {"1", "true", "yes", "on"}
 
 
@@ -2592,6 +2602,77 @@ def _motion_supersample() -> float:
     return max(1.0, min(2.0, v))
 
 
+# bit-depth-gamut — the opt-in higher-bit-depth / wide-gamut ENCODE vocabulary.
+# Each entry is a FIXED, verified (codec, pixelFormat, colorSpace, container)
+# quad — a closed table, never an expression language: no operator-supplied
+# codec/pixelFormat string ever reaches renderMedia, only these names select a
+# profile. All shipped profiles are MP4-container so the six ``video/mp4``
+# serving routes need no change; the ``container`` field exists so a future
+# ``.mov``/ProRes profile can slot in once those routes learn ``video/quicktime``.
+#
+# Honesty (invariant 5): Chromium composites 8-bit sRGB frames. These profiles
+# RE-ENCODE those same brand-locked, APCA-gated colours at higher bit-depth
+# precision (less encode banding) and TAG the container's gamut/transfer
+# metadata. They do NOT synthesise wide-gamut colour that was never rendered.
+# ``h265-10`` (genuine 10-bit precision, no colour tag) and ``h265-10-bt709``
+# (10-bit + honest rec709 tag) are the SAFE recommended defaults. ``bt2020-ncl``
+# is offered but FLAGGED: ffmpeg tags the file HLG/2020 and applies a limited-
+# range matrix relabel over sRGB-origin pixels — it is NOT a true gamut map, and
+# a tonemapping player that honours the tag can display it differently from the
+# approved 8-bit sRGB still. The manifest states this verbatim.
+MOTION_ENCODE_PROFILES: dict[str, dict] = {
+    "h265-10": {
+        "name": "h265-10",
+        "codec": "h265",
+        "pixelFormat": "yuv420p10le",
+        "colorSpace": None,
+        "container": ".mp4",
+    },
+    "h265-10-bt709": {
+        "name": "h265-10-bt709",
+        "codec": "h265",
+        "pixelFormat": "yuv420p10le",
+        "colorSpace": "bt709",
+        "container": ".mp4",
+    },
+    "h265-10-bt2020": {
+        "name": "h265-10-bt2020",
+        "codec": "h265",
+        "pixelFormat": "yuv420p10le",
+        "colorSpace": "bt2020-ncl",
+        "container": ".mp4",
+    },
+    "h265-8-bt709": {
+        "name": "h265-8-bt709",
+        "codec": "h265",
+        "pixelFormat": "yuv420p",
+        "colorSpace": "bt709",
+        "container": ".mp4",
+    },
+}
+
+
+def _motion_encode_profile() -> Optional[dict]:
+    """The opt-in higher-bit-depth / wide-gamut ENCODE profile, or None (default).
+
+    ``MEDIAHUB_MOTION_ENCODE`` selects a named profile from the closed
+    :data:`MOTION_ENCODE_PROFILES` vocabulary. Unset / empty / ``"default"`` /
+    ``"h264"`` / any unknown name → ``None``, which keeps the render
+    byte-identical to today (8-bit ``yuv420p``, no colour tag, ``.mp4``).
+    Returns a *copy* so callers cannot mutate the shared table.
+
+    Deterministic-engine boundary respected: a pure dict + env lookup, no DSP,
+    no model, no operator-supplied codec strings. Unknown names resolve to
+    ``None`` (never a raise, never an arbitrary codec) — a typo silently keeps
+    the safe byte-identical default rather than emitting an off-spec file, and
+    can never smuggle a codec string through to ``renderMedia`` (invariant 7)."""
+    raw = os.environ.get("MEDIAHUB_MOTION_ENCODE", "").strip().lower()
+    if not raw or raw in ("default", "h264"):
+        return None
+    prof = MOTION_ENCODE_PROFILES.get(raw)
+    return dict(prof) if prof is not None else None
+
+
 def _photo_supersample() -> int:
     """Per-photo resample-quality knob (``MEDIAHUB_PHOTO_SUPERSAMPLE``), returned
     as ``0`` (off / default) or ``2`` (capped).
@@ -2629,6 +2710,7 @@ def _run_remotion(
     timeout: int = 600,
     supersample: float = 1.0,
     fps: int = MOTION_FPS,
+    encode: Optional[dict] = None,
 ) -> Path:
     """Invoke the Node render script. Raises RuntimeError on failure."""
     if not node_available():
@@ -2651,7 +2733,13 @@ def _run_remotion(
     # a complete MP4 (or from one complete MP4 to another). (The opt-in
     # parallel-segment reel composite and the ffmpeg fallback engine write the
     # slot through their own ffmpeg invocations; they are separate follow-ups.)
-    tmp_out = out_path.with_name(f".{out_path.stem}.{os.getpid()}.{threading.get_ident()}.tmp.mp4")
+    # bit-depth-gamut: the temp file carries the profile's container so a future
+    # non-.mp4 profile writes the right suffix; every shipped profile is .mp4, so
+    # the default (encode is None) suffix stays byte-identically ".tmp.mp4".
+    tmp_suffix = (encode["container"] if encode is not None else ".mp4").lstrip(".")
+    tmp_out = out_path.with_name(
+        f".{out_path.stem}.{os.getpid()}.{threading.get_ident()}.tmp.{tmp_suffix}"
+    )
 
     # Write props to a temp file alongside the cache; cheap and lets us tail
     # the JSON if a render fails.
@@ -2680,6 +2768,15 @@ def _run_remotion(
     # command (and its cache-busting hash) stays byte-identical to before.
     if int(fps) != MOTION_FPS:
         cmd.extend(["--fps", str(int(fps))])
+    # bit-depth-gamut: append the encode flags ONLY when a profile is active, so
+    # the OFF path (encode is None) issues the identical argv as before —
+    # render.js then falls back to its h264 / yuv420p / no-colorSpace defaults.
+    # --color-space is appended only when the profile carries one (h265-10 has
+    # None → no colour tag, matching Remotion's 'default' no-args behaviour).
+    if encode is not None:
+        cmd.extend(["--codec", encode["codec"], "--pixel-format", encode["pixelFormat"]])
+        if encode.get("colorSpace"):
+            cmd.extend(["--color-space", encode["colorSpace"]])
 
     from mediahub.visual.proc import run_capture
 
@@ -2827,6 +2924,14 @@ def render_story_card(
     engine = _dispatch_engine()
     size = motion_format_size(format_name)
     supersample = _motion_supersample()
+    # bit-depth-gamut: resolve the opt-in encode profile. None (default) keeps
+    # everything byte-identical. When active it is MUTUALLY EXCLUSIVE with the
+    # whole-composition supersample downscale, which hardcodes libx264/yuv420p
+    # and would flatten a 10-bit render back to 8-bit h264 — so encode wins and
+    # supersample is forced off (recorded honestly in the manifest below).
+    encode = _motion_encode_profile()
+    if encode is not None:
+        supersample = 1.0
     out_path = Path(out_path)
     brand_dict = _brand_to_dict(brand_kit)
     # M23 — footage-backed story: resolve the card's race clip for this 6s
@@ -2927,8 +3032,15 @@ def render_story_card(
     # shipped render's key is untouched.
     if ab_disabled:
         cache_payload["ab_review"] = ab_disabled
+    # bit-depth-gamut: fold the profile NAME (not the codec strings) into the key
+    # only when active, so an 8-bit cache entry can never be served for a 10-bit
+    # request (or vice-versa) and the default (encode is None) key is untouched.
+    if encode is not None:
+        cache_payload["encode"] = encode["name"]
     cache_key = _content_hash(cache_payload, kind="story")
-    cached = _cache_dir() / f"{cache_key}.mp4"
+    # Container-aware cached slot: every shipped profile is .mp4, so this is a
+    # no-op for the shipped set but keeps the seam correct for a future .mov.
+    cached = _cache_dir() / f"{cache_key}{encode['container'] if encode else '.mp4'}"
     if cached.exists() and cached.stat().st_size > 1024:
         _touch_cache_hit(cached)  # LRU recency (#71)
         # Re-publish the cached MP4 at the caller-requested path. The
@@ -2951,6 +3063,7 @@ def render_story_card(
         duration_sec=duration_sec,
         size=size,
         supersample=supersample,
+        **_encode_kw(encode),
         **_fps_kw(fps),
     )
     audio_rec = _finish_cached_video(
@@ -2974,6 +3087,34 @@ def render_story_card(
     }
     if supersample > 1.0:
         story_manifest["supersample"] = supersample
+    # bit-depth-gamut: record the encode profile HONESTLY — the source frames are
+    # Chromium 8-bit sRGB; 10-bit reduces encode banding and colorSpace tags the
+    # container. This is a precision + metadata change over the same brand-locked,
+    # APCA-gated colours, NOT a synthesised wide-gamut master.
+    if encode is not None:
+        story_manifest["encode"] = {
+            "profile": encode["name"],
+            "codec": encode["codec"],
+            "pixel_format": encode["pixelFormat"],
+            "color_space": encode.get("colorSpace") or "untagged",
+            "note": (
+                "Higher-bit-depth/gamut-tagged re-ENCODE of the same brand-locked, "
+                "APCA-gated colours. Source frames are Chromium 8-bit sRGB; 10-bit "
+                "reduces encode banding and colorSpace tags the container — this is "
+                "a precision + metadata change, not a synthesised wide-gamut master. "
+                "bt2020-ncl is a HLG/2020 re-tag + limited-range matrix relabel over "
+                "sRGB-origin pixels (not a true gamut map): a tonemapping player that "
+                "honours the tag may display it differently from the approved still."
+            ),
+        }
+        # Mutual exclusion with the whole-composition supersample: if the operator
+        # also asked for supersample, say so honestly (encode wins).
+        if _motion_supersample() > 1.0:
+            story_manifest["supersample"] = {
+                "requested": _motion_supersample(),
+                "applied": False,
+                "reason": "incompatible with encode profile (10-bit downscale unsupported)",
+            }
     # transform-sampling (AE-gap): record the per-photo hint HONESTLY — a
     # best-effort compositor interpolation hint, NOT a guaranteed dense-buffer
     # supersample (that is the whole-composition MEDIAHUB_MOTION_SUPERSAMPLE).
@@ -3768,6 +3909,15 @@ def _render_reel_one_format(
     """
     size = motion_format_size(format_name)
     supersample = _motion_supersample()
+    # bit-depth-gamut: resolve the opt-in encode profile. None (default) keeps
+    # every reel byte-identical. When active it is MUTUALLY EXCLUSIVE with the
+    # supersample downscale (which would flatten 10-bit back to 8-bit h264) and
+    # forces the SERIAL render path — the parallel-segment composite stream-copies
+    # h264 segments and threads no codec/pixelFormat/colorSpace, so it cannot emit
+    # the profile output. encode wins; supersample is forced off.
+    encode = _motion_encode_profile()
+    if encode is not None:
+        supersample = 1.0
     photo_ss = _photo_supersample()
     out_path = Path(out_path)
     # R1.7: steer each card's photo focus for this cut's aspect ratio (no-op for
@@ -3873,8 +4023,14 @@ def _render_reel_one_format(
     # key. Set ONLY on the validated review path; a shipped reel is untouched.
     if ab_disabled:
         cache_payload["ab_review"] = ab_disabled
+    # bit-depth-gamut: fold the profile NAME only when active, so a 10-bit/tagged
+    # reel can never be served from an 8-bit cache entry and the default (encode
+    # is None) reel key stays byte-identical.
+    if encode is not None:
+        cache_payload["encode"] = encode["name"]
     cache_key = _content_hash(cache_payload, kind="reel")
-    cached = _cache_dir() / f"{cache_key}.mp4"
+    # Container-aware cached slot (no-op for the .mp4-only shipped set).
+    cached = _cache_dir() / f"{cache_key}{encode['container'] if encode else '.mp4'}"
     if cached.exists() and cached.stat().st_size > 1024:
         _touch_cache_hit(cached)  # LRU recency (#71)
         audio_rec = _finish_cached_video(
@@ -3922,12 +4078,23 @@ def _render_reel_one_format(
     render_strategy = "serial"
     # Supersample forces the serial path: the parallel-segment composite doesn't
     # thread the --scale/downscale, so it's skipped when supersampling (an
-    # unchanged 1x reel still tries parallel first).
-    if supersample <= 1.0 and (
-        _render_reel_parallel_or_none(
-            props=reel_props, cached=cached, duration_sec=duration_sec, size=size, **_fps_kw(fps)
+    # unchanged 1x reel still tries parallel first). bit-depth-gamut: an active
+    # encode profile forces serial too — the parallel composite stream-copies its
+    # h264 segments and threads no codec/pixelFormat/colorSpace, so it cannot
+    # produce the profile output; only the serial _run_remotion carries encode=.
+    if (
+        encode is None
+        and supersample <= 1.0
+        and (
+            _render_reel_parallel_or_none(
+                props=reel_props,
+                cached=cached,
+                duration_sec=duration_sec,
+                size=size,
+                **_fps_kw(fps),
+            )
+            is not None
         )
-        is not None
     ):
         render_strategy = "parallel-segments"
     else:
@@ -3938,6 +4105,7 @@ def _render_reel_one_format(
             duration_sec=duration_sec,
             size=size,
             supersample=supersample,
+            **_encode_kw(encode),
             **_fps_kw(fps),
         )
     audio_rec = _finish_cached_video(
@@ -3965,6 +4133,44 @@ def _render_reel_one_format(
             "engine": engine,
             "render_strategy": render_strategy,
             **({"supersample": supersample} if supersample > 1.0 else {}),
+            # bit-depth-gamut: honest encode-profile record (fold-only-when-active).
+            # Same brand-locked, APCA-gated colours re-encoded at higher bit-depth
+            # precision + gamut-tagged — not a synthesised wide-gamut master.
+            **(
+                {
+                    "encode": {
+                        "profile": encode["name"],
+                        "codec": encode["codec"],
+                        "pixel_format": encode["pixelFormat"],
+                        "color_space": encode.get("colorSpace") or "untagged",
+                        "note": (
+                            "Higher-bit-depth/gamut-tagged re-ENCODE of the same "
+                            "brand-locked, APCA-gated colours. Source frames are "
+                            "Chromium 8-bit sRGB; 10-bit reduces encode banding and "
+                            "colorSpace tags the container — a precision + metadata "
+                            "change, not a synthesised wide-gamut master. bt2020-ncl "
+                            "is a HLG/2020 re-tag + limited-range matrix relabel over "
+                            "sRGB-origin pixels (not a true gamut map): a tonemapping "
+                            "player that honours the tag may display it differently "
+                            "from the approved still."
+                        ),
+                    },
+                    **(
+                        {
+                            "supersample": {
+                                "requested": _motion_supersample(),
+                                "applied": False,
+                                "reason": "incompatible with encode profile "
+                                "(10-bit downscale unsupported)",
+                            }
+                        }
+                        if _motion_supersample() > 1.0
+                        else {}
+                    ),
+                }
+                if encode is not None
+                else {}
+            ),
             # transform-sampling (AE-gap): honest per-photo hint record — a
             # best-effort compositor interpolation hint on the beats' scaled
             # photos, NOT a guaranteed dense-buffer supersample.
