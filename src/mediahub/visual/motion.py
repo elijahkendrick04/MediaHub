@@ -768,6 +768,36 @@ def _overlap_accent_for_brief(brief: Optional[dict]) -> str:
         return ""
 
 
+def _texture_blend_for_brief(brief: Optional[dict]) -> str:
+    """The still's seeded texture composite blend mode (blend-modes), or ``""``.
+
+    Mirrors ``render._v2_style_pack_overlay``: only a card that opted into
+    ``seeded_blend`` AND resolved a NON-BARE style pack AND carries a stable card
+    key + a biased mood yields a blend, computed by the SAME
+    ``style_packs.texture_blend_for``. Attached only when non-empty, so every
+    other card keeps byte-identical props (and story cache key).
+    """
+    if not isinstance(brief, dict):
+        return ""
+    if not brief.get("seeded_blend"):
+        return ""
+    pack_id = str(brief.get("style_pack") or "").strip()
+    if not pack_id:
+        return ""
+    key = str(brief.get("variation_signature") or brief.get("id") or "").strip()
+    if not key:
+        return ""
+    try:
+        from mediahub.graphic_renderer import style_packs as _sp
+
+        pack = _sp.style_pack_from_id(pack_id)
+        if pack is None or pack.is_bare:
+            return ""
+        return _sp.texture_blend_for(str(brief.get("mood") or ""), key, enabled=True)
+    except Exception:
+        return ""
+
+
 # The v2 archetypes whose motion scenes paint the cutout as layered depth
 # planes themselves (M12 twins). They take the decoration-scaled depth
 # treatment and (band_break) the alpha-derived band placement props.
@@ -1518,6 +1548,13 @@ def _card_to_props(
     overlap_accent = _overlap_accent_for_brief(b)
     if overlap_accent:
         props["overlapAccent"] = overlap_accent
+    # blend-modes (still parity): the seeded, mood-biased texture composite blend
+    # the still painted. Attached only when the brief opted in AND a blend
+    # resolved, so every other card keeps byte-identical props (and cache key) —
+    # no composition-revision bump (fold-only-when-present).
+    texture_blend = _texture_blend_for_brief(b)
+    if texture_blend:
+        props["textureBlend"] = texture_blend
     # LEFTOVER-1 (UI 1.18 → motion): a manual crop persisted in the card's
     # inspector overrides wins over the saliency focus — the same
     # ``photo_pos`` value the still honours, validated by the still's own
@@ -1757,6 +1794,7 @@ def _card_manifest_axes(card_props: dict) -> dict:
         "archetype": card_props.get("archetype") or "",
         "style_pack": card_props.get("stylePack") or "",
         "overlap_accent": card_props.get("overlapAccent") or "",
+        "texture_blend": card_props.get("textureBlend") or "",
         "motion_intent": card_props.get("motionIntent") or "",
         "text_granularity": card_props.get("textGranularity") or "word",
         "accent_style": card_props.get("accentStyle") or "",

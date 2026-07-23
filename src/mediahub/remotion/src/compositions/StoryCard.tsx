@@ -188,6 +188,11 @@ export const cardSchema = z.object({
   // The motion pack layer paints the same shape at a fixed overlap-safe corner.
   // Empty = no overlap accent (bare/legacy card), byte-equivalent.
   overlapAccent: z.string().default(""),
+  // blend-modes (still parity): the seeded, mood-biased texture composite blend
+  // mode (a lightening-family CSS mix-blend value, e.g. "screen"). Empty (the
+  // default) keeps the hard-coded "overlay" composite — byte-equivalent to the
+  // pre-blend-modes render. Set only when the still opted into seeded_blend.
+  textureBlend: z.string().default(""),
   // The design-spec director's motion language for this card
   // (design_spec.MOTION_INTENTS). Empty = the mood/seed default programme.
   motionIntent: z.string().default(""),
@@ -2069,6 +2074,11 @@ const StylePackLayer: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
   }
   const { width, height, frame, roles } = ctx;
   const accent = roles.accent || "#FFFFFF";
+  // blend-modes (still parity): the seeded texture composite blend, or the
+  // hard-coded "overlay" when the card did not opt in — byte-equivalent to the
+  // pre-blend-modes render. Only the composite mix-blend swaps; the stack's
+  // internal background-blend-mode (its tile-fusing lever) is untouched.
+  const texBlend = ctx.card.textureBlend || "overlay";
   // Ease the whole treatment in with the scene (motion only for feedback).
   const enter = interpolate(frame, [2, 16], [0, 1], {
     extrapolateLeft: "clamp",
@@ -2098,7 +2108,7 @@ const StylePackLayer: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
             backgroundRepeat: "repeat, repeat",
             backgroundBlendMode: blend,
             opacity: pack.bold ? 0.15 : 0.1,
-            mixBlendMode: "overlay",
+            mixBlendMode: texBlend as React.CSSProperties["mixBlendMode"],
           }}
         />,
       );
@@ -2118,7 +2128,7 @@ const StylePackLayer: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
             backgroundSize: `${size}px ${size}px`,
             backgroundRepeat: "repeat",
             opacity: op,
-            mixBlendMode: "overlay",
+            mixBlendMode: texBlend as React.CSSProperties["mixBlendMode"],
           }}
         />,
       );

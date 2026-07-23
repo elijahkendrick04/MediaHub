@@ -179,6 +179,12 @@ class CreativeBrief:
     # strength on both the still and the motion surface.
     photo_treatment_intensity: float = -1.0
     mood: str = ""  # one or two mood words
+    # blend-modes — opt into the seeded/mood-biased texture composite blend
+    # (graphic_renderer.style_packs.texture_blend_for). False (the default) keeps
+    # the hard-coded ``overlay`` composite blend on both the still and the motion
+    # render, so a legacy/undirected brief is byte-identical. Set from the design
+    # director's DesignSpec.seeded_blend by apply_design_spec.
+    seeded_blend: bool = False
     ai_directed: bool = False  # True when AI chose the direction
     variation_signature: str = ""  # short signature for dedup/audit
     # Gen Engine v2 style pack (additive; default-safe). The decorative lever
@@ -965,6 +971,9 @@ def apply_design_spec(brief: CreativeBrief, spec) -> CreativeBrief:
         # M9: the director's mood re-keys the photo grade (celebratory →
         # punchy, stoic → editorial, …) so pixels match the chosen feeling.
         brief.photo_adjust = _photo_recipe_for_mood(spec.mood)
+    # blend-modes — carry the director's opt-in for the seeded texture composite
+    # blend. False (the default) keeps the byte-identical ``overlay`` composite.
+    brief.seeded_blend = bool(getattr(spec, "seeded_blend", False))
     if spec.rationale:
         brief.why_this_design = spec.rationale
     if spec.motion_intent:

@@ -414,3 +414,58 @@ def test_mesh_token_takes_no_pattern_tile():
     assert _background_pattern_for("mesh") == clean
     # the default is untouched
     assert _background_pattern_for("water") != clean
+
+
+# ---------------------------------------------------------------------------
+# blend-modes — DesignSpec.seeded_blend → CreativeBrief → still overlay
+# ---------------------------------------------------------------------------
+
+
+def test_apply_design_spec_carries_seeded_blend_onto_the_brief():
+    # Reachability: the director's opt-in must land on the brief (not be dead
+    # code on DesignSpec only). Off by default, on when the spec sets it.
+    off = _bare_brief(style_pack="vignette-grain-corner_ticks-standard")
+    apply_design_spec(off, _spec(seeded_blend=False))
+    assert off.seeded_blend is False
+
+    on = _bare_brief(style_pack="vignette-grain-corner_ticks-standard")
+    apply_design_spec(on, _spec(mood="explosive", seeded_blend=True))
+    assert on.seeded_blend is True
+
+
+def test_still_overlay_blend_is_default_off_and_active_when_opted_in():
+    from mediahub.graphic_renderer.render import _v2_style_pack_overlay
+
+    brief = _bare_brief(style_pack="vignette-grain-corner_ticks-standard", mood="explosive")
+    brief.variation_signature = "sig-blend-1"
+
+    # Off (default): byte-identical to a plain pack overlay — hard-coded overlay.
+    off_html = _v2_style_pack_overlay(brief, 1080, 1350)
+    plain = sp.pack_overlay_html(
+        sp.style_pack_from_id("vignette-grain-corner_ticks-standard"), width=1080, height=1350
+    )
+    assert off_html == plain
+    assert "mix-blend-mode:overlay" in off_html
+
+    # On: the composite mix-blend swaps to the seeded family member.
+    brief.seeded_blend = True
+    on_html = _v2_style_pack_overlay(brief, 1080, 1350)
+    blend = sp.texture_blend_for("explosive", "sig-blend-1", enabled=True)
+    assert blend and blend != "overlay"
+    assert f"mix-blend-mode:{blend}" in on_html
+    assert on_html != off_html
+
+
+def test_still_overlay_blend_off_for_neutral_mood():
+    from mediahub.graphic_renderer.render import _v2_style_pack_overlay
+
+    brief = _bare_brief(style_pack="vignette-grain-corner_ticks-standard", mood="neutral")
+    brief.variation_signature = "sig-blend-2"
+    brief.seeded_blend = True
+    # Neutral mood carries no bias → "" → keeps the hard-coded overlay.
+    html = _v2_style_pack_overlay(brief, 1080, 1350)
+    assert "mix-blend-mode:overlay" in html
+    plain = sp.pack_overlay_html(
+        sp.style_pack_from_id("vignette-grain-corner_ticks-standard"), width=1080, height=1350
+    )
+    assert html == plain

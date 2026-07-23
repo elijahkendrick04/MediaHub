@@ -348,6 +348,12 @@ class DesignSpec:
     # older spec dict without the fields normalises to a byte-identical card.
     emphasis_word: str = ""
     emphasis_style: str = DEFAULT_EMPHASIS_STYLE
+    # blend-modes — opt into the seeded/mood-biased texture composite blend
+    # (graphic_renderer.style_packs.texture_blend_for). ``False`` (the default)
+    # keeps the hard-coded ``overlay`` composite blend, so an older spec dict
+    # without the field normalises to a byte-identical card. When ``True`` AND a
+    # biased mood + card key resolve, the still and motion pick the same blend.
+    seeded_blend: bool = False
 
     def text_effects_map(self) -> dict[str, str]:
         """The text effects as a ``slot -> effect`` dict (renderer-facing shape)."""
@@ -373,6 +379,7 @@ class DesignSpec:
             "text_effects": self.text_effects_map(),
             "emphasis_word": self.emphasis_word,
             "emphasis_style": self.emphasis_style,
+            "seeded_blend": self.seeded_blend,
         }
 
 
@@ -489,6 +496,21 @@ def _coerce_text_effects(value: Any) -> tuple[tuple[str, str], ...]:
     return tuple(sorted(out.items()))
 
 
+def _coerce_bool(value: Any) -> bool:
+    """Coerce a raw opt-in flag to a strict bool.
+
+    Accepts a real JSON boolean or a common truthy string ("true"/"1"/"yes"/
+    "on", case-insensitive); everything else (including ``None`` and numbers)
+    is ``False`` — so an absent or malformed field keeps the byte-identical
+    default-off behaviour.
+    """
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().casefold() in ("true", "1", "yes", "on")
+    return False
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -560,6 +582,7 @@ def normalise(raw: dict, *, archetypes: list[str], token_roles: list[str]) -> De
         emphasis_style=_coerce_enum(
             data.get("emphasis_style"), EMPHASIS_STYLES, DEFAULT_EMPHASIS_STYLE
         ),
+        seeded_blend=_coerce_bool(data.get("seeded_blend")),
     )
 
 
@@ -631,6 +654,10 @@ def design_spec_json_schema(*, archetypes: list[str], token_roles: list[str]) ->
             # defaults, so an older dict without them still validates.
             "emphasis_word": {"type": "string", "maxLength": MAX_EMPHASIS_WORD_LEN},
             "emphasis_style": {"type": "string", "enum": list(EMPHASIS_STYLES)},
+            # blend-modes — opt into the seeded texture composite blend. Required
+            # like every other field (normalise defaults it to False, so an older
+            # dict without it still validates and renders byte-identically).
+            "seeded_blend": {"type": "boolean"},
         },
         "required": [
             "archetype",
@@ -653,6 +680,7 @@ def design_spec_json_schema(*, archetypes: list[str], token_roles: list[str]) ->
             # "" / accent_ink defaults, so an older dict still validates).
             "emphasis_word",
             "emphasis_style",
+            "seeded_blend",
         ],
     }
 

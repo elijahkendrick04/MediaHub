@@ -5676,7 +5676,22 @@ def _v2_style_pack_overlay(
         pack = _sp.style_pack_from_id(pack_id)
         if pack is None:
             return ""
-        return _sp.pack_overlay_html(pack, width=width, height=height, focus=focus)
+        # blend-modes (opt-in): a decorated (non-bare) card whose brief opted
+        # into ``seeded_blend`` resolves a seeded, mood-biased texture composite
+        # blend from the same card key the overlap accent uses. The default
+        # (flag off / bare pack / neutral-or-unknown mood / no card key) leaves
+        # ``blend_override`` None → byte-identical overlay HTML.
+        blend_override: Optional[str] = None
+        if getattr(brief, "seeded_blend", False) and not pack.is_bare:
+            card_key = str(
+                getattr(brief, "variation_signature", "") or getattr(brief, "id", "") or ""
+            ).strip()
+            blend_override = (
+                _sp.texture_blend_for(getattr(brief, "mood", ""), card_key, enabled=True) or None
+            )
+        return _sp.pack_overlay_html(
+            pack, width=width, height=height, focus=focus, blend_override=blend_override
+        )
     except Exception:
         return ""
 
