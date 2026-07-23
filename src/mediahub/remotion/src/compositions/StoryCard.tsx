@@ -440,6 +440,12 @@ export type AnimChannels = {
   // Numeric count-up progress for the result value (count_up intent).
   // 1 everywhere else, so every other programme renders the verbatim text.
   resultProgress: number;
+  // Typewriter/scramble "decode" progress for the result string (text_scramble
+  // intent). 1 = identity (the verbatim value); <1 drives the length-preserving
+  // left-to-right scramble decode. 1 everywhere else, so every other programme
+  // (all 8 core + every existing sprint intent) renders the verbatim text and
+  // stays byte-identical.
+  textRevealProgress: number;
   // Per-word staggered reveal (kinetic_type); identity elsewhere.
   wordAt: (index: number) => { y: number; opacity: number };
   // Per-glyph staggered reveal (kinetic_type / cascade under the seed gate);
@@ -571,6 +577,7 @@ function animProgram(
     resolveAccent: resolvePulse,
     resolveAccentKind,
     resultProgress: 1,
+    textRevealProgress: 1,
     wordAt: identityWord,
     glyphAt: identityGlyph,
   };
@@ -744,6 +751,7 @@ function animProgram(
         resolveAccent: 0,
         resolveAccentKind: "none",
         resultProgress: 1,
+        textRevealProgress: 1,
         wordAt: identityWord,
         glyphAt: identityGlyph,
       };
@@ -1029,6 +1037,88 @@ function countUpDisplay(text: string, progress: number): string {
     return (parseFloat(t) * p).toFixed(decimals);
   }
   return text;
+}
+
+// Charset the scramble picks unsettled glyphs from — uppercase A-Z + 0-9 only,
+// every one of which the heavy display faces (Anton/Bebas/Bowlby) carry, so no
+// scramble frame ever hits a missing-glyph fallback. Spaces/punctuation are
+// never scrambled (they pass through), so the string's shape holds throughout.
+const SCRAMBLE_CHARSET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+// How many discrete scramble "flips" an unsettled position cycles through over
+// the whole decode. Quantising progress to an integer tick makes the scramble
+// advance in stable, re-render-identical steps (frame-pure, no time source).
+const SCRAMBLE_CYCLES = 6;
+
+// Deterministic 32-bit hash of (seed, position, tick) — frame-pure, no
+// randomness. Same mix as motion/compile.ts:glyphHash, extended with the tick
+// so a position's decoy glyph advances deterministically as progress ticks.
+function scrambleHash(seed: number, pos: number, tick: number): number {
+  let x =
+    (Math.imul(seed | 0, 73856093) ^
+      Math.imul(pos | 0, 19349663) ^
+      Math.imul(tick | 0, 83492791)) >>>
+    0;
+  x = Math.imul(x ^ (x >>> 13), 0x5bd1e995) >>> 0;
+  return (x ^ (x >>> 15)) >>> 0;
+}
+
+// Deterministic typewriter/scramble "decode" of the result string for the
+// text_scramble intent. Length-preserving and in-place: every character
+// position is present from frame 0 (no growth → no autofit reflow of the
+// APCA-sized text box), and position `i` settles onto its TRUE glyph once
+// `progress >= (i+1)/len` (left-to-right typewriter order). Unsettled
+// alphanumeric positions show a decoy glyph from SCRAMBLE_CHARSET chosen by a
+// hash of (seed, i, quantised-progress-tick); spaces and punctuation always
+// pass through so the shape reads. Pure function of (text, progress, seed):
+// `progress` is frame-derived (interpolate in the sprint intent) and glyph
+// choice uses only the integer hash above — never Math.random/Date.now/new
+// Date. The `progress >= 1 || !text` guard makes it land on the EXACT verified
+// string (mirrors countUpDisplay's verbatim guard), so it always resolves to
+// the verified value — never an invented one.
+function scrambleReveal(text: string, progress: number, seed: number): string {
+  if (progress >= 1 || !text) {
+    return text;
+  }
+  const p = Math.max(0, progress);
+  const len = text.length;
+  // Quantise progress to a stable per-decode tick so decoy glyphs step in
+  // discrete, re-render-identical increments rather than flickering per frame.
+  const tick = Math.floor(p * len * SCRAMBLE_CYCLES);
+  let out = "";
+  for (let i = 0; i < len; i++) {
+    const ch = text[i];
+    // Left-to-right settle: position i shows its true glyph once progress has
+    // reached its slot. Non-alphanumeric glyphs (space, ":", ".", "—") always
+    // pass through so the value's shape is preserved during the decode.
+    const settled = p >= (i + 1) / len;
+    const isAlnum =
+      (ch >= "A" && ch <= "Z") ||
+      (ch >= "a" && ch <= "z") ||
+      (ch >= "0" && ch <= "9");
+    if (settled || !isAlnum) {
+      out += ch;
+    } else {
+      const h = scrambleHash(seed, i, tick);
+      out += SCRAMBLE_CHARSET[h % SCRAMBLE_CHARSET.length];
+    }
+  }
+  return out;
+}
+
+// Router for the single reveal-driven result string threaded into ctx.result:
+// when a card opts into the text_scramble decode (textRevealProgress < 1) it
+// runs the scramble; otherwise it is the numeric count-up verbatim. For every
+// existing intent textRevealProgress === 1, so this is countUpDisplay(text,
+// resultProgress) exactly — byte-identical, no behaviour change.
+function revealResult(
+  text: string,
+  resultProgress: number,
+  textRevealProgress: number,
+  seed: number,
+): string {
+  return textRevealProgress < 1
+    ? scrambleReveal(text, textRevealProgress, seed)
+    : countUpDisplay(text, resultProgress);
 }
 
 // A5 (Canva gap analysis) parity — kern the result numeral's intra-numeric
@@ -3487,7 +3577,12 @@ export const StoryCard: React.FC<Props> = ({ card, brand }) => {
     firstName: (card.athleteFirstName || "").toUpperCase(),
     label: (card.achievementLabel || "").toUpperCase(),
     event: card.eventName || "",
-    result: countUpDisplay(card.resultValue || "", anim.resultProgress),
+    result: revealResult(
+      card.resultValue || "",
+      anim.resultProgress,
+      anim.textRevealProgress,
+      card.variationSeed || 0,
+    ),
     resultFinal: card.resultValue || "",
     meet: card.meetName || "",
     club: (brand.displayName || brand.shortName || "").toUpperCase(),

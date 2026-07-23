@@ -195,6 +195,12 @@ MOTION_INTENTS: tuple[str, ...] = (
     "rise",
     "pop",
     "drop_in",
+    # Deterministic typewriter/scramble reveal — the result string decodes,
+    # left-to-right, onto the EXACT verified value. Executed by its own
+    # auto-discovered sprint file (sprint/intents/text_scramble.ts) via the
+    # textRevealProgress channel; _coerce_enum validates-not-index-picks, so
+    # appending it cannot shift any existing card's intent.
+    "text_scramble",
 )
 
 # 1.9 — text-effect tokens. The slots a per-text effect can be requested on

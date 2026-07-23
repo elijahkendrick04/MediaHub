@@ -246,7 +246,7 @@ def _design_spec_system_prompt(archetypes: list[str], token_roles: list[str]) ->
         '  "photo_treatment": "cutout|duotone|halftone|vignette|wash|sticker",\n'
         '  "logo_lockup": "full_horizontal|full_stacked|mono_light|mono_dark|icon",\n'
         '  "mood": "explosive|electric|calm|fierce|celebratory|stoic|precise|bold|triumphant|minimal",\n'
-        '  "motion_intent": "fade_in|snap_in_then_settle|slide_up|scale_in|kinetic_type|count_up|static|bounce_in|flip_reveal|swirl|reveal_from_sides|cascade|rise|pop|drop_in",\n'
+        '  "motion_intent": "fade_in|snap_in_then_settle|slide_up|scale_in|kinetic_type|count_up|static|bounce_in|flip_reveal|swirl|reveal_from_sides|cascade|rise|pop|drop_in|text_scramble",\n'
         '  "text_effects": {"headline|result|kicker|event|meta": "none|shadow|lift|hollow|outline|splice|echo|glitch|neon|background|gradient|extrude|warp|curve"} (optional flourish — usually {} ),\n'
         '  "emphasis_word": <optional: ONE word already present in a slot to two-tone-highlight, else "">,\n'
         '  "emphasis_style": "accent_ink|accent_pill|heavy",\n'
@@ -280,7 +280,9 @@ def _design_spec_system_prompt(archetypes: list[str], token_roles: list[str]) ->
         "swirl for a celebratory win, flip_reveal or reveal_from_sides for a single "
         "standout stat, cascade when several facts share the card. rise is a calm "
         "lift for understated results, pop a confident scale punch, drop_in a "
-        "decisive arrival from above.\n"
+        "decisive arrival from above. text_scramble decodes the result string "
+        "with a typewriter/scramble effect that lands on the exact value — reach "
+        "for it when a headline time or number is the whole story.\n"
         "accent_treatment is the margin accent the card carries on the still AND "
         "its motion render: the sizing variants (thick/thin/double stripe, "
         "large/small brackets, bracket_frame, corner_tabs, offset_badge, "

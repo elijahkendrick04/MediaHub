@@ -1053,7 +1053,7 @@ def render_story_card_from_props(
                 "engine_note": (
                     "Rendered by the reduced-motion FFmpeg engine: the card's own "
                     "approved still with a deterministic camera move — no text "
-                    "choreography or count-up."
+                    "choreography, count-up, or typewriter/scramble reveal."
                 ),
             },
         }
