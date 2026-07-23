@@ -2069,6 +2069,22 @@ def _update_manifest_audio(cached: Path, audio_rec: dict) -> None:
         pass
 
 
+def _motion_supersample() -> float:
+    """Supersample factor for motion renders (``MEDIAHUB_MOTION_SUPERSAMPLE``),
+    clamped to ``[1.0, 2.0]``. ``1.0`` (unset / malformed / default) renders at
+    the native target resolution — byte-identical to today. A value > 1 renders
+    at scale× and Lanczos-downscales back to the target for crisper text / vector
+    / gradient edges, at extra render cost (mirrors the stills' DPR supersample)."""
+    raw = os.environ.get("MEDIAHUB_MOTION_SUPERSAMPLE", "").strip()
+    if not raw:
+        return 1.0
+    try:
+        v = float(raw)
+    except ValueError:
+        return 1.0
+    return max(1.0, min(2.0, v))
+
+
 def _run_remotion(
     *,
     composition_id: str,
@@ -2077,6 +2093,7 @@ def _run_remotion(
     duration_sec: Optional[float] = None,
     size: Optional[tuple[int, int]] = None,
     timeout: int = 600,
+    supersample: float = 1.0,
 ) -> Path:
     """Invoke the Node render script. Raises RuntimeError on failure."""
     if not node_available():
@@ -2122,6 +2139,8 @@ def _run_remotion(
         cmd.extend(["--duration", str(duration_sec)])
     if size is not None:
         cmd.extend(["--width", str(int(size[0])), "--height", str(int(size[1]))])
+    if supersample > 1.0:
+        cmd.extend(["--scale", f"{supersample:g}"])
 
     from mediahub.visual.proc import run_capture
 
@@ -2143,6 +2162,46 @@ def _run_remotion(
     if not tmp_out.exists() or tmp_out.stat().st_size < 1024:
         tmp_out.unlink(missing_ok=True)
         raise RuntimeError(f"Remotion reported success but {out_path} is missing or empty")
+    # Supersample finish: the node render emitted an n× MP4; Lanczos-downscale it
+    # back to the exact target WxH (same h264/yuv420p deliverable) so only edge
+    # fidelity improves — a deterministic ffmpeg pass, the same class the audio
+    # mux and poster grabs already rely on.
+    if supersample > 1.0 and size is not None:
+        from mediahub.visual.reel_ffmpeg import ffmpeg_exe
+
+        exe = ffmpeg_exe()
+        if not exe:
+            tmp_out.unlink(missing_ok=True)
+            raise RuntimeError("supersample downscale needs an FFmpeg binary")
+        down = out_path.with_name(f".{out_path.stem}.{os.getpid()}.{threading.get_ident()}.ss.mp4")
+        ds = subprocess.run(
+            [
+                exe,
+                "-y",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-i",
+                str(tmp_out),
+                "-vf",
+                f"scale={int(size[0])}:{int(size[1])}:flags=lanczos",
+                "-c:v",
+                "libx264",
+                "-pix_fmt",
+                "yuv420p",
+                "-movflags",
+                "+faststart",
+                str(down),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+        tmp_out.unlink(missing_ok=True)
+        if ds.returncode != 0 or not down.exists() or down.stat().st_size < 1024:
+            down.unlink(missing_ok=True)
+            raise RuntimeError(f"supersample downscale failed (exit {ds.returncode})")
+        tmp_out = down
     # Atomic publish: the completed MP4 flips into the cache slot in one rename,
     # so a concurrent same-key render or cache-hit reader never sees a torn file.
     os.replace(tmp_out, out_path)
@@ -2207,6 +2266,7 @@ def render_story_card(
     """
     engine = _dispatch_engine()
     size = motion_format_size(format_name)
+    supersample = _motion_supersample()
     out_path = Path(out_path)
     brand_dict = _brand_to_dict(brand_kit)
     # M23 — footage-backed story: resolve the card's race clip for this 6s
@@ -2270,6 +2330,10 @@ def render_story_card(
     # no-footage card keeps its byte-identical key.
     if foot is not None:
         cache_payload["footage"] = foot.cache_sig
+    # Supersample folds in only when active, so a default (1x) render keeps its
+    # byte-identical story cache key; a 2x render keys independently.
+    if supersample > 1.0:
+        cache_payload["supersample"] = supersample
     cache_key = _content_hash(cache_payload, kind="story")
     cached = _cache_dir() / f"{cache_key}.mp4"
     if cached.exists() and cached.stat().st_size > 1024:
@@ -2293,6 +2357,7 @@ def render_story_card(
         out_path=cached,
         duration_sec=duration_sec,
         size=size,
+        supersample=supersample,
     )
     audio_rec = _finish_cached_video(
         cached, kind="story", plan=audio_plan, duration_sec=duration_sec
@@ -2312,6 +2377,8 @@ def render_story_card(
         "poster": poster_path_for(cached).name if poster_path_for(cached).exists() else "",
         "poster_source": poster_source,
     }
+    if supersample > 1.0:
+        story_manifest["supersample"] = supersample
     # M23 explainability: full provenance when a clip plays; the honest
     # fall-back reason when a candidate existed but the photo path won.
     if foot is not None:
@@ -3008,6 +3075,7 @@ def _render_reel_one_format(
     (same contract as reel captions).
     """
     size = motion_format_size(format_name)
+    supersample = _motion_supersample()
     out_path = Path(out_path)
     # R1.7: steer each card's photo focus for this cut's aspect ratio (no-op for
     # the story base). Folds into the cache key below, so each cut caches its own
@@ -3066,6 +3134,10 @@ def _render_reel_one_format(
         cache_payload["footage"] = [
             (f.cache_sig if f is not None else None) for f, _ in footage_list
         ]
+    # Supersample folds in only when active, so a default (1x) reel keeps its
+    # byte-identical cache key; a 2x reel keys independently.
+    if supersample > 1.0:
+        cache_payload["supersample"] = supersample
     cache_key = _content_hash(cache_payload, kind="reel")
     cached = _cache_dir() / f"{cache_key}.mp4"
     if cached.exists() and cached.stat().st_size > 1024:
@@ -3105,7 +3177,10 @@ def _render_reel_one_format(
     # workers. It returns None — and we take the unchanged serial render — when
     # disabled, unavailable, or on any failure.
     render_strategy = "serial"
-    if (
+    # Supersample forces the serial path: the parallel-segment composite doesn't
+    # thread the --scale/downscale, so it's skipped when supersampling (an
+    # unchanged 1x reel still tries parallel first).
+    if supersample <= 1.0 and (
         _render_reel_parallel_or_none(
             props=reel_props, cached=cached, duration_sec=duration_sec, size=size
         )
@@ -3119,6 +3194,7 @@ def _render_reel_one_format(
             out_path=cached,
             duration_sec=duration_sec,
             size=size,
+            supersample=supersample,
         )
     audio_rec = _finish_cached_video(
         cached,
@@ -3144,6 +3220,7 @@ def _render_reel_one_format(
             "kind": "reel",
             "engine": engine,
             "render_strategy": render_strategy,
+            **({"supersample": supersample} if supersample > 1.0 else {}),
             "format": format_name,
             "composition_revision": REEL_COMPOSITION_REVISION,
             "size": list(size),

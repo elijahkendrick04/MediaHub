@@ -74,6 +74,10 @@ async function main() {
   const durationSec = args.duration ? parseFloat(args.duration) : null;
   const widthPx = args.width ? parseInt(args.width, 10) : null;
   const heightPx = args.height ? parseInt(args.height, 10) : null;
+  // Optional supersample factor: render at scale× the target and let Python
+  // Lanczos-downscale back to WxH for crisper text/vector/gradient edges. Omitted
+  // (scale absent) when <=1 so the default render is byte-identical.
+  const scaleN = args.scale ? parseFloat(args.scale) : 1;
 
   if (!compositionId || !propsPath || !outputPath) {
     console.error(
@@ -145,6 +149,7 @@ async function main() {
     },
     serveUrl,
     codec: "h264",
+    ...(scaleN > 1 ? { scale: scaleN } : {}),
     outputLocation: outputPath,
     inputProps,
     chromiumOptions: {

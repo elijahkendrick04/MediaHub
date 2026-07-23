@@ -134,6 +134,18 @@ _XFADE_FOR_KIND: dict[str, str] = {
 # ---------------------------------------------------------------------------
 
 
+def _supersample_requested() -> bool:
+    """True when the Remotion-only motion supersample knob is set > 1. This free
+    engine renders pre-baked Playwright stills and never invokes render.js, so it
+    reports the knob as not-applied in its manifest rather than silently swallowing
+    it (its stills already get their own DPR supersample upstream)."""
+    raw = os.environ.get("MEDIAHUB_MOTION_SUPERSAMPLE", "").strip()
+    try:
+        return float(raw) > 1.0
+    except ValueError:
+        return False
+
+
 def ffmpeg_exe() -> Optional[str]:
     """Resolve the FFmpeg binary, or None when no source provides one."""
     env = os.environ.get("MEDIAHUB_FFMPEG", "").strip()
@@ -1024,6 +1036,11 @@ def render_story_card_from_props(
             "kb_variant": variant,
             "captions": _caption_manifest(str(card_props.get("captionsJson") or "")),
             "notes": {
+                **(
+                    {"supersample": {"applied": False, "reason": "remotion-only"}}
+                    if _supersample_requested()
+                    else {}
+                ),
                 # M23: footage-backed beats need the Remotion engine (this
                 # path animates the card's pre-baked still and cannot play a
                 # video plane) — an honest capability note, never a fake beat.
@@ -1206,6 +1223,11 @@ def render_meet_reel_from_props(
             "transitions": transitions,
             "captions": {"status": "unsupported-on-engine"},
             "notes": {
+                **(
+                    {"supersample": {"applied": False, "reason": "remotion-only"}}
+                    if _supersample_requested()
+                    else {}
+                ),
                 "captions": "unsupported-on-engine",
                 "stat_chips": "static-cover",
                 # M23: footage-backed beats need the Remotion engine (this

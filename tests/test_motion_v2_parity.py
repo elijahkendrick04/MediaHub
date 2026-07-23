@@ -240,7 +240,16 @@ def test_motion_format_sizes():
 def _stub_render(tmp_path, monkeypatch, fmt: str, captured: dict):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
 
-    def _fake_run(*, composition_id, props, out_path, duration_sec=None, size=None, timeout=600):
+    def _fake_run(
+        *,
+        composition_id,
+        props,
+        out_path,
+        duration_sec=None,
+        size=None,
+        timeout=600,
+        supersample=1.0,
+    ):
         captured["size"] = size
         out = Path(out_path)
         out.parent.mkdir(parents=True, exist_ok=True)
@@ -393,7 +402,16 @@ def test_story_render_writes_explainability_manifest(tmp_path, monkeypatch):
 def test_reel_render_writes_manifest_with_per_card_axes(tmp_path, monkeypatch):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
 
-    def _fake_run(*, composition_id, props, out_path, duration_sec=None, size=None, timeout=600):
+    def _fake_run(
+        *,
+        composition_id,
+        props,
+        out_path,
+        duration_sec=None,
+        size=None,
+        timeout=600,
+        supersample=1.0,
+    ):
         out = Path(out_path)
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_bytes(b"0" * 2048)
@@ -441,6 +459,6 @@ def test_reel_duration_contract():
 def test_render_js_supports_width_height_override():
     src = (motion.REMOTION_DIR / "render.js").read_text()
     assert "--width" in src and "--height" in src
-    assert re.search(r"width,\s*\n\s*height,", src), (
-        "render.js must pass the overridden canvas into renderMedia"
-    )
+    assert re.search(
+        r"width,\s*\n\s*height,", src
+    ), "render.js must pass the overridden canvas into renderMedia"

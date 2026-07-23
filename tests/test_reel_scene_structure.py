@@ -83,7 +83,16 @@ def _render_reel_capture(tmp_path, monkeypatch, cards, **kwargs):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     captured: dict = {}
 
-    def _fake_run(*, composition_id, props, out_path, duration_sec=None, size=None, timeout=600):
+    def _fake_run(
+        *,
+        composition_id,
+        props,
+        out_path,
+        duration_sec=None,
+        size=None,
+        timeout=600,
+        supersample=1.0,
+    ):
         captured["composition_id"] = composition_id
         captured["props"] = props
         captured["duration_sec"] = duration_sec
@@ -94,9 +103,7 @@ def _render_reel_capture(tmp_path, monkeypatch, cards, **kwargs):
         return out
 
     with mock.patch.object(motion, "_run_remotion", side_effect=_fake_run):
-        result = motion.render_meet_reel(
-            cards, BRAND, tmp_path / "out" / "reel.mp4", **kwargs
-        )
+        result = motion.render_meet_reel(cards, BRAND, tmp_path / "out" / "reel.mp4", **kwargs)
     return captured, result
 
 
@@ -109,9 +116,7 @@ def test_reel_duration_is_data_driven_by_default(tmp_path, monkeypatch):
 
 
 def test_explicit_duration_still_wins(tmp_path, monkeypatch):
-    cap, _ = _render_reel_capture(
-        tmp_path, monkeypatch, [_card(1), _card(2)], duration_sec=12.5
-    )
+    cap, _ = _render_reel_capture(tmp_path, monkeypatch, [_card(1), _card(2)], duration_sec=12.5)
     assert cap["duration_sec"] == 12.5
 
 
@@ -161,13 +166,21 @@ def test_tsx_compositions_declare_the_forwarded_fields():
     story can never be silently stripped on its reel beat.
     """
     story = (motion.REMOTION_DIR / "src" / "compositions" / "StoryCard.tsx").read_text()
-    for field in ("archetype", "heroStat", "motionIntent", "photoPos",
-                  "roleGround", "roleSurface", "roleAccent", "roleOnGround"):
+    for field in (
+        "archetype",
+        "heroStat",
+        "motionIntent",
+        "photoPos",
+        "roleGround",
+        "roleSurface",
+        "roleAccent",
+        "roleOnGround",
+    ):
         assert field in story, field
     reel = (motion.REMOTION_DIR / "src" / "compositions" / "MeetReel.tsx").read_text()
-    assert "cardSchema" in reel and 'from "./StoryCard"' in reel, (
-        "MeetReel must reuse StoryCard's exported cardSchema"
-    )
+    assert (
+        "cardSchema" in reel and 'from "./StoryCard"' in reel
+    ), "MeetReel must reuse StoryCard's exported cardSchema"
 
 
 # ---------------------------------------------------------------------------
@@ -205,9 +218,10 @@ def test_v1_render_never_fetches_background_when_flag_off(tmp_path, monkeypatch)
         kit,
         profile_id="seq4",
     )
-    with mock.patch.object(ai_bg, "is_available", return_value=True), mock.patch.object(
-        ai_bg, "background_data_uri_for"
-    ) as fetch:
+    with (
+        mock.patch.object(ai_bg, "is_available", return_value=True),
+        mock.patch.object(ai_bg, "background_data_uri_for") as fetch,
+    ):
         res = render_brief(
             brief,
             output_dir=tmp_path,

@@ -314,7 +314,16 @@ def _render_reel_capture(tmp_path, monkeypatch, cards, **kwargs):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     captured: dict = {}
 
-    def _fake_run(*, composition_id, props, out_path, duration_sec=None, size=None, timeout=600):
+    def _fake_run(
+        *,
+        composition_id,
+        props,
+        out_path,
+        duration_sec=None,
+        size=None,
+        timeout=600,
+        supersample=1.0,
+    ):
         out = Path(out_path)
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_bytes(b"0" * 2048)

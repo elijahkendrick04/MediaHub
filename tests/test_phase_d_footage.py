@@ -512,7 +512,16 @@ class TestMotionFootageFold:
 
         keys: list[str] = []
 
-        def fake_run(*, composition_id, props, out_path, duration_sec=None, size=None, timeout=600):
+        def fake_run(
+            *,
+            composition_id,
+            props,
+            out_path,
+            duration_sec=None,
+            size=None,
+            timeout=600,
+            supersample=1.0,
+        ):
             keys.append(Path(out_path).stem)
             Path(out_path).parent.mkdir(parents=True, exist_ok=True)
             Path(out_path).write_bytes(b"0" * 2048)
@@ -559,7 +568,16 @@ class TestMotionFootageFold:
 
         keys: list[str] = []
 
-        def fake_run(*, composition_id, props, out_path, duration_sec=None, size=None, timeout=600):
+        def fake_run(
+            *,
+            composition_id,
+            props,
+            out_path,
+            duration_sec=None,
+            size=None,
+            timeout=600,
+            supersample=1.0,
+        ):
             keys.append(Path(out_path).stem)
             Path(out_path).parent.mkdir(parents=True, exist_ok=True)
             Path(out_path).write_bytes(b"0" * 2048)

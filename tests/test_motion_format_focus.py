@@ -235,7 +235,16 @@ def _capture_story(tmp_path, monkeypatch, fmt: str, photo: Path) -> dict:
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     captured: dict = {}
 
-    def _fake_run(*, composition_id, props, out_path, duration_sec=None, size=None, timeout=600):
+    def _fake_run(
+        *,
+        composition_id,
+        props,
+        out_path,
+        duration_sec=None,
+        size=None,
+        timeout=600,
+        supersample=1.0,
+    ):
         captured["props"] = props
         captured["size"] = size
         out = Path(out_path)
@@ -273,7 +282,16 @@ def test_render_meet_reel_plumbs_format_into_each_card(tmp_path, monkeypatch, co
     p = corner_subject
     captured: dict = {}
 
-    def _fake_run(*, composition_id, props, out_path, duration_sec=None, size=None, timeout=600):
+    def _fake_run(
+        *,
+        composition_id,
+        props,
+        out_path,
+        duration_sec=None,
+        size=None,
+        timeout=600,
+        supersample=1.0,
+    ):
         captured["props"] = props
         out = Path(out_path)
         out.parent.mkdir(parents=True, exist_ok=True)

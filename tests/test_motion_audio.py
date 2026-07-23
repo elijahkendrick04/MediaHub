@@ -48,7 +48,9 @@ def _card(i: int = 1) -> dict:
     }
 
 
-def _fake_run(*, composition_id, props, out_path, duration_sec=None, size=None, timeout=600):
+def _fake_run(
+    *, composition_id, props, out_path, duration_sec=None, size=None, timeout=600, supersample=1.0
+):
     out = Path(out_path)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_bytes(b"0" * 2048)
@@ -132,9 +134,9 @@ def test_silent_path_cache_key_is_byte_identical_to_pre_audio(tmp_path, monkeypa
     with mock.patch.object(motion, "_run_remotion", side_effect=_fake_run):
         motion.render_story_card(_card(1), BRAND, tmp_path / "out" / "story.mp4")
     expected = _silent_story_key(_card(1))
-    assert (motion._cache_dir() / f"{expected}.mp4").exists(), (
-        "audio-off renders must keep the historic cache key (no orphaned caches)"
-    )
+    assert (
+        motion._cache_dir() / f"{expected}.mp4"
+    ).exists(), "audio-off renders must keep the historic cache key (no orphaned caches)"
 
 
 def test_audio_plan_changes_the_cache_key(tmp_path, monkeypatch):
@@ -355,9 +357,9 @@ def test_balanced_render_keeps_the_pre_profile_cache_key(tmp_path, monkeypatch):
     with mock.patch.object(motion, "_run_remotion", side_effect=_fake_run):
         motion.render_story_card(_card(1), BRAND, tmp_path / "out" / "story.mp4")
     assert len(calls) == 1
-    assert "mix" not in calls[0]["plan"], (
-        "a balanced (default) narrated render must not fold a mix into the key"
-    )
+    assert (
+        "mix" not in calls[0]["plan"]
+    ), "a balanced (default) narrated render must not fold a mix into the key"
 
 
 def test_per_card_mix_profile_folds_into_the_cache_key(tmp_path, monkeypatch):
