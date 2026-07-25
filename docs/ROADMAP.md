@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-07-23 · `9bf42568b` · docs: auto-update roadmap (#1335) [skip render]
+**Last updated:** 2026-07-24 · `9f08f95c9` · build(deps): bump actions/setup-python from 6 to 7 (#1337) [skip render]
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1227,6 +1227,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-07-24 | `9288bc8f4` | build(deps): bump actions/setup-python from 6 to 7 |
 | 2026-07-20 | `47490bb1d` | fix: Marketing steps and product steps use different names for th |
 | 2026-07-19 | `7d5becce9` | fix: Post-approval publishing path is unclear — download-only or |
 | 2026-07-19 | `afaba1b3b` | ci: run all workflows on Python 3.14 to match the 3.14-slim deploy image |
@@ -1237,6 +1238,4 @@ list and the auto table below, not here.
 | 2026-07-19 | `60b5a1c7c` | chore: suppress 4 nan-injection false positives semgrep can now see (#15) |
 | 2026-07-19 | `a80c18b56` | fix: capture the real app for worker threads + last 2 source-scan migrations (#15) |
 | 2026-07-18 | `5cde5de98` | refactor(web): carve the remaining 5 surfaces — finding #15 complete |
-| 2026-07-18 | `2b0dc723a` | test: repoint the moment-count consistency test at /about after the IA rename |
-| 2026-07-18 | `04e4e2771` | test: scan the whole web surface in 2 source-scan guards (#15 carve) |
 <!-- /ROADMAP:ACTIVITY -->
