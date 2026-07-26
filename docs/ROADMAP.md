@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-07-24 · `9f08f95c9` · build(deps): bump actions/setup-python from 6 to 7 (#1337) [skip render]
+**Last updated:** 2026-07-25 · `c103455db` · docs: auto-update roadmap (#1340) [skip render]
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1237,5 +1237,4 @@ list and the auto table below, not here.
 | 2026-07-19 | `0d615fc0d` | F6 elevation — parity persistence, energy-term correctness, pool measurement, deep test battery |
 | 2026-07-19 | `60b5a1c7c` | chore: suppress 4 nan-injection false positives semgrep can now see (#15) |
 | 2026-07-19 | `a80c18b56` | fix: capture the real app for worker threads + last 2 source-scan migrations (#15) |
-| 2026-07-18 | `5cde5de98` | refactor(web): carve the remaining 5 surfaces — finding #15 complete |
 <!-- /ROADMAP:ACTIVITY -->
