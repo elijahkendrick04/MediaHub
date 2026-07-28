@@ -178,6 +178,13 @@ async function main() {
     ...(scaleN > 1 ? { scale: scaleN } : {}),
     ...(colorSpaceArg ? { colorSpace: colorSpaceArg } : {}),
     ...(proResProfileArg ? { proResProfile: proResProfileArg } : {}),
+    // alpha-export: Remotion requires PNG video frames for the alpha pixel
+    // formats — validateSelectedPixelFormatAndImageFormatCombination throws for
+    // yuva420p / yuva444p10le with the default 'jpeg' imageFormat, and jpeg
+    // frames carry no alpha channel anyway. Spread ONLY on the alpha path
+    // (mirroring the scale/colorSpace/proResProfile spreads above) so the
+    // default renderMedia call stays byte-identical.
+    ...(pixelFormatArg.startsWith("yuva") ? { imageFormat: "png" } : {}),
     outputLocation: outputPath,
     inputProps,
     chromiumOptions: {

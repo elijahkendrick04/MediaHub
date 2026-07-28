@@ -139,9 +139,31 @@ def test_kineticline_word_mode_preserved_and_glyph_branch_added():
     assert STORY_TSX.count('perGlyph={ctx.card.textGranularity === "glyph"}') == 6
 
 
-def test_scenekit_kineticwords_mirrors_glyph_split():
-    assert 'ctx.card.textGranularity === "glyph"' in SCENEKIT_TSX
-    assert "const a = ctx.anim.glyphAt(base + ci, lineTotal);" in SCENEKIT_TSX
+def test_kineticline_glyph_branch_kerns_numeric_separators():
+    """engine-math-1 (PR#1334 deep review): glyph mode must carry the still's
+    A5 numeric-separator kerning too — the same `(?<=\\d)[.:](?=\\d)` contract
+    the word branch's kernNumeric implements — or a glyph-mode poster result
+    numeral renders ~0.2em wider than the approved still (parity drift)."""
+    assert "function isNumericSepGlyph(chars: string[], i: number): boolean" in STORY_TSX
+    assert "const sep = isNumericSepGlyph(chars, ci);" in STORY_TSX
+    # The separator glyph carries the still's exact class + tightening margin;
+    # every other glyph keeps the byte-identical bare span.
+    assert 'className={sep ? "mh-sep" : undefined}' in STORY_TSX
+    assert 'style={sep ? { ...glyphStyle, margin: "0 -0.10em" } : glyphStyle}' in STORY_TSX
+
+
+def test_scenekit_kineticwords_delegates_to_shared_kineticline():
+    """engine-math-6 (PR#1334 deep review): KineticWords no longer keeps its own
+    near-verbatim copy of the glyph/word split (which had already drifted —
+    no kernNumeric, no text-fx channels, so animators silently no-opped on
+    sprint scenes while the manifest reported them). It delegates to StoryCard's
+    exported KineticLine, so kerning + fx land on both surfaces at once.
+    (Contract legitimately changed: the old inline glyph-split is gone.)"""
+    assert "export const KineticLine" in STORY_TSX
+    assert "<KineticLine" in SCENEKIT_TSX
+    assert 'perGlyph={ctx.card.textGranularity === "glyph"}' in SCENEKIT_TSX
+    # The drifting inline copy must not come back.
+    assert "ctx.anim.glyphAt(" not in SCENEKIT_TSX
 
 
 def test_intentprogram_threads_seed_and_dispatch_passes_it():

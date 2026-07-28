@@ -13,6 +13,7 @@ combination: dispatch tests in test_reel_engine.py + the real assembly here.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -472,9 +473,7 @@ def test_ffmpeg_reports_text_fx_unsupported():
     DOM, so BOTH the story and the reel manifests declare it unsupported-on-engine
     — never a faked per-character animation."""
     src = (Path(reel_ffmpeg.__file__)).read_text()
-    assert (
-        src.count('"text_fx": "per-glyph-text-animators-unsupported-on-engine"') == 2
-    )
+    assert src.count('"text_fx": "per-glyph-text-animators-unsupported-on-engine"') == 2
 
 
 def test_ffmpeg_reel_branch_declares_logo_drawon_unsupported_when_requested():
@@ -1097,3 +1096,110 @@ def test_reel_graph_actually_routes_through_the_compiler(monkeypatch):
         kb_variants=["zoom_in", "pan_left", "zoom_tl"],
     )
     assert calls == ["ken_burns_in", "pan_left"]  # zoom_tl is engine-only
+
+
+# ---------------------------------------------------------------------------
+# any-canvas geometry — the filter graph at ARBITRARY (non-preset) sizes
+# (deep-review finding: geometry parametrisations covered only the 4 presets)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("width,height", [(1280, 720), (2560, 640), (640, 2560)])
+def test_story_filter_graph_coherent_at_arbitrary_sizes(width, height):
+    """Every emitted filter geometry stays coherent at extreme-but-valid
+    any-canvas sizes: the target WxH appears verbatim, every scale/pad/crop
+    dimension in the graph is positive and even (yuv420p), and no preset
+    dimension leaks through."""
+    args = reel_ffmpeg.story_ffmpeg_args(
+        Path("still.png"), Path("out.mp4"), 6.0, width=width, height=height
+    )
+    joined = " ".join(args)
+    assert f"{width}x{height}" in joined or (f"={width}" in joined and f"={height}" in joined)
+    # Any explicit WxH pair the graph emits is positive and even.
+    for w_s, h_s in re.findall(r"(?:s|size)=(\d+)x(\d+)", joined):
+        w_i, h_i = int(w_s), int(h_s)
+        assert w_i > 0 and h_i > 0
+        assert w_i % 2 == 0 and h_i % 2 == 0, (w_i, h_i)
+    # The preset canvas must not leak into a non-preset request.
+    if (width, height) != (reel_ffmpeg.WIDTH, reel_ffmpeg.HEIGHT):
+        assert f"{reel_ffmpeg.WIDTH}x{reel_ffmpeg.HEIGHT}" not in joined
+
+
+@pytest.mark.parametrize("width,height", [(1280, 720), (2560, 640)])
+def test_reel_filter_graph_coherent_at_arbitrary_sizes(width, height):
+    stills = [Path(f"f{i}.png") for i in range(3)]
+    segs = reel_ffmpeg.reel_segment_durations(2, reel_duration_for(2))
+    args = reel_ffmpeg.reel_ffmpeg_args(stills, Path("reel.mp4"), segs, width=width, height=height)
+    fc = args[args.index("-filter_complex") + 1]
+    for w_s, h_s in re.findall(r"(?:s|size)=(\d+)x(\d+)", fc):
+        w_i, h_i = int(w_s), int(h_s)
+        assert w_i > 0 and h_i > 0 and w_i % 2 == 0 and h_i % 2 == 0
+
+
+# ---------------------------------------------------------------------------
+# Manifest-honesty folds + note gating (deep-review findings: env-gated notes
+# were not cache-key folded, so manifests went stale across env toggles; the
+# text_fx note fired unconditionally on every default render)
+# ---------------------------------------------------------------------------
+
+
+def test_env_gated_notes_fold_into_story_cache_key(monkeypatch, tmp_path):
+    """Toggling an env-gated capability request re-keys the ffmpeg story cache
+    (fold-only-when-requested), so a cached manifest can never describe the
+    OTHER env state. Default (nothing requested) folds no key at all."""
+    from mediahub.visual import motion
+
+    for var in (
+        "MEDIAHUB_MOTION_BLUR",
+        "MEDIAHUB_MOTION_ENCODE",
+        "MEDIAHUB_TEXT_FX",
+        "MEDIAHUB_PHOTO_SUPERSAMPLE",
+    ):
+        monkeypatch.delenv(var, raising=False)
+    payload = {"card": {"a": 1}, "brand": {}, "duration": 6.0}
+
+    def key_now():
+        # Mirror the production fold: the sorted requested-note names.
+        reqs = sorted(
+            k
+            for k, req in (
+                ("photo_supersample", reel_ffmpeg._photo_supersample_requested()),
+                ("text_fx", reel_ffmpeg._text_fx_requested()),
+                ("motion_blur", reel_ffmpeg._motion_blur_requested()),
+                ("encode", reel_ffmpeg._motion_encode_requested()),
+            )
+            if req
+        )
+        p = dict(payload)
+        if reqs:
+            p["notes_requested"] = reqs
+        return motion._content_hash(p, kind="story")
+
+    base = key_now()
+    assert key_now() == base  # deterministic
+    monkeypatch.setenv("MEDIAHUB_MOTION_BLUR", "1")
+    with_blur = key_now()
+    assert with_blur != base
+    monkeypatch.delenv("MEDIAHUB_MOTION_BLUR", raising=False)
+    assert key_now() == base  # toggling back restores the exact default key
+
+
+def test_text_fx_and_dither_notes_are_request_gated(monkeypatch):
+    """The text_fx note fires ONLY when MEDIAHUB_TEXT_FX is on (delegating to
+    the canonical switch), and the source gates the dither note on the card
+    actually carrying the dither opt-in — no phantom notes on default renders."""
+    monkeypatch.delenv("MEDIAHUB_TEXT_FX", raising=False)
+    assert reel_ffmpeg._text_fx_requested() is False
+    monkeypatch.setenv("MEDIAHUB_TEXT_FX", "1")
+    assert reel_ffmpeg._text_fx_requested() is True
+    monkeypatch.setenv("MEDIAHUB_TEXT_FX", "0")
+    assert reel_ffmpeg._text_fx_requested() is False
+    src = Path(reel_ffmpeg.__file__).read_text(encoding="utf-8")
+    # Both text_fx notes are conditional (no bare always-on mapping entry).
+    assert '"text_fx": "per-glyph-text-animators-unsupported-on-engine"}' in src
+    assert (
+        '\n                "text_fx": "per-glyph-text-animators-unsupported-on-engine",\n'
+        not in src
+    )
+    # The story dither note is gated on the card carrying the opt-in.
+    assert 'if card_props.get("dither")' in src

@@ -30,9 +30,25 @@ v1 scope — **preview / A-B only.** The route wiring merges a template into the
 brief ONLY at motion-render time (exactly like the review-only ``effect_toggles``
 path); it never regenerates or re-persists the STILL. So a templated MP4 is a
 *preview*, not the approved / exported artifact, and the approved card's
-still↔motion parity is untouched. Structural, pack-level decisions
+still↔motion parity is untouched. On the motion-artifact side the routes
+enforce the same guarantee: a templated render publishes to its own
+``…_tmpl<hash8>…`` preview slot (:func:`preview_slot_token` — MP4, manifest and
+poster sidecars alike), so the canonical slot the motion-file / manifest routes
+serve always holds the approved parity render. Structural, pack-level decisions
 (archetype / layout_template / style_pack) are excluded from v1 — they reshape the
 card and are a pack decision, not a per-render whim.
+
+Route contract for the ``render`` section: the HTTP routes honour ``fps`` and
+``effect_toggles`` everywhere and ``weights`` on the reel routes (an explicit
+query rhythm wins), and REJECT with an honest 400 what they cannot honour —
+``format`` on every route (the output cut is a URL concern: ``?format=`` /
+``?w=&h=`` bind the out-path and Content-Type before the body is read) and
+``weights`` on the single-card routes (beat rhythm is a reel concept). On the
+reel routes the reel-level ``template`` is render-only (art axes belong in the
+positional per-beat ``templates`` list, which is in turn art-only, and never
+longer than the reel's card list) — each misplacement is a 400. A validated
+directive is never silently ignored — the loud-error policy above applies at
+the route surface too.
 
 Security: a closed top-level schema (unknown key ⇒ raise), each field validated
 against a closed allowlist sourced from the canonical registries, and an emitted
@@ -45,6 +61,8 @@ LLM anywhere.
 
 from __future__ import annotations
 
+import hashlib
+import json
 from typing import Any, Optional
 
 from mediahub.creative_brief.design_spec import (
@@ -67,6 +85,7 @@ __all__ = [
     "brief_overrides_from_template",
     "merge_into_brief",
     "render_kwargs_from_template",
+    "preview_slot_token",
 ]
 
 MOTION_TEMPLATE_VERSION = 1
@@ -155,6 +174,22 @@ _RENDER_KEYS: frozenset[str] = frozenset({"format", "fps", "weights", "effect_to
 _VERSION_KEY = "version"
 
 
+def _short(value: Any, limit: int = 120) -> str:
+    """``repr(value)`` bounded to ``limit`` chars for error messages.
+
+    Every :class:`MotionTemplateError` echoes the offending operator value so
+    the 400 is actionable — but the raw value is operator-controlled and only
+    bounded by the app's multi-MB ``MAX_CONTENT_LENGTH``, so an unbounded
+    ``{value!r}`` would reflect a huge junk payload whole into the HTTP 400
+    detail and every log line that records it. All legal values are short enum
+    tokens / numbers, so truncation never hides a legitimate value.
+    """
+    text = repr(value)
+    if len(text) <= limit:
+        return text
+    return f"{text[:limit]}…(+{len(text) - limit} chars)"
+
+
 def _validate_enum(key: str, value: Any, allowed: tuple[str, ...]) -> str:
     """Return the canonical member of ``allowed`` matching ``value`` (case /
     space tolerant, via the shared ``design_spec._match_enum``), else raise.
@@ -165,7 +200,7 @@ def _validate_enum(key: str, value: Any, allowed: tuple[str, ...]) -> str:
     """
     match = _match_enum(value, allowed)
     if match is None:
-        raise MotionTemplateError(f"{key}={value!r} is not one of {list(allowed)!r}")
+        raise MotionTemplateError(f"{key}={_short(value)} is not one of {list(allowed)!r}")
     return match
 
 
@@ -180,7 +215,7 @@ def _validate_float01(key: str, value: Any) -> float:
     surprise the parity contract.
     """
     if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise MotionTemplateError(f"{key}={value!r} must be a number in [0, 1]")
+        raise MotionTemplateError(f"{key}={_short(value)} must be a number in [0, 1]")
     num = float(value)
     if key == "photo_treatment_intensity" and num == float(UNSET_PHOTO_TREATMENT_INTENSITY):
         raise MotionTemplateError(
@@ -192,7 +227,7 @@ def _validate_float01(key: str, value: Any) -> float:
 
 def _validate_bool(key: str, value: Any) -> bool:
     if not isinstance(value, bool):
-        raise MotionTemplateError(f"{key}={value!r} must be a boolean (true/false)")
+        raise MotionTemplateError(f"{key}={_short(value)} must be a boolean (true/false)")
     return value
 
 
@@ -206,7 +241,9 @@ def _validate_render_format(value: Any) -> str:
     from mediahub.visual.motion import MOTION_FORMATS
 
     if not isinstance(value, str) or value not in MOTION_FORMATS:
-        raise MotionTemplateError(f"format={value!r} is not one of {sorted(MOTION_FORMATS)!r}")
+        raise MotionTemplateError(
+            f"format={_short(value)} is not one of {sorted(MOTION_FORMATS)!r}"
+        )
     return value
 
 
@@ -227,11 +264,11 @@ def _validate_render_weights(value: Any) -> list[float]:
     fits it to the card count at render time). Each entry must be a real number;
     bools and non-numerics raise. An empty list raises (it asks for nothing)."""
     if not isinstance(value, (list, tuple)) or isinstance(value, (str, bytes)):
-        raise MotionTemplateError(f"weights={value!r} must be a list of numbers")
+        raise MotionTemplateError(f"weights={_short(value)} must be a list of numbers")
     out: list[float] = []
     for w in value:
         if isinstance(w, bool) or not isinstance(w, (int, float)):
-            raise MotionTemplateError(f"weights entry {w!r} must be a number")
+            raise MotionTemplateError(f"weights entry {_short(w)} must be a number")
         out.append(float(w))
     if not out:
         raise MotionTemplateError("weights must be a non-empty list of numbers")
@@ -251,12 +288,14 @@ def _validate_render_effect_toggles(value: Any) -> list[str]:
     from mediahub.visual.motion import EFFECT_TOGGLE_ALLOWLIST
 
     if not isinstance(value, (list, tuple)) or isinstance(value, (str, bytes)):
-        raise MotionTemplateError(f"effect_toggles={value!r} must be a list of effect keys")
+        raise MotionTemplateError(f"effect_toggles={_short(value)} must be a list of effect keys")
     allowed = set(EFFECT_TOGGLE_ALLOWLIST)
     out: set[str] = set()
     for k in value:
         if not isinstance(k, str) or k not in allowed:
-            raise MotionTemplateError(f"effect_toggles key {k!r} is not one of {sorted(allowed)!r}")
+            raise MotionTemplateError(
+                f"effect_toggles key {_short(k)} is not one of {sorted(allowed)!r}"
+            )
         out.add(k)
     return sorted(out)
 
@@ -306,7 +345,8 @@ def validate_motion_template(raw: Any) -> Optional[dict]:
             # ``bool`` is an ``int`` subclass (True == 1 == VERSION); reject it.
             if isinstance(value, bool) or value != MOTION_TEMPLATE_VERSION:
                 raise MotionTemplateError(
-                    f"unsupported template version {value!r}; expected {MOTION_TEMPLATE_VERSION}"
+                    f"unsupported template version {_short(value)}; "
+                    f"expected {MOTION_TEMPLATE_VERSION}"
                 )
             continue
         if key in _ART_ENUM_KEYS:
@@ -318,7 +358,7 @@ def validate_motion_template(raw: Any) -> Optional[dict]:
         elif key in _RENDER_KEYS:
             render[key] = _RENDER_VALIDATORS[key](value)
         else:
-            raise MotionTemplateError(f"unknown motion-template key {key!r}")
+            raise MotionTemplateError(f"unknown motion-template key {_short(key)}")
 
     out: dict[str, dict] = {}
     if art:
@@ -369,6 +409,12 @@ def render_kwargs_from_template(t: Optional[dict], *, n_cards: int = 1) -> dict:
         effect_toggles -> review_ab   (already-validated LIST of axes to suppress)
         weights        -> rhythm      ({"weights": [...]} through normalise_reel_rhythm)
 
+    Note the HTTP routes REJECT ``format`` before reaching this mapping (an
+    honest 400 — the output cut is bound to the URL's ``?format=`` / ``?w=&h=``
+    before the body is read), so ``format_name`` is only ever consumed by a
+    caller that binds its own out-path from it. See the module docstring's
+    route contract.
+
     ``weights`` folds only when ``normalise_reel_rhythm(n_cards)`` returns
     non-``None`` (an effectively-default weight list asks for nothing and is
     dropped), so the reel's byte-identity / cache-fold behaviour is inherited
@@ -392,3 +438,31 @@ def render_kwargs_from_template(t: Optional[dict], *, n_cards: int = 1) -> dict:
         if rhythm is not None:
             out["rhythm"] = rhythm
     return out
+
+
+def preview_slot_token(template: Optional[dict], beat_templates: Optional[list] = None) -> str:
+    """Deterministic 8-hex token naming a templated render's PREVIEW slot.
+
+    A templated render is a preview, never the approved artifact — so the web
+    routes publish it to a ``…_tmpl<token>…`` filename (MP4 + manifest +
+    poster sidecars alike), exactly the ``_sel<hash8>`` discipline the M31
+    reel selection uses, and the canonical slot the motion-file / manifest
+    routes serve keeps the approved parity render. The file/manifest routes
+    fetch the preview back via ``?tmpl=<token>``.
+
+    Inputs must be **already-validated** templates (``validate_motion_template``
+    output — canonical spellings, sorted keys), so equivalent operator
+    spellings hash identically. ``beat_templates`` is the reel's positional
+    per-beat list; trailing inert entries are trimmed (they cannot change the
+    render, so they must not fork the slot). Returns ``""`` when nothing was
+    effectively asked for — no template ⇒ the canonical slot, byte-identical.
+    """
+    beats = list(beat_templates or [])
+    while beats and beats[-1] is None:
+        beats.pop()
+    if template is None and not any(b is not None for b in beats):
+        return ""
+    payload = {"template": template, "templates": beats}
+    return hashlib.sha1(
+        json.dumps(payload, sort_keys=True).encode("utf-8"), usedforsecurity=False
+    ).hexdigest()[:8]

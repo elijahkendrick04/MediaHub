@@ -204,6 +204,21 @@ def test_unknown_format_raises_before_any_render(tmp_path, monkeypatch):
     assert called == [], "no cut should render when a requested format is invalid"
 
 
+def test_any_canvas_token_raises_not_silently_dropped(tmp_path, monkeypatch):
+    """A VALID any-canvas "WxH" token passes motion_format_size but has no batch
+    slot — the batch is preset-only and must raise loudly, never validate the
+    token and then silently render presets without it (deep-review finding:
+    the token used to vanish with no render and no errors entry)."""
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    called = []
+    monkeypatch.setattr(motion, "_render_reel_one_format", lambda **kw: called.append(1))
+    with pytest.raises(ValueError, match="preset cuts only"):
+        motion.render_meet_reel_all_formats(
+            [_card()], _brand(), tmp_path / "motion", formats=["story", "1080x1440"]
+        )
+    assert called == [], "no cut should render when a non-preset token is requested"
+
+
 def test_batch_manifest_sidecar_written(tmp_path, monkeypatch):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     monkeypatch.setattr(

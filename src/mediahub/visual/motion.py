@@ -1614,8 +1614,6 @@ _TEXT_ANIMATORS: tuple[str, ...] = (
     "word_rise_blur",
 )
 
-_TEXT_FX_TRUTHY = {"1", "true", "yes", "on"}
-
 
 def _text_fx_enabled() -> bool:
     """Master switch for the richer text animators (``MEDIAHUB_TEXT_FX``).
@@ -1624,7 +1622,7 @@ def _text_fx_enabled() -> bool:
     card carries a ``textAnimator`` prop and every existing cache key and
     rendered byte is unchanged (byte-identical default). Mirrors
     ``_motion_supersample``'s honest env parse — no DSP guessing."""
-    return os.environ.get("MEDIAHUB_TEXT_FX", "").strip().lower() in _TEXT_FX_TRUTHY
+    return os.environ.get("MEDIAHUB_TEXT_FX", "").strip().lower() in _TRUTHY
 
 
 def _text_animator_for(props: dict, variation_seed: Any) -> str:
@@ -2108,12 +2106,38 @@ def _write_render_manifest(cached: Path, manifest: dict) -> None:
         pass
 
 
+def published_sidecar_path(out_path: Path, suffix: str) -> Path:
+    """The sidecar path (manifest ``.json`` / ``.poster.png``) beside a
+    PUBLISHED video file.
+
+    An opaque ``.mp4`` publish keeps the historic ``with_suffix`` names
+    (``<stem>.json`` / ``<stem>.poster.png``) so every existing link and
+    artifact stays byte-identical. An alpha container (``.mov``/``.webm``)
+    folds its profile key into the stem (``<stem>_prores4444.json`` /
+    ``<stem>_vp9.poster.png``): the alpha and opaque cuts of one card share
+    ``<stem>`` by design, so ``with_suffix`` alone would make the two cuts
+    publish — and clobber — the SAME manifest/poster names, silently serving
+    one cut's explainability record for the other. The cache-dir sidecars are
+    untouched (the alpha profile is already folded into the cache key, so
+    cache stems never collide). Shared by ``_publish`` and the web file /
+    manifest routes so both sides derive the identical name.
+    """
+    out_path = Path(out_path)
+    ext = out_path.suffix.lstrip(".").lower()
+    if ext in ("", "mp4"):
+        return out_path.with_suffix(suffix)
+    token = next((p.key for p in ALPHA_PROFILES.values() if p.ext == ext), ext)
+    return out_path.with_name(f"{out_path.stem}_{token}{suffix}")
+
+
 def _publish_sidecar(cached: Path, out_path: Path) -> None:
-    """Ship the explainability manifest with the MP4 it explains. Cache hits
-    carry the sidecar from the original render; best-effort like the write."""
+    """Ship the explainability manifest with the video it explains. Cache hits
+    carry the sidecar from the original render; best-effort like the write.
+    The published name is container-aware (``published_sidecar_path``) so an
+    alpha cut's manifest never collides with the opaque cut's."""
     try:
         src = cached.with_suffix(".json")
-        dst = out_path.with_suffix(".json")
+        dst = published_sidecar_path(out_path, ".json")
         if src.exists() and src.resolve() != dst.resolve():
             shutil.copyfile(src, dst)
     except Exception:
@@ -2210,28 +2234,6 @@ def _validate_effect_toggles(keys: Any) -> list[str]:
     allowed = set(EFFECT_TOGGLE_ALLOWLIST)
     out = {str(k) for k in keys if str(k) in allowed}
     return sorted(out)
-
-
-def _effect_toggles_for_brief(brief: Optional[dict]) -> list[str]:
-    """The sorted decorative axes a brief asks to SUPPRESS, or ``[]``.
-
-    Reads ``brief["effect_toggles"]`` — a plain ``{effect_key: bool}`` dict — and
-    returns the allowlisted keys explicitly set falsey (validated + sorted via
-    :func:`_validate_effect_toggles`). Keys set truthy, unknown keys, and an
-    absent field all yield no suppression. Read straight from the payload (like
-    ``_card_mix_profile``), never model-inferred.
-
-    NOTE: this is consumed ONLY by the review-only A/B render path — it is never
-    folded into a shipped card's props, so the still a shipped card mirrors stays
-    in still<->motion parity. Toggling an effect changes the *comparison* render,
-    not the card that gets exported for posting.
-    """
-    b = brief if isinstance(brief, dict) else {}
-    toggles = b.get("effect_toggles")
-    if not isinstance(toggles, dict):
-        return []
-    disabled = [k for k, v in toggles.items() if not v]
-    return _validate_effect_toggles(disabled)
 
 
 def _library_bed_for(content_key: str):
@@ -2535,6 +2537,13 @@ def _ensure_poster_sidecar(cached: Path, *, kind: str, duration_sec: float) -> s
     never runs ``render.js``), a ``render.js`` poster-capture failure, or a video
     cached before R1.29 being re-finished on a cache hit.
 
+    alpha-export: for an alpha container (``.mov``/``.webm``) the ffmpeg
+    frame grab is DELIBERATELY unavailable — the in-render ``renderStill``
+    PNG is the only poster source, so the poster stays a transparent PNG and
+    the ``_alpha_manifest`` note stays true. Absent → ``""`` (no poster),
+    reported honestly, rather than a frame grab whose decode may bake an
+    opaque backdrop into a "transparent" export's thumbnail.
+
     Returns the provenance for the explainability manifest — ``"in-render"`` /
     ``"ffmpeg"`` / ``""`` (no poster could be written). Never raises.
     """
@@ -2546,6 +2555,8 @@ def _ensure_poster_sidecar(cached: Path, *, kind: str, duration_sec: float) -> s
             return "in-render"
     except OSError:
         pass
+    if Path(cached).suffix.lower() != ".mp4":
+        return ""
     ok = audio_mux.write_poster(
         cached, poster, at_sec=audio_mux.poster_time_for(kind, duration_sec)
     )
@@ -2636,7 +2647,9 @@ def _publish(cached: Path, out_path: Path) -> Path:
     cached_poster = poster_path_for(cached)
     if cached_poster.exists():
         try:
-            shutil.copyfile(cached_poster, poster_path_for(out_path))
+            # Container-aware published name: an alpha cut's poster must not
+            # clobber (or be served as) the opaque cut's <stem>.poster.png.
+            shutil.copyfile(cached_poster, published_sidecar_path(out_path, ".poster.png"))
         except OSError:
             pass
     return out_path
@@ -2683,8 +2696,11 @@ def _motion_supersample() -> float:
 # ONLY the settling moving layers (the story hero/result entrance + count-up, the
 # reel whip flick) in a frame-pure multi-sample sampler: it recomputes the
 # closed-form animated quantity at ``samples`` deterministic sub-frame offsets
-# across the shutter window and composites the copies with equal-weight
-# progressive alpha. The sub-frame set is a pure function of the integer frame,
+# across the shutter window and composites the copies as an equal 1/n
+# premultiplied average (each copy at opacity 1/n, summed with
+# mix-blend-mode: plus-lighter inside an isolated group — f810ea0 replaced the
+# old progressive-opacity scheme, which over-accumulated alpha). The sub-frame
+# set is a pure function of the integer frame,
 # so identical env ⇒ identical render (no Math.random/Date.now anywhere). The
 # perpetual camera/parallax channels are deliberately NOT sampled, so the
 # terminal/held frame collapses to the single at-rest frame and still↔motion
@@ -2971,6 +2987,16 @@ def _run_remotion(
     tmp_out = out_path.with_name(
         f".{out_path.stem}.{os.getpid()}.{threading.get_ident()}.tmp.{tmp_suffix}"
     )
+    from mediahub.visual.audio_mux import poster_path_for
+
+    # render.js writes its in-render renderStill poster (R1.29) beside its
+    # --output — i.e. beside the dotfile temp path above. Capture that name now
+    # so every exit path below publishes it with the video or cleans it up;
+    # without the rename it was stranded as an unswept ".<stem>...tmp.poster.png"
+    # dotfile (invisible to the prune globs) and the finishing pass always fell
+    # back to the ffmpeg frame grab — which the alpha containers deliberately
+    # refuse, so alpha renders would ship with no poster at all.
+    tmp_poster = poster_path_for(tmp_out)
 
     # Write props to a temp file alongside the cache; cheap and lets us tail
     # the JSON if a render fails.
@@ -3023,16 +3049,19 @@ def _run_remotion(
         proc = run_capture(cmd, cwd=str(REMOTION_DIR), timeout=timeout)
     except subprocess.TimeoutExpired as e:
         tmp_out.unlink(missing_ok=True)
+        tmp_poster.unlink(missing_ok=True)
         raise RuntimeError(f"Remotion render timed out after {timeout}s") from e
 
     if proc.returncode != 0:
         tmp_out.unlink(missing_ok=True)
+        tmp_poster.unlink(missing_ok=True)
         stderr = (proc.stderr or "").strip().splitlines()
         tail = "\n".join(stderr[-15:]) if stderr else "(no stderr)"
         # Keep props_path on failure — it's the render's input, useful to reproduce.
         raise RuntimeError(f"Remotion render failed (exit {proc.returncode}):\n{tail}")
     if not tmp_out.exists() or tmp_out.stat().st_size < 1024:
         tmp_out.unlink(missing_ok=True)
+        tmp_poster.unlink(missing_ok=True)
         raise RuntimeError(f"Remotion reported success but {out_path} is missing or empty")
     # Supersample finish: the node render emitted an n× MP4; Lanczos-downscale it
     # back to the exact target WxH (same h264/yuv420p deliverable) so only edge
@@ -3050,6 +3079,11 @@ def _run_remotion(
         if not exe:
             tmp_out.unlink(missing_ok=True)
             raise RuntimeError("supersample downscale needs an FFmpeg binary")
+        # The in-render poster was captured at the n× supersample geometry; it no
+        # longer matches the downscaled deliverable, so drop it here and let the
+        # finishing pass ffmpeg-grab a target-size poster from the final MP4
+        # (this branch is .mp4-only — encode/alpha force supersample=1.0 above).
+        tmp_poster.unlink(missing_ok=True)
         down = out_path.with_name(f".{out_path.stem}.{os.getpid()}.{threading.get_ident()}.ss.mp4")
         ds = subprocess.run(
             [
@@ -3082,6 +3116,17 @@ def _run_remotion(
     # Atomic publish: the completed MP4 flips into the cache slot in one rename,
     # so a concurrent same-key render or cache-hit reader never sees a torn file.
     os.replace(tmp_out, out_path)
+    # R1.29 for every profile: publish the in-render poster with its video (the
+    # supersample branch above already dropped its mis-sized one). Best-effort —
+    # a missing/empty poster simply leaves the finishing-pass policy in charge
+    # (ffmpeg grab for .mp4, honest no-poster for alpha containers).
+    try:
+        if tmp_poster.exists() and tmp_poster.stat().st_size > 0:
+            os.replace(tmp_poster, poster_path_for(out_path))
+        else:
+            tmp_poster.unlink(missing_ok=True)
+    except OSError:
+        pass
     # Success: drop the props sidecar so it doesn't accumulate one-per-MP4 forever
     # (it was never pruned). Failed renders keep theirs for debugging (above).
     props_path.unlink(missing_ok=True)
@@ -3412,6 +3457,15 @@ def render_story_card(
     # in-render PNG poster, APCA-pair caveat).
     if alpha_prof is not None:
         story_manifest["alpha"] = _alpha_manifest(alpha_prof)
+        # Mutual exclusion with the whole-composition supersample, recorded
+        # exactly like the encode branch below: alpha forced it off, say so.
+        if _motion_supersample() > 1.0:
+            story_manifest["supersample"] = {
+                "requested": _motion_supersample(),
+                "applied": False,
+                "reason": "incompatible with alpha export "
+                "(the libx264 downscale would flatten the alpha channel)",
+            }
     # bit-depth-gamut: record the encode profile HONESTLY — the source frames are
     # Chromium 8-bit sRGB; 10-bit reduces encode banding and colorSpace tags the
     # container. This is a precision + metadata change over the same brand-locked,
@@ -3463,12 +3517,16 @@ def render_story_card(
             "note": (
                 "Real multi-sample shutter accumulation: the settling hero/result "
                 "entrance + count-up is recomputed at %d deterministic sub-frames "
-                "across a %g-degree shutter and composited with equal-weight "
-                "progressive alpha (frame-pure, no @remotion/motion-blur). The "
-                "perpetual photo camera / parallax are NOT sampled, so the terminal "
-                "held frame collapses to the approved still (still<->motion parity). "
-                "Cost scales with the sample count (%d x the wrapped layer's "
-                "per-frame work)." % (mblur["samples"], mblur["shutter"], mblur["samples"])
+                "across a %g-degree shutter and composited as an equal 1/n "
+                "premultiplied plus-lighter average (frame-pure, no "
+                "@remotion/motion-blur). The "
+                "perpetual photo camera / parallax are NOT sampled, and a settled "
+                "frame (channels identical across the shutter window, probed per "
+                "frame) collapses to ONE unwrapped draw — so every held frame is "
+                "byte-exact with the approved still (still<->motion parity) and "
+                "the %d-x per-frame accumulation cost is paid only while the "
+                "entrance/count-up is actually moving."
+                % (mblur["samples"], mblur["shutter"], mblur["samples"])
             ),
         }
     # M23 explainability: full provenance when a clip plays; the honest
@@ -3572,7 +3630,13 @@ REEL_TOTAL_RANGE = (3.0, 60.0)
 #          untouched default path (pixel-identical), but adding Dither.tsx +
 #          editing MeetReel busts renderer_generation()'s content hash once — a
 #          documented full re-render, hence this explicit bump.
-REEL_COMPOSITION_REVISION = "11"
+#   "12" — glyph-kern parity (PR#1334 deep-review, engine-math-1/-6): the shared
+#          KineticLine gained still-parity numeric-separator kerning in its
+#          per-glyph branch and sprint sceneKit's KineticWords now delegates to
+#          it (text-fx + kerning reach sprint scenes). Reel beats render through
+#          StoryCard, so a glyph-mode beat's deterministic output moves toward
+#          the approved still for an unchanged payload — hence the bump.
+REEL_COMPOSITION_REVISION = "12"
 
 # Story composition revision — folded into the STORY cache key (M15). The
 # story payload historically had no revision field; introducing one both
@@ -3628,7 +3692,16 @@ REEL_COMPOSITION_REVISION = "11"
 #         renders the untouched default path (pixel-identical); adding the new
 #         component busts renderer_generation()'s content hash once — a
 #         documented full re-render, so this bump is the explicit human signal.
-STORY_COMPOSITION_REVISION = "8"
+#   "9" — glyph-kern parity (PR#1334 deep-review, engine-math-1/-6): KineticLine's
+#         per-glyph branch now carries the still's numeric-separator kerning
+#         (mh-sep, margin 0 -0.10em — the same `(?<=\d)[.:](?=\d)` contract as
+#         the word branch's kernNumeric), and sprint sceneKit's KineticWords
+#         delegates to the shared KineticLine so text-fx + kerning paint on
+#         sprint scenes too. A glyph-mode card's deterministic output moves
+#         TOWARD the approved still for an unchanged payload — hence the bump.
+#         Word-mode (default-gate-off) cards with non-numeric words render
+#         byte-identically.
+STORY_COMPOSITION_REVISION = "9"
 
 
 def _clamp(value: float, lo: float, hi: float) -> float:
@@ -4099,8 +4172,10 @@ def _assemble_reel_props(
     if _subtitles_enabled() and audio_plan and audio_plan.get("voice") and audio_plan.get("script"):
         beats = reel_card_beat_frames(len(cards_props), duration_sec, rhythm_norm, fps=fps)
         for idx, cp in enumerate(cards_props):
-            beat_frames = max(1, beats[idx]) if idx < len(beats) else 1
-            cj = _reel_caption_json(cp, brand_dict, beat_frames=beat_frames, fps=fps)
+            # Distinct name: the outer `beat_frames` (list of per-beat frame
+            # counts) must not be shadowed by this per-card scalar.
+            cap_beat_frames = max(1, beats[idx]) if idx < len(beats) else 1
+            cj = _reel_caption_json(cp, brand_dict, beat_frames=cap_beat_frames, fps=fps)
             if cj:
                 cp["captionsJson"] = cj
 
@@ -4566,8 +4641,22 @@ def _render_reel_one_format(
             "render_strategy": render_strategy,
             **({"supersample": supersample} if supersample > 1.0 else {}),
             # alpha-export: honest transparent-export record (fold-only-when-active,
-            # mutually exclusive with the encode block below).
+            # mutually exclusive with the encode block below). When the operator
+            # ALSO asked for the whole-composition supersample, record the
+            # suppression exactly like the encode branch: alpha forced it off.
             **({"alpha": _alpha_manifest(alpha_prof)} if alpha_prof is not None else {}),
+            **(
+                {
+                    "supersample": {
+                        "requested": _motion_supersample(),
+                        "applied": False,
+                        "reason": "incompatible with alpha export "
+                        "(the libx264 downscale would flatten the alpha channel)",
+                    }
+                }
+                if (alpha_prof is not None and _motion_supersample() > 1.0)
+                else {}
+            ),
             # bit-depth-gamut: honest encode-profile record (fold-only-when-active).
             # Same brand-locked, APCA-gated colours re-encoded at higher bit-depth
             # precision + gamut-tagged — not a synthesised wide-gamut master.
@@ -4638,11 +4727,22 @@ def _render_reel_one_format(
                             "transition's lateral flick and each beat's settling "
                             "hero/result entrance + count-up are recomputed at "
                             "%d deterministic sub-frames across a %g-degree shutter "
-                            "and composited with equal-weight progressive alpha "
-                            "(frame-pure, no @remotion/motion-blur). The perpetual "
-                            "photo camera / parallax are NOT sampled, so terminal "
-                            "held frames collapse to the approved stills. Cost "
-                            "scales with the sample count." % (mblur["samples"], mblur["shutter"])
+                            "and composited as an equal 1/n premultiplied "
+                            "plus-lighter average (frame-pure, no "
+                            "@remotion/motion-blur). The perpetual "
+                            "photo camera / parallax are NOT sampled, and each "
+                            "sampler at-rest-collapses independently (channels "
+                            "probed across the shutter window per frame) to ONE "
+                            "unwrapped draw, so held frames are byte-exact with "
+                            "the approved stills and the accumulation cost is "
+                            "paid only while a motion is actually moving. Only "
+                            "frames where the whip AND the beat's entrance move "
+                            "together render samples^2 (%d) scene copies."
+                            % (
+                                mblur["samples"],
+                                mblur["shutter"],
+                                mblur["samples"] * mblur["samples"],
+                            )
                         ),
                     }
                 }
@@ -4926,9 +5026,17 @@ def render_meet_reel_all_formats(
     engine = _dispatch_engine()
 
     requested = list(formats) if formats else list(MOTION_FORMATS)
-    # Validate up front so a typo fails loudly before any render work.
+    # Validate up front so a typo fails loudly before any render work. The batch
+    # is PRESET-ONLY: an any-canvas "WxH" token would pass motion_format_size but
+    # then be silently dropped by the preset-order filter below — reject it
+    # explicitly instead (honesty: validated input is never silently ignored).
     for fmt in requested:
         motion_format_size(fmt)
+        if fmt not in MOTION_FORMATS:
+            raise ValueError(
+                f"batch renders preset cuts only ({', '.join(MOTION_FORMATS)}); "
+                f"use render_meet_reel for an arbitrary canvas like {fmt!r}"
+            )
     stat_config = normalise_reel_stat_config(reel_stat_config)
     # Render in canonical MOTION_FORMATS order regardless of request order,
     # de-duplicated, so the result is stable and story (the cheapest reuse) is
@@ -5078,6 +5186,7 @@ __all__ = [
     "DEFAULT_MOTION_FORMAT",
     "ALPHA_PROFILES",
     "resolve_alpha_profile",
+    "published_sidecar_path",
     "AlphaUnsupportedError",
     "node_available",
     "remotion_installed",

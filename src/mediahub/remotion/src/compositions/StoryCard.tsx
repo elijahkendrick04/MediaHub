@@ -1452,6 +1452,20 @@ function kernNumeric(text: string): React.ReactNode {
   return <>{nodes}</>;
 }
 
+// A5 parity, glyph mode — the SAME `(?<=\d)[.:](?=\d)` separator contract as
+// kernNumeric, evaluated per glyph against its word's character array, so the
+// per-glyph branch carries the identical tightened separator spacing the word
+// branch (and the approved still) paint. Any non-separator glyph returns false
+// and its span stays byte-identical to the pre-kern glyph DOM.
+function isNumericSepGlyph(chars: string[], i: number): boolean {
+  const c = chars[i];
+  if (c !== "." && c !== ":") {
+    return false;
+  }
+  const isDigit = (s: string): boolean => s.length === 1 && s >= "0" && s <= "9";
+  return i > 0 && i + 1 < chars.length && isDigit(chars[i - 1]) && isDigit(chars[i + 1]);
+}
+
 // Display ordinal for a numeric placing ("1" → "1ST"); non-numeric values
 // pass through untouched — never invent a placing that wasn't detected.
 function placeDisplay(place: string): string {
@@ -1478,7 +1492,10 @@ function placeDisplay(place: string): string {
 // `perGlyph` (threaded from card.textGranularity === "glyph") splits each word
 // into per-character inline-block spans driven by `anim.glyphAt`; when
 // false/absent the DOM is byte-identical to the pre-glyph word structure.
-const KineticLine: React.FC<{
+// Exported so sprint/sceneKit's KineticWords delegates here instead of keeping
+// a drifting copy — kerning, text-fx, and any future glyph feature land on
+// both surfaces at once.
+export const KineticLine: React.FC<{
   text: string;
   anim: AnimChannels;
   style: React.CSSProperties;
@@ -1538,8 +1555,17 @@ const KineticLine: React.FC<{
                         transform: `translateY(${a.y}px)`,
                         opacity: a.opacity,
                       };
+                // A5 parity — a '.'/':' between two digits carries the still's
+                // tightened separator spacing in glyph mode too, exactly as the
+                // word branch's kernNumeric(w) does. Non-separator glyphs keep
+                // the byte-identical bare span.
+                const sep = isNumericSepGlyph(chars, ci);
                 return (
-                  <span key={ci} style={glyphStyle}>
+                  <span
+                    key={ci}
+                    className={sep ? "mh-sep" : undefined}
+                    style={sep ? { ...glyphStyle, margin: "0 -0.10em" } : glyphStyle}
+                  >
                     {ch}
                   </span>
                 );
@@ -3891,6 +3917,73 @@ export function motionBlurSubFrames(frame: number, samples: number, shutter: num
 // composites source-over onto the scene below. Only ever mounted when a motionBlur
 // prop is present (the OFF path renders the verbatim unwrapped layer), so the default
 // DOM is byte-identical.
+// true-motion-blur — the at-rest probe. Layered rasterization is NOT byte-equal
+// to a single draw even for identical copies (glyph edges rasterize with
+// grayscale AA inside an opacity/blend layer vs subpixel AA unwrapped — a real
+// render measured up to ~9/255 on edge pixels), so a settled frame must NOT go
+// through the sampler at all. Rather than derive a settle-time bound over every
+// intent keyframe / stagger offset / glyph budget, we PROBE: recompute the
+// channels at the shutter window's edges + centre and compare — scalars
+// directly, the function channels (word/glyph reveals, text-fx) at a dense
+// index grid (0..23 against two representative totals; surname/result strings
+// are ≤12 glyphs, so the grid covers real lines completely). The frozen photo
+// channels (photoScale/DriftX/DriftY/bgDrift — held constant across sub-frames
+// by renderSceneAt) are deliberately excluded. Equal ⇒ the copies would be
+// pixel-identical ⇒ render the single unwrapped draw (exact still parity AND
+// 1× instead of n× scene cost across the whole held phase). A pathological
+// miss (all probes equal while an unprobed value moves) renders one frame
+// without its residual half-frame smear — never a parity, purity, or
+// byte-identity break. Pure function of its inputs; frame-pure.
+export function animChannelsSettled(a: AnimChannels, b: AnimChannels): boolean {
+  // Sub-quantum tolerance, NOT exact equality: Remotion's spring() asymptotes
+  // (it never exactly reaches its target), so the settled tail still differs by
+  // ~1e-9 between sub-frames forever — an exact compare would never collapse.
+  // 1e-3 is far below one 8-bit intensity quantum (1/255 ≈ 3.9e-3) and far
+  // below a visible sub-pixel move, so any residual "motion" under it cannot
+  // change a rendered pixel; a genuinely moving entrance travels orders of
+  // magnitude more per half-frame window.
+  const near = (x: number, y: number) => Math.abs(x - y) <= 1e-3;
+  if (
+    !near(a.heroY, b.heroY) ||
+    !near(a.heroOpacity, b.heroOpacity) ||
+    !near(a.heroScale, b.heroScale) ||
+    !near(a.secondaryOpacity, b.secondaryOpacity) ||
+    !near(a.resultOpacity, b.resultOpacity) ||
+    !near(a.resultScale, b.resultScale) ||
+    !near(a.chipOpacity, b.chipOpacity) ||
+    !near(a.resolveAccent, b.resolveAccent) ||
+    a.resolveAccentKind !== b.resolveAccentKind ||
+    !near(a.resultProgress, b.resultProgress) ||
+    !near(a.textRevealProgress, b.textRevealProgress) ||
+    !near(a.wghtBloom, b.wghtBloom) ||
+    !near(a.trackingDeltaEm, b.trackingDeltaEm) ||
+    a.fxUnit !== b.fxUnit
+  ) {
+    return false;
+  }
+  for (const total of [12, 24]) {
+    for (let i = 0; i < total; i++) {
+      const wa = a.wordAt(i);
+      const wb = b.wordAt(i);
+      if (!near(wa.y, wb.y) || !near(wa.opacity, wb.opacity)) return false;
+      const ga = a.glyphAt(i, total);
+      const gb = b.glyphAt(i, total);
+      if (!near(ga.y, gb.y) || !near(ga.opacity, gb.opacity)) return false;
+      const fa = a.glyphFx(i, total);
+      const fb = b.glyphFx(i, total);
+      if (
+        !near(fa.blur, fb.blur) ||
+        !near(fa.dx, fb.dx) ||
+        !near(fa.dy, fb.dy) ||
+        !near(fa.rotate, fb.rotate)
+      ) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
 export const MotionBlurSampler: React.FC<{
   frame: number;
   samples: number;
@@ -4059,6 +4152,23 @@ export const StoryCard: React.FC<Props & { motionBlur?: MotionBlur }> = ({
     return <Scene ctx={ctxSub} />;
   };
 
+  // true-motion-blur at-rest probe: recompute the varying channels at the
+  // shutter window's first/centre/last sub-frames and compare (the photo
+  // channels are frozen across copies by renderSceneAt, so they are excluded
+  // by animChannelsSettled). Settled ⇒ the sampler's copies would be
+  // pixel-identical ⇒ render the single unwrapped draw below. Pure function of
+  // (frame, mb) — frame-pure; false whenever blur is off so the default path
+  // never computes any of this beyond the `mb &&` short-circuit.
+  const mbSettled = (() => {
+    if (!mb) return false;
+    const subs = motionBlurSubFrames(frame, mb.samples, mb.shutter);
+    const first = animAt(subs[0]);
+    const last = animAt(subs[subs.length - 1]);
+    if (!animChannelsSettled(first, last)) return false;
+    const mid = animAt(subs[Math.floor(subs.length / 2)]);
+    return animChannelsSettled(first, mid);
+  })();
+
   return (
     <AbsoluteFill
       style={{
@@ -4086,15 +4196,30 @@ export const StoryCard: React.FC<Props & { motionBlur?: MotionBlur }> = ({
       {/* render-banding-dither: the debanding overlay rides directly over the
           ground fill and BENEATH the content (mirroring the still's below-copy
           placement), so it composites against the big brand fill that bands.
-          Mounted only when the still opted in; absent = byte-identical. */}
-      {card.dither ? <Dither /> : null}
+          Mounted only when the still opted in; absent = byte-identical.
+          alpha-export: gated off under transparentBg — the tile is an opaque
+          near-neutral wash whose mix-blend-mode:overlay resolves to ITSELF over
+          a transparent backdrop, which would fill the whole "transparent"
+          region with solid grey. There is no ground fill to deband anyway
+          (default false keeps the mount byte-identical). */}
+      {card.dither && !card.transparentBg ? <Dither /> : null}
       {/* Pack ground BENEATH the scene (the still's z1-under-copy order).
           per-effect-toggle: the "style_pack" toggle drops both pack layers. */}
       {off("style_pack") ? null : <StylePackGroundLayer ctx={ctx} />}
       {/* true-motion-blur: wrap ONLY the scene (hero/result entrance + count-up)
           in the frame-pure sampler when opted in; OFF (the default) renders the
-          verbatim `<Scene ctx={ctx} />`, so the default DOM is byte-identical. */}
-      {mb ? (
+          verbatim `<Scene ctx={ctx} />`, so the default DOM is byte-identical.
+          AT-REST COLLAPSE: layered rasterization is not byte-equal to a single
+          draw even for identical copies (grayscale vs subpixel AA on glyph
+          edges — a real render measured ~9/255 on edge pixels), so a settled
+          frame probes as settled (animChannelsSettled across the shutter
+          window's edges + centre) and renders the SINGLE unwrapped scene:
+          exact still<->motion parity at every held frame, and 1× instead of
+          `samples`× scene cost across the held phase. Moving frames pay the
+          honest `samples`× accumulation cost (manifest states it). Under a
+          reel whip handoff this nests inside TransitionWrap's sampler
+          (samples² only while BOTH are mid-move — see MeetReel.tsx). */}
+      {mb && !mbSettled ? (
         <MotionBlurSampler
           frame={frame}
           samples={mb.samples}

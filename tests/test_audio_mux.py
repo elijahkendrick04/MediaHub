@@ -8,6 +8,7 @@ extraction on a generated test clip.
 
 from __future__ import annotations
 
+import math
 import subprocess
 from pathlib import Path
 
@@ -128,6 +129,27 @@ def test_plan_with_music_only(tmp_path, monkeypatch):
     monkeypatch.delenv("MEDIAHUB_VOICEOVER", raising=False)
     plan = audio_mux.build_audio_plan(script="ignored without voice", content_key="k")
     assert plan == {"music": "bed.mp3", "music_bytes": 128}
+
+
+def test_plan_operator_music_stat_race_yields_no_music_entry(tmp_path, monkeypatch):
+    """A track deleted between pick_music's listing and the stat leaves NO music
+    entry at all (symmetric with the library branch) — never a name-only claim
+    whose cache key loses the byte-size and whose mux cannot resolve the file."""
+    d = tmp_path / "music"
+    d.mkdir()
+    (d / "bed.mp3").write_bytes(b"x" * 128)
+    monkeypatch.setenv("MEDIAHUB_REEL_MUSIC_DIR", str(d))
+    # Simulate the deletion race: the pick returns a path that no longer exists.
+    monkeypatch.setattr(audio_mux, "pick_music", lambda key: d / "gone.mp3")
+    # Music was the only source → the plan honestly reports silent (None).
+    monkeypatch.delenv("MEDIAHUB_VOICEOVER", raising=False)
+    assert audio_mux.build_audio_plan(script="ignored", content_key="k") is None
+    # With voice on, the plan carries the voice but no half-built music keys.
+    monkeypatch.setenv("MEDIAHUB_VOICEOVER", "1")
+    monkeypatch.setattr("mediahub.visual.voiceover.is_available", lambda: True)
+    plan = audio_mux.build_audio_plan(script="Recap.", content_key="k")
+    assert plan is not None and "voice" in plan
+    assert "music" not in plan and "music_bytes" not in plan
 
 
 def test_plan_with_voice(monkeypatch):
@@ -787,6 +809,19 @@ def test_resolve_loudnorm_defaults_and_clamps(monkeypatch):
     assert audio_mux.resolve_loudnorm()["i"] == audio_mux.LOUDNORM_DEFAULT_I
 
 
+def test_resolve_loudnorm_rejects_non_finite(monkeypatch):
+    """nan/inf parse without raising but must never reach the filter graph:
+    each falls back to the default target (the resolve_duck counterpart)."""
+    monkeypatch.setenv("MEDIAHUB_REEL_LOUDNORM", "1")
+    for k in ("LUFS", "TP", "LRA"):
+        monkeypatch.delenv(f"MEDIAHUB_REEL_LOUDNORM_{k}", raising=False)
+    for bad in ("nan", "inf", "-inf", "Infinity"):
+        monkeypatch.setenv("MEDIAHUB_REEL_LOUDNORM_LUFS", bad)
+        got = audio_mux.resolve_loudnorm()
+        assert got["i"] == audio_mux.LOUDNORM_DEFAULT_I, bad
+        assert all(math.isfinite(v) for v in got.values()), bad
+
+
 def test_build_audio_plan_omits_loudnorm_by_default(tmp_path, monkeypatch):
     """Feature off → the plan is byte-identical to the pre-loudnorm era."""
     d = tmp_path / "music"
@@ -1074,6 +1109,57 @@ def test_apply_audio_records_duck_in_manifest(tmp_path, monkeypatch):
         duration_sec=5.0,
     )
     assert rec_off["status"] == "mixed" and "duck" not in rec_off
+
+
+def test_apply_audio_records_effective_duck_params(tmp_path, monkeypatch):
+    """Whenever ducking ran, the manifest carries the EFFECTIVE compressor params
+    (override where set, else profile ratio / module constants) so a reader needs
+    no internal tables — while the plan-side partial 'duck' stays untouched."""
+    d = tmp_path / "music"
+    d.mkdir()
+    (d / "bed.mp3").write_bytes(b"m")
+    monkeypatch.setenv("MEDIAHUB_REEL_MUSIC_DIR", str(d))
+    monkeypatch.setattr(
+        audio_mux, "_run_ffmpeg", lambda args, **k: Path(args[-1]).write_bytes(b"x" * 2048)
+    )
+
+    class _Result:
+        audio_path = tmp_path / "voice.wav"
+        transcript = "Recap."
+
+    _Result.audio_path.write_bytes(b"v")
+    monkeypatch.setattr("mediahub.visual.voiceover.synthesize", lambda *a, **k: _Result())
+
+    base = {"voice": "en-GB-SoniaNeural", "script": "Recap.", "music": "bed.mp3"}
+    video = tmp_path / "reel.mp4"
+
+    # No override, non-default profile: constants + the PROFILE's ratio (9.0).
+    video.write_bytes(b"vid")
+    rec = audio_mux.apply_audio(video, {**base, "mix": "voice_lead"}, duration_sec=5.0)
+    assert rec["status"] == "mixed" and "duck" not in rec
+    assert rec["duck_effective"] == {
+        "threshold": audio_mux.DUCK_THRESHOLD,
+        "ratio": audio_mux.AUDIO_MIX_PROFILES["voice_lead"]["duck_ratio"],
+        "attack": audio_mux.DUCK_ATTACK_MS,
+        "release": audio_mux.DUCK_RELEASE_MS,
+    }
+
+    # Partial override: the set knob wins, the rest resolve from their sources.
+    video.write_bytes(b"vid")
+    rec = audio_mux.apply_audio(video, {**base, "duck": {"threshold": 0.05}}, duration_sec=5.0)
+    assert rec["duck"] == {"threshold": 0.05}  # plan-side partial stays as-is
+    assert rec["duck_effective"] == {
+        "threshold": 0.05,
+        "ratio": audio_mux.DUCK_RATIO,  # balanced profile's ratio
+        "attack": audio_mux.DUCK_ATTACK_MS,
+        "release": audio_mux.DUCK_RELEASE_MS,
+    }
+
+    # Single-source render: no ducking ran, so no effective record either.
+    video.write_bytes(b"vid")
+    rec_music_only = audio_mux.apply_audio(video, {"music": "bed.mp3"}, duration_sec=5.0)
+    assert rec_music_only["status"] == "mixed"
+    assert "duck_effective" not in rec_music_only and "duck" not in rec_music_only
 
 
 def test_duck_folds_into_cache_key_absence_is_byte_identical():

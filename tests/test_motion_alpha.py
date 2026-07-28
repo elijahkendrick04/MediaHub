@@ -14,7 +14,10 @@ degrade-and-ship — a mislabeled opaque file would be a lie).
 
 from __future__ import annotations
 
+import json
 import re
+import shutil
+import subprocess
 from pathlib import Path
 from unittest.mock import patch
 
@@ -70,7 +73,9 @@ def _remotion_valid_sets():
     # proResProfileOptions; parse loosely (path varies), else skip that check.
     profiles: set[str] = set()
     for p in motion.REMOTION_DIR.glob("node_modules/remotion/dist/**/prores_profile.js"):
-        m = re.search(r"proResProfileOptions\s*=\s*\[(.*?)\]", p.read_text(encoding="utf-8"), re.DOTALL)
+        m = re.search(
+            r"proResProfileOptions\s*=\s*\[(.*?)\]", p.read_text(encoding="utf-8"), re.DOTALL
+        )
         if m:
             profiles = set(re.findall(r"'([^']+)'", m.group(1)))
             break
@@ -260,7 +265,9 @@ def test_story_cache_key_byte_identical_without_alpha(tmp_path, monkeypatch):
         patch.object(motion, "_run_remotion", side_effect=_fake_run_remotion_factory(sink)),
         patch.object(motion, "_content_hash", side_effect=spy),
     ):
-        motion.render_story_card(_fake_card(), _fake_brand(), tmp_path / "story.mp4", alpha_profile="")
+        motion.render_story_card(
+            _fake_card(), _fake_brand(), tmp_path / "story.mp4", alpha_profile=""
+        )
     payload = seen["payload"]
     # No alpha fold, no transparentBg prop, .mp4 slot, no encode kw.
     assert "alpha" not in payload
@@ -301,6 +308,11 @@ def test_story_alpha_folds_key_prop_and_ext(tmp_path, monkeypatch):
     assert manifest["alpha"]["profile"] == "prores4444"
     assert manifest["alpha"]["container"] == "mov"
     assert "encode" not in manifest
+    # …and records the suppressed supersample honestly, like the encode branch.
+    ss = manifest["supersample"]
+    assert ss["requested"] == 2.0
+    assert ss["applied"] is False
+    assert "alpha" in ss["reason"]
 
 
 def test_reel_alpha_forces_serial_and_props(tmp_path, monkeypatch):
@@ -348,7 +360,9 @@ def test_reel_cache_key_byte_identical_without_alpha(tmp_path, monkeypatch):
         patch.object(motion, "_render_reel_parallel_or_none", side_effect=lambda **k: None),
         patch.object(motion, "_content_hash", side_effect=spy),
     ):
-        motion.render_meet_reel([_fake_card()], _fake_brand(), tmp_path / "reel.mp4", alpha_profile="")
+        motion.render_meet_reel(
+            [_fake_card()], _fake_brand(), tmp_path / "reel.mp4", alpha_profile=""
+        )
     assert "alpha" not in seen["payload"]
 
 
@@ -453,10 +467,10 @@ def test_ffmpeg_engine_no_alpha_still_renders_normally(tmp_path, monkeypatch):
         out.write_bytes(b"x" * 4096)
         return out
 
-    with patch.object(
-        reel_ffmpeg, "render_story_card_from_props", side_effect=_fake_ffmpeg_story
-    ):
-        motion.render_story_card(_fake_card(), _fake_brand(), tmp_path / "story.mp4", alpha_profile="")
+    with patch.object(reel_ffmpeg, "render_story_card_from_props", side_effect=_fake_ffmpeg_story):
+        motion.render_story_card(
+            _fake_card(), _fake_brand(), tmp_path / "story.mp4", alpha_profile=""
+        )
     assert called.get("hit") is True
 
 
@@ -550,22 +564,489 @@ def test_alpha_does_not_bump_composition_revisions():
     behind a false-default boolean (the footage-beat precedent, not dither's
     new-component case). renderer_generation() re-fingerprints the .tsx/.js edits
     once for everyone, so the per-composition revisions must NOT bump."""
-    assert motion.STORY_COMPOSITION_REVISION == "8"
-    assert motion.REEL_COMPOSITION_REVISION == "11"
+    # The pinned values track later unrelated legit bumps — currently "9"/"12"
+    # from the glyph-kern parity fix (engine-math-1/-6), not alpha-export.
+    assert motion.STORY_COMPOSITION_REVISION == "9"
+    assert motion.REEL_COMPOSITION_REVISION == "12"
 
 
 def test_transparent_bg_prop_gates_fill_in_tsx():
     """The false-default transparentBg prop must suppress the outer ground fill
     (and full-bleed meshBg) in StoryCard, and the cover/outro fills in MeetReel,
     so the OFF-path DOM is byte-identical."""
-    story = (
-        motion.REMOTION_DIR / "src" / "compositions" / "StoryCard.tsx"
-    ).read_text(encoding="utf-8")
+    story = (motion.REMOTION_DIR / "src" / "compositions" / "StoryCard.tsx").read_text(
+        encoding="utf-8"
+    )
     assert "transparentBg: z.boolean().default(false)" in story
     assert "...(card.transparentBg ? {} : { backgroundColor: roles.ground })" in story
     assert "&& !card.transparentBg" in story  # meshBg suppressed too
-    reel = (
-        motion.REMOTION_DIR / "src" / "compositions" / "MeetReel.tsx"
-    ).read_text(encoding="utf-8")
+    reel = (motion.REMOTION_DIR / "src" / "compositions" / "MeetReel.tsx").read_text(
+        encoding="utf-8"
+    )
     assert "transparentBg: z.boolean().default(false)" in reel
     assert reel.count("...(transparentBg") >= 2  # cover + outro fills gated
+
+
+def test_dither_mount_is_transparent_bg_gated():
+    """The Dither overlay is a fully OPAQUE near-neutral tile whose
+    mix-blend-mode:overlay resolves to itself over a transparent backdrop —
+    unmounted, a dither-brief card's alpha export would composite its whole
+    "transparent" region as solid grey. Every Dither mount (StoryCard's card
+    layer, MeetReel's cover + outro bookends) must therefore be gated off under
+    transparentBg; the false default keeps the OFF-path DOM byte-identical."""
+    story = (motion.REMOTION_DIR / "src" / "compositions" / "StoryCard.tsx").read_text(
+        encoding="utf-8"
+    )
+    assert "{card.dither && !card.transparentBg ? <Dither /> : null}" in story
+    assert "{card.dither ? <Dither /> : null}" not in story
+    reel = (motion.REMOTION_DIR / "src" / "compositions" / "MeetReel.tsx").read_text(
+        encoding="utf-8"
+    )
+    assert reel.count("{dither && !transparentBg ? <Dither /> : null}") == 2
+    assert "{dither ? <Dither /> : null}" not in reel
+
+
+def test_render_js_alpha_image_format_spread():
+    """Remotion requires PNG video frames for the alpha pixel formats
+    (validateSelectedPixelFormatAndImageFormatCombination throws for yuva* with
+    the default 'jpeg', and jpeg frames carry no alpha channel anyway).
+    render.js must spread imageFormat:'png' ONLY on the alpha path, mirroring
+    the scale/colorSpace/proResProfile spreads, so the default renderMedia call
+    stays byte-identical. The cross-validator test below executes the installed
+    dist against this exact rule."""
+    src = (motion.REMOTION_DIR / "render.js").read_text(encoding="utf-8")
+    assert '...(pixelFormatArg.startsWith("yuva") ? { imageFormat: "png" } : {}),' in src
+
+
+# ---------------------------------------------------------------------------
+# Dist-level cross-validator parity (executes the INSTALLED Remotion validators)
+# ---------------------------------------------------------------------------
+
+
+def _renderer_dist():
+    d = motion.REMOTION_DIR / "node_modules" / "@remotion" / "renderer" / "dist"
+    needed = ("image-format.js", "pixel-format.js", "prores-profile.js")
+    return d if all((d / n).exists() for n in needed) else None
+
+
+def _effective_image_format(pixel_format: str) -> str:
+    """The imageFormat renderMedia actually validates for a render.js call:
+    render.js spreads imageFormat:'png' only for the alpha (yuva*) pixel
+    formats; otherwise renderMedia resolves DEFAULT_VIDEO_IMAGE_FORMAT
+    ('jpeg'). Kept honest by test_render_js_alpha_image_format_spread, which
+    pins the render.js rule this mirrors."""
+    return "png" if pixel_format.startswith("yuva") else "jpeg"
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")
+def test_profiles_pass_installed_remotion_cross_validators():
+    """Run every shipped profile's exact codec × pixelFormat × imageFormat ×
+    proResProfile combination through the INSTALLED dist's combination
+    validators (pixelFormat↔imageFormat, pixelFormat↔codec, codec↔proResProfile).
+
+    Membership checks alone missed this rule class: every individual alpha
+    value was 'valid' while the combination renderMedia actually receives threw
+    at render time (the imageFormat defect that shipped the alpha export dead
+    on arrival). This render-free contract check fails the moment any
+    profile/flag combination would throw inside renderMedia. A negative
+    control proves the validators really execute."""
+    dist = _renderer_dist()
+    if dist is None:
+        pytest.skip("Remotion dist not installed")
+    combos: list[dict] = [
+        {"name": "default", "codec": "h264", "pixelFormat": "yuv420p", "imageFormat": "jpeg"}
+    ]
+    for prof in motion.ALPHA_PROFILES.values():
+        combos.append(
+            {
+                "name": f"alpha:{prof.key}",
+                "codec": prof.codec,
+                "pixelFormat": prof.pixel_format,
+                "imageFormat": _effective_image_format(prof.pixel_format),
+                **({"proResProfile": prof.prores_profile} if prof.prores_profile else {}),
+            }
+        )
+    for enc in motion.MOTION_ENCODE_PROFILES.values():
+        combos.append(
+            {
+                "name": f"encode:{enc['name']}",
+                "codec": enc["codec"],
+                "pixelFormat": enc["pixelFormat"],
+                "imageFormat": _effective_image_format(enc["pixelFormat"]),
+            }
+        )
+    # Negative control: the pre-fix combination (alpha pixel format + the
+    # default jpeg frames) must THROW — proving the validators are really
+    # executing rather than silently absent/renamed.
+    combos.append(
+        {
+            "name": "negative:yuva444p10le+jpeg",
+            "codec": "prores",
+            "pixelFormat": "yuva444p10le",
+            "imageFormat": "jpeg",
+            "proResProfile": "4444",
+            "expect_error": True,
+        }
+    )
+    # The package exports map blocks subpath require, so require via file path.
+    script = (
+        "const dist = process.argv[1];"
+        "const combos = JSON.parse(process.argv[2]);"
+        "const im = require(dist + '/image-format.js');"
+        "const pf = require(dist + '/pixel-format.js');"
+        "const pp = require(dist + '/prores-profile.js');"
+        "const out = combos.map((c) => {"
+        "  try {"
+        "    im.validateSelectedPixelFormatAndImageFormatCombination("
+        "      c.pixelFormat, c.imageFormat);"
+        "    pf.validateSelectedPixelFormatAndCodecCombination(c.pixelFormat, c.codec);"
+        "    pp.validateSelectedCodecAndProResCombination("
+        "      { codec: c.codec, proResProfile: c.proResProfile });"
+        "    return { name: c.name, ok: true };"
+        "  } catch (e) {"
+        "    return { name: c.name, ok: false,"
+        "      error: String(e && e.message ? e.message : e) };"
+        "  }"
+        "});"
+        "console.log(JSON.stringify(out));"
+    )
+    res = subprocess.run(
+        ["node", "-e", script, str(dist), json.dumps(combos)],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert res.returncode == 0, f"node failed: {res.stderr}"
+    results = {r["name"]: r for r in json.loads(res.stdout.strip())}
+    assert set(results) == {c["name"] for c in combos}
+    for combo in combos:
+        got = results[combo["name"]]
+        if combo.get("expect_error"):
+            assert got["ok"] is False, f"{combo['name']}: validator did not throw"
+            assert "PNG" in got["error"], got["error"]
+        else:
+            assert got["ok"] is True, f"{combo['name']}: {got.get('error')}"
+
+
+# ---------------------------------------------------------------------------
+# Alpha overrides an active env encode profile (mutual exclusion, both paths)
+# ---------------------------------------------------------------------------
+
+
+def test_alpha_wins_over_env_encode_profile_story(tmp_path, monkeypatch):
+    """The shipped contract: an alpha export OVERRIDES an active
+    MEDIAHUB_MOTION_ENCODE profile (alpha needs prores/vp9 + an alpha
+    pixelFormat), and exactly one of cache_payload['alpha'] /
+    cache_payload['encode'] folds. An env-wins refactor would ship an opaque
+    h265/yuv420p10le file under the .mov alpha slot with the suite green —
+    this pins the stacked combination every other alpha test delenv's away."""
+    monkeypatch.delenv("MEDIAHUB_REEL_ENGINE", raising=False)
+    monkeypatch.setenv("MEDIAHUB_MOTION_ENCODE", "h265-10-bt2020")
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    seen, spy = _capture_cache_payload()
+    sink: dict = {}
+    with (
+        patch.object(motion, "_run_remotion", side_effect=_fake_run_remotion_factory(sink)),
+        patch.object(motion, "_content_hash", side_effect=spy),
+    ):
+        motion.render_story_card(
+            _fake_card(), _fake_brand(), tmp_path / "story.mov", alpha_profile="prores4444"
+        )
+    # The render threads the ALPHA-derived encode dict, not the env profile.
+    assert sink["encode"] == motion._alpha_encode(motion.resolve_alpha_profile("prores4444"))
+    payload = seen["payload"]
+    assert payload["alpha"] == "prores4444"
+    assert "encode" not in payload
+    assert Path(sink["out_path"]).suffix == ".mov"
+    manifest = _read_manifest(tmp_path)
+    assert manifest["alpha"]["profile"] == "prores4444"
+    assert "encode" not in manifest
+
+
+def test_alpha_wins_over_env_encode_profile_reel(tmp_path, monkeypatch):
+    monkeypatch.delenv("MEDIAHUB_REEL_ENGINE", raising=False)
+    monkeypatch.setenv("MEDIAHUB_MOTION_ENCODE", "h265-10-bt2020")
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    seen, spy = _capture_cache_payload()
+    sink: dict = {}
+    with (
+        patch.object(motion, "_run_remotion", side_effect=_fake_run_remotion_factory(sink)),
+        patch.object(motion, "_render_reel_parallel_or_none", side_effect=lambda **k: None),
+        patch.object(motion, "_content_hash", side_effect=spy),
+    ):
+        motion.render_meet_reel(
+            [_fake_card()], _fake_brand(), tmp_path / "reel.webm", alpha_profile="vp9"
+        )
+    assert sink["encode"] == motion._alpha_encode(motion.resolve_alpha_profile("vp9"))
+    payload = seen["payload"]
+    assert payload["alpha"] == "vp9"
+    assert "encode" not in payload
+    assert Path(sink["out_path"]).suffix == ".webm"
+    manifest = _read_manifest(tmp_path)
+    assert manifest["alpha"]["profile"] == "vp9"
+    assert "encode" not in manifest
+
+
+def test_reel_alpha_records_suppressed_supersample(tmp_path, monkeypatch):
+    """When the operator ALSO asked for the whole-composition supersample, the
+    alpha reel manifest records the suppression honestly — exactly like the
+    encode branch's {requested, applied: False} record."""
+    monkeypatch.delenv("MEDIAHUB_REEL_ENGINE", raising=False)
+    monkeypatch.delenv("MEDIAHUB_MOTION_ENCODE", raising=False)
+    monkeypatch.setenv("MEDIAHUB_MOTION_SUPERSAMPLE", "2")
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    sink: dict = {}
+    with (
+        patch.object(motion, "_run_remotion", side_effect=_fake_run_remotion_factory(sink)),
+        patch.object(motion, "_render_reel_parallel_or_none", side_effect=lambda **k: None),
+    ):
+        motion.render_meet_reel(
+            [_fake_card()], _fake_brand(), tmp_path / "reel.webm", alpha_profile="vp9"
+        )
+    assert sink.get("supersample") == 1.0
+    manifest = _read_manifest(tmp_path)
+    ss = manifest["supersample"]
+    assert ss["requested"] == 2.0
+    assert ss["applied"] is False
+    assert "alpha" in ss["reason"]
+
+
+# ---------------------------------------------------------------------------
+# Published sidecar names — alpha and opaque cuts must never collide
+# ---------------------------------------------------------------------------
+
+
+def test_published_sidecar_path_naming():
+    p = motion.published_sidecar_path
+    # Opaque .mp4 keeps the historic with_suffix names (byte-identical links).
+    assert p(Path("/x/c1.mp4"), ".json") == Path("/x/c1.json")
+    assert p(Path("/x/c1.mp4"), ".poster.png") == Path("/x/c1.poster.png")
+    assert p(Path("/x/c1_landscape.mp4"), ".json") == Path("/x/c1_landscape.json")
+    # Alpha containers fold their profile key into the stem.
+    assert p(Path("/x/c1.mov"), ".json") == Path("/x/c1_prores4444.json")
+    assert p(Path("/x/c1.webm"), ".poster.png") == Path("/x/c1_vp9.poster.png")
+
+
+def test_publish_alpha_and_opaque_sidecars_do_not_collide(tmp_path):
+    """<c>.mov (alpha) and <c>.mp4 (opaque) share a stem by design, so the
+    published manifest/poster names must differ — pre-fix both cuts published
+    <c>.json / <c>.poster.png and the last render (or cache-hit re-publish)
+    clobbered the other cut's explainability record."""
+    from mediahub.visual.audio_mux import poster_path_for
+
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    out_dir = tmp_path / "motion"
+    out_dir.mkdir()
+    mp4 = cache / "aaa111.mp4"
+    mp4.write_bytes(b"o" * 2048)
+    mp4.with_suffix(".json").write_text('{"cut": "opaque"}', encoding="utf-8")
+    poster_path_for(mp4).write_bytes(b"opaque-poster")
+    mov = cache / "bbb222.mov"
+    mov.write_bytes(b"a" * 2048)
+    mov.with_suffix(".json").write_text('{"cut": "alpha"}', encoding="utf-8")
+    poster_path_for(mov).write_bytes(b"alpha-poster")
+
+    motion._publish(mp4, out_dir / "c1.mp4")
+    motion._publish(mov, out_dir / "c1.mov")
+
+    assert (out_dir / "c1.json").read_text(encoding="utf-8") == '{"cut": "opaque"}'
+    assert (out_dir / "c1_prores4444.json").read_text(encoding="utf-8") == '{"cut": "alpha"}'
+    assert (out_dir / "c1.poster.png").read_bytes() == b"opaque-poster"
+    assert (out_dir / "c1_prores4444.poster.png").read_bytes() == b"alpha-poster"
+
+
+# ---------------------------------------------------------------------------
+# Poster policy — alpha containers refuse the ffmpeg grab; in-render publishes
+# ---------------------------------------------------------------------------
+
+
+def test_alpha_container_skips_ffmpeg_poster_grab(tmp_path, monkeypatch):
+    """_ensure_poster_sidecar must honour the _alpha_manifest claim: the ffmpeg
+    frame grab is unavailable for alpha containers — the in-render transparent
+    PNG is the only poster source, and its absence is an honest '' (no
+    poster), never a grab that may bake an opaque backdrop into the thumb."""
+    from mediahub.visual import audio_mux
+
+    calls: list = []
+    monkeypatch.setattr(audio_mux, "write_poster", lambda *a, **k: calls.append(1) or True)
+    for name in ("c.mov", "c.webm"):
+        cached = tmp_path / name
+        cached.write_bytes(b"x" * 2048)
+        assert motion._ensure_poster_sidecar(cached, kind="story", duration_sec=6.0) == ""
+    assert calls == [], "alpha containers must never reach the ffmpeg grab"
+    # An in-render poster beside the alpha slot is trusted as usual.
+    cached = tmp_path / "c.mov"
+    audio_mux.poster_path_for(cached).write_bytes(b"\x89PNG transparent")
+    assert motion._ensure_poster_sidecar(cached, kind="story", duration_sec=6.0) == "in-render"
+    assert calls == []
+
+
+def test_run_remotion_publishes_in_render_poster_sidecar(tmp_path, monkeypatch):
+    """render.js writes its renderStill poster beside --output — the dotfile
+    temp path. _run_remotion must publish it beside the final video (R1.29 for
+    every profile) instead of stranding it as an unswept dotfile; for alpha
+    containers this is the ONLY poster source."""
+    from mediahub.visual import audio_mux
+
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(motion, "node_available", lambda: True)
+
+    class _Proc:
+        returncode = 0
+        stderr = ""
+
+    def fake_run_capture(cmd, *, cwd=None, timeout=None):
+        out = Path(cmd[cmd.index("--output") + 1])
+        out.write_bytes(b"x" * 4096)
+        audio_mux.poster_path_for(out).write_bytes(b"\x89PNG in-render")
+        return _Proc()
+
+    monkeypatch.setattr("mediahub.visual.proc.run_capture", fake_run_capture)
+    out = tmp_path / "card.mov"
+    motion._run_remotion(
+        composition_id="StoryCard",
+        props={"card": {}, "brand": {}},
+        out_path=out,
+        duration_sec=6.0,
+        size=(1080, 1920),
+        encode=motion._alpha_encode(motion.resolve_alpha_profile("prores4444")),
+    )
+    poster = audio_mux.poster_path_for(out)
+    assert poster.exists() and poster.read_bytes() == b"\x89PNG in-render"
+    dotfiles = [p.name for p in tmp_path.iterdir() if p.name.startswith(".")]
+    assert dotfiles == [], f"stranded temp files: {dotfiles}"
+
+
+def test_run_remotion_cleans_tmp_poster_on_failure(tmp_path, monkeypatch):
+    """A failed render must take its partial in-render poster with it — the
+    dotfile temp poster is invisible to the prune globs, so leaving it behind
+    leaks one PNG per failure on the bounded deployment disk."""
+    from mediahub.visual import audio_mux
+
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(motion, "node_available", lambda: True)
+
+    class _Proc:
+        returncode = 1
+        stderr = "boom"
+
+    def fake_run_capture(cmd, *, cwd=None, timeout=None):
+        out = Path(cmd[cmd.index("--output") + 1])
+        out.write_bytes(b"x" * 4096)
+        audio_mux.poster_path_for(out).write_bytes(b"\x89PNG partial")
+        return _Proc()
+
+    monkeypatch.setattr("mediahub.visual.proc.run_capture", fake_run_capture)
+    with pytest.raises(RuntimeError, match="Remotion render failed"):
+        motion._run_remotion(
+            composition_id="StoryCard",
+            props={"card": {}, "brand": {}},
+            out_path=tmp_path / "card.mp4",
+            duration_sec=6.0,
+            size=(1080, 1920),
+            encode=None,
+        )
+    dotfiles = [p.name for p in tmp_path.iterdir() if p.name.startswith(".")]
+    assert dotfiles == [], f"stranded temp files: {dotfiles}"
+
+
+# ---------------------------------------------------------------------------
+# Web routes — shared ?alpha resolver + container-aware sidecar resolution
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def alpha_run_env(app, web_module):
+    from mediahub.web.club_profile import ClubProfile, save_profile
+
+    save_profile(ClubProfile(profile_id="alphaclub", display_name="Alpha SC"))
+    run = {
+        "run_id": "ar1",
+        "profile_id": "alphaclub",
+        "meet_name": "Test Open",
+        "meet": {"name": "Test Open"},
+        "recognition_report": {
+            "ranked_achievements": [
+                {
+                    "id": "swim-1",
+                    "rank": 1,
+                    "priority": 0.9,
+                    "achievement": {
+                        "swim_id": "swim-1",
+                        "swimmer_name": "Eira Hughes",
+                        "event": "100m Freestyle",
+                        "time": "59.80",
+                    },
+                }
+            ]
+        },
+    }
+    (web_module.RUNS_DIR / "ar1.json").write_text(json.dumps(run), encoding="utf-8")
+    return app, web_module
+
+
+def test_resolve_alpha_from_request_contract(alpha_run_env):
+    """One shared resolver (the _resolve_motion_canvas pattern) for all six
+    motion/reel sites: absent → the byte-identical opaque default, known
+    profiles resolve to the closed tuple, junk is one honest 400 payload."""
+    app, wm = alpha_run_env
+    with app.test_request_context("/x"):
+        resolved, err = wm._resolve_alpha_from_request()
+    assert err is None
+    assert resolved == ("", None, "mp4", "video/mp4")
+    with app.test_request_context("/x?alpha=prores4444"):
+        resolved, err = wm._resolve_alpha_from_request()
+    assert err is None
+    alpha, prof, ext, ctype = resolved
+    assert alpha == "prores4444"
+    assert prof == motion.resolve_alpha_profile("prores4444")
+    assert (ext, ctype) == ("mov", "video/quicktime")
+    with app.test_request_context("/x?alpha=garbage"):
+        resolved, err = wm._resolve_alpha_from_request()
+    assert resolved is None
+    resp, status = err
+    assert status == 400
+    body = resp.get_json()
+    assert body["error"] == "bad_alpha"
+    assert body["valid_alpha"] == sorted(motion.ALPHA_PROFILES)
+    assert "detail" in body
+
+
+def test_manifest_and_poster_routes_resolve_alpha_cut(alpha_run_env):
+    """?alpha= on the manifest/poster surfaces resolves the transparent cut's
+    OWN container-aware sidecars — pre-fix there was no URL that could fetch
+    the alpha cut's manifest, and ?poster=1 served whichever cut published
+    last."""
+    app, wm = alpha_run_env
+    motion_dir = wm.RUNS_DIR / "ar1" / "motion"
+    motion_dir.mkdir(parents=True, exist_ok=True)
+    (motion_dir / "swim-1.mp4").write_bytes(b"0" * 2048)
+    (motion_dir / "swim-1.json").write_text('{"cut": "opaque"}', encoding="utf-8")
+    (motion_dir / "swim-1.poster.png").write_bytes(b"op")
+    (motion_dir / "swim-1.mov").write_bytes(b"0" * 2048)
+    (motion_dir / "swim-1_prores4444.json").write_text('{"cut": "alpha"}', encoding="utf-8")
+    (motion_dir / "swim-1_prores4444.poster.png").write_bytes(b"ap")
+    (motion_dir / "reel_3.webm").write_bytes(b"0" * 2048)
+    (motion_dir / "reel_3_vp9.json").write_text('{"cut": "alpha-reel"}', encoding="utf-8")
+    with app.test_client() as c:
+        c.post("/api/organisation/active", data={"profile_id": "alphaclub"})
+        r = c.get("/api/runs/ar1/card/swim-1/motion/manifest")
+        assert r.status_code == 200 and r.get_json() == {"cut": "opaque"}
+        r = c.get("/api/runs/ar1/card/swim-1/motion/manifest?alpha=prores4444")
+        assert r.status_code == 200 and r.get_json() == {"cut": "alpha"}
+        bad = c.get("/api/runs/ar1/card/swim-1/motion/manifest?alpha=nope")
+        assert bad.status_code == 400 and bad.get_json()["error"] == "bad_alpha"
+        # The reel manifest route resolves the same way.
+        r = c.get("/api/runs/ar1/reel-manifest?alpha=vp9")
+        assert r.status_code == 200 and r.get_json() == {"cut": "alpha-reel"}
+        # ?poster=1 serves each cut's own poster, not whichever was written last.
+        p = c.get("/api/runs/ar1/card/swim-1/motion-file?poster=1")
+        assert p.status_code == 200 and p.data == b"op"
+        p = c.get("/api/runs/ar1/card/swim-1/motion-file?alpha=prores4444&poster=1")
+        assert p.status_code == 200 and p.data == b"ap"
+        # The file routes answer the SAME 400 payload shape as the resolver.
+        bad = c.get("/api/runs/ar1/card/swim-1/motion-file?alpha=nope")
+        assert bad.status_code == 400
+        body = bad.get_json()
+        assert body["error"] == "bad_alpha" and "detail" in body

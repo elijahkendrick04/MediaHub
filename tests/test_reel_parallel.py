@@ -133,6 +133,47 @@ def test_plan_segments_rejects_empty_timeline():
 
 
 # ---------------------------------------------------------------------------
+# planned_total_frames — Python/JS rounding parity (deep-review engine-math-2)
+# ---------------------------------------------------------------------------
+
+
+def _js_math_round(x: float) -> int:
+    """Independent emulation of JavaScript Math.round (half away from zero for
+    non-negative values) — deliberately not motion._js_round, so a regression
+    in either mirror is caught."""
+    import math
+
+    return int(math.floor(x + 0.5))
+
+
+@pytest.mark.parametrize("fps", sorted(motion.ALLOWED_FPS))
+@pytest.mark.parametrize("n_cards", [1, 2, 3, 4, 5])
+def test_planned_total_frames_matches_the_js_serial_render(fps, n_cards):
+    """The parallel plan and render.js / render_segments.js must agree on the
+    total frame count for every allowed fps × default-rhythm duration, or the
+    composite is a different length from the serial render under the SAME
+    cache key."""
+    duration = motion.reel_duration_for(n_cards)
+    assert reel_parallel.planned_total_frames(duration, fps) == max(
+        1, _js_math_round(duration * fps)
+    ), (fps, n_cards, duration)
+
+
+def test_planned_total_frames_fps25_half_frame_regression():
+    """fps=25 × the 1-card default reel (8.5s) hits an exact 212.5 product:
+    Python's banker's round() planned 212 frames while the JS side computes
+    Math.round(212.5) = 213, so the parallel composite silently dropped the
+    final frame. The plan must match the JS count."""
+    assert reel_parallel.planned_total_frames(8.5, 25) == 213
+    # The exact drift this guards against: banker's rounding goes half-to-even.
+    assert round(8.5 * 25) == 212
+
+
+def test_planned_total_frames_floors_at_one():
+    assert reel_parallel.planned_total_frames(0.0, 30) == 1
+
+
+# ---------------------------------------------------------------------------
 # FFmpeg builders (pure)
 # ---------------------------------------------------------------------------
 
