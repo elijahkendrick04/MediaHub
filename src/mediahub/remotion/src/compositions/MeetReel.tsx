@@ -1313,7 +1313,10 @@ const CoverScreen: React.FC<{
         opacity: selfExit ? env.outroFade : 1,
       }}
     >
-      {dither ? <Dither /> : null}
+      {/* alpha-export: the dither tile is opaque and its overlay blend resolves
+          to itself over a transparent backdrop, so it must never mount when the
+          cover ground is suppressed (default false keeps it byte-identical). */}
+      {dither && !transparentBg ? <Dither /> : null}
       <Body
         brand={brand}
         meetName={meetName}
@@ -1440,7 +1443,9 @@ const OutroScreen: React.FC<{
         opacity: outroFade,
       }}
     >
-      {dither ? <Dither /> : null}
+      {/* alpha-export: same gate as the cover — an opaque debanding wash over a
+          transparent backdrop would defeat the transparent export. */}
+      {dither && !transparentBg ? <Dither /> : null}
       <div
         style={{
           position: "absolute",

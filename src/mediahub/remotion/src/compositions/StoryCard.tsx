@@ -4086,8 +4086,13 @@ export const StoryCard: React.FC<Props & { motionBlur?: MotionBlur }> = ({
       {/* render-banding-dither: the debanding overlay rides directly over the
           ground fill and BENEATH the content (mirroring the still's below-copy
           placement), so it composites against the big brand fill that bands.
-          Mounted only when the still opted in; absent = byte-identical. */}
-      {card.dither ? <Dither /> : null}
+          Mounted only when the still opted in; absent = byte-identical.
+          alpha-export: gated off under transparentBg — the tile is an opaque
+          near-neutral wash whose mix-blend-mode:overlay resolves to ITSELF over
+          a transparent backdrop, which would fill the whole "transparent"
+          region with solid grey. There is no ground fill to deband anyway
+          (default false keeps the mount byte-identical). */}
+      {card.dither && !card.transparentBg ? <Dither /> : null}
       {/* Pack ground BENEATH the scene (the still's z1-under-copy order).
           per-effect-toggle: the "style_pack" toggle drops both pack layers. */}
       {off("style_pack") ? null : <StylePackGroundLayer ctx={ctx} />}

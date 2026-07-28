@@ -28710,6 +28710,40 @@ def _resolve_motion_canvas():
     return fmt, None
 
 
+def _resolve_alpha_from_request():
+    """Resolve the opt-in ``?alpha=`` transparent-export param once for every
+    motion/reel route (render assembly + file + manifest — the
+    ``_resolve_motion_canvas`` pattern), so all sites validate identically and
+    answer one 400 payload shape instead of drifting copies.
+
+    Absent → the default opaque cut (``("", None, "mp4", "video/mp4")``,
+    byte-identical). A known profile resolves to its closed
+    ``ALPHA_PROFILES`` tuple; an unknown value is an honest 400. Returns
+    ``((alpha, profile, ext, content_type), None)`` on success or
+    ``(None, (response, 400))`` — the same contract as the canvas resolver.
+    The ext/content_type come from the validated profile tuple only, never
+    from raw query text, so filename derivation stays allowlisted.
+    """
+    from mediahub.visual import motion as _motion
+
+    alpha = (request.args.get("alpha") or "").strip().lower()
+    if alpha and alpha not in _motion.ALPHA_PROFILES:
+        return None, (
+            jsonify(
+                {
+                    "error": "bad_alpha",
+                    "detail": f"unknown alpha export profile {alpha!r}",
+                    "valid_alpha": sorted(_motion.ALPHA_PROFILES),
+                }
+            ),
+            400,
+        )
+    prof = _motion.resolve_alpha_profile(alpha) if alpha else None
+    ext = prof.ext if prof else "mp4"
+    content_type = prof.content_type if prof else "video/mp4"
+    return (alpha, prof, ext, content_type), None
+
+
 def _assemble_card_motion_inputs(run_id: str, card_id: str):
     """Shared validation + payload assembly for the per-card motion routes.
 
@@ -28778,25 +28812,14 @@ def _assemble_card_motion_inputs(run_id: str, card_id: str):
         )
 
     # alpha-export — optional opt-in transparent-background export
-    # (?alpha=prores4444|vp9), validated against the closed ALPHA_PROFILES
-    # vocabulary. Absent keeps the default opaque .mp4 (byte-identical); an
-    # unknown value is an honest 400. When set, the served file carries the
-    # profile's container extension + Content-Type and the render runs silent.
-    from mediahub.visual import motion as _motion
-
-    alpha = (request.args.get("alpha") or "").strip().lower()
-    if alpha and alpha not in _motion.ALPHA_PROFILES:
-        return None, (
-            jsonify(
-                {
-                    "error": "bad_alpha",
-                    "detail": f"unknown alpha export profile {alpha!r}",
-                    "valid_alpha": sorted(_motion.ALPHA_PROFILES),
-                }
-            ),
-            400,
-        )
-    alpha_prof = _motion.resolve_alpha_profile(alpha) if alpha else None
+    # (?alpha=prores4444|vp9) via the shared resolver. Absent keeps the default
+    # opaque .mp4 (byte-identical); an unknown value is an honest 400. When set,
+    # the served file carries the profile's container extension + Content-Type
+    # and the render runs silent.
+    alpha_resolved, alpha_err = _resolve_alpha_from_request()
+    if alpha_err is not None:
+        return None, alpha_err
+    alpha, alpha_prof, _alpha_ext, _alpha_content_type = alpha_resolved
 
     ach = target.get("achievement") or {}
     meet_name = (run_data.get("meet") or {}).get("name") or run_data.get("meet_name", "")
@@ -28831,8 +28854,7 @@ def _assemble_card_motion_inputs(run_id: str, card_id: str):
     # cached artifacts stay valid; other cuts get a format suffix. alpha-export
     # swaps the .mp4 extension for the profile's alpha container (.mov/.webm) so
     # the served file name matches its true container.
-    ext = alpha_prof.ext if alpha_prof else "mp4"
-    out_name = f"{card_id}.{ext}" if fmt == "story" else f"{card_id}_{fmt}.{ext}"
+    out_name = f"{card_id}.{_alpha_ext}" if fmt == "story" else f"{card_id}_{fmt}.{_alpha_ext}"
     out_path = out_dir / out_name
 
     # Load the most recent Gemini-directed brief for this card so the
@@ -28863,7 +28885,7 @@ def _assemble_card_motion_inputs(run_id: str, card_id: str):
             "variation_seed": variation_seed,
             "brief": brief_dict,
             "alpha": alpha,
-            "content_type": alpha_prof.content_type if alpha_prof else "video/mp4",
+            "content_type": _alpha_content_type,
         },
         None,
     )
@@ -28956,23 +28978,14 @@ def _assemble_reel_inputs(run_id: str):
         )
 
     # alpha-export — optional opt-in transparent-background reel
-    # (?alpha=prores4444|vp9), validated against the closed ALPHA_PROFILES
-    # vocabulary. Absent keeps the default opaque .mp4 (byte-identical); an
-    # unknown value is an honest 400. When set, the reel is silent and the
-    # served file carries the profile's container extension + Content-Type.
-    alpha = (request.args.get("alpha") or "").strip().lower()
-    if alpha and alpha not in _motion.ALPHA_PROFILES:
-        return None, (
-            jsonify(
-                {
-                    "error": "bad_alpha",
-                    "detail": f"unknown alpha export profile {alpha!r}",
-                    "valid_alpha": sorted(_motion.ALPHA_PROFILES),
-                }
-            ),
-            400,
-        )
-    alpha_prof = _motion.resolve_alpha_profile(alpha) if alpha else None
+    # (?alpha=prores4444|vp9) via the shared resolver. Absent keeps the default
+    # opaque .mp4 (byte-identical); an unknown value is an honest 400. When set,
+    # the reel is silent and the served file carries the profile's container
+    # extension + Content-Type.
+    alpha_resolved, alpha_err = _resolve_alpha_from_request()
+    if alpha_err is not None:
+        return None, alpha_err
+    alpha, alpha_prof, _alpha_ext, _alpha_content_type = alpha_resolved
 
     # R1.13 — optional cover stat-chip config from the POST body. Validated
     # via normalise_reel_stat_config (ValueError on junk ids → honest 400);
@@ -29193,8 +29206,7 @@ def _assemble_reel_inputs(run_id: str):
     base_name = f"reel_{n}{sel_suffix}{_lang_suffix}"
     _stem = base_name if fmt == "story" else f"{base_name}_{fmt}"
     # alpha-export swaps the .mp4 extension for the profile's alpha container.
-    _ext = alpha_prof.ext if alpha_prof else "mp4"
-    out_path = out_dir / f"{_stem}.{_ext}"
+    out_path = out_dir / f"{_stem}.{_alpha_ext}"
 
     # Look up the latest brief per card so every beat of the reel
     # carries its own AI-directed variation. Cards without a brief
@@ -29237,7 +29249,7 @@ def _assemble_reel_inputs(run_id: str):
             # reel-file route re-derives the same _sel suffix).
             "cards_param": ",".join(ordered_ids) if sel_suffix else "",
             "alpha": alpha,
-            "content_type": alpha_prof.content_type if alpha_prof else "video/mp4",
+            "content_type": _alpha_content_type,
         },
         None,
     )

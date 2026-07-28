@@ -4082,15 +4082,14 @@ def api_card_motion_file(run_id: str, card_id: str):
     if canvas_err is not None:
         return canvas_err
     # alpha-export: an alpha cut is served from its .mov/.webm slot with the
-    # profile's Content-Type. Absent keeps the historic .mp4 / video/mp4 path.
+    # profile's Content-Type (shared resolver — one validation + 400 payload
+    # across all motion/reel routes). Absent keeps the historic .mp4 path.
     from mediahub.visual import motion as _motion
 
-    alpha = (request.args.get("alpha") or "").strip().lower()
-    if alpha and alpha not in _motion.ALPHA_PROFILES:
-        return jsonify({"error": "bad_alpha", "valid_alpha": sorted(_motion.ALPHA_PROFILES)}), 400
-    _alpha_prof = _motion.resolve_alpha_profile(alpha) if alpha else None
-    _ext = _alpha_prof.ext if _alpha_prof else "mp4"
-    _content_type = _alpha_prof.content_type if _alpha_prof else "video/mp4"
+    alpha_resolved, alpha_err = W._resolve_alpha_from_request()
+    if alpha_err is not None:
+        return alpha_err
+    _alpha, _alpha_prof, _ext, _content_type = alpha_resolved
     motion_dir = W.RUNS_DIR / run_id / "motion"
     name = f"{card_id}.{_ext}" if fmt == "story" else f"{card_id}_{fmt}.{_ext}"
     path = motion_dir / name
@@ -4104,7 +4103,10 @@ def api_card_motion_file(run_id: str, card_id: str):
     if not path.exists():
         return jsonify({"error": "motion_not_rendered"}), 404
     if (request.args.get("poster") or "").strip().lower() in {"1", "true", "yes"}:
-        poster = path.with_suffix(".poster.png")
+        # Container-aware published name: the alpha cut's poster lives at its
+        # own profile-suffixed sidecar so ?alpha= serves the transparent
+        # poster, never whichever cut was published last.
+        poster = _motion.published_sidecar_path(path, ".poster.png")
         if not poster.exists():
             return jsonify({"error": "poster_not_rendered"}), 404
         return send_file(
@@ -4120,12 +4122,21 @@ def api_card_motion_file(run_id: str, card_id: str):
 def api_card_motion_manifest(run_id: str, card_id: str):
     """The motion render's explainability record — archetype, motion
     intent, mood, colour source, seed — written as a JSON sidecar beside
-    every rendered MP4. 404 until the matching cut has been rendered."""
+    every rendered video. 404 until the matching cut has been rendered.
+    ``?alpha=`` (same validated vocabulary as the render/file routes)
+    selects the transparent cut's own container-aware sidecar name, so the
+    alpha and opaque cuts' explainability records never shadow each other."""
     fmt, canvas_err = W._resolve_motion_canvas()
     if canvas_err is not None:
         return canvas_err
-    name = f"{card_id}.json" if fmt == "story" else f"{card_id}_{fmt}.json"
-    sidecar = W.RUNS_DIR / run_id / "motion" / name
+    alpha_resolved, alpha_err = W._resolve_alpha_from_request()
+    if alpha_err is not None:
+        return alpha_err
+    _alpha, _alpha_prof, _ext, _content_type = alpha_resolved
+    from mediahub.visual import motion as _motion
+
+    name = f"{card_id}.{_ext}" if fmt == "story" else f"{card_id}_{fmt}.{_ext}"
+    sidecar = _motion.published_sidecar_path(W.RUNS_DIR / run_id / "motion" / name, ".json")
     if not sidecar.exists():
         return jsonify({"error": "manifest_not_found", "detail": "render this cut first"}), 404
     try:
@@ -5257,26 +5268,26 @@ def api_run_reel_file(run_id: str):
         else ""
     )
     # alpha-export: a transparent reel is served from its .mov/.webm slot with
-    # the profile's Content-Type; absent keeps the historic .mp4 / video/mp4 path.
+    # the profile's Content-Type (shared resolver — one validation + 400
+    # payload across all motion/reel routes); absent keeps the historic .mp4 path.
     from mediahub.visual import motion as _motion
 
-    alpha = (request.args.get("alpha") or "").strip().lower()
-    if alpha and alpha not in _motion.ALPHA_PROFILES:
-        return jsonify({"error": "bad_alpha", "valid_alpha": sorted(_motion.ALPHA_PROFILES)}), 400
-    _alpha_prof = _motion.resolve_alpha_profile(alpha) if alpha else None
-    _ext = _alpha_prof.ext if _alpha_prof else "mp4"
-    _content_type = _alpha_prof.content_type if _alpha_prof else "video/mp4"
+    alpha_resolved, alpha_err = W._resolve_alpha_from_request()
+    if alpha_err is not None:
+        return alpha_err
+    _alpha, _alpha_prof, _ext, _content_type = alpha_resolved
     base = f"reel_{n}{_sel}{_suffix}"
     name = f"{base}.{_ext}" if fmt == "story" else f"{base}_{fmt}.{_ext}"
     path = W.RUNS_DIR / run_id / "motion" / name
     if not path.exists():
         return jsonify({"error": "reel_not_rendered"}), 404
     if (request.args.get("poster") or "").strip().lower() in {"1", "true", "yes"}:
-        # The poster-frame PNG sidecar written beside the rendered MP4
+        # The poster-frame PNG sidecar written beside the rendered video
         # (visual/audio_mux.py) — a thumbnail for review surfaces and
         # platforms that want one. 404s honestly when absent (e.g. a
-        # reel rendered before posters existed).
-        poster = path.with_suffix(".poster.png")
+        # reel rendered before posters existed). Container-aware name: the
+        # alpha cut's poster never shadows the opaque cut's.
+        poster = _motion.published_sidecar_path(path, ".poster.png")
         if not poster.exists():
             return jsonify({"error": "poster_not_rendered"}), 404
         return send_file(
@@ -5298,8 +5309,9 @@ def api_run_reel_file(run_id: str):
 def api_run_reel_manifest(run_id: str):
     """The reel's explainability manifest (M22 handoff) — engine, beats,
     rhythm, honest capability notes — written as a JSON sidecar beside the
-    rendered MP4 by BOTH engines. Same ``n``/``format``/``lang``/``cards``
-    resolution as ``reel-file``; 404 until that cut has been rendered."""
+    rendered video by BOTH engines. Same ``n``/``format``/``lang``/``cards``/
+    ``alpha`` resolution as ``reel-file``; 404 until that cut has been
+    rendered."""
     run_data = W._load_run(run_id)
     if run_data is None:
         run_json = W.RUNS_DIR / run_id / "run.json"
@@ -5339,9 +5351,18 @@ def api_run_reel_manifest(run_id: str):
         if _cards_arg
         else ""
     )
+    # alpha-export: ?alpha= (same validated vocabulary as the reel-file route)
+    # resolves the transparent cut's own container-aware sidecar name, so the
+    # alpha and opaque cuts' explainability records never shadow each other.
+    alpha_resolved, alpha_err = W._resolve_alpha_from_request()
+    if alpha_err is not None:
+        return alpha_err
+    _alpha, _alpha_prof, _ext, _content_type = alpha_resolved
+    from mediahub.visual import motion as _motion
+
     base = f"reel_{n}{_sel}{_suffix}"
-    name = f"{base}.json" if fmt == "story" else f"{base}_{fmt}.json"
-    sidecar = W.RUNS_DIR / run_id / "motion" / name
+    name = f"{base}.{_ext}" if fmt == "story" else f"{base}_{fmt}.{_ext}"
+    sidecar = _motion.published_sidecar_path(W.RUNS_DIR / run_id / "motion" / name, ".json")
     if not sidecar.exists():
         return jsonify({"error": "manifest_not_found", "detail": "render this cut first"}), 404
     try:
