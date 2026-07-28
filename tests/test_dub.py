@@ -160,7 +160,16 @@ def test_dub_failure_reason_reaches_the_render_manifest(tmp_path, monkeypatch):
     def _boom(*a, **k):
         raise ClaudeUnavailableError("no provider")
 
-    def _fake_run(*, composition_id, props, out_path, duration_sec=None, size=None, timeout=600):
+    def _fake_run(
+        *,
+        composition_id,
+        props,
+        out_path,
+        duration_sec=None,
+        size=None,
+        timeout=600,
+        supersample=1.0,
+    ):
         out = Path(out_path)
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_bytes(b"0" * 2048)
@@ -175,14 +184,13 @@ def test_dub_failure_reason_reaches_the_render_manifest(tmp_path, monkeypatch):
         mock.patch.object(dub, "translate_text", side_effect=_boom),
         mock.patch.object(M, "_run_remotion", side_effect=_fake_run),
     ):
-        M.render_meet_reel([card], {"display_name": "Dub SC"}, tmp_path / "o" / "r.mp4",
-                           dub_language="cy")
+        M.render_meet_reel(
+            [card], {"display_name": "Dub SC"}, tmp_path / "o" / "r.mp4", dub_language="cy"
+        )
 
     manifest = json.loads(
         next(
-            p
-            for p in M._cache_dir().glob("*.json")
-            if not p.name.endswith(".audio.json")
+            p for p in M._cache_dir().glob("*.json") if not p.name.endswith(".audio.json")
         ).read_text(encoding="utf-8")
     )
     assert "no provider" in manifest["audio"]["dub_error"]

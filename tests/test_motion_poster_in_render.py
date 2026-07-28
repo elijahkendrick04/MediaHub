@@ -61,9 +61,7 @@ def test_in_render_poster_returns_in_render_and_skips_ffmpeg(tmp_path, monkeypat
     audio_mux.poster_path_for(cached).write_bytes(b"\x89PNG\r\n\x1a\n in-render frame")
 
     calls: list = []
-    monkeypatch.setattr(
-        audio_mux, "write_poster", lambda *a, **k: calls.append((a, k)) or True
-    )
+    monkeypatch.setattr(audio_mux, "write_poster", lambda *a, **k: calls.append((a, k)) or True)
 
     source = motion._ensure_poster_sidecar(cached, kind="story", duration_sec=6.0)
 
@@ -87,9 +85,9 @@ def test_missing_in_render_poster_falls_back_to_ffmpeg(tmp_path, monkeypatch):
     source = motion._ensure_poster_sidecar(cached, kind="reel", duration_sec=15.0)
 
     assert source == "ffmpeg"
-    assert at_secs == [audio_mux.poster_time_for("reel", 15.0)], (
-        "the fallback must extract at the deterministic poster timestamp"
-    )
+    assert at_secs == [
+        audio_mux.poster_time_for("reel", 15.0)
+    ], "the fallback must extract at the deterministic poster timestamp"
     assert audio_mux.poster_path_for(cached).exists()
 
 
@@ -135,9 +133,7 @@ def test_finish_cached_video_skips_ffmpeg_when_in_render_poster_present(tmp_path
     calls: list = []
     monkeypatch.setattr(audio_mux, "write_poster", lambda *a, **k: calls.append(1) or True)
 
-    audio_rec = motion._finish_cached_video(
-        cached, kind="story", plan=None, duration_sec=6.0
-    )
+    audio_rec = motion._finish_cached_video(cached, kind="story", plan=None, duration_sec=6.0)
 
     assert calls == [], "the in-render poster must skip the ffmpeg extraction"
     assert audio_rec == {"status": "off", "poster_source": "in-render"}
@@ -151,7 +147,14 @@ def test_cold_render_skips_ffmpeg_when_render_js_wrote_poster(tmp_path, monkeypa
     monkeypatch.delenv("MEDIAHUB_REEL_MUSIC_DIR", raising=False)
 
     def _fake_run_with_in_render_poster(
-        *, composition_id, props, out_path, duration_sec=None, size=None, timeout=600
+        *,
+        composition_id,
+        props,
+        out_path,
+        duration_sec=None,
+        size=None,
+        timeout=600,
+        supersample=1.0,
     ):
         out = Path(out_path)
         out.parent.mkdir(parents=True, exist_ok=True)
@@ -161,9 +164,7 @@ def test_cold_render_skips_ffmpeg_when_render_js_wrote_poster(tmp_path, monkeypa
         return out
 
     ffmpeg_calls: list = []
-    monkeypatch.setattr(
-        audio_mux, "write_poster", lambda *a, **k: ffmpeg_calls.append(1) or True
-    )
+    monkeypatch.setattr(audio_mux, "write_poster", lambda *a, **k: ffmpeg_calls.append(1) or True)
 
     brand = BrandKit(profile_id="x", display_name="Poster Club")
     card = {
@@ -175,9 +176,7 @@ def test_cold_render_skips_ffmpeg_when_render_js_wrote_poster(tmp_path, monkeypa
         },
     }
     out = tmp_path / "out" / "s.mp4"
-    with mock.patch.object(
-        motion, "_run_remotion", side_effect=_fake_run_with_in_render_poster
-    ):
+    with mock.patch.object(motion, "_run_remotion", side_effect=_fake_run_with_in_render_poster):
         result = motion.render_story_card(card, brand, out)
 
     assert ffmpeg_calls == [], "the in-render poster must skip the ffmpeg extraction"
@@ -195,7 +194,14 @@ def test_cold_render_without_in_render_poster_uses_ffmpeg(tmp_path, monkeypatch)
     monkeypatch.delenv("MEDIAHUB_REEL_MUSIC_DIR", raising=False)
 
     def _fake_run_no_poster(
-        *, composition_id, props, out_path, duration_sec=None, size=None, timeout=600
+        *,
+        composition_id,
+        props,
+        out_path,
+        duration_sec=None,
+        size=None,
+        timeout=600,
+        supersample=1.0,
     ):
         out = Path(out_path)
         out.parent.mkdir(parents=True, exist_ok=True)
@@ -228,19 +234,17 @@ def test_cold_render_without_in_render_poster_uses_ffmpeg(tmp_path, monkeypatch)
 
 def test_render_js_wires_in_render_poster_capture():
     src = _RENDER_JS.read_text(encoding="utf-8")
-    assert "renderStill" in src, (
-        "render.js must call renderStill for the in-render poster capture"
-    )
-    assert "delayRender" in src, (
-        "render.js must document that the capture honours the fonts delayRender hook"
-    )
-    assert "posterTimeFor" in src and "posterPathFor" in src, (
-        "render.js must own the poster-frame policy helpers"
-    )
+    assert "renderStill" in src, "render.js must call renderStill for the in-render poster capture"
+    assert (
+        "delayRender" in src
+    ), "render.js must document that the capture honours the fonts delayRender hook"
+    assert (
+        "posterTimeFor" in src and "posterPathFor" in src
+    ), "render.js must own the poster-frame policy helpers"
     assert "module.exports" in src, "the poster helpers must be exported for parity tests"
-    assert "require.main === module" in src, (
-        "main() must be guarded so require() can import the helpers without rendering"
-    )
+    assert (
+        "require.main === module" in src
+    ), "main() must be guarded so require() can import the helpers without rendering"
 
 
 # ---------------------------------------------------------------------------
@@ -269,9 +273,7 @@ def test_poster_helpers_parity_with_python():
         "path:m.posterPathFor('/x/y/abc123.mp4')};"
         "console.log(JSON.stringify(out));"
     )
-    res = subprocess.run(
-        [_node(), "-e", script], capture_output=True, text=True, timeout=30
-    )
+    res = subprocess.run([_node(), "-e", script], capture_output=True, text=True, timeout=30)
     assert res.returncode == 0, f"node failed: {res.stderr}"
     got = json.loads(res.stdout.strip())
 
@@ -326,9 +328,9 @@ def test_real_render_emits_in_render_poster(tmp_path, monkeypatch):
     result = motion.render_story_card(card, brand, out, duration_sec=1.0, variation_seed=1)
 
     cached_poster = audio_mux.poster_path_for(Path(result))
-    assert cached_poster.exists() and cached_poster.stat().st_size > 0, (
-        "the in-render poster sidecar must exist next to the cached MP4"
-    )
+    assert (
+        cached_poster.exists() and cached_poster.stat().st_size > 0
+    ), "the in-render poster sidecar must exist next to the cached MP4"
     assert cached_poster.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n", "poster must be a real PNG"
     # The poster also ships next to the published out-path MP4.
     assert audio_mux.poster_path_for(out).exists()

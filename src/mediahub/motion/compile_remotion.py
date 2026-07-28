@@ -18,7 +18,24 @@ import json
 from typing import Any, Dict, Iterable
 
 from .easing import EASINGS
-from .vocabulary import FPS, MOTION_REV, PRESETS, MotionPreset
+from .vocabulary import FPS, GLYPH_STAGGER_SEC, MOTION_REV, PRESETS, MotionPreset
+
+
+def _kf_token(k) -> Dict[str, Any]:
+    """One keyframe as a token dict.
+
+    ``interp`` is emitted ONLY when non-default (fold-only-when-present), so the
+    serialized dict for every shipped bezier preset stays byte-identical and the
+    generated ``tokens.generated.ts`` DATA blocks do not change.
+    """
+    tok: Dict[str, Any] = {
+        "offset": round(k.offset, 6),
+        "value": round(k.value, 6),
+        "easing": k.easing,
+    }
+    if k.interp != "bezier":
+        tok["interp"] = k.interp
+    return tok
 
 
 def preset_tokens(preset: MotionPreset) -> Dict[str, Any]:
@@ -31,13 +48,7 @@ def preset_tokens(preset: MotionPreset) -> Dict[str, Any]:
         "durationFrames": preset.duration_frames,
         "loop": preset.loop,
         "photo": preset.photo,
-        "channels": {
-            ch: [
-                {"offset": round(k.offset, 6), "value": round(k.value, 6), "easing": k.easing}
-                for k in kfs
-            ]
-            for ch, kfs in preset.channels.items()
-        },
+        "channels": {ch: [_kf_token(k) for k in kfs] for ch, kfs in preset.channels.items()},
     }
 
 
@@ -50,6 +61,11 @@ def token_bundle(presets: Iterable[MotionPreset] | None = None) -> Dict[str, Any
         "easings": {name: {"bezier": list(e.bezier)} for name, e in EASINGS.items()},
         "presets": {p.name: preset_tokens(p) for p in items},
         "reduced": {p.name: preset_tokens(p.reduced()) for p in items},
+        # Text-level timing shared by the TSX type channels. `glyphStaggerSec`
+        # is the per-glyph reveal cadence the kinetic_type / cascade intents read
+        # for their opt-in per-character reveal (the per-word channel keeps its
+        # own inline tempo). Single source of truth — the TSX never hard-codes it.
+        "text": {"glyphStaggerSec": round(GLYPH_STAGGER_SEC, 6)},
     }
 
 
@@ -67,7 +83,8 @@ def export_ts(bundle: Dict[str, Any] | None = None) -> str:
         "// The single source of truth is the Python preset registry; a guard\n"
         "// test (tests/test_motion_tokens_sync.py) fails if this drifts.\n"
         "\n"
-        "export type MotionKeyframe = { offset: number; value: number; easing: string };\n"
+        "export type MotionKeyframe = { offset: number; value: number; easing: string;"
+        ' interp?: "hold" | "auto" | "continuous" };\n'
         "export type MotionChannels = Record<string, MotionKeyframe[]>;\n"
         "export type MotionPresetTokens = {\n"
         "  name: string;\n"
@@ -85,6 +102,7 @@ def export_ts(bundle: Dict[str, Any] | None = None) -> str:
         "  easings: Record<string, { bezier: number[] }>;\n"
         "  presets: Record<string, MotionPresetTokens>;\n"
         "  reduced: Record<string, MotionPresetTokens>;\n"
+        "  text: { glyphStaggerSec: number };\n"
         "};\n"
         "\n"
         f"export const MOTION_TOKENS: MotionTokenBundle = {payload} as const;\n"

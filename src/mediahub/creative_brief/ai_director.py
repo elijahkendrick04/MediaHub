@@ -243,10 +243,14 @@ def _design_spec_system_prompt(archetypes: list[str], token_roles: list[str]) ->
         "diagonal_underline|thick_stripe|thin_stripe|double_stripe|side_rail|"
         "large_brackets|small_brackets|bracket_frame|corner_tabs|offset_badge|"
         'glass_chip",  # glass_chip = frosted-glass data chips over a photo (photo-led cards)\n'
-        '  "photo_treatment": "cutout|duotone|halftone|vignette|wash|sticker",\n'
+        '  "photo_treatment": "cutout|duotone|halftone|vignette|wash|sticker|'
+        'mosaic|motion_tile|roughen_edges",\n'
+        '  "photo_treatment_intensity": <-1 for auto (size the grade off the '
+        "card's decoration strength), else 0..1 for how strong the photo grade "
+        "reads>,\n"
         '  "logo_lockup": "full_horizontal|full_stacked|mono_light|mono_dark|icon",\n'
         '  "mood": "explosive|electric|calm|fierce|celebratory|stoic|precise|bold|triumphant|minimal",\n'
-        '  "motion_intent": "fade_in|snap_in_then_settle|slide_up|scale_in|kinetic_type|count_up|static|bounce_in|flip_reveal|swirl|reveal_from_sides|cascade|rise|pop|drop_in",\n'
+        '  "motion_intent": "fade_in|snap_in_then_settle|slide_up|scale_in|kinetic_type|count_up|static|bounce_in|flip_reveal|swirl|reveal_from_sides|cascade|rise|pop|drop_in|text_scramble",\n'
         '  "text_effects": {"headline|result|kicker|event|meta": "none|shadow|lift|hollow|outline|splice|echo|glitch|neon|background|gradient|extrude|warp|curve"} (optional flourish — usually {} ),\n'
         '  "emphasis_word": <optional: ONE word already present in a slot to two-tone-highlight, else "">,\n'
         '  "emphasis_style": "accent_ink|accent_pill|heavy",\n'
@@ -271,7 +275,13 @@ def _design_spec_system_prompt(archetypes: list[str], token_roles: list[str]) ->
         "word when it genuinely appears and reads legibly, else it stays plain.\n"
         "photo_treatment craft: wash unifies mismatched/phone photography into "
         "one campaign look; sticker gives a cutout the die-cut poster edge "
-        "(cutout archetypes only); duotone is the full two-ink brand grade.\n"
+        "(cutout archetypes only); duotone is the full two-ink brand grade. "
+        "mosaic/motion_tile/roughen_edges are editorial stylize looks (a blocky "
+        "posterise, a tiled photo replicate, a roughened silhouette) — reach for "
+        "them sparingly, only when a graphic, treated feel genuinely suits the "
+        "moment. photo_treatment_intensity tunes how strong any grade reads: use "
+        "-1 (auto) for most cards to size it off the card's decoration strength, "
+        "and 0..1 only when you want to dial a specific grade up or down.\n"
         "Choose the archetype that fits the moment (a medal → spotlight; a standout "
         "time with no photo → big_number or minimal poster; a great photo → "
         "full-bleed or diagonal). Lead with the most newsworthy hero_stat. Pick "
@@ -280,7 +290,9 @@ def _design_spec_system_prompt(archetypes: list[str], token_roles: list[str]) ->
         "swirl for a celebratory win, flip_reveal or reveal_from_sides for a single "
         "standout stat, cascade when several facts share the card. rise is a calm "
         "lift for understated results, pop a confident scale punch, drop_in a "
-        "decisive arrival from above.\n"
+        "decisive arrival from above. text_scramble decodes the result string "
+        "with a typewriter/scramble effect that lands on the exact value — reach "
+        "for it when a headline time or number is the whole story.\n"
         "accent_treatment is the margin accent the card carries on the still AND "
         "its motion render: the sizing variants (thick/thin/double stripe, "
         "large/small brackets, bracket_frame, corner_tabs, offset_badge, "

@@ -74,6 +74,34 @@ async function main() {
   const durationSec = args.duration ? parseFloat(args.duration) : null;
   const widthPx = args.width ? parseInt(args.width, 10) : null;
   const heightPx = args.height ? parseInt(args.height, 10) : null;
+  // Optional output frame rate override (fps-option). Absent (or <=0) keeps the
+  // composition's declared fps, so the default render is byte-identical; a
+  // curated value (24/25/30/50/60) re-times durationInFrames + the poster math
+  // and rides into the composition object exactly like --width/--height. The
+  // TSX is already fps-aware via useVideoConfig().fps, and compile.ts rescales
+  // its preset frame counts by fps/MOTION_TOKENS.fps.
+  const fpsArg = args.fps ? parseInt(args.fps, 10) : null;
+  // Optional supersample factor: render at scale× the target and let Python
+  // Lanczos-downscale back to WxH for crisper text/vector/gradient edges. Omitted
+  // (scale absent) when <=1 so the default render is byte-identical.
+  const scaleN = args.scale ? parseFloat(args.scale) : 1;
+  // Optional encode profile (bit-depth-gamut): higher-bit-depth codec /
+  // pixelFormat and a container colour-space tag, resolved Python-side from a
+  // closed profile vocabulary and passed as fixed CLI strings. Absent flags
+  // keep the historic h264 / yuv420p / no-colorSpace defaults, so the default
+  // renderMedia call is byte-identical to before. colorSpace stays null unless
+  // the flag is present — Remotion's own default is 'default', which emits NO
+  // colour-tagging ffmpeg args, so the OFF path must pass nothing at all.
+  const codecArg = args.codec || "h264";
+  const pixelFormatArg = args["pixel-format"] || "yuv420p";
+  const colorSpaceArg = args["color-space"] || null;
+  // Optional ProRes profile (alpha-export): only meaningful with codec=prores
+  // (Remotion throws if proResProfile is set with a non-prores codec). Absent
+  // (the default) spreads nothing, so the default renderMedia call is
+  // byte-identical; the transparent-export path passes "4444" alongside
+  // codec=prores + pixelFormat=yuva444p10le. Encoder-only — never touches the
+  // rendered frame buffer, so frame-purity is intact.
+  const proResProfileArg = args["prores-profile"] || null;
 
   if (!compositionId || !propsPath || !outputPath) {
     console.error(
@@ -126,15 +154,16 @@ async function main() {
     process.exit(4);
   }
 
+  const fps = fpsArg && fpsArg > 0 ? fpsArg : composition.fps;
   let durationInFrames = composition.durationInFrames;
   if (durationSec) {
-    durationInFrames = Math.max(1, Math.round(durationSec * composition.fps));
+    durationInFrames = Math.max(1, Math.round(durationSec * fps));
   }
   const width = widthPx && widthPx > 0 ? widthPx : composition.width;
   const height = heightPx && heightPx > 0 ? heightPx : composition.height;
 
   console.error(
-    `[remotion] rendering ${compositionId} (${width}x${height} @ ${composition.fps}fps × ${durationInFrames} frames)`,
+    `[remotion] rendering ${compositionId} (${width}x${height} @ ${fps}fps × ${durationInFrames} frames)`,
   );
   await renderMedia({
     composition: {
@@ -142,9 +171,13 @@ async function main() {
       durationInFrames,
       width,
       height,
+      fps,
     },
     serveUrl,
-    codec: "h264",
+    codec: codecArg,
+    ...(scaleN > 1 ? { scale: scaleN } : {}),
+    ...(colorSpaceArg ? { colorSpace: colorSpaceArg } : {}),
+    ...(proResProfileArg ? { proResProfile: proResProfileArg } : {}),
     outputLocation: outputPath,
     inputProps,
     chromiumOptions: {
@@ -154,7 +187,7 @@ async function main() {
     // the MeetReel on a 1-CPU deployment. Python's subprocess timeout is
     // 600s, so 120s here stays well inside the outer budget.
     timeoutInMilliseconds: 120000,
-    pixelFormat: "yuv420p",
+    pixelFormat: pixelFormatArg,
   });
   const renderElapsed = ((Date.now() - start) / 1000).toFixed(1);
   console.error(`[remotion] rendered → ${outputPath} (${renderElapsed}s)`);
@@ -171,15 +204,12 @@ async function main() {
   const kind = compositionId === "MeetReel" ? "reel" : "story";
   const posterPath = posterPathFor(outputPath);
   const posterFrame = Math.min(
-    Math.max(
-      0,
-      Math.round(posterTimeFor(kind, durationInFrames / composition.fps) * composition.fps),
-    ),
+    Math.max(0, Math.round(posterTimeFor(kind, durationInFrames / fps) * fps)),
     durationInFrames - 1,
   );
   try {
     await renderStill({
-      composition: { ...composition, durationInFrames, width, height },
+      composition: { ...composition, durationInFrames, width, height, fps },
       serveUrl,
       output: posterPath,
       frame: posterFrame,

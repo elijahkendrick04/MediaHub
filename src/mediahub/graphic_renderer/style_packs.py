@@ -801,14 +801,89 @@ def texture_stack(texture: str) -> Optional[tuple[str, str, str]]:
     return _TEXTURE_STACKS.get(str(texture or "").strip().lower())
 
 
-def _composite_texture_layer(base_a: str, base_b: str, blend: str, opacity: float) -> str:
+# ---------------------------------------------------------------------------
+# Seeded / mood-biased texture blend vocabulary (blend-modes, opt-in).
+#
+# The three hard-coded composite blends above (single-tile ``mix-blend-mode``,
+# stack composite ``mix-blend-mode``) are ``overlay`` by default. When a brief
+# opts into the seeded-blend feature, ``texture_blend_for`` picks a blend from
+# a mood-biased ordering of the *lightening/neutral* family, seeded by the
+# card key so the axis varies deterministically per card.
+#
+# ``multiply`` is deliberately EXCLUDED here (it darkens): two faint
+# white-on-transparent tiles must never fuse into a dark opaque mass over copy
+# (the invariant documented for ``_TEXTURE_STACKS`` above). This override lever
+# only ever swaps the *composite* mix-blend; the stack's internal
+# ``background-blend-mode`` (its tile-fusing lever from ``_TEXTURE_STACKS``)
+# stays untouched.
+# ---------------------------------------------------------------------------
+
+_TEXTURE_BLEND_FAMILY: tuple[str, ...] = ("overlay", "soft-light", "screen", "lighten")
+
+# mood → ordered blend preference (a permutation/subset of the safe family).
+# Keyed by the exact ``creative_brief.design_spec.MOODS`` tokens (pinned to that
+# vocabulary by ``tests/test_texture_layering.py``). A ``neutral`` mood (and any
+# unknown/absent mood) maps to the empty ordering — the sentinel meaning "no
+# bias, keep the hard-coded blend" — so the feature stays byte-identical there
+# even when the flag is on.
+_MOOD_BLEND_BIAS: dict[str, tuple[str, ...]] = {
+    "neutral": (),
+    "explosive": ("screen", "lighten", "overlay", "soft-light"),
+    "electric": ("screen", "lighten", "overlay", "soft-light"),
+    "celebratory": ("lighten", "screen", "overlay", "soft-light"),
+    "calm": ("soft-light", "overlay", "screen", "lighten"),
+    "stoic": ("soft-light", "overlay", "screen", "lighten"),
+    "minimal": ("soft-light", "overlay", "screen", "lighten"),
+    "fierce": ("overlay", "screen", "lighten", "soft-light"),
+    "precise": ("overlay", "soft-light", "lighten", "screen"),
+    "warm": ("soft-light", "overlay", "lighten", "screen"),
+    "bold": ("screen", "overlay", "lighten", "soft-light"),
+    "triumphant": ("lighten", "screen", "overlay", "soft-light"),
+}
+
+
+def texture_blend_for(mood: Optional[str], card_key: str, *, enabled: bool) -> str:
+    """A seeded, mood-biased texture composite blend mode, or ``""`` (blend-modes).
+
+    Returns ``""`` — the sentinel meaning "keep the current hard-coded
+    ``overlay`` blend" — when the feature is off (``not enabled``), when no
+    ``card_key`` resolves, or when the mood carries no bias (``neutral`` /
+    absent / unknown, via ``_mood_key`` normalisation). Otherwise picks a member
+    of the mood's ordering (all drawn from :data:`_TEXTURE_BLEND_FAMILY`;
+    ``multiply`` never appears), indexed by ``_seed_for(card_key, salt="blend")``
+    so the choice is deterministic per card and identical still↔motion.
+    """
+    if not enabled:
+        return ""
+    key = str(card_key or "").strip()
+    if not key:
+        return ""
+    ordering = _MOOD_BLEND_BIAS.get(_mood_key(mood))
+    if not ordering:
+        return ""
+    return ordering[_seed_for(key, salt="blend") % len(ordering)]
+
+
+def _composite_texture_layer(
+    base_a: str,
+    base_b: str,
+    blend: str,
+    opacity: float,
+    *,
+    blend_override: Optional[str] = None,
+) -> str:
     """Compositor: fuse two base tiles into one blended overlay div (G1.6).
 
     The two white-on-transparent tiles become the div's two ``background-image``
     layers, fused per-pixel by ``background-blend-mode:{blend}``; the composite
-    then rides onto the card via the shared ``mix-blend-mode:overlay`` at low
+    then rides onto the card via the shared ``mix-blend-mode`` at low
     ``opacity``. Returns ``""`` if either base tile is unknown (never a broken
     half-rendered layer). Distinct region from the ground/accent generators.
+
+    ``blend_override`` (blend-modes): when a validated family member, it replaces
+    the composite ``mix-blend-mode`` only (the tile-fusing
+    ``background-blend-mode:{blend}`` is untouched). ``None`` (the default) keeps
+    ``overlay`` — byte-identical to the historic string.
     """
     tile_a = _TEX_TILES.get(base_a, "")
     tile_b = _TEX_TILES.get(base_b, "")
@@ -816,22 +891,27 @@ def _composite_texture_layer(base_a: str, base_b: str, blend: str, opacity: floa
         return ""
     size_a = _TEX_SIZE.get(base_a, 20)
     size_b = _TEX_SIZE.get(base_b, 20)
+    mix = blend_override if blend_override else "overlay"
     return (
         f'<div style="position:absolute;inset:0;z-index:6;pointer-events:none;'
         f"background-image:url(&quot;{tile_a}&quot;),url(&quot;{tile_b}&quot;);"
         f"background-size:{size_a}px {size_a}px,{size_b}px {size_b}px;"
         f"background-repeat:repeat,repeat;background-blend-mode:{blend};"
-        f'opacity:{round(opacity, 3)};mix-blend-mode:overlay;"></div>'
+        f'opacity:{round(opacity, 3)};mix-blend-mode:{mix};"></div>'
     )
 
 
-def _texture_layer_html(texture: str, bold: bool) -> str:
+def _texture_layer_html(texture: str, bold: bool, *, blend_override: Optional[str] = None) -> str:
     """Texture generator: the surface-texture overlay for one texture token.
 
     Dispatches a *layered* token (two tiles fused by the compositor) or a plain
     *single* tile (the original grain-precedent overlay), returning ``""`` for
     ``none``/unknown so an undecorated surface injects nothing. The single-tile
     branch is byte-identical to the pre-G1.6 inline block.
+
+    ``blend_override`` (blend-modes): a validated lightening-family member
+    replaces the composite ``mix-blend-mode`` on both the single-tile and the
+    layered-stack path. ``None`` (the default) keeps ``overlay`` — byte-identical.
     """
     if texture == "none":
         return ""
@@ -840,16 +920,19 @@ def _texture_layer_html(texture: str, bold: bool) -> str:
         base_a, base_b, blend = stack
         # Two stacked patterns → a touch under the single-tile opacity so the
         # combined surface stays as faint as one tile (legibility-safe).
-        return _composite_texture_layer(base_a, base_b, blend, 0.15 if bold else 0.10)
+        return _composite_texture_layer(
+            base_a, base_b, blend, 0.15 if bold else 0.10, blend_override=blend_override
+        )
     tile = _TEX_TILES.get(texture, "")
     if not tile:
         return ""
     size = _TEX_SIZE.get(texture, 20)
     opacity = (0.16 if bold else 0.10) if texture != "grain" else (0.18 if bold else 0.12)
+    mix = blend_override if blend_override else "overlay"
     return (
         f'<div style="position:absolute;inset:0;z-index:6;pointer-events:none;'
         f"background-image:url(&quot;{tile}&quot;);background-size:{size}px {size}px;"
-        f'background-repeat:repeat;opacity:{opacity};mix-blend-mode:overlay;"></div>'
+        f'background-repeat:repeat;opacity:{opacity};mix-blend-mode:{mix};"></div>'
     )
 
 
@@ -957,6 +1040,7 @@ def pack_overlay_html(
     width: int,
     height: int,
     focus: tuple[float, float] | None = None,
+    blend_override: Optional[str] = None,
 ) -> str:
     """Build the overlay markup for ``pack`` (the ``{{ACCENT_DECORATION}}`` fill).
 
@@ -968,6 +1052,10 @@ def pack_overlay_html(
     ``focus`` (E6): the card's resolved saliency focus ``(fx, fy)`` in percent,
     recentring the ``vignette`` / ``spotlight`` ground on the subject. ``None``
     (photo-less cards) keeps the fixed centres — byte-identical.
+
+    ``blend_override`` (blend-modes): a validated lightening-family blend that
+    replaces the texture composite ``mix-blend-mode``. ``None`` (the default)
+    keeps the historic ``overlay`` — byte-identical.
     """
     if pack.is_bare:
         return ""
@@ -985,7 +1073,7 @@ def pack_overlay_html(
     # 2) Surface texture — a faint blended tile, or (G1.6) a two-tile layered
     #    composite. The generator dispatches single vs layered; both stay the
     #    low-opacity, mix-blend grain-precedent overlay.
-    tex_layer = _texture_layer_html(pack.texture, bold)
+    tex_layer = _texture_layer_html(pack.texture, bold, blend_override=blend_override)
     if tex_layer:
         layers.append(tex_layer)
 
@@ -1465,6 +1553,7 @@ __all__ = [
     "ACCENT_GEOS",
     "DENSITIES",
     "texture_stack",
+    "texture_blend_for",
     "StylePack",
     "normalise_pack",
     "list_style_packs",

@@ -25,6 +25,7 @@
 import React from "react";
 import { Easing, interpolate, useVideoConfig } from "remotion";
 import type { SceneCtx } from "./registry";
+import { wghtBloomAt, wghtFvs } from "../StoryCard";
 import {
   PhotoFilterDefs,
   photoGradeFilterFor,
@@ -227,6 +228,44 @@ export const KineticWords: React.FC<{
   if (parts.length === 0) {
     return null;
   }
+  // Glyph granularity (kinetic_type / cascade under the seed gate) splits each
+  // word into per-character inline-block spans on the shared glyph channel; word
+  // mode (the default) is byte-identical to the pre-glyph structure.
+  if (ctx.card.textGranularity === "glyph") {
+    let glyph = startIndex;
+    const lineTotal = parts.reduce((n, w) => n + Array.from(w).length, 0);
+    return (
+      <div style={style}>
+        {parts.map((w, wi) => {
+          const chars = Array.from(w);
+          const base = glyph;
+          glyph += chars.length;
+          return (
+            <span
+              key={`${w}-${wi}`}
+              style={{ display: "inline-block", marginRight: "0.28em" }}
+            >
+              {chars.map((ch, ci) => {
+                const a = ctx.anim.glyphAt(base + ci, lineTotal);
+                return (
+                  <span
+                    key={ci}
+                    style={{
+                      display: "inline-block",
+                      transform: `translateY(${a.y}px)`,
+                      opacity: a.opacity,
+                    }}
+                  >
+                    {ch}
+                  </span>
+                );
+              })}
+            </span>
+          );
+        })}
+      </div>
+    );
+  }
   return (
     <div style={style}>
       {parts.map((w, i) => {
@@ -306,7 +345,7 @@ export const PhotoFill: React.FC<{
   );
   return (
     <>
-      <PhotoFilterDefs card={card} />
+      <PhotoFilterDefs card={card} frame={frame} fps={fps} />
       {cropScale > 1 ? (
         <div
           style={{
@@ -412,8 +451,10 @@ export const StatChipsBlock: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
               fontVariantNumeric: "tabular-nums",
               fontWeight: 700,
               // D8 — the still's data-register weight (0 ⇒ omit, byte-identical).
-              fontVariationSettings:
-                card.wghtData && card.wghtData > 0 ? `'wght' ${Math.round(card.wghtData)}` : undefined,
+              // varfont-animation — blooms UP to that static weight via the
+              // shared frame-pure curve (identical to StoryCard's registers).
+              fontVariationSettings: wghtFvs(card.wghtData, wghtBloomAt(frame, durationInFrames))
+                .fontVariationSettings,
               fontSize: Math.round(17 * ts),
               color: valueInk,
               padding: `0 ${Math.round(10 * ts)}px`,
@@ -481,10 +522,12 @@ export const StatChipsBlock: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
                     fontVariantNumeric: "tabular-nums",
                     fontWeight: 700,
                     // D8 — the still's data-register weight (0 ⇒ omit, byte-identical).
-                    fontVariationSettings:
-                      card.wghtData && card.wghtData > 0
-                        ? `'wght' ${Math.round(card.wghtData)}`
-                        : undefined,
+                    // varfont-animation — blooms UP to that static weight via
+                    // the shared frame-pure curve.
+                    fontVariationSettings: wghtFvs(
+                      card.wghtData,
+                      wghtBloomAt(frame, durationInFrames),
+                    ).fontVariationSettings,
                     fontSize: Math.round(30 * ts),
                     lineHeight: 1.05,
                     color: ink,

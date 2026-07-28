@@ -35,12 +35,15 @@ from mediahub.creative_brief.generator import CreativeBrief, generate
 from mediahub.graphic_renderer.render import (
     _band_top_fraction,
     _duotone_defs_svg,
+    _roughen_seed_for,
     _sticker_outline_css,
+    _v2_photo_treatment_assets,
     _wash_defs_svg,
     darken,
     resolved_role_vars_for_brief,
 )
 from mediahub.visual import motion
+from mediahub.visual.motion import _photo_treatment_mirror_props, _roughen_seed_for_brief
 
 
 BRAND = BrandKit(
@@ -317,8 +320,158 @@ def test_untreated_cards_attach_no_filter_props(photo_env):
         "stickerRadius",
         "washTint",
         "washMix",
+        # stylize-richer — a clean cutout card attaches none of the new props.
+        "mosaicBlock",
+        "motionTileGrid",
+        "roughenSeed",
+        "roughenScale",
+        "treatmentIntensity",
     ):
         assert key not in props
+
+
+# ===========================================================================
+# stylize-richer — mosaic / motion_tile / roughen_edges + tunable intensity
+# ===========================================================================
+
+_V2_TPL = "full_bleed_photo_lower_third"
+
+
+def _still_brief(**over):
+    base = dict(
+        photo_treatment="cutout",
+        decoration_strength=0.5,
+        photo_treatment_intensity=-1.0,
+        variation_signature="sig",
+        id="x",
+    )
+    base.update(over)
+    return types.SimpleNamespace(**base)
+
+
+def _motion_brief(**over) -> dict:
+    d = {
+        "layout_template": _V2_TPL,
+        "photo_treatment": "cutout",
+        "decoration_strength": 0.5,
+        "variation_signature": "sig",
+        "id": "x",
+    }
+    d.update(over)
+    return d
+
+
+def test_mosaic_still_and_motion_share_the_block_size():
+    css, defs = _v2_photo_treatment_assets(
+        _still_brief(photo_treatment="mosaic"), {}, 1080, 1350, True
+    )
+    r = max(1, round(1 + 4 * 0.5))  # decoration_strength 0.5 → 3
+    assert f"mh-mosaic-{r}" in css
+    assert f'<feMorphology operator="dilate" radius="{r}"/>' in defs
+    props = _photo_treatment_mirror_props(
+        _motion_brief(photo_treatment="mosaic"), {"--mh-primary": "#000"}, True
+    )
+    assert props["mosaicBlock"] == r
+
+
+def test_motion_tile_still_and_motion_share_the_grid():
+    css, defs = _v2_photo_treatment_assets(
+        _still_brief(photo_treatment="motion_tile"), {}, 1080, 1350, True
+    )
+    n = 2 + round(2 * 0.5)  # 3
+    assert f"mh-mtile-{n}" in css
+    # The centre-crop subregion percentages are 4dp-formatted identically to the
+    # TSX's (100/n).toFixed(4) / (50-50/n).toFixed(4).
+    assert f'width="{100 / n:.4f}%"' in defs and f'x="{50 - 50 / n:.4f}%"' in defs
+    assert "<feTile" in defs
+    props = _photo_treatment_mirror_props(
+        _motion_brief(photo_treatment="motion_tile"), {"--mh-primary": "#000"}, True
+    )
+    assert props["motionTileGrid"] == n
+
+
+def test_roughen_still_and_motion_share_the_seed_and_scale():
+    sig = "roughen|parity|sig"
+    b = _still_brief(
+        photo_treatment="roughen_edges", decoration_strength=0.7, variation_signature=sig
+    )
+    css, defs = _v2_photo_treatment_assets(b, {}, 1080, 1350, True)
+    seed = _roughen_seed_for(b)
+    scale = max(1, round(2 + 10 * 0.7))  # 9
+    assert f"mh-roughen-{seed}-{scale}" in css
+    assert f'seed="{seed}"' in defs and f'scale="{scale}"' in defs
+    assert "feTurbulence" in defs and "feDisplacementMap" in defs
+    props = _photo_treatment_mirror_props(
+        _motion_brief(
+            photo_treatment="roughen_edges", decoration_strength=0.7, variation_signature=sig
+        ),
+        {"--mh-primary": "#000"},
+        True,
+    )
+    assert props["roughenSeed"] == seed
+    assert props["roughenScale"] == scale
+
+
+def test_roughen_seed_is_a_deterministic_function_of_variation_signature():
+    """Same signature → same seed (parity + stable re-renders); different
+    signatures spread; and the still and motion surfaces derive the IDENTICAL
+    seed from the same signature — never Math.random / a per-surface value."""
+    a1 = _roughen_seed_for(
+        _still_brief(photo_treatment="roughen_edges", variation_signature="sig-A")
+    )
+    a2 = _roughen_seed_for(
+        _still_brief(photo_treatment="roughen_edges", variation_signature="sig-A")
+    )
+    b = _roughen_seed_for(
+        _still_brief(photo_treatment="roughen_edges", variation_signature="sig-B")
+    )
+    assert a1 == a2  # deterministic
+    assert a1 != b  # different signatures spread
+    # The motion surface hashes the SAME signature to the SAME seed.
+    assert _roughen_seed_for_brief({"variation_signature": "sig-A"}) == a1
+    # No randomness lives in the motion filter layer (a call, not the header
+    # comment's "No Math.random / Date" prose).
+    src = _src("sprint/layers/photo_filters.tsx")
+    assert "Math.random(" not in src and "Date.now(" not in src and "new Date(" not in src
+
+
+def test_intensity_overrides_decoration_strength_on_both_surfaces():
+    # decoration_strength 0.0 would give the smallest block, but intensity 1.0
+    # overrides it to the largest — on BOTH surfaces, in lock-step.
+    b = _still_brief(
+        photo_treatment="mosaic", decoration_strength=0.0, photo_treatment_intensity=1.0
+    )
+    css, _ = _v2_photo_treatment_assets(b, {}, 1080, 1350, True)
+    r = max(1, round(1 + 4 * 1.0))  # 5
+    assert f"mh-mosaic-{r}" in css
+    props = _photo_treatment_mirror_props(
+        _motion_brief(
+            photo_treatment="mosaic", decoration_strength=0.0, photo_treatment_intensity=1.0
+        ),
+        {"--mh-primary": "#000"},
+        True,
+    )
+    assert props["mosaicBlock"] == r
+    assert props["treatmentIntensity"] == 1.0
+
+
+def test_stylize_looks_absent_stay_byte_identical():
+    # A clean cutout still emits neither CSS nor defs, and the halftone/wash
+    # existing looks are unchanged when intensity is unset (byte-identity guard).
+    assert _v2_photo_treatment_assets(_still_brief(), {}, 1080, 1350, True) == ("", "")
+    props = _photo_treatment_mirror_props(_motion_brief(), {"--mh-primary": "#000"}, True)
+    for k in ("mosaicBlock", "motionTileGrid", "roughenSeed", "roughenScale", "treatmentIntensity"):
+        assert k not in props
+
+
+def test_stylize_looks_named_by_the_motion_layer():
+    """Every stylize look the still executes is rebuilt by the motion layer."""
+    src = _src("sprint/layers/photo_filters.tsx")
+    for token in ("mosaicFilterId", "motionTileFilterId", "roughenFilterId"):
+        assert token in src
+    assert 'operator="dilate"' in src
+    assert "feTile" in src
+    assert 'type="fractalNoise"' in src and "feDisplacementMap" in src
 
 
 # ===========================================================================

@@ -23,8 +23,23 @@ from typing import Mapping
 from .vocabulary import MotionCapError, MotionPreset, nearest_ken_burns_variant
 
 
+def _has_non_bezier_interp(preset: MotionPreset) -> bool:
+    """True when any keyframe uses a hold/auto/continuous interp mode.
+
+    FFmpeg's fade/zoompan recipes express only bezier easing — a step or
+    cubic-Hermite track shape cannot be reproduced by the fade filter (opacity
+    tracks) or the Ken Burns zoompan (photo scale tracks). Rendering one anyway
+    would silently diverge from Remotion/CSS, so it's declared unsupported.
+    """
+    return any(k.interp != "bezier" for kfs in preset.channels.values() for k in kfs)
+
+
 def supports_ffmpeg(preset: MotionPreset) -> bool:
     """True when FFmpeg can render this preset at the frame level."""
+    # A non-bezier interp (hold/auto/continuous) is unsupported on this engine —
+    # honest fallback rather than a wrong linear fade or bezier Ken Burns.
+    if _has_non_bezier_interp(preset):
+        return False
     if preset.photo and nearest_ken_burns_variant(preset.name):
         return True
     # Opacity-only entrances/exits map cleanly to the fade filter.
@@ -39,6 +54,7 @@ def compile_ffmpeg(
     width: int = 1080,
     height: int = 1920,
     tag: str = "0",
+    fps: int = 30,
 ) -> str:
     """An FFmpeg filtergraph fragment for ``preset`` (no leading/trailing pads).
 
@@ -48,6 +64,15 @@ def compile_ffmpeg(
     a fade-out lands at the clip's tail.
     """
     clip = float(clip_sec if clip_sec is not None else duration_sec)
+    # A non-bezier interp reaches both the photo (scale) and opacity branches; the
+    # FFmpeg recipes can only express bezier easing, so refuse it honestly rather
+    # than render a curve that diverges from Remotion/CSS.
+    if _has_non_bezier_interp(preset):
+        raise MotionCapError(
+            f"{preset.name!r} uses a non-bezier keyframe interpolation "
+            "(hold/auto/continuous); the FFmpeg engine only expresses bezier "
+            "easing — use the Remotion or CSS target."
+        )
     if preset.photo:
         variant = nearest_ken_burns_variant(preset.name)
         if not variant:
@@ -56,7 +81,7 @@ def compile_ffmpeg(
         from mediahub.visual.reel_ffmpeg import _ken_burns_filter
 
         return _ken_burns_filter(
-            float(duration_sec), variant=variant, tag=tag, width=width, height=height
+            float(duration_sec), variant=variant, tag=tag, width=width, height=height, fps=fps
         )
     if preset.channel_names() == ("opacity",):
         return _fade_fragment(preset, float(duration_sec), clip)

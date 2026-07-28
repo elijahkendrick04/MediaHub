@@ -110,9 +110,29 @@ _EASINGS: Tuple[Easing, ...] = (
         "(1-pow(1-P,3))",
         note="FFmpeg approximation drops the overshoot (no negative range in zoompan).",
     ),
+    # Graded overshoot beside ease_out_back: a gentler and a more pronounced recoil.
+    Easing(
+        "ease_out_back_soft",
+        (0.34, 1.30, 0.64, 1.0),
+        "(1-pow(1-P,3))",
+        note="FFmpeg approximation drops the gentle overshoot (no negative range in zoompan).",
+    ),
+    Easing(
+        "ease_out_back_strong",
+        (0.34, 1.80, 0.64, 1.0),
+        "(1-pow(1-P,3))",
+        note="FFmpeg approximation drops the pronounced overshoot (no negative range in zoompan).",
+    ),
     # Exits — accelerate away.
     Easing("ease_in_cubic", (0.55, 0.055, 0.675, 0.19), "pow(P,3)"),
     Easing("ease_in_quad", (0.55, 0.085, 0.68, 0.53), "pow(P,2)"),
+    # Anticipation: a small pre-load (dips below the start) before it advances.
+    Easing(
+        "ease_in_back",
+        (0.36, 0.0, 0.66, -0.56),
+        "pow(P,3)",
+        note="FFmpeg approximation drops the anticipation pre-load (no negative range in zoompan).",
+    ),
     # Reposition / ambient — neutral, organic.
     Easing(
         "ease_in_out_cubic",
@@ -120,6 +140,13 @@ _EASINGS: Tuple[Easing, ...] = (
         "(if(lt(P,0.5),4*pow(P,3),1-pow(-2*P+2,3)/2))",
     ),
     Easing("ease_in_out_sine", (0.445, 0.05, 0.55, 0.95), "(0.5-0.5*cos(PI*P))"),
+    # Anticipate then overshoot — a full pre-load-and-recoil for a within-scene move.
+    Easing(
+        "ease_in_out_back",
+        (0.68, -0.6, 0.32, 1.6),
+        "(if(lt(P,0.5),4*pow(P,3),1-pow(-2*P+2,3)/2))",
+        note="FFmpeg approximation drops the anticipation and overshoot (no negative range in zoompan).",
+    ),
 )
 
 EASINGS: Dict[str, Easing] = {e.name: e for e in _EASINGS}

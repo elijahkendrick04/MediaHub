@@ -49,6 +49,10 @@ _TREATMENT_PHRASES: dict[str, str] = {
     "vignette": "cutout with vignette glow",
     "duotone": "duotone-tinted cutout in brand colour",
     "halftone": "halftone-dot cutout treatment",
+    # stylize-richer — the three pure-SVG stylize looks.
+    "mosaic": "blocky mosaic stylize on the photo",
+    "motion_tile": "static tiled-replicate stylize on the photo",
+    "roughen_edges": "roughened-edge silhouette stylize on the photo",
 }
 
 # M9 (STILLS-3): mood → server-side PhotoRecipe preset. Every brief carries a
@@ -169,7 +173,18 @@ class CreativeBrief:
     composition: str = "right"
     photo_treatment: str = "cutout"
     decoration_strength: float = 0.5
+    # stylize-richer — the OPTIONAL tunable photo-grade strength (0..1). -1.0 (the
+    # sentinel) means "unset → size the grade off decoration_strength", so a legacy
+    # brief without the field renders byte-identically. A set value overrides the
+    # strength on both the still and the motion surface.
+    photo_treatment_intensity: float = -1.0
     mood: str = ""  # one or two mood words
+    # blend-modes — opt into the seeded/mood-biased texture composite blend
+    # (graphic_renderer.style_packs.texture_blend_for). False (the default) keeps
+    # the hard-coded ``overlay`` composite blend on both the still and the motion
+    # render, so a legacy/undirected brief is byte-identical. Set from the design
+    # director's DesignSpec.seeded_blend by apply_design_spec.
+    seeded_blend: bool = False
     ai_directed: bool = False  # True when AI chose the direction
     variation_signature: str = ""  # short signature for dedup/audit
     # Gen Engine v2 style pack (additive; default-safe). The decorative lever
@@ -956,6 +971,9 @@ def apply_design_spec(brief: CreativeBrief, spec) -> CreativeBrief:
         # M9: the director's mood re-keys the photo grade (celebratory →
         # punchy, stoic → editorial, …) so pixels match the chosen feeling.
         brief.photo_adjust = _photo_recipe_for_mood(spec.mood)
+    # blend-modes — carry the director's opt-in for the seeded texture composite
+    # blend. False (the default) keeps the byte-identical ``overlay`` composite.
+    brief.seeded_blend = bool(getattr(spec, "seeded_blend", False))
     if spec.rationale:
         brief.why_this_design = spec.rationale
     if spec.motion_intent:
@@ -990,6 +1008,10 @@ def apply_design_spec(brief: CreativeBrief, spec) -> CreativeBrief:
     ):
         brief.photo_treatment = spec.photo_treatment
         brief.image_treatment = _TREATMENT_PHRASES[spec.photo_treatment]
+        # stylize-richer — carry the OPTIONAL tunable grade strength alongside
+        # the treatment it sizes. Unset (the -1.0 sentinel) leaves the grade on
+        # the byte-identical decoration_strength path.
+        brief.photo_treatment_intensity = getattr(spec, "photo_treatment_intensity", -1.0)
     brief.ai_directed = True
     opts = brief.hero_stat_options or {}
     if spec.hero_stat in opts:

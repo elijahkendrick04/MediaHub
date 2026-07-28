@@ -100,10 +100,7 @@ def _lever_executed(src: str, token: str) -> bool:
     import re
 
     escaped = re.escape(token)
-    return bool(
-        re.search(rf'case\s+"{escaped}"\s*:', src)
-        or re.search(rf'"{escaped}"\s*:', src)
-    )
+    return bool(re.search(rf'case\s+"{escaped}"\s*:', src) or re.search(rf'"{escaped}"\s*:', src))
 
 
 def test_tsx_executes_every_style_pack_lever():
@@ -116,18 +113,15 @@ def test_tsx_executes_every_style_pack_lever():
     for ground in sp.GROUNDS:
         if ground == "flat":
             continue
-        assert _lever_executed(src, ground), \
-            f"ground {ground!r} not executed in StoryCard.tsx"
+        assert _lever_executed(src, ground), f"ground {ground!r} not executed in StoryCard.tsx"
     for texture in sp.TEXTURES:
         if texture == "none":
             continue
-        assert _lever_executed(src, texture), \
-            f"texture {texture!r} not executed in StoryCard.tsx"
+        assert _lever_executed(src, texture), f"texture {texture!r} not executed in StoryCard.tsx"
     for geo in sp.ACCENT_GEOS:
         if geo == "none":
             continue
-        assert _lever_executed(src, geo), \
-            f"accent geometry {geo!r} not executed in StoryCard.tsx"
+        assert _lever_executed(src, geo), f"accent geometry {geo!r} not executed in StoryCard.tsx"
 
 
 def test_pack_ground_paints_beneath_scene_content_like_the_still():
@@ -162,7 +156,16 @@ def test_reel_threads_brief_so_pack_reaches_each_beat(monkeypatch):
     bd = _brief_dict(monkeypatch, seed=3, cid="swim-2")
     captured: dict = {}
 
-    def _fake_run(*, composition_id, props, out_path, duration_sec=None, size=None, timeout=600):
+    def _fake_run(
+        *,
+        composition_id,
+        props,
+        out_path,
+        duration_sec=None,
+        size=None,
+        timeout=600,
+        supersample=1.0,
+    ):
         captured["props"] = props
         from pathlib import Path
 
@@ -175,8 +178,6 @@ def test_reel_threads_brief_so_pack_reaches_each_beat(monkeypatch):
 
     with mock.patch.object(motion, "_run_remotion", side_effect=_fake_run):
         monkeypatch.setenv("DATA_DIR", tempfile.mkdtemp())
-        motion.render_meet_reel(
-            [_card(2)], BRAND, tempfile.mkdtemp() + "/reel.mp4", briefs=[bd]
-        )
+        motion.render_meet_reel([_card(2)], BRAND, tempfile.mkdtemp() + "/reel.mp4", briefs=[bd])
     beat = captured["props"]["cards"][0]
     assert beat["stylePack"] == bd["style_pack"]

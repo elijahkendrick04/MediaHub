@@ -31,12 +31,13 @@ import hashlib
 import json
 import math
 import os
+import re
 import shutil
 import subprocess
 import threading
 from dataclasses import is_dataclass, asdict
 from pathlib import Path
-from typing import Any, Callable, ContextManager, Optional
+from typing import Any, Callable, ContextManager, NamedTuple, Optional
 
 
 from mediahub.visual.reel_engine import (
@@ -64,17 +65,103 @@ MOTION_FORMATS: dict[str, tuple[int, int]] = {
 }
 DEFAULT_MOTION_FORMAT = "story"
 
+# Arbitrary-canvas geometry (any-canvas): beyond the 4 named presets a caller
+# may request a validated custom ``(width, height)`` cut via a canonical
+# ``"WxH"`` size token (route params ``?w=&h=`` or ``?size=WxH``; there is no
+# env var). The TSX compositions are preset-free responsive, so one composition
+# serves any size — no ``.tsx``/``.ts``/``.css`` edit, so ``renderer_generation()``
+# is unchanged and every named-preset byte stays identical (presets never leave
+# the dict path below). The bounds keep the encode honest: even luma dims
+# (yuv420p / h264), a sane per-dimension range, and a bounded aspect. The
+# MAX ceiling also keeps a 2x supersample intermediate (≤5120px) inside libx264.
+MIN_CANVAS_DIM = 256  # per-dimension floor
+MAX_CANVAS_DIM = 2560  # per-dimension ceiling (2x supersample intermediate stays < libx264 limit)
+MIN_CANVAS_ASPECT = 0.25  # 1:4
+MAX_CANVAS_ASPECT = 4.0  # 4:1
+_SIZE_TOKEN_RE = re.compile(r"^(\d{2,4})x(\d{2,4})$")  # canonical "WxH", lowercase x
+
+
+def validate_canvas_size(w: int, h: int) -> tuple[int, int]:
+    """Validate an arbitrary motion canvas ``(w, h)`` — the ONE resolver.
+
+    Raises ``ValueError`` (an honest config error, same contract as
+    :func:`motion_format_size`) when either dimension is not an ``int``, is
+    ``< MIN_CANVAS_DIM`` or ``> MAX_CANVAS_DIM``, is **odd** (yuv420p / h264 need
+    even luma dims), or the aspect ``w/h`` is outside
+    ``[MIN_CANVAS_ASPECT, MAX_CANVAS_ASPECT]``. Bools are rejected explicitly
+    (``bool`` is an ``int`` subclass), mirroring ``_validate_fps`` and
+    ``saliency._parse_ratio``. Returns ``(w, h)`` unchanged on success.
+
+    This is the single validator both the route layer and
+    :func:`motion_format_size` call, so a size the route accepted can never
+    later raise inside a deep render helper.
+    """
+    if isinstance(w, bool) or isinstance(h, bool):
+        raise ValueError(f"canvas dims must be int, not bool: {(w, h)!r}")
+    if not isinstance(w, int) or not isinstance(h, int):
+        raise ValueError(f"canvas dims must be int: {(w, h)!r}")
+    for dim in (w, h):
+        if dim < MIN_CANVAS_DIM or dim > MAX_CANVAS_DIM:
+            raise ValueError(f"canvas dim {dim} out of range [{MIN_CANVAS_DIM}, {MAX_CANVAS_DIM}]")
+        if dim % 2 != 0:
+            raise ValueError(f"canvas dim {dim} must be even (yuv420p / h264)")
+    aspect = w / h
+    if aspect < MIN_CANVAS_ASPECT or aspect > MAX_CANVAS_ASPECT:
+        raise ValueError(
+            f"canvas aspect {aspect:.3f} out of range "
+            f"[{MIN_CANVAS_ASPECT}, {MAX_CANVAS_ASPECT}]"
+        )
+    return w, h
+
+
+def _parse_size_token(token: str) -> Optional[tuple[int, int]]:
+    """Parse a canonical ``"WxH"`` size token → validated ``(w, h)``.
+
+    Returns ``None`` on a regex miss (so ``motion_format_size`` can then raise
+    its "unknown format" error); on a regex hit calls :func:`validate_canvas_size`,
+    which RAISES ``ValueError`` on an out-of-bounds / odd / bad-aspect size. The
+    single validator means the token this returns is always the fully-validated
+    one — never an unvalidated size on one path and a validated one on another.
+    """
+    m = _SIZE_TOKEN_RE.match(str(token).strip().lower())
+    if m is None:
+        return None
+    return validate_canvas_size(int(m.group(1)), int(m.group(2)))
+
+
+def canonical_motion_format(w: int, h: int) -> str:
+    """Normalise a validated ``(w, h)`` to a preset NAME or a ``"WxH"`` token.
+
+    A client that reaches a preset's exact dims via ``?w=&h=`` collapses to the
+    preset name (so it reuses the preset cache key + bare filename + byte-identical
+    output rather than minting a duplicate ``"1080x1920"`` cut); any other size
+    returns ``f"{w}x{h}"`` built from the **validated ints**. This is the route-layer
+    normaliser that keeps preset byte-identity even when a caller uses geometry
+    params. ``(w, h)`` is assumed already validated by :func:`validate_canvas_size`.
+    """
+    for name, dims in MOTION_FORMATS.items():
+        if dims == (w, h):
+            return name
+    return f"{w}x{h}"
+
 
 def motion_format_size(format_name: str) -> tuple[int, int]:
     """Resolve a motion format name to ``(width, height)``.
 
-    Unknown names raise ``ValueError`` — an honest configuration error
-    beats silently rendering the wrong aspect ratio.
+    Named presets (``story``/``portrait``/``square``/``landscape``) resolve via
+    the ``MOTION_FORMATS`` dict — 100% unchanged. A non-preset key is then tried
+    as a canonical arbitrary-canvas ``"WxH"`` token (route params ``?w=&h=`` /
+    ``?size=WxH``); a valid token returns its validated ``(w, h)``. Anything else
+    raises ``ValueError`` — an honest configuration error beats silently
+    rendering the wrong aspect ratio.
     """
     key = (format_name or DEFAULT_MOTION_FORMAT).strip().lower()
-    if key not in MOTION_FORMATS:
-        raise ValueError(f"unknown motion format {format_name!r}; valid: {sorted(MOTION_FORMATS)}")
-    return MOTION_FORMATS[key]
+    if key in MOTION_FORMATS:
+        return MOTION_FORMATS[key]
+    parsed = _parse_size_token(key)
+    if parsed is not None:
+        return parsed
+    raise ValueError(f"unknown motion format {format_name!r}; valid: {sorted(MOTION_FORMATS)}")
 
 
 def _data_dir() -> Path:
@@ -117,20 +204,33 @@ def _touch_cache_hit(cached: Path) -> None:
 
 
 def _prune_motion_cache(d: Optional[Path] = None) -> None:
-    """Bound the motion cache to ``_motion_cache_max()`` MP4s, oldest first.
+    """Bound the motion cache to ``_motion_cache_max()`` video slots, oldest first.
 
-    Each evicted ``<hash>.mp4`` takes its sidecars with it (the ``<hash>.json``
+    Each evicted ``<hash>.<ext>`` takes its sidecars with it (the ``<hash>.json``
     manifest, ``<hash>.poster.png`` poster, ``<hash>.audio.json`` record). The
     ``props/`` subdir is keyed by output-stem, not cache-hash, so it is left
     alone. Best-effort: a prune failure must never fail a successful render.
+
+    alpha-export: the glob unions the ``.mp4`` slots with the opt-in alpha
+    ``.mov``/``.webm`` slots so a transparent-export cut still counts toward the
+    cap and is swept with its sidecars — otherwise alpha slots would grow
+    UNBOUNDED on the bounded Render disk. With zero alpha files present the union
+    returns the identical ``.mp4`` set, so the DEFAULT prune stays byte-identical.
     """
     d = d or _cache_dir()
     cap = _motion_cache_max()
     try:
-        # Skip in-flight atomic-render temp files (".<stem>.<pid>.<tid>.tmp.mp4",
+        # Skip in-flight atomic-render temp files (".<stem>.<pid>.<tid>.tmp.<ext>",
         # #73) — they are hidden dotfiles, whereas a real cache entry is a bare
         # 24-hex-char stem, so they must never count toward the cap or be evicted.
-        entries = [p for p in d.glob("*.mp4") if not p.name.startswith(".")]
+        # The dotfile exclusion also drops the alpha tmp files (".<stem>...tmp.mov"
+        # / ".tmp.webm").
+        entries = [
+            p
+            for ext in ("*.mp4", "*.mov", "*.webm")
+            for p in d.glob(ext)
+            if not p.name.startswith(".")
+        ]
     except OSError:
         return
     if len(entries) <= cap:
@@ -172,6 +272,125 @@ def _logo_to_data_uri(logo_svg: Optional[str]) -> str:
         return ""
     encoded = base64.b64encode(s.encode("utf-8")).decode("ascii")
     return f"data:image/svg+xml;base64,{encoded}"
+
+
+def _brand_logo_svg(brand_kit: Any) -> str:
+    """Extract the brand's raw inline SVG markup (mirrors ``_brand_to_dict``'s
+    source resolution), or ``""`` when the brand carries no SVG mark.
+
+    Only ever returns raw ``<svg …>`` markup (never a ``data:`` URI or a stale
+    text mark), so the decomposer below can parse the DOM the still renderer
+    also draws — no remote fetch, no invented content.
+    """
+    if brand_kit is None:
+        raw = ""
+    elif isinstance(brand_kit, dict):
+        raw = brand_kit.get("logo_svg") or brand_kit.get("logoSvg") or ""
+    elif is_dataclass(brand_kit):
+        raw = getattr(brand_kit, "logo_svg", "") or ""
+    else:
+        raw = getattr(brand_kit, "logo_svg", "") or getattr(brand_kit, "logoSvg", "") or ""
+    raw = raw if isinstance(raw, str) else ""
+    s = raw.strip()
+    return s if s.startswith("<") else ""
+
+
+def _decompose_logo_svg(logo_svg: Optional[str]) -> Optional[dict]:
+    """Decompose an inline SVG logo into ordered per-path draw-on data, or
+    ``None`` for an honest degrade to the static filled ``<img>``.
+
+    Returns ``{"viewBox": str, "paths": [{"d", "len", "stroke"}, …]}`` where
+    ``len`` is the deterministic polyline arc-length of the path (via
+    :func:`mediahub.motion.paths.from_svg`, computed here so the browser never
+    calls ``getTotalLength()``) and ``stroke`` is the path's OWN resolved
+    fill-or-stroke colour (inherited from an ancestor when the path itself
+    declares none) — never an invented hue.
+
+    Degrades to ``None`` (→ the existing static ``<img>``) when:
+      * the markup fails to parse,
+      * it has NO ``<path>`` children (a pure ``<circle>``/``<rect>``/raster
+        logo the trim-path can't animate), or
+      * ANY path uses a command ``paths.from_svg`` does not model (A/S/T/…),
+        since a partial draw-on of a mis-parsed path would be dishonest.
+
+    Deterministic: ``xml.etree`` parse of a fixed string + the deterministic
+    arc-length maths, identical every run. No LLM, no network.
+    """
+    if not logo_svg or not isinstance(logo_svg, str):
+        return None
+    s = logo_svg.strip()
+    if not s.startswith("<"):
+        return None
+
+    import xml.etree.ElementTree as ET
+
+    from mediahub.motion import paths as _paths
+
+    try:
+        root = ET.fromstring(s)
+    except ET.ParseError:
+        return None
+
+    def _local(tag: Any) -> str:
+        # Strip the "{namespace}" prefix ElementTree prepends.
+        return tag.rsplit("}", 1)[-1] if isinstance(tag, str) else ""
+
+    # viewBox verbatim, else derived from width/height, else give up (the TSX
+    # needs a coordinate space for the paths).
+    view_box = (root.get("viewBox") or root.get("viewbox") or "").strip()
+    if not view_box:
+        w = (root.get("width") or "").strip().rstrip("px").strip()
+        h = (root.get("height") or "").strip().rstrip("px").strip()
+        try:
+            if w and h:
+                view_box = f"0 0 {float(w):g} {float(h):g}"
+        except ValueError:
+            view_box = ""
+    if not view_box:
+        return None
+
+    # Parent map so a path with no own fill/stroke can inherit the colour its
+    # ancestor <g>/<svg> declared (the same colour the browser paints the img).
+    parent = {child: p for p in root.iter() for child in p}
+
+    def _inherited(el: Any, attr: str) -> str:
+        cur: Any = el
+        while cur is not None:
+            v = (cur.get(attr) or "").strip()
+            if v:
+                return v
+            cur = parent.get(cur)
+        return ""
+
+    def _stroke_for(el: Any) -> str:
+        fill = _inherited(el, "fill")
+        if fill and fill.lower() != "none":
+            return fill
+        stroke = _inherited(el, "stroke")
+        if stroke and stroke.lower() != "none":
+            return stroke
+        # SVG's default paint is black; honest (the browser paints the same),
+        # never an invented brand hue.
+        return "#000000"
+
+    out_paths: list[dict] = []
+    for el in root.iter():
+        if _local(el.tag) != "path":
+            continue
+        d = (el.get("d") or "").strip()
+        if not d:
+            continue
+        try:
+            mp = _paths.from_svg(d)
+        except ValueError:
+            # Unsupported command (A/S/T/…): honest degrade — never a partial
+            # draw of a mis-parsed path.
+            return None
+        out_paths.append({"d": d, "len": round(mp.length, 3), "stroke": _stroke_for(el)})
+
+    if not out_paths:
+        return None
+    return {"viewBox": view_box, "paths": out_paths}
 
 
 def _brand_to_dict(brand_kit: Any) -> dict[str, str]:
@@ -585,6 +804,27 @@ def _cutout_data_uri_for_brief(brief: Optional[dict]) -> str:
 # sprint_hooks/gradient_mesh_bg._TRIGGERS; parsed before any ":mode" suffix).
 _MESH_TRIGGERS = frozenset({"gradient_mesh", "gradient-mesh", "mesh"})
 
+# render-banding-dither: the still's standalone opt-in token for the ordered-
+# dither debanding overlay (mirrors sprint_hooks/dither_bg._TRIGGERS). A base
+# token, deliberately SEPARATE from the mesh ":mode" suffix so the two never
+# collide on background_style's single suffix slot.
+_DITHER_TRIGGERS = frozenset({"dither"})
+
+
+def _dither_for_brief(brief: Optional[dict]) -> bool:
+    """Whether the still opted into the ordered-dither debanding overlay.
+
+    Parity by construction: parses ``background_style`` exactly like the still
+    render hook (``sprint_hooks.dither_bg``) — the standalone ``"dither"`` base
+    token — so a card's video debands the same big fill the approved still did.
+    False (the default and every miss) keeps the card props byte-identical.
+    """
+    b = brief if isinstance(brief, dict) else {}
+    raw = str(b.get("background_style") or "").strip().lower()
+    if not raw:
+        return False
+    return raw.partition(":")[0] in _DITHER_TRIGGERS
+
 
 def _mesh_bg_for_brief(brief: Optional[dict], brand_kit: Any, format_name: str) -> str:
     """The still's G1.8 gradient-mesh ground for this card as a CSS
@@ -768,6 +1008,36 @@ def _overlap_accent_for_brief(brief: Optional[dict]) -> str:
         return ""
 
 
+def _texture_blend_for_brief(brief: Optional[dict]) -> str:
+    """The still's seeded texture composite blend mode (blend-modes), or ``""``.
+
+    Mirrors ``render._v2_style_pack_overlay``: only a card that opted into
+    ``seeded_blend`` AND resolved a NON-BARE style pack AND carries a stable card
+    key + a biased mood yields a blend, computed by the SAME
+    ``style_packs.texture_blend_for``. Attached only when non-empty, so every
+    other card keeps byte-identical props (and story cache key).
+    """
+    if not isinstance(brief, dict):
+        return ""
+    if not brief.get("seeded_blend"):
+        return ""
+    pack_id = str(brief.get("style_pack") or "").strip()
+    if not pack_id:
+        return ""
+    key = str(brief.get("variation_signature") or brief.get("id") or "").strip()
+    if not key:
+        return ""
+    try:
+        from mediahub.graphic_renderer import style_packs as _sp
+
+        pack = _sp.style_pack_from_id(pack_id)
+        if pack is None or pack.is_bare:
+            return ""
+        return _sp.texture_blend_for(str(brief.get("mood") or ""), key, enabled=True)
+    except Exception:
+        return ""
+
+
 # The v2 archetypes whose motion scenes paint the cutout as layered depth
 # planes themselves (M12 twins). They take the decoration-scaled depth
 # treatment and (band_break) the alpha-derived band placement props.
@@ -782,6 +1052,39 @@ def _decoration_strength_of(brief: Optional[dict]) -> float:
         return float(b.get("decoration_strength") or 0.5)
     except (TypeError, ValueError):
         return 0.5
+
+
+def _resolved_treatment_strength_of(brief: Optional[dict]) -> float:
+    """The 0..1 strength that sizes a photo grade — the motion mirror of
+    ``render._resolved_treatment_strength``. ``photo_treatment_intensity`` (0..1)
+    wins when set; otherwise it falls back to ``decoration_strength`` (clamped),
+    so a card without the new token sizes every grade byte-identically."""
+    b = brief if isinstance(brief, dict) else {}
+    raw = b.get("photo_treatment_intensity", -1.0)
+    try:
+        intensity = float(raw)
+    except (TypeError, ValueError):
+        intensity = -1.0
+    if intensity >= 0.0:
+        return max(0.0, min(1.0, intensity))
+    return max(0.0, min(1.0, _decoration_strength_of(b)))
+
+
+def _roughen_seed_for_brief(brief: Optional[dict]) -> int:
+    """The feTurbulence integer seed for a roughen-edges card, derived from the
+    card's shared ``variation_signature`` (salt='roughen') — byte-for-byte the
+    same derivation as ``render._roughen_seed_for``, so still and motion draw the
+    identical silhouette perturbation."""
+    b = brief if isinstance(brief, dict) else {}
+    sig = str(b.get("variation_signature") or b.get("id") or "").strip()
+    if not sig:
+        return 0
+    try:
+        from mediahub.graphic_renderer.style_packs import _seed_for as _rk_seed
+
+        return _rk_seed(sig, salt="roughen") % 100000
+    except Exception:
+        return 0
 
 
 def _pack_ground_focus_prop(
@@ -864,13 +1167,13 @@ def _photo_treatment_mirror_props(
             "duotoneHighlight": root_vars.get("--mh-accent", "#FFFFFF"),
         }
     if treatment == "halftone":
-        strength = _decoration_strength_of(b)
+        strength = _resolved_treatment_strength_of(b)
         return {"halftoneTile": int(round(14 + 18 * max(0.0, min(1.0, strength))))}
     if treatment == "sticker":
         ink = root_vars.get("--mh-on-primary")
         if not ink or not has_cutout:
             return {}
-        s = max(0.0, min(1.0, _decoration_strength_of(b)))
+        s = _resolved_treatment_strength_of(b)
         width, height = motion_format_size(format_name)
         radius = max(3, int(round(min(width, height) * (0.003 + 0.004 * s))))
         return {"stickerInk": str(ink), "stickerRadius": radius}
@@ -881,9 +1184,60 @@ def _photo_treatment_mirror_props(
             tint = darken(root_vars.get("--mh-primary", "#0A2540"), 0.20)
         except Exception:
             return {}
-        s = max(0.0, min(1.0, _decoration_strength_of(b)))
+        s = _resolved_treatment_strength_of(b)
         return {"washTint": tint, "washMix": round(0.18 + 0.24 * s, 4)}
+    # stylize-richer — three pure-SVG stylize looks. Each derives its param(s)
+    # from the SAME resolved strength the still uses, so the TSX rebuilds the
+    # identical held filter; attached ONLY on its own branch, so every other
+    # card keeps a byte-identical prop dict. ``treatmentIntensity`` rides the
+    # props (informational parity + it folds the tuning into the content hash).
+    if treatment == "mosaic":
+        s = _resolved_treatment_strength_of(b)
+        return {"mosaicBlock": max(1, int(round(1 + 4 * s))), "treatmentIntensity": round(s, 4)}
+    if treatment == "motion_tile":
+        s = _resolved_treatment_strength_of(b)
+        return {"motionTileGrid": 2 + int(round(2 * s)), "treatmentIntensity": round(s, 4)}
+    if treatment == "roughen_edges":
+        s = _resolved_treatment_strength_of(b)
+        return {
+            "roughenSeed": _roughen_seed_for_brief(b),
+            "roughenScale": max(1, int(round(2 + 10 * s))),
+            "treatmentIntensity": round(s, 4),
+        }
     return {}
+
+
+# blur-family — the develop-in focus blur enriches from the single isotropic
+# gaussian into a deterministic {directional, radial, lens} family, but ONLY on
+# a legacy-animated graded photo card (a sourced photograph with a graded
+# treatment that did NOT resolve an exact still-mirror). The four graded
+# treatments photo_filters.baseStackFor animates; the exact-mirror v2 cards
+# (duotone/halftone/wash) keep their held SVG grade with no stacked intro blur.
+_FOCUS_BLUR_TREATMENTS = frozenset({"duotone", "halftone", "vignette", "wash"})
+_FOCUS_BLUR_STYLES = ("directional", "radial", "lens")
+# The same two mood families photo_filters.applyMoodNuance buckets on.
+_FOCUS_BLUR_ENERGETIC = ("electric", "kinetic", "snappy", "bold", "triumph", "celebratory")
+_FOCUS_BLUR_CALM = ("calm", "composed", "weighty", "contemplative", "melancholic")
+
+
+def _focus_blur_style(seed: int, mood: str) -> str:
+    """The develop-in focus-blur family for a legacy-animated graded photo card.
+
+    A pure function of (variation_seed, mood): energetic moods get a directional
+    whip streak, calm moods a lens bokeh, and a neutral mood lets the seed pick
+    so a pack of neutral cards still varies. Never returns "gaussian" — that is
+    the absence default photo_filters.tsx renders when the prop is not attached.
+    The specific SVG smear (directional axis, radial orientation, lens lift) is
+    a frame-pure sub-choice inside the TSX; this only names the family.
+    """
+    m = (mood or "").lower()
+    if any(w in m for w in _FOCUS_BLUR_ENERGETIC):
+        return "directional"
+    if any(w in m for w in _FOCUS_BLUR_CALM):
+        return "lens"
+    s = abs(int(seed or 0))
+    frac = (((s * 2654435761) % 1000) + 1000) % 1000 / 1000
+    return _FOCUS_BLUR_STYLES[int(frac * len(_FOCUS_BLUR_STYLES)) % len(_FOCUS_BLUR_STYLES)]
 
 
 def _stat_chips_for_brief(brief: Optional[dict]) -> list[dict[str, str]]:
@@ -1174,7 +1528,12 @@ def _photo_srcs_for_card(card: Any, brief: Optional[dict], brand_kit: Any) -> li
 
 
 def _footage_for_card(
-    card: Any, brief: Optional[dict], brand_kit: Any, *, beat_seconds: float
+    card: Any,
+    brief: Optional[dict],
+    brand_kit: Any,
+    *,
+    beat_seconds: float,
+    speed_ramp: str = "",
 ) -> tuple[Optional[Any], str]:
     """Resolve this card's footage beat (M23) — ``(resolution, reason)``.
 
@@ -1185,16 +1544,111 @@ def _footage_for_card(
     quiet miss, ``(None, reason)`` when a candidate lost or failed — the
     caller records the reason in the render manifest and the photo path
     renders untouched.
+
+    ``speed_ramp`` (opt-in, default ``""``) requests a baked decelerate-into-
+    the-beat ramp on the resolved clip; ``""`` keeps the clip byte-identical.
     """
     try:
         from mediahub.visual import footage as _footage
 
         photo_asset, _ = _photo_asset_for_brief(brief)
         return _footage.resolve_card_footage(
-            card, brief, brand_kit, beat_seconds=beat_seconds, photo_asset=photo_asset
+            card,
+            brief,
+            brand_kit,
+            beat_seconds=beat_seconds,
+            photo_asset=photo_asset,
+            speed_ramp=speed_ramp or None,
         )
     except Exception:
         return None, ""
+
+
+def _brief_speed_ramp(brief: Optional[dict]) -> str:
+    """The story card's opt-in footage speed-ramp kind, or ``""`` (off).
+
+    A server-only creative axis read straight from the brief (``speed_ramp``);
+    it never rides into the Remotion props — the ramp is baked into the trimmed
+    clip on the server. Absent / blank keeps the footage beat byte-identical.
+    Only a kind :func:`footage.speed_ramp_plan` recognises has any effect (an
+    unknown value degrades honestly to the native trim).
+    """
+    b = brief if isinstance(brief, dict) else {}
+    return str(b.get("speed_ramp") or "").strip()
+
+
+# Entrance-stagger scale (adjustable-stagger): a deterministic mood-derived
+# multiplier on the token-compiled entrance intents' importance stagger. Calm /
+# measured moods loosen the separation (>1), high-energy moods tighten it (<1).
+# Substring matching mirrors the TSX mood gating (pop.ts subdued set + the
+# StoryCard accent-amp regex), so compound moods still resolve. Only drop_in /
+# rise / pop route through entranceChannels, so only they consume it.
+_STAGGER_LOOSER = ("calm", "stoic", "precise", "minimal", "composed", "weighty")
+_STAGGER_TIGHTER = ("electric", "explosive", "fierce", "celebratory", "triumph")
+_STAGGER_INTENTS = frozenset({"drop_in", "rise", "pop"})
+
+
+def _entrance_stagger_scale(mood: str, motion_intent: str) -> float:
+    """A deterministic entrance-stagger multiplier, or ``1.0`` for a neutral mood
+    or a non-entrance intent (``1.0`` → the prop is omitted → byte-identical)."""
+    if motion_intent not in _STAGGER_INTENTS:
+        return 1.0
+    m = (mood or "").lower()
+    if any(k in m for k in _STAGGER_LOOSER):
+        return 1.3
+    if any(k in m for k in _STAGGER_TIGHTER):
+        return 0.65
+    return 1.0
+
+
+# text-fx-richer — the CLOSED set of opt-in entrance text animators. This is the
+# SOLE trusted producer of the tokens the TSX ``textAnimator`` enum accepts:
+# Python only ever emits one of these four members (or omits the prop), so no
+# operator string reaches the animator switch — a closed enum + a single trusted
+# producer, never an expression language (invariant #6/#7). Order is fixed so
+# the deterministic seed bucket below is stable across runs.
+_TEXT_ANIMATORS: tuple[str, ...] = (
+    "blur_reveal",
+    "track_in",
+    "wiggle_settle",
+    "word_rise_blur",
+)
+
+_TEXT_FX_TRUTHY = {"1", "true", "yes", "on"}
+
+
+def _text_fx_enabled() -> bool:
+    """Master switch for the richer text animators (``MEDIAHUB_TEXT_FX``).
+
+    Default OFF: unset / malformed / a non-truthy value returns ``False`` so no
+    card carries a ``textAnimator`` prop and every existing cache key and
+    rendered byte is unchanged (byte-identical default). Mirrors
+    ``_motion_supersample``'s honest env parse — no DSP guessing."""
+    return os.environ.get("MEDIAHUB_TEXT_FX", "").strip().lower() in _TEXT_FX_TRUTHY
+
+
+def _text_animator_for(props: dict, variation_seed: Any) -> str:
+    """Pick the opt-in entrance animator for a card, or ``""``.
+
+    Returns ``""`` (no animator) unless the master switch is ON **and** the card
+    is a type-carried intent card (kinetic_type / cascade — the surface the
+    KineticLine per-glyph reveal owns) **and** it is on the SAME glyph gate that
+    yields per-glyph mode (``seed % 2 == 1``, mirroring the ``textGranularity``
+    gate). Gating on the glyph condition guarantees ``perGlyph`` is true wherever
+    an animator attaches, so a per-glyph animator is never painted onto a
+    word-mode card. The preset is picked from a DIFFERENT seed bucket
+    (``(seed // 2) % 4``) than the granularity gate, so the two gates are
+    independent and sibling cards vary. A pure integer bucket over the sanctioned
+    ``variation_seed`` — no model inference, deterministic-engine boundary
+    respected."""
+    if not _text_fx_enabled():
+        return ""
+    if props.get("motionIntent") not in ("kinetic_type", "cascade"):
+        return ""
+    seed = int(variation_seed or 0)
+    if seed % 2 != 1:
+        return ""
+    return _TEXT_ANIMATORS[(seed // 2) % len(_TEXT_ANIMATORS)]
 
 
 def _card_to_props(
@@ -1376,6 +1830,42 @@ def _card_to_props(
         props["photoSrcs"] = photo_srcs
     if mesh_bg:
         props["meshBg"] = mesh_bg
+    # render-banding-dither: the ordered-dither debanding overlay, attached ONLY
+    # when the still opted in (background_style="dither"), so every other card's
+    # props (and cache key) stay byte-identical (fold-only-when-present). The TSX
+    # <Dither> layer paints the same static Bayer tile the still hook injects, so
+    # the video debands the same big fill the approved still did.
+    if _dither_for_brief(b):
+        props["dither"] = True
+    # adjustable-stagger: retune the token-compiled entrance stagger by mood
+    # (calm moods loosen the separation, high-energy tighten it). Attached only
+    # when it differs from the default AND the intent is one of the entrance
+    # intents that consume it, so neutral / non-entrance cards keep byte-identical
+    # props (and story cache keys) — no composition-revision bump.
+    _stagger_scale = _entrance_stagger_scale(props.get("mood", ""), props.get("motionIntent", ""))
+    if _stagger_scale != 1.0:
+        props["staggerScale"] = _stagger_scale
+    # per-glyph text reveal: the two type-carried intents (kinetic_type /
+    # cascade) can render their headline one CHARACTER at a time instead of one
+    # word at a time. Selection is a deterministic engine decision (a seed gate),
+    # never a director/LLM field — half the seeds of those two intents opt in, so
+    # sibling cards vary. Attached ONLY when it fires (fold-only-when-present), so
+    # every other card keeps a byte-identical prop dict / cache key; the TSX reads
+    # "word" by default and renders the byte-identical per-word DOM.
+    if (
+        props.get("motionIntent") in ("kinetic_type", "cascade")
+        and int(variation_seed or 0) % 2 == 1
+    ):
+        props["textGranularity"] = "glyph"
+    # text-fx-richer: the opt-in closed-enum entrance animator. Attached ONLY
+    # when the master switch (MEDIAHUB_TEXT_FX) is on AND the card is on the same
+    # glyph gate above (so perGlyph is guaranteed true and a per-glyph animator
+    # never lands on a word-mode card). Fold-only-when-present — with the switch
+    # off (the default) every card keeps a byte-identical prop dict / cache key /
+    # rendered byte, exactly like the textGranularity / overlapAccent attaches.
+    _text_animator = _text_animator_for(props, variation_seed)
+    if _text_animator:
+        props["textAnimator"] = _text_animator
     # F9 medal chrome (still parity): the resolved specular ramp, attached only
     # on a gate-passing medal card so non-medal cards keep byte-identical props.
     medal_ramp = roles.get("roleMedalRamp", "")
@@ -1390,6 +1880,13 @@ def _card_to_props(
     overlap_accent = _overlap_accent_for_brief(b)
     if overlap_accent:
         props["overlapAccent"] = overlap_accent
+    # blend-modes (still parity): the seeded, mood-biased texture composite blend
+    # the still painted. Attached only when the brief opted in AND a blend
+    # resolved, so every other card keeps byte-identical props (and cache key) —
+    # no composition-revision bump (fold-only-when-present).
+    texture_blend = _texture_blend_for_brief(b)
+    if texture_blend:
+        props["textureBlend"] = texture_blend
     # LEFTOVER-1 (UI 1.18 → motion): a manual crop persisted in the card's
     # inspector overrides wins over the saliency focus — the same
     # ``photo_pos`` value the still honours, validated by the still's own
@@ -1443,6 +1940,24 @@ def _card_to_props(
             format_name=format_name,
         )
     )
+    # blur-family: enrich the develop-in focus blur into a deterministic
+    # {directional, radial, lens} family for a legacy-animated graded photo
+    # card — a sourced photograph with a graded treatment that did NOT resolve
+    # an exact still-mirror (v2 duotone/halftone/wash keep their held SVG grade
+    # with no stacked intro blur; a footage beat plays real video, no develop-in
+    # grade). Fold-only-when-present: attached ONLY here, so every photo-less /
+    # cutout / clean / exact-mirror / footage / default card keeps a
+    # byte-identical prop dict (and cache key). The style is picked Python-side
+    # (pure fn of variation_seed + mood) and rendered by photo_filters.tsx; it
+    # resolves to 0 on the held frame, so still<->motion parity is preserved.
+    _pt = str(b.get("photo_treatment") or "").strip().lower()
+    _exact_mirror = any(
+        k in props for k in ("duotoneShadow", "duotoneHighlight", "halftoneTile", "washTint")
+    )
+    if photo_uri and footage is None and _pt in _FOCUS_BLUR_TREATMENTS and not _exact_mirror:
+        props["focusBlurStyle"] = _focus_blur_style(
+            int(variation_seed or 0), str(b.get("mood") or "")
+        )
     # D8 (Canva gap analysis): the still's density/mood-coherent supporting weight
     # register (kicker/meta/data), mirrored so the reel's labels/meta/data carry
     # the same weights the still painted. Attached ONLY when the still spent the
@@ -1611,9 +2126,13 @@ def _card_manifest_axes(card_props: dict) -> dict:
         "archetype": card_props.get("archetype") or "",
         "style_pack": card_props.get("stylePack") or "",
         "overlap_accent": card_props.get("overlapAccent") or "",
+        "texture_blend": card_props.get("textureBlend") or "",
         "motion_intent": card_props.get("motionIntent") or "",
+        "text_granularity": card_props.get("textGranularity") or "word",
+        "text_animator": card_props.get("textAnimator") or "",
         "accent_style": card_props.get("accentStyle") or "",
         "photo_treatment": card_props.get("photoTreatment") or "",
+        "focus_blur_style": card_props.get("focusBlurStyle") or "gaussian",
         "background_style": card_props.get("backgroundStyle") or "",
         "mood": card_props.get("mood") or "",
         "variation_seed": card_props.get("variationSeed") or 0,
@@ -1629,6 +2148,10 @@ def _card_manifest_axes(card_props: dict) -> dict:
         "hero_stat": card_props.get("heroStat") or "",
         "stat_chips": len(card_props.get("statChips") or []),
         "has_pb_bars": bool(card_props.get("pbBars")),
+        # per-effect-toggle: the decorative axes this render suppressed for an
+        # A/B comparison. Empty on every shipped card (the review-only path is
+        # the only writer), so a default manifest is unchanged in meaning.
+        "effects_disabled": list(card_props.get("effectsDisabled") or []),
     }
 
 
@@ -1653,6 +2176,62 @@ def _card_mix_profile(card: Any, brief: Optional[dict] = None) -> Optional[str]:
             if val:
                 return str(val)
     return None
+
+
+# per-effect-toggle (REVIEW-ONLY A/B): the fixed allowlist of DECORATIVE axes a
+# reviewer may suppress for a with/without comparison render. Deliberately
+# excludes every legibility- / accessibility-critical layer — photo scrims and
+# filters, and burn-in captions stay ALWAYS-ON — so no toggle can drop a text/bg
+# pair below its APCA gate or remove a required scrim. Sorted, immutable.
+EFFECT_TOGGLE_ALLOWLIST: tuple[str, ...] = (
+    "accent",
+    "background_pattern",
+    "cutout",
+    "mesh_bg",
+    "motion_intent",
+    "overlap_accent",
+    "sprint_layers",
+    "style_pack",
+    "text_fx",
+)
+
+
+def _validate_effect_toggles(keys: Any) -> list[str]:
+    """Filter an arbitrary iterable of effect keys to the sorted allowlist.
+
+    Unknown keys are dropped; duplicates collapse. The result is a stable,
+    sorted list so the same request always keys the same cache entry (and the
+    order can never perturb the content hash). A non-iterable / empty input
+    yields ``[]``. This is a deterministic production knob — no model inference —
+    so it never crosses the deterministic-engine boundary.
+    """
+    if not keys or isinstance(keys, (str, bytes)):
+        return []
+    allowed = set(EFFECT_TOGGLE_ALLOWLIST)
+    out = {str(k) for k in keys if str(k) in allowed}
+    return sorted(out)
+
+
+def _effect_toggles_for_brief(brief: Optional[dict]) -> list[str]:
+    """The sorted decorative axes a brief asks to SUPPRESS, or ``[]``.
+
+    Reads ``brief["effect_toggles"]`` — a plain ``{effect_key: bool}`` dict — and
+    returns the allowlisted keys explicitly set falsey (validated + sorted via
+    :func:`_validate_effect_toggles`). Keys set truthy, unknown keys, and an
+    absent field all yield no suppression. Read straight from the payload (like
+    ``_card_mix_profile``), never model-inferred.
+
+    NOTE: this is consumed ONLY by the review-only A/B render path — it is never
+    folded into a shipped card's props, so the still a shipped card mirrors stays
+    in still<->motion parity. Toggling an effect changes the *comparison* render,
+    not the card that gets exported for posting.
+    """
+    b = brief if isinstance(brief, dict) else {}
+    toggles = b.get("effect_toggles")
+    if not isinstance(toggles, dict):
+        return []
+    disabled = [k for k, v in toggles.items() if not v]
+    return _validate_effect_toggles(disabled)
 
 
 def _library_bed_for(content_key: str):
@@ -1784,6 +2363,48 @@ def _reel_audio_plan(
 # The Remotion compositions and the FFmpeg engine both run at 30fps; the caption
 # engine needs the cadence to turn millisecond SRT cues into frame windows.
 MOTION_FPS = 30
+
+# Curated, selectable output frame rates (fps-option). 30 stays the default and
+# the byte-identical baseline; a non-default choice folds "fps" into the content
+# cache key and appends --fps to the node command (fold-only-when-active), and
+# compile.ts rescales its preset frame counts by fps/30 so entrances keep their
+# wall-clock timing. The set is deliberately small — the film/broadcast/social
+# rates the renderer is validated for.
+ALLOWED_FPS = frozenset({24, 25, 30, 50, 60})
+
+
+def _validate_fps(fps: int) -> int:
+    """Return ``fps`` if it is one of :data:`ALLOWED_FPS`, else raise ``ValueError``.
+
+    Rejects anything outside the curated set (``0``, ``48``, ``None``, floats,
+    booleans) up front so a bad request fails loudly before any expensive
+    photo-embed / render work rather than emitting an off-spec MP4.
+    """
+    if isinstance(fps, bool) or not isinstance(fps, int) or fps not in ALLOWED_FPS:
+        raise ValueError(f"unsupported fps {fps!r}; choose one of {sorted(ALLOWED_FPS)}")
+    return fps
+
+
+def _fps_kw(fps: int) -> dict:
+    """The ``fps=`` keyword to forward, empty at the default.
+
+    Only non-default renders carry the kwarg downstream, so the default call
+    signature — and every existing render mock / call assertion — is unchanged
+    and the default render stays byte-identical.
+    """
+    return {"fps": int(fps)} if int(fps) != MOTION_FPS else {}
+
+
+def _encode_kw(encode: Optional[dict]) -> dict:
+    """The ``encode=`` keyword to forward, empty at the default (encode is None).
+
+    bit-depth-gamut: only an active profile carries the kwarg downstream, so the
+    default call signature — and every existing render mock / call assertion —
+    is unchanged and the default render stays byte-identical (``_run_remotion``
+    itself defaults ``encode=None``, so an absent kwarg == the OFF path)."""
+    return {"encode": encode} if encode is not None else {}
+
+
 _TRUTHY = {"1", "true", "yes", "on"}
 
 
@@ -1812,7 +2433,7 @@ def _caption_roles(card_dict: dict, brand_dict: dict) -> tuple[str, str, str]:
 
 
 def _story_caption_json(
-    card_dict: dict, brand_dict: dict, audio_plan, *, duration_sec: float
+    card_dict: dict, brand_dict: dict, audio_plan, *, duration_sec: float, fps: int = MOTION_FPS
 ) -> str:
     """The caption track for a story render as a JSON string, or ``""``.
 
@@ -1834,7 +2455,7 @@ def _story_caption_json(
             script,
             voice=voice,
             duration_sec=duration_sec,
-            fps=MOTION_FPS,
+            fps=fps,
             ground=ground,
             onground=onground,
             accent=accent,
@@ -1844,7 +2465,9 @@ def _story_caption_json(
         return ""
 
 
-def _reel_caption_json(card_dict: dict, brand_dict: dict, *, beat_frames: int) -> str:
+def _reel_caption_json(
+    card_dict: dict, brand_dict: dict, *, beat_frames: int, fps: int = MOTION_FPS
+) -> str:
     """Per-beat caption track for a reel card as a JSON string, or ``""``.
 
     The reel narrates one continuous script, so each beat is captioned from its
@@ -1861,7 +2484,7 @@ def _reel_caption_json(card_dict: dict, brand_dict: dict, *, beat_frames: int) -
         track = subtitle_burn.text_caption_track(
             line,
             total_frames=beat_frames,
-            fps=MOTION_FPS,
+            fps=fps,
             ground=ground,
             onground=onground,
             accent=accent,
@@ -2037,6 +2660,277 @@ def _update_manifest_audio(cached: Path, audio_rec: dict) -> None:
         pass
 
 
+def _motion_supersample() -> float:
+    """Supersample factor for motion renders (``MEDIAHUB_MOTION_SUPERSAMPLE``),
+    clamped to ``[1.0, 2.0]``. ``1.0`` (unset / malformed / default) renders at
+    the native target resolution — byte-identical to today. A value > 1 renders
+    at scale× and Lanczos-downscales back to the target for crisper text / vector
+    / gradient edges, at extra render cost (mirrors the stills' DPR supersample)."""
+    raw = os.environ.get("MEDIAHUB_MOTION_SUPERSAMPLE", "").strip()
+    if not raw:
+        return 1.0
+    try:
+        v = float(raw)
+    except ValueError:
+        return 1.0
+    return max(1.0, min(2.0, v))
+
+
+# true-motion-blur — the opt-in shutter-accumulation axis. OFF by default:
+# without ``MEDIAHUB_MOTION_BLUR`` opted in, ``_motion_blur()`` returns ``None``
+# so no ``motionBlur`` prop is folded into the card/reel props and every cache
+# key + rendered byte is byte-identical to today. When ON, the composition wraps
+# ONLY the settling moving layers (the story hero/result entrance + count-up, the
+# reel whip flick) in a frame-pure multi-sample sampler: it recomputes the
+# closed-form animated quantity at ``samples`` deterministic sub-frame offsets
+# across the shutter window and composites the copies with equal-weight
+# progressive alpha. The sub-frame set is a pure function of the integer frame,
+# so identical env ⇒ identical render (no Math.random/Date.now anywhere). The
+# perpetual camera/parallax channels are deliberately NOT sampled, so the
+# terminal/held frame collapses to the single at-rest frame and still↔motion
+# parity is preserved. A closed env parse + fixed clamp — no DSP/LLM guessing, so
+# the deterministic-engine boundary is respected.
+MOTION_BLUR_DEFAULT_SAMPLES = 8
+MOTION_BLUR_SAMPLES_RANGE = (2, 16)
+MOTION_BLUR_DEFAULT_SHUTTER = 180.0
+MOTION_BLUR_SHUTTER_RANGE = (1.0, 360.0)
+
+
+def _motion_blur() -> Optional[dict]:
+    """Resolve the opt-in motion-blur config, or ``None`` when OFF.
+
+    Returns ``None`` unless ``MEDIAHUB_MOTION_BLUR`` is truthy (the byte-identical
+    default). When ON, reads the optional ``MEDIAHUB_MOTION_BLUR_SAMPLES`` (clamped
+    to ``[2, 16]``) and ``MEDIAHUB_MOTION_BLUR_SHUTTER`` (shutter angle in degrees,
+    clamped to ``[1.0, 360.0]``) and returns a canonical
+    ``{"samples": <int>, "shutter": <float>}`` dict. Malformed values fall back to
+    the defaults (never raises) so the render stays deterministic. Mirrors
+    ``_motion_supersample``'s honest env parse — no DSP guessing."""
+    if os.environ.get("MEDIAHUB_MOTION_BLUR", "").strip().lower() not in _TRUTHY:
+        return None
+    lo_s, hi_s = MOTION_BLUR_SAMPLES_RANGE
+    samples = MOTION_BLUR_DEFAULT_SAMPLES
+    raw_s = os.environ.get("MEDIAHUB_MOTION_BLUR_SAMPLES", "").strip()
+    if raw_s:
+        try:
+            samples = int(round(float(raw_s)))
+        except ValueError:
+            samples = MOTION_BLUR_DEFAULT_SAMPLES
+    samples = max(lo_s, min(hi_s, samples))
+    lo_a, hi_a = MOTION_BLUR_SHUTTER_RANGE
+    shutter = MOTION_BLUR_DEFAULT_SHUTTER
+    raw_a = os.environ.get("MEDIAHUB_MOTION_BLUR_SHUTTER", "").strip()
+    if raw_a:
+        try:
+            shutter = float(raw_a)
+        except ValueError:
+            shutter = MOTION_BLUR_DEFAULT_SHUTTER
+    shutter = max(lo_a, min(hi_a, shutter))
+    return {"samples": samples, "shutter": shutter}
+
+
+# bit-depth-gamut — the opt-in higher-bit-depth / wide-gamut ENCODE vocabulary.
+# Each entry is a FIXED, verified (codec, pixelFormat, colorSpace, container)
+# quad — a closed table, never an expression language: no operator-supplied
+# codec/pixelFormat string ever reaches renderMedia, only these names select a
+# profile. All shipped profiles are MP4-container so the six ``video/mp4``
+# serving routes need no change; the ``container`` field exists so a future
+# ``.mov``/ProRes profile can slot in once those routes learn ``video/quicktime``.
+#
+# Honesty (invariant 5): Chromium composites 8-bit sRGB frames. These profiles
+# RE-ENCODE those same brand-locked, APCA-gated colours at higher bit-depth
+# precision (less encode banding) and TAG the container's gamut/transfer
+# metadata. They do NOT synthesise wide-gamut colour that was never rendered.
+# ``h265-10`` (genuine 10-bit precision, no colour tag) and ``h265-10-bt709``
+# (10-bit + honest rec709 tag) are the SAFE recommended defaults. ``bt2020-ncl``
+# is offered but FLAGGED: ffmpeg tags the file HLG/2020 and applies a limited-
+# range matrix relabel over sRGB-origin pixels — it is NOT a true gamut map, and
+# a tonemapping player that honours the tag can display it differently from the
+# approved 8-bit sRGB still. The manifest states this verbatim.
+MOTION_ENCODE_PROFILES: dict[str, dict] = {
+    "h265-10": {
+        "name": "h265-10",
+        "codec": "h265",
+        "pixelFormat": "yuv420p10le",
+        "colorSpace": None,
+        "container": ".mp4",
+    },
+    "h265-10-bt709": {
+        "name": "h265-10-bt709",
+        "codec": "h265",
+        "pixelFormat": "yuv420p10le",
+        "colorSpace": "bt709",
+        "container": ".mp4",
+    },
+    "h265-10-bt2020": {
+        "name": "h265-10-bt2020",
+        "codec": "h265",
+        "pixelFormat": "yuv420p10le",
+        "colorSpace": "bt2020-ncl",
+        "container": ".mp4",
+    },
+    "h265-8-bt709": {
+        "name": "h265-8-bt709",
+        "codec": "h265",
+        "pixelFormat": "yuv420p",
+        "colorSpace": "bt709",
+        "container": ".mp4",
+    },
+}
+
+
+def _motion_encode_profile() -> Optional[dict]:
+    """The opt-in higher-bit-depth / wide-gamut ENCODE profile, or None (default).
+
+    ``MEDIAHUB_MOTION_ENCODE`` selects a named profile from the closed
+    :data:`MOTION_ENCODE_PROFILES` vocabulary. Unset / empty / ``"default"`` /
+    ``"h264"`` / any unknown name → ``None``, which keeps the render
+    byte-identical to today (8-bit ``yuv420p``, no colour tag, ``.mp4``).
+    Returns a *copy* so callers cannot mutate the shared table.
+
+    Deterministic-engine boundary respected: a pure dict + env lookup, no DSP,
+    no model, no operator-supplied codec strings. Unknown names resolve to
+    ``None`` (never a raise, never an arbitrary codec) — a typo silently keeps
+    the safe byte-identical default rather than emitting an off-spec file, and
+    can never smuggle a codec string through to ``renderMedia`` (invariant 7)."""
+    raw = os.environ.get("MEDIAHUB_MOTION_ENCODE", "").strip().lower()
+    if not raw or raw in ("default", "h264"):
+        return None
+    prof = MOTION_ENCODE_PROFILES.get(raw)
+    return dict(prof) if prof is not None else None
+
+
+# alpha-export — the opt-in transparent-background compositing vocabulary
+# (Remotion-only). Each entry is a FIXED, internally-consistent
+# ``(codec, pixel_format, prores_profile, ext, content_type)`` tuple from a
+# CLOSED table — no operator-supplied codec/pixelFormat string ever reaches
+# renderMedia, only these names select a profile (invariant 7). The two targets
+# are both fully supported by the pinned Remotion 4.0.493 + its bundled
+# compositor ffmpeg, and each triple is kept valid so Remotion's own
+# pixel-format<->codec / proResProfile<->codec validators never throw:
+#   - prores4444: ProRes 4444 (codec=prores, pixelFormat=yuva444p10le,
+#     proResProfile=4444, .mov, video/quicktime) — the AE-parity target.
+#   - vp9:        VP9 (codec=vp9, pixelFormat=yuva420p, NO proResProfile,
+#     .webm, video/webm) — a web-friendly transparent video.
+# Honesty (invariant 5): alpha only REMOVES the outer full-bleed ground paint
+# (via the composition's false-default ``transparentBg`` prop) and re-encodes
+# the SAME brand-locked, APCA-gated colours into an alpha container — it never
+# synthesises colour. Scene-internal full-bleed fills and full-bleed athlete
+# photos stay opaque (recorded honestly in the manifest). PNG-sequence export is
+# out of scope (renderMedia cannot emit image sequences — that is renderFrames,
+# a different output/packaging path).
+class _AlphaProfile(NamedTuple):
+    key: str
+    codec: str
+    pixel_format: str
+    prores_profile: str  # "" when not applicable (vp9)
+    ext: str  # container extension WITHOUT the dot ("mov" / "webm")
+    content_type: str
+
+
+ALPHA_PROFILES: dict[str, _AlphaProfile] = {
+    "prores4444": _AlphaProfile(
+        "prores4444", "prores", "yuva444p10le", "4444", "mov", "video/quicktime"
+    ),
+    "vp9": _AlphaProfile("vp9", "vp9", "yuva420p", "", "webm", "video/webm"),
+}
+
+
+class AlphaUnsupportedError(RuntimeError):
+    """Raised when a transparent-background (alpha) export is requested on an
+    engine that cannot produce one — currently the free FFmpeg fallback, which
+    composites opaque 8-bit stills. Erroring is a DELIBERATE deviation from that
+    engine's usual degrade-and-ship pattern: shipping a mislabeled OPAQUE file
+    under a ``.mov``/``.webm`` transparent-export name would be an active lie,
+    worse than an honest error (invariant 5). The web routes map this to a 503."""
+
+
+def resolve_alpha_profile(name: str) -> Optional[_AlphaProfile]:
+    """Resolve a transparent-export profile NAME to its ``_AlphaProfile``, or None.
+
+    ``""`` / whitespace / any unknown name → ``None`` (alpha OFF — byte-identical
+    default). A closed lower/strip dict lookup: no expression language, no eval,
+    no operator-supplied codec strings (invariant 7)."""
+    key = (name or "").strip().lower()
+    return ALPHA_PROFILES.get(key)
+
+
+def _alpha_encode(prof: _AlphaProfile) -> dict:
+    """Express an ``_AlphaProfile`` as the ``encode`` dict ``_run_remotion`` and the
+    cache-slot/manifest seams already understand (built by bit-depth-gamut).
+
+    The dict reuses the bit-depth ``encode`` threading verbatim — ``codec`` /
+    ``pixelFormat`` / ``container`` — with ``colorSpace=None`` (no gamut tag) and a
+    ``proResProfile`` key added ONLY for a profile that carries one (dropped for
+    vp9, so Remotion's "proResProfile with a non-prores codec throws" trap is
+    avoided). ``alpha`` marks it as a transparent export so the manifest branch
+    picks the alpha note rather than the bit-depth note."""
+    d = {
+        "name": prof.key,
+        "codec": prof.codec,
+        "pixelFormat": prof.pixel_format,
+        "colorSpace": None,
+        "container": f".{prof.ext}",
+        "alpha": True,
+    }
+    if prof.prores_profile:
+        d["proResProfile"] = prof.prores_profile
+    return d
+
+
+def _alpha_manifest(prof: _AlphaProfile) -> dict:
+    """The manifest ``alpha`` block for a transparent export — states the real
+    scope boundary and the deliberate deviations honestly (invariant 5)."""
+    return {
+        "profile": prof.key,
+        "codec": prof.codec,
+        "pixel_format": prof.pixel_format,
+        **({"prores_profile": prof.prores_profile} if prof.prores_profile else {}),
+        "container": prof.ext,
+        "note": (
+            "Transparent-background compositing export (Remotion-only). Only the "
+            "OUTERMOST per-scene full-bleed ground fill (+ full-bleed meshBg) is "
+            "suppressed; scene-internal full-bleed fills and full-bleed athlete "
+            "photos stay OPAQUE. Silent by design — a compositing asset carries no "
+            "audio (the aac-in-mp4/mov mux is not validated for 10-bit prores / "
+            "vp9-webm). The poster is the in-render transparent PNG "
+            "(renderStill imageFormat:png); the ffmpeg frame-grab fallback is "
+            "intentionally unavailable for alpha containers. The operator owns the "
+            "downstream backdrop, so the text-on-ground APCA pair no longer "
+            "describes the final composited contrast — colour choice is unchanged; "
+            "the ground paint is removed, not recoloured. PNG-sequence export is "
+            "out of scope (renderMedia cannot emit image sequences)."
+        ),
+    }
+
+
+def _photo_supersample() -> int:
+    """Per-photo resample-quality knob (``MEDIAHUB_PHOTO_SUPERSAMPLE``), returned
+    as ``0`` (off / default) or ``2`` (capped).
+
+    This is the honest, opt-in analogue of the FFmpeg engine's fixed 2x Lanczos
+    prescale for the Remotion transform-scaled athlete photos. It is deliberately
+    NOT the whole-composition supersample (that is ``_motion_supersample`` /
+    ``MEDIAHUB_MOTION_SUPERSAMPLE``, which renderMedia-scales the entire frame and
+    Lanczos-downscales — the guaranteed dense-buffer path). When set, it folds a
+    ``photoSupersample`` card prop that pins ``imageRendering:'auto'`` on those
+    ``<img>`` elements so the compositor uses high-quality interpolation; the
+    manifest records it as a best-effort hint, never a claimed supersample.
+
+    Capped at ``2`` for cross-engine parity: the FFmpeg fallback's prescale is a
+    fixed 2x, so a higher factor could never be honoured there. ``0`` (unset /
+    malformed / ``<= 1``) means off — byte-identical to today (fold-only-when-
+    active)."""
+    raw = os.environ.get("MEDIAHUB_PHOTO_SUPERSAMPLE", "").strip()
+    if not raw:
+        return 0
+    try:
+        v = int(float(raw))
+    except ValueError:
+        return 0
+    return 2 if v >= 2 else 0
+
+
 def _run_remotion(
     *,
     composition_id: str,
@@ -2045,6 +2939,9 @@ def _run_remotion(
     duration_sec: Optional[float] = None,
     size: Optional[tuple[int, int]] = None,
     timeout: int = 600,
+    supersample: float = 1.0,
+    fps: int = MOTION_FPS,
+    encode: Optional[dict] = None,
 ) -> Path:
     """Invoke the Node render script. Raises RuntimeError on failure."""
     if not node_available():
@@ -2067,7 +2964,13 @@ def _run_remotion(
     # a complete MP4 (or from one complete MP4 to another). (The opt-in
     # parallel-segment reel composite and the ffmpeg fallback engine write the
     # slot through their own ffmpeg invocations; they are separate follow-ups.)
-    tmp_out = out_path.with_name(f".{out_path.stem}.{os.getpid()}.{threading.get_ident()}.tmp.mp4")
+    # bit-depth-gamut: the temp file carries the profile's container so a future
+    # non-.mp4 profile writes the right suffix; every shipped profile is .mp4, so
+    # the default (encode is None) suffix stays byte-identically ".tmp.mp4".
+    tmp_suffix = (encode["container"] if encode is not None else ".mp4").lstrip(".")
+    tmp_out = out_path.with_name(
+        f".{out_path.stem}.{os.getpid()}.{threading.get_ident()}.tmp.{tmp_suffix}"
+    )
 
     # Write props to a temp file alongside the cache; cheap and lets us tail
     # the JSON if a render fails.
@@ -2090,6 +2993,26 @@ def _run_remotion(
         cmd.extend(["--duration", str(duration_sec)])
     if size is not None:
         cmd.extend(["--width", str(int(size[0])), "--height", str(int(size[1]))])
+    if supersample > 1.0:
+        cmd.extend(["--scale", f"{supersample:g}"])
+    # fps-option: append --fps only for a non-default rate, so the default node
+    # command (and its cache-busting hash) stays byte-identical to before.
+    if int(fps) != MOTION_FPS:
+        cmd.extend(["--fps", str(int(fps))])
+    # bit-depth-gamut: append the encode flags ONLY when a profile is active, so
+    # the OFF path (encode is None) issues the identical argv as before —
+    # render.js then falls back to its h264 / yuv420p / no-colorSpace defaults.
+    # --color-space is appended only when the profile carries one (h265-10 has
+    # None → no colour tag, matching Remotion's 'default' no-args behaviour).
+    if encode is not None:
+        cmd.extend(["--codec", encode["codec"], "--pixel-format", encode["pixelFormat"]])
+        if encode.get("colorSpace"):
+            cmd.extend(["--color-space", encode["colorSpace"]])
+        # alpha-export: ProRes 4444 needs its proResProfile; it is present ONLY
+        # for the prores profile (dropped for vp9), so Remotion never sees a
+        # proResProfile paired with a non-prores codec.
+        if encode.get("proResProfile"):
+            cmd.extend(["--prores-profile", encode["proResProfile"]])
 
     from mediahub.visual.proc import run_capture
 
@@ -2111,6 +3034,51 @@ def _run_remotion(
     if not tmp_out.exists() or tmp_out.stat().st_size < 1024:
         tmp_out.unlink(missing_ok=True)
         raise RuntimeError(f"Remotion reported success but {out_path} is missing or empty")
+    # Supersample finish: the node render emitted an n× MP4; Lanczos-downscale it
+    # back to the exact target WxH (same h264/yuv420p deliverable) so only edge
+    # fidelity improves — a deterministic ffmpeg pass, the same class the audio
+    # mux and poster grabs already rely on.
+    # alpha-export / bit-depth-gamut belt-and-braces: an active encode profile
+    # (10-bit / alpha) is incompatible with this libx264/yuv420p downscale, which
+    # would flatten the higher bit-depth or destroy the alpha channel. Callers
+    # already force supersample=1.0 whenever encode is set, so this block is
+    # unreachable on those paths; the ``encode is None`` guard makes that explicit.
+    if supersample > 1.0 and size is not None and encode is None:
+        from mediahub.visual.reel_ffmpeg import ffmpeg_exe
+
+        exe = ffmpeg_exe()
+        if not exe:
+            tmp_out.unlink(missing_ok=True)
+            raise RuntimeError("supersample downscale needs an FFmpeg binary")
+        down = out_path.with_name(f".{out_path.stem}.{os.getpid()}.{threading.get_ident()}.ss.mp4")
+        ds = subprocess.run(
+            [
+                exe,
+                "-y",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-i",
+                str(tmp_out),
+                "-vf",
+                f"scale={int(size[0])}:{int(size[1])}:flags=lanczos",
+                "-c:v",
+                "libx264",
+                "-pix_fmt",
+                "yuv420p",
+                "-movflags",
+                "+faststart",
+                str(down),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+        tmp_out.unlink(missing_ok=True)
+        if ds.returncode != 0 or not down.exists() or down.stat().st_size < 1024:
+            down.unlink(missing_ok=True)
+            raise RuntimeError(f"supersample downscale failed (exit {ds.returncode})")
+        tmp_out = down
     # Atomic publish: the completed MP4 flips into the cache slot in one rename,
     # so a concurrent same-key render or cache-hit reader never sees a torn file.
     os.replace(tmp_out, out_path)
@@ -2150,6 +3118,10 @@ def render_story_card(
     duration_sec: float = 6.0,
     brief: Optional[dict] = None,
     format_name: str = DEFAULT_MOTION_FORMAT,
+    fps: int = MOTION_FPS,
+    review_ab: Optional[list[str]] = None,
+    alpha_profile: str = "",
+    motion_template: Optional[dict] = None,
 ) -> Path:
     """Render a single content-pack card to an MP4 story.
 
@@ -2165,18 +3137,93 @@ def render_story_card(
 
     ``format_name`` picks the output cut: ``story`` (1080×1920, default),
     ``portrait`` (1080×1350), ``square`` (1080×1080) or ``landscape``
-    (1920×1080).
+    (1920×1080). Beyond the presets it also accepts a validated arbitrary-canvas
+    ``"WxH"`` token (any-canvas — the web routes expose it as ``?w=&h=`` /
+    ``?size=WxH``): a distinct ``(w, h)`` keys its own cache entry via the
+    already-folded ``size`` list, so the preset paths stay byte-identical.
 
     When audio is configured (``MEDIAHUB_VOICEOVER=1`` narration and/or an
     operator ``MEDIAHUB_REEL_MUSIC_DIR`` bed), the finished MP4 carries the
     mixed track and the audio plan is folded into the cache key; otherwise
     the silent path's cache keys stay byte-identical to the pre-audio era.
     A poster-frame PNG sidecar is written beside the MP4 either way.
+
+    ``fps`` selects the output frame rate from the curated ``ALLOWED_FPS`` set
+    (default 30). A non-default rate folds into the cache key and appends
+    ``--fps`` to the render; 30 keeps the byte-identical default.
+
+    ``review_ab`` (per-effect-toggle, REVIEW-ONLY) is an opt-in list of
+    decorative axes to SUPPRESS for a with/without comparison — the "B" variant
+    of an A/B review, rendered against the normal full-effect "A" render. It is
+    validated against ``EFFECT_TOGGLE_ALLOWLIST`` (decorative axes only — photo
+    scrims/filters and burn-in captions are never toggleable, so APCA is never at
+    risk), attaches ``effectsDisabled`` to the card props, and folds a distinct
+    ``ab_review`` marker into the cache key so it can never collide with or shift
+    the default render's key/bytes. ``None`` (the default) — and a list that
+    validates to empty — leave the render byte-identical to the shipped card, so
+    a card that gets exported for posting always keeps still<->motion parity.
+
+    ``motion_template`` (data-driven-json, opt-in, PREVIEW/A-B only) is a
+    validated declarative art template (see :mod:`mediahub.visual.motion_template`)
+    whose ``art`` overrides are merged into the card's ``brief`` BEFORE prop
+    assembly, so BOTH the Remotion and the FFmpeg engines render the same
+    reselected treatment. It is validated / clamped against the closed brief
+    vocabularies (an unknown key or out-of-vocabulary value raises
+    :class:`~mediahub.visual.motion_template.MotionTemplateError`); the merge is
+    object-identity when the template is ``None`` / empty, so the default render
+    stays byte-identical. This drives a motion PREVIEW only — it never
+    regenerates or persists the approved still, so the exported card's
+    still<->motion parity is untouched (exactly like ``review_ab``). The
+    template's ``render`` section is resolved by the route into the existing
+    ``format_name`` / ``fps`` / ``review_ab`` kwargs, never here.
+
+    ``alpha_profile`` (alpha-export, opt-in, Remotion-only) selects a
+    transparent-background compositing export from the closed
+    :data:`ALPHA_PROFILES` vocabulary (``"prores4444"`` / ``"vp9"``). When set,
+    the composition's outer full-bleed ground fill is suppressed (via the
+    ``transparentBg`` prop), the render is encoded into an alpha container
+    (``.mov``/``.webm``) with a distinct cache key, the whole-composition
+    supersample is forced off (its libx264 downscale would flatten alpha), and
+    the asset is silent by design (a compositing layer carries no audio). On the
+    free FFmpeg engine an alpha request raises :class:`AlphaUnsupportedError`
+    rather than shipping a mislabeled opaque file. ``""`` (default) → alpha OFF,
+    byte-identical to before.
     """
+    fps = _validate_fps(fps)
     engine = _dispatch_engine()
     size = motion_format_size(format_name)
+    supersample = _motion_supersample()
+    # bit-depth-gamut: resolve the opt-in encode profile. None (default) keeps
+    # everything byte-identical. When active it is MUTUALLY EXCLUSIVE with the
+    # whole-composition supersample downscale, which hardcodes libx264/yuv420p
+    # and would flatten a 10-bit render back to 8-bit h264 — so encode wins and
+    # supersample is forced off (recorded honestly in the manifest below).
+    encode = _motion_encode_profile()
+    # alpha-export: an opt-in transparent export OVERRIDES the env encode profile
+    # (mutually exclusive — alpha needs prores/vp9 + an alpha pixelFormat) and
+    # rides the same ``encode`` seam. On the FFmpeg engine it errors honestly.
+    alpha_prof = resolve_alpha_profile(alpha_profile)
+    if alpha_prof is not None:
+        if engine == "ffmpeg":
+            raise AlphaUnsupportedError(
+                "alpha_unsupported_on_engine: a transparent-background export "
+                "requires the Remotion engine; the free FFmpeg engine composites "
+                "opaque 8-bit stills and cannot produce a transparent asset."
+            )
+        encode = _alpha_encode(alpha_prof)
+    if encode is not None:
+        supersample = 1.0
     out_path = Path(out_path)
     brand_dict = _brand_to_dict(brand_kit)
+    # data-driven-json (PREVIEW/A-B only): merge the validated template's art
+    # overrides into the brief BEFORE footage resolution and prop assembly, so
+    # every downstream reader (footage, _card_to_props + its helpers, the ffmpeg
+    # brief_dict) sees the same reselected treatment. Object-identity no-op when
+    # the template is None/empty ⇒ byte-identical default. Raises
+    # MotionTemplateError up to the route (→ HTTP 400) on any bad input.
+    from mediahub.visual import motion_template as _mt
+
+    brief = _mt.merge_into_brief(brief, _mt.validate_motion_template(motion_template))
     # M23 — footage-backed story: resolve the card's race clip for this 6s
     # beat. Remotion-only (the ffmpeg fallback renders pre-baked stills and
     # cannot play a video plane — its manifest says so honestly); a miss of
@@ -2184,7 +3231,11 @@ def render_story_card(
     foot, foot_reason = (None, "")
     if engine != "ffmpeg":
         foot, foot_reason = _footage_for_card(
-            card_payload, brief, brand_kit, beat_seconds=duration_sec
+            card_payload,
+            brief,
+            brand_kit,
+            beat_seconds=duration_sec,
+            speed_ramp=_brief_speed_ramp(brief),
         )
     card_dict = _card_to_props(
         card_payload,
@@ -2197,12 +3248,52 @@ def render_story_card(
     audio_plan = _story_audio_plan(
         card_dict, brand_dict, mix_profile=_card_mix_profile(card_payload, brief)
     )
+    # alpha-export: a transparent compositing asset is silent by design — drop the
+    # audio plan so the mux (_finish_cached_video) never runs (an aac-in-mp4/mov
+    # mux is not validated for 10-bit prores / vp9-webm), and no burn-in caption
+    # track is derived. Done before the caption build so captions stay off too.
+    if alpha_prof is not None:
+        audio_plan = None
 
     # Burn-in captions (R1.3): only attach the prop when a track exists so the
     # captions-off path keeps the historic cache key byte-identical.
-    caption_json = _story_caption_json(card_dict, brand_dict, audio_plan, duration_sec=duration_sec)
+    caption_json = _story_caption_json(
+        card_dict, brand_dict, audio_plan, duration_sec=duration_sec, fps=fps
+    )
     if caption_json:
         card_dict = {**card_dict, "captionsJson": caption_json}
+
+    # transform-sampling (AE-gap): attach the per-photo resample hint ONLY when
+    # the operator opted in (> 0), exactly like the captions fold above, so every
+    # default render keeps its byte-identical card_dict and story cache key.
+    photo_ss = _photo_supersample()
+    if photo_ss > 0:
+        card_dict = {**card_dict, "photoSupersample": photo_ss}
+
+    # true-motion-blur: attach the opt-in shutter-accumulation config ONLY when
+    # the operator opted in (None = OFF), exactly like the photoSupersample fold
+    # above, so every default render keeps a byte-identical card_dict + story
+    # cache key. The composition wraps only the settling hero/result entrance +
+    # count-up in the frame-pure sampler; absent => the verbatim current DOM.
+    mblur = _motion_blur()
+    if mblur is not None:
+        card_dict = {**card_dict, "motionBlur": mblur}
+
+    # alpha-export: mark the card for the transparent export so the composition's
+    # false-default ``transparentBg`` prop suppresses the outer full-bleed ground
+    # fill. Attach-only (fold-only-when-active), so a non-alpha render keeps a
+    # byte-identical card_dict + story cache key.
+    if alpha_prof is not None:
+        card_dict = {**card_dict, "transparentBg": True}
+
+    # per-effect-toggle (REVIEW-ONLY A/B): attach the suppressed-axis list ONLY on
+    # the explicit review path AND only when it validates non-empty, so a shipped
+    # render (review_ab=None) keeps a byte-identical card_dict + cache key — the
+    # still<->motion parity guarantee. The list rides inside card_dict, so it
+    # folds into the story cache key automatically (fold-only-when-present).
+    ab_disabled = _validate_effect_toggles(review_ab) if review_ab is not None else []
+    if ab_disabled:
+        card_dict = {**card_dict, "effectsDisabled": ab_disabled}
 
     if engine == "ffmpeg":
         from mediahub.visual import reel_ffmpeg
@@ -2216,6 +3307,7 @@ def render_story_card(
             brief_dict=brief,
             audio_plan=audio_plan,
             format_name=format_name,
+            **_fps_kw(fps),
         )
 
     cache_payload = {
@@ -2238,8 +3330,37 @@ def render_story_card(
     # no-footage card keeps its byte-identical key.
     if foot is not None:
         cache_payload["footage"] = foot.cache_sig
+    # Supersample folds in only when active, so a default (1x) render keeps its
+    # byte-identical story cache key; a 2x render keys independently.
+    if supersample > 1.0:
+        cache_payload["supersample"] = supersample
+    # fps-option: fold the frame rate only for a non-default choice, so the
+    # default (30fps) story cache key is byte-identical to before.
+    if int(fps) != MOTION_FPS:
+        cache_payload["fps"] = int(fps)
+    # per-effect-toggle (REVIEW-ONLY A/B): a distinct top-level marker so the
+    # comparison "B" variant can never collide with, or perturb, the default
+    # single-render key. Set ONLY when the review path validated non-empty, so a
+    # shipped render's key is untouched.
+    if ab_disabled:
+        cache_payload["ab_review"] = ab_disabled
+    # alpha-export: fold the transparent-export profile under a distinct ``alpha``
+    # key when active, so an alpha cut can never be served from — or overwrite —
+    # an opaque cache entry, and the default (alpha off) key is untouched.
+    # bit-depth-gamut: fold the profile NAME (not the codec strings) into the key
+    # only when active, so an 8-bit cache entry can never be served for a 10-bit
+    # request (or vice-versa) and the default (encode is None) key is untouched.
+    # The two are mutually exclusive (alpha overrode encode above), so exactly one
+    # of these folds fires.
+    if alpha_prof is not None:
+        cache_payload["alpha"] = alpha_prof.key
+    elif encode is not None:
+        cache_payload["encode"] = encode["name"]
     cache_key = _content_hash(cache_payload, kind="story")
-    cached = _cache_dir() / f"{cache_key}.mp4"
+    # Container-aware cached slot: opaque profiles are .mp4; an alpha export writes
+    # the profile's .mov/.webm slot (the alpha key already differs, so no collision
+    # with an h264 slot).
+    cached = _cache_dir() / f"{cache_key}{encode['container'] if encode else '.mp4'}"
     if cached.exists() and cached.stat().st_size > 1024:
         _touch_cache_hit(cached)  # LRU recency (#71)
         # Re-publish the cached MP4 at the caller-requested path. The
@@ -2261,6 +3382,9 @@ def render_story_card(
         out_path=cached,
         duration_sec=duration_sec,
         size=size,
+        supersample=supersample,
+        **_encode_kw(encode),
+        **_fps_kw(fps),
     )
     audio_rec = _finish_cached_video(
         cached, kind="story", plan=audio_plan, duration_sec=duration_sec
@@ -2274,12 +3398,79 @@ def render_story_card(
         "format": format_name,
         "size": list(size),
         "duration_sec": duration_sec,
+        "fps": int(fps),
         "card": _card_manifest_axes(card_dict),
         "audio": audio_rec,
         "captions": _caption_manifest(card_dict.get("captionsJson") or ""),
         "poster": poster_path_for(cached).name if poster_path_for(cached).exists() else "",
         "poster_source": poster_source,
     }
+    if supersample > 1.0:
+        story_manifest["supersample"] = supersample
+    # alpha-export: record the transparent export HONESTLY and state the real
+    # scope boundary + deliberate deviations (silent, opaque scene-internal fills,
+    # in-render PNG poster, APCA-pair caveat).
+    if alpha_prof is not None:
+        story_manifest["alpha"] = _alpha_manifest(alpha_prof)
+    # bit-depth-gamut: record the encode profile HONESTLY — the source frames are
+    # Chromium 8-bit sRGB; 10-bit reduces encode banding and colorSpace tags the
+    # container. This is a precision + metadata change over the same brand-locked,
+    # APCA-gated colours, NOT a synthesised wide-gamut master.
+    elif encode is not None:
+        story_manifest["encode"] = {
+            "profile": encode["name"],
+            "codec": encode["codec"],
+            "pixel_format": encode["pixelFormat"],
+            "color_space": encode.get("colorSpace") or "untagged",
+            "note": (
+                "Higher-bit-depth/gamut-tagged re-ENCODE of the same brand-locked, "
+                "APCA-gated colours. Source frames are Chromium 8-bit sRGB; 10-bit "
+                "reduces encode banding and colorSpace tags the container — this is "
+                "a precision + metadata change, not a synthesised wide-gamut master. "
+                "bt2020-ncl is a HLG/2020 re-tag + limited-range matrix relabel over "
+                "sRGB-origin pixels (not a true gamut map): a tonemapping player that "
+                "honours the tag may display it differently from the approved still."
+            ),
+        }
+        # Mutual exclusion with the whole-composition supersample: if the operator
+        # also asked for supersample, say so honestly (encode wins).
+        if _motion_supersample() > 1.0:
+            story_manifest["supersample"] = {
+                "requested": _motion_supersample(),
+                "applied": False,
+                "reason": "incompatible with encode profile (10-bit downscale unsupported)",
+            }
+    # transform-sampling (AE-gap): record the per-photo hint HONESTLY — a
+    # best-effort compositor interpolation hint, NOT a guaranteed dense-buffer
+    # supersample (that is the whole-composition MEDIAHUB_MOTION_SUPERSAMPLE).
+    if photo_ss > 0:
+        story_manifest["photoSupersample"] = {
+            "factor": photo_ss,
+            "kind": "best-effort-hint",
+            "note": "imageRendering:auto on scaled photos; guaranteed dense-buffer "
+            "supersample is the whole-composition MEDIAHUB_MOTION_SUPERSAMPLE",
+        }
+    # true-motion-blur: record the opt-in shutter-accumulation HONESTLY — the
+    # sample count is the per-frame cost multiplier (the composition re-renders the
+    # wrapped settling layer ``samples``× per frame), and the scope is bounded to
+    # the hero/result entrance + count-up (the photo camera / parallax are NOT
+    # sampled, so the held frame stays the approved still). Fold-only-when-active.
+    if mblur is not None:
+        story_manifest["motionBlur"] = {
+            "samples": mblur["samples"],
+            "shutter": mblur["shutter"],
+            "scope": "entrance+count_up",
+            "note": (
+                "Real multi-sample shutter accumulation: the settling hero/result "
+                "entrance + count-up is recomputed at %d deterministic sub-frames "
+                "across a %g-degree shutter and composited with equal-weight "
+                "progressive alpha (frame-pure, no @remotion/motion-blur). The "
+                "perpetual photo camera / parallax are NOT sampled, so the terminal "
+                "held frame collapses to the approved still (still<->motion parity). "
+                "Cost scales with the sample count (%d x the wrapped layer's "
+                "per-frame work)." % (mblur["samples"], mblur["shutter"], mblur["samples"])
+            ),
+        }
     # M23 explainability: full provenance when a clip plays; the honest
     # fall-back reason when a candidate existed but the photo path won.
     if foot is not None:
@@ -2342,7 +3533,46 @@ REEL_TOTAL_RANGE = (3.0, 60.0)
 #         + firmer on-video text (outline / shadow3d / stroke_animate) and
 #         firmer photo scrim for muted-feed legibility. All change MeetReel's
 #         deterministic output for an unchanged payload, so cached reels retire.
-REEL_COMPOSITION_REVISION = "5"
+#   "6" — the whip transition's blur is now velocity-aligned: an X-axis-only
+#         SVG feGaussianBlur (a genuine directional smear along the lateral
+#         motion) replaces the isotropic CSS blur() on both the incoming
+#         (TransitionWrap) and paired exit (ExitWrap) whip. Reel-only (whip
+#         lives only in MeetReel), so cached reels retire; story is untouched.
+#   "7" — per-glyph text reveal: the shared KineticLine / KineticWords gained a
+#         glyph-granularity branch for the kinetic_type / cascade intents. Word
+#         mode is byte-identical; belt-and-braces bump since the shared line
+#         component changed (renderer_generation already busts + re-renders the
+#         untouched cards identically).
+#   "8" — range selectors: the per-glyph reveal's stagger ORDER × SHAPE now flows
+#         through the seeded sprint/rangeSelector.ts vocabulary (reverse /
+#         centre-out / seeded scatter, eased), picked from (variationSeed, mood).
+#         The identity selector ({index, linear}, e.g. every restraint mood) is
+#         byte-identical to rev "7"; energetic / seed-varied glyph cards reveal
+#         in a new order, so a glyph-opted reel's deterministic output changes for
+#         an unchanged payload — hence the bump. Word-mode + non-glyph cards are
+#         untouched (glyphAt is never invoked there).
+#   "9" — varfont-animation: the supporting weight registers (kicker/meta/data)
+#         now BLOOM their variable wght axis up to the still's static target over
+#         the first ~20% of the beat (StoryCard.wghtFvs + shared wghtBloomAt;
+#         sceneKit's data chips share the curve). Register-ABSENT cards
+#         (wghtKicker/Meta/Data == 0) keep wghtFvs's unchanged `{}` branch and
+#         render byte-identically; a register-BEARING reel's deterministic output
+#         changes for an unchanged payload (the terminal/held weight equals the
+#         still, so still↔motion parity holds) — hence the bump.
+#   "10" — stylize-richer: photo_filters.tsx gained three held SVG stylize looks
+#          (mosaic / motion_tile / roughen_edges) + the tunable
+#          photo_treatment_intensity. Untreated cards attach none of the new
+#          props and render byte-identically, but editing the shared photo_filters
+#          layer busts renderer_generation()'s content hash once — a documented
+#          full re-render (identical pixels for unchanged intents/cards), so this
+#          bump is the explicit human signal for the shared-vocabulary change.
+#   "11" — render-banding-dither: a new Dither.tsx overlay component, mounted in
+#          StoryCard (every reel card beat) and on the reel cover/outro when a
+#          card opted in. Cards WITHOUT the attach-only `dither` prop render the
+#          untouched default path (pixel-identical), but adding Dither.tsx +
+#          editing MeetReel busts renderer_generation()'s content hash once — a
+#          documented full re-render, hence this explicit bump.
+REEL_COMPOSITION_REVISION = "11"
 
 # Story composition revision — folded into the STORY cache key (M15). The
 # story payload historically had no revision field; introducing one both
@@ -2367,7 +3597,38 @@ REEL_COMPOSITION_REVISION = "5"
 #         change is reel-only, but StoryCard shares the text_fx + photo_scrim
 #         sprint layers, so these firmer values change a story's deterministic
 #         output for an unchanged payload too — hence the story bump.
-STORY_COMPOSITION_REVISION = "3"
+#   "4" — per-glyph text reveal: KineticLine gained a glyph-granularity branch
+#         (kinetic_type / cascade opt in via the deterministic seed gate). Word
+#         mode renders byte-identically, so an unchanged, non-opted-in payload is
+#         pixel-identical; this bump is belt-and-braces for the shared component.
+#   "5" — range selectors: the per-glyph reveal's stagger ORDER × SHAPE now flows
+#         through the seeded sprint/rangeSelector.ts vocabulary (reverse /
+#         centre-out / seeded scatter, eased), picked from (variationSeed, mood).
+#         The identity selector ({index, linear}, e.g. every restraint mood)
+#         renders byte-identically to rev "4"; energetic / seed-varied glyph cards
+#         reveal in a new order, so a glyph-opted story's deterministic output
+#         changes for an unchanged payload. Word-mode + non-glyph cards are
+#         untouched (glyphAt is never invoked there).
+#   "6" — varfont-animation: the supporting weight registers (kicker/meta/data)
+#         now BLOOM their variable wght axis up to the still's static target over
+#         the first ~20% of the beat (StoryCard.wghtFvs + shared wghtBloomAt).
+#         Register-ABSENT cards keep the unchanged `{}` branch and render
+#         byte-identically; a register-BEARING story's deterministic output
+#         changes for an unchanged payload (terminal/held weight equals the
+#         still — still↔motion parity preserved) — hence the bump.
+#   "7" — stylize-richer: photo_filters.tsx gained three held SVG stylize looks
+#         (mosaic / motion_tile / roughen_edges) + the tunable
+#         photo_treatment_intensity. Untreated cards attach none of the new props
+#         and render byte-identically; editing the shared photo_filters layer
+#         busts renderer_generation()'s content hash once — a documented full
+#         re-render (identical pixels for unchanged cards) — so this bump is the
+#         explicit human signal for the shared-vocabulary change.
+#   "8" — render-banding-dither: StoryCard gained a Dither.tsx overlay, mounted
+#         only when the attach-only `dither` prop is set. A card WITHOUT it
+#         renders the untouched default path (pixel-identical); adding the new
+#         component busts renderer_generation()'s content hash once — a
+#         documented full re-render, so this bump is the explicit human signal.
+STORY_COMPOSITION_REVISION = "8"
 
 
 def _clamp(value: float, lo: float, hi: float) -> float:
@@ -2640,7 +3901,7 @@ def _reel_duration_kwargs(rhythm: Optional[dict]) -> dict:
 
 
 def _render_reel_parallel_or_none(
-    *, props: dict, cached: Path, duration_sec: float, size: tuple[int, int]
+    *, props: dict, cached: Path, duration_sec: float, size: tuple[int, int], fps: int = MOTION_FPS
 ) -> Optional[Path]:
     """Opt-in parallel reel composition (roadmap R1.28).
 
@@ -2663,6 +3924,7 @@ def _render_reel_parallel_or_none(
         out_path=cached,
         duration_sec=duration_sec,
         size=size,
+        **_fps_kw(fps),
     )
 
 
@@ -2676,6 +3938,9 @@ def _assemble_reel_props(
     rhythm: Optional[dict] = None,
     dub_language: str = "",
     resolve_footage: bool = False,
+    peak_speed_ramp: str = "",
+    fps: int = MOTION_FPS,
+    motion_templates: Optional[list[Optional[dict]]] = None,
 ) -> tuple[list[dict], dict, str, float, Any, list, Optional[dict], Optional[dict], list]:
     """Format-independent prop assembly shared by the single and batch reel
     renders.
@@ -2700,6 +3965,13 @@ def _assemble_reel_props(
     longer window. Off (the default, and always off for the ffmpeg engine),
     every prop dict is byte-identical to the photo-only behaviour.
 
+    ``peak_speed_ramp`` (speed-ramp, opt-in) requests a baked decelerate-into-
+    the-beat ramp on the reel's PEAK beat only (``idx==0`` — the #1 ranked card
+    the beat carve already emphasises). It is a SERVER-ONLY field, deliberately
+    kept OUT of the Remotion-bound ``rhythm`` dict (the ramp is baked into the
+    clip, never a prop). ``""`` (the default) leaves every footage beat
+    byte-identical.
+
     Returns ``(cards_props, brand_dict, meet_name, duration_sec, audio_plan,
     briefs_list, rhythm_norm, audio_notes, footage_list)`` — ``audio_notes``
     carries honest manifest-only facts about the plan (e.g. a dropped dub's
@@ -2719,7 +3991,7 @@ def _assemble_reel_props(
     rhythm_norm = normalise_reel_rhythm(rhythm, n_cards)
     if duration_sec is None:
         duration_sec = reel_duration_for(n_cards, **_reel_duration_kwargs(rhythm_norm))
-    beat_frames = reel_card_beat_frames(n_cards, duration_sec, rhythm_norm)
+    beat_frames = reel_card_beat_frames(n_cards, duration_sec, rhythm_norm, fps=fps)
 
     cards_props: list[dict] = []
     footage_list: list[tuple[Optional[Any], str]] = []
@@ -2749,13 +4021,39 @@ def _assemble_reel_props(
                     except Exception:
                         seed = 1
         brief = briefs_list[idx] if idx < len(briefs_list) else None
+        # data-driven-json (PREVIEW/A-B only): merge this beat's validated
+        # template art overrides into the brief IN PLACE (write back to
+        # briefs_list[idx]) BEFORE footage, _card_to_props, the mix-profile read,
+        # and the edit-signature fold — so every per-card reader sees the same
+        # reselected treatment. Object-identity no-op when the template is
+        # None/empty ⇒ that card stays byte-identical. Raises MotionTemplateError
+        # up to the route (→ 400) on any bad input.
+        if motion_templates and idx < len(motion_templates):
+            from mediahub.visual import motion_template as _mt
+
+            brief = _mt.merge_into_brief(brief, _mt.validate_motion_template(motion_templates[idx]))
+            if idx < len(briefs_list):
+                briefs_list[idx] = brief
+            else:
+                while len(briefs_list) <= idx:
+                    briefs_list.append(None)
+                briefs_list[idx] = brief
         # M23 — this card's footage beat, trimmed to its OWN carved beat
         # seconds. Only attempted when the engine can play it; any miss keeps
         # the card's props byte-identical with the reason kept for the manifest.
         foot, foot_reason = (None, "")
         if resolve_footage and idx < len(beat_frames):
+            # Convert this beat's carved frames to seconds at the SELECTED fps —
+            # beat_frames already scales with fps, so dividing by the fixed
+            # MOTION_FPS would over-trim the footage window by fps/30 at 50/60.
+            # speed-ramp is gated to the PEAK beat (idx==0) and only when the
+            # server-only opt-in named a kind, so every other beat is untouched.
             foot, foot_reason = _footage_for_card(
-                c, brief, brand_kit, beat_seconds=beat_frames[idx] / MOTION_FPS
+                c,
+                brief,
+                brand_kit,
+                beat_seconds=beat_frames[idx] / fps,
+                speed_ramp=peak_speed_ramp if idx == 0 else "",
             )
         footage_list.append((foot, foot_reason))
         # Format-independent base focus (story 9:16); the per-cut saliency
@@ -2799,10 +4097,10 @@ def _assemble_reel_props(
     # MeetReel.tsx allocation), not a flat REEL_PER_CARD_SEC grid, so trailing
     # cues survive short beats and the emphasised beat stays captioned.
     if _subtitles_enabled() and audio_plan and audio_plan.get("voice") and audio_plan.get("script"):
-        beats = reel_card_beat_frames(len(cards_props), duration_sec, rhythm_norm)
+        beats = reel_card_beat_frames(len(cards_props), duration_sec, rhythm_norm, fps=fps)
         for idx, cp in enumerate(cards_props):
             beat_frames = max(1, beats[idx]) if idx < len(beats) else 1
-            cj = _reel_caption_json(cp, brand_dict, beat_frames=beat_frames)
+            cj = _reel_caption_json(cp, brand_dict, beat_frames=beat_frames, fps=fps)
             if cj:
                 cp["captionsJson"] = cj
 
@@ -2954,6 +4252,10 @@ def _render_reel_one_format(
     audio_notes: Optional[dict] = None,
     stat_config: Optional[dict] = None,
     footage_list: Optional[list] = None,
+    fps: int = MOTION_FPS,
+    review_ab: Optional[list[str]] = None,
+    logo_drawon: bool = False,
+    alpha_profile: str = "",
 ) -> Path:
     """Render (or serve cached) ONE reel cut from already-assembled props.
 
@@ -2971,16 +4273,92 @@ def _render_reel_one_format(
     (same contract as reel captions).
     """
     size = motion_format_size(format_name)
+    supersample = _motion_supersample()
+    # bit-depth-gamut: resolve the opt-in encode profile. None (default) keeps
+    # every reel byte-identical. When active it is MUTUALLY EXCLUSIVE with the
+    # supersample downscale (which would flatten 10-bit back to 8-bit h264) and
+    # forces the SERIAL render path — the parallel-segment composite stream-copies
+    # h264 segments and threads no codec/pixelFormat/colorSpace, so it cannot emit
+    # the profile output. encode wins; supersample is forced off.
+    encode = _motion_encode_profile()
+    # alpha-export: an opt-in transparent reel OVERRIDES the env encode profile
+    # (mutually exclusive) and rides the same ``encode`` seam. It forces the
+    # SERIAL render (the parallel-segment composite stream-copies h264 and threads
+    # no codec/pixelFormat — the ``encode is None`` guard below already excludes
+    # it), silences the reel, and errors honestly on the FFmpeg engine.
+    alpha_prof = resolve_alpha_profile(alpha_profile)
+    if alpha_prof is not None:
+        if engine == "ffmpeg":
+            raise AlphaUnsupportedError(
+                "alpha_unsupported_on_engine: a transparent-background reel "
+                "requires the Remotion engine; the free FFmpeg engine composites "
+                "opaque 8-bit stills and cannot produce a transparent asset."
+            )
+        encode = _alpha_encode(alpha_prof)
+        audio_plan = None
+    if encode is not None:
+        supersample = 1.0
+    photo_ss = _photo_supersample()
+    # true-motion-blur: resolve the opt-in shutter-accumulation config once. None
+    # (default) keeps the reel byte-identical. The whip transition lives in the
+    # composition chrome (not per-card), so this is a REEL-LEVEL prop — it rides
+    # into reel_props + the cache key only when active, and the composition threads
+    # it down to each <StoryCard> beat's entrance/count-up as a dedicated prop, so
+    # cards_props (and its cache contribution) stay byte-identical when off.
+    mblur = _motion_blur()
     out_path = Path(out_path)
     # R1.7: steer each card's photo focus for this cut's aspect ratio (no-op for
     # the story base). Folds into the cache key below, so each cut caches its own
     # focus and the story cut stays byte-identical.
     cards_props = _apply_format_photo_focus(cards_props, briefs_list, format_name)
 
+    # transform-sampling (AE-gap): attach the per-photo resample hint to each
+    # beat's card ONLY when opted in (> 0), mirroring the fold-only pattern so an
+    # un-opted reel keeps byte-identical card props and cache key. Each reel beat
+    # renders through <StoryCard>, so the card prop drives supersampledImgStyle
+    # identically to the story path.
+    if photo_ss > 0:
+        cards_props = [{**cp, "photoSupersample": photo_ss} for cp in cards_props]
+
+    # alpha-export: mark every beat's card for the transparent export so each
+    # <StoryCard> beat suppresses its outer ground fill; the reel-level cover/outro
+    # inherit it via reel_props["transparentBg"] below. A transparent compositing
+    # asset is also silent by design (audio_plan was nulled above), so drop any
+    # burn-in caption track that _assemble_reel_props baked upstream too — otherwise a
+    # voiceover+subtitles reel would ship a silent transparent asset with hardcoded
+    # captions, contradicting the alpha "clean compositing asset" contract and the
+    # story path (which nulls the audio plan before its caption build so captions stay
+    # off too). Attach-and-drop only, so a non-alpha reel keeps byte-identical card
+    # props + cache key (and this lands before the cache-payload fold, so a caption-free
+    # alpha reel keys distinctly and never collides with a captioned opaque reel).
+    if alpha_prof is not None:
+        cards_props = [
+            {**{k: v for k, v in cp.items() if k != "captionsJson"}, "transparentBg": True}
+            for cp in cards_props
+        ]
+
+    # per-effect-toggle (REVIEW-ONLY A/B): suppress the decorative axes on EVERY
+    # beat's card for a with/without comparison reel, attached ONLY on the
+    # explicit review path AND only when it validates non-empty, so a shipped
+    # reel keeps byte-identical card props + cache key. Rides through <StoryCard>
+    # (and the ffmpeg path's card manifest) via the card prop. The reel COVER and
+    # OUTRO are separate, non-per-card scenes and deliberately keep their full
+    # treatment — the toggle scopes to the card beats it names.
+    ab_disabled = _validate_effect_toggles(review_ab) if review_ab is not None else []
+    if ab_disabled:
+        cards_props = [{**cp, "effectsDisabled": ab_disabled} for cp in cards_props]
+
     # M18 — brand-true cover/outro props (APCA-gated roles, top card's
     # typography, top photo for the pool-gated photo cover). Assembled per cut
     # so the cover photo's saliency focus follows the format.
     cover_props = _reel_cover_props(cards_props, brand_dict, brand_kit)
+
+    # svg-shape-decompose — opt-in logo draw-on for the cover/outro brand
+    # scenes. Decompose the brand's OWN inline SVG into ordered per-path
+    # draw-on data; ``None`` (opt-out OR an honest degrade — raster/circle-only
+    # or an unsupported path command) keeps the static filled ``<img>`` and a
+    # byte-identical cache key. Folded into props + cache key only when present.
+    logo_drawon_payload = _decompose_logo_svg(_brand_logo_svg(brand_kit)) if logo_drawon else None
 
     if engine == "ffmpeg":
         from mediahub.visual import reel_ffmpeg
@@ -2997,6 +4375,8 @@ def _render_reel_one_format(
             format_name=format_name,
             rhythm=rhythm,
             audio_notes=audio_notes,
+            logo_drawon=logo_drawon,
+            **_fps_kw(fps),
         )
 
     cache_payload = {
@@ -3015,6 +4395,11 @@ def _render_reel_one_format(
         cache_payload["cta"] = cta_props
     if cover_props:
         cache_payload["cover"] = cover_props
+    # svg-shape-decompose: fold the decomposed logo paths ONLY when the draw-on
+    # is active (opt-in + successful decompose), so every reel rendered without
+    # it keeps a byte-identical cache key.
+    if logo_drawon_payload:
+        cache_payload["logoDrawOn"] = logo_drawon_payload
     if audio_plan:
         cache_payload["audio"] = audio_plan
     # M21: per-card edit-recipe signatures, folded only when any card's photo
@@ -3029,8 +4414,41 @@ def _render_reel_one_format(
         cache_payload["footage"] = [
             (f.cache_sig if f is not None else None) for f, _ in footage_list
         ]
+    # Supersample folds in only when active, so a default (1x) reel keeps its
+    # byte-identical cache key; a 2x reel keys independently.
+    if supersample > 1.0:
+        cache_payload["supersample"] = supersample
+    # true-motion-blur: the reel-level shutter-accumulation axis. Folded ONLY when
+    # active (mblur is not None) so a blurred reel can never be served from — or
+    # overwrite — an un-blurred cache entry, and the default reel key is untouched.
+    # Reel-level (not per-card), so it needs its own fold: cards_props stay
+    # byte-identical, and each distinct (samples, shutter) keys independently.
+    if mblur is not None:
+        cache_payload["motionBlur"] = mblur
+    # fps-option: fold the frame rate only for a non-default choice, so the
+    # default (30fps) reel cache key is byte-identical to before.
+    if int(fps) != MOTION_FPS:
+        cache_payload["fps"] = int(fps)
+    # per-effect-toggle (REVIEW-ONLY A/B): a distinct top-level marker so the
+    # comparison "B" reel can never collide with, or perturb, the default reel
+    # key. Set ONLY on the validated review path; a shipped reel is untouched.
+    if ab_disabled:
+        cache_payload["ab_review"] = ab_disabled
+    # alpha-export: fold the transparent-export profile under a distinct ``alpha``
+    # key when active, so an alpha reel can never be served from — or overwrite —
+    # an opaque cache entry, and the default reel key is untouched.
+    # bit-depth-gamut: fold the profile NAME only when active, so a 10-bit/tagged
+    # reel can never be served from an 8-bit cache entry and the default (encode
+    # is None) reel key stays byte-identical. Mutually exclusive (alpha overrode
+    # encode above) — exactly one fold fires.
+    if alpha_prof is not None:
+        cache_payload["alpha"] = alpha_prof.key
+    elif encode is not None:
+        cache_payload["encode"] = encode["name"]
     cache_key = _content_hash(cache_payload, kind="reel")
-    cached = _cache_dir() / f"{cache_key}.mp4"
+    # Container-aware cached slot: opaque reels are .mp4; an alpha reel writes the
+    # profile's .mov/.webm slot (the alpha key already differs, so no collision).
+    cached = _cache_dir() / f"{cache_key}{encode['container'] if encode else '.mp4'}"
     if cached.exists() and cached.stat().st_size > 1024:
         _touch_cache_hit(cached)  # LRU recency (#71)
         audio_rec = _finish_cached_video(
@@ -3062,17 +4480,53 @@ def _render_reel_one_format(
         reel_props["rhythm"] = rhythm
     if stat_config:
         reel_props["reelStatConfig"] = stat_config
+    # alpha-export: drive the CoverScreen/OutroScreen ground suppression via the
+    # reel-level prop (the per-card beats already carry their own transparentBg).
+    # Attach-only, so a non-alpha reel's props (and bundle hash) stay byte-identical.
+    if alpha_prof is not None:
+        reel_props["transparentBg"] = True
+    # svg-shape-decompose: pass the decomposed logo paths into the reel props
+    # ONLY when active, so the default reel's props (and thus the bundle hash)
+    # stay byte-identical. The zod defaults (logoDrawOn:false, logoPaths:[])
+    # make the composition's inactive DOM the exact filled ``<img>``.
+    if logo_drawon_payload:
+        reel_props["logoDrawOn"] = True
+        reel_props["logoViewBox"] = logo_drawon_payload["viewBox"]
+        reel_props["logoPaths"] = logo_drawon_payload["paths"]
+    # true-motion-blur: pass the reel-level shutter-accumulation config into the
+    # reel props ONLY when active, so the default reel's props (and thus the bundle
+    # hash) stay byte-identical. The composition wraps the whip flick AND threads
+    # this down to each <StoryCard> beat's entrance/count-up as a dedicated prop
+    # (never via cards_props, which stays byte-identical). The zod
+    # ``motionBlur.optional()`` default (absent => undefined) keeps the inactive
+    # DOM the exact current whip feGaussianBlur + unwrapped beats.
+    if mblur is not None:
+        reel_props["motionBlur"] = mblur
     # Cold render. Try the opt-in parallel composition path (R1.28) first: it
     # splits the reel's frames across concurrent segment renders and composites
     # them into a byte-equivalent silent reel, cutting wall-clock on multi-core
     # workers. It returns None — and we take the unchanged serial render — when
     # disabled, unavailable, or on any failure.
     render_strategy = "serial"
+    # Supersample forces the serial path: the parallel-segment composite doesn't
+    # thread the --scale/downscale, so it's skipped when supersampling (an
+    # unchanged 1x reel still tries parallel first). bit-depth-gamut: an active
+    # encode profile forces serial too — the parallel composite stream-copies its
+    # h264 segments and threads no codec/pixelFormat/colorSpace, so it cannot
+    # produce the profile output; only the serial _run_remotion carries encode=.
     if (
-        _render_reel_parallel_or_none(
-            props=reel_props, cached=cached, duration_sec=duration_sec, size=size
+        encode is None
+        and supersample <= 1.0
+        and (
+            _render_reel_parallel_or_none(
+                props=reel_props,
+                cached=cached,
+                duration_sec=duration_sec,
+                size=size,
+                **_fps_kw(fps),
+            )
+            is not None
         )
-        is not None
     ):
         render_strategy = "parallel-segments"
     else:
@@ -3082,6 +4536,9 @@ def _render_reel_one_format(
             out_path=cached,
             duration_sec=duration_sec,
             size=size,
+            supersample=supersample,
+            **_encode_kw(encode),
+            **_fps_kw(fps),
         )
     audio_rec = _finish_cached_video(
         cached,
@@ -3107,10 +4564,96 @@ def _render_reel_one_format(
             "kind": "reel",
             "engine": engine,
             "render_strategy": render_strategy,
+            **({"supersample": supersample} if supersample > 1.0 else {}),
+            # alpha-export: honest transparent-export record (fold-only-when-active,
+            # mutually exclusive with the encode block below).
+            **({"alpha": _alpha_manifest(alpha_prof)} if alpha_prof is not None else {}),
+            # bit-depth-gamut: honest encode-profile record (fold-only-when-active).
+            # Same brand-locked, APCA-gated colours re-encoded at higher bit-depth
+            # precision + gamut-tagged — not a synthesised wide-gamut master.
+            **(
+                {
+                    "encode": {
+                        "profile": encode["name"],
+                        "codec": encode["codec"],
+                        "pixel_format": encode["pixelFormat"],
+                        "color_space": encode.get("colorSpace") or "untagged",
+                        "note": (
+                            "Higher-bit-depth/gamut-tagged re-ENCODE of the same "
+                            "brand-locked, APCA-gated colours. Source frames are "
+                            "Chromium 8-bit sRGB; 10-bit reduces encode banding and "
+                            "colorSpace tags the container — a precision + metadata "
+                            "change, not a synthesised wide-gamut master. bt2020-ncl "
+                            "is a HLG/2020 re-tag + limited-range matrix relabel over "
+                            "sRGB-origin pixels (not a true gamut map): a tonemapping "
+                            "player that honours the tag may display it differently "
+                            "from the approved still."
+                        ),
+                    },
+                    **(
+                        {
+                            "supersample": {
+                                "requested": _motion_supersample(),
+                                "applied": False,
+                                "reason": "incompatible with encode profile "
+                                "(10-bit downscale unsupported)",
+                            }
+                        }
+                        if _motion_supersample() > 1.0
+                        else {}
+                    ),
+                }
+                if (encode is not None and alpha_prof is None)
+                else {}
+            ),
+            # transform-sampling (AE-gap): honest per-photo hint record — a
+            # best-effort compositor interpolation hint on the beats' scaled
+            # photos, NOT a guaranteed dense-buffer supersample.
+            **(
+                {
+                    "photoSupersample": {
+                        "factor": photo_ss,
+                        "kind": "best-effort-hint",
+                        "note": "imageRendering:auto on scaled photos; guaranteed "
+                        "dense-buffer supersample is the whole-composition "
+                        "MEDIAHUB_MOTION_SUPERSAMPLE",
+                    }
+                }
+                if photo_ss > 0
+                else {}
+            ),
+            # true-motion-blur: honest reel-level shutter-accumulation record —
+            # the sample count is the per-frame cost multiplier and the scope is
+            # bounded to the whip flick + each beat's settling entrance/count-up
+            # (the photo camera / parallax are NOT sampled, so held frames stay
+            # the approved stills). Fold-only-when-active.
+            **(
+                {
+                    "motionBlur": {
+                        "samples": mblur["samples"],
+                        "shutter": mblur["shutter"],
+                        "scope": "whip+entrance+count_up",
+                        "note": (
+                            "Real multi-sample shutter accumulation: the whip "
+                            "transition's lateral flick and each beat's settling "
+                            "hero/result entrance + count-up are recomputed at "
+                            "%d deterministic sub-frames across a %g-degree shutter "
+                            "and composited with equal-weight progressive alpha "
+                            "(frame-pure, no @remotion/motion-blur). The perpetual "
+                            "photo camera / parallax are NOT sampled, so terminal "
+                            "held frames collapse to the approved stills. Cost "
+                            "scales with the sample count." % (mblur["samples"], mblur["shutter"])
+                        ),
+                    }
+                }
+                if mblur is not None
+                else {}
+            ),
             "format": format_name,
             "composition_revision": REEL_COMPOSITION_REVISION,
             "size": list(size),
             "duration_sec": duration_sec,
+            "fps": int(fps),
             "meet_name": meet_name,
             "rhythm": rhythm or "default",
             "cta": cta_props,
@@ -3127,6 +4670,18 @@ def _render_reel_one_format(
             },
             "cards": [_card_manifest_axes(cp) for cp in cards_props],
             "stat_config": stat_config or "default",
+            # svg-shape-decompose: honest provenance of the logo draw-on, folded
+            # only when active — how many of the brand's OWN paths draw on.
+            **(
+                {
+                    "logo_drawon": {
+                        "paths": len(logo_drawon_payload["paths"]),
+                        "view_box": logo_drawon_payload["viewBox"],
+                    }
+                }
+                if logo_drawon_payload
+                else {}
+            ),
             "audio": audio_rec,
             "captions": _reel_caption_manifest(cards_props),
             "poster": poster_path_for(cached).name if poster_path_for(cached).exists() else "",
@@ -3157,6 +4712,12 @@ def render_meet_reel(
     rhythm: Optional[dict] = None,
     dub_language: str = "",
     reel_stat_config: Optional[dict] = None,
+    fps: int = MOTION_FPS,
+    review_ab: Optional[list[str]] = None,
+    logo_drawon: bool = False,
+    peak_speed_ramp: str = "",
+    alpha_profile: str = "",
+    motion_templates: Optional[list[Optional[dict]]] = None,
 ) -> Path:
     """Render a multi-card reel from the top cards for a meet.
 
@@ -3174,7 +4735,10 @@ def render_meet_reel(
                   ranked moments (1 card → 7s … 5 cards → 23s; 3 cards keep the
                   historic 15s) unless customised.
       format_name  output cut: ``story`` (default) / ``portrait`` /
-                  ``square`` / ``landscape``.
+                  ``square`` / ``landscape``, or a validated arbitrary-canvas
+                  ``"WxH"`` token (any-canvas — exposed on the routes as
+                  ``?w=&h=`` / ``?size=WxH``). A custom size keys its own cache
+                  entry via the folded ``size`` list; presets stay byte-identical.
       sponsor     optional sponsor name for the reel's outro close (R1.30).
                   When set, the Remotion outro shows a "proudly supported by"
                   thank-you; blank falls back to the follow-the-club close.
@@ -3200,8 +4764,33 @@ def render_meet_reel(
     are mixed in when configured, with an honest silent fallback, and a
     poster-frame PNG sidecar lands beside the MP4.
 
+    ``fps`` selects the output frame rate from the curated ``ALLOWED_FPS`` set
+    (default 30, byte-identical); a non-default rate folds into the cache key
+    and re-times the render across the serial, parallel and ffmpeg engines.
+
+    ``review_ab`` (per-effect-toggle, REVIEW-ONLY) mirrors ``render_story_card``:
+    an opt-in list of decorative axes to SUPPRESS on every card beat for a
+    with/without comparison reel, validated against ``EFFECT_TOGGLE_ALLOWLIST``
+    and keyed distinctly (``ab_review``) so the default reel's key/bytes are
+    untouched. The cover/outro keep their full treatment (they are not per-card
+    axes). ``None`` — and an all-unknown list — render byte-identically.
+
+    ``logo_drawon`` (svg-shape-decompose) opts the reel's cover + outro brand
+    scenes into a per-path SVG stroke draw-on: the club's OWN logo paths trace
+    on then cross-fade into the exact filled logo. Decomposed deterministically
+    from the brand's inline SVG; a raster / circle-only / unsupported-command
+    logo degrades honestly to the static ``<img>``. ``False`` (default) — and
+    any logo that can't decompose — keeps the reel byte-identical, folding
+    nothing into the cache key. The free FFmpeg engine reports it unsupported.
+
+    ``peak_speed_ramp`` (speed-ramp, opt-in) bakes a decelerate-into-the-beat
+    ramp onto the reel's PEAK beat (the #1 ranked card) via ffmpeg ``setpts`` —
+    a server-only field kept OUT of the Remotion-bound rhythm dict. ``""`` (the
+    default) keeps every footage beat byte-identical.
+
     For every cut in one request, see ``render_meet_reel_all_formats``.
     """
+    fps = _validate_fps(fps)
     engine = _dispatch_engine()
     # Validate the stat-chip config up front so a typo fails loudly before any
     # expensive photo-embed/prop work.
@@ -3225,6 +4814,9 @@ def render_meet_reel(
         rhythm=rhythm,
         dub_language=dub_language,
         resolve_footage=engine != "ffmpeg",
+        peak_speed_ramp=peak_speed_ramp,
+        fps=fps,
+        motion_templates=motion_templates,
     )
     cta_props = _reel_cta_props(sponsor, next_meet)
     return _render_reel_one_format(
@@ -3243,10 +4835,16 @@ def render_meet_reel(
         audio_notes=audio_notes,
         stat_config=stat_config,
         footage_list=footage_list,
+        fps=fps,
+        review_ab=review_ab,
+        logo_drawon=logo_drawon,
+        alpha_profile=alpha_profile,
     )
 
 
-def reel_format_out_path(out_dir: Path, format_name: str, *, base_name: str = "reel") -> Path:
+def reel_format_out_path(
+    out_dir: Path, format_name: str, *, base_name: str = "reel", container_ext: str = "mp4"
+) -> Path:
     """Resolve one cut's output path under ``out_dir``.
 
     The ``story`` cut keeps the bare ``<base_name>.mp4`` filename (so existing
@@ -3254,10 +4852,14 @@ def reel_format_out_path(out_dir: Path, format_name: str, *, base_name: str = "r
     ``<base_name>_<format>.mp4``. Mirrors the naming the reel routes already
     use (``reel_<n>.mp4`` / ``reel_<n>_<fmt>.mp4``), so the batch writes the
     exact files the ``reel-file`` route serves.
+
+    ``container_ext`` (alpha-export) swaps the ``.mp4`` extension for a
+    transparent-export container (``mov``/``webm``); the default ``"mp4"`` keeps
+    every existing name byte-identical.
     """
     motion_format_size(format_name)  # validate the name (raises on unknown)
     stem = base_name if format_name == DEFAULT_MOTION_FORMAT else f"{base_name}_{format_name}"
-    return Path(out_dir) / f"{stem}.mp4"
+    return Path(out_dir) / f"{stem}.{container_ext.lstrip('.')}"
 
 
 def render_meet_reel_all_formats(
@@ -3276,6 +4878,11 @@ def render_meet_reel_all_formats(
     rhythm: Optional[dict] = None,
     dub_language: str = "",
     reel_stat_config: Optional[dict] = None,
+    fps: int = MOTION_FPS,
+    logo_drawon: bool = False,
+    peak_speed_ramp: str = "",
+    alpha_profile: str = "",
+    motion_templates: Optional[list[Optional[dict]]] = None,
 ) -> dict[str, Any]:
     """Render + cache every requested reel format in a single pass (R1.15).
 
@@ -3315,6 +4922,7 @@ def render_meet_reel_all_formats(
     still ships what succeeded. The order of ``rendered`` follows
     ``MOTION_FORMATS`` for stable, predictable output.
     """
+    fps = _validate_fps(fps)
     engine = _dispatch_engine()
 
     requested = list(formats) if formats else list(MOTION_FORMATS)
@@ -3346,14 +4954,22 @@ def render_meet_reel_all_formats(
         rhythm=rhythm,
         dub_language=dub_language,
         resolve_footage=engine != "ffmpeg",
+        peak_speed_ramp=peak_speed_ramp,
+        fps=fps,
+        motion_templates=motion_templates,
     )
     cta_props = _reel_cta_props(sponsor, next_meet)
 
     out_dir = Path(out_dir)
+    # alpha-export: every cut in the batch inherits the transparent profile; the
+    # cut filenames carry the profile's .mov/.webm container so they match the
+    # reel-file route's alpha-aware naming.
+    alpha_prof = resolve_alpha_profile(alpha_profile)
+    _cut_ext = alpha_prof.ext if alpha_prof else "mp4"
     rendered: dict[str, Path] = {}
     errors: dict[str, str] = {}
     for fmt in ordered:
-        out_path = reel_format_out_path(out_dir, fmt, base_name=base_name)
+        out_path = reel_format_out_path(out_dir, fmt, base_name=base_name, container_ext=_cut_ext)
         slot_cm: ContextManager = render_slot(fmt) if render_slot else contextlib.nullcontext()
         try:
             with slot_cm:
@@ -3373,6 +4989,9 @@ def render_meet_reel_all_formats(
                     audio_notes=audio_notes,
                     stat_config=stat_config,
                     footage_list=footage_list,
+                    fps=fps,
+                    logo_drawon=logo_drawon,
+                    alpha_profile=alpha_profile,
                 )
         except ReelEngineUnavailable as e:
             # Expected capability gap (e.g. ffmpeg can't do non-story) —
@@ -3453,8 +5072,13 @@ __all__ = [
     "reel_duration_for",
     "normalise_reel_rhythm",
     "motion_format_size",
+    "validate_canvas_size",
+    "canonical_motion_format",
     "MOTION_FORMATS",
     "DEFAULT_MOTION_FORMAT",
+    "ALPHA_PROFILES",
+    "resolve_alpha_profile",
+    "AlphaUnsupportedError",
     "node_available",
     "remotion_installed",
     "REMOTION_DIR",

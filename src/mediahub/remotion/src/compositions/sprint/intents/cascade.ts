@@ -1,4 +1,5 @@
 import { Easing, interpolate, spring } from "remotion";
+import { glyphRevealAt } from "../../../motion/compile";
 import type { IntentProgram } from "../registry";
 
 /**
@@ -14,7 +15,15 @@ import type { IntentProgram } from "../registry";
  * cascade its own language is the *even, stepped, top-to-bottom* rhythm carried
  * across every layer, not just the words.
  */
-const program: IntentProgram = (frame, fps, _durationInFrames, _mood, base) => {
+const program: IntentProgram = (
+  frame,
+  fps,
+  _durationInFrames,
+  mood,
+  base,
+  _stagger,
+  seed = 0,
+) => {
   const fallEase = {
     extrapolateLeft: "clamp" as const,
     extrapolateRight: "clamp" as const,
@@ -67,6 +76,13 @@ const program: IntentProgram = (frame, fps, _durationInFrames, _mood, base) => {
         }),
       };
     },
+    // Per-glyph cascade for cards that opted into glyph granularity — the same
+    // seeded, ORDER × SHAPE-selected, APCA-clamped reveal kinetic_type uses,
+    // driven by the seed the registry now threads in (cascade previously had no
+    // seed in scope, which is why the shared IntentProgram signature was
+    // extended). Frame-pure.
+    glyphAt: (i: number, total: number) =>
+      glyphRevealAt(i, total, frame, fps, seed, mood),
   };
 };
 

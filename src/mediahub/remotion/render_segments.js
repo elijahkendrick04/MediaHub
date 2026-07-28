@@ -66,6 +66,10 @@ async function main() {
   const durationSec = args.duration ? parseFloat(args.duration) : null;
   const widthPx = args.width ? parseInt(args.width, 10) : null;
   const heightPx = args.height ? parseInt(args.height, 10) : null;
+  // Optional output frame rate override (fps-option) — mirrors render.js so a
+  // parallel segment render re-times to the same fps the serial render would.
+  // Absent (or <=0) keeps the composition's declared fps (byte-identical).
+  const fpsArg = args.fps ? parseInt(args.fps, 10) : null;
   // Tabs per segment render. The wall-clock win comes from running the
   // segments concurrently, so each one stays narrow (default 1 tab) to avoid
   // oversubscribing the CPU when N segments run at once.
@@ -132,16 +136,17 @@ async function main() {
     process.exit(4);
   }
 
+  const fps = fpsArg && fpsArg > 0 ? fpsArg : composition.fps;
   let durationInFrames = composition.durationInFrames;
   if (durationSec) {
-    durationInFrames = Math.max(1, Math.round(durationSec * composition.fps));
+    durationInFrames = Math.max(1, Math.round(durationSec * fps));
   }
   const width = widthPx && widthPx > 0 ? widthPx : composition.width;
   const height = heightPx && heightPx > 0 ? heightPx : composition.height;
 
   // Validate + clamp the requested frame ranges against the authoritative
-  // duration computed from the composition's own fps. Python plans the split
-  // at the same 30fps, so this is a belt-and-braces clamp, not a remap.
+  // duration computed from the effective fps. Python plans the split at the
+  // same fps, so this is a belt-and-braces clamp, not a remap.
   const plan = [];
   for (let i = 0; i < segments.length; i++) {
     const seg = segments[i] || {};
@@ -163,13 +168,13 @@ async function main() {
 
   console.error(
     `[remotion] rendering ${plan.length} segments of ${compositionId} ` +
-      `(${width}x${height} @ ${composition.fps}fps, ${durationInFrames} frames, ${concurrency} tab(s)/segment)`,
+      `(${width}x${height} @ ${fps}fps, ${durationInFrames} frames, ${concurrency} tab(s)/segment)`,
   );
 
   const renderSegment = async (seg) => {
     fs.mkdirSync(path.dirname(seg.output), { recursive: true });
     await renderMedia({
-      composition: { ...composition, durationInFrames, width, height },
+      composition: { ...composition, durationInFrames, width, height, fps },
       serveUrl,
       codec: "h264",
       outputLocation: seg.output,

@@ -268,7 +268,16 @@ def _render_capture(tmp_path, monkeypatch, cards, **kwargs):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     captured: dict = {}
 
-    def _fake_run(*, composition_id, props, out_path, duration_sec=None, size=None, timeout=600):
+    def _fake_run(
+        *,
+        composition_id,
+        props,
+        out_path,
+        duration_sec=None,
+        size=None,
+        timeout=600,
+        supersample=1.0,
+    ):
         captured["props"] = props
         captured["duration_sec"] = duration_sec
         out = Path(out_path)
@@ -312,9 +321,7 @@ def test_default_reel_reuses_the_legacy_cache_entry(tmp_path, monkeypatch):
 
 def test_distinct_rhythms_get_distinct_cache_entries(tmp_path, monkeypatch):
     _render_capture(tmp_path, monkeypatch, [_card(i) for i in range(3)])  # default
-    _render_capture(
-        tmp_path, monkeypatch, [_card(i) for i in range(3)], rhythm={"cover": 3}
-    )
+    _render_capture(tmp_path, monkeypatch, [_card(i) for i in range(3)], rhythm={"cover": 3})
     _render_capture(
         tmp_path, monkeypatch, [_card(i) for i in range(3)], rhythm={"weights": [2, 1, 1]}
     )

@@ -187,8 +187,20 @@ def footage_env(tmp_path, monkeypatch):
     # Fake trim: writes a deterministic file instead of shelling FFmpeg.
     trims: list[dict] = []
 
-    def fake_trim(src, out_path, *, in_ms, out_ms, dims):
-        trims.append({"src": str(src), "in": in_ms, "out": out_ms, "dims": dims})
+    def fake_trim(
+        src, out_path, *, in_ms, out_ms, dims, stabilize=False, setpts_expr=None, out_dur_ms=None
+    ):
+        trims.append(
+            {
+                "src": str(src),
+                "in": in_ms,
+                "out": out_ms,
+                "dims": dims,
+                "stabilize": stabilize,
+                "setpts_expr": setpts_expr,
+                "out_dur_ms": out_dur_ms,
+            }
+        )
         Path(out_path).write_bytes(b"clip" * 512)
         return True
 
@@ -404,6 +416,65 @@ class TestResolveCardFootage:
         res, why = self._resolve(tmp, store=FakeStore([_footage_asset(tmp)]))
         assert res is None and why == "ffmpeg-trim-failed-or-unavailable"
 
+    # -- opt-in deterministic stabilization (footage-stabilization) --
+
+    def test_stabilize_off_is_byte_identical(self, footage_env):
+        """A clip that doesn't request stabilization keeps the exact historic
+        filename, cache_sig, and (no) provenance — trim invoked with stabilize=False."""
+        tmp = footage_env["tmp"]
+        res, why = self._resolve(tmp, store=FakeStore([_footage_asset(tmp)]))
+        assert res is not None and why == ""
+        assert "-stab" not in res.video_src
+        assert "stabilize" not in res.cache_sig
+        assert "stabilize" not in res.provenance
+        assert footage_env["trims"][-1]["stabilize"] is False
+
+    def test_stabilize_applied(self, footage_env, monkeypatch):
+        tmp = footage_env["tmp"]
+        monkeypatch.setattr("mediahub.video.enhance.is_stabilize_available", lambda: True)
+        ft = _footage_asset(tmp)
+        ft.media_meta["stabilize"] = True
+        res, why = self._resolve(tmp, store=FakeStore([ft]))
+        assert res is not None and why == ""
+        assert res.video_src.endswith("-stab.mp4")
+        assert res.cache_sig["stabilize"] == "applied"
+        assert res.provenance["stabilize"] == {
+            "requested": True,
+            "applied": True,
+            "reason": "",
+        }
+        assert footage_env["trims"][-1]["stabilize"] is True
+
+    def test_stabilize_unavailable_honest_fallback(self, footage_env, monkeypatch):
+        """vidstab requested but the host FFmpeg lacks the filter → plain trim,
+        honestly recorded, never a faked steadied clip."""
+        tmp = footage_env["tmp"]
+        monkeypatch.setattr("mediahub.video.enhance.is_stabilize_available", lambda: False)
+        ft = _footage_asset(tmp)
+        ft.media_meta["stabilize"] = True
+        res, why = self._resolve(tmp, store=FakeStore([ft]))
+        assert res is not None and why == ""
+        assert "-stab" not in res.video_src
+        assert res.cache_sig["stabilize"] == "unavailable"
+        assert res.provenance["stabilize"]["applied"] is False
+        assert res.provenance["stabilize"]["reason"] == "vidstab-unavailable"
+        assert footage_env["trims"][-1]["stabilize"] is False
+
+    def test_stabilize_folds_into_content_hash(self, footage_env):
+        """The stabilize cache_sig key changes the motion content hash; the
+        default cache_sig (no key) hashes byte-identically to before."""
+        from mediahub.visual import motion
+
+        tmp = footage_env["tmp"]
+        base, _ = self._resolve(tmp, store=FakeStore([_footage_asset(tmp)]))
+        assert "stabilize" not in base.cache_sig
+        # Same footage sig ± only the stabilize key isolates the fold.
+        stabbed_sig = {**base.cache_sig, "stabilize": "applied"}
+        h_plain = motion._content_hash({"footage": base.cache_sig}, kind="story")
+        h_stab = motion._content_hash({"footage": stabbed_sig}, kind="story")
+        assert h_plain == motion._content_hash({"footage": base.cache_sig}, kind="story")
+        assert h_plain != h_stab  # stabilize state re-keys the render
+
 
 # ---------------------------------------------------------------------------
 # M23 — motion props + cache folds (attach only when present)
@@ -451,7 +522,16 @@ class TestMotionFootageFold:
 
         keys: list[str] = []
 
-        def fake_run(*, composition_id, props, out_path, duration_sec=None, size=None, timeout=600):
+        def fake_run(
+            *,
+            composition_id,
+            props,
+            out_path,
+            duration_sec=None,
+            size=None,
+            timeout=600,
+            supersample=1.0,
+        ):
             keys.append(Path(out_path).stem)
             Path(out_path).parent.mkdir(parents=True, exist_ok=True)
             Path(out_path).write_bytes(b"0" * 2048)
@@ -498,7 +578,16 @@ class TestMotionFootageFold:
 
         keys: list[str] = []
 
-        def fake_run(*, composition_id, props, out_path, duration_sec=None, size=None, timeout=600):
+        def fake_run(
+            *,
+            composition_id,
+            props,
+            out_path,
+            duration_sec=None,
+            size=None,
+            timeout=600,
+            supersample=1.0,
+        ):
             keys.append(Path(out_path).stem)
             Path(out_path).parent.mkdir(parents=True, exist_ok=True)
             Path(out_path).write_bytes(b"0" * 2048)
@@ -537,6 +626,74 @@ class TestMotionFootageFold:
         )
         d = self._props(footage=res, brief=_brief(crop_intent="tight_portrait"))
         assert "photoScale" not in d
+
+
+# ---------------------------------------------------------------------------
+# speed-ramp — reel PEAK-beat gate (idx==0), server-only opt-in
+# ---------------------------------------------------------------------------
+
+
+class TestReelPeakSpeedRampGate:
+    def _capture_ramps(self, monkeypatch):
+        from mediahub.visual import motion
+
+        calls: list[str] = []
+
+        def capture(card, brief, brand_kit, *, beat_seconds, speed_ramp=""):
+            calls.append(speed_ramp)
+            return None, ""
+
+        monkeypatch.setattr(motion, "_footage_for_card", capture)
+        return motion, calls
+
+    def test_peak_ramp_gated_to_idx0(self, footage_env, monkeypatch):
+        motion, calls = self._capture_ramps(monkeypatch)
+        cards = [_card(), _card(id="swim-2", swim_id="swim-2")]
+        briefs = [_brief(), _brief()]
+        motion._assemble_reel_props(
+            cards,
+            BRAND,
+            meet_name="M",
+            duration_sec=None,
+            briefs=briefs,
+            resolve_footage=True,
+            peak_speed_ramp="slow_in",
+        )
+        # Only the #1 ranked beat (idx 0) requests the ramp.
+        assert calls == ["slow_in", ""]
+
+    def test_default_off_no_beat_requests_ramp(self, footage_env, monkeypatch):
+        motion, calls = self._capture_ramps(monkeypatch)
+        cards = [_card(), _card(id="swim-2", swim_id="swim-2")]
+        briefs = [_brief(), _brief()]
+        motion._assemble_reel_props(
+            cards,
+            BRAND,
+            meet_name="M",
+            duration_sec=None,
+            briefs=briefs,
+            resolve_footage=True,
+        )
+        assert calls == ["", ""]
+
+    def test_ramp_stays_out_of_remotion_rhythm_dict(self, footage_env, monkeypatch):
+        """The peak-ramp opt-in must NEVER ride into the Remotion-bound rhythm
+        prop (correction #2): normalise_reel_rhythm's shape is prop-verbatim."""
+        motion, _ = self._capture_ramps(monkeypatch)
+        (_, _, _, _, _, _, rhythm_norm, _, _) = motion._assemble_reel_props(
+            [_card()],
+            BRAND,
+            meet_name="M",
+            duration_sec=None,
+            briefs=[_brief()],
+            resolve_footage=True,
+            peak_speed_ramp="slow_in",
+        )
+        # Default rhythm request → None; a customised one would still never carry
+        # a peakSpeedRamp/speed_ramp key.
+        if rhythm_norm is not None:
+            assert "peakSpeedRamp" not in rhythm_norm
+            assert "speed_ramp" not in rhythm_norm
 
 
 # ---------------------------------------------------------------------------

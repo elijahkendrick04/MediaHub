@@ -407,6 +407,49 @@ class TestD8LayoutAndMotionParity:
         assert "wghtKicker" not in std
         assert bold["wghtKicker"] == 700 and bold["wghtMeta"] == 820
 
+    def test_varfont_animation_does_not_change_the_static_targets(self):
+        # varfont-animation animates the register weight in the compositions
+        # (a bloom UP to these targets), but must NOT alter the values motion.py
+        # emits — the terminal/held weight the still ships is unchanged, so
+        # still↔motion parity holds and no register regressed.
+        from mediahub.brand.kit import BrandKit
+        from mediahub.visual import motion
+
+        brand = BrandKit(
+            profile_id="p",
+            display_name="P SC",
+            primary_colour="#0E2A47",
+            secondary_colour="#C9A227",
+            accent_colour="#FFFFFF",
+            short_name="PSC",
+        )
+        card = {
+            "id": "s1",
+            "swim_id": "s1",
+            "meet_name": "Open",
+            "achievement": {
+                "swim_id": "s1",
+                "swimmer_name": "Eira Hughes",
+                "event_name": "100m Free",
+                "result_time": "1:01.00",
+            },
+        }
+        bold = motion._card_to_props(
+            card,
+            brief={
+                "style_pack": "bokeh-none-none-bold",
+                "mood": "explosive",
+                "layout_template": "big_number_dominant",
+                "text_layers": {},
+            },
+            brand_kit=brand,
+        )
+        # The emitted register targets are the deterministic engine's, not the
+        # bloom's — and no animation-only field ("wghtBloom") leaks into props.
+        assert bold["wghtKicker"] == 700 and bold["wghtMeta"] == 820
+        assert bold["wghtData"] == 790
+        assert "wghtBloom" not in bold
+
 
 # --------------------------------------------------------------------------- #
 # D9 — self-hosted Noto display cuts + per-script advance scales
@@ -446,9 +489,9 @@ class TestD9NonLatinDisplay:
             if fam in ("Anton", "Bebas Neue", "Bowlby One") and "cyrillic" in src:
                 assert "black" in src, f"{fam} display cut should be the Black weight, got {src}"
             if fam in ("Inter", "JetBrains Mono", "Space Grotesk") and "cyrillic" in src:
-                assert "black" not in src and "bold" not in src, (
-                    f"{fam} body should keep 400: {src}"
-                )
+                assert (
+                    "black" not in src and "bold" not in src
+                ), f"{fam} body should keep 400: {src}"
 
     def test_noto_display_woff2_present(self):
         names = {p.name for p in _FONTS.glob("*.woff2")}

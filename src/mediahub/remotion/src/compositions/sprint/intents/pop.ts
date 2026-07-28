@@ -10,14 +10,14 @@ import { entranceChannels } from "../../../motion/compile";
  * (`src/mediahub/motion/vocabulary.py`); compiled, not hand-tuned. Pure function
  * of the frame.
  */
-const program: IntentProgram = (frame, fps, _durationInFrames, mood, base) => {
+const program: IntentProgram = (frame, fps, _durationInFrames, mood, base, stagger) => {
   const m = (mood || "").toLowerCase();
   const subdued =
     m.includes("calm") ||
     m.includes("stoic") ||
     m.includes("minimal") ||
     m.includes("precise");
-  return entranceChannels(subdued ? "scale_in" : "pop", frame, fps, base);
+  return entranceChannels(subdued ? "scale_in" : "pop", frame, fps, base, stagger);
 };
 
 export default { name: "pop", program };

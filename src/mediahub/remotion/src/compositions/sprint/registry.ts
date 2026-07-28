@@ -31,6 +31,9 @@ import type { AnimChannels, Roles, SceneCtx } from "../StoryCard";
 // Re-exported so every sprint module imports its types from one place
 // (`../registry`) regardless of which subfolder it lives in.
 export type { AnimChannels, Roles, SceneCtx } from "../StoryCard";
+export type { StaggerConfig } from "../../motion/compile";
+
+import type { StaggerConfig } from "../../motion/compile";
 
 export type IntentProgram = (
   frame: number,
@@ -38,6 +41,12 @@ export type IntentProgram = (
   durationInFrames: number,
   mood: string,
   base: AnimChannels,
+  stagger?: StaggerConfig,
+  // The card's variationSeed, threaded from `animProgram` so a sprint intent
+  // can build a deterministic, frame-pure per-glyph / per-card variation
+  // (e.g. cascade's seeded per-character reveal). Optional so existing intent
+  // modules that ignore it keep the exact same signature.
+  seed?: number,
 ) => AnimChannels;
 
 export type SpringConfig = { damping: number; stiffness: number; mass: number };

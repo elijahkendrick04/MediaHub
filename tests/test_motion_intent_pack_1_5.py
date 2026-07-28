@@ -10,6 +10,7 @@ browser plays. These tests lock that contract end-to-end (mirroring
 
 No Node needed: pure-Python shaping + TS source contracts.
 """
+
 from __future__ import annotations
 
 import re
@@ -50,8 +51,16 @@ def test_normalise_round_trips(intent):
 
 def test_pack_is_additive_to_the_existing_vocabulary():
     for existing in (
-        "fade_in", "slide_up", "scale_in", "count_up", "static",  # built-ins
-        "bounce_in", "flip_reveal", "swirl", "reveal_from_sides", "cascade",  # R1.1
+        "fade_in",
+        "slide_up",
+        "scale_in",
+        "count_up",
+        "static",  # built-ins
+        "bounce_in",
+        "flip_reveal",
+        "swirl",
+        "reveal_from_sides",
+        "cascade",  # R1.1
     ):
         assert existing in ds.MOTION_INTENTS
 
@@ -94,7 +103,11 @@ def test_compile_ts_helper_exists_and_is_frame_pure():
     src = _COMPILE_TS.read_text()
     assert "export function entranceChannels" in src
     assert "export function sampleChannel" in src
-    for banned in ("Math.random", "Date.now"):
+    # Frame-purity guard: forbid actual invocations, not the bare names — a
+    # comment may legitimately document the contract ("no Math.random / Date.now")
+    # and that prose must not trip the guard (same convention as
+    # test_reel_transitions_r1_14.py::test_new_branches_are_deterministic...).
+    for banned in ("Math.random(", "Date.now(", "new Date("):
         assert banned not in src
 
 
@@ -111,17 +124,23 @@ def test_not_inlined_in_storycard(intent):
 
 def _brand() -> BrandKit:
     return BrandKit(
-        profile_id="m15", display_name="1.5 SC", primary_colour="#0E2A47",
-        secondary_colour="#C9A227", short_name="MSC",
+        profile_id="m15",
+        display_name="1.5 SC",
+        primary_colour="#0E2A47",
+        secondary_colour="#C9A227",
+        short_name="MSC",
     )
 
 
 def _card() -> dict:
     return {
-        "id": "swim-15-1", "swim_id": "swim-15-1",
+        "id": "swim-15-1",
+        "swim_id": "swim-15-1",
         "achievement": {
-            "swim_id": "swim-15-1", "swimmer_name": "Swimmer One",
-            "event_name": "100m Freestyle", "result_time": "1:01.00",
+            "swim_id": "swim-15-1",
+            "swimmer_name": "Swimmer One",
+            "event_name": "100m Freestyle",
+            "result_time": "1:01.00",
         },
         "meet_name": "1.5 Invitational",
     }
@@ -130,9 +149,14 @@ def _card() -> dict:
 @pytest.mark.parametrize("intent", PACK_1_5)
 def test_intent_flows_brief_to_props(intent):
     brief = generate(
-        {"id": "swim-15-1", "post_angle": "confirmed_official_pb",
-         "achievement": _card()["achievement"]},
-        None, _brand(), profile_id="m15",
+        {
+            "id": "swim-15-1",
+            "post_angle": "confirmed_official_pb",
+            "achievement": _card()["achievement"],
+        },
+        None,
+        _brand(),
+        profile_id="m15",
     )
     d = brief.to_dict()
     d["motion_intent"] = intent

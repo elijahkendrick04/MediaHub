@@ -229,6 +229,7 @@ def _run_node_segments(
     size: tuple[int, int],
     concurrency: int,
     timeout: int,
+    fps: int = REEL_FPS,
 ) -> None:
     """Render every planned segment concurrently via render_segments.js."""
     cmd = [
@@ -249,6 +250,10 @@ def _run_node_segments(
         "--concurrency",
         str(int(concurrency)),
     ]
+    # fps-option: append --fps only for a non-default rate so the default
+    # segment command stays byte-identical to the pre-fps behaviour.
+    if int(fps) != REEL_FPS:
+        cmd.extend(["--fps", str(int(fps))])
     from mediahub.visual.proc import run_capture
 
     try:
@@ -353,6 +358,7 @@ def render_reel_parallel(
             size=size,
             concurrency=per_segment_concurrency(len(ranges)),
             timeout=timeout,
+            fps=int(fps),
         )
 
         missing = [str(p) for p in seg_paths if not (p.exists() and p.stat().st_size > 256)]
@@ -386,6 +392,7 @@ def try_render_reel_parallel(
     out_path: Path,
     duration_sec: float,
     size: tuple[int, int],
+    fps: int = REEL_FPS,
     timeout: int = 600,
 ) -> Optional[Path]:
     """Gated, honest-fallback wrapper around :func:`render_reel_parallel`.
@@ -413,6 +420,7 @@ def try_render_reel_parallel(
             out_path=out_path,
             duration_sec=duration_sec,
             size=size,
+            fps=fps,
             timeout=timeout,
         )
     except ReelParallelUnavailable as e:
