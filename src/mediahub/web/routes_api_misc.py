@@ -997,6 +997,11 @@ def api_workflow_set(run_id, card_id):
     if ws is None:
         return jsonify({"error": "workflow not available"}), 503
 
+    # The creative toolbar's JS carries the DOM slug of the card id — state
+    # persisted under the slug is invisible to pack build / exports, which
+    # read by the real id. Canonicalise before any read or write.
+    card_id = W._canonical_card_id_for_run(run_id, card_id)
+
     payload = request.get_json(silent=True) or {}
     action = payload.get("action", "set_status")
     # Finding #116: record the signed-in member as the audit actor so the

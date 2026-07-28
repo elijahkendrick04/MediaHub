@@ -29,13 +29,15 @@ def test_caption_assist_buttons_driven_from_preset_labels():
 
     html = w._caption_assist_buttons("card-xyz")
     # Every slug in the fixed order renders its PRESET_LABELS value and an
-    # onclick whose transform slug is the PRESETS key.
+    # onclick whose transform slug is the PRESETS key. The onclick is built by
+    # _onclick_js (quote-safe JSON + HTML escaping — apostrophe-bearing card
+    # ids must not break the attribute), so assert via the same builder.
     for slug in w._ASSIST_BUTTON_ORDER:
         assert PRESET_LABELS[slug] in html
-        assert f"'card-xyz', '{slug}'" in html
+        assert w._onclick_js("captionAssistRun", "card-xyz", slug) in html
     # fuller / calmer stay opt-in — no dedicated button unless added deliberately.
-    assert "'card-xyz', 'fuller'" not in html
-    assert "'card-xyz', 'calmer'" not in html
+    assert w._onclick_js("captionAssistRun", "card-xyz", "fuller") not in html
+    assert w._onclick_js("captionAssistRun", "card-xyz", "calmer") not in html
 
 
 def test_colour_accessibility_panel_renders_details():

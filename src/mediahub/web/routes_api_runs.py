@@ -1171,8 +1171,12 @@ def api_card_translate(run_id, card_id, run_data):
             detail=f"lang={target}",
         )
 
-    # Persist on the card so approving the card approves the pair.
-    card_id_dec = _up.unquote(card_id)
+    # Persist on the card so approving the card approves the pair. The
+    # creative toolbar's JS carries the DOM slug of the card id — resolve it
+    # back to the real id (same canonicalisation as api_workflow_set) or the
+    # stored translation would be invisible to pack build / export, which
+    # read workflow state by the raw id.
+    card_id_dec = W._canonical_card_id_for_run(run_id, _up.unquote(card_id))
     ws = W._get_wf_store()
     if ws is not None:
         try:
@@ -2198,6 +2202,12 @@ def api_card_photo_upload(run_id: str, card_id: str):
             return jsonify({"error": "run_not_found"}), 404
     if not W._can_access_run(run_id, run_data, W._active_profile_id()):
         return jsonify({"error": "run_not_found"}), 404
+    # 1.18 role gate: writing a photo/clip into the org's media library is a
+    # content edit — a read-only seat (Viewer/Reviewer/Approver) on a bound
+    # workspace must not grow the library through this side door.
+    denied = W._role_denied_json(W._perms.CAP_EDIT, run_id, run_data)
+    if denied:
+        return denied
 
     # Resolve the card so the upload is linked to a real athlete.
     rr = run_data.get("recognition_report") or {}
@@ -3014,6 +3024,20 @@ def api_create_graphic(run_id: str, card_id: str):
     recent_sigs = history.get("signatures", [])[-6:]
     recent_hooks = history.get("hooks", [])[-6:]
 
+    # "Use this design" (pickVariant) persists the chosen variant's seed in
+    # the workflow store — honour it on later renders so the pick actually
+    # sticks across reloads. An explicit ?variation_seed=/?stable= in THIS
+    # request still wins.
+    if seed_raw in (None, "") and not stable_mode:
+        try:
+            _wf_state = (W._get_wf_store().load(run_id) or {}).get(card_id)
+            _picked = (getattr(_wf_state, "edited_captions", None) or {}).get(
+                "picked_variation_seed"
+            )
+            if _picked not in (None, ""):
+                seed_raw = str(_picked)
+        except Exception:
+            pass
     if seed_raw not in (None, ""):
         try:
             variation_seed = int(seed_raw)
@@ -6170,12 +6194,23 @@ def api_card_voiceover(run_id: str, card_id: str):
     # Derive the verbatim caption text from approved state, server-side.
     text = ""
     if state is not None and state.edited_captions:
-        # Honour the human's edits: join the saved slots in a stable order.
-        # ``prev.*`` slots are the H-10 restore history, not current copy.
+        # Honour the human's edits: join the saved CAPTION slots in a stable
+        # order. The edited_captions bag also carries non-caption state that
+        # must never be spoken: ``prev.*`` (H-10 restore history), ``insp.*``
+        # (inspector overrides — accent hex, crop tokens), ``alt_text``
+        # (accessibility text for the image), and ``picked_*`` (variant
+        # picks). Reading those aloud produced narrations like
+        # "#0A2540 centre-top".
+        _non_caption = ("prev.", "insp.", "picked_")
+
+        def _is_caption_slot(k: str) -> bool:
+            ks = str(k)
+            return not ks.startswith(_non_caption) and ks != "alt_text"
+
         parts = [
             state.edited_captions[k]
             for k in sorted(state.edited_captions)
-            if state.edited_captions.get(k) and not str(k).startswith("prev.")
+            if state.edited_captions.get(k) and _is_caption_slot(k)
         ]
         text = "\n".join(p for p in parts if p).strip()
     if not text and W._build_caption_text is not None:
