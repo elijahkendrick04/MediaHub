@@ -1748,7 +1748,7 @@ def content_pack(run_id):
             f'<img src="{_h(_thumb)}" data-src="{_h(_thumb)}" alt="" loading="lazy" '
             'style="width:34px;aspect-ratio:4/5;object-fit:cover;border-radius:4px;'
             'border:1px solid var(--border);background:var(--panel)" '
-            'onerror="window.mhThumbRetry?mhThumbRetry(this):(this.style.visibility=\'hidden\')">'
+            "onerror=\"window.mhThumbRetry?mhThumbRetry(this):(this.style.visibility='hidden')\">"
             f'<span style="font-size:12px;color:var(--ink)">{_h(_label) or _h(_cid)}</span>'
             "</label>"
         )
