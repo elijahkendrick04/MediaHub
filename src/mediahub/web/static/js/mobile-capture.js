@@ -124,20 +124,32 @@
     }
   }
 
-  function processAndUpload(file) {
-    if (!file) return;
-    setStatus("Preparing photo…");
+  // Downscale when possible; report whether the bytes were actually
+  // re-encoded. The .jpg rename below must ONLY happen when the canvas
+  // re-encode ran — renaming an untouched .heic to .jpg ships raw HEIC
+  // bytes under a JPEG name, defeating the server's filename-based gate
+  // and producing a confusing "unreadable photo" error later.
+  function prepFile(file) {
     var prep =
       canDownscale() && file.size > DOWNSCALE_MIN_BYTES
         ? downscale(file).catch(function () {
             return file;
           })
         : Promise.resolve(file);
-    prep
-      .then(function (blob) {
+    return prep.then(function (blob) {
+      var fname = file.name || "photo.jpg";
+      if (blob !== file) fname = fname.replace(/\.(heic|heif)$/i, ".jpg");
+      return { blob: blob, fname: fname };
+    });
+  }
+
+  function processAndUpload(file) {
+    if (!file) return;
+    setStatus("Preparing photo…");
+    prepFile(file)
+      .then(function (p) {
         setStatus("Uploading…");
-        var fname = (file.name || "photo.jpg").replace(/\.(heic|heif)$/i, ".jpg");
-        return uploadBlob(blob, fname);
+        return uploadBlob(p.blob, p.fname);
       })
       .then(function () {
         setStatus("Added to your library.");
@@ -166,16 +178,9 @@
     files.forEach(function (file, i) {
       chain = chain.then(function () {
         setStatus("Uploading " + (i + 1) + " of " + total + "…");
-        var prep =
-          canDownscale() && file.size > DOWNSCALE_MIN_BYTES
-            ? downscale(file).catch(function () {
-                return file;
-              })
-            : Promise.resolve(file);
-        return prep
-          .then(function (blob) {
-            var fname = (file.name || "photo.jpg").replace(/\.(heic|heif)$/i, ".jpg");
-            return uploadBlob(blob, fname);
+        return prepFile(file)
+          .then(function (p) {
+            return uploadBlob(p.blob, p.fname);
           })
           .then(
             function () {

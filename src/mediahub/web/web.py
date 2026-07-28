@@ -3993,6 +3993,58 @@ def _dom_card_uuid(card_id: str) -> str:
     return str(card_id).replace(":", "_").replace(",", "_").replace("~", "_")
 
 
+def _onclick_js(func: str, *args) -> str:
+    """A quote-safe ``onclick`` attribute body: ``func(this, <args…>)`` with
+    every argument JSON-encoded, HTML-escaped for a double-quoted attribute.
+
+    Replaces the fragile ``{repr(url)}`` / ``'{card_uuid}'`` interpolations:
+    ``repr`` switches to double quotes when the value contains an apostrophe
+    (an O'Brien swim id, a quoted meet name in a URL), terminating the
+    attribute mid-call and killing every control on that card. JSON + HTML
+    escaping survives any id/URL content.
+    """
+    call = func + "(this" + "".join(", " + json.dumps(str(a)) for a in args) + ")"
+    return str(_h(call))
+
+
+def _canonical_card_id_for_run(run_id: str, card_id: str) -> str:
+    """Resolve a DOM-slugged card id back to the run's real card id.
+
+    The creative toolbar's JS carries ``_dom_card_uuid``'s slug (``:`` ``,``
+    ``~`` → ``_``) of a card id, and some callers persist workflow state with
+    it. State keyed on the slug is invisible to every reader keyed on the
+    real id — ``build_content_pack`` reads ``wf_states.get(swim_id)``, so a
+    caption edit saved under the slug silently vanished from the pack. A
+    card id that already matches a known id passes through unchanged; a slug
+    that uniquely matches one known id's slug resolves to that id; anything
+    else (stub packs, unknown runs) passes through untouched.
+    """
+    cid = str(card_id or "")
+    if not cid:
+        return cid
+    run_data = _load_run(run_id)
+    if not run_data:
+        return cid
+    known: set[str] = set()
+    ranked = (run_data.get("recognition_report") or {}).get("ranked_achievements") or []
+    known.update(u for u in _unique_card_ids(ranked) if u)
+    for ra in ranked:
+        ach = ra.get("achievement") or {}
+        for v in (ach.get("swim_id"), ra.get("id"), ach.get("swimmer_id")):
+            if v:
+                known.add(str(v))
+    for c in run_data.get("cards") or []:
+        for v in (c.get("swim_id"), c.get("id"), c.get("card_id")):
+            if v:
+                known.add(str(v))
+    if cid in known:
+        return cid
+    matches = {k for k in known if _dom_card_uuid(k) == cid}
+    if len(matches) == 1:
+        return matches.pop()
+    return cid
+
+
 def _resolve_card_ra(ranked, card_id):
     """Return the ranked achievement whose unique per-card id equals
     ``card_id`` — honouring the ``~n`` dedup suffix so a duplicate twin
@@ -5464,7 +5516,9 @@ function saveActiveCaption(btn, cardId) {
   if (!panel) { return; }
   var ta = panel.querySelector('.caption-textarea');
   var textEl = panel.querySelector('.caption-text');
-  var text = (ta && ta.value) ? ta.value : (textEl ? textEl.textContent.trim() : '');
+  // The 'Click to generate…' placeholder lives inside .caption-text — it
+  // must never be saved/copied/adapted as if it were a caption.
+  var text = (ta && ta.value) ? ta.value : ((textEl && !panel.querySelector('.caption-placeholder')) ? textEl.textContent.trim() : '');
   var statusEl = document.querySelector('.caption-save-status[data-card="' + cardId + '"]');
   if (!text) { if (statusEl) { statusEl.textContent = 'Generate a caption first.'; statusEl.style.color = 'var(--ink-muted)'; } return; }
   var orig = btn.textContent;
@@ -5619,6 +5673,9 @@ function captionAssistRun(btn, cardId, transform) {
       }
       if (textEl) textEl.textContent = j.caption;
       if (ta) ta.value = j.caption;
+      // Keep the session tone-cache in step — otherwise switching to another
+      // tone and back silently reverted the panel to the pre-assist caption.
+      _captionCache[cardId + '|' + tone] = {text: j.caption, variants: [j.caption]};
       // Assist is an explicit wording change the user asked for — persist it so
       // the revision survives approval without a trip to the inspector.
       _persistCaption(cardId, j.caption, function(ok, why){ _setSaveStatus(cardId, ok, why); });
@@ -5656,7 +5713,9 @@ function createGraphic(btn, createUrl, cardId, fmt, assetId, noPhoto) {
         prog.stop();
         btn.disabled = false; btn.textContent = origLabel;
         var emsg = (res.body && res.body.user_message) || ('Error: ' + ((res.body && res.body.error) || 'render failed'));
-        panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">' + emsg + '</div>';
+        // Server error strings can carry raw detail (str(e), filenames) —
+        // escape before the innerHTML sink.
+        panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">' + window.safeText(emsg) + '</div>';
         return;
       }
       _visualCache[cacheKey] = res.body;
@@ -5672,7 +5731,7 @@ function createGraphic(btn, createUrl, cardId, fmt, assetId, noPhoto) {
     .catch(function(err) {
       prog.stop();
       btn.disabled = false; btn.textContent = origLabel;
-      panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">Network error: ' + err + '</div>';
+      panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">Network error: ' + window.safeText(err) + '</div>';
     });
 }
 
@@ -5682,6 +5741,23 @@ function createGraphic(btn, createUrl, cardId, fmt, assetId, noPhoto) {
 // them back to " before passing to the JS engine).
 function _attrEsc(jsExpr) {
   return '"' + jsExpr.replace(/&/g, '&amp;').replace(/"/g, '&quot;') + '"';
+}
+
+// HTML-escape untrusted text/attribute values before string-built innerHTML.
+// Server data is NOT safe here: venue queries derive from org-entered meet
+// names and thumb URLs come from third-party photo searches.
+function _mhEsc(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+// Session CSRF token for JS-built non-JSON writes (FormData uploads, empty
+// bodies). JSON fetches are exempt from the CSRF layer; everything else must
+// send this header or production 403s the request (_csrf_protect).
+function mhCsrfToken() {
+  var m = document.querySelector('meta[name="csrf-token"]');
+  return (m && m.content) || '';
 }
 
 // Upload a photo for ONE card: file dialog → POST to the card's /photo
@@ -5699,8 +5775,13 @@ function mhCardPhotoUpload(btn, photoUrl, createUrl, cardId, fmt, accept) {
     var orig = btn.textContent;
     btn.disabled = true;
     btn.textContent = 'Uploading…';
-    fetch(photoUrl, {method: 'POST', body: fd})
-      .then(function(r) { return r.json(); })
+    fetch(photoUrl, {method: 'POST', headers: {'X-CSRF-Token': mhCsrfToken(), 'Accept': 'application/json'}, body: fd})
+      .then(function(r) {
+        // A 413 (body over the upload cap) comes back as HTML, not JSON —
+        // map it to a plain message instead of letting r.json() throw.
+        if (r.status === 413) { return {error: 'too_large', message: 'That file is too large — try a smaller one.'}; }
+        return r.json();
+      })
       .then(function(j) {
         btn.disabled = false; btn.textContent = orig;
         if (!j.ok || !j.asset) {
@@ -5713,7 +5794,7 @@ function mhCardPhotoUpload(btn, photoUrl, createUrl, cardId, fmt, accept) {
           // extracted best frame (M25, when available) becomes the still's
           // photo in the same breath.
           var hasFrame = j.asset.frame_asset && j.asset.frame_asset.id;
-          if (window.MH && MH.toast) MH.toast('Race clip saved &amp; linked to this card' + (hasFrame ? ' — using its best frame as the photo' : ''), 'success', 3200);
+          if (window.MH && MH.toast) MH.toast('Race clip saved and linked to this card' + (hasFrame ? ' — using its best frame as the photo' : ''), 'success', 3200);
           createGraphic(btn, createUrl, cardId, fmt, hasFrame ? j.asset.frame_asset.id : '', false);
           return;
         }
@@ -5790,16 +5871,16 @@ function mhVenueSearchOpen(btn, createUrl, cardId, fmt) {
     .then(function(j) {
       var res = (j && j.results) || [];
       if (!res.length) {
-        slot.innerHTML = '<span style="font-size:11px;color:var(--ink-muted)">No public venue photos found' + (j && j.query ? ' for “' + j.query + '”' : '') + '.</span>';
+        slot.innerHTML = '<span style="font-size:11px;color:var(--ink-muted)">No public venue photos found' + (j && j.query ? ' for “' + _mhEsc(j.query) + '”' : '') + '.</span>';
         return;
       }
       _venueResults[cardId] = res;
-      var html = '<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:4px">Venue backdrops' + (j.query ? ' · ' + j.query : '') + ' · CC-licensed, attribution saved with the asset</div>';
+      var html = '<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:4px">Venue backdrops' + (j.query ? ' · ' + _mhEsc(j.query) : '') + ' · CC-licensed, attribution saved with the asset</div>';
       res.forEach(function(ph, i) {
-        html += '<button type="button" title="' + ((ph.title || '') + (ph.licence ? ' · ' + ph.licence : '')).replace(/"/g, '&quot;') + '"' +
+        html += '<button type="button" title="' + _mhEsc((ph.title || '') + (ph.licence ? ' · ' + ph.licence : '')) + '"' +
           ' onclick=' + _attrEsc('mhVenueImport(this, ' + JSON.stringify(createUrl) + ', ' + JSON.stringify(cardId) + ', ' + JSON.stringify(fmt) + ', ' + i + ')') +
           ' style="padding:0;border-radius:6px;cursor:pointer;border:2px solid var(--border);background:var(--bg);line-height:0;margin:0 4px 4px 0">' +
-          '<img src="' + ph.thumb_url + '" data-src="' + ph.thumb_url + '" onerror="mhThumbRetry(this)" alt="" style="width:44px;height:44px;object-fit:cover;border-radius:4px;pointer-events:none"/></button>';
+          '<img src="' + _mhEsc(ph.thumb_url) + '" data-src="' + _mhEsc(ph.thumb_url) + '" onerror="mhThumbRetry(this)" alt="" style="width:44px;height:44px;object-fit:cover;border-radius:4px;pointer-events:none"/></button>';
       });
       slot.innerHTML = html;
     })
@@ -5848,8 +5929,12 @@ function _renderVisualPanel(panel, data, cardId, createUrl) {
   var imgUrl = apiBase + '/api/visual/' + encodeURIComponent(v.id) + '/png/' + encodeURIComponent(cur);
   var why = (data.brief && data.brief.why_this_design) || v.why_this_design || '';
   var layout = v.layout_template || (data.brief && data.brief.layout_template) || '';
-  var formats = ['feed_portrait', 'feed_square', 'story_vertical'];
-  var formatLabels = {'feed_portrait':'Portrait', 'feed_square':'Square', 'story_vertical':'Story'};
+  // Names must match graphic_renderer FORMAT_SIZES — the renderer silently
+  // filters unknown formats, so a wrong name here renders NOTHING (the old
+  // 'story_vertical' tab produced an empty render on every click; the
+  // renderer's 9:16 cut is named 'story').
+  var formats = ['feed_portrait', 'feed_square', 'story'];
+  var formatLabels = {'feed_portrait':'Portrait', 'feed_square':'Square', 'story':'Story'};
   var tabsHtml = formats.map(function(f) {
     var active = (f === cur);
     return '<button class="vfmt-tab" data-fmt="' + f + '" onclick=' + _attrEsc('createGraphic(this, ' + JSON.stringify(createUrl) + ', ' + JSON.stringify(cardId) + ', ' + JSON.stringify(f) + ', ' + JSON.stringify(chosen) + ', ' + (noP ? 'true' : 'false') + ')') + ' style="font-size:11px;padding:3px 10px;border-radius:999px;border:1px solid var(--border);cursor:pointer;background:' + (active ? 'color-mix(in oklab, var(--lane) 15%, transparent)' : 'transparent') + ';color:' + (active ? 'var(--lane)' : 'var(--ink-dim)') + ';font-family:inherit;margin-right:4px">' + formatLabels[f] + '</button>';
@@ -5992,7 +6077,7 @@ function voiceoverToggle(btn, voUrl, cardId) {
       var j = res.body || {};
       if (res.status !== 200 || !j.ok) {
         var msg = j.user_message || j.detail || j.error || 'Voiceover failed — try again.';
-        panel.innerHTML = '<div style="padding:10px;font-size:12px;color:var(--bad)">' + msg + '</div>';
+        panel.innerHTML = '<div style="padding:10px;font-size:12px;color:var(--bad)">' + window.safeText(msg) + '</div>';
         return;
       }
       panel.dataset.loaded = '1';
@@ -6010,7 +6095,7 @@ function voiceoverToggle(btn, voUrl, cardId) {
     })
     .catch(function(err){
       btn.disabled = false; btn.textContent = origLabel;
-      panel.innerHTML = '<div style="padding:10px;font-size:12px;color:var(--bad)">Network error: ' + err + '</div>';
+      panel.innerHTML = '<div style="padding:10px;font-size:12px;color:var(--bad)">Network error: ' + window.safeText(err) + '</div>';
     });
 }
 
@@ -6399,7 +6484,13 @@ function mhReelComposerState() {
   var comp = document.getElementById('mh-reel-composer');
   if (!comp) return null;
   var picks = Array.prototype.slice.call(comp.querySelectorAll('.mh-reel-pick:checked')).map(function(c){ return c.value; });
-  var defaults = (comp.getAttribute('data-default-cards') || '').split(',').filter(Boolean);
+  // data-default-cards is a JSON array: card ids routinely embed commas
+  // ("club:Last,First:event:…"), so a comma-joined attribute fragmented
+  // into junk ids, broke the untouched-composer detection below, and made
+  // every Generate-reel request carry a mangled cards= that the server
+  // rejected with bad_cards — no reel could ever render from the builder.
+  var defaults = [];
+  try { defaults = JSON.parse(comp.getAttribute('data-default-cards') || '[]'); } catch (e) { defaults = []; }
   var rhythmSel = document.getElementById('mh-reel-rhythm');
   var mixSel = document.getElementById('mh-reel-mix');
   var dubSel = document.getElementById('mh-reel-dub');
@@ -6419,7 +6510,9 @@ function mhReelComposerQuery() {
   var isDefaultSel = st.picks.length === st.defaults.length &&
     st.picks.every(function(v, i) { return v === st.defaults[i]; });
   if (st.picks.length && !isDefaultSel) {
-    params.push('cards=' + encodeURIComponent(st.picks.join(',')));
+    // One repeated cards= param per id — never a comma-joined list, which
+    // the server cannot split apart when the ids themselves contain commas.
+    st.picks.forEach(function(p) { params.push('cards=' + encodeURIComponent(p)); });
   }
   if (st.rhythm === 'punchy' && st.picks.length) {
     var w = [String(MH_REEL_MATHS.punchyTopWeight)];
@@ -7540,7 +7633,7 @@ def _caption_assist_buttons(card_uuid: str) -> str:
         title_attr = f' title="{_h(title)}"' if title else ""
         out.append(
             f'<button class="btn secondary" style="font-size:11px;padding:3px 9px" '
-            f"onclick=\"captionAssistRun(this, '{card_uuid}', '{slug}')\"{title_attr}>{label}</button>"
+            f"onclick=\"{_onclick_js('captionAssistRun', card_uuid, slug)}\"{title_attr}>{label}</button>"
         )
     return "".join(out)
 
@@ -7708,7 +7801,7 @@ def _render_card_creative_toolbar(
         tabs_html += (
             f'<button class="tone-tab {extra_cls} {active_attr}" '
             f'data-card="{card_uuid}" data-tone="{t_key}" '
-            f'onclick="switchToneLive(this, {repr(_caption_url)}, {repr(card_uuid)})" '
+            f'onclick="{_onclick_js("switchToneLive", _caption_url, card_uuid)}" '
             f'title="{_h(title)}" '
             f'style="font-size:11px;padding:3px 10px;border-radius:999px;border:1px solid var(--border);'
             f"cursor:pointer;background:{init_bg};color:{init_fg};"
@@ -7737,7 +7830,7 @@ def _render_card_creative_toolbar(
         _voiceover_url = url_for("api_card_voiceover", run_id=run_id, card_id=card_id_raw)
         _voiceover_btn = (
             f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" '
-            f"onclick=\"voiceoverToggle(this, {repr(_voiceover_url)}, '{card_uuid}')\" "
+            f'onclick="{_onclick_js("voiceoverToggle", _voiceover_url, card_uuid)}" '
             f'title="Hear the approved caption read aloud &mdash; MP3 + subtitles for a muted-autoplay post. Speaks only the human-approved text, verbatim.">'
             f"&#x1F50A; Voiceover</button>"
         )
@@ -7763,13 +7856,13 @@ def _render_card_creative_toolbar(
         f'<summary class="btn secondary" style="font-size:11px;padding:4px 10px">'
         f'More &#x25BE;<span class="comments-count" data-card="{card_uuid}"></span></summary>'
         f'<div class="mh-card-more-menu">'
-        f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="reformatToggle(this, \'{card_uuid}\')" title="Re-target this approved design to another size or format — story, square, poster, certificate, YouTube thumbnail…">&#x21C4; Reformat&hellip;</button>'
-        f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="copilotToggle(this, \'{card_uuid}\')" title="Ask the copilot to edit this design in plain words — &lsquo;make the headline punchier, more navy&rsquo;. It proposes safe, on-brand changes; you approve.">&#10024; Copilot&hellip;</button>'
-        f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="commentsToggle(this, \'{card_uuid}\')" title="Comments, @mentions and tasks. A task must be resolved before this card can be approved.">&#x1F4AC; Comments</button>'
-        f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="historyToggle(this, \'{card_uuid}\')" title="Version history — see every design version of this card, compare them, and roll back.">&#x21BA; History</button>'
-        f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="locksToggle(this, \'{card_uuid}\')" title="Lock elements (e.g. the sponsor strip) so a later edit — even the copilot — can\'t change them.">&#x1F512; Locks</button>'
+        f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="{_onclick_js("reformatToggle", card_uuid)}" title="Re-target this approved design to another size or format — story, square, poster, certificate, YouTube thumbnail…">&#x21C4; Reformat&hellip;</button>'
+        f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="{_onclick_js("copilotToggle", card_uuid)}" title="Ask the copilot to edit this design in plain words — &lsquo;make the headline punchier, more navy&rsquo;. It proposes safe, on-brand changes; you approve.">&#10024; Copilot&hellip;</button>'
+        f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="{_onclick_js("commentsToggle", card_uuid)}" title="Comments, @mentions and tasks. A task must be resolved before this card can be approved.">&#x1F4AC; Comments</button>'
+        f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="{_onclick_js("historyToggle", card_uuid)}" title="Version history — see every design version of this card, compare them, and roll back.">&#x21BA; History</button>'
+        f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="{_onclick_js("locksToggle", card_uuid)}" title="Lock elements (e.g. the sponsor strip) so a later edit — even the copilot — can\'t change them.">&#x1F512; Locks</button>'
         f'<a class="btn secondary" href="{_h(_elements_url)}" target="_blank" rel="noopener" style="font-size:11px;padding:4px 10px;text-decoration:none" title="Add on-brand stickers to this card — sport pictograms, PB and stat chips, dividers, frames — all painted in your club colours. Opens the element library scoped to this card; re-render the graphic to see them.">&#127912; Elements&hellip;</a>'
-        f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="shareToggle(this, \'{card_uuid}\')" title="Create an expiring link so someone outside the club (e.g. a parent) can view — or comment on — this card without an account.">&#x1F517; Share</button>'
+        f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="{_onclick_js("shareToggle", card_uuid)}" title="Create an expiring link so someone outside the club (e.g. a parent) can view — or comment on — this card without an account.">&#x1F517; Share</button>'
         f"{schedule_btn}"
         f"{_voiceover_btn}"
         f"</div></details>"
@@ -7784,20 +7877,20 @@ def _render_card_creative_toolbar(
         # M35: caption actions dock under the tone panel, next to the caption
         # they act on.
         f'<div class="mh-caption-actions" style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap;align-items:center">'
-        f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="regenerateCaption(this, {repr(_caption_url)}, \'{card_uuid}\')">&#x21BA; Regenerate caption</button>'
-        f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="moreCaptionOptions(this, {repr(_caption_url)}, \'{card_uuid}\')" title="Generate a few alternative captions and pick your favourite">&#x2726; More options</button>'
-        f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="captionAssistToggle(this, \'{card_uuid}\')">&#10024; Assist&hellip;</button>'
-        f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="platformVariants(this, \'{card_uuid}\')" title="Adapt this caption for Instagram &amp; Facebook, Stories, X and LinkedIn">&#x1F4F1; Platform variants</button>'
-        f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="saveActiveCaption(this, \'{card_uuid}\')" title="Save this caption so it is used when the card is approved and exported">&#x1F4BE; Save caption</button>'
+        f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="{_onclick_js("regenerateCaption", _caption_url, card_uuid)}">&#x21BA; Regenerate caption</button>'
+        f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="{_onclick_js("moreCaptionOptions", _caption_url, card_uuid)}" title="Generate a few alternative captions and pick your favourite">&#x2726; More options</button>'
+        f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="{_onclick_js("captionAssistToggle", card_uuid)}">&#10024; Assist&hellip;</button>'
+        f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="{_onclick_js("platformVariants", card_uuid)}" title="Adapt this caption for Instagram &amp; Facebook, Stories, X and LinkedIn">&#x1F4F1; Platform variants</button>'
+        f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="{_onclick_js("saveActiveCaption", card_uuid)}" title="Save this caption so it is used when the card is approved and exported">&#x1F4BE; Save caption</button>'
         f'<span class="caption-save-status" data-card="{card_uuid}" style="font-size:10px;color:var(--ink-muted)" aria-live="polite"></span>'
         f"</div>"
         f'<div class="platform-variants-out" data-card="{card_uuid}" style="margin-top:6px"></div>'
         # M35: the primary action row — the two things that matter, then Copy,
         # then everything else behind More.
         f'<div class="mh-card-actions" style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;align-items:center">'
-        f'<button class="btn" style="font-size:11px;padding:4px 10px;background:var(--lane);color:var(--lane-ink);border:none" onclick="createGraphic(this, {repr(_create_graphic_url)}, \'{card_uuid}\')">&#x2726; Create graphic</button>'
-        f'<button class="btn" style="font-size:11px;padding:4px 10px;background:var(--medal);color:var(--medal-ink);border:none" onclick="generateMotion(this, {repr(_motion_url)}, \'{card_uuid}\')">&#x25B6; Generate motion</button>'
-        f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="copyActiveTone(this, \'{card_uuid}\')">Copy caption</button>'
+        f'<button class="btn" style="font-size:11px;padding:4px 10px;background:var(--lane);color:var(--lane-ink);border:none" onclick="{_onclick_js("createGraphic", _create_graphic_url, card_uuid)}">&#x2726; Create graphic</button>'
+        f'<button class="btn" style="font-size:11px;padding:4px 10px;background:var(--medal);color:var(--medal-ink);border:none" onclick="{_onclick_js("generateMotion", _motion_url, card_uuid)}">&#x25B6; Generate motion</button>'
+        f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="{_onclick_js("copyActiveTone", card_uuid)}">Copy caption</button>'
         f"{_more_menu}"
         f'<span class="caption-timestamp" style="font-size:10px;color:var(--ink-muted)"></span>'
         f"</div>"
@@ -7806,7 +7899,7 @@ def _render_card_creative_toolbar(
         f'<div style="display:flex;gap:5px;flex-wrap:wrap;align-items:center">'
         f"{_caption_assist_buttons(card_uuid)}"
         f'<input class="assist-custom" type="text" maxlength="140" placeholder="or type a change&hellip;" aria-label="Custom caption change instruction" style="flex:1;min-width:140px;font-size:12px;padding:4px 8px;border:1px solid var(--border);border-radius:6px;background:rgba(255,255,255,0.04);color:inherit;font-family:inherit" />'
-        f'<button class="btn" style="font-size:11px;padding:3px 10px;background:var(--lane);color:var(--lane-ink);border:none" onclick="captionAssistRun(this, \'{card_uuid}\', \'custom\')">Apply</button>'
+        f'<button class="btn" style="font-size:11px;padding:3px 10px;background:var(--lane);color:var(--lane-ink);border:none" onclick="{_onclick_js("captionAssistRun", card_uuid, "custom")}">Apply</button>'
         f"</div>"
         f'<div class="assist-status" style="font-size:11px;color:var(--ink-muted);margin-top:6px"></div>'
         f"</div>"
@@ -14645,6 +14738,9 @@ _COMPOSITE_BUILDER_JS = """
 (function(){
   function tools(){ return document.getElementById('cb-tools'); }
   function capEl(){ return document.getElementById('cb-caption'); }
+  // Empty-body POSTs carry no Content-Type, so they are NOT exempt from the
+  // CSRF layer the way JSON fetches are — every write here sends the header.
+  function cbCsrf(){ return (document.querySelector('meta[name="csrf-token"]')||{}).content||''; }
   window.cbTone = function(btn, tone){
     var wrap = tools(); if(!wrap) return;
     var url = wrap.getAttribute('data-caption-url'); if(!url) return;
@@ -14658,7 +14754,7 @@ _COMPOSITE_BUILDER_JS = """
     wrap.setAttribute('data-tone', tone);
     var cap = capEl(); var prev = cap.textContent;
     cap.textContent = 'Composing\\u2026'; if(btn) btn.disabled = true;
-    fetch(url + '?tone=' + encodeURIComponent(tone), {method:'POST', credentials:'same-origin'})
+    fetch(url + '?tone=' + encodeURIComponent(tone), {method:'POST', headers:{'X-CSRF-Token': cbCsrf()}, credentials:'same-origin'})
       .then(function(r){ return r.json(); })
       .then(function(j){
         if(btn) btn.disabled = false;
@@ -14706,7 +14802,7 @@ _COMPOSITE_BUILDER_JS = """
     var orig = btn.textContent; btn.disabled = true; btn.textContent = 'Rendering reel\\u2026';
     var done = function(){ btn.disabled = false; btn.textContent = orig; };
     var fail = function(m){ done(); box.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">Reel error: ' + m + '</div>'; };
-    fetch(jobUrl, {method:'POST', credentials:'same-origin'})
+    fetch(jobUrl, {method:'POST', headers:{'X-CSRF-Token': cbCsrf()}, credentials:'same-origin'})
       .then(function(r){ return r.json().then(function(j){ return {s:r.status, b:j}; }); })
       .then(function(res){
         if(res.s !== 202 || !res.b || !res.b.poll_url){ fail((res.b && (res.b.user_message || res.b.error)) || 'could not start the render'); return; }
@@ -14747,7 +14843,7 @@ _COMPOSITE_BUILDER_JS = """
     var url = box.querySelector('[data-reformat-url]').getAttribute('data-reformat-url');
     var out = box.querySelector('.cb-reformat-out');
     out.innerHTML = '<div style="font-size:12px;color:var(--ink-dim)">Reformatting\\u2026</div>';
-    fetch(url + '?format=' + encodeURIComponent(fmt), {method:'POST', credentials:'same-origin'})
+    fetch(url + '?format=' + encodeURIComponent(fmt), {method:'POST', headers:{'X-CSRF-Token': cbCsrf()}, credentials:'same-origin'})
       .then(function(r){ if(!r.ok){ return r.json().then(function(j){ throw (j.user_message || j.error || 'failed'); }); } return r.blob(); })
       .then(function(b){ var u = URL.createObjectURL(b);
         out.innerHTML = '<img src="' + u + '" style="max-width:240px;border-radius:8px;display:block"/>'
@@ -14790,7 +14886,10 @@ _COMPOSITE_BUILDER_JS = """
   var STYLE = {queue:['rgba(255,174,59,0.18)','#ffae3b'], approved:['rgba(74,222,128,0.18)','#4ade80'], rejected:['rgba(244,63,94,0.18)','#f43f5e']};
   function apply(btn, status){ var s = STYLE[status] || STYLE.queue; btn.style.background = s[0]; btn.style.color = s[1]; btn.dataset.status = status; btn.textContent = status; }
   function send(btn, status){ var prev = btn.dataset.status; apply(btn, status); var fd = new FormData(); fd.append('status', status);
-    fetch(btn.dataset.url, {method:'POST', body: fd, credentials:'same-origin'}).then(function(r){ if(!r.ok) throw 0; return r.json(); })
+    // Manual FormData is NOT exempt from the CSRF layer (unlike the JSON
+    // fetches on this page) — without the header this pill 403s in production.
+    var csrf = (document.querySelector('meta[name="csrf-token"]')||{}).content||'';
+    fetch(btn.dataset.url, {method:'POST', headers:{'X-CSRF-Token': csrf}, body: fd, credentials:'same-origin'}).then(function(r){ if(!r.ok) throw 0; return r.json(); })
       .then(function(j){ if(j && j.status) apply(btn, j.status); }).catch(function(){ apply(btn, prev); window.MH && MH.toast('Could not save status', 'error'); }); }
   document.addEventListener('click', function(e){ var btn = e.target.closest('.sp-wf-pill'); if(!btn) return; e.preventDefault(); send(btn, NEXT[btn.dataset.status] || 'approved'); });
   document.addEventListener('contextmenu', function(e){ var btn = e.target.closest('.sp-wf-pill'); if(!btn) return; e.preventDefault(); send(btn, 'queue'); });
@@ -15499,6 +15598,7 @@ def _layout(
 <meta name="color-scheme" content="dark" />
 <meta name="theme-color" content="#0A0B11" />
 <meta name="format-detection" content="telephone=no" />
+<meta name="csrf-token" content="{{ csrf_token_value }}" />
 <title>{{ title }} &mdash; MediaHub</title>
 <link rel="icon" type="image/svg+xml" href="{{ url_for('favicon') }}" />
 <link rel="manifest" href="{{ url_for('web_manifest') }}" />
@@ -16071,8 +16171,10 @@ def _layout(
 
   function onItem(it){
     if (!it.read){
+      // Empty-body POST — needs the CSRF header (not JSON-exempt) or the
+      // read-state write is 403d in production and the badge never clears.
       fetch(LIST_URL + '/' + encodeURIComponent(it.id) + '/read',
-            {method:'POST', headers:{'Accept':'application/json'}})
+            {method:'POST', headers:{'Accept':'application/json', 'X-CSRF-Token':(document.querySelector('meta[name="csrf-token"]')||{}).content||''}})
         .then(function(r){ return r.json(); })
         .then(function(d){ if (d && typeof d.unread === 'number') paintBadge(d.unread); })
         .catch(function(){});
@@ -16149,7 +16251,7 @@ def _layout(
   if (readAll){
     readAll.addEventListener('click', function(e){
       e.stopPropagation();
-      fetch(READALL_URL, {method:'POST', headers:{'Accept':'application/json'}})
+      fetch(READALL_URL, {method:'POST', headers:{'Accept':'application/json', 'X-CSRF-Token':(document.querySelector('meta[name="csrf-token"]')||{}).content||''}})
         .then(function(r){ return r.json(); })
         .then(function(){ paintBadge(0); poll(); })
         .catch(function(){ if (window.MH && MH.toast) MH.toast('Could not mark notifications read — check your connection.', 'error', 3000); });
@@ -16395,7 +16497,9 @@ def _layout(
       panel.textContent = 'Asking the AI to weave the reasoning into a fresh caption…';
     }
     var url = captionUrl + (captionUrl.indexOf('?') === -1 ? '?' : '&') + 'include_why=1&tone=ai&n_variants=1';
-    fetch(url, {method: 'POST', cache: 'no-store'}).then(function(r){
+    // JSON content-type keeps this write CSRF-exempt (_csrf_protect); a bare
+    // empty-body POST carries no content-type and is 403d in production.
+    fetch(url, {method: 'POST', cache: 'no-store', headers: {'Content-Type': 'application/json'}, body: '{}'}).then(function(r){
       return r.json().then(function(j){ return {status: r.status, body: j}; });
     }).then(function(o){
       btn.disabled = false; btn.textContent = origLabel;
@@ -18135,6 +18239,11 @@ def _layout(
         bg_logos_html=bg_logos_html,
         flash_toast=flash_toast,
         theme_seed_style=_theme_seed_style_block(),
+        # Session CSRF token as a <meta> so JS-built non-JSON writes
+        # (FormData uploads, empty-body POSTs) can attach X-CSRF-Token.
+        # The <form> auto-injection in _security_headers only covers
+        # rendered form tags — fetch() bodies get nothing without this.
+        csrf_token_value=_csrf_token(),
         provider_identity=(
             f"{_legal.COMPANY_NAME} · {_legal.REGISTERED_ADDRESS} · {_legal.CONTACT_EMAIL}"
         ),
@@ -19531,7 +19640,7 @@ _CHARTS_PAGE_JS = """
   var recBtn=document.getElementById('mh-rec-btn');
   if(recBtn) recBtn.addEventListener('click', function(){
     busy(recBtn,true,'Thinking…');
-    fetch('__REC_URL__',{method:'POST'}).then(function(r){return r.json();}).then(function(j){
+    fetch('__REC_URL__',{method:'POST',headers:{'X-CSRF-Token':(document.querySelector('meta[name="csrf-token"]')||{}).content||''}}).then(function(r){return r.json();}).then(function(j){
       busy(recBtn,false);
       if(j.available===false){ show(msg(j.message||'AI is not configured on this deployment.')); return; }
       var rec=j.recommendation;
@@ -19549,7 +19658,7 @@ _CHARTS_PAGE_JS = """
   var insBtn=document.getElementById('mh-ins-btn');
   if(insBtn) insBtn.addEventListener('click', function(){
     busy(insBtn,true,'Writing…');
-    fetch('__INS_URL__',{method:'POST'}).then(function(r){return r.json();}).then(function(j){
+    fetch('__INS_URL__',{method:'POST',headers:{'X-CSRF-Token':(document.querySelector('meta[name="csrf-token"]')||{}).content||''}}).then(function(r){return r.json();}).then(function(j){
       busy(insBtn,false);
       if(j.available===false){ show(msg(j.message||'AI is not configured on this deployment.')); return; }
       var ins=j.insights||{}; var items=ins.takeaways||[];
@@ -28697,6 +28806,21 @@ def _resolve_motion_canvas():
 
     fmt = (request.args.get("format") or _motion.DEFAULT_MOTION_FORMAT).strip().lower()
     if fmt not in _motion.MOTION_FORMATS:
+        # A WxH-shaped ``?format=`` token is a custom canvas round-tripping
+        # back through the file/manifest routes: the async job routes mint
+        # their video_url with ``format=<canonical token>`` (e.g. 1600x900),
+        # so the resolver must accept its own canonical output here or a
+        # finished custom-canvas job's video_url answers 400 bad_format.
+        try:
+            parsed = _motion._parse_size_token(fmt)
+        except ValueError as e:
+            return None, (jsonify({"error": "bad_canvas", "detail": str(e)}), 400)
+        if parsed is not None:
+            try:
+                w, h = _motion.validate_canvas_size(*parsed)
+            except ValueError as e:
+                return None, (jsonify({"error": "bad_canvas", "detail": str(e)}), 400)
+            return _motion.canonical_motion_format(w, h), None
         return None, (
             jsonify(
                 {
@@ -28897,15 +29021,26 @@ def _assemble_reel_inputs(run_id: str):
     if not _can_access_run(run_id, run_data, _active_profile_id()):
         return None, (jsonify({"error": "run_not_found"}), 404)
 
-    # M31 (UX-3) — explicit moment selection: ?cards=<id1>,<id2>,… names
-    # the exact cards for this reel (validated below; assembled in RANK
-    # order regardless of request order; max 5). Absent keeps the classic
-    # top-N behaviour byte-identical.
-    _cards_arg = (request.args.get("cards") or "").strip()
+    # M31 (UX-3) — explicit moment selection names the exact cards for this
+    # reel (validated below; assembled in RANK order regardless of request
+    # order; max 5). Absent keeps the classic top-N behaviour byte-identical.
+    #
+    # Transport: swim ids routinely embed commas ("club:Last,First:event:…"),
+    # so a comma-joined ?cards= list is ambiguous — splitting it fragmented
+    # real ids into junk and every composer selection died with bad_cards.
+    # The composer now sends one repeated ?cards= param per id (no joining,
+    # no ambiguity). A single-value ?cards= is kept for API callers: it is
+    # treated as ONE id when it matches a known card exactly (so a lone
+    # comma-carrying id still works), else split on commas (legacy form).
+    _cards_values = [v for v in request.args.getlist("cards") if str(v).strip()]
+    _legacy_single = len(_cards_values) == 1 and "," in _cards_values[0]
     selected_ids: list[str] = []
-    if _cards_arg:
+    if _cards_values:
+        raw_parts = (
+            [p for p in _cards_values[0].split(",")] if _legacy_single else list(_cards_values)
+        )
         seen_sel: set[str] = set()
-        for part in _cards_arg.split(","):
+        for part in raw_parts:
             cid = part.strip()
             if cid and cid not in seen_sel:
                 seen_sel.add(cid)
@@ -29033,7 +29168,19 @@ def _assemble_reel_inputs(run_id: str):
 
     def _ra_ids(ra: dict) -> set[str]:
         ach = ra.get("achievement") or {}
-        return {str(v) for v in (ach.get("swim_id"), ra.get("id")) if v}
+        # Mirror workflow/pack.py's _card_id fallbacks (swimmer_id, rank):
+        # the content builder's checkboxes carry those ids for achievements
+        # without a swim_id, and a pick must always resolve here.
+        return {
+            str(v)
+            for v in (
+                ach.get("swim_id"),
+                ra.get("id"),
+                ach.get("swimmer_id"),
+                str(ra.get("rank", "") or "") or None,
+            )
+            if v
+        }
 
     sel_suffix = ""
     if selected_ids:
@@ -29042,6 +29189,12 @@ def _assemble_reel_inputs(run_id: str):
             known |= _ra_ids(ra)
         for c in run_data.get("cards") or []:
             known |= {str(v) for v in (c.get("swim_id"), c.get("id")) if v}
+        # Legacy single-value ?cards=: when the un-split value is itself a
+        # known id (one id that happens to contain commas), honour it whole
+        # rather than the comma fragments.
+        if _legacy_single and _cards_values[0].strip() in known:
+            selected_ids = [_cards_values[0].strip()]
+            n = 1
         unknown = [cid for cid in selected_ids if cid not in known]
         if unknown:
             return None, (
@@ -29082,7 +29235,39 @@ def _assemble_reel_inputs(run_id: str):
                 ).hexdigest()[:8]
             )
     else:
-        top = ranked_sorted[:n]
+        # The no-selection default must respect review decisions when any
+        # exist: the content builder pre-checks the top APPROVED cards, and
+        # a reel is exported content — an untouched "Generate reel" must
+        # never ship a card the reviewer explicitly REJECTED, nor silently
+        # swap in unapproved cards when approvals exist. With no workflow
+        # state at all (API callers on un-reviewed runs) the classic
+        # top-N-by-rank behaviour is byte-identical.
+        _wf_states: dict = {}
+        try:
+            _ws = _get_wf_store()
+            if _ws is not None:
+                _wf_states = _ws.load(run_id) or {}
+        except Exception:
+            _wf_states = {}
+
+        from mediahub.workflow.status import CardStatus as _CS
+
+        def _ra_wf_status(ra: dict):
+            ach = ra.get("achievement") or {}
+            # Same key derivation as workflow/pack.py so the two agree on
+            # which decision belongs to which achievement.
+            key = ach.get("swim_id") or ach.get("swimmer_id") or str(ra.get("rank", "") or "")
+            wf = _wf_states.get(str(key))
+            return getattr(wf, "status", None) if wf else None
+
+        _statuses = {id(ra): _ra_wf_status(ra) for ra in ranked_sorted}
+        _approved_pool = [
+            ra for ra in ranked_sorted if _statuses[id(ra)] in (_CS.APPROVED, _CS.POSTED)
+        ]
+        if _approved_pool:
+            top = _approved_pool[:n]
+        else:
+            top = [ra for ra in ranked_sorted if _statuses[id(ra)] != _CS.REJECTED][:n]
         if not top:
             # Fall back to the cards array if no recognition report.
             top = [{"achievement": c} for c in (run_data.get("cards") or [])[:n]]

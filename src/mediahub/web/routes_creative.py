@@ -1637,7 +1637,7 @@ def content_pack(run_id):
         )
         _initial_motion = W._rendered_motion_strip_html(run_id, card_id_raw)
         cards_html += f"""
-<div class="card" id="pc-{_h(card_id_raw)}" style="margin-bottom:14px;page-break-inside:avoid">
+<div class="card" id="pc-{_h(card_uuid)}" style="margin-bottom:14px;page-break-inside:avoid">
   <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap">
     <div style="flex:1">
       <div style="font-size:13px;font-weight:700">{swimmer}{(" · " + event) if event else ""}</div>
@@ -1745,9 +1745,10 @@ def content_pack(run_id):
             f'<input type="checkbox" class="mh-reel-pick" value="{_h(_cid)}" {_checked} '
             'onchange="mhReelComposerSync()">'
             f'<span style="color:var(--ink-muted);font-size:11px;min-width:22px">#{_idx + 1}</span>'
-            f'<img src="{_h(_thumb)}" alt="" loading="lazy" '
+            f'<img src="{_h(_thumb)}" data-src="{_h(_thumb)}" alt="" loading="lazy" '
             'style="width:34px;aspect-ratio:4/5;object-fit:cover;border-radius:4px;'
-            'border:1px solid var(--border);background:var(--panel)" onerror="this.style.visibility=\'hidden\'">'
+            'border:1px solid var(--border);background:var(--panel)" '
+            'onerror="window.mhThumbRetry?mhThumbRetry(this):(this.style.visibility=\'hidden\')">'
             f'<span style="font-size:12px;color:var(--ink)">{_h(_label) or _h(_cid)}</span>'
             "</label>"
         )
@@ -1792,7 +1793,7 @@ def content_pack(run_id):
                 '<option value="">No narration dub</option>' + _dub_opts + "</select></label>"
             )
     _reel_composer_html = f"""
-<div class="card no-print" id="mh-reel-composer" data-default-cards="{_h(",".join(_default_reel_ids))}" style="margin-bottom:14px">
+<div class="card no-print" id="mh-reel-composer" data-default-cards="{_h(json.dumps(_default_reel_ids))}" style="margin-bottom:14px">
   <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap">
     <div>
       <div style="font-size:13px;font-weight:700">Meet reel</div>
@@ -1814,9 +1815,9 @@ def content_pack(run_id):
   </div>
   <div style="display:flex;gap:6px;flex-wrap:wrap">
     <button class="btn mh-reel-go" style="font-size:12px;padding:6px 14px;background:var(--medal);color:var(--medal-ink);border:none"
-            onclick="generateReel(this, {repr(_reel_url)})">&#x25B6; Generate reel</button>
+            onclick="{W._onclick_js("generateReel", _reel_url)}">&#x25B6; Generate reel</button>
     <button class="btn secondary mh-reel-go" style="font-size:12px;padding:6px 14px"
-            onclick="generateReelBatch(this, {repr(_reel_url)})">All 4 formats</button>
+            onclick="{W._onclick_js("generateReelBatch", _reel_url)}">All 4 formats</button>
   </div>
   {f'<div class="dim" style="font-size:11px;margin-top:8px">Working from race footage? <a href="{url_for("video_studio_page")}">Try the Video Studio &rarr;</a></div>' if W._v8_ok else ""}
 </div>"""
@@ -2047,6 +2048,13 @@ def content_pack(run_id):
   .no-print {{ display: none !important; }}
   body {{ background: white; color: black; }}
   .card {{ border: 1px solid #ccc; box-shadow: none; }}
+  /* The per-card creative toolbar is interactive chrome — printing it
+     produced rows of dead buttons per card. The visual panel's rendered
+     graphic still prints; only its controls are hidden. */
+  .tone-picker, .mh-card-more-menu, .motion-panel, .reformat-panel,
+  .copilot-panel, .comments-panel, .history-panel, .locks-panel,
+  .share-panel, .voiceover-panel {{ display: none !important; }}
+  .visual-panel button, .visual-panel .btn {{ display: none !important; }}
 }}
 </style>
 {_ai_banner_html}
@@ -2263,6 +2271,10 @@ function mhCertificatesJob(a) {{
             finish(s.user_message || s.error || 'Certificates export failed.');
             return;
           }}
+          if (s.error && !s.status) {{
+            finish(s.user_message || 'The certificates job was lost — try again.');
+            return;
+          }}
           var n = Math.min((s.done || 0) + 1, s.total || 1);
           say('Rendering certificate ' + n + ' of ' + (s.total || '?') + (s.current ? (' — ' + s.current) : '') + '…');
           setTimeout(poll, 2000);
@@ -2301,6 +2313,14 @@ function mhCertificatesJob(a) {{
             if (s.status === 'error') {{
               go.disabled = false;
               say(s.user_message || s.error || 'Batch render failed.');
+              return;
+            }}
+            // A statusless error body (job_not_found after a worker restart,
+            // an auth lapse) is terminal — polling it forever left the button
+            // dead with a frozen progress line.
+            if (s.error && !s.status) {{
+              go.disabled = false;
+              say(s.user_message || 'The render job was lost — try again.');
               return;
             }}
             say((s.done || 0) + ' of ' + (s.total || 0) + ' rendered' + (s.current ? (' — designing ' + s.current) : '') + '…');
@@ -2431,11 +2451,12 @@ def content_pack_grouped(run_id):
             # spot (the builder's per-card anchor is `pc-<card id>`).
             builder_link = ""
             if card_id_raw:
-                from urllib.parse import quote as _quote  # noqa: PLC0415
-
+                # The builder's per-card anchor is the DOM slug (pc-<slug>) —
+                # slugged ids need no URL-encoding and match the element id
+                # byte-for-byte, so the deep link always lands.
                 builder_link = (
                     f'<a class="btn secondary" style="font-size:12px;padding:4px 10px" '
-                    f'href="{_h(_pack_url)}#pc-{_h(_quote(str(card_id_raw), safe=""))}" '
+                    f'href="{_h(_pack_url)}#pc-{_h(card_uuid)}" '
                     f'title="Open this card in the content builder — approved cards are '
                     f'captioned, rendered and downloaded there.">'
                     f"Open in content builder &rarr;</a>"
@@ -2456,7 +2477,7 @@ def content_pack_grouped(run_id):
                 )
                 motion_btn = (
                     f'<button class="btn secondary" style="font-size:12px;padding:4px 10px" '
-                    f"onclick=\"generateMotion(this, {repr(_motion_url)}, '{card_uuid}')\" "
+                    f'onclick="{W._onclick_js("generateMotion", _motion_url, card_uuid)}" '
                     f'title="Render a 6-second branded story-format MP4 for this card. '
                     f'The first render can take up to 90 seconds; repeats are instant.">'
                     f"&#x25B6; Motion video</button>"

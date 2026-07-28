@@ -219,7 +219,15 @@ class TestComposerMarkup:
         app, wm, _ = app_env
         html = self._builder_html(app, wm, tmp_path)
         assert 'id="mh-reel-composer"' in html
-        assert 'data-default-cards="swim-1,swim-2,swim-3"' in html
+        # data-default-cards is a JSON array (HTML-escaped), never a
+        # comma-joined string: swim ids can embed commas, and the joined
+        # form fragmented them so the untouched-composer detection broke.
+        import html as _html
+        import re as _re
+
+        m = _re.search(r'data-default-cards="([^"]*)"', html)
+        assert m, "composer missing data-default-cards"
+        assert json.loads(_html.unescape(m.group(1))) == ["swim-1", "swim-2", "swim-3"]
         # Rank-ordered checkboxes; the top three are pre-checked.
         assert html.count('class="mh-reel-pick"') == 4
         assert html.count("mh-reel-pick") >= 4
@@ -235,3 +243,116 @@ class TestComposerMarkup:
         app, wm, _ = app_env
         html = self._builder_html(app, wm, tmp_path)
         assert 'id="mh-reel-mix"' not in html  # voiceover off in this env
+
+
+class TestCommaIdSelection:
+    """Swim ids routinely embed commas ("club:Last,First:event:…") — the
+    real parser emits them for every "Lastname, Firstname" swimmer. The
+    selection transport must survive them: one repeated ``?cards=`` param
+    per id (the composer's form), and a lone comma-carrying id sent as a
+    single param must be honoured whole, never split into junk."""
+
+    _IDS = [
+        "club_sc:Eastcote,Barnaby:400FRSC:timed_final:gold",
+        "club_sc:Veldt,Tamsin:200IMSC:timed_final:gold",
+        "club_sc:Marchbank,Isolde:50FLLC:timed_final:silver",
+        "club_sc:Quickfall,Soren:200BRSC:timed_final:silver",
+    ]
+
+    @pytest.fixture
+    def comma_app_env(self, app, web_module, tmp_path):
+        import mediahub.media_library.store as mls
+
+        mls._default_store = None
+        from mediahub.web.club_profile import ClubProfile, save_profile
+
+        save_profile(ClubProfile(profile_id="alpha", display_name="Alpha SC"))
+        payload = {
+            "run_id": "r2",
+            "profile_id": "alpha",
+            "meet_name": "Comma Open",
+            "meet": {"name": "Comma Open"},
+            "recognition_report": {
+                "ranked_achievements": [
+                    {
+                        "id": cid,
+                        "rank": i + 1,
+                        "priority": 0.9 - i * 0.1,
+                        "achievement": {
+                            "swim_id": cid,
+                            "swimmer_name": f"Swimmer {i + 1}",
+                            "event": "100m Freestyle",
+                            "headline": "PB set",
+                            "time": "59.80",
+                        },
+                    }
+                    for i, cid in enumerate(self._IDS)
+                ]
+            },
+        }
+        (web_module.RUNS_DIR / "r2.json").write_text(json.dumps(payload), encoding="utf-8")
+        return app, web_module
+
+    def test_repeated_cards_params_survive_embedded_commas(self, comma_app_env):
+        app, wm = comma_app_env
+        from urllib.parse import quote
+
+        url = "/api/runs/r2/reel?" + "&".join(
+            "cards=" + quote(cid, safe="") for cid in (self._IDS[1], self._IDS[3])
+        )
+        resp, cap = _capture_reel(app, url)
+        assert resp.status_code == 200, resp.get_json()
+        assert [c["id"] for c in cap["cards"]] == [self._IDS[1], self._IDS[3]]
+        assert cap["out_path"].name.startswith("reel_2_sel")
+
+    def test_single_comma_id_param_is_honoured_whole(self, comma_app_env):
+        app, wm = comma_app_env
+        from urllib.parse import quote
+
+        resp, cap = _capture_reel(
+            app, "/api/runs/r2/reel?cards=" + quote(self._IDS[2], safe="")
+        )
+        assert resp.status_code == 200, resp.get_json()
+        assert [c["id"] for c in cap["cards"]] == [self._IDS[2]]
+
+    def test_repeated_default_selection_keeps_default_naming(self, comma_app_env):
+        app, wm = comma_app_env
+        from urllib.parse import quote
+
+        url = "/api/runs/r2/reel?" + "&".join(
+            "cards=" + quote(cid, safe="") for cid in self._IDS[:3]
+        )
+        resp, cap = _capture_reel(app, url)
+        assert resp.status_code == 200, resp.get_json()
+        assert cap["out_path"].name == "reel_3.mp4"  # top-3 == default, no _sel
+
+
+class TestAnyCanvasFileRoundTrip:
+    """PR #1334 regression: the async job routes mint their ``video_url``
+    with ``format=<canonical WxH token>`` for a custom canvas, so the
+    file/manifest resolver must accept its own canonical output — not 400
+    ``bad_format`` on the very URL a finished job handed back."""
+
+    def test_reel_file_accepts_canonical_wxh_format_token(self, app_env):
+        app, wm, _ = app_env
+        with app.test_client() as c:
+            c.post("/api/organisation/active", data={"profile_id": "alpha"})
+            # Unrendered → an honest 404, never 400 bad_format.
+            r = c.get("/api/runs/r1/reel-file?n=3&format=1600x900")
+            assert r.status_code == 404, r.get_json()
+            assert r.get_json()["error"] == "reel_not_rendered"
+            # Rendered → served.
+            mdir = wm.RUNS_DIR / "r1" / "motion"
+            mdir.mkdir(parents=True, exist_ok=True)
+            (mdir / "reel_3_1600x900.mp4").write_bytes(b"0" * 2048)
+            r = c.get("/api/runs/r1/reel-file?n=3&format=1600x900")
+            assert r.status_code == 200
+            assert "video/mp4" in (r.headers.get("Content-Type") or "")
+
+    def test_junk_format_still_400s(self, app_env):
+        app, wm, _ = app_env
+        with app.test_client() as c:
+            c.post("/api/organisation/active", data={"profile_id": "alpha"})
+            r = c.get("/api/runs/r1/reel-file?format=blorp")
+            assert r.status_code == 400
+            assert r.get_json()["error"] == "bad_format"
