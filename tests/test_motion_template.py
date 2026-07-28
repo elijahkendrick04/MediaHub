@@ -581,3 +581,61 @@ def test_template_is_preview_only_still_untouched(tmp_path, monkeypatch):
     # The render seam merged into a NEW dict — the caller's persisted brief (the
     # still's source of truth) is byte-for-byte unchanged.
     assert persisted_brief == persisted_snapshot
+
+
+# ---------------------------------------------------------------------------
+# Bounded error echo + preview-slot token
+# ---------------------------------------------------------------------------
+
+
+def test_error_detail_is_bounded_for_huge_operator_values():
+    # Every raise site echoes the offending value; a multi-MB junk payload must
+    # be truncated (~120 chars of repr + context), never reflected whole into
+    # the HTTP 400 detail or the server log.
+    huge = "x" * 1_000_000
+    for bad in (
+        {"mood": huge},
+        {"decoration_strength": huge},
+        {"seeded_blend": huge},
+        {"format": huge},
+        {"weights": huge},
+        {"weights": [huge]},
+        {"effect_toggles": huge},
+        {"effect_toggles": [huge]},
+        {"version": huge},
+        {huge: "dots"},
+    ):
+        with pytest.raises(mt.MotionTemplateError) as ei:
+            mt.validate_motion_template(bad)
+        assert len(str(ei.value)) < 600, list(bad)[0][:20]
+
+
+def test_short_helper_truncates_and_keeps_small_values_verbatim():
+    assert mt._short("dots") == "'dots'"
+    long = mt._short("y" * 500)
+    assert len(long) < 160
+    assert "chars)" in long
+
+
+def test_preview_slot_token_contract():
+    # Nothing asked for → "" → the canonical slot (byte-identical default).
+    assert mt.preview_slot_token(None) == ""
+    assert mt.preview_slot_token(None, []) == ""
+    assert mt.preview_slot_token(None, [None, None]) == ""
+
+    v = mt.validate_motion_template({"background_style": "dots"})
+    tok = mt.preview_slot_token(v)
+    assert len(tok) == 8 and all(ch in "0123456789abcdef" for ch in tok)
+    # Deterministic, and distinct templates get distinct slots.
+    assert mt.preview_slot_token(v) == tok
+    other = mt.validate_motion_template({"background_style": "halftone"})
+    assert mt.preview_slot_token(other) != tok
+    # Beat lists fork their own slots; trailing inert entries cannot change the
+    # render, so they must not fork the slot either.
+    beats = [mt.validate_motion_template({"mood": "calm"})]
+    beat_tok = mt.preview_slot_token(None, beats)
+    assert beat_tok and beat_tok != tok
+    assert mt.preview_slot_token(None, beats + [None]) == beat_tok
+    # Canonicalised spellings hash identically (validation canonicalises).
+    v2 = mt.validate_motion_template({"background_style": "DOTS"})
+    assert mt.preview_slot_token(v2) == tok

@@ -28744,6 +28744,151 @@ def _resolve_alpha_from_request():
     return (alpha, prof, ext, content_type), None
 
 
+def _resolve_motion_template_body(body: dict, *, n_cards: int = 1, reel: bool = False):
+    """Resolve the optional PREVIEW/A-B ``template`` POST body once for every
+    motion/reel render route — sync and async job alike (the
+    ``_resolve_motion_canvas`` / ``_resolve_alpha_from_request`` pattern), so
+    all sites validate identically, reject the same route-unsupported keys
+    loudly (never a validated-then-ignored 200) and derive the same
+    preview-slot token.
+
+    Returns ``(resolved, None)`` on success or ``(None, (response, 400))``.
+    ``resolved`` carries:
+
+    - ``template``  — the RAW body value (``render_story_card`` /
+      ``render_meet_reel`` re-validate it; the double validation is deliberate
+      defence-in-depth),
+    - ``templates`` — the RAW per-beat list (reel only; ``None`` when absent),
+    - ``tmpl_kw``   — the ``fps`` / ``review_ab`` render kwargs to forward,
+    - ``rhythm``    — the template-weights rhythm (reel only; the caller must
+      keep an explicit query rhythm winning over it),
+    - ``token``     — ``""`` (no effective template ⇒ the canonical slot,
+      byte-identical) or the 8-hex ``preview_slot_token`` that forks the
+      published filename away from the canonical approved artifact, so a
+      preview can never clobber the parity render the file/manifest routes
+      serve.
+
+    Route-unsupported template keys are an honest 400 here, never a silent
+    drop: ``format`` everywhere (the output cut is bound to ``?format=`` /
+    ``?w=&h=`` before the body is read — out_path and Content-Type derive from
+    it), ``weights`` on the single-card routes (beat rhythm is a reel concept),
+    art axes on the reel-level ``template`` (there is no reel-level art seam —
+    per-beat art goes in ``templates``), any ``render`` key on a per-beat
+    template (one render fires; per-beat entries are art-only), and more
+    per-beat templates than reel cards.
+    """
+    from mediahub.visual import motion_template as _mt
+
+    def _err(detail: str):
+        return None, (jsonify({"error": "bad_motion_template", "detail": detail}), 400)
+
+    template = body.get("template")
+    templates = body.get("templates") if reel else None
+    if reel and templates is not None and not isinstance(templates, list):
+        return _err("templates must be a list")
+    try:
+        v_tmpl = _mt.validate_motion_template(template)
+        v_beats: list = []
+        if templates is not None:
+            if len(templates) > n_cards:
+                return _err(
+                    f"{len(templates)} per-beat templates for a {n_cards}-card reel; "
+                    "supply at most one per card"
+                )
+            v_beats = [_mt.validate_motion_template(t) for t in templates]
+    except _mt.MotionTemplateError as e:
+        return _err(str(e))
+    for idx, v in enumerate(v_beats):
+        bad = sorted((v or {}).get("render") or {})
+        if bad:
+            return _err(
+                f"per-beat templates are art-only; render key(s) {', '.join(bad)} on "
+                f"beat {idx + 1} are not supported — put fps/weights/effect_toggles "
+                "on the reel-level 'template'"
+            )
+    render_section = (v_tmpl or {}).get("render") or {}
+    if "format" in render_section:
+        return _err(
+            "template key 'format' is not supported on the HTTP routes — the output "
+            "cut is a URL concern; pick it with ?format= (or ?w=&h= / ?size=WxH)"
+        )
+    if not reel and "weights" in render_section:
+        return _err(
+            "template key 'weights' shapes reel beat rhythm and is not supported on "
+            "the single-card motion routes — use the reel routes"
+        )
+    if reel and (v_tmpl or {}).get("art"):
+        bad = ", ".join(sorted(v_tmpl["art"]))
+        return _err(
+            f"the reel-level template is render-only (fps/weights/effect_toggles); "
+            f"art key(s) {bad} belong in the per-beat 'templates' list"
+        )
+    render_kw = _mt.render_kwargs_from_template(v_tmpl, n_cards=n_cards)
+    tmpl_kw: dict = {}
+    if "fps" in render_kw:
+        tmpl_kw["fps"] = render_kw["fps"]
+    if "review_ab" in render_kw:
+        tmpl_kw["review_ab"] = render_kw["review_ab"]
+    return (
+        {
+            "template": template,
+            "templates": templates,
+            "tmpl_kw": tmpl_kw,
+            "rhythm": render_kw.get("rhythm"),
+            "token": _mt.preview_slot_token(v_tmpl, v_beats),
+        },
+        None,
+    )
+
+
+def _resolve_tmpl_from_request():
+    """Resolve the opt-in ``?tmpl=`` preview-slot token for the motion/reel
+    file + manifest routes (the ``_resolve_alpha_from_request`` pattern).
+
+    A templated render publishes to a ``…_tmpl<hash8>…`` preview slot so it can
+    never clobber the canonical approved artifact; ``?tmpl=<hash8>`` — the
+    token from the render response's ``X-Motion-Preview`` header or the job's
+    ``video_url`` — fetches that preview variant (file, poster and manifest
+    sidecars alike). Absent → ``""`` → the canonical slot, byte-identical. The
+    token is validated as exactly 8 lowercase hex chars and the filename part
+    is built only from the validated token, so the path-traversal posture is
+    unchanged. Returns ``(name_part, None)`` or ``(None, (response, 400))``.
+    """
+    tok = (request.args.get("tmpl") or "").strip().lower()
+    if not tok:
+        return "", None
+    if not re.fullmatch(r"[0-9a-f]{8}", tok):
+        return None, (
+            jsonify(
+                {
+                    "error": "bad_motion_template",
+                    "detail": "tmpl must be the 8-character hex preview-slot token "
+                    "returned by a templated render",
+                }
+            ),
+            400,
+        )
+    return f"_tmpl{tok}", None
+
+
+def _motion_preview_out_path(out_path, stem_base: str, fmt: str, token: str) -> Path:
+    """The preview-slot output path for a templated render.
+
+    Folds the template's 8-hex content token into the published stem (the M31
+    ``_sel<hash8>`` discipline) while keeping the format suffix and container
+    extension, so an unapproved preview publishes beside — never over — the
+    canonical approved slot, sidecars included (``_publish`` derives the
+    manifest/poster names from this path). ``stem_base`` is the card id for
+    per-card motion or the reel's ``base_name``; the file/manifest routes
+    re-derive the identical name from the validated ``?tmpl=`` token.
+    """
+    out_path = Path(out_path)
+    ext = out_path.suffix.lstrip(".")
+    stem = f"{stem_base}_tmpl{token}"
+    name = f"{stem}.{ext}" if fmt == "story" else f"{stem}_{fmt}.{ext}"
+    return out_path.with_name(name)
+
+
 def _assemble_card_motion_inputs(run_id: str, card_id: str):
     """Shared validation + payload assembly for the per-card motion routes.
 

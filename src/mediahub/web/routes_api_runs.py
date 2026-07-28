@@ -3692,6 +3692,19 @@ def api_card_motion(run_id: str, card_id: str):
     that preset. Synchronous — the UI now prefers the async ``motion-job``
     route (M32), which survives proxy timeouts on cold renders; this route
     remains for API callers and cache-hit fetches.
+
+    Template body contract (PREVIEW/A-B only): an optional ``template`` object
+    in the POST body drives this preview's art axes plus the ``fps`` /
+    ``effect_toggles`` render knobs. Template keys this route cannot honour
+    are an honest 400 ``bad_motion_template``, never a validated-then-ignored
+    200: ``format`` (the output cut is a URL concern — out_path/Content-Type
+    are bound to ``?format=`` before the body is read) and ``weights``
+    (reel-only beat rhythm). A templated render publishes to its own
+    ``<card_id>_tmpl<hash8>`` preview slot — manifest + poster sidecars
+    included — so the canonical ``<card_id>`` slot served by the
+    motion-file/manifest routes always keeps the approved parity render; the
+    token rides back on the ``X-Motion-Preview`` response header and fetches
+    the preview via ``motion-file?tmpl=<hash8>``.
     """
     from flask import send_file
 
@@ -3704,28 +3717,24 @@ def api_card_motion(run_id: str, card_id: str):
     if err is not None:
         return err
 
-    # data-driven-json (PREVIEW/A-B ONLY): an optional ``template`` object in the
-    # POST body drives this motion preview's art axes (merged into the brief at
-    # render time) — it never regenerates or persists the approved still, so the
-    # exported card's still<->motion parity is untouched. Validated up front so a
-    # bad template is an honest 400 before any render work. The render section
-    # maps onto the existing fps/review_ab kwargs; ``format`` stays a ``?format=``
-    # query concern (out_path / Content-Type are already bound to it). Absent
+    # data-driven-json (PREVIEW/A-B ONLY): the shared body resolver validates the
+    # optional ``template`` (honest 400 on bad input AND on route-unsupported
+    # format/weights keys — see the docstring), maps its render section onto the
+    # existing fps/review_ab kwargs, and mints the preview-slot token. It never
+    # regenerates or persists the approved still, and the preview-slot fork below
+    # means it never overwrites the approved motion artifact either. Absent
     # template ⇒ inert ⇒ byte-identical.
-    from mediahub.visual import motion_template as _mt
-
-    _body = request.get_json(silent=True) or {}
-    _template = _body.get("template")
-    try:
-        _tmpl = _mt.validate_motion_template(_template)
-    except _mt.MotionTemplateError as e:
-        return jsonify({"error": "bad_motion_template", "detail": str(e)}), 400
-    _render_kw = _mt.render_kwargs_from_template(_tmpl)
-    _tmpl_kw: dict = {}
-    if "fps" in _render_kw:
-        _tmpl_kw["fps"] = _render_kw["fps"]
-    if "review_ab" in _render_kw:
-        _tmpl_kw["review_ab"] = _render_kw["review_ab"]
+    _tmpl_resolved, _tmpl_err = W._resolve_motion_template_body(request.get_json(silent=True) or {})
+    if _tmpl_err is not None:
+        return _tmpl_err
+    _template = _tmpl_resolved["template"]
+    _tmpl_kw = _tmpl_resolved["tmpl_kw"]
+    _tmpl_tok = _tmpl_resolved["token"]
+    if _tmpl_tok:
+        inputs["out_path"] = W._motion_preview_out_path(
+            inputs["out_path"], card_id, inputs["format"], _tmpl_tok
+        )
+        inputs["out_name"] = Path(inputs["out_path"]).name
 
     try:
         with W._render_slot("motion", card_id, timeout=W._RENDER_TRY_TIMEOUT):
@@ -3764,12 +3773,17 @@ def api_card_motion(run_id: str, card_id: str):
                 ),
             }
         ), 500
-    return send_file(
+    resp = send_file(
         str(mp4),
         mimetype=inputs["content_type"],
         as_attachment=False,
         download_name=inputs["out_name"],
     )
+    if _tmpl_tok:
+        # The preview-slot token: the caller needs it to fetch this preview
+        # back from the motion-file/manifest routes (?tmpl=<hash8>).
+        resp.headers["X-Motion-Preview"] = _tmpl_tok
+    return resp
 
 
 def api_card_motion_job(run_id: str, card_id: str):
@@ -3781,6 +3795,13 @@ def api_card_motion_job(run_id: str, card_id: str):
     already fixed with ``/reel-job``. Same cure, same disk-backed job
     store: render in a daemon thread, poll ``api_reel_job_status``, then
     stream the finished MP4 from ``motion-file``.
+
+    Honours the same optional ``template`` POST body as the sync route —
+    same validation, same 400s for route-unsupported keys, same
+    ``_tmpl<hash8>`` preview slot — a first templated render is by
+    construction a cold cache-miss, i.e. exactly the case this job route
+    exists for. The job's ``video_url`` carries ``?tmpl=`` so the poller
+    streams the preview variant; the canonical slot stays untouched.
     """
     try:
         from mediahub.visual import motion as _motion
@@ -3791,6 +3812,22 @@ def api_card_motion_job(run_id: str, card_id: str):
     if err is not None:
         return err
 
+    # data-driven-json (PREVIEW/A-B, async): validate + thread the template
+    # BEFORE the worker thread spawns (it has no request context). Previously
+    # a posted template body was silently dropped here — a 202 + the DEFAULT
+    # render, the exact silent-wrong-output the honest-error rule forbids.
+    _tmpl_resolved, _tmpl_err = W._resolve_motion_template_body(request.get_json(silent=True) or {})
+    if _tmpl_err is not None:
+        return _tmpl_err
+    _template = _tmpl_resolved["template"]
+    _tmpl_kw = _tmpl_resolved["tmpl_kw"]
+    _tmpl_tok = _tmpl_resolved["token"]
+    if _tmpl_tok:
+        inputs["out_path"] = W._motion_preview_out_path(
+            inputs["out_path"], card_id, inputs["format"], _tmpl_tok
+        )
+        inputs["out_name"] = Path(inputs["out_path"]).name
+
     # url_for needs the request context — resolve before the thread.
     _file_kwargs = {"run_id": run_id, "card_id": card_id}
     if inputs["format"] != _motion.DEFAULT_MOTION_FORMAT:
@@ -3799,6 +3836,10 @@ def api_card_motion_job(run_id: str, card_id: str):
     # name + Content-Type.
     if inputs["alpha"]:
         _file_kwargs["alpha"] = inputs["alpha"]
+    # Preview slot: carry the template token so the file route serves the
+    # preview variant, never the canonical approved artifact.
+    if _tmpl_tok:
+        _file_kwargs["tmpl"] = _tmpl_tok
     file_url = url_for("api_card_motion_file", **_file_kwargs)
     job_id = W.uuid.uuid4().hex
     job: dict = {
@@ -3826,6 +3867,8 @@ def api_card_motion_job(run_id: str, card_id: str):
                         brief=inputs["brief"],
                         format_name=inputs["format"],
                         alpha_profile=inputs["alpha"],
+                        motion_template=_template,
+                        **_tmpl_kw,
                     )
             if not Path(mp4).exists():
                 raise RuntimeError("mp4 missing after render")
@@ -3889,6 +3932,10 @@ def api_card_motion_batch_job(run_id: str, card_id: str):
     ``motion-file`` URL and ``formats_failed`` carries the honest reason
     for any cut that could not render. The motion cache makes re-runs
     cheap: cuts already rendered complete near-instantly.
+
+    A posted ``template`` body is a 400 ``bad_motion_template`` — the batch
+    renders the approved artifact's cuts, not previews; use the single
+    ``/motion`` / ``/motion-job`` routes for a templated preview.
     """
     try:
         from mediahub.visual import motion as _motion
@@ -3899,6 +3946,19 @@ def api_card_motion_batch_job(run_id: str, card_id: str):
     inputs, err = W._assemble_card_motion_inputs(run_id, card_id)
     if err is not None:
         return err
+
+    # Template preview is a single-render concern; the batch renders every cut
+    # of the approved artifact. A posted template body is an honest 400 here —
+    # never silently dropped (POST it to /motion or /motion-job instead).
+    _body = request.get_json(silent=True) or {}
+    if _body.get("template") is not None or _body.get("templates") is not None:
+        return jsonify(
+            {
+                "error": "bad_motion_template",
+                "detail": "template preview is not supported on the batch route; "
+                "POST the template to the single motion (or motion-job) route",
+            }
+        ), 400
 
     out_dir = Path(inputs["out_path"]).parent
     # alpha-export: every cut in the batch inherits the requested transparent
@@ -4055,6 +4115,9 @@ def api_card_motion_file(run_id: str, card_id: str):
     The persistent counterpart of the blob URLs the old sync flow lost on
     navigation (M32). ``?format=`` picks the cut; ``?poster=1`` serves the
     poster-frame PNG sidecar written beside every rendered MP4.
+    ``?tmpl=<hash8>`` (the validated preview-slot token from a templated
+    render) serves that render's ``_tmpl``-suffixed preview slot; absent
+    keeps the canonical approved artifact, byte-identical.
     """
     from flask import send_file
 
@@ -4090,8 +4153,14 @@ def api_card_motion_file(run_id: str, card_id: str):
     if alpha_err is not None:
         return alpha_err
     _alpha, _alpha_prof, _ext, _content_type = alpha_resolved
+    # Preview slot: ?tmpl=<hash8> (shared validated resolver) selects a
+    # templated render's _tmpl-suffixed slot; absent keeps the canonical name.
+    _tmpl_part, _tmpl_err = W._resolve_tmpl_from_request()
+    if _tmpl_err is not None:
+        return _tmpl_err
     motion_dir = W.RUNS_DIR / run_id / "motion"
-    name = f"{card_id}.{_ext}" if fmt == "story" else f"{card_id}_{fmt}.{_ext}"
+    _stem = f"{card_id}{_tmpl_part}"
+    name = f"{_stem}.{_ext}" if fmt == "story" else f"{_stem}_{fmt}.{_ext}"
     path = motion_dir / name
     # Defence-in-depth: the card id is a single URL segment, but never let
     # a crafted id escape the run's motion dir.
@@ -4125,7 +4194,8 @@ def api_card_motion_manifest(run_id: str, card_id: str):
     every rendered video. 404 until the matching cut has been rendered.
     ``?alpha=`` (same validated vocabulary as the render/file routes)
     selects the transparent cut's own container-aware sidecar name, so the
-    alpha and opaque cuts' explainability records never shadow each other."""
+    alpha and opaque cuts' explainability records never shadow each other.
+    ``?tmpl=<hash8>`` selects a templated render's preview-slot manifest."""
     fmt, canvas_err = W._resolve_motion_canvas()
     if canvas_err is not None:
         return canvas_err
@@ -4133,9 +4203,13 @@ def api_card_motion_manifest(run_id: str, card_id: str):
     if alpha_err is not None:
         return alpha_err
     _alpha, _alpha_prof, _ext, _content_type = alpha_resolved
+    _tmpl_part, _tmpl_err = W._resolve_tmpl_from_request()
+    if _tmpl_err is not None:
+        return _tmpl_err
     from mediahub.visual import motion as _motion
 
-    name = f"{card_id}.{_ext}" if fmt == "story" else f"{card_id}_{fmt}.{_ext}"
+    _stem = f"{card_id}{_tmpl_part}"
+    name = f"{_stem}.{_ext}" if fmt == "story" else f"{_stem}_{fmt}.{_ext}"
     sidecar = _motion.published_sidecar_path(W.RUNS_DIR / run_id / "motion" / name, ".json")
     if not sidecar.exists():
         return jsonify({"error": "manifest_not_found", "detail": "render this cut first"}), 404
@@ -4718,6 +4792,17 @@ def api_run_reel(run_id: str):
     the count with ?n=<int> up to a hard cap of 5. ``?format=`` picks a
     named cut; ``?w=&h=`` / ``?size=WxH`` requests a single arbitrary
     validated canvas (any-canvas), which wins over ``?format=``.
+
+    Template body contract (PREVIEW/A-B only): optional per-beat
+    ``templates`` (art-only, at most one per card) and a reel-level
+    ``template`` (render-only: ``fps`` / ``effect_toggles`` / ``weights`` —
+    query rhythm wins over template weights). ``format`` in a template, art
+    on the reel-level template, ``render`` keys on a beat template, or more
+    templates than cards are each a 400 ``bad_motion_template`` — honest,
+    never silently ignored. A templated reel publishes to its own
+    ``_tmpl<hash8>`` preview slot (fetch via ``reel-file?tmpl=``; token on
+    the ``X-Motion-Preview`` header) so the canonical reel slot keeps the
+    approved render.
     """
     from flask import send_file
 
@@ -4730,39 +4815,36 @@ def api_run_reel(run_id: str):
     if err is not None:
         return err
 
-    # data-driven-json (PREVIEW/A-B ONLY): an optional per-beat ``templates``
-    # array (parallel to the cards) drives each card beat's art axes, and an
-    # optional reel-level ``template`` object's render section maps onto the
-    # existing fps / review_ab / rhythm kwargs. This is a motion preview — it
-    # never regenerates or persists the approved stills. Validated up front so a
-    # bad template is an honest 400. Precedence: an explicit ``?cover/outro/beat/
-    # weights`` query rhythm WINS over a template's weights (they can't clobber);
-    # ``format`` stays a ``?format=`` query concern. Absent ⇒ inert ⇒
-    # byte-identical.
-    from mediahub.visual import motion_template as _mt
-
-    _body = request.get_json(silent=True) or {}
-    _templates = _body.get("templates")
-    if _templates is not None and not isinstance(_templates, list):
-        return jsonify({"error": "bad_motion_template", "detail": "templates must be a list"}), 400
-    try:
-        if _templates is not None:
-            for _t in _templates:
-                _mt.validate_motion_template(_t)
-        _reel_tmpl = _mt.validate_motion_template(_body.get("template"))
-    except _mt.MotionTemplateError as e:
-        return jsonify({"error": "bad_motion_template", "detail": str(e)}), 400
-    _render_kw = _mt.render_kwargs_from_template(_reel_tmpl, n_cards=len(inputs["cards"]))
-    _tmpl_kw: dict = {}
-    if "fps" in _render_kw:
-        _tmpl_kw["fps"] = _render_kw["fps"]
-    if "review_ab" in _render_kw:
-        _tmpl_kw["review_ab"] = _render_kw["review_ab"]
+    # data-driven-json (PREVIEW/A-B ONLY): the shared body resolver validates an
+    # optional per-beat ``templates`` array (parallel to the cards, art-only,
+    # never longer than the card list) and an optional reel-level ``template``
+    # (render-only: fps / effect_toggles / weights) — every misplaced or
+    # route-unsupported key (``format``; art on the reel-level template; render
+    # sections on beats; surplus beats) is an honest 400, never a
+    # validated-then-ignored 200. This is a motion preview: it never regenerates
+    # the approved stills, and a templated reel publishes to its own
+    # ``_tmpl<hash8>`` preview slot (manifest + poster included) so the
+    # canonical reel slot keeps the approved render — fetch the preview via
+    # ``reel-file?tmpl=`` (token on the X-Motion-Preview header). Precedence: an
+    # explicit ``?cover/outro/beat/weights`` query rhythm WINS over a template's
+    # weights (they can't clobber). Absent ⇒ inert ⇒ byte-identical.
+    _tmpl_resolved, _tmpl_err = W._resolve_motion_template_body(
+        request.get_json(silent=True) or {}, n_cards=len(inputs["cards"]), reel=True
+    )
+    if _tmpl_err is not None:
+        return _tmpl_err
+    _templates = _tmpl_resolved["templates"]
+    _tmpl_kw = _tmpl_resolved["tmpl_kw"]
+    _tmpl_tok = _tmpl_resolved["token"]
     # Query rhythm wins; only fall back to a template's weights when no explicit
     # rhythm was requested, so the two rhythm channels can never clobber.
     _reel_rhythm = inputs["rhythm"]
-    if _reel_rhythm is None and "rhythm" in _render_kw:
-        _reel_rhythm = _render_kw["rhythm"]
+    if _reel_rhythm is None and _tmpl_resolved["rhythm"] is not None:
+        _reel_rhythm = _tmpl_resolved["rhythm"]
+    if _tmpl_tok:
+        inputs["out_path"] = W._motion_preview_out_path(
+            inputs["out_path"], inputs["base_name"], inputs["format"], _tmpl_tok
+        )
 
     try:
         with W._render_slot("reel", run_id, timeout=W._RENDER_TRY_TIMEOUT):
@@ -4807,12 +4889,17 @@ def api_run_reel(run_id: str):
             }
         ), 500
     _reel_ext = Path(mp4).suffix.lstrip(".") or "mp4"
-    return send_file(
+    resp = send_file(
         str(mp4),
         mimetype=inputs["content_type"],
         as_attachment=False,
         download_name=f"meet_reel_{run_id}.{_reel_ext}",
     )
+    if _tmpl_tok:
+        # The preview-slot token: the caller needs it to fetch this preview
+        # back from the reel-file/manifest routes (?tmpl=<hash8>).
+        resp.headers["X-Motion-Preview"] = _tmpl_tok
+    return resp
 
 
 def api_run_charts(run_id: str):
@@ -4980,6 +5067,13 @@ def api_run_reel_job(run_id: str):
     from the user's side the button simply "does nothing". Same cure as
     the V10 graphic-variants job: render in a daemon thread, poll for
     the outcome, then stream the finished MP4 from the file route.
+
+    Honours the same optional ``template``/``templates`` POST body as the
+    sync ``/reel`` route — same validation, same 400s for misplaced keys,
+    same ``_tmpl<hash8>`` preview slot — a first templated render is by
+    construction a cold cache-miss, i.e. exactly the case this job route
+    exists for. The job's ``video_url`` carries ``?tmpl=`` so the poller
+    streams the preview variant; the canonical reel slot stays untouched.
     """
     try:
         from mediahub.visual import motion as _motion
@@ -4990,10 +5084,35 @@ def api_run_reel_job(run_id: str):
     if err is not None:
         return err
 
-    # url_for needs the request context — resolve before the thread.
-    file_url = url_for(
-        "api_run_reel_file", format=inputs["format"], **W._reel_file_url_kwargs(inputs, run_id)
+    # data-driven-json (PREVIEW/A-B, async): validate + thread the template
+    # BEFORE the worker thread spawns (it has no request context). Previously
+    # a posted template body was silently dropped here — a 202 + the DEFAULT
+    # render, the exact silent-wrong-output the honest-error rule forbids.
+    _tmpl_resolved, _tmpl_err = W._resolve_motion_template_body(
+        request.get_json(silent=True) or {}, n_cards=len(inputs["cards"]), reel=True
     )
+    if _tmpl_err is not None:
+        return _tmpl_err
+    _templates = _tmpl_resolved["templates"]
+    _tmpl_kw = _tmpl_resolved["tmpl_kw"]
+    _tmpl_tok = _tmpl_resolved["token"]
+    # Query rhythm wins; only fall back to a template's weights when no explicit
+    # rhythm was requested (sync-route parity).
+    _reel_rhythm = inputs["rhythm"]
+    if _reel_rhythm is None and _tmpl_resolved["rhythm"] is not None:
+        _reel_rhythm = _tmpl_resolved["rhythm"]
+    if _tmpl_tok:
+        inputs["out_path"] = W._motion_preview_out_path(
+            inputs["out_path"], inputs["base_name"], inputs["format"], _tmpl_tok
+        )
+
+    # url_for needs the request context — resolve before the thread.
+    _file_kwargs = W._reel_file_url_kwargs(inputs, run_id)
+    if _tmpl_tok:
+        # Preview slot: the poller must stream the preview variant, never the
+        # canonical approved artifact.
+        _file_kwargs["tmpl"] = _tmpl_tok
+    file_url = url_for("api_run_reel_file", format=inputs["format"], **_file_kwargs)
     job_id = W.uuid.uuid4().hex
     job: dict = {
         "id": job_id,
@@ -5022,12 +5141,14 @@ def api_run_reel_job(run_id: str):
                         meet_name=inputs["meet_name"],
                         briefs=inputs["briefs"],
                         format_name=inputs["format"],
-                        rhythm=inputs["rhythm"],
+                        rhythm=_reel_rhythm,
                         sponsor=inputs.get("sponsor", ""),
                         next_meet=inputs.get("next_meet", ""),
                         dub_language=inputs.get("dub_language", ""),
                         reel_stat_config=inputs.get("reel_stat_config"),
                         alpha_profile=inputs["alpha"],
+                        motion_templates=_templates,
+                        **_tmpl_kw,
                     )
             if not Path(mp4).exists():
                 raise RuntimeError("mp4 missing after render")
@@ -5095,6 +5216,10 @@ def api_run_reel_batch(run_id: str):
     ``video_urls`` (one per produced cut) and ``formats_failed`` (the
     honest reason for any cut the active engine couldn't produce — e.g.
     the ffmpeg fallback's non-story cuts).
+
+    A posted ``template``/``templates`` body is a 400 ``bad_motion_template``
+    — the batch renders the approved artifact's cuts, not previews; use the
+    single ``/reel`` / ``/reel-job`` routes for a templated preview.
     """
     try:
         from mediahub.visual import motion as _motion
@@ -5104,6 +5229,19 @@ def api_run_reel_batch(run_id: str):
     inputs, err = W._assemble_reel_inputs(run_id)
     if err is not None:
         return err
+
+    # Template preview is a single-render concern; the batch renders every cut
+    # of the approved artifact. A posted template body is an honest 400 here —
+    # never silently dropped (POST it to /reel or /reel-job instead).
+    _body = request.get_json(silent=True) or {}
+    if _body.get("template") is not None or _body.get("templates") is not None:
+        return jsonify(
+            {
+                "error": "bad_motion_template",
+                "detail": "template preview is not supported on the batch route; "
+                "POST the template to the single reel (or reel-job) route",
+            }
+        ), 400
 
     n = inputs["n"]
     out_dir = Path(inputs["out_path"]).parent
@@ -5219,7 +5357,11 @@ def api_run_reel_batch(run_id: str):
 
 
 def api_run_reel_file(run_id: str):
-    """Serve an already-rendered reel MP4 — never triggers a render."""
+    """Serve an already-rendered reel MP4 — never triggers a render.
+
+    ``?tmpl=<hash8>`` (the validated preview-slot token from a templated
+    render) serves that render's ``_tmpl``-suffixed preview slot; absent
+    keeps the canonical approved reel, byte-identical."""
     from flask import send_file
 
     run_data = W._load_run(run_id)
@@ -5276,7 +5418,12 @@ def api_run_reel_file(run_id: str):
     if alpha_err is not None:
         return alpha_err
     _alpha, _alpha_prof, _ext, _content_type = alpha_resolved
-    base = f"reel_{n}{_sel}{_suffix}"
+    # Preview slot: ?tmpl=<hash8> (shared validated resolver) selects a
+    # templated render's _tmpl-suffixed slot; absent keeps the canonical name.
+    _tmpl_part, _tmpl_err = W._resolve_tmpl_from_request()
+    if _tmpl_err is not None:
+        return _tmpl_err
+    base = f"reel_{n}{_sel}{_suffix}{_tmpl_part}"
     name = f"{base}.{_ext}" if fmt == "story" else f"{base}_{fmt}.{_ext}"
     path = W.RUNS_DIR / run_id / "motion" / name
     if not path.exists():
@@ -5310,8 +5457,8 @@ def api_run_reel_manifest(run_id: str):
     """The reel's explainability manifest (M22 handoff) — engine, beats,
     rhythm, honest capability notes — written as a JSON sidecar beside the
     rendered video by BOTH engines. Same ``n``/``format``/``lang``/``cards``/
-    ``alpha`` resolution as ``reel-file``; 404 until that cut has been
-    rendered."""
+    ``alpha``/``tmpl`` resolution as ``reel-file``; 404 until that cut has
+    been rendered."""
     run_data = W._load_run(run_id)
     if run_data is None:
         run_json = W.RUNS_DIR / run_id / "run.json"
@@ -5358,9 +5505,13 @@ def api_run_reel_manifest(run_id: str):
     if alpha_err is not None:
         return alpha_err
     _alpha, _alpha_prof, _ext, _content_type = alpha_resolved
+    # Preview slot: ?tmpl=<hash8> selects a templated render's manifest.
+    _tmpl_part, _tmpl_err = W._resolve_tmpl_from_request()
+    if _tmpl_err is not None:
+        return _tmpl_err
     from mediahub.visual import motion as _motion
 
-    base = f"reel_{n}{_sel}{_suffix}"
+    base = f"reel_{n}{_sel}{_suffix}{_tmpl_part}"
     name = f"{base}.{_ext}" if fmt == "story" else f"{base}_{fmt}.{_ext}"
     sidecar = _motion.published_sidecar_path(W.RUNS_DIR / run_id / "motion" / name, ".json")
     if not sidecar.exists():
