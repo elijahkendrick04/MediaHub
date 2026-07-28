@@ -175,32 +175,46 @@ def _clamp(v: float, lo: float, hi: float) -> float:
     return lo if v < lo else hi if v > hi else v
 
 
+def _env_float(name: str, default: Optional[float], lo: float, hi: float) -> Optional[float]:
+    """The one hardened env-float parser shared by the audio resolvers.
+
+    Reads ``name``, strips, parses as float, rejects non-finite values (a nan
+    or inf would break the FFmpeg filter graph) and clamps to ``[lo, hi]``.
+    Unset, malformed, or non-finite → ``default`` (never raises).
+    ``resolve_loudnorm`` passes its fixed target as the default;
+    ``resolve_duck`` passes ``None`` so a bad knob is omitted from its partial
+    dict. Both resolvers MUST parse through here — they forked once and the
+    copies drifted (the loudnorm copy missed the non-finite guard).
+    """
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        v = float(raw)
+    except ValueError:
+        return default
+    if not math.isfinite(v):
+        return default
+    return _clamp(v, lo, hi)
+
+
 def resolve_loudnorm() -> Optional[dict]:
     """Opt-in EBU R128 loudness target for the final mix, or ``None`` when off.
 
     Off unless ``MEDIAHUB_REEL_LOUDNORM`` is truthy. When on, the integrated
     loudness / true-peak / range targets may be tuned via
     ``MEDIAHUB_REEL_LOUDNORM_LUFS`` / ``_TP`` / ``_LRA`` — each parsed and clamped
-    to a fixed range, with malformed values falling back to the default (never
-    raises). Returns a canonical ``{"i", "tp", "lra"}`` dict so identical env
-    gives an identical filter string, and therefore an identical cache key.
+    to a fixed range, with malformed or non-finite values falling back to the
+    default (never raises). Returns a canonical ``{"i", "tp", "lra"}`` dict so
+    identical env gives an identical filter string, and therefore an identical
+    cache key.
     """
     if os.environ.get("MEDIAHUB_REEL_LOUDNORM", "").strip().lower() not in _TRUTHY:
         return None
-
-    def _read(name: str, default: float, lo: float, hi: float) -> float:
-        raw = os.environ.get(name, "").strip()
-        if not raw:
-            return default
-        try:
-            return _clamp(float(raw), lo, hi)
-        except ValueError:
-            return default
-
     return {
-        "i": _read("MEDIAHUB_REEL_LOUDNORM_LUFS", LOUDNORM_DEFAULT_I, *_LOUDNORM_I_RANGE),
-        "tp": _read("MEDIAHUB_REEL_LOUDNORM_TP", LOUDNORM_DEFAULT_TP, *_LOUDNORM_TP_RANGE),
-        "lra": _read("MEDIAHUB_REEL_LOUDNORM_LRA", LOUDNORM_DEFAULT_LRA, *_LOUDNORM_LRA_RANGE),
+        "i": _env_float("MEDIAHUB_REEL_LOUDNORM_LUFS", LOUDNORM_DEFAULT_I, *_LOUDNORM_I_RANGE),
+        "tp": _env_float("MEDIAHUB_REEL_LOUDNORM_TP", LOUDNORM_DEFAULT_TP, *_LOUDNORM_TP_RANGE),
+        "lra": _env_float("MEDIAHUB_REEL_LOUDNORM_LRA", LOUDNORM_DEFAULT_LRA, *_LOUDNORM_LRA_RANGE),
     }
 
 
@@ -241,17 +255,30 @@ def resolve_duck() -> Optional[dict]:
     )
     out: dict[str, float] = {}
     for key, env, (lo, hi) in specs:
-        raw = os.environ.get(env, "").strip()
-        if not raw:
-            continue
-        try:
-            val = float(raw)
-        except ValueError:
-            continue  # malformed -> leave that knob at its default (omit)
-        if not math.isfinite(val):
-            continue  # nan/inf -> would break the filter graph; omit
-        out[key] = _clamp(val, lo, hi)
+        val = _env_float(env, None, lo, hi)
+        if val is not None:  # unset/malformed/non-finite -> leave the knob at its default (omit)
+            out[key] = val
     return out or None
+
+
+def _effective_duck(profile: Any, duck: Optional[dict]) -> dict[str, float]:
+    """The compressor params the sidechain actually runs with, fully resolved.
+
+    Each knob comes from the operator override when set, else its true runtime
+    source: ratio from the mix profile's ``duck_ratio``, threshold/attack/release
+    from the module constants. Shared by ``mux_args`` (which builds the filter
+    from it) and ``apply_audio`` (which records it in the manifest as
+    ``duck_effective``), so the explainability record can never drift from the
+    graph.
+    """
+    levels = mix_profile_levels(profile)
+    d = duck or {}
+    return {
+        "threshold": d.get("threshold", DUCK_THRESHOLD),
+        "ratio": d.get("ratio", levels["duck_ratio"]),
+        "attack": d.get("attack", DUCK_ATTACK_MS),
+        "release": d.get("release", DUCK_RELEASE_MS),
+    }
 
 
 def _coalesce_profile(explicit: Any) -> str:
@@ -489,7 +516,13 @@ def build_audio_plan(
             plan["music"] = track.name
             plan["music_bytes"] = track.stat().st_size
         except OSError:
-            pass
+            # The track vanished between pick_music's listing and the stat
+            # (deploy sync, operator cleanup). Mirror the library branch: drop
+            # the whole entry so the plan honestly reports no bed, rather than
+            # a name-only claim whose cache key loses the byte-size and whose
+            # mux would fail to resolve the file.
+            plan.pop("music", None)
+            plan.pop("music_bytes", None)
     elif library_track is not None:
         try:
             plan["music"] = library_track.id
@@ -702,11 +735,11 @@ def mux_args(
     # Opt-in sidechain-duck overrides: each unset knob defaults to its true runtime source
     # (ratio from the mix profile, threshold/attack/release from the module constants), so an
     # absent/empty ``duck`` reproduces today's filter string character-for-character.
-    _d = duck or {}
-    duck_threshold = _d.get("threshold", DUCK_THRESHOLD)
-    duck_ratio = _d.get("ratio", levels["duck_ratio"])
-    duck_attack = _d.get("attack", DUCK_ATTACK_MS)
-    duck_release = _d.get("release", DUCK_RELEASE_MS)
+    _d = _effective_duck(profile, duck)
+    duck_threshold = _d["threshold"]
+    duck_ratio = _d["ratio"]
+    duck_attack = _d["attack"]
+    duck_release = _d["release"]
     d = max(0.1, float(duration_sec))
     fade_start = max(0.0, d - AUDIO_FADE_OUT_SEC)
     args: list[str] = ["-i", str(video)]
@@ -899,6 +932,12 @@ def apply_audio(
         record["ducking"] = "sidechain"
         if plan.get("duck"):
             record["duck"] = plan["duck"]
+        # Explainability: the plan-side ``duck`` is only the operator's override
+        # subset (cache identity folds overrides alone); record the EFFECTIVE
+        # compressor params the graph actually ran with — resolved by the same
+        # helper ``mux_args`` builds the filter from — so the manifest is
+        # self-contained (no reader needs the constant table or profile map).
+        record["duck_effective"] = _effective_duck(profile, plan.get("duck"))
     if music_path is not None:
         bpm = track_bpm(music_path)
         if bpm is not None:
