@@ -259,7 +259,11 @@ class TestRestorePrevious:
 class TestPrevSlotsInert:
     def test_caption_join_sites_exclude_prev(self):
         assert _WEB_SRC.count('startswith(("insp.", "prev."))') >= 1
-        assert 'not str(k).startswith("prev.")' in _WEB_SRC
+        # The voiceover join-site widened its guard from prev.-only to every
+        # non-caption slot family (insp.* overrides, picked_* variant picks,
+        # alt_text) — prev.* stays excluded via the same tuple.
+        assert '_non_caption = ("prev.", "insp.", "picked_")' in _WEB_SRC
+        assert 'ks != "alt_text"' in _WEB_SRC
 
     def test_pack_builder_ignores_prev_slots(self, tmp_path):
         """The pack's tone_slot parser must not apply a prev.* slot as a
