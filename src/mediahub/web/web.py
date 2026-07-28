@@ -2482,6 +2482,14 @@ def _variant_jobs_dir() -> Path:
     return d
 
 
+# Serialises concurrent saves of the same job dict (worker + heartbeat +
+# batch sub-steps): json.dumps over a dict another thread is mutating can
+# raise "dictionary changed size during iteration", killing the save and
+# leaving the job stale until the next heartbeat. The snapshot is taken as
+# a shallow copy under the lock; writes stay atomic via unique-tmp+replace.
+_variant_job_io_lock = threading.Lock()
+
+
 def _variant_job_save(job: dict) -> None:
     """Atomically persist a job snapshot.
 
@@ -2489,11 +2497,13 @@ def _variant_job_save(job: dict) -> None:
     so the tmp name is unique per write — a shared ``.tmp`` path let their
     writes interleave into a torn/absent job file for a poll cycle. The tmp
     stays in the same directory, so ``os.replace`` remains atomic."""
-    job["updated_at"] = time.time()
     path = _variant_jobs_dir() / f"{job['id']}.json"
     tmp = path.with_suffix(f".{uuid.uuid4().hex[:8]}.tmp")
     try:
-        tmp.write_text(json.dumps(job), encoding="utf-8")
+        with _variant_job_io_lock:
+            job["updated_at"] = time.time()
+            payload = json.dumps(dict(job))
+        tmp.write_text(payload, encoding="utf-8")
         os.replace(tmp, path)
     except Exception:
         log.exception("variant job %s: persist failed", str(job.get("id", ""))[:8])
@@ -2549,8 +2559,80 @@ def _variant_jobs_gc() -> None:
                     f.unlink(missing_ok=True)
             except Exception:
                 pass
+        # Orphaned unique-tmp files from failed saves (disk-full, crash
+        # between write and replace) previously accumulated forever.
+        for f in _variant_jobs_dir().glob("*.tmp"):
+            try:
+                if now - f.stat().st_mtime > 3600.0:
+                    f.unlink(missing_ok=True)
+            except Exception:
+                pass
     except Exception:
         pass
+
+
+# Per-organisation ceiling on concurrently RUNNING background render jobs.
+# Render jobs are heavy (Remotion/Chromium bound) and any seat that can view
+# a run can start them — without a ceiling one tab-happy user (or a narrowed
+# read-only seat) could queue dozens and starve every other org's renders.
+# The default leaves honest headroom: a render-all batch + a reel + margin.
+_RENDER_JOBS_PER_ORG_CAP = max(
+    1, int(os.environ.get("MEDIAHUB_MAX_RENDER_JOBS_PER_ORG", "4") or "4")
+)
+_RENDER_JOB_KINDS = frozenset(
+    {
+        "reel",
+        "reel-batch",
+        "motion",
+        "motion-batch",
+        "render-all",
+        "certificates",
+        "sponsor-variant",
+        "variants",
+        "bulk_export",
+    }
+)
+
+
+def _render_job_quota_denied():
+    """A 429 JSON refusal when the active org already has the cap's worth of
+    LIVE render jobs (running + heartbeat-fresh), else ``None``. Stale and
+    finished jobs never count, so a crashed worker can't wedge the quota."""
+    pid = _active_profile_id() or ""
+    now = time.time()
+    live = 0
+    try:
+        for f in _variant_jobs_dir().glob("*.json"):
+            try:
+                job = json.loads(f.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            if job.get("kind") not in _RENDER_JOB_KINDS:
+                continue
+            if (job.get("owner_pid") or "") != pid:
+                continue
+            if job.get("status") != "running":
+                continue
+            if now - float(job.get("updated_at") or 0.0) > _VARIANT_JOB_STALL_S:
+                continue
+            live += 1
+            if live >= _RENDER_JOBS_PER_ORG_CAP:
+                return (
+                    jsonify(
+                        {
+                            "error": "render_jobs_capped",
+                            "user_message": (
+                                "Several renders are already running for your "
+                                "organisation — wait for one to finish, then "
+                                "try again."
+                            ),
+                        }
+                    ),
+                    429,
+                )
+    except Exception:
+        return None
+    return None
 
 
 def _maybe_evict_active_runs() -> None:

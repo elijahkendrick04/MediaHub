@@ -3219,6 +3219,12 @@ def api_sponsor_variant_job(run_id: str, card_id: str):
         if k != "hide_sponsor"
     }
 
+    # Per-org ceiling on live render jobs (heartbeat-fresh, running) —
+    # an honest 429 instead of unbounded queueing on the shared renderer.
+    _quota = W._render_job_quota_denied()
+    if _quota is not None:
+        return _quota
+
     job_id = W.uuid.uuid4().hex
     job: dict = {
         "id": job_id,
@@ -3519,9 +3525,19 @@ def api_regenerate_variants(run_id: str, card_id: str):
     # sequentially in a daemon thread with use_ai_director=False so
     # its direction can't be overridden, a final guard re-rolls any
     # duplicate signature, and the route returns a job id the UI polls.
+    # Per-org ceiling on live render jobs (heartbeat-fresh, running) —
+    # an honest 429 instead of unbounded queueing on the shared renderer.
+    _quota = W._render_job_quota_denied()
+    if _quota is not None:
+        return _quota
+
     job_id = W.uuid.uuid4().hex
     job: dict = {
         "id": job_id,
+        # The render-job quota counts live jobs by kind; the status route
+        # (api_variant_job_status) never validates it, so stamping the kind
+        # changes nothing for pollers.
+        "kind": "variants",
         "status": "running",
         "variants": [],
         "total": 3,
@@ -3865,6 +3881,12 @@ def api_card_motion_job(run_id: str, card_id: str):
     if _tmpl_tok:
         _file_kwargs["tmpl"] = _tmpl_tok
     file_url = url_for("api_card_motion_file", **_file_kwargs)
+    # Per-org ceiling on live render jobs (heartbeat-fresh, running) —
+    # an honest 429 instead of unbounded queueing on the shared renderer.
+    _quota = W._render_job_quota_denied()
+    if _quota is not None:
+        return _quota
+
     job_id = W.uuid.uuid4().hex
     job: dict = {
         "id": job_id,
@@ -4011,6 +4033,12 @@ def api_card_motion_batch_job(run_id: str, card_id: str):
         if inputs["alpha"]:
             _file_kwargs["alpha"] = inputs["alpha"]
         file_urls[fmt] = url_for("api_card_motion_file", **_file_kwargs)
+
+    # Per-org ceiling on live render jobs (heartbeat-fresh, running) —
+    # an honest 429 instead of unbounded queueing on the shared renderer.
+    _quota = W._render_job_quota_denied()
+    if _quota is not None:
+        return _quota
 
     job_id = W.uuid.uuid4().hex
     job: dict = {
@@ -5149,6 +5177,12 @@ def api_run_reel_job(run_id: str):
         # canonical approved artifact.
         _file_kwargs["tmpl"] = _tmpl_tok
     file_url = url_for("api_run_reel_file", format=inputs["format"], **_file_kwargs)
+    # Per-org ceiling on live render jobs (heartbeat-fresh, running) —
+    # an honest 429 instead of unbounded queueing on the shared renderer.
+    _quota = W._render_job_quota_denied()
+    if _quota is not None:
+        return _quota
+
     job_id = W.uuid.uuid4().hex
     job: dict = {
         "id": job_id,
@@ -5304,6 +5338,12 @@ def api_run_reel_batch(run_id: str):
         for fmt in _motion.MOTION_FORMATS
     }
 
+    # Per-org ceiling on live render jobs (heartbeat-fresh, running) —
+    # an honest 429 instead of unbounded queueing on the shared renderer.
+    _quota = W._render_job_quota_denied()
+    if _quota is not None:
+        return _quota
+
     job_id = W.uuid.uuid4().hex
     job: dict = {
         "id": job_id,
@@ -5404,6 +5444,41 @@ def api_run_reel_batch(run_id: str):
     )
 
 
+def _resolve_reel_sel_from_request():
+    """The reel file/manifest routes' selection discriminator.
+
+    ``?cards=`` re-derives the ``_sel<hash8>`` marker from the exact
+    rank-ordered id list the job threaded into the URL. ``?sel=<hash8>``
+    names the marker directly — the content builder's revisit restore knows
+    the rendered file's name but cannot reverse the hash back into an id
+    list. Strictly ``[0-9a-f]{8}`` (it is a filename fragment under the
+    tenant-gated run's own motion dir; anything else is an honest 400).
+    ``?cards=`` wins when both are supplied. Returns ``(_sel, None)`` or
+    ``(None, (response, status))``.
+    """
+    _cards_arg = (request.args.get("cards") or "").strip()
+    if _cards_arg:
+        return (
+            "_sel"
+            + W.hashlib.sha1(_cards_arg.encode("utf-8"), usedforsecurity=False).hexdigest()[:8],
+            None,
+        )
+    _sel_arg = (request.args.get("sel") or "").strip().lower()
+    if not _sel_arg:
+        return "", None
+    if not re.fullmatch(r"[0-9a-f]{8}", _sel_arg):
+        return None, (
+            jsonify(
+                {
+                    "error": "bad_sel",
+                    "detail": "sel must be the 8-hex-char selection marker",
+                }
+            ),
+            400,
+        )
+    return f"_sel{_sel_arg}", None
+
+
 def api_run_reel_file(run_id: str):
     """Serve an already-rendered reel MP4 — never triggers a render.
 
@@ -5451,12 +5526,9 @@ def api_run_reel_file(run_id: str):
     # M31 — a custom selection's file carries the same deterministic
     # _sel<hash8> marker the assembly derived from the final rank-ordered
     # id list (the job threads that exact list into this URL's ?cards=).
-    _cards_arg = (request.args.get("cards") or "").strip()
-    _sel = (
-        "_sel" + W.hashlib.sha1(_cards_arg.encode("utf-8"), usedforsecurity=False).hexdigest()[:8]
-        if _cards_arg
-        else ""
-    )
+    _sel, _sel_err = _resolve_reel_sel_from_request()
+    if _sel_err is not None:
+        return _sel_err
     # alpha-export: a transparent reel is served from its .mov/.webm slot with
     # the profile's Content-Type (shared resolver — one validation + 400
     # payload across all motion/reel routes); absent keeps the historic .mp4 path.
@@ -5540,12 +5612,9 @@ def api_run_reel_manifest(run_id: str):
         if (_lang and _dub.is_dubbable(_lang) and _lang.split("-", 1)[0] != "en")
         else ""
     )
-    _cards_arg = (request.args.get("cards") or "").strip()
-    _sel = (
-        "_sel" + W.hashlib.sha1(_cards_arg.encode("utf-8"), usedforsecurity=False).hexdigest()[:8]
-        if _cards_arg
-        else ""
-    )
+    _sel, _sel_err = _resolve_reel_sel_from_request()
+    if _sel_err is not None:
+        return _sel_err
     # alpha-export: ?alpha= (same validated vocabulary as the reel-file route)
     # resolves the transparent cut's own container-aware sidecar name, so the
     # alpha and opaque cuts' explainability records never shadow each other.
@@ -5671,6 +5740,12 @@ def api_run_render_all_job(run_id: str):
         if _d.get("id") and _q.get("dhash"):
             dhash_by_id[str(_d["id"])] = str(_q["dhash"])
     card_overrides = {cid: W._inspector_overrides_for_card(run_id, cid) for cid, _, _ in todo}
+
+    # Per-org ceiling on live render jobs (heartbeat-fresh, running) —
+    # an honest 429 instead of unbounded queueing on the shared renderer.
+    _quota = W._render_job_quota_denied()
+    if _quota is not None:
+        return _quota
 
     job_id = W.uuid.uuid4().hex
     job: dict = {
@@ -5844,6 +5919,12 @@ def api_run_bulk_export(run_id: str, run_data):
 
     meet = (run_data or {}).get("meet") or {}
     label = meet.get("name") or run_id
+
+    # Per-org ceiling on live render jobs (heartbeat-fresh, running) —
+    # an honest 429 instead of unbounded queueing on the shared renderer.
+    _quota = W._render_job_quota_denied()
+    if _quota is not None:
+        return _quota
 
     job_id = W.uuid.uuid4().hex
     out_path = W.RUNS_DIR / run_id / "exports" / f"bulk_{job_id}.zip"
@@ -6552,6 +6633,12 @@ def api_run_certificates_job(run_id: str):
         request.args.get("colorbar") or request.args.get("colourbar") or "1"
     ).strip().lower() in W._TRUTHY
     want_cmyk = (request.args.get("cmyk") or "").strip().lower() in W._TRUTHY
+
+    # Per-org ceiling on live render jobs (heartbeat-fresh, running) —
+    # an honest 429 instead of unbounded queueing on the shared renderer.
+    _quota = W._render_job_quota_denied()
+    if _quota is not None:
+        return _quota
 
     job_id = W.uuid.uuid4().hex
     out_dir = W.DATA_DIR / "print_exports" / run_id

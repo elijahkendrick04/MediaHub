@@ -1939,9 +1939,50 @@ def content_pack(run_id):
     except Exception:
         _coverage_html = ""
 
-    # M32 — restore the reel on revisit whenever its file exists (the old
-    # behaviour only restored when review comments happened to exist).
-    _reel_prerendered = (W.RUNS_DIR / run_id / "motion" / "reel_3.mp4").exists()
+    # M32 — restore the reel on revisit whenever a rendered file exists (the
+    # old behaviour only restored when review comments happened to exist, and
+    # then only the default reel_3 story cut — a custom selection, n≠3, dubbed
+    # or non-story reel was invisible after a reload). Scan the run's motion
+    # dir for published reel MP4s, parse each stem back into its file-route
+    # params (n / _sel<hash8> / language / format — ?sel= names the marker the
+    # hash can't be reversed into), and restore the NEWEST one. ``_tmpl``
+    # A/B-preview renders are deliberately skipped — they are previews, not
+    # the published reel.
+    _reel_restore_url = ""
+    _reel_restore_fmt = "story"
+    try:
+        _stem_rx = re.compile(
+            r"^reel_([1-5])"
+            r"(?:_sel([0-9a-f]{8}))?"
+            r"(?:_([a-z]{2,3}))?"
+            r"(?:_(portrait|square|landscape|\d{3,4}x\d{3,4}))?\.mp4$"
+        )
+        _newest: tuple[float, re.Match] | None = None
+        _motion_dir = W.RUNS_DIR / run_id / "motion"
+        if _motion_dir.is_dir():
+            for _p in _motion_dir.glob("reel_*.mp4"):
+                if "_tmpl" in _p.stem:
+                    continue
+                _m = _stem_rx.match(_p.name)
+                if _m is None:
+                    continue
+                _mt = _p.stat().st_mtime
+                if _newest is None or _mt > _newest[0]:
+                    _newest = (_mt, _m)
+        if _newest is not None:
+            _m = _newest[1]
+            _restore_kwargs: dict = {"n": _m.group(1)}
+            if _m.group(2):
+                _restore_kwargs["sel"] = _m.group(2)
+            if _m.group(3):
+                _restore_kwargs["lang"] = _m.group(3)
+            if _m.group(4):
+                _restore_kwargs["format"] = _m.group(4)
+                _reel_restore_fmt = _m.group(4)
+            _reel_restore_url = url_for("api_run_reel_file", run_id=run_id, **_restore_kwargs)
+    except Exception:
+        _reel_restore_url = ""
+        _reel_restore_fmt = "story"
 
     # M30 — honest export gating copy: the ZIPs bundle only what exists.
     if not approved:
@@ -2196,19 +2237,23 @@ def content_pack(run_id):
 // so a returning user finds their MP4 instead of a blank builder.
 (function(){{
   var reelUrl = {json.dumps(_reel_url)};
-  var prerendered = {json.dumps(_reel_prerendered)};
+  // The newest published reel's file URL (any cut — custom selection, n≠3,
+  // dubbed, non-story), resolved server-side from the rendered file's name;
+  // '' when nothing is rendered yet.
+  var restoreUrl = {json.dumps(_reel_restore_url)};
+  var restoreFmt = {json.dumps(_reel_restore_fmt)};
   var panel = document.getElementById('reel-panel');
   if (!panel || typeof mhReelComments !== 'function') return;
   // JS-3: the finished-file restore is shared — mhResumeReelJob falls back
   // to it when its recalled job record turns out stale/unreachable, so a
   // dead record can no longer suppress the finished reel.
   var mhRestoreFinishedReel = function() {{
-    var fileUrl = reelUrl + '-file?n=3&format=story';
-    if (prerendered) {{
+    if (restoreUrl) {{
       panel.style.display = '';
-      mhRenderReel(panel, reelUrl, 'story', fileUrl);
+      mhRenderReel(panel, reelUrl, restoreFmt, restoreUrl);
       return;
     }}
+    var fileUrl = reelUrl + '-file?n=3&format=story';
     fetch(reelUrl + '/comments?target=reel', {{headers:{{'Accept':'application/json'}}}})
       .then(function(r){{ return r.json(); }})
       .then(function(j){{
