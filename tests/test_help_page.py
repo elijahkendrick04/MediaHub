@@ -119,7 +119,7 @@ class TestSignedInHome:
         # Quick-action tiles to the working surfaces.
         for label in (
             "Create new content",
-            "My Season",
+            "Season Timeline",
             "Media library",
             "Brand &amp; profile",
             "All activity",
