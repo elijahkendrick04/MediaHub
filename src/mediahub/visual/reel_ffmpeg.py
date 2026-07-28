@@ -168,11 +168,29 @@ def _motion_encode_requested() -> bool:
     the Remotion ``renderMedia`` encoder settings and its still sources carry no
     extra precision to preserve. So a 10-bit/wide-gamut request degrades HONESTLY:
     the manifest records ``encode: unsupported-on-engine`` rather than shipping a
-    faked 10-bit or falsely bt2020-tagged file (invariant 5). Mirrors
-    ``_photo_supersample_requested`` env-read shape; unset / ``default`` / ``h264``
-    → False (no note, byte-identical)."""
-    raw = os.environ.get("MEDIAHUB_MOTION_ENCODE", "").strip().lower()
-    return bool(raw) and raw not in ("default", "h264")
+    faked 10-bit or falsely bt2020-tagged file (invariant 5). Delegates to the
+    canonical ``motion._motion_encode_profile`` resolver so BOTH engines read the
+    env identically: unset / ``default`` / ``h264`` / any unknown name → False
+    (no note, byte-identical) — an unknown value is a no-request on the Remotion
+    path, so it must not spawn a phantom "unsupported" note here either."""
+    from mediahub.visual.motion import _motion_encode_profile
+
+    return _motion_encode_profile() is not None
+
+
+def _text_fx_requested() -> bool:
+    """True when the opt-in richer text animators (``MEDIAHUB_TEXT_FX``) are on.
+
+    The closed-enum entrance animators are Remotion DOM effects; this engine
+    animates the card's pre-baked still and has no per-glyph/-word/-line DOM, so
+    a request degrades HONESTLY: the manifest records
+    ``text_fx: ...-unsupported-on-engine`` — never a faked per-character
+    animation. Delegates to the canonical ``motion._text_fx_enabled`` switch so
+    BOTH engines read the env identically; unset → False (no note,
+    byte-identical)."""
+    from mediahub.visual.motion import _text_fx_enabled
+
+    return _text_fx_enabled()
 
 
 def _motion_blur_requested() -> bool:
@@ -1061,6 +1079,24 @@ def render_story_card_from_props(
     # default (30fps) ffmpeg-story cache key is byte-identical to before.
     if int(fps) != FPS:
         cache_payload["fps"] = int(fps)
+    # Manifest-honesty fold (logo_drawon_requested precedent): the env-gated
+    # capability notes below ride into this render's manifest, so each flag must
+    # fold into the cache key when requested — otherwise toggling the env would
+    # serve a cached manifest describing the OTHER state. The rendered bytes are
+    # identical either way (this engine cannot do these); fold-only-when-
+    # requested keeps every default key byte-identical.
+    _notes_requested = sorted(
+        k
+        for k, req in (
+            ("photo_supersample", _photo_supersample_requested()),
+            ("text_fx", _text_fx_requested()),
+            ("motion_blur", _motion_blur_requested()),
+            ("encode", _motion_encode_requested()),
+        )
+        if req
+    )
+    if _notes_requested:
+        cache_payload["notes_requested"] = _notes_requested
     cache_key = _content_hash(cache_payload, kind="story")
     cached = _cache_dir() / f"{cache_key}.mp4"
     if cached.exists() and cached.stat().st_size > 1024:
@@ -1147,7 +1183,10 @@ def render_story_card_from_props(
                 # STORY render honestly reports it absent — never a faked layer.
                 # (The reel path composites the pre-baked still PNGs, which already
                 # carry the still-side dither baked in, so it needs no such note.)
-                "dither": "unsupported-on-engine",
+                # Fold-only-when-requested (the card carries the dither opt-in, so
+                # the gate rides the cache key automatically): a card that never
+                # asked for dither gets no phantom "unsupported" note.
+                **({"dither": "unsupported-on-engine"} if card_props.get("dither") else {}),
                 # blur-family: the develop-in directional/radial/lens focus blur
                 # is a per-frame Remotion photo-element grade; this engine
                 # composites the approved still unblurred, so the intro smear is
@@ -1163,8 +1202,13 @@ def render_story_card_from_props(
                 # Remotion DOM effects; this engine animates the card's pre-baked
                 # still and has no per-glyph/-word/-line DOM, so a text-fx request
                 # degrades honestly to the whole-still camera move — never a faked
-                # per-character animation.
-                "text_fx": "per-glyph-text-animators-unsupported-on-engine",
+                # per-character animation. Fold-only-when-requested (mirrors the
+                # sibling env-gated notes): no phantom note on default renders.
+                **(
+                    {"text_fx": "per-glyph-text-animators-unsupported-on-engine"}
+                    if _text_fx_requested()
+                    else {}
+                ),
                 # true-motion-blur: real shutter-accumulation blur re-renders the
                 # moving layer at N sub-frame offsets and composites them — a
                 # per-frame Remotion DOM capability. This engine animates the card's
@@ -1289,6 +1333,23 @@ def render_meet_reel_from_props(
     # default (30fps) ffmpeg-reel cache key is byte-identical to before.
     if int(fps) != FPS:
         cache_payload["fps"] = int(fps)
+    # Manifest-honesty fold (logo_drawon_requested precedent): the env-gated
+    # capability notes ride into this render's manifest, so each flag must fold
+    # into the cache key when requested — otherwise toggling the env would serve
+    # a cached manifest describing the OTHER state. Bytes identical either way;
+    # fold-only-when-requested keeps every default key byte-identical.
+    _notes_requested = sorted(
+        k
+        for k, req in (
+            ("photo_supersample", _photo_supersample_requested()),
+            ("text_fx", _text_fx_requested()),
+            ("motion_blur", _motion_blur_requested()),
+            ("encode", _motion_encode_requested()),
+        )
+        if req
+    )
+    if _notes_requested:
+        cache_payload["notes_requested"] = _notes_requested
     cache_key = _content_hash(cache_payload, kind="reel")
     cached = _cache_dir() / f"{cache_key}.mp4"
     if cached.exists() and cached.stat().st_size > 1024:
@@ -1437,8 +1498,13 @@ def render_meet_reel_from_props(
                 # Remotion DOM effects; this engine animates the card's pre-baked
                 # still and has no per-glyph/-word/-line DOM, so a text-fx request
                 # degrades honestly to the whole-still camera move — never a faked
-                # per-character animation.
-                "text_fx": "per-glyph-text-animators-unsupported-on-engine",
+                # per-character animation. Fold-only-when-requested (mirrors the
+                # sibling env-gated notes): no phantom note on default renders.
+                **(
+                    {"text_fx": "per-glyph-text-animators-unsupported-on-engine"}
+                    if _text_fx_requested()
+                    else {}
+                ),
                 # true-motion-blur: real shutter-accumulation blur re-renders the
                 # moving layer (whip flick + beat entrance/count-up) at N sub-frame
                 # offsets and composites them — a per-frame Remotion DOM capability.

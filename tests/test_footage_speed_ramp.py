@@ -249,3 +249,63 @@ class TestRampResolve:
             "applied": False,
             "reason": "speed-ramp-bake-failed",
         }
+
+
+class TestStoryPathWiring:
+    """render_story_card threads the brief's speed_ramp into _footage_for_card.
+
+    The reel peak gate had coverage; this pins the STORY seam (deep-review
+    finding: _brief_speed_ramp -> render_story_card had zero tests), so a
+    refactor cannot silently drop the ramp kwarg from the story footage call.
+    """
+
+    def _spy_story(self, tmp_path, monkeypatch, brief):
+        from unittest.mock import patch
+        from mediahub.brand.kit import BrandKit
+        from mediahub.visual import motion
+
+        monkeypatch.setenv("DATA_DIR", str(tmp_path))
+        monkeypatch.delenv("MEDIAHUB_REEL_ENGINE", raising=False)
+        seen: dict = {}
+
+        def fake_footage(card, b, kit, *, beat_seconds, speed_ramp=""):
+            seen["speed_ramp"] = speed_ramp
+            seen["beat_seconds"] = beat_seconds
+            return None, "spy"
+
+        def fake_remotion(**kwargs):
+            out = Path(kwargs["out_path"])
+            out.parent.mkdir(parents=True, exist_ok=True)
+            out.write_bytes(b"\x00\x00\x00\x18ftypisom" + b"\x00" * 4096)
+            return out
+
+        kit = BrandKit(
+            profile_id="ramp-story",
+            display_name="Ramp SC",
+            primary_colour="#0E2A47",
+            secondary_colour="#C9A227",
+            short_name="RSC",
+        )
+        card = {
+            "id": "ramp-story-1",
+            "achievement": {
+                "swimmer_name": "Ramp Tester",
+                "event_name": "100m Free LC",
+                "result_time": "00:55.00",
+            },
+        }
+        with (
+            patch.object(motion, "_footage_for_card", side_effect=fake_footage),
+            patch.object(motion, "_run_remotion", side_effect=fake_remotion),
+        ):
+            motion.render_story_card(card, kit, tmp_path / "story.mp4", brief=brief)
+        return seen
+
+    def test_brief_ramp_reaches_footage_call(self, tmp_path, monkeypatch):
+        seen = self._spy_story(tmp_path, monkeypatch, {"speed_ramp": "slow_in"})
+        assert seen["speed_ramp"] == "slow_in"
+        assert seen["beat_seconds"] == 6.0
+
+    def test_no_brief_ramp_is_empty_not_missing(self, tmp_path, monkeypatch):
+        seen = self._spy_story(tmp_path, monkeypatch, {})
+        assert seen["speed_ramp"] == ""

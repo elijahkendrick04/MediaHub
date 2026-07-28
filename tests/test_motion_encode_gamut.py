@@ -173,24 +173,64 @@ def test_run_remotion_cmd_appends_flags_when_on(tmp_path, monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_encode_folds_into_story_cache_key_only_when_active():
-    base = {"card": {"a": 1}, "size": [1080, 1920]}
-    h_plain = motion._content_hash(base, kind="story")
-    assert h_plain == motion._content_hash(base, kind="story")
-    h_a = motion._content_hash({**base, "encode": "h265-10"}, kind="story")
-    h_b = motion._content_hash({**base, "encode": "h265-10-bt709"}, kind="story")
-    assert h_plain != h_a
-    assert h_a != h_b  # distinct profile names → distinct keys
+def _capture_cache_payload():
+    """Spy the PRODUCTION cache_payload as it is hashed (not a local rebuild),
+    so a dropped production-side fold fails this suite instead of silently
+    serving an 8-bit cache entry for a 10-bit request."""
+    seen: dict = {}
+    real = motion._content_hash
+
+    def _spy(payload, *, kind):
+        seen.setdefault(kind, dict(payload))
+        return real(payload, kind=kind)
+
+    return seen, _spy
 
 
-def test_encode_folds_into_reel_cache_key_only_when_active():
-    base = {"cards": [{"a": 1}], "size": [1080, 1920]}
-    h_plain = motion._content_hash(base, kind="reel")
-    assert h_plain == motion._content_hash(base, kind="reel")
-    h_a = motion._content_hash({**base, "encode": "h265-10"}, kind="reel")
-    h_b = motion._content_hash({**base, "encode": "h265-10-bt2020"}, kind="reel")
-    assert h_plain != h_a
-    assert h_a != h_b
+def test_encode_folds_into_story_cache_key_only_when_active(tmp_path, monkeypatch):
+    monkeypatch.delenv("MEDIAHUB_REEL_ENGINE", raising=False)
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    # OFF: the production story payload carries NO encode key.
+    monkeypatch.delenv("MEDIAHUB_MOTION_ENCODE", raising=False)
+    seen, spy = _capture_cache_payload()
+    with (
+        patch.object(motion, "_run_remotion", side_effect=_fake_run_remotion_factory({})),
+        patch.object(motion, "_content_hash", side_effect=spy),
+    ):
+        motion.render_story_card(_fake_card(), _fake_brand(), tmp_path / "off.mp4")
+    assert "encode" not in seen["story"]
+    # ON: the production payload folds the profile NAME (distinct per profile).
+    monkeypatch.setenv("MEDIAHUB_MOTION_ENCODE", "h265-10")
+    seen_on, spy_on = _capture_cache_payload()
+    with (
+        patch.object(motion, "_run_remotion", side_effect=_fake_run_remotion_factory({})),
+        patch.object(motion, "_content_hash", side_effect=spy_on),
+    ):
+        motion.render_story_card(_fake_card(), _fake_brand(), tmp_path / "on.mp4")
+    assert seen_on["story"].get("encode") == "h265-10"
+
+
+def test_encode_folds_into_reel_cache_key_only_when_active(tmp_path, monkeypatch):
+    monkeypatch.delenv("MEDIAHUB_REEL_ENGINE", raising=False)
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.delenv("MEDIAHUB_MOTION_ENCODE", raising=False)
+    seen, spy = _capture_cache_payload()
+    with (
+        patch.object(motion, "_run_remotion", side_effect=_fake_run_remotion_factory({})),
+        patch.object(motion, "_render_reel_parallel_or_none", side_effect=lambda **k: None),
+        patch.object(motion, "_content_hash", side_effect=spy),
+    ):
+        motion.render_meet_reel([_fake_card()], _fake_brand(), tmp_path / "off_reel.mp4")
+    assert "encode" not in seen["reel"]
+    monkeypatch.setenv("MEDIAHUB_MOTION_ENCODE", "h265-10-bt2020")
+    seen_on, spy_on = _capture_cache_payload()
+    with (
+        patch.object(motion, "_run_remotion", side_effect=_fake_run_remotion_factory({})),
+        patch.object(motion, "_render_reel_parallel_or_none", side_effect=lambda **k: None),
+        patch.object(motion, "_content_hash", side_effect=spy_on),
+    ):
+        motion.render_meet_reel([_fake_card()], _fake_brand(), tmp_path / "on_reel.mp4")
+    assert seen_on["reel"].get("encode") == "h265-10-bt2020"
 
 
 # ---------------------------------------------------------------------------
@@ -324,12 +364,16 @@ def test_reel_manifest_records_encode(tmp_path, monkeypatch):
 
 
 def test_ffmpeg_fallback_encode_requested_helper(monkeypatch):
+    """Both engines read MEDIAHUB_MOTION_ENCODE identically: the helper
+    delegates to the canonical resolver, so an unknown name (a typo) is a
+    NO-request on this engine too — no phantom "unsupported" note when the
+    Remotion path would have rendered the byte-identical default."""
     monkeypatch.delenv("MEDIAHUB_MOTION_ENCODE", raising=False)
     assert reel_ffmpeg._motion_encode_requested() is False
-    for raw in ("", "default", "h264"):
+    for raw in ("", "default", "h264", "garbage", "hevc"):
         monkeypatch.setenv("MEDIAHUB_MOTION_ENCODE", raw)
         assert reel_ffmpeg._motion_encode_requested() is False, raw
-    for raw in ("h265-10", "garbage", "h265-10-bt2020"):
+    for raw in ("h265-10", "h265-10-bt2020", "h265-10-bt709", "h265-8-bt709"):
         monkeypatch.setenv("MEDIAHUB_MOTION_ENCODE", raw)
         assert reel_ffmpeg._motion_encode_requested() is True, raw
 

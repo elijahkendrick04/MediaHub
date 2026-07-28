@@ -14,6 +14,7 @@ import {
   cardSchema,
   fontStackFor,
   motionBlurSchema,
+  motionBlurSubFrames,
   MotionBlurSampler,
   type MotionBlur,
 } from "./StoryCard";
@@ -1886,14 +1887,15 @@ const TransitionWrap: React.FC<{
     // is exactly what a whip pan should smear. On the landing frame (t=1) all
     // sub-frames collapse to the resting transform, so the beat resolves clean.
     // COST (honest): the children include the beat's <StoryCard motionBlur={...}>,
-    // which mounts its OWN sampler, so every frame of a whip beat renders
-    // samples² scene subtrees (64 at the default 8, 256 at the clamp) — and the
-    // wrapper has no window gate, so this persists past the whip-in window even
-    // though tt clamps to 1 there. Suppressing the card's inner sampler under a
-    // whip would drop the visible entrance/count-up smear during the overlap
-    // (the two motions coexist early in the beat), i.e. it would change the
-    // opted-in pixels — so the nesting is kept and the reel manifest states the
-    // samples² cost instead.
+    // which mounts its OWN sampler, so samples² scene subtrees can render (64 at
+    // the default 8) — but ONLY while BOTH motions are mid-move: each sampler
+    // at-rest-collapses independently (the whip via the transform probe below,
+    // the card via animChannelsSettled), so once the whip lands (tt clamps to 1
+    // across the whole shutter window) this wrapper renders ONE unwrapped copy —
+    // exact parity with the landed frame, layered-AA divergence avoided, and the
+    // samples² cost confined to the brief genuine overlap. Suppressing the
+    // card's inner sampler here instead would drop the visible entrance smear
+    // during the overlap (the two motions coexist), so both keep their own gate.
     if (mb) {
       const whipAt = (f: number) => {
         const tt = interpolate(f, [0, fadeInFrames], [0, 1], {
@@ -1902,6 +1904,17 @@ const TransitionWrap: React.FC<{
         });
         return { opacity: Math.min(1, tt * 1.6), tx: (1 - tt) * width * 0.5 };
       };
+      const subs = motionBlurSubFrames(frame, mb.samples, mb.shutter);
+      const w0 = whipAt(subs[0]);
+      const wN = whipAt(subs[subs.length - 1]);
+      if (w0.opacity === wN.opacity && w0.tx === wN.tx) {
+        const w = whipAt(frame);
+        return (
+          <AbsoluteFill style={{ opacity: w.opacity, transform: `translateX(${w.tx}px)` }}>
+            {children}
+          </AbsoluteFill>
+        );
+      }
       return (
         <MotionBlurSampler
           frame={frame}
@@ -2073,9 +2086,18 @@ const ExitWrap: React.FC<{
     // true-motion-blur (opt-in): REAL shutter accumulation for the mirrored exit —
     // resample the closed-form lateral translateX at N deterministic sub-frames and
     // composite N copies of the (rigid) children, the exit twin of the incoming
-    // whip's pan blur. On the fully-exited frame all sub-frames collapse, so the
-    // handoff resolves clean.
+    // whip's pan blur. At-rest collapse: when the transform is identical across
+    // the shutter window (before the exit starts, or fully exited) render ONE
+    // unwrapped copy — exact parity, no layered-AA divergence, 1× cost.
     if (mb) {
+      const subs = motionBlurSubFrames(frame, mb.samples, mb.shutter);
+      if (exitT(subs[0]) === exitT(subs[subs.length - 1])) {
+        return (
+          <AbsoluteFill style={{ transform: `translateX(${-exitT(frame) * width * 0.5}px)` }}>
+            {children}
+          </AbsoluteFill>
+        );
+      }
       return (
         <MotionBlurSampler
           frame={frame}

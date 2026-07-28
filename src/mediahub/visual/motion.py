@@ -1614,8 +1614,6 @@ _TEXT_ANIMATORS: tuple[str, ...] = (
     "word_rise_blur",
 )
 
-_TEXT_FX_TRUTHY = {"1", "true", "yes", "on"}
-
 
 def _text_fx_enabled() -> bool:
     """Master switch for the richer text animators (``MEDIAHUB_TEXT_FX``).
@@ -1624,7 +1622,7 @@ def _text_fx_enabled() -> bool:
     card carries a ``textAnimator`` prop and every existing cache key and
     rendered byte is unchanged (byte-identical default). Mirrors
     ``_motion_supersample``'s honest env parse — no DSP guessing."""
-    return os.environ.get("MEDIAHUB_TEXT_FX", "").strip().lower() in _TEXT_FX_TRUTHY
+    return os.environ.get("MEDIAHUB_TEXT_FX", "").strip().lower() in _TRUTHY
 
 
 def _text_animator_for(props: dict, variation_seed: Any) -> str:
@@ -2236,28 +2234,6 @@ def _validate_effect_toggles(keys: Any) -> list[str]:
     allowed = set(EFFECT_TOGGLE_ALLOWLIST)
     out = {str(k) for k in keys if str(k) in allowed}
     return sorted(out)
-
-
-def _effect_toggles_for_brief(brief: Optional[dict]) -> list[str]:
-    """The sorted decorative axes a brief asks to SUPPRESS, or ``[]``.
-
-    Reads ``brief["effect_toggles"]`` — a plain ``{effect_key: bool}`` dict — and
-    returns the allowlisted keys explicitly set falsey (validated + sorted via
-    :func:`_validate_effect_toggles`). Keys set truthy, unknown keys, and an
-    absent field all yield no suppression. Read straight from the payload (like
-    ``_card_mix_profile``), never model-inferred.
-
-    NOTE: this is consumed ONLY by the review-only A/B render path — it is never
-    folded into a shipped card's props, so the still a shipped card mirrors stays
-    in still<->motion parity. Toggling an effect changes the *comparison* render,
-    not the card that gets exported for posting.
-    """
-    b = brief if isinstance(brief, dict) else {}
-    toggles = b.get("effect_toggles")
-    if not isinstance(toggles, dict):
-        return []
-    disabled = [k for k, v in toggles.items() if not v]
-    return _validate_effect_toggles(disabled)
 
 
 def _library_bed_for(content_key: str):
@@ -3544,11 +3520,12 @@ def render_story_card(
                 "across a %g-degree shutter and composited as an equal 1/n "
                 "premultiplied plus-lighter average (frame-pure, no "
                 "@remotion/motion-blur). The "
-                "perpetual photo camera / parallax are NOT sampled, so the terminal "
-                "held frame collapses to the approved still (still<->motion parity). "
-                "Cost scales with the sample count (%d x the wrapped layer's "
-                "per-frame work) and is paid on EVERY frame of the beat, including "
-                "the held phase where the samples collapse to one identical draw."
+                "perpetual photo camera / parallax are NOT sampled, and a settled "
+                "frame (channels identical across the shutter window, probed per "
+                "frame) collapses to ONE unwrapped draw — so every held frame is "
+                "byte-exact with the approved still (still<->motion parity) and "
+                "the %d-x per-frame accumulation cost is paid only while the "
+                "entrance/count-up is actually moving."
                 % (mblur["samples"], mblur["shutter"], mblur["samples"])
             ),
         }
@@ -4195,8 +4172,10 @@ def _assemble_reel_props(
     if _subtitles_enabled() and audio_plan and audio_plan.get("voice") and audio_plan.get("script"):
         beats = reel_card_beat_frames(len(cards_props), duration_sec, rhythm_norm, fps=fps)
         for idx, cp in enumerate(cards_props):
-            beat_frames = max(1, beats[idx]) if idx < len(beats) else 1
-            cj = _reel_caption_json(cp, brand_dict, beat_frames=beat_frames, fps=fps)
+            # Distinct name: the outer `beat_frames` (list of per-beat frame
+            # counts) must not be shadowed by this per-card scalar.
+            cap_beat_frames = max(1, beats[idx]) if idx < len(beats) else 1
+            cj = _reel_caption_json(cp, brand_dict, beat_frames=cap_beat_frames, fps=fps)
             if cj:
                 cp["captionsJson"] = cj
 
@@ -4751,12 +4730,14 @@ def _render_reel_one_format(
                             "and composited as an equal 1/n premultiplied "
                             "plus-lighter average (frame-pure, no "
                             "@remotion/motion-blur). The perpetual "
-                            "photo camera / parallax are NOT sampled, so terminal "
-                            "held frames collapse to the approved stills. Cost "
-                            "scales with the sample count on every frame of every "
-                            "beat, and a whip-handoff beat nests the beat's own "
-                            "sampled entrance inside the sampled whip — those "
-                            "frames render samples^2 (%d) scene copies."
+                            "photo camera / parallax are NOT sampled, and each "
+                            "sampler at-rest-collapses independently (channels "
+                            "probed across the shutter window per frame) to ONE "
+                            "unwrapped draw, so held frames are byte-exact with "
+                            "the approved stills and the accumulation cost is "
+                            "paid only while a motion is actually moving. Only "
+                            "frames where the whip AND the beat's entrance move "
+                            "together render samples^2 (%d) scene copies."
                             % (
                                 mblur["samples"],
                                 mblur["shutter"],
@@ -5045,9 +5026,17 @@ def render_meet_reel_all_formats(
     engine = _dispatch_engine()
 
     requested = list(formats) if formats else list(MOTION_FORMATS)
-    # Validate up front so a typo fails loudly before any render work.
+    # Validate up front so a typo fails loudly before any render work. The batch
+    # is PRESET-ONLY: an any-canvas "WxH" token would pass motion_format_size but
+    # then be silently dropped by the preset-order filter below — reject it
+    # explicitly instead (honesty: validated input is never silently ignored).
     for fmt in requested:
         motion_format_size(fmt)
+        if fmt not in MOTION_FORMATS:
+            raise ValueError(
+                f"batch renders preset cuts only ({', '.join(MOTION_FORMATS)}); "
+                f"use render_meet_reel for an arbitrary canvas like {fmt!r}"
+            )
     stat_config = normalise_reel_stat_config(reel_stat_config)
     # Render in canonical MOTION_FORMATS order regardless of request order,
     # de-duplicated, so the result is stable and story (the cheapest reuse) is

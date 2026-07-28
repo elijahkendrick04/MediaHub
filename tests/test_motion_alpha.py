@@ -73,7 +73,9 @@ def _remotion_valid_sets():
     # proResProfileOptions; parse loosely (path varies), else skip that check.
     profiles: set[str] = set()
     for p in motion.REMOTION_DIR.glob("node_modules/remotion/dist/**/prores_profile.js"):
-        m = re.search(r"proResProfileOptions\s*=\s*\[(.*?)\]", p.read_text(encoding="utf-8"), re.DOTALL)
+        m = re.search(
+            r"proResProfileOptions\s*=\s*\[(.*?)\]", p.read_text(encoding="utf-8"), re.DOTALL
+        )
         if m:
             profiles = set(re.findall(r"'([^']+)'", m.group(1)))
             break
@@ -263,7 +265,9 @@ def test_story_cache_key_byte_identical_without_alpha(tmp_path, monkeypatch):
         patch.object(motion, "_run_remotion", side_effect=_fake_run_remotion_factory(sink)),
         patch.object(motion, "_content_hash", side_effect=spy),
     ):
-        motion.render_story_card(_fake_card(), _fake_brand(), tmp_path / "story.mp4", alpha_profile="")
+        motion.render_story_card(
+            _fake_card(), _fake_brand(), tmp_path / "story.mp4", alpha_profile=""
+        )
     payload = seen["payload"]
     # No alpha fold, no transparentBg prop, .mp4 slot, no encode kw.
     assert "alpha" not in payload
@@ -356,7 +360,9 @@ def test_reel_cache_key_byte_identical_without_alpha(tmp_path, monkeypatch):
         patch.object(motion, "_render_reel_parallel_or_none", side_effect=lambda **k: None),
         patch.object(motion, "_content_hash", side_effect=spy),
     ):
-        motion.render_meet_reel([_fake_card()], _fake_brand(), tmp_path / "reel.mp4", alpha_profile="")
+        motion.render_meet_reel(
+            [_fake_card()], _fake_brand(), tmp_path / "reel.mp4", alpha_profile=""
+        )
     assert "alpha" not in seen["payload"]
 
 
@@ -461,10 +467,10 @@ def test_ffmpeg_engine_no_alpha_still_renders_normally(tmp_path, monkeypatch):
         out.write_bytes(b"x" * 4096)
         return out
 
-    with patch.object(
-        reel_ffmpeg, "render_story_card_from_props", side_effect=_fake_ffmpeg_story
-    ):
-        motion.render_story_card(_fake_card(), _fake_brand(), tmp_path / "story.mp4", alpha_profile="")
+    with patch.object(reel_ffmpeg, "render_story_card_from_props", side_effect=_fake_ffmpeg_story):
+        motion.render_story_card(
+            _fake_card(), _fake_brand(), tmp_path / "story.mp4", alpha_profile=""
+        )
     assert called.get("hit") is True
 
 
@@ -568,15 +574,15 @@ def test_transparent_bg_prop_gates_fill_in_tsx():
     """The false-default transparentBg prop must suppress the outer ground fill
     (and full-bleed meshBg) in StoryCard, and the cover/outro fills in MeetReel,
     so the OFF-path DOM is byte-identical."""
-    story = (
-        motion.REMOTION_DIR / "src" / "compositions" / "StoryCard.tsx"
-    ).read_text(encoding="utf-8")
+    story = (motion.REMOTION_DIR / "src" / "compositions" / "StoryCard.tsx").read_text(
+        encoding="utf-8"
+    )
     assert "transparentBg: z.boolean().default(false)" in story
     assert "...(card.transparentBg ? {} : { backgroundColor: roles.ground })" in story
     assert "&& !card.transparentBg" in story  # meshBg suppressed too
-    reel = (
-        motion.REMOTION_DIR / "src" / "compositions" / "MeetReel.tsx"
-    ).read_text(encoding="utf-8")
+    reel = (motion.REMOTION_DIR / "src" / "compositions" / "MeetReel.tsx").read_text(
+        encoding="utf-8"
+    )
     assert "transparentBg: z.boolean().default(false)" in reel
     assert reel.count("...(transparentBg") >= 2  # cover + outro fills gated
 

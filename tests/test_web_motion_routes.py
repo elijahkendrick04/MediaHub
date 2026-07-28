@@ -483,6 +483,19 @@ class TestAsyncJobTemplate:
             assert r.status_code == 400, url
             assert r.get_json()["error"] == "bad_motion_template"
 
+    def test_batch_routes_reject_custom_canvas(self, run_env):
+        # any-canvas honesty (deep-review finding): the batches render the four
+        # preset cuts only — a validated ?size=/?w=&h= custom canvas is an
+        # honest 400 here, never validated-then-silently-preset-rendered.
+        c, wm = _client(run_env)
+        for url in (
+            "/api/runs/r1/card/swim-1/motion-batch-job?size=1080x1440",
+            "/api/runs/r1/reel-batch?w=1280&h=720",
+        ):
+            r = c.post(url)
+            assert r.status_code == 400, url
+            assert r.get_json()["error"] == "bad_canvas"
+
 
 class TestAlphaRouteContract:
     """The alpha-export HTTP contract at the route surface."""

@@ -20,13 +20,13 @@ import re
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from mediahub.brand.kit import BrandKit
 from mediahub.visual import motion
 from mediahub.visual import reel_ffmpeg
 
-STORY_TSX = (
-    motion.REMOTION_DIR / "src" / "compositions" / "StoryCard.tsx"
-)
+STORY_TSX = motion.REMOTION_DIR / "src" / "compositions" / "StoryCard.tsx"
 REEL_TSX = motion.REMOTION_DIR / "src" / "compositions" / "MeetReel.tsx"
 PACKAGE_JSON = motion.REMOTION_DIR / "package.json"
 
@@ -197,7 +197,11 @@ def test_story_cache_key_distinct_per_config_and_off_stable(tmp_path, monkeypatc
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
 
     def _key_for(env: dict) -> str:
-        for k in ("MEDIAHUB_MOTION_BLUR", "MEDIAHUB_MOTION_BLUR_SAMPLES", "MEDIAHUB_MOTION_BLUR_SHUTTER"):
+        for k in (
+            "MEDIAHUB_MOTION_BLUR",
+            "MEDIAHUB_MOTION_BLUR_SAMPLES",
+            "MEDIAHUB_MOTION_BLUR_SHUTTER",
+        ):
             monkeypatch.delenv(k, raising=False)
         for k, v in env.items():
             monkeypatch.setenv(k, v)
@@ -377,14 +381,24 @@ def test_tsx_sampler_composites_true_premultiplied_average():
 
 
 def test_tsx_story_gates_wrapper_on_prop_present():
-    """The wrapper is inserted ONLY when a motionBlur prop is present; the OFF
-    path renders the verbatim `<Scene ctx={ctx} />` (byte-identical default)."""
+    """The wrapper is inserted ONLY when a motionBlur prop is present AND the
+    channels are actually moving across the shutter window; the OFF path — and
+    every at-rest frame — renders the verbatim `<Scene ctx={ctx} />` (exact
+    still parity; layered rasterization is not byte-equal even for identical
+    copies, so settled frames must not enter the sampler)."""
     code = _strip_comments(STORY_TSX.read_text())
     # StoryCard reads card.motionBlur OR the reel-injected prop.
     assert "card.motionBlur ?? motionBlur" in code
-    # Ternary gate: mb ? <MotionBlurSampler .../> : <Scene ctx={ctx} />
-    assert re.search(r"mb\s*\?\s*\(\s*<MotionBlurSampler", code)
+    # Ternary gate: mb && !mbSettled ? <MotionBlurSampler/> : <Scene ctx={ctx}/>
+    assert re.search(r"mb && !mbSettled\s*\?\s*\(\s*<MotionBlurSampler", code)
     assert "<Scene ctx={ctx} />" in code
+    # The at-rest probe compares scalars AND the function channels (word/glyph
+    # reveals + text-fx) across the window's first/centre/last sub-frames.
+    assert "export function animChannelsSettled" in code
+    assert "animChannelsSettled(first, last)" in code
+    assert "animChannelsSettled(first, mid)" in code
+    for probed in ("wordAt(i)", "glyphAt(i, total)", "glyphFx(i, total)"):
+        assert probed in code, probed
 
 
 def test_tsx_whip_keeps_default_fegaussian_and_gates_accumulation():
@@ -398,3 +412,64 @@ def test_tsx_whip_keeps_default_fegaussian_and_gates_accumulation():
     assert "<MotionBlurSampler" in code
     # The reel injects motionBlur into the StoryCard beats via a dedicated prop.
     assert "motionBlur={motionBlur}" in code
+
+
+# ---------------------------------------------------------------------------
+# Opt-in PIXEL-LEVEL contract (real Remotion render — no mocks). Rides the
+# established heavy-render gate (MEDIAHUB_RUN_DIFF_REGRESSION=1), so CI cost is
+# opt-in. Deep-review finding: the average/collapse contract was guarded only
+# by source greps; a render-time break (the alpha imageFormat class) would pass
+# the mocked suite. This test drives the REAL node path end-to-end.
+# ---------------------------------------------------------------------------
+
+import os as _os
+
+_RUN_PIXEL = _os.environ.get("MEDIAHUB_RUN_DIFF_REGRESSION", "").lower() in ("1", "true", "yes")
+
+
+@pytest.mark.skipif(not _RUN_PIXEL, reason="opt-in: set MEDIAHUB_RUN_DIFF_REGRESSION=1")
+@pytest.mark.skipif(not motion.node_available(), reason="node not installed")
+def test_pixel_blur_on_differs_but_held_poster_collapses(tmp_path, monkeypatch):
+    """Two REAL renders of the same card: blur-off and blur-on.
+
+    (a) Both must succeed through the real render.js path (this alone catches
+        the renderMedia-validation break class the mocked suite cannot).
+    (b) The two MP4s must DIFFER — mid-entrance frames carry the accumulation
+        smear only when blur is on.
+    (c) The in-render poster (a settled frame at ~55% of the clip) must be
+        pixel-equal within float/AA tolerance — the plus-lighter 1/n average of
+        n identical sub-frames collapses to a single draw, alpha included
+        (still<->motion parity at the held frame).
+    """
+    from PIL import Image, ImageChops
+
+    for var in ("MEDIAHUB_MOTION_ENCODE", "MEDIAHUB_MOTION_SUPERSAMPLE", "MEDIAHUB_TEXT_FX"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+
+    monkeypatch.delenv("MEDIAHUB_MOTION_BLUR", raising=False)
+    off_path = motion.render_story_card(_card(), _brand(), tmp_path / "off.mp4")
+    off_bytes = Path(off_path).read_bytes()
+    off_poster = Path(off_path).with_suffix("").with_suffix("")  # noqa: F841 (derived below)
+    off_poster = Path(str(off_path)[: -len(Path(off_path).suffix)] + ".poster.png")
+    assert off_poster.exists() and off_poster.stat().st_size > 0
+
+    monkeypatch.setenv("MEDIAHUB_MOTION_BLUR", "1")
+    monkeypatch.setenv("MEDIAHUB_MOTION_BLUR_SAMPLES", "6")
+    on_path = motion.render_story_card(_card(), _brand(), tmp_path / "on.mp4")
+    on_bytes = Path(on_path).read_bytes()
+    on_poster = Path(str(on_path)[: -len(Path(on_path).suffix)] + ".poster.png")
+    assert on_poster.exists() and on_poster.stat().st_size > 0
+
+    # (b) distinct cache keys AND distinct video bytes (the smear is real).
+    assert Path(off_path).name != Path(on_path).name or off_bytes != on_bytes
+    assert off_bytes != on_bytes
+
+    # (c) held-frame collapse: settled poster pixels match within tolerance.
+    a = Image.open(off_poster).convert("RGB")
+    b = Image.open(on_poster).convert("RGB")
+    assert a.size == b.size
+    diff = ImageChops.difference(a, b)
+    extrema = diff.getextrema()  # per-channel (min, max)
+    max_delta = max(hi for _lo, hi in extrema)
+    assert max_delta <= 2, f"held frame diverged under blur (max channel delta {max_delta})"

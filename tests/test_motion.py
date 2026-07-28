@@ -627,27 +627,6 @@ def test_effect_toggle_allowlist_is_decorative_only_and_excludes_legibility():
     assert motion._validate_effect_toggles([]) == []
 
 
-def test_effect_toggles_for_brief_returns_sorted_false_allowlisted_keys():
-    """Only allowlisted keys set FALSEY are suppressed; keys set truthy, unknown
-    keys, and an absent field yield no suppression (sorted, deterministic)."""
-    disabled = motion._effect_toggles_for_brief(
-        {
-            "effect_toggles": {
-                "style_pack": False,
-                "accent": True,
-                "mesh_bg": False,
-                "unknown_axis": False,
-            }
-        }
-    )
-    # accent is True (keep), unknown dropped, remaining sorted.
-    assert disabled == ["mesh_bg", "style_pack"]
-    assert motion._effect_toggles_for_brief(None) == []
-    assert motion._effect_toggles_for_brief({}) == []
-    assert motion._effect_toggles_for_brief({"effect_toggles": {}}) == []
-    assert motion._effect_toggles_for_brief({"effect_toggles": "nope"}) == []
-
-
 def test_card_manifest_axes_records_effects_disabled():
     """The manifest records the suppressed axes — empty on every shipped card
     (only the review path is a writer), populated when the review path set them."""

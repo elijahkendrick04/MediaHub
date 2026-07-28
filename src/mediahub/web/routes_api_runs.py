@@ -3960,6 +3960,18 @@ def api_card_motion_batch_job(run_id: str, card_id: str):
             }
         ), 400
 
+    # any-canvas honesty: the batch renders the four preset cuts only. A custom
+    # ?w=&h= / ?size=WxH validates in the shared resolver but has no batch slot —
+    # reject it explicitly rather than silently rendering presets instead.
+    if inputs["format"] not in _motion.MOTION_FORMATS:
+        return jsonify(
+            {
+                "error": "bad_canvas",
+                "detail": "the batch route renders the preset cuts only; "
+                "request a custom canvas on the single motion route",
+            }
+        ), 400
+
     out_dir = Path(inputs["out_path"]).parent
     # alpha-export: every cut in the batch inherits the requested transparent
     # profile; the .mov/.webm extension threads into the file names + URLs.
@@ -5240,6 +5252,18 @@ def api_run_reel_batch(run_id: str):
                 "error": "bad_motion_template",
                 "detail": "template preview is not supported on the batch route; "
                 "POST the template to the single reel (or reel-job) route",
+            }
+        ), 400
+
+    # any-canvas honesty: the batch renders the four preset cuts only. A custom
+    # ?w=&h= / ?size=WxH validates in the shared resolver but has no batch slot —
+    # reject it explicitly rather than silently rendering presets instead.
+    if inputs["format"] not in _motion.MOTION_FORMATS:
+        return jsonify(
+            {
+                "error": "bad_canvas",
+                "detail": "the batch route renders the preset cuts only; "
+                "request a custom canvas on the single reel route",
             }
         ), 400
 
