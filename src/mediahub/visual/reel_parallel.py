@@ -75,6 +75,23 @@ RENDER_SEGMENTS_SCRIPT = REMOTION_DIR / "render_segments.js"
 _TRUTHY = {"1", "true", "yes", "on"}
 
 
+def planned_total_frames(duration_sec: float, fps: int) -> int:
+    """The reel's total frame count — the exact Python mirror of render.js /
+    render_segments.js (``Math.round(durationSec * fps)``, half away from zero
+    for non-negative values).
+
+    Python's built-in ``round`` is banker's (half-to-even), which disagrees at
+    exact ``.5`` products: at fps=25 every default-rhythm reel duration
+    (8.5 / 12.5 / 16.5 / 20.5 / 24.5 s) hits one, so the parallel plan would be
+    one frame SHORT of the serial render under the same cache key — the final
+    frame would never be rendered. Mirroring ``motion._js_round`` keeps the
+    parallel composite byte-identical to the serial timeline.
+    """
+    from mediahub.visual.motion import _js_round
+
+    return max(1, _js_round(float(duration_sec) * int(fps)))
+
+
 class ReelParallelUnavailable(RuntimeError):
     """The parallel path cannot service this request (too few frames, etc.).
 
@@ -323,7 +340,7 @@ def render_reel_parallel(
     finishing pass is unchanged. Raises on any failure — callers should use
     :func:`try_render_reel_parallel` for the gated, honest-fallback entry point.
     """
-    total_frames = max(1, round(float(duration_sec) * int(fps)))
+    total_frames = planned_total_frames(duration_sec, fps)
     if total_frames < MIN_FRAMES_TO_SPLIT:
         raise ReelParallelUnavailable(
             f"{total_frames} frames is below the {MIN_FRAMES_TO_SPLIT}-frame "

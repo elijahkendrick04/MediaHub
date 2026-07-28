@@ -1885,6 +1885,15 @@ const TransitionWrap: React.FC<{
     // whip's OWN transform, never re-time the children's internal animation), which
     // is exactly what a whip pan should smear. On the landing frame (t=1) all
     // sub-frames collapse to the resting transform, so the beat resolves clean.
+    // COST (honest): the children include the beat's <StoryCard motionBlur={...}>,
+    // which mounts its OWN sampler, so every frame of a whip beat renders
+    // samples² scene subtrees (64 at the default 8, 256 at the clamp) — and the
+    // wrapper has no window gate, so this persists past the whip-in window even
+    // though tt clamps to 1 there. Suppressing the card's inner sampler under a
+    // whip would drop the visible entrance/count-up smear during the overlap
+    // (the two motions coexist early in the beat), i.e. it would change the
+    // opted-in pixels — so the nesting is kept and the reel manifest states the
+    // samples² cost instead.
     if (mb) {
       const whipAt = (f: number) => {
         const tt = interpolate(f, [0, fadeInFrames], [0, 1], {

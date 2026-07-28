@@ -3547,7 +3547,9 @@ def render_story_card(
                 "perpetual photo camera / parallax are NOT sampled, so the terminal "
                 "held frame collapses to the approved still (still<->motion parity). "
                 "Cost scales with the sample count (%d x the wrapped layer's "
-                "per-frame work)." % (mblur["samples"], mblur["shutter"], mblur["samples"])
+                "per-frame work) and is paid on EVERY frame of the beat, including "
+                "the held phase where the samples collapse to one identical draw."
+                % (mblur["samples"], mblur["shutter"], mblur["samples"])
             ),
         }
     # M23 explainability: full provenance when a clip plays; the honest
@@ -3651,7 +3653,13 @@ REEL_TOTAL_RANGE = (3.0, 60.0)
 #          untouched default path (pixel-identical), but adding Dither.tsx +
 #          editing MeetReel busts renderer_generation()'s content hash once — a
 #          documented full re-render, hence this explicit bump.
-REEL_COMPOSITION_REVISION = "11"
+#   "12" — glyph-kern parity (PR#1334 deep-review, engine-math-1/-6): the shared
+#          KineticLine gained still-parity numeric-separator kerning in its
+#          per-glyph branch and sprint sceneKit's KineticWords now delegates to
+#          it (text-fx + kerning reach sprint scenes). Reel beats render through
+#          StoryCard, so a glyph-mode beat's deterministic output moves toward
+#          the approved still for an unchanged payload — hence the bump.
+REEL_COMPOSITION_REVISION = "12"
 
 # Story composition revision — folded into the STORY cache key (M15). The
 # story payload historically had no revision field; introducing one both
@@ -3707,7 +3715,16 @@ REEL_COMPOSITION_REVISION = "11"
 #         renders the untouched default path (pixel-identical); adding the new
 #         component busts renderer_generation()'s content hash once — a
 #         documented full re-render, so this bump is the explicit human signal.
-STORY_COMPOSITION_REVISION = "8"
+#   "9" — glyph-kern parity (PR#1334 deep-review, engine-math-1/-6): KineticLine's
+#         per-glyph branch now carries the still's numeric-separator kerning
+#         (mh-sep, margin 0 -0.10em — the same `(?<=\d)[.:](?=\d)` contract as
+#         the word branch's kernNumeric), and sprint sceneKit's KineticWords
+#         delegates to the shared KineticLine so text-fx + kerning paint on
+#         sprint scenes too. A glyph-mode card's deterministic output moves
+#         TOWARD the approved still for an unchanged payload — hence the bump.
+#         Word-mode (default-gate-off) cards with non-numeric words render
+#         byte-identically.
+STORY_COMPOSITION_REVISION = "9"
 
 
 def _clamp(value: float, lo: float, hi: float) -> float:
@@ -4736,7 +4753,15 @@ def _render_reel_one_format(
                             "@remotion/motion-blur). The perpetual "
                             "photo camera / parallax are NOT sampled, so terminal "
                             "held frames collapse to the approved stills. Cost "
-                            "scales with the sample count." % (mblur["samples"], mblur["shutter"])
+                            "scales with the sample count on every frame of every "
+                            "beat, and a whip-handoff beat nests the beat's own "
+                            "sampled entrance inside the sampled whip — those "
+                            "frames render samples^2 (%d) scene copies."
+                            % (
+                                mblur["samples"],
+                                mblur["shutter"],
+                                mblur["samples"] * mblur["samples"],
+                            )
                         ),
                     }
                 }

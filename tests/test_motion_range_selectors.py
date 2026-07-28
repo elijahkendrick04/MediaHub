@@ -94,6 +94,19 @@ def test_seeded_permutation_is_driven_by_the_seed():
     assert "for (let i = arr.length - 1; i > 0; i--) {" in RANGE_TS
 
 
+def test_seeded_permutation_is_memoised_input_keyed():
+    """engine-math-5 (PR#1334 deep review): orderRank requests the permutation
+    once per glyph per frame (× blur sub-samples), so rebuilding the
+    Fisher-Yates array every call was O(n²) per line-frame. The memo must be
+    INPUT-keyed on (seed, n) — never frame/time/identity-keyed — so
+    frame-purity holds by construction."""
+    assert "const PERM_CACHE = new Map<string, number[]>();" in RANGE_TS
+    # The key is a pure function of the two inputs — nothing else may enter it
+    # (the frame-purity test above already bans every wall-clock call).
+    assert "const key = `${seed | 0}:${size}`;" in RANGE_TS
+    assert "PERM_CACHE.set(key, arr);" in RANGE_TS
+
+
 def test_shape_uses_remotion_easing():
     assert 'import { Easing } from "remotion";' in RANGE_TS
     assert "Easing.in(Easing.cubic)(x)" in RANGE_TS

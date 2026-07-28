@@ -17,15 +17,17 @@
  *                        value), never a mid-count number a viewer could screenshot.
  *
  * The helpers mirror the private cousins in `StoryCard.tsx` (`fitLinePx`,
- * `placeDisplay`, `LogoChip`, `BottomStrip`, `KineticLine`) so a sprint scene
- * reads like a built-in one — they are duplicated here only because those are
- * not exported, and the scene seam's whole point is to add capability without
- * touching the shared composition file.
+ * `placeDisplay`, `LogoChip`, `BottomStrip`) so a sprint scene reads like a
+ * built-in one — they are duplicated here only because those are not exported,
+ * and the scene seam's whole point is to add capability without touching the
+ * shared composition file. `KineticWords` is the exception: it delegates to
+ * StoryCard's exported `KineticLine` so the glyph/word split (kerning, text-fx)
+ * can never drift between the two surfaces again.
  */
 import React from "react";
 import { Easing, interpolate, useVideoConfig } from "remotion";
 import type { SceneCtx } from "./registry";
-import { wghtBloomAt, wghtFvs } from "../StoryCard";
+import { KineticLine, wghtBloomAt, wghtFvs } from "../StoryCard";
 import {
   PhotoFilterDefs,
   photoGradeFilterFor,
@@ -125,11 +127,6 @@ export function fitLine(
   return Math.max(36, Math.min(basePx, fitted));
 }
 
-// Split into whitespace words for per-word staggered reveals.
-export function splitWords(text: string): string[] {
-  return (text || "").split(/\s+/).filter(Boolean);
-}
-
 // Display ordinal for a real numeric placing ("1" → "1ST"); any non-numeric
 // value passes through uppercased — never invent a placing that was not detected.
 export function placeOrdinal(place: string): string {
@@ -218,75 +215,29 @@ export const MetaFooter: React.FC<{ ctx: SceneCtx; tint?: string }> = ({
 // Per-word staggered line driven by the active intent's `anim.wordAt` channel —
 // identity reveal for non-kinetic intents (the parent owns the motion), real
 // per-word stagger for `kinetic_type`.
+//
+// Delegates to StoryCard's exported KineticLine (the single glyph/word-split
+// implementation) instead of keeping a near-verbatim copy: this is what makes
+// the text-fx channels (fxUnit / glyphFx / trackingDeltaEm), the A5 numeric-
+// separator kerning, and any future glyph feature land on sprint scenes at the
+// same moment they land on the built-in scenes — the two implementations had
+// already drifted (kern + fx) after one PR. With no active animator
+// (fxUnit === "", the default) and non-numeric words, KineticLine's output is
+// byte-identical to the word/glyph DOM this component used to build inline.
 export const KineticWords: React.FC<{
   ctx: SceneCtx;
   text: string;
   style: React.CSSProperties;
   startIndex?: number;
-}> = ({ ctx, text, style, startIndex = 0 }) => {
-  const parts = splitWords(text);
-  if (parts.length === 0) {
-    return null;
-  }
-  // Glyph granularity (kinetic_type / cascade under the seed gate) splits each
-  // word into per-character inline-block spans on the shared glyph channel; word
-  // mode (the default) is byte-identical to the pre-glyph structure.
-  if (ctx.card.textGranularity === "glyph") {
-    let glyph = startIndex;
-    const lineTotal = parts.reduce((n, w) => n + Array.from(w).length, 0);
-    return (
-      <div style={style}>
-        {parts.map((w, wi) => {
-          const chars = Array.from(w);
-          const base = glyph;
-          glyph += chars.length;
-          return (
-            <span
-              key={`${w}-${wi}`}
-              style={{ display: "inline-block", marginRight: "0.28em" }}
-            >
-              {chars.map((ch, ci) => {
-                const a = ctx.anim.glyphAt(base + ci, lineTotal);
-                return (
-                  <span
-                    key={ci}
-                    style={{
-                      display: "inline-block",
-                      transform: `translateY(${a.y}px)`,
-                      opacity: a.opacity,
-                    }}
-                  >
-                    {ch}
-                  </span>
-                );
-              })}
-            </span>
-          );
-        })}
-      </div>
-    );
-  }
-  return (
-    <div style={style}>
-      {parts.map((w, i) => {
-        const a = ctx.anim.wordAt(startIndex + i);
-        return (
-          <span
-            key={`${w}-${i}`}
-            style={{
-              display: "inline-block",
-              transform: `translateY(${a.y}px)`,
-              opacity: a.opacity,
-              marginRight: "0.28em",
-            }}
-          >
-            {w}
-          </span>
-        );
-      })}
-    </div>
-  );
-};
+}> = ({ ctx, text, style, startIndex = 0 }) => (
+  <KineticLine
+    text={text}
+    anim={ctx.anim}
+    style={style}
+    startIndex={startIndex}
+    perGlyph={ctx.card.textGranularity === "glyph"}
+  />
+);
 
 type ScrimMode = "full" | "bottom" | "top" | "radial" | "none";
 

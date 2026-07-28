@@ -390,6 +390,25 @@ def test_ffmpeg_segments_honour_beat_weights():
     assert sum(segs) - X * (len(segs) - 1) == pytest.approx(total, abs=1e-9)
 
 
+def test_ffmpeg_segments_fit_a_total_clamped_rhythm_exactly():
+    """engine-math-3 (PR#1334 deep review): when reel_duration_for's
+    REEL_TOTAL_RANGE clamp bites (5 cards × 10s beats + weights → 64.5s pinned
+    to 60s), the carve must fit the clamped total exactly — mirroring how
+    MeetReel.tsx fits beats proportionally into durationInFrames — instead of
+    scaling by the un-clamped reference and overshooting the advertised
+    manifest / audio-plan duration by 4.5s."""
+    X = reel_ffmpeg.CROSSFADE_SEC
+    rhythm = motion.normalise_reel_rhythm({"beat": 10, "weights": [2, 1, 1, 1, 1]}, 5)
+    total = motion.reel_duration_for(5, per_card_sec=10, beat_weights=[2, 1, 1, 1, 1])
+    assert total == 60.0  # the REEL_TOTAL_RANGE clamp bit (un-clamped: 64.5)
+    segs = reel_ffmpeg.reel_segment_durations(5, total, rhythm=rhythm)
+    chained = sum(segs) - X * (len(segs) - 1)
+    assert chained == pytest.approx(total, abs=1e-9)
+    # The rhythm's proportions survive the fit: the weighted card is still 2×.
+    visible = [segs[i] - (X if i < len(segs) - 1 else 0.0) for i in range(len(segs))]
+    assert visible[1] == pytest.approx(2 * visible[2], abs=1e-9)
+
+
 def test_motion_dispatch_forwards_rhythm_to_the_ffmpeg_engine(tmp_path, monkeypatch):
     """When the ffmpeg engine is selected, the normalised rhythm must reach
     reel_ffmpeg.render_meet_reel_from_props (so the free engine renders the

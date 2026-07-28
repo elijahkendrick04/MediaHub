@@ -817,7 +817,21 @@ def reel_segment_durations(
         per_card_sec=per_card,
         beat_weights=(weights or None),
     )
-    factor = float(total_sec) / ref_total if ref_total else 1.0
+    # reel_duration_for caps n to 1..5 and pins the grand total to
+    # REEL_TOTAL_RANGE; the ``base`` list built above does neither. When one of
+    # those clamps bites, ``sum(base) > ref_total`` and scaling by
+    # ``total_sec / ref_total`` would overshoot the caller's advertised total
+    # (manifest / audio-plan duration) — the Remotion carve never does, because
+    # MeetReel.tsx fits the beats proportionally into durationInFrames. Rebase
+    # the factor on the un-clamped carve itself in that case so the chained
+    # total always equals ``total_sec``. The 1e-3 tolerance covers
+    # reel_duration_for's round(…, 3) — every non-clamping rhythm (including
+    # the flat default) keeps the historic ref_total factor byte-identically.
+    base_total = sum(base)
+    if base_total > 0 and abs(base_total - ref_total) > 1e-3:
+        factor = float(total_sec) / base_total
+    else:
+        factor = float(total_sec) / ref_total if ref_total else 1.0
     visible = [b * factor for b in base]
     return [v + (CROSSFADE_SEC if i < len(visible) - 1 else 0.0) for i, v in enumerate(visible)]
 

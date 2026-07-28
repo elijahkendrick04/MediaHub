@@ -289,8 +289,11 @@ def test_reel_cards_props_byte_identical_on_off(tmp_path, monkeypatch):
 
 
 def test_composition_revisions_unbumped():
-    assert motion.STORY_COMPOSITION_REVISION == "8"
-    assert motion.REEL_COMPOSITION_REVISION == "11"
+    # true-motion-blur itself must not bump the revisions (its OFF path is
+    # byte-identical). The pinned values track later unrelated legit bumps —
+    # currently "9"/"12" from the glyph-kern parity fix (engine-math-1/-6).
+    assert motion.STORY_COMPOSITION_REVISION == "9"
+    assert motion.REEL_COMPOSITION_REVISION == "12"
 
 
 # ---------------------------------------------------------------------------

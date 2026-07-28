@@ -558,8 +558,10 @@ def test_alpha_does_not_bump_composition_revisions():
     behind a false-default boolean (the footage-beat precedent, not dither's
     new-component case). renderer_generation() re-fingerprints the .tsx/.js edits
     once for everyone, so the per-composition revisions must NOT bump."""
-    assert motion.STORY_COMPOSITION_REVISION == "8"
-    assert motion.REEL_COMPOSITION_REVISION == "11"
+    # The pinned values track later unrelated legit bumps — currently "9"/"12"
+    # from the glyph-kern parity fix (engine-math-1/-6), not alpha-export.
+    assert motion.STORY_COMPOSITION_REVISION == "9"
+    assert motion.REEL_COMPOSITION_REVISION == "12"
 
 
 def test_transparent_bg_prop_gates_fill_in_tsx():

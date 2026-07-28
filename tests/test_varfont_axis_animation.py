@@ -107,8 +107,10 @@ def test_channel_wired_in_both_compositions():
     assert "wghtFvs(ctx.card.wghtMeta, anim.wghtBloom)" in STORY_TSX
     assert "wghtFvs(ctx.card.wghtKicker, anim.wghtBloom)" in STORY_TSX
     # sceneKit's data chips import and drive the identical curve — no inline
-    # static ternary left behind.
-    assert 'import { wghtBloomAt, wghtFvs } from "../StoryCard";' in SCENEKIT_TSX
+    # static ternary left behind. (The import also carries KineticLine since the
+    # engine-math-6 delegation, so match the symbols, not the exact line.)
+    assert "wghtBloomAt" in SCENEKIT_TSX and "wghtFvs" in SCENEKIT_TSX
+    assert 'from "../StoryCard";' in SCENEKIT_TSX
     # Both data-register sites drive the shared curve (prettier may wrap the
     # call, so normalise whitespace before counting).
     compact = " ".join(SCENEKIT_TSX.split())

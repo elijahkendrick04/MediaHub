@@ -54,13 +54,28 @@ function mulberry32(a: number): () => number {
   };
 }
 
+// Memo for seededPermutation — the permutation is a pure function of
+// (n, seed), yet `orderRank` requests it once per glyph per frame (× the
+// motion-blur sub-samples), which rebuilt the Fisher-Yates array O(n²) times
+// per line-frame. The cache is INPUT-keyed (never frame/time/identity-keyed),
+// so frame-purity holds by construction, and it is bounded by the distinct
+// (seed, line-length) pairs a render touches — a handful per card.
+const PERM_CACHE = new Map<string, number[]>();
+
 /**
  * A stable Fisher-Yates permutation of [0 .. n-1] driven purely by `seed`;
  * `perm[i]` is glyph i's reveal rank. Same seed -> same permutation, every
- * frame — no randomness that could drift between renders.
+ * frame — no randomness that could drift between renders. Memoised on
+ * (n, seed); callers must treat the returned array as read-only.
  */
 export function seededPermutation(n: number, seed: number): number[] {
-  const arr = Array.from({ length: Math.max(0, n) }, (_v, i) => i);
+  const size = Math.max(0, n);
+  const key = `${seed | 0}:${size}`;
+  const hit = PERM_CACHE.get(key);
+  if (hit) {
+    return hit;
+  }
+  const arr = Array.from({ length: size }, (_v, i) => i);
   const rand = mulberry32(xmur3(seed));
   for (let i = arr.length - 1; i > 0; i--) {
     const j = Math.floor(rand() * (i + 1));
@@ -68,6 +83,7 @@ export function seededPermutation(n: number, seed: number): number[] {
     arr[i] = arr[j];
     arr[j] = tmp;
   }
+  PERM_CACHE.set(key, arr);
   return arr;
 }
 

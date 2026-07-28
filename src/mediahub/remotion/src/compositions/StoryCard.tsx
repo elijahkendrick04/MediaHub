@@ -1452,6 +1452,20 @@ function kernNumeric(text: string): React.ReactNode {
   return <>{nodes}</>;
 }
 
+// A5 parity, glyph mode — the SAME `(?<=\d)[.:](?=\d)` separator contract as
+// kernNumeric, evaluated per glyph against its word's character array, so the
+// per-glyph branch carries the identical tightened separator spacing the word
+// branch (and the approved still) paint. Any non-separator glyph returns false
+// and its span stays byte-identical to the pre-kern glyph DOM.
+function isNumericSepGlyph(chars: string[], i: number): boolean {
+  const c = chars[i];
+  if (c !== "." && c !== ":") {
+    return false;
+  }
+  const isDigit = (s: string): boolean => s.length === 1 && s >= "0" && s <= "9";
+  return i > 0 && i + 1 < chars.length && isDigit(chars[i - 1]) && isDigit(chars[i + 1]);
+}
+
 // Display ordinal for a numeric placing ("1" → "1ST"); non-numeric values
 // pass through untouched — never invent a placing that wasn't detected.
 function placeDisplay(place: string): string {
@@ -1478,7 +1492,10 @@ function placeDisplay(place: string): string {
 // `perGlyph` (threaded from card.textGranularity === "glyph") splits each word
 // into per-character inline-block spans driven by `anim.glyphAt`; when
 // false/absent the DOM is byte-identical to the pre-glyph word structure.
-const KineticLine: React.FC<{
+// Exported so sprint/sceneKit's KineticWords delegates here instead of keeping
+// a drifting copy — kerning, text-fx, and any future glyph feature land on
+// both surfaces at once.
+export const KineticLine: React.FC<{
   text: string;
   anim: AnimChannels;
   style: React.CSSProperties;
@@ -1538,8 +1555,17 @@ const KineticLine: React.FC<{
                         transform: `translateY(${a.y}px)`,
                         opacity: a.opacity,
                       };
+                // A5 parity — a '.'/':' between two digits carries the still's
+                // tightened separator spacing in glyph mode too, exactly as the
+                // word branch's kernNumeric(w) does. Non-separator glyphs keep
+                // the byte-identical bare span.
+                const sep = isNumericSepGlyph(chars, ci);
                 return (
-                  <span key={ci} style={glyphStyle}>
+                  <span
+                    key={ci}
+                    className={sep ? "mh-sep" : undefined}
+                    style={sep ? { ...glyphStyle, margin: "0 -0.10em" } : glyphStyle}
+                  >
                     {ch}
                   </span>
                 );
@@ -4098,7 +4124,16 @@ export const StoryCard: React.FC<Props & { motionBlur?: MotionBlur }> = ({
       {off("style_pack") ? null : <StylePackGroundLayer ctx={ctx} />}
       {/* true-motion-blur: wrap ONLY the scene (hero/result entrance + count-up)
           in the frame-pure sampler when opted in; OFF (the default) renders the
-          verbatim `<Scene ctx={ctx} />`, so the default DOM is byte-identical. */}
+          verbatim `<Scene ctx={ctx} />`, so the default DOM is byte-identical.
+          COST (honest): the sampler mounts for the WHOLE beat, so every frame —
+          including the held phase where all sub-frames provably collapse to one
+          draw — pays `samples`× the scene subtree's render/paint (and `samples`
+          copies of any <OffthreadVideo> footage). A settle-window gate would be
+          output-identical but must exactly bound every intent keyframe, stagger
+          offset, glyph/text-fx budget and the ±half-shutter window; until that
+          bound is derived and tested we keep the simple always-on mount and the
+          manifest states the cost. Under a reel whip handoff this nests inside
+          TransitionWrap's sampler (samples² — see MeetReel.tsx). */}
       {mb ? (
         <MotionBlurSampler
           frame={frame}
