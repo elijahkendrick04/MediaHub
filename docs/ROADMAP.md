@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-07-27 · `c514aa414` · docs: auto-update roadmap (#1342) [skip render]
+**Last updated:** 2026-07-28 · `ee4a7cdd4` · Content-builder follow-ups: restore any reel cut, cap render jobs per org, job-store hygiene (#1346)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1227,12 +1227,16 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-07-28 | `2bb7630b9` | docs: record MEDIAHUB_MAX_RENDER_JOBS_PER_ORG in the env inventory + .env.example |
+| 2026-07-28 | `07fe56b5b` | Content-builder follow-ups: restore any reel cut, cap render jobs per org, job-store hygiene |
+| 2026-07-28 | `7459c9abb` | review fixes: honesty/docs sweep, test hardening, motion-blur at-rest collapse |
+| 2026-07-28 | `dfc095cc7` | fix(audio-mux): one hardened env-float parser, symmetric stat-race handling, effective duck in manif |
+| 2026-07-28 | `f230801a7` | fix(template): preview-slot isolation, honest 400s, async-job wiring, bounded echoes (template-fix 1 |
+| 2026-07-28 | `8f2d38d22` | fix(engine-math): cross-language rounding, carve clamp, glyph-kern parity, fx delegation (engine-mat |
+| 2026-07-28 | `7cc5df000` | fix(alpha-export): make the transparent export actually work end-to-end (alpha-fix 1-9) |
+| 2026-07-28 | `e907d00f2` | test: pin the voiceover join-site's widened non-caption guard |
+| 2026-07-28 | `5081a3b36` | test: assert assist-button onclicks via the quote-safe _onclick_js builder |
+| 2026-07-28 | `f976a75c7` | style: ruff-format quoting on the composer thumb onerror line |
+| 2026-07-28 | `61add46d9` | Fix content builder: reels never rendered, uploads 403d, plus review sweep |
 | 2026-07-24 | `9288bc8f4` | build(deps): bump actions/setup-python from 6 to 7 |
-| 2026-07-20 | `47490bb1d` | fix: Marketing steps and product steps use different names for th |
-| 2026-07-19 | `7d5becce9` | fix: Post-approval publishing path is unclear — download-only or |
-| 2026-07-19 | `afaba1b3b` | ci: run all workflows on Python 3.14 to match the 3.14-slim deploy image |
-| 2026-07-19 | `9344adecd` | build(deps): bump the remotion-deps group across 1 directory with 4 updates |
-| 2026-07-19 | `2fae4fe1d` | style: collapse legal TOC join to one line (ruff-format) |
-| 2026-07-19 | `034364986` | cleanup: resolve 22 minor observations from the 300-PR quality audit |
-| 2026-07-19 | `0d615fc0d` | F6 elevation — parity persistence, energy-term correctness, pool measurement, deep test battery |
 <!-- /ROADMAP:ACTIVITY -->
