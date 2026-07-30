@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-07-28 · `ee4a7cdd4` · Content-builder follow-ups: restore any reel cut, cap render jobs per org, job-store hygiene (#1346)
+**Last updated:** 2026-07-29 · `f8331f39c` · docs: auto-update roadmap (#1347) [skip render]
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
