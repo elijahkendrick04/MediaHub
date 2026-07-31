@@ -28,10 +28,10 @@ pillow>=12.3.0
 # (media_library.heic). BSD-3 wrapper over bundled libheif; manylinux wheels
 # need no system libs. Decode-only at upload time; the code honest-errors on a
 # HEIC upload if it's ever absent.
-pillow-heif>=1.4.0
-rembg>=2.0.76
-onnxruntime>=1.27.0
-anthropic>=0.117.0
+pillow-heif>=1.5.0
+rembg>=2.0.77
+onnxruntime>=1.28.0
+anthropic>=0.120.2
 replicate>=1.0.7
 
 # P0.1 free reel fallback (MEDIAHUB_REEL_ENGINE=ffmpeg): ships a static FFmpeg
