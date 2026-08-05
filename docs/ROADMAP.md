@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-08-03 · `5747154b4` · docs: auto-update roadmap (#1353) [skip render]
+**Last updated:** 2026-08-04 · `350952d7c` · docs: auto-update roadmap (#1354) [skip render]
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1237,5 +1237,4 @@ list and the auto table below, not here.
 | 2026-07-28 | `e907d00f2` | test: pin the voiceover join-site's widened non-caption guard |
 | 2026-07-28 | `5081a3b36` | test: assert assist-button onclicks via the quote-safe _onclick_js builder |
 | 2026-07-28 | `f976a75c7` | style: ruff-format quoting on the composer thumb onerror line |
-| 2026-07-28 | `61add46d9` | Fix content builder: reels never rendered, uploads 403d, plus review sweep |
 <!-- /ROADMAP:ACTIVITY -->
