@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-08-07 · `4d8baa1e2` · docs: auto-update roadmap (#1357) [skip render]
+**Last updated:** 2026-08-08 · `88e491582` · docs: auto-update roadmap (#1360) [skip render]
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1233,5 +1233,4 @@ list and the auto table below, not here.
 | 2026-07-28 | `dfc095cc7` | fix(audio-mux): one hardened env-float parser, symmetric stat-race handling, effective duck in manif |
 | 2026-07-28 | `f230801a7` | fix(template): preview-slot isolation, honest 400s, async-job wiring, bounded echoes (template-fix 1 |
 | 2026-07-28 | `8f2d38d22` | fix(engine-math): cross-language rounding, carve clamp, glyph-kern parity, fx delegation (engine-mat |
-| 2026-07-28 | `7cc5df000` | fix(alpha-export): make the transparent export actually work end-to-end (alpha-fix 1-9) |
 <!-- /ROADMAP:ACTIVITY -->
