@@ -41,7 +41,7 @@ _EN: dict[str, str] = {
     "nav.media_library": "Media library",
     "nav.media": "Media",  # short mobile bottom-nav label
     "nav.activity": "Activity",
-    "nav.my_season": "My Season",
+    "nav.my_season": "Season Timeline",
     "nav.research": "Research",
     "nav.help": "Help",
     "nav.pricing": "Pricing",
@@ -78,7 +78,7 @@ _CY: dict[str, str] = {
     "nav.media_library": "Llyfrgell cyfryngau",
     "nav.media": "Cyfryngau",
     "nav.activity": "Gweithgarwch",
-    "nav.my_season": "Fy Nhymor",
+    "nav.my_season": "Llinell Amser y Tymor",
     "nav.research": "Ymchwil",
     "nav.help": "Cymorth",
     "nav.pricing": "Prisiau",
