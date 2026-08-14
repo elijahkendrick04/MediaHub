@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-08-12 · `9f2647fde` · docs: auto-update roadmap (#1364) [skip render]
+**Last updated:** 2026-08-13 · `8ef86910e` · docs: auto-update roadmap (#1365) [skip render]
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1228,5 +1228,4 @@ list and the auto table below, not here.
 | Date | Commit | Summary |
 |---|---|---|
 | 2026-07-28 | `2bb7630b9` | docs: record MEDIAHUB_MAX_RENDER_JOBS_PER_ORG in the env inventory + .env.example |
-| 2026-07-28 | `07fe56b5b` | Content-builder follow-ups: restore any reel cut, cap render jobs per org, job-store hygiene |
 <!-- /ROADMAP:ACTIVITY -->
