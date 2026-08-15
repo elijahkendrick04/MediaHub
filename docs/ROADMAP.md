@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-08-13 · `8ef86910e` · docs: auto-update roadmap (#1365) [skip render]
+**Last updated:** 2026-08-14 · `385d51481` · docs: auto-update roadmap (#1366) [skip render]
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1227,5 +1227,5 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
-| 2026-07-28 | `2bb7630b9` | docs: record MEDIAHUB_MAX_RENDER_JOBS_PER_ORG in the env inventory + .env.example |
+| — | — | _(no recent activity)_ |
 <!-- /ROADMAP:ACTIVITY -->
