@@ -8,15 +8,15 @@
     "preview": "remotion studio src/index.ts"
   },
   "dependencies": {
-    "@remotion/bundler": "4.0.493",
-    "@remotion/cli": "4.0.493",
-    "@remotion/renderer": "4.0.493",
-    "react": "19.2.7",
-    "react-dom": "19.2.7",
-    "remotion": "4.0.493"
+    "@remotion/bundler": "4.0.513",
+    "@remotion/cli": "4.0.513",
+    "@remotion/renderer": "4.0.513",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "remotion": "4.0.513"
   },
   "devDependencies": {
-    "@types/react": "^19.2.17",
+    "@types/react": "^19.2.18",
     "typescript": "^6.0.3"
   },
   "engines": {
