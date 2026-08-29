@@ -228,7 +228,7 @@ def home():
             '<p class="mh-demo-line">Just looking? '
             '<a href="#mh-see-it-work">See it in action</a>, '
             '<a href="' + url_for("about_page") + '">take the full tour</a> '
-            'or <a href="' + url_for("sign_in_page") + '">browse pinned organisations</a>.'
+            'or <a href="' + url_for("sign_in_page") + '">browse existing organisations</a>.'
             "</p>"
         )
 
