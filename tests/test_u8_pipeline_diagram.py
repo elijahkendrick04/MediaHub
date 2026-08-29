@@ -251,6 +251,23 @@ def test_svgs_are_decorative_with_a_text_alternative(section):
     assert "approval" in summary
 
 
+def test_a11y_summary_does_not_restate_the_visible_lede_verbatim(section):
+    """The visible ``mh-pl-lede`` paragraph and the ``mh-visually-hidden``
+    summary sit back-to-back in the section. If the summary restates the
+    lede's exact wording, a screen-reader user (and any tool that reads the
+    accessibility tree) hears the same "how it works" explanation twice in a
+    row — reads as an unfinished, duplicated paragraph. The summary must
+    describe the diagram in its own words, not quote the lede."""
+    lede = section.split('class="mh-pl-lede">', 1)[1].split("</p>", 1)[0]
+    summary = section.split('class="mh-visually-hidden">', 1)[1].split("</p>", 1)[0]
+    shared_phrase = "club site, social profiles and brand kit"
+    assert shared_phrase in lede
+    assert shared_phrase not in summary, (
+        "the visually-hidden summary must not repeat the visible lede's exact "
+        "phrasing verbatim"
+    )
+
+
 # =========================================================================== #
 # End-to-end render on /about
 # =========================================================================== #
