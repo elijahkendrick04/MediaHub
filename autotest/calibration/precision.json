@@ -4,6 +4,6 @@
   "n_labelled": 81,
   "n_curated": 0,
   "n_scored": 81,
-  "computed_at": "2026-09-03T16:02:50+00:00",
+  "computed_at": "2026-09-03T20:44:09+00:00",
   "note": "not published: only 0/20 labels are human-curated \u2014 using defaults (precision=null) to avoid blind trust"
 }
