@@ -72,13 +72,16 @@ _ENGINE_TITLE = "THE ENGINE"
 _ENGINE_SUB = "detect · rank · brand · generate"
 
 # Plain-language alternative announced to assistive tech (both SVGs are
-# aria-hidden decorative duplicates of this single description).
+# aria-hidden decorative duplicates of this single description). This is a
+# description of the DIAGRAM itself — its nodes and the flow between them —
+# not a restatement of the visible mh-pl-lede paragraph immediately above it;
+# repeating that paragraph's wording here would read as the same explanation
+# spoken twice back-to-back to a screen-reader user.
 _A11Y_SUMMARY = (
-    "How MediaHub works: it reads the sources you already have — your club "
-    "site, social profiles and brand kit (your logo, colours and fonts). "
-    "The engine detects the moments that matter, ranks them, applies your "
-    "branding and generates the content. It writes posting-ready captions, "
-    "graphics and reels for your approval."
+    "Diagram of the pipeline: MediaHub reads your club site, socials and "
+    "brand kit, feeds them through an engine that detects, ranks, brands "
+    "and generates, then writes captions, graphics and reels for your "
+    "approval."
 )
 
 
