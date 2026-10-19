@@ -4,6 +4,6 @@
 
 - 🔬 Judge trust: council precision 0.06 · recall 1.00 (tp=2 fp=30 fn=0 tn=49; 0 human-curated of 81 labelled)
 - **Published to precision.json:** no — not published: only 0/20 labels are human-curated — using defaults (precision=null) to avoid blind trust
-- **Computed:** `2026-10-18T20:19:37+00:00`
+- **Computed:** `2026-10-19T03:48:33+00:00`
 
 See `docs/autotest/AUTOTEST_BENCHMARK_AND_GAPS.md` (A5) for the methodology and sources.
