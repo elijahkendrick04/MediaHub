@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-11-04 · `538984ed8` · docs: auto-update roadmap (#1455) [skip render]
+**Last updated:** 2026-11-05 · `c5bae3da0` · docs: auto-update roadmap (#1456) [skip render]
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
